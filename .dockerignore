@@ -1,0 +1,37 @@
+node_modules
+.dist
+dist
+.git
+.github
+.turbo
+*.log
+npm-debug.log*
+.env
+.env.*
+!.env.example
+*.md
+!README.md
+LICENSE
+.vscode
+.cursor
+.idea
+coverage
+__tests__
+tests
+*.test.ts
+*.spec.ts
+vitest.config.*
+.dockerignore
+Dockerfile
+docker-compose*.yml
+
+# Rust proxy (separate build pipeline)
+packages/proxy
+
+# Config/docs (not needed in Docker builds)
+config/
+docs/lld/
+docs/runbooks/
+docs/proposals/
+docs/recents/
+docs/reference/

@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "intutic-clawde"
+version = "1.0.0"
+description = "Programmatic proxy connection wrappers and warm-path budget gates for Intutic"
+authors = ["Intutic <engineering@intutic.ai>"]
+readme = "README.md"
+packages = [{include = "intutic_clawde"}]
+
+[tool.poetry.dependencies]
+python = "^3.9"
+requests = "^2.31.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

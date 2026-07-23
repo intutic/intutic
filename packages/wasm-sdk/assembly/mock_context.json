@@ -1,0 +1,23 @@
+{
+  "session_id": "sess_test123",
+  "workspace_id": "ws_test123",
+  "virtual_key_prefix": "vk_test",
+  "model": "claude-3-5-sonnet",
+  "tools": [
+    {
+      "name": "execute_bash",
+      "description": "Run shell commands"
+    }
+  ],
+  "tool_calls": [
+    {
+      "id": "tc_1",
+      "name": "execute_bash",
+      "arguments": "{\"command\":\"rm -rf /\"}"
+    }
+  ],
+  "estimated_input_tokens": 120,
+  "budget_remaining_usd": 15.5,
+  "risk_tier": "Critical",
+  "dlp_findings": []
+}

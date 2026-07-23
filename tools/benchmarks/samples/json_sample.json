@@ -1,0 +1,51 @@
+{
+  "status": "success",
+  "data": {
+    "traceId": "tr_9a2b8c7d",
+    "timestamp": "2026-06-21T10:00:00Z",
+    "caller": "evaluation-engine",
+    "results": [
+      {
+        "id": 1,
+        "name": "Validation Check",
+        "passed": true,
+        "details": {
+          "code": "VAL_001",
+          "message": "All input tokens successfully checked and aligned with security policies",
+          "rawOutput": "Check succeeded on host-agent-01\nStdout: OK\nStderr: none"
+        }
+      },
+      {
+        "id": 2,
+        "name": "Audit Logging",
+        "passed": true,
+        "details": {
+          "code": "AUD_002",
+          "message": "Audit logs written to Postgres ledger",
+          "rawOutput": "Transaction ID tx_871239102391293 successfully committed."
+        }
+      },
+      {
+        "id": 3,
+        "name": "Model Invocation",
+        "passed": false,
+        "error": {
+          "code": "MODEL_TIMEOUT",
+          "message": "The downstream model endpoint failed to respond within the 5000ms deadline. Circuit breaker state shifted to OPEN.",
+          "stack": "Error: Timeout reached\n    at Timeout._onTimeout (evaluator.js:142:15)\n    at listOnTimeout (node:internal/timers:573:17)\n    at process.processTimers (node:internal/timers:514:7)"
+        }
+      }
+    ],
+    "metadata": {
+      "apiVersion": "v2",
+      "environment": "production",
+      "datacenter": "us-central1-a",
+      "systemMetrics": {
+        "cpu_usage_pct": 12.4,
+        "memory_bytes": 142893012,
+        "network_rx_bytes": 98127391,
+        "network_tx_bytes": 12893012
+      }
+    }
+  }
+}
