@@ -1,0 +1,2 @@
+{"incidentId":"535a62554f3fd91f7c4d6c4af61fdcc230ff682f","kind":"tool_blocked","toolName":"Bash","toolInput":{"args":["rm -rf"]},"workspaceId":"ws_integration","harnessType":"mcp-governance-proxy","reason":"Blocked in test","timestamp":"2026-06-21T17:41:55.853Z"}
+{"incidentId":"c981afc5cd4f0b9c9b5f320bf958b04a2da43163","kind":"tool_blocked","toolName":"Bash","toolInput":{"args":["rm -rf"]},"workspaceId":"ws_integration","harnessType":"mcp-governance-proxy","reason":"Blocked in test","timestamp":"2026-06-21T17:42:18.325Z"}

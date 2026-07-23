@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Intutic Governance Proxy MDM Configuration Profile -->
+<!-- Deploy via Jamf, Apple Business Manager, or profiles install -->
+<!-- Generated: 2026-06-19T12:59:11.781Z -->
+<plist version="1.0">
+<dict>
+  <key>PayloadContent</key>
+  <array>
+    <dict>
+      <!-- CA Trust payload -->
+      <key>PayloadType</key>
+      <string>com.apple.security.root</string>
+      <key>PayloadIdentifier</key>
+      <string>ai.intutic.governance.ca</string>
+      <key>PayloadDisplayName</key>
+      <string>Intutic Governance Proxy CA</string>
+      <key>PayloadDescription</key>
+      <string>Trusts the Intutic local CA for AI traffic governance</string>
+      <key>PayloadVersion</key>
+      <integer>1</integer>
+      <key>PayloadUUID</key>
+      <string>4E89D13A-B6C2-4F1D-9E2A-7F3C5A8B2E6D</string>
+    </dict>
+    <dict>
+      <!-- System-wide HTTP proxy for Windsurf Cascade AI traffic -->
+      <key>PayloadType</key>
+      <string>com.apple.proxy.http</string>
+      <key>PayloadIdentifier</key>
+      <string>ai.intutic.governance.proxy</string>
+      <key>PayloadDisplayName</key>
+      <string>Intutic AI Governance Proxy</string>
+      <key>Enabled</key>
+      <true/>
+      <key>Server</key>
+      <string>127.0.0.1</string>
+      <key>Port</key>
+      <integer>8877</integer>
+      <key>ProxyType</key>
+      <string>HTTP</string>
+    </dict>
+  </array>
+  <key>PayloadDisplayName</key>
+  <string>Intutic AI Governance Proxy Configuration</string>
+  <key>PayloadIdentifier</key>
+  <string>ai.intutic.governance</string>
+  <key>PayloadType</key>
+  <string>Configuration</string>
+  <key>PayloadVersion</key>
+  <integer>1</integer>
+  <key>PayloadUUID</key>
+  <string>8A1C3F5E-D2B4-4A6C-8E0F-1D3B5A7C9E2F</string>
+</dict>
+</plist>

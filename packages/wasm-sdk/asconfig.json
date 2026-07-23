@@ -1,0 +1,14 @@
+{
+  "targets": {
+    "release": {
+      "outFile": "build/rule.wasm",
+      "optimizeLevel": 3,
+      "shrinkLevel": 0,
+      "converge": false,
+      "noAssert": true
+    }
+  },
+  "options": {
+    "bindings": "none"
+  }
+}
