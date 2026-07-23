@@ -1,0 +1,15 @@
+{
+  "name": "@intutic/wasm-sdk",
+  "version": "1.5.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "asc assembly/index.ts -o build/rule.wasm --optimize --exportRuntime --debug --sourceMap"
+  },
+  "dependencies": {
+    "assemblyscript-json": "^1.1.0"
+  },
+  "devDependencies": {
+    "assemblyscript": "^0.27.29"
+  }
+}

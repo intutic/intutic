@@ -1,0 +1,49 @@
+#!/bin/bash
+# Exit on any failure
+set -e
+
+# Run Git LFS if LFS is configured and we are running inside git push (arguments are passed)
+if [ -n "$1" ] && command -v git-lfs >/dev/null 2>&1; then
+  echo "=== Running Git LFS pre-push ==="
+  git lfs pre-push "$@"
+fi
+
+echo "=== Running pre-push quality checks & tests ==="
+
+# 1. Run lint and typecheck (fast check)
+echo "Running: pnpm lint"
+pnpm lint
+
+echo "Running: pnpm typecheck"
+pnpm typecheck
+
+# 2. Spin up test DB stack if docker daemon is running
+if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+  echo "Spinning up Valkey test stack..."
+  # Clean up any conflicting containers first
+  docker compose -f docker-compose.test.yml down --remove-orphans || true
+  
+  docker compose -f docker-compose.test.yml up -d --wait
+  
+  # Register cleanup trap to shut down containers on script exit
+  trap 'docker compose -f docker-compose.test.yml down' EXIT
+  
+  echo "Running database migrations..."
+  DATABASE_URL="postgresql://intutic:changeme@127.0.0.1:5436/intutic_test" \
+  pnpm db:migrate:postgres
+  
+  echo "Running Vitest suite..."
+  DATABASE_URL="postgresql://intutic:changeme@127.0.0.1:5436/intutic_test" \
+  VALKEY_URL="redis://127.0.0.1:6380" \
+  pnpm test -- --fileParallelism=false --maxWorkers=1
+  
+  # 3. Rust proxy tests
+  echo "Running Rust proxy tests..."
+  (cd packages/proxy && cargo test)
+else
+  echo "WARNING: Docker is not running or unreachable. Skipping Vitest & database tests."
+  echo "Running offline Rust proxy tests only..."
+  (cd packages/proxy && cargo test)
+fi
+
+echo "=== All pre-push checks passed successfully ==="
