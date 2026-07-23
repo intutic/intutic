@@ -1,0 +1,24 @@
+{
+  "name": "@intutic/shared-types",
+  "version": "1.5.0",
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "./dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^3.23"
+  },
+  "devDependencies": {
+    "typescript": "^5.5",
+    "vitest": "^3"
+  }
+}

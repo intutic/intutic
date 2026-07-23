@@ -1,0 +1,53 @@
+{
+  "name": "@intutic/vscode-extension",
+  "displayName": "Intutic Governance Extension",
+  "description": "AI Governance Control Plane for VS Code / Cursor workspaces",
+  "version": "1.5.0",
+  "publisher": "intutic",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "intutic.connect",
+        "title": "Intutic: Connect to workspace"
+      },
+      {
+        "command": "intutic.status",
+        "title": "Intutic: Show daemon status"
+      },
+      {
+        "command": "intutic.openTraces",
+        "title": "Intutic: Open trace viewer"
+      },
+      {
+        "command": "intutic.openSops",
+        "title": "Intutic: Browse active SOPs"
+      },
+      {
+        "command": "intutic.openIncidents",
+        "title": "Intutic: View governance incidents"
+      },
+      {
+        "command": "intutic.openWasmRules",
+        "title": "Intutic: View WASM rule bundles"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/vscode": "^1.90.0",
+    "typescript": "^5.5"
+  }
+}

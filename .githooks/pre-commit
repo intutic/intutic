@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# UAT slice-boundary enforcement.
+# DISCOVERY / PHASE_PLAN / CLEANUP / INFRA slices may modify
+# metadata files only, never source code.
+
+set -euo pipefail
+
+SLICE_FILE="uat/CURRENT_SLICE.md"
+if [ ! -f "$SLICE_FILE" ]; then
+  exit 0
+fi
+
+# Read slice type from disk, NOT from staged content.
+# This prevents same-commit bypass (editing CURRENT_SLICE and
+# source in one commit).
+SLICE_TYPE="$(grep -E '^Type:' "$SLICE_FILE" | head -1 \
+              | awk '{print $2}')"
+
+case "$SLICE_TYPE" in
+  DISCOVERY|PHASE_PLAN|CLEANUP|INFRA) ;;
+  *) exit 0 ;;
+esac
+
+ALLOWED_REGEX='^(uat/|intutic_analysis/QUEUE\.md$|\.agents/|\.githooks/|docs/)'
+
+STAGED="$(git diff --cached --name-only)"
+
+VIOLATIONS=""
+while IFS= read -r file; do
+  [ -z "$file" ] && continue
+  if ! echo "$file" | grep -Eq "$ALLOWED_REGEX"; then
+    VIOLATIONS="${VIOLATIONS}  ${file}"$'\n'
+  fi
+done <<< "$STAGED"
+
+if [ -n "$VIOLATIONS" ]; then
+  cat >&2 <<EOF
+
+============================================================
+UAT SLICE BOUNDARY VIOLATION
+============================================================
+Current slice type: $SLICE_TYPE
+This slice type may only modify metadata files.
+Staged files outside the allowed set:
+
+$VIOLATIONS
+Allowed paths:
+  uat/**
+  intutic_analysis/QUEUE.md
+  .agents/**
+  .githooks/**
+  docs/**
+
+Fix by unstaging source files and recording them in QUEUE.md
+for later EXEC, OR by opening a new EXEC slice (change
+CURRENT_SLICE.md Type in a separate prior commit).
+============================================================
+EOF
+  exit 1
+fi
+
+exit 0

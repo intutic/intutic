@@ -1,0 +1,35 @@
+# Grammar version pins — update via scripts/update-grammars.sh
+# Tags used for human readability; full commit SHAs used for reproducibility.
+# sha field accepts either a tag (e.g. v0.23.6) or a full commit SHA.
+#
+# subdir: if set, tree-sitter build --wasm is run from <repo_root>/<subdir>
+#         (required for tree-sitter-typescript which stores grammar in typescript/)
+#
+# wasm_status:
+#   "verified"    — WASM loads correctly under our wasmtime version
+#   "best-effort" — C external scanner known to be unstable; fallback to regex
+#   "failed"      — confirmed failure; regex is the only path
+#
+# To update a grammar:
+#   1. Run: bash scripts/update-grammars.sh       (shows available updates)
+#   2. Run: bash scripts/update-grammars.sh --bump <lang>  (bumps the SHA)
+#   3. Run: bash scripts/download-grammars.sh     (rebuilds .wasm)
+#   4. Run: cargo test snip
+#   5. Commit GRAMMAR_PINS.toml + updated .wasm LFS pointer
+#
+[grammars]
+# tag v0.23.6 = commit bffb65a8cfe4e46290331dfef0dbf0ef3679de11
+python     = { repo = "tree-sitter/tree-sitter-python",     sha = "v0.23.6",               wasm_status = "verified" }
+
+# tag v0.23.2 = commit f975a621f4e7f532fe322e13c4f79495e0a7b2e7
+# subdir required: grammar lives in tree-sitter-typescript/typescript/
+typescript = { repo = "tree-sitter/tree-sitter-typescript", sha = "v0.23.2", subdir = "typescript", wasm_status = "best-effort" }
+
+# tag v0.23.1 = commit 3a837b6f3658ca3618f2022f8707e29739c91364
+javascript = { repo = "tree-sitter/tree-sitter-javascript", sha = "v0.23.1",               wasm_status = "verified" }
+
+# tag v0.23.4 = commit 3c3775faa968158a8b4ac190a7fda867fd5fb748
+go         = { repo = "tree-sitter/tree-sitter-go",         sha = "v0.23.4",               wasm_status = "verified" }
+
+# tag v0.23.5 = commit 94703d5a6bed02b98e438d7cad1136c01a60ba2c
+java       = { repo = "tree-sitter/tree-sitter-java",       sha = "v0.23.5",               wasm_status = "verified" }

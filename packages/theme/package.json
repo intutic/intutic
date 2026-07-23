@@ -1,0 +1,24 @@
+{
+  "name": "@intutic/theme",
+  "version": "1.5.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./tokens": "./dist/tokens.js",
+    "./css": "./dist/variables.css"
+  },
+  "scripts": {
+    "build": "tsc -b && node dist/build-tokens.js && node dist/tools/sync-assets.js",
+    "sync": "node dist/tools/sync-assets.js"
+  },
+  "dependencies": {
+    "@intutic/logger": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^5.7.0"
+  }
+}

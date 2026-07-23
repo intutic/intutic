@@ -1,0 +1,180 @@
+# ─────────────────────────────────────────────────────────────
+# publish.yml — Full CI/CD Multi-Platform Build & Release Pipeline
+# ─────────────────────────────────────────────────────────────
+#
+# Triggered by:
+#   1. Push of a version tag (e.g. v1.5.0)
+#   2. Manual workflow_dispatch
+#
+# Automated Outputs:
+#   1. Publishes all 6 npm packages (@intutic/shared-types, @intutic/id, @intutic/clawde, @intutic/mcp-governance-proxy, @intutic/proxy, @intutic/cli)
+#   2. Builds multi-platform Rust proxy binaries (macOS arm64/x64, Linux x64, Windows x64)
+#   3. Packages standalone CLI executables (macOS arm64/x64, Linux x64, Windows x64)
+#   4. Automatically creates GitHub Release with attached binaries and npm tarballs
+# ─────────────────────────────────────────────────────────────
+
+name: Release Pipeline & Multi-Platform Binaries
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (skip actual publish and release)"
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "22"
+  TURBO_TELEMETRY_DISABLED: 1
+
+jobs:
+  publish-npm:
+    name: Publish npm Packages
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          lfs: true
+
+      - name: Install pnpm
+        run: npm install -g pnpm@11.6.0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build workspace packages
+        run: pnpm turbo run build
+
+      - name: Publish All 6 Packages to npm
+        run: |
+          for pkg in packages/shared-types packages/id packages/clawde-sdk packages/mcp-proxy packages/proxy tools/cli; do
+            echo "📦 Publishing $pkg to npm..."
+            (cd $pkg && pnpm publish --no-git-checks --access public || echo "⚠️ May already be published")
+          done
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  build-rust-proxy:
+    name: Build Native Rust Proxy (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            artifact_name: intutic-proxy-darwin-arm64
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            artifact_name: intutic-proxy-darwin-x64
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            artifact_name: intutic-proxy-linux-amd64
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            artifact_name: intutic-proxy-win32-x64.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          lfs: true
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Build Proxy Binary
+        run: cargo build --release --target ${{ matrix.target }} --package intutic-proxy
+        working-directory: .
+      - name: Stage Artifact
+        shell: bash
+        run: |
+          mkdir -p dist-release
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            cp target/${{ matrix.target }}/release/intutic-proxy.exe dist-release/${{ matrix.artifact_name }}
+          else
+            cp target/${{ matrix.target }}/release/intutic-proxy dist-release/${{ matrix.artifact_name }}
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: dist-release/${{ matrix.artifact_name }}
+
+  build-cli-binaries:
+    name: Package Standalone CLI Binaries (${{ matrix.target_os }})
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          lfs: true
+      - name: Install pnpm
+        run: npm install -g pnpm@11.6.0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Install dependencies & compile CLI standalone binaries
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm turbo run build
+          mkdir -p dist-cli
+          npx pkg tools/cli/package.json --targets node18-macos-arm64,node18-macos-x64,node18-linux-x64,node18-win-x64 --out-path dist-cli
+          mv dist-cli/cli-macos-arm64 dist-cli/cli-macos-arm64 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-standalone-binaries
+          path: dist-cli/*
+
+  github-release:
+    name: Create GitHub Release & Upload Assets
+    needs: [publish-npm, build-rust-proxy, build-cli-binaries]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          lfs: true
+      - name: Install pnpm
+        run: npm install -g pnpm@11.6.0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Install dependencies & build tarballs
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm turbo run build
+          mkdir -p release-assets
+          for pkg in packages/shared-types packages/id packages/clawde-sdk packages/mcp-proxy packages/proxy tools/cli; do
+            (cd $pkg && npm pack --pack-destination ../../release-assets)
+          done
+
+      - name: Download All Compiled Binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets/
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create ${{ github.ref_name }} release-assets/* \
+            --title "Release ${{ github.ref_name }}" \
+            --notes "Official release ${{ github.ref_name }} including multi-platform precompiled Rust proxy binaries, standalone CLI executables, and npm package tarballs." \
+            || gh release upload ${{ github.ref_name }} release-assets/* --clobber
