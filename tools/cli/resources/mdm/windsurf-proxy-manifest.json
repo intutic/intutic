@@ -1,0 +1,11 @@
+{
+  "_comment": "Intutic Governance — Windsurf proxy settings for MDM deployment",
+  "_generated": "2026-06-19T12:59:11.781Z",
+  "target_path": "/Users/ishangupta/.codeium/windsurf/settings.json",
+  "note": "User-level path — deploy per user via login script or MDM user config",
+  "content": {
+    "http.proxy": "http://127.0.0.1:8877",
+    "http.proxyStrictSSL": false,
+    "codeium.proxy": "http://127.0.0.1:8877"
+  }
+}

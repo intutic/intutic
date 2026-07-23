@@ -1,0 +1,17 @@
+{
+  "name": "@intutic/docs",
+  "version": "1.5.0",
+  "private": true,
+  "type": "module",
+  "description": "Intutic Developer Portal — Control and governance framework for AI Agents",
+  "scripts": {
+    "dev": "vitepress dev",
+    "build": "vitepress build",
+    "preview": "vitepress preview"
+  },
+  "devDependencies": {
+    "@intutic/theme": "workspace:*",
+    "vitepress": "^1.6.3",
+    "vue": "^3.5.13"
+  }
+}

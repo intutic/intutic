@@ -1,0 +1,13 @@
+#!/bin/bash
+# Exit on any failure
+set -e
+
+echo "=== Running pre-commit quality checks ==="
+
+echo "Running: pnpm lint"
+pnpm lint
+
+echo "Running: pnpm typecheck"
+pnpm typecheck
+
+echo "=== Pre-commit checks passed ==="

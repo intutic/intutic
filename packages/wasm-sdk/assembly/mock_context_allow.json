@@ -1,0 +1,12 @@
+{
+  "session_id": "sess_test123",
+  "workspace_id": "ws_test123",
+  "virtual_key_prefix": "vk_test",
+  "model": "claude-3-5-sonnet",
+  "tools": [],
+  "tool_calls": [],
+  "estimated_input_tokens": 120,
+  "budget_remaining_usd": 15.5,
+  "risk_tier": "Low",
+  "dlp_findings": []
+}

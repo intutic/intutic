@@ -1,0 +1,193 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "22"
+  TURBO_TELEMETRY_DISABLED: 1
+
+jobs:
+  lint:
+    name: Lint (TS Workspaces) - Run ESLint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          lfs: true
+
+      - name: Install pnpm
+        run: npm install -g pnpm@11.6.0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run ESLint
+        run: pnpm turbo lint
+
+      - name: Run Style Lint (Design System Check)
+        run: pnpm lint:styles
+
+  typecheck:
+    name: Typecheck (TS Workspaces) - Run TypeScript typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          lfs: true
+
+      - name: Install pnpm
+        run: npm install -g pnpm@11.6.0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run TypeScript typecheck
+        run: pnpm turbo typecheck
+
+  test:
+    name: Test (TS Workspaces) - Run Vitest Suite (Sync Daemon, CLI, Packages)
+    runs-on: ubuntu-latest
+    services:
+      valkey:
+        image: valkey/valkey:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      VALKEY_URL: redis://localhost:6379
+      JWT_SECRET: test-jwt-secret-for-ci
+      ENCRYPTION_KEY: ci-test-encryption-key-32-bytes-ok!
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          lfs: true
+ 
+      - name: Install pnpm
+        run: npm install -g pnpm@11.6.0
+ 
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+ 
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+ 
+      - name: Run Vitest Suite (Sync Daemon, CLI, Packages)
+        run: pnpm turbo test
+
+  rust:
+    name: Rust Proxy (Build & Test)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (with Git LFS)
+        uses: actions/checkout@v5
+        with:
+          lfs: true   # pulls real .wasm bytes; without this, git-lfs pointers are checked out
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            packages/proxy/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('packages/proxy/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      # ── Grammar .wasm files ──────────────────────────────────────────────────
+      # Strategy: LFS pull is the fast path (files already built and stored).
+      # If any .wasm is missing or is still a pointer stub (<256 bytes), we
+      # install emscripten + tree-sitter-cli and rebuild from GRAMMAR_PINS.toml.
+      - name: Verify grammar .wasm files (LFS pull)
+        id: grammar_check
+        run: |
+          MISSING=0
+          for wasm in packages/proxy/assets/grammars/*.wasm; do
+            size=$(wc -c < "$wasm" 2>/dev/null || echo 0)
+            if [ "$size" -lt 1024 ]; then
+              echo "WARN: $wasm is missing or a stub (${size}B) — will rebuild"
+              MISSING=1
+            fi
+          done
+          echo "missing=$MISSING" >> "$GITHUB_OUTPUT"
+
+      - name: Rebuild grammars from GRAMMAR_PINS.toml (fallback)
+        if: steps.grammar_check.outputs.missing == '1'
+        run: |
+          echo "Installing emscripten..."
+          sudo apt-get update -qq
+          sudo apt-get install -y emscripten nodejs npm
+          npm install -g tree-sitter-cli
+          emcc --version
+          tree-sitter --version
+          echo "Rebuilding .wasm grammars..."
+          cd packages/proxy && bash scripts/download-grammars.sh
+
+      - name: Show grammar files
+        run: |
+          echo "Grammar .wasm files:"
+          ls -lh packages/proxy/assets/grammars/*.wasm
+      # ── End grammar section ──────────────────────────────────────────────────
+
+      - name: cargo build --release (embeds grammars via include_bytes!)
+        run: cd packages/proxy && cargo build --release
+
+      - name: cargo test (all suites, nocapture for grammar load logs)
+        run: |
+          cd packages/proxy
+          cargo test --test snip_test -- --nocapture 2>&1 | grep -E '(\[TD-|test result|FAILED|running)'
+          cargo test
+
+  build:
+    name: Build (TS Workspaces) - Bundle TS apps and packages
+    runs-on: ubuntu-latest
+    needs: [lint, typecheck, test, rust]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          lfs: true
+
+      - name: Install pnpm
+        run: npm install -g pnpm@11.6.0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Bundle TS apps and packages
+        run: pnpm turbo build

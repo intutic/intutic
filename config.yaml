@@ -1,0 +1,41 @@
+# Default Intutic Proxy Configuration — dev mode
+model_list:
+  - model_name: claude-3-5-sonnet
+    litellm_params:
+      model: anthropic/claude-3-5-sonnet-20241022
+
+  - model_name: gpt-4o
+    litellm_params:
+      model: openai/gpt-4o
+      api_base: "http://127.0.0.1:4001"
+      api_key: "mock-key"
+
+  - model_name: gemini-2.0-flash
+    litellm_params:
+      model: gemini/gemini-2.0-flash
+
+general_settings:
+  master_key: ""
+
+intutic_settings:
+  snip_compactor:
+    enabled: true
+    max_tool_output_tokens: 8192
+    collapse_repetitions_above: 3
+    import_dedup: true
+    stack_trace_dedup: true
+    whitespace_normalize: true
+
+  dlp:
+    enabled: true
+    scan_input: true
+    scan_output: true
+
+  policy:
+    # Will be overridden by CONTROL_PLANE_URL env var if set
+    control_plane_url: "https://api.intutic.ai"
+    fail_closed: true
+    timeout_ms: 3000
+
+  harness_overrides:
+    advertise_url: true

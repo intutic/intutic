@@ -1,0 +1,40 @@
+{
+  "name": "@intutic/proxy",
+  "version": "1.5.0",
+  "description": "Native high-performance AI agent governance proxy binary",
+  "type": "module",
+  "main": "bin/proxy.js",
+  "bin": {
+    "intutic-proxy": "bin/proxy.js"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "cargo build --release && mkdir -p bin && (cp target/release/intutic-proxy bin/ 2>/dev/null || cp ../../target/release/intutic-proxy bin/)",
+    "prepublishOnly": "cargo build --release && mkdir -p bin && (cp target/release/intutic-proxy bin/ 2>/dev/null || cp ../../target/release/intutic-proxy bin/)"
+  },
+  "files": [
+    "bin/",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/intutic/intutic.git"
+  },
+  "license": "MIT",
+  "homepage": "https://intutic.ai",
+  "keywords": [
+    "ai",
+    "governance",
+    "proxy",
+    "wasm",
+    "circuit-breaker",
+    "litellm",
+    "rust"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}

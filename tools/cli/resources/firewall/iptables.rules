@@ -1,0 +1,31 @@
+# Intutic iptables redirection rules for Linux
+# Redirects direct outbound HTTPS traffic to AI providers to the local Intutic proxy (port 4000).
+# Load with: sudo iptables-restore < /Users/ishangupta/intutic/tools/cli/resources/firewall/iptables.rules
+
+*nat
+:PREROUTING ACCEPT [0:0]
+:INPUT ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+:POSTROUTING ACCEPT [0:0]
+
+# Create INTUTIC chain
+-N INTUTIC
+
+# Redirect to local proxy port 4000
+-A INTUTIC -p tcp --dport 443 -j REDIRECT --to-ports 4000
+
+# Intercept AI providers in OUTPUT chain (for local client processes)
+# Skip traffic originating from the proxy itself to prevent routing loop.
+# Assuming the proxy runs under a group 'intutic' or user 'intutic'.
+# Replace 'intutic' with the username/group running the proxy.
+-A OUTPUT -p tcp -m owner --uid-owner intutic -j ACCEPT
+-A OUTPUT -d api.anthropic.com -p tcp --dport 443 -j INTUTIC
+-A OUTPUT -d api.openai.com -p tcp --dport 443 -j INTUTIC
+-A OUTPUT -d api2.cursor.sh -p tcp --dport 443 -j INTUTIC
+-A OUTPUT -d openrouter.ai -p tcp --dport 443 -j INTUTIC
+-A OUTPUT -d api.mistral.ai -p tcp --dport 443 -j INTUTIC
+-A OUTPUT -d api.cohere.com -p tcp --dport 443 -j INTUTIC
+-A OUTPUT -d api.together.xyz -p tcp --dport 443 -j INTUTIC
+-A OUTPUT -d generativelanguage.googleapis.com -p tcp --dport 443 -j INTUTIC
+
+COMMIT

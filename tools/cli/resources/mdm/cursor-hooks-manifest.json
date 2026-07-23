@@ -1,0 +1,27 @@
+{
+  "_comment": "Intutic Governance — Cursor system-level hooks.json for MDM deployment",
+  "_generated": "2026-06-19T12:59:11.781Z",
+  "target_path": "/Library/Application Support/Cursor/hooks.json",
+  "content": {
+    "failClosed": true,
+    "hooks": {
+      "beforeShellExecution": {
+        "command": "node /opt/intutic/hooks/pre-tool-check.js",
+        "failClosed": true
+      },
+      "beforeMCPExecution": {
+        "command": "node /opt/intutic/hooks/pre-tool-check.js",
+        "failClosed": true
+      },
+      "beforeFileEdit": {
+        "command": "node /opt/intutic/hooks/pre-tool-check.js",
+        "failClosed": true
+      }
+    }
+  },
+  "deployment": {
+    "jamf": "Deploy as Extension Attribute with file target_path",
+    "intune": "Custom Configuration Profile > Files > target_path",
+    "chef": "cookbook: intutic-governance, recipe: cursor_hooks"
+  }
+}

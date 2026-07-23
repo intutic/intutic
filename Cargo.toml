@@ -1,0 +1,5 @@
+[workspace]
+members = [
+    "packages/proxy",
+]
+resolver = "2"

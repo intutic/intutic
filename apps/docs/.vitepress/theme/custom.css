@@ -1,0 +1,74 @@
+@import "@intutic/theme/css";
+
+:root {
+  --vp-font-family-base: var(--font-sans);
+  --vp-font-family-mono: var(--font-mono);
+
+  --vp-c-brand-1: var(--color-accent);
+  --vp-c-brand-2: var(--color-accent-hover);
+  --vp-c-brand-3: var(--color-accent-subtle);
+  --vp-c-brand-soft: var(--color-accent-muted);
+
+  --vp-c-tip-1: var(--color-success);
+  --vp-c-tip-2: var(--color-success);
+  --vp-c-tip-3: var(--color-success);
+  --vp-c-tip-soft: var(--color-success-bg);
+
+  /* Force brand button background and text colors to prevent light mode grey fallbacks */
+  --vp-button-brand-bg: var(--vp-c-brand-1);
+  --vp-button-brand-border: var(--vp-c-brand-1);
+  --vp-button-brand-text: var(--color-constant-white);
+  --vp-button-brand-hover-bg: var(--vp-c-brand-2);
+  --vp-button-brand-hover-border: var(--vp-c-brand-2);
+  --vp-button-brand-hover-text: var(--color-constant-white);
+}
+
+.dark {
+  --vp-c-bg: var(--color-bg-primary);
+  --vp-c-bg-alt: var(--color-bg-secondary);
+  --vp-c-bg-elv: var(--color-bg-glass-elevated);
+  --vp-c-bg-soft: var(--color-bg-secondary);
+}
+
+/* Hero section */
+.VPHero .VPImage {
+  filter: drop-shadow(0 0 40px rgba(59, 130, 246, 0.3));
+}
+
+/* Feature cards */
+.VPFeature {
+  border: 1px solid rgba(59, 130, 246, 0.15) !important;
+  transition: border-color 0.25s, box-shadow 0.25s;
+}
+
+.VPFeature:hover {
+  border-color: rgba(59, 130, 246, 0.4) !important;
+  box-shadow: 0 4px 24px rgba(59, 130, 246, 0.08);
+}
+
+/* Code blocks */
+.dark .vp-code-group .tabs label {
+  color: rgba(255, 255, 255, 0.64);
+}
+
+.dark .vp-code-group .tabs label.active {
+  color: var(--vp-c-brand-1);
+}
+
+/* Badge colors */
+.dark .VPBadge.tip {
+  background-color: var(--vp-c-tip-soft);
+  color: var(--vp-c-tip-1);
+}
+
+.dark .VPBadge.warning {
+  background-color: var(--color-warning-bg);
+  color: var(--color-warning);
+  border: 1px solid var(--color-warning-border);
+}
+
+.dark .VPBadge.danger {
+  background-color: var(--color-error-bg);
+  color: var(--color-error);
+  border: 1px solid var(--color-error-border);
+}

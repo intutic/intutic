@@ -1,0 +1,9 @@
+packages:
+  - 'packages/*'
+  - 'services/*'
+  - 'tools/*'
+  - 'apps/*'
+allowBuilds:
+  argon2: true
+  esbuild: true
+  protobufjs: true

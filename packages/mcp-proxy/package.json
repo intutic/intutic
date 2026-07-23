@@ -1,0 +1,32 @@
+{
+  "name": "@intutic/mcp-governance-proxy",
+  "version": "1.5.0",
+  "description": "Intutic MCP Governance Proxy — transparent stdio proxy that intercepts all tools/call JSON-RPC messages and applies workspace SOP policy before forwarding to real MCP servers",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "intutic-mcp-proxy": "./dist/index.js",
+    "intutic-mcp-daemon": "./dist/daemon/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@intutic/id": "workspace:*",
+    "@intutic/logger": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "ioredis": "^5",
+    "zod": "^3"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "tsx": "^4",
+    "typescript": "^5.5",
+    "vitest": "^3"
+  }
+}

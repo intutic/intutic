@@ -1,0 +1,81 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build output
+.dist/
+dist/
+build/
+*.tsbuildinfo
+
+# Turbo
+.turbo/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Rust (future proxy service)
+target/
+**/*.rs.bk
+Cargo.lock
+!packages/proxy/Cargo.lock
+
+# Docker
+docker-compose.override.yml
+
+# Generated docs
+docs/api/typescript/
+docs/api/openapi.yaml
+docs/api/cli.md
+
+# Terraform
+.terraform/
+*.tfplan
+tfplan
+*.tfstate
+*.tfstate.*
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraform.lock.hcl
+
+# Local testing and scratch repos
+test-workspace-e2e/
+llm-bridge-study/
+
+# Local Intutic runtime files
+.intutic/
+scratch/
+
+# Local temporary harness run outputs
+.claude/
+.cline/
+.cursor/
+.openhands/
+.windsurf/
+

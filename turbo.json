@@ -1,0 +1,38 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
+    },
+    "test": {
+      "dependsOn": ["build"]
+    },
+    "test:integration": {
+      "dependsOn": ["build"]
+    },
+    "test:cross": {
+      "dependsOn": ["build"]
+    },
+    "test:e2e": {
+      "dependsOn": ["build"]
+    },
+    "bench": {
+      "dependsOn": ["build"]
+    },
+    "lint": {},
+    "typecheck": {
+      "dependsOn": ["^build"]
+    },
+    "docs": {
+      "dependsOn": ["build"],
+      "outputs": ["docs/api/**"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    }
+  },
+  "ui": "stream",
+  "globalPassThroughEnv": ["VITE_*", "DATABASE_URL", "VALKEY_URL", "JWT_SECRET", "ENCRYPTION_KEY", "NODE_ENV", "RESEND_API_KEY", "RESEND_FROM_ADDRESS"]
+}

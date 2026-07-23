@@ -1,0 +1,84 @@
+{
+  "name": "@intutic/sync-daemon",
+  "version": "1.5.0",
+  "description": "Intutic Sync Daemon — bidirectional state sync between control plane and developer workspaces",
+  "type": "module",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./harness/clineHooks": {
+      "import": "./dist/harness/clineHooks.js",
+      "types": "./dist/harness/clineHooks.d.ts"
+    },
+    "./harness/cursorHooks": {
+      "import": "./dist/harness/cursorHooks.js",
+      "types": "./dist/harness/cursorHooks.d.ts"
+    },
+    "./harness/openhandsHooks": {
+      "import": "./dist/harness/openhandsHooks.js",
+      "types": "./dist/harness/openhandsHooks.d.ts"
+    },
+    "./harness/gooseHooks": {
+      "import": "./dist/harness/gooseHooks.js",
+      "types": "./dist/harness/gooseHooks.d.ts"
+    },
+    "./harness/windsurfHooks": {
+      "import": "./dist/harness/windsurfHooks.js",
+      "types": "./dist/harness/windsurfHooks.d.ts"
+    },
+    "./harness/aiderConfigMerger": {
+      "import": "./dist/harness/aiderConfigMerger.js",
+      "types": "./dist/harness/aiderConfigMerger.d.ts"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "harness/clineHooks": [
+        "src/harness/clineHooks.ts"
+      ],
+      "harness/cursorHooks": [
+        "src/harness/cursorHooks.ts"
+      ],
+      "harness/openhandsHooks": [
+        "src/harness/openhandsHooks.ts"
+      ],
+      "harness/gooseHooks": [
+        "src/harness/gooseHooks.ts"
+      ],
+      "harness/windsurfHooks": [
+        "src/harness/windsurfHooks.ts"
+      ],
+      "harness/aiderConfigMerger": [
+        "src/harness/aiderConfigMerger.ts"
+      ]
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@intutic/id": "workspace:*",
+    "@intutic/logger": "workspace:*",
+    "@intutic/mcp-governance-proxy": "workspace:*",
+    "@intutic/shared-types": "workspace:*",
+    "chokidar": "^5.0.0",
+    "ioredis": "^5.11.1",
+    "ws": "^8.21.0",
+    "zod": "^3"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4",
+    "typescript": "^5.5",
+    "vitest": "^3"
+  }
+}
