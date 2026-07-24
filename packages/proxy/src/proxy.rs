@@ -37,6 +37,7 @@ use crate::dlp;
 use crate::metering::{check_loop_block, check_workspace_hard_block, validate_virtual_key, check_budget, MeteringError};
 use crate::pricing;
 use crate::protocol::Protocol;
+use crate::routing::reward::{RewardEngine, RewardMode, RewardSignals};
 use crate::snip;
 use crate::telemetry::{publish_trace, ExecutionTrace};
 use crate::wasm::registry::PluginRegistry;
@@ -56,6 +57,39 @@ pub struct AppState {
     pub wasm_registry: Arc<PluginRegistry>,
     /// Lazily initialised reqwest client (shared across requests for connection pooling).
     pub http_client: Arc<Client>,
+    /// Local deterministic bandit reward writer (standalone open-core mode).
+    pub reward_engine: Arc<RewardEngine>,
+}
+
+/// Fire-and-forget local bandit reward update — never on the latency path.
+fn spawn_reward_update(
+    state: &AppState,
+    workspace_id: &str,
+    routed_model: &str,
+    sop_tier: &str,
+    task_type: &str,
+    cfg: crate::config::RewardConfig,
+    signals: RewardSignals,
+) {
+    let engine = Arc::clone(&state.reward_engine);
+    let valkey = Arc::clone(&state.valkey);
+    let workspace_id = workspace_id.to_string();
+    let routed_model = routed_model.to_string();
+    let sop_tier = sop_tier.to_string();
+    let task_type = task_type.to_string();
+    spawn(async move {
+        engine
+            .record(
+                &valkey,
+                &workspace_id,
+                &routed_model,
+                &sop_tier,
+                &task_type,
+                signals,
+                &cfg,
+            )
+            .await;
+    });
 }
 
 // ─── Protocol detection ──────────────────────────────────────────────
@@ -1262,7 +1296,12 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         tokio::time::error::Elapsed,
     > = tokio::time::timeout(std::time::Duration::from_millis(500), conn.get(&ff_key)).await;
 
+    let mut flags_key_present = false;
     if let Ok(Ok(Some(ff_str))) = raw_ffs_res {
+        // Presence of the key is what makes the control plane authoritative —
+        // even an unparseable value must NOT fall back to local config (the
+        // flags then simply resolve to false, matching enterprise behavior).
+        flags_key_present = true;
         if let Ok(ff_json) = serde_json::from_str::<serde_json::Value>(&ff_str) {
             ff_bandit_routing = ff_json
                 .get("ff_bandit_routing")
@@ -1278,6 +1317,20 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 .unwrap_or(false);
         }
     }
+
+    // Standalone open-core mode: when no control plane manages this workspace
+    // (no feature-flag hash in Valkey), routing may be enabled via config.yaml.
+    // A present flag hash is always authoritative.
+    let bandit_active = if flags_key_present {
+        ff_bandit_routing
+    } else {
+        state
+            .config
+            .intutic_settings
+            .routing
+            .enabled
+            .unwrap_or(false)
+    };
 
     let session_id = headers
         .get("x-session-id")
@@ -1350,13 +1403,14 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
 
     // Contextual Bandit Routing
     let prompt_text = crate::plugins::semantic_cache::extract_prompt_text(&body_json);
-    let (mut actual_model, _sop_tier, task_type) = if ff_bandit_routing {
+    let (mut actual_model, sop_tier, task_type) = if bandit_active {
         match crate::routing::bandit::route_model(
             &state.valkey,
             &workspace_id,
             &session_id,
             &model,
             &prompt_text,
+            &state.config.intutic_settings.routing.candidate_models,
         )
         .await
         {
@@ -1372,9 +1426,30 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
 
     let original_routed_model = actual_model.clone();
 
-    if get_model_provider(&actual_model) == Provider::Anthropic {
-        actual_model = "claude-opus-4-8".to_string();
+    if let Some(override_model) = &state
+        .config
+        .intutic_settings
+        .routing
+        .anthropic_model_override
+    {
+        if get_model_provider(&actual_model) == Provider::Anthropic {
+            actual_model = override_model.clone();
+        }
     }
+
+    // Local reward loop: only learns arms the bandit can actually select
+    // (mirrors the candidate-pool bypass inside route_model). Arm keys use the
+    // pre-override routed model, consistent with the outage-penalty keys.
+    let reward_cfg = state.config.intutic_settings.routing.reward.clone();
+    let reward_eligible = bandit_active
+        && reward_cfg.enabled
+        && state
+            .config
+            .intutic_settings
+            .routing
+            .candidate_models
+            .iter()
+            .any(|m| m == &original_routed_model);
 
     let target_provider = get_model_provider(&actual_model);
     let is_same_provider = target_provider == provider;
@@ -1600,11 +1675,34 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             )
             .await;
 
-            if ff_bandit_routing {
+            // The outage counter is a cloud-cron input; skip it when the local
+            // reward loop owns learning (it records the same failure as a
+            // 0-reward), otherwise a later cloud takeover double-counts it.
+            if bandit_active
+                && state.reward_engine.cached_mode(&workspace_id) != Some(RewardMode::Local)
+            {
                 let failure_key = format!("bandit:outage_failures:{}", workspace_id);
-                let arm_key = format!("arm:{}:{}:{}", original_routed_model, _sop_tier, task_type);
+                let arm_key = format!("arm:{}:{}:{}", original_routed_model, sop_tier, task_type);
                 let mut conn_clone = state.valkey.as_ref().clone();
                 let _: Result<(), _> = conn_clone.hincr(&failure_key, &arm_key, 1).await;
+            }
+
+            if reward_eligible {
+                spawn_reward_update(
+                    &state,
+                    &workspace_id,
+                    &original_routed_model,
+                    &sop_tier,
+                    &task_type,
+                    reward_cfg.clone(),
+                    RewardSignals {
+                        upstream_ok: false,
+                        latency_ms: start.elapsed().as_millis() as u32,
+                        token_anomaly: false,
+                        raw_cost_usd: 0.0,
+                        actual_cost_usd: 0.0,
+                    },
+                );
             }
 
             return json_error(StatusCode::BAD_GATEWAY, "upstream_error", &desc);
@@ -1628,11 +1726,34 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             "Upstream returned error response!"
         );
 
-        if ff_bandit_routing && err_status.is_server_error() {
+        if bandit_active
+            && err_status.is_server_error()
+            && state.reward_engine.cached_mode(&workspace_id) != Some(RewardMode::Local)
+        {
             let failure_key = format!("bandit:outage_failures:{}", workspace_id);
-            let arm_key = format!("arm:{}:{}:{}", original_routed_model, _sop_tier, task_type);
+            let arm_key = format!("arm:{}:{}:{}", original_routed_model, sop_tier, task_type);
             let mut conn_clone = state.valkey.as_ref().clone();
             let _: Result<(), _> = conn_clone.hincr(&failure_key, &arm_key, 1).await;
+        }
+
+        // 4xx is the caller's fault, not the model's — only 5xx counts as a
+        // failed pull against the arm.
+        if reward_eligible && err_status.is_server_error() {
+            spawn_reward_update(
+                &state,
+                &workspace_id,
+                &original_routed_model,
+                &sop_tier,
+                &task_type,
+                reward_cfg.clone(),
+                RewardSignals {
+                    upstream_ok: false,
+                    latency_ms: start.elapsed().as_millis() as u32,
+                    token_anomaly: false,
+                    raw_cost_usd: 0.0,
+                    actual_cost_usd: 0.0,
+                },
+            );
         }
 
         let final_prompt_tokens = (body_bytes.len() as f64 / 4.0).max(1.0) as u32;
@@ -1731,6 +1852,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         let personal_sops_clone = personal_sops.clone();
         let protocol_clone = protocol.clone();
         let client_api_key_clone = raw_token.to_string();
+        let reward_engine_clone = Arc::clone(&state.reward_engine);
+        let reward_cfg_clone = reward_cfg.clone();
+        let original_routed_model_clone = original_routed_model.clone();
+        let sop_tier_clone = sop_tier.clone();
 
         spawn(async move {
             let mut stream = upstream_stream;
@@ -2078,11 +2203,38 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                         }
                     }
                     Err(e) => {
+                        // Mid-stream upstream failure is a failed pull — the
+                        // pre-stream failure sites never see it, so record it
+                        // here or the arm learns nothing from broken streams.
+                        if reward_eligible {
+                            reward_engine_clone
+                                .record(
+                                    &valkey_clone,
+                                    &workspace_id_clone,
+                                    &original_routed_model_clone,
+                                    &sop_tier_clone,
+                                    &task_type_clone,
+                                    RewardSignals {
+                                        upstream_ok: false,
+                                        latency_ms: start.elapsed().as_millis() as u32,
+                                        token_anomaly: false,
+                                        raw_cost_usd: 0.0,
+                                        actual_cost_usd: 0.0,
+                                    },
+                                    &reward_cfg_clone,
+                                )
+                                .await;
+                        }
                         let _ = tx.send(Err(std::io::Error::other(e.to_string()))).await;
                         return;
                     }
                 }
             }
+
+            // Upstream latency ends when the stream ends — the judge
+            // round-trips and cache writes below are proxy overhead and must
+            // not count against the routed model's latency SLO.
+            let upstream_latency_ms = start.elapsed().as_millis() as u32;
 
             if judge_active_clone {
                 tracing::info!(handles_count = %chunk_handles.len(), "Waiting for chunk evaluation handles");
@@ -2284,6 +2436,32 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 final_completion_tokens,
             );
 
+            // A same-provider stream that ended without its terminal event
+            // ([DONE] / message_stop) was truncated — learn it as a failed
+            // pull instead of crediting a clean success. Cross-provider
+            // streams are re-emitted without terminal tracking; treat them
+            // as complete.
+            let stream_complete = done_received || !is_same_provider;
+            if reward_eligible {
+                reward_engine_clone
+                    .record(
+                        &valkey_clone,
+                        &workspace_id_clone,
+                        &original_routed_model_clone,
+                        &sop_tier_clone,
+                        &task_type_clone,
+                        RewardSignals {
+                            upstream_ok: stream_complete,
+                            latency_ms: upstream_latency_ms,
+                            token_anomaly,
+                            raw_cost_usd,
+                            actual_cost_usd,
+                        },
+                        &reward_cfg_clone,
+                    )
+                    .await;
+            }
+
             let trace = ExecutionTrace {
                 trace_id: uuid::Uuid::new_v4().to_string(),
                 session_id: session_id_clone,
@@ -2332,6 +2510,24 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         Ok(b) => b,
         Err(e) => {
             tracing::error!("Failed to read upstream response: {}", e);
+            // A body-read failure is a failed pull, same as a transport error.
+            if reward_eligible {
+                spawn_reward_update(
+                    &state,
+                    &workspace_id,
+                    &original_routed_model,
+                    &sop_tier,
+                    &task_type,
+                    reward_cfg.clone(),
+                    RewardSignals {
+                        upstream_ok: false,
+                        latency_ms: start.elapsed().as_millis() as u32,
+                        token_anomaly: false,
+                        raw_cost_usd: 0.0,
+                        actual_cost_usd: 0.0,
+                    },
+                );
+            }
             return json_error(
                 StatusCode::BAD_GATEWAY,
                 "upstream_error",
@@ -2339,6 +2535,11 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             );
         }
     };
+
+    // Upstream latency ends once the body is fully read — judge round-trips,
+    // DLP, compaction, and cache writes below are proxy overhead and must not
+    // count against the routed model's latency SLO.
+    let upstream_latency_ms = start.elapsed().as_millis() as u32;
 
     let (mut final_body_bytes, prompt_tokens, completion_tokens, mut accumulated_content) =
         if is_same_provider {
@@ -2716,6 +2917,24 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     let actual_cost_usd =
         estimate_model_cost(&actual_model, final_prompt_tokens, final_completion_tokens);
     let latency_ms = start.elapsed().as_millis() as u32;
+
+    if reward_eligible {
+        spawn_reward_update(
+            &state,
+            &workspace_id,
+            &original_routed_model,
+            &sop_tier,
+            &task_type,
+            reward_cfg,
+            RewardSignals {
+                upstream_ok: true,
+                latency_ms: upstream_latency_ms,
+                token_anomaly,
+                raw_cost_usd,
+                actual_cost_usd,
+            },
+        );
+    }
 
     // ── Step 8: Publish execution trace (fire-and-forget) ─────────────
     let trace = ExecutionTrace {

@@ -11,8 +11,6 @@ use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-pub const CANDIDATE_MODELS: &[&str] = &["claude-3-5-sonnet", "gpt-4o", "gemini-1.5-pro"];
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BanditArmState {
     pub alpha: f64,
@@ -161,12 +159,16 @@ pub fn sample_beta(alpha: f64, beta: f64) -> f64 {
 }
 
 /// Resolves model routing via Contextual Bandit or Session Lock.
+///
+/// `candidate_models` comes from `intutic_settings.routing.candidate_models`;
+/// requests for models outside the pool bypass the bandit entirely.
 pub async fn route_model(
     valkey: &Arc<redis::aio::ConnectionManager>,
     workspace_id: &str,
     session_id: &str,
     requested_model: &str,
     prompt: &str,
+    candidate_models: &[String],
 ) -> anyhow::Result<(String, String, String)> {
     let mut conn = valkey.as_ref().clone();
 
@@ -189,7 +191,7 @@ pub async fn route_model(
     let task_type = classify_task_dynamic(prompt, keywords_json.as_ref());
 
     // 0. Bypass bandit routing if the requested model is not in the candidate pool
-    if !CANDIDATE_MODELS.contains(&requested_model) {
+    if !candidate_models.iter().any(|m| m == requested_model) {
         tracing::debug!(requested_model = %requested_model, "Requested model not in candidate pool — bypassing bandit");
 
         let session_key = format!("session:metadata:{}", session_id);
@@ -246,7 +248,7 @@ pub async fn route_model(
     let mut arms = Vec::new();
     let mut total_pulls = 0;
 
-    for &model in CANDIDATE_MODELS {
+    for model in candidate_models {
         let arm_key = format!("arm:{}:{}:{}", model, resolved_sop_tier, task_type);
         let arm_state = if let Some(val) = raw_arms.get(&arm_key) {
             serde_json::from_str::<BanditArmState>(val).ok()

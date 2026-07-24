@@ -152,6 +152,7 @@ export default defineConfig({
             { text: 'Standalone Cloud Proxy', link: '/integrations/standalone' },
             { text: 'MCP Governance Proxy', link: '/integrations/mcp-proxy' },
             { text: 'Kitkat Agent Custom Skill', link: '/integrations/kitkat' },
+            { text: 'Rule Author Agent Skill', link: '/integrations/rule-author' },
           ],
         },
         {
