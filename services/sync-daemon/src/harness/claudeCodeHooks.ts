@@ -346,6 +346,22 @@ process.stdin.on('end', () => {
   await node_fs.writeFile(localSettingsPath, JSON.stringify(mergedLocal, null, 2) + '\n', 'utf-8')
 
   // Write global settings config ~/.claude/settings.json
+  //
+  // GUARD (bugfix): never touch the user's real global settings from a test
+  // run. Vitest sets VITEST=1; without this guard, every run of
+  // __tests__/harness/claudeCodeHooks.test.ts merged the MOCK SOP denies
+  // (Bash/Write/rm -rf/…) into the developer's real ~/.claude/settings.json
+  // and pointed global hooks at a mkdtemp dir the test then deleted —
+  // leaving dead fail-closed hooks and a denied Bash/Write toolset.
+  // INTUTIC_SKIP_GLOBAL_HOOKS=1 is an explicit opt-out for dev machines.
+  if (process.env['VITEST'] || process.env['INTUTIC_SKIP_GLOBAL_HOOKS']) {
+    log.info(
+      { action: 'global_hooks_skipped' },
+      'Skipping global ~/.claude settings write (test or opt-out environment)',
+    )
+    return
+  }
+
   const globalClaudeDir = node_path.join(node_os.homedir(), '.claude')
   await node_fs.mkdir(globalClaudeDir, { recursive: true })
   const globalSettingsPath = node_path.join(globalClaudeDir, 'settings.json')
