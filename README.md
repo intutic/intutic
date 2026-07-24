@@ -12,6 +12,10 @@
 
 [Quickstart](#-30-second-quickstart) • [Architecture](#%EF%B8%8F-architecture) • [Key Features](#-key-features) • [Supported Harnesses](#-supported-harnesses) • [Docs](https://docs.intutic.ai)
 
+<br>
+
+<img src="assets/demo.gif" alt="Intutic Hero Demo — Real-time AI Agent Circuit Breaker" width="100%">
+
 </div>
 
 ---
