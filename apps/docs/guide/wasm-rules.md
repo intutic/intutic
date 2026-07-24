@@ -36,7 +36,7 @@ Every custom filter runs inside a secure WebAssembly sandbox with strict constra
 
 | Limit | Value | Purpose |
 |-------|-------|---------|
-| **Memory** | 1 MB | Prevents excessive memory consumption |
+| **Memory** | 16 MB | Prevents excessive memory consumption |
 | **CPU Fuel** | 1,000,000 units | Prevents infinite loops and excessive computation |
 | **Timeout** | 5 ms per request | Maintains low proxy latency |
 
@@ -125,6 +125,22 @@ You can dry-run and test your compiled `.wasm` binary locally against any mock r
 ```bash
 intutic policy test --wasm build/rule.wasm --mock mock_context.json
 ```
+
+Test both directions before installing: a context your rule should block and one it should allow.
+
+### 5. Install into the Local Proxy (Open-Core)
+
+Install the validated rule into the local rules directory the proxy watches:
+
+```bash
+intutic policy install --wasm build/rule.wasm --name budget-guard --priority 50
+intutic policy list-local
+```
+
+The rule lands in `~/.intutic/wasm/` as `50_budget-guard.wasm` (lower priority numbers run first) and the proxy hot-loads it within ~5 seconds on the next request — no restart, no control plane. `install` refuses binaries that fail instantiation, because a broken rule enforces nothing (the sandbox fails open).
+
+> [!TIP]
+> Any AI coding agent in your workspace can drive this whole loop — authoring, compiling, dry-running, and installing — via the [Rule Author agent skill](/integrations/rule-author).
 
 ---
 

@@ -118,6 +118,14 @@ export async function writeConfigFiles(
   const filesWritten: string[] = []
   const filesSkipped: string[] = []
 
+  // Bundled agent skills — write-if-missing, not drift-enforced
+  try {
+    const { writeBundledSkills } = await import('./skillWriter.js')
+    await writeBundledSkills(workspaceRoot)
+  } catch (e) {
+    console.warn('[sync-daemon] writeBundledSkills failed (non-fatal):', e)
+  }
+
   // Load and compile local SOP entries
   const localSopEntries: SyncSopEntry[] = []
   try {

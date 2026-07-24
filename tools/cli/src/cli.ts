@@ -137,6 +137,36 @@ policyCmd
     await runPolicyTest(opts)
   })
 
+policyCmd
+  .command('compile')
+  .description('Compile an AssemblyScript rule to WASM (wraps asc)')
+  .option('--src <path>', 'Rule source entry file', 'assembly/index.ts')
+  .option('--out <path>', 'Output .wasm path', 'build/rule.wasm')
+  .option('--debug', 'Include debug info and source maps')
+  .action(async (opts) => {
+    const { runPolicyCompile } = await import('./commands/policy.js')
+    await runPolicyCompile(opts)
+  })
+
+policyCmd
+  .command('install')
+  .description('Validate and install a compiled WASM rule into the local proxy rules dir')
+  .requiredOption('--wasm <path>', 'Path to compiled WASM rule binary')
+  .option('--name <name>', 'Rule name (defaults to the file name)')
+  .option('--priority <NN>', 'Evaluation priority — lower runs first', '100')
+  .action(async (opts) => {
+    const { runPolicyInstall } = await import('./commands/policy.js')
+    await runPolicyInstall(opts)
+  })
+
+policyCmd
+  .command('list-local')
+  .description('List WASM rules installed in the local proxy rules dir')
+  .action(async () => {
+    const { runPolicyListLocal } = await import('./commands/policy.js')
+    await runPolicyListLocal()
+  })
+
 program
   .command('whoami')
   .description('Show current authenticated identity')

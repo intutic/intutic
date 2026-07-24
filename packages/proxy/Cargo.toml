@@ -84,6 +84,11 @@ rustls-pemfile = "2"
 [dev-dependencies]
 tokio-test = "0.4"
 wiremock = "0.6"
+# Integration tests (tests/reward_test.rs) talk to Valkey directly
+redis = { version = "0.25", features = ["aio", "tokio-comp", "connection-manager"] }
+# Integration tests (tests/wasm_local_test.rs) compile minimal WAT rule fixtures
+wat = "1"
+wasmtime = "29"
 criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 

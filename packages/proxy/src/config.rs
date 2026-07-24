@@ -54,6 +54,12 @@ pub struct IntuticSettings {
     pub harness_overrides: HarnessOverrides,
     #[serde(default)]
     pub policy: PolicyConfig,
+    #[serde(default)]
+    pub routing: RoutingConfig,
+    /// Override for the local WASM rule directory (default: `~/.intutic/wasm`).
+    /// The `INTUTIC_WASM_DIR` env var takes precedence over this value.
+    #[serde(default)]
+    pub wasm_local_dir: Option<String>,
 }
 
 /// Policy enforcement settings — controls connection to the control plane
@@ -259,6 +265,87 @@ impl Default for DlpConfig {
     }
 }
 
+/// Contextual bandit routing settings (LLD #26).
+///
+/// In control-plane-managed workspaces the Valkey feature-flag hash
+/// (`workspace:feature_flags:{ws}` → `ff_bandit_routing`) is authoritative.
+/// `enabled` only applies when that hash is absent — i.e. standalone
+/// open-core mode with no control plane managing the workspace.
+#[derive(Debug, Deserialize, Clone)]
+pub struct RoutingConfig {
+    /// `None` — defer entirely to the Valkey feature flag (control-plane managed).
+    /// `Some(true)` — enable bandit routing in standalone mode.
+    #[serde(default)]
+    pub enabled: Option<bool>,
+
+    /// Candidate model pool for Thompson sampling. Requests for models outside
+    /// this pool bypass the bandit entirely. Names must match `model_list`
+    /// entries so provider resolution and pricing stay accurate.
+    #[serde(default = "default_candidate_models")]
+    pub candidate_models: Vec<String>,
+
+    /// When set, any Anthropic-bound model is rewritten to this ID after
+    /// routing. `None` (the default) leaves the routed model untouched.
+    #[serde(default)]
+    pub anthropic_model_override: Option<String>,
+
+    #[serde(default)]
+    pub reward: RewardConfig,
+}
+
+impl Default for RoutingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: None,
+            candidate_models: default_candidate_models(),
+            anthropic_model_override: None,
+            reward: RewardConfig::default(),
+        }
+    }
+}
+
+/// Local deterministic reward loop settings.
+///
+/// Rewards are computed only from signals the proxy already observes
+/// (upstream success, latency vs SLO, token anomaly, cost ratio) — no LLM
+/// judge. The update rule matches the control-plane reward cron so arm state
+/// stays continuous when a workspace upgrades to cloud-managed learning.
+#[derive(Debug, Deserialize, Clone)]
+pub struct RewardConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+
+    /// Latency SLO; responses slower than this are penalised proportionally.
+    /// Includes full stream duration for streaming responses.
+    #[serde(default = "default_latency_slo_ms")]
+    pub latency_slo_ms: u32,
+
+    /// Maximum reward deduction for exceeding the latency SLO.
+    #[serde(default = "default_latency_penalty")]
+    pub latency_penalty: f64,
+
+    /// Reward deduction when the token-anomaly detector fires.
+    #[serde(default = "default_token_anomaly_penalty")]
+    pub token_anomaly_penalty: f64,
+
+    /// Maximum reward deduction when the routed model costs more than the
+    /// requested model would have.
+    #[serde(default = "default_cost_penalty")]
+    pub cost_penalty: f64,
+}
+
+impl Default for RewardConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            latency_slo_ms: 30_000,
+            latency_penalty: 0.3,
+            token_anomaly_penalty: 0.2,
+            cost_penalty: 0.2,
+        }
+    }
+}
+
 fn default_true() -> bool {
     true
 }
@@ -282,6 +369,25 @@ fn default_json_entropy_threshold() -> f64 {
 }
 fn default_code_skeleton_min_lines() -> usize {
     10
+}
+fn default_candidate_models() -> Vec<String> {
+    vec![
+        "claude-3-5-sonnet".to_string(),
+        "gpt-4o".to_string(),
+        "gemini-2.0-flash".to_string(),
+    ]
+}
+fn default_latency_slo_ms() -> u32 {
+    30_000
+}
+fn default_latency_penalty() -> f64 {
+    0.3
+}
+fn default_token_anomaly_penalty() -> f64 {
+    0.2
+}
+fn default_cost_penalty() -> f64 {
+    0.2
 }
 
 pub fn load_config(path: &str) -> anyhow::Result<ProxyConfig> {
@@ -459,5 +565,77 @@ intutic_settings:
         // Absent env var → None
         let cfg = PolicyConfig::default();
         assert!(cfg.current_region.is_none());
+    }
+
+    /// Absent `routing:` block yields control-plane-deferred defaults.
+    #[test]
+    fn test_routing_config_defaults() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        std::env::remove_var("INTUTIC_REGION");
+        let config_content = r#"
+model_list: []
+general_settings: {}
+intutic_settings: {}
+"#;
+        let file_path = std::env::temp_dir().join("test_routing_defaults.yaml");
+        std::fs::write(&file_path, config_content).unwrap();
+        let config = load_config(file_path.to_str().unwrap()).unwrap();
+
+        let routing = &config.intutic_settings.routing;
+        assert_eq!(routing.enabled, None);
+        assert_eq!(
+            routing.candidate_models,
+            vec!["claude-3-5-sonnet", "gpt-4o", "gemini-2.0-flash"]
+        );
+        assert!(routing.anthropic_model_override.is_none());
+        assert!(routing.reward.enabled);
+        assert_eq!(routing.reward.latency_slo_ms, 30_000);
+        assert!((routing.reward.latency_penalty - 0.3).abs() < f64::EPSILON);
+        assert!((routing.reward.token_anomaly_penalty - 0.2).abs() < f64::EPSILON);
+        assert!((routing.reward.cost_penalty - 0.2).abs() < f64::EPSILON);
+        assert!(config.intutic_settings.wasm_local_dir.is_none());
+        let _ = std::fs::remove_file(file_path);
+    }
+
+    /// Explicit `routing:` block round-trips; unspecified reward fields keep defaults.
+    #[test]
+    fn test_routing_config_explicit() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        std::env::remove_var("INTUTIC_REGION");
+        let config_content = r#"
+model_list: []
+intutic_settings:
+  routing:
+    enabled: true
+    candidate_models: ["claude-3-5-sonnet", "gpt-4o"]
+    anthropic_model_override: "claude-opus-4-5"
+    reward:
+      enabled: false
+      latency_slo_ms: 5000
+      latency_penalty: 0.5
+  wasm_local_dir: "/custom/wasm"
+"#;
+        let file_path = std::env::temp_dir().join("test_routing_explicit.yaml");
+        std::fs::write(&file_path, config_content).unwrap();
+        let config = load_config(file_path.to_str().unwrap()).unwrap();
+
+        let routing = &config.intutic_settings.routing;
+        assert_eq!(routing.enabled, Some(true));
+        assert_eq!(routing.candidate_models, vec!["claude-3-5-sonnet", "gpt-4o"]);
+        assert_eq!(
+            routing.anthropic_model_override.as_deref(),
+            Some("claude-opus-4-5")
+        );
+        assert!(!routing.reward.enabled);
+        assert_eq!(routing.reward.latency_slo_ms, 5_000);
+        assert!((routing.reward.latency_penalty - 0.5).abs() < f64::EPSILON);
+        // Unspecified fields fall back to defaults.
+        assert!((routing.reward.token_anomaly_penalty - 0.2).abs() < f64::EPSILON);
+        assert!((routing.reward.cost_penalty - 0.2).abs() < f64::EPSILON);
+        assert_eq!(
+            config.intutic_settings.wasm_local_dir.as_deref(),
+            Some("/custom/wasm")
+        );
+        let _ = std::fs::remove_file(file_path);
     }
 }

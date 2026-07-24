@@ -39,3 +39,23 @@ intutic_settings:
 
   harness_overrides:
     advertise_url: true
+
+  # Contextual bandit model routing (standalone open-core mode).
+  # In control-plane-managed workspaces the ff_bandit_routing feature flag
+  # in Valkey is authoritative and this block's `enabled` is ignored.
+  # routing:
+  #   enabled: true
+  #   candidate_models: ["claude-3-5-sonnet", "gpt-4o", "gemini-2.0-flash"]
+  #   # Uncomment to restore the pre-v1.6 behavior of pinning every
+  #   # Anthropic-bound request to a single model:
+  #   # anthropic_model_override: "claude-opus-4-8"
+  #   reward:
+  #     enabled: true
+  #     latency_slo_ms: 30000
+  #     latency_penalty: 0.3
+  #     token_anomaly_penalty: 0.2
+  #     cost_penalty: 0.2
+
+  # Directory scanned for locally installed WASM rules (default ~/.intutic/wasm;
+  # the INTUTIC_WASM_DIR env var takes precedence).
+  # wasm_local_dir: "~/.intutic/wasm"

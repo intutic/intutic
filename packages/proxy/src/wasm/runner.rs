@@ -43,7 +43,7 @@ impl ResourceLimiter for WasmState {
 }
 
 /// Evaluates a RequestContext against a loaded WASM module.
-/// Enforces a 1MB memory limit, 1,000,000 fuel limit, and a 5ms timeout.
+/// Enforces a 16MB memory limit, 1,000,000 fuel limit, and a 5ms timeout.
 pub async fn evaluate_wasm_rule(engine: &Engine, module: &Module, ctx: &RequestContext) -> Verdict {
     let json_bytes = match serde_json::to_vec(ctx) {
         Ok(bytes) => bytes,
@@ -84,7 +84,7 @@ pub async fn evaluate_wasm_rule(engine: &Engine, module: &Module, ctx: &RequestC
             .ok_or_else(|| anyhow::anyhow!("WASM module missing 'memory' export"))?;
 
         // Allocate memory in guest for request JSON
-        // First try to look up __allocate, fallback to __new
+        // First try to look up `allocate`, fallback to AssemblyScript `__new`
         let offset = if let Ok(alloc_fn) =
             instance.get_typed_func::<i32, i32>(&mut store, "allocate")
         {
@@ -94,7 +94,7 @@ pub async fn evaluate_wasm_rule(engine: &Engine, module: &Module, ctx: &RequestC
             new_fn.call(&mut store, (json_bytes.len() as i32, 0))?
         } else {
             return Err(anyhow::anyhow!(
-                "WASM module missing '__allocate' or '__new' export"
+                "WASM module missing 'allocate' or '__new' export"
             ));
         };
 

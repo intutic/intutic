@@ -5,7 +5,7 @@
 //!
 //! Architecture: See docs/lld/02-proxy-gateway.lld.md
 
-use intutic_proxy::{config, proxy, router, telemetry, wasm};
+use intutic_proxy::{config, proxy, router, routing, telemetry, wasm};
 
 use std::net::SocketAddr;
 use tracing_subscriber::layer::SubscriberExt;
@@ -84,8 +84,12 @@ async fn main() -> anyhow::Result<()> {
     let valkey = telemetry::connect_valkey(&valkey_url).await?;
     tracing::info!("Connected to Valkey at {}", valkey_url);
 
-    // Initialize WASM plugin registry
-    let wasm_registry = wasm::registry::PluginRegistry::new(&valkey).await?;
+    // Initialize WASM plugin registry (Valkey + local ~/.intutic/wasm rules)
+    let wasm_registry = wasm::registry::PluginRegistry::new(
+        &valkey,
+        config.intutic_settings.wasm_local_dir.as_deref(),
+    )
+    .await?;
     tracing::info!(
         "WASM plugin registry initialized ({} plugins)",
         wasm_registry.plugin_count().await
@@ -105,6 +109,7 @@ async fn main() -> anyhow::Result<()> {
         valkey,
         wasm_registry,
         http_client,
+        reward_engine: std::sync::Arc::new(routing::reward::RewardEngine::new()),
     };
 
     // Ensure local CA exists for TLS MITM (generates ca.crt/ca.key if missing)

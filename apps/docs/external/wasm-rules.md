@@ -9,7 +9,7 @@ This page documents how the WebAssembly (WASM) Rules Engine is structured, compi
 The WASM Rules Engine enables developers to write custom, high-performance policy rules in AssemblyScript (a TypeScript subset), compile them to WebAssembly, and run them inside a sandboxed `wasmtime` environment inside the Intutic Proxy.
 
 To guarantee that custom user code cannot degrade proxy performance or compromise host security, each rule is strictly constrained:
-* **Memory Cap**: Limited to **1MB** of linear memory.
+* **Memory Cap**: Limited to **16MB** of linear memory.
 * **CPU Fuel Limit**: Bound to **1,000,000 fuel units** to prevent infinite loops.
 * **Execution Timeout**: **5ms** budget per request. If a rule exceeds 5ms, it is immediately terminated and fails open to maintain low latency.
 
@@ -23,21 +23,26 @@ The WASM rules lifecycle supports both local offline development and centralized
 In pure Open-Core mode, rule binaries run completely offline on your local machine:
 
 ```
-[Developer: AssemblyScript Code] ──(asc)──► [WASM Binary (.wasm)]
+[Developer: AssemblyScript Code] ──(asc / intutic policy compile)──► [WASM Binary (.wasm)]
                                                    │
-                                            (Local File Placement)
+                                       (intutic policy install)
                                                    ▼
-                                         [~/.intutic/wasm/*.wasm]
+                                       [~/.intutic/wasm/NN_name.wasm]
                                                    │
-                                           (Local Hot-Reload Watcher)
+                                     (5s TTL rescan on the request path)
                                                    ▼
                                              [Rust Proxy]
                                       (wasmtime module compile)
 ```
 
-1. **Compilation**: Rules are compiled to WebAssembly binaries (`.wasm`) using AssemblyScript (`asc`).
-2. **Local Placement**: Drop compiled `.wasm` files into your workspace or user directory (`~/.intutic/wasm/`).
-3. **Hot-Reload**: The local Rust proxy detects file changes in `~/.intutic/wasm/` via a local directory watcher and instantiates the updated `wasmtime::Module` instantly without requiring a service restart.
+1. **Compilation**: `intutic policy compile --src assembly/index.ts --out build/rule.wasm` (wraps the AssemblyScript compiler `asc`).
+2. **Dry-run**: `intutic policy test --wasm build/rule.wasm --mock mock.json` — validate both a should-block and a should-allow context before installing.
+3. **Install**: `intutic policy install --wasm build/rule.wasm --name <name> --priority NN` copies the validated binary into `~/.intutic/wasm/` as `NN_name.wasm`. Inspect with `intutic policy list-local`. Override the directory with the `INTUTIC_WASM_DIR` env var or `intutic_settings.wasm_local_dir` in `config.yaml`.
+4. **Hot-Reload**: The proxy rescans the directory's file signatures (mtime + size) at most every **5 seconds, on the request path** — rules only matter when a request arrives, so no background watcher process is needed. Changed files are recompiled to `wasmtime::Module`s without a service restart. Loading is **fail-open per file**: a corrupt or mid-copy file is logged and skipped, and the previous good version of that rule keeps enforcing until a valid replacement compiles.
+5. **Naming Convention**: `NN_name.wasm` — the numeric `NN` prefix is the evaluation priority (lower runs first); files without the prefix default to priority `100`.
+
+#### Precedence & Coexistence
+Local rules and centrally-synced (Valkey) rules are merged into a single priority-ordered list at evaluation time (ties keep central rules first). `BLOCK` short-circuits the chain and no verdict can override a block, so the union is **most-restrictive-wins**: a local rule can add restrictions but can never neutralize a centrally-synced rule.
 
 <!-- ENTERPRISE_ONLY_START -->
 ### Enterprise Cloud / Team Sync Mode
@@ -80,7 +85,7 @@ The Rust host normalizes the intercepted request context (tool calls, arguments,
 
 ### B. Memory Allocation & Injection
 Because WASM sandboxes have isolated linear memory, the host must inject the context:
-1. The host calls the exported WASM function `__allocate(len)` to allocate buffer memory within the guest instance.
+1. The host calls the exported WASM function `allocate(len)` (falling back to AssemblyScript's `__new(len, 0)`) to allocate buffer memory within the guest instance.
 2. The host writes the serialized JSON string directly to that allocated offset in the guest's memory.
 
 ### C. Execution
@@ -102,6 +107,6 @@ The guest function returns an integer verdict that dictates how the proxy gates 
 |:---:|---|---|
 | **`0`** | `ALLOW` | The request is marked clean and continues down the pipeline. |
 | **`1`** | `BLOCK` | The request is rejected immediately. The proxy short-circuits the connection and returns a block response: `{ "error": "Blocked by WASM rule policy" }`. |
-| **`2`** | `REDACT` | The proxy filters/strips out matching sensitive parameters or credentials before forwarding the payload to the provider. |
+| **`2`** | `REDACT` | Currently treated as a block: the request is rejected with a DLP-flavored reason. In-flight payload redaction is not implemented. |
 
 *Note: If multiple rules are active, the runner evaluates all instances sequentially and returns the **most restrictive** verdict.*
