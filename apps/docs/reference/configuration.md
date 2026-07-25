@@ -17,6 +17,7 @@ These variables configure the local client utilities, sync daemon, and proxy gat
 | `CONTROL_PLANE_URL` | ❌ | `https://api.intutic.ai` | Control plane base URL for remote SOP and policy syncing |
 | `CONFIG_CAPTURE_INTERVAL` | ❌ | `5` | Sync loop cycles between local configuration snapshots |
 | `MCP_DAEMON_SOCKET` | ❌ | `~/.intutic/mcp-proxy.sock` | Daemon Unix IPC socket path |
+| `INTUTIC_WASM_DIR` | ❌ | `~/.intutic/wasm` | Overrides the local WASM rule directory; takes precedence over the `intutic_settings.wasm_local_dir` config file value |
 
 ### Enterprise Control Plane (SaaS / Private VPC)
 
@@ -70,6 +71,7 @@ Workspaces are the top-level organizational unit. Each workspace has:
 | Plan | enum | `free_trial`, `pro`, `team`, `enterprise` |
 | Budget tiers | object | Per-role budget limits |
 
+<!-- ENTERPRISE_ONLY_START -->
 ## Workspace Roles (RBAC)
 
 | Role | Access Level |
@@ -81,6 +83,7 @@ Workspaces are the top-level organizational unit. Each workspace has:
 | `VIEWER` | Read-only access to dashboard |
 
 Hierarchy: `OWNER` > `ADMIN` > `EM` > `DEVELOPER` > `VIEWER`
+<!-- ENTERPRISE_ONLY_END -->
 
 ## Budget Tiers
 
@@ -126,3 +129,54 @@ All IDs in Intutic use prefixed nanoid format:
 | `se_` | Session |
 
 Never use raw UUIDs or `Date.now()` directly. Use `newId(prefix)` and `newIso()` from `@intutic/id`.
+
+---
+
+## 4. Proxy `config.yaml` (`intutic_settings`)
+
+The proxy reads a LiteLLM-compatible `config.yaml`. Intutic-specific options live under the top-level `intutic_settings` key, alongside `model_list` and `general_settings`.
+
+| Setting | Type | Default | Description |
+| :--- | :---: | :---: | :--- |
+| `wasm_local_dir` | string | `~/.intutic/wasm` | Directory scanned for locally installed WASM rules. The `INTUTIC_WASM_DIR` env var takes precedence over this value |
+
+### Model Routing (`intutic_settings.routing`)
+
+Contextual bandit routing picks a model per request via Thompson sampling over a candidate pool.
+
+| Setting | Type | Default | Description |
+| :--- | :---: | :---: | :--- |
+| `enabled` | boolean | — | Enables bandit routing in standalone mode. Unset defers entirely to the control plane |
+| `candidate_models` | string[] | `claude-3-5-sonnet`, `gpt-4o`, `gemini-2.0-flash` | Candidate model pool for Thompson sampling. Requests for models outside this pool bypass the bandit entirely. Names must match `model_list` entries so provider resolution and pricing stay accurate |
+| `anthropic_model_override` | string | — | When set, any Anthropic-bound model is rewritten to this ID after routing. Unset leaves the routed model untouched |
+
+**Precedence:** when a control plane manages the workspace, the Valkey `ff_bandit_routing` feature flag is authoritative. `routing.enabled` applies only to standalone deployments where no control plane manages the workspace.
+
+### Reward Loop (`intutic_settings.routing.reward`)
+
+Rewards are computed only from signals the proxy already observes — upstream success, latency versus SLO, token anomaly, and cost ratio. No LLM judge is involved.
+
+| Setting | Type | Default | Description |
+| :--- | :---: | :---: | :--- |
+| `enabled` | boolean | `true` | Enables the local deterministic reward loop |
+| `latency_slo_ms` | number | `30000` | Latency SLO; responses slower than this are penalised proportionally. Includes full stream duration for streaming responses |
+| `latency_penalty` | number | `0.3` | Maximum reward deduction for exceeding the latency SLO |
+| `token_anomaly_penalty` | number | `0.2` | Reward deduction when the token-anomaly detector fires |
+| `cost_penalty` | number | `0.2` | Maximum reward deduction when the routed model costs more than the requested model would have |
+
+```yaml
+intutic_settings:
+  # Directory scanned for locally installed WASM rules
+  # (INTUTIC_WASM_DIR takes precedence over this value).
+  wasm_local_dir: "~/.intutic/wasm"
+
+  routing:
+    enabled: true
+    candidate_models: ["claude-3-5-sonnet", "gpt-4o", "gemini-2.0-flash"]
+    reward:
+      enabled: true
+      latency_slo_ms: 30000
+      latency_penalty: 0.3
+      token_anomaly_penalty: 0.2
+      cost_penalty: 0.2
+```

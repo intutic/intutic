@@ -40,7 +40,7 @@ Configure authentication, access control, and API credentials for your workspace
 
 ### Single Sign-On (SSO)
 
-Set up SAML/OIDC-based SSO providers so team members can log in with Okta, Entra ID (Azure AD), Google, or Ping Identity. Refer to the configuration helper links inside the modal for step-by-step setup guides.
+Set up SAML 2.0 or OIDC-based SSO providers so team members can log in with Okta, Entra ID (Azure AD), Google, or Ping Identity. Refer to the configuration helper links inside the modal for step-by-step setup guides.
 
 ### API Keys
 

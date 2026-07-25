@@ -2,7 +2,7 @@
   "name": "@intutic/vscode-extension",
   "displayName": "Intutic Governance Extension",
   "description": "AI Governance Control Plane for VS Code / Cursor workspaces",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "publisher": "intutic",
   "engines": {
     "vscode": "^1.90.0"

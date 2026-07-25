@@ -37,11 +37,21 @@ npm-debug.log*
 coverage/
 .nyc_output/
 
-# Rust (future proxy service)
+# Rust proxy service
 target/
 **/*.rs.bk
-Cargo.lock
-!packages/proxy/Cargo.lock
+# The workspace root Cargo.lock is the ONE Cargo actually resolves against
+# (root Cargo.toml declares packages/proxy as a [workspace] member), so it is
+# committed to pin release builds. packages/proxy/Cargo.lock is inert — Cargo
+# never reads a member lockfile — and is deliberately untracked.
+packages/proxy/Cargo.lock
+# Standalone bench fixture crate — not a workspace member, never tracked.
+packages/proxy/benches/wasm_guest/Cargo.lock
+
+# Prebuilt proxy binary — the CLI downloads per-platform assets from GitHub
+# Releases (see tools/cli/src/commands/connect.ts), so committing a 39.7MB
+# single-platform binary here only taxes every clone.
+packages/proxy/bin/intutic-proxy
 
 # Docker
 docker-compose.override.yml
@@ -79,3 +89,21 @@ scratch/
 .openhands/
 .windsurf/
 
+# Python (packages/intutic-clawde)
+__pycache__/
+*.py[cod]
+.pytest_cache/
+# Virtualenvs are local dev environments, never committed — the one in
+# packages/intutic-clawde is ~73MB and was previously un-ignored, so a
+# `git add -A` would have staged it wholesale.
+.venv/
+venv/
+*.egg-info/
+build/
+
+# VitePress build cache and output — never committed. 17 `deps_temp_*` cache
+# files were tracked before this; they are regenerated on every build and only
+# ever produced diff noise.
+**/.vitepress/cache/
+**/.vitepress/dist/
+**/.vitepress/cache_temp/

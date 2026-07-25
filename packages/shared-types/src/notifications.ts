@@ -20,7 +20,6 @@ export type NotificationEventType =
   | 'context_gap.auto_injected'
   | 'trajectory.alert'
   // ── Calibration & drift (Q10 orphan audit) ──
-  | 'calibration.computed'
   | 'calibration.threshold_breach'
   | 'anomaly.drift.detected'
   | 'anomaly.capability_miss'
@@ -41,21 +40,12 @@ export type NotificationEventType =
   | 'trial.expired_downgraded'
   | 'trial.day7_report_sent'
   | 'trial.day13_report_sent'
-  // ── Plans & annotations ──
+  // ── Plans ──
   | 'plan.captured'
   | 'plan.approved'
   | 'plan.deviation.detected'
-  | 'annotation.queue_populated'
-  | 'annotation.created'
-  // ── CFO & reports ──
-  | 'cfo.report.ready'
   // ── Identity & compliance ──
   | 'identity.offboarding.completed'
-  | 'gdpr.memory_erased'
-  // ── Prompt library ──
-  | 'prompt_library.created'
-  | 'prompt_library.version_created'
-  | 'prompt_library.imported'
   // ── Workspace context ──
   | 'workspace.context.updated'
 

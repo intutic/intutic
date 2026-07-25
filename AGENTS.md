@@ -20,7 +20,7 @@ This file is the **machine-readable** entry point for AI coding agents working i
 | [`packages/clawde-sdk/`](packages/clawde-sdk/) | TypeScript SDK for Claude agent integration |
 | [`packages/intutic-clawde/`](packages/intutic-clawde/) | Python SDK for Claude agent integration |
 | [`packages/mcp-proxy/`](packages/mcp-proxy/) | Model Context Protocol governance proxy |
-| [`packages/wasm-sdk/`](packages/wasm-sdk/) | Rust WASM SDK for custom proxy policy filters |
+| [`packages/wasm-sdk/`](packages/wasm-sdk/) | AssemblyScript WASM rules SDK (built with `asc`) for custom proxy policy filters |
 | [`services/sync-daemon/`](services/sync-daemon/) | Bidirectional config sync daemon (SOPs → harness) |
 | [`tools/cli/`](tools/cli/) | Developer CLI tool (`@intutic/cli`) |
 | [`apps/docs/`](apps/docs/) | Developer Portal — VitePress docs site (docs.intutic.ai) |
@@ -58,7 +58,7 @@ pnpm run docs
 - **IDs:** Always use `newId(prefix)` from `@intutic/id`. Never use raw UUIDs or `Date.now()`.
 - **Timestamps:** Always use `newIso()` from `@intutic/id`. Never use `Date.now()` directly.
 - **Testing:** Zero `vi.mock` in core library unit tests where possible.
-- **Design System Compliance:** All styling must strictly utilize CSS custom variables from `globals.css` and `glass.css`. Hardcoded hex codes and color functions are prohibited inside component CSS files.
+- **Design System Compliance:** All styling must strictly utilize CSS custom variables from `@intutic/theme` (`packages/theme/src/tokens.ts`, emitted as `@intutic/theme/css`). Hardcoded hex codes and color functions are prohibited inside component CSS files.
 - **Docker Compose Decoupling:** `docker-compose.yml` in this open-core repository must remain Valkey-only (`valkey:8` on port 6379).
 
 ## High-value `rg` patterns

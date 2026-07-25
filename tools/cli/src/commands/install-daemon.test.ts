@@ -11,7 +11,7 @@ import {
 
 describe('Daemon Installer Configuration Builder', () => {
   const opts = {
-    workspaceId: 'ws_test',
+    workspaceId: 'wk_test',
     apiKey: 'vk_test',
     binaryPath: '/usr/local/bin/intutic',
     controlPlaneUrl: 'https://api.intutic.ai'

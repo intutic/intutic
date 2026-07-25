@@ -1,6 +1,6 @@
 {
   "name": "@intutic/proxy",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "Native high-performance AI agent governance proxy binary",
   "type": "module",
   "main": "bin/proxy.js",
@@ -11,11 +11,10 @@
     "access": "public"
   },
   "scripts": {
-    "build": "cargo build --release && mkdir -p bin && (cp target/release/intutic-proxy bin/ 2>/dev/null || cp ../../target/release/intutic-proxy bin/)",
-    "prepublishOnly": "cargo build --release && mkdir -p bin && (cp target/release/intutic-proxy bin/ 2>/dev/null || cp ../../target/release/intutic-proxy bin/)"
+    "build": "cargo build --release"
   },
   "files": [
-    "bin/",
+    "bin/proxy.js",
     "README.md",
     "LICENSE"
   ],

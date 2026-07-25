@@ -7,7 +7,7 @@ Write custom validation rules that run at wire speed in the Intutic proxy using 
 Custom Filters let you write policy rules in AssemblyScript (a TypeScript subset), compile them to WebAssembly, and run them inside the Intutic proxy on every request. They execute in a sandboxed environment with strict resource limits.
 
 ::: info Availability
-Custom Filters require the `feature.wasm_rules` capability and are accessible to **Owner**, **Admin**, and **EM** roles.
+Local filters installed into `~/.intutic/wasm/` need no capability and no role — the open-core proxy loads them on the request path in any build. Dashboard-managed filters (Cloud) require the `feature.wasm_rules` capability and are accessible to **Owner**, **Admin**, and **EM** roles.
 :::
 
 ---

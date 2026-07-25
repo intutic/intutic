@@ -146,6 +146,7 @@ Budget tiers control how much each developer can spend on LLM calls. They map to
 
 Exceeding your tier's budget triggers a `BUDGET_BREACH` anomaly and a `KILL` enforcement action. Budget caps are enforced per developer session.
 
+<!-- ENTERPRISE_ONLY_START -->
 ## RBAC Roles
 
 Intutic uses role-based access control with five roles:
@@ -161,6 +162,7 @@ Intutic uses role-based access control with five roles:
 ::: warning Role assignment
 Only OWNER and ADMIN roles can assign or change roles for other team members.
 :::
+<!-- ENTERPRISE_ONLY_END -->
 
 ## How it all fits together
 

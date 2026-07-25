@@ -109,10 +109,19 @@ async function downloadValkeyBinary(destPath: string): Promise<string> {
   const url = `https://intutic.ai/valkey/v${valkeyVersion}/${assetName}`
 
   log.info(`Downloading precompiled Valkey server from ${url}...`)
-  
+
   const response = await fetch(url)
   if (!response.ok) {
-    throw new Error(`Failed to download Valkey binary: HTTP ${response.status} ${response.statusText}`)
+    // We do not build Valkey ourselves, so this mirror can be missing a platform.
+    // Fail with something the user can act on instead of a bare HTTP status.
+    throw new Error(
+      `Failed to download a Valkey binary for ${platform}-${arch} (HTTP ${response.status} ${response.statusText}).\n` +
+        `Intutic needs a local Valkey (or Redis) on port 6379. Install one and re-run \`intutic connect\`:\n` +
+        `  macOS:  brew install valkey && brew services start valkey\n` +
+        `  Linux:  apt install valkey-server  (or redis-server)\n` +
+        `  Docker: docker run -d -p 6379:6379 valkey/valkey:8\n` +
+        `Already running elsewhere? Point Intutic at it with VALKEY_URL=redis://host:port`
+    )
   }
 
   const arrayBuffer = await response.arrayBuffer()
@@ -150,8 +159,11 @@ async function downloadProxyBinary(destPath: string): Promise<string> {
     throw new Error(`Unsupported platform/architecture: ${platform}-${arch}`)
   }
 
-  const cliVersion = '1.5.0'
-  const url = `https://intutic.ai/proxy/v${cliVersion}/${assetName}`
+  // Binaries are published as GitHub Release assets by .github/workflows/publish.yml
+  // (the github-release job uploads every build-rust-proxy artifact under the vX.Y.Z
+  // tag). Asset names here MUST match that workflow's matrix `artifact_name` values.
+  const cliVersion = '1.6.0'
+  const url = `https://github.com/intutic/intutic/releases/download/v${cliVersion}/${assetName}`
 
   log.info(`Downloading precompiled Intutic proxy from ${url}...`)
   
@@ -440,7 +452,7 @@ export async function runConnect(opts: {
       
       proxyEnv = {
         ...process.env,
-        VALKEY_URL: process.env.VALKEY_URL || 'redis://127.0.0.1:6380',
+        VALKEY_URL: process.env.VALKEY_URL || 'redis://127.0.0.1:6379',
         ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || '',
         INTUTIC_CONTROL_PLANE_URL: controlPlaneUrl,
         CONTROL_PLANE_URL: controlPlaneUrl,

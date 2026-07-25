@@ -242,9 +242,9 @@ In multi-agent systems where execution and checking are divided across parallel 
 ### 16. How are the local Rust proxy and CLI binaries packaged and hosted?
 
 To keep the global developer installation lightweight, the local Rust proxy binary is **not** bundled inside the `@intutic/cli` npm package. Instead:
-*   **Pipeline Compilation:** When a version tag (e.g. `v1.0.8`) is pushed, the Github Actions publish workflow compiles the Rust proxy code (`packages/proxy`) for five target combinations: macOS arm64/x64, Linux arm64/x64, and Windows x64.
-*   **GCP Storage Hosting:** The runner uploads these precompiled binaries to a secure, public Google Cloud Storage bucket (`gs://releases.intutic.ai/proxy/v1.0.8/`).
-*   **Dynamic Download:** When a developer runs `intutic connect` for the first time, the CLI detects the local OS/architecture, downloads the matching precompiled binary, and saves it in `~/.intutic/bin/` to run as a local managed process.
+*   **Pipeline Compilation:** When a version tag (e.g. `v1.6.0`) is pushed, the Github Actions publish workflow (`.github/workflows/publish.yml`) compiles the Rust proxy code (`packages/proxy`) for five target combinations: `aarch64-apple-darwin`, `x86_64-apple-darwin`, `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, and `x86_64-pc-windows-msvc` — that is, macOS arm64/x64, Linux x64/arm64, and Windows x64.
+*   **GitHub Release Hosting:** The `github-release` job collects every compiled artifact together with the `npm pack` tarballs and attaches them to a GitHub Release for the tag (`gh release create <tag> release-assets/*`); the standalone `pkg`-built CLI executables ride along in the same release. In parallel, `packages/proxy` is published to npm as `@intutic/proxy` — the npm package ships the `bin/proxy.js` launcher only, not a compiled binary, so the tarball stays small on every platform.
+*   **Dynamic Download:** `intutic connect` only fetches a binary in non-dev mode, and only after it fails to find one at `packages/proxy/target/release/intutic-proxy`, then `target/debug/intutic-proxy`, then the global cache `~/.intutic/bin/`. It then detects the local OS/architecture and downloads the matching asset from the GitHub Release for the pinned CLI version — `https://github.com/intutic/intutic/releases/download/v<version>/<asset-name>` (e.g. `intutic-proxy-darwin-arm64`) — marks it executable, and saves it in `~/.intutic/bin/` to run as a local managed process. Because the URL is derived from the release tag, the download can never drift from the published assets. If the download fails, the CLI falls back to `cargo run`.
 
 ---
 
@@ -255,7 +255,7 @@ No changes to the CLI or local proxy binaries are required to upgrade tiers. The
 1.  **Open Core / Standalone (Local Mode):** The proxy and CLI run entirely locally. Budget limits are evaluated against `maxDailyBudgetUsd` in `~/.intutic/config.json` and saved to sharded local spend log files (`~/.intutic/logs/local-spend-YYYY-MM-DD.jsonl`).
 2.  **Free Tier SaaS (Connected Mode):** The user registers on the web dashboard to receive a Workspace ID and API Key, and runs:
     ```bash
-    npx @intutic/cli connect --workspace-id <ws_id> --api-key <api_key>
+    npx @intutic/cli connect --workspace-id <wk_id> --api-key <api_key>
     ```
     *(Or `intutic connect` if the CLI is installed globally).*
     The Sync Daemon immediately uploads buffered local traces (`traces-YYYY-MM-DD.jsonl`) to `/api/v1/traces/sync-back` and syncs workspace-wide rules. Onboarding users use **Direct Provisioning** — admins create accounts directly by entering a display name and role, and the dashboard UI generates a secure random temporary password (`tempPassword`) that the admin copies and shares manually (avoiding email server delivery failures).

@@ -25,33 +25,11 @@ Most endpoints require a JWT access token in the `Authorization` header:
 Authorization: Bearer <access_token>
 ```
 
-Public endpoints (register, login, refresh, signup) do not require authentication.
+Public endpoints (signup, login, refresh) do not require authentication.
 
 ---
 
 ## Auth Endpoints
-
-### POST /api/v1/auth/register
-
-Register a new user and workspace.
-
-**Auth:** None (public)
-
-**Request body:**
-
-```json
-{
-  "email": "dev@example.com",
-  "password": "securepassword",
-  "name": "Jane Developer"
-}
-```
-
-**Response:** `201 Created`
-
-**Error codes:** `400` validation, `409` email already exists
-
----
 
 ### POST /api/v1/auth/signup
 
@@ -542,7 +520,6 @@ The control plane includes additional routes not yet documented in detail:
 | `keys.ts` | `/api/v1/keys` | Virtual API key management |
 | `members.ts` | `/api/v1/members` | Workspace member management |
 | `plans.ts` | `/api/v1/plans` | Execution plan management |
-| `scim.ts` | `/scim/v2/Users`, `/scim/v2/Groups` | SCIM 2.0 user/group provisioning (RFC 7643/7644) |
 | `sync.ts` | `/api/v1/sync` | Harness config sync |
 | `trust.ts` | `/api/v1/trust` | Trust score management |
 | `workspace.ts` | `/api/v1/workspace` | Workspace CRUD |
@@ -583,12 +560,12 @@ The `OWNER` role cannot be assigned via invite. Only existing Owners can transfe
 
 ```json
 {
-  "memberId": "mem_abc123",
+  "memberId": "mb_abc123",
   "userId": "usr_def456",
   "email": "newdev@example.com",
   "displayName": "Jane Developer",
   "role": "DEVELOPER",
-  "workspaceId": "ws_ghi789"
+  "workspaceId": "wk_ghi789"
 }
 ```
 

@@ -6,7 +6,7 @@ This page documents how LLM requests are routed from client harnesses (Cursor, C
 
 ## 1. Local Open-Core Routing (Developer Sandbox)
 
-In the open-source local developer sandbox, routing is designed to be stateless, lightweight, and extremely low-latency. 
+In the open-source local developer sandbox, routing is designed to be stateless, lightweight, and extremely low-latency **out of the box**. The same open-core proxy also ships an optional stateful routing mode (Thompson sampling with a local reward loop) that is opt-in via `config.yaml`. 
 
 ```
                                ┌────────────────────────────────┐
@@ -23,6 +23,7 @@ In the open-source local developer sandbox, routing is designed to be stateless,
 
 *   **Direct-to-Provider:** The local **Intutic Proxy Gateway** (a custom proxy written in Rust, located in `packages/proxy`) intercepts API calls, runs Layer 1 safety checks (DLP, local budget gates, and sandboxed WASM custom rules) in under **5ms**, and forwards the stream **directly** to the upstream model provider.
 *   **Zero Local Overhead:** The open-source local developer sandbox does **not** run or require any Python LiteLLM container or Node.js control plane processes. It keeps the workstation footprint small and avoids adding cold-path routing hops.
+*   **Optional Stateful Routing:** The same open-core proxy also contains the full Thompson-sampling bandit router (`packages/proxy/src/routing/bandit.rs`) and a local deterministic reward loop (`packages/proxy/src/routing/reward.rs`) that learns arm state from signals the proxy already observes — upstream success, latency vs. SLO, token anomaly, and routed-vs-requested cost ratio — with no LLM judge and no control plane. It is enabled through the `intutic_settings.routing` block in `config.yaml`, which ships **commented out**, so the stateless direct-to-provider path above remains the default until you explicitly turn it on.
 
 ---
 
@@ -59,10 +60,10 @@ The commercial control plane deploys an internal Python `litellm` container. It 
 
 ## 3. Intelligent Model Routing
 
-The commercial control plane proxy integrates an **Intelligent Model Routing** engine using **Adaptive Reinforcement Selection** to optimize cost vs. capability dynamically. 
+The **Intelligent Model Routing** engine — **Adaptive Reinforcement Selection** over a Thompson-sampling arm set — ships in the open-core Rust proxy and is shared by both deployments, optimizing cost vs. capability dynamically. In standalone open-core mode the proxy learns arm state itself from the local deterministic reward loop; the commercial control plane takes over arm learning to layer on the cloud refinements described below (LLM-as-a-judge classification refinement, daily decay, and outage penalties). 
 
 ### Adaptive Selection & Candidate Selection
-* **Candidate Pool:** The router evaluates a core pool of high-capability candidate models: `claude-3-5-sonnet`, `gpt-4o`, and `gemini-1.5-pro`.
+* **Candidate Pool:** The router evaluates a core pool of high-capability candidate models: `claude-3-5-sonnet`, `gpt-4o`, and `gemini-2.0-flash`.
 * **Automatic Bypass:** If a client explicitly requests a custom, specialized, or low-cost local model (e.g. `llama-3-8b`), the router automatically bypasses intelligent routing selection to prevent upgrading cheap requests to expensive frontier models.
 * **Cold-Start Fallback:** If a workspace has fewer than 20 cumulative requests handled, the routing model remains inactive to gather baseline observations first.
 
@@ -82,6 +83,9 @@ To maintain optimal task classification without hot path overhead:
 1. **Asynchronous Analysis**: A daily background cron job processes a sample of execution trace prompts, using high-performance LLM-as-a-judge completion calls to review and refine their classifications.
 2. **In-Memory Statistics Redirection**: To comply with audit guidelines that require `execution_traces` to be strictly write-once / append-only, classification adjustments are performed in-memory during reward aggregation. Reward feedback is shifted directly to the refined arm (e.g. from `coding` to `testing`) without mutating historical records.
 3. **Keyword Expansion**: Newly identified keywords are automatically added to the workspace's custom settings lists, enhancing local matching accuracy on future runs.
+
+#### Single-Writer Ownership
+Arm learning has exactly one writer per workspace, tracked in Valkey under `bandit:reward_mode:{workspaceId}`. A standalone open-core proxy claims the marker as `local` and runs the deterministic reward loop itself. When a control plane takes the workspace over, it sets the marker to `cloud`; the local writer sees the change on its next ownership refresh and stands down within **~60s**, leaving the cloud reward cron as the sole writer. This prevents the local loop and the cron from double-counting rewards against the same arms.
 
 ### Real-Time Outage Protection & Penalties
 * **Outage Capture:** The Rust proxy detects upstream connection timeouts and $500+$ server errors. 

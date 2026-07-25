@@ -6,6 +6,45 @@ import path from 'path'
 const hasControlPlane = fs.existsSync(path.resolve(__dirname, '../../../services/control-plane'));
 const IS_OSS = process.env.INTUTIC_ENTERPRISE_BUILD !== 'true' || !hasControlPlane;
 
+/**
+ * Pages whose title carries a `Cloud …` or `Enterprise` badge — i.e. pages that
+ * document paid-tier functionality.
+ *
+ * These are excluded from the OSS build entirely (see `srcExclude` below).
+ * Sidebar entries for them were already `!IS_OSS`-gated, but the pages
+ * themselves were still rendered and served: 22 of them, of which only 7 had
+ * any ENTERPRISE_ONLY wrapping, so the rest published their full cloud content
+ * at a public URL that navigation simply never linked to.
+ *
+ * The list is derived from the badge at build time rather than hard-coded, so a
+ * newly added Cloud/Enterprise page is excluded automatically instead of
+ * silently shipping until someone remembers to update a list.
+ */
+function paidTierPages(): string[] {
+  const root = path.resolve(__dirname, '..')
+  const found: string[] = []
+  const skip = new Set(['node_modules', 'public', 'dist'])
+  const walk = (dir: string) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name.startsWith('.') || skip.has(entry.name)) continue
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) {
+        walk(full)
+      } else if (entry.name.endsWith('.md')) {
+        // The badge lives on the H1, so only the head of the file matters.
+        const head = fs.readFileSync(full, 'utf8').slice(0, 512)
+        if (/<Badge[^>]*text="(Cloud[^"]*|Enterprise[^"]*)"/.test(head)) {
+          found.push(path.relative(root, full))
+        }
+      }
+    }
+  }
+  walk(root)
+  return found
+}
+
+const PAID_TIER_PAGES = IS_OSS ? paidTierPages() : []
+
 const navItems = [
   { text: 'Guide', link: '/guide/getting-started' },
   { text: 'Integrations', link: '/integrations/' },
@@ -55,6 +94,12 @@ sidebarGuide.push({
   text: 'Advanced Features',
   items: [
     { text: 'Custom Filters (Open-Core)', link: '/guide/wasm-rules' },
+    // Routing ships in open-core. Enterprise builds already list this page under
+    // 'Using Intutic' as 'Intelligent Model Routing (Cloud)', so this entry is
+    // OSS-only to keep the page from appearing twice in the enterprise sidebar.
+    ...(IS_OSS ? [
+      { text: 'Intelligent Model Routing (Open-Core)', link: '/guide/intelligent-routing' },
+    ] : []),
     ...(!IS_OSS ? [
       { text: 'SOP Optimizer (Cloud)', link: '/guide/metaclaw' },
       { text: 'Drift Detection (Cloud)', link: '/guide/drift-detection' },
@@ -118,6 +163,34 @@ export default defineConfig({
 
   appearance: 'dark',
   ignoreDeadLinks: true,
+
+  // Paid-tier pages are not built at all in OSS mode. Cloud pages cross-link to
+  // each other, so excluding the set removes both the pages and their linkers;
+  // `ignoreDeadLinks` above absorbs any stragglers.
+  srcExclude: PAID_TIER_PAGES,
+
+  // Strip ENTERPRISE_ONLY blocks in the markdown pipeline, not only in the Vite
+  // transform below.
+  //
+  // The Vite `oss-domain-replacer` plugin cleans the rendered PAGES, but
+  // VitePress builds its local search index from a separate markdown render
+  // that never passes through that plugin. Without this rule the OSS build
+  // shipped ~57 enterprise-only section titles — "Setting Up SSO",
+  // "On-Behalf-Of (OBO) Tokens", "Cloud Reward Feedback (LLM-as-a-Judge)" —
+  // as searchable results that jumped to anchors which do not exist on the
+  // stripped page. Running here catches both paths; the Vite pass then finds
+  // nothing left to strip and only performs its domain rewrites.
+  markdown: {
+    config: (md) => {
+      if (!IS_OSS) return
+      md.core.ruler.before('normalize', 'strip-enterprise-only', (state) => {
+        state.src = state.src.replace(
+          /<!-- ENTERPRISE_ONLY_START -->[\s\S]*?<!-- ENTERPRISE_ONLY_END -->/gm,
+          ''
+        )
+      })
+    },
+  },
 
   themeConfig: {
     logo: {

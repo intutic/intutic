@@ -1,11 +1,20 @@
 {
   "name": "@intutic/sync-daemon",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "Intutic Sync Daemon — bidirectional state sync between control plane and developer workspaces",
   "type": "module",
-  "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/intutic/intutic",
+    "directory": "services/sync-daemon"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "files": [
+    "dist/",
+    "README.md"
+  ],
   "exports": {
     ".": {
       "import": "./dist/index.js",
@@ -80,5 +89,8 @@
     "tsx": "^4",
     "typescript": "^5.5",
     "vitest": "^3"
+  },
+  "engines": {
+    "node": ">=20.19.0"
   }
 }

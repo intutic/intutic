@@ -39,7 +39,7 @@ intutic init [options]
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-1. Scans the workspace for all 17 harness config files
+1. Scans the workspace for all 18 harness config files
 2. Creates a workspace on the control plane
 3. Generates a virtual API key (`vk_*`)
 4. Writes governance config into each detected harness file
@@ -262,7 +262,9 @@ intutic loop start [options]
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--name <name>` | Unique name identifier for the loop run | _(required)_ |
-| `--budget <limit>` | Maximum budget ceiling in USD | `10.00` |
+| `--budget <limit>` | Maximum token spend budget in USD (e.g. `5.00`) | _(none)_ |
+| `--sops <sops>` | Comma-separated local SOP folder names or option indices | — |
+| `--auto-judge` | Enable automatic E2E judging for the loop | — |
 | `--dev` | Use local control plane | — |
 
 ---
@@ -280,7 +282,9 @@ intutic loop exec [options] -- <command> [args...]
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--name <name>` | Unique name identifier for the loop run | _(generated)_ |
-| `--budget <limit>` | Maximum budget ceiling in USD | `10.00` |
+| `--budget <limit>` | Maximum token spend budget in USD (e.g. `5.00`) | _(none)_ |
+| `--sops <sops>` | Comma-separated local SOP folder names or option indices | — |
+| `--auto-judge` | Enable automatic E2E judging for the loop | — |
 | `--dev` | Use local control plane | — |
 
 **Example:**
@@ -400,5 +404,249 @@ intutic policy test --wasm <path> --mock <path>
 |--------|-------------|
 | `--wasm <path>` | Path to compiled WebAssembly rule binary (required) |
 | `--mock <path>` | Path to mock JSON request context file (required) |
+
+---
+
+## `intutic policy compile`
+
+Compile an AssemblyScript rule to WASM (wraps `asc`).
+
+```bash
+intutic policy compile [options]
+```
+
+**Options:**
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--src <path>` | Rule source entry file | `assembly/index.ts` |
+| `--out <path>` | Output `.wasm` path | `build/rule.wasm` |
+| `--debug` | Include debug info and source maps | `false` |
+
+**What it does:**
+Shells out to `npx --no-install asc <src> -o <out> --optimize --exportRuntime`, creating the output directory if needed. With `--debug` it also passes `--debug --sourceMap`. If `asc` is not available, install it with `pnpm add -D assemblyscript assemblyscript-json`.
+
+---
+
+## `intutic policy install`
+
+Validate and install a compiled WASM rule into the local proxy rules dir.
+
+```bash
+intutic policy install --wasm <path> [options]
+```
+
+**Options:**
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--wasm <path>` | Path to compiled WebAssembly rule binary (required) | — |
+| `--name <name>` | Rule name | _(the file name)_ |
+| `--priority <NN>` | Evaluation priority — lower runs first | `100` |
+
+**What it does:**
+1. Instantiates the rule and evaluates it against a built-in allow-mock context — a rule that fails to instantiate or evaluate is **not** installed
+2. Writes it as `{priority}_{name}.wasm` into the local rules dir — `INTUTIC_WASM_DIR` if set, otherwise `~/.intutic/wasm`
+3. Prints the destination path, priority, and SHA-256 of the installed binary
+
+The proxy picks up local rule changes within ~5s on the next request. If your proxy `config.yaml` sets `intutic_settings.wasm_local_dir`, make sure it matches this path (or set `INTUTIC_WASM_DIR` for both).
+
+---
+
+## `intutic policy list-local`
+
+List WASM rules installed in the local proxy rules dir.
+
+```bash
+intutic policy list-local
+```
+
+No options. For each `.wasm` file in the local rules dir (`INTUTIC_WASM_DIR`, defaulting to `~/.intutic/wasm`) it prints the rule name, priority, size, mtime, and a SHA-256 prefix.
+
+---
+
+## `intutic doctor`
+
+Diagnose workspace health — proxy, auth, daemon, configs, logs.
+
+```bash
+intutic doctor
+```
+
+No options. Runs seven checks in order, each printing ✓ or ✗ plus a one-line remediation on failure:
+
+1. Proxy reachable (`http://127.0.0.1:4000/health`)
+2. Control plane auth (via stored credentials)
+3. Sync daemon running (PID file or process scan)
+4. Harness config files intact (SHA-256 drift check)
+5. Daemon log readable (`~/.intutic/daemon.log`)
+6. Valkey connectivity (proxy `/health`, falling back to a TCP probe on port 6379)
+7. CA cert trust (`~/.intutic/ca.crt` plus the OS trust store)
+
+---
+
+## `intutic budget`
+
+Check remaining daily/monthly budget and list active loops.
+
+```bash
+intutic budget [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Fetches cloud budget status (daily and monthly spend, percentages used, remaining budget, alert flag), prints the local spending cap configured in `~/.intutic/config.json` (default `$10.00`), and lists all `ACTIVE` loop runs with their token spend and budget limit. Without stored credentials it runs in standalone (offline) mode and reports only the local cap.
+
+---
+
+## `intutic sops push <name>`
+
+Push a local offline SOP folder to the central workspace.
+
+```bash
+intutic sops push <name> [options]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `name` | Folder name under `.intutic/sops/` in the workspace root |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Concatenates every `.md` file in `.intutic/sops/<name>/`, derives a title from the folder name (`postgres-migration` → `Postgres Migration`), and creates a workspace SOP on the control plane. Fails if the folder is missing or contains no markdown.
+
+---
+
+## `intutic exec`
+
+Execute a command wrapped with Intutic proxy environment variables.
+
+```bash
+intutic exec -- <command> [args...]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `command...` | Command and arguments to execute (e.g. `-- claude`) |
+
+**What it does:**
+Injects the proxy environment into the child process, then spawns it with inherited stdio and exits with the child's exit code. The injected variables cover the competing SDK conventions:
+
+| Variable | Consumers |
+|----------|-----------|
+| `OPENAI_API_BASE` | LiteLLM, LangChain, CrewAI, ADK, Aider |
+| `OPENAI_BASE_URL` | OpenAI Python SDK v1+, Pydantic-AI, Agent SDK |
+| `OPENAI_API_BASE_URL` | OpenWebUI |
+| `OPENAI_HOST` | Goose (host only, no `/v1`) |
+| `ANTHROPIC_BASE_URL` | Claude Code, Anthropic SDK (host only) |
+| `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `INTUTIC_API_KEY` | API key for all of the above |
+
+Requires `intutic login` first. In dev mode the proxy is `http://localhost:4000`, otherwise `http://localhost:4000`.
+
+**Examples:**
+
+```bash
+intutic exec -- claude
+intutic exec -- aider --model openai/gpt-4o
+intutic exec -- python my_agent.py
+```
+
+---
+
+## `intutic daemon install`
+
+Install sync-daemon as a system service (auto-starts on login, restarts on any exit).
+
+```bash
+intutic daemon install --workspace-id <id> --api-key <key> [options]
+```
+
+Also available as the top-level shortcut `intutic install-daemon`.
+
+**Options:**
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--workspace-id <id>` | Workspace ID, e.g. `wk_xxxx` (required) | — |
+| `--api-key <key>` | Workspace API key, e.g. `vk_xxxx` (required) | — |
+| `--control-plane-url <url>` | Control plane URL | `https://api.intutic.ai` |
+| `--binary-path <path>` | Path to the `intutic` CLI binary | _(current process)_ |
+| `--dry-run` | Print what would be done without writing files | — |
+| `--system` | Install as a system-level service (LaunchDaemon on macOS, systemd system unit on Linux) | — |
+
+**Service files written:**
+- macOS: `~/Library/LaunchAgents/ai.intutic.sync-daemon.plist` (`KeepAlive: true`)
+- Linux: `~/.config/systemd/user/intutic-sync-daemon.service` (`Restart=always`)
+
+Because the service restarts on any exit, stopping it requires `intutic daemon stop`, `intutic daemon uninstall`, or `launchctl unload`.
+
+---
+
+## `intutic daemon uninstall`
+
+Remove the sync-daemon system service and stop it permanently.
+
+```bash
+intutic daemon uninstall [options]
+```
+
+Also available as the top-level shortcut `intutic uninstall-daemon`.
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--dry-run` | Print what would be done without writing files |
+| `--system` | Uninstall the system-level service |
+
+---
+
+## `intutic daemon status`
+
+Show sync-daemon system service status.
+
+```bash
+intutic daemon status
+```
+
+No options.
+
+---
+
+## `intutic daemon start`
+
+Start and load the sync-daemon system service.
+
+```bash
+intutic daemon start
+```
+
+No options.
+
+---
+
+## `intutic daemon stop`
+
+Stop and unload the sync-daemon system service.
+
+```bash
+intutic daemon stop
+```
+
+No options.
 
 

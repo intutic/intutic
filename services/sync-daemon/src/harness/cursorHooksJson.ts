@@ -137,8 +137,22 @@ async function writeHooksJson(filePath: string, hookScriptPath: string, level: s
  */
 export async function writeCursorHooksJson(workspaceRoot: string): Promise<void> {
   // 1. User-level: ~/.cursor/hooks.json
-  const userHooksPath = node_path.join(node_os.homedir(), '.cursor', 'hooks.json')
-  await writeHooksJson(userHooksPath, HOOK_SCRIPT, 'user')
+  //
+  // GUARD (bugfix): never touch the user's real global Cursor config from a
+  // test run — the same failure already fixed for ~/.claude in
+  // claudeCodeHooks.ts. Vitest sets VITEST=1; without this guard every run of
+  // the sync-daemon suite rewrote the developer's real ~/.cursor/hooks.json
+  // and pointed it at a temp dir the test then deleted, leaving a dead hook.
+  // INTUTIC_SKIP_GLOBAL_HOOKS=1 is an explicit opt-out for dev machines.
+  if (process.env['VITEST'] || process.env['INTUTIC_SKIP_GLOBAL_HOOKS']) {
+    log.info(
+      { action: 'cursor_user_hooks_skipped' },
+      'Skipping global ~/.cursor/hooks.json write (test or opt-out environment)',
+    )
+  } else {
+    const userHooksPath = node_path.join(node_os.homedir(), '.cursor', 'hooks.json')
+    await writeHooksJson(userHooksPath, HOOK_SCRIPT, 'user')
+  }
 
   // 2. Project-level: <workspaceRoot>/.cursor/hooks.json
   const projectHooksPath = node_path.join(workspaceRoot, '.cursor', 'hooks.json')

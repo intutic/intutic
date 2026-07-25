@@ -13,7 +13,7 @@ The proxy calls `evaluate(offset, len)` with a JSON-serialized `RequestContext`:
 
 ```jsonc
 {
-  "session_id": "sess_x", "workspace_id": "ws_x", "virtual_key_prefix": "vk_x",
+  "session_id": "sess_x", "workspace_id": "wk_x", "virtual_key_prefix": "vk_x",
   "model": "claude-3-5-sonnet",
   "tools": [{ "name": "bash", "description": "run shell commands" }],
   "tool_calls": [{ "id": "t1", "name": "bash", "arguments": {} }],
