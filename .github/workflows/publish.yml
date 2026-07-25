@@ -7,8 +7,9 @@
 #   2. Manual workflow_dispatch
 #
 # Automated Outputs:
-#   1. Publishes all 6 npm packages (@intutic/shared-types, @intutic/id, @intutic/clawde, @intutic/mcp-governance-proxy, @intutic/proxy, @intutic/cli)
-#   2. Builds multi-platform Rust proxy binaries (macOS arm64/x64, Linux x64, Windows x64)
+#   1. Publishes all 8 npm packages (shared-types, id, logger, clawde-sdk,
+#      sync-daemon, mcp-governance-proxy, proxy, cli)
+#   2. Builds multi-platform Rust proxy binaries (macOS arm64/x64, Linux x64/arm64, Windows x64)
 #   3. Packages standalone CLI executables (macOS arm64/x64, Linux x64, Windows x64)
 #   4. Automatically creates GitHub Release with attached binaries and npm tarballs
 # ─────────────────────────────────────────────────────────────
@@ -36,9 +37,46 @@ env:
   TURBO_TELEMETRY_DISABLED: 1
 
 jobs:
+  # Gate: a tag that disagrees with the manifests would publish eight packages
+  # at the wrong version and cut a GitHub Release whose assets do not match its
+  # name. Fail before anything is pushed, not after.
+  verify-versions:
+    name: Verify Tag Matches Package Versions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Compare tag against every published manifest
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME#v}"
+          echo "Tag version: $TAG"
+          fail=0
+          for pkg in packages/shared-types packages/id packages/logger \
+                     packages/clawde-sdk services/sync-daemon packages/mcp-proxy \
+                     packages/proxy tools/cli; do
+            actual="$(node -p "require('./$pkg/package.json').version")"
+            if [ "$actual" != "$TAG" ]; then
+              echo "::error file=$pkg/package.json::version $actual != tag $TAG"
+              fail=1
+            fi
+          done
+          crate="$(grep -m1 '^version' packages/proxy/Cargo.toml | cut -d'"' -f2)"
+          if [ "$crate" != "$TAG" ]; then
+            echo "::error file=packages/proxy/Cargo.toml::version $crate != tag $TAG"
+            fail=1
+          fi
+          if [ "$fail" -ne 0 ]; then
+            echo "Refusing to publish: tag and manifests disagree."
+            exit 1
+          fi
+          echo "✅ All manifests match $TAG"
+
   publish-npm:
     name: Publish npm Packages
     runs-on: ubuntu-latest
+    needs: verify-versions
     permissions:
       contents: read
     steps:
@@ -61,17 +99,66 @@ jobs:
       - name: Build workspace packages
         run: pnpm turbo run build
 
-      - name: Publish All 6 Packages to npm
+      - name: Verify no unrewritten workspace refs
+        # Defence in depth for issue #1: @intutic/cli 1.4.0–1.5.0 shipped with
+        # `workspace:*` dependencies, making `npm install -g @intutic/cli` fail
+        # outright for three releases. Pack each package and inspect what would
+        # actually reach the registry, rather than trusting the tooling.
         run: |
-          for pkg in packages/shared-types packages/id packages/clawde-sdk packages/mcp-proxy packages/proxy tools/cli; do
-            echo "📦 Publishing $pkg to npm..."
-            (cd $pkg && pnpm publish --no-git-checks --access public || echo "⚠️ May already be published")
+          set -euo pipefail
+          fail=0
+          tmp="$(mktemp -d)"
+          for pkg in packages/shared-types packages/id packages/logger packages/clawde-sdk \
+                     services/sync-daemon packages/mcp-proxy packages/proxy tools/cli; do
+            (cd "$pkg" && pnpm pack --pack-destination "$tmp" >/dev/null)
+          done
+          for tgz in "$tmp"/*.tgz; do
+            refs="$(tar xzOf "$tgz" package/package.json | grep -c '"workspace:' || true)"
+            if [ "$refs" != "0" ]; then
+              echo "::error::$(basename "$tgz") contains $refs unrewritten workspace: dependency"
+              fail=1
+            fi
+          done
+          [ "$fail" -eq 0 ] && echo "✅ No workspace: refs in any tarball"
+          exit $fail
+
+      - name: Publish All 8 Packages to npm
+        # Order matters: @intutic/logger and @intutic/sync-daemon are runtime
+        # dependencies of @intutic/cli (and logger of @intutic/mcp-governance-proxy).
+        # pnpm rewrites `workspace:*` to the concrete version at publish time, so
+        # they must exist on npm or `npm i -g @intutic/cli` fails with E404.
+        #
+        # A failed publish must FAIL the job. The previous `|| echo "may already
+        # be published"` swallowed auth errors, build errors, and version
+        # conflicts alike, so the pipeline reported success while shipping
+        # nothing. An already-published version is the one tolerable case, and it
+        # is confirmed against the registry rather than assumed.
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -uo pipefail
+          for pkg in packages/shared-types packages/id packages/logger packages/clawde-sdk services/sync-daemon packages/mcp-proxy packages/proxy tools/cli; do
+            name="$(node -p "require('./$pkg/package.json').name")"
+            version="$(node -p "require('./$pkg/package.json').version")"
+            echo "📦 Publishing $name@$version ..."
+            if (cd "$pkg" && pnpm publish --no-git-checks --access public); then
+              echo "✅ Published $name@$version"
+            elif npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "ℹ️  $name@$version already on npm — skipping"
+            else
+              echo "::error::Failed to publish $name@$version and it is not on npm"
+              exit 1
+            fi
           done
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+      - name: Dry run — skipped publish
+        if: ${{ inputs.dry_run }}
+        run: echo "dry_run=true — build and pack verified, no packages published."
+
   build-rust-proxy:
     name: Build Native Rust Proxy (${{ matrix.target }})
+    needs: verify-versions
     strategy:
       fail-fast: false
       matrix:
@@ -82,9 +169,15 @@ jobs:
           - target: x86_64-apple-darwin
             os: macos-latest
             artifact_name: intutic-proxy-darwin-x64
+          # Artifact names MUST match the asset names the CLI requests in
+          # tools/cli/src/commands/connect.ts (…-linux-x64, not -amd64).
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            artifact_name: intutic-proxy-linux-amd64
+            artifact_name: intutic-proxy-linux-x64
+          # Native arm64 runner — avoids cross-compiling wasmtime/ring.
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+            artifact_name: intutic-proxy-linux-arm64
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             artifact_name: intutic-proxy-win32-x64.exe
@@ -114,8 +207,12 @@ jobs:
           path: dist-release/${{ matrix.artifact_name }}
 
   build-cli-binaries:
-    name: Package Standalone CLI Binaries (${{ matrix.target_os }})
+    # `pkg` cross-builds every target in one invocation, so this job has no
+    # matrix — an earlier ${{ matrix.target_os }} here rendered as an empty
+    # "( )" in the job name.
+    name: Package Standalone CLI Binaries (all targets)
     runs-on: ubuntu-latest
+    needs: verify-versions
     steps:
       - uses: actions/checkout@v5
         with:
@@ -159,8 +256,14 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm turbo run build
           mkdir -p release-assets
-          for pkg in packages/shared-types packages/id packages/clawde-sdk packages/mcp-proxy packages/proxy tools/cli; do
-            (cd $pkg && npm pack --pack-destination ../../release-assets)
+          # MUST be `pnpm pack`, not `npm pack`. npm does not understand the
+          # `workspace:` protocol and leaves `workspace:*` verbatim in the packed
+          # package.json; pnpm rewrites it to the concrete version. Release
+          # tarballs built with npm shipped `"@intutic/id": "workspace:*"`, which
+          # fails any install with EUNSUPPORTEDPROTOCOL (see issue #1).
+          for pkg in packages/shared-types packages/id packages/logger packages/clawde-sdk \
+                     services/sync-daemon packages/mcp-proxy packages/proxy tools/cli; do
+            (cd $pkg && pnpm pack --pack-destination ../../release-assets)
           done
 
       - name: Download All Compiled Binaries
@@ -170,7 +273,7 @@ jobs:
           merge-multiple: true
 
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: ${{ startsWith(github.ref, 'refs/tags/') && !inputs.dry_run }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

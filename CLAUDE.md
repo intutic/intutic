@@ -14,7 +14,8 @@ This file contains standard operating rules and governance constraints for AI co
 ## 2. Command Execution Restrictions
 
 - **Dependencies**: Use `pnpm` exclusively for Node.js workspace management.
-- **Rust Toolchain**: Use `cargo` for `packages/proxy` and `packages/wasm-sdk`.
+- **Rust Toolchain**: Use `cargo` for `packages/proxy` only.
+- **WASM Rules SDK**: `packages/wasm-sdk` is AssemblyScript, not Rust — build it with `pnpm` / `asc`. It has no `Cargo.toml` and must never be built with `cargo`.
 - **Privileges**: No root privilege (`sudo`) or administrative execution permitted.
 
 ---

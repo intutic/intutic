@@ -69,7 +69,7 @@ Wraps downstream MCP servers (e.g. Filesystem or Postgres) to intercept and eval
         "-y",
         "@intutic/mcp-governance-proxy",
         "--workspace-id",
-        "ws_production",
+        "wk_production",
         "--",
         "npx",
         "-y",

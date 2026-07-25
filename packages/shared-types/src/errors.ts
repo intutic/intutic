@@ -94,12 +94,6 @@ export const E_PROVIDER_DISABLED = 'PROVIDER_DISABLED' as const
 /** Cannot delete provider — active members are using it. */
 export const E_PROVIDER_IN_USE = 'PROVIDER_IN_USE' as const
 
-/** SCIM bearer token authentication failed. */
-export const E_SCIM_AUTH_FAILED = 'SCIM_AUTH_FAILED' as const
-
-/** SCIM resource already exists (duplicate externalId). */
-export const E_SCIM_DUPLICATE = 'SCIM_DUPLICATE' as const
-
 /** Offboarding cascade is already running for this user. */
 export const E_OFFBOARDING_IN_PROGRESS = 'OFFBOARDING_IN_PROGRESS' as const
 
@@ -160,8 +154,6 @@ export type IntuticErrorCode =
   | typeof E_OIDC_CLAIMS_MISSING
   | typeof E_PROVIDER_DISABLED
   | typeof E_PROVIDER_IN_USE
-  | typeof E_SCIM_AUTH_FAILED
-  | typeof E_SCIM_DUPLICATE
   | typeof E_OFFBOARDING_IN_PROGRESS
   | typeof E_FEATURE_NOT_AVAILABLE
   // WS4 — Enterprise Identity & Compliance (LLD #19)

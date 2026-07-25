@@ -135,7 +135,7 @@ Wraps downstream MCP tools (e.g. Filesystem or Postgres) to intercept and evalua
         "-y",
         "@intutic/mcp-governance-proxy",
         "--workspace-id",
-        "ws_production",
+        "wk_production",
         "--",
         "npx",
         "-y",

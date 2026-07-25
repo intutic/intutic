@@ -43,6 +43,10 @@ struct LocalRules {
     last_checked: Option<Instant>,
     signatures: HashMap<PathBuf, (SystemTime, u64)>,
     modules: Vec<LoadedModule>,
+    /// Set by [`PluginRegistry::force_local_rescan`] to make the next scan
+    /// reload unconditionally, even when the on-disk signatures are unchanged
+    /// (mtime granularity can hide a same-second rewrite). Cleared on swap.
+    force: bool,
 }
 
 /// Plugin registry — manages loaded WASM plugins per workspace
@@ -85,14 +89,19 @@ impl PluginRegistry {
         valkey_count + self.local_rules.read().await.modules.len()
     }
 
-    /// Drop the local-dir rescan TTL AND the stored signatures so the next
-    /// evaluation rescans and reloads unconditionally — even if a replaced
+    /// Drop the local-dir rescan TTL and mark the next scan as forced, so the
+    /// next evaluation rescans and reloads unconditionally — even if a replaced
     /// file kept an identical (mtime, size) signature. Used by integration
     /// tests and manual reload triggers.
+    ///
+    /// The force flag must NOT be expressed by clearing `signatures`: doing so
+    /// makes an empty directory compare equal to the empty baseline, so the
+    /// "every rule was deleted" case short-circuits and leaves the previously
+    /// loaded modules enforcing forever.
     pub async fn force_local_rescan(&self) {
         let mut guard = self.local_rules.write().await;
         guard.last_checked = None;
-        guard.signatures.clear();
+        guard.force = true;
     }
 
     /// Run all plugins in priority order, short-circuit on KILL.
@@ -188,9 +197,11 @@ impl PluginRegistry {
         };
 
         // Compare and snapshot the previous modules under a short read lock.
+        // An unchanged signature set means nothing on disk moved, so the loaded
+        // modules are already correct — unless a forced rescan was requested.
         let previous = {
             let guard = self.local_rules.read().await;
-            if new_signatures == guard.signatures {
+            if !guard.force && new_signatures == guard.signatures {
                 drop(guard);
                 self.local_rules.write().await.last_checked = Some(Instant::now());
                 return;
@@ -230,6 +241,7 @@ impl PluginRegistry {
         guard.modules = loaded;
         guard.signatures = new_signatures;
         guard.last_checked = Some(Instant::now());
+        guard.force = false;
     }
 
     async fn ensure_up_to_date(

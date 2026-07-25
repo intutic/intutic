@@ -60,7 +60,7 @@ In enterprise environments with centralized governance:
                                                       (wasmtime module compile)
 ```
 
-1. **Registry Storage**: Rules are uploaded via the IC Performance Dashboard (`POST /api/v1/wasm-rules`) and persisted in the `wasm_rule_bundles` database table.
+1. **Registry Storage**: Rules are uploaded via the Custom Filters dashboard (`POST /api/v1/wasm-rules`) and persisted in the `wasm_rule_bundles` database table.
 2. **Real-time Sync**: The control plane broadcasts updates via Valkey Pub/Sub to active connected proxies, which load the updated module dynamically.
 <!-- ENTERPRISE_ONLY_END -->
 

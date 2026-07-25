@@ -5,7 +5,7 @@
  * Delegation Capability Token (DCT) structures used by the Circuit
  * Breaker and PCAS subsystems.
  *
- * HLD §3.3 (PCAS), LLD 01-data-architecture §3.2 (FalkorDB org graph)
+ * HLD §3.3 (PCAS), LLD 01-data-architecture §3.2
  *
  * @module
  */
@@ -17,7 +17,7 @@ import type { BudgetTier, EnforcementAction } from './enums.js'
 /**
  * Resolved permission set for a user/agent within a workspace.
  *
- * Produced by PCAS permission resolution (Valkey cache or FalkorDB query).
+ * Produced by PCAS permission resolution (Valkey cache or graph query).
  * The allowed/denied tool lists are evaluated against the current SOP.
  *
  * HLD §3.3 — PCAS permission resolution

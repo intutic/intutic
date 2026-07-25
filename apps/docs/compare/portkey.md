@@ -21,11 +21,10 @@ If your AI agent tries to `rm -rf /`, Portkey will log it. Intutic will kill it.
 | **Config sync** | Bidirectional daemon — SOPs sync to agents, configs sync to cloud | One-way SDK push |
 | **Data residency** | Local-first — proxy runs on your machine | Cloud-hosted gateway |
 | **DLP / threat detection** | Secrets redaction, SQL injection, prompt injection | Basic content filtering |
-| **FinOps & Budgets** | CFO Ledger & GL cost allocations, seat reclamation | Cost tracking and budget caps |
+| **FinOps & Budgets** | Local daily spend ceilings, pre-execution cost estimation blocks over-budget requests | Cost tracking and budget caps |
 | **Audit trail** | Full tool-call-level audit with enforcement decisions | Request-level logging |
-| **Prompt Management** | Prompt Library with versioning snapshots & Myers LCS diffs | Basic prompt registry |
 | **Semantic Cache & Recall** | Valkey-backed Custom Caching | Basic semantic caching |
-| **Agent Sandboxing** | Docker/V8 Process Isolation & Sandbox Guardrails | Not available |
+| **Agent Sandboxing** | wasmtime WASM sandbox — 16 MB memory, 1,000,000 fuel, 5ms timeout | Not available |
 
 ## Integration Comparison
 

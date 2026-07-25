@@ -82,6 +82,7 @@ intutic_settings:
 
 ## Setup & Activation
 
+<!-- ENTERPRISE_ONLY_START -->
 ### Step 1: Enable Routing in the Dashboard
 1. Open the **Compute Metrics Dashboard** (e.g., `localhost:5174` or your local console at `http://localhost:5174`).
 2. Navigate to **Settings** from the sidebar navigation.
@@ -104,6 +105,7 @@ You can customize the words that trigger model redirection to fit your team's te
 > Custom keywords are validated at the API layer. Keywords must be alphanumeric strings (or `ci/cd`) and between 2 and 19 characters long.
 
 ---
+<!-- ENTERPRISE_ONLY_END -->
 
 ### Step 3: Route Agent Traffic
 To route agent traffic, you must ensure your AI agent harnesses are connected to the Intutic proxy gateway:
@@ -120,8 +122,9 @@ intutic connect
 #### Option B: Standalone Proxy Redirects
 For custom agent configurations, point your agent's API base URL environment variables directly to the proxy gateway:
 ```bash
-export OPENAI_API_BASE="http://localhost:4000/v1"
-export ANTHROPIC_API_BASE="http://localhost:4000/v1"
+export OPENAI_BASE_URL="http://localhost:4000/v1"
+# Host only — the Anthropic SDK appends /v1/messages itself.
+export ANTHROPIC_BASE_URL="http://localhost:4000"
 ```
 
 Once connected, your prompts are automatically routed to the most optimal model based on local rules and current learning rates.

@@ -18,7 +18,7 @@ const program = new Command()
 program
   .name('intutic')
   .description('Intutic CLI — AI governance control plane for developer workspaces')
-  .version('1.5.0')
+  .version('1.6.0')
 
 program
   .command('init')
@@ -255,7 +255,7 @@ daemon
     '  NOTE: To stop the daemon you MUST use \'intutic daemon uninstall\' or \'launchctl unload\'.\n' +
     '  \'intutic disconnect\' alone will NOT stop a daemon-installed service. (TD-154)'
   )
-  .requiredOption('--workspace-id <id>', 'Workspace ID (e.g. ws_xxxx)')
+  .requiredOption('--workspace-id <id>', 'Workspace ID (e.g. wk_xxxx)')
   .requiredOption('--api-key <key>', 'Workspace API key (e.g. vk_xxxx)')
   .option('--control-plane-url <url>', 'Control plane URL', 'https://api.intutic.ai')
   .option('--binary-path <path>', 'Path to intutic CLI binary (defaults to current process)')

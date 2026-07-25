@@ -10,8 +10,9 @@ intutic-proxy is a high-performance AI agent proxy written in Rust (edition 2021
 
 ### WASM Plugin Sandbox
 
-- **Runtime**: wasmtime v21 with pre-compiled module caching
-- **Memory limit**: 1 MB per plugin invocation
+- **Runtime**: wasmtime v29 with pre-compiled module caching
+- **Memory limit**: 16 MB per plugin invocation
+- **Fuel limit**: 1,000,000 units per plugin invocation
 - **Execution timeout**: 5 ms hard wall-clock cutoff
 - **Isolation**: Each plugin runs in a dedicated WASM store
 

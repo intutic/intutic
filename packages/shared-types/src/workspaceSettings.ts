@@ -74,10 +74,6 @@ export interface WorkspaceSettings {
     ff_response_cache_semantic?: boolean
     /** Phase 5 — MetaClaw prompt evolution engine (Enterprise only) */
     ff_metaclaw_evolution?: boolean
-    /** Phase 6 — Network controls MDM enforcement */
-    ff_network_controls?: boolean
-    /** Phase 6 — Multi-region residency enforcement */
-    ff_multi_region?: boolean
   }
 
   /**

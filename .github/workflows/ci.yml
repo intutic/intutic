@@ -105,6 +105,22 @@ jobs:
   rust:
     name: Rust Proxy (Build & Test)
     runs-on: ubuntu-latest
+    # Valkey is REQUIRED, not optional: tests/reward_test.rs and
+    # tests/wasm_local_test.rs read VALKEY_URL and return early when it is
+    # unset, so without this service block their bodies never execute and the
+    # job reports green on tests that never ran.
+    services:
+      valkey:
+        image: valkey/valkey:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      VALKEY_URL: redis://localhost:6379
     steps:
       - name: Checkout (with Git LFS)
         uses: actions/checkout@v5
@@ -121,7 +137,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             packages/proxy/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('packages/proxy/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
 
@@ -169,10 +185,35 @@ jobs:
           cargo test --test snip_test -- --nocapture 2>&1 | grep -E '(\[TD-|test result|FAILED|running)'
           cargo test
 
+  python:
+    name: Python SDK (intutic-clawde) - Run pytest
+    runs-on: ubuntu-latest
+    # packages/intutic-clawde is published to PyPI and carries its own pytest
+    # suite, but no CI job ever ran it — the same silent gap the `rust` job had
+    # before it was given a Valkey service. Its 6 tests now gate the release.
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          # Matches `python = "^3.9"` in packages/intutic-clawde/pyproject.toml.
+          python-version: "3.11"
+
+      - name: Install Poetry
+        run: pipx install poetry
+
+      - name: Install package + dev dependencies
+        working-directory: packages/intutic-clawde
+        run: poetry install --with dev
+
+      - name: Run pytest
+        working-directory: packages/intutic-clawde
+        run: poetry run pytest -q
+
   build:
     name: Build (TS Workspaces) - Bundle TS apps and packages
     runs-on: ubuntu-latest
-    needs: [lint, typecheck, test, rust]
+    needs: [lint, typecheck, test, rust, python]
     steps:
       - uses: actions/checkout@v5
         with:

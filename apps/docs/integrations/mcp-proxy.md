@@ -36,7 +36,7 @@ The `@intutic/mcp-governance-proxy` package supports two complementary execution
 | Mode | Command Syntax | Purpose & Exposed Capabilities |
 | :--- | :--- | :--- |
 | **Standalone Governance Server** | `npx @intutic/mcp-governance-proxy` | Exposes governance status tools directly to the agent (`intutic_governance_status`, `intutic_list_sops`, `intutic_list_incidents`). |
-| **Governed Proxy Wrapper** | `npx @intutic/mcp-governance-proxy --workspace-id <ws_id> -- <real-mcp-command>` | Intercepts, evaluates, and logs tool calls for downstream MCP tools (e.g. Filesystem, Postgres) before forwarding. |
+| **Governed Proxy Wrapper** | `npx @intutic/mcp-governance-proxy --workspace-id <wk_id> -- <real-mcp-command>` | Intercepts, evaluates, and logs tool calls for downstream MCP tools (e.g. Filesystem, Postgres) before forwarding. |
 
 ---
 
@@ -59,7 +59,7 @@ You can configure both modes together in `claude_desktop_config.json` or `~/.cla
       "args": [
         "-y",
         "@intutic/mcp-governance-proxy",
-        "--workspace-id", "ws_production",
+        "--workspace-id", "wk_production",
         "--",
         "npx", "-y", "@modelcontextprotocol/server-filesystem", "/projects"
       ]
@@ -109,7 +109,7 @@ The Intutic MCP proxy guarantees strict `stdio` isolation — all governance log
            "command": "node",
            "args": [
              "/path/to/packages/mcp-proxy/dist/index.js",
-             "--workspace-id", "ws_production",
+             "--workspace-id", "wk_production",
              "--",
              "npx", "-y", "@modelcontextprotocol/server-filesystem", "/Users/yourname"
            ]

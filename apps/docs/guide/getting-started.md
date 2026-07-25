@@ -45,7 +45,7 @@ Verify:
 
 ```bash
 intutic --version
-# @intutic/cli 1.5.0
+# @intutic/cli 1.6.0
 ```
 
 ::: details Alternative package managers & Standalone Binaries
@@ -57,7 +57,7 @@ pnpm add -g @intutic/cli @intutic/proxy
 yarn global add @intutic/cli @intutic/proxy
 ```
 
-For environments without Node.js, download single-file precompiled binaries directly from [GitHub Releases v1.5.0](https://github.com/intutic/intutic/releases/tag/v1.5.0):
+For environments without Node.js, download single-file precompiled binaries directly from [GitHub Releases v1.6.0](https://github.com/intutic/intutic/releases/tag/v1.6.0):
 * 🪟 Windows (x64): `cli-win-x64.exe`
 * 🐧 Linux (x64): `cli-linux-x64`
 * 🍎 macOS (Apple Silicon): `cli-macos-arm64` / `intutic-proxy-darwin-arm64`
@@ -77,7 +77,7 @@ You'll be prompted for your email and password. On success:
 Control plane: https://api.intutic.ai
 
 ✔ Authenticated as you@company.com
-  Workspace: ws_k8x9m2p4
+  Workspace: wk_k8x9m2p4
   Role: admin
 ```
 
@@ -150,7 +150,7 @@ real-time policy updates, and discovers all local agent tools.
 You'll see confirmation:
 
 ```
-✓ Connected to workspace: my-team (ws_wR1ePE40kLNAneONnIumE)
+✓ Connected to workspace: my-team (wk_wR1ePE40kLNAneONnIumE)
 ✓ Proxy running: http://localhost:4000
 ✓ Sync daemon active: listening for harness changes
 ✓ Governance policy: 14 active SOPs, WASM hot-reload ready
@@ -161,7 +161,9 @@ You'll see confirmation:
 Set your agent's base URL environment variable to point at the local Intutic proxy:
 
 ```bash
-export ANTHROPIC_BASE_URL="http://localhost:4000/v1"
+# Host only — the Anthropic SDK and Claude Code append /v1/messages themselves.
+# Adding /v1 here produces /v1/v1/messages, which the proxy cannot route.
+export ANTHROPIC_BASE_URL="http://localhost:4000"
 ```
 
 Now, every LLM API call and tool execution is evaluated pre-flight.
@@ -236,7 +238,7 @@ intutic status
 
 ```
 ╭─ Intutic — Workspace Status ─╮
-  Auth: ✔ you@company.com (ws_k8x9m2p4)
+  Auth: ✔ you@company.com (wk_k8x9m2p4)
   Workspace root: /home/dev/my-project
   Harnesses: cursor ✔, claude-code ✔
   Daemon: running (PID 48291)

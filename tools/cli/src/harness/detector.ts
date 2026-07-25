@@ -1,7 +1,7 @@
 /**
  * Harness detector — auto-detect which AI harnesses are present.
  *
- * Instantiates all 14 adapters and checks each for presence in
+ * Instantiates all 18 adapters and checks each for presence in
  * the workspace. Returns a DetectedHarness array for reporting.
  *
  * HLD §3.14 — Harness Onboarding Matrix

@@ -10,8 +10,8 @@ We provide security updates and patches for the following versions of Intutic pa
 
 | Version | Supported | Description / Patch SLA |
 | :--- | :---: | :--- |
-| `1.5.x` (Latest) | :white_check_mark: | **Active Support** — Current stable production release line. Critical security patches within 24–48 hours. |
-| `< 1.5.0` | :x: | **Unsupported / Pre-release** — Legacy or pre-release iterations. Users should upgrade to `1.5.x`. |
+| `1.6.x` (Latest) | :white_check_mark: | **Active Support** — Current stable production release line. Critical security patches within 24–48 hours. |
+| `< 1.6.0` | :x: | **Unsupported / Pre-release** — Legacy or pre-release iterations. Users should upgrade to `1.6.x`. |
 
 ---
 
@@ -19,7 +19,7 @@ We provide security updates and patches for the following versions of Intutic pa
 
 **Please do NOT report security vulnerabilities through public GitHub issues.**
 
-If you discover a security vulnerability or security policy bypass in Intutic (including the proxy gateway, CLI tools, sync daemon, or control plane), please report it to our team privately:
+If you discover a security vulnerability or security policy bypass in Intutic (including the proxy gateway, CLI tools, sync daemon, or MCP governance proxy), please report it to our team privately:
 
 * **Primary Email:** [support@intutic.ai](mailto:support@intutic.ai)
 * **GitHub Private Advisory:** Click on the **"Report a vulnerability"** button under the repository's [Security Tab](https://github.com/intutic/intutic/security/advisories/new).
@@ -28,7 +28,7 @@ If you discover a security vulnerability or security policy bypass in Intutic (i
 To help us triage and fix the vulnerability efficiently, please include:
 1. Type of issue (e.g. proxy sandbox escape, token leakage, DLP bypass, command injection).
 2. Step-by-step instructions or proof-of-concept (PoC) code to reproduce the issue.
-3. Affected components (e.g. `@intutic/cli`, `packages/proxy`, `services/control-plane`).
+3. Affected components (e.g. `@intutic/cli`, `packages/proxy`, `services/sync-daemon`, `packages/mcp-proxy`).
 4. Potential impact of the vulnerability.
 
 ---

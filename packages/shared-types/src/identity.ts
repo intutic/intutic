@@ -2,7 +2,7 @@
  * Identity Federation types — LLD #11
  *
  * Cross-workspace user identity, SSO/OIDC provider configuration,
- * SCIM 2.0 provisioning resources, and offboarding cascade types.
+ * and offboarding cascade types.
  *
  * @module
  */

@@ -129,7 +129,7 @@ export async function runPolicyExport(opts: { all?: boolean; dev?: boolean }): P
  */
 export const DEFAULT_ALLOW_MOCK = JSON.stringify({
   session_id: 'sess_test123',
-  workspace_id: 'ws_test123',
+  workspace_id: 'wk_test123',
   virtual_key_prefix: 'vk_test',
   model: 'claude-3-5-sonnet',
   tools: [],

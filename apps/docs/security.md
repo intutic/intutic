@@ -87,7 +87,7 @@ The identity, SSO, OIDC, and compliance capabilities below are available in the 
 
 Intutic provides enterprise-grade identity and access management:
 
-- **Single Sign-On (SSO)** — OIDC integration with Okta, Microsoft Entra ID, Google Workspace, Ping Identity, and custom OIDC providers
+- **Single Sign-On (SSO)** — SAML 2.0 and OIDC integration with Okta, Microsoft Entra ID, Google Workspace, Ping Identity, and custom providers. Available from the Biz Org plan upward.
 - **API Keys** — Virtual keys (`vk_` prefix) for programmatic access, with rotation and revocation
 - **OBO Tokens** — Short-lived, employee-scoped agent credentials that replace shared API keys
 - **RBAC Roles** — Five-tier role hierarchy (Owner → Admin → EM → Developer → Viewer) with feature-level gating
@@ -100,7 +100,15 @@ Intutic helps your organization meet regulatory requirements for AI governance:
 
 - **SOC 2 Readiness** — Automated evidence collection for trust service criteria (security, availability, processing integrity, confidentiality)
 - **HIPAA BAA** — PHI safeguard tracking and BAA status management
-- **GDPR** — Data erasure (right to be forgotten), consent management, and data processing agreements
+- **GDPR** — Article 17 erasure, consent management, and data processing
+  agreements. Erasure is fulfilled by our team on request rather than through a
+  self-service endpoint, within the one-month window Article 12(3) allows.
+  Identity and credential records are purged; execution traces are retained
+  under their 3-year compliance obligation but de-identified, so they can no
+  longer be attributed to the subject. Free-text and structured content is
+  scrubbed on **exact identifier match** (name, email, account identifiers);
+  indirect references — "the engineer who approved this" — are handled on
+  specific request.
 - **Data Residency** — Pin governance data to US, EU, or APAC regions
 
 ---

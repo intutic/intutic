@@ -1,6 +1,8 @@
-# Traces <Badge type="warning" text="Cloud / Team" />
+# Traces <Badge type="tip" text="Open-Core" />
 
 Traces are the audit trail of every AI agent request that flows through the Intutic proxy. Each trace records what happened, what enforcement action was applied, and how much it cost.
+
+In open-core the proxy writes traces locally as daily-sharded JSONL under `~/.intutic/logs/`, and `intutic traces list` / `intutic traces inspect` read them straight off disk — no control plane required. The REST API shown alongside each CLI example below is the connected-mode equivalent.
 
 ## What's in a trace?
 
@@ -50,6 +52,7 @@ intutic traces list --json
 | `--json` | JSON output instead of table | `false` |
 | `--dev` | Use local control plane | `false` |
 
+<!-- ENTERPRISE_ONLY_START -->
 ### API
 
 ```bash
@@ -76,6 +79,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 | `enforcement` | enum | `BYPASS`, `ENHANCE`, `HIJACK`, `KILL` |
 | `model` | string | Filter by model name |
 
+<!-- ENTERPRISE_ONLY_END -->
 ## Inspecting a trace
 
 ### CLI
@@ -90,6 +94,7 @@ Returns the full trace detail including:
 - Anomaly data (if any)
 - Corrective prompt card (if enforcement was applied)
 
+<!-- ENTERPRISE_ONLY_START -->
 ### API
 
 ```bash
@@ -127,6 +132,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" \
 | `classification` | enum | `USEFUL` or `WASTED` |
 | `reason` | string | 1–1000 chars explaining the classification |
 
+<!-- ENTERPRISE_ONLY_END -->
 ## Understanding enforcement actions
 
 ### BYPASS

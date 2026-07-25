@@ -35,7 +35,7 @@ async fn main() -> anyhow::Result<()> {
                     .with_endpoint(otel_endpoint.clone()),
             )
             .with_trace_config(
-                trace::config()
+                trace::Config::default()
                     .with_sampler(Sampler::AlwaysOn)
                     .with_resource(opentelemetry_sdk::Resource::new(vec![KeyValue::new(
                         "service.name",
