@@ -34,7 +34,18 @@ real time and return one of four verdicts: **BYPASS**, **ENHANCE**, **HIJACK**, 
 |---|---|
 | **Node.js** | 18 or later |
 | **npm** | 10 or later |
+| **Valkey** (or Redis) | 8.x — the proxy's policy cache and telemetry store |
 | **AI coding agent** | Any of the [18 supported harnesses](/integrations/) (Cursor, Claude Code, Aider, Windsurf, Antigravity, etc.) |
+
+The proxy needs Valkey running before it will start. If you do not already have
+one:
+
+```bash
+docker run -d --name intutic-valkey -p 6379:6379 valkey/valkey:8-alpine
+```
+
+Point elsewhere with `VALKEY_URL=redis://host:port`. No configuration file is
+required — the proxy runs on built-in defaults unless you supply one.
 
 ## Step 1 — Install the CLI & Native Proxy Gateway
 
@@ -143,18 +154,41 @@ intutic init --dev
 ```
 :::
 
-## Step 4 — Connect and start the daemon
+## Step 4 — Start the proxy
 
-Start the sync daemon:
+### Standalone (open core)
+
+Start the proxy directly. No account, no configuration file, nothing leaving
+your machine:
+
+```bash
+intutic-proxy
+```
+
+```
+INFO intutic_proxy: No config file found — running with built-in defaults.
+INFO intutic_proxy: Connected to Valkey at redis://127.0.0.1:6379
+INFO intutic_proxy: Listening on 0.0.0.0:4000
+```
+
+That is the whole of it — DLP scanning, WASM rule enforcement and policy
+evaluation all run locally against your own Valkey.
+
+::: warning `intutic connect` is not this
+`intutic connect` starts the **sync daemon**, which mirrors governance config
+with a control plane. Open core does not include one, so that command will ask
+you to authenticate against an account you have no way to create. Use it only if
+you are running a control plane yourself, or on Intutic Cloud.
+:::
+
+### Connected (Cloud / self-hosted control plane)
+
+With a control plane available, `intutic connect` additionally opens a WebSocket
+for live policy updates and watches your harness configs for drift:
 
 ```bash
 intutic connect
 ```
-
-This starts the Intutic Rust proxy on port 4000, opens a WebSocket for
-real-time policy updates, and discovers all local agent tools.
-
-You'll see confirmation:
 
 ```
 ✓ Connected to workspace: my-team (wk_wR1ePE40kLNAneONnIumE)
