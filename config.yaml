@@ -32,8 +32,22 @@ intutic_settings:
     scan_output: true
 
   policy:
-    # Will be overridden by CONTROL_PLANE_URL env var if set
-    control_plane_url: "https://api.intutic.ai"
+    # Control plane is OPTIONAL and deliberately unset here.
+    #
+    # Open core ships no control plane (services/ contains only sync-daemon), so
+    # pointing this at the hosted API means every request is policy-checked
+    # against an endpoint you have no credentials for. Combined with
+    # `fail_closed: true` below, that returns 403 on *every* request — the proxy
+    # is unusable out of the box. Left unset, the policy pre-check is skipped
+    # entirely and the proxy runs fully standalone.
+    #
+    # To connect a control plane, uncomment this or set the CONTROL_PLANE_URL
+    # env var, which takes precedence over this file either way.
+    #
+    # control_plane_url: "https://api.intutic.ai"
+
+    # Only consulted when a control plane is configured. With none set, there is
+    # nothing to fail against and this has no effect.
     fail_closed: true
     timeout_ms: 3000
 
