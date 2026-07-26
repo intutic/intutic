@@ -83,10 +83,16 @@ jobs:
   # so every install during the window 404'd on first run. Depending on
   # github-release closes that window: by the time the package is installable,
   # the assets it reaches for are already published.
+  #
+  # It also waits on smoke-test-linux, so a binary that cannot start on the
+  # oldest supported distro blocks the publish rather than being discovered
+  # afterwards. npm versions cannot be recalled; a GitHub Release can be
+  # deleted, so failing here leaves the recoverable artefact published and the
+  # unrecoverable one not.
   publish-npm:
     name: Publish npm Packages
     runs-on: ubuntu-latest
-    needs: [verify-versions, github-release]
+    needs: [verify-versions, github-release, smoke-test-linux]
     permissions:
       contents: read
     steps:
@@ -302,3 +308,85 @@ jobs:
             --title "Release ${{ github.ref_name }}" \
             --notes "Official release ${{ github.ref_name }} including multi-platform precompiled Rust proxy binaries, standalone CLI executables, and npm package tarballs." \
             || gh release upload ${{ github.ref_name }} release-assets/* --clobber
+
+  # ── Old-glibc smoke test ────────────────────────────────────────────────────
+  #
+  # Runs the binary we are about to ship inside Debian 12 and fails if it cannot
+  # start. This exists because nothing else in this pipeline can catch a glibc
+  # regression: every job builds AND tests on the runner's own glibc, so a binary
+  # linked too high looks perfectly healthy right up until a user runs it.
+  #
+  # That is exactly how v1.6.0 shipped broken. `ubuntu-latest` moved to Ubuntu
+  # 24.04 (glibc 2.39), the Linux binaries started demanding GLIBC_2.38, CI was
+  # green throughout, and the first sign of trouble was issue #1 —
+  #   /root/.intutic/bin/intutic-proxy: /lib/x86_64-linux-gnu/libc.so.6:
+  #   version `GLIBC_2.38' not found
+  # on Debian 12 (glibc 2.36), plus Ubuntu 22.04 LTS, RHEL 9 and Amazon Linux
+  # 2023. Pinning the build matrix to 22.04 fixed it; this job is what stops it
+  # from silently coming back the next time someone "modernizes" a runner label.
+  #
+  # Debian 12 is the floor we test because it is the oldest distro we claim to
+  # support. Each arch runs on its own native runner rather than under QEMU, so
+  # a failure here means a real failure rather than an emulation artefact.
+  smoke-test-linux:
+    name: Smoke Test Linux Binary on Debian 12 (${{ matrix.arch }})
+    needs: github-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            os: ubuntu-latest
+            asset: intutic-proxy-linux-x64
+          - arch: arm64
+            os: ubuntu-22.04-arm
+            asset: intutic-proxy-linux-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      # The artifact is byte-identical to the asset uploaded to the release —
+      # github-release downloads these same artifacts and uploads them verbatim.
+      # Pulling the artifact rather than the release URL means this also runs on
+      # a dry run, where no release exists, so a glibc regression is caught in
+      # the rehearsal instead of after the packages are public.
+      - name: Download the binary that is about to ship
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ matrix.asset }}
+          path: smoke/
+
+      - name: Run it on Debian 12
+        run: |
+          set -euo pipefail
+          BIN="smoke/${{ matrix.asset }}"
+          # upload-artifact does not preserve the executable bit.
+          chmod +x "$BIN"
+
+          echo "Binary: $(file -b "$BIN")"
+          echo "Highest glibc symbol required:"
+          objdump -T "$BIN" | grep -oE 'GLIBC_[0-9.]+' | sort -uV | tail -1 || true
+
+          # The proxy exits non-zero here because the container has no config
+          # file — that is fine and expected. What matters is that it gets far
+          # enough to print its own startup line, which means the dynamic linker
+          # was satisfied. `|| true` keeps that expected exit from failing the
+          # step before the assertions below run.
+          out="$(docker run --rm -v "$PWD/smoke:/smoke:ro" debian:12 \
+                   "/smoke/${{ matrix.asset }}" 2>&1 | head -20 || true)"
+          echo "--- output ---"
+          echo "$out"
+          echo "--------------"
+
+          if grep -qiE "GLIBC_[0-9.]+' not found|error while loading shared libraries|cannot execute binary file|Exec format error" <<<"$out"; then
+            echo "::error::${{ matrix.asset }} cannot start on Debian 12 — glibc floor regression. Check the runner images in the build-rust-proxy matrix; they must stay at 22.04."
+            exit 1
+          fi
+
+          # Positive assertion, not just absence of known errors: require the
+          # app's own first log line. A binary that dies for some new reason
+          # would otherwise slip through the grep above.
+          if ! grep -q "Intutic Proxy Gateway starting" <<<"$out"; then
+            echo "::error::${{ matrix.asset }} did not reach startup on Debian 12. It may run on the build runner but not on the oldest supported distro."
+            exit 1
+          fi
+
+          echo "✅ ${{ matrix.asset }} starts on Debian 12 (glibc $(docker run --rm debian:12 sh -c 'ldd --version | head -1' | grep -oE '[0-9]+\.[0-9]+$'))"
