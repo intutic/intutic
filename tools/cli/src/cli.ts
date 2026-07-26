@@ -186,8 +186,19 @@ program
   })
 
 program
+  .command('start')
+  .description('Start the proxy standalone — no account or control plane needed')
+  .option('--port <port>', 'Proxy port', '4000')
+  .option('--valkey-port <port>', 'Valkey port', '6379')
+  .option('--upstream-url <url>', 'Upstream LLM provider base URL')
+  .action(async (opts) => {
+    const { runStart } = await import('./commands/start.js')
+    await runStart(opts)
+  })
+
+program
   .command('connect')
-  .description('Start sync daemon — bidirectional config sync with control plane')
+  .description('Start sync daemon — bidirectional config sync with control plane (requires an account)')
   .option('--dev', 'Use local control plane (http://localhost:3001)')
   .option('--interval <ms>', 'Poll interval in milliseconds', '30000')
   .option('--workspace-id <id>', 'Workspace ID override')
