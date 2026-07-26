@@ -207,7 +207,25 @@ export async function runConnect(opts: {
   }
 
   if (!creds) {
-    log.error('Not authenticated. Run `intutic login` first.')
+    // `connect` starts the sync daemon, which mirrors config with a control
+    // plane — so it genuinely needs credentials. But open core ships no control
+    // plane, and the documented install ends by telling users to run this. The
+    // bare "run `intutic login` first" sent them looking for an account that
+    // does not exist for standalone use (issue #1). Say what this command is
+    // for and point at the path that does work without one.
+    log.error('`intutic connect` needs a control plane, and you are not authenticated.')
+    log.info('')
+    log.info('This command runs the sync daemon, which mirrors governance config')
+    log.info('with a control plane. Open core does not include one.')
+    log.info('')
+    log.info('To run standalone — policy enforcement, DLP and WASM rules, all local:')
+    log.info('')
+    log.info('  docker run -d --name intutic-valkey -p 6379:6379 valkey/valkey:8-alpine')
+    log.info('  intutic-proxy')
+    log.info('  export ANTHROPIC_BASE_URL=http://localhost:4000')
+    log.info('')
+    log.info('If you do have a control plane, authenticate with `intutic login`')
+    log.info('(add --dev to target http://localhost:3001).')
     process.exit(1)
   }
 
