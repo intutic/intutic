@@ -9,7 +9,13 @@ use std::path::Path;
 /// Top-level configuration structure
 #[derive(Debug, Deserialize, Clone)]
 pub struct ProxyConfig {
-    /// LiteLLM model list (provider routes)
+    /// LiteLLM model list (provider routes).
+    ///
+    /// Defaults to empty. Upstreams are resolved from `ANTHROPIC_UPSTREAM_URL`
+    /// and friends at request time (see proxy.rs), so an empty list is a valid
+    /// standalone setup rather than a misconfiguration — and without a default
+    /// here, a proxy with no config.yaml cannot start at all.
+    #[serde(default)]
     pub model_list: Vec<ModelEntry>,
 
     /// LiteLLM general settings
@@ -391,7 +397,30 @@ fn default_cost_penalty() -> f64 {
 }
 
 pub fn load_config(path: &str) -> anyhow::Result<ProxyConfig> {
-    let contents = std::fs::read_to_string(Path::new(path))?;
+    // A missing config file is not an error. `npm i -g @intutic/proxy` installs
+    // a binary and nothing else, so a user following the documented install has
+    // no config.yaml in their working directory — and this previously exited
+    // with a bare `No such file or directory (os error 2)`, which says nothing
+    // about what was being looked for (issue #1). Every field either has a
+    // serde default or is optional, so defaults are a working standalone
+    // configuration: DLP on, no control plane, upstreams from env.
+    //
+    // A file that exists but is malformed still fails: that is a real mistake
+    // and silently ignoring it would be worse than stopping.
+    let contents = match std::fs::read_to_string(Path::new(path)) {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            tracing::info!(
+                path = %path,
+                "No config file found — running with built-in defaults. \
+                 Set CONFIG_PATH to use one."
+            );
+            String::from("{}")
+        }
+        Err(e) => {
+            return Err(anyhow::anyhow!("Failed to read config file '{}': {}", path, e));
+        }
+    };
     let mut config: ProxyConfig = serde_yaml::from_str(&contents)?;
 
     // Environment variables take precedence over config file
