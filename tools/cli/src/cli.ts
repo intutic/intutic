@@ -12,13 +12,22 @@
  */
 
 import { Command } from 'commander'
+import { createRequire } from 'node:module'
+
+// Read the version from package.json rather than repeating it here. The literal
+// that used to live below said 1.6.0 for three releases running, so
+// `intutic --version` reported a version the user did not have — and any check
+// of it was worthless, since it printed the same string regardless of what was
+// installed. createRequire because this is ESM, where `require` is unavailable
+// but JSON imports still need an assertion on older runtimes.
+const { version } = createRequire(import.meta.url)('../package.json') as { version: string }
 
 const program = new Command()
 
 program
   .name('intutic')
   .description('Intutic CLI — AI governance control plane for developer workspaces')
-  .version('1.6.0')
+  .version(version)
 
 program
   .command('init')
