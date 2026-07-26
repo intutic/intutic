@@ -158,21 +158,35 @@ intutic init --dev
 
 ### Standalone (open core)
 
-Start the proxy directly. No account, no configuration file, nothing leaving
-your machine:
+One command. No account, no configuration file, nothing leaving your machine:
+
+```bash
+intutic start
+```
+
+```
+ℹ No Valkey detected on port 6379. Trying to start one…
+ℹ Docker detected — starting a Valkey container (intutic-valkey)…
+✔ Valkey running in Docker (intutic-valkey) on port 6379.
+ℹ Starting proxy on port 4000…
+INFO intutic_proxy: Listening on 0.0.0.0:4000
+```
+
+`start` finds a Valkey for you — an existing one on 6379, else Docker, else
+`valkey-server` or `redis-server` on your PATH — and then runs the proxy. If none
+of those are available it tells you exactly what to install.
+
+DLP scanning, WASM rule enforcement and policy evaluation all run locally
+against that Valkey.
+
+::: details Running the proxy yourself
+`intutic start` is a convenience wrapper. To manage Valkey yourself, run the
+proxy directly — it needs no configuration file:
 
 ```bash
 intutic-proxy
 ```
-
-```
-INFO intutic_proxy: No config file found — running with built-in defaults.
-INFO intutic_proxy: Connected to Valkey at redis://127.0.0.1:6379
-INFO intutic_proxy: Listening on 0.0.0.0:4000
-```
-
-That is the whole of it — DLP scanning, WASM rule enforcement and policy
-evaluation all run locally against your own Valkey.
+:::
 
 ::: warning `intutic connect` is not this
 `intutic connect` starts the **sync daemon**, which mirrors governance config
