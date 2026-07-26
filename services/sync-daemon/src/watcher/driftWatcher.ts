@@ -33,7 +33,7 @@ export function startWatcher(
   workspaceRoot: string,
   harnesses: HarnessType[],
   onChange: (filePath: string) => Promise<void>
-): { stop: () => void } {
+): { stop: () => Promise<void> } {
   const filePaths = harnesses
     .map((h) => HARNESS_FILES[h])
     .filter((f) => !!f)
@@ -77,11 +77,19 @@ export function startWatcher(
   })
 
   return {
-    stop: () => {
+    // Returns the close promise rather than discarding it. chokidar's close()
+    // is asynchronous, so a fire-and-forget stop() hands back control while
+    // events are still in flight — and any that land afterwards run `onChange`
+    // against a workspace the caller may already have torn down. Callers that
+    // do not care can still ignore the promise; callers that need shutdown to
+    // be complete before touching the filesystem can now await it.
+    stop: async () => {
       log.info({ action: 'stop_watcher' }, 'Stopping filesystem watcher')
-      watcher.close().catch((err) => {
+      try {
+        await watcher.close()
+      } catch (err) {
         log.warn({ action: 'watcher_close_error', err }, 'Error closing filesystem watcher')
-      })
+      }
     },
   }
 }
