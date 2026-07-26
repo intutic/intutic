@@ -79,7 +79,22 @@ async fn main() -> anyhow::Result<()> {
     // Connect to Valkey
     let valkey_url =
         std::env::var("VALKEY_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
-    let valkey = telemetry::connect_valkey(&valkey_url).await?;
+    // Valkey is currently required — the WASM registry, telemetry, metering,
+    // semantic cache and bandit router all hold a connection. Surface that as
+    // something actionable: the bare `Connection refused (os error 111)` this
+    // used to emit gave no clue what was being connected to or how to fix it,
+    // which is where the documented install left users stranded (issue #1).
+    let valkey = match telemetry::connect_valkey(&valkey_url).await {
+        Ok(v) => v,
+        Err(e) => {
+            return Err(anyhow::anyhow!(
+                "Could not connect to Valkey at {valkey_url}: {e}\n\n\
+                 The proxy needs Valkey for its policy cache and telemetry. Start one with:\n\n  \
+                 docker run -d --name intutic-valkey -p 6379:6379 valkey/valkey:8-alpine\n\n\
+                 Then re-run the proxy. Point elsewhere with VALKEY_URL=redis://host:port."
+            ));
+        }
+    };
     tracing::info!("Connected to Valkey at {}", valkey_url);
 
     // Initialize WASM plugin registry (Valkey + local ~/.intutic/wasm rules)
