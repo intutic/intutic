@@ -17,8 +17,9 @@ const IS_OSS = process.env.INTUTIC_ENTERPRISE_BUILD !== 'true' || !hasControlPla
  * the rendered output.
  *
  * Any build destined for docs.intutic.ai therefore sets INTUTIC_REQUIRE_OSS=true
- * (see apps/docs/Dockerfile and scripts/deploy-docs-local.sh) and this throws
- * rather than emitting the wrong site. Loud and early beats silent and public.
+ * (see the enterprise repo's apps/docs/Dockerfile, whose flags the deploy script
+ * re-checks before building) and this throws rather than emitting the wrong
+ * site. Loud and early beats silent and public.
  */
 if (process.env.INTUTIC_REQUIRE_OSS === 'true' && !IS_OSS) {
   throw new Error(
@@ -204,6 +205,11 @@ export default defineConfig({
   // stripped page. Running here catches both paths; the Vite pass then finds
   // nothing left to strip and only performs its domain rewrites.
   markdown: {
+    // VitePress does not render TeX unless this is on, so `$$…$$` blocks and
+    // inline `$…$` spans were being emitted as literal source. The routing
+    // guide's Beta-arm update rule and its inline `$\alpha, \beta$` references
+    // were showing raw markup to readers. Requires markdown-it-mathjax3.
+    math: true,
     config: (md) => {
       if (!IS_OSS) return
       md.core.ruler.before('normalize', 'strip-enterprise-only', (state) => {
