@@ -73,10 +73,20 @@ jobs:
           fi
           echo "✅ All manifests match $TAG"
 
+  # npm goes LAST, after the GitHub Release exists.
+  #
+  # tools/cli ships a launcher (packages/proxy/bin/proxy.js) that downloads its
+  # native proxy binary from
+  #   https://github.com/intutic/intutic/releases/download/v<version>/<asset>
+  # on first run. When this job ran in parallel with the binary builds,
+  # @intutic/cli was live on npm tens of minutes before that release existed —
+  # so every install during the window 404'd on first run. Depending on
+  # github-release closes that window: by the time the package is installable,
+  # the assets it reaches for are already published.
   publish-npm:
     name: Publish npm Packages
     runs-on: ubuntu-latest
-    needs: verify-versions
+    needs: [verify-versions, github-release]
     permissions:
       contents: read
     steps:
@@ -237,7 +247,9 @@ jobs:
 
   github-release:
     name: Create GitHub Release & Upload Assets
-    needs: [publish-npm, build-rust-proxy, build-cli-binaries]
+    # Deliberately does NOT depend on publish-npm — the dependency runs the
+    # other way now, so the release assets land before the CLI is installable.
+    needs: [build-rust-proxy, build-cli-binaries]
     runs-on: ubuntu-latest
     permissions:
       contents: write
