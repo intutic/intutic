@@ -376,9 +376,9 @@ mod tests {
     fn test_sample_beta_bounds() {
         // Enforces floor of 1.0 and samples between 0.0 and 1.0
         let val = sample_beta(0.5, 0.5);
-        assert!(val >= 0.0 && val <= 1.0);
+        assert!((0.0..=1.0).contains(&val));
         let val2 = sample_beta(-5.0, -10.0);
-        assert!(val2 >= 0.0 && val2 <= 1.0);
+        assert!((0.0..=1.0).contains(&val2));
     }
 
     #[test]

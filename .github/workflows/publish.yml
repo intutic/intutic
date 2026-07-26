@@ -211,7 +211,7 @@ jobs:
           else
             cp target/${{ matrix.target }}/release/intutic-proxy dist-release/${{ matrix.artifact_name }}
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact_name }}
           path: dist-release/${{ matrix.artifact_name }}
@@ -240,7 +240,7 @@ jobs:
           mkdir -p dist-cli
           npx pkg tools/cli/package.json --targets node18-macos-arm64,node18-macos-x64,node18-linux-x64,node18-win-x64 --out-path dist-cli
           mv dist-cli/cli-macos-arm64 dist-cli/cli-macos-arm64 2>/dev/null || true
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: cli-standalone-binaries
           path: dist-cli/*
@@ -279,7 +279,7 @@ jobs:
           done
 
       - name: Download All Compiled Binaries
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: release-assets/
           merge-multiple: true

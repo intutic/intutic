@@ -140,6 +140,10 @@ impl RewardEngine {
     /// Record one routed request's outcome against its bandit arm.
     /// Silent on Valkey errors — learning loss is preferable to noise on a
     /// path that runs for every request.
+    // Seven parameters plus &self. The routing keys and the signals payload are
+    // already grouped as far as they usefully can be; splitting further would
+    // separate values that are always supplied together.
+    #[allow(clippy::too_many_arguments)]
     pub async fn record(
         &self,
         valkey: &Arc<ConnectionManager>,

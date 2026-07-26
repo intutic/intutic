@@ -278,7 +278,8 @@ fn bench_trace_publish(c: &mut Criterion) {
 ///   2. GET v2:vk:{key} + JSON parse     — key lookup (~0.5ms)
 ///   3. DLP scan (CPU)                    — regex scan (~0.003ms)
 ///   4. PUBLISH trace event              — fire-and-forget (~0.2ms)
-///   Total expected: ~1-2ms P50, ~2-3ms P95, well under 5ms.
+///
+/// Total expected: ~1-2ms P50, ~2-3ms P95, well under 5ms.
 fn bench_full_chain_e2e(c: &mut Criterion) {
     let runtime = rt();
     let mut conn = runtime.block_on(connect());
