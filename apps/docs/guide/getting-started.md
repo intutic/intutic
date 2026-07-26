@@ -61,7 +61,7 @@ Verify:
 
 ```bash
 intutic --version
-# @intutic/cli 1.6.0
+# 1.6.2
 ```
 
 ::: details Alternative package managers & Standalone Binaries
