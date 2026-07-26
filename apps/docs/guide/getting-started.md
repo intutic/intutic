@@ -14,10 +14,15 @@ Go from zero to your first blocked tool call in under 5 minutes.
 └─────────────┘    └──────┬───────┘    └──────────────────┘
                           │
                    ┌──────▼───────┐
-                   │ Control Plane│
-                   │    :3001     │
+                   │ WASM Policy  │
+                   │   Engine     │
                    └──────────────┘
+                    (all local — no
+                     network egress)
 ```
+
+Everything above runs on your machine. A control plane is **optional** and not
+part of open core; see [Security](/security) for what changes if you connect one.
 
 Every LLM request from your AI agent flows through Intutic's local proxy,
 where SOPs (Standard Operating Procedures) evaluate each tool call in
@@ -92,11 +97,13 @@ intutic login --api-key vk_your_key_here
 :::
 
 ::: details Local development
-Point at a local control plane with `--dev`:
+If you are running a control plane of your own, point at it with `--dev`:
 ```bash
 intutic login --dev
 ```
-This uses `http://localhost:3001` instead of the hosted API.
+This uses `http://localhost:3001` instead of the hosted API. Open core does not
+include a control plane, so this is only useful if you are supplying one — the
+proxy itself needs no login and runs standalone without either.
 :::
 
 ## Step 3 — Initialize your workspace
