@@ -511,7 +511,12 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         }
         propagator.extract(&HeaderExtractor(request.headers()))
     });
-    tracing::Span::current().set_parent(parent_cx);
+    // tracing-opentelemetry 0.33 made set_parent fallible. A failure here means
+    // this span is orphaned from the caller's trace, so it is logged rather than
+    // discarded — a silently broken trace is worse than a noisy one.
+    if let Err(err) = tracing::Span::current().set_parent(parent_cx) {
+        tracing::warn!("failed to attach upstream trace context: {err}");
+    }
 
     // ── Extract basic request metadata ────────────────────────────────
     let uri_path = request.uri().path().to_string();

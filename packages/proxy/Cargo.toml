@@ -27,8 +27,15 @@ hyper-util = { version = "0.1", features = ["full"] }
 reqwest = { version = "0.12", features = ["stream", "json", "rustls-tls"], default-features = false }
 
 # WASM runtime
-wasmtime = "29"
-wasmtime-wasi = "29"
+#
+# Held at >=36: RUSTSEC/GHSA advisories against 29 cover out-of-sandbox loads
+# from the `f64.copysign` and `f64x2.splat` lowerings on x86-64 (fixed 36.0.5 /
+# 36.0.7). Those are Cranelift codegen bugs, and Cranelift is the backend we
+# use, so they are reachable from any rule we execute. 36 also clears the
+# Winch, component-model and WASI advisories, none of which we were exposed to.
+# wasmtime-wasi is used only by benches/wasm_bench.rs, never by shipped code.
+wasmtime = "36"
+wasmtime-wasi = "36"
 
 
 # Serialization
@@ -47,16 +54,27 @@ syn = { version = "2.0", features = ["parsing", "full"] }
 
 # Code skeleton extraction — multi-language via tree-sitter WASM grammars
 # Grammars are embedded via include_bytes! at compile time (see assets/grammars/)
-# wasmtime is already a dependency; tree-sitter just enables its wasm feature
-tree-sitter = { version = "0.24", features = ["wasm"] }
+#
+# The `wasm` feature pulls wasmtime-c-api-impl, i.e. a SECOND wasmtime entirely
+# separate from the one above. 0.24 pinned that to wasmtime 25, which carried
+# the same advisories and would have kept them open no matter what the direct
+# dependency said. 0.26 moved it to wasmtime-c-api-impl ^36.0.12, which is why
+# this bump is part of the security fix rather than routine maintenance.
+tree-sitter = { version = "0.26", features = ["wasm"] }
 
 # Logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-opentelemetry = { version = "0.24", features = ["trace"] }
-opentelemetry_sdk = { version = "0.24", features = ["rt-tokio", "trace"] }
-opentelemetry-otlp = { version = "0.17", features = ["tonic", "tokio", "trace"] }
-tracing-opentelemetry = "0.25"
+# Held at >=0.32.1: opentelemetry_sdk 0.24 allocates without bound while parsing
+# W3C Baggage headers, which are attacker-controlled on any inbound request.
+# These four move as a set — otlp 0.32 requires sdk 0.32, and
+# tracing-opentelemetry 0.33 is the first release built against otel 0.32.
+opentelemetry = { version = "0.32", features = ["trace"] }
+opentelemetry_sdk = { version = "0.32", features = ["rt-tokio", "trace"] }
+# The tonic transport feature was renamed "tonic" -> "grpc-tonic"; the separate
+# "tokio" feature no longer exists.
+opentelemetry-otlp = { version = "0.32", features = ["grpc-tonic", "trace"] }
+tracing-opentelemetry = "0.33"
 
 # Misc
 uuid = { version = "1", features = ["v4"] }
@@ -88,7 +106,10 @@ wiremock = "0.6"
 redis = { version = "0.25", features = ["aio", "tokio-comp", "connection-manager"] }
 # Integration tests (tests/wasm_local_test.rs) compile minimal WAT rule fixtures
 wat = "1"
-wasmtime = "29"
+# Must track the runtime dependency above. Left at 29 this pulled a whole second
+# vulnerable wasmtime into the lockfile, which Dependabot flags on Cargo.lock
+# regardless of it being test-only.
+wasmtime = "36"
 criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
