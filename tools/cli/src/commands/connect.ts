@@ -14,6 +14,7 @@
 import * as node_path from 'node:path'
 import * as node_fs from 'node:fs/promises'
 import { log } from '../lib/logger.js'
+import { ensureValkey, valkeyRemediation, isValkeyRunning } from '../lib/ensureValkey.js'
 import {
   loadCredentials,
   loadConfig,
@@ -67,77 +68,7 @@ function isPortInUse(port: number): Promise<boolean> {
   })
 }
 
-function isValkeyRunning(port = 6379): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = new net.Socket()
-    socket.setTimeout(1000)
-    socket.once('connect', () => {
-      socket.destroy()
-      resolve(true)
-    })
-    socket.once('error', () => {
-      resolve(false)
-    })
-    socket.once('timeout', () => {
-      socket.destroy()
-      resolve(false)
-    })
-    socket.connect(port, '127.0.0.1')
-  })
-}
 
-async function downloadValkeyBinary(destPath: string): Promise<string> {
-  const platform = process.platform
-  const arch = process.arch
-  
-  let assetName = ''
-  if (platform === 'darwin') {
-    if (arch === 'arm64') assetName = 'valkey-server-darwin-arm64'
-    else if (arch === 'x64') assetName = 'valkey-server-darwin-x64'
-  } else if (platform === 'linux') {
-    if (arch === 'x64') assetName = 'valkey-server-linux-x64'
-    else if (arch === 'arm64') assetName = 'valkey-server-linux-arm64'
-  } else if (platform === 'win32') {
-    if (arch === 'x64') assetName = 'valkey-server-win32-x64.exe'
-  }
-
-  if (!assetName) {
-    throw new Error(`Unsupported platform/architecture for Valkey: ${platform}-${arch}`)
-  }
-
-  const valkeyVersion = '1.0.0'
-  const url = `https://intutic.ai/valkey/v${valkeyVersion}/${assetName}`
-
-  log.info(`Downloading precompiled Valkey server from ${url}...`)
-
-  const response = await fetch(url)
-  if (!response.ok) {
-    // We do not build Valkey ourselves, so this mirror can be missing a platform.
-    // Fail with something the user can act on instead of a bare HTTP status.
-    throw new Error(
-      `Failed to download a Valkey binary for ${platform}-${arch} (HTTP ${response.status} ${response.statusText}).\n` +
-        `Intutic needs a local Valkey (or Redis) on port 6379. Install one and re-run \`intutic connect\`:\n` +
-        `  macOS:  brew install valkey && brew services start valkey\n` +
-        `  Linux:  apt install valkey-server  (or redis-server)\n` +
-        `  Docker: docker run -d -p 6379:6379 valkey/valkey:8\n` +
-        `Already running elsewhere? Point Intutic at it with VALKEY_URL=redis://host:port`
-    )
-  }
-
-  const arrayBuffer = await response.arrayBuffer()
-  const buffer = Buffer.from(arrayBuffer)
-
-  const destDir = node_path.dirname(destPath)
-  await node_fs.mkdir(destDir, { recursive: true })
-  await node_fs.writeFile(destPath, buffer)
-
-  if (platform !== 'win32') {
-    await node_fs.chmod(destPath, 0o755)
-  }
-
-  log.success(`Successfully downloaded and installed Valkey binary to ${destPath}`)
-  return destPath
-}
 
 
 async function downloadProxyBinary(destPath: string): Promise<string> {
@@ -220,9 +151,10 @@ export async function runConnect(opts: {
     log.info('')
     log.info('To run standalone — policy enforcement, DLP and WASM rules, all local:')
     log.info('')
-    log.info('  docker run -d --name intutic-valkey -p 6379:6379 valkey/valkey:8-alpine')
-    log.info('  intutic-proxy')
+    log.info('  intutic start')
     log.info('  export ANTHROPIC_BASE_URL=http://localhost:4000')
+    log.info('')
+    log.info('`intutic start` brings up Valkey for you (Docker or a local binary).')
     log.info('')
     log.info('If you do have a control plane, authenticate with `intutic login`')
     log.info('(add --dev to target http://localhost:3001).')
@@ -313,103 +245,18 @@ export async function runConnect(opts: {
   process.on('SIGINT', shutdown)
   process.on('SIGTERM', shutdown)
 
-  // 2.4. Pre-flight Valkey Validation
-  const valkeyPort = 6379
-  let valkeyActive = await isValkeyRunning(valkeyPort)
-  if (!valkeyActive) {
-    log.info('Valkey cache not detected on port 6379. Initiating auto-provisioning...')
-    
-    // Check if Docker is running
-    let dockerActive = false
-    try {
-      execSync('docker info', { stdio: 'ignore' })
-      dockerActive = true
-    } catch {}
-
-    if (dockerActive) {
-      log.info('Docker detected. Spawning background Valkey container (intutic-valkey)...')
-      try {
-        const existing = execSync('docker ps -a --filter name=intutic-valkey --format "{{.Names}}"', { encoding: 'utf8' }).trim()
-        if (existing === 'intutic-valkey') {
-          execSync('docker start intutic-valkey', { stdio: 'ignore' })
-        } else {
-          execSync('docker run -d --name intutic-valkey -p 6379:6379 valkey/valkey', { stdio: 'ignore' })
-        }
-        
-        // Wait for Valkey to be ready
-        for (let i = 0; i < 10; i++) {
-          if (await isValkeyRunning(valkeyPort)) {
-            valkeyActive = true
-            log.success('Successfully started background Valkey container (intutic-valkey).')
-            break
-          }
-          await new Promise(r => setTimeout(r, 500))
-        }
-      } catch (err: any) {
-        log.warn(`Docker auto-spawn failed: ${err.message}`)
-      }
+    // 2.4. Pre-flight Valkey Validation
+    //
+    // Shared with `intutic start` (lib/ensureValkey.ts). This ladder used to be
+    // inline here, below the credential check — so open-core users, who cannot
+    // authenticate, never reached it and were told to install Valkey by hand.
+    const valkeyPort = 6379
+    const valkeyResult = await ensureValkey(valkeyPort)
+    if (!valkeyResult.running) {
+      log.warn('Running in degraded offline mode (caching disabled; local JSONL trace logging active).')
+      for (const line of valkeyRemediation(valkeyPort).split('\n')) log.info(line)
     }
 
-    if (!valkeyActive) {
-      // Try native binary in PATH
-      let hasNativeBinary = false
-      let nativeCmd = 'valkey-server'
-      try {
-        execSync('which valkey-server', { stdio: 'ignore' })
-        hasNativeBinary = true
-      } catch {
-        try {
-          execSync('which redis-server', { stdio: 'ignore' })
-          nativeCmd = 'redis-server'
-          hasNativeBinary = true
-        } catch {}
-      }
-
-      if (hasNativeBinary) {
-        log.info(`Found native ${nativeCmd} in PATH. Spawning background daemon...`)
-        try {
-          const proc = spawn(nativeCmd, ['--port', '6379', '--daemonize', 'yes'], { stdio: 'ignore', detached: true })
-          proc.unref()
-          
-          for (let i = 0; i < 10; i++) {
-            if (await isValkeyRunning(valkeyPort)) {
-              valkeyActive = true
-              log.success(`Successfully spawned native ${nativeCmd} in background.`)
-              break
-            }
-            await new Promise(r => setTimeout(r, 500))
-          }
-        } catch (err: any) {
-          log.warn(`Native spawn failed: ${err.message}`)
-        }
-      }
-    }
-
-    if (!valkeyActive) {
-      // Dynamic Static Download
-      log.info('No native database binary on path. Downloading precompiled static Valkey binary...')
-      const globalValkeyBinPath = node_path.join(getIntuticDir(), 'bin', process.platform === 'win32' ? 'valkey-server.exe' : 'valkey-server')
-      try {
-        await downloadValkeyBinary(globalValkeyBinPath)
-        log.info('Spawning downloaded Valkey server in background...')
-        const args = process.platform === 'win32' ? ['--port', '6379'] : ['--port', '6379', '--daemonize', 'yes']
-        const proc = spawn(globalValkeyBinPath, args, { stdio: 'ignore', detached: true })
-        proc.unref()
-
-        for (let i = 0; i < 10; i++) {
-          if (await isValkeyRunning(valkeyPort)) {
-            valkeyActive = true
-            log.success('Successfully spawned downloaded Valkey server in background.')
-            break
-          }
-          await new Promise(r => setTimeout(r, 500))
-        }
-      } catch (err: any) {
-        log.error(`Valkey server auto-download/setup failed: ${err.message}`)
-        log.warn('Running in degraded offline mode (caching disabled; local JSONL trace logging active).')
-      }
-    }
-  }
 
   // 2.5. Manage LiteLLM-Rust Proxy Gateway Process
   const proxyPort = parseInt(process.env.PORT || '4000', 10)
