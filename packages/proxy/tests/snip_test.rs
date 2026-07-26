@@ -159,8 +159,10 @@ fn test_snip_compact_short_code_not_skeleton() {
 
 #[test]
 fn test_snip_compact_disabled_passthrough() {
-    let mut config = SnipCompactorConfig::default();
-    config.enabled = false;
+    let config = SnipCompactorConfig {
+        enabled: false,
+        ..Default::default()
+    };
     let input = r#"{"big":"array","data":[1,2,3,4,5]}"#.repeat(100);
     let (out, ratio) = snip::compact(&input, &config);
     assert_eq!(
@@ -285,9 +287,11 @@ fn test_detect_content_type_text() {
 
 #[test]
 fn test_hard_truncation_fires_on_overflow() {
-    let mut config = SnipCompactorConfig::default();
-    config.max_tool_output_tokens = 10; // very small: 40 chars
-    config.code_skeleton_enabled = false; // isolate truncation test
+    let config = SnipCompactorConfig {
+        max_tool_output_tokens: 10,   // very small: 40 chars
+        code_skeleton_enabled: false, // isolate truncation test
+        ..Default::default()
+    };
 
     let input = "x".repeat(200); // 200 chars → ~50 tokens, over limit
     let (out, _) = snip::compact(&input, &config);
@@ -345,9 +349,9 @@ fn test_td003_grammar_load_status_smoke() {
             "not detected"
         };
         println!(
-            "[TD-003] {}: language={}, skeleton_len={}/{}, status={}",
+            "[TD-003] {}: language={:?}, skeleton_len={}/{}, status={}",
             name,
-            format!("{:?}", detected),
+            detected,
             skeleton.len(),
             code.len(),
             status

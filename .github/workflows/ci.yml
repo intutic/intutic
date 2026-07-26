@@ -194,7 +194,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           # Matches `python = "^3.9"` in packages/intutic-clawde/pyproject.toml.
           python-version: "3.11"

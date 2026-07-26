@@ -156,6 +156,10 @@ struct PolicyCheckResponse {
 
 /// POST /api/v1/policy/check on the control plane.
 /// Returns Ok(()) if allowed, Err with reason string if denied.
+// Eight request-scoped values forwarded to a single control-plane call, with one
+// call site. Grouping them into a struct would add a type whose only purpose is
+// to satisfy the argument-count threshold.
+#[allow(clippy::too_many_arguments)]
 async fn policy_check(
     client: &Client,
     control_plane_url: &str,
