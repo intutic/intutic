@@ -51,7 +51,10 @@ Intutic Proxy supports two primary self-hosted deployment topologies depending o
         - "4000:4000"
       environment:
         - UPSTREAM_URL=http://litellm:4000
-        - CONTROL_PLANE_URL=http://control-plane:3001
+        # No CONTROL_PLANE_URL: open core ships no control plane, and pointing
+        # this at a host that does not exist makes the policy pre-check fail —
+        # which, with the default `fail_closed: true`, blocks every request.
+        # Set it only when you actually have a control plane to talk to.
 
     litellm:
       image: ghcr.io/berriai/litellm:main-latest

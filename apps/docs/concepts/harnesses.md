@@ -45,6 +45,12 @@ Developer's Machine                              Cloud
 └──────────────────────────────────────┘
 ```
 
+::: tip Open-core runs the left-hand column only
+The Cloud column is optional. Open core ships no control plane, so a standalone
+install runs the harness, proxy, config files and sync daemon entirely on the
+developer's machine — steps 4 and 5 below apply only once you connect one.
+:::
+
 ### The flow
 
 1. **Harness** makes an LLM API call (e.g., `POST /v1/chat/completions`)
