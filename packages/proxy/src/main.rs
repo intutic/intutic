@@ -19,35 +19,33 @@ async fn main() -> anyhow::Result<()> {
     let service_name =
         std::env::var("OTEL_SERVICE_NAME").unwrap_or_else(|_| "intutic-proxy".to_string());
 
-    // Initialize OpenTelemetry tracer
-    let (otel_layer, _uninstall) = if std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").is_ok() {
-        use opentelemetry::KeyValue;
-        use opentelemetry_otlp::WithExportConfig;
-        use opentelemetry_sdk::trace::{self, Sampler};
-
+    // Initialize OpenTelemetry tracer.
+    //
+    // opentelemetry 0.32 removed the `new_pipeline()` builder chain in favour of
+    // constructing the exporter and provider explicitly. The provider is kept
+    // rather than discarded so shutdown can flush pending spans — the old
+    // `global::shutdown_tracer_provider()` no longer exists.
+    let (otel_layer, tracer_provider) = if std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").is_ok() {
         use opentelemetry::trace::TracerProvider;
+        use opentelemetry_otlp::{SpanExporter, WithExportConfig};
+        use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider};
+        use opentelemetry_sdk::Resource;
 
-        let tracer_provider = opentelemetry_otlp::new_pipeline()
-            .tracing()
-            .with_exporter(
-                opentelemetry_otlp::new_exporter()
-                    .tonic()
-                    .with_endpoint(otel_endpoint.clone()),
-            )
-            .with_trace_config(
-                trace::Config::default()
-                    .with_sampler(Sampler::AlwaysOn)
-                    .with_resource(opentelemetry_sdk::Resource::new(vec![KeyValue::new(
-                        "service.name",
-                        service_name,
-                    )])),
-            )
-            .install_batch(opentelemetry_sdk::runtime::Tokio)
-            .expect("Failed to initialize OpenTelemetry tracer");
+        let exporter = SpanExporter::builder()
+            .with_tonic()
+            .with_endpoint(otel_endpoint.clone())
+            .build()
+            .expect("Failed to build OTLP span exporter");
 
-        let tracer = tracer_provider.tracer("intutic-proxy");
+        let provider = SdkTracerProvider::builder()
+            .with_batch_exporter(exporter)
+            .with_sampler(Sampler::AlwaysOn)
+            .with_resource(Resource::builder().with_service_name(service_name).build())
+            .build();
+
+        let tracer = provider.tracer("intutic-proxy");
         let layer = tracing_opentelemetry::layer().with_tracer(tracer);
-        (Some(layer), Some(()))
+        (Some(layer), Some(provider))
     } else {
         (None, None)
     };
@@ -128,9 +126,11 @@ async fn main() -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
 
-    // Shutdown OpenTelemetry
-    if _uninstall.is_some() {
-        opentelemetry::global::shutdown_tracer_provider();
+    // Shutdown OpenTelemetry, flushing any spans still in the batch queue.
+    if let Some(provider) = tracer_provider {
+        if let Err(err) = provider.shutdown() {
+            tracing::warn!("OpenTelemetry shutdown failed: {err}");
+        }
     }
 
     Ok(())
