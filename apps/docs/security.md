@@ -23,6 +23,10 @@ Intutic defends against three categories of threat:
 
 ## Data Flow
 
+Intutic runs in one of two modes, and they differ in exactly one respect: whether anything leaves your machine.
+
+### Standalone (open-core default)
+
 ```
 Developer → AI Agent → Intutic Proxy (:4000) → LLM Provider
                             │
@@ -31,25 +35,45 @@ Developer → AI Agent → Intutic Proxy (:4000) → LLM Provider
                       │  Engine    │
                       │  (WASM +   │
                       │   SOPs)    │
-                      └─────┬──────┘
-                            │
-                      ┌─────▼──────┐
-                      │  Control   │
-                      │  Plane     │
-                      │  (:3001)   │
                       └────────────┘
+                       (nothing leaves
+                        this machine)
 ```
 
 1. Every LLM request from an AI agent is routed through the **local Intutic proxy** on port 4000
 2. The proxy evaluates tool calls against SOPs in the **WASM policy engine** (< 5ms typical)
-3. Verdicts, traces, and telemetry are sent to the **control plane** for storage and analysis
+3. Verdicts and telemetry stay **on the local machine**. Bandit routing state is written to your own Valkey; nothing is transmitted to Intutic or anyone else
 4. The proxy **never stores prompts or completions** — only structured telemetry (tool names, verdicts, token counts, timing)
+
+This is what you get by default. Open core ships no control plane, and with `policy.control_plane_url` unset the policy pre-check is skipped entirely.
+
+### Connected (Cloud / self-hosted control plane)
+
+Setting `policy.control_plane_url` — or the `CONTROL_PLANE_URL` environment variable — adds a control plane for storage, analysis and centrally managed policy:
+
+```
+Developer → AI Agent → Intutic Proxy (:4000) → LLM Provider
+                            │
+                      ┌─────▼──────┐
+                      │  Policy    │
+                      │  Engine    │
+                      └─────┬──────┘
+                            │  governance telemetry only
+                      ┌─────▼──────┐
+                      │  Control   │
+                      │  Plane     │
+                      └────────────┘
+```
+
+In this mode, and only in this mode, verdicts and traces are sent to the control plane. Point it at Intutic Cloud or at a control plane you host yourself. Prompts and completions are still never transmitted.
 
 ---
 
 ## Data Locality
 
-The proxy runs **locally on the developer's machine**. LLM traffic is not rerouted through Intutic's cloud infrastructure — it flows directly from the proxy to the LLM provider. Only governance telemetry reaches the control plane.
+The proxy runs **locally on the developer's machine**. LLM traffic is not rerouted through Intutic's cloud infrastructure — it flows directly from the proxy to the LLM provider, in both modes.
+
+In **standalone** mode nothing leaves the machine at all: no telemetry, no verdicts, no traces. In **connected** mode only governance telemetry reaches the control plane — never prompts or completions.
 
 ---
 
