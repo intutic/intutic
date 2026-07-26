@@ -7,6 +7,29 @@ const hasControlPlane = fs.existsSync(path.resolve(__dirname, '../../../services
 const IS_OSS = process.env.INTUTIC_ENTERPRISE_BUILD !== 'true' || !hasControlPlane;
 
 /**
+ * Fail-closed guard for anything that ships.
+ *
+ * In the enterprise repo `hasControlPlane` is true, so IS_OSS collapses to
+ * `INTUTIC_ENTERPRISE_BUILD !== 'true'` — a single stray `export` in a shell is
+ * all that separates a normal build from one that publishes every paid-tier
+ * page. Defaulting to OSS makes that unlikely; it does not make it impossible,
+ * and the failure is silent: the build succeeds and the leak only shows up in
+ * the rendered output.
+ *
+ * Any build destined for docs.intutic.ai therefore sets INTUTIC_REQUIRE_OSS=true
+ * (see apps/docs/Dockerfile and scripts/deploy-docs-local.sh) and this throws
+ * rather than emitting the wrong site. Loud and early beats silent and public.
+ */
+if (process.env.INTUTIC_REQUIRE_OSS === 'true' && !IS_OSS) {
+  throw new Error(
+    'Refusing to build: INTUTIC_REQUIRE_OSS=true but OSS gating is OFF ' +
+      `(INTUTIC_ENTERPRISE_BUILD=${JSON.stringify(process.env.INTUTIC_ENTERPRISE_BUILD)}, ` +
+      `hasControlPlane=${hasControlPlane}). This build would publish paid-tier pages.`,
+  )
+}
+console.log(`[docs] build mode: ${IS_OSS ? 'OSS (paid-tier pages excluded)' : 'ENTERPRISE (all pages)'}`)
+
+/**
  * Pages whose title carries a `Cloud …` or `Enterprise` badge — i.e. pages that
  * document paid-tier functionality.
  *
