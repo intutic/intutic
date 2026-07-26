@@ -181,12 +181,21 @@ jobs:
             artifact_name: intutic-proxy-darwin-x64
           # Artifact names MUST match the asset names the CLI requests in
           # tools/cli/src/commands/connect.ts (…-linux-x64, not -amd64).
+          #
+          # Pinned to 22.04, NOT ubuntu-latest. glibc is backward but not
+          # forward compatible: a binary linked on a newer glibc demands that
+          # version at runtime. `ubuntu-latest` moved to 24.04 (glibc 2.39), so
+          # v1.6.0's Linux binaries required GLIBC_2.38 and died on start with
+          # "version `GLIBC_2.38' not found" on Debian 12 (2.36), Ubuntu 22.04
+          # (2.35) and RHEL 9 — see issue #1. 22.04 gives glibc 2.35, which runs
+          # on every one of those. Do not change this to ubuntu-latest.
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-22.04
             artifact_name: intutic-proxy-linux-x64
-          # Native arm64 runner — avoids cross-compiling wasmtime/ring.
+          # Native arm64 runner — avoids cross-compiling wasmtime/ring. Same
+          # glibc-floor reasoning as above.
           - target: aarch64-unknown-linux-gnu
-            os: ubuntu-24.04-arm
+            os: ubuntu-22.04-arm
             artifact_name: intutic-proxy-linux-arm64
           - target: x86_64-pc-windows-msvc
             os: windows-latest
