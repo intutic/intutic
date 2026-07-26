@@ -14,6 +14,10 @@ use super::format_as_llm_response;
 /// - `Ok(Some(response))` if the prompt was gated (score below threshold)
 /// - `Ok(None)` if quality is acceptable (proceed to LLM)
 /// - `Err(_)` on infrastructure failure (caller should proceed)
+// Eight request-scoped values with no natural grouping — a params struct here
+// would be a bag that has to be built at the one call site and immediately
+// destructured, trading a lint for indirection.
+#[allow(clippy::too_many_arguments)]
 pub async fn check(
     http_client: &reqwest::Client,
     control_plane_url: &str,

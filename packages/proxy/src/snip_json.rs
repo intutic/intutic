@@ -491,7 +491,7 @@ mod tests {
     #[test]
     fn test_compact_preserves_short_values() {
         let input = r#"{"status":"ok","count":42}"#;
-        let (out, _) = compact_json(&input, &cfg());
+        let (out, _) = compact_json(input, &cfg());
         assert!(
             out.contains("\"ok\""),
             "short value 'ok' should be preserved"
@@ -522,7 +522,7 @@ mod tests {
     #[test]
     fn test_compact_preserves_booleans_nulls() {
         let input = r#"{"active":true,"deleted":false,"ref":null}"#;
-        let (out, _) = compact_json(&input, &cfg());
+        let (out, _) = compact_json(input, &cfg());
         assert!(out.contains("true"));
         assert!(out.contains("false"));
         assert!(out.contains("null"));
@@ -531,7 +531,7 @@ mod tests {
     #[test]
     fn test_compact_nested_objects_keys_preserved() {
         let input = r#"{"user":{"id":"u1","meta":{"role":"admin"}}}"#;
-        let (out, _) = compact_json(&input, &cfg());
+        let (out, _) = compact_json(input, &cfg());
         assert!(out.contains("\"user\""));
         assert!(out.contains("\"id\""));
         assert!(out.contains("\"meta\""));
