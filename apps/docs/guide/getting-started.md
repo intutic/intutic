@@ -34,18 +34,15 @@ real time and return one of four verdicts: **BYPASS**, **ENHANCE**, **HIJACK**, 
 |---|---|
 | **Node.js** | 18 or later |
 | **npm** | 10 or later |
-| **Valkey** (or Redis) | 8.x — the proxy's policy cache and telemetry store |
+| **Valkey** (or Redis) | 8.x — the proxy's policy cache. `intutic start` will start one for you |
 | **AI coding agent** | Any of the [18 supported harnesses](/integrations/) (Cursor, Claude Code, Aider, Windsurf, Antigravity, etc.) |
 
-The proxy needs Valkey running before it will start. If you do not already have
-one:
+You do not need to set Valkey up yourself. `intutic start` uses one already
+listening on 6379, else starts a Docker container, else a `valkey-server` or
+`redis-server` on your PATH — and tells you what to install if it finds none.
 
-```bash
-docker run -d --name intutic-valkey -p 6379:6379 valkey/valkey:8-alpine
-```
-
-Point elsewhere with `VALKEY_URL=redis://host:port`. No configuration file is
-required — the proxy runs on built-in defaults unless you supply one.
+Already have one elsewhere? Point at it with `VALKEY_URL=redis://host:port`. No
+configuration file is required either; the proxy runs on built-in defaults.
 
 ## Step 1 — Install the CLI & Native Proxy Gateway
 
@@ -61,7 +58,7 @@ Verify:
 
 ```bash
 intutic --version
-# 1.6.2
+# 1.6.3
 ```
 
 ::: details Alternative package managers & Standalone Binaries
@@ -73,14 +70,20 @@ pnpm add -g @intutic/cli @intutic/proxy
 yarn global add @intutic/cli @intutic/proxy
 ```
 
-For environments without Node.js, download single-file precompiled binaries directly from [GitHub Releases v1.6.0](https://github.com/intutic/intutic/releases/tag/v1.6.0):
+For environments without Node.js, download single-file precompiled binaries directly from [GitHub Releases](https://github.com/intutic/intutic/releases/latest):
 * 🪟 Windows (x64): `cli-win-x64.exe`
 * 🐧 Linux (x64): `cli-linux-x64`
 * 🍎 macOS (Apple Silicon): `cli-macos-arm64` / `intutic-proxy-darwin-arm64`
 * 💻 macOS (Intel): `cli-macos-x64`
 :::
 
-## Step 2 — Log in
+## Step 2 — Log in <Badge type="tip" text="Connected mode only" />
+
+::: tip Running open core standalone? Skip to [Step 4](#step-4-start-the-proxy).
+`login` and `init` register you with a **control plane**, which open core does
+not include. Standalone needs neither — `intutic start` runs the proxy with no
+account at all.
+:::
 
 ```bash
 intutic login

@@ -1465,7 +1465,7 @@ dependencies = [
 
 [[package]]
 name = "intutic-proxy"
-version = "1.6.2"
+version = "1.6.3"
 dependencies = [
  "anyhow",
  "axum",

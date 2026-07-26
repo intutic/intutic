@@ -1,6 +1,6 @@
 {
   "name": "@intutic/proxy",
-  "version": "1.6.2",
+  "version": "1.6.3",
   "description": "Native high-performance AI agent governance proxy binary",
   "type": "module",
   "main": "bin/proxy.js",
