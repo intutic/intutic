@@ -56,8 +56,12 @@ describe('Drift Filesystem Watcher', () => {
     expect(changedFiles.length).toBeGreaterThanOrEqual(1)
     expect(changedFiles.some((f) => f.includes('.cursorrules'))).toBe(true)
 
-    // Cleanup
-    watcher.stop()
+    // Cleanup. Await the watcher's shutdown BEFORE removing the directory:
+    // rm fires unlink events on every watched file, and if chokidar is still
+    // open those invoke the change callback against a path that no longer
+    // exists. In this suite that surfaced as an unhandled ENOENT from the
+    // callback's appendFile, failing the run intermittently on CI.
+    await watcher.stop()
     await node_fs.rm(tempDir, { recursive: true, force: true })
   })
 
@@ -67,6 +71,13 @@ describe('Drift Filesystem Watcher', () => {
     const cursorRulesPath = node_path.join(tempDir, '.cursorrules')
     const testEventsLog = node_path.join(tempDir, '.intutic', 'events', 'hook-events.jsonl')
     await node_fs.mkdir(node_path.dirname(testEventsLog), { recursive: true })
+    // Pre-create the log. Only the directory existed before, so any path where
+    // the callback's appendFile had not yet landed turned the later readFile
+    // into an ENOENT crash rather than a legible assertion failure. The
+    // assertions below already ignore empty lines, so an empty file changes
+    // nothing about what is being tested — it just makes the failure mode
+    // "expected >= 1 events, got 0" instead of a stack trace.
+    await node_fs.writeFile(testEventsLog, '', 'utf-8')
 
     // Write initial mock file
     await node_fs.writeFile(cursorRulesPath, 'governance: initial rules', 'utf-8')
@@ -124,8 +135,12 @@ describe('Drift Filesystem Watcher', () => {
     expect(event).toHaveProperty('toolName', 'config_file')
     expect(event).toHaveProperty('workspaceId', 'ws-test-123')
 
-    // Cleanup
-    watcher.stop()
+    // Cleanup. Await the watcher's shutdown BEFORE removing the directory:
+    // rm fires unlink events on every watched file, and if chokidar is still
+    // open those invoke the change callback against a path that no longer
+    // exists. In this suite that surfaced as an unhandled ENOENT from the
+    // callback's appendFile, failing the run intermittently on CI.
+    await watcher.stop()
     await node_fs.rm(tempDir, { recursive: true, force: true })
   })
 })
