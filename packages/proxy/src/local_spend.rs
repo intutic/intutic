@@ -80,12 +80,34 @@ pub fn add_local_spend(amount: f64) {
     }
 }
 
+/// Size at which the day's trace log stops accepting writes.
+///
+/// The file already rotates by date, which bounds how *long* one lives but not
+/// how *large* it gets. A busy graph writes a trace per node per request, so a
+/// single day can run away unbounded on a developer's laptop — the file is
+/// under `$HOME` and nothing prunes it.
+///
+/// 64MB is generous for a day of local traces while staying far away from
+/// filling a disk. Past it, writes are dropped rather than rotated to a
+/// suffixed file: this is a local debugging aid, and silently consuming a
+/// developer's disk is a worse failure than losing the tail of a very noisy
+/// day.
+const MAX_TRACE_LOG_BYTES: u64 = 64 * 1024 * 1024;
+
 pub fn log_offline_trace(trace: &serde_json::Value) {
     let dir = intutic_dir().join("logs");
     let _ = fs::create_dir_all(&dir);
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     let trace_filename = format!("traces-{}.jsonl", today);
     let trace_path = dir.join(&trace_filename);
+
+    // Checked before opening, so an oversized file costs one stat rather than
+    // an open and a write.
+    if let Ok(meta) = fs::metadata(&trace_path) {
+        if meta.len() >= MAX_TRACE_LOG_BYTES {
+            return;
+        }
+    }
 
     if let Ok(line) = serde_json::to_string(trace) {
         if let Ok(mut file) = OpenOptions::new()
