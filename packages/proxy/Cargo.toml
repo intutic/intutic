@@ -83,6 +83,11 @@ base64 = "0.22"
 sha2 = "0.10"
 hex = "0.4"
 anyhow = "1"
+# Storage trait (src/store) — dyn-compatible async methods. Native AFIT is
+# available but is not dyn-compatible, and the alternative is a generic
+# AppState<S> threaded through the axum router and every State<…> extractor.
+# Already in Cargo.lock transitively, so this adds no new crate to the tree.
+async-trait = "0.1"
 once_cell = "1"
 thiserror = "1"
 chrono = { version = "0.4", features = ["serde"] }
