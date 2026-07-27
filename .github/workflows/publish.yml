@@ -93,6 +93,7 @@ jobs:
     name: Publish npm Packages
     runs-on: ubuntu-latest
     needs: [verify-versions, github-release, smoke-test-linux]
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
@@ -331,6 +332,10 @@ jobs:
   smoke-test-linux:
     name: Smoke Test Linux Binary on Debian 12 (${{ matrix.arch }})
     needs: github-release
+    # Defence in depth. This job once hung on a `head -N` that waited for output
+    # a now-long-running process never produced, and with no bound that is six
+    # hours of a blocked npm publish rather than a fast, obvious failure.
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -365,13 +370,26 @@ jobs:
           echo "Highest glibc symbol required:"
           objdump -T "$BIN" | grep -oE 'GLIBC_[0-9.]+' | sort -uV | tail -1 || true
 
-          # The proxy exits non-zero here because the container has no config
-          # file — that is fine and expected. What matters is that it gets far
-          # enough to print its own startup line, which means the dynamic linker
-          # was satisfied. `|| true` keeps that expected exit from failing the
-          # step before the assertions below run.
-          out="$(docker run --rm -v "$PWD/smoke:/smoke:ro" debian:12 \
-                   "/smoke/${{ matrix.asset }}" 2>&1 | head -20 || true)"
+          # This test only asks one question: does the dynamic linker accept
+          # this binary on the oldest supported distro? So it captures the
+          # first few seconds of output and then stops the container, without
+          # caring whether the process exits on its own.
+          #
+          # It used to pipe `docker run` straight into `head -20` and rely on
+          # the proxy exiting because the container had no config file. Both
+          # halves of that stopped being true: config became optional in 1.6.2,
+          # and from 1.7.0 a missing Valkey falls back to standalone instead of
+          # being fatal. The proxy now starts successfully, binds a port and
+          # runs forever — so `head -20` waited for lines that never came and
+          # the step hung until the job timeout, blocking the npm publish.
+          #
+          # Detached + logs + kill is indifferent to that: it works whether the
+          # binary exits immediately, runs forever, or dies halfway.
+          cid="$(docker run -d -v "$PWD/smoke:/smoke:ro" debian:12 \
+                   "/smoke/${{ matrix.asset }}")"
+          sleep 10
+          out="$(docker logs "$cid" 2>&1 | head -40 || true)"
+          docker rm -f "$cid" >/dev/null 2>&1 || true
           echo "--- output ---"
           echo "$out"
           echo "--------------"
