@@ -60,7 +60,7 @@ pnpm run docs
 - **Testing:** Zero `vi.mock` in core library unit tests where possible.
 - **Design System Compliance:** All styling must strictly utilize CSS custom variables from `@intutic/theme` (`packages/theme/src/tokens.ts`, emitted as `@intutic/theme/css`). Hardcoded hex codes and color functions are prohibited inside component CSS files.
 - **Docker Compose Decoupling:** `docker-compose.yml` in this open-core repository must remain Valkey-only (`valkey:8` on port 6379).
-- **This repo is the source of truth for everything in it.** These packages are mirrored into a private enterprise tree, but changes land *here* first and flow outward — not the other way round. Do not treat a divergence as something to be fixed by copying inward, and do not assume an edit made elsewhere will arrive; make it here.
+- **This repo is the source of truth for everything in it.** Changes land here first. Do not treat a divergence as something to be fixed by copying inward, and do not assume an edit made elsewhere will arrive; make it here.
 
 ## High-value `rg` patterns
 
