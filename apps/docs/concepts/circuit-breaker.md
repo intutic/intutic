@@ -194,6 +194,7 @@ All circuit breaker state lives in Valkey for fast access:
 
 ---
 
+<!-- ENTERPRISE_ONLY_START -->
 ## Source code references
 
 | Component / File | What it implements | Scope |
@@ -207,6 +208,8 @@ All circuit breaker state lives in Valkey for fast access:
 | `sslEnforcementService.ts` | Three-layer SSL enforcement | Enterprise Control Plane |
 
 ---
+
+<!-- ENTERPRISE_ONLY_END -->
 
 ## Related
 

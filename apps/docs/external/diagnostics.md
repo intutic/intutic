@@ -80,7 +80,7 @@ kubectl exec deployment/control-plane -n intutic-dev -- wget -qO- http://litellm
 ## 4. Local Access & Debugging
 
 ### Port-Forwarding
-If you need to connect your local terminal or tools to the GKE-deployed LiteLLM instance:
+If you need to connect your local terminal or tools to the-deployed LiteLLM instance:
 ```bash
 kubectl port-forward svc/litellm 4000:4000 -n intutic-dev
 ```
