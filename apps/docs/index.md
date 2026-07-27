@@ -43,9 +43,8 @@ features:
 # Install global CLI and native Rust proxy binary
 npm install -g @intutic/cli @intutic/proxy
 
-# Initialize workspace and start local proxy gateway
-intutic init
-intutic connect
+# Start the local proxy gateway (no account needed)
+intutic start
 ```
 
 Your workspace is now governed. Every AI agent request flows through the Intutic proxy, where SOPs are enforced and traces are recorded.

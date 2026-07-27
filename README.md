@@ -73,11 +73,13 @@ npm install -g @intutic/cli @intutic/proxy
 npx @intutic/proxy
 ```
 
-### 2. Connect Your Workspace
-Run `intutic connect` inside your project folder. This boots the local high-speed Rust proxy on port `4000` and auto-detects installed coding assistants:
+### 2. Start the Proxy
+Run `intutic start` inside your project folder. This boots the local high-speed Rust proxy on port `4000`. No account, no control plane, no config file:
 ```bash
-intutic connect
+intutic start
 ```
+
+> Running your own control plane, or on Intutic Cloud? Use `intutic connect` instead. It starts the same proxy and adds bidirectional config sync, but it requires an account.
 
 ### 3. Route Any Agent to Intutic
 Point your favorite LLM client or agent framework to the local proxy:

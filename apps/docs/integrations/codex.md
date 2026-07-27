@@ -36,11 +36,13 @@ source .env.intutic
 codex
 ```
 
-### 4. Start sync
+### 4. Start the proxy
 
 ```bash
-intutic connect
+intutic start
 ```
+
+> Have an Intutic account or run your own control plane? Use `intutic connect` instead. It starts the same proxy and adds bidirectional config sync.
 
 ## What gets written
 

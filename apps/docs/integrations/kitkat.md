@@ -28,13 +28,15 @@ Download the pre-configured skill instruction template and save it directly in t
 
 <a href="/downloads/SKILL.md" download="SKILL.md" class="download-button" style="display: inline-block; padding: 6px 12px; background: var(--vp-c-brand); color: white; border-radius: 4px; text-decoration: none; font-weight: 500; font-size: 0.85rem; margin-top: 8px; margin-bottom: 12px;">Download SKILL.md</a>
 
-### 3. Connect to Intutic
+### 3. Start the proxy
 
-Boot the sync daemon and proxy to begin intercepting requests:
+Boot the proxy to begin intercepting requests:
 
 ```bash
-intutic connect
+intutic start
 ```
+
+> Have an Intutic account or run your own control plane? Use `intutic connect` instead. It starts the same proxy and adds bidirectional config sync.
 
 *Your agentic assistant will now detect the Kitkat governance persona, apply token predictions, and prompt-intercept through the local proxy port (`4000`).*
 
