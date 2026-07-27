@@ -157,8 +157,7 @@ export async function runConnect(opts: {
     log.error('`intutic connect` needs a control plane, and you are not authenticated.')
     log.info('')
     log.info('This command runs the sync daemon, which mirrors governance config')
-    log.info('with a control plane. Open core does not ship one, though Intutic')
-    log.info('Cloud provides a hosted one if you want it.')
+    log.info('with a control plane. Open core does not include one.')
     log.info('')
     log.info('To run standalone, with policy enforcement, DLP and WASM rules all local:')
     log.info('')
@@ -168,8 +167,8 @@ export async function runConnect(opts: {
     log.info('`intutic start` needs nothing else. It will set up Valkey if Docker is')
     log.info('available, since that makes the response cache shared, but runs without it.')
     log.info('')
-    log.info('If you want a control plane, sign in or sign up at http://localhost:5174')
-    log.info('then run `intutic login` (add --dev to target http://localhost:3001).')
+    log.info('If you run your own control plane, authenticate with `intutic login`')
+    log.info('(add --dev to target http://localhost:3001).')
     process.exit(1)
   }
 

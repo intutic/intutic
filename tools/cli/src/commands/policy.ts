@@ -11,7 +11,7 @@ import { createApiClient } from '../lib/api.js'
 async function getClient(dev?: boolean) {
   const creds = await loadCredentials()
   if (!creds) {
-    log.error('Not authenticated. This command needs an Intutic control plane — sign in at http://localhost:5174, then run `intutic login`. To run the proxy without an account: `intutic start`.')
+    log.error('Not authenticated. This command needs an Intutic control plane, which open core does not include. To run the proxy without one: `intutic start`.')
     process.exit(1)
   }
   const config = loadConfig()
