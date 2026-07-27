@@ -9,7 +9,7 @@ The Intutic control plane exposes a RESTful API under `/api/v1/`. All endpoints 
 ## Base URL
 
 ```
-https://api.intutic.ai/api/v1
+https://your-control-plane.example/api/v1
 ```
 
 For local development:

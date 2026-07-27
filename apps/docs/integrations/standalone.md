@@ -1,6 +1,6 @@
 # Standalone Cloud Proxy Integration Guide
 
-Intutic's proxy engine (`intutic-proxy`) is a high-performance, OpenAI-compatible proxy gateway written in Rust. It can be deployed in the cloud (such as on GKE) to audit, cache, and govern agent model traffic centrally without installing any workstation shims or developer daemons.
+Intutic's proxy engine (`intutic-proxy`) is a high-performance, OpenAI-compatible proxy gateway written in Rust. It can be deployed on your own infrastructure to audit, cache, and govern agent model traffic centrally without installing any workstation shims or developer daemons.
 
 ---
 
@@ -100,7 +100,7 @@ from typing import TypedDict
 # 1. Initialize LLM pointing to the Intutic proxy gateway
 llm = ChatOpenAI(
     model="gpt-4o",
-    base_url="http://localhost:4000/v1",  # GKE Proxy URL
+    base_url="https://proxy.your-domain.example/v1",  # your hosted proxy
     api_key="your-intutic-api-key"
 )
 
@@ -132,7 +132,7 @@ import { ChatOpenAI } from "@langchain/openai";
 const model = new ChatOpenAI({
   model: "gpt-4o",
   configuration: {
-    baseURL: "http://localhost:4000/v1", // GKE Proxy URL
+    baseURL: "https://proxy.your-domain.example/v1", // your hosted proxy
     apiKey: "your-intutic-api-key",
   }
 });

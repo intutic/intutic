@@ -94,7 +94,7 @@ Intutic provides zero-trust governance regardless of your agent architecture:
 
 | Integration | Description |
 |---|---|
-| [**Standalone Cloud Proxy**](/integrations/standalone) | Route any LLM traffic through `localhost:4000` without a harness adapter — works with any OpenAI-compatible client |
+| [**Standalone Proxy**](/integrations/standalone) | Route any LLM traffic through your own proxy without a harness adapter — works with any OpenAI-compatible client |
 | [**Kitkat Agent Custom Skill**](/integrations/kitkat) | Pre-built governance skill for agents that support custom skill files (`.intutic/SKILL.md`) |
 
 ---
@@ -118,7 +118,7 @@ All 18 harnesses share the same integration flow:
 1. **`intutic init`** scans your workspace and detects all harness config files
 2. Governance rules (SOPs) are written into each harness's native config format
 3. **`intutic connect`** starts the proxy and keeps configs in sync as SOPs change
-   (`intutic connect` needs an account. Without one, `intutic start` runs the proxy and every harness config written in step 2 still applies.)
+   (`intutic connect` needs a control plane. Without one, `intutic start` runs the proxy and every harness config written in step 2 still applies.)
 4. Every tool call flows through the proxy for real-time policy evaluation
 
 Each adapter uses **atomic writes** (write to temp file, then rename) to prevent config corruption during sync.

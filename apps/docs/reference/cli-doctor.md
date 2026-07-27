@@ -35,7 +35,7 @@ The doctor runs these checks in order:
 Intutic Doctor — Workspace Health Check
 
   ✓ Proxy — Reachable at http://127.0.0.1:4000/health (HTTP 200)
-  ✓ Control Plane Auth — Authenticated at https://api.intutic.ai
+  ✓ Control Plane Auth — Authenticated at https://your-control-plane.example
   ✓ Sync Daemon — Running (PID 42156)
   ✓ Harness Configs — 3 file(s) intact — no drift detected
   ✓ Daemon Log — Readable at /Users/dev/.intutic/daemon.log (847 lines)
