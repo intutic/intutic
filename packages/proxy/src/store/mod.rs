@@ -1,9 +1,7 @@
 //! Storage abstraction — the proxy's entire Valkey surface, behind two traits.
 //!
-//! Grew out of a spike scoped to the bandit/reward slice (see
-//! `SPIKE-FINDINGS.md`); this is the full port that spike recommended. The goal
-//! it serves: open core runs standalone with no Valkey, while Valkey remains
-//! the backend whenever a control plane is connected.
+//! The goal it serves: open core runs standalone with no Valkey, while Valkey
+//! remains the backend whenever a control plane is connected.
 //!
 //! Deliberately domain-level rather than command-level. A command-level trait
 //! (`get`/`hset`/`hincr`) is dyn-compatible if return types are pinned, so
