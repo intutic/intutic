@@ -1,6 +1,6 @@
 {
   "name": "@intutic/shared-types",
-  "version": "1.6.3",
+  "version": "1.7.0",
   "description": "Shared TypeScript types for the Intutic control plane, CLI, and sync daemon",
   "license": "MIT",
   "repository": {
