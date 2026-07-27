@@ -70,6 +70,28 @@ impl NotificationClient {
         Ok(notifications)
     }
 
+    /// Drain this node's graph queue.
+    ///
+    /// `key` is `"{graphId}:{nodeId}"`. Each node reads its own queue: the
+    /// producer fans a finding out to one queue per registered sibling, so
+    /// nobody can consume another's copy.
+    pub async fn drain_graph_notifications(
+        &self,
+        key: &str,
+    ) -> Result<Vec<GovernanceNotification>> {
+        let raw = self
+            .control_plane
+            .drain_notifications(NotifyScope::Graph, key)
+            .await;
+        let notifications = Self::parse(raw);
+        debug!(
+            graph_key = key,
+            count = notifications.len(),
+            "Drained graph governance notifications"
+        );
+        Ok(notifications)
+    }
+
     /// Drain all pending workspace-level notifications.
     ///
     /// Queued by control-plane crons (e.g. context gap suggestions) and

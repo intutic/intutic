@@ -129,6 +129,48 @@ to another node through the model. Findings arrive in the rule context as
 `dlp_findings`, and can be combined with the sequence: *this* tool call is only
 a problem because of what an earlier node already exposed.
 
+## Telling the rest of the graph
+
+A verdict stops one request. The sibling about to deploy does not otherwise
+learn that the tester already failed, and will happily repeat the work that was
+just refused.
+
+So when a node trips a detector, the finding is queued to every **other** node
+in its graph and injected into their context after their next response — the
+same governance block the proxy already uses. The originating node is skipped;
+it received the verdict directly.
+
+```
+node-a (planner)  ──trips LOOP_DETECTED──▶  proxy
+                                              │
+                            ┌─────────────────┴─────────────────┐
+                            ▼                                   ▼
+                   node-b's queue                       node-c's queue
+   "Node node-a (planner) was stopped: Runaway recursion: depth 20 exceeds 7"
+```
+
+Each node has its own queue rather than sharing one, because the existing
+workspace queue is drain-on-read: whichever node polled first would consume
+everyone else's copy, and the rest would silently never hear.
+
+::: warning Only deterministic facts are broadcast
+What travels between nodes is a category, a verdict, and the threshold that was
+crossed — never a model's opinion.
+
+That restriction is the point. Feeding one agent's judgement into every
+sibling's context is exactly the failure mode graph engineering is criticised
+for: agents checking agents produce confident nonsense, because a false positive
+becomes every downstream node's premise and compounds at each hop. A detector
+finding is safe to propagate because it is reproducible from the request —
+anyone can check it. An inference is not.
+:::
+
+Broadcast needs Valkey, which `intutic start` provisions when it can. Without
+it, every session-scoped guarantee still holds — all the detectors, budget
+ceilings, DLP, verdicts — and only cross-node delivery is lost. A file on disk
+would give mutual exclusion, not fan-out or ordering, and a notification is
+read-once: getting that wrong means a sibling silently never receives a `KILL`.
+
 ## What is available to a rule
 
 The full context the proxy serialises for each evaluation. Field names are

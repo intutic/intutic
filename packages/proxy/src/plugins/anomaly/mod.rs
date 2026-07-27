@@ -23,6 +23,7 @@
 
 use crate::wasm::context::{RequestContext, Verdict};
 
+pub mod broadcast;
 pub mod detectors;
 
 /// The 12-value runtime anomaly taxonomy.
