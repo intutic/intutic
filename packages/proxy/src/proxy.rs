@@ -1187,6 +1187,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         node,
     };
 
+    // Owned copy for the trace sites below, which are spread across the
+    // success paths and cannot all borrow wasm_ctx.
+    let node_for_trace = wasm_ctx.node.clone();
+
     // Evaluate native budget gate
     let budget_plugin = crate::plugins::budget_gate::BudgetGatePlugin::new();
     if let crate::wasm::context::Verdict::Kill { reason, .. } = budget_plugin.evaluate(&wasm_ctx) {
@@ -1226,6 +1230,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     f.reason
                 );
             }
+            let now = chrono::Utc::now().to_rfc3339();
+
             // Tell the siblings. A verdict stops this request, but the node
             // about to repeat the same work does not otherwise learn of it.
             // Advisory and best-effort — the decision is already made, so a
@@ -1234,9 +1240,55 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 &state.store,
                 &wasm_ctx,
                 &findings,
-                &chrono::Utc::now().to_rfc3339(),
+                &now,
             )
             .await;
+
+            // Trace the block.
+            //
+            // Every other trace site is on a success path, so without this the
+            // trajectory would record only the requests that went through and
+            // silently omit every one that was stopped — which are precisely
+            // the events anyone reading a trajectory is looking for. A refused
+            // request costs nothing upstream, hence the zeroed token and cost
+            // fields.
+            let blocked_trace = crate::telemetry::ExecutionTrace {
+                trace_id: uuid::Uuid::new_v4().to_string(),
+                session_id: session_id.clone(),
+                workspace_id: workspace_id.clone(),
+                virtual_key_id: key_prefix.to_string(),
+                model: model.clone(),
+                provider: provider.harness_name().to_string(),
+                raw_input_tokens: wasm_ctx.estimated_input_tokens,
+                compressed_input_tokens: wasm_ctx.estimated_input_tokens,
+                output_tokens: 0,
+                raw_cost_usd: 0.0,
+                actual_cost_usd: 0.0,
+                cache_hit: false,
+                latency_ms: start.elapsed().as_millis() as u32,
+                verdict: if worst.kill { "killed" } else { "hijacked" }.to_string(),
+                harness_type: provider.harness_name().to_string(),
+                created_at: now,
+                requested_model: model.clone(),
+                actual_model_routed: model.clone(),
+                task_type: String::new(),
+                reconstruction_quality: 0,
+                token_anomaly: false,
+                loop_run_id: loop_run_id_header.clone(),
+                graph: crate::telemetry::GraphTrace::from_node(
+                    &wasm_ctx.node,
+                    findings.iter().map(|f| f.kind.as_str().to_string()).collect(),
+                ),
+            };
+            crate::local_spend::log_offline_trace(
+                &serde_json::to_value(&blocked_trace).unwrap_or_default(),
+            );
+            let blocked_store = Arc::clone(&state.store);
+            spawn(async move {
+                if let Err(e) = blocked_store.publish_trace(&blocked_trace).await {
+                    tracing::warn!("Failed to publish blocked-request trace: {}", e);
+                }
+            });
 
             let code = if worst.kill {
                 "policy_denied"
@@ -1453,6 +1505,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 reconstruction_quality: 100,
                 token_anomaly: false,
                 loop_run_id: loop_run_id_header.clone(),
+                graph: crate::telemetry::GraphTrace::from_node(&node_for_trace, vec![]),
             };
 
             let trace_store = Arc::clone(&state.store);
@@ -1838,6 +1891,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             reconstruction_quality: 100,
             token_anomaly: false,
             loop_run_id: loop_run_id_header.clone(),
+            graph: crate::telemetry::GraphTrace::from_node(&node_for_trace, vec![]),
         };
         let cache_store_clone = Arc::clone(&state.store);
         tokio::spawn(async move {
@@ -2543,6 +2597,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 reconstruction_quality,
                 token_anomaly,
                 loop_run_id: loop_run_id_clone,
+                graph: crate::telemetry::GraphTrace::from_node(&node_for_trace, vec![]),
             };
 
             let _ = cache_store_clone.publish_trace(&trace).await;
@@ -3015,6 +3070,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         reconstruction_quality,
         token_anomaly,
         loop_run_id: loop_run_id_header,
+        graph: crate::telemetry::GraphTrace::from_node(&node_for_trace, vec![]),
     };
 
     crate::local_spend::add_local_spend(actual_cost_usd);
