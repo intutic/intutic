@@ -70,7 +70,9 @@ export async function runInit(opts: { dev?: boolean }): Promise<void> {
   // 3. Check credentials
   const creds = await loadCredentials()
   if (!creds) {
-    log.warn('Not authenticated. Run `intutic login` to connect to the control plane.')
+    log.warn('Not authenticated — harness configs were still written locally.')
+    log.info('Sync them with a control plane by signing in at http://localhost:5174, then `intutic login`.')
+    log.info('To just run the proxy locally, no account needed: `intutic start`.')
   } else {
     log.success(`Authenticated as ${creds.email}`)
   }

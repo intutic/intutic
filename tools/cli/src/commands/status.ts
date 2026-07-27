@@ -41,7 +41,7 @@ export async function runStatus(): Promise<void> {
     log.field('Workspace', creds.workspaceId)
     log.field('Control Plane', creds.controlPlaneUrl)
   } else {
-    log.warn('Not authenticated. Run `intutic login` first.')
+    log.warn('Not authenticated. This command needs an Intutic control plane — sign in at http://localhost:5174, then run `intutic login`. To run the proxy without an account: `intutic start`.')
   }
 
   // Config
