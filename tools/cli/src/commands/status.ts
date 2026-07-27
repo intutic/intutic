@@ -41,7 +41,7 @@ export async function runStatus(): Promise<void> {
     log.field('Workspace', creds.workspaceId)
     log.field('Control Plane', creds.controlPlaneUrl)
   } else {
-    log.warn('Not authenticated. This command needs an Intutic control plane — sign in at http://localhost:5174, then run `intutic login`. To run the proxy without an account: `intutic start`.')
+    log.warn('Not authenticated. This command needs an Intutic control plane, which open core does not include. To run the proxy without one: `intutic start`.')
   }
 
   // Config
