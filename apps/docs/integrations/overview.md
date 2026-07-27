@@ -30,6 +30,7 @@ Intutic supports 18 AI agent harnesses out of the box. The CLI auto-detects whic
 1. **`intutic init`** scans your workspace for all 18 harness config files
 2. For each detected harness, governance rules (SOPs) are written into the harness-native config format
 3. **`intutic connect`** keeps these files in sync as SOPs change on the control plane
+   (`intutic connect` needs an account. Without one, `intutic start` runs the proxy and every harness config written in step 2 still applies.)
 4. Each harness adapter uses **atomic writes** (write to temp file, then rename) to prevent corruption
 
 ## Config format per harness
