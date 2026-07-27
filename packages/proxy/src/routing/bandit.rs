@@ -5,9 +5,9 @@
 //!
 //! LLD #26 §4.1 — Thompson Sampling Selector
 
+use crate::store::{ControlPlaneCache, LocalStore};
 use rand::prelude::*;
 use rand_distr::Beta;
-use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -163,51 +163,33 @@ pub fn sample_beta(alpha: f64, beta: f64) -> f64 {
 /// `candidate_models` comes from `intutic_settings.routing.candidate_models`;
 /// requests for models outside the pool bypass the bandit entirely.
 pub async fn route_model(
-    valkey: &Arc<redis::aio::ConnectionManager>,
+    store: &Arc<dyn LocalStore>,
+    control_plane: &Arc<dyn ControlPlaneCache>,
     workspace_id: &str,
     session_id: &str,
     requested_model: &str,
     prompt: &str,
     candidate_models: &[String],
 ) -> anyhow::Result<(String, String, String)> {
-    let mut conn = valkey.as_ref().clone();
-
-    // Fetch custom keywords from Valkey with a short timeout to prevent latencies
-    let keywords_key = format!("workspace:bandit_keywords:{}", workspace_id);
-    let raw_keywords: Result<
-        Result<Option<String>, redis::RedisError>,
-        tokio::time::error::Elapsed,
-    > = tokio::time::timeout(
-        std::time::Duration::from_millis(200),
-        conn.get(&keywords_key),
-    )
-    .await;
-
-    let keywords_json = match raw_keywords {
-        Ok(Ok(Some(s))) => serde_json::from_str::<serde_json::Value>(&s).ok(),
-        _ => None,
-    };
-
+    // Keyword overrides are control-plane state; standalone this is `None` and
+    // the classifier falls back to its built-in vocabulary.
+    let keywords_json = control_plane.bandit_keywords(workspace_id).await;
     let task_type = classify_task_dynamic(prompt, keywords_json.as_ref());
+
+    let session = store.session_routing(session_id).await.unwrap_or_default();
+
+    // Resolve SOP tier: session pin, else workspace default, else TIER_1.
+    let resolved_sop_tier = match session.sop_tier {
+        Some(t) => t,
+        None => control_plane
+            .active_sop_tier(workspace_id)
+            .await
+            .unwrap_or_else(|| "TIER_1".to_string()),
+    };
 
     // 0. Bypass bandit routing if the requested model is not in the candidate pool
     if !candidate_models.iter().any(|m| m == requested_model) {
         tracing::debug!(requested_model = %requested_model, "Requested model not in candidate pool — bypassing bandit");
-
-        let session_key = format!("session:metadata:{}", session_id);
-        let sop_tier: String = conn
-            .hget(&session_key, "sopTier")
-            .await
-            .unwrap_or_else(|_| "".to_string());
-
-        let resolved_sop_tier = if sop_tier.is_empty() {
-            conn.get(format!("workspace:active_sop_tier:{}", workspace_id))
-                .await
-                .unwrap_or_else(|_| "TIER_1".to_string())
-        } else {
-            sop_tier
-        };
-
         return Ok((
             requested_model.to_string(),
             resolved_sop_tier,
@@ -215,51 +197,25 @@ pub async fn route_model(
         ));
     }
 
-    // 1. Session-Locked Model Routing (check existing lock in session:metadata)
-    let session_key = format!("session:metadata:{}", session_id);
-    let cached_lock: Option<String> = conn.hget(&session_key, "lockedModel").await.ok().flatten();
-
-    // Resolve SOP tier
-    let sop_tier: String = conn
-        .hget(&session_key, "sopTier")
-        .await
-        .unwrap_or_else(|_| "".to_string());
-
-    let resolved_sop_tier = if sop_tier.is_empty() {
-        conn.get(format!("workspace:active_sop_tier:{}", workspace_id))
-            .await
-            .unwrap_or_else(|_| "TIER_1".to_string())
-    } else {
-        sop_tier
-    };
-
-    if let Some(locked_model) = cached_lock {
-        if !locked_model.is_empty() {
-            tracing::debug!(session_id = %session_id, locked_model = %locked_model, "Session lock hit");
-            return Ok((locked_model, resolved_sop_tier, task_type.to_string()));
-        }
+    // 1. Session-Locked Model Routing
+    if let Some(locked_model) = session.locked_model {
+        tracing::debug!(session_id = %session_id, locked_model = %locked_model, "Session lock hit");
+        return Ok((locked_model, resolved_sop_tier, task_type.to_string()));
     }
 
-    // 2. Load arms from Valkey bandit hash
-    let bandit_key = format!("bandit:{}", workspace_id);
-    let raw_arms: std::collections::HashMap<String, String> =
-        conn.hgetall(&bandit_key).await.unwrap_or_default();
+    // 2. Load arms
+    let raw_arms = store.load_arms(workspace_id).await.unwrap_or_default();
 
     let mut arms = Vec::new();
     let mut total_pulls = 0;
 
     for model in candidate_models {
         let arm_key = format!("arm:{}:{}:{}", model, resolved_sop_tier, task_type);
-        let arm_state = if let Some(val) = raw_arms.get(&arm_key) {
-            serde_json::from_str::<BanditArmState>(val).ok()
-        } else {
-            None
-        };
 
-        match arm_state {
+        match raw_arms.get(&arm_key) {
             Some(state) => {
                 total_pulls += state.pulls;
-                arms.push((model.to_string(), state));
+                arms.push((model.to_string(), state.clone()));
             }
             None => {
                 // Seed default arm on cache miss
@@ -269,8 +225,9 @@ pub async fn route_model(
                     pulls: 0,
                     last_updated: chrono::Utc::now().to_rfc3339(),
                 };
-                let state_str = serde_json::to_string(&default_state).unwrap();
-                let _: Result<(), _> = conn.hset(&bandit_key, &arm_key, &state_str).await;
+                let _ = store
+                    .seed_arm(workspace_id, &arm_key, &default_state)
+                    .await;
                 arms.push((model.to_string(), default_state));
             }
         }
@@ -280,10 +237,8 @@ pub async fn route_model(
     if total_pulls < 20 {
         tracing::debug!(workspace_id = %workspace_id, total_pulls = %total_pulls, "Total pulls < 20 — using requested model");
         let selected_model = requested_model.to_string();
-
-        // Lock this model for the session
-        let _: Result<(), _> = conn
-            .hset(&session_key, "lockedModel", &selected_model)
+        let _ = store
+            .set_session_locked_model(session_id, &selected_model)
             .await;
         return Ok((selected_model, resolved_sop_tier, task_type.to_string()));
     }
@@ -301,7 +256,9 @@ pub async fn route_model(
     }
 
     // Lock selected model for the session
-    let _: Result<(), _> = conn.hset(&session_key, "lockedModel", &best_model).await;
+    let _ = store
+        .set_session_locked_model(session_id, &best_model)
+        .await;
 
     Ok((best_model, resolved_sop_tier, task_type.to_string()))
 }

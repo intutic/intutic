@@ -20,7 +20,6 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use futures_util::stream::StreamExt;
-use redis::AsyncCommands;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -34,12 +33,13 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 use crate::config::ProxyConfig;
 use crate::config::SnipCompactorConfig;
 use crate::dlp;
-use crate::metering::{check_loop_block, check_workspace_hard_block, validate_virtual_key, check_budget, MeteringError};
+use crate::metering::check_budget;
 use crate::pricing;
 use crate::protocol::Protocol;
 use crate::routing::reward::{RewardEngine, RewardMode, RewardSignals};
 use crate::snip;
-use crate::telemetry::{publish_trace, ExecutionTrace};
+use crate::store::{ControlPlaneAuth, ControlPlaneCache, JudgeScope, LocalStore};
+use crate::telemetry::ExecutionTrace;
 use crate::wasm::registry::PluginRegistry;
 
 // Phase 7: Intelligence Engine modules
@@ -47,18 +47,29 @@ use crate::postprocessor::ResponsePostProcessor;
 use crate::quality::RequestPreProcessor;
 use crate::token::prediction::CostPredictionGate;
 
+/// Newest N tool calls retained per session for sequence-anomaly detection.
+const TOOL_SEQUENCE_CAP: usize = 20;
+
+/// Lifetime of a judged-chunk list on the streaming paths.
+const SESSION_CHUNK_TTL_SECS: u64 = 3_600;
+
 // ─── Shared state ────────────────────────────────────────────────────
 
 /// Shared application state passed to all handlers.
 #[derive(Clone)]
 pub struct AppState {
     pub config: ProxyConfig,
-    pub valkey: Arc<redis::aio::ConnectionManager>,
     pub wasm_registry: Arc<PluginRegistry>,
     /// Lazily initialised reqwest client (shared across requests for connection pooling).
     pub http_client: Arc<Client>,
     /// Local deterministic bandit reward writer (standalone open-core mode).
     pub reward_engine: Arc<RewardEngine>,
+    /// Proxy-owned stateful storage — Valkey-backed, or in-memory standalone.
+    /// `dyn` rather than a type parameter on purpose: a generic `AppState<S>`
+    /// would infect every handler signature and `State<…>` extractor.
+    pub store: Arc<dyn LocalStore>,
+    /// Control-plane-written keys; all `None` when standalone.
+    pub control_plane: Arc<dyn ControlPlaneCache>,
 }
 
 /// Fire-and-forget local bandit reward update — never on the latency path.
@@ -72,7 +83,7 @@ fn spawn_reward_update(
     signals: RewardSignals,
 ) {
     let engine = Arc::clone(&state.reward_engine);
-    let valkey = Arc::clone(&state.valkey);
+    let store = Arc::clone(&state.store);
     let workspace_id = workspace_id.to_string();
     let routed_model = routed_model.to_string();
     let sop_tier = sop_tier.to_string();
@@ -80,7 +91,7 @@ fn spawn_reward_update(
     spawn(async move {
         engine
             .record(
-                &valkey,
+                &store,
                 &workspace_id,
                 &routed_model,
                 &sop_tier,
@@ -281,12 +292,10 @@ fn estimate_model_cost(model: &str, input_tokens: u32, output_tokens: u32) -> f6
 }
 
 async fn fetch_provider_credential(
-    valkey: &Arc<redis::aio::ConnectionManager>,
+    store: &Arc<dyn LocalStore>,
     workspace_id: &str,
     provider: &Provider,
 ) -> Option<String> {
-    let mut conn = (**valkey).clone();
-    let creds_key = format!("workspace:credentials:{}", workspace_id);
     let fields = match provider {
         Provider::Anthropic => vec![
             "anthropic_api_key",
@@ -298,12 +307,8 @@ async fn fetch_provider_credential(
         Provider::OpenAI => vec!["openai_api_key", "openai", "openaiKey", "authorization"],
         Provider::Gemini => vec!["gemini_api_key", "gemini", "geminiKey"],
     };
-    for field in fields {
-        if let Ok(Some(val)) = conn.hget::<_, _, Option<String>>(&creds_key, field).await {
-            if !val.is_empty() {
-                return Some(val);
-            }
-        }
+    if let Some(val) = store.workspace_credential(workspace_id, &fields).await {
+        return Some(val);
     }
     match provider {
         Provider::Anthropic => std::env::var("ANTHROPIC_API_KEY").ok(),
@@ -573,20 +578,16 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
 
     // Dynamic session credential capture (for developer OAuth/Pro sessions)
     if !raw_token.is_empty() && !raw_token.starts_with("vk_") && workspace_id != "unknown" {
-        let valkey = Arc::clone(&state.valkey);
+        let store = Arc::clone(&state.store);
         let wid = workspace_id.clone();
         let tok = raw_token.to_string();
         spawn(async move {
-            let mut conn = (*valkey).clone();
-            let creds_key = format!("workspace:credentials:{}", wid);
             let field = if tok.starts_with("sk-ant-oat") || tok.ends_with("wAA") {
                 "anthropic_oauth_token"
             } else {
                 "anthropic_api_key"
             };
-            let _: Result<(), _> = redis::Cmd::hset(&creds_key, field, &tok)
-                .query_async(&mut conn)
-                .await;
+            store.set_workspace_credential(&wid, field, &tok).await;
         });
     }
 
@@ -650,19 +651,12 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         .unwrap_or("unknown")
         .to_string();
 
-    {
-        let mut conn = state.valkey.as_ref().clone();
-        let key = format!("session:auto_judge:{}", session_id_hdr);
-        if let Ok(Ok(Some(is_auto))) = tokio::time::timeout(
-            std::time::Duration::from_millis(500),
-            conn.get::<_, Option<String>>(&key),
-        )
+    if state
+        .control_plane
+        .auto_judge_active(JudgeScope::Session, &session_id_hdr)
         .await
-        {
-            if is_auto == "true" {
-                judge_active = true;
-            }
-        }
+    {
+        judge_active = true;
     }
 
     if !judge_active {
@@ -673,17 +667,12 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             .map(|v| v.to_string());
 
         if let Some(ref lr_id) = loop_run_id_header {
-            let mut conn = state.valkey.as_ref().clone();
-            let key = format!("loop:auto_judge:{}", lr_id);
-            if let Ok(Ok(Some(is_auto))) = tokio::time::timeout(
-                std::time::Duration::from_millis(500),
-                conn.get::<_, Option<String>>(&key),
-            )
-            .await
+            if state
+                .control_plane
+                .auto_judge_active(JudgeScope::Loop, lr_id)
+                .await
             {
-                if is_auto == "true" {
-                    judge_active = true;
-                }
+                judge_active = true;
             }
         }
     }
@@ -969,9 +958,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     }
 
     // ── Step 2.5: Validate virtual key and check budget (Valkey) ─────
-    let key_record = match validate_virtual_key(raw_token, &state.valkey).await {
-        Ok(k) => Some(k),
-        Err(MeteringError::KeyNotFound) => {
+    let key_record = match state.control_plane.auth_context(raw_token).await {
+        ControlPlaneAuth::Known(k) => Some(*k),
+        ControlPlaneAuth::Rejected => {
             tracing::warn!(token = %key_prefix, "Virtual key not found in cache");
             return json_error(
                 StatusCode::UNAUTHORIZED,
@@ -979,10 +968,14 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 "Virtual API key is invalid, expired, or revoked.",
             );
         }
-        Err(e) => {
-            tracing::warn!("Valkey virtual key check failed (failing open): {}", e);
+        ControlPlaneAuth::Unavailable => {
+            tracing::warn!("Control-plane virtual key check failed (failing open)");
             None
         }
+        // Standalone open core: no control plane issues virtual keys, so there
+        // is no key to validate against. Spend is bounded by `local_spend`'s
+        // on-disk daily cap instead of a control-plane budget.
+        ControlPlaneAuth::Unmanaged => None,
     };
 
     if let Some(ref key) = key_record {
@@ -1001,20 +994,15 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     }
 
     // ── Step 3: Hard-cap block check (Valkey, <1ms P99) ─────────────
-    match check_workspace_hard_block(&workspace_id, &state.valkey).await {
-        Err(MeteringError::HardCapExceeded { .. }) => {
-            tracing::warn!(workspace_id = %workspace_id, "Hard cap block active — rejecting request");
-            return json_error(
-                StatusCode::TOO_MANY_REQUESTS,
-                "OVERAGE_HARD_CAP_EXCEEDED",
-                "Daily spend cap exceeded. This workspace is blocked until midnight UTC. Contact your Intutic admin.",
-            );
-        }
-        Err(MeteringError::ValkeyCommunicationError(e)) => {
-            // Non-fatal: log and continue (Valkey is a cache, not auth)
-            tracing::warn!("Valkey hard-cap check failed (continuing): {}", e);
-        }
-        _ => {}
+    // A read failure resolves to `false` inside the impl — this is a cache,
+    // not auth, so an unreachable control plane must not block traffic.
+    if state.control_plane.hard_block(&workspace_id).await {
+        tracing::warn!(workspace_id = %workspace_id, "Hard cap block active — rejecting request");
+        return json_error(
+            StatusCode::TOO_MANY_REQUESTS,
+            "OVERAGE_HARD_CAP_EXCEEDED",
+            "Daily spend cap exceeded. This workspace is blocked until midnight UTC. Contact your Intutic admin.",
+        );
     }
 
     // ── Step 3b: Loop execution governance check (Valkey, <1ms P99) ─────────
@@ -1025,8 +1013,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         .map(|v| v.to_string());
 
     if let Some(ref lr_id) = loop_run_id_header {
-        match check_loop_block(lr_id, &state.valkey).await {
-            Err(MeteringError::LoopTerminated { status, .. }) => {
+        if let Some(status) = state.control_plane.loop_status(lr_id).await {
+            if status == "KILLED" || status == "COMPLETED" {
                 tracing::warn!(workspace_id = %workspace_id, loop_run_id = %lr_id, status = %status, "Loop execution terminated by safety rules — rejecting request");
                 return json_error(
                     StatusCode::FORBIDDEN,
@@ -1034,10 +1022,6 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     &format!("This request was blocked because the associated loop run {} is completed or terminated (status: {}).", lr_id, status),
                 );
             }
-            Err(e) => {
-                tracing::warn!("Valkey loop check failed (continuing): {}", e);
-            }
-            _ => {}
         }
     }
 
@@ -1074,14 +1058,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         .get("x-intutic-break-glass")
         .and_then(|v| v.to_str().ok())
     {
-        let mut conn = state.valkey.as_ref().clone();
-        let bg_key = format!("bg:token:{}", bg_token);
-        let raw_bg_res: Result<
-            Result<Option<String>, redis::RedisError>,
-            tokio::time::error::Elapsed,
-        > = tokio::time::timeout(std::time::Duration::from_millis(500), conn.get(&bg_key)).await;
-
-        if let Ok(Ok(Some(_))) = raw_bg_res {
+        if state.control_plane.break_glass_valid(bg_token).await {
             tracing::info!(workspace_id = %workspace_id, token = %bg_token, "Active break-glass override token detected — bypassing safety policies");
             has_break_glass = true;
         } else {
@@ -1104,23 +1081,12 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         0.0
     };
 
-    use redis::AsyncCommands;
-    let mut conn = state.valkey.as_ref().clone();
-    let valkey_key = format!("v2:session:{}:tools", session_id);
-    let mut tool_sequence: Vec<String> = conn.lrange(&valkey_key, 0, -1).await.unwrap_or_default();
-
     let request_tool_calls = extract_request_tool_calls(&body_json);
-    if !request_tool_calls.is_empty() {
-        for tool in &request_tool_calls {
-            tool_sequence.push(tool.clone());
-            let _: Result<(), redis::RedisError> = conn.rpush(&valkey_key, tool).await;
-        }
-        if tool_sequence.len() > 20 {
-            let _: Result<(), redis::RedisError> = conn.ltrim(&valkey_key, -20, -1).await;
-            let start_idx = tool_sequence.len() - 20;
-            tool_sequence = tool_sequence.split_off(start_idx);
-        }
-    }
+    let tool_sequence = state
+        .store
+        .record_tool_sequence(&session_id, &request_tool_calls, TOOL_SEQUENCE_CAP)
+        .await
+        .unwrap_or_default();
 
     let wasm_ctx = crate::wasm::context::RequestContext {
         session_id: session_id.clone(),
@@ -1172,7 +1138,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     }
 
     if !has_break_glass {
-        let wasm_verdict = state.wasm_registry.evaluate(&state.valkey, &wasm_ctx).await;
+        let wasm_verdict = state.wasm_registry.evaluate(&state.control_plane, &wasm_ctx).await;
         tracing::info!(workspace_id = %workspace_id, verdict = ?wasm_verdict, "WASM evaluation verdict");
         if let crate::wasm::context::Verdict::Kill { reason, .. } = wasm_verdict {
             tracing::warn!(workspace_id = %workspace_id, reason = %reason, "WASM custom rule blocked this request");
@@ -1293,52 +1259,23 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
 
     // Step 6: Forward to upstream LLM provider
 
-    // Fetch feature flags from Valkey (fail-open on errors/timeouts)
-    let mut conn = state.valkey.as_ref().clone();
-    let ff_key = format!("workspace:feature_flags:{}", workspace_id);
-    let mut ff_bandit_routing = false;
-    let mut ff_response_cache_exact = false;
-    let mut ff_response_cache_semantic = false;
+    // Feature flags. `None` *is* "no control plane manages this workspace" —
+    // there is no separate presence flag to forget to consult.
+    let feature_flags = state.control_plane.feature_flags(&workspace_id).await;
 
-    let raw_ffs_res: Result<
-        Result<Option<String>, redis::RedisError>,
-        tokio::time::error::Elapsed,
-    > = tokio::time::timeout(std::time::Duration::from_millis(500), conn.get(&ff_key)).await;
+    let ff_response_cache_exact = feature_flags.is_some_and(|f| f.response_cache_exact);
+    let ff_response_cache_semantic = feature_flags.is_some_and(|f| f.response_cache_semantic);
 
-    let mut flags_key_present = false;
-    if let Ok(Ok(Some(ff_str))) = raw_ffs_res {
-        // Presence of the key is what makes the control plane authoritative —
-        // even an unparseable value must NOT fall back to local config (the
-        // flags then simply resolve to false, matching enterprise behavior).
-        flags_key_present = true;
-        if let Ok(ff_json) = serde_json::from_str::<serde_json::Value>(&ff_str) {
-            ff_bandit_routing = ff_json
-                .get("ff_bandit_routing")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            ff_response_cache_exact = ff_json
-                .get("ff_response_cache_exact")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            ff_response_cache_semantic = ff_json
-                .get("ff_response_cache_semantic")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-        }
-    }
-
-    // Standalone open-core mode: when no control plane manages this workspace
-    // (no feature-flag hash in Valkey), routing may be enabled via config.yaml.
-    // A present flag hash is always authoritative.
-    let bandit_active = if flags_key_present {
-        ff_bandit_routing
-    } else {
-        state
+    // Standalone open-core mode: with no control-plane flags, routing may be
+    // enabled via config.yaml. A present flag payload is always authoritative.
+    let bandit_active = match feature_flags {
+        Some(f) => f.bandit_routing,
+        None => state
             .config
             .intutic_settings
             .routing
             .enabled
-            .unwrap_or(false)
+            .unwrap_or(false),
     };
 
     let session_id = headers
@@ -1350,7 +1287,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // Check response cache
     if ff_response_cache_exact || ff_response_cache_semantic {
         if let Some(cached_resp) = crate::plugins::semantic_cache::check_cache(
-            &state.valkey,
+            &state.store,
             &state.http_client,
             &workspace_id,
             &body_json,
@@ -1399,9 +1336,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 loop_run_id: loop_run_id_header.clone(),
             };
 
-            let valkey = Arc::clone(&state.valkey);
+            let trace_store = Arc::clone(&state.store);
             spawn(async move {
-                if let Err(e) = publish_trace(&valkey, &trace).await {
+                if let Err(e) = trace_store.publish_trace(&trace).await {
                     tracing::warn!("Failed to publish cache trace: {}", e);
                 }
             });
@@ -1414,7 +1351,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     let prompt_text = crate::plugins::semantic_cache::extract_prompt_text(&body_json);
     let (mut actual_model, sop_tier, task_type) = if bandit_active {
         match crate::routing::bandit::route_model(
-            &state.valkey,
+            &state.store,
+            &state.control_plane,
             &workspace_id,
             &session_id,
             &model,
@@ -1552,7 +1490,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     let mut creds_injected = false;
     if raw_token.starts_with("vk_") {
         if let Some(cred) =
-            fetch_provider_credential(&state.valkey, &workspace_id, &target_provider).await
+            fetch_provider_credential(&state.store, &workspace_id, &target_provider).await
         {
             match target_provider {
                 Provider::Anthropic => {
@@ -1599,7 +1537,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     if !creds_injected {
         if !is_same_provider {
             if let Some(cred) =
-                fetch_provider_credential(&state.valkey, &workspace_id, &target_provider).await
+                fetch_provider_credential(&state.store, &workspace_id, &target_provider).await
             {
                 match target_provider {
                     Provider::Anthropic => {
@@ -1677,12 +1615,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         Err(e) => {
             let desc = format!("Failed to reach LLM provider: {}", e);
             tracing::error!(upstream_url = %upstream_url, error = %e, "{}", desc);
-            crate::plugins::semantic_cache::publish_system_anomaly(
-                &state.valkey,
-                &workspace_id,
-                &desc,
-            )
-            .await;
+            state.store.publish_system_anomaly(&workspace_id, &desc).await;
 
             // The outage counter is a cloud-cron input; skip it when the local
             // reward loop owns learning (it records the same failure as a
@@ -1690,10 +1623,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             if bandit_active
                 && state.reward_engine.cached_mode(&workspace_id) != Some(RewardMode::Local)
             {
-                let failure_key = format!("bandit:outage_failures:{}", workspace_id);
                 let arm_key = format!("arm:{}:{}:{}", original_routed_model, sop_tier, task_type);
-                let mut conn_clone = state.valkey.as_ref().clone();
-                let _: Result<(), _> = conn_clone.hincr(&failure_key, &arm_key, 1).await;
+                let _ = state.store.incr_outage_failure(&workspace_id, &arm_key).await;
             }
 
             if reward_eligible {
@@ -1739,10 +1670,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             && err_status.is_server_error()
             && state.reward_engine.cached_mode(&workspace_id) != Some(RewardMode::Local)
         {
-            let failure_key = format!("bandit:outage_failures:{}", workspace_id);
             let arm_key = format!("arm:{}:{}:{}", original_routed_model, sop_tier, task_type);
-            let mut conn_clone = state.valkey.as_ref().clone();
-            let _: Result<(), _> = conn_clone.hincr(&failure_key, &arm_key, 1).await;
+            let _ = state.store.incr_outage_failure(&workspace_id, &arm_key).await;
         }
 
         // 4xx is the caller's fault, not the model's — only 5xx counts as a
@@ -1791,9 +1720,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             token_anomaly: false,
             loop_run_id: loop_run_id_header.clone(),
         };
-        let valkey_clone = Arc::clone(&state.valkey);
+        let cache_store_clone = Arc::clone(&state.store);
         tokio::spawn(async move {
-            let _ = publish_trace(&valkey_clone, &trace).await;
+            let _ = cache_store_clone.publish_trace(&trace).await;
         });
 
         let mut resp_builder = Response::builder().status(err_status);
@@ -1844,7 +1773,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
 
         let (tx, rx) = tokio::sync::mpsc::channel::<Result<axum::body::Bytes, std::io::Error>>(100);
         let upstream_stream = upstream_resp.bytes_stream();
-        let valkey_clone = Arc::clone(&state.valkey);
+        let cache_store_clone = Arc::clone(&state.store);
         let http_client_clone = state.http_client.as_ref().clone();
         let workspace_id_clone = workspace_id.clone();
         let body_json_clone = body_json.clone();
@@ -1862,6 +1791,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         let protocol_clone = protocol.clone();
         let client_api_key_clone = raw_token.to_string();
         let reward_engine_clone = Arc::clone(&state.reward_engine);
+        let reward_store_clone = Arc::clone(&state.store);
         let reward_cfg_clone = reward_cfg.clone();
         let original_routed_model_clone = original_routed_model.clone();
         let sop_tier_clone = sop_tier.clone();
@@ -2140,15 +2070,12 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                             let cp_url = control_plane_url_clone.clone();
                                             let ws_id = workspace_id_clone.clone();
                                             let sess_id = session_id_clone.clone();
-                                            let mut conn_clone = valkey_clone.as_ref().clone();
+                                            let chunk_store = Arc::clone(&cache_store_clone);
                                             let cur_index = chunk_index;
 
                                             let personal_sops_chunk = personal_sops_clone.clone();
                                             let api_key_for_chunk = client_api_key_clone.clone();
                                             let handle = spawn(async move {
-                                                use redis::AsyncCommands;
-                                                let list_key =
-                                                    format!("session:chunks:{}", sess_id);
 
                                                 let check_url =
                                                     format!("{}/api/v1/judge/chunk", cp_url);
@@ -2192,12 +2119,12 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                                 });
                                                 let json_str =
                                                     serde_json::to_string(&chunk_json).unwrap();
-                                                let _: () = conn_clone
-                                                    .rpush(&list_key, &json_str)
-                                                    .await
-                                                    .unwrap_or_default();
-                                                let _: () = conn_clone
-                                                    .expire(&list_key, 3600)
+                                                chunk_store
+                                                    .push_session_chunk(
+                                                        &sess_id,
+                                                        &json_str,
+                                                        Some(SESSION_CHUNK_TTL_SECS),
+                                                    )
                                                     .await
                                                     .unwrap_or_default();
                                             });
@@ -2218,7 +2145,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                         if reward_eligible {
                             reward_engine_clone
                                 .record(
-                                    &valkey_clone,
+                                    &reward_store_clone,
                                     &workspace_id_clone,
                                     &original_routed_model_clone,
                                     &sop_tier_clone,
@@ -2260,9 +2187,6 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                         paragraph_history.clone()
                     };
 
-                    use redis::AsyncCommands;
-                    let mut conn_clone = valkey_clone.as_ref().clone();
-                    let list_key = format!("session:chunks:{}", session_id_clone);
 
                     let check_url = format!("{}/api/v1/judge/chunk", control_plane_url_clone);
                     tracing::info!(url = %check_url, "Sending trailing chunk to judge");
@@ -2303,11 +2227,13 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                         "verdict": verdict,
                     });
                     let json_str = serde_json::to_string(&chunk_json).unwrap();
-                    let _: () = conn_clone
-                        .rpush(&list_key, &json_str)
-                        .await
-                        .unwrap_or_default();
-                    let _: () = conn_clone.expire(&list_key, 3600).await.unwrap_or_default();
+                    let _ = cache_store_clone
+                        .push_session_chunk(
+                            &session_id_clone,
+                            &json_str,
+                            Some(SESSION_CHUNK_TTL_SECS),
+                        )
+                        .await;
                 }
 
                 let finalize_url = format!("{}/api/v1/judge/finalize", control_plane_url_clone);
@@ -2399,7 +2325,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
 
             if !accumulated_content.is_empty() {
                 let _ = crate::plugins::semantic_cache::write_cache(
-                    &valkey_clone,
+                    &cache_store_clone,
                     &http_client_clone,
                     &workspace_id_clone,
                     &body_json_clone,
@@ -2454,7 +2380,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             if reward_eligible {
                 reward_engine_clone
                     .record(
-                        &valkey_clone,
+                        &reward_store_clone,
                         &workspace_id_clone,
                         &original_routed_model_clone,
                         &sop_tier_clone,
@@ -2496,7 +2422,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 loop_run_id: loop_run_id_clone,
             };
 
-            let _ = publish_trace(&valkey_clone, &trace).await;
+            let _ = cache_store_clone.publish_trace(&trace).await;
         });
 
         let mut response = Response::builder().status(upstream_status);
@@ -2686,14 +2612,12 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             let cp_url = control_plane_url.clone();
             let ws_id = workspace_id.clone();
             let sess_id = session_id.clone();
-            let mut conn_clone = state.valkey.as_ref().clone();
+            let chunk_store = Arc::clone(&state.store);
             let cur_index = chunk_index;
             let personal_sops_chunk = personal_sops.clone();
             let api_key_for_chunk = raw_token.to_string();
 
             let handle = spawn(async move {
-                use redis::AsyncCommands;
-                let list_key = format!("session:chunks:{}", sess_id);
                 let check_url = format!("{}/api/v1/judge/chunk", cp_url);
                 tracing::info!(url = %check_url, "Sending non-streaming chunk to judge");
                 let response = client
@@ -2733,10 +2657,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     "verdict": verdict,
                 });
                 let json_str = serde_json::to_string(&chunk_json).unwrap();
-                let _: () = conn_clone
-                    .rpush(&list_key, &json_str)
-                    .await
-                    .unwrap_or_default();
+                let _ = chunk_store
+                    .push_session_chunk(&sess_id, &json_str, None)
+                    .await;
             });
             chunk_handles.push(handle);
             chunk_index += 1;
@@ -2886,7 +2809,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // Write cache
     if !accumulated_content.is_empty() {
         let _ = crate::plugins::semantic_cache::write_cache(
-            &state.valkey,
+            &state.store,
             &state.http_client,
             &workspace_id,
             &body_json,
@@ -2976,9 +2899,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         crate::local_spend::log_offline_trace(&trace_val);
     }
 
-    let valkey = Arc::clone(&state.valkey);
+    let trace_store = Arc::clone(&state.store);
     spawn(async move {
-        if let Err(e) = publish_trace(&valkey, &trace).await {
+        if let Err(e) = trace_store.publish_trace(&trace).await {
             tracing::warn!("Failed to publish trace: {}", e);
         }
     });

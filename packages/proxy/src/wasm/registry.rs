@@ -1,7 +1,6 @@
 //! WASM Plugin Registry — loads plugins from Valkey and the local rules
 //! directory (`~/.intutic/wasm`), both hot-reloaded on a 5 s TTL rescan.
 
-use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -11,6 +10,7 @@ use tokio::sync::RwLock;
 use wasmtime::{Engine, Module};
 
 use super::context::{RequestContext, Verdict};
+use crate::store::ControlPlaneCache;
 use super::local_loader;
 use super::runner::evaluate_wasm_rule;
 
@@ -58,12 +58,10 @@ pub struct PluginRegistry {
 }
 
 impl PluginRegistry {
-    /// Create a new plugin registry, loading plugins from Valkey and the
-    /// local rules directory (see [`local_loader::resolve_local_dir`]).
-    pub async fn new(
-        _valkey: &Arc<redis::aio::ConnectionManager>,
-        local_dir_override: Option<&str>,
-    ) -> anyhow::Result<Arc<Self>> {
+    /// Create a new plugin registry. Local rules load from the rules directory
+    /// (see [`local_loader::resolve_local_dir`]); control-plane-distributed
+    /// rules are fetched lazily per workspace via [`Self::evaluate`].
+    pub async fn new(local_dir_override: Option<&str>) -> anyhow::Result<Arc<Self>> {
         let mut config = wasmtime::Config::new();
         config.consume_fuel(true);
         let engine = Engine::new(&config)?;
@@ -71,7 +69,7 @@ impl PluginRegistry {
         let local_dir = local_loader::resolve_local_dir(local_dir_override);
         tracing::info!(
             local_dir = %local_dir.display(),
-            "WASM plugin registry initialized (Valkey + local rules dir)"
+            "WASM plugin registry initialized (local rules dir; control-plane rules load per workspace)"
         );
         Ok(Arc::new(Self {
             engine,
@@ -81,12 +79,12 @@ impl PluginRegistry {
         }))
     }
 
-    /// Number of loaded plugins globally (Valkey-sourced + local).
+    /// Number of loaded plugins globally (control-plane-sourced + local).
     pub async fn plugin_count(&self) -> usize {
         let guard = self.workspace_modules.read().await;
-        let valkey_count: usize = guard.values().map(|w| w.modules.len()).sum();
+        let remote_count: usize = guard.values().map(|w| w.modules.len()).sum();
         drop(guard);
-        valkey_count + self.local_rules.read().await.modules.len()
+        remote_count + self.local_rules.read().await.modules.len()
     }
 
     /// Drop the local-dir rescan TTL and mark the next scan as forced, so the
@@ -112,13 +110,13 @@ impl PluginRegistry {
     /// union is most-restrictive-wins: local rules can only add restrictions.
     pub async fn evaluate(
         &self,
-        valkey: &Arc<redis::aio::ConnectionManager>,
+        control_plane: &Arc<dyn ControlPlaneCache>,
         ctx: &RequestContext,
     ) -> Verdict {
         let workspace_id = &ctx.workspace_id;
 
         // Sync rules on cache expiration
-        if let Err(e) = self.ensure_up_to_date(valkey, workspace_id).await {
+        if let Err(e) = self.ensure_up_to_date(control_plane, workspace_id).await {
             tracing::error!(
                 "Failed to sync WASM plugins for workspace {}: {}",
                 workspace_id,
@@ -246,7 +244,7 @@ impl PluginRegistry {
 
     async fn ensure_up_to_date(
         &self,
-        valkey: &Arc<redis::aio::ConnectionManager>,
+        control_plane: &Arc<dyn ControlPlaneCache>,
         workspace_id: &str,
     ) -> anyhow::Result<()> {
         {
@@ -266,10 +264,7 @@ impl PluginRegistry {
             }
         }
 
-        let mut conn = valkey.as_ref().clone();
-        let key = format!("wasm:plugins:{}", workspace_id);
-
-        let plugins_json: Option<String> = conn.get(&key).await?;
+        let plugins_json = control_plane.wasm_plugins(workspace_id).await?;
 
         let mut new_modules = Vec::new();
         if let Some(json_str) = plugins_json {
@@ -292,8 +287,7 @@ impl PluginRegistry {
                         module: module.clone(),
                     });
                 } else {
-                    let bin_key = format!("wasm:binary:{}", desc.sha256);
-                    let bin_bytes: Option<Vec<u8>> = conn.get(&bin_key).await?;
+                    let bin_bytes = control_plane.wasm_binary(&desc.sha256).await?;
                     if let Some(bytes) = bin_bytes {
                         let module = Module::from_binary(&self.engine, &bytes)?;
                         new_modules.push(LoadedModule {
@@ -304,7 +298,7 @@ impl PluginRegistry {
                             module,
                         });
                     } else {
-                        tracing::warn!("WASM binary missing in Valkey for hash: {}", desc.sha256);
+                        tracing::warn!("WASM binary missing from control plane for hash: {}", desc.sha256);
                     }
                 }
             }

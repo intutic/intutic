@@ -36,7 +36,11 @@ Background **LLMProbe** workers audit trajectory outputs, evaluating response qu
 
 ## Local Deterministic Reward Mode (Open-Core)
 
-Standalone proxies learn without any LLM judge: after every routed request, the proxy computes a reward in $[0, 1]$ from signals it already observes and updates the arm directly in Valkey — entirely on your machine, off the request latency path.
+Standalone proxies learn without any LLM judge: after every routed request, the proxy computes a reward in $[0, 1]$ from signals it already observes and updates the arm directly — entirely on your machine, off the request latency path.
+
+Where that arm state lives depends on whether a Valkey is present. With one, it is the `bandit:{workspaceId}` hash. Without one, it is `~/.intutic/bandit-state.json`, written atomically after each update. **Both persist across restarts**, which matters because Thompson sampling only engages after 20 cumulative pulls — a proxy that forgot its arms on every restart would never reach that threshold, and would fall back to the requested model forever.
+
+The two representations are numerically equivalent within `1e-12`. The difference is not the update rule — that is shared code — but serialization: Valkey round-trips each arm through `cjson`'s 14 significant digits, while the local file keeps full `f64` precision. The local store is, marginally, the more precise of the two.
 
 | Signal | Effect on reward |
 |---|---|
@@ -76,7 +80,7 @@ intutic_settings:
 `candidate_models` must name entries from your `model_list` so provider resolution and cost estimation stay accurate. Requests for models outside the pool bypass the bandit untouched.
 
 > [!IMPORTANT]
-> **Precedence**: if the workspace has a feature-flag hash in Valkey (i.e. a control plane manages it), the `ff_bandit_routing` flag is authoritative and `routing.enabled` is ignored. The config toggle only applies to standalone workspaces.
+> **Precedence**: if a control plane publishes a feature-flag payload for the workspace, `ff_bandit_routing` is authoritative and `routing.enabled` is ignored — even if that payload is malformed, in which case every flag resolves to `false`. Presence is what confers authority. The config toggle applies only when no control plane manages the workspace.
 
 ---
 
