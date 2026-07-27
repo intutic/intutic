@@ -171,6 +171,39 @@ ceilings, DLP, verdicts — and only cross-node delivery is lost. A file on disk
 would give mutual exclusion, not fan-out or ordering, and a notification is
 read-once: getting that wrong means a sibling silently never receives a `KILL`.
 
+## Seeing the trajectory
+
+Every traced request records where in the graph it happened — which node, what
+role, which node handed it the work, how deep, and any anomaly categories
+raised. A flat stream of requests becomes a trajectory you can follow.
+
+```json
+{
+  "verdict": "killed",
+  "graph_id": "g-traj",
+  "node_id": "node-x",
+  "agent_role": "worker",
+  "parent_node_id": "orch-1",
+  "graph_depth": 30,
+  "anomalies": ["LOOP_DETECTED"],
+  "actual_cost_usd": 0.0
+}
+```
+
+Refused requests are traced too. Every other trace is written on a success
+path, so without this the trajectory would show only the requests that went
+through and silently omit every one that was stopped — which are precisely the
+events you open a trajectory to find.
+
+Where it goes depends on your setup: `~/.intutic/logs/traces-{date}.jsonl`
+standalone, the Valkey trace channel when one is attached. The local file
+rotates daily and stops writing at 64 MB, because a busy graph writes a record
+per node per request and nothing prunes your home directory for you.
+
+A single-agent session adds no graph keys at all — not `graph_id` pointing at
+itself, not a depth of zero. The record is byte-identical to what it was before
+graphs existed, because a graph of one has no topology worth describing.
+
 ## What is available to a rule
 
 The full context the proxy serialises for each evaluation. Field names are
