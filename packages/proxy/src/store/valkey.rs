@@ -20,8 +20,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::{
-    CachedResponse, ClaimOutcome, ControlPlaneAuth, ControlPlaneCache, FeatureFlags, JudgeScope,
-    LocalStore, Ownership, SessionRouting,
+    CachedResponse, ClaimOutcome, ControlPlaneAuth, ControlPlaneCache, FeatureFlags, HardCapStatus,
+    JudgeScope, LocalStore, NotifyScope, Ownership, SessionRouting, TokenBaseline,
 };
 use crate::metering::VirtualKeyRecord;
 use crate::routing::bandit::BanditArmState;
@@ -489,13 +489,25 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
         }))
     }
 
-    async fn hard_block(&self, workspace_id: &str) -> bool {
+    async fn hard_block(&self, workspace_id: &str) -> HardCapStatus {
         let mut conn = self.conn();
-        let value: Option<String> = conn
-            .get(format!("v2:budget:hard_block:{}", workspace_id))
+        match conn
+            .get::<_, Option<String>>(format!("v2:budget:hard_block:{}", workspace_id))
             .await
-            .unwrap_or(None);
-        value.as_deref() == Some("1")
+        {
+            Ok(Some(v)) if v == "1" => HardCapStatus::Blocked,
+            Ok(_) => HardCapStatus::Clear,
+            // Unreachable control plane: spend cannot be verified, so the
+            // caller must not admit the request on an unverifiable budget.
+            Err(e) => {
+                tracing::warn!(
+                    workspace_id = %workspace_id,
+                    error = %e,
+                    "hard-cap check failed; spend is unverifiable"
+                );
+                HardCapStatus::Unverifiable
+            }
+        }
     }
 
     async fn loop_status(&self, loop_run_id: &str) -> Option<String> {
@@ -533,4 +545,97 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
         let mut conn = self.conn();
         Ok(conn.get(format!("wasm:binary:{}", sha256)).await?)
     }
+
+    async fn predict_gate_threshold(&self, workspace_id: &str) -> Option<f64> {
+        let mut conn = self.conn();
+        let raw: Option<String> = conn
+            .get(format!("tok:predict:gate:{}", workspace_id))
+            .await
+            .ok()?;
+        raw.and_then(|v| v.parse().ok())
+    }
+
+    async fn token_baseline(
+        &self,
+        workspace_id: &str,
+        model: &str,
+        bucket: &str,
+    ) -> Option<TokenBaseline> {
+        let mut conn = self.conn();
+        // Workspace-specific first, then the global rollup.
+        let ws_key = format!("tok:baseline:{}:{}:coding:{}", workspace_id, model, bucket);
+        if let Some(stats) = read_baseline_hash(&mut conn, &ws_key).await {
+            return Some(stats);
+        }
+        let global_key = format!("tok:baseline:global:{}:coding:{}", model, bucket);
+        read_baseline_hash(&mut conn, &global_key).await
+    }
+
+    async fn drain_notifications(&self, scope: NotifyScope, id: &str) -> Vec<String> {
+        let mut conn = self.conn();
+        let key = match scope {
+            NotifyScope::Session => format!("gov:notify:{}", id),
+            NotifyScope::Workspace => format!("gov:notify:workspace:{}", id),
+        };
+
+        // Fast path — most requests have nothing queued.
+        let len: usize = conn.llen(&key).await.unwrap_or(0);
+        if len == 0 {
+            return Vec::new();
+        }
+
+        // Read and delete in one atomic step, so a crash in between cannot
+        // deliver the same notification twice.
+        let mut pipe = redis::pipe();
+        pipe.atomic()
+            .cmd("LRANGE")
+            .arg(&key)
+            .arg(0i64)
+            .arg(-1i64)
+            .cmd("DEL")
+            .arg(&key);
+
+        let drained: Result<(Vec<String>, i64), redis::RedisError> =
+            pipe.query_async(&mut conn).await;
+        match drained {
+            Ok((items, _)) => items,
+            Err(e) => {
+                tracing::debug!(error = %e, "failed to drain notifications");
+                Vec::new()
+            }
+        }
+    }
+}
+
+/// `HMGET count sum reasoning_sum` on a baseline hash. `None` when the hash is
+/// absent or reports zero samples.
+async fn read_baseline_hash(
+    conn: &mut ConnectionManager,
+    key: &str,
+) -> Option<TokenBaseline> {
+    let values: Vec<Option<String>> = redis::cmd("HMGET")
+        .arg(key)
+        .arg("count")
+        .arg("sum")
+        .arg("reasoning_sum")
+        .query_async(conn)
+        .await
+        .ok()?;
+
+    let count: u64 = values.first()?.as_ref()?.parse().ok()?;
+    if count == 0 {
+        return None;
+    }
+    let sum: f64 = values.get(1)?.as_ref()?.parse().ok()?;
+    let reasoning_sum: f64 = values
+        .get(2)
+        .and_then(|v| v.as_ref())
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0.0);
+
+    Some(TokenBaseline {
+        count,
+        sum,
+        reasoning_sum,
+    })
 }

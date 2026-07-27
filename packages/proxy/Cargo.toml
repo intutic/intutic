@@ -104,6 +104,12 @@ rustls = { version = "0.23", features = ["ring"] }
 tokio-rustls = "0.26"
 rustls-pemfile = "2"
 
+# Advisory file locking (flock) for the standalone learning snapshot, so two
+# proxies sharing ~/.intutic cannot clobber each other's arms. Already in the
+# lockfile transitively via tokio, so this adds no new crate to the tree.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 tokio-test = "0.4"
 wiremock = "0.6"

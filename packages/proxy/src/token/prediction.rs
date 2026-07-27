@@ -5,16 +5,21 @@
 //! If the estimated cost exceeds the threshold, returns a cost estimate
 //! response instead of forwarding to the LLM.
 
-use anyhow::Result;
-use redis::AsyncCommands;
 use serde::Serialize;
-use tracing::warn;
+use std::sync::Arc;
 
+use crate::store::ControlPlaneCache;
 use crate::token::counter;
 
 /// Cost prediction gate.
+///
+/// Every key it reads (`tok:predict:gate:*`, `tok:baseline:*`) is written by
+/// the control plane and only read here, so it holds a `ControlPlaneCache`
+/// rather than its own connection. Standalone that resolves to the null cache
+/// and the gate is inert — which is correct, since nothing in open core
+/// produces those baselines.
 pub struct CostPredictionGate {
-    valkey: redis::Client,
+    control_plane: Arc<dyn ControlPlaneCache>,
 }
 
 /// Result of cost estimation.
@@ -29,7 +34,7 @@ pub struct CostEstimate {
     pub exceeds_threshold: bool,
 }
 
-/// Historical baseline statistics from Valkey.
+/// Historical baseline statistics, derived from the stored counters.
 #[derive(Debug)]
 struct BaselineStats {
     avg: f64,
@@ -41,9 +46,8 @@ struct BaselineStats {
 }
 
 impl CostPredictionGate {
-    pub fn new(valkey_url: &str) -> Result<Self> {
-        let valkey = redis::Client::open(valkey_url)?;
-        Ok(Self { valkey })
+    pub fn new(control_plane: Arc<dyn ControlPlaneCache>) -> Self {
+        Self { control_plane }
     }
 
     /// Predict estimated cost and tokens.
@@ -57,7 +61,11 @@ impl CostPredictionGate {
         let input_tokens = counter::count_message_tokens(input_messages, model).ok()?;
 
         // 2. Get workspace gate threshold
-        let threshold = self.get_threshold(workspace_id).await.unwrap_or(0.0);
+        let threshold = self
+            .control_plane
+            .predict_gate_threshold(workspace_id)
+            .await
+            .unwrap_or(0.0);
 
         // 3. Look up historical baseline
         let bucket = counter::get_input_bucket(input_tokens);
@@ -159,69 +167,26 @@ impl CostPredictionGate {
         serde_json::to_vec(&response).unwrap_or_default()
     }
 
-    async fn get_threshold(&self, workspace_id: &str) -> Option<f64> {
-        let mut conn = match self.valkey.get_multiplexed_async_connection().await {
-            Ok(c) => c,
-            Err(e) => {
-                warn!(error = %e, "Failed to connect to Valkey for cost gate threshold");
-                return None;
-            }
-        };
-        let key = format!("tok:predict:gate:{}", workspace_id);
-        let val: Option<String> = conn.get(&key).await.ok()?;
-        val.and_then(|v| v.parse().ok())
-    }
-
     async fn get_baseline(
         &self,
         workspace_id: &str,
         model: &str,
         bucket: &str,
     ) -> Option<BaselineStats> {
-        let mut conn = self.valkey.get_multiplexed_async_connection().await.ok()?;
-
-        // Try workspace-specific first
-        let ws_key = format!("tok:baseline:{}:{}:coding:{}", workspace_id, model, bucket);
-        if let Some(stats) = Self::read_baseline_hash(&mut conn, &ws_key).await {
-            return Some(stats);
-        }
-
-        // Fall back to global
-        let global_key = format!("tok:baseline:global:{}:coding:{}", model, bucket);
-        Self::read_baseline_hash(&mut conn, &global_key).await
-    }
-
-    async fn read_baseline_hash(
-        conn: &mut redis::aio::MultiplexedConnection,
-        key: &str,
-    ) -> Option<BaselineStats> {
-        let values: Vec<Option<String>> = redis::cmd("HMGET")
-            .arg(key)
-            .arg("count")
-            .arg("sum")
-            .arg("reasoning_sum")
-            .query_async(conn)
-            .await
-            .ok()?;
-
-        let count: u64 = values.first()?.as_ref()?.parse().ok()?;
-        if count == 0 {
+        let raw = self
+            .control_plane
+            .token_baseline(workspace_id, model, bucket)
+            .await?;
+        if raw.count == 0 {
             return None;
         }
-        let sum: f64 = values.get(1)?.as_ref()?.parse().ok()?;
-        let reasoning_sum: f64 = values
-            .get(2)
-            .and_then(|v| v.as_ref())
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0.0);
-
-        let avg = sum / count as f64;
+        let avg = raw.sum / raw.count as f64;
         Some(BaselineStats {
             avg,
             p50: avg,       // Approximate — exact p50 requires sorted data
             p95: avg * 1.5, // Approximate
-            reasoning_avg: reasoning_sum / count as f64,
-            sample_count: count,
+            reasoning_avg: raw.reasoning_sum / raw.count as f64,
+            sample_count: raw.count,
         })
     }
 }
