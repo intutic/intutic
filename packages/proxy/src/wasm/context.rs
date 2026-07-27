@@ -53,6 +53,44 @@ pub struct DlpFinding {
     pub length: usize,
 }
 
+/// Identity of a single node in a multi-agent graph.
+///
+/// Sourced from W3C Baggage carrying OpenTelemetry GenAI attributes, with
+/// `X-Intutic-*` headers as a fallback for harnesses without OTel
+/// instrumentation. See `graph::identity` for the extraction, and ADR-009 for
+/// why the standard is preferred over a proprietary header namespace.
+///
+/// # Trust
+///
+/// Every field here is client-supplied and unverifiable — W3C Baggage is
+/// explicitly specified as untrusted. These values are for observability and
+/// self-consistency only. **Never** grant capability on the basis of
+/// `agent_role`: an agent able to set a header can claim any role, which would
+/// make this a privilege-escalation vector. Authorisation stays bound to the
+/// virtual key.
+///
+/// `#[serde(default)]` is load-bearing: combined with `flatten` on the parent,
+/// it lets a payload written before graph support existed still deserialise.
+/// Without it serde demands every field be present and rejects the whole
+/// context with "missing field `node_id`".
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NodeIdentity {
+    /// `gen_ai.agent.id` — stable id for this node. Defaults to the session id.
+    pub node_id: String,
+    /// `gen_ai.agent.name` — the node's role within the graph.
+    pub agent_role: String,
+    /// `gen_ai.conversation.id` — shared by every node in one graph. Defaults
+    /// to the session id, so a single-agent session is a graph of one.
+    pub graph_id: String,
+    /// Parent span from `traceparent`, or the parent session id. Empty at root.
+    pub parent_session_id: String,
+    /// Distance from the graph root. No standard carries this — `traceparent`
+    /// identifies the immediate parent but not depth, and deriving it needs the
+    /// whole trace tree, which a stateless hot-path evaluation cannot assemble.
+    pub depth: u32,
+}
+
 /// Context passed to WASM plugins on each request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RequestContext {
@@ -67,6 +105,10 @@ pub struct RequestContext {
     pub risk_tier: RiskLevel,
     pub dlp_findings: Vec<DlpFinding>,
     pub tool_sequence: Vec<String>,
+    /// Graph position. Flattened onto the wire so existing guest rules that
+    /// index fields by name keep working and simply gain new keys.
+    #[serde(flatten)]
+    pub node: NodeIdentity,
 }
 
 /// Context passed to WASM plugins on each response
@@ -79,4 +121,98 @@ pub struct ResponseContext {
     pub actual_cost_usd: f64,
     pub response_tool_calls: Vec<ToolCall>,
     pub dlp_findings: Vec<DlpFinding>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ctx() -> RequestContext {
+        RequestContext {
+            session_id: "ses_1".into(),
+            workspace_id: "ws_1".into(),
+            virtual_key_prefix: "vk_1".into(),
+            model: "claude-sonnet-4".into(),
+            tools: vec![],
+            tool_calls: vec![],
+            estimated_input_tokens: 42,
+            budget_remaining_usd: 1.5,
+            risk_tier: RiskLevel::Low,
+            dlp_findings: vec![],
+            tool_sequence: vec!["Glob".into(), "View".into()],
+            node: NodeIdentity {
+                node_id: "planner-1".into(),
+                agent_role: "planner".into(),
+                graph_id: "graph-42".into(),
+                parent_session_id: "00f067aa0ba902b7".into(),
+                depth: 2,
+            },
+        }
+    }
+
+    /// The guest contract. `#[serde(flatten)]` must put the node fields at the
+    /// top level — the AssemblyScript SDK reads `node_id`, not `node.node_id`,
+    /// and a nested object would leave every graph-aware rule silently reading
+    /// defaults.
+    #[test]
+    fn node_identity_serialises_flat() {
+        let v: serde_json::Value = serde_json::to_value(ctx()).unwrap();
+        let obj = v.as_object().unwrap();
+
+        assert_eq!(obj["node_id"], "planner-1");
+        assert_eq!(obj["agent_role"], "planner");
+        assert_eq!(obj["graph_id"], "graph-42");
+        assert_eq!(obj["parent_session_id"], "00f067aa0ba902b7");
+        assert_eq!(obj["depth"], 2);
+
+        assert!(
+            obj.get("node").is_none(),
+            "node must be flattened, not nested"
+        );
+    }
+
+    /// Existing keys must keep their names and snake_case form. Renaming one
+    /// silently breaks every rule already deployed against it.
+    #[test]
+    fn existing_wire_keys_are_unchanged() {
+        let v: serde_json::Value = serde_json::to_value(ctx()).unwrap();
+        let obj = v.as_object().unwrap();
+        for key in [
+            "session_id",
+            "workspace_id",
+            "virtual_key_prefix",
+            "model",
+            "tools",
+            "tool_calls",
+            "estimated_input_tokens",
+            "budget_remaining_usd",
+            "risk_tier",
+            "dlp_findings",
+            "tool_sequence",
+        ] {
+            assert!(obj.contains_key(key), "missing wire key: {key}");
+        }
+    }
+
+    /// A context serialised before graph support must still deserialise, so a
+    /// stored or replayed payload does not become unreadable.
+    #[test]
+    fn deserialises_payload_without_graph_fields() {
+        let legacy = serde_json::json!({
+            "session_id": "ses_1",
+            "workspace_id": "ws_1",
+            "virtual_key_prefix": "vk_1",
+            "model": "claude-sonnet-4",
+            "tools": [],
+            "tool_calls": [],
+            "estimated_input_tokens": 10,
+            "budget_remaining_usd": 1.0,
+            "risk_tier": "Low",
+            "dlp_findings": [],
+            "tool_sequence": []
+        });
+        let parsed: RequestContext = serde_json::from_value(legacy).unwrap();
+        assert_eq!(parsed.node.depth, 0);
+        assert!(parsed.node.node_id.is_empty());
+    }
 }

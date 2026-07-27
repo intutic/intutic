@@ -74,14 +74,25 @@ When an LLM or tool request is intercepted, the Rust proxy executes the rule usi
 The Rust host normalizes the intercepted request context (tool calls, arguments, tokens, user role, etc.) and serializes it into a JSON string format:
 ```json
 {
-  "workspaceId": "wk_abc",
+  "session_id": "ses_7x2k9m",
+  "workspace_id": "wk_abc",
+  "virtual_key_prefix": "vk_live",
   "model": "claude-3-5-haiku",
-  "toolName": "bash",
-  "toolArgs": { "command": "rm -rf /" },
-  "userRole": "developer",
-  "tokenCount": 1200
+  "tools": [],
+  "tool_calls": [{ "id": "call_1", "name": "bash", "arguments": "{\"command\":\"rm -rf /\"}" }],
+  "estimated_input_tokens": 1200,
+  "budget_remaining_usd": 4.25,
+  "risk_tier": "HIGH",
+  "dlp_findings": [],
+  "tool_sequence": ["Glob", "View", "bash"]
 }
 ```
+
+Field names are **snake_case** on the wire — the Rust `RequestContext` is
+serialised without a rename, so the AssemblyScript SDK parses `session_id`, not
+`sessionId`. `tool_sequence` carries the session's tool history oldest-first,
+which is what makes ordering and cycle rules possible; see
+[Graph Guardrails](/guide/graph-guardrails).
 
 ### B. Memory Allocation & Injection
 Because WASM sandboxes have isolated linear memory, the host must inject the context:
