@@ -577,6 +577,38 @@ impl LocalStore for MemoryStore {
         );
     }
 
+    /// Standalone has no cross-process transport, so a notification can only
+    /// be logged.
+    ///
+    /// This is the degrade path chosen deliberately over a file-backed spool:
+    /// a spool with an advisory lock gives mutual exclusion, not fan-out,
+    /// ordering or liveness, and notifications are read-once and
+    /// time-sensitive — getting fan-out wrong means a sibling silently never
+    /// receives a KILL. Every session-scoped guarantee still holds here; only
+    /// cross-node delivery is lost, and `intutic start` provisions Valkey
+    /// whenever it can.
+    async fn publish_notification(&self, scope: NotifyScope, id: &str, payload: &str) {
+        tracing::info!(
+            scope = ?scope,
+            target = %id,
+            "governance notification (standalone: not delivered to siblings): {}",
+            payload
+        );
+    }
+
+    /// No-op: membership needs state shared across processes.
+    async fn touch_graph_node(&self, _graph_id: &str, _node_id: &str, _ttl_secs: u64) {}
+
+    /// Always empty.
+    ///
+    /// Load-bearing rather than a stub: it makes graph broadcast a no-op
+    /// instead of letting a single-process view be mistaken for the whole
+    /// graph, which would deliver findings to one node and silently strand
+    /// every other.
+    async fn graph_members(&self, _graph_id: &str) -> Vec<String> {
+        Vec::new()
+    }
+
     /// `ttl_secs` ignored — chunks are read back within the same request that
     /// wrote them, and the process boundary already bounds their lifetime.
     async fn push_session_chunk(

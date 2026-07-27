@@ -162,11 +162,34 @@ pub enum HardCapStatus {
     Unverifiable,
 }
 
-/// Which governance notification queue to drain.
+/// Which governance notification queue to address.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NotifyScope {
+    /// One agent turn.
     Session,
+    /// Every node sharing a `graph_id` — siblings in one multi-agent graph.
+    ///
+    /// Distinct from [`NotifyScope::Workspace`] in both reach and delivery.
+    /// Workspace notifications are drain-on-read: whichever session polls
+    /// first consumes them, which is right for "tell somebody once" and wrong
+    /// for a graph, where a sibling that never learns of a KILL carries on
+    /// working against a decision that has already been made.
+    Graph,
+    /// Everything in a workspace.
     Workspace,
+}
+
+impl NotifyScope {
+    /// Key prefix for this scope's queue. Session and workspace keys keep the
+    /// shapes the control plane already writes and the postprocessor already
+    /// drains; only the graph tier is new.
+    pub fn key_prefix(self) -> &'static str {
+        match self {
+            Self::Session => "gov:notify:",
+            Self::Graph => "gov:notify:graph:",
+            Self::Workspace => "gov:notify:workspace:",
+        }
+    }
 }
 
 /// Historical token-usage baseline for a (workspace, model, size-bucket).
@@ -309,6 +332,50 @@ pub trait LocalStore: Send + Sync + 'static {
 
     /// Publish an infrastructure anomaly to `intutic:system_anomalies`.
     async fn publish_system_anomaly(&self, workspace_id: &str, description: &str);
+
+    /// Queue a governance notification for later delivery.
+    ///
+    /// This is the producer counterpart to `ControlPlaneCache::drain_notifications`.
+    /// Until now only the control plane could write into those queues, so a
+    /// standalone proxy could detect a graph-wide problem and have no way to
+    /// tell the other nodes about it.
+    ///
+    /// Deliberately on `LocalStore` rather than `ControlPlaneCache`: producing
+    /// is something the proxy does from its own findings, and gating it on a
+    /// control plane would put graph broadcast behind a component open core
+    /// does not ship.
+    ///
+    /// Fire-and-forget. A notification that fails to queue must never fail the
+    /// request — the enforcement decision has already been made and returned;
+    /// this only informs siblings.
+    ///
+    /// # Delivery
+    ///
+    /// [`NotifyScope::Graph`] fans out: one copy per registered sibling, so
+    /// each reads its own. Session and workspace scopes keep their existing
+    /// drain-on-read behaviour.
+    async fn publish_notification(&self, scope: NotifyScope, id: &str, payload: &str);
+
+    /// Mark this node live in its graph.
+    ///
+    /// Called on **every** graph request, not only when something is detected:
+    /// a node that behaves perfectly still has to be a known member, or a
+    /// sibling's finding has nowhere to be delivered. Membership is TTL'd and
+    /// refreshed per call, so a node that goes quiet ages out instead of
+    /// accumulating forever.
+    ///
+    /// Write-only and fire-and-forget, deliberately separate from
+    /// [`LocalStore::graph_members`]: this is on the hot path for every request
+    /// in a graph, while reading the membership is only needed on the rare
+    /// request that actually has something to broadcast.
+    async fn touch_graph_node(&self, graph_id: &str, node_id: &str, ttl_secs: u64);
+
+    /// Current members of a graph, including the caller.
+    ///
+    /// An empty result means the store cannot track membership — standalone
+    /// without Valkey — in which case broadcast degrades to nothing rather
+    /// than guessing at a topology it cannot see.
+    async fn graph_members(&self, graph_id: &str) -> Vec<String>;
 
     /// Append a judged chunk to `session:chunks:{sid}`.
     ///

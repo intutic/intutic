@@ -57,6 +57,15 @@ return 1
 /// so a slow read must not become a slow route.
 const KEYWORDS_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(200);
 
+/// Most notifications held per queue. A graph that trips detectors on every
+/// request would otherwise grow one without bound; the newest are the ones
+/// worth delivering.
+const NOTIFY_QUEUE_CAP: isize = 50;
+
+/// How long an undelivered notification survives. Past this it is stale advice
+/// about a request the agent has long since moved on from.
+const NOTIFY_TTL_SECS: i64 = 3600;
+
 /// Timeout on lookups that gate whether the request proceeds at all. Matches
 /// the 500 ms budget these reads carried before the port.
 const GATE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
@@ -355,6 +364,40 @@ impl LocalStore for ValkeyStore {
         }
     }
 
+    async fn publish_notification(&self, scope: NotifyScope, id: &str, payload: &str) {
+        let mut conn = self.conn();
+
+        // One queue, addressed by `id`. For graph scope the caller passes
+        // "{graphId}:{nodeId}" — the same composite key `drain_notifications`
+        // reads, so publish and drain stay symmetric. Fanning out across
+        // siblings is the caller's job, because only it knows which node
+        // originated the finding and should therefore be skipped.
+        let key = format!("{}{}", scope.key_prefix(), id);
+
+        // Bound the queue: a pathological graph must not be able to grow one
+        // without limit, and a notification nobody drained within the TTL is
+        // stale advice about a request the agent has long since moved past.
+        let _: Result<(), redis::RedisError> = conn.rpush(&key, payload).await;
+        let _: Result<(), redis::RedisError> = conn.ltrim(&key, -NOTIFY_QUEUE_CAP, -1).await;
+        let _: Result<(), redis::RedisError> = conn.expire(&key, NOTIFY_TTL_SECS).await;
+    }
+
+    async fn touch_graph_node(&self, graph_id: &str, node_id: &str, ttl_secs: u64) {
+        let mut conn = self.conn();
+        let key = format!("graph:{graph_id}:nodes");
+        // Two writes, no read — this runs on every request in a graph, so the
+        // membership read is deferred to the broadcast path.
+        let _: Result<(), redis::RedisError> = conn.sadd(&key, node_id).await;
+        let _: Result<(), redis::RedisError> = conn.expire(&key, ttl_secs as i64).await;
+    }
+
+    async fn graph_members(&self, graph_id: &str) -> Vec<String> {
+        let mut conn = self.conn();
+        conn.smembers(format!("graph:{graph_id}:nodes"))
+            .await
+            .unwrap_or_default()
+    }
+
     async fn push_session_chunk(
         &self,
         session_id: &str,
@@ -573,10 +616,10 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
 
     async fn drain_notifications(&self, scope: NotifyScope, id: &str) -> Vec<String> {
         let mut conn = self.conn();
-        let key = match scope {
-            NotifyScope::Session => format!("gov:notify:{}", id),
-            NotifyScope::Workspace => format!("gov:notify:workspace:{}", id),
-        };
+        // For graph scope the caller passes "{graph_id}:{node_id}", because
+        // fan-out gives each sibling its own queue — draining a shared one
+        // would mean the first reader consumed everyone else's copy.
+        let key = format!("{}{}", scope.key_prefix(), id);
 
         // Fast path — most requests have nothing queued.
         let len: usize = conn.llen(&key).await.unwrap_or(0);
