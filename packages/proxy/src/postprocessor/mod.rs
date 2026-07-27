@@ -36,8 +36,12 @@ impl ResponsePostProcessor {
     ///
     /// Selects the appropriate formatter (markdown vs plaintext) based
     /// on which AI coding harness is making the request.
-    pub fn new(valkey_url: &str, harness_type: &str, protocol: Protocol) -> anyhow::Result<Self> {
-        let notification_client = NotificationClient::new(valkey_url)?;
+    pub fn new(
+        control_plane: std::sync::Arc<dyn crate::store::ControlPlaneCache>,
+        harness_type: &str,
+        protocol: Protocol,
+    ) -> anyhow::Result<Self> {
+        let notification_client = NotificationClient::new(control_plane);
         let formatter: Box<dyn GovernanceFormatter + Send + Sync> = match harness_type {
             "cursor" | "claude_code" | "windsurf" | "antigravity" | "openhands" | "cline"
             | "roo_code" => Box::new(formatters::markdown::MarkdownFormatter),

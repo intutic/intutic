@@ -12,8 +12,9 @@ use intutic_proxy::config::RewardConfig;
 use intutic_proxy::routing::bandit::route_model;
 use intutic_proxy::routing::reward::{apply_update, RewardEngine, RewardSignals};
 use intutic_proxy::store::{
-    CachedResponse, ControlPlaneAuth, ControlPlaneCache, FeatureFlags, JudgeScope, LocalStore,
-    MemoryStore, NullControlPlaneCache, Ownership, ValkeyControlPlaneCache, ValkeyStore,
+    CachedResponse, ControlPlaneAuth, ControlPlaneCache, FeatureFlags, HardCapStatus, JudgeScope,
+    LocalStore, MemoryStore, NotifyScope, NullControlPlaneCache, Ownership,
+    ValkeyControlPlaneCache, ValkeyStore,
 };
 use redis::AsyncCommands;
 use std::sync::Arc;
@@ -372,7 +373,7 @@ async fn managed_auth_still_rejects_unknown_keys() {
 #[tokio::test]
 async fn standalone_gates_are_all_closed() {
     let cp = NullControlPlaneCache;
-    assert!(!cp.hard_block("ws").await, "no cap without a control plane");
+    assert_eq!(cp.hard_block("ws").await, HardCapStatus::Clear, "no cap without a control plane");
     assert!(
         !cp.break_glass_valid("any-token").await,
         "no issuer means no valid break-glass token"
@@ -619,6 +620,134 @@ async fn upgrading_to_valkey_carries_standalone_learning() {
     );
 
     cleanup(&ws, None).await;
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// The hard spend cap fails CLOSED when it cannot be verified.
+///
+/// This is deliberately the opposite of the usual rate-limiter convention. A
+/// cap is a financial control that its operator explicitly opted into, so the
+/// workspace most likely to be capped is exactly the one that would resume
+/// spending if an unreachable control plane resolved to "allow".
+#[tokio::test]
+async fn unverifiable_spend_is_not_clear() {
+    // A well-formed URL that nothing is listening on: reads fail rather than
+    // returning "no cap".
+    let client = redis::Client::open("redis://127.0.0.1:6399").unwrap();
+    let Ok(mgr) = redis::aio::ConnectionManager::new(client).await else {
+        // Couldn't even build a manager — nothing to assert against.
+        eprintln!("skipping: could not construct a manager for the dead address");
+        return;
+    };
+    let cp = ValkeyControlPlaneCache::new(Arc::new(mgr));
+    assert_eq!(
+        cp.hard_block("any-workspace").await,
+        HardCapStatus::Unverifiable,
+        "an unreachable control plane must not report a workspace as uncapped"
+    );
+}
+
+/// Standalone answers `Clear`, never `Unverifiable` — there is no control plane
+/// to have set a cap, so the answer is definite. Getting this wrong would 503
+/// every standalone request.
+#[tokio::test]
+async fn standalone_spend_is_clear_not_unverifiable() {
+    assert_eq!(
+        NullControlPlaneCache.hard_block("ws").await,
+        HardCapStatus::Clear
+    );
+}
+
+/// A live control plane with no cap set reports `Clear`, and one with the
+/// marker set reports `Blocked`.
+#[tokio::test]
+async fn live_control_plane_distinguishes_clear_from_blocked() {
+    let Some(valkey) = valkey_conn().await else {
+        eprintln!("skipping: VALKEY_URL not set or Valkey unreachable");
+        return;
+    };
+    let ws = unique_ws("cap");
+    let cp = ValkeyControlPlaneCache::new(valkey.clone());
+    assert_eq!(cp.hard_block(&ws).await, HardCapStatus::Clear);
+
+    let mut conn = valkey.as_ref().clone();
+    let _: () = conn
+        .set(format!("v2:budget:hard_block:{}", ws), "1")
+        .await
+        .unwrap();
+    assert_eq!(cp.hard_block(&ws).await, HardCapStatus::Blocked);
+
+    let _: Result<(), _> = conn.del(format!("v2:budget:hard_block:{}", ws)).await;
+}
+
+/// Both ported modules read only control-plane-written keys, so standalone they
+/// are inert by construction rather than by a caller remembering to skip them.
+#[tokio::test]
+async fn standalone_token_and_notification_reads_are_empty() {
+    let cp = NullControlPlaneCache;
+    assert_eq!(cp.predict_gate_threshold("ws").await, None);
+    assert!(cp.token_baseline("ws", "claude-3-5-sonnet", "0-5k").await.is_none());
+    assert!(cp.drain_notifications(NotifyScope::Session, "s").await.is_empty());
+    assert!(cp.drain_notifications(NotifyScope::Workspace, "w").await.is_empty());
+}
+
+/// Draining is read-and-delete in one atomic step, so a notification is
+/// delivered at most once.
+#[tokio::test]
+async fn draining_notifications_consumes_them_once() {
+    let Some(valkey) = valkey_conn().await else {
+        eprintln!("skipping: VALKEY_URL not set or Valkey unreachable");
+        return;
+    };
+    let sid = unique_ws("notify");
+    let mut conn = valkey.as_ref().clone();
+    let payload = r#"{"notification_id":"n1","session_id":"s","workspace_id":"w","priority":"high","category":"budget","title":"t","body":"b","action_url":null,"created_at":"2026-01-01T00:00:00Z"}"#;
+    let _: () = conn
+        .rpush(format!("gov:notify:{}", sid), payload)
+        .await
+        .unwrap();
+
+    let cp = ValkeyControlPlaneCache::new(valkey.clone());
+    let first = cp.drain_notifications(NotifyScope::Session, &sid).await;
+    assert_eq!(first.len(), 1, "first drain must yield the notification");
+    let second = cp.drain_notifications(NotifyScope::Session, &sid).await;
+    assert!(second.is_empty(), "a drained notification must not reappear");
+}
+
+/// Two processes sharing one snapshot must not erase each other's learning.
+/// Atomic replace alone would let the last writer win; the merge is what makes
+/// concurrent standalone proxies converge.
+#[tokio::test]
+async fn concurrent_snapshot_writers_do_not_clobber() {
+    let dir = std::env::temp_dir().join(unique_ws("concurrent"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("bandit-state.json");
+
+    // Two independent stores, as two processes would be.
+    let a: Arc<dyn LocalStore> = Arc::new(MemoryStore::durable_at(path.clone()));
+    let b: Arc<dyn LocalStore> = Arc::new(MemoryStore::durable_at(path.clone()));
+
+    for _ in 0..5 {
+        a.update_arm("ws", "arm:a", 1.0, "now").await.unwrap();
+    }
+    for _ in 0..3 {
+        b.update_arm("ws", "arm:b", 1.0, "now").await.unwrap();
+    }
+
+    // A third process reads what survived.
+    let c: Arc<dyn LocalStore> = Arc::new(MemoryStore::durable_at(path.clone()));
+    let arms = c.load_arms("ws").await.unwrap();
+    assert_eq!(
+        arms.get("arm:a").map(|x| x.pulls),
+        Some(5),
+        "writer A's arm must survive writer B"
+    );
+    assert_eq!(
+        arms.get("arm:b").map(|x| x.pulls),
+        Some(3),
+        "writer B's arm must survive writer A"
+    );
+
     std::fs::remove_dir_all(&dir).ok();
 }
 
