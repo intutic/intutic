@@ -195,6 +195,7 @@ SOP: block-destructive-fs (sop_fs001)
 
 ---
 
+<!-- ENTERPRISE_ONLY_START -->
 ## Source code references
 
 The enforcement action system is defined across these components:
@@ -210,6 +211,8 @@ The enforcement action system is defined across these components:
 | `finopsService.ts` | Budget gate enforcement + cost tracking per action | Enterprise Control Plane |
 
 ---
+
+<!-- ENTERPRISE_ONLY_END -->
 
 ## Related
 

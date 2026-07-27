@@ -230,12 +230,30 @@ export default defineConfig({
         // These terms describe infrastructure an open-core user does not have
         // and cannot reach. If one is genuinely needed, wrap it rather than
         // widening this list.
+        // Hostnames and product names, plus the control-plane internals that
+        // have no open-core counterpart. The second group matters more: the
+        // first sweep only banned names, so security.md still published the
+        // control plane's TLS paths, its PostgreSQL storage, its dashboard and
+        // an RBAC/OBO threat-model row -- while the same page marked RBAC and
+        // OBO as Enterprise Tier fifty lines further down and wrapped them.
+        //
+        // Saying open core has no control plane is fine and necessary.
+        // Documenting how that control plane is built is not.
         const BANNED = [
           'Intutic Cloud',
           'GCP Secret Manager',
           'app.intutic.ai',
           'proxy.intutic.ai',
           'api.intutic.ai',
+          'PostgreSQL',
+          'OBO token',
+          'RBAC',
+          'Control Plane |',
+          // Precise rather than a bare 'GKE': integrations/mcp-proxy.md
+          // legitimately names "GKE MCP" as an example MCP server, which has
+          // nothing to do with our hosting.
+          'GKE control plane',
+          'GKE Control Plane',
         ]
         const src = state.src
         const found = BANNED.filter((t) => src.includes(t))
