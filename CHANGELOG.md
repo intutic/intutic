@@ -73,6 +73,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apps/docs/guide/faqs.md` described the budget gate as failing closed while
   the code failed open. The code now matches the documentation.
 
+## [1.6.3] - 2026-07-26
+
+### Added
+
+- **`intutic start`** — one command to run the proxy standalone: no account, no
+  control plane, no configuration file. The Valkey provisioning ladder
+  (existing instance, then Docker, then a local `valkey-server`/`redis-server`)
+  previously sat below `intutic connect`'s credential check, so the open-core
+  users who needed it could never reach it.
+
+### Fixed
+
+- `intutic --version` reads the installed `package.json` instead of a literal
+  that had reported 1.6.0 for three releases.
+
+## [1.6.2] - 2026-07-26
+
+### Fixed
+
+- A missing `config.yaml` no longer stops the proxy starting. `npm i -g
+  @intutic/proxy` installs a binary and nothing else, so anyone following the
+  documented install had no config file and got a bare
+  `No such file or directory`. Defaults are now a working standalone
+  configuration; a file that exists but is malformed still fails.
+- An unreachable Valkey reports what it was connecting to and how to start one,
+  instead of a bare `Connection refused (os error 111)`.
+- The sync daemon stops its drift watcher before tearing down the workspace it
+  watches, rather than after.
+- Documentation no longer describes a control plane that open core does not
+  ship.
+- LaTeX in the docs renders instead of printing as source.
+
+## [1.6.1] - 2026-07-26
+
+### Fixed
+
+- Linux release binaries build against glibc 2.35 rather than 2.39, restoring
+  compatibility with Ubuntu 22.04 and other still-supported distributions. The
+  npm publish is now blocked on an old-glibc smoke test so this cannot regress
+  silently.
+
 ## [1.6.0] - 2026-07-25
 
 ### ⚠️ Breaking
