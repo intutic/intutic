@@ -115,27 +115,24 @@ async fn main() -> anyhow::Result<()> {
         ));
     }
 
+    // When falling back is allowed, the probe is bounded. `ConnectionManager`
+    // retries with exponential backoff, which takes ~9s even on an immediate
+    // connection-refused — silent dead air on first run for precisely the
+    // no-Docker user this fallback exists for. Managed deployments keep the
+    // full retry budget, since there the connection is required and worth
+    // waiting for.
+    const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1500);
+
     let valkey = if standalone_forced {
         tracing::info!("INTUTIC_STANDALONE set — running standalone, not probing for Valkey.");
         None
-    } else {
-        match telemetry::connect_valkey(&valkey_url).await {
-            Ok(v) => {
+    } else if !managed {
+        match tokio::time::timeout(PROBE_TIMEOUT, telemetry::connect_valkey(&valkey_url)).await {
+            Ok(Ok(v)) => {
                 tracing::info!("Connected to Valkey at {}", valkey_url);
                 Some(v)
             }
-            Err(e) if managed => {
-                return Err(anyhow::anyhow!(
-                    "Could not connect to Valkey at {valkey_url}: {e}\n\n\
-                     CONTROL_PLANE_URL is set, so this proxy is control-plane managed and \
-                     Valkey holds the auth and budget cache it depends on. Running without \
-                     it would leave requests unauthenticated, so this is fatal rather than \
-                     a fallback.\n\n  \
-                     docker run -d --name intutic-valkey -p 6379:6379 valkey/valkey:8-alpine\n\n\
-                     Point elsewhere with VALKEY_URL=redis://host:port."
-                ));
-            }
-            Err(e) => {
+            Ok(Err(e)) => {
                 tracing::info!(
                     "No Valkey at {} ({}). Running standalone — bandit learning persists to \
                      ~/.intutic, the response cache is in-memory, and control-plane features \
@@ -145,6 +142,33 @@ async fn main() -> anyhow::Result<()> {
                     e
                 );
                 None
+            }
+            Err(_) => {
+                tracing::info!(
+                    "Valkey at {} did not answer within {:?}. Running standalone; \
+                     set VALKEY_URL if it lives elsewhere.",
+                    valkey_url,
+                    PROBE_TIMEOUT
+                );
+                None
+            }
+        }
+    } else {
+        match telemetry::connect_valkey(&valkey_url).await {
+            Ok(v) => {
+                tracing::info!("Connected to Valkey at {}", valkey_url);
+                Some(v)
+            }
+            Err(e) => {
+                return Err(anyhow::anyhow!(
+                    "Could not connect to Valkey at {valkey_url}: {e}\n\n\
+                     CONTROL_PLANE_URL is set, so this proxy is control-plane managed and \
+                     Valkey holds the auth and budget cache it depends on. Running without \
+                     it would leave requests unauthenticated, so this is fatal rather than \
+                     a fallback.\n\n  \
+                     docker run -d --name intutic-valkey -p 6379:6379 valkey/valkey:8-alpine\n\n\
+                     Point elsewhere with VALKEY_URL=redis://host:port."
+                ));
             }
         }
     };
@@ -206,6 +230,9 @@ async fn main() -> anyhow::Result<()> {
         reward_engine: std::sync::Arc::new(routing::reward::RewardEngine::new()),
         store,
         control_plane,
+        // Only Some when the Valkey backend was actually selected — see the
+        // field's docs on why an env read here would be wrong.
+        valkey_url: valkey.as_ref().map(|_| valkey_url.clone()),
     };
 
     // Ensure local CA exists for TLS MITM (generates ca.crt/ca.key if missing)
