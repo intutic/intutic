@@ -15,7 +15,7 @@ import { log } from './logger.js'
  *
  * @param harnesses - List of harness types (e.g. ['cursor', 'aider'])
  * @param apiKey - Optional API key to display in the instructions
- * @param devMode - If true, use localhost:4000; otherwise use remote proxy
+ * @param devMode - retained for call-site compatibility; the proxy is always local
  */
 function maskUserToken(tokenVal?: string): string {
   if (!tokenVal) return '<YOUR_INTUTIC_API_KEY>'
@@ -36,8 +36,13 @@ function printYamlKey(keyName: string, keyVal: string, spaces = 5): void {
 
 export function printOnboardingGuide(harnesses: string[], userAuthToken?: string, devMode = false): void {
   const safeDisplayValue = maskUserToken(userAuthToken)
-  const proxyUrl = devMode ? 'http://localhost:4000/v1' : 'http://localhost:4000/v1'
-  const proxyHost = devMode ? 'http://localhost:4000' : 'http://localhost:4000'
+  // Always the local proxy. This used to branch to a remote host when devMode
+  // was false, which meant the onboarding instructions we print told people to
+  // send their agent traffic somewhere other than the proxy they had just
+  // started. Set INTUTIC_PROXY_URL to override.
+  void devMode
+  const proxyHost = (process.env.INTUTIC_PROXY_URL ?? 'http://localhost:4000').replace(/\/+$/, '')
+  const proxyUrl = `${proxyHost}/v1`
 
   writeCliOutput('')
   log.header('Intutic — Setup & Integration Instructions')
