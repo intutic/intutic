@@ -1,6 +1,6 @@
 {
   "name": "@intutic/sync-daemon",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "Intutic Sync Daemon — bidirectional state sync between control plane and developer workspaces",
   "type": "module",
   "license": "MIT",

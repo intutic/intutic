@@ -12,6 +12,7 @@
  */
 
 import * as node_path from 'node:path'
+import { createRequire } from 'node:module'
 import * as node_fs from 'node:fs/promises'
 import { log } from '../lib/logger.js'
 import { ensureValkey, valkeyRemediation, isValkeyRunning } from '../lib/ensureValkey.js'
@@ -93,7 +94,15 @@ async function downloadProxyBinary(destPath: string): Promise<string> {
   // Binaries are published as GitHub Release assets by .github/workflows/publish.yml
   // (the github-release job uploads every build-rust-proxy artifact under the vX.Y.Z
   // tag). Asset names here MUST match that workflow's matrix `artifact_name` values.
-  const cliVersion = '1.6.0'
+  //
+  // Read the version from package.json rather than repeating it here. This was
+  // pinned to a literal '1.6.0', so every release after that shipped a CLI that
+  // downloaded a proxy several versions behind itself — a 1.7.0 user got the
+  // 1.6.0 proxy, which still required Valkey and had none of the standalone
+  // work. Same bug, same fix, as `intutic --version` in cli.ts.
+  const { version: cliVersion } = createRequire(import.meta.url)('../../package.json') as {
+    version: string
+  }
   const url = `https://github.com/intutic/intutic/releases/download/v${cliVersion}/${assetName}`
 
   log.info(`Downloading precompiled Intutic proxy from ${url}...`)
@@ -147,17 +156,19 @@ export async function runConnect(opts: {
     log.error('`intutic connect` needs a control plane, and you are not authenticated.')
     log.info('')
     log.info('This command runs the sync daemon, which mirrors governance config')
-    log.info('with a control plane. Open core does not include one.')
+    log.info('with a control plane. Open core does not ship one, though Intutic')
+    log.info('Cloud provides a hosted one if you want it.')
     log.info('')
-    log.info('To run standalone — policy enforcement, DLP and WASM rules, all local:')
+    log.info('To run standalone, with policy enforcement, DLP and WASM rules all local:')
     log.info('')
     log.info('  intutic start')
     log.info('  export ANTHROPIC_BASE_URL=http://localhost:4000')
     log.info('')
-    log.info('`intutic start` brings up Valkey for you (Docker or a local binary).')
+    log.info('`intutic start` needs nothing else. It will set up Valkey if Docker is')
+    log.info('available, since that makes the response cache shared, but runs without it.')
     log.info('')
-    log.info('If you do have a control plane, authenticate with `intutic login`')
-    log.info('(add --dev to target http://localhost:3001).')
+    log.info('If you want a control plane, sign in or sign up at http://localhost:5174')
+    log.info('then run `intutic login` (add --dev to target http://localhost:3001).')
     process.exit(1)
   }
 
