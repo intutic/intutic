@@ -1,6 +1,6 @@
 {
   "name": "@intutic/mcp-governance-proxy",
-  "version": "1.7.1",
+  "version": "1.7.2",
   "description": "Intutic MCP Governance Proxy \u2014 transparent stdio proxy that intercepts all tools/call JSON-RPC messages and applies workspace SOP policy before forwarding to real MCP servers",
   "type": "module",
   "license": "MIT",
