@@ -35,6 +35,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`integrations/standalone.md` documented a flag that does not exist.**
   `intutic connect --upstream-url ...` — `--upstream-url` is an option of
   `start`, not `connect`, so the command exited with an unknown-option error.
+- **Docs pointed every harness at a hosted proxy.** Twelve integration guides
+  gave a remote base URL and never mentioned `http://localhost:4000`, so
+  following them routed every LLM request — prompts and provider API keys
+  included — off the machine, when the whole premise of open core is that the
+  proxy runs locally. All of them now point at the local proxy.
+- **The OSS docs build now fails on hosted-infrastructure references.** Section
+  stripping was opt-in, so anything nobody remembered to wrap shipped. The
+  build refuses to publish those terms and names the offending page.
+
 - **"Not authenticated" told you to run a command that would also fail.**
   Eight commands emitted `Run \`intutic login\` first` with no indication of
   the command needed, or that `intutic start` needs nothing. They now say both.
