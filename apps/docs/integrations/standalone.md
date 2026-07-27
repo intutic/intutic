@@ -69,7 +69,7 @@ Intutic Proxy supports two primary self-hosted deployment topologies depending o
 * **Environment Setup:**
   ```bash
   export ANTHROPIC_BASE_URL="http://localhost:4000/v1"
-  intutic connect --upstream-url "https://api.anthropic.com"
+  intutic start --upstream-url "https://api.anthropic.com"
   ```
 
 ### Option C: Native NPM Binary Runner (`npx @intutic/proxy`)
