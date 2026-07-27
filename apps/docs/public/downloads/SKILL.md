@@ -17,7 +17,7 @@ Use the `intutic` CLI commands to manage the daemon, inspect execution traces, o
 - **Authenticate:** `intutic login` (authenticates with your Intutic control plane).
 - **Initialize Workspace:** `intutic init` (scans active developer harnesses like Claude Code or Cursor, and configures synchronization hooks).
 - **Start Connection:** `intutic connect` (spawns the sync daemon to mirror policies and boots the local interceptor proxy).
-- **Offline Spend Sync:** The sync daemon automatically reconciles offline query consumption logs (`traces-*.jsonl`) and local budgets back to the GKE control plane on reconnect.
+- **Offline Spend Sync:** The sync daemon automatically reconciles offline query consumption logs (`traces-*.jsonl`) and local budgets back to the control plane on reconnect.
 
 ### 2. Traces & Auditing
 - **Check Budget:** `intutic budget` (displays overall monthly/daily spend limits, local spend caps, and active task loops).
