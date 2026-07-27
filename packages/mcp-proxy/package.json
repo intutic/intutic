@@ -1,7 +1,7 @@
 {
   "name": "@intutic/mcp-governance-proxy",
   "version": "1.7.0",
-  "description": "Intutic MCP Governance Proxy — transparent stdio proxy that intercepts all tools/call JSON-RPC messages and applies workspace SOP policy before forwarding to real MCP servers",
+  "description": "Intutic MCP Governance Proxy \u2014 transparent stdio proxy that intercepts all tools/call JSON-RPC messages and applies workspace SOP policy before forwarding to real MCP servers",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -12,11 +12,12 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "intutic-mcp-proxy": "./dist/index.js",
-    "intutic-mcp-daemon": "./dist/daemon/index.js"
+    "intutic-mcp-proxy": "./bin/mcp-proxy.js",
+    "intutic-mcp-daemon": "./bin/mcp-daemon.js"
   },
   "files": [
     "dist/",
+    "bin/",
     "README.md",
     "LICENSE"
   ],
