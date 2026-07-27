@@ -5,6 +5,30 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.1] - 2026-07-27
+
+### Fixed
+
+- **`intutic connect` downloaded the wrong proxy.** The release tag it fetched
+  the native binary from was pinned to a literal `1.6.0`, so every version
+  since shipped a CLI that installed a proxy several releases behind itself. A
+  1.7.0 user got the 1.6.0 binary, which still required Valkey and had none of
+  the standalone work. It now reads the version from its own `package.json`,
+  the same fix `intutic --version` got in 1.6.3.
+- **Every install path pointed at `intutic connect`.** The README, the docs
+  landing page, the marketing site and 18 integration guides all opened with
+  `intutic init` then `intutic connect`, which starts the sync daemon and
+  requires an account. Anyone without one hit a login wall on step 2 of a
+  "30-second" quickstart. They all lead with `intutic start` now, with a note
+  pointing at `connect` for people who have an account (#1).
+- **`integrations/standalone.md` documented a flag that does not exist.**
+  `intutic connect --upstream-url ...` — `--upstream-url` is an option of
+  `start`, not `connect`, so the command exited with an unknown-option error.
+- **"Not authenticated" told you to run a command that would also fail.**
+  Eight commands emitted `Run \`intutic login\` first` with no indication of
+  what an account is for, where to get one, or that `intutic start` needs
+  none. They now say all three.
+
 ## [1.7.0] - 2026-07-27
 
 ### ⚠️ Breaking
