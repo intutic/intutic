@@ -1,11 +1,14 @@
 //! Integration tests for local WASM rule ingestion (`~/.intutic/wasm/`).
 //!
-//! The loader-level tests are self-contained. The registry-level tests need
-//! a reachable Valkey (`VALKEY_URL`) because `PluginRegistry` construction
-//! and evaluation take a live connection; they skip silently otherwise.
+//! All self-contained. The registry-level tests used to require a reachable
+//! Valkey — `PluginRegistry` construction and evaluation took a live
+//! connection — and skipped without one. After the storage port they take a
+//! `ControlPlaneCache`, so `NullControlPlaneCache` covers them: local rules are
+//! precisely the half that does not come from a control plane.
 
 use intutic_proxy::wasm::context::{RequestContext, RiskLevel, Verdict};
 use intutic_proxy::wasm::local_loader::{load_local_modules, scan_signatures};
+use intutic_proxy::store::{ControlPlaneCache, NullControlPlaneCache};
 use intutic_proxy::wasm::registry::PluginRegistry;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -116,23 +119,17 @@ fn corrupt_file_fails_open_and_retains_previous_good_module() {
 
 // ─── Registry-level (needs Valkey) ───────────────────────────────────
 
-async fn connect() -> Option<Arc<redis::aio::ConnectionManager>> {
-    let url = std::env::var("VALKEY_URL").ok()?;
-    let client = redis::Client::open(url).ok()?;
-    let mgr = redis::aio::ConnectionManager::new(client).await.ok()?;
-    Some(Arc::new(mgr))
+/// Local rules come from disk, never from a control plane — so the null cache
+/// is the correct backing here, not a stand-in for a missing one.
+fn control_plane() -> Arc<dyn ControlPlaneCache> {
+    Arc::new(NullControlPlaneCache)
 }
 
 #[tokio::test]
 async fn registry_hot_picks_up_local_rules_and_attributes_kills() {
-    let Some(valkey) = connect().await else {
-        eprintln!("skipping: VALKEY_URL not set or Valkey unreachable");
-        return;
-    };
+    let valkey = control_plane();
     let dir = temp_rule_dir("registry");
-    let registry = PluginRegistry::new(&valkey, dir.to_str())
-        .await
-        .unwrap();
+    let registry = PluginRegistry::new(dir.to_str()).await.unwrap();
     let ctx = test_ctx("test-ws-local-rules");
 
     // Empty dir → no rules → Bypass.

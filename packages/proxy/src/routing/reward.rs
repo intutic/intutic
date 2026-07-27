@@ -22,8 +22,7 @@
 //! distortion when a workspace upgrades to cloud-managed learning.
 
 use crate::config::RewardConfig;
-use redis::aio::ConnectionManager;
-use redis::AsyncCommands;
+use crate::store::{ClaimOutcome, LocalStore, Ownership};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
@@ -64,8 +63,10 @@ pub fn compute_reward(s: &RewardSignals, cfg: &RewardConfig) -> f64 {
     r.clamp(0.0, 1.0)
 }
 
-/// Pure mirror of [`ARM_UPDATE_SCRIPT`] for unit tests and documentation.
-/// The Lua script is the runtime source of truth; keep both in sync.
+/// The arm update rule. Mirrors the Lua script in
+/// [`crate::store::valkey`] — which remains the source of truth for the
+/// Valkey-backed path — and is what [`crate::store::MemoryStore`] applies
+/// directly. Keep both in sync.
 pub fn apply_update(alpha: f64, beta: f64, pulls: u32, reward: f64) -> (f64, f64, u32) {
     let scale = (1.0 / ((pulls as f64) + 2.0).log2()).max(0.1);
     (
@@ -74,32 +75,6 @@ pub fn apply_update(alpha: f64, beta: f64, pulls: u32, reward: f64) -> (f64, f64
         pulls + 1,
     )
 }
-
-/// Atomic read-modify-write of one arm inside `bandit:{ws}`.
-///
-/// KEYS[1] = bandit hash key, ARGV[1] = arm field, ARGV[2] = reward,
-/// ARGV[3] = RFC3339 timestamp. A corrupt arm JSON self-heals to a fresh
-/// `Beta(1,1)` arm rather than erroring.
-const ARM_UPDATE_SCRIPT: &str = r#"
-local raw = redis.call('HGET', KEYS[1], ARGV[1])
-local arm = {}
-if raw then
-  local ok, decoded = pcall(cjson.decode, raw)
-  if ok and type(decoded) == 'table' then arm = decoded end
-end
-local alpha = tonumber(arm.alpha) or 1.0
-local beta = tonumber(arm.beta) or 1.0
-local pulls = tonumber(arm.pulls) or 0
-local scale = 1.0 / (math.log(pulls + 2) / math.log(2))
-if scale < 0.1 then scale = 0.1 end
-local r = tonumber(ARGV[2])
-arm.alpha = alpha + r * scale
-arm.beta = beta + (1.0 - r) * scale
-arm.pulls = pulls + 1
-arm.lastUpdated = ARGV[3]
-redis.call('HSET', KEYS[1], ARGV[1], cjson.encode(arm))
-return 1
-"#;
 
 /// Who owns arm updates for a workspace.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,8 +94,16 @@ const MARKER_TTL_SECS: u64 = 86_400;
 /// Fire-and-forget writer for local bandit rewards. One instance per proxy,
 /// held in `AppState`; all methods are called off the request latency path.
 pub struct RewardEngine {
-    update_script: redis::Script,
     mode_cache: RwLock<HashMap<String, (Instant, RewardMode)>>,
+}
+
+impl From<Ownership> for RewardMode {
+    fn from(o: Ownership) -> Self {
+        match o {
+            Ownership::Local => RewardMode::Local,
+            Ownership::Cloud => RewardMode::Cloud,
+        }
+    }
 }
 
 impl Default for RewardEngine {
@@ -132,7 +115,6 @@ impl Default for RewardEngine {
 impl RewardEngine {
     pub fn new() -> Self {
         Self {
-            update_script: redis::Script::new(ARM_UPDATE_SCRIPT),
             mode_cache: RwLock::new(HashMap::new()),
         }
     }
@@ -146,7 +128,7 @@ impl RewardEngine {
     #[allow(clippy::too_many_arguments)]
     pub async fn record(
         &self,
-        valkey: &Arc<ConnectionManager>,
+        store: &Arc<dyn LocalStore>,
         workspace_id: &str,
         routed_model: &str,
         sop_tier: &str,
@@ -154,23 +136,16 @@ impl RewardEngine {
         signals: RewardSignals,
         cfg: &RewardConfig,
     ) {
-        let mut conn = valkey.as_ref().clone();
-        if self.resolve_mode(&mut conn, workspace_id).await == RewardMode::Cloud {
+        if self.resolve_mode(store.as_ref(), workspace_id).await == RewardMode::Cloud {
             return;
         }
 
         let reward = compute_reward(&signals, cfg);
-        let bandit_key = format!("bandit:{}", workspace_id);
         let arm_key = format!("arm:{}:{}:{}", routed_model, sop_tier, task_type);
         let now = chrono::Utc::now().to_rfc3339();
 
-        let res: Result<i64, redis::RedisError> = self
-            .update_script
-            .key(&bandit_key)
-            .arg(&arm_key)
-            .arg(reward)
-            .arg(&now)
-            .invoke_async(&mut conn)
+        let res = store
+            .update_arm(workspace_id, &arm_key, reward, &now)
             .await;
 
         match res {
@@ -217,17 +192,9 @@ impl RewardEngine {
     /// in local mode the reward loop already learns the same failures as
     /// 0-rewards, so leaving a backlog would double-penalize the arms if a
     /// control plane later takes over.
-    async fn refresh_local_ownership(
-        &self,
-        conn: &mut ConnectionManager,
-        workspace_id: &str,
-        marker_key: &str,
-    ) {
-        let _: Result<(), redis::RedisError> =
-            conn.expire(marker_key, MARKER_TTL_SECS as i64).await;
-        let _: Result<(), redis::RedisError> = conn
-            .del(format!("bandit:outage_failures:{}", workspace_id))
-            .await;
+    async fn refresh_local_ownership(&self, store: &dyn LocalStore, workspace_id: &str) {
+        let _ = store.refresh_ownership(workspace_id, MARKER_TTL_SECS).await;
+        let _ = store.clear_outage_failures(workspace_id).await;
     }
 
     /// Resolve arm-update ownership for a workspace, claiming `"local"` via
@@ -237,53 +204,39 @@ impl RewardEngine {
     /// Fail-safe: when the marker cannot be read or claimed (Valkey error),
     /// this stands down (`Cloud`) WITHOUT caching the result, so a transient
     /// outage can never elect a second writer on a cloud-owned workspace.
-    async fn resolve_mode(&self, conn: &mut ConnectionManager, workspace_id: &str) -> RewardMode {
+    async fn resolve_mode(&self, store: &dyn LocalStore, workspace_id: &str) -> RewardMode {
         if let Some(mode) = self.cached_mode(workspace_id) {
             return mode;
         }
 
-        let marker_key = format!("bandit:reward_mode:{}", workspace_id);
-        let current: Option<String> = match conn.get(&marker_key).await {
+        let current = match store.reward_mode(workspace_id).await {
             Ok(v) => v,
             Err(_) => return RewardMode::Cloud, // uncached — re-resolve next request
         };
-        let mode = match current.as_deref() {
-            Some("cloud") => RewardMode::Cloud,
-            Some(_) => {
-                self.refresh_local_ownership(conn, workspace_id, &marker_key)
-                    .await;
+        let mode = match current {
+            Some(Ownership::Cloud) => RewardMode::Cloud,
+            Some(Ownership::Local) => {
+                self.refresh_local_ownership(store, workspace_id).await;
                 RewardMode::Local
             }
-            None => {
-                let claimed: Result<Option<String>, redis::RedisError> = redis::cmd("SET")
-                    .arg(&marker_key)
-                    .arg("local")
-                    .arg("NX")
-                    .arg("EX")
-                    .arg(MARKER_TTL_SECS)
-                    .query_async(conn)
-                    .await;
-                match claimed {
-                    Ok(Some(_)) => {
-                        // Fresh claim: drop any stale outage backlog so a later
-                        // cloud takeover cannot double-count failures the local
-                        // loop learns as 0-rewards from here on.
-                        let _: Result<(), redis::RedisError> = conn
-                            .del(format!("bandit:outage_failures:{}", workspace_id))
-                            .await;
-                        RewardMode::Local
-                    }
-                    Ok(None) => {
-                        // Lost the race — a control plane may have claimed "cloud".
-                        match conn.get::<_, Option<String>>(&marker_key).await {
-                            Ok(Some(v)) if v == "cloud" => RewardMode::Cloud,
-                            Ok(_) => RewardMode::Local,
-                            Err(_) => return RewardMode::Cloud, // uncached
-                        }
-                    }
-                    Err(_) => return RewardMode::Cloud, // uncached
+            None => match store.claim_local_ownership(workspace_id, MARKER_TTL_SECS).await {
+                Ok(ClaimOutcome::Claimed) => {
+                    // Fresh claim: drop any stale outage backlog so a later
+                    // cloud takeover cannot double-count failures the local
+                    // loop learns as 0-rewards from here on.
+                    let _ = store.clear_outage_failures(workspace_id).await;
+                    RewardMode::Local
                 }
-            }
+                Ok(ClaimOutcome::Lost) => {
+                    // Lost the race — a control plane may have claimed "cloud".
+                    match store.reward_mode(workspace_id).await {
+                        Ok(Some(o)) => o.into(),
+                        Ok(None) => RewardMode::Local,
+                        Err(_) => return RewardMode::Cloud, // uncached
+                    }
+                }
+                Err(_) => return RewardMode::Cloud, // uncached
+            },
         };
 
         self.store_mode(workspace_id, mode);
