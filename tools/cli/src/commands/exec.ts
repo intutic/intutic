@@ -31,14 +31,16 @@ import pc from 'picocolors'
  * @returns Record of env vars to inject
  */
 export function buildProxyEnv(apiKey: string, devMode: boolean): Record<string, string> {
-  const proxyUrl = devMode
-    ? 'http://localhost:4000/v1'
-    : 'http://localhost:4000/v1'
-
-  // Host-only URL (no /v1) — used by Claude Code and Goose
-  const proxyHost = devMode
-    ? 'http://localhost:4000'
-    : 'http://localhost:4000'
+  // The local proxy is the default, and for open core it is the only proxy
+  // there is. This used to point at a remote host unless --dev was passed, so
+  // `intutic exec` sent both the agent's traffic and OPENAI_API_KEY off the
+  // machine -- to a host that does not resolve, so the command could not work
+  // either. `intutic start` binds :4000; that is what these should reach.
+  //
+  // Set INTUTIC_PROXY_URL to point at a proxy you run somewhere else.
+  const proxyHost = (process.env.INTUTIC_PROXY_URL ?? 'http://localhost:4000').replace(/\/+$/, '')
+  const proxyUrl = `${proxyHost}/v1`
+  void devMode
 
   return {
     // OpenAI-compatible (covers LiteLLM, LangChain, CrewAI, ADK, Aider)
