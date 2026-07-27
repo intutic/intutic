@@ -1127,6 +1127,27 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // harness behaves exactly as before.
     let node = crate::graph::identity_from_headers(&headers, &session_id);
 
+    // Address of this node's own graph notification queue. `None` when the
+    // request is not part of a real graph — a graph of one has no siblings to
+    // hear from, and draining a queue nobody writes to is pure overhead on
+    // every single-agent request.
+    let graph_key = if node.graph_id == session_id {
+        None
+    } else {
+        // Join the graph on every request, not just when something trips. A
+        // node that never misbehaves still has to be a known member, or a
+        // sibling's finding has nowhere to be delivered.
+        state
+            .store
+            .touch_graph_node(
+                &node.graph_id,
+                &node.node_id,
+                crate::plugins::anomaly::broadcast::NODE_TTL_SECS,
+            )
+            .await;
+        Some(format!("{}:{}", node.graph_id, node.node_id))
+    };
+
     let wasm_ctx = crate::wasm::context::RequestContext {
         session_id: session_id.clone(),
         workspace_id: workspace_id.clone(),
@@ -1181,6 +1202,18 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     f.reason
                 );
             }
+            // Tell the siblings. A verdict stops this request, but the node
+            // about to repeat the same work does not otherwise learn of it.
+            // Advisory and best-effort — the decision is already made, so a
+            // delivery failure must not become a serving failure.
+            crate::plugins::anomaly::broadcast::broadcast_findings(
+                &state.store,
+                &wasm_ctx,
+                &findings,
+                &chrono::Utc::now().to_rfc3339(),
+            )
+            .await;
+
             let code = if worst.kill {
                 "policy_denied"
             } else {
@@ -1841,6 +1874,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         let body_json_clone = body_json.clone();
         let key_prefix_clone = key_prefix.to_string();
         let session_id_clone = session_id.clone();
+        // Per-node graph queue key. Composed here, where identity is in
+        // scope, because the streaming closures below only receive clones.
+        let graph_key_clone = graph_key.clone();
         let requested_model_clone = model.clone();
         let actual_model_clone = actual_model.clone();
         let task_type_clone = task_type.clone();
@@ -1925,7 +1961,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                             ResponsePostProcessor::new(Arc::clone(&cp_clone), harness, proto)
                                         {
                                             if let Some(gov_block) = pp
-                                                .process(&session_id_clone, &workspace_id_clone)
+                                                .process(&session_id_clone, &workspace_id_clone, graph_key_clone.as_deref())
                                                 .await
                                             {
                                                 let _ = tx
@@ -2035,7 +2071,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                                 proto,
                                             ) {
                                                 if let Some(gov_block) = pp
-                                                    .process(&session_id, &workspace_id_clone)
+                                                    .process(&session_id, &workspace_id_clone, graph_key_clone.as_deref())
                                                     .await
                                                 {
                                                     let _ = tx
