@@ -47,7 +47,7 @@ Developer → AI Agent → Intutic Proxy (:4000) → LLM Provider
 
 This is what you get by default. Open core ships no control plane, and with `policy.control_plane_url` unset the policy pre-check is skipped entirely.
 
-### Connected (Cloud / self-hosted control plane)
+### Connected (self-hosted control plane)
 
 Setting `policy.control_plane_url` — or the `CONTROL_PLANE_URL` environment variable — adds a control plane for storage, analysis and centrally managed policy:
 
@@ -65,7 +65,7 @@ Developer → AI Agent → Intutic Proxy (:4000) → LLM Provider
                       └────────────┘
 ```
 
-In this mode, and only in this mode, verdicts and traces are sent to the control plane. Point it at Intutic Cloud or at a control plane you host yourself. Prompts and completions are still never transmitted.
+In this mode, and only in this mode, verdicts and traces are sent to the control plane. Point it at a control plane you host yourself. Prompts and completions are still never transmitted.
 
 ---
 
@@ -151,13 +151,14 @@ Connected harnesses are scored on a four-tier system:
 
 ---
 
+<!-- ENTERPRISE_ONLY_START -->
 ## Infrastructure Security
 
 | Layer | Controls |
 |---|---|
 | **Network** | VPC isolation, private subnets, no public database endpoints |
 | **Compute** | GKE with node auto-upgrade, workload identity, pod security standards |
-| **Secrets** | GCP Secret Manager — never committed to source control |
+| **Secrets** | A managed secret store — never committed to source control |
 | **Monitoring** | Structured logging with trace context |
 | **Supply chain** | Dependabot, lockfile integrity, signed container images |
 
@@ -166,6 +167,7 @@ Connected harnesses are scored on a four-tier system:
 
 ---
 
+<!-- ENTERPRISE_ONLY_END -->
 ## Responsible Disclosure
 
 If you discover a security vulnerability, please report it to **support@intutic.ai**. We aim to acknowledge reports within 24 hours and provide a fix or mitigation within 7 business days.

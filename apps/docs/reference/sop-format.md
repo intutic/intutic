@@ -121,7 +121,7 @@ Use the API to transition an SOP:
 curl -X POST -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"target_state": "VALIDATED", "reason": "Approved by team lead"}' \
-  "https://api.intutic.ai/api/v1/sops/sop_abc123/transition"
+  "https://your-control-plane.example/api/v1/sops/sop_abc123/transition"
 ```
 
 ## Change Classification
@@ -153,7 +153,7 @@ View the dependency graph:
 
 ```bash
 curl -H "Authorization: Bearer $TOKEN" \
-  "https://api.intutic.ai/api/v1/sops/sop_abc123/dependencies"
+  "https://your-control-plane.example/api/v1/sops/sop_abc123/dependencies"
 ```
 
 ## Health Metrics
@@ -162,7 +162,7 @@ Each SOP has health metrics showing how effective it is:
 
 ```bash
 curl -H "Authorization: Bearer $TOKEN" \
-  "https://api.intutic.ai/api/v1/sops/sop_abc123/health"
+  "https://your-control-plane.example/api/v1/sops/sop_abc123/health"
 ```
 
 Health metrics include enforcement hit rate, false positive rate, and compliance improvement over time.

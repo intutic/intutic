@@ -217,6 +217,38 @@ export default defineConfig({
           /<!-- ENTERPRISE_ONLY_START -->[\s\S]*?<!-- ENTERPRISE_ONLY_END -->/gm,
           ''
         )
+
+        // Fail the build on hosted-infrastructure terms that survive stripping.
+        //
+        // ENTERPRISE_ONLY is opt-in, so it only protects what somebody
+        // remembered to wrap. Everything else ships. security.md was the proof:
+        // its two badged sections were wrapped, while "Infrastructure Security"
+        // — GKE, GCP Secret Manager, VPC layout — sat unwrapped and published
+        // our own hosted topology to open-core readers, because it carried no
+        // Enterprise badge for the page-level exclusion to key on.
+        //
+        // These terms describe infrastructure an open-core user does not have
+        // and cannot reach. If one is genuinely needed, wrap it rather than
+        // widening this list.
+        const BANNED = [
+          'Intutic Cloud',
+          'GCP Secret Manager',
+          'app.intutic.ai',
+          'proxy.intutic.ai',
+          'api.intutic.ai',
+        ]
+        const src = state.src
+        const found = BANNED.filter((t) => src.includes(t))
+        if (found.length > 0) {
+          const where = state.env?.relativePath ?? 'unknown page'
+          throw new Error(
+            `[docs] OSS build refuses to publish hosted-infrastructure references.\n` +
+              `  page:  ${where}\n` +
+              `  terms: ${found.join(', ')}\n` +
+              `  Wrap them in <!-- ENTERPRISE_ONLY_START --> … <!-- ENTERPRISE_ONLY_END -->, ` +
+              `or reword to describe a control plane generically.`
+          )
+        }
       })
     },
   },
