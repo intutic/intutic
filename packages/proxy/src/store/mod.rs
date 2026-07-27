@@ -377,6 +377,31 @@ pub trait LocalStore: Send + Sync + 'static {
     /// than guessing at a topology it cannot see.
     async fn graph_members(&self, graph_id: &str) -> Vec<String>;
 
+    /// Whether a specific node is currently a live member of a graph.
+    ///
+    /// A single-key membership test rather than fetching the whole set,
+    /// because this runs on the request path to check whether a caller's
+    /// declared parent is still alive.
+    ///
+    /// `None` means the store cannot answer — standalone, or the graph is
+    /// unknown. Callers must treat that as "no opinion" and not as "dead",
+    /// since concluding a parent is gone on the basis of a store that never
+    /// tracked it would orphan every node in a graph.
+    async fn is_graph_member(&self, graph_id: &str, node_id: &str) -> Option<bool>;
+
+    /// Add to a graph's running cost and return the new total.
+    ///
+    /// Aggregated across every node so fan-out is visible: a graph spawning
+    /// eight workers spends eight times what any one of them was budgeted, and
+    /// a per-node view cannot see that at all.
+    ///
+    /// Returns `None` when the store cannot aggregate, which reads as "no
+    /// spend signal" rather than zero.
+    async fn add_graph_spend(&self, graph_id: &str, amount: f64, ttl_secs: u64) -> Option<f64>;
+
+    /// A graph's cost so far, across all nodes.
+    async fn graph_spend(&self, graph_id: &str) -> Option<f64>;
+
     /// Append a judged chunk to `session:chunks:{sid}`.
     ///
     /// `ttl_secs` is `Some` on the streaming paths and `None` on the

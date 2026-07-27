@@ -398,6 +398,36 @@ impl LocalStore for ValkeyStore {
             .unwrap_or_default()
     }
 
+    async fn is_graph_member(&self, graph_id: &str, node_id: &str) -> Option<bool> {
+        let mut conn = self.conn();
+        let key = format!("graph:{graph_id}:nodes");
+        // An unknown graph is not the same as a dead node — if we never
+        // tracked this graph, we have no opinion on who is alive in it.
+        let exists: bool = conn.exists(&key).await.ok()?;
+        if !exists {
+            return None;
+        }
+        conn.sismember(&key, node_id).await.ok()
+    }
+
+    async fn add_graph_spend(&self, graph_id: &str, amount: f64, ttl_secs: u64) -> Option<f64> {
+        let mut conn = self.conn();
+        let key = format!("graph:{graph_id}:spend");
+        let total: f64 = conn.incr(&key, amount).await.ok()?;
+        // Same TTL as membership, so a finished graph's cost does not linger
+        // and get attributed to a later graph that reuses the id.
+        let _: Result<(), redis::RedisError> = conn.expire(&key, ttl_secs as i64).await;
+        Some(total)
+    }
+
+    async fn graph_spend(&self, graph_id: &str) -> Option<f64> {
+        let mut conn = self.conn();
+        conn.get::<_, Option<f64>>(format!("graph:{graph_id}:spend"))
+            .await
+            .ok()
+            .flatten()
+    }
+
     async fn push_session_chunk(
         &self,
         session_id: &str,

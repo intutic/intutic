@@ -89,6 +89,25 @@ pub struct NodeIdentity {
     /// identifies the immediate parent but not depth, and deriving it needs the
     /// whole trace tree, which a stateless hot-path evaluation cannot assemble.
     pub depth: u32,
+
+    // ── Graph aggregates ────────────────────────────────────────────────
+    //
+    // Read from the store on the request path and handed to detectors as
+    // plain data, which is what keeps every detector a pure function of one
+    // context rather than something that reaches for I/O mid-evaluation. The
+    // tool sequence already works this way.
+    //
+    // All three are Option because "the store cannot tell us" and "the answer
+    // is zero/false" are different, and conflating them produces exactly the
+    // wrong verdict: a graph that has spent nothing looks identical to one
+    // whose cost we never tracked.
+    /// Total cost across every node in this graph, if known.
+    pub graph_spend_usd: Option<f64>,
+    /// The per-node budget ceiling this graph is measured against, if known.
+    pub graph_budget_usd: Option<f64>,
+    /// Whether this node's declared parent is still a live graph member.
+    /// `None` when there is no parent, or the store cannot say.
+    pub parent_alive: Option<bool>,
 }
 
 /// Context passed to WASM plugins on each request
@@ -146,6 +165,9 @@ mod tests {
                 graph_id: "graph-42".into(),
                 parent_session_id: "00f067aa0ba902b7".into(),
                 depth: 2,
+                graph_spend_usd: Some(3.25),
+                graph_budget_usd: Some(10.0),
+                parent_alive: Some(true),
             },
         }
     }

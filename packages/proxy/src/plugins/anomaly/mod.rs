@@ -203,6 +203,8 @@ impl DetectorRegistry {
                 Box::new(ToolDiversityCollapseDetector::default()),
                 Box::new(ContextGrowthDetector::default()),
                 Box::new(BudgetExhaustionDetector::default()),
+                Box::new(SpawnBudgetBreachDetector::default()),
+                Box::new(OrphanExecutionDetector::default()),
             ],
         }
     }
