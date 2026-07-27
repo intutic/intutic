@@ -9,12 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **`intutic connect` downloaded the wrong proxy.** The release tag it fetched
-  the native binary from was pinned to a literal `1.6.0`, so every version
-  since shipped a CLI that installed a proxy several releases behind itself. A
-  1.7.0 user got the 1.6.0 binary, which still required Valkey and had none of
-  the standalone work. It now reads the version from its own `package.json`,
-  the same fix `intutic --version` got in 1.6.3.
+- **The CLI installed, and then kept, the wrong proxy binary.** Two halves of
+  one bug:
+
+  The release tag `intutic connect` fetched the binary from was pinned to a
+  literal `1.6.0`, so every version since shipped a CLI that installed a proxy
+  several releases behind itself. A 1.7.0 user got the 1.6.0 binary, which
+  still required Valkey and had none of the standalone work. It now reads the
+  version from its own `package.json`, the same fix `intutic --version` got in
+  1.6.3.
+
+  Worse, the download cached to a single unversioned `~/.intutic/bin/intutic-proxy`
+  that nothing ever revalidated: the launcher used the first binary it found and
+  only downloaded when there was none. So upgrading the package did not upgrade
+  the binary, and anyone who had already run `intutic connect` or
+  `npx @intutic/proxy` would have stayed on the old proxy no matter how many
+  times they upgraded. The cache is now keyed by version, and the old
+  unversioned entry is deleted on first run.
 - **Every install path pointed at `intutic connect`.** The README, the docs
   landing page, the marketing site and 18 integration guides all opened with
   `intutic init` then `intutic connect`, which starts the sync daemon and
