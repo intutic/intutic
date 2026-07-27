@@ -21,6 +21,24 @@
 //! (write temp, `rename`), so a crash mid-write cannot leave a torn file; the
 //! worst case is losing the most recent update, which costs one pull.
 //!
+//! ## Two proxies, one `$HOME`
+//!
+//! Atomic replace stops a *torn* file but not a *lost update*: each process
+//! writes its whole view, so the last writer would otherwise erase whatever the
+//! other had learned. Persisting therefore takes an exclusive `flock` on a
+//! sidecar lock file and merges the on-disk state before writing.
+//!
+//! The merge keeps, per arm, whichever copy has more `pulls`. That is
+//! convergent rather than linearizable — two processes that both advance the
+//! same arm keep the further-along one instead of summing them — which is the
+//! right trade here: arm state is a running estimate, and losing a handful of
+//! pulls costs a little exploration, whereas summing would double-count shared
+//! history and skew the posterior. Arms only one process has seen are always
+//! preserved.
+//!
+//! Locking is Unix-only. On other platforms the merge still runs, which
+//! narrows the race without closing it.
+//!
 //! ## What this deliberately does not have
 //!
 //! * **TTLs on ownership.** `ttl_secs` is accepted and ignored. The marker
@@ -54,8 +72,8 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use super::{
-    CachedResponse, ClaimOutcome, ControlPlaneAuth, ControlPlaneCache, FeatureFlags, JudgeScope,
-    LocalStore, Ownership, SessionRouting,
+    CachedResponse, ClaimOutcome, ControlPlaneAuth, ControlPlaneCache, FeatureFlags, HardCapStatus,
+    JudgeScope, LocalStore, NotifyScope, Ownership, SessionRouting, TokenBaseline,
 };
 use crate::routing::bandit::BanditArmState;
 use crate::routing::reward::apply_update;
@@ -79,6 +97,79 @@ struct Snapshot {
     /// standalone proxy has none.
     #[serde(default)]
     local_owned: Vec<String>,
+}
+
+impl Snapshot {
+    /// Fold another process's snapshot into this one. Per arm the copy with
+    /// more `pulls` wins; arms only the other side has are adopted wholesale.
+    fn merge_from(&mut self, other: Snapshot) {
+        for (workspace_id, other_arms) in other.arms {
+            let mine = self.arms.entry(workspace_id).or_default();
+            for (arm_key, other_arm) in other_arms {
+                match mine.get(&arm_key) {
+                    Some(existing) if existing.pulls >= other_arm.pulls => {}
+                    _ => {
+                        mine.insert(arm_key, other_arm);
+                    }
+                }
+            }
+        }
+        for ws in other.local_owned {
+            if !self.local_owned.contains(&ws) {
+                self.local_owned.push(ws);
+            }
+        }
+    }
+}
+
+/// Exclusive advisory lock held for the duration of a snapshot update.
+///
+/// Unix-only; elsewhere this is a no-op and the merge alone narrows the race.
+/// Acquisition failure is not fatal — a snapshot written without the lock is
+/// still atomic and still merged, just not serialised against a concurrent
+/// writer.
+struct FileLock {
+    #[cfg(unix)]
+    file: Option<std::fs::File>,
+}
+
+impl FileLock {
+    fn acquire(path: &std::path::Path) -> Self {
+        #[cfg(unix)]
+        {
+            use std::os::unix::io::AsRawFd;
+            let file = std::fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(false)
+                .open(path)
+                .ok();
+            if let Some(f) = &file {
+                // SAFETY: `f` owns a valid fd for the duration of this call.
+                if unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX) } != 0 {
+                    tracing::debug!("could not lock {}; proceeding unlocked", path.display());
+                    return Self { file: None };
+                }
+            }
+            Self { file }
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = path;
+            Self {}
+        }
+    }
+}
+
+impl Drop for FileLock {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        if let Some(f) = &self.file {
+            use std::os::unix::io::AsRawFd;
+            // SAFETY: `f` is still alive; releasing a lock we hold.
+            unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_UN) };
+        }
+    }
 }
 
 #[derive(Default)]
@@ -206,13 +297,15 @@ impl MemoryStore {
         store
     }
 
-    /// Atomic whole-file replace. Best-effort: a snapshot failure must never
-    /// fail the request that triggered it, so errors are logged and swallowed.
+    /// Atomic whole-file replace, under an exclusive cross-process lock and
+    /// merged with whatever is already on disk. Best-effort: a snapshot failure
+    /// must never fail the request that triggered it, so errors are logged and
+    /// swallowed.
     fn persist(&self) {
         let Some(path) = &self.snapshot_path else {
             return;
         };
-        let snapshot = {
+        let mut snapshot = {
             let Ok(arms) = self.arms.lock() else { return };
             let Ok(modes) = self.modes.lock() else { return };
             Snapshot {
@@ -225,15 +318,27 @@ impl MemoryStore {
             }
         };
 
-        let Ok(encoded) = serde_json::to_string(&snapshot) else {
-            return;
-        };
         if let Some(dir) = path.parent() {
             if let Err(e) = std::fs::create_dir_all(dir) {
                 tracing::warn!("could not create {}: {}", dir.display(), e);
                 return;
             }
         }
+
+        // Held for the whole read-merge-write-rename. The lock lives on a
+        // sidecar path because the snapshot itself is replaced by `rename`,
+        // which would detach a lock taken on the old inode.
+        let _guard = FileLock::acquire(&path.with_extension("json.lock"));
+
+        if let Ok(raw) = std::fs::read_to_string(path) {
+            if let Ok(on_disk) = serde_json::from_str::<Snapshot>(&raw) {
+                snapshot.merge_from(on_disk);
+            }
+        }
+
+        let Ok(encoded) = serde_json::to_string(&snapshot) else {
+            return;
+        };
         // Same-directory temp so the rename stays within one filesystem and is
         // therefore atomic; a crash leaves either the old file or the new one.
         let tmp = path.with_extension("json.tmp");
@@ -521,8 +626,12 @@ impl ControlPlaneCache for NullControlPlaneCache {
         ControlPlaneAuth::Unmanaged
     }
 
-    async fn hard_block(&self, _workspace_id: &str) -> bool {
-        false
+    /// `Clear`, never `Unverifiable`. Standalone has no control plane to have
+    /// set a cap, so there is nothing unverifiable about the answer — this is a
+    /// definite "no cap", not a failed lookup. Standalone spend stays bounded
+    /// by `local_spend`'s on-disk daily cap.
+    async fn hard_block(&self, _workspace_id: &str) -> HardCapStatus {
+        HardCapStatus::Clear
     }
 
     async fn loop_status(&self, _loop_run_id: &str) -> Option<String> {
@@ -547,5 +656,25 @@ impl ControlPlaneCache for NullControlPlaneCache {
 
     async fn wasm_binary(&self, _sha256: &str) -> anyhow::Result<Option<Vec<u8>>> {
         Ok(None)
+    }
+
+    async fn predict_gate_threshold(&self, _workspace_id: &str) -> Option<f64> {
+        None
+    }
+
+    async fn token_baseline(
+        &self,
+        _workspace_id: &str,
+        _model: &str,
+        _bucket: &str,
+    ) -> Option<TokenBaseline> {
+        None
+    }
+
+    /// Always empty. Nothing in open core writes `gov:notify:*` — the queues
+    /// are filled by the control plane's corrective-prompt and cron services,
+    /// so standalone is a consumer with no producer.
+    async fn drain_notifications(&self, _scope: NotifyScope, _id: &str) -> Vec<String> {
+        Vec::new()
     }
 }

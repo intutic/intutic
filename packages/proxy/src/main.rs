@@ -230,9 +230,6 @@ async fn main() -> anyhow::Result<()> {
         reward_engine: std::sync::Arc::new(routing::reward::RewardEngine::new()),
         store,
         control_plane,
-        // Only Some when the Valkey backend was actually selected — see the
-        // field's docs on why an env read here would be wrong.
-        valkey_url: valkey.as_ref().map(|_| valkey_url.clone()),
     };
 
     // Ensure local CA exists for TLS MITM (generates ca.crt/ca.key if missing)
