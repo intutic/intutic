@@ -623,6 +623,29 @@ async fn upgrading_to_valkey_carries_standalone_learning() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
+/// Auth fails CLOSED when the control plane cannot be reached.
+///
+/// OWASP's `Fail Securely` test for an authentication control is whether taking
+/// the credential store offline lets you in. `Unavailable` is distinct from
+/// `Rejected` so the caller can answer 503 (retry — the key may be fine) rather
+/// than 401 (your key is bad), but either way the request is not admitted.
+#[tokio::test]
+async fn unreachable_control_plane_does_not_admit_unvalidated_keys() {
+    let client = redis::Client::open("redis://127.0.0.1:6399").unwrap();
+    let Ok(mgr) = redis::aio::ConnectionManager::new(client).await else {
+        eprintln!("skipping: could not construct a manager for the dead address");
+        return;
+    };
+    let cp = ValkeyControlPlaneCache::new(Arc::new(mgr));
+    assert!(
+        matches!(
+            cp.auth_context("vk_some_key").await,
+            ControlPlaneAuth::Unavailable
+        ),
+        "an unreachable control plane must not report a key as Known"
+    );
+}
+
 /// The hard spend cap fails CLOSED when it cannot be verified.
 ///
 /// This is deliberately the opposite of the usual rate-limiter convention. A
