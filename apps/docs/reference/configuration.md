@@ -14,7 +14,7 @@ These variables configure the local client utilities, sync daemon, and proxy gat
 | :--- | :---: | :---: | :--- |
 | `VALKEY_URL` | ❌ | `redis://127.0.0.1:6379` | Local Valkey cache connection URL |
 | `INTUTIC_API_KEY` | ❌ | — | Virtual API key (`vk_*`) used to authenticate and sync workspace rules |
-| `CONTROL_PLANE_URL` | ❌ | `https://api.intutic.ai` | Control plane base URL for remote SOP and policy syncing |
+| `CONTROL_PLANE_URL` | ❌ | `https://your-control-plane.example` | Control plane base URL for remote SOP and policy syncing |
 | `CONFIG_CAPTURE_INTERVAL` | ❌ | `5` | Sync loop cycles between local configuration snapshots |
 | `MCP_DAEMON_SOCKET` | ❌ | `~/.intutic/mcp-proxy.sock` | Daemon Unix IPC socket path |
 | `INTUTIC_WASM_DIR` | ❌ | `~/.intutic/wasm` | Overrides the local WASM rule directory; takes precedence over the `intutic_settings.wasm_local_dir` config file value |

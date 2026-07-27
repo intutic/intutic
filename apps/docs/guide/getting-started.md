@@ -97,7 +97,7 @@ You'll be prompted for your email and password. On success:
 
 ```
 ╭─ Intutic — Authentication ─╮
-Control plane: https://api.intutic.ai
+Control plane: https://your-control-plane.example
 
 ✔ Authenticated as you@company.com
   Workspace: wk_k8x9m2p4
@@ -226,7 +226,7 @@ INTUTIC_STANDALONE=1 intutic-proxy
 `intutic connect` starts the **sync daemon**, which mirrors governance config
 with a control plane. Open core does not include one, so that command will ask
 you to authenticate against an account you have no way to create. Use it only if
-you are running a control plane yourself, or on Intutic Cloud.
+you are running a control plane yourself.
 :::
 
 ### Connected (Cloud / self-hosted control plane)
@@ -255,7 +255,7 @@ Standalone has no such cache to lose, which is why `intutic start` degrades
 happily and `intutic connect` does not.
 :::
 
-### Moving from standalone to Cloud
+### Attaching a control plane
 
 Nothing to migrate and nothing to rewrite. `intutic connect` sets
 `CONTROL_PLANE_URL`, and from that point the control plane is authoritative:

@@ -58,15 +58,15 @@ intutic traces list --json
 ```bash
 # List traces with pagination
 curl -H "Authorization: Bearer $TOKEN" \
-  "https://api.intutic.ai/api/v1/traces?limit=20&offset=0"
+  "https://your-control-plane.example/api/v1/traces?limit=20&offset=0"
 
 # Filter by enforcement action and time
 curl -H "Authorization: Bearer $TOKEN" \
-  "https://api.intutic.ai/api/v1/traces?enforcement=KILL&since=2026-06-01T00:00:00Z"
+  "https://your-control-plane.example/api/v1/traces?enforcement=KILL&since=2026-06-01T00:00:00Z"
 
 # Filter by model
 curl -H "Authorization: Bearer $TOKEN" \
-  "https://api.intutic.ai/api/v1/traces?model=gpt-4o"
+  "https://your-control-plane.example/api/v1/traces?model=gpt-4o"
 ```
 
 **Query parameters:**
@@ -99,7 +99,7 @@ Returns the full trace detail including:
 
 ```bash
 curl -H "Authorization: Bearer $TOKEN" \
-  "https://api.intutic.ai/api/v1/traces/tr_abc123"
+  "https://your-control-plane.example/api/v1/traces/tr_abc123"
 ```
 
 **Response:** Full trace object with all fields.
@@ -121,7 +121,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" \
     "classification": "WASTED",
     "reason": "Agent looped on the same file 5 times"
   }' \
-  "https://api.intutic.ai/api/v1/usage/classify"
+  "https://your-control-plane.example/api/v1/usage/classify"
 ```
 
 **Request body:**
