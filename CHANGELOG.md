@@ -29,16 +29,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Every install path pointed at `intutic connect`.** The README, the docs
   landing page, the marketing site and 18 integration guides all opened with
   `intutic init` then `intutic connect`, which starts the sync daemon and
-  requires an account. Anyone without one hit a login wall on step 2 of a
-  "30-second" quickstart. They all lead with `intutic start` now, with a note
-  pointing at `connect` for people who have an account (#1).
+  requires credentials for a control plane, which open core does not include.
+  Anyone without one hit a login wall on step 2 of a "30-second" quickstart.
+  They all lead with `intutic start` now (#1).
 - **`integrations/standalone.md` documented a flag that does not exist.**
   `intutic connect --upstream-url ...` — `--upstream-url` is an option of
   `start`, not `connect`, so the command exited with an unknown-option error.
 - **"Not authenticated" told you to run a command that would also fail.**
   Eight commands emitted `Run \`intutic login\` first` with no indication of
-  what an account is for, where to get one, or that `intutic start` needs
-  none. They now say all three.
+  the command needed, or that `intutic start` needs nothing. They now say both.
 
 ## [1.7.0] - 2026-07-27
 
@@ -84,8 +83,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   clobbering each other. Provider credentials are held in memory only and are
   never written to disk.
 - **Learning carries over on upgrade.** Connecting a control plane seeds Valkey
-  from the local snapshot, so moving to Cloud does not reset the workspace to
-  cold start. Only arms Valkey does not already have are seeded; existing
+  from the local snapshot, so attaching a control plane does not reset the
+  workspace to cold start. Only arms Valkey does not already have are seeded; existing
   control-plane state is never overwritten.
 - **`INTUTIC_STANDALONE=1`** forces standalone regardless of what is listening
   on the Valkey port.
@@ -112,7 +111,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`intutic start`** — one command to run the proxy standalone: no account, no
+- **`intutic start`** — one command to run the proxy standalone: no
   control plane, no configuration file. The Valkey provisioning ladder
   (existing instance, then Docker, then a local `valkey-server`/`redis-server`)
   previously sat below `intutic connect`'s credential check, so the open-core
