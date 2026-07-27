@@ -5,6 +5,74 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-07-27
+
+### ⚠️ Breaking
+
+- **Valkey is no longer required.** The proxy runs standalone with an in-memory,
+  file-backed store. Nothing to change for existing setups — a reachable Valkey
+  is still used whenever one is found — but the boot behaviour differs:
+
+  | Environment | Behaviour |
+  |---|---|
+  | `CONTROL_PLANE_URL` set, Valkey unreachable | **fatal** (was: fatal) |
+  | no `CONTROL_PLANE_URL`, Valkey unreachable | **standalone** (was: fatal) |
+  | `INTUTIC_STANDALONE=1` | standalone, no probe (new) |
+
+- **Control-plane-managed deployments now fail closed on an unverifiable
+  request.** Previously, if Valkey became unreachable *after* startup, the proxy
+  admitted requests it could neither authenticate nor budget-check. Both gates
+  now reject instead:
+
+  - `503 AUTH_UNVERIFIABLE` — the virtual key could not be validated
+  - `503 BUDGET_UNVERIFIABLE` — spend could not be verified against the cap
+
+  Both are retryable; clients should back off rather than treat the key as
+  invalid. This affects managed deployments only. Standalone has no control
+  plane to be unreachable and is unaffected.
+
+  Rationale: authentication and hard spend caps are security and financial
+  controls, where wrongly allowing is unbounded and wrongly denying costs a
+  retry. Rate limiting and feature flags continue to fail open.
+
+### Added
+
+- **Standalone open core.** `intutic start` no longer exits when Valkey cannot
+  be provisioned — it warns and runs. Routing, policies, DLP, WASM rules and
+  local spend caps all work without one. Closes the last dead-end in the
+  documented install (#1).
+- **Durable standalone learning.** Bandit arm state persists to
+  `~/.intutic/bandit-state.json` and reloads on boot, so a per-session CLI proxy
+  accumulates learning across restarts and reaches the 20-pull threshold at
+  which Thompson sampling engages. Writes are atomic and merged under an
+  exclusive lock, so two proxies sharing a home directory converge instead of
+  clobbering each other. Provider credentials are held in memory only and are
+  never written to disk.
+- **Learning carries over on upgrade.** Connecting a control plane seeds Valkey
+  from the local snapshot, so moving to Cloud does not reset the workspace to
+  cold start. Only arms Valkey does not already have are seeded; existing
+  control-plane state is never overwritten.
+- **`INTUTIC_STANDALONE=1`** forces standalone regardless of what is listening
+  on the Valkey port.
+
+### Changed
+
+- **The proxy's entire Valkey surface moved behind two traits** (`LocalStore`,
+  `ControlPlaneCache`). All 20 per-call-site connection clones are gone, and
+  `redis::` now appears in exactly two files. Wire format is unchanged: the
+  arm-update Lua runs verbatim and cached responses keep their field names, so
+  state written by this version stays readable by the control plane's crons.
+- **The standalone Valkey probe is bounded at 1.5s.** Falling back previously
+  waited on the client's full retry budget (~9s) before starting.
+
+### Fixed
+
+- The cost-prediction gate and notification reader no longer construct a Redis
+  client per request; both read only control-plane-written keys and are inert
+  without one.
+- `apps/docs/guide/faqs.md` described the budget gate as failing closed while
+  the code failed open. The code now matches the documentation.
+
 ## [1.6.0] - 2026-07-25
 
 ### ⚠️ Breaking
