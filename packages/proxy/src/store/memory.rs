@@ -609,6 +609,26 @@ impl LocalStore for MemoryStore {
         Vec::new()
     }
 
+    /// `None` — no opinion, not "dead".
+    ///
+    /// Returning `Some(false)` here would declare every parent gone and orphan
+    /// an entire graph on a store that never tracked it.
+    async fn is_graph_member(&self, _graph_id: &str, _node_id: &str) -> Option<bool> {
+        None
+    }
+
+    /// `None` — no spend signal, not zero.
+    ///
+    /// Zero would read as "this graph has cost nothing", which is exactly the
+    /// wrong conclusion to hand a budget detector.
+    async fn add_graph_spend(&self, _graph_id: &str, _amount: f64, _ttl_secs: u64) -> Option<f64> {
+        None
+    }
+
+    async fn graph_spend(&self, _graph_id: &str) -> Option<f64> {
+        None
+    }
+
     /// `ttl_secs` ignored — chunks are read back within the same request that
     /// wrote them, and the process boundary already bounds their lifetime.
     async fn push_session_chunk(
@@ -708,5 +728,25 @@ impl ControlPlaneCache for NullControlPlaneCache {
     /// so standalone is a consumer with no producer.
     async fn drain_notifications(&self, _scope: NotifyScope, _id: &str) -> Vec<String> {
         Vec::new()
+    }
+}
+
+#[cfg(test)]
+mod graph_tests {
+    use super::*;
+
+    /// A store that cannot track graphs must say so, not guess.
+    ///
+    /// The distinction is load-bearing for two detectors. `Some(false)` for
+    /// liveness would orphan every node in every graph; `Some(0.0)` for spend
+    /// would tell a budget detector the graph has cost nothing. Both are the
+    /// wrong answer, and both are what a naive default would produce.
+    #[tokio::test]
+    async fn unknowable_graph_facts_are_none_not_defaults() {
+        let s = MemoryStore::new();
+        assert_eq!(s.is_graph_member("g", "n").await, None);
+        assert_eq!(s.graph_spend("g").await, None);
+        assert_eq!(s.add_graph_spend("g", 1.0, 60).await, None);
+        assert!(s.graph_members("g").await.is_empty());
     }
 }

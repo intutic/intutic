@@ -1131,9 +1131,26 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // request is not part of a real graph — a graph of one has no siblings to
     // hear from, and draining a queue nobody writes to is pure overhead on
     // every single-agent request.
+    let mut node = node;
     let graph_key = if node.graph_id == session_id {
+        // A graph of one: no siblings, no aggregates to gather, and no reason
+        // to spend round trips on a store for either.
         None
     } else {
+        // Ask about the parent BEFORE joining. Registering first creates the
+        // graph, and the freshly-created set contains only this node — so the
+        // parent would look dead in every brand-new graph, and a node would
+        // orphan itself the moment it arrived.
+        //
+        // Only asked when the caller actually claims a parent, so a root node
+        // costs nothing extra.
+        if !node.parent_session_id.is_empty() {
+            node.parent_alive = state
+                .store
+                .is_graph_member(&node.graph_id, &node.parent_session_id)
+                .await;
+        }
+
         // Join the graph on every request, not just when something trips. A
         // node that never misbehaves still has to be a known member, or a
         // sibling's finding has nowhere to be delivered.
@@ -1145,6 +1162,13 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 crate::plugins::anomaly::broadcast::NODE_TTL_SECS,
             )
             .await;
+
+        // Graph-wide facts the detectors need, fetched here so each detector
+        // stays a pure function of the context rather than reaching for I/O
+        // mid-evaluation.
+        node.graph_spend_usd = state.store.graph_spend(&node.graph_id).await;
+        node.graph_budget_usd = Some(crate::local_spend::get_max_daily_budget());
+
         Some(format!("{}:{}", node.graph_id, node.node_id))
     };
 
@@ -2994,6 +3018,20 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     };
 
     crate::local_spend::add_local_spend(actual_cost_usd);
+
+    // Accumulate against the graph as well as the machine, so fan-out is
+    // visible: eight workers each inside their own budget can still put the
+    // graph far past what was intended for the whole task.
+    if graph_key.is_some() && actual_cost_usd > 0.0 {
+        state
+            .store
+            .add_graph_spend(
+                &wasm_ctx.node.graph_id,
+                actual_cost_usd,
+                crate::plugins::anomaly::broadcast::NODE_TTL_SECS,
+            )
+            .await;
+    }
     if let Ok(trace_val) = serde_json::to_value(&trace) {
         crate::local_spend::log_offline_trace(&trace_val);
     }
