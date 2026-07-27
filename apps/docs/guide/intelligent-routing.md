@@ -88,7 +88,7 @@ intutic_settings:
 
 <!-- ENTERPRISE_ONLY_START -->
 ### Step 1: Enable Routing in the Dashboard
-1. Open the **Compute Metrics Dashboard** (e.g., `localhost:5174` or your local console at `http://localhost:5174`).
+1. Open the **Compute Metrics Dashboard** (e.g., your control-plane console, or the local one at `http://localhost:5174`).
 2. Navigate to **Settings** from the sidebar navigation.
 3. Click on the **Smart Model Routing & Response Cache** tab.
 4. Check the **`Enable Intelligent Model Routing`** option.

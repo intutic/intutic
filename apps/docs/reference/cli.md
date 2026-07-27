@@ -583,7 +583,7 @@ Also available as the top-level shortcut `intutic install-daemon`.
 |--------|-------------|---------|
 | `--workspace-id <id>` | Workspace ID, e.g. `wk_xxxx` (required) | — |
 | `--api-key <key>` | Workspace API key, e.g. `vk_xxxx` (required) | — |
-| `--control-plane-url <url>` | Control plane URL | `https://api.intutic.ai` |
+| `--control-plane-url <url>` | Control plane URL | `https://your-control-plane.example` |
 | `--binary-path <path>` | Path to the `intutic` CLI binary | _(current process)_ |
 | `--dry-run` | Print what would be done without writing files | — |
 | `--system` | Install as a system-level service (LaunchDaemon on macOS, systemd system unit on Linux) | — |

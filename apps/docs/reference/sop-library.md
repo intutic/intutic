@@ -163,7 +163,7 @@ Annotations: `{ piiDetected: true, piiTypes: ["email", "ssn"] }`
 Use the SOP registry API to create hook SOPs in your workspace:
 
 ```bash
-curl -X POST https://api.intutic.ai/api/v1/sops \
+curl -X POST https://your-control-plane.example/api/v1/sops \
   -H "Authorization: Bearer vk_your_key" \
   -H "Content-Type: application/json" \
   -d '{
