@@ -74,7 +74,7 @@ Web UIs, desktop apps, and collaboration tools that host AI agents.
 Intutic provides zero-trust governance regardless of your agent architecture:
 
 - **Single-Agent Assistants**: Governs individual coding tools (*Claude Code, Cursor, Windsurf, Aider, Antigravity*). Tool calls, file writes, and shell execution are intercepted synchronously before execution.
-- **Multi-Agent Swarms & Graphs**: Governs multi-agent frameworks (**LangGraph, CrewAI, AutoGen, OpenHands, OpenClaw, Hermes**). Intutic tracks inter-agent delegation sub-loops, assigns unified session trace IDs, evaluates role-specific SOPs per agent node, and breaks off recursive multi-agent failure loops.
+- **Multi-Agent Swarms & Graphs**: Governs multi-agent frameworks (**LangGraph, CrewAI, AutoGen, OpenHands, OpenClaw, Hermes**). Every node's traffic crosses the same proxy under one session ID, so rules see the whole graph's tool history rather than a single node's turn — which is what makes ordering constraints, cycle-breaking and a shared budget ceiling enforceable across nodes. Note that the request context carries no per-node identity, so rules constrain the graph globally rather than addressing one agent by role. See [Graph Guardrails](/guide/graph-guardrails).
 
 ---
 

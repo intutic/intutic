@@ -48,6 +48,7 @@ fn test_ctx(workspace_id: &str) -> RequestContext {
         risk_tier: RiskLevel::Low,
         dlp_findings: vec![],
         tool_sequence: vec![],
+        node: Default::default(),
     }
 }
 

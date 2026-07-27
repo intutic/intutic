@@ -1,0 +1,718 @@
+//! Hot-path anomaly detectors.
+//!
+//! Each is a pure function of one [`RequestContext`]. They read the session's
+//! tool history (`tool_sequence`, oldest first), the DLP findings, token
+//! estimates and budget headroom — everything the proxy already knows without
+//! reaching for storage.
+//!
+//! Thresholds are stated as named constants rather than inline literals so the
+//! tuning surface is visible in one place.
+
+use super::{AnomalyDetector, AnomalyFinding, AnomalyKind};
+use crate::wasm::context::RequestContext;
+use std::collections::HashSet;
+
+// ── Loop and cycle detection ────────────────────────────────────────────────
+
+/// Consecutive calls to one tool before it is treated as a spin.
+const REPETITION_THRESHOLD: usize = 5;
+
+/// A node calling the same tool over and over is the most common shape of a
+/// graph that has stopped making progress.
+pub struct ConsecutiveRepeatDetector {
+    threshold: usize,
+}
+
+impl Default for ConsecutiveRepeatDetector {
+    fn default() -> Self {
+        Self {
+            threshold: REPETITION_THRESHOLD,
+        }
+    }
+}
+
+impl AnomalyDetector for ConsecutiveRepeatDetector {
+    fn kind(&self) -> AnomalyKind {
+        AnomalyKind::LoopDetected
+    }
+
+    fn detect(&self, ctx: &RequestContext) -> Option<AnomalyFinding> {
+        let seq = &ctx.tool_sequence;
+        let mut run = 1;
+        for i in 1..seq.len() {
+            if seq[i] == seq[i - 1] {
+                run += 1;
+                if run >= self.threshold {
+                    return Some(AnomalyFinding::kill(
+                        AnomalyKind::LoopDetected,
+                        format!(
+                            "Loop detected: '{}' called {} times consecutively without progress",
+                            seq[i], run
+                        ),
+                    ));
+                }
+            } else {
+                run = 1;
+            }
+        }
+        None
+    }
+}
+
+/// Full A→B→A→B repetitions before a two-tool alternation counts as a cycle.
+const PING_PONG_CYCLES: usize = 3;
+
+/// Two nodes handing work back and forth. Invisible to a consecutive-repeat
+/// check, because no tool ever repeats twice in a row — which is exactly why
+/// this one exists.
+pub struct PingPongCycleDetector {
+    cycles: usize,
+}
+
+impl Default for PingPongCycleDetector {
+    fn default() -> Self {
+        Self {
+            cycles: PING_PONG_CYCLES,
+        }
+    }
+}
+
+impl AnomalyDetector for PingPongCycleDetector {
+    fn kind(&self) -> AnomalyKind {
+        AnomalyKind::LoopDetected
+    }
+
+    fn detect(&self, ctx: &RequestContext) -> Option<AnomalyFinding> {
+        let seq = &ctx.tool_sequence;
+        let needed = self.cycles * 2;
+        if seq.len() < needed {
+            return None;
+        }
+        let tail = &seq[seq.len() - needed..];
+        let (a, b) = (&tail[0], &tail[1]);
+        if a == b {
+            return None; // that is a spin, not an alternation
+        }
+        let alternating = tail
+            .iter()
+            .enumerate()
+            .all(|(i, t)| if i % 2 == 0 { t == a } else { t == b });
+        if !alternating {
+            return None;
+        }
+        Some(AnomalyFinding::kill(
+            AnomalyKind::LoopDetected,
+            format!(
+                "Loop detected: '{}' and '{}' alternating for {} cycles with no other activity",
+                a, b, self.cycles
+            ),
+        ))
+    }
+}
+
+/// Depth beyond which a graph is treated as runaway recursion.
+const MAX_GRAPH_DEPTH: u32 = 7;
+
+/// Runaway recursion — a node spawning a node spawning a node. Uses the depth
+/// the caller reports, which is untrusted, so this can be defeated by a caller
+/// that simply lies. It is a guard against accidental recursion, not an
+/// adversary.
+pub struct RecursionDepthDetector {
+    max_depth: u32,
+}
+
+impl Default for RecursionDepthDetector {
+    fn default() -> Self {
+        Self {
+            max_depth: MAX_GRAPH_DEPTH,
+        }
+    }
+}
+
+impl AnomalyDetector for RecursionDepthDetector {
+    fn kind(&self) -> AnomalyKind {
+        AnomalyKind::LoopDetected
+    }
+
+    fn detect(&self, ctx: &RequestContext) -> Option<AnomalyFinding> {
+        if ctx.node.depth <= self.max_depth {
+            return None;
+        }
+        Some(AnomalyFinding::kill(
+            AnomalyKind::LoopDetected,
+            format!(
+                "Runaway recursion: graph depth {} exceeds the maximum of {}",
+                ctx.node.depth, self.max_depth
+            ),
+        ))
+    }
+}
+
+// ── Transition scoring ──────────────────────────────────────────────────────
+
+/// Average transition score below which a sequence is treated as drifting.
+const MIN_TRANSITION_PROBABILITY: f64 = 0.35;
+
+/// Scores each `A → B` step against a fixed table of plausible transitions.
+///
+/// The table is **hardcoded on purpose**. A fitted matrix would be a learned
+/// parameter, which is a different tier of functionality and a different
+/// deployment story; keeping this fixed makes the detector a pure function.
+pub struct TransitionProbabilityDetector {
+    min_probability: f64,
+}
+
+impl Default for TransitionProbabilityDetector {
+    fn default() -> Self {
+        Self {
+            min_probability: MIN_TRANSITION_PROBABILITY,
+        }
+    }
+}
+
+impl TransitionProbabilityDetector {
+    fn probability(from: &str, to: &str) -> f64 {
+        match (from, to) {
+            ("list_dir", "view_file") => 0.90,
+            ("grep_search", "view_file") => 0.90,
+            ("view_file", "view_file") => 0.85,
+            ("view_file", "replace_file_content") => 0.80,
+            ("replace_file_content", "run_command") => 0.75,
+            ("Write", "Write") => 0.85,
+            ("Write", "Bash") => 0.80,
+            ("Bash", "Bash") => 0.70,
+            ("View", "View") => 0.85,
+            ("View", "Write") => 0.80,
+            ("Glob", "View") => 0.90,
+            ("Grep", "View") => 0.90,
+            ("run_command", "run_command") => 0.15,
+            ("replace_file_content", "replace_file_content") => 0.30,
+            (a, b) if a == b => 0.20,
+            _ => 0.50,
+        }
+    }
+}
+
+impl AnomalyDetector for TransitionProbabilityDetector {
+    fn kind(&self) -> AnomalyKind {
+        AnomalyKind::ToolAbuse
+    }
+
+    fn detect(&self, ctx: &RequestContext) -> Option<AnomalyFinding> {
+        let seq = &ctx.tool_sequence;
+        if seq.len() < 2 {
+            return None;
+        }
+        let total: f64 = seq
+            .windows(2)
+            .map(|w| Self::probability(&w[0], &w[1]))
+            .sum();
+        let avg = total / (seq.len() - 1) as f64;
+        if avg >= self.min_probability {
+            return None;
+        }
+        Some(AnomalyFinding::steer(
+            AnomalyKind::ToolAbuse,
+            format!(
+                "Anomalous tool sequence: average transition plausibility {:.2} is below {:.2}",
+                avg, self.min_probability
+            ),
+            1.0 - avg,
+        ))
+    }
+}
+
+// ── Ordering invariants ─────────────────────────────────────────────────────
+
+/// A tool that must not run unless a prerequisite ran earlier in the session.
+///
+/// These are the invariants a single node cannot check for itself, because the
+/// node that deploys is usually not the node that tested.
+const REQUIRED_PREDECESSORS: &[(&str, &str)] = &[
+    ("deploy", "run_tests"),
+    ("publish", "run_tests"),
+    ("release", "run_tests"),
+];
+
+pub struct MissingPredecessorDetector {
+    rules: &'static [(&'static str, &'static str)],
+}
+
+impl Default for MissingPredecessorDetector {
+    fn default() -> Self {
+        Self {
+            rules: REQUIRED_PREDECESSORS,
+        }
+    }
+}
+
+impl AnomalyDetector for MissingPredecessorDetector {
+    fn kind(&self) -> AnomalyKind {
+        AnomalyKind::ScopeViolation
+    }
+
+    fn detect(&self, ctx: &RequestContext) -> Option<AnomalyFinding> {
+        let seq = &ctx.tool_sequence;
+        for (tool, prerequisite) in self.rules {
+            let used = seq.iter().position(|t| t == tool)?;
+            if seq[..used].iter().any(|t| t == prerequisite) {
+                continue;
+            }
+            return Some(AnomalyFinding::kill(
+                AnomalyKind::ScopeViolation,
+                format!(
+                    "Ordering violation: '{}' ran with no prior '{}' anywhere in this session",
+                    tool, prerequisite
+                ),
+            ));
+        }
+        None
+    }
+}
+
+/// A tool that must not run *after* another has run.
+const FORBIDDEN_SUCCESSIONS: &[(&str, &str)] = &[
+    ("pii_export", "db_write"),
+    ("pii_export", "http_post"),
+    ("secret_read", "http_post"),
+];
+
+pub struct ForbiddenSuccessionDetector {
+    rules: &'static [(&'static str, &'static str)],
+}
+
+impl Default for ForbiddenSuccessionDetector {
+    fn default() -> Self {
+        Self {
+            rules: FORBIDDEN_SUCCESSIONS,
+        }
+    }
+}
+
+impl AnomalyDetector for ForbiddenSuccessionDetector {
+    fn kind(&self) -> AnomalyKind {
+        AnomalyKind::ScopeViolation
+    }
+
+    fn detect(&self, ctx: &RequestContext) -> Option<AnomalyFinding> {
+        let seq = &ctx.tool_sequence;
+        for (first, then) in self.rules {
+            let Some(first_at) = seq.iter().position(|t| t == first) else {
+                continue;
+            };
+            let violated = seq[first_at + 1..].iter().any(|t| t == then);
+            if !violated {
+                continue;
+            }
+            return Some(AnomalyFinding::kill(
+                AnomalyKind::ScopeViolation,
+                format!(
+                    "Forbidden succession: '{}' ran after '{}' in the same session",
+                    then, first
+                ),
+            ));
+        }
+        None
+    }
+}
+
+// ── Data flow ───────────────────────────────────────────────────────────────
+
+/// Distinct blocking DLP findings before the session is treated as probing.
+const DLP_ESCALATION_THRESHOLD: usize = 3;
+
+/// One redacted secret is a mistake. Several distinct blocking findings in one
+/// session is a pattern — often a node retrying an exfiltration by another
+/// route after the first was masked.
+pub struct DlpEscalationDetector {
+    threshold: usize,
+}
+
+impl Default for DlpEscalationDetector {
+    fn default() -> Self {
+        Self {
+            threshold: DLP_ESCALATION_THRESHOLD,
+        }
+    }
+}
+
+impl AnomalyDetector for DlpEscalationDetector {
+    fn kind(&self) -> AnomalyKind {
+        AnomalyKind::DataExfiltration
+    }
+
+    fn detect(&self, ctx: &RequestContext) -> Option<AnomalyFinding> {
+        let blocking: HashSet<&str> = ctx
+            .dlp_findings
+            .iter()
+            .filter(|f| f.action == "block")
+            .map(|f| f.pattern_name.as_str())
+            .collect();
+        if blocking.len() < self.threshold {
+            return None;
+        }
+        let mut names: Vec<&str> = blocking.into_iter().collect();
+        names.sort_unstable();
+        Some(AnomalyFinding::kill(
+            AnomalyKind::DataExfiltration,
+            format!(
+                "Repeated exfiltration attempts: {} distinct blocked patterns in one request ({})",
+                names.len(),
+                names.join(", ")
+            ),
+        ))
+    }
+}
+
+// ── Progress and cost ───────────────────────────────────────────────────────
+
+/// Window examined for diversity collapse.
+const DIVERSITY_WINDOW: usize = 10;
+/// Distinct tools required within that window.
+const DIVERSITY_MIN_DISTINCT: usize = 2;
+
+/// A long run drawing on a single tool. Distinct from a consecutive spin: the
+/// calls may be interleaved with nothing else, yet still make no progress.
+pub struct ToolDiversityCollapseDetector {
+    window: usize,
+    min_distinct: usize,
+}
+
+impl Default for ToolDiversityCollapseDetector {
+    fn default() -> Self {
+        Self {
+            window: DIVERSITY_WINDOW,
+            min_distinct: DIVERSITY_MIN_DISTINCT,
+        }
+    }
+}
+
+impl AnomalyDetector for ToolDiversityCollapseDetector {
+    fn kind(&self) -> AnomalyKind {
+        AnomalyKind::TokenWaste
+    }
+
+    fn detect(&self, ctx: &RequestContext) -> Option<AnomalyFinding> {
+        let seq = &ctx.tool_sequence;
+        if seq.len() < self.window {
+            return None;
+        }
+        let tail = &seq[seq.len() - self.window..];
+        let distinct: HashSet<&String> = tail.iter().collect();
+        if distinct.len() >= self.min_distinct {
+            return None;
+        }
+        Some(AnomalyFinding::steer(
+            AnomalyKind::TokenWaste,
+            format!(
+                "No progress: the last {} tool calls used only '{}'",
+                self.window, tail[0]
+            ),
+            0.8,
+        ))
+    }
+}
+
+/// Estimated input tokens beyond which context growth is flagged.
+const CONTEXT_GROWTH_TOKENS: u32 = 150_000;
+/// Tool calls by which that size is considered disproportionate.
+const CONTEXT_GROWTH_MIN_CALLS: usize = 5;
+
+/// Context ballooning across hops. Each handoff in a graph tends to carry the
+/// previous node's context forward, so growth compounds in a way it does not in
+/// a single loop.
+pub struct ContextGrowthDetector {
+    max_tokens: u32,
+    min_calls: usize,
+}
+
+impl Default for ContextGrowthDetector {
+    fn default() -> Self {
+        Self {
+            max_tokens: CONTEXT_GROWTH_TOKENS,
+            min_calls: CONTEXT_GROWTH_MIN_CALLS,
+        }
+    }
+}
+
+impl AnomalyDetector for ContextGrowthDetector {
+    fn kind(&self) -> AnomalyKind {
+        AnomalyKind::TokenWaste
+    }
+
+    fn detect(&self, ctx: &RequestContext) -> Option<AnomalyFinding> {
+        if ctx.estimated_input_tokens < self.max_tokens
+            || ctx.tool_sequence.len() < self.min_calls
+        {
+            return None;
+        }
+        Some(AnomalyFinding::steer(
+            AnomalyKind::TokenWaste,
+            format!(
+                "Context growth: ~{} input tokens after {} tool calls",
+                ctx.estimated_input_tokens,
+                ctx.tool_sequence.len()
+            ),
+            0.7,
+        ))
+    }
+}
+
+/// Remaining budget below which the session is refused outright.
+const BUDGET_FLOOR_USD: f64 = 0.0;
+
+/// Hard budget floor. The ceiling is set once for the whole session, so every
+/// hop, sub-agent and retry in a graph draws from the same pool — a per-node
+/// budget would let a graph that fans out to eight workers spend eight times
+/// what was capped.
+#[derive(Default)]
+pub struct BudgetExhaustionDetector;
+
+impl AnomalyDetector for BudgetExhaustionDetector {
+    fn kind(&self) -> AnomalyKind {
+        AnomalyKind::BudgetBreach
+    }
+
+    fn detect(&self, ctx: &RequestContext) -> Option<AnomalyFinding> {
+        if ctx.budget_remaining_usd > BUDGET_FLOOR_USD {
+            return None;
+        }
+        Some(AnomalyFinding::kill(
+            AnomalyKind::BudgetBreach,
+            "Budget exhausted: no headroom remaining for this session".to_string(),
+        ))
+    }
+}
+
+// ── Test support ────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+pub mod test_support {
+    use crate::wasm::context::{DlpFinding, NodeIdentity, RequestContext, RiskLevel};
+
+    pub fn base_ctx() -> RequestContext {
+        RequestContext {
+            session_id: "ses_test".into(),
+            workspace_id: "ws_test".into(),
+            virtual_key_prefix: "vk_test".into(),
+            model: "claude-sonnet-4".into(),
+            tools: vec![],
+            tool_calls: vec![],
+            estimated_input_tokens: 100,
+            // Positive by default, so the budget detector stays quiet unless a
+            // test is specifically about budget.
+            budget_remaining_usd: 10.0,
+            risk_tier: RiskLevel::Low,
+            dlp_findings: vec![],
+            tool_sequence: vec![],
+            node: NodeIdentity::default(),
+        }
+    }
+
+    pub fn ctx_with_sequence(seq: &[&str]) -> RequestContext {
+        RequestContext {
+            tool_sequence: seq.iter().map(|s| s.to_string()).collect(),
+            ..base_ctx()
+        }
+    }
+
+    pub fn dlp(pattern: &str, action: &str) -> DlpFinding {
+        DlpFinding {
+            category: "secret".into(),
+            pattern_name: pattern.into(),
+            action: action.into(),
+            offset: 0,
+            length: 8,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::test_support::*;
+    use super::*;
+
+    #[test]
+    fn consecutive_repeat_fires_at_threshold() {
+        let d = ConsecutiveRepeatDetector::default();
+        assert!(d.detect(&ctx_with_sequence(&["Bash"; 4])).is_none());
+        let hit = d.detect(&ctx_with_sequence(&["Bash"; 5])).unwrap();
+        assert_eq!(hit.kind, AnomalyKind::LoopDetected);
+        assert!(hit.kill);
+    }
+
+    #[test]
+    fn consecutive_repeat_ignores_interrupted_runs() {
+        let d = ConsecutiveRepeatDetector::default();
+        let ctx = ctx_with_sequence(&["Bash", "Bash", "View", "Bash", "Bash", "Bash"]);
+        assert!(d.detect(&ctx).is_none());
+    }
+
+    #[test]
+    fn ping_pong_detects_alternation() {
+        let d = PingPongCycleDetector::default();
+        let ctx = ctx_with_sequence(&["plan", "review", "plan", "review", "plan", "review"]);
+        let hit = d.detect(&ctx).unwrap();
+        assert_eq!(hit.kind, AnomalyKind::LoopDetected);
+    }
+
+    #[test]
+    fn ping_pong_ignores_a_spin() {
+        // A run of one tool is a spin, and belongs to the repeat detector.
+        let d = PingPongCycleDetector::default();
+        assert!(d.detect(&ctx_with_sequence(&["plan"; 6])).is_none());
+    }
+
+    #[test]
+    fn ping_pong_ignores_genuine_variety() {
+        let d = PingPongCycleDetector::default();
+        let ctx = ctx_with_sequence(&["a", "b", "a", "b", "a", "c"]);
+        assert!(d.detect(&ctx).is_none());
+    }
+
+    #[test]
+    fn recursion_depth_respects_limit() {
+        let d = RecursionDepthDetector::default();
+        let mut ctx = base_ctx();
+        ctx.node.depth = 7;
+        assert!(d.detect(&ctx).is_none());
+        ctx.node.depth = 8;
+        assert!(d.detect(&ctx).unwrap().kill);
+    }
+
+    #[test]
+    fn missing_predecessor_blocks_deploy_without_tests() {
+        let d = MissingPredecessorDetector::default();
+        let ctx = ctx_with_sequence(&["build", "deploy"]);
+        let hit = d.detect(&ctx).unwrap();
+        assert_eq!(hit.kind, AnomalyKind::ScopeViolation);
+    }
+
+    #[test]
+    fn missing_predecessor_allows_deploy_after_tests() {
+        let d = MissingPredecessorDetector::default();
+        let ctx = ctx_with_sequence(&["run_tests", "build", "deploy"]);
+        assert!(d.detect(&ctx).is_none());
+    }
+
+    #[test]
+    fn predecessor_must_come_before_not_after() {
+        // Tests running *after* the deploy do not retroactively make it safe.
+        let d = MissingPredecessorDetector::default();
+        let ctx = ctx_with_sequence(&["deploy", "run_tests"]);
+        assert!(d.detect(&ctx).is_some());
+    }
+
+    #[test]
+    fn forbidden_succession_blocks_write_after_pii_export() {
+        let d = ForbiddenSuccessionDetector::default();
+        let ctx = ctx_with_sequence(&["pii_export", "transform", "db_write"]);
+        assert!(d.detect(&ctx).unwrap().kill);
+    }
+
+    #[test]
+    fn forbidden_succession_allows_reverse_order() {
+        // A write *before* the export is not the hazard this guards against.
+        let d = ForbiddenSuccessionDetector::default();
+        let ctx = ctx_with_sequence(&["db_write", "pii_export"]);
+        assert!(d.detect(&ctx).is_none());
+    }
+
+    #[test]
+    fn dlp_escalation_counts_distinct_blocking_patterns() {
+        let d = DlpEscalationDetector::default();
+        let mut ctx = base_ctx();
+        ctx.dlp_findings = vec![
+            dlp("aws_key", "block"),
+            dlp("github_token", "block"),
+            dlp("ssn", "block"),
+        ];
+        assert!(d.detect(&ctx).unwrap().kill);
+    }
+
+    #[test]
+    fn dlp_escalation_ignores_redactions_and_duplicates() {
+        let d = DlpEscalationDetector::default();
+        let mut ctx = base_ctx();
+        // Same pattern three times, plus redactions — neither is escalation.
+        ctx.dlp_findings = vec![
+            dlp("aws_key", "block"),
+            dlp("aws_key", "block"),
+            dlp("aws_key", "block"),
+            dlp("ssn", "redact"),
+            dlp("email", "redact"),
+        ];
+        assert!(d.detect(&ctx).is_none());
+    }
+
+    #[test]
+    fn diversity_collapse_needs_a_full_window() {
+        let d = ToolDiversityCollapseDetector::default();
+        assert!(d.detect(&ctx_with_sequence(&["Bash"; 9])).is_none());
+        assert!(d.detect(&ctx_with_sequence(&["Bash"; 10])).is_some());
+    }
+
+    #[test]
+    fn diversity_collapse_ignores_mixed_work() {
+        let d = ToolDiversityCollapseDetector::default();
+        let seq: Vec<&str> = (0..12)
+            .map(|i| if i % 2 == 0 { "View" } else { "Write" })
+            .collect();
+        assert!(d.detect(&ctx_with_sequence(&seq)).is_none());
+    }
+
+    #[test]
+    fn context_growth_needs_both_size_and_hops() {
+        let d = ContextGrowthDetector::default();
+        let mut ctx = ctx_with_sequence(&["a", "b", "c", "d", "e"]);
+        ctx.estimated_input_tokens = 149_000;
+        assert!(d.detect(&ctx).is_none(), "under the token bar");
+
+        ctx.estimated_input_tokens = 200_000;
+        assert!(d.detect(&ctx).is_some());
+
+        // A single huge prompt is not graph-driven context growth.
+        let mut short = ctx_with_sequence(&["a"]);
+        short.estimated_input_tokens = 200_000;
+        assert!(d.detect(&short).is_none());
+    }
+
+    #[test]
+    fn budget_exhaustion_fires_at_zero() {
+        let d = BudgetExhaustionDetector;
+        let mut ctx = base_ctx();
+        assert!(d.detect(&ctx).is_none());
+        ctx.budget_remaining_usd = 0.0;
+        assert!(d.detect(&ctx).unwrap().kill);
+        ctx.budget_remaining_usd = -1.5;
+        assert!(d.detect(&ctx).is_some());
+    }
+
+    #[test]
+    fn transition_probability_flags_low_plausibility_runs() {
+        let d = TransitionProbabilityDetector::default();
+        // run_command -> run_command scores 0.15.
+        let ctx = ctx_with_sequence(&["run_command", "run_command", "run_command"]);
+        let hit = d.detect(&ctx).unwrap();
+        assert_eq!(hit.kind, AnomalyKind::ToolAbuse);
+        assert!(!hit.kill, "drift steers rather than kills");
+        assert!(hit.confidence > 0.5);
+    }
+
+    #[test]
+    fn transition_probability_accepts_normal_work() {
+        let d = TransitionProbabilityDetector::default();
+        let ctx = ctx_with_sequence(&["list_dir", "view_file", "replace_file_content"]);
+        assert!(d.detect(&ctx).is_none());
+    }
+
+    #[test]
+    fn single_call_sequences_are_never_anomalous() {
+        let ctx = ctx_with_sequence(&["Bash"]);
+        assert!(ConsecutiveRepeatDetector::default().detect(&ctx).is_none());
+        assert!(PingPongCycleDetector::default().detect(&ctx).is_none());
+        assert!(TransitionProbabilityDetector::default()
+            .detect(&ctx)
+            .is_none());
+    }
+}

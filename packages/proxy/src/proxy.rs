@@ -1122,6 +1122,11 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         .await
         .unwrap_or_default();
 
+    // Where this request sits in a multi-agent graph. Falls back to a
+    // graph-of-one keyed on the session, so an uninstrumented single-agent
+    // harness behaves exactly as before.
+    let node = crate::graph::identity_from_headers(&headers, &session_id);
+
     let wasm_ctx = crate::wasm::context::RequestContext {
         session_id: session_id.clone(),
         workspace_id: workspace_id.clone(),
@@ -1134,6 +1139,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         risk_tier: crate::wasm::context::RiskLevel::Low,
         dlp_findings,
         tool_sequence,
+        node,
     };
 
     // Evaluate native budget gate
@@ -1147,27 +1153,48 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         );
     }
 
-    // Evaluate sequence anomaly plugin
-    let seq_plugin = crate::plugins::sequence_anomaly::SequenceAnomalyPlugin::new();
+    // Evaluate the anomaly detector registry.
+    //
+    // This replaces the older single-purpose sequence-anomaly plugin, which
+    // covered two of the taxonomy's twelve categories. The registry runs every
+    // detector and returns the most severe finding, so a request that trips
+    // several checks is reported by its worst one rather than whichever
+    // happened to run first. The two original checks are preserved inside it as
+    // `ConsecutiveRepeatDetector` and `TransitionProbabilityDetector`.
+    let anomaly_registry = crate::plugins::anomaly::DetectorRegistry::with_defaults();
     if !has_break_glass {
-        match seq_plugin.evaluate(&wasm_ctx) {
-            crate::wasm::context::Verdict::Kill { reason, .. } => {
-                tracing::warn!(workspace_id = %workspace_id, reason = %reason, "Sequence loop/abuse blocked request");
-                return json_error(
-                    StatusCode::FORBIDDEN,
-                    "policy_denied",
-                    &format!("Request blocked by sequence anomaly policy: {}", reason),
+        let findings = anomaly_registry.evaluate_all(&wasm_ctx);
+        if let Some(worst) = findings.first() {
+            // Log every finding — the secondary ones are what make a report
+            // actionable, and they are lost if only the verdict is recorded.
+            for f in &findings {
+                tracing::warn!(
+                    workspace_id = %workspace_id,
+                    graph_id = %wasm_ctx.node.graph_id,
+                    node_id = %wasm_ctx.node.node_id,
+                    agent_role = %wasm_ctx.node.agent_role,
+                    depth = wasm_ctx.node.depth,
+                    anomaly = %f.kind.as_str(),
+                    severity = %f.kind.severity().as_str(),
+                    confidence = f.confidence,
+                    "Graph anomaly detected: {}",
+                    f.reason
                 );
             }
-            crate::wasm::context::Verdict::Hijack { reason, .. } => {
-                tracing::warn!(workspace_id = %workspace_id, reason = %reason, "Anomalous sequence flagged for review");
-                return json_error(
-                    StatusCode::FORBIDDEN,
-                    "policy_flagged",
-                    &format!("Request flagged by sequence anomaly policy: {}", reason),
-                );
-            }
-            _ => {}
+            let code = if worst.kill {
+                "policy_denied"
+            } else {
+                "policy_flagged"
+            };
+            return json_error(
+                StatusCode::FORBIDDEN,
+                code,
+                &format!(
+                    "Request blocked by anomaly policy [{}]: {}",
+                    worst.kind.as_str(),
+                    worst.reason
+                ),
+            );
         }
     }
 
