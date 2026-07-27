@@ -7,11 +7,11 @@
 //! The [`evaluate_chain`] function runs plugins in priority order and
 //! short-circuits on the first [`Verdict::Kill`].
 
+pub mod anomaly;
 pub mod budget_gate;
 pub mod dlp_gate;
 pub mod pcas_gate;
 pub mod semantic_cache;
-pub mod sequence_anomaly;
 pub mod sop_prompt_injector;
 
 use crate::wasm::context::{RequestContext, Verdict};
@@ -108,6 +108,7 @@ mod tests {
             risk_tier: RiskLevel::Low,
             dlp_findings: vec![],
             tool_sequence: vec![],
+            node: Default::default(),
         }
     }
 

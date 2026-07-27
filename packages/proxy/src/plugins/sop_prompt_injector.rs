@@ -309,6 +309,7 @@ mod tests {
             risk_tier: crate::wasm::context::RiskLevel::Low,
             dlp_findings: vec![],
             tool_sequence: vec![],
+            node: Default::default(),
         };
         let verdict = plugin.evaluate(&ctx);
         assert!(matches!(verdict, Verdict::Enhance { .. }));
