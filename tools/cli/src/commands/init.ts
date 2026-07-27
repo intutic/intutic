@@ -71,7 +71,7 @@ export async function runInit(opts: { dev?: boolean }): Promise<void> {
   const creds = await loadCredentials()
   if (!creds) {
     log.warn('Not authenticated — harness configs were still written locally.')
-    log.info('Sync them with a control plane by signing in at http://localhost:5174, then `intutic login`.')
+    log.info('Config sync needs a control plane, which open core does not include.')
     log.info('To just run the proxy locally, no account needed: `intutic start`.')
   } else {
     log.success(`Authenticated as ${creds.email}`)
