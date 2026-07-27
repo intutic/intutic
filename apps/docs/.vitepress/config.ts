@@ -118,6 +118,7 @@ sidebarGuide.push({
   text: 'Advanced Features',
   items: [
     { text: 'Custom Filters (Open-Core)', link: '/guide/wasm-rules' },
+    { text: 'Graph Guardrails (Open-Core)', link: '/guide/graph-guardrails' },
     // Routing ships in open-core. Enterprise builds already list this page under
     // 'Using Intutic' as 'Intelligent Model Routing (Cloud)', so this entry is
     // OSS-only to keep the page from appearing twice in the enterprise sidebar.

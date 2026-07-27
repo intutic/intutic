@@ -120,6 +120,7 @@ mod tests {
             risk_tier: RiskLevel::Low,
             dlp_findings: vec![],
             tool_sequence: vec![],
+            node: Default::default(),
         }
     }
 

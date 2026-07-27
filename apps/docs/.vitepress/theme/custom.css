@@ -72,3 +72,20 @@
   color: var(--color-error);
   border: 1px solid var(--color-error-border);
 }
+
+/* Tables on phones.
+ *
+ * VitePress already gives tables `display: block; overflow-x: auto`, so they
+ * never widen the page. But with nothing holding the columns open the table
+ * shrinks to the viewport instead of scrolling, and a five-column reference
+ * table ends up one or two words per line per cell — technically visible,
+ * effectively unreadable.
+ *
+ * A floor on cell width lets the table keep usable proportions and scroll for
+ * the rest. Two-column tables are unaffected: 2 x 8rem still fits. */
+@media (max-width: 640px) {
+  .vp-doc th,
+  .vp-doc td {
+    min-width: 8rem;
+  }
+}

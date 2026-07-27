@@ -31,6 +31,32 @@ class RequestContext {
   risk_tier: string = "";
   dlp_findings: DlpFinding[] = [];
   tool_sequence: string[] = [];
+
+  // ── Graph position ──────────────────────────────────────────────────────
+  //
+  // Where this request sits in a multi-agent graph. The proxy derives these
+  // from W3C Baggage carrying OpenTelemetry GenAI attributes
+  // (`gen_ai.agent.id`, `gen_ai.agent.name`, `gen_ai.conversation.id`) and from
+  // `traceparent`, falling back to `X-Intutic-*` headers.
+  //
+  // For a single-agent session `node_id` and `graph_id` both equal
+  // `session_id`, `depth` is 0 and the rest are empty — so a rule written
+  // before these existed behaves identically.
+  //
+  // These values are client-supplied and unverifiable. Use them to observe the
+  // graph, never to grant capability: an agent that can set a header can claim
+  // any role.
+
+  /** `gen_ai.agent.id` — this node's id. Defaults to `session_id`. */
+  node_id: string = "";
+  /** `gen_ai.agent.name` — this node's role. Empty when unset. */
+  agent_role: string = "";
+  /** `gen_ai.conversation.id` — shared by every node in one graph. */
+  graph_id: string = "";
+  /** Parent span from `traceparent`. Empty at the graph root. */
+  parent_session_id: string = "";
+  /** Distance from the graph root. 0 at the root. */
+  depth: i32 = 0;
 }
 
 let activeBuffer: Uint8Array | null = null;
@@ -107,6 +133,24 @@ function parseRequestContext(jsonBytes: Uint8Array): RequestContext {
 
   const risk_tier = jsonObj.getString("risk_tier");
   if (risk_tier) ctx.risk_tier = risk_tier.toString();
+
+  // Graph position. Absent on a single-agent session, in which case node_id
+  // and graph_id mirror the session id so rules can treat every session as a
+  // graph of at least one node.
+  const node_id = jsonObj.getString("node_id");
+  ctx.node_id = node_id ? node_id.toString() : ctx.session_id;
+
+  const agent_role = jsonObj.getString("agent_role");
+  if (agent_role) ctx.agent_role = agent_role.toString();
+
+  const graph_id = jsonObj.getString("graph_id");
+  ctx.graph_id = graph_id ? graph_id.toString() : ctx.session_id;
+
+  const parent_session_id = jsonObj.getString("parent_session_id");
+  if (parent_session_id) ctx.parent_session_id = parent_session_id.toString();
+
+  const depth = jsonObj.getInteger("depth");
+  if (depth) ctx.depth = i32(depth.valueOf());
 
   trace("WASM: parsed primitive fields");
 
