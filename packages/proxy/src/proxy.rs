@@ -70,6 +70,17 @@ pub struct AppState {
     pub store: Arc<dyn LocalStore>,
     /// Control-plane-written keys; all `None` when standalone.
     pub control_plane: Arc<dyn ControlPlaneCache>,
+    /// Set only when the Valkey backend was actually selected at startup.
+    ///
+    /// `CostPredictionGate` and `NotificationClient` still build their own
+    /// per-request `redis::Client` (out of scope for the storage port). They
+    /// used to read `VALKEY_URL` directly, which was safe only because an
+    /// unreachable Valkey stopped the proxy booting. Now that standalone is a
+    /// supported fallback, a stale `VALKEY_URL` would have them dial a dead
+    /// address on every request — `Client::open` is lazy and neither has a
+    /// timeout. Gating on the resolved backend instead makes that
+    /// unrepresentable.
+    pub valkey_url: Option<String>,
 }
 
 /// Fire-and-forget local bandit reward update — never on the latency path.
@@ -781,8 +792,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     };
 
     if is_predict_cmd {
-        if let Ok(valkey_url) = std::env::var("VALKEY_URL") {
-            if let Ok(gate) = CostPredictionGate::new(&valkey_url) {
+        if let Some(valkey_url) = state.valkey_url.as_deref() {
+            if let Ok(gate) = CostPredictionGate::new(valkey_url) {
                 if let Some(msgs) = body_json.get("messages") {
                     if let Some(estimate) = gate.predict(&workspace_id, &model, msgs).await {
                         let text = format!(
@@ -1224,8 +1235,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         }
 
         // Cost prediction gate
-        if let Ok(valkey_url) = std::env::var("VALKEY_URL") {
-            if let Ok(gate) = CostPredictionGate::new(&valkey_url) {
+        if let Some(valkey_url) = state.valkey_url.as_deref() {
+            if let Ok(gate) = CostPredictionGate::new(valkey_url) {
                 let messages = body_json.get("messages").cloned();
                 if let Some(msgs) = &messages {
                     if let Some(estimate) = gate
@@ -1792,6 +1803,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         let client_api_key_clone = raw_token.to_string();
         let reward_engine_clone = Arc::clone(&state.reward_engine);
         let reward_store_clone = Arc::clone(&state.store);
+        let valkey_url_clone = state.valkey_url.clone();
         let reward_cfg_clone = reward_cfg.clone();
         let original_routed_model_clone = original_routed_model.clone();
         let sop_tier_clone = sop_tier.clone();
@@ -1847,7 +1859,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                 if judge_active_clone && (done_received || is_content_block_stop) {
                                     skip_forward = true;
                                 } else if is_done {
-                                    if let Ok(valkey_url) = std::env::var("VALKEY_URL") {
+                                    if let Some(valkey_url) = valkey_url_clone.as_deref() {
                                         let harness = session_id_clone.as_str();
                                         let proto = match provider_clone {
                                             Provider::Anthropic => {
@@ -1859,7 +1871,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                             _ => crate::postprocessor::Protocol::OpenAI,
                                         };
                                         if let Ok(pp) =
-                                            ResponsePostProcessor::new(&valkey_url, harness, proto)
+                                            ResponsePostProcessor::new(valkey_url, harness, proto)
                                         {
                                             if let Some(gov_block) = pp
                                                 .process(&session_id_clone, &workspace_id_clone)
@@ -1955,7 +1967,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                 {
                                     if current_data == "[DONE]" {
                                         // Phase 7: Inject governance notifications before [DONE]
-                                        if let Ok(valkey_url) = std::env::var("VALKEY_URL") {
+                                        if let Some(valkey_url) = state.valkey_url.as_deref() {
                                             let harness = session_id.as_str();
                                             let proto = match provider {
                                                 Provider::Anthropic => {
@@ -1967,7 +1979,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                                 _ => crate::postprocessor::Protocol::OpenAI,
                                             };
                                             if let Ok(pp) = ResponsePostProcessor::new(
-                                                &valkey_url,
+                                                valkey_url,
                                                 harness,
                                                 proto,
                                             ) {
