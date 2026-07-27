@@ -27,7 +27,7 @@ import pc from 'picocolors'
  * Build the proxy environment variables for a child process.
  *
  * @param apiKey   - Intutic API key (intk_...)
- * @param devMode  - If true, use localhost:4000; otherwise use remote proxy
+ * @param devMode  - retained for call-site compatibility; the proxy is always local
  * @returns Record of env vars to inject
  */
 export function buildProxyEnv(apiKey: string, devMode: boolean): Record<string, string> {
