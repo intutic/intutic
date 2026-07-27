@@ -17,7 +17,7 @@ Intutic defends against three categories of threat:
 |---|---|---|
 | **Agent misuse** | AI agent executes destructive tool calls (file deletion, credential exposure, unauthorized API calls) | Real-time SOP evaluation with BYPASS/ENHANCE/HIJACK/KILL verdicts via the [circuit breaker](/guide/how-it-works) |
 | **Credential leakage** | API keys, tokens, or secrets exfiltrated through agent output or prompt injection | DLP scanning in the proxy hot path; secrets detected and redacted before reaching the LLM |
-| **Unauthorized access** | Rogue agents or developers bypassing governance controls | RBAC enforcement, OBO token scoping, harness config drift detection with auto-revert, and break-glass overrides |
+| **Unauthorized access** | Rogue agents or developers bypassing governance controls | Harness config drift detection with auto-revert, immutable local SOP rules, and local daily spend caps |
 
 ---
 
@@ -47,6 +47,7 @@ Developer → AI Agent → Intutic Proxy (:4000) → LLM Provider
 
 This is what you get by default. Open core ships no control plane, and with `policy.control_plane_url` unset the policy pre-check is skipped entirely.
 
+<!-- ENTERPRISE_ONLY_START -->
 ### Connected (self-hosted control plane)
 
 Setting `policy.control_plane_url` — or the `CONTROL_PLANE_URL` environment variable — adds a control plane for storage, analysis and centrally managed policy:
@@ -69,11 +70,13 @@ In this mode, and only in this mode, verdicts and traces are sent to the control
 
 ---
 
+<!-- ENTERPRISE_ONLY_END -->
+
 ## Data Locality
 
-The proxy runs **locally on the developer's machine**. LLM traffic is not rerouted through Intutic's cloud infrastructure — it flows directly from the proxy to the LLM provider, in both modes.
+The proxy runs **locally on the developer's machine**. LLM traffic is never rerouted anywhere — it flows directly from the proxy to the LLM provider.
 
-In **standalone** mode nothing leaves the machine at all: no telemetry, no verdicts, no traces. In **connected** mode only governance telemetry reaches the control plane — never prompts or completions.
+Nothing leaves the machine: no telemetry, no verdicts, no traces. Prompts and completions are never transmitted anywhere by the proxy.
 
 ---
 
@@ -86,19 +89,15 @@ All network communication is encrypted with TLS 1.2+:
 | Path | Protocol |
 |---|---|
 | Proxy → LLM Provider | HTTPS (TLS 1.2+) |
-| Proxy → Control Plane | HTTPS (TLS 1.2+) |
-| Sync Daemon ↔ Control Plane | WSS (WebSocket over TLS) |
-| Dashboard → Control Plane | HTTPS (TLS 1.2+) |
 
 ### At Rest
 
 | Data | Storage | Encryption |
 |---|---|---|
-| Governance traces | PostgreSQL | AES-256 (managed encryption) |
 | Session state & caches | Valkey (Redis-compatible) | Ephemeral — not persisted to disk |
-| SOP definitions | PostgreSQL | AES-256 (managed encryption) |
-| API keys & credentials | PostgreSQL + system keychain | AES-256 + OS-level keychain encryption |
-| Local config | `~/.intutic/credentials.json` | File permissions (`0600`) + system keychain |
+| Bandit learning | `~/.intutic/bandit-state.json` | File permissions inherited from `~/.intutic` |
+| Local config & credentials | `~/.intutic/credentials.json` | File permissions (`0600`) + system keychain |
+| Provider credentials in flight | Process memory only | Never written to disk |
 
 ---
 

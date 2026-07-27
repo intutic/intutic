@@ -51,7 +51,7 @@ In enterprise environments with centralized governance:
 ```
 [Developer / Admin] ──(asc)──► [WASM Binary] ──(Dashboard Upload)──┐
                                                                     ▼
-                                                             [PostgreSQL]
+                                                             [Control Plane]
                                                                     │
                                                            (Valkey Pub/Sub)
                                                                     │

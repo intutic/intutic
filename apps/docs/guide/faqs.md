@@ -1,6 +1,6 @@
 # Frequently Asked Questions <Badge type="tip" text="Guides" />
 
-This page provides a detailed breakdown of how the open-core and enterprise boundaries, the local Rust proxy, and the GKE control plane interact to handle slash commands, FinOps, policy evaluations, and spend limits.
+This page provides a detailed breakdown of how the open-core and enterprise boundaries, the local Rust proxy, and the control plane interact to handle slash commands, FinOps, policy evaluations, and spend limits.
 
 ---
 
@@ -8,7 +8,7 @@ This page provides a detailed breakdown of how the open-core and enterprise boun
 
 The slash command pipeline operates differently depending on the deployment mode:
 *   **Online/Connected Mode (Free Tier / SaaS):** Outbound slash commands (like `@intutic initialize` or `@intutic start`) are intercepted by the local proxy and forwarded via HTTP to the control-plane API (which is either hosted in the cloud or run locally in a developer sandbox Docker container). The control plane executes `slashCommandService.ts` to perform database/Valkey queries (e.g., fetching Jira tickets) and returns a rendered Markdown card response.
-*   **Offline/Standalone Mode (Pure Open-Core):** The local CLI daemon handles core commands locally. For instance, active local SOP folder scanning, compilation, and file writes are executed entirely on your local machine using standard Node.js filesystem APIs and a local **JSON** database, bypassing GKE control plane requirements.
+*   **Offline/Standalone Mode (Pure Open-Core):** The local CLI daemon handles core commands locally. For instance, active local SOP folder scanning, compilation, and file writes are executed entirely on your local machine using standard Node.js filesystem APIs and a local **JSON** database, bypassing control plane requirements.
 
 ---
 
@@ -27,11 +27,11 @@ The local Rust proxy acts as a transparent middleman. It doesn't run the slash c
 
 It is a hybrid system divided between the **Local Rust Proxy** and the **Remote Control Plane**:
 
-| Capability | Local Rust Proxy / Daemon | GKE Control Plane / Remote Proxy |
+| Capability | Local Rust Proxy / Daemon | control plane / Remote Proxy |
 | :--- | :--- | :--- |
 | **Local SOPs Evaluation** | **Yes (WASM-based)**. Runs local markdown rules in a WASM sandbox. Violations are logged to a local JSONL trace log and shown in the developer console. | No. Local personal rules are kept strictly private to the developer's computer. |
-| **Corporate SOP Evaluations** | No. | **Yes (LLM-as-a-Judge)**. Performs semantic similarity and L2/L3 evaluation, logs incidents to PostgreSQL, and triggers GKE alerts. |
-| **Token & Cost Auditing** | **Yes (Pre-flight estimation)**. Estimates counts pre-flight to prevent runaway token spend. | **Yes (Historical ledger)**. Persists actual token costs in PostgreSQL for company-wide dashboards. |
+| **Corporate SOP Evaluations** | No. | **Yes**. Performs semantic similarity and L2/L3 evaluation, records incidents centrally, and raises alerts. |
+| **Token & Cost Auditing** | **Yes (Pre-flight estimation)**. Estimates counts pre-flight to prevent runaway token spend. | **Yes (Historical ledger)**. Persists actual token costs centrally for workspace-wide reporting. |
 
 ---
 
@@ -41,7 +41,7 @@ It is a hybrid system divided between the **Local Rust Proxy** and the **Remote 
 *   Developers can define personal, local-only guidelines in `.intutic/sops/` subdirectories.
 *   The sync daemon compiles and merges these local guidelines directly into `.cursorrules`, `CLAUDE.md`, or `.windsurfrules` in real-time.
 *   Outbound prompts and streams are evaluated against these files using the local WASM rules engine. If a rule is violated, warnings are printed directly in the terminal client.
-*   This setup protects developer privacy: local rule deviations are kept entirely offline in your workspace, while providing active stream-level interception and rule enforcement. Central database logging, deep trajectory analysis, and remote drift monitoring are only enabled when connected to the commercial GKE control plane.
+*   This setup protects developer privacy: local rule deviations are kept entirely offline in your workspace, while providing active stream-level interception and rule enforcement. Central database logging, deep trajectory analysis, and remote drift monitoring are only enabled when connected to the commercial control plane.
 
 ---
 
@@ -92,7 +92,7 @@ The local Rust proxy acts as an inline firewalled gateway between the developer'
     *   It appends a **Synthesis Card** detailing the violation.
     *   In strict modes, it terminates the stream immediately (`KILL` action), preventing the agent from receiving the invalid code block.
 3.  **Local Configuration File Integrity (`driftWatcher.ts`):** The sync daemon runs `driftWatcher.ts`, a local filesystem watcher using `chokidar` that monitors critical workspace files (like `.cursorrules`, `CLAUDE.md`, or `.intutic/sops`). If the agent attempts to modify or delete these local guidelines, `driftWatcher.ts` immediately restores them, preventing the agent from silently disabling its own rules.
-4.  **Active Trajectory Drift Correction (Enterprise Feature):** In remote connected environments, the GKE control plane calculates a semantic centroid of the trace embedding in the background as the agent interacts. If the agent's behavioral path drifts from the baseline (crossing semantic thresholds managed by `driftDetectorCron` and `p5DriftCron`), a `NEGATIVE_DRIFT` event is registered. The `correctivePromptService` then maps this anomaly to a steering recommendation (a corrective system prompt) and pushes it to the session's Valkey queue (`gov:notify:${sessionId}`) to be dynamically injected back into the agent's context window.
+4.  **Active Trajectory Drift Correction (Enterprise Feature):** In remote connected environments, the control plane calculates a semantic centroid of the trace embedding in the background as the agent interacts. If the agent's behavioral path drifts from the baseline (crossing semantic thresholds managed by `driftDetectorCron` and `p5DriftCron`), a `NEGATIVE_DRIFT` event is registered. The `correctivePromptService` then maps this anomaly to a steering recommendation (a corrective system prompt) and pushes it to the session's Valkey queue (`gov:notify:${sessionId}`) to be dynamically injected back into the agent's context window.
 
 ---
 
@@ -112,7 +112,7 @@ Agents are stateful, recursive loops where each turn appends the previous histor
 
 ### 9. What works and what does not work in pure Standalone Open-Core mode?
 
-If you run Intutic in **pure, standalone Open-Core mode** (100% offline, with zero connection to the GKE control plane or SaaS free tier), here is exactly what works and what does not:
+If you run Intutic in **pure, standalone Open-Core mode** (100% offline, with zero connection to the control plane or SaaS free tier), here is exactly what works and what does not:
 
 #### What works 100% locally in Standalone Open-Core:
 *   **Local Rule Synthesis & Syncing:** The `sync-daemon` scans `.intutic/sops/` and dynamically compiles/merges your local markdown guidelines into `.cursorrules`, `CLAUDE.md`, or `.windsurfrules` as files change.
@@ -121,7 +121,7 @@ If you run Intutic in **pure, standalone Open-Core mode** (100% offline, with ze
 *   **Local Cost Predictions:** `@intutic predict` queries your local JSONL history to compute sliding-window averages.
 *   **Local Spending Caps (Rust Proxy):** Enforces global daily limits set in `~/.intutic/config.json` natively inside the proxy gateway.
 
-#### What is Gated (Requires GKE Control Plane / SaaS Tier):
+#### What is Gated (Requires control plane / SaaS Tier):
 *   **Ticket Board Integrations (Jira / Linear):** `@intutic initialize` cannot log into enterprise APIs to pull issues. Scoping local rules via `--sops` still works, but cost attribution to a Jira key is unavailable.
 *   **Central Governance Dashboard:** The web UI for tracking team-wide spending, compute budgets, and developer audits is disabled.
 *   **Corporate Policy Distribution:** Centralized policy management and automated distribution of tamper-proof global SOPs to developers requires GKE.
@@ -166,7 +166,7 @@ Intutic enforces financial controls differently based on connection state to ens
 *   **Central Workspace Limits:** Daily monitored LLM volume limits and active budget thresholds are managed at the workspace level.
 *   **Valkey Fast-Path Interception:** The corporate control plane caches live billing limits and cumulative usage counters in Valkey. On every request, the proxy does a fast-path cache precheck (`check_workspace_hard_block`) in under `<1ms` p99 latency.
 *   **Fail-Closed Protection:** If the cache layer is unreachable, spend cannot be verified, and the budget gate fails closed — the request is rejected with `503 BUDGET_UNVERIFIABLE` rather than admitted on an unverifiable budget. This is deliberately the opposite of the usual rate-limiter convention: a spend cap is a financial control that you explicitly opted into, so the cost of wrongly allowing is unbounded, while the cost of wrongly denying is a retry. Note this applies only to control-plane-managed workspaces; standalone has no central cap to verify and is bounded by the local daily cap instead.
-*   **Real-time Ledger Rollups:** Once upstream completions finish, actual token costs are saved in PostgreSQL, and cumulative workspace counters are updated to maintain global enforcement.
+*   **Real-time Ledger Rollups:** Once upstream completions finish, actual token costs are recorded centrally, and cumulative workspace counters are updated to maintain global enforcement.
 
 #### Standalone / Offline Mode (Local Fallback Enforcer)
 *   **Local Budget Definition:** The local proxy reads the configured daily budget cap (`maxDailyBudgetUsd`) directly from `~/.intutic/config.json` (falling back to a default of `$10.00`).
@@ -183,7 +183,7 @@ When developers pair-program in Standalone / Offline mode, all LLM trajectories,
 1.  **Local Append Logging:** The local proxy writes every successful LLM completion as a structured JSON line to sharded, daily offline trace files `~/.intutic/logs/traces-YYYY-MM-DD.jsonl`.
 2.  **Sync Daemon Reconnect:** When the developer logs in (`intutic login`) and starts the sync daemon (`intutic connect`), the daemon scans `~/.intutic/logs` for trace files on startup and on every subsequent polling iteration.
 3.  **Batch Reconstruction & Upload:** The daemon renames active trace files to `traces-YYYY-MM-DD.jsonl.syncing` to prevent concurrency conflicts, groups the offline traces into batches of 100 and uploads them securely via `POST /api/v1/traces/sync-back` to the control plane.
-4.  **Database Ingestion & Validation:** The control plane validates the API token, resolves trace parameters (e.g., mapping orphaned session IDs to synthetic sessions if context was missing), persists them in PostgreSQL using the `recordUsageEvent` service, and updates Valkey billing states.
+4.  **Database Ingestion & Validation:** The control plane validates the API token, resolves trace parameters (e.g., mapping orphaned session IDs to synthetic sessions if context was missing), persists them in the control plane’s datastore using the `recordUsageEvent` service, and updates Valkey billing states.
 5.  **Log Cleanup:** Upon receiving a successful `200 OK` response from the control plane for all batches in a file, the sync daemon deletes the local `.syncing` file, preventing double-processing.
 
 ---
@@ -198,7 +198,7 @@ Intutic supports local-first development by letting developers test custom promp
     ```bash
     intutic sops push <rule-group-name>
     ```
-    This packages the rule group's markdown files, posts them to `/api/v1/sops`, and writes them to the central PostgreSQL `sops` table.
+    This packages the rule group's markdown files, posts them to `/api/v1/sops`, and writes them to the central the control plane’s datastore `sops` table.
 *   **Workspace-wide Distribution:** During subsequent sync cycles, the sync daemons of all other developers in the workspace automatically fetch the newly promoted rule, write it to their local `.intutic/sops/` folders, and update their respective adapter configs (like `.cursorrules` or `CLAUDE.md`).
 
 ---

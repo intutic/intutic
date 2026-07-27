@@ -51,7 +51,7 @@ Intutic's budget enforcer operates in two distinct modes depending on connection
 <!-- ENTERPRISE_ONLY_START -->
 #### 1. Active GKE/SaaS Enforcement (Connected Mode)
 *   **Centralized Caps:** Daily and monthly budgets are managed centrally.
-*   **Valkey Cache Validation:** The GKE control plane caches billing limits and cumulative workspace usage counters in Valkey. The proxy performs a fast-path cache precheck (`check_workspace_hard_block`) in under `<1ms` p99 latency for every incoming request.
+*   **Valkey Cache Validation:** The control plane caches billing limits and cumulative workspace usage counters in Valkey. The proxy performs a fast-path cache precheck (`check_workspace_hard_block`) in under `<1ms` p99 latency for every incoming request.
 *   **Heartbeat Sync:** Actual query costs update Valkey counters and PostgreSQL in real time upon successful completions.
 <!-- ENTERPRISE_ONLY_END -->
 
