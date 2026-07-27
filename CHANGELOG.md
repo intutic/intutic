@@ -5,6 +5,21 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.2] - 2026-07-27
+
+### Fixed
+
+- **`intutic exec` sent agent traffic and API keys to a remote host.**
+  `buildProxyEnv` pointed `OPENAI_BASE_URL`, `ANTHROPIC_BASE_URL` and the rest
+  at a remote proxy unless `--dev` was passed, and injected `OPENAI_API_KEY`
+  alongside them. The default path therefore routed an agent's prompts and its
+  provider credentials off the machine. That host does not resolve, so the
+  command could not work either way. It now uses the local proxy that
+  `intutic start` binds on `:4000`; set `INTUTIC_PROXY_URL` to point elsewhere.
+- **Onboarding printed the same wrong address.** The setup instructions the CLI
+  prints after `intutic init` told you to point your agent at a remote host
+  rather than the proxy you had just started.
+
 ## [1.7.1] - 2026-07-27
 
 ### Fixed
