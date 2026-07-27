@@ -13,6 +13,10 @@
 
 import * as node_path from 'node:path'
 import { createRequire } from 'node:module'
+
+const { version: cliPkgVersion } = createRequire(import.meta.url)('../../package.json') as {
+  version: string
+}
 import * as node_fs from 'node:fs/promises'
 import { log } from '../lib/logger.js'
 import { ensureValkey, valkeyRemediation, isValkeyRunning } from '../lib/ensureValkey.js'
@@ -100,10 +104,7 @@ async function downloadProxyBinary(destPath: string): Promise<string> {
   // downloaded a proxy several versions behind itself — a 1.7.0 user got the
   // 1.6.0 proxy, which still required Valkey and had none of the standalone
   // work. Same bug, same fix, as `intutic --version` in cli.ts.
-  const { version: cliVersion } = createRequire(import.meta.url)('../../package.json') as {
-    version: string
-  }
-  const url = `https://github.com/intutic/intutic/releases/download/v${cliVersion}/${assetName}`
+  const url = `https://github.com/intutic/intutic/releases/download/v${cliPkgVersion}/${assetName}`
 
   log.info(`Downloading precompiled Intutic proxy from ${url}...`)
   
@@ -314,7 +315,9 @@ export async function runConnect(opts: {
             exeArgs = []
           } catch {
             // Fallback to globally cached binary in ~/.intutic/bin/
-            const globalBinPath = node_path.join(getIntuticDir(), 'bin', process.platform === 'win32' ? 'intutic-proxy.exe' : 'intutic-proxy')
+            // Version-specific: an unversioned cache entry was never revalidated,
+            // so upgrading the CLI left the old binary in place indefinitely.
+            const globalBinPath = node_path.join(getIntuticDir(), 'bin', `intutic-proxy-${cliPkgVersion}${process.platform === 'win32' ? '.exe' : ''}`)
             try {
               await node_fs.access(globalBinPath)
               exeCmd = globalBinPath

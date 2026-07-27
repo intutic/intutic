@@ -58,8 +58,27 @@ function cacheDir() {
 }
 
 /**
+ * Name the cached binary after the version that produced it.
+ *
+ * The cache used to be a single unversioned `intutic-proxy`, and nothing ever
+ * checked what was in it — `findExistingBinary` returned the first path that
+ * existed and `main` only downloaded when there was none. So upgrading the npm
+ * package did not upgrade the binary: anyone who ran `intutic connect` or
+ * `npx @intutic/proxy` before this kept executing whatever they first
+ * downloaded, indefinitely. Combined with the release tag having been pinned to
+ * a literal 1.6.0, that meant users stuck on a proxy that still required Valkey
+ * no matter how many times they upgraded.
+ *
+ * Versioning the filename makes a stale cache unrepresentable: a new version
+ * looks for a name that does not exist yet, so it downloads.
+ */
+function cachedBinaryName() {
+  return isWindows ? `intutic-proxy-${version}.exe` : `intutic-proxy-${version}`;
+}
+
+/**
  * Search order matches `intutic connect`: a locally built binary wins (so repo
- * development never hits the network), then the shared global cache.
+ * development never hits the network), then the version-specific global cache.
  */
 function findExistingBinary() {
   const cache = cacheDir();
@@ -67,9 +86,28 @@ function findExistingBinary() {
     path.join(__dirname, binaryName),
     path.resolve(__dirname, '..', 'target', 'release', binaryName),
     path.resolve(__dirname, '..', '..', '..', 'target', 'release', binaryName),
-    ...(cache ? [path.join(cache, binaryName)] : []),
+    ...(cache ? [path.join(cache, cachedBinaryName())] : []),
   ];
   return candidates.find((p) => fs.existsSync(p)) ?? null;
+}
+
+/**
+ * Remove the pre-1.7.1 unversioned cache entry if present. Its version is
+ * unknowable, so it cannot be trusted or reused — and leaving it behind means
+ * every upgraded user carries a dead 39MB file forever.
+ */
+function pruneLegacyCache() {
+  const cache = cacheDir();
+  if (!cache) return;
+  const legacy = path.join(cache, binaryName);
+  try {
+    if (fs.existsSync(legacy)) {
+      fs.unlinkSync(legacy);
+      process.stderr.write('intutic-proxy: removed unversioned cached binary from a previous release\n');
+    }
+  } catch {
+    // Best effort. A stale file we cannot delete is not a reason to fail.
+  }
 }
 
 async function downloadBinary(destPath) {
@@ -108,6 +146,7 @@ async function downloadBinary(destPath) {
 }
 
 async function main() {
+  pruneLegacyCache();
   let binaryPath = findExistingBinary();
 
   if (!binaryPath) {
@@ -121,7 +160,7 @@ async function main() {
       process.exit(1);
     }
     try {
-      binaryPath = await downloadBinary(path.join(cache, binaryName));
+      binaryPath = await downloadBinary(path.join(cache, cachedBinaryName()));
     } catch (err) {
       process.stderr.write(`Error: ${err instanceof Error ? err.message : String(err)}\n`);
       process.exit(1);

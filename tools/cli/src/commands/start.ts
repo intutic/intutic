@@ -29,11 +29,21 @@ import * as node_fs from 'node:fs'
 import { log } from '../lib/logger.js'
 import { ensureValkey, valkeyRemediation } from '../lib/ensureValkey.js'
 import { getIntuticDir } from '../config/paths.js'
+import { createRequire } from 'node:module'
 
-/** Where the proxy launcher installs the native binary. */
+const { version } = createRequire(import.meta.url)('../../package.json') as { version: string }
+
+/**
+ * Where the proxy launcher installs the native binary.
+ *
+ * Version-specific: the cache used to be a single unversioned `intutic-proxy`
+ * that nothing ever revalidated, so upgrading the CLI did not upgrade the
+ * binary. Looking for a name that only this version writes means a stale entry
+ * simply is not found, and the launcher downloads the right one.
+ */
 function localProxyBinary(): string | null {
-  const name = process.platform === 'win32' ? 'intutic-proxy.exe' : 'intutic-proxy'
-  const candidate = node_path.join(getIntuticDir(), 'bin', name)
+  const ext = process.platform === 'win32' ? '.exe' : ''
+  const candidate = node_path.join(getIntuticDir(), 'bin', `intutic-proxy-${version}${ext}`)
   return node_fs.existsSync(candidate) ? candidate : null
 }
 
