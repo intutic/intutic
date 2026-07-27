@@ -484,6 +484,92 @@ impl AnomalyDetector for BudgetExhaustionDetector {
     }
 }
 
+// ── Graph-wide cost and liveness ────────────────────────────────────────────
+
+/// Multiple of the per-node budget at which a graph's total spend is a breach.
+///
+/// Matches the platform-wide spawn budget multiplier, so the hot path and the
+/// post-hoc classifier agree on what constitutes fan-out overspend.
+const SPAWN_BUDGET_MULTIPLIER: f64 = 1.5;
+
+/// A graph spending far more than any single node was budgeted.
+///
+/// This is the failure a per-node budget cannot see: cap each node at $5 and a
+/// graph that fans out to eight workers spends $40, with every individual node
+/// still inside its limit and nothing anywhere reporting a problem.
+#[derive(Default)]
+pub struct SpawnBudgetBreachDetector;
+
+impl AnomalyDetector for SpawnBudgetBreachDetector {
+    fn kind(&self) -> AnomalyKind {
+        AnomalyKind::SpawnBudgetBreach
+    }
+
+    fn detect(&self, ctx: &RequestContext) -> Option<AnomalyFinding> {
+        // Both unknown means the store cannot aggregate — no signal, so no
+        // verdict. Inferring a breach from absent data would block every graph
+        // running without a shared store.
+        let spend = ctx.node.graph_spend_usd?;
+        let budget = ctx.node.graph_budget_usd?;
+        if budget <= 0.0 {
+            return None;
+        }
+
+        let ceiling = budget * SPAWN_BUDGET_MULTIPLIER;
+        if spend <= ceiling {
+            return None;
+        }
+
+        Some(AnomalyFinding::kill(
+            AnomalyKind::SpawnBudgetBreach,
+            format!(
+                "Fan-out overspend: this graph has cost ${:.2} against a ${:.2} per-node budget \
+                 ({:.0}% of the ${:.2} ceiling)",
+                spend,
+                budget,
+                (spend / ceiling) * 100.0,
+                ceiling
+            ),
+        ))
+    }
+}
+
+/// A node still working for a parent that is gone.
+///
+/// When an orchestrator dies its children do not necessarily notice, and keep
+/// spending against a result nobody will collect. Detectable only because the
+/// caller names its parent and the graph tracks who is live.
+#[derive(Default)]
+pub struct OrphanExecutionDetector;
+
+impl AnomalyDetector for OrphanExecutionDetector {
+    fn kind(&self) -> AnomalyKind {
+        AnomalyKind::Hallucination
+    }
+
+    fn detect(&self, ctx: &RequestContext) -> Option<AnomalyFinding> {
+        // No parent means this is a root, which cannot be orphaned.
+        if ctx.node.parent_session_id.is_empty() {
+            return None;
+        }
+        // `None` is "the store has no opinion", which must not be read as
+        // "dead" — that would orphan every node in every untracked graph.
+        if ctx.node.parent_alive? {
+            return None;
+        }
+
+        Some(AnomalyFinding::steer(
+            AnomalyKind::Hallucination,
+            format!(
+                "Orphaned execution: parent '{}' is no longer active in graph '{}', \
+                 so this work has no caller to return to",
+                ctx.node.parent_session_id, ctx.node.graph_id
+            ),
+            0.9,
+        ))
+    }
+}
+
 // ── Test support ────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -714,5 +800,103 @@ mod tests {
         assert!(TransitionProbabilityDetector::default()
             .detect(&ctx)
             .is_none());
+    }
+}
+
+#[cfg(test)]
+mod graph_aggregate_tests {
+    use super::test_support::*;
+    use super::*;
+
+    #[test]
+    fn spawn_budget_fires_past_the_multiplier() {
+        let d = SpawnBudgetBreachDetector;
+        let mut ctx = base_ctx();
+        ctx.node.graph_budget_usd = Some(10.0); // ceiling is 15.00
+
+        ctx.node.graph_spend_usd = Some(14.99);
+        assert!(d.detect(&ctx).is_none(), "just under the ceiling");
+
+        ctx.node.graph_spend_usd = Some(15.01);
+        let hit = d.detect(&ctx).unwrap();
+        assert_eq!(hit.kind, AnomalyKind::SpawnBudgetBreach);
+        assert!(hit.kill);
+    }
+
+    #[test]
+    fn spawn_budget_is_silent_without_a_spend_signal() {
+        // The whole point of Option here: an unaggregated graph must not be
+        // treated as one that has spent nothing, nor as one that has breached.
+        let d = SpawnBudgetBreachDetector;
+        let mut ctx = base_ctx();
+        ctx.node.graph_budget_usd = Some(10.0);
+        ctx.node.graph_spend_usd = None;
+        assert!(d.detect(&ctx).is_none());
+
+        ctx.node.graph_spend_usd = Some(999.0);
+        ctx.node.graph_budget_usd = None;
+        assert!(d.detect(&ctx).is_none());
+    }
+
+    #[test]
+    fn spawn_budget_ignores_a_zero_budget() {
+        // Zero would make every ceiling zero and every graph a breach.
+        let d = SpawnBudgetBreachDetector;
+        let mut ctx = base_ctx();
+        ctx.node.graph_budget_usd = Some(0.0);
+        ctx.node.graph_spend_usd = Some(50.0);
+        assert!(d.detect(&ctx).is_none());
+    }
+
+    #[test]
+    fn orphan_fires_when_the_parent_is_gone() {
+        let d = OrphanExecutionDetector;
+        let mut ctx = base_ctx();
+        ctx.node.parent_session_id = "parent-1".into();
+        ctx.node.graph_id = "g1".into();
+        ctx.node.parent_alive = Some(false);
+
+        let hit = d.detect(&ctx).unwrap();
+        assert_eq!(hit.kind, AnomalyKind::Hallucination);
+        assert!(!hit.kill, "an orphan is steered, not killed");
+        assert!(hit.reason.contains("parent-1"));
+    }
+
+    #[test]
+    fn orphan_is_silent_for_a_live_parent() {
+        let d = OrphanExecutionDetector;
+        let mut ctx = base_ctx();
+        ctx.node.parent_session_id = "parent-1".into();
+        ctx.node.parent_alive = Some(true);
+        assert!(d.detect(&ctx).is_none());
+    }
+
+    #[test]
+    fn orphan_never_fires_on_a_root() {
+        let d = OrphanExecutionDetector;
+        let mut ctx = base_ctx();
+        ctx.node.parent_session_id = String::new();
+        ctx.node.parent_alive = Some(false); // even so
+        assert!(d.detect(&ctx).is_none());
+    }
+
+    #[test]
+    fn orphan_treats_unknown_liveness_as_no_opinion() {
+        // Reading None as "dead" would orphan every node in every graph the
+        // store never tracked — which is all of them in standalone.
+        let d = OrphanExecutionDetector;
+        let mut ctx = base_ctx();
+        ctx.node.parent_session_id = "parent-1".into();
+        ctx.node.parent_alive = None;
+        assert!(d.detect(&ctx).is_none());
+    }
+
+    #[test]
+    fn a_plain_single_agent_request_trips_nothing_new() {
+        // The default context has no graph aggregates at all, which is what
+        // every single-agent request looks like.
+        let ctx = base_ctx();
+        assert!(SpawnBudgetBreachDetector.detect(&ctx).is_none());
+        assert!(OrphanExecutionDetector.detect(&ctx).is_none());
     }
 }

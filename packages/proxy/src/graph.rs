@@ -180,6 +180,10 @@ pub fn identity_from_headers(headers: &HeaderMap, session_id: &str) -> NodeIdent
         graph_id,
         parent_session_id,
         depth,
+        // Aggregates come from the store, not the caller. Leaving them unset
+        // here is deliberate: a client that could declare its own graph spend
+        // could declare it low and walk past the budget detector.
+        ..NodeIdentity::default()
     }
 }
 

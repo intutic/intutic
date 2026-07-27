@@ -57,6 +57,20 @@ class RequestContext {
   parent_session_id: string = "";
   /** Distance from the graph root. 0 at the root. */
   depth: i32 = 0;
+
+  // Graph-wide aggregates, read from shared storage by the proxy.
+  //
+  // AssemblyScript has no Option, and "unknown" genuinely differs from "zero"
+  // here: a graph whose cost was never aggregated is not a graph that has
+  // spent nothing. Unknown is therefore -1, and a rule that treats -1 as 0
+  // will block graphs that have done nothing wrong.
+
+  /** Total cost across every node in this graph. `-1` when unknown. */
+  graph_spend_usd: f64 = -1;
+  /** Per-node budget this graph is measured against. `-1` when unknown. */
+  graph_budget_usd: f64 = -1;
+  /** Is this node's parent still live? `1` yes, `0` no, `-1` unknown. */
+  parent_alive: i32 = -1;
 }
 
 let activeBuffer: Uint8Array | null = null;
@@ -151,6 +165,17 @@ function parseRequestContext(jsonBytes: Uint8Array): RequestContext {
 
   const depth = jsonObj.getInteger("depth");
   if (depth) ctx.depth = i32(depth.valueOf());
+
+  // Absent or JSON null leaves the -1 sentinel in place, which is the
+  // difference between "we did not measure" and "it measured zero".
+  const graph_spend_usd = jsonObj.getFloat("graph_spend_usd");
+  if (graph_spend_usd) ctx.graph_spend_usd = graph_spend_usd.valueOf();
+
+  const graph_budget_usd = jsonObj.getFloat("graph_budget_usd");
+  if (graph_budget_usd) ctx.graph_budget_usd = graph_budget_usd.valueOf();
+
+  const parent_alive = jsonObj.getBool("parent_alive");
+  if (parent_alive) ctx.parent_alive = parent_alive.valueOf() ? 1 : 0;
 
   trace("WASM: parsed primitive fields");
 
