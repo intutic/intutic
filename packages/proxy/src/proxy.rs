@@ -969,9 +969,28 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 "Virtual API key is invalid, expired, or revoked.",
             );
         }
+        // Fail CLOSED, and with a retryable status. Admitting a key we could
+        // not validate is an authentication bypass — OWASP's canonical test for
+        // "fails securely" is literally whether taking the credential store
+        // offline lets you in.
+        //
+        // This costs no availability that was not already lost: the hard-cap
+        // gate immediately below returns `Unverifiable` on the same outage, so
+        // a dead control plane already rejects every managed request. All this
+        // does is reject it before the bypass window rather than after.
+        //
+        // 503 rather than 401 on purpose — the key may well be valid, so the
+        // client should retry rather than conclude its credentials are bad.
         ControlPlaneAuth::Unavailable => {
-            tracing::warn!("Control-plane virtual key check failed (failing open)");
-            None
+            tracing::error!(
+                token = %key_prefix,
+                "Control-plane virtual key check failed — rejecting rather than admitting unvalidated"
+            );
+            return json_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "AUTH_UNVERIFIABLE",
+                "Your API key could not be validated against the control plane, so this request was not admitted. Retry shortly.",
+            );
         }
         // Standalone open core: no control plane issues virtual keys, so there
         // is no key to validate against. Spend is bounded by `local_spend`'s
