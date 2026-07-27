@@ -40,6 +40,15 @@ export const E_VALIDATION_FAILED = 'E_VALIDATION_FAILED' as const
 
 /** Stripe/billing checkout disabled or unavailable. */
 export const E_CHECKOUT_DISABLED = 'CHECKOUT_DISABLED' as const
+/**
+ * Self-serve account provisioning is switched off for this deployment.
+ *
+ * Returned by every signup path when `INTUTIC_SELF_SERVE_SIGNUP` is not
+ * explicitly `true`. The flag is fail-closed: an unset or malformed value
+ * disables signup, so a deployment cannot start accepting public registrations
+ * because someone forgot to set something.
+ */
+export const E_SIGNUP_DISABLED = 'SIGNUP_DISABLED' as const
 
 /** Workspace already on the requested tier. */
 export const E_ALREADY_ON_TIER = 'ALREADY_ON_TIER' as const
@@ -136,6 +145,7 @@ export type IntuticErrorCode =
   | typeof E_APPROVAL_RATIONALE_REQUIRED
   | typeof E_VALIDATION_FAILED
   | typeof E_CHECKOUT_DISABLED
+  | typeof E_SIGNUP_DISABLED
   | typeof E_ALREADY_ON_TIER
   | typeof E_STRIPE_ERROR
   | typeof E_SIGNATURE_INVALID
