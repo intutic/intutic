@@ -253,8 +253,16 @@ export async function runConnect(opts: {
     const valkeyPort = 6379
     const valkeyResult = await ensureValkey(valkeyPort)
     if (!valkeyResult.running) {
-      log.warn('Running in degraded offline mode (caching disabled; local JSONL trace logging active).')
+      // `connect` attaches to a control plane, so the proxy will refuse to
+      // start without Valkey — it holds the auth and budget cache, and running
+      // without it would leave requests unauthenticated. This is deliberately
+      // NOT the standalone fallback that `intutic start` gets.
+      log.error('Valkey is required when connected to a control plane, and could not be started.')
+      log.info('It holds the auth and budget cache; the proxy will not run unauthenticated.')
+      log.info('')
       for (const line of valkeyRemediation(valkeyPort).split('\n')) log.info(line)
+      log.info('')
+      log.info('To run without a control plane instead: intutic start')
     }
 
 

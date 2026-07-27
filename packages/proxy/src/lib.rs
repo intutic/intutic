@@ -16,6 +16,8 @@ pub mod hostname_filter;
 /// Offline model pricing — compile-time bundle + family prefix fallback (WS-5OP)
 pub mod pricing;
 pub mod routing;
+/// Storage abstraction — Valkey-backed or in-memory (SPIKE, bandit slice only)
+pub mod store;
 pub mod tls_mitm;
 // WS-6NC: Network Controls + MDM Agent
 pub mod dns_interceptor;

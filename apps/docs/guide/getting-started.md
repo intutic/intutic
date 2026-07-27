@@ -34,15 +34,19 @@ real time and return one of four verdicts: **BYPASS**, **ENHANCE**, **HIJACK**, 
 |---|---|
 | **Node.js** | 18 or later |
 | **npm** | 10 or later |
-| **Valkey** (or Redis) | 8.x — the proxy's policy cache. `intutic start` will start one for you |
 | **AI coding agent** | Any of the [18 supported harnesses](/integrations/) (Cursor, Claude Code, Aider, Windsurf, Antigravity, etc.) |
+| **Valkey** (or Redis) | *Optional.* 8.x — a shared, durable cache. `intutic start` provisions one if it can, and runs without it if it cannot |
 
-You do not need to set Valkey up yourself. `intutic start` uses one already
-listening on 6379, else starts a Docker container, else a `valkey-server` or
-`redis-server` on your PATH — and tells you what to install if it finds none.
+That is the whole list. **Valkey is not required**, and neither is a
+configuration file — the proxy runs on built-in defaults.
 
-Already have one elsewhere? Point at it with `VALKEY_URL=redis://host:port`. No
-configuration file is required either; the proxy runs on built-in defaults.
+`intutic start` will try to give you a Valkey anyway, because it is worth
+having: it makes the response cache shared across processes and lets a control
+plane attach later. But if Docker is unavailable or the machine is locked down,
+the proxy simply runs standalone. Bandit learning still persists, to
+`~/.intutic/bandit-state.json`.
+
+Already have a Valkey elsewhere? Point at it with `VALKEY_URL=redis://host:port`.
 
 ## Step 1 — Install the CLI & Native Proxy Gateway
 
@@ -175,12 +179,33 @@ intutic start
 INFO intutic_proxy: Listening on 0.0.0.0:4000
 ```
 
-`start` finds a Valkey for you — an existing one on 6379, else Docker, else
-`valkey-server` or `redis-server` on your PATH — and then runs the proxy. If none
-of those are available it tells you exactly what to install.
+If no Valkey can be started — no Docker, no `valkey-server` on your PATH — the
+proxy runs anyway:
 
-DLP scanning, WASM rule enforcement and policy evaluation all run locally
-against that Valkey.
+```
+⚠ Could not start Valkey — running standalone.
+ℹ Routing, policies, DLP and local spend caps all work.
+ℹ Bandit learning persists to ~/.intutic; the response cache is per-process.
+ℹ Starting proxy on port 4000 (standalone)…
+INFO intutic_proxy: Listening on 0.0.0.0:4000
+```
+
+DLP scanning, WASM rule enforcement, policy evaluation and intelligent routing
+all run locally either way. What Valkey adds is a response cache shared between
+processes, and the ability for a control plane to attach.
+
+::: details What standalone gives up
+Nothing that requires a control plane was ever available in open core, so
+standalone loses only:
+
+- **A shared response cache.** Each proxy process caches for itself.
+- **Cross-process bandit state.** Learning still persists across restarts via
+  `~/.intutic/bandit-state.json`, but two proxies on one machine learn
+  separately rather than pooling.
+
+Provider credentials are held in memory only and never written to disk in
+either mode.
+:::
 
 ::: details Running the proxy yourself
 `intutic start` is a convenience wrapper. To manage Valkey yourself, run the
@@ -188,6 +213,12 @@ proxy directly — it needs no configuration file:
 
 ```bash
 intutic-proxy
+```
+
+Force standalone even when a Valkey is running:
+
+```bash
+INTUTIC_STANDALONE=1 intutic-proxy
 ```
 :::
 
@@ -213,6 +244,34 @@ intutic connect
 ✓ Sync daemon active: listening for harness changes
 ✓ Governance policy: 14 active SOPs, WASM hot-reload ready
 ```
+
+::: warning Connected mode requires Valkey
+This is the one case where Valkey is not optional. It holds the auth and budget
+cache the control plane writes, so a managed proxy that could not reach it would
+have no way to validate a virtual key — and rather than let requests through
+unauthenticated, the proxy refuses to start.
+
+Standalone has no such cache to lose, which is why `intutic start` degrades
+happily and `intutic connect` does not.
+:::
+
+### Moving from standalone to Cloud
+
+Nothing to migrate and nothing to rewrite. `intutic connect` sets
+`CONTROL_PLANE_URL`, and from that point the control plane is authoritative:
+
+| | Standalone | Connected |
+|---|---|---|
+| Bandit arm state | `~/.intutic/bandit-state.json` | `bandit:{workspaceId}` in Valkey |
+| Who updates arms | this proxy, deterministically | the control plane's judge, if it claims the workspace |
+| Feature flags | `config.yaml` | control plane, authoritative |
+| Auth & budgets | local daily spend cap | workspace virtual keys and budgets |
+
+Arm state carries over rather than resetting: the update rule is the same in
+both modes, and the two representations agree within `1e-12`. A workspace that
+learned standalone keeps that learning when a control plane takes over, and the
+control plane signals the handover by setting the workspace's reward mode to
+`cloud`, at which point the local loop stands down within 60 seconds.
 
 ### 3. Route Your Agent
 

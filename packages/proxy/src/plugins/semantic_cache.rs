@@ -6,24 +6,16 @@
 //! LLD #26 §4.2 — Semantic Cache Filter
 
 use crate::protocol::Protocol;
-use redis::AsyncCommands;
-use serde::{Deserialize, Serialize};
+use crate::store::LocalStore;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CachedResponse {
-    pub prompt: String,
-    pub response: String,
-    pub model: String,
-    #[serde(rename = "promptTokens")]
-    pub prompt_tokens: u32,
-    #[serde(rename = "completionTokens")]
-    pub completion_tokens: u32,
-    #[serde(rename = "cachedAt")]
-    pub cached_at: String,
-}
+/// Re-exported from the store layer, which owns the on-the-wire shape.
+pub use crate::store::CachedResponse;
+
+/// Exact-cache entry lifetime.
+const RESPONSE_CACHE_TTL_SECS: u64 = 86_400;
 
 /// Helper to extract text from prompts across OpenAI, Anthropic, and Gemini payloads.
 pub fn extract_prompt_text(body: &Value) -> String {
@@ -193,28 +185,10 @@ async fn query_turbovec(
     Ok(None)
 }
 
-/// Publishes a system anomaly event to Valkey on infrastructure issues.
-pub async fn publish_system_anomaly(
-    valkey: &Arc<redis::aio::ConnectionManager>,
-    workspace_id: &str,
-    description: &str,
-) {
-    let mut conn = valkey.as_ref().clone();
-    let payload = json!({
-        "workspace_id": workspace_id,
-        "description": description,
-        "severity": "HIGH",
-        "timestamp": chrono::Utc::now().to_rfc3339()
-    });
-    if let Ok(payload_str) = serde_json::to_string(&payload) {
-        let _: Result<(), _> = conn.publish("intutic:system_anomalies", &payload_str).await;
-    }
-}
-
 /// Checks the exact/semantic response cache.
 /// Returns Option<CachedResponse> on hit.
 pub async fn check_cache(
-    valkey: &Arc<redis::aio::ConnectionManager>,
+    store: &Arc<dyn LocalStore>,
     http_client: &reqwest::Client,
     workspace_id: &str,
     body_json: &Value,
@@ -225,7 +199,6 @@ pub async fn check_cache(
         return None;
     }
 
-    let mut conn = valkey.as_ref().clone();
     let prompt_text = extract_prompt_text(body_json);
     if prompt_text.is_empty() {
         return None;
@@ -235,23 +208,15 @@ pub async fn check_cache(
 
     // 1. Exact Match Path
     if ff_exact {
-        let cache_key = format!("cache:response:{}", sha256_hash);
-        let cached_val: Option<String> = conn.get(&cache_key).await.unwrap_or(None);
-        if let Some(val_str) = cached_val {
-            if let Ok(cached) = serde_json::from_str::<CachedResponse>(&val_str) {
-                // Increment exact hit counter
-                let metrics_key = format!("cache:metrics:{}", workspace_id);
-                let _: Result<(), _> = conn.hincr(&metrics_key, "exact_hits", 1).await;
-                // Calculate savings
-                let raw_cost: f64 = body_json
-                    .get("model")
-                    .map(|_| 0.0015) // Mock cost calculation fallback if prices not parsed
-                    .unwrap_or(0.0);
-                let _: Result<(), _> = conn
-                    .hincr(&metrics_key, "estimated_savings_usd", raw_cost)
-                    .await;
-                return Some(cached);
-            }
+        if let Some(cached) = store.cached_response(&sha256_hash).await {
+            store.incr_cache_counter(workspace_id, "exact_hits", 1).await;
+            // Calculate savings
+            let raw_cost: f64 = body_json
+                .get("model")
+                .map(|_| 0.0015) // Mock cost calculation fallback if prices not parsed
+                .unwrap_or(0.0);
+            store.add_cache_savings(workspace_id, raw_cost).await;
+            return Some(cached);
         }
     }
 
@@ -262,7 +227,7 @@ pub async fn check_cache(
             Err(e) => {
                 let desc = format!("Embedding generator unreachable or slow: {}", e);
                 tracing::warn!(%workspace_id, "{}", desc);
-                publish_system_anomaly(valkey, workspace_id, &desc).await;
+                store.publish_system_anomaly(workspace_id, &desc).await;
                 return None; // Fail-open
             }
         };
@@ -272,42 +237,34 @@ pub async fn check_cache(
             Err(e) => {
                 let desc = format!("TurboVec sidecar unreachable or slow: {}", e);
                 tracing::warn!(%workspace_id, "{}", desc);
-                publish_system_anomaly(valkey, workspace_id, &desc).await;
+                store.publish_system_anomaly(workspace_id, &desc).await;
                 return None; // Fail-open
             }
         };
 
         if let Some((exact_hash, score)) = nearest {
             if score >= 0.95 {
-                // Fetch matched exact hit from Valkey
-                let cache_key = format!("cache:response:{}", exact_hash);
-                let cached_val: Option<String> = conn.get(&cache_key).await.unwrap_or(None);
-                if let Some(val_str) = cached_val {
-                    if let Ok(cached) = serde_json::from_str::<CachedResponse>(&val_str) {
-                        // Increment semantic hit counter
-                        let metrics_key = format!("cache:metrics:{}", workspace_id);
-                        let _: Result<(), _> = conn.hincr(&metrics_key, "semantic_hits", 1).await;
-                        let raw_cost: f64 = body_json.get("model").map(|_| 0.0015).unwrap_or(0.0);
-                        let _: Result<(), _> = conn
-                            .hincr(&metrics_key, "estimated_savings_usd", raw_cost)
-                            .await;
-                        return Some(cached);
-                    }
+                if let Some(cached) = store.cached_response(&exact_hash).await {
+                    store
+                        .incr_cache_counter(workspace_id, "semantic_hits", 1)
+                        .await;
+                    let raw_cost: f64 = body_json.get("model").map(|_| 0.0015).unwrap_or(0.0);
+                    store.add_cache_savings(workspace_id, raw_cost).await;
+                    return Some(cached);
                 }
             }
         }
     }
 
     // Cache Miss
-    let metrics_key = format!("cache:metrics:{}", workspace_id);
-    let _: Result<(), _> = conn.hincr(&metrics_key, "misses", 1).await;
+    store.incr_cache_counter(workspace_id, "misses", 1).await;
     None
 }
 
 /// Writes a response to exact and semantic cache.
 #[allow(clippy::too_many_arguments)]
 pub async fn write_cache(
-    valkey: &Arc<redis::aio::ConnectionManager>,
+    store: &Arc<dyn LocalStore>,
     http_client: &reqwest::Client,
     workspace_id: &str,
     body_json: &Value,
@@ -317,7 +274,6 @@ pub async fn write_cache(
     completion_tokens: u32,
     ff_semantic: bool,
 ) -> Result<(), anyhow::Error> {
-    let mut conn = valkey.as_ref().clone();
     let prompt_text = extract_prompt_text(body_json);
     if prompt_text.is_empty() {
         return Ok(());
@@ -333,15 +289,13 @@ pub async fn write_cache(
         cached_at: chrono::Utc::now().to_rfc3339(),
     };
 
-    let cache_val = serde_json::to_string(&cached_resp)?;
-    let cache_key = format!("cache:response:{}", sha256_hash);
-
     // Save exact cache (TTL 24 hours)
-    let _: () = conn.set_ex(&cache_key, cache_val, 86400).await?;
+    store
+        .store_response(&sha256_hash, &cached_resp, RESPONSE_CACHE_TTL_SECS)
+        .await?;
 
     // Increment cache size metric
-    let metrics_key = format!("cache:metrics:{}", workspace_id);
-    let _: Result<(), _> = conn.hincr(&metrics_key, "cache_size", 1).await;
+    store.incr_cache_counter(workspace_id, "cache_size", 1).await;
 
     // Write to TurboVec for semantic cache if enabled
     if ff_semantic {
@@ -368,13 +322,13 @@ pub async fn write_cache(
                 if let Err(e) = resp {
                     let desc = format!("Failed to insert vector into TurboVec: {}", e);
                     tracing::warn!(%workspace_id, "{}", desc);
-                    publish_system_anomaly(valkey, workspace_id, &desc).await;
+                    store.publish_system_anomaly(workspace_id, &desc).await;
                 }
             }
             Err(e) => {
                 let desc = format!("Failed to generate embedding for cache insert: {}", e);
                 tracing::warn!(%workspace_id, "{}", desc);
-                publish_system_anomaly(valkey, workspace_id, &desc).await;
+                store.publish_system_anomaly(workspace_id, &desc).await;
             }
         }
     }

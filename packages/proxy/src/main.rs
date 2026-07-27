@@ -1,11 +1,12 @@
 //! Intutic Proxy Gateway
 //!
-//! Single entry point. Loads config, initializes WASM plugin chain,
-//! connects to Valkey, and starts the axum HTTP server.
+//! Single entry point. Loads config, selects a storage backend (Valkey when
+//! reachable, in-memory otherwise), initializes the WASM plugin chain, and
+//! starts the axum HTTP server.
 //!
 //! Architecture: See docs/lld/02-proxy-gateway.lld.md
 
-use intutic_proxy::{config, proxy, router, routing, telemetry, wasm};
+use intutic_proxy::{config, proxy, router, routing, store, telemetry, wasm};
 
 use std::net::SocketAddr;
 use tracing_subscriber::layer::SubscriberExt;
@@ -76,33 +77,114 @@ async fn main() -> anyhow::Result<()> {
     let config = config::load_config(&config_path)?;
     tracing::info!("Config loaded from {}", config_path);
 
-    // Connect to Valkey
+    // ── Storage backend ───────────────────────────────────────────────
+    //
+    // Valkey is not required. Falling back to standalone is deliberately
+    // permissive so that open-core users hit zero friction — that failure was
+    // exactly what left the documented install unable to reach a running proxy
+    // (issue #1).
+    //
+    // Permissive everywhere except one case, which is a security boundary
+    // rather than a preference. Standalone means `NullControlPlaneCache`, and
+    // that reports every virtual key as `Unmanaged` — correct when no control
+    // plane exists, an authentication bypass when one does but is merely
+    // unreachable. So the rule is intent-based:
+    //
+    //   * `CONTROL_PLANE_URL` set → this deployment is managed. Valkey holds the
+    //     auth and budget cache it depends on, so an unreachable Valkey is a
+    //     hard error. Never silently degrade a managed deployment into an
+    //     unauthenticated one.
+    //   * otherwise → standalone on any failure, with a log line saying what is
+    //     inactive.
+    //
+    // `INTUTIC_STANDALONE=1` forces standalone regardless, so a stray Valkey on
+    // the default port cannot silently opt a deployment back in.
+    let standalone_forced = std::env::var("INTUTIC_STANDALONE")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    let managed = std::env::var("CONTROL_PLANE_URL")
+        .map(|v| !v.trim().is_empty())
+        .unwrap_or(false);
     let valkey_url =
         std::env::var("VALKEY_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
-    // Valkey is currently required — the WASM registry, telemetry, metering,
-    // semantic cache and bandit router all hold a connection. Surface that as
-    // something actionable: the bare `Connection refused (os error 111)` this
-    // used to emit gave no clue what was being connected to or how to fix it,
-    // which is where the documented install left users stranded (issue #1).
-    let valkey = match telemetry::connect_valkey(&valkey_url).await {
-        Ok(v) => v,
-        Err(e) => {
-            return Err(anyhow::anyhow!(
-                "Could not connect to Valkey at {valkey_url}: {e}\n\n\
-                 The proxy needs Valkey for its policy cache and telemetry. Start one with:\n\n  \
-                 docker run -d --name intutic-valkey -p 6379:6379 valkey/valkey:8-alpine\n\n\
-                 Then re-run the proxy. Point elsewhere with VALKEY_URL=redis://host:port."
-            ));
+
+    if standalone_forced && managed {
+        return Err(anyhow::anyhow!(
+            "INTUTIC_STANDALONE and CONTROL_PLANE_URL are both set, which ask for \
+             opposite things: standalone has no control plane. Unset one."
+        ));
+    }
+
+    let valkey = if standalone_forced {
+        tracing::info!("INTUTIC_STANDALONE set — running standalone, not probing for Valkey.");
+        None
+    } else {
+        match telemetry::connect_valkey(&valkey_url).await {
+            Ok(v) => {
+                tracing::info!("Connected to Valkey at {}", valkey_url);
+                Some(v)
+            }
+            Err(e) if managed => {
+                return Err(anyhow::anyhow!(
+                    "Could not connect to Valkey at {valkey_url}: {e}\n\n\
+                     CONTROL_PLANE_URL is set, so this proxy is control-plane managed and \
+                     Valkey holds the auth and budget cache it depends on. Running without \
+                     it would leave requests unauthenticated, so this is fatal rather than \
+                     a fallback.\n\n  \
+                     docker run -d --name intutic-valkey -p 6379:6379 valkey/valkey:8-alpine\n\n\
+                     Point elsewhere with VALKEY_URL=redis://host:port."
+                ));
+            }
+            Err(e) => {
+                tracing::info!(
+                    "No Valkey at {} ({}). Running standalone — bandit learning persists to \
+                     ~/.intutic, the response cache is in-memory, and control-plane features \
+                     (auth, budgets, WASM rule distribution, auto-judge) are inactive. \
+                     Connect a control plane with CONTROL_PLANE_URL to enable them.",
+                    valkey_url,
+                    e
+                );
+                None
+            }
         }
     };
-    tracing::info!("Connected to Valkey at {}", valkey_url);
 
-    // Initialize WASM plugin registry (Valkey + local ~/.intutic/wasm rules)
-    let wasm_registry = wasm::registry::PluginRegistry::new(
-        &valkey,
-        config.intutic_settings.wasm_local_dir.as_deref(),
-    )
-    .await?;
+    let (store, control_plane): (
+        std::sync::Arc<dyn store::LocalStore>,
+        std::sync::Arc<dyn store::ControlPlaneCache>,
+    ) = match &valkey {
+        Some(conn) => {
+            let store: std::sync::Arc<dyn store::LocalStore> =
+                std::sync::Arc::new(store::ValkeyStore::new(conn.clone()));
+            // Upgrading from standalone must not reset the workspace to cold
+            // start. Seeds only arms Valkey does not already have, so this is a
+            // no-op on every boot after the first.
+            match store::migrate_local_learning(&store, &store::local_snapshot_path()).await {
+                Ok(0) => {}
+                Ok(n) => tracing::info!(
+                    "carried {} bandit arm(s) over from standalone learning",
+                    n
+                ),
+                Err(e) => tracing::warn!("could not carry over standalone learning: {}", e),
+            }
+            (
+                store,
+                std::sync::Arc::new(store::ValkeyControlPlaneCache::new(conn.clone())),
+            )
+        }
+        // Standalone learns across restarts; losing every arm on each boot
+        // would mean the `>= 20 pulls` gate never opens for a per-session CLI
+        // proxy, and intelligent routing would never activate.
+        None => (
+            std::sync::Arc::new(store::MemoryStore::durable()),
+            std::sync::Arc::new(store::NullControlPlaneCache),
+        ),
+    };
+
+    // Initialize WASM plugin registry (control plane + local ~/.intutic/wasm rules)
+    let wasm_registry =
+        wasm::registry::PluginRegistry::new(config.intutic_settings.wasm_local_dir.as_deref())
+            .await?;
     tracing::info!(
         "WASM plugin registry initialized ({} plugins)",
         wasm_registry.plugin_count().await
@@ -119,10 +201,11 @@ async fn main() -> anyhow::Result<()> {
     // Build application state
     let state = proxy::AppState {
         config,
-        valkey,
         wasm_registry,
         http_client,
         reward_engine: std::sync::Arc::new(routing::reward::RewardEngine::new()),
+        store,
+        control_plane,
     };
 
     // Ensure local CA exists for TLS MITM (generates ca.crt/ca.key if missing)
