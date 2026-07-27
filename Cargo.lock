@@ -1477,6 +1477,7 @@ dependencies = [
  "hex",
  "hyper",
  "hyper-util",
+ "libc",
  "nanoid",
  "once_cell",
  "opentelemetry",

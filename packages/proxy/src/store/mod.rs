@@ -140,6 +140,46 @@ pub enum ControlPlaneAuth {
     Unavailable,
 }
 
+/// Whether a workspace's hard spend cap could be verified, and what it said.
+///
+/// Three-valued rather than `bool` because "verified not capped" and "could not
+/// check" must not collapse. This gate protects against unbounded spend on a
+/// workspace whose operator explicitly chose `enforcement_mode=hard`, so an
+/// unverifiable answer is not a licence to proceed — the workspace most likely
+/// to be capped is exactly the one that would resume spending.
+///
+/// This is deliberately the opposite of the usual rate-limiter convention,
+/// where fail-open is right because a brief lapse in throttling beats an
+/// outage. A spend cap is a financial control, not a throttle: the cost of
+/// wrongly allowing is unbounded and unrecoverable, while the cost of wrongly
+/// denying is a retry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HardCapStatus {
+    /// Verified: no cap is active. Standalone always answers this — there is
+    /// no control plane to have set a cap, so nothing is unverifiable.
+    Clear,
+    /// Verified: the cap is active → 429.
+    Blocked,
+    /// The control plane could not be reached, so spend is unverifiable → 503.
+    Unverifiable,
+}
+
+/// Which governance notification queue to drain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotifyScope {
+    Session,
+    Workspace,
+}
+
+/// Historical token-usage baseline for a (workspace, model, size-bucket).
+/// Raw counters as stored; the caller derives averages.
+#[derive(Debug, Clone, Copy)]
+pub struct TokenBaseline {
+    pub count: u64,
+    pub sum: f64,
+    pub reasoning_sum: f64,
+}
+
 /// Which auto-judge marker to consult. Two keys, one shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JudgeScope {
@@ -309,9 +349,9 @@ pub trait ControlPlaneCache: Send + Sync + 'static {
     /// `Option`.
     async fn auth_context(&self, token: &str) -> ControlPlaneAuth;
 
-    /// `true` when the workspace is under a hard daily spend cap. Failure to
-    /// read is `false` — this is a cache, not auth.
-    async fn hard_block(&self, workspace_id: &str) -> bool;
+    /// Whether the workspace is under a hard daily spend cap. See
+    /// [`HardCapStatus`] for why this is not `bool`.
+    async fn hard_block(&self, workspace_id: &str) -> HardCapStatus;
 
     /// Status of a governed loop run, if the control plane is tracking it.
     async fn loop_status(&self, loop_run_id: &str) -> Option<String>;
@@ -334,4 +374,28 @@ pub trait ControlPlaneCache: Send + Sync + 'static {
     /// surface, and it lands on the null side — which is why the byte/string
     /// split never reaches the half that needed real work.
     async fn wasm_binary(&self, sha256: &str) -> anyhow::Result<Option<Vec<u8>>>;
+
+    // ── Token intelligence ───────────────────────────────────────────
+
+    /// Per-workspace cost-gate threshold in USD.
+    async fn predict_gate_threshold(&self, workspace_id: &str) -> Option<f64>;
+
+    /// Historical output-token baseline, workspace-specific if present and
+    /// global otherwise. Both are written by the control plane's rollups.
+    async fn token_baseline(
+        &self,
+        workspace_id: &str,
+        model: &str,
+        bucket: &str,
+    ) -> Option<TokenBaseline>;
+
+    // ── Governance notifications ─────────────────────────────────────
+
+    /// Atomically drain a notification queue, returning the raw JSON payloads.
+    ///
+    /// Read-and-delete is one atomic step so a crash between them cannot
+    /// deliver the same notification twice. Returns raw strings rather than
+    /// parsed values to keep the store layer independent of the postprocessor's
+    /// types.
+    async fn drain_notifications(&self, scope: NotifyScope, id: &str) -> Vec<String>;
 }

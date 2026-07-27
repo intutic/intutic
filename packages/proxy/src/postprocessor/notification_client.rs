@@ -1,16 +1,24 @@
-//! Valkey notification queue client.
+//! Governance notification queue reader.
 //!
-//! Reads and atomically drains governance notifications from a per-session
-//! Valkey list using MULTI/EXEC (LRANGE + DEL).
+//! Drains `gov:notify:{sessionId}` and `gov:notify:workspace:{workspaceId}`.
+//! Both queues are written by the control plane (corrective-prompt service and
+//! crons) and only read here, so this holds a `ControlPlaneCache` rather than
+//! its own connection — the atomic LRANGE+DEL lives in the Valkey impl.
+//!
+//! Standalone the cache is the null one and both drains return empty. That is
+//! not a degradation: nothing in open core writes these queues, so here this is
+//! a consumer with no producer.
 
 use anyhow::Result;
-use redis::AsyncCommands;
 use serde::Deserialize;
+use std::sync::Arc;
 use tracing::debug;
 
-/// Client for reading governance notifications from Valkey.
+use crate::store::{ControlPlaneCache, NotifyScope};
+
+/// Reader for governance notifications.
 pub struct NotificationClient {
-    client: redis::Client,
+    control_plane: Arc<dyn ControlPlaneCache>,
 }
 
 /// A governance notification queued for inline delivery.
@@ -28,44 +36,12 @@ pub struct GovernanceNotification {
 }
 
 impl NotificationClient {
-    /// Create a new notification client connected to Valkey.
-    pub fn new(valkey_url: &str) -> Result<Self> {
-        let client = redis::Client::open(valkey_url)?;
-        Ok(Self { client })
+    pub fn new(control_plane: Arc<dyn ControlPlaneCache>) -> Self {
+        Self { control_plane }
     }
 
-    /// Atomically drain all pending notifications for a session.
-    ///
-    /// Uses a Redis pipeline with MULTI/EXEC to read the list and delete
-    /// it in a single atomic operation. This prevents duplicate delivery
-    /// if the proxy crashes after reading but before deleting.
-    pub async fn drain_notifications(
-        &self,
-        session_id: &str,
-    ) -> Result<Vec<GovernanceNotification>> {
-        let mut conn = self.client.get_multiplexed_async_connection().await?;
-        let key = format!("gov:notify:{}", session_id);
-
-        // Check if key exists first (fast path — most requests have no notifications)
-        let len: usize = conn.llen(&key).await.unwrap_or(0);
-        if len == 0 {
-            return Ok(Vec::new());
-        }
-
-        // Atomic read + delete via pipeline
-        let mut pipe = redis::pipe();
-        pipe.atomic()
-            .cmd("LRANGE")
-            .arg(&key)
-            .arg(0i64)
-            .arg(-1i64)
-            .cmd("DEL")
-            .arg(&key);
-
-        let (raw_items, _deleted): (Vec<String>, i64) = pipe.query_async(&mut conn).await?;
-
-        let notifications: Vec<GovernanceNotification> = raw_items
-            .iter()
+    fn parse(raw: Vec<String>) -> Vec<GovernanceNotification> {
+        raw.iter()
             .filter_map(|s| match serde_json::from_str(s) {
                 Ok(n) => Some(n),
                 Err(e) => {
@@ -73,64 +49,45 @@ impl NotificationClient {
                     None
                 }
             })
-            .collect();
+            .collect()
+    }
 
+    /// Drain all pending notifications for a session.
+    pub async fn drain_notifications(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<GovernanceNotification>> {
+        let raw = self
+            .control_plane
+            .drain_notifications(NotifyScope::Session, session_id)
+            .await;
+        let notifications = Self::parse(raw);
         debug!(
             session_id,
             count = notifications.len(),
-            "Drained governance notifications from Valkey"
+            "Drained governance notifications"
         );
-
         Ok(notifications)
     }
 
-    /// Atomically drain all pending workspace-level notifications.
+    /// Drain all pending workspace-level notifications.
     ///
-    /// Workspace notifications are queued by cron jobs (e.g. context gap
-    /// suggestions) and delivered to whichever session drains them first.
-    /// Uses the same atomic MULTI/EXEC pattern as `drain_notifications()`.
+    /// Queued by control-plane crons (e.g. context gap suggestions) and
+    /// delivered to whichever session drains them first.
     pub async fn drain_workspace_notifications(
         &self,
         workspace_id: &str,
     ) -> Result<Vec<GovernanceNotification>> {
-        let mut conn = self.client.get_multiplexed_async_connection().await?;
-        let key = format!("gov:notify:workspace:{}", workspace_id);
-
-        // Fast path — most requests have no workspace-level notifications
-        let len: usize = conn.llen(&key).await.unwrap_or(0);
-        if len == 0 {
-            return Ok(Vec::new());
-        }
-
-        // Atomic read + delete via pipeline
-        let mut pipe = redis::pipe();
-        pipe.atomic()
-            .cmd("LRANGE")
-            .arg(&key)
-            .arg(0i64)
-            .arg(-1i64)
-            .cmd("DEL")
-            .arg(&key);
-
-        let (raw_items, _deleted): (Vec<String>, i64) = pipe.query_async(&mut conn).await?;
-
-        let notifications: Vec<GovernanceNotification> = raw_items
-            .iter()
-            .filter_map(|s| match serde_json::from_str(s) {
-                Ok(n) => Some(n),
-                Err(e) => {
-                    debug!(error = %e, "Failed to parse workspace notification JSON");
-                    None
-                }
-            })
-            .collect();
-
+        let raw = self
+            .control_plane
+            .drain_notifications(NotifyScope::Workspace, workspace_id)
+            .await;
+        let notifications = Self::parse(raw);
         debug!(
             workspace_id,
             count = notifications.len(),
-            "Drained workspace governance notifications from Valkey"
+            "Drained workspace governance notifications"
         );
-
         Ok(notifications)
     }
 }
