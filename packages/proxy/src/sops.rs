@@ -71,6 +71,13 @@ pub struct Sop {
     /// "everything not explicitly permitted is denied" would block every tool
     /// call for every user who never wrote a policy.
     pub deny_tools: Vec<String>,
+    /// Harnesses this SOP permits for the roles it covers.
+    ///
+    /// Empty means unrestricted. Present, it becomes an allowlist — safe here
+    /// where it is not for tools, because a workspace has a handful of
+    /// harnesses that someone can enumerate, not the open-ended tool surface
+    /// each of them exposes.
+    pub allow_harnesses: Vec<String>,
 }
 
 impl Sop {
@@ -98,17 +105,17 @@ impl Sop {
 /// `roles:`, and taking a YAML dependency to read a comma-separated list would
 /// be a poor trade — as would silently failing to load a policy because its
 /// front matter had a tab in it.
-fn parse_front_matter(raw: &str) -> (Vec<String>, Vec<String>, String) {
+fn parse_front_matter(raw: &str) -> (Vec<String>, Vec<String>, Vec<String>, String) {
     let trimmed = raw.trim_start();
     if !trimmed.starts_with("---") {
-        return (Vec::new(), Vec::new(), raw.trim().to_string());
+        return (Vec::new(), Vec::new(), Vec::new(), raw.trim().to_string());
     }
     let rest = &trimmed[3..];
     let Some(end) = rest.find("\n---") else {
         // An unterminated fence is malformed. Treat the whole file as body
         // rather than dropping the policy, so a typo cannot silently disarm a
         // rule the author believes is active.
-        return (Vec::new(), Vec::new(), raw.trim().to_string());
+        return (Vec::new(), Vec::new(), Vec::new(), raw.trim().to_string());
     };
     let (front, body) = rest.split_at(end);
 
@@ -127,6 +134,8 @@ fn parse_front_matter(raw: &str) -> (Vec<String>, Vec<String>, String) {
 
     (
         list("roles:", true),
+        // Harness names are lowercase by convention (`claude-code`, `cursor`).
+        list("allow_harnesses:", true),
         // Tool names keep their case — harnesses ship tools called `Bash` and
         // `Write`, and lowercasing them would stop the denylist matching.
         list("deny_tools:", false),
@@ -146,8 +155,8 @@ fn read_dir_sops(dir: &Path) -> Vec<Sop> {
                 return None;
             }
             let raw = std::fs::read_to_string(&path).ok()?;
-            let (roles, deny_tools, body) = parse_front_matter(&raw);
-            if body.is_empty() && deny_tools.is_empty() {
+            let (roles, allow_harnesses, deny_tools, body) = parse_front_matter(&raw);
+            if body.is_empty() && deny_tools.is_empty() && allow_harnesses.is_empty() {
                 return None;
             }
             Some(Sop {
@@ -155,6 +164,7 @@ fn read_dir_sops(dir: &Path) -> Vec<Sop> {
                 body,
                 roles,
                 deny_tools,
+                allow_harnesses,
             })
         })
         .collect();
@@ -256,6 +266,22 @@ pub fn governance_block_for_role(role: &str) -> Option<String> {
 /// never wrote one.
 pub fn denied_tools_for_role(role: &str) -> Vec<String> {
     collect_denies(&all_sops(), role)
+}
+
+/// Harnesses permitted for this role. Empty means unrestricted.
+pub fn allowed_harnesses_for_role(role: &str) -> Vec<String> {
+    collect_harnesses(&all_sops(), role)
+}
+
+fn collect_harnesses(sops: &[Sop], role: &str) -> Vec<String> {
+    let mut out: Vec<String> = sops
+        .iter()
+        .filter(|s| s.applies_to(role))
+        .flat_map(|s| s.allow_harnesses.iter().cloned())
+        .collect();
+    out.sort();
+    out.dedup();
+    out
 }
 
 fn collect_denies(sops: &[Sop], role: &str) -> Vec<String> {
@@ -397,6 +423,7 @@ mod tests {
             body: format!("- rule for {title}"),
             roles: roles.iter().map(|r| r.to_string()).collect(),
             deny_tools: Vec::new(),
+            allow_harnesses: Vec::new(),
         }
     }
 
@@ -424,14 +451,14 @@ mod tests {
 
     #[test]
     fn front_matter_is_split_from_body() {
-        let (roles, _deny, body) = parse_front_matter("---\nroles: reviewer, Deployer\n---\n## Policy\n- x");
+        let (roles, _h, _deny, body) = parse_front_matter("---\nroles: reviewer, Deployer\n---\n## Policy\n- x");
         assert_eq!(roles, vec!["reviewer", "deployer"]);
         assert_eq!(body, "## Policy\n- x");
     }
 
     #[test]
     fn a_file_without_front_matter_is_all_body() {
-        let (roles, _deny, body) = parse_front_matter("## Policy\n- x");
+        let (roles, _h, _deny, body) = parse_front_matter("## Policy\n- x");
         assert!(roles.is_empty());
         assert_eq!(body, "## Policy\n- x");
     }
@@ -440,14 +467,14 @@ mod tests {
     fn malformed_front_matter_keeps_the_policy() {
         // An unterminated fence is a typo. Dropping the file would silently
         // disarm a rule its author believes is active.
-        let (roles, _deny, body) = parse_front_matter("---\nroles: reviewer\n## Policy");
+        let (roles, _h, _deny, body) = parse_front_matter("---\nroles: reviewer\n## Policy");
         assert!(roles.is_empty());
         assert!(body.contains("## Policy"));
     }
 
     #[test]
     fn bracketed_yaml_list_form_is_accepted() {
-        let (roles, _deny, _body) = parse_front_matter("---\nroles: [reviewer, deployer]\n---\nbody");
+        let (roles, _h, _deny, _body) = parse_front_matter("---\nroles: [reviewer, deployer]\n---\nbody");
         assert_eq!(roles, vec!["reviewer", "deployer"]);
     }
 
@@ -479,6 +506,7 @@ mod tests {
                 body: "x".repeat(500),
                 roles: vec![],
                 deny_tools: vec![],
+                allow_harnesses: vec![],
             })
             .collect();
         let out = render(&big, "any").unwrap();
@@ -681,13 +709,13 @@ mod deny_tests {
             body: "- prose".into(),
             roles: roles.iter().map(|r| r.to_string()).collect(),
             deny_tools: denies.iter().map(|d| d.to_string()).collect(),
+            allow_harnesses: Vec::new(),
         }
     }
 
     #[test]
     fn deny_tools_parse_from_front_matter() {
-        let (roles, deny, body) =
-            parse_front_matter("---\nroles: deployer\ndeny_tools: Bash, rm\n---\n- prose");
+        let (roles, _h, deny, body) = parse_front_matter("---\nroles: deployer\ndeny_tools: Bash, rm\n---\n- prose");
         assert_eq!(roles, vec!["deployer"]);
         assert_eq!(deny, vec!["Bash", "rm"]);
         assert_eq!(body, "- prose");
@@ -697,7 +725,7 @@ mod deny_tests {
     fn tool_names_keep_their_case() {
         // Harnesses ship tools called `Bash` and `Write`. Lowercasing the
         // denylist the way roles are lowercased would stop it matching.
-        let (_, deny, _) = parse_front_matter("---\ndeny_tools: Bash, WebFetch\n---\nx");
+        let (_, _h, deny, _) = parse_front_matter("---\ndeny_tools: Bash, WebFetch\n---\nx");
         assert_eq!(deny, vec!["Bash", "WebFetch"]);
     }
 
@@ -728,8 +756,45 @@ mod deny_tests {
     fn a_deny_only_sop_is_still_loaded() {
         // A file that is nothing but a denylist has no prose body, and must
         // not be discarded for it.
-        let (_, deny, body) = parse_front_matter("---\ndeny_tools: rm\n---\n");
+        let (_, _h, deny, body) = parse_front_matter("---\ndeny_tools: rm\n---\n");
         assert!(body.is_empty());
         assert_eq!(deny, vec!["rm"]);
+    }
+}
+
+#[cfg(test)]
+mod harness_policy_tests {
+    use super::*;
+
+    #[test]
+    fn allow_harnesses_parse_and_lowercase() {
+        let (roles, harnesses, _deny, _body) =
+            parse_front_matter("---\nroles: reviewer\nallow_harnesses: Claude-Code, cursor\n---\nx");
+        assert_eq!(roles, vec!["reviewer"]);
+        assert_eq!(harnesses, vec!["claude-code", "cursor"]);
+    }
+
+    #[test]
+    fn harnesses_are_collected_per_role() {
+        let sops = vec![
+            Sop {
+                title: "a".into(),
+                body: "x".into(),
+                roles: vec!["reviewer".into()],
+                deny_tools: vec![],
+                allow_harnesses: vec!["claude-code".into()],
+            },
+            Sop {
+                title: "b".into(),
+                body: "x".into(),
+                roles: vec!["deployer".into()],
+                deny_tools: vec![],
+                allow_harnesses: vec!["cursor".into()],
+            },
+        ];
+        assert_eq!(collect_harnesses(&sops, "reviewer"), vec!["claude-code"]);
+        assert_eq!(collect_harnesses(&sops, "deployer"), vec!["cursor"]);
+        // A role no SOP restricts stays unrestricted.
+        assert!(collect_harnesses(&sops, "planner").is_empty());
     }
 }

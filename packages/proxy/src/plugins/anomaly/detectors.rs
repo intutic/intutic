@@ -623,6 +623,138 @@ impl AnomalyDetector for UnauthorizedToolDetector {
     }
 }
 
+/// Distinct injection techniques before the request is refused rather than
+/// steered.
+///
+/// One match is often ordinary language that happens to resemble an attack.
+/// Several distinct techniques in one payload is not a coincidence.
+const INJECTION_KILL_THRESHOLD: usize = 2;
+
+/// Text attempting to override the instructions the agent is operating under.
+///
+/// Sharper in a graph than in a single agent: one node's output becomes the
+/// next node's input, so a payload picked up from a fetched page or a file
+/// arrives at the next node indistinguishable from an instruction issued by
+/// the orchestrator.
+///
+/// Graded rather than absolute, because the false-positive cost is real —
+/// people say "ignore the previous suggestion" to agents in earnest.
+pub struct PromptInjectionDetector {
+    kill_threshold: usize,
+}
+
+impl Default for PromptInjectionDetector {
+    fn default() -> Self {
+        Self {
+            kill_threshold: INJECTION_KILL_THRESHOLD,
+        }
+    }
+}
+
+impl AnomalyDetector for PromptInjectionDetector {
+    fn kind(&self) -> AnomalyKind {
+        AnomalyKind::PromptInjection
+    }
+
+    fn detect(&self, ctx: &RequestContext) -> Option<AnomalyFinding> {
+        if ctx.injection_findings.is_empty() {
+            return None;
+        }
+        // Pattern names only. The matched span is attacker-controlled text,
+        // and this reason string travels into telemetry and into sibling
+        // agents' context — quoting the payload would deliver it to precisely
+        // the places this detector exists to protect.
+        let techniques = ctx.injection_findings.join(", ");
+
+        if ctx.injection_findings.len() >= self.kill_threshold {
+            return Some(AnomalyFinding::kill(
+                AnomalyKind::PromptInjection,
+                format!("Prompt injection: {} techniques present ({techniques})", ctx.injection_findings.len()),
+            ));
+        }
+        Some(AnomalyFinding::steer(
+            AnomalyKind::PromptInjection,
+            format!("Possible prompt injection: {techniques}"),
+            0.6,
+        ))
+    }
+}
+
+// ── Workflow and harness boundaries ─────────────────────────────────────────
+
+/// A loop run past the ceiling it was started with.
+///
+/// Distinct from the per-session and per-graph budgets: a loop run is the unit
+/// of *work*, and it can span many sessions, many nodes and many turns. It is
+/// the thing a `--budget` on `intutic loop exec` names, and the only level at
+/// which "this task cost too much" is a meaningful statement.
+#[derive(Default)]
+pub struct WorkflowBudgetBreachDetector;
+
+impl AnomalyDetector for WorkflowBudgetBreachDetector {
+    fn kind(&self) -> AnomalyKind {
+        AnomalyKind::WorkflowBudgetBreach
+    }
+
+    fn detect(&self, ctx: &RequestContext) -> Option<AnomalyFinding> {
+        let spend = ctx.workflow_spend_usd?;
+        // No ceiling means nobody budgeted this run. That is not a budget of
+        // zero, and refusing an unbudgeted run would break every loop started
+        // without the flag.
+        let budget = ctx.workflow_budget_usd?;
+        if budget <= 0.0 || spend <= budget {
+            return None;
+        }
+        Some(AnomalyFinding::kill(
+            AnomalyKind::WorkflowBudgetBreach,
+            format!(
+                "Workflow over budget: this run has cost ${:.2} against its ${:.2} ceiling",
+                spend, budget
+            ),
+        ))
+    }
+}
+
+/// A node running under a harness its SOPs do not permit.
+///
+/// The case this guards is work crossing a boundary it was scoped to stay
+/// inside — a policy written for a reviewed IDE session being carried into an
+/// unattended CLI agent, where the human who was assumed to be watching is not.
+///
+/// An allowlist is workable here where it is not for tools: a workspace has a
+/// handful of harnesses someone can name, not the open-ended tool surface each
+/// of them exposes. Unlike the graph identity fields, the harness is resolved
+/// from the route rather than asserted by the caller, so it is sound to gate on.
+#[derive(Default)]
+pub struct CrossHarnessViolationDetector;
+
+impl AnomalyDetector for CrossHarnessViolationDetector {
+    fn kind(&self) -> AnomalyKind {
+        AnomalyKind::UnauthorizedTool
+    }
+
+    fn detect(&self, ctx: &RequestContext) -> Option<AnomalyFinding> {
+        if ctx.allowed_harnesses.is_empty() || ctx.harness.is_empty() {
+            return None;
+        }
+        if ctx
+            .allowed_harnesses
+            .iter()
+            .any(|h| h.eq_ignore_ascii_case(&ctx.harness))
+        {
+            return None;
+        }
+        Some(AnomalyFinding::kill(
+            AnomalyKind::UnauthorizedTool,
+            format!(
+                "Cross-harness violation: this node ran under '{}', but its SOPs permit only [{}]",
+                ctx.harness,
+                ctx.allowed_harnesses.join(", ")
+            ),
+        ))
+    }
+}
+
 // ── Test support ────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -645,6 +777,11 @@ pub mod test_support {
             dlp_findings: vec![],
             tool_sequence: vec![],
             denied_tools: vec![],
+            injection_findings: vec![],
+            harness: String::new(),
+            allowed_harnesses: vec![],
+            workflow_spend_usd: None,
+            workflow_budget_usd: None,
             node: NodeIdentity::default(),
         }
     }
@@ -1027,5 +1164,124 @@ mod tool_policy_tests {
         let r = d.detect(&ctx).unwrap().reason;
         assert!(r.contains("kubectl") && r.contains("rm"));
         assert!(!r.contains("Read"));
+    }
+}
+
+#[cfg(test)]
+mod injection_detector_tests {
+    use super::test_support::*;
+    use super::*;
+
+    #[test]
+    fn a_single_technique_steers() {
+        // People do write "ignore the previous suggestion" in earnest, so one
+        // match is a flag rather than a refusal.
+        let d = PromptInjectionDetector::default();
+        let mut ctx = base_ctx();
+        ctx.injection_findings = vec!["override-instructions".into()];
+        let hit = d.detect(&ctx).unwrap();
+        assert_eq!(hit.kind, AnomalyKind::PromptInjection);
+        assert!(!hit.kill);
+    }
+
+    #[test]
+    fn several_techniques_together_are_refused() {
+        let d = PromptInjectionDetector::default();
+        let mut ctx = base_ctx();
+        ctx.injection_findings =
+            vec!["override-instructions".into(), "role-reassignment".into()];
+        assert!(d.detect(&ctx).unwrap().kill);
+    }
+
+    #[test]
+    fn clean_text_is_silent() {
+        assert!(PromptInjectionDetector::default().detect(&base_ctx()).is_none());
+    }
+
+    #[test]
+    fn the_payload_is_never_quoted_back() {
+        // The reason string reaches telemetry and sibling agents' context.
+        // Echoing the matched text would deliver the payload to exactly the
+        // places this detector protects.
+        let d = PromptInjectionDetector::default();
+        let mut ctx = base_ctx();
+        ctx.injection_findings = vec!["override-instructions".into()];
+        let reason = d.detect(&ctx).unwrap().reason;
+        assert!(reason.contains("override-instructions"));
+        assert!(!reason.contains("Ignore all previous"));
+    }
+}
+
+#[cfg(test)]
+mod workflow_and_harness_tests {
+    use super::test_support::*;
+    use super::*;
+
+    #[test]
+    fn workflow_budget_fires_past_its_ceiling() {
+        let d = WorkflowBudgetBreachDetector;
+        let mut ctx = base_ctx();
+        ctx.workflow_budget_usd = Some(5.0);
+        ctx.workflow_spend_usd = Some(4.99);
+        assert!(d.detect(&ctx).is_none());
+        ctx.workflow_spend_usd = Some(5.01);
+        let hit = d.detect(&ctx).unwrap();
+        assert_eq!(hit.kind, AnomalyKind::WorkflowBudgetBreach);
+        assert!(hit.kill);
+    }
+
+    #[test]
+    fn an_unbudgeted_run_is_never_refused() {
+        // No ceiling means nobody set one — not a ceiling of zero. Refusing
+        // here would break every loop started without the flag.
+        let d = WorkflowBudgetBreachDetector;
+        let mut ctx = base_ctx();
+        ctx.workflow_spend_usd = Some(999.0);
+        ctx.workflow_budget_usd = None;
+        assert!(d.detect(&ctx).is_none());
+    }
+
+    #[test]
+    fn a_request_outside_any_run_is_silent() {
+        assert!(WorkflowBudgetBreachDetector.detect(&base_ctx()).is_none());
+    }
+
+    #[test]
+    fn a_disallowed_harness_is_refused() {
+        let d = CrossHarnessViolationDetector;
+        let mut ctx = base_ctx();
+        ctx.harness = "cursor".into();
+        ctx.allowed_harnesses = vec!["claude-code".into()];
+        let hit = d.detect(&ctx).unwrap();
+        assert!(hit.kill);
+        assert!(hit.reason.contains("cursor"));
+    }
+
+    #[test]
+    fn a_permitted_harness_passes() {
+        let d = CrossHarnessViolationDetector;
+        let mut ctx = base_ctx();
+        ctx.harness = "Claude-Code".into();
+        ctx.allowed_harnesses = vec!["claude-code".into()];
+        assert!(d.detect(&ctx).is_none(), "comparison is case-insensitive");
+    }
+
+    #[test]
+    fn no_harness_policy_permits_everything() {
+        // The default. Adding allow_harnesses to one SOP must not implicitly
+        // restrict roles no SOP mentions.
+        let d = CrossHarnessViolationDetector;
+        let mut ctx = base_ctx();
+        ctx.harness = "anything".into();
+        assert!(d.detect(&ctx).is_none());
+    }
+
+    #[test]
+    fn an_unknown_harness_is_not_guessed_at() {
+        let d = CrossHarnessViolationDetector;
+        let mut ctx = base_ctx();
+        ctx.harness = String::new();
+        ctx.allowed_harnesses = vec!["claude-code".into()];
+        assert!(d.detect(&ctx).is_none());
     }
 }

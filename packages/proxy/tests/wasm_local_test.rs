@@ -49,6 +49,11 @@ fn test_ctx(workspace_id: &str) -> RequestContext {
         dlp_findings: vec![],
         tool_sequence: vec![],
         denied_tools: vec![],
+        injection_findings: vec![],
+        harness: String::new(),
+        allowed_harnesses: vec![],
+        workflow_spend_usd: None,
+        workflow_budget_usd: None,
         node: Default::default(),
     }
 }

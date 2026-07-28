@@ -402,6 +402,21 @@ pub trait LocalStore: Send + Sync + 'static {
     /// A graph's cost so far, across all nodes.
     async fn graph_spend(&self, graph_id: &str) -> Option<f64>;
 
+    /// Add to a loop run's running cost and return the new total.
+    ///
+    /// A loop run is the workflow: one named unit of work that may span many
+    /// requests, many nodes and many turns. Its ceiling is set once when the
+    /// run starts, so this is what a `--budget` on the run is actually
+    /// measured against.
+    async fn add_workflow_spend(&self, loop_run_id: &str, amount: f64) -> Option<f64>;
+
+    /// A loop run's cost so far, and the ceiling it was started with.
+    ///
+    /// The ceiling is written by whoever started the run, so `None` means no
+    /// budget was ever set — not a budget of zero. Treating it as zero would
+    /// refuse every request in a run nobody capped.
+    async fn workflow_budget(&self, loop_run_id: &str) -> (Option<f64>, Option<f64>);
+
     /// Append a judged chunk to `session:chunks:{sid}`.
     ///
     /// `ttl_secs` is `Some` on the streaming paths and `None` on the

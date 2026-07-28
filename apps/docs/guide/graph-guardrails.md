@@ -56,8 +56,31 @@ the shared anomaly taxonomy:
 | Context growth | large context after several hops | `TOKEN_WASTE` |
 | Budget exhaustion | no headroom left | `BUDGET_BREACH` |
 | Fan-out overspend | graph cost past 1.5× the per-node budget | `SPAWN_BUDGET_BREACH` |
+| Workflow overspend | a loop run past its own `--budget` | `WORKFLOW_BUDGET_BREACH` |
 | Orphaned execution | parent no longer live in the graph | `HALLUCINATION` |
 | Forbidden tool | a tool an SOP in force denies | `UNAUTHORIZED_TOOL` |
+| Cross-harness | a harness the node's SOPs don't permit | `UNAUTHORIZED_TOOL` |
+| Prompt injection | text attempting to override instructions | `PROMPT_INJECTION` |
+
+That is **11 of the 12** runtime anomaly categories. The twelfth,
+`WORKFLOW_GOAL_DRIFT`, asks whether an agent is still doing what it was asked
+to do — which needs the goal and a semantic comparison against it. That is an
+embedding or a model call, so it is neither a pure function of one request nor
+something that belongs inline on a path measured in milliseconds. It is out of
+scope here by decision rather than by omission.
+
+Prompt injection deserves its own caveat: it is pattern matching on the
+well-known phrasings, not a classifier. Someone who rewords will get past it.
+It is a tripwire on the obvious cases, priced at a few regex passes. A single
+match steers rather than blocks, because people write *"ignore the previous
+suggestion"* to agents in earnest; several distinct techniques in one payload
+is not a coincidence, and that is refused.
+
+In a graph this matters more than for a single agent. One node's output becomes
+the next node's input, so a payload picked up from a fetched page arrives at
+the next node looking exactly like an instruction from the orchestrator — there
+is no marker in a prompt saying which words came from a trusted planner and
+which came from a README the agent happened to read.
 
 The ping-pong detector exists because a consecutive-repeat check cannot see two
 nodes handing work back and forth — no tool ever repeats twice in a row, yet
@@ -218,6 +241,20 @@ deny_tools: kubectl, terraform
 A node in that role calling `kubectl` is refused with `UNAUTHORIZED_TOOL`.
 A node in a different role is not bound by it, and a node calling anything else
 is unaffected.
+
+`allow_harnesses` works the same way, restricting *where* a role may run:
+
+```markdown
+---
+roles: deployer
+allow_harnesses: claude-code
+---
+```
+
+An allowlist is workable here where it isn't for tools — a workspace has a
+handful of harnesses someone can name, not the open-ended tool surface each one
+exposes. And unlike the role, the harness is resolved from the route rather
+than asserted by the caller, so it is sound to gate on.
 
 This is a denylist, not an allowlist. An allowlist needs a complete picture of
 every tool your harnesses might legitimately use — get it wrong and real work
