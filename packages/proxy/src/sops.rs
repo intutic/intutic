@@ -146,8 +146,30 @@ struct Cached {
 
 static CACHE: Mutex<Option<Cached>> = Mutex::new(None);
 
-fn sops_dir() -> PathBuf {
-    PathBuf::from(".intutic/sops")
+/// How far up the tree to look for a workspace before giving up.
+///
+/// Bounded so a proxy started somewhere unexpected walks a few levels rather
+/// than stat-ing its way to `/`.
+const MAX_ANCESTOR_WALK: usize = 12;
+
+/// Locate `.intutic/sops`, searching upward from the working directory.
+///
+/// Walking up rather than reading a fixed relative path, because the proxy's
+/// working directory is not reliably the workspace root. `intutic connect`
+/// sets `cwd` to the workspace, but `intutic start` inherits whatever
+/// directory the user happened to be in, and `intutic-proxy` can be run
+/// directly from anywhere. A plain `.intutic/sops` therefore resolves to
+/// nothing whenever someone starts the proxy from a subdirectory — with no
+/// error, since an absent directory is indistinguishable from an empty one.
+///
+/// Same rule a developer already expects from `.git`: the project is wherever
+/// its marker is, not wherever the shell happens to be pointing.
+fn sops_dir() -> Option<PathBuf> {
+    let cwd = std::env::current_dir().ok()?;
+    cwd.ancestors()
+        .take(MAX_ANCESTOR_WALK)
+        .map(|dir| dir.join(".intutic").join("sops"))
+        .find(|candidate| candidate.is_dir())
 }
 
 /// All SOPs on disk, re-reading at most once per [`CACHE_TTL`].
@@ -164,7 +186,28 @@ fn all_sops() -> Vec<Sop> {
             return c.sops.clone();
         }
     }
-    let sops = read_dir_sops(&sops_dir());
+
+    let dir = sops_dir();
+    let sops = dir.as_deref().map(read_dir_sops).unwrap_or_default();
+
+    // Say once where they came from, or that none were found. Silence here is
+    // the failure mode worth guarding against: a user who wrote SOPs and
+    // started the proxy from the wrong directory otherwise sees a governed
+    // session with none of their policy in it, and nothing anywhere says so.
+    if guard.is_none() {
+        match dir {
+            Some(d) => tracing::info!(
+                path = %d.display(),
+                count = sops.len(),
+                "Loaded role-scoped SOPs"
+            ),
+            None => tracing::info!(
+                "No .intutic/sops directory found above the working directory — \
+                 no role-scoped SOPs will be injected"
+            ),
+        }
+    }
+
     *guard = Some(Cached {
         sops: sops.clone(),
         read_at: Instant::now(),
@@ -533,5 +576,49 @@ mod unknown_protocol_test {
         let mut b = original.clone();
         assert!(!inject_into_body(&mut b, &Protocol::Unknown, "block"));
         assert_eq!(b, original, "an unparsed body must not be mutated");
+    }
+}
+
+#[cfg(test)]
+mod discovery_tests {
+    use super::*;
+
+    /// The proxy's working directory is not reliably the workspace root:
+    /// `intutic start` inherits whatever directory the user was in. Resolution
+    /// therefore has to walk up, or SOPs silently never load for anyone who
+    /// starts the proxy from a subdirectory.
+    #[test]
+    fn sops_are_found_from_a_subdirectory() {
+        let root = std::env::temp_dir().join(format!("intutic-walk-{}", std::process::id()));
+        let sops = root.join(".intutic").join("sops");
+        let deep = root.join("packages").join("thing").join("src");
+        std::fs::create_dir_all(&sops).unwrap();
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(sops.join("p.md"), "- rule").unwrap();
+
+        // Resolution is relative to the process CWD, so this test drives it
+        // directly rather than mutating global state other tests share.
+        let found = deep
+            .ancestors()
+            .take(MAX_ANCESTOR_WALK)
+            .map(|d| d.join(".intutic").join("sops"))
+            .find(|c| c.is_dir());
+
+        assert_eq!(found.as_deref(), Some(sops.as_path()));
+        assert_eq!(read_dir_sops(&sops).len(), 1);
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn no_workspace_anywhere_resolves_to_nothing() {
+        let orphan = std::env::temp_dir().join(format!("intutic-none-{}", std::process::id()));
+        std::fs::create_dir_all(&orphan).unwrap();
+        let found = orphan
+            .ancestors()
+            .take(MAX_ANCESTOR_WALK)
+            .map(|d| d.join(".intutic").join("sops"))
+            .find(|c| c.is_dir());
+        assert!(found.is_none() || !found.unwrap().starts_with(&orphan));
+        std::fs::remove_dir_all(&orphan).ok();
     }
 }
