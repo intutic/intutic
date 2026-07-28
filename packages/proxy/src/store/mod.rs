@@ -377,6 +377,24 @@ pub trait LocalStore: Send + Sync + 'static {
     /// than guessing at a topology it cannot see.
     async fn graph_members(&self, graph_id: &str) -> Vec<String>;
 
+    /// Record this session's tool signature, returning the first one seen.
+    ///
+    /// Session-scoped, so it stays inside the boundary a hot-path detector may
+    /// read: it is the same kind of state as the tool sequence, not history
+    /// from other sessions.
+    ///
+    /// Returns the signature stored on the session's first request, which is
+    /// `signature` itself when this is that request. `None` when the store
+    /// cannot remember, in which case drift is simply not detectable.
+    async fn first_tool_signature(&self, session_id: &str, signature: &str) -> Option<String>;
+
+    /// How many nodes are currently live in a graph.
+    ///
+    /// A count rather than the member list, because this is read on every
+    /// graph request and the names are only needed when something is actually
+    /// being broadcast.
+    async fn graph_node_count(&self, graph_id: &str) -> Option<u32>;
+
     /// Whether a specific node is currently a live member of a graph.
     ///
     /// A single-key membership test rather than fetching the whole set,
@@ -401,6 +419,27 @@ pub trait LocalStore: Send + Sync + 'static {
 
     /// A graph's cost so far, across all nodes.
     async fn graph_spend(&self, graph_id: &str) -> Option<f64>;
+
+    /// Claim the right to broadcast a finding of `kind` into `graph_id`.
+    ///
+    /// Returns `false` when the broadcast should be suppressed. Two things are
+    /// enforced together because they guard the same failure:
+    ///
+    /// **Loop-suppression.** A finding delivered to a sibling lands in that
+    /// sibling's context, which becomes part of its next request. Without a
+    /// guard the same fact can ricochet around a graph, and each hop makes it
+    /// look independently corroborated when it is one observation being
+    /// repeated. The same category is therefore broadcast once per graph per
+    /// window, not once per request.
+    ///
+    /// **Rate ceiling.** A graph tripping detectors on every request would
+    /// otherwise broadcast on every request, to every sibling — quadratic in
+    /// graph size, and a way for a pathological graph to bury real findings
+    /// under its own noise.
+    ///
+    /// Returns `false` when the store cannot arbitrate, which correctly makes
+    /// broadcast a no-op rather than an unbounded one.
+    async fn claim_broadcast(&self, graph_id: &str, kind: &str) -> bool;
 
     /// Add to a loop run's running cost and return the new total.
     ///
