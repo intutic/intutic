@@ -1399,20 +1399,37 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 }
             });
 
-            let code = if worst.kill {
-                "policy_denied"
-            } else {
-                "policy_flagged"
-            };
-            return json_error(
-                StatusCode::FORBIDDEN,
-                code,
-                &format!(
-                    "Request blocked by anomaly policy [{}]: {}",
-                    worst.kind.as_str(),
-                    worst.reason
-                ),
-            );
+            // Only a *killing* finding stops the request.
+            //
+            // `AnomalyFinding::steer` sets `kill: false`, and `to_verdict` maps
+            // it to `Verdict::Hijack` — steer, do not block. The request path
+            // calls `evaluate_all` and never `to_verdict`, so that distinction
+            // was lost here: every finding returned 403, and the `kill` flag
+            // only chose between two error strings. Six of the nineteen
+            // detectors emit `steer` (ToolAbuse, TokenWaste, Hallucination,
+            // PromptInjection), so those six were hard-blocking requests they
+            // were written to merely advise on.
+            //
+            // Note this scans all findings rather than testing `worst.kill`.
+            // `worst` is `first()` after sorting by severity, with `kill` only
+            // as a tiebreak — so a High-severity steer sorts above a
+            // Medium-severity kill, and gating on `worst.kill` would suppress a
+            // genuine block whenever an advisory finding happened to outrank it.
+            if let Some(k) = crate::plugins::anomaly::DetectorRegistry::blocking_finding(&findings)
+            {
+                return json_error(
+                    StatusCode::FORBIDDEN,
+                    "policy_denied",
+                    &format!(
+                        "Request blocked by anomaly policy [{}]: {}",
+                        k.kind.as_str(),
+                        k.reason
+                    ),
+                );
+            }
+
+            // Advisory only. The findings are already logged above, already
+            // broadcast to siblings, and already traced. The request proceeds.
         }
     }
 
