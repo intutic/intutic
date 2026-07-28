@@ -426,10 +426,17 @@ mod coverage_tests {
         // The remainder, and why it is not here rather than merely missing.
         //
         // WORKFLOW_GOAL_DRIFT asks whether an agent is still doing what it was
-        // asked to do. Answering that needs the goal and a semantic comparison
-        // against it — an embedding or a model call — which is neither a pure
-        // function of one request nor something that belongs inline on the hot
-        // path. It is deliberately out of scope here, not overlooked.
+        // asked to do. That is not a pure function of one request: it needs the
+        // plan the agent was given, and a record of how far execution has strayed
+        // from it. Both live in the control plane — `storedPlans.complianceScore`,
+        // decremented per recorded deviation — and reaching them means a database
+        // lookup, which does not belong inline on the hot path.
+        //
+        // Note the scoring itself is *not* the obstacle, and earlier revisions of
+        // this comment were wrong to say it needed an embedding or a model call.
+        // The control plane's own check is a plain threshold comparison against a
+        // 0..1 score. What the proxy lacks is the plan, not the arithmetic.
+        // It is deliberately out of scope here, not overlooked.
         let uncovered: Vec<&str> = ALL_KINDS
             .iter()
             .map(|k| k.as_str())
