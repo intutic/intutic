@@ -1184,6 +1184,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         risk_tier: crate::wasm::context::RiskLevel::Low,
         dlp_findings,
         tool_sequence,
+        // Tool bans from the SOPs in force for this node's role. Resolved here
+        // so the detector remains a pure function of the context.
+        denied_tools: crate::sops::denied_tools_for_role(&node.agent_role),
         node,
     };
 

@@ -570,6 +570,59 @@ impl AnomalyDetector for OrphanExecutionDetector {
     }
 }
 
+// ── Tool policy ─────────────────────────────────────────────────────────────
+
+/// A node reaching for a tool its own SOPs forbid.
+///
+/// This is the point at which an SOP stops being advice. The prose telling an
+/// agent not to run something is injected into its context and can be read,
+/// weighed and — as anyone who has watched a long agent loop knows —
+/// eventually ignored. This runs on the request that ignores it.
+///
+/// Denylist rather than allowlist, deliberately. An allowlist needs a complete
+/// picture of every tool a harness might legitimately use, which open core has
+/// no way to obtain; getting it wrong blocks real work, and the resulting
+/// pressure is to disable governance rather than to fix the list. A denylist is
+/// incomplete by nature but wrong only in the safe direction.
+#[derive(Default)]
+pub struct UnauthorizedToolDetector;
+
+impl AnomalyDetector for UnauthorizedToolDetector {
+    fn kind(&self) -> AnomalyKind {
+        AnomalyKind::UnauthorizedTool
+    }
+
+    fn detect(&self, ctx: &RequestContext) -> Option<AnomalyFinding> {
+        if ctx.denied_tools.is_empty() || ctx.tool_calls.is_empty() {
+            return None;
+        }
+
+        let mut hits: Vec<&str> = ctx
+            .tool_calls
+            .iter()
+            .filter(|tc| {
+                ctx.denied_tools
+                    .iter()
+                    .any(|d| d.eq_ignore_ascii_case(&tc.name))
+            })
+            .map(|tc| tc.name.as_str())
+            .collect();
+        if hits.is_empty() {
+            return None;
+        }
+        hits.sort_unstable();
+        hits.dedup();
+
+        Some(AnomalyFinding::kill(
+            AnomalyKind::UnauthorizedTool,
+            format!(
+                "Forbidden tool call: {} — denied by an SOP in force for this node",
+                hits.join(", ")
+            ),
+        ))
+    }
+}
+
 // ── Test support ────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -591,6 +644,7 @@ pub mod test_support {
             risk_tier: RiskLevel::Low,
             dlp_findings: vec![],
             tool_sequence: vec![],
+            denied_tools: vec![],
             node: NodeIdentity::default(),
         }
     }
@@ -898,5 +952,80 @@ mod graph_aggregate_tests {
         let ctx = base_ctx();
         assert!(SpawnBudgetBreachDetector.detect(&ctx).is_none());
         assert!(OrphanExecutionDetector.detect(&ctx).is_none());
+    }
+}
+
+#[cfg(test)]
+mod tool_policy_tests {
+    use super::test_support::*;
+    use super::*;
+    use crate::wasm::context::ToolCall;
+
+    fn call(name: &str) -> ToolCall {
+        ToolCall {
+            id: "c1".into(),
+            name: name.into(),
+            arguments: serde_json::Value::Null,
+        }
+    }
+
+    #[test]
+    fn a_forbidden_tool_is_blocked() {
+        let d = UnauthorizedToolDetector;
+        let mut ctx = base_ctx();
+        ctx.denied_tools = vec!["kubectl".into()];
+        ctx.tool_calls = vec![call("kubectl")];
+        let hit = d.detect(&ctx).unwrap();
+        assert_eq!(hit.kind, AnomalyKind::UnauthorizedTool);
+        assert!(hit.kill);
+        assert!(hit.reason.contains("kubectl"));
+    }
+
+    #[test]
+    fn permitted_tools_pass() {
+        let d = UnauthorizedToolDetector;
+        let mut ctx = base_ctx();
+        ctx.denied_tools = vec!["kubectl".into()];
+        ctx.tool_calls = vec![call("Read"), call("Write")];
+        assert!(d.detect(&ctx).is_none());
+    }
+
+    #[test]
+    fn matching_is_case_insensitive() {
+        // An agent calling `Bash` must not slip past a policy written as `bash`.
+        let d = UnauthorizedToolDetector;
+        let mut ctx = base_ctx();
+        ctx.denied_tools = vec!["bash".into()];
+        ctx.tool_calls = vec![call("Bash")];
+        assert!(d.detect(&ctx).is_some());
+    }
+
+    #[test]
+    fn an_empty_policy_denies_nothing() {
+        // Fail-open by design: no policy means no restrictions, never
+        // "deny everything unlisted".
+        let d = UnauthorizedToolDetector;
+        let mut ctx = base_ctx();
+        ctx.tool_calls = vec![call("anything"), call("at-all")];
+        assert!(d.detect(&ctx).is_none());
+    }
+
+    #[test]
+    fn a_policy_with_no_tool_calls_is_quiet() {
+        let d = UnauthorizedToolDetector;
+        let mut ctx = base_ctx();
+        ctx.denied_tools = vec!["kubectl".into()];
+        assert!(d.detect(&ctx).is_none());
+    }
+
+    #[test]
+    fn every_forbidden_tool_is_named() {
+        let d = UnauthorizedToolDetector;
+        let mut ctx = base_ctx();
+        ctx.denied_tools = vec!["rm".into(), "kubectl".into()];
+        ctx.tool_calls = vec![call("kubectl"), call("Read"), call("rm")];
+        let r = d.detect(&ctx).unwrap().reason;
+        assert!(r.contains("kubectl") && r.contains("rm"));
+        assert!(!r.contains("Read"));
     }
 }

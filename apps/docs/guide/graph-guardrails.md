@@ -55,6 +55,9 @@ the shared anomaly taxonomy:
 | Diversity collapse | last 10 calls used one tool | `TOKEN_WASTE` |
 | Context growth | large context after several hops | `TOKEN_WASTE` |
 | Budget exhaustion | no headroom left | `BUDGET_BREACH` |
+| Fan-out overspend | graph cost past 1.5× the per-node budget | `SPAWN_BUDGET_BREACH` |
+| Orphaned execution | parent no longer live in the graph | `HALLUCINATION` |
+| Forbidden tool | a tool an SOP in force denies | `UNAUTHORIZED_TOOL` |
 
 The ping-pong detector exists because a consecutive-repeat check cannot see two
 nodes handing work back and forth — no tool ever repeats twice in a row, yet
@@ -198,6 +201,29 @@ its system prompt:
 | `reviewer` | unscoped SOPs + the reviewer ones |
 | `deployer` | unscoped SOPs + the deployer ones |
 | no role | unscoped SOPs only |
+
+### Making an SOP enforceable
+
+Prose tells an agent what not to do. `deny_tools` is the part the proxy acts on
+when it does it anyway:
+
+```markdown
+---
+roles: deployer
+deny_tools: kubectl, terraform
+---
+- Deployments go through the pipeline, not by hand.
+```
+
+A node in that role calling `kubectl` is refused with `UNAUTHORIZED_TOOL`.
+A node in a different role is not bound by it, and a node calling anything else
+is unaffected.
+
+This is a denylist, not an allowlist. An allowlist needs a complete picture of
+every tool your harnesses might legitimately use — get it wrong and real work
+breaks, and the pressure is then to switch governance off rather than fix the
+list. **An SOP with no `deny_tools` forbids nothing**, so adding this to an
+existing set changes nothing until you say what to block.
 
 Your own system prompt is preserved and left last, closest to the task —
 governance is the frame it sits inside, not a replacement for it. Anthropic
