@@ -171,6 +171,51 @@ ceilings, DLP, verdicts — and only cross-node delivery is lost. A file on disk
 would give mutual exclusion, not fan-out or ordering, and a notification is
 read-once: getting that wrong means a sibling silently never receives a `KILL`.
 
+## Role-scoped SOPs
+
+Nodes in a graph do different jobs, and the rules that matter differ with the
+job. A reviewer needs the review policy; telling it the deployment policy too
+spends context on something it will never act on and dilutes the part it should
+follow.
+
+Put SOPs in `.intutic/sops/` and declare who each applies to:
+
+```markdown
+---
+roles: reviewer
+---
+- Never approve a change that removes a test.
+```
+
+A file with no `roles:` applies to every node, so an existing flat set keeps
+working untouched and gains scoping only when you ask for it.
+
+Each node then receives only what matches the role it reported, prepended to
+its system prompt:
+
+| Node reports | Receives |
+|---|---|
+| `reviewer` | unscoped SOPs + the reviewer ones |
+| `deployer` | unscoped SOPs + the deployer ones |
+| no role | unscoped SOPs only |
+
+Your own system prompt is preserved and left last, closest to the task —
+governance is the frame it sits inside, not a replacement for it. Anthropic
+system blocks keep their array structure so `cache_control` markers survive;
+OpenAI, the Responses API and Gemini each get the shape they expect.
+
+The set is re-read at most every 30 seconds and capped at 8 KB per request,
+because injected text is paid for on every turn. If SOPs are dropped to stay
+under the cap, the block says so rather than leaving an agent believing it has
+the full set.
+
+::: warning Scoping, not authorisation
+The role is a client-supplied header. Showing a node the wrong policy is the
+worst a false claim achieves — which is why SOP text must never be what stands
+between an agent and a capability. Enforcement is the detectors and WASM rules,
+and neither consults the role.
+:::
+
 ## Seeing the trajectory
 
 Every traced request records where in the graph it happened — which node, what
