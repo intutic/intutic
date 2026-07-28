@@ -1131,6 +1131,16 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // request is not part of a real graph — a graph of one has no siblings to
     // hear from, and draining a queue nobody writes to is pure overhead on
     // every single-agent request.
+    // Cost and ceiling for the loop run this request belongs to, if any. A run
+    // spans many requests and nodes, so this is the only place its total is
+    // visible.
+    // Kept separately because the trace below takes ownership of the header.
+    let workflow_run_id = loop_run_id_header.clone();
+    let (workflow_spend, workflow_budget) = match workflow_run_id.as_deref() {
+        Some(id) => state.store.workflow_budget(id).await,
+        None => (None, None),
+    };
+
     let mut node = node;
     let graph_key = if node.graph_id == session_id {
         // A graph of one: no siblings, no aggregates to gather, and no reason
@@ -1187,6 +1197,16 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         // Tool bans from the SOPs in force for this node's role. Resolved here
         // so the detector remains a pure function of the context.
         denied_tools: crate::sops::denied_tools_for_role(&node.agent_role),
+        // Scanned over the whole request text, so injected content arriving
+        // via a tool result from an earlier node is seen too — which is the
+        // case that matters in a graph, where one node's output is the next
+        // node's input.
+        injection_findings: crate::injection::scan(&body_str),
+        // Resolved from the route, not asserted by the caller.
+        harness: provider.harness_name().to_string(),
+        allowed_harnesses: crate::sops::allowed_harnesses_for_role(&node.agent_role),
+        workflow_spend_usd: workflow_spend,
+        workflow_budget_usd: workflow_budget,
         node,
     };
 
@@ -3105,6 +3125,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // Accumulate against the graph as well as the machine, so fan-out is
     // visible: eight workers each inside their own budget can still put the
     // graph far past what was intended for the whole task.
+    if let (Some(lr), true) = (workflow_run_id.as_deref(), actual_cost_usd > 0.0) {
+        state.store.add_workflow_spend(lr, actual_cost_usd).await;
+    }
+
     if graph_key.is_some() && actual_cost_usd > 0.0 {
         state
             .store

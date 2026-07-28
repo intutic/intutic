@@ -71,6 +71,20 @@ class RequestContext {
   graph_budget_usd: f64 = -1;
   /** Is this node's parent still live? `1` yes, `0` no, `-1` unknown. */
   parent_alive: i32 = -1;
+
+  // ── Policy and provenance ───────────────────────────────────────────────
+
+  /** Tool names the SOPs in force forbid for this node. Empty = unrestricted. */
+  denied_tools: string[] = [];
+  /** Prompt-injection pattern names matched in this request. */
+  injection_findings: string[] = [];
+  /** Harness this request came through. Resolved from the route, not claimed. */
+  harness: string = "";
+  /** Harnesses the SOPs permit. Empty = unrestricted. */
+  allowed_harnesses: string[] = [];
+  /** Cost of the loop run this belongs to, and its ceiling. `-1` = unknown. */
+  workflow_spend_usd: f64 = -1;
+  workflow_budget_usd: f64 = -1;
 }
 
 let activeBuffer: Uint8Array | null = null;
@@ -115,6 +129,19 @@ function readString(offset: i32, len: i32): string {
     str += String.fromCharCode(load<u8>(offset + i));
   }
   return str;
+}
+
+/** Read a JSON string array, or an empty array when absent. */
+function parseStringArray(obj: JSON.Obj, key: string): string[] {
+  const out: string[] = [];
+  const arr = obj.getArr(key);
+  if (!arr) return out;
+  const values = arr.valueOf();
+  for (let i = 0; i < values.length; i++) {
+    const v = values[i];
+    if (v.isString) out.push((<JSON.Str>v).valueOf());
+  }
+  return out;
 }
 
 function parseRequestContext(jsonBytes: Uint8Array): RequestContext {
@@ -176,6 +203,19 @@ function parseRequestContext(jsonBytes: Uint8Array): RequestContext {
 
   const parent_alive = jsonObj.getBool("parent_alive");
   if (parent_alive) ctx.parent_alive = parent_alive.valueOf() ? 1 : 0;
+
+  const harness = jsonObj.getString("harness");
+  if (harness) ctx.harness = harness.toString();
+
+  const workflow_spend_usd = jsonObj.getFloat("workflow_spend_usd");
+  if (workflow_spend_usd) ctx.workflow_spend_usd = workflow_spend_usd.valueOf();
+
+  const workflow_budget_usd = jsonObj.getFloat("workflow_budget_usd");
+  if (workflow_budget_usd) ctx.workflow_budget_usd = workflow_budget_usd.valueOf();
+
+  ctx.denied_tools = parseStringArray(jsonObj, "denied_tools");
+  ctx.injection_findings = parseStringArray(jsonObj, "injection_findings");
+  ctx.allowed_harnesses = parseStringArray(jsonObj, "allowed_harnesses");
 
   trace("WASM: parsed primitive fields");
 
