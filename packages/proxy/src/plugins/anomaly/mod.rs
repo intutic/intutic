@@ -223,6 +223,23 @@ impl DetectorRegistry {
         self.detectors.is_empty()
     }
 
+    /// The finding that should stop the request, if any.
+    ///
+    /// `None` means every finding was advisory and the request proceeds — the
+    /// findings are still logged, broadcast and traced by the caller.
+    ///
+    /// This scans for *any* killing finding rather than testing whether the
+    /// most severe one kills. `evaluate_all` sorts by severity with `kill` only
+    /// as a tiebreak, so a High-severity steer sorts above a Medium-severity
+    /// kill; testing `findings.first().kill` would let an advisory finding mask
+    /// a real block. Among killers, the most severe wins the error message.
+    pub fn blocking_finding(findings: &[AnomalyFinding]) -> Option<&AnomalyFinding> {
+        findings
+            .iter()
+            .filter(|f| f.kill)
+            .max_by_key(|f| f.kind.severity())
+    }
+
     /// Run every detector and return all findings, most severe first.
     ///
     /// All detectors run rather than short-circuiting on the first hit: a
@@ -443,5 +460,74 @@ mod coverage_tests {
             .filter(|k| !covered.contains(k))
             .collect();
         assert_eq!(uncovered, vec!["WORKFLOW_GOAL_DRIFT"]);
+    }
+
+    // ── blocking_finding ────────────────────────────────────────────────
+    //
+    // The request path returned 403 for every finding, using `kill` only to
+    // choose between two error strings. Six of the nineteen detectors emit
+    // `steer` (kill: false), which `to_verdict` maps to Hijack — advise, do not
+    // block. Those six were hard-blocking requests they were written to advise
+    // on. These tests pin the corrected selection.
+
+    #[test]
+    fn advisory_findings_alone_do_not_block() {
+        let findings = vec![
+            AnomalyFinding::steer(AnomalyKind::ToolAbuse, "repetitive", 0.7),
+            AnomalyFinding::steer(AnomalyKind::TokenWaste, "wasteful", 0.4),
+        ];
+        assert!(
+            DetectorRegistry::blocking_finding(&findings).is_none(),
+            "steer-only findings must not stop the request"
+        );
+    }
+
+    #[test]
+    fn a_killing_finding_blocks() {
+        let findings = vec![AnomalyFinding::kill(
+            AnomalyKind::DataExfiltration,
+            "credentials in tool arguments",
+        )];
+        let blocking = DetectorRegistry::blocking_finding(&findings).expect("must block");
+        assert_eq!(blocking.kind, AnomalyKind::DataExfiltration);
+    }
+
+    #[test]
+    fn a_high_severity_steer_does_not_mask_a_lower_severity_kill() {
+        // The reason this scans for any killer instead of testing
+        // findings.first().kill. evaluate_all sorts by severity with kill only
+        // as a tiebreak, so the steer below sorts first — and a `worst.kill`
+        // gate would let it suppress a genuine block.
+        let steer = AnomalyFinding::steer(AnomalyKind::ToolAbuse, "advisory", 0.9);
+        let killer = AnomalyFinding::kill(AnomalyKind::TokenWaste, "budget exhausted");
+
+        assert!(
+            steer.kind.severity() > killer.kind.severity(),
+            "test premise: the steer must outrank the kill by severity"
+        );
+
+        let mut findings = vec![steer, killer];
+        findings.sort_by(|a, b| {
+            b.kind
+                .severity()
+                .cmp(&a.kind.severity())
+                .then(b.kill.cmp(&a.kill))
+        });
+        assert!(!findings[0].kill, "test premise: the steer sorts first");
+
+        let blocking = DetectorRegistry::blocking_finding(&findings)
+            .expect("the kill must still be found behind the higher-severity steer");
+        assert_eq!(blocking.kind, AnomalyKind::TokenWaste);
+    }
+
+    #[test]
+    fn the_most_severe_killer_supplies_the_message() {
+        let findings = vec![
+            AnomalyFinding::kill(AnomalyKind::TokenWaste, "lower severity"),
+            AnomalyFinding::kill(AnomalyKind::DataExfiltration, "higher severity"),
+        ];
+        let blocking = DetectorRegistry::blocking_finding(&findings).expect("must block");
+        assert_eq!(blocking.kind, AnomalyKind::DataExfiltration);
+        assert_eq!(blocking.reason, "higher severity");
     }
 }
