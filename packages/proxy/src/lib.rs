@@ -1,6 +1,7 @@
 pub mod config;
 pub mod dlp;
 pub mod graph;
+pub mod injection;
 pub mod metering;
 pub mod plugins;
 pub mod protocol;

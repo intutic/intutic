@@ -428,6 +428,31 @@ impl LocalStore for ValkeyStore {
             .flatten()
     }
 
+    async fn add_workflow_spend(&self, loop_run_id: &str, amount: f64) -> Option<f64> {
+        let mut conn = self.conn();
+        // No TTL: a loop run's lifetime is bounded by its own status, which is
+        // already tracked, and expiring the spend under a live run would reset
+        // its budget to zero-spent halfway through.
+        conn.incr(format!("intutic:loop:{loop_run_id}:spend"), amount)
+            .await
+            .ok()
+    }
+
+    async fn workflow_budget(&self, loop_run_id: &str) -> (Option<f64>, Option<f64>) {
+        let mut conn = self.conn();
+        let spend = conn
+            .get::<_, Option<f64>>(format!("intutic:loop:{loop_run_id}:spend"))
+            .await
+            .ok()
+            .flatten();
+        let budget = conn
+            .get::<_, Option<f64>>(format!("intutic:loop:{loop_run_id}:budget"))
+            .await
+            .ok()
+            .flatten();
+        (spend, budget)
+    }
+
     async fn push_session_chunk(
         &self,
         session_id: &str,

@@ -1,18 +1,30 @@
 //! Governance plugin system — native Rust implementations.
 //!
-//! Phase 1 uses native trait impls compiled directly into the proxy binary.
-//! Phase 3 adds wasmtime WASM host for user-authored rules (TD-004).
-//!
 //! Each plugin receives a [`RequestContext`] and returns a [`Verdict`].
 //! The [`evaluate_chain`] function runs plugins in priority order and
 //! short-circuits on the first [`Verdict::Kill`].
+//!
+//! # Removed plugins
+//!
+//! `pcas_gate`, `dlp_gate` and `sop_prompt_injector` were defined here but
+//! never called from the request path — dead code that read as working
+//! governance. Each is superseded rather than dropped:
+//!
+//! * `pcas_gate` — tool authorisation is now `UnauthorizedToolDetector`,
+//!   driven by `deny_tools` in an SOP. The original defaulted every unlisted
+//!   tool to `Unknown -> Hijack`, which open core cannot use: with no policy
+//!   service to populate the permission map, every tool call would be held for
+//!   a review that has nowhere to happen.
+//! * `dlp_gate` — DLP runs directly via `dlp::scan` on the request path, and
+//!   its findings reach `DlpEscalationDetector`. The plugin was a wrapper
+//!   around work already being done.
+//! * `sop_prompt_injector` — replaced by `sops`, which resolves SOPs by role
+//!   and injects their content. The original fetched a rule *count* from the
+//!   control plane and returned a notice nothing consumed.
 
 pub mod anomaly;
 pub mod budget_gate;
-pub mod dlp_gate;
-pub mod pcas_gate;
 pub mod semantic_cache;
-pub mod sop_prompt_injector;
 
 use crate::wasm::context::{RequestContext, Verdict};
 
@@ -109,6 +121,11 @@ mod tests {
             dlp_findings: vec![],
             tool_sequence: vec![],
             denied_tools: vec![],
+            injection_findings: vec![],
+            harness: String::new(),
+            allowed_harnesses: vec![],
+            workflow_spend_usd: None,
+            workflow_budget_usd: None,
             node: Default::default(),
         }
     }

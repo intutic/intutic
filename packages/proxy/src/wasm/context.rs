@@ -132,6 +132,31 @@ pub struct RequestContext {
     /// never "deny everything unlisted".
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub denied_tools: Vec<String>,
+    /// Prompt-injection patterns matched in this request's text.
+    ///
+    /// Pattern names, not the matched text — the matched span is attacker
+    /// input, and copying it into telemetry, notifications and sibling agent
+    /// context would propagate the payload to exactly the places the detector
+    /// exists to protect.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub injection_findings: Vec<String>,
+    /// The harness this request came through, e.g. `claude-code`, `cursor`.
+    ///
+    /// Derived from the upstream route the proxy resolved, not from anything
+    /// the caller asserts, so unlike the graph identity fields this one is
+    /// trustworthy enough to gate on.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub harness: String,
+    /// Harnesses the SOPs in force permit for this node's role. Empty means
+    /// unrestricted.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_harnesses: Vec<String>,
+    /// Cost of the loop run this request belongs to, and the ceiling it was
+    /// started with. `None` when there is no run, or nobody set a budget.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workflow_spend_usd: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workflow_budget_usd: Option<f64>,
     /// Graph position. Flattened onto the wire so existing guest rules that
     /// index fields by name keep working and simply gain new keys.
     #[serde(flatten)]
@@ -168,6 +193,11 @@ mod tests {
             dlp_findings: vec![],
             tool_sequence: vec!["Glob".into(), "View".into()],
             denied_tools: vec![],
+            injection_findings: vec![],
+            harness: String::new(),
+            allowed_harnesses: vec![],
+            workflow_spend_usd: None,
+            workflow_budget_usd: None,
             node: NodeIdentity {
                 node_id: "planner-1".into(),
                 agent_role: "planner".into(),
