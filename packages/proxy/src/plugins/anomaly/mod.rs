@@ -205,6 +205,7 @@ impl DetectorRegistry {
                 Box::new(BudgetExhaustionDetector::default()),
                 Box::new(SpawnBudgetBreachDetector::default()),
                 Box::new(OrphanExecutionDetector::default()),
+                Box::new(UnauthorizedToolDetector::default()),
             ],
         }
     }

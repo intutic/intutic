@@ -52,13 +52,25 @@ const CACHE_TTL: Duration = Duration::from_secs(30);
 /// than truncating advice they can still read in full on disk.
 const MAX_INJECTED_BYTES: usize = 8 * 1024;
 
-/// One policy document and the roles it applies to.
+/// One policy document, the roles it applies to, and anything it forbids.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Sop {
     pub title: String,
     pub body: String,
     /// Lowercased roles this applies to. Empty means every role.
     pub roles: Vec<String>,
+    /// Tool names this SOP forbids for the roles it covers.
+    ///
+    /// This is what makes an SOP enforceable rather than advisory. The prose
+    /// tells the agent not to do something; this is the part the proxy acts on
+    /// when it tries anyway — which is the entire premise, since a rule an
+    /// agent can read is a rule an agent can decide to ignore.
+    ///
+    /// Empty by default, so an SOP forbids nothing until someone says so.
+    /// Open core has no policy service to consult, and defaulting to
+    /// "everything not explicitly permitted is denied" would block every tool
+    /// call for every user who never wrote a policy.
+    pub deny_tools: Vec<String>,
 }
 
 impl Sop {
@@ -79,35 +91,47 @@ impl Sop {
     }
 }
 
-/// Split optional front matter from the body, returning `(roles, body)`.
+/// Split optional front matter from the body, returning
+/// `(roles, deny_tools, body)`.
 ///
 /// Intentionally not a YAML parser. The one directive that matters is
 /// `roles:`, and taking a YAML dependency to read a comma-separated list would
 /// be a poor trade — as would silently failing to load a policy because its
 /// front matter had a tab in it.
-fn parse_front_matter(raw: &str) -> (Vec<String>, String) {
+fn parse_front_matter(raw: &str) -> (Vec<String>, Vec<String>, String) {
     let trimmed = raw.trim_start();
     if !trimmed.starts_with("---") {
-        return (Vec::new(), raw.trim().to_string());
+        return (Vec::new(), Vec::new(), raw.trim().to_string());
     }
     let rest = &trimmed[3..];
     let Some(end) = rest.find("\n---") else {
         // An unterminated fence is malformed. Treat the whole file as body
         // rather than dropping the policy, so a typo cannot silently disarm a
         // rule the author believes is active.
-        return (Vec::new(), raw.trim().to_string());
+        return (Vec::new(), Vec::new(), raw.trim().to_string());
     };
     let (front, body) = rest.split_at(end);
 
-    let roles = front
-        .lines()
-        .filter_map(|l| l.trim().strip_prefix("roles:"))
-        .flat_map(|v| v.split(','))
-        .map(|r| r.trim().trim_matches(['"', '\'', '[', ']']).to_ascii_lowercase())
-        .filter(|r| !r.is_empty())
-        .collect();
+    let list = |key: &str, lower: bool| -> Vec<String> {
+        front
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix(key))
+            .flat_map(|v| v.split(','))
+            .map(|r| {
+                let t = r.trim().trim_matches(['"', '\'', '[', ']']).to_string();
+                if lower { t.to_ascii_lowercase() } else { t }
+            })
+            .filter(|r| !r.is_empty())
+            .collect()
+    };
 
-    (roles, body.trim_start_matches("\n---").trim().to_string())
+    (
+        list("roles:", true),
+        // Tool names keep their case — harnesses ship tools called `Bash` and
+        // `Write`, and lowercasing them would stop the denylist matching.
+        list("deny_tools:", false),
+        body.trim_start_matches("\n---").trim().to_string(),
+    )
 }
 
 fn read_dir_sops(dir: &Path) -> Vec<Sop> {
@@ -122,14 +146,15 @@ fn read_dir_sops(dir: &Path) -> Vec<Sop> {
                 return None;
             }
             let raw = std::fs::read_to_string(&path).ok()?;
-            let (roles, body) = parse_front_matter(&raw);
-            if body.is_empty() {
+            let (roles, deny_tools, body) = parse_front_matter(&raw);
+            if body.is_empty() && deny_tools.is_empty() {
                 return None;
             }
             Some(Sop {
                 title: path.file_stem()?.to_str()?.to_string(),
                 body,
                 roles,
+                deny_tools,
             })
         })
         .collect();
@@ -221,6 +246,27 @@ fn all_sops() -> Vec<Sop> {
 /// carries no injected text at all rather than an empty header.
 pub fn governance_block_for_role(role: &str) -> Option<String> {
     render(&all_sops(), role)
+}
+
+/// Tool names forbidden for a node in this role, from every SOP that applies.
+///
+/// Empty means nothing is forbidden — the default, and the correct one. Open
+/// core has no policy service to ask, so treating an empty policy as
+/// "deny everything unlisted" would block every tool call for every user who
+/// never wrote one.
+pub fn denied_tools_for_role(role: &str) -> Vec<String> {
+    collect_denies(&all_sops(), role)
+}
+
+fn collect_denies(sops: &[Sop], role: &str) -> Vec<String> {
+    let mut out: Vec<String> = sops
+        .iter()
+        .filter(|s| s.applies_to(role))
+        .flat_map(|s| s.deny_tools.iter().cloned())
+        .collect();
+    out.sort();
+    out.dedup();
+    out
 }
 
 /// Rendering split out so it can be tested without touching the filesystem.
@@ -350,6 +396,7 @@ mod tests {
             title: title.into(),
             body: format!("- rule for {title}"),
             roles: roles.iter().map(|r| r.to_string()).collect(),
+            deny_tools: Vec::new(),
         }
     }
 
@@ -377,14 +424,14 @@ mod tests {
 
     #[test]
     fn front_matter_is_split_from_body() {
-        let (roles, body) = parse_front_matter("---\nroles: reviewer, Deployer\n---\n## Policy\n- x");
+        let (roles, _deny, body) = parse_front_matter("---\nroles: reviewer, Deployer\n---\n## Policy\n- x");
         assert_eq!(roles, vec!["reviewer", "deployer"]);
         assert_eq!(body, "## Policy\n- x");
     }
 
     #[test]
     fn a_file_without_front_matter_is_all_body() {
-        let (roles, body) = parse_front_matter("## Policy\n- x");
+        let (roles, _deny, body) = parse_front_matter("## Policy\n- x");
         assert!(roles.is_empty());
         assert_eq!(body, "## Policy\n- x");
     }
@@ -393,14 +440,14 @@ mod tests {
     fn malformed_front_matter_keeps_the_policy() {
         // An unterminated fence is a typo. Dropping the file would silently
         // disarm a rule its author believes is active.
-        let (roles, body) = parse_front_matter("---\nroles: reviewer\n## Policy");
+        let (roles, _deny, body) = parse_front_matter("---\nroles: reviewer\n## Policy");
         assert!(roles.is_empty());
         assert!(body.contains("## Policy"));
     }
 
     #[test]
     fn bracketed_yaml_list_form_is_accepted() {
-        let (roles, _) = parse_front_matter("---\nroles: [reviewer, deployer]\n---\nbody");
+        let (roles, _deny, _body) = parse_front_matter("---\nroles: [reviewer, deployer]\n---\nbody");
         assert_eq!(roles, vec!["reviewer", "deployer"]);
     }
 
@@ -431,6 +478,7 @@ mod tests {
                 title: format!("sop-{i:02}"),
                 body: "x".repeat(500),
                 roles: vec![],
+                deny_tools: vec![],
             })
             .collect();
         let out = render(&big, "any").unwrap();
@@ -620,5 +668,68 @@ mod discovery_tests {
             .find(|c| c.is_dir());
         assert!(found.is_none() || !found.unwrap().starts_with(&orphan));
         std::fs::remove_dir_all(&orphan).ok();
+    }
+}
+
+#[cfg(test)]
+mod deny_tests {
+    use super::*;
+
+    fn with_denies(roles: &[&str], denies: &[&str]) -> Sop {
+        Sop {
+            title: "policy".into(),
+            body: "- prose".into(),
+            roles: roles.iter().map(|r| r.to_string()).collect(),
+            deny_tools: denies.iter().map(|d| d.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn deny_tools_parse_from_front_matter() {
+        let (roles, deny, body) =
+            parse_front_matter("---\nroles: deployer\ndeny_tools: Bash, rm\n---\n- prose");
+        assert_eq!(roles, vec!["deployer"]);
+        assert_eq!(deny, vec!["Bash", "rm"]);
+        assert_eq!(body, "- prose");
+    }
+
+    #[test]
+    fn tool_names_keep_their_case() {
+        // Harnesses ship tools called `Bash` and `Write`. Lowercasing the
+        // denylist the way roles are lowercased would stop it matching.
+        let (_, deny, _) = parse_front_matter("---\ndeny_tools: Bash, WebFetch\n---\nx");
+        assert_eq!(deny, vec!["Bash", "WebFetch"]);
+    }
+
+    #[test]
+    fn denies_are_collected_per_role_and_deduped() {
+        let sops = vec![
+            with_denies(&[], &["rm"]),
+            with_denies(&["deployer"], &["kubectl", "rm"]),
+            with_denies(&["reviewer"], &["git-push"]),
+        ];
+        assert_eq!(collect_denies(&sops, "deployer"), vec!["kubectl", "rm"]);
+        assert_eq!(collect_denies(&sops, "reviewer"), vec!["git-push", "rm"]);
+        // A node with no role still inherits the unscoped bans.
+        assert_eq!(collect_denies(&sops, ""), vec!["rm"]);
+    }
+
+    #[test]
+    fn no_policy_means_nothing_is_denied() {
+        // The critical default. Open core has no policy service, so an empty
+        // policy must mean "no restrictions" — treating it as "deny everything
+        // unlisted" would block every tool call for every user who never wrote
+        // one.
+        assert!(collect_denies(&[], "deployer").is_empty());
+        assert!(collect_denies(&[with_denies(&[], &[])], "deployer").is_empty());
+    }
+
+    #[test]
+    fn a_deny_only_sop_is_still_loaded() {
+        // A file that is nothing but a denylist has no prose body, and must
+        // not be discarded for it.
+        let (_, deny, body) = parse_front_matter("---\ndeny_tools: rm\n---\n");
+        assert!(body.is_empty());
+        assert_eq!(deny, vec!["rm"]);
     }
 }
