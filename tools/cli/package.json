@@ -1,7 +1,7 @@
 {
   "name": "@intutic/cli",
-  "version": "1.7.2",
-  "description": "Intutic CLI — sync daemon, harness detection, and workspace management",
+  "version": "1.8.0",
+  "description": "Intutic CLI \u2014 sync daemon, harness detection, and workspace management",
   "type": "module",
   "bin": {
     "intutic": "./dist/cli.js"
