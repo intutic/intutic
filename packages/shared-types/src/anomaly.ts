@@ -71,7 +71,10 @@ export interface AnomalyClassification {
  *
  * HLD §3.5 — Alert Route column
  */
-export type AnomalySeverity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFORMATIONAL'
+// Imported for local use below and re-exported for existing importers.
+// `export type { ... } from` alone re-exports without binding it in scope.
+import type { AnomalySeverity } from '@intutic/anomaly-taxonomy'
+export type { AnomalySeverity }
 
 /**
  * Static mapping from anomaly type to default severity.
@@ -79,20 +82,13 @@ export type AnomalySeverity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFORMAT
  * HLD §3.5 — 12-category table, Alert Route column
  * LLD #5 Appendix B
  */
-export const ANOMALY_SEVERITY_MAP: Record<AnomalyType, AnomalySeverity> = {
-  TOOL_ABUSE: 'HIGH',
-  TOKEN_WASTE: 'MEDIUM',
-  LOOP_DETECTED: 'HIGH',
-  UNAUTHORIZED_TOOL: 'HIGH',
-  DATA_EXFILTRATION: 'CRITICAL',
-  PROMPT_INJECTION: 'CRITICAL',
-  HALLUCINATION: 'HIGH',
-  SCOPE_VIOLATION: 'MEDIUM',
-  BUDGET_BREACH: 'HIGH',
-  SPAWN_BUDGET_BREACH: 'HIGH',
-  WORKFLOW_BUDGET_BREACH: 'HIGH',
-  WORKFLOW_GOAL_DRIFT: 'MEDIUM',
-} as const
+/**
+ * Severity per anomaly category.
+ *
+ * Re-exported from `@intutic/anomaly-taxonomy`. Kept as a named export here so
+ * existing importers are unaffected, but declared in exactly one place.
+ */
+export { ANOMALY_SEVERITY_MAP } from '@intutic/anomaly-taxonomy'
 
 // ─── Corrective Prompt Card ──────────────────────────────────────────
 

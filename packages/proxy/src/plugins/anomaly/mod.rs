@@ -286,21 +286,21 @@ mod tests {
         }
     }
 
-    /// Cross-check the Rust taxonomy against the TypeScript one it mirrors.
+    /// Cross-check the Rust taxonomy against `@intutic/anomaly-taxonomy`,
+    /// which is the source of truth.
     ///
-    /// The enum is declared twice — once here, once in
-    /// `packages/shared-types/src/enums.ts` — because the hot path is Rust and
-    /// the control plane is TypeScript. Two hand-maintained copies drift, and
-    /// drift here is silent: a renamed category simply stops being classified
-    /// downstream, with no error anywhere.
+    /// The enum is declared twice — once here, once in that package — because
+    /// the hot path is Rust and cannot call into TypeScript. Two
+    /// hand-maintained copies drift, and drift here is silent: a renamed
+    /// category simply stops being classified downstream, with no error
+    /// anywhere.
     ///
-    /// So the test reads the TypeScript source and fails the build on any
-    /// divergence. This is a stopgap until the shared taxonomy package exists;
-    /// once it does, both sides generate from one source and this can go.
+    /// So the test parses the published source and fails the build on any
+    /// divergence, which turns a silent classification gap into a broken build.
     #[test]
     fn taxonomy_matches_typescript_source() {
         let ts_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../shared-types/src/enums.ts");
+            .join("../anomaly-taxonomy/src/index.ts");
 
         let Ok(src) = std::fs::read_to_string(&ts_path) else {
             // The crate can be built outside the monorepo, where the sibling
@@ -337,7 +337,7 @@ mod tests {
 
         assert_eq!(
             rust_values, ts_values,
-            "Rust taxonomy has drifted from packages/shared-types/src/enums.ts"
+            "Rust taxonomy has drifted from packages/anomaly-taxonomy/src/index.ts"
         );
     }
 

@@ -96,24 +96,20 @@ export type ChangeClassification = typeof ChangeClassification[keyof typeof Chan
 // ─── Anomaly Type ────────────────────────────────────────────────────
 // HLD §3.5, LLD §3.1 — anomaly_type enum (12-category runtime taxonomy)
 
-/** Runtime anomaly classification taxonomy. */
-export const AnomalyType = {
-  TOOL_ABUSE: 'TOOL_ABUSE',
-  TOKEN_WASTE: 'TOKEN_WASTE',
-  LOOP_DETECTED: 'LOOP_DETECTED',
-  UNAUTHORIZED_TOOL: 'UNAUTHORIZED_TOOL',
-  DATA_EXFILTRATION: 'DATA_EXFILTRATION',
-  PROMPT_INJECTION: 'PROMPT_INJECTION',
-  HALLUCINATION: 'HALLUCINATION',
-  SCOPE_VIOLATION: 'SCOPE_VIOLATION',
-  BUDGET_BREACH: 'BUDGET_BREACH',
-  SPAWN_BUDGET_BREACH: 'SPAWN_BUDGET_BREACH',
-  WORKFLOW_BUDGET_BREACH: 'WORKFLOW_BUDGET_BREACH',
-  WORKFLOW_GOAL_DRIFT: 'WORKFLOW_GOAL_DRIFT',
-} as const
-
-/** Union of all anomaly type values. */
-export type AnomalyType = typeof AnomalyType[keyof typeof AnomalyType]
+/**
+ * Runtime anomaly classification taxonomy.
+ *
+ * Re-exported from `@intutic/anomaly-taxonomy`, which is the source of truth.
+ * It lives in its own package because the Rust proxy declares the same twelve
+ * categories — the hot path cannot call into TypeScript — and the proxy's
+ * tests parse that package to fail the build if the two ever diverge.
+ *
+ * Re-exported rather than redeclared so this file cannot become a third copy.
+ */
+export { AnomalyType } from '@intutic/anomaly-taxonomy'
+export type {
+  AnomalySeverity,
+} from '@intutic/anomaly-taxonomy'
 
 // ─── Harness Type ────────────────────────────────────────────────────
 // HLD §3.14, §4.5 — Supported AI agent harness integrations

@@ -1,0 +1,26 @@
+{
+  "name": "@intutic/anomaly-taxonomy",
+  "version": "1.7.2",
+  "description": "The Intutic runtime anomaly taxonomy — category enum and severity map. Type-only, zero dependencies.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/intutic/intutic",
+    "directory": "packages/anomaly-taxonomy"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "./dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}
