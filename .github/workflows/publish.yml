@@ -67,6 +67,14 @@ jobs:
             echo "::error file=packages/proxy/Cargo.toml::version $crate != tag $TAG"
             fail=1
           fi
+          # publish-pypi.yml fires on the same v* tag and publishes whatever
+          # version pyproject.toml declares. It was left out of this gate, and
+          # drifted: the v1.8.0 tag would have published intutic-clawde 1.6.3.
+          pyver="$(grep -m1 '^version' packages/intutic-clawde/pyproject.toml | cut -d'"' -f2)"
+          if [ "$pyver" != "$TAG" ]; then
+            echo "::error file=packages/intutic-clawde/pyproject.toml::version $pyver != tag $TAG"
+            fail=1
+          fi
           if [ "$fail" -ne 0 ]; then
             echo "Refusing to publish: tag and manifests disagree."
             exit 1
