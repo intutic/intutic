@@ -708,14 +708,15 @@ impl AnomalyDetector for SchemaDriftDetector {
     }
 
     fn detect(&self, ctx: &RequestContext) -> Option<AnomalyFinding> {
-        if !ctx.tools_changed_mid_session {
+        if !ctx.tool_contract_changed {
             return None;
         }
         Some(AnomalyFinding::steer(
             AnomalyKind::ToolAbuse,
-            "Tool contract drift: a tool name or description has changed since this session opened. \
-             Tool descriptions are model-visible instructions, so a changed one has rewritten \
-             what the agent was told without any tool call being made."
+            "Tool contract drift: a tool definition no longer matches the one pinned for this \
+             workspace on first use. Names, descriptions and input schemas are all model-visible \
+             instructions, so an altered one has rewritten what the agent was told without any \
+             tool call being made."
                 .to_string(),
             0.7,
         ))
@@ -851,7 +852,7 @@ pub mod test_support {
             tool_sequence: vec![],
             denied_tools: vec![],
             injection_findings: vec![],
-            tools_changed_mid_session: false,
+            tool_contract_changed: false,
             harness: String::new(),
             allowed_harnesses: vec![],
             workflow_spend_usd: None,
@@ -1405,7 +1406,7 @@ mod schema_drift_tests {
     fn a_changed_tool_set_is_flagged() {
         let d = SchemaDriftDetector;
         let mut ctx = base_ctx();
-        ctx.tools_changed_mid_session = true;
+        ctx.tool_contract_changed = true;
         let hit = d.detect(&ctx).unwrap();
         assert_eq!(hit.kind, AnomalyKind::ToolAbuse);
         assert!(!hit.kill, "harnesses do renegotiate tools; this steers");
@@ -1434,7 +1435,7 @@ mod tool_poisoning_tests {
     fn a_changed_description_is_contract_drift() {
         let d = SchemaDriftDetector;
         let mut ctx = base_ctx();
-        ctx.tools_changed_mid_session = true;
+        ctx.tool_contract_changed = true;
         let hit = d.detect(&ctx).unwrap();
         assert_eq!(hit.kind, AnomalyKind::ToolAbuse);
         assert!(

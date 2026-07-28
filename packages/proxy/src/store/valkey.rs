@@ -409,18 +409,20 @@ impl LocalStore for ValkeyStore {
             .unwrap_or_default()
     }
 
-    async fn first_tool_signature(&self, session_id: &str, signature: &str) -> Option<String> {
+    async fn pinned_tool_signature(
+        &self,
+        workspace_id: &str,
+        signature: &str,
+    ) -> Option<String> {
         let mut conn = self.conn();
-        let key = format!("session:tools:{session_id}");
-        // SET NX then GET: the first writer wins and every later request reads
-        // back what it recorded, so the comparison is against the session's
-        // opening toolset rather than merely the previous request's.
+        let key = format!("tools:pin:{workspace_id}");
+        // SET NX with no expiry: the pin is the workspace's baseline and must
+        // outlive every session, or a rug pull only has to wait for the next
+        // one. Clearing it is a deliberate act — re-approval — not a timeout.
         let _: Result<Option<String>, redis::RedisError> = redis::cmd("SET")
             .arg(&key)
             .arg(signature)
             .arg("NX")
-            .arg("EX")
-            .arg(86_400)
             .query_async(&mut conn)
             .await;
         conn.get::<_, Option<String>>(&key).await.ok().flatten()
