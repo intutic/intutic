@@ -12,6 +12,7 @@ pub mod sops;
 pub mod snip_code;
 pub mod snip_json;
 pub mod telemetry;
+pub mod tool_pin;
 pub mod wasm;
 // TLS MITM for Windsurf Cascade AI traffic interception
 pub mod ca_manager;
