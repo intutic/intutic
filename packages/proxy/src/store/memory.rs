@@ -238,6 +238,35 @@ pub async fn migrate_local_learning(
 
 /// Where standalone learning lives. Sits beside `local_spend`'s files, which is
 /// the existing precedent for proxy-owned state under `$HOME`.
+/// Where trust-on-first-use tool pins live.
+fn tool_pin_path() -> PathBuf {
+    default_snapshot_path().with_file_name("tool-pins.json")
+}
+
+fn load_tool_pins() -> HashMap<String, String> {
+    std::fs::read_to_string(tool_pin_path())
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default()
+}
+
+/// Whole-file atomic replace, same as the bandit snapshot: write a temporary
+/// file and rename, so a crash mid-write cannot leave a truncated pin file
+/// that would read as "nothing pinned" and re-baseline every workspace.
+fn save_tool_pins(pins: &HashMap<String, String>) {
+    let path = tool_pin_path();
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let Ok(encoded) = serde_json::to_string_pretty(pins) else {
+        return;
+    };
+    let tmp = path.with_extension("json.tmp");
+    if std::fs::write(&tmp, encoded).is_ok() {
+        let _ = std::fs::rename(&tmp, &path);
+    }
+}
+
 pub(crate) fn default_snapshot_path() -> PathBuf {
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
@@ -611,15 +640,31 @@ impl LocalStore for MemoryStore {
         Vec::new()
     }
 
-    /// Remembers within the process, which is where a session lives anyway.
-    async fn first_tool_signature(&self, session_id: &str, signature: &str) -> Option<String> {
+    /// Trust-on-first-use, persisted to disk.
+    ///
+    /// Durability is the whole point rather than a nicety: a pin that dies
+    /// with the process is no pin at all, because a rug pull only has to wait
+    /// for the proxy to restart. Kept in its own file rather than alongside
+    /// the bandit snapshot — that one is a running estimate where losing an
+    /// update costs a little exploration, whereas losing a pin silently
+    /// re-baselines onto whatever a server is serving now.
+    async fn pinned_tool_signature(
+        &self,
+        workspace_id: &str,
+        signature: &str,
+    ) -> Option<String> {
         let mut guard = self.tool_signatures.lock().ok()?;
-        Some(
-            guard
-                .entry(session_id.to_string())
-                .or_insert_with(|| signature.to_string())
-                .clone(),
-        )
+        if guard.is_empty() {
+            *guard = load_tool_pins();
+        }
+        match guard.get(workspace_id) {
+            Some(existing) => Some(existing.clone()),
+            None => {
+                guard.insert(workspace_id.to_string(), signature.to_string());
+                save_tool_pins(&guard);
+                Some(signature.to_string())
+            }
+        }
     }
 
     /// `None` — a graph spans processes, so its size is not knowable here.

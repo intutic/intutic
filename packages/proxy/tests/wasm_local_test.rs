@@ -50,7 +50,7 @@ fn test_ctx(workspace_id: &str) -> RequestContext {
         tool_sequence: vec![],
         denied_tools: vec![],
         injection_findings: vec![],
-        tools_changed_mid_session: false,
+        tool_contract_changed: false,
         harness: String::new(),
         allowed_harnesses: vec![],
         workflow_spend_usd: None,
