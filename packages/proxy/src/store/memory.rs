@@ -178,6 +178,8 @@ pub struct MemoryStore {
     modes: Mutex<HashMap<String, Ownership>>,
     sessions: Mutex<HashMap<String, SessionRouting>>,
     tool_sequences: Mutex<HashMap<String, Vec<String>>>,
+    /// First tool signature seen per session, for drift detection.
+    tool_signatures: Mutex<HashMap<String, String>>,
     credentials: Mutex<HashMap<String, HashMap<String, String>>>,
     responses: Mutex<HashMap<String, Expiring>>,
     cache_counters: Mutex<HashMap<String, HashMap<String, i64>>>,
@@ -609,6 +611,22 @@ impl LocalStore for MemoryStore {
         Vec::new()
     }
 
+    /// Remembers within the process, which is where a session lives anyway.
+    async fn first_tool_signature(&self, session_id: &str, signature: &str) -> Option<String> {
+        let mut guard = self.tool_signatures.lock().ok()?;
+        Some(
+            guard
+                .entry(session_id.to_string())
+                .or_insert_with(|| signature.to_string())
+                .clone(),
+        )
+    }
+
+    /// `None` — a graph spans processes, so its size is not knowable here.
+    async fn graph_node_count(&self, _graph_id: &str) -> Option<u32> {
+        None
+    }
+
     /// `None` — no opinion, not "dead".
     ///
     /// Returning `Some(false)` here would declare every parent gone and orphan
@@ -627,6 +645,12 @@ impl LocalStore for MemoryStore {
 
     async fn graph_spend(&self, _graph_id: &str) -> Option<f64> {
         None
+    }
+
+    /// `false` — nothing to arbitrate, because standalone has no cross-node
+    /// delivery to suppress in the first place.
+    async fn claim_broadcast(&self, _graph_id: &str, _kind: &str) -> bool {
+        false
     }
 
     /// `None` — a loop run spans processes, so its cost cannot be aggregated

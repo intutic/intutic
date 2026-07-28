@@ -1115,6 +1115,22 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         0.0
     };
 
+    // Signature of the tool set this request advertises. Compared against the
+    // one the session opened with, so a harness quietly presenting a different
+    // surface part-way through is visible.
+    let advertised_tools = extract_tools(&body_json);
+    let tool_signature = {
+        let mut names: Vec<&str> = advertised_tools.iter().map(|t| t.name.as_str()).collect();
+        names.sort_unstable();
+        names.join(",")
+    };
+    let tools_changed_mid_session = !tool_signature.is_empty()
+        && state
+            .store
+            .first_tool_signature(&session_id, &tool_signature)
+            .await
+            .is_some_and(|first| first != tool_signature);
+
     let request_tool_calls = extract_request_tool_calls(&body_json);
     let tool_sequence = state
         .store
@@ -1177,6 +1193,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         // stays a pure function of the context rather than reaching for I/O
         // mid-evaluation.
         node.graph_spend_usd = state.store.graph_spend(&node.graph_id).await;
+        node.graph_node_count = state.store.graph_node_count(&node.graph_id).await;
         node.graph_budget_usd = Some(crate::local_spend::get_max_daily_budget());
 
         Some(format!("{}:{}", node.graph_id, node.node_id))
@@ -1202,6 +1219,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         // case that matters in a graph, where one node's output is the next
         // node's input.
         injection_findings: crate::injection::scan(&body_str),
+        tools_changed_mid_session,
         // Resolved from the route, not asserted by the caller.
         harness: provider.harness_name().to_string(),
         allowed_harnesses: crate::sops::allowed_harnesses_for_role(&node.agent_role),
