@@ -66,6 +66,17 @@ const NOTIFY_QUEUE_CAP: isize = 50;
 /// about a request the agent has long since moved on from.
 const NOTIFY_TTL_SECS: i64 = 3600;
 
+/// Window over which a graph may broadcast a given anomaly category once, and
+/// over which its total broadcasts are counted.
+const BROADCAST_WINDOW_SECS: u64 = 60;
+
+/// Most broadcasts one graph may emit per window, across all categories.
+///
+/// Ten is generous for a graph behaving badly in several distinct ways at once
+/// and low enough that a pathological one cannot bury real findings under its
+/// own noise.
+const BROADCAST_MAX_PER_WINDOW: i64 = 10;
+
 /// Timeout on lookups that gate whether the request proceeds at all. Matches
 /// the 500 ms budget these reads carried before the port.
 const GATE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
@@ -398,6 +409,30 @@ impl LocalStore for ValkeyStore {
             .unwrap_or_default()
     }
 
+    async fn first_tool_signature(&self, session_id: &str, signature: &str) -> Option<String> {
+        let mut conn = self.conn();
+        let key = format!("session:tools:{session_id}");
+        // SET NX then GET: the first writer wins and every later request reads
+        // back what it recorded, so the comparison is against the session's
+        // opening toolset rather than merely the previous request's.
+        let _: Result<Option<String>, redis::RedisError> = redis::cmd("SET")
+            .arg(&key)
+            .arg(signature)
+            .arg("NX")
+            .arg("EX")
+            .arg(86_400)
+            .query_async(&mut conn)
+            .await;
+        conn.get::<_, Option<String>>(&key).await.ok().flatten()
+    }
+
+    async fn graph_node_count(&self, graph_id: &str) -> Option<u32> {
+        let mut conn = self.conn();
+        conn.scard::<_, u32>(format!("graph:{graph_id}:nodes"))
+            .await
+            .ok()
+    }
+
     async fn is_graph_member(&self, graph_id: &str, node_id: &str) -> Option<bool> {
         let mut conn = self.conn();
         let key = format!("graph:{graph_id}:nodes");
@@ -426,6 +461,47 @@ impl LocalStore for ValkeyStore {
             .await
             .ok()
             .flatten()
+    }
+
+    async fn claim_broadcast(&self, graph_id: &str, kind: &str) -> bool {
+        let mut conn = self.conn();
+
+        // Loop-suppression first, and it is the cheaper check. SET NX EX
+        // succeeds only for the first caller in the window; every repeat of
+        // the same category within it is a re-statement of a fact the graph
+        // has already been told.
+        let claimed: Option<String> = redis::cmd("SET")
+            .arg(format!("graph:{graph_id}:bcast:{kind}"))
+            .arg("1")
+            .arg("NX")
+            .arg("EX")
+            .arg(BROADCAST_WINDOW_SECS)
+            .query_async(&mut conn)
+            .await
+            .unwrap_or(None);
+        if claimed.is_none() {
+            return false;
+        }
+
+        // Then the ceiling across all categories. Counted after the dedupe so
+        // repeats of one category cannot consume the budget that lets a
+        // genuinely different finding through.
+        let rate_key = format!("graph:{graph_id}:bcast:rate");
+        let count: i64 = conn.incr(&rate_key, 1).await.unwrap_or(0);
+        if count == 1 {
+            let _: Result<(), redis::RedisError> =
+                conn.expire(&rate_key, BROADCAST_WINDOW_SECS as i64).await;
+        }
+        if count > BROADCAST_MAX_PER_WINDOW {
+            tracing::warn!(
+                graph_id,
+                kind,
+                count,
+                "Graph broadcast rate ceiling reached — suppressing"
+            );
+            return false;
+        }
+        true
     }
 
     async fn add_workflow_spend(&self, loop_run_id: &str, amount: f64) -> Option<f64> {

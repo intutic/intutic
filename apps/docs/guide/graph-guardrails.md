@@ -48,6 +48,8 @@ the shared anomaly taxonomy:
 | Consecutive repeat | 5 identical tool calls in a row | `LOOP_DETECTED` |
 | Ping-pong cycle | two tools alternating for 3 full cycles | `LOOP_DETECTED` |
 | Runaway recursion | graph depth beyond 7 | `LOOP_DETECTED` |
+| Runaway fan-out | more than 50 live nodes in one graph | `LOOP_DETECTED` |
+| Schema drift | tool set changes mid-session | `TOOL_ABUSE` |
 | Transition plausibility | low-scoring `A -> B` run | `TOOL_ABUSE` |
 | Missing predecessor | `deploy` with no earlier `run_tests` | `SCOPE_VIOLATION` |
 | Forbidden succession | `db_write` after `pii_export` | `SCOPE_VIOLATION` |
@@ -190,6 +192,13 @@ becomes every downstream node's premise and compounds at each hop. A detector
 finding is safe to propagate because it is reproducible from the request —
 anyone can check it. An inference is not.
 :::
+
+A finding is broadcast **once per graph per minute per category**, and a graph
+is capped at ten broadcasts a minute overall. Both bounds exist for the same
+reason: a finding delivered to a sibling becomes part of that sibling's next
+request, so without suppression the same observation ricochets around the graph
+and each hop makes it look independently corroborated. It is one fact, and it
+is delivered once.
 
 Broadcast needs Valkey, which `intutic start` provisions when it can. Without
 it, every session-scoped guarantee still holds — all the detectors, budget

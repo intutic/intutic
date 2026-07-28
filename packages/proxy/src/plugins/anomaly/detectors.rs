@@ -680,6 +680,69 @@ impl AnomalyDetector for PromptInjectionDetector {
     }
 }
 
+/// A harness advertising a different tool set part-way through a session.
+///
+/// Tools are declared once at the start of a normal session. A set that
+/// changes mid-flight means either the harness config was rewritten underneath
+/// the agent — which is what the drift watcher exists to catch — or something
+/// is presenting a different surface than the one the session's policy was
+/// evaluated against.
+///
+/// Steers rather than kills: legitimate harnesses do occasionally renegotiate
+/// tools, and stopping the request outright would break them for a signal that
+/// is suggestive rather than conclusive.
+#[derive(Default)]
+pub struct SchemaDriftDetector;
+
+impl AnomalyDetector for SchemaDriftDetector {
+    fn kind(&self) -> AnomalyKind {
+        AnomalyKind::ToolAbuse
+    }
+
+    fn detect(&self, ctx: &RequestContext) -> Option<AnomalyFinding> {
+        if !ctx.tools_changed_mid_session {
+            return None;
+        }
+        Some(AnomalyFinding::steer(
+            AnomalyKind::ToolAbuse,
+            "Tool schema drift: this request advertises a different tool set than the session opened with"
+                .to_string(),
+            0.7,
+        ))
+    }
+}
+
+/// Live nodes in one graph beyond which the fan-out is treated as runaway.
+///
+/// Mirrors the spawn-count limit the platform taxonomy specifies alongside the
+/// depth limit — a graph can run away by going wide as easily as by going deep,
+/// and depth alone does not see it.
+const MAX_GRAPH_NODES: u32 = 50;
+
+/// A graph that has spawned far more nodes than any task plausibly needs.
+#[derive(Default)]
+pub struct FanOutExplosionDetector;
+
+impl AnomalyDetector for FanOutExplosionDetector {
+    fn kind(&self) -> AnomalyKind {
+        AnomalyKind::LoopDetected
+    }
+
+    fn detect(&self, ctx: &RequestContext) -> Option<AnomalyFinding> {
+        let count = ctx.node.graph_node_count?;
+        if count <= MAX_GRAPH_NODES {
+            return None;
+        }
+        Some(AnomalyFinding::kill(
+            AnomalyKind::LoopDetected,
+            format!(
+                "Runaway fan-out: {} live nodes in this graph exceeds the maximum of {}",
+                count, MAX_GRAPH_NODES
+            ),
+        ))
+    }
+}
+
 // ── Workflow and harness boundaries ─────────────────────────────────────────
 
 /// A loop run past the ceiling it was started with.
@@ -778,6 +841,7 @@ pub mod test_support {
             tool_sequence: vec![],
             denied_tools: vec![],
             injection_findings: vec![],
+            tools_changed_mid_session: false,
             harness: String::new(),
             allowed_harnesses: vec![],
             workflow_spend_usd: None,
@@ -1283,5 +1347,62 @@ mod workflow_and_harness_tests {
         ctx.harness = String::new();
         ctx.allowed_harnesses = vec!["claude-code".into()];
         assert!(d.detect(&ctx).is_none());
+    }
+}
+
+#[cfg(test)]
+mod fan_out_tests {
+    use super::test_support::*;
+    use super::*;
+
+    #[test]
+    fn fan_out_fires_past_the_node_limit() {
+        let d = FanOutExplosionDetector;
+        let mut ctx = base_ctx();
+        ctx.node.graph_node_count = Some(50);
+        assert!(d.detect(&ctx).is_none(), "at the limit is not over it");
+        ctx.node.graph_node_count = Some(51);
+        let hit = d.detect(&ctx).unwrap();
+        assert_eq!(hit.kind, AnomalyKind::LoopDetected);
+        assert!(hit.kill);
+    }
+
+    #[test]
+    fn an_unknown_graph_size_is_not_a_breach() {
+        // Standalone cannot count nodes. Reading None as "very large" would
+        // block every graph the store cannot see.
+        let d = FanOutExplosionDetector;
+        let mut ctx = base_ctx();
+        ctx.node.graph_node_count = None;
+        assert!(d.detect(&ctx).is_none());
+    }
+
+    #[test]
+    fn a_normal_graph_passes() {
+        let d = FanOutExplosionDetector;
+        let mut ctx = base_ctx();
+        ctx.node.graph_node_count = Some(6);
+        assert!(d.detect(&ctx).is_none());
+    }
+}
+
+#[cfg(test)]
+mod schema_drift_tests {
+    use super::test_support::*;
+    use super::*;
+
+    #[test]
+    fn a_changed_tool_set_is_flagged() {
+        let d = SchemaDriftDetector;
+        let mut ctx = base_ctx();
+        ctx.tools_changed_mid_session = true;
+        let hit = d.detect(&ctx).unwrap();
+        assert_eq!(hit.kind, AnomalyKind::ToolAbuse);
+        assert!(!hit.kill, "harnesses do renegotiate tools; this steers");
+    }
+
+    #[test]
+    fn a_stable_tool_set_is_silent() {
+        assert!(SchemaDriftDetector.detect(&base_ctx()).is_none());
     }
 }

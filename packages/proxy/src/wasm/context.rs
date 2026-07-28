@@ -108,6 +108,8 @@ pub struct NodeIdentity {
     /// Whether this node's declared parent is still a live graph member.
     /// `None` when there is no parent, or the store cannot say.
     pub parent_alive: Option<bool>,
+    /// How many nodes are live in this graph, if known.
+    pub graph_node_count: Option<u32>,
 }
 
 /// Context passed to WASM plugins on each request
@@ -140,6 +142,10 @@ pub struct RequestContext {
     /// exists to protect.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub injection_findings: Vec<String>,
+    /// True when this request advertises a different tool set than the one the
+    /// session opened with.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub tools_changed_mid_session: bool,
     /// The harness this request came through, e.g. `claude-code`, `cursor`.
     ///
     /// Derived from the upstream route the proxy resolved, not from anything
@@ -194,6 +200,7 @@ mod tests {
             tool_sequence: vec!["Glob".into(), "View".into()],
             denied_tools: vec![],
             injection_findings: vec![],
+            tools_changed_mid_session: false,
             harness: String::new(),
             allowed_harnesses: vec![],
             workflow_spend_usd: None,
@@ -207,6 +214,7 @@ mod tests {
                 graph_spend_usd: Some(3.25),
                 graph_budget_usd: Some(10.0),
                 parent_alive: Some(true),
+                graph_node_count: Some(3),
             },
         }
     }

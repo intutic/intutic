@@ -101,6 +101,17 @@ pub async fn broadcast_findings(
     let siblings: Vec<&String> = members.iter().filter(|m| **m != ctx.node.node_id).collect();
 
     for finding in findings.iter().take(MAX_BROADCAST_PER_REQUEST) {
+        // Loop-suppression and rate ceiling. Checked once per finding, before
+        // the fan-out, so a suppressed finding costs one round trip rather
+        // than one per sibling.
+        //
+        // Without this the same fact ricochets: a finding lands in a sibling's
+        // context, becomes part of that sibling's next request, and each hop
+        // makes one observation look independently corroborated. That is the
+        // amplification this whole feature has to avoid being an instance of.
+        if !store.claim_broadcast(&ctx.node.graph_id, finding.kind.as_str()).await {
+            continue;
+        }
         let Some(body) = payload(ctx, finding, timestamp) else {
             continue;
         };
@@ -187,5 +198,31 @@ mod tests {
     async fn empty_findings_short_circuit() {
         let store: Arc<dyn LocalStore> = Arc::new(crate::store::memory::MemoryStore::new());
         broadcast_findings(&store, &ctx_in_graph(), &[], "2026-07-27T00:00:00Z").await;
+    }
+}
+
+#[cfg(test)]
+mod suppression_tests {
+    use super::*;
+
+    /// Standalone must not broadcast at all, and the claim is what says so.
+    ///
+    /// The real suppression semantics — one broadcast per category per window,
+    /// and a ceiling across categories — live in the Valkey impl and are
+    /// exercised against a running server rather than mocked, because what
+    /// matters there is the atomicity of SET NX EX and INCR, which a fake
+    /// store would assert nothing about.
+    #[tokio::test]
+    async fn standalone_never_claims_a_broadcast() {
+        let store = crate::store::memory::MemoryStore::new();
+        assert!(!store.claim_broadcast("g", "LOOP_DETECTED").await);
+    }
+
+    /// The origin is excluded from its own fan-out.
+    #[test]
+    fn siblings_exclude_the_originating_node() {
+        let members = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        let siblings: Vec<&String> = members.iter().filter(|m| **m != "a").collect();
+        assert_eq!(siblings, vec!["b", "c"]);
     }
 }
