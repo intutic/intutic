@@ -377,16 +377,24 @@ pub trait LocalStore: Send + Sync + 'static {
     /// than guessing at a topology it cannot see.
     async fn graph_members(&self, graph_id: &str) -> Vec<String>;
 
-    /// Record this session's tool signature, returning the first one seen.
+    /// Pin a workspace's tool definitions on first sight, returning the pin.
     ///
-    /// Session-scoped, so it stays inside the boundary a hot-path detector may
-    /// read: it is the same kind of state as the tool sequence, not history
-    /// from other sessions.
+    /// Trust-on-first-use: the first definition seen is recorded, and every
+    /// later request is compared against it.
     ///
-    /// Returns the signature stored on the session's first request, which is
-    /// `signature` itself when this is that request. `None` when the store
-    /// cannot remember, in which case drift is simply not detectable.
-    async fn first_tool_signature(&self, session_id: &str, signature: &str) -> Option<String>;
+    /// **Workspace-scoped and durable, not per-session.** A per-session pin
+    /// re-pins on every new session, so it only catches a swap that happens
+    /// mid-conversation — the least likely timing. A real rug pull arrives
+    /// with a server update between sessions, and a per-session pin would
+    /// silently adopt the poisoned definition as its new baseline. OWASP's MCP
+    /// guidance is explicit that pinning is per-installation and must survive
+    /// session boundaries.
+    ///
+    /// Returns the pinned signature, which is `signature` itself on the first
+    /// request. `None` when the store cannot remember, in which case a rug
+    /// pull is simply not detectable and no claim is made that it is.
+    async fn pinned_tool_signature(&self, workspace_id: &str, signature: &str)
+        -> Option<String>;
 
     /// How many nodes are currently live in a graph.
     ///

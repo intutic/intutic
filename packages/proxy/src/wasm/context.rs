@@ -142,10 +142,15 @@ pub struct RequestContext {
     /// exists to protect.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub injection_findings: Vec<String>,
-    /// True when this request advertises a different tool set than the one the
-    /// session opened with.
+    /// True when the advertised tool definitions no longer match the pin
+    /// recorded for this workspace on first use.
+    ///
+    /// Trust-on-first-use over name, description and input schema. Workspace-
+    /// scoped and durable rather than per-session: a rug pull arrives with a
+    /// server update between sessions, and a per-session baseline would adopt
+    /// the poisoned definition instead of flagging it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub tools_changed_mid_session: bool,
+    pub tool_contract_changed: bool,
     /// The harness this request came through, e.g. `claude-code`, `cursor`.
     ///
     /// Derived from the upstream route the proxy resolved, not from anything
@@ -200,7 +205,7 @@ mod tests {
             tool_sequence: vec!["Glob".into(), "View".into()],
             denied_tools: vec![],
             injection_findings: vec![],
-            tools_changed_mid_session: false,
+            tool_contract_changed: false,
             harness: String::new(),
             allowed_harnesses: vec![],
             workflow_spend_usd: None,
