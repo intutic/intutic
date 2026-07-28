@@ -1074,30 +1074,57 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 "Request body contains content blocked by DLP policy (e.g., private keys). Remove the sensitive content and retry.",
             );
         }
-        // NOTE: findings with action="redact" are detected and reported but
-        // the ORIGINAL body is still forwarded upstream — redaction-before-
-        // forward is TD-DLP-001 and is not implemented. Only action="block"
-        // patterns (private_key, anthropic_api_key) actually stop a request.
+        // Redaction before forward (TD-DLP-001).
         //
-        // That means an AWS access key, GitHub token, bearer token or SSN in a
-        // request is logged and then sent to the provider anyway.
-        if !findings.is_empty() {
-            let redacting: Vec<&str> = findings
-                .iter()
-                .filter(|f| f.action == "redact")
-                .map(|f| f.pattern_name.as_str())
-                .collect();
-            if !redacting.is_empty() {
-                // Deliberately worded as "detected, NOT redacted". The previous
-                // message said "DLP findings redacted from request", which was
-                // untrue and would let an operator reviewing logs believe a
-                // secret had been scrubbed when it was forwarded intact.
-                tracing::warn!(
-                    workspace_id = %workspace_id,
-                    patterns = ?redacting,
-                    "DLP: sensitive content detected and FORWARDED UNREDACTED \
-                     (redaction-before-forward not implemented — TD-DLP-001)"
-                );
+        // Everything reaching here is action="redact" — the block patterns
+        // returned above — and until this existed those findings were logged
+        // and the original body sent to the provider anyway. An AWS key,
+        // GitHub token, bearer token or SSN left the machine while the log
+        // said it had been redacted.
+        //
+        // Both representations are replaced together, and that is the whole
+        // subtlety: `body_str` is what was scanned, but later stages
+        // re-serialise `body_json` (SOP injection does), which would restore
+        // the secret from the parsed copy and silently undo this. Redacting
+        // one without the other is worse than redacting neither, because the
+        // logs would then say it was handled.
+        let redacting: Vec<&str> = findings
+            .iter()
+            .filter(|f| f.action == "redact")
+            .map(|f| f.pattern_name.as_str())
+            .collect();
+        if !redacting.is_empty() {
+            let redacted = dlp::redact(&body_str, &findings);
+            match serde_json::from_str::<serde_json::Value>(&redacted) {
+                Ok(reparsed) => {
+                    body_str = redacted;
+                    body_json = reparsed;
+                    body_bytes = axum::body::Bytes::from(body_str.clone());
+                    tracing::info!(
+                        workspace_id = %workspace_id,
+                        patterns = ?redacting,
+                        "DLP: sensitive content redacted before forwarding"
+                    );
+                }
+                Err(e) => {
+                    // Redaction produced something that is no longer valid
+                    // JSON. Forwarding the original would leak the secret and
+                    // forwarding the broken body would fail confusingly, so
+                    // refuse — a request the operator can retry beats a
+                    // credential that has already left.
+                    tracing::error!(
+                        workspace_id = %workspace_id,
+                        error = %e,
+                        patterns = ?redacting,
+                        "DLP redaction produced invalid JSON — refusing rather than forwarding"
+                    );
+                    return json_error(
+                        StatusCode::BAD_REQUEST,
+                        "dlp_policy_violation",
+                        "Request contains sensitive content that could not be safely redacted. \
+                         Remove the sensitive content and retry.",
+                    );
+                }
             }
         }
         findings

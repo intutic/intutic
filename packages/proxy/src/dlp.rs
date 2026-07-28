@@ -135,3 +135,71 @@ mod tests {
         assert!(findings.is_empty());
     }
 }
+
+#[cfg(test)]
+mod redaction_before_forward_tests {
+    use super::*;
+
+    /// Redaction must leave the body parseable, because the proxy forwards the
+    /// redacted JSON rather than the original (TD-DLP-001). A replacement that
+    /// broke the structure would turn a leak into a confusing upstream error.
+    #[test]
+    fn redacting_inside_json_keeps_it_valid() {
+        let body = r#"{"messages":[{"role":"user","content":"key AKIAIOSFODNN7EXAMPLE here"}]}"#;
+        let findings = scan(body);
+        assert!(!findings.is_empty(), "the fixture must actually match");
+
+        let redacted = redact(body, &findings);
+        let parsed: serde_json::Value =
+            serde_json::from_str(&redacted).expect("redacted body must still be valid JSON");
+
+        let content = parsed["messages"][0]["content"].as_str().unwrap();
+        assert!(!content.contains("AKIAIOSFODNN7EXAMPLE"), "secret must be gone");
+        assert!(content.contains("REDACTED"));
+    }
+
+    /// The replacement text must not introduce characters that would need
+    /// escaping inside a JSON string.
+    #[test]
+    fn the_replacement_needs_no_json_escaping() {
+        let findings = scan("AKIAIOSFODNN7EXAMPLE");
+        let out = redact("AKIAIOSFODNN7EXAMPLE", &findings);
+        assert!(!out.contains('"'), "a quote would break the enclosing string");
+        assert!(!out.contains('\\'), "a backslash would break escaping");
+    }
+
+    #[test]
+    fn several_secrets_in_one_body_are_all_removed() {
+        // Offsets shift as each replacement is applied; reverse ordering is
+        // what keeps the later ones pointing at the right bytes.
+        let body = r#"{"a":"AKIAIOSFODNN7EXAMPLE","b":"ghp_012345678901234567890123456789012345","c":"123-45-6789"}"#;
+        let findings = scan(body);
+        assert!(findings.len() >= 3, "expected three matches, got {}", findings.len());
+
+        let redacted = redact(body, &findings);
+        serde_json::from_str::<serde_json::Value>(&redacted).expect("still valid JSON");
+        assert!(!redacted.contains("AKIAIOSFODNN7EXAMPLE"));
+        assert!(!redacted.contains("ghp_012345678901234567890123456789012345"));
+        assert!(!redacted.contains("123-45-6789"));
+    }
+
+    #[test]
+    fn multibyte_content_does_not_split_a_character() {
+        // replace_range panics on a non-char-boundary. Regex offsets are byte
+        // offsets, so a body with multibyte text before the secret is the case
+        // that would expose it.
+        let body = r#"{"m":"日本語のテキスト AKIAIOSFODNN7EXAMPLE です"}"#;
+        let findings = scan(body);
+        let redacted = redact(body, &findings);
+        let parsed: serde_json::Value = serde_json::from_str(&redacted).unwrap();
+        let m = parsed["m"].as_str().unwrap();
+        assert!(m.contains("日本語のテキスト"), "surrounding text intact");
+        assert!(!m.contains("AKIAIOSFODNN7EXAMPLE"));
+    }
+
+    #[test]
+    fn a_clean_body_is_returned_unchanged() {
+        let body = r#"{"messages":[{"role":"user","content":"nothing sensitive"}]}"#;
+        assert_eq!(redact(body, &scan(body)), body);
+    }
+}
