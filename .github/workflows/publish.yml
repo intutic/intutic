@@ -7,7 +7,7 @@
 #   2. Manual workflow_dispatch
 #
 # Automated Outputs:
-#   1. Publishes all 8 npm packages (shared-types, id, logger, clawde-sdk,
+#   1. Publishes all 9 npm packages (anomaly-taxonomy, shared-types, id, logger, clawde-sdk,
 #      sync-daemon, mcp-governance-proxy, proxy, cli)
 #   2. Builds multi-platform Rust proxy binaries (macOS arm64/x64, Linux x64/arm64, Windows x64)
 #   3. Packages standalone CLI executables (macOS arm64/x64, Linux x64, Windows x64)
@@ -53,7 +53,7 @@ jobs:
           TAG="${GITHUB_REF_NAME#v}"
           echo "Tag version: $TAG"
           fail=0
-          for pkg in packages/shared-types packages/id packages/logger \
+          for pkg in packages/anomaly-taxonomy packages/shared-types packages/id packages/logger \
                      packages/clawde-sdk services/sync-daemon packages/mcp-proxy \
                      packages/proxy tools/cli; do
             actual="$(node -p "require('./$pkg/package.json').version")"
@@ -125,7 +125,7 @@ jobs:
           set -euo pipefail
           fail=0
           tmp="$(mktemp -d)"
-          for pkg in packages/shared-types packages/id packages/logger packages/clawde-sdk \
+          for pkg in packages/anomaly-taxonomy packages/shared-types packages/id packages/logger packages/clawde-sdk \
                      services/sync-daemon packages/mcp-proxy packages/proxy tools/cli; do
             (cd "$pkg" && pnpm pack --pack-destination "$tmp" >/dev/null)
           done
@@ -153,7 +153,10 @@ jobs:
         if: ${{ !inputs.dry_run }}
         run: |
           set -uo pipefail
-          for pkg in packages/shared-types packages/id packages/logger packages/clawde-sdk services/sync-daemon packages/mcp-proxy packages/proxy tools/cli; do
+          # anomaly-taxonomy first — shared-types depends on it, and publishing
+          # a package whose dependency is not yet on the registry makes every
+          # install of it fail until the second publish lands.
+          for pkg in packages/anomaly-taxonomy packages/shared-types packages/id packages/logger packages/clawde-sdk services/sync-daemon packages/mcp-proxy packages/proxy tools/cli; do
             name="$(node -p "require('./$pkg/package.json').name")"
             version="$(node -p "require('./$pkg/package.json').version")"
             echo "📦 Publishing $name@$version ..."
@@ -289,7 +292,7 @@ jobs:
           # package.json; pnpm rewrites it to the concrete version. Release
           # tarballs built with npm shipped `"@intutic/id": "workspace:*"`, which
           # fails any install with EUNSUPPORTEDPROTOCOL (see issue #1).
-          for pkg in packages/shared-types packages/id packages/logger packages/clawde-sdk \
+          for pkg in packages/anomaly-taxonomy packages/shared-types packages/id packages/logger packages/clawde-sdk \
                      services/sync-daemon packages/mcp-proxy packages/proxy tools/cli; do
             (cd $pkg && pnpm pack --pack-destination ../../release-assets)
           done
