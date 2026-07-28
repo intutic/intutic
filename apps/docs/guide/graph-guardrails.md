@@ -190,10 +190,29 @@ known in advance.
 
 ### 5. Data flow between nodes
 
-DLP runs on the traffic itself, so a secret that one node reads cannot be handed
-to another node through the model. Findings arrive in the rule context as
-`dlp_findings`, and can be combined with the sequence: *this* tool call is only
-a problem because of what an earlier node already exposed.
+DLP runs on the traffic itself, so a secret one node reads cannot be handed to
+another node through the model.
+
+Two outcomes, depending on the pattern:
+
+| Pattern | Behaviour |
+|---|---|
+| Private keys, Anthropic API keys | request **refused** |
+| AWS access keys, GitHub tokens, bearer tokens, SSNs | **redacted before forwarding** — replaced with `[REDACTED_*]`, and the redacted body is what reaches your provider |
+
+Redaction rather than refusal for the second group is deliberate. A developer
+who pastes a key into a prompt usually wants their question answered; refusing
+the request teaches them to turn DLP off, while redacting answers the question
+with the key removed.
+
+This is the layer that does not depend on recognising an attack. If a poisoned
+tool description talks an agent into reading `~/.aws/credentials`, nothing
+upstream has to identify the injection — the credential is scrubbed on its way
+out regardless.
+
+Findings also arrive in the rule context as `dlp_findings`, so they can be
+combined with the sequence: *this* tool call is only a problem because of what
+an earlier node already exposed.
 
 ## Telling the rest of the graph
 
