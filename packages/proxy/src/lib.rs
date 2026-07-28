@@ -7,6 +7,7 @@ pub mod protocol;
 pub mod proxy;
 pub mod router;
 pub mod snip;
+pub mod sops;
 pub mod snip_code;
 pub mod snip_json;
 pub mod telemetry;
