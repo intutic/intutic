@@ -7,3 +7,21 @@ allowBuilds:
   argon2: true
   esbuild: true
   protobufjs: true
+
+# Transitive-only advisories: nothing in this workspace declares these directly,
+# so forcing resolution is the only way to take the fix. Pinned to the minimum
+# patched version rather than latest, to keep the change as small as the CVE
+# requires. Note these live here and not under a "pnpm" key in package.json —
+# pnpm 11 silently ignores that field.
+#
+# vite and esbuild are deliberately absent: vitepress 1.6.4 hard-pins vite ^5.4.14
+# and 2.x is alpha-only, so the fix is not reachable. Both advisories are
+# dev-server-only, and apps/docs is a private devDependency that builds to static
+# HTML in CI — nothing serves the dev server.
+overrides:
+  brace-expansion: '^5.0.8' # CVE-2026-13149, CVE-2026-14257
+  fast-uri: '^3.1.4' # CVE-2026-16221, CVE-2026-13676
+  js-yaml: '^4.3.0' # CVE-2026-59869
+  # @modelcontextprotocol/sdk pins hono ^4.11.4 and resolves it to a version
+  # below the fix. 4.12.31 satisfies that range, so this needs no SDK bump.
+  hono: '^4.12.31' # CVE-2026-59895, CVE-2026-59896, CVE-2026-59897
