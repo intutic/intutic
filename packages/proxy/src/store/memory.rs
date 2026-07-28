@@ -629,6 +629,18 @@ impl LocalStore for MemoryStore {
         None
     }
 
+    /// `None` — a loop run spans processes, so its cost cannot be aggregated
+    /// in per-process memory.
+    async fn add_workflow_spend(&self, _loop_run_id: &str, _amount: f64) -> Option<f64> {
+        None
+    }
+
+    /// `(None, None)` — no spend signal and no ceiling, which reads as
+    /// "unbudgeted" rather than "zero budget, already spent".
+    async fn workflow_budget(&self, _loop_run_id: &str) -> (Option<f64>, Option<f64>) {
+        (None, None)
+    }
+
     /// `ttl_secs` ignored — chunks are read back within the same request that
     /// wrote them, and the process boundary already bounds their lifetime.
     async fn push_session_chunk(

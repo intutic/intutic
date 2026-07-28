@@ -206,6 +206,9 @@ impl DetectorRegistry {
                 Box::new(SpawnBudgetBreachDetector::default()),
                 Box::new(OrphanExecutionDetector::default()),
                 Box::new(UnauthorizedToolDetector::default()),
+                Box::new(PromptInjectionDetector::default()),
+                Box::new(WorkflowBudgetBreachDetector::default()),
+                Box::new(CrossHarnessViolationDetector::default()),
             ],
         }
     }
@@ -379,5 +382,57 @@ mod tests {
     #[test]
     fn default_registry_is_populated() {
         assert!(!DetectorRegistry::default().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod coverage_tests {
+    use super::*;
+
+    /// Which taxonomy categories the hot path can actually raise.
+    ///
+    /// Pinned deliberately. "Coverage" is easy to overstate — a detector that
+    /// exists but can never fire looks the same from the outside as one that
+    /// works — so this asserts the exact set and fails if a category is added
+    /// or quietly dropped.
+    #[test]
+    fn hot_path_covers_eleven_of_twelve_categories() {
+        let registry = DetectorRegistry::with_defaults();
+        let mut covered: Vec<&str> = registry
+            .detectors
+            .iter()
+            .map(|d| d.kind().as_str())
+            .collect();
+        covered.sort_unstable();
+        covered.dedup();
+
+        let expected = [
+            "BUDGET_BREACH",
+            "DATA_EXFILTRATION",
+            "HALLUCINATION",
+            "LOOP_DETECTED",
+            "PROMPT_INJECTION",
+            "SCOPE_VIOLATION",
+            "SPAWN_BUDGET_BREACH",
+            "TOKEN_WASTE",
+            "TOOL_ABUSE",
+            "UNAUTHORIZED_TOOL",
+            "WORKFLOW_BUDGET_BREACH",
+        ];
+        assert_eq!(covered, expected);
+
+        // The remainder, and why it is not here rather than merely missing.
+        //
+        // WORKFLOW_GOAL_DRIFT asks whether an agent is still doing what it was
+        // asked to do. Answering that needs the goal and a semantic comparison
+        // against it — an embedding or a model call — which is neither a pure
+        // function of one request nor something that belongs inline on the hot
+        // path. It is deliberately out of scope here, not overlooked.
+        let uncovered: Vec<&str> = ALL_KINDS
+            .iter()
+            .map(|k| k.as_str())
+            .filter(|k| !covered.contains(k))
+            .collect();
+        assert_eq!(uncovered, vec!["WORKFLOW_GOAL_DRIFT"]);
     }
 }
