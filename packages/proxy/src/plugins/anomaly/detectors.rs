@@ -254,7 +254,16 @@ impl AnomalyDetector for MissingPredecessorDetector {
     fn detect(&self, ctx: &RequestContext) -> Option<AnomalyFinding> {
         let seq = &ctx.tool_sequence;
         for (tool, prerequisite) in self.rules {
-            let used = seq.iter().position(|t| t == tool)?;
+            // `else { continue }`, not `?`. The `?` returned `None` from the
+            // whole function rather than skipping the rule, so evaluation
+            // stopped at the first rule whose tool was absent from the
+            // sequence — and since the rules are ("deploy", …), ("publish", …),
+            // ("release", …), any session that never ran `deploy` had its
+            // `publish` and `release` rules silently unchecked.
+            // ForbiddenSuccessionDetector below already does this correctly.
+            let Some(used) = seq.iter().position(|t| t == tool) else {
+                continue;
+            };
             if seq[..used].iter().any(|t| t == prerequisite) {
                 continue;
             }
@@ -945,6 +954,35 @@ mod tests {
         let d = MissingPredecessorDetector::default();
         let ctx = ctx_with_sequence(&["run_tests", "build", "deploy"]);
         assert!(d.detect(&ctx).is_none());
+    }
+
+    #[test]
+    fn missing_predecessor_checks_rules_past_the_first() {
+        // The rules are ("deploy", "run_tests"), ("publish", "run_tests"),
+        // ("release", "run_tests"). `?` on the position lookup returned None
+        // from the whole function when the first rule's tool was absent, so a
+        // session that never ran `deploy` had `publish` and `release`
+        // unchecked. Every test here previously used `deploy`, which is why it
+        // survived.
+        let d = MissingPredecessorDetector::default();
+
+        for tool in ["publish", "release"] {
+            let ctx = ctx_with_sequence(&["build", tool]);
+            let hit = d
+                .detect(&ctx)
+                .unwrap_or_else(|| panic!("'{tool}' without run_tests must be caught"));
+            assert_eq!(hit.kind, AnomalyKind::ScopeViolation);
+            assert!(hit.reason.contains(tool), "reason should name the tool that violated");
+        }
+    }
+
+    #[test]
+    fn missing_predecessor_allows_later_rules_when_satisfied() {
+        let d = MissingPredecessorDetector::default();
+        for tool in ["publish", "release"] {
+            let ctx = ctx_with_sequence(&["run_tests", "build", tool]);
+            assert!(d.detect(&ctx).is_none(), "'{tool}' after run_tests is fine");
+        }
     }
 
     #[test]
