@@ -124,6 +124,14 @@ pub struct RequestContext {
     pub risk_tier: RiskLevel,
     pub dlp_findings: Vec<DlpFinding>,
     pub tool_sequence: Vec<String>,
+    /// Tool names this node's SOPs forbid, resolved for its role.
+    ///
+    /// Resolved on the request path so the detector stays a pure function.
+    /// Empty means nothing is forbidden, which is the default: open core has
+    /// no policy service, so an empty policy must mean "no restrictions" and
+    /// never "deny everything unlisted".
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub denied_tools: Vec<String>,
     /// Graph position. Flattened onto the wire so existing guest rules that
     /// index fields by name keep working and simply gain new keys.
     #[serde(flatten)]
@@ -159,6 +167,7 @@ mod tests {
             risk_tier: RiskLevel::Low,
             dlp_findings: vec![],
             tool_sequence: vec!["Glob".into(), "View".into()],
+            denied_tools: vec![],
             node: NodeIdentity {
                 node_id: "planner-1".into(),
                 agent_role: "planner".into(),
