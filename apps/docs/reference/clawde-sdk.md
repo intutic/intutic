@@ -18,6 +18,12 @@ Install the open-core Python SDK equivalent:
 pip install intutic-clawde
 ```
 
+**Requires Python 3.10 or newer.** The floor was 3.9 through 1.6.3. It moved
+because the patched releases of `requests` and `urllib3` — which carry fixes for
+CVE-2026-25645, CVE-2026-44431 and CVE-2026-44432 — themselves require 3.10, so
+supporting 3.9 would have meant pinning known-vulnerable transports. Python 3.9
+reached end of life in October 2025.
+
 ---
 
 ## Architecture & Primitives
