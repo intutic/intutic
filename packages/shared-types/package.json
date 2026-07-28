@@ -22,7 +22,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "zod": "^3.23"
+    "zod": "^3.23",
+    "@intutic/anomaly-taxonomy": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.5",

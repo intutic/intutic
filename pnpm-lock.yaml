@@ -51,6 +51,12 @@ importers:
         specifier: ^3.5.13
         version: 3.5.38(typescript@5.9.3)
 
+  packages/anomaly-taxonomy:
+    devDependencies:
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
+
   packages/clawde-sdk:
     devDependencies:
       typescript:
@@ -124,6 +130,9 @@ importers:
 
   packages/shared-types:
     dependencies:
+      '@intutic/anomaly-taxonomy':
+        specifier: workspace:*
+        version: link:../anomaly-taxonomy
       zod:
         specifier: ^3.23
         version: 3.25.76
