@@ -1191,6 +1191,30 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // success paths and cannot all borrow wasm_ctx.
     let node_for_trace = wasm_ctx.node.clone();
 
+    // Give this node the policy for the job it says it is doing.
+    //
+    // Scoping only — the role is a client-supplied header, so the worst a
+    // lying node achieves is being shown advice meant for someone else. What
+    // it must never do is gate a capability, which is why enforcement lives in
+    // the detectors and WASM rules and neither consults the role.
+    //
+    // Injected before the body is handed upstream, and only re-serialised when
+    // something was actually added.
+    if let Some(block) = crate::sops::governance_block_for_role(&wasm_ctx.node.agent_role) {
+        if crate::sops::inject_into_body(&mut body_json, &protocol, &block) {
+            body_bytes = serde_json::to_vec(&body_json)
+                .map(axum::body::Bytes::from)
+                .unwrap_or(body_bytes);
+            // body_str is not read past this point — only body_bytes reaches
+            // upstream — so it is deliberately not rebuilt here.
+            tracing::debug!(
+                agent_role = %wasm_ctx.node.agent_role,
+                bytes = block.len(),
+                "Injected role-scoped SOPs"
+            );
+        }
+    }
+
     // Evaluate native budget gate
     let budget_plugin = crate::plugins::budget_gate::BudgetGatePlugin::new();
     if let crate::wasm::context::Verdict::Kill { reason, .. } = budget_plugin.evaluate(&wasm_ctx) {
