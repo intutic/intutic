@@ -12,19 +12,11 @@ npm install @intutic/clawde
 ```
 
 ### Python SDK
-
-::: warning Not yet on PyPI
-`pip install intutic-clawde` does **not** work — the package has never been
-published to PyPI. Install from the open-core repository instead:
-:::
+Install the open-core Python SDK equivalent:
 
 ```bash
-pip install "git+https://github.com/intutic/intutic.git#subdirectory=packages/intutic-clawde"
+pip install intutic-clawde
 ```
-
-This builds the same package from source and resolves the same dependencies.
-The PyPI release is pending; this page will switch to `pip install
-intutic-clawde` when it lands.
 
 **Requires Python 3.10 or newer.** The floor was 3.9 through 1.6.3. It moved
 because the patched releases of `requests` and `urllib3` — which carry fixes for
