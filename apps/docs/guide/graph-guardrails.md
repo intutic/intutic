@@ -30,6 +30,52 @@ That is the role Intutic occupies. The proxy is **not a node in the graph**. It
 is the network hop every node's traffic crosses, and it decides deterministically
 in the hot path, without asking a model.
 
+## Harness, loop, graph — three layers, three failure modes
+
+These three words get used interchangeably, and the confusion gets expensive the
+moment an agent leaves the notebook and starts touching real files, APIs and
+customers. They are different layers:
+
+| Layer | What it is | The question it answers |
+|---|---|---|
+| **Harness** | The machinery around the model — tools, memory, sandboxes, permissions, logging. Delete the model from your diagram; everything left is the harness. | *What can this agent reach?* |
+| **Loop** | The work-and-feedback cycle: call model → observe → run tools → feed back → repeat. | *When does it stop?* |
+| **Graph** | The workflow topology — nodes, edges, branches, joins. | *What is allowed to run next?* |
+
+Conventionally the graph runs inside the harness and the loops live inside the
+graph. In practice that nesting only holds when you built the harness yourself.
+Teams run harnesses they did not build — a Cursor agent hands off to a Claude
+Code agent — so the graph spans harnesses, and the one place all three layers are
+observable at once is the network hop they share. That is why Intutic governs
+from the proxy rather than from inside any one harness.
+
+### Diagnose by failure, not by buzzword
+
+Most "the model is unreliable" reports are orchestration problems. The symptom
+tells you the layer, and the layer tells you the primitive:
+
+| Symptom | Layer | The primitive that catches it |
+|---|---|---|
+| Can't access data safely | Harness | [DLP](/concepts/harnesses) on requests, responses and headers; scoped MCP tools |
+| Forgets progress between runs | Harness | Config integrity + drift watch; governed memory providers *(Cloud)* |
+| Close, but unreliable | Loop | Auto-judge grading output against SOPs mid-stream *(Cloud)*; steering advice injected into the stream |
+| Runs past success | Loop | Turn caps, budget ceilings, the cost-prediction gate, `LOOP_RUN_TERMINATED` |
+| Specialists need an order | Graph | Ordering invariants, forbidden succession, role-scoped `deny_tools` |
+| Agents verify each other into confident nonsense | Graph | Deterministic detectors that are not themselves prompts (below) |
+
+Everything unmarked runs in open core, on the developer's machine.
+
+### Loop on evidence, not on confidence
+
+The rule worth stating plainly, because it is the one most often missed:
+**"the agent says it's done" is not a stopping condition.** "Tests pass, schema
+validates, budget remains, reviewer approves" is.
+
+Intutic's contribution is that these stopping conditions are enforced from
+*outside* the agent, at the network hop, so the agent's own self-assessment
+cannot overrule them. A loop run marked `KILLED` is checked on every subsequent
+request and refused with a 403 — no cooperation from the agent required.
+
 ## What holds across the whole graph
 
 Every request from every node in a session carries the same `session_id`, and
