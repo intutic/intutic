@@ -628,7 +628,7 @@ impl LocalStore for MemoryStore {
     }
 
     /// No-op: membership needs state shared across processes.
-    async fn touch_graph_node(&self, _graph_id: &str, _node_id: &str, _ttl_secs: u64) {}
+    async fn touch_graph_node(&self, _workspace_id: &str, _graph_id: &str, _node_id: &str, _ttl_secs: u64) {}
 
     /// Always empty.
     ///
@@ -636,7 +636,7 @@ impl LocalStore for MemoryStore {
     /// instead of letting a single-process view be mistaken for the whole
     /// graph, which would deliver findings to one node and silently strand
     /// every other.
-    async fn graph_members(&self, _graph_id: &str) -> Vec<String> {
+    async fn graph_members(&self, _workspace_id: &str, _graph_id: &str) -> Vec<String> {
         Vec::new()
     }
 
@@ -668,7 +668,7 @@ impl LocalStore for MemoryStore {
     }
 
     /// `None` — a graph spans processes, so its size is not knowable here.
-    async fn graph_node_count(&self, _graph_id: &str) -> Option<u32> {
+    async fn graph_node_count(&self, _workspace_id: &str, _graph_id: &str) -> Option<u32> {
         None
     }
 
@@ -676,7 +676,7 @@ impl LocalStore for MemoryStore {
     ///
     /// Returning `Some(false)` here would declare every parent gone and orphan
     /// an entire graph on a store that never tracked it.
-    async fn is_graph_member(&self, _graph_id: &str, _node_id: &str) -> Option<bool> {
+    async fn is_graph_member(&self, _workspace_id: &str, _graph_id: &str, _node_id: &str) -> Option<bool> {
         None
     }
 
@@ -684,17 +684,17 @@ impl LocalStore for MemoryStore {
     ///
     /// Zero would read as "this graph has cost nothing", which is exactly the
     /// wrong conclusion to hand a budget detector.
-    async fn add_graph_spend(&self, _graph_id: &str, _amount: f64, _ttl_secs: u64) -> Option<f64> {
+    async fn add_graph_spend(&self, _workspace_id: &str, _graph_id: &str, _amount: f64, _ttl_secs: u64) -> Option<f64> {
         None
     }
 
-    async fn graph_spend(&self, _graph_id: &str) -> Option<f64> {
+    async fn graph_spend(&self, _workspace_id: &str, _graph_id: &str) -> Option<f64> {
         None
     }
 
     /// `false` — nothing to arbitrate, because standalone has no cross-node
     /// delivery to suppress in the first place.
-    async fn claim_broadcast(&self, _graph_id: &str, _kind: &str) -> bool {
+    async fn claim_broadcast(&self, _workspace_id: &str, _graph_id: &str, _kind: &str) -> bool {
         false
     }
 
@@ -825,9 +825,9 @@ mod graph_tests {
     #[tokio::test]
     async fn unknowable_graph_facts_are_none_not_defaults() {
         let s = MemoryStore::new();
-        assert_eq!(s.is_graph_member("g", "n").await, None);
-        assert_eq!(s.graph_spend("g").await, None);
-        assert_eq!(s.add_graph_spend("g", 1.0, 60).await, None);
-        assert!(s.graph_members("g").await.is_empty());
+        assert_eq!(s.is_graph_member("ws", "g", "n").await, None);
+        assert_eq!(s.graph_spend("ws", "g").await, None);
+        assert_eq!(s.add_graph_spend("ws", "g", 1.0, 60).await, None);
+        assert!(s.graph_members("ws", "g").await.is_empty());
     }
 }

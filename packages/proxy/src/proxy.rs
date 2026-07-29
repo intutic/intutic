@@ -1217,7 +1217,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         if !node.parent_session_id.is_empty() {
             node.parent_alive = state
                 .store
-                .is_graph_member(&node.graph_id, &node.parent_session_id)
+                .is_graph_member(&workspace_id, &node.graph_id, &node.parent_session_id)
                 .await;
         }
 
@@ -1227,6 +1227,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         state
             .store
             .touch_graph_node(
+                &workspace_id,
                 &node.graph_id,
                 &node.node_id,
                 crate::plugins::anomaly::broadcast::NODE_TTL_SECS,
@@ -1236,11 +1237,14 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         // Graph-wide facts the detectors need, fetched here so each detector
         // stays a pure function of the context rather than reaching for I/O
         // mid-evaluation.
-        node.graph_spend_usd = state.store.graph_spend(&node.graph_id).await;
-        node.graph_node_count = state.store.graph_node_count(&node.graph_id).await;
+        node.graph_spend_usd = state.store.graph_spend(&workspace_id, &node.graph_id).await;
+        node.graph_node_count = state.store.graph_node_count(&workspace_id, &node.graph_id).await;
         node.graph_budget_usd = Some(crate::local_spend::get_max_daily_budget());
 
-        Some(format!("{}:{}", node.graph_id, node.node_id))
+        // The workspace segment makes the drain key match the broadcast
+        // fan-out and keeps one tenant's queue unreachable from another's
+        // graph-id choice.
+        Some(format!("{}:{}:{}", workspace_id, node.graph_id, node.node_id))
     };
 
     let wasm_ctx = crate::wasm::context::RequestContext {
@@ -3212,6 +3216,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         state
             .store
             .add_graph_spend(
+                &wasm_ctx.workspace_id,
                 &wasm_ctx.node.graph_id,
                 actual_cost_usd,
                 crate::plugins::anomaly::broadcast::NODE_TTL_SECS,

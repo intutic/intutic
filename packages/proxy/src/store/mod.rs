@@ -186,6 +186,10 @@ impl NotifyScope {
     pub fn key_prefix(self) -> &'static str {
         match self {
             Self::Session => "gov:notify:",
+            // Composite id is "{workspaceId}:{graphId}:{nodeId}". The
+            // workspace segment is load-bearing: graph_id is client-supplied
+            // free text, so without it two tenants choosing the same graph id
+            // on a shared Valkey would drain each other's queues.
             Self::Graph => "gov:notify:graph:",
             Self::Workspace => "gov:notify:workspace:",
         }
@@ -368,14 +372,14 @@ pub trait LocalStore: Send + Sync + 'static {
     /// [`LocalStore::graph_members`]: this is on the hot path for every request
     /// in a graph, while reading the membership is only needed on the rare
     /// request that actually has something to broadcast.
-    async fn touch_graph_node(&self, graph_id: &str, node_id: &str, ttl_secs: u64);
+    async fn touch_graph_node(&self, workspace_id: &str, graph_id: &str, node_id: &str, ttl_secs: u64);
 
     /// Current members of a graph, including the caller.
     ///
     /// An empty result means the store cannot track membership — standalone
     /// without Valkey — in which case broadcast degrades to nothing rather
     /// than guessing at a topology it cannot see.
-    async fn graph_members(&self, graph_id: &str) -> Vec<String>;
+    async fn graph_members(&self, workspace_id: &str, graph_id: &str) -> Vec<String>;
 
     /// Pin a workspace's tool definitions on first sight, returning the pin.
     ///
@@ -401,7 +405,7 @@ pub trait LocalStore: Send + Sync + 'static {
     /// A count rather than the member list, because this is read on every
     /// graph request and the names are only needed when something is actually
     /// being broadcast.
-    async fn graph_node_count(&self, graph_id: &str) -> Option<u32>;
+    async fn graph_node_count(&self, workspace_id: &str, graph_id: &str) -> Option<u32>;
 
     /// Whether a specific node is currently a live member of a graph.
     ///
@@ -413,7 +417,7 @@ pub trait LocalStore: Send + Sync + 'static {
     /// unknown. Callers must treat that as "no opinion" and not as "dead",
     /// since concluding a parent is gone on the basis of a store that never
     /// tracked it would orphan every node in a graph.
-    async fn is_graph_member(&self, graph_id: &str, node_id: &str) -> Option<bool>;
+    async fn is_graph_member(&self, workspace_id: &str, graph_id: &str, node_id: &str) -> Option<bool>;
 
     /// Add to a graph's running cost and return the new total.
     ///
@@ -423,10 +427,10 @@ pub trait LocalStore: Send + Sync + 'static {
     ///
     /// Returns `None` when the store cannot aggregate, which reads as "no
     /// spend signal" rather than zero.
-    async fn add_graph_spend(&self, graph_id: &str, amount: f64, ttl_secs: u64) -> Option<f64>;
+    async fn add_graph_spend(&self, workspace_id: &str, graph_id: &str, amount: f64, ttl_secs: u64) -> Option<f64>;
 
     /// A graph's cost so far, across all nodes.
-    async fn graph_spend(&self, graph_id: &str) -> Option<f64>;
+    async fn graph_spend(&self, workspace_id: &str, graph_id: &str) -> Option<f64>;
 
     /// Claim the right to broadcast a finding of `kind` into `graph_id`.
     ///
@@ -447,7 +451,7 @@ pub trait LocalStore: Send + Sync + 'static {
     ///
     /// Returns `false` when the store cannot arbitrate, which correctly makes
     /// broadcast a no-op rather than an unbounded one.
-    async fn claim_broadcast(&self, graph_id: &str, kind: &str) -> bool;
+    async fn claim_broadcast(&self, workspace_id: &str, graph_id: &str, kind: &str) -> bool;
 
     /// Add to a loop run's running cost and return the new total.
     ///

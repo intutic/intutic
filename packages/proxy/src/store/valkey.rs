@@ -406,18 +406,18 @@ impl LocalStore for ValkeyStore {
         let _: Result<(), redis::RedisError> = conn.expire(&key, NOTIFY_TTL_SECS).await;
     }
 
-    async fn touch_graph_node(&self, graph_id: &str, node_id: &str, ttl_secs: u64) {
+    async fn touch_graph_node(&self, workspace_id: &str, graph_id: &str, node_id: &str, ttl_secs: u64) {
         let mut conn = self.conn();
-        let key = format!("graph:{graph_id}:nodes");
+        let key = format!("graph:{workspace_id}:{graph_id}:nodes");
         // Two writes, no read — this runs on every request in a graph, so the
         // membership read is deferred to the broadcast path.
         let _: Result<(), redis::RedisError> = conn.sadd(&key, node_id).await;
         let _: Result<(), redis::RedisError> = conn.expire(&key, ttl_secs as i64).await;
     }
 
-    async fn graph_members(&self, graph_id: &str) -> Vec<String> {
+    async fn graph_members(&self, workspace_id: &str, graph_id: &str) -> Vec<String> {
         let mut conn = self.conn();
-        conn.smembers(format!("graph:{graph_id}:nodes"))
+        conn.smembers(format!("graph:{workspace_id}:{graph_id}:nodes"))
             .await
             .unwrap_or_default()
     }
@@ -441,16 +441,16 @@ impl LocalStore for ValkeyStore {
         conn.get::<_, Option<String>>(&key).await.ok().flatten()
     }
 
-    async fn graph_node_count(&self, graph_id: &str) -> Option<u32> {
+    async fn graph_node_count(&self, workspace_id: &str, graph_id: &str) -> Option<u32> {
         let mut conn = self.conn();
-        conn.scard::<_, u32>(format!("graph:{graph_id}:nodes"))
+        conn.scard::<_, u32>(format!("graph:{workspace_id}:{graph_id}:nodes"))
             .await
             .ok()
     }
 
-    async fn is_graph_member(&self, graph_id: &str, node_id: &str) -> Option<bool> {
+    async fn is_graph_member(&self, workspace_id: &str, graph_id: &str, node_id: &str) -> Option<bool> {
         let mut conn = self.conn();
-        let key = format!("graph:{graph_id}:nodes");
+        let key = format!("graph:{workspace_id}:{graph_id}:nodes");
         // An unknown graph is not the same as a dead node — if we never
         // tracked this graph, we have no opinion on who is alive in it.
         let exists: bool = conn.exists(&key).await.ok()?;
@@ -460,9 +460,9 @@ impl LocalStore for ValkeyStore {
         conn.sismember(&key, node_id).await.ok()
     }
 
-    async fn add_graph_spend(&self, graph_id: &str, amount: f64, ttl_secs: u64) -> Option<f64> {
+    async fn add_graph_spend(&self, workspace_id: &str, graph_id: &str, amount: f64, ttl_secs: u64) -> Option<f64> {
         let mut conn = self.conn();
-        let key = format!("graph:{graph_id}:spend");
+        let key = format!("graph:{workspace_id}:{graph_id}:spend");
         let total: f64 = conn.incr(&key, amount).await.ok()?;
         // Same TTL as membership, so a finished graph's cost does not linger
         // and get attributed to a later graph that reuses the id.
@@ -470,15 +470,15 @@ impl LocalStore for ValkeyStore {
         Some(total)
     }
 
-    async fn graph_spend(&self, graph_id: &str) -> Option<f64> {
+    async fn graph_spend(&self, workspace_id: &str, graph_id: &str) -> Option<f64> {
         let mut conn = self.conn();
-        conn.get::<_, Option<f64>>(format!("graph:{graph_id}:spend"))
+        conn.get::<_, Option<f64>>(format!("graph:{workspace_id}:{graph_id}:spend"))
             .await
             .ok()
             .flatten()
     }
 
-    async fn claim_broadcast(&self, graph_id: &str, kind: &str) -> bool {
+    async fn claim_broadcast(&self, workspace_id: &str, graph_id: &str, kind: &str) -> bool {
         let mut conn = self.conn();
 
         // Loop-suppression first, and it is the cheaper check. SET NX EX
@@ -486,7 +486,7 @@ impl LocalStore for ValkeyStore {
         // the same category within it is a re-statement of a fact the graph
         // has already been told.
         let claimed: Option<String> = redis::cmd("SET")
-            .arg(format!("graph:{graph_id}:bcast:{kind}"))
+            .arg(format!("graph:{workspace_id}:{graph_id}:bcast:{kind}"))
             .arg("1")
             .arg("NX")
             .arg("EX")
@@ -501,7 +501,7 @@ impl LocalStore for ValkeyStore {
         // Then the ceiling across all categories. Counted after the dedupe so
         // repeats of one category cannot consume the budget that lets a
         // genuinely different finding through.
-        let rate_key = format!("graph:{graph_id}:bcast:rate");
+        let rate_key = format!("graph:{workspace_id}:{graph_id}:bcast:rate");
         let count: i64 = conn.incr(&rate_key, 1).await.unwrap_or(0);
         if count == 1 {
             let _: Result<(), redis::RedisError> =
