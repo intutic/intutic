@@ -2,52 +2,199 @@
 //!
 //! Uses Rust `regex` crate (linear-time, ReDoS-safe).
 //! Scans both input and output streams for secrets, PII, and credentials.
+//!
+//! # Pattern doctrine
+//!
+//! Every pattern here is **prefix- or magic-substring-anchored** — the tier
+//! gitleaks and TruffleHog treat as high-confidence without entropy gates or
+//! context keywords. Formats are ported from the gitleaks default config and
+//! TruffleHog detector sources (verified 2026-07-28), which is why some look
+//! oddly specific: `T3BlbkFJ` is base64("OpenAI") and appears in every OpenAI
+//! key; `AgEIcHlwaS5vcmc` is the macaroon header embedding "pypi.org".
+//!
+//! Deliberately absent, with reasons:
+//! - **Bare 40-char AWS secret keys** — neither reference tool ships this
+//!   without context keywords or live verification; unanchored it matches git
+//!   SHAs and base64 fragments constantly.
+//! - **Generic high-entropy strings** — the entropy+stopword machinery that
+//!   makes those tolerable is out of proportion to this scanner.
+//! - **Context-required vendors** (Telegram, Twilio auth tokens) — their
+//!   secrets are format-ambiguous without a nearby vendor keyword.
+//!
+//! Action doctrine: `block` is reserved for material that is catastrophic to
+//! forward and unambiguous to match (private key blocks, Anthropic keys —
+//! the credential class this proxy itself runs on). Everything else redacts:
+//! a developer who pastes a key wants their question answered, and refusing
+//! teaches them to switch DLP off. Redaction answers with the key removed.
 
 use once_cell::sync::Lazy;
-use regex::Regex;
+use regex::{Regex, RegexSet};
 
 use crate::wasm::context::DlpFinding;
 
 /// DLP pattern categories
 static PATTERNS: Lazy<Vec<DlpPattern>> = Lazy::new(|| {
-    vec![
-        DlpPattern {
-            name: "aws_access_key".into(),
-            category: "secret".into(),
-            regex: Regex::new(r"AKIA[0-9A-Z]{16}").unwrap(),
-            action: "redact".into(),
-        },
-        DlpPattern {
-            name: "github_token".into(),
-            category: "secret".into(),
-            regex: Regex::new(r"ghp_[0-9a-zA-Z]{36}").unwrap(),
-            action: "redact".into(),
-        },
-        DlpPattern {
-            name: "anthropic_api_key".into(),
-            category: "secret".into(),
-            regex: Regex::new(r"sk-ant-[A-Za-z0-9\-_]{10,}").unwrap(),
-            action: "block".into(),
-        },
-        DlpPattern {
-            name: "ssn".into(),
-            category: "pii".into(),
-            regex: Regex::new(r"\b\d{3}-\d{2}-\d{4}\b").unwrap(),
-            action: "redact".into(),
-        },
-        DlpPattern {
-            name: "bearer_token".into(),
-            category: "credential".into(),
-            regex: Regex::new(r"Bearer\s+[A-Za-z0-9\-._~+/]+=*").unwrap(),
-            action: "redact".into(),
-        },
-        DlpPattern {
-            name: "private_key".into(),
-            category: "secret".into(),
-            regex: Regex::new(r"-----BEGIN (RSA |EC |DSA )?PRIVATE KEY-----").unwrap(),
-            action: "block".into(),
-        },
-    ]
+    let defs: Vec<(&str, &str, &str, &str)> = vec![
+        // (name, category, regex, action)
+        (
+            "aws_access_key",
+            "secret",
+            // AKIA long-lived, ASIA temporary, ABIA/ACCA/A3T* other classes.
+            // Base32 alphabet [A-Z2-7] per gitleaks — 0,1,8,9 never appear.
+            r"\b(?:A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z2-7]{16}\b",
+            "redact",
+        ),
+        (
+            "github_token",
+            "secret",
+            // All five classic prefixes: PAT, OAuth, App-user, App-server,
+            // refresh. The old pattern matched ghp_ only.
+            r"\b(?:ghp|gho|ghu|ghs|ghr)_[0-9a-zA-Z]{36}\b",
+            "redact",
+        ),
+        (
+            "github_fine_grained_pat",
+            "secret",
+            // 93 chars total; the tail carries a checksum, so this format is
+            // near-zero-FP by construction (GitHub's own design goal).
+            r"\bgithub_pat_\w{82}\b",
+            "redact",
+        ),
+        (
+            "anthropic_api_key",
+            "secret",
+            r"sk-ant-[A-Za-z0-9\-_]{10,}",
+            "block",
+        ),
+        (
+            "openai_api_key",
+            "secret",
+            // Anchored on T3BlbkFJ = base64("OpenAI"), present in legacy
+            // sk-{48} keys and current sk-proj-/sk-svcacct-/sk-admin- keys.
+            r"\b(?:sk-(?:proj|svcacct|admin)-(?:[A-Za-z0-9_-]{74}|[A-Za-z0-9_-]{58})T3BlbkFJ(?:[A-Za-z0-9_-]{74}|[A-Za-z0-9_-]{58})|sk-[a-zA-Z0-9]{20}T3BlbkFJ[a-zA-Z0-9]{20})\b",
+            "redact",
+        ),
+        (
+            "gitlab_pat",
+            "secret",
+            // Legacy glpat-{20} and the newer routable form with a
+            // dot-separated version+checksum suffix.
+            r"\bglpat-[0-9a-zA-Z_-]{20,300}(?:\.[0-9a-z]{9})?\b",
+            "redact",
+        ),
+        (
+            "slack_token",
+            "secret",
+            // Bot/user/app/legacy families share the xox?- shape; xapp- is
+            // the app-level token.
+            r"\b(?:xox[baprse]-[0-9a-zA-Z-]{10,}|xapp-\d-[A-Z0-9]+-\d+-[a-z0-9]+)\b",
+            "redact",
+        ),
+        (
+            "slack_webhook_url",
+            "secret",
+            // The path IS the secret; anyone holding it can post.
+            r"hooks\.slack\.com/(?:services|workflows|triggers)/[A-Za-z0-9+/]{40,60}",
+            "redact",
+        ),
+        (
+            "google_api_key",
+            "secret",
+            r"\bAIza[0-9A-Za-z_-]{35}\b",
+            "redact",
+        ),
+        (
+            "stripe_key",
+            "secret",
+            // Secret and restricted keys, all modes. Test keys redact too:
+            // harmless when redacted, and the format is identical.
+            r"\b(?:sk|rk)_(?:test|live|prod)_[a-zA-Z0-9]{10,99}\b",
+            "redact",
+        ),
+        (
+            "sendgrid_api_key",
+            "secret",
+            // Three-part SG.<key id>.<secret> shape per TruffleHog.
+            r"\bSG\.[0-9A-Za-z_-]{20,24}\.[0-9A-Za-z_-]{39,50}\b",
+            "redact",
+        ),
+        (
+            "npm_token",
+            "secret",
+            r"\bnpm_[A-Za-z0-9]{36}\b",
+            "redact",
+        ),
+        (
+            "pypi_token",
+            "secret",
+            // AgEIcHlwaS5vcmc is the macaroon header embedding "pypi.org".
+            r"pypi-AgEIcHlwaS5vcmc[0-9A-Za-z_-]{50,1000}",
+            "redact",
+        ),
+        (
+            "huggingface_token",
+            "secret",
+            // Letters only, per gitleaks' empirically tuned form.
+            r"\b(?:hf_|api_org_)[A-Za-z]{34}\b",
+            "redact",
+        ),
+        (
+            "db_connection_string",
+            "credential",
+            // scheme://user:password@ — the credential is the matched span,
+            // so redaction removes exactly the user:pass while the host
+            // stays legible in what the model sees.
+            r"\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|rediss?|amqps?)://[^:\s'\x22/@]{1,64}:[^@\s'\x22]{1,128}@",
+            "redact",
+        ),
+        (
+            "jwt",
+            "credential",
+            // Signature segment required (gitleaks makes it optional; we
+            // trade a little recall for precision on the hot path).
+            r"\bey[a-zA-Z0-9]{17,}\.ey[a-zA-Z0-9/_-]{17,}\.[a-zA-Z0-9/_-]{10,}={0,2}",
+            "redact",
+        ),
+        (
+            "ssn",
+            "pii",
+            r"\b\d{3}-\d{2}-\d{4}\b",
+            "redact",
+        ),
+        (
+            "bearer_token",
+            "credential",
+            r"Bearer\s+[A-Za-z0-9\-._~+/]+=*",
+            "redact",
+        ),
+        (
+            "private_key",
+            "secret",
+            // The full PEM family via the free-form slot: RSA, EC, DSA,
+            // OPENSSH, ENCRYPTED (PKCS#8), PGP (with " BLOCK"), and bare
+            // "PRIVATE KEY". The old pattern named three variants and
+            // missed OPENSSH and PGP entirely.
+            r"(?i)-----BEGIN[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----",
+            "block",
+        ),
+    ];
+
+    defs.into_iter()
+        .map(|(name, category, regex, action)| DlpPattern {
+            name: name.into(),
+            category: category.into(),
+            regex: Regex::new(regex).unwrap(),
+            action: action.into(),
+        })
+        .collect()
+});
+
+/// One pass over the body decides which patterns matched at all; only those
+/// run their capturing scan. With the set now ~20 patterns, the naive loop
+/// cost one full body traversal per pattern per direction — the prefilter
+/// makes the common case (no secrets) a single traversal.
+static PREFILTER: Lazy<RegexSet> = Lazy::new(|| {
+    RegexSet::new(PATTERNS.iter().map(|p| p.regex.as_str())).unwrap()
 });
 
 struct DlpPattern {
@@ -60,7 +207,8 @@ struct DlpPattern {
 /// Scan text for DLP matches
 pub fn scan(text: &str) -> Vec<DlpFinding> {
     let mut findings = Vec::new();
-    for pattern in PATTERNS.iter() {
+    for idx in PREFILTER.matches(text) {
+        let pattern = &PATTERNS[idx];
         for mat in pattern.regex.find_iter(text) {
             findings.push(DlpFinding {
                 category: pattern.category.clone(),
@@ -133,6 +281,132 @@ mod tests {
         let text = "Hello world, this is a normal message";
         let findings = scan(text);
         assert!(findings.is_empty());
+    }
+
+    // ── Expanded pattern set (2026-07-29) ───────────────────────────────
+    //
+    // Formats ported from the gitleaks default config and TruffleHog
+    // detector sources. Each test uses a syntactically valid but fake token.
+
+    fn names(text: &str) -> Vec<String> {
+        scan(text).into_iter().map(|f| f.pattern_name).collect()
+    }
+
+    #[test]
+    fn aws_temporary_and_other_key_classes_detected() {
+        // ASIA (STS temporary) was invisible to the old AKIA-only pattern.
+        assert!(names("key ASIAJEXAMPLEKEY234AB here").contains(&"aws_access_key".into()));
+        assert!(names("key ABIAJEXAMPLEKEY234AB here").contains(&"aws_access_key".into()));
+    }
+
+    #[test]
+    fn all_github_classic_prefixes_detected() {
+        // Only ghp_ matched before; the other four classes were invisible.
+        for prefix in ["ghp", "gho", "ghu", "ghs", "ghr"] {
+            let tok = format!("{}_{}", prefix, "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8");
+            assert!(
+                names(&format!("token {tok} end")).contains(&"github_token".into()),
+                "{prefix} must be detected"
+            );
+        }
+    }
+
+    #[test]
+    fn github_fine_grained_pat_detected() {
+        let tok = format!("github_pat_{}", "A".repeat(82));
+        assert!(names(&tok).contains(&"github_fine_grained_pat".into()));
+    }
+
+    #[test]
+    fn openai_keys_detected_via_magic_substring() {
+        // Legacy: sk- + 20 alnum + T3BlbkFJ + 20 alnum.
+        let legacy = format!("sk-{}T3BlbkFJ{}", "a1B2c3D4e5F6g7H8i9J0", "K1l2M3n4O5p6Q7r8S9t0");
+        assert!(names(&legacy).contains(&"openai_api_key".into()));
+        // Project-scoped: symmetric 58-char halves around the magic.
+        let half = "a".repeat(58);
+        let proj = format!("sk-proj-{half}T3BlbkFJ{half}");
+        assert!(names(&proj).contains(&"openai_api_key".into()));
+    }
+
+    #[test]
+    fn platform_tokens_detected() {
+        let cases: Vec<(String, &str)> = vec![
+            (format!("glpat-{}", "aB3dE5fG7hI9jK1lM3nO"), "gitlab_pat"),
+            // Assembled at runtime: a contiguous literal in this shape trips
+            // GitHub push protection — correctly, which is its own kind of
+            // proof the pattern is worth having.
+            (format!("xox{}-123456789012-123456789012-AbCdEfGhIjKlMnOp", "b"), "slack_token"),
+            (format!("https://hooks.slack.com/services/{}", "A".repeat(44)), "slack_webhook_url"),
+            (format!("AIza{}", "SyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6c"), "google_api_key"),
+            (format!("sk_live_{}", "a1B2c3D4e5F6g7H8i9J0k1L2"), "stripe_key"),
+            (format!("SG.{}.{}", "a".repeat(22), "b".repeat(43)), "sendgrid_api_key"),
+            (format!("npm_{}", "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"), "npm_token"),
+            (format!("pypi-AgEIcHlwaS5vcmc{}", "x".repeat(60)), "pypi_token"),
+            (format!("hf_{}", "AbCdEfGhIjKlMnOpQrStUvWxYzAbCdEfGh"), "huggingface_token"),
+        ];
+        for (tok, expected) in cases {
+            assert!(
+                names(&format!("value: {tok} .")).contains(&expected.to_string()),
+                "{expected} must detect {tok}"
+            );
+        }
+    }
+
+    #[test]
+    fn db_connection_credentials_detected_and_redaction_spares_the_host() {
+        let text = "url is postgres://svc_user:hunter22secret@db.internal:5432/app";
+        let findings = scan(text);
+        assert!(findings.iter().any(|f| f.pattern_name == "db_connection_string"));
+        let redacted = redact(text, &findings);
+        assert!(!redacted.contains("hunter22secret"), "password must be gone");
+        assert!(redacted.contains("db.internal:5432/app"), "host stays legible");
+    }
+
+    #[test]
+    fn jwt_with_signature_detected() {
+        let jwt = format!(
+            "eyJhbGciOiJIUzI1NiJ9x.eyJzdWIiOiIxMjM0NTY3ODkwIn0.{}",
+            "TJVA95OrM7E2cBab30RM"
+        );
+        assert!(names(&jwt).contains(&"jwt".into()));
+    }
+
+    #[test]
+    fn bearer_token_detected() {
+        // Had zero coverage since the pattern was written.
+        let f = scan("Authorization value Bearer abc123DEF456ghi789 in body");
+        assert!(f.iter().any(|x| x.pattern_name == "bearer_token"));
+    }
+
+    #[test]
+    fn private_key_family_blocks_including_openssh_and_pgp() {
+        // Had zero coverage; the old pattern also missed both of these.
+        for header in [
+            "-----BEGIN PRIVATE KEY-----",
+            "-----BEGIN RSA PRIVATE KEY-----",
+            "-----BEGIN OPENSSH PRIVATE KEY-----",
+            "-----BEGIN ENCRYPTED PRIVATE KEY-----",
+            "-----BEGIN PGP PRIVATE KEY BLOCK-----",
+        ] {
+            let f = scan(header);
+            let hit = f.iter().find(|x| x.pattern_name == "private_key");
+            let hit = hit.unwrap_or_else(|| panic!("{header} must be caught"));
+            assert_eq!(hit.action, "block", "{header} must block, not redact");
+        }
+    }
+
+    #[test]
+    fn ordinary_technical_text_produces_no_findings() {
+        // The false-positive control. Everyday engineering text carrying the
+        // shapes that trip naive scanners: git SHAs, UUIDs, base64-ish ids,
+        // words containing pattern prefixes.
+        let text = "task-123 finished; risk-based review of commit                     9f86d081884c7d659a2feaa0c55ad015a3bf4f1b left node_modules                     unchanged. uuid 550e8400-e29b-41d4-a716-446655440000,                     ghost_user asked about skiing at https://example.com/a/b.                     The phone extension is 555-0100 and the build id is                     AKIA-lowercase-not-a-key.";
+        let findings = scan(text);
+        assert!(
+            findings.is_empty(),
+            "no findings expected, got: {:?}",
+            findings.iter().map(|f| &f.pattern_name).collect::<Vec<_>>()
+        );
     }
 }
 
