@@ -106,6 +106,8 @@ class Filter:
         ts = datetime.now(timezone.utc).isoformat()
         model = body.get("model", "unknown")
         workspace_id = env["INTUTIC_WORKSPACE_ID"]
+        meta = body.get("metadata") or {}
+        session_id = meta.get("session_id") or meta.get("chat_id") or ""
         incident_id = hashlib.sha1(
             f"{ts}{model}{workspace_id}".encode()
         ).hexdigest()[:16]
@@ -117,6 +119,7 @@ class Filter:
             "harnessType": HARNESS_TYPE,
             "timestamp": ts,
             "incidentId": incident_id,
+            **({"sessionId": session_id} if session_id else {}),
         }
         _log_event(env, event)
         return body

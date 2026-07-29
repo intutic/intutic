@@ -89,6 +89,7 @@ const PROTECTED_PATHS = ${JSON.stringify(PROTECTED_PATHS, null, 2)};
  * Appends a governance event to the local hook-events log (Path B)
  * and fires a non-blocking HTTP POST to the control plane (Path A).
  */
+let _intuticSessionId = '';
 function logEvent(verdict, toolName, reason) {
   try {
     const ts = new Date().toISOString();
@@ -102,6 +103,7 @@ function logEvent(verdict, toolName, reason) {
       harnessType: 'openclaw',
       timestamp: ts,
       incidentId,
+      ...(_intuticSessionId ? { sessionId: _intuticSessionId } : {}),
     }) + '\\n';
     // Path B: reliable file append (sync-daemon drains on FSEvents change)
     fs.appendFileSync(${JSON.stringify(hookEventsLog)}, entry, { flag: 'a' });
@@ -137,6 +139,7 @@ process.stdin.on('data', (chunk) => { inputData += chunk; });
 process.stdin.on('end', () => {
   try {
     const ctx = JSON.parse(inputData);
+    _intuticSessionId = ctx.session_id || ctx.sessionId || ctx.conversation_id || ctx.conversationId || ctx.task_id || ctx.taskId || '';
     const toolName = (ctx.tool_name || ctx.toolName || '').toLowerCase();
     const toolInput = ctx.tool_input || ctx.toolInput || {};
 

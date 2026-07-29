@@ -98,6 +98,7 @@ const PROTECTED_PATHS = ${JSON.stringify(PROTECTED_PATHS)};
 // ── Dual-path logEvent ────────────────────────────────────────────────────────
 const HOOK_EVENTS_LOG = ${JSON.stringify(hookEventsLog)};
 
+let _intuticSessionId = '';
 function logEvent(env, verdict, toolName, reason) {
   const ts = new Date().toISOString();
   const incidentId = crypto.createHash('sha1')
@@ -112,6 +113,7 @@ function logEvent(env, verdict, toolName, reason) {
     harnessType: 'roo-code',
     timestamp: ts,
     incidentId,
+    ...(_intuticSessionId ? { sessionId: _intuticSessionId } : {}),
   };
 
   // Path B — reliable file append
@@ -163,6 +165,7 @@ process.stdin.on('data', (chunk) => { inputData += chunk; });
 process.stdin.on('end', () => {
   try {
     const ctx = JSON.parse(inputData);
+    _intuticSessionId = ctx.session_id || ctx.sessionId || ctx.conversation_id || ctx.conversationId || ctx.task_id || ctx.taskId || '';
     const toolName = (ctx.tool_name || ctx.toolName || '').toLowerCase();
     const toolInput = ctx.tool_input || ctx.toolInput || {};
     const toolInputStr = JSON.stringify(toolInput);
