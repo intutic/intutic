@@ -87,7 +87,7 @@ If the agent LLM attempts to deviate or ignore the instructions (which is common
 The local Rust proxy acts as an inline firewalled gateway between the developer's agent client (e.g., Claude Code, Cursor) and the LLM providers (Anthropic, OpenAI, Gemini). It enforces rules through three active gates:
 
 1.  **Tool-Call Interception (`pcas_gate.rs`):** If the LLM generates a tool call (like running a terminal command or writing a file) that violates a policy (e.g. running `rm -rf` or performing a database write without a transaction), the proxy **intercepts and blocks** the request *before* the agent harness can execute it, returning a synthetic error message (e.g., `PCAS policy violation - denied tool`).
-2.  **Stream Interception (`dlp_gate.rs` & `snip.rs`):** The proxy evaluates the LLM's output stream in real-time on paragraph boundaries. If it detects forbidden outputs or rule deviations (e.g., writing a raw hex color code instead of a CSS variable, or printing an environment secret key):
+2.  **Response scanning:** The proxy scans non-streaming response bodies with the same DLP pattern set and redacts findings before they reach the client. (Streaming responses are not scanned mid-stream today; input-side DLP, which runs on every request, is the enforced boundary for secrets.) If a rule deviation is detected (e.g., writing a raw hex color code instead of a CSS variable):
     *   It injects a **Steering Advice** warning directly into the stream, forcing the agent to see the correction.
     *   It appends a **Synthesis Card** detailing the violation.
     *   In strict modes, it terminates the stream immediately (`KILL` action), preventing the agent from receiving the invalid code block.

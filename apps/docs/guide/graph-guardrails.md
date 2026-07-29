@@ -212,8 +212,14 @@ Two outcomes, depending on the pattern:
 
 | Pattern | Behaviour |
 |---|---|
-| Private keys, Anthropic API keys | request **refused** |
-| AWS access keys, GitHub tokens, bearer tokens, SSNs | **redacted before forwarding** — replaced with `[REDACTED_*]`, and the redacted body is what reaches your provider |
+| Private keys (RSA, EC, DSA, OpenSSH, PGP, PKCS#8), Anthropic API keys | request **refused** |
+| AWS access keys (incl. temporary `ASIA` creds), GitHub tokens (all five classic prefixes + fine-grained), OpenAI / GitLab / Slack / Google / Stripe / SendGrid / npm / PyPI / Hugging Face keys, Slack webhook URLs, database connection credentials, JWTs, bearer tokens, SSNs | **redacted before forwarding** — replaced with `[REDACTED_*]`, and the redacted body is what reaches your provider |
+
+Every pattern is prefix- or magic-substring-anchored — the tier the reference
+scanners (gitleaks, TruffleHog) treat as high-confidence — so ordinary
+technical text does not trip it. Formats that are ambiguous without context
+(bare 40-char AWS secrets, unprefixed hex tokens) are deliberately excluded
+rather than matched noisily.
 
 Redaction rather than refusal for the second group is deliberate. A developer
 who pastes a key into a prompt usually wants their question answered; refusing
