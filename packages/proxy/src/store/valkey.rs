@@ -66,6 +66,17 @@ const NOTIFY_QUEUE_CAP: isize = 50;
 /// about a request the agent has long since moved on from.
 const NOTIFY_TTL_SECS: i64 = 3600;
 
+/// Sliding TTL on a session's tool-sequence list.
+///
+/// The list itself is length-capped by `LTRIM`, but nothing bounded the number
+/// of *keys* — one per session id ever seen, kept forever. Every other
+/// session-scoped key in this file expires; this one predated the convention.
+///
+/// Sliding, refreshed on every write: an active session never expires, and a
+/// session idle for a day loses only its detector context — which fails safe,
+/// since every sequence detector treats a short history as benign.
+const TOOL_SEQUENCE_TTL_SECS: i64 = 86_400;
+
 /// Window over which a graph may broadcast a given anomaly category once, and
 /// over which its total broadcasts are counted.
 const BROADCAST_WINDOW_SECS: u64 = 60;
@@ -273,6 +284,8 @@ impl LocalStore for ValkeyStore {
                 let start = sequence.len() - cap;
                 sequence = sequence.split_off(start);
             }
+            let _: Result<(), redis::RedisError> =
+                conn.expire(&key, TOOL_SEQUENCE_TTL_SECS).await;
         }
         Ok(sequence)
     }
