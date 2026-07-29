@@ -486,10 +486,13 @@ mod coverage_tests {
     // ── blocking_finding ────────────────────────────────────────────────
     //
     // The request path returned 403 for every finding, using `kill` only to
-    // choose between two error strings. Six of the nineteen detectors emit
-    // `steer` (kill: false), which `to_verdict` maps to Hijack — advise, do not
-    // block. Those six were hard-blocking requests they were written to advise
-    // on. These tests pin the corrected selection.
+    // choose between two error strings. Six steer emission sites across the
+    // registry's EIGHTEEN detectors (PromptInjection has both a steer tier and
+    // a kill tier, so counting emission sites gives nineteen and counting
+    // structs gives eighteen — the registry registers eighteen) produce
+    // `kill: false`, which `to_verdict` maps to Hijack — advise, do not block.
+    // Those paths were hard-blocking requests they were written to advise on.
+    // These tests pin the corrected selection.
 
     #[test]
     fn advisory_findings_alone_do_not_block() {

@@ -1440,9 +1440,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // it to `Verdict::Hijack` — steer, do not block. The request path
             // calls `evaluate_all` and never `to_verdict`, so that distinction
             // was lost here: every finding returned 403, and the `kill` flag
-            // only chose between two error strings. Six of the nineteen
-            // detectors emit `steer` (ToolAbuse, TokenWaste, Hallucination,
-            // PromptInjection), so those six were hard-blocking requests they
+            // only chose between two error strings. Six steer emission sites
+            // across the eighteen registered detectors (ToolAbuse, TokenWaste,
+            // Hallucination, PromptInjection) were hard-blocking requests they
             // were written to merely advise on.
             //
             // Note this scans all findings rather than testing `worst.kill`.

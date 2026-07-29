@@ -177,7 +177,7 @@ In addition to organization-wide policies synced from the centralized control pl
 * **Initialization & Scoping**: When you run `@intutic initialize`, the control plane lists both open board tickets and detected local rules folders as numbered choices.
 * **Activating SOPs**: Start the session scoping to a subset of local SOPs using option indices or names with the `--sops` flag (e.g., `@intutic start 1 --sops=3` or `@intutic start --sops=security-dlp`).
 * **Execution**: During the scoped session, the local daemon merges only the selected active local rules with corporate policies before writing them to harness files (`CLAUDE.md`, `.cursorrules`, etc.) and evaluating pre-flight prompts. If no options are specified, all detected local SOP folders are active by default.
-* **Privacy Preservation**: If a personal rule is violated, the anomaly is flagged in the developer's console output to offer steering guidance, but **no incident is logged in the remote organization database/dashboard**.
+* **Privacy Preservation**: If a personal prose rule is violated, the anomaly is flagged in the developer's console output to offer steering guidance. `deny_tools:` front matter in the same files is enforced harder: a call to a denied tool is blocked outright (403, `UNAUTHORIZED_TOOL`), and `allow_harnesses:` restricts which harnesses a role may use, but **no incident is logged in the remote organization database/dashboard**.
 * **Sharing & Version Control**: Since these rules are standard text files, you can check them into Git version control to share with specific teammates or add the `.intutic/sops/` folder to `.gitignore` to keep them strictly private to your machine.
 
 ## Change classification

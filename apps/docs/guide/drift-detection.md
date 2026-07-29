@@ -98,7 +98,8 @@ To intercept anomalous behaviors (such as infinite tool execution loops, abnorma
 1. **Valkey Queue Tracking** — The proxy maintains a sliding window of the last 20 tool calls executed during a session.
 2. **Repetition Filtering** — If a single tool name is repeated consecutively 5 or more times, the proxy terminates the request immediately with a `Verdict::Kill`.
 3. **Markov Transition Probabilities** — The proxy evaluates the probability matrix of transitions between consecutive tool invocations (e.g., `view_file` -> `run_command` is highly probable, while `run_command` -> `run_command` is anomalous).
-4. **Enforcement Actions** — If the transition probability drops below `0.35`, the request is flagged with a `Verdict::Hijack` or blocked with a `Verdict::Kill`.
+4. **Enforcement Actions** — If the transition probability drops below `0.35`, the request is flagged with an advisory `Verdict::Hijack` (steer) — low
+transition plausibility never blocks on its own.
 
 ---
 
