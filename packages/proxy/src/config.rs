@@ -66,6 +66,21 @@ pub struct IntuticSettings {
     /// The `INTUTIC_WASM_DIR` env var takes precedence over this value.
     #[serde(default)]
     pub wasm_local_dir: Option<String>,
+    /// `/fix` and `/draw` command behaviour.
+    #[serde(default)]
+    pub commands: CommandsConfig,
+}
+
+/// Settings for the `/fix` and `/draw` blocking commands.
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct CommandsConfig {
+    /// When true, `/fix` does not answer locally: the synthesis card is
+    /// appended to the user's prompt (command token stripped) and the turn is
+    /// forwarded to the upstream provider, so the model sees the enhanced
+    /// prompt. `/draw` stays blocking either way — a visualization has no
+    /// upstream half. Default false: blocking costs zero tokens.
+    #[serde(default)]
+    pub non_blocking: bool,
 }
 
 /// Policy enforcement settings — controls connection to the control plane

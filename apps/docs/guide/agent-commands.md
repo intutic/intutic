@@ -21,10 +21,13 @@ model reply. The card:
 5. Lists **recommendations** for whatever guardrail is off — e.g. "enable output
    DLP", "write a role SOP under `.intutic/sops`".
 
-It never leaves your machine. In the enterprise tier, `/fix` can additionally
-enhance the prompt with ranked chunks from your connected memory providers
-(mem0, Supermemory, AgentMemory, …), routed through the LLM-as-judge — that path
-runs in the control plane and is off in open core.
+It never leaves your machine. When a control plane is connected, `/fix`
+additionally enhances the card with a **Memory context** section: your
+workspace's memory providers (mem0, Supermemory, AgentMemory, or any provider
+via the generic HTTP connector) are searched with the prompt, the chunks are
+ranked by the LLM-as-judge (with a deterministic fallback when no judge is
+reachable), and the winners are inlined with their provider attribution. A
+provider that is down contributes nothing rather than blocking the command.
 
 ## `/draw` — visualize the agent
 
@@ -48,8 +51,12 @@ orange < 65, yellow < 85, green ≥ 85.
 ## Blocking vs. passthrough
 
 Both commands are **blocking** by default: the proxy answers and no upstream
-request is made, so they cost nothing in tokens. They are deterministic and
-local — the whole of the open-core behaviour.
+request is made, so they cost nothing in tokens. Setting
+`intutic_settings.commands.non_blocking: true` in `config.yaml` switches `/fix`
+to passthrough: the command token is stripped, the synthesis card is appended
+to your prompt, and the turn is forwarded to your provider so the model sees
+the enhanced prompt. `/draw` stays blocking either way — a visualization has no
+upstream half.
 
 ## Related
 
