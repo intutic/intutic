@@ -849,3 +849,95 @@ async fn backends_agree_within_epsilon() {
 
     cleanup(&ws, None).await;
 }
+
+/// The tenancy property TD-208 exists for: two workspaces that choose the SAME
+/// graph id must not see each other's membership, spend, broadcast claims, or
+/// notification queues. graph_id is client-supplied free text from a baggage
+/// header, so before the workspace segment was added to every graph key,
+/// isolation was an accident of id uniqueness on a shared Valkey.
+///
+/// MemoryStore no-ops every one of these paths, so this is Valkey-gated — a
+/// green run without VALKEY_URL proves nothing about the keys.
+#[tokio::test]
+async fn graph_keys_are_isolated_between_workspaces() {
+    let Some(conn) = valkey_conn().await else {
+        eprintln!("skipping: VALKEY_URL not set or Valkey unreachable");
+        return;
+    };
+    let store: Arc<dyn LocalStore> = Arc::new(ValkeyStore::new(conn.clone()));
+    // Publish lives on LocalStore; drain lives on ControlPlaneCache.
+    let cp: Arc<dyn ControlPlaneCache> = Arc::new(ValkeyControlPlaneCache::new(conn.clone()));
+
+    let graph = unique_ws("shared-graph-id");
+    let (ws_a, ws_b) = (unique_ws("tenant-a"), unique_ws("tenant-b"));
+
+    // Same graph id, two tenants.
+    store.touch_graph_node(&ws_a, &graph, "node-a1", 60).await;
+    store.touch_graph_node(&ws_a, &graph, "node-a2", 60).await;
+    store.touch_graph_node(&ws_b, &graph, "node-b1", 60).await;
+
+    // Membership must not bleed.
+    let a = store.graph_members(&ws_a, &graph).await;
+    let b = store.graph_members(&ws_b, &graph).await;
+    assert_eq!(a.len(), 2, "tenant A sees only its own nodes");
+    assert_eq!(b, vec!["node-b1".to_string()], "tenant B sees only its own node");
+    assert!(!a.contains(&"node-b1".to_string()), "A must not see B's node");
+
+    // Spend must not aggregate across tenants — it feeds the budget detector.
+    store.add_graph_spend(&ws_a, &graph, 5.0, 60).await;
+    let b_spend = store.graph_spend(&ws_b, &graph).await;
+    assert!(
+        b_spend.is_none() || b_spend == Some(0.0),
+        "tenant B must not inherit tenant A's spend, got {b_spend:?}"
+    );
+
+    // A's broadcast claim must not consume B's once-per-graph-per-kind budget.
+    assert!(store.claim_broadcast(&ws_a, &graph, "LOOP_DETECTED").await);
+    assert!(
+        store.claim_broadcast(&ws_b, &graph, "LOOP_DETECTED").await,
+        "tenant B's first claim must succeed even though A claimed the same kind on the same graph id"
+    );
+    // And the claim still dedupes within a tenant.
+    assert!(!store.claim_broadcast(&ws_a, &graph, "LOOP_DETECTED").await);
+
+    // The raw keys carry the workspace segment — asserted against Valkey
+    // directly so a regression to unscoped keys cannot pass.
+    let mut raw = conn.as_ref().clone();
+    let a_nodes: bool = redis::cmd("EXISTS")
+        .arg(format!("graph:{ws_a}:{graph}:nodes"))
+        .query_async(&mut raw)
+        .await
+        .unwrap();
+    let unscoped: bool = redis::cmd("EXISTS")
+        .arg(format!("graph:{graph}:nodes"))
+        .query_async(&mut raw)
+        .await
+        .unwrap();
+    assert!(a_nodes, "workspace-scoped key must exist");
+    assert!(!unscoped, "the old unscoped key must NOT be written");
+
+    // Notification queues: fan-out to A's sibling must be invisible to B's
+    // identically-named node.
+    store
+        .publish_notification(
+            NotifyScope::Graph,
+            &format!("{ws_a}:{graph}:node-a2"),
+            "{\"category\":\"LOOP_DETECTED\"}",
+        )
+        .await;
+    let b_drain = cp
+        .drain_notifications(NotifyScope::Graph, &format!("{ws_b}:{graph}:node-a2"))
+        .await;
+    assert!(b_drain.is_empty(), "B must not drain A's queue for an identically-named node");
+    let a_drain = cp
+        .drain_notifications(NotifyScope::Graph, &format!("{ws_a}:{graph}:node-a2"))
+        .await;
+    assert_eq!(a_drain.len(), 1, "A's own sibling drains its copy");
+
+    // Cleanup.
+    for ws in [&ws_a, &ws_b] {
+        for suffix in ["nodes", "spend", "bcast:LOOP_DETECTED", "bcast:rate"] {
+            let _: Result<(), _> = raw.del(format!("graph:{ws}:{graph}:{suffix}")).await;
+        }
+    }
+}

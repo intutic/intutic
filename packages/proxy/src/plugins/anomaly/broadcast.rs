@@ -89,7 +89,7 @@ pub async fn broadcast_findings(
     // A graph of one is just a session, and telling a node about its own
     // finding is noise — it already received the verdict. Membership is
     // written on every request by the caller; this only reads it.
-    let members = store.graph_members(&ctx.node.graph_id).await;
+    let members = store.graph_members(&ctx.workspace_id, &ctx.node.graph_id).await;
     if members.len() < 2 {
         return;
     }
@@ -109,7 +109,7 @@ pub async fn broadcast_findings(
         // context, becomes part of that sibling's next request, and each hop
         // makes one observation look independently corroborated. That is the
         // amplification this whole feature has to avoid being an instance of.
-        if !store.claim_broadcast(&ctx.node.graph_id, finding.kind.as_str()).await {
+        if !store.claim_broadcast(&ctx.workspace_id, &ctx.node.graph_id, finding.kind.as_str()).await {
             continue;
         }
         let Some(body) = payload(ctx, finding, timestamp) else {
@@ -119,7 +119,7 @@ pub async fn broadcast_findings(
             store
                 .publish_notification(
                     NotifyScope::Graph,
-                    &format!("{}:{}", ctx.node.graph_id, sibling),
+                    &format!("{}:{}:{}", ctx.workspace_id, ctx.node.graph_id, sibling),
                     &body,
                 )
                 .await;
@@ -215,7 +215,7 @@ mod suppression_tests {
     #[tokio::test]
     async fn standalone_never_claims_a_broadcast() {
         let store = crate::store::memory::MemoryStore::new();
-        assert!(!store.claim_broadcast("g", "LOOP_DETECTED").await);
+        assert!(!store.claim_broadcast("ws", "g", "LOOP_DETECTED").await);
     }
 
     /// The origin is excluded from its own fan-out.

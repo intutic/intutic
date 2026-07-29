@@ -204,7 +204,12 @@ pub async fn check_cache(
         return None;
     }
 
-    let sha256_hash = compute_sha256(&prompt_text);
+    // Salted with the workspace: the response cache key was a pure content
+    // hash, so two tenants sending the same prompt shared cache entries —
+    // including responses generated with the other tenant's injected SOPs.
+    // The semantic index was already per-workspace (query_turbovec takes
+    // workspace_id); this closes the exact-match path to match.
+    let sha256_hash = compute_sha256(&format!("{workspace_id}\n{prompt_text}"));
 
     // 1. Exact Match Path
     if ff_exact {
@@ -279,7 +284,12 @@ pub async fn write_cache(
         return Ok(());
     }
 
-    let sha256_hash = compute_sha256(&prompt_text);
+    // Salted with the workspace: the response cache key was a pure content
+    // hash, so two tenants sending the same prompt shared cache entries —
+    // including responses generated with the other tenant's injected SOPs.
+    // The semantic index was already per-workspace (query_turbovec takes
+    // workspace_id); this closes the exact-match path to match.
+    let sha256_hash = compute_sha256(&format!("{workspace_id}\n{prompt_text}"));
     let cached_resp = CachedResponse {
         prompt: prompt_text.clone(),
         response: completion_text.to_string(),
