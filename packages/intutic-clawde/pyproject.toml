@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "intutic-clawde"
-version = "1.9.0"
+version = "1.10.0"
 description = "Programmatic proxy connection wrappers and warm-path budget gates for Intutic"
 authors = ["Intutic <engineering@intutic.ai>"]
 readme = "README.md"
