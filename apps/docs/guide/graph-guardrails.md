@@ -102,7 +102,8 @@ All detectors run on every request rather than stopping at the first hit — a
 request that trips three checks tells you more than one that trips one — and the
 most severe **killing** finding determines the verdict. Deterministic
 detectors kill; the heuristic ones — transition plausibility, contract drift,
-diversity collapse, context growth, a single injection technique — advise:
+diversity collapse, context growth, orphaned execution, a single injection
+technique — advise:
 they are logged, broadcast to siblings and traced, and the request proceeds.
 
 ### 2. Tool definitions, pinned on first use

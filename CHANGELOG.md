@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **DLP scanner expanded from 6 patterns to 20**, all prefix- or
+- **DLP scanner expanded from 6 patterns to 19**, all prefix- or
   magic-substring-anchored (formats ported from the gitleaks default config
   and TruffleHog detectors): OpenAI, GitLab, Slack tokens and webhook URLs,
   Google, Stripe, SendGrid, npm, PyPI, Hugging Face, database connection
