@@ -974,6 +974,82 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         }
     }
 
+    // ── Step 2.4: `/fix` and `/draw` blocking commands (open core) ──────
+    // Answered locally by the proxy and never forwarded upstream, exactly like
+    // `/intutic-predict`. `/fix` enhances the prompt with an inventory of the
+    // Intutic primitives configured for this request plus recommendations;
+    // `/draw` renders the guardrail/trajectory graph. Both are deterministic
+    // here; the enterprise control plane can enhance `/fix` with judge-routed
+    // memory chunks, but that path is invoked from the control plane, not here.
+    if let Some(text) = last_user_content.as_ref() {
+        if let Some((cmd, prompt)) = crate::commands::detect(text) {
+            let node = crate::graph::identity_from_headers(&headers, &session_id_hdr);
+            let dlp = &state.config.intutic_settings.dlp;
+            let wasm_dir = crate::wasm::local_loader::resolve_local_dir(
+                state.config.intutic_settings.wasm_local_dir.as_deref(),
+            );
+            let wasm_rule_count = std::fs::read_dir(&wasm_dir)
+                .map(|entries| {
+                    entries
+                        .filter_map(|e| e.ok())
+                        .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("wasm"))
+                        .count() as u32
+                })
+                .unwrap_or(0);
+            let applicable_sops: Vec<crate::sops::Sop> = crate::sops::loaded_sops()
+                .into_iter()
+                .filter(|s| s.applies_to(&node.agent_role))
+                .collect();
+
+            let inv = crate::commands::Inventory {
+                role: if node.agent_role.is_empty() { "unscoped".into() } else { node.agent_role.clone() },
+                dlp_scan_input: dlp.enabled && dlp.scan_input,
+                dlp_scan_output: dlp.enabled && dlp.scan_output,
+                wasm_rule_count,
+                hook_gate: true, // the proxy is on the path; the hook gate is always present
+                policy_enforced: state.config.intutic_settings.policy.fail_closed,
+                applicable_sops,
+            };
+
+            let card = match cmd {
+                crate::commands::Command::Fix => crate::commands::render_fix_card(&prompt, &inv),
+                crate::commands::Command::Draw => crate::commands::render_draw_card(&prompt, &inv),
+            };
+
+            let wire = match provider {
+                Provider::Anthropic => crate::commands::WireProvider::Anthropic,
+                Provider::Gemini => crate::commands::WireProvider::Gemini,
+                Provider::OpenAI => crate::commands::WireProvider::OpenAI,
+            };
+            let is_streaming = body_json.get("stream").and_then(|v| v.as_bool()).unwrap_or(false);
+
+            if is_streaming {
+                let (tx, rx) = tokio::sync::mpsc::channel::<Result<axum::body::Bytes, std::io::Error>>(10);
+                let sse = crate::commands::streaming_body(wire, &model, &card);
+                tokio::spawn(async move {
+                    let _ = tx.send(Ok(axum::body::Bytes::from(sse))).await;
+                });
+                let mut response = Response::builder().status(StatusCode::OK);
+                if let Some(h) = response.headers_mut() {
+                    h.insert(
+                        axum::http::HeaderName::from_static("content-type"),
+                        axum::http::HeaderValue::from_static("text/event-stream"),
+                    );
+                }
+                return response
+                    .body(Body::from_stream(ReceiverStream::new(rx)))
+                    .unwrap_or_else(|_| json_error(StatusCode::INTERNAL_SERVER_ERROR, "command_error", "Failed to construct streaming response"));
+            } else {
+                let body = crate::commands::non_streaming_body(wire, &model, &card);
+                return Response::builder()
+                    .status(StatusCode::OK)
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&body).unwrap_or_default()))
+                    .unwrap_or_else(|_| json_error(StatusCode::INTERNAL_SERVER_ERROR, "command_error", "Failed to construct response"));
+            }
+        }
+    }
+
     // ── Step 2.5: Validate virtual key and check budget (Valkey) ─────
     let key_record = match state.control_plane.auth_context(raw_token).await {
         ControlPlaneAuth::Known(k) => Some(*k),
