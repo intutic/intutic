@@ -44,7 +44,16 @@ interface ExecutionTrace {
   enforcementAction: 'ALLOW' | 'BLOCK' | 'HIJACK' | 'KILL' | 'BYPASS';
   
   // Anomalies
-  anomalyDetected?: 'TOKEN_WASTE' | 'LOOP_DETECTED' | 'HALLUCINATION' | 'SECURITY_VIOLATION';
+  anomalies?: string[]         // categories raised on this request, most severe
+                               // first, from the 12-value anomaly taxonomy
+  taskType?: string            // task classification ("coding", ...)
+  tools?: string[]             // tool calls newly observed on THIS request —
+                               // the per-turn delta, not the cumulative history
+  graphId?: string             // multi-agent graph coordinates; present only
+  nodeId?: string              // when the request is part of a real graph
+  agentRole?: string
+  parentNodeId?: string
+  graphDepth?: number;
   anomalyConfidenceScore?: number;
 }
 ```

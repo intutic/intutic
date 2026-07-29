@@ -1,11 +1,11 @@
 ---
 title: SOP Library
-description: 8 pre-built hook SOPs for common governance rules — filesystem, secrets, git, database, cost, review, network, and compliance.
+description: A library of 20 pre-built hook SOPs for common governance rules — filesystem, secrets, git, database, cost, review, network, and compliance.
 ---
 
 # SOP Library <Badge type="tip" text="Built-in" />
 
-Intutic ships with 8 pre-built hook SOPs that cover the most common governance needs. Each SOP runs as a `PRE_TOOL` hook in the [V8 sandbox](/concepts/enforcement-actions#hook-sop-examples) and uses `intutic.verdict()` to allow, block, warn, or modify tool calls.
+Intutic ships with 20 pre-built hook SOPs that cover the most common governance needs. Each SOP runs as a `PRE_TOOL` hook in the [V8 sandbox](/concepts/enforcement-actions#hook-sop-examples) and uses `intutic.verdict()` to allow, block, warn, or modify tool calls.
 
 ## Available SOPs
 

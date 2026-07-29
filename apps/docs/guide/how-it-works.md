@@ -71,7 +71,7 @@ The **Policy Compliance and Action System** evaluates every request against your
 | **BYPASS** | Request passes through unmodified | Compliant with all SOPs |
 | **ENHANCE** | Request is modified (prompt enrichment, model upgrade) | SOP suggests improvements |
 | **HIJACK** | Request is rerouted to a different model or modified substantially | Cost optimization, capability routing |
-| **KILL** | Request is blocked entirely | Policy violation, budget breach, anomaly detected |
+| **KILL** | Request is blocked entirely | Policy violation, budget breach, deterministic anomaly (loop, forbidden succession, credential sweep) |
 
 ## The Circuit Breaker
 
