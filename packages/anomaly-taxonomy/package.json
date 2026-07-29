@@ -1,6 +1,6 @@
 {
   "name": "@intutic/anomaly-taxonomy",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "description": "The Intutic runtime anomaly taxonomy \u2014 category enum and severity map. Type-only, zero dependencies.",
   "license": "Apache-2.0",
   "repository": {
