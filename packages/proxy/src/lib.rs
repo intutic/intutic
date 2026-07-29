@@ -1,6 +1,7 @@
 pub mod commands;
 pub mod config;
 pub mod dlp;
+pub mod memory;
 pub mod posture;
 pub mod graph;
 pub mod injection;
