@@ -222,6 +222,38 @@ pub fn scan(text: &str) -> Vec<DlpFinding> {
     findings
 }
 
+/// Scrub one unit of streamed text (TD-210).
+///
+/// The proxy's streaming forward loop is line-buffered — every SSE line is
+/// reassembled before it is re-emitted — so the scrub unit is a complete
+/// line, and no byte-holdback is needed: a secret always sits within one
+/// line's `data:` JSON or it has SSE scaffolding through the middle of it,
+/// which no linear pattern can match anyway. Per-line scrubbing therefore
+/// gives the same coverage a windowed scrubber would, with zero added
+/// latency on the token stream.
+///
+/// Returns `None` when the line is clean (the overwhelming case — the caller
+/// forwards the original, allocating nothing), or the scrubbed line plus the
+/// pattern names redacted.
+///
+/// Block-action patterns are redacted here, not blocked. Input-side "block"
+/// exists to keep material from reaching the provider; on the output side
+/// the goal is containment — the private key never reaches the client — and
+/// redaction achieves that without killing a live stream.
+pub fn scrub_stream_text(text: &str) -> Option<(String, Vec<String>)> {
+    let findings = scan(text);
+    if findings.is_empty() {
+        return None;
+    }
+    let mut names: Vec<String> = Vec::new();
+    for f in &findings {
+        if !names.contains(&f.pattern_name) {
+            names.push(f.pattern_name.clone());
+        }
+    }
+    Some((redact(text, &findings), names))
+}
+
 /// Redact all findings in text, replacing matches with [REDACTED_{CATEGORY}]
 pub fn redact(text: &str, findings: &[DlpFinding]) -> String {
     let mut result = text.to_string();
@@ -407,6 +439,50 @@ mod tests {
             "no findings expected, got: {:?}",
             findings.iter().map(|f| &f.pattern_name).collect::<Vec<_>>()
         );
+    }
+}
+
+#[cfg(test)]
+mod stream_scrub_tests {
+    use super::*;
+
+    #[test]
+    fn clean_line_returns_none_and_costs_nothing() {
+        assert!(scrub_stream_text(r#"data: {"delta":{"text":"hello world"}}"#).is_none());
+    }
+
+    #[test]
+    fn secret_inside_a_delta_is_redacted_and_named() {
+        let line = r#"data: {"delta":{"text":"key: AKIAIOSFODNN7EXAMPLE done"}}"#;
+        let (scrubbed, names) = scrub_stream_text(line).expect("must find the key");
+        assert!(!scrubbed.contains("AKIAIOSFODNN7EXAMPLE"));
+        assert!(scrubbed.contains("[REDACTED_SECRET]"));
+        assert_eq!(names, ["aws_access_key"]);
+        // The scrubbed line must still be a valid SSE data line with valid JSON.
+        let json_part = scrubbed.strip_prefix("data: ").unwrap();
+        assert!(serde_json::from_str::<serde_json::Value>(json_part).is_ok());
+    }
+
+    #[test]
+    fn block_action_material_is_contained_by_redaction() {
+        // Output-side doctrine: containment, not stream-kill.
+        let line = r#"data: {"delta":{"text":"-----BEGIN OPENSSH PRIVATE KEY----- b"}}"#;
+        let (scrubbed, names) = scrub_stream_text(line).unwrap();
+        assert!(!scrubbed.contains("BEGIN OPENSSH"));
+        assert!(names.contains(&"private_key".to_string()));
+    }
+
+    #[test]
+    fn several_distinct_secrets_in_one_line_all_redact() {
+        let line = format!(
+            r#"data: {{"text":"a AKIAIOSFODNN7EXAMPLE b ghp_{} c 123-45-6789"}}"#,
+            "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"
+        );
+        let (scrubbed, names) = scrub_stream_text(&line).unwrap();
+        assert!(!scrubbed.contains("AKIA"));
+        assert!(!scrubbed.contains("ghp_"));
+        assert!(!scrubbed.contains("123-45-6789"));
+        assert_eq!(names.len(), 3);
     }
 }
 
