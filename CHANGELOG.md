@@ -5,6 +5,37 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.0] - 2026-07-29
+
+### Added
+
+- **DLP scanner expanded from 6 patterns to 20**, all prefix- or
+  magic-substring-anchored (formats ported from the gitleaks default config
+  and TruffleHog detectors): OpenAI, GitLab, Slack tokens and webhook URLs,
+  Google, Stripe, SendGrid, npm, PyPI, Hugging Face, database connection
+  credentials, JWTs — plus widened AWS (temporary `ASIA` credentials), GitHub
+  (all five classic prefixes + fine-grained), and the full PEM private-key
+  family (OpenSSH, PGP, PKCS#8). A RegexSet prefilter keeps the clean-body
+  scan at a single traversal.
+- **Streaming responses are now scanned by output DLP.** Each SSE line is
+  scrubbed before it is forwarded and before it is parsed, so the client, the
+  judge, the semantic cache and the trace all see redacted text. Previously
+  the streaming branch bypassed output DLP entirely.
+- **Forwarded request headers are scanned** with the body's doctrine:
+  block-action findings refuse the request, the rest are redacted in place.
+
+### Fixed
+
+- `DlpEscalationDetector` (the credential-sweep kill) was unfireable: it
+  counted block-action findings, which refuse the request before the detector
+  registry runs. It now counts distinct pattern types, so an AWS key + GitHub
+  token + SSN in one request kills even though each is individually redacted.
+- Multibyte characters bisected by a network chunk boundary were corrupted in
+  streamed responses (per-chunk lossy decoding); the stream buffer is now
+  bytes, decoded per line.
+- The claude-code hook forwards Claude Code's `session_id`, restoring
+  per-user attribution for hook-gate blocks after the next `intutic connect`.
+
 ## [1.9.0] - 2026-07-29
 
 ### Changed
