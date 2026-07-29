@@ -1034,6 +1034,23 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // passed input DLP by this point in the enterprise deployment
             // model, and only the prompt is sent — never the whole body.
             let mut memory_chunks: Vec<(String, String)> = Vec::new();
+
+            // Local vaults first: Obsidian/Logseq/Foam notes on this machine.
+            // Deterministic, offline, and available in standalone open core —
+            // the cloud providers below need a control plane and cannot reach
+            // a vault sitting on localhost anyway.
+            if matches!(cmd, crate::commands::Command::Fix)
+                && !prompt.is_empty()
+                && state.config.intutic_settings.memory.enabled
+            {
+                for chunk in crate::memory::search(
+                    &prompt,
+                    &state.config.intutic_settings.memory.vaults,
+                ) {
+                    memory_chunks.push((format!("vault:{}/{}", chunk.vault, chunk.note), chunk.text));
+                }
+            }
+
             if matches!(cmd, crate::commands::Command::Fix) && !prompt.is_empty() {
                 if let Some(cp_url) = state.config.intutic_settings.policy.control_plane_url.as_deref() {
                     let client = reqwest::Client::builder()
