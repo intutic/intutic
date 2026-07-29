@@ -83,10 +83,20 @@ The Rust host normalizes the intercepted request context (tool calls, arguments,
   "estimated_input_tokens": 1200,
   "budget_remaining_usd": 4.25,
   "risk_tier": "HIGH",
+  "node_id": "ses_7x2k9m",
+  "agent_role": "",
+  "graph_id": "ses_7x2k9m",
+  "parent_session_id": "",
+  "depth": 0,
   "dlp_findings": [],
   "tool_sequence": ["Glob", "View", "bash"]
 }
 ```
+
+Graph position (`node_id`, `agent_role`, `graph_id`, `parent_session_id`,
+`depth`) is flattened into the same object — for a standalone session the ids
+fall back to the session id at depth 0. See the full field table in
+[Graph Guardrails](/guide/graph-guardrails).
 
 Field names are **snake_case** on the wire — the Rust `RequestContext` is
 serialised without a rename, so the AssemblyScript SDK parses `session_id`, not
