@@ -45,6 +45,17 @@ pub struct VaultChunk {
     pub score: u32,
 }
 
+/// Should vault search run at all?
+///
+/// Two gates compose: the developer's own `memory.enabled` config, and the
+/// workspace policy (`allowLocalMemoryVaults`) which arrives as the
+/// `INTUTIC_LOCAL_VAULTS` env var set by `intutic connect` at proxy spawn —
+/// "off" disables. Policy changes apply on the next connect; content never
+/// leaves the machine under either setting.
+pub fn vaults_allowed(config_enabled: bool, env_value: Option<&str>) -> bool {
+    config_enabled && env_value != Some("off")
+}
+
 /// Expand a leading `~` against `$HOME`. Paths are user-authored config, so
 /// this is the one shell-ism worth honouring.
 fn expand_home(raw: &str) -> PathBuf {
@@ -245,6 +256,14 @@ pub fn search(query: &str, configured: &[String]) -> Vec<VaultChunk> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn workspace_policy_off_beats_local_config_on() {
+        assert!(vaults_allowed(true, None));
+        assert!(vaults_allowed(true, Some("on")));
+        assert!(!vaults_allowed(true, Some("off")), "workspace policy must win");
+        assert!(!vaults_allowed(false, None), "developer's own config still counts");
+    }
 
     /// Build a throwaway vault; returns its root.
     fn make_vault(tag: &str, marker: Option<&str>, notes: &[(&str, &str)]) -> PathBuf {

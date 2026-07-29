@@ -438,6 +438,7 @@ async function runSyncIteration(ctx: IterationContext): Promise<SyncResult> {
       configSynced,
       dlpEnabled: true, // the daemon-managed proxy ships DLP on by default
       policyEnforced: Boolean(controlPlaneUrl),
+      allowLocalVaults: config.settings?.allowLocalMemoryVaults,
     })
     await reportAgent(controlPlaneUrl, apiKey, workspaceId, report)
 

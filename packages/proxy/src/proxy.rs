@@ -1041,7 +1041,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // a vault sitting on localhost anyway.
             if matches!(cmd, crate::commands::Command::Fix)
                 && !prompt.is_empty()
-                && state.config.intutic_settings.memory.enabled
+                && crate::memory::vaults_allowed(
+                    state.config.intutic_settings.memory.enabled,
+                    std::env::var("INTUTIC_LOCAL_VAULTS").ok().as_deref(),
+                )
             {
                 for chunk in crate::memory::search(
                     &prompt,

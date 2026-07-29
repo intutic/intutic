@@ -28,6 +28,7 @@ interface AgentFacets {
   skills: Array<{ name: string; source: string }>
   loops: { configured: boolean }
   harness: { type: string; config_synced: boolean }
+  memory: Array<{ provider: string; configured: boolean }>
 }
 
 export interface AgentReport {
@@ -89,6 +90,24 @@ async function collectSkills(workspaceRoot: string): Promise<AgentFacets['skills
   }
 }
 
+/** Local notes vaults (Obsidian/Logseq/Foam) at or above the workspace root. */
+async function detectLocalVaults(workspaceRoot: string): Promise<string[]> {
+  const markers = ['.obsidian', '.logseq', '.foam']
+  const found: string[] = []
+  let dir = workspaceRoot
+  for (let depth = 0; depth < 8; depth++) {
+    for (const marker of markers) {
+      if (await exists(join(dir, marker))) {
+        found.push(marker.slice(1))
+      }
+    }
+    const parent = join(dir, '..')
+    if (parent === dir) break
+    dir = parent
+  }
+  return [...new Set(found)]
+}
+
 /**
  * MCP servers declared in a harness's config. Claude Code / Cursor keep these
  * in JSON; we read the well-known locations and flatten server→tool with any
@@ -135,12 +154,15 @@ export async function collectAgentReport(opts: {
   dlpEnabled: boolean
   policyEnforced: boolean
   budgetTier?: string
+  /** Workspace policy: may local vaults feed /fix? Defaults to allowed. */
+  allowLocalVaults?: boolean
 }): Promise<AgentReport> {
-  const [wasmRules, sops, skills, mcpTools] = await Promise.all([
+  const [wasmRules, sops, skills, mcpTools, vaults] = await Promise.all([
     countWasmRules(),
     collectSops(opts.workspaceRoot),
     collectSkills(opts.workspaceRoot),
     collectMcpTools(opts.workspaceRoot),
+    detectLocalVaults(opts.workspaceRoot),
   ])
 
   const role = opts.agentRole ?? ''
@@ -162,6 +184,13 @@ export async function collectAgentReport(opts: {
       skills,
       loops: { configured: false }, // set by the loops feature when a run is active
       harness: { type: opts.harnessType, config_synced: opts.configSynced },
+      // Visibility, not content: which vault kinds exist near the workspace,
+      // and whether workspace policy lets them feed /fix. Note names/content
+      // never leave the machine.
+      memory:
+        opts.allowLocalVaults === false
+          ? []
+          : vaults.map((kind) => ({ provider: `local-vault:${kind}`, configured: true })),
     },
   }
 }

@@ -183,7 +183,7 @@ impl Inventory {
                 .iter()
                 .map(|(p, _)| p)
                 .collect::<std::collections::HashSet<_>>()
-                .len() as u32, // routed through the control plane = governed
+                .len() as u32, // cloud chunks are judge-routed; vault chunks run under workspace policy + DLP
             ..Default::default()
         }
     }

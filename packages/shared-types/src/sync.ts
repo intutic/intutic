@@ -150,6 +150,12 @@ export interface IntuticConfig {
   maxDailyBudgetUsd?: number
   /** Local daily spending cap limit in USD (alias). */
   max_daily_budget_usd?: number
+  /**
+   * Workspace settings mirrored from the last successful sync, so policies
+   * that apply at proxy spawn (e.g. `allowLocalMemoryVaults`) survive a
+   * restart without waiting for the first fetch.
+   */
+  settings?: WorkspaceSettings
 }
 
 /** Local integrity store at .intutic/integrity.json (per-workspace). */

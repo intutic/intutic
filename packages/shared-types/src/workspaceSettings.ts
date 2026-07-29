@@ -25,6 +25,18 @@ export type { McpProxyFailBehavior, McpProxyMode, BypassEnforcementTier }
  */
 export interface WorkspaceSettings {
   /**
+   * Whether developers' local markdown vaults (Obsidian/Logseq/Foam) may feed
+   * the `/fix` command's Memory context on their machines.
+   *
+   * Enforced by the proxy at connect time via the sync channel. Vault content
+   * never reaches the control plane either way — this governs only whether
+   * the local search runs at all. Personal notes injected into prompts are a
+   * memory-poisoning surface (OWASP agentic T1), which is why the switch is a
+   * workspace policy rather than purely personal preference.
+   */
+  allowLocalMemoryVaults: boolean
+
+  /**
    * What the MCP governance proxy does when the Intutic control plane is
    * unreachable during a tool call interception attempt.
    *
@@ -115,6 +127,7 @@ export interface WorkspaceSettings {
  */
 export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
   mcpProxyFailBehavior: 'open',
+  allowLocalMemoryVaults: true,
   mcpProxyMode:         'per-session',
   bypassEnforcementTier: 'rewrite',
   featureFlags: {
