@@ -148,5 +148,5 @@ The request was rerouted — typically for cost optimization (downgrading an exp
 The request was blocked. Common reasons:
 - Budget exceeded for the user's tier
 - SOP policy violation detected
-- Anomaly score too high
+- A deterministic anomaly detector fired (loop, forbidden tool, credential sweep, budget breach)
 - Unauthorized tool call attempted

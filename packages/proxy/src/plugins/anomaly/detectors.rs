@@ -327,12 +327,22 @@ impl AnomalyDetector for ForbiddenSuccessionDetector {
 
 // ── Data flow ───────────────────────────────────────────────────────────────
 
-/// Distinct blocking DLP findings before the session is treated as probing.
+/// Distinct DLP pattern types in one request before it is treated as probing.
 const DLP_ESCALATION_THRESHOLD: usize = 3;
 
-/// One redacted secret is a mistake. Several distinct blocking findings in one
-/// session is a pattern — often a node retrying an exfiltration by another
-/// route after the first was masked.
+/// One redacted secret is a mistake. Several DISTINCT pattern types in one
+/// request — an AWS key and a GitHub token and an SSN together — is a
+/// credential sweep, and it kills even though each individual finding was
+/// redacted.
+///
+/// Counts every finding regardless of action, deliberately. The original
+/// filter was `action == "block"`, which made this detector dead code: any
+/// block-action finding refuses the request with 400 dlp_policy_violation
+/// before the detector registry ever runs, so the findings reaching this point
+/// are redact-action by construction and the count never left zero. Its own
+/// unit test passed anyway, because tests construct findings directly and
+/// bypass the path that makes block findings unreachable — which is exactly
+/// how an unfireable detector stays "covered".
 pub struct DlpEscalationDetector {
     threshold: usize,
 }
@@ -351,21 +361,20 @@ impl AnomalyDetector for DlpEscalationDetector {
     }
 
     fn detect(&self, ctx: &RequestContext) -> Option<AnomalyFinding> {
-        let blocking: HashSet<&str> = ctx
+        let distinct: HashSet<&str> = ctx
             .dlp_findings
             .iter()
-            .filter(|f| f.action == "block")
             .map(|f| f.pattern_name.as_str())
             .collect();
-        if blocking.len() < self.threshold {
+        if distinct.len() < self.threshold {
             return None;
         }
-        let mut names: Vec<&str> = blocking.into_iter().collect();
+        let mut names: Vec<&str> = distinct.into_iter().collect();
         names.sort_unstable();
         Some(AnomalyFinding::kill(
             AnomalyKind::DataExfiltration,
             format!(
-                "Repeated exfiltration attempts: {} distinct blocked patterns in one request ({})",
+                "Credential sweep: {} distinct sensitive patterns in one request ({})",
                 names.len(),
                 names.join(", ")
             ),
@@ -1009,30 +1018,43 @@ mod tests {
     }
 
     #[test]
-    fn dlp_escalation_counts_distinct_blocking_patterns() {
+    fn dlp_escalation_fires_on_the_findings_production_actually_delivers() {
+        // Redact-action findings are the ONLY kind that reach the registry:
+        // any block-action finding refuses the request with 400 before
+        // detectors run. The original filter counted blocks, which made this
+        // detector unfireable in production while its test — constructing
+        // block findings directly — stayed green.
         let d = DlpEscalationDetector::default();
         let mut ctx = base_ctx();
         ctx.dlp_findings = vec![
-            dlp("aws_key", "block"),
-            dlp("github_token", "block"),
-            dlp("ssn", "block"),
+            dlp("aws_key", "redact"),
+            dlp("github_token", "redact"),
+            dlp("ssn", "redact"),
         ];
-        assert!(d.detect(&ctx).unwrap().kill);
+        let hit = d.detect(&ctx).expect("three distinct patterns is a sweep");
+        assert!(hit.kill);
+        assert!(hit.reason.contains("aws_key"));
     }
 
     #[test]
-    fn dlp_escalation_ignores_redactions_and_duplicates() {
+    fn dlp_escalation_ignores_duplicates_of_one_pattern() {
         let d = DlpEscalationDetector::default();
         let mut ctx = base_ctx();
-        // Same pattern three times, plus redactions — neither is escalation.
+        // One secret pasted three times is a mistake, not a sweep.
         ctx.dlp_findings = vec![
-            dlp("aws_key", "block"),
-            dlp("aws_key", "block"),
-            dlp("aws_key", "block"),
-            dlp("ssn", "redact"),
-            dlp("email", "redact"),
+            dlp("aws_key", "redact"),
+            dlp("aws_key", "redact"),
+            dlp("aws_key", "redact"),
         ];
         assert!(d.detect(&ctx).is_none());
+    }
+
+    #[test]
+    fn dlp_escalation_needs_three_distinct_patterns() {
+        let d = DlpEscalationDetector::default();
+        let mut ctx = base_ctx();
+        ctx.dlp_findings = vec![dlp("aws_key", "redact"), dlp("ssn", "redact")];
+        assert!(d.detect(&ctx).is_none(), "two distinct patterns stays below the bar");
     }
 
     #[test]

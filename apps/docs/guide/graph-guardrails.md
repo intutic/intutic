@@ -53,7 +53,7 @@ the shared anomaly taxonomy:
 | Transition plausibility | low-scoring `A -> B` run | `TOOL_ABUSE` |
 | Missing predecessor | `deploy` with no earlier `run_tests` | `SCOPE_VIOLATION` |
 | Forbidden succession | `db_write` after `pii_export` | `SCOPE_VIOLATION` |
-| DLP escalation | 3+ distinct blocked patterns in one request | `DATA_EXFILTRATION` |
+| DLP escalation | 3+ distinct sensitive patterns in one request | `DATA_EXFILTRATION` |
 | Diversity collapse | last 10 calls used one tool | `TOKEN_WASTE` |
 | Context growth | large context after several hops | `TOKEN_WASTE` |
 | Budget exhaustion | no headroom left | `BUDGET_BREACH` |
@@ -66,10 +66,16 @@ the shared anomaly taxonomy:
 
 That is **11 of the 12** runtime anomaly categories. The twelfth,
 `WORKFLOW_GOAL_DRIFT`, asks whether an agent is still doing what it was asked
-to do — which needs the goal and a semantic comparison against it. That is an
-embedding or a model call, so it is neither a pure function of one request nor
-something that belongs inline on a path measured in milliseconds. It is out of
-scope here by decision rather than by omission.
+to do — which needs the plan the agent was given and a record of how far execution has
+strayed from it. Both live in the control plane's database, and a lookup does
+not belong inline on a path measured in milliseconds. The scoring itself is a
+plain threshold comparison against a 0..1 adherence score — not an embedding
+or a model call. It is out of
+scope *here* by decision rather than by omission — and covered where the plan
+lives: the control plane classifies blocked tool calls on an advisory tee and
+raises `WORKFLOW_GOAL_DRIFT` from stored-plan adherence, so all twelve
+categories are evaluated across the platform while the hot path stays
+deterministic.
 
 Prompt injection deserves its own caveat: it is pattern matching on the
 well-known phrasings, not a classifier. Someone who rewords will get past it.
@@ -94,7 +100,10 @@ of a graph that has stopped making progress.
 
 All detectors run on every request rather than stopping at the first hit — a
 request that trips three checks tells you more than one that trips one — and the
-most severe finding determines the verdict.
+most severe **killing** finding determines the verdict. Deterministic
+detectors kill; the heuristic ones — transition plausibility, contract drift,
+diversity collapse, context growth, a single injection technique — advise:
+they are logged, broadcast to siblings and traced, and the request proceeds.
 
 ### 2. Tool definitions, pinned on first use
 
@@ -112,11 +121,17 @@ ship benign tools, get approved, and later serve altered ones:
 
 The tool name is unchanged. No tool call looks unusual. The agent follows the
 new text because it cannot tell it from the old text. This is the **rug pull**,
-and hash-pinning is the control that stops it.
+and hash-pinning is the control that catches it — the agent is steered off the
+changed tool, and DLP scrubs any credential that gets read regardless.
 
 Intutic pins the first definition it sees for a workspace — a SHA-256 over each
-tool's **name, description and input schema** — and refuses any request whose
-definitions no longer match, as `TOOL_ABUSE`.
+tool's **name, description and input schema** — and flags any request whose
+definitions no longer match, as `TOOL_ABUSE`. The finding is advisory: the
+agent is steered off the changed tool rather than stopped, because harnesses
+do legitimately renegotiate their tool lists mid-session, and blocking every
+server upgrade teaches people to clear pins reflexively. The backstop is
+enforced regardless of recognition: whatever a poisoned description talks an
+agent into reading, DLP scrubs credentials on the way out.
 
 Three details that decide whether this actually works:
 
@@ -137,7 +152,7 @@ standalone, or `tools:pin:{workspace}` in Valkey.
 ### 3. One budget for the whole graph
 
 A per-node budget is not a budget: a graph that fans out to eight workers spends
-eight times what you capped. The ceiling is set on the session, so every hop,
+eight times what you capped. The ceiling is set on the run, so every hop,
 every sub-agent and every retry draws from it.
 
 ```bash
@@ -231,7 +246,7 @@ node-a (planner)  ──trips LOOP_DETECTED──▶  proxy
                             ┌─────────────────┴─────────────────┐
                             ▼                                   ▼
                    node-b's queue                       node-c's queue
-   "Node node-a (planner) was stopped: Runaway recursion: depth 20 exceeds 7"
+   "Node node-a (planner) was stopped: Runaway recursion: graph depth 20 exceeds the maximum of 7"
 ```
 
 Each node has its own queue rather than sharing one, because the existing
@@ -341,8 +356,11 @@ the full set.
 ::: warning Scoping, not authorisation
 The role is a client-supplied header. Showing a node the wrong policy is the
 worst a false claim achieves — which is why SOP text must never be what stands
-between an agent and a capability. Enforcement is the detectors and WASM rules,
-and neither consults the role.
+between an agent and a capability. Enforcement is the detectors and WASM rules —
+though note that role-scoped `deny_tools` are enforced against the role the
+node *reported*, so a false role claim dodges a role-scoped denylist. Put
+security-critical `deny_tools` in unscoped SOPs, which bind every node
+regardless of what it claims to be.
 :::
 
 ## Seeing the trajectory
