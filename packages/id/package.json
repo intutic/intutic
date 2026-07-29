@@ -1,6 +1,6 @@
 {
   "name": "@intutic/id",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "description": "Prefixed, collision-resistant ID generation for Intutic workspaces and entities",
   "license": "MIT",
   "repository": {
