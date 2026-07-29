@@ -4,6 +4,16 @@ Intutic provides deep, real-time governance for recursive and autonomous agent l
 
 ## The Challenge: Infinite Execution Loops
 
+The rule most builders miss: **do not loop on confidence — loop on evidence.**
+"The agent says it's done" is not a stopping condition. "Tests pass, schema
+validates, budget remains, reviewer approves" is.
+
+The difficulty is that the agent is the one reporting its own progress, so a
+stopping condition it evaluates itself is one it can talk its way past. Intutic
+enforces the condition from outside the agent — at the proxy every request
+crosses — so a loop marked `KILLED` is refused on the next request whether or
+not the agent agrees it is finished.
+
 Autonomous agents typically execute within a feedback loop:
 1. Observe current state.
 2. Formulate a plan.
