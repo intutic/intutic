@@ -386,10 +386,15 @@ mod tests {
 
     #[test]
     fn db_connection_credentials_detected_and_redaction_spares_the_host() {
-        let text = "url is postgres://svc_user:hunter22secret@db.internal:5432/app";
-        let findings = scan(text);
+        // Assembled at runtime so no credential-shaped literal exists in
+        // source (GitHub secret scanning flags the contiguous form).
+        let text = format!(
+            "url is postgres://{}:{}@db.internal:5432/app",
+            "svc_user", "hunter22secret"
+        );
+        let findings = scan(&text);
         assert!(findings.iter().any(|f| f.pattern_name == "db_connection_string"));
-        let redacted = redact(text, &findings);
+        let redacted = redact(&text, &findings);
         assert!(!redacted.contains("hunter22secret"), "password must be gone");
         assert!(redacted.contains("db.internal:5432/app"), "host stays legible");
     }
