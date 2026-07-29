@@ -290,6 +290,20 @@ pub trait LocalStore: Send + Sync + 'static {
         cap: usize,
     ) -> anyhow::Result<Vec<String>>;
 
+    /// Swap the count of tool calls extracted from this session's request
+    /// bodies so far, returning the previous count (0 when unseen).
+    ///
+    /// Exists because agent harnesses resend the whole message history on
+    /// every request, so the extractor yields the cumulative call list each
+    /// time. The caller subtracts the previous count to recover the per-turn
+    /// delta; appending the raw extract instead duplicates the entire history
+    /// into the stored sequence on every turn, which is exactly what it did
+    /// before this method existed.
+    ///
+    /// GETSET semantics, not INCR: when the history *shrinks* (harness
+    /// compaction), the count resets to the new length in the same call.
+    async fn swap_extracted_tool_count(&self, session_id: &str, new_count: u64) -> u64;
+
     // ── Provider credentials ─────────────────────────────────────────
 
     /// First non-empty value among `fields` in `workspace:credentials:{ws}`.
