@@ -13,7 +13,8 @@ Intutic protects your workspace using two complementary enforcement layers:
 
 ## Data Loss Prevention (DLP)
 
-The DLP gate scans request payloads and tool outputs for sensitive data before forwarding them to LLM providers.
+The DLP gate scans request payloads, forwarded request headers, and response
+bodies — streaming included — for sensitive data.
 
 ### What's Detected
 
@@ -36,8 +37,13 @@ DLP is configured in `config.yaml` under `intutic_settings.dlp`:
 | Setting | Default | Effect |
 |---------|---------|--------|
 | `enabled` | `true` | Master switch |
-| `scan_input` | `true` | Scan request bodies before forwarding |
-| `scan_output` | `true` | Scan (non-streaming) response bodies; findings are redacted |
+| `scan_input` | `true` | Scan request bodies and forwarded header values before forwarding |
+| `scan_output` | `true` | Scan response bodies; streaming responses are scrubbed per SSE line before each line reaches the client |
+
+Headers follow the same doctrine: a block-action match in a forwarded header
+refuses the request with a DLP error, and any other header finding is redacted
+in place before the request leaves the machine. In streamed responses,
+block-tier matches are contained by redaction rather than killing the stream.
 
 There is no log-only mode today; every finding is also recorded in the trace
 and available to WASM rules as `dlp_findings`.
