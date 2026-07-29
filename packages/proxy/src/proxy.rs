@@ -451,6 +451,22 @@ fn extract_wasm_tool_calls(body: &serde_json::Value) -> Vec<crate::wasm::context
     tc_list
 }
 
+/// The tool calls newly observed this turn, given the cumulative extract and
+/// how many calls this session had already reported.
+///
+/// Harnesses resend the full message history per request, so the extractor's
+/// output is cumulative; the delta is its suffix beyond `prev_count`. When the
+/// history has shrunk (harness compaction), which calls are new is unknowable
+/// and the delta is empty: a missed observation is recoverable noise, while a
+/// re-appended duplicate is amplified signal in every sequence detector.
+fn per_turn_tool_delta(prev_count: usize, extracted: &[String]) -> Vec<String> {
+    if prev_count <= extracted.len() {
+        extracted[prev_count..].to_vec()
+    } else {
+        Vec::new()
+    }
+}
+
 fn extract_request_tool_calls(body: &serde_json::Value) -> Vec<String> {
     let mut tool_names = Vec::new();
     if let Some(messages) = body.get("messages").and_then(|m| m.as_array()) {
@@ -1176,9 +1192,23 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             .is_some_and(|pinned| pinned != tool_signature);
 
     let request_tool_calls = extract_request_tool_calls(&body_json);
+    // The extractor walks the request's full message history, and harnesses
+    // resend that history every turn — so the raw extract is cumulative, and
+    // appending it wholesale duplicated the entire history into the stored
+    // sequence on every request. The count swap recovers the per-turn delta:
+    // only the calls beyond what this session already reported are new.
+    // When the history *shrinks* (harness compaction), which calls are new is
+    // unknowable; the delta is empty for that turn — a missed observation is
+    // recoverable noise, re-appended duplicates are amplified signal in every
+    // sequence detector.
+    let prev_count = state
+        .store
+        .swap_extracted_tool_count(&session_id, request_tool_calls.len() as u64)
+        .await as usize;
+    let new_tool_calls = per_turn_tool_delta(prev_count, &request_tool_calls);
     let tool_sequence = state
         .store
-        .record_tool_sequence(&session_id, &request_tool_calls, TOOL_SEQUENCE_CAP)
+        .record_tool_sequence(&session_id, &new_tool_calls, TOOL_SEQUENCE_CAP)
         .await
         .unwrap_or_default();
 
@@ -1385,6 +1415,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 requested_model: model.clone(),
                 actual_model_routed: model.clone(),
                 task_type: String::new(),
+                tools: new_tool_calls.clone(),
                 reconstruction_quality: 0,
                 token_anomaly: false,
                 loop_run_id: loop_run_id_header.clone(),
@@ -1632,6 +1663,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     &crate::plugins::semantic_cache::extract_prompt_text(&body_json),
                 )
                 .to_string(),
+                tools: new_tool_calls.clone(),
                 reconstruction_quality: 100,
                 token_anomaly: false,
                 loop_run_id: loop_run_id_header.clone(),
@@ -2018,6 +2050,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             requested_model: model.clone(),
             actual_model_routed: actual_model.clone(),
             task_type: task_type.clone(),
+            tools: new_tool_calls.clone(),
             reconstruction_quality: 100,
             token_anomaly: false,
             loop_run_id: loop_run_id_header.clone(),
@@ -2088,6 +2121,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         let requested_model_clone = model.clone();
         let actual_model_clone = actual_model.clone();
         let task_type_clone = task_type.clone();
+        let new_tool_calls_clone = new_tool_calls.clone();
         let prompt_text_clone = prompt_text.clone();
         let provider_clone = provider.clone();
         let loop_run_id_clone = loop_run_id_header.clone();
@@ -2724,6 +2758,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 requested_model: requested_model_clone,
                 actual_model_routed: actual_model_clone,
                 task_type: task_type_clone,
+                tools: new_tool_calls_clone,
                 reconstruction_quality,
                 token_anomaly,
                 loop_run_id: loop_run_id_clone,
@@ -3197,6 +3232,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         requested_model: model.clone(),
         actual_model_routed: actual_model,
         task_type,
+        tools: new_tool_calls.clone(),
         reconstruction_quality,
         token_anomaly,
         loop_run_id: loop_run_id_header,
@@ -3429,5 +3465,54 @@ mod tests {
             get_terminal_stream_event(&crate::protocol::Protocol::Gemini),
             "data: [DONE]\n\n"
         );
+    }
+
+    // ── per_turn_tool_delta ─────────────────────────────────────────────
+    //
+    // Harnesses resend the whole message history each request, so the
+    // extractor's output is cumulative. Before the delta existed, that raw
+    // extract was appended to the stored sequence on every turn — duplicating
+    // the entire history into it each time, and quietly distorting every
+    // sequence detector's input.
+
+    #[test]
+    fn tool_delta_returns_only_new_calls() {
+        let extracted = vec!["Read".to_string(), "Edit".to_string(), "Bash".to_string()];
+        assert_eq!(
+            super::per_turn_tool_delta(2, &extracted),
+            vec!["Bash".to_string()],
+            "only the calls beyond the previous count are new"
+        );
+    }
+
+    #[test]
+    fn tool_delta_is_full_extract_for_a_fresh_session() {
+        let extracted = vec!["Read".to_string(), "Edit".to_string()];
+        assert_eq!(super::per_turn_tool_delta(0, &extracted), extracted);
+    }
+
+    #[test]
+    fn tool_delta_is_empty_when_nothing_changed() {
+        let extracted = vec!["Read".to_string()];
+        assert!(super::per_turn_tool_delta(1, &extracted).is_empty());
+    }
+
+    #[test]
+    fn tool_delta_is_empty_after_history_compaction() {
+        // The history shrank below what was already reported. Which tail calls
+        // are new is unknowable; guessing re-introduces the duplication this
+        // function exists to remove. Missing one turn is the safe failure.
+        let extracted = vec!["Bash".to_string()];
+        assert!(super::per_turn_tool_delta(5, &extracted).is_empty());
+    }
+
+    #[tokio::test]
+    async fn swap_extracted_tool_count_round_trips() {
+        use crate::store::LocalStore;
+        let s = crate::store::MemoryStore::new();
+        assert_eq!(s.swap_extracted_tool_count("ses", 3).await, 0, "unseen session starts at 0");
+        assert_eq!(s.swap_extracted_tool_count("ses", 5).await, 3, "returns the previous count");
+        assert_eq!(s.swap_extracted_tool_count("ses", 1).await, 5, "compaction resets via the same swap");
+        assert_eq!(s.swap_extracted_tool_count("other", 1).await, 0, "sessions are independent");
     }
 }

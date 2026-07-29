@@ -178,6 +178,8 @@ pub struct MemoryStore {
     modes: Mutex<HashMap<String, Ownership>>,
     sessions: Mutex<HashMap<String, SessionRouting>>,
     tool_sequences: Mutex<HashMap<String, Vec<String>>>,
+    /// Cumulative extracted-call count per session, for per-turn deltas.
+    extracted_tool_counts: Mutex<HashMap<String, u64>>,
     /// First tool signature seen per session, for drift detection.
     tool_signatures: Mutex<HashMap<String, String>>,
     credentials: Mutex<HashMap<String, HashMap<String, String>>>,
@@ -517,6 +519,13 @@ impl LocalStore for MemoryStore {
             }
         }
         Ok(sequence.clone())
+    }
+
+    async fn swap_extracted_tool_count(&self, session_id: &str, new_count: u64) -> u64 {
+        let Ok(mut counts) = lock(&self.extracted_tool_counts, "tool-count") else {
+            return 0;
+        };
+        counts.insert(session_id.to_string(), new_count).unwrap_or(0)
     }
 
     async fn workspace_credential(

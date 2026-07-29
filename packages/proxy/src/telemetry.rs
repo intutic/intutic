@@ -37,6 +37,13 @@ pub struct ExecutionTrace {
     pub requested_model: String,
     pub actual_model_routed: String,
     pub task_type: String,
+    /// Tool calls newly observed on THIS request — the per-turn delta, not the
+    /// cumulative history the request body carries. Empty for requests with no
+    /// tool activity, and skipped on the wire so the trace shape is unchanged
+    /// for them. Mirrors the OTel GenAI model: the inference span carries its
+    /// own 0..N tool_call parts; it never re-lists the conversation's history.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<String>,
     pub reconstruction_quality: u8,
     pub token_anomaly: bool,
     pub loop_run_id: Option<String>,
