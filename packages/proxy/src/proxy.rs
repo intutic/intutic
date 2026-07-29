@@ -1001,6 +1001,70 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 .filter(|s| s.applies_to(&node.agent_role))
                 .collect();
 
+            // Graph position from the identity headers: a default identity has
+            // graph_id == session id at depth 0 with no parent — anything else
+            // means this request is a node in a real graph.
+            let graph = (node.graph_id != session_id_hdr
+                || node.depth > 0
+                || !node.parent_session_id.is_empty())
+            .then(|| crate::commands::GraphContext {
+                graph_id: node.graph_id.clone(),
+                depth: node.depth,
+                parent_session_id: node.parent_session_id.clone(),
+            });
+
+            // Live loop status when the request carries a loop run header.
+            let loop_run = if let Some(lr_id) = headers
+                .get("x-loop-run-id")
+                .and_then(|v| v.to_str().ok())
+            {
+                state
+                    .control_plane
+                    .loop_status(lr_id)
+                    .await
+                    .map(|status| (lr_id.to_string(), status))
+            } else {
+                None
+            };
+
+            // `/fix` only: ask the control plane for ranked memory chunks from
+            // the workspace's providers (mem0/Supermemory/AgentMemory/…). The
+            // judge-ranked path lives server-side; a missing control plane or a
+            // timeout just yields no memory section. The prompt has already
+            // passed input DLP by this point in the enterprise deployment
+            // model, and only the prompt is sent — never the whole body.
+            let mut memory_chunks: Vec<(String, String)> = Vec::new();
+            if matches!(cmd, crate::commands::Command::Fix) && !prompt.is_empty() {
+                if let Some(cp_url) = state.config.intutic_settings.policy.control_plane_url.as_deref() {
+                    let client = reqwest::Client::builder()
+                        .timeout(std::time::Duration::from_secs(6))
+                        .build();
+                    if let Ok(client) = client {
+                        let resp = client
+                            .post(format!("{}/api/v1/fix/enhance", cp_url.trim_end_matches('/')))
+                            .bearer_auth(raw_token)
+                            .json(&serde_json::json!({ "prompt": prompt, "role": node.agent_role }))
+                            .send()
+                            .await;
+                        if let Ok(resp) = resp {
+                            if resp.status().is_success() {
+                                if let Ok(body) = resp.json::<serde_json::Value>().await {
+                                    if let Some(chunks) = body.pointer("/data/chunks").and_then(|c| c.as_array()) {
+                                        for chunk in chunks {
+                                            let provider = chunk.get("provider").and_then(|p| p.as_str()).unwrap_or("memory");
+                                            let text = chunk.get("text").and_then(|t| t.as_str()).unwrap_or("");
+                                            if !text.is_empty() {
+                                                memory_chunks.push((provider.to_string(), text.to_string()));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             let inv = crate::commands::Inventory {
                 role: if node.agent_role.is_empty() { "unscoped".into() } else { node.agent_role.clone() },
                 dlp_scan_input: dlp.enabled && dlp.scan_input,
@@ -1009,6 +1073,11 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 hook_gate: true, // the proxy is on the path; the hook gate is always present
                 policy_enforced: state.config.intutic_settings.policy.fail_closed,
                 applicable_sops,
+                skills: crate::commands::discover_skills(),
+                mcp_servers: crate::commands::discover_mcp_servers(),
+                graph,
+                loop_run,
+                memory_chunks,
             };
 
             let card = match cmd {
@@ -1016,36 +1085,85 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 crate::commands::Command::Draw => crate::commands::render_draw_card(&prompt, &inv),
             };
 
-            let wire = match provider {
-                Provider::Anthropic => crate::commands::WireProvider::Anthropic,
-                Provider::Gemini => crate::commands::WireProvider::Gemini,
-                Provider::OpenAI => crate::commands::WireProvider::OpenAI,
-            };
-            let is_streaming = body_json.get("stream").and_then(|v| v.as_bool()).unwrap_or(false);
-
-            if is_streaming {
-                let (tx, rx) = tokio::sync::mpsc::channel::<Result<axum::body::Bytes, std::io::Error>>(10);
-                let sse = crate::commands::streaming_body(wire, &model, &card);
-                tokio::spawn(async move {
-                    let _ = tx.send(Ok(axum::body::Bytes::from(sse))).await;
-                });
-                let mut response = Response::builder().status(StatusCode::OK);
-                if let Some(h) = response.headers_mut() {
-                    h.insert(
-                        axum::http::HeaderName::from_static("content-type"),
-                        axum::http::HeaderValue::from_static("text/event-stream"),
-                    );
+            // Non-blocking mode (`intutic_settings.commands.non_blocking`):
+            // `/fix` strips the command token, appends the card to the user's
+            // prompt, and falls through to the normal pipeline so the enhanced
+            // prompt reaches the upstream provider. `/draw` has no upstream
+            // half and stays blocking regardless.
+            let mut answer_locally = true;
+            if state.config.intutic_settings.commands.non_blocking
+                && matches!(cmd, crate::commands::Command::Fix)
+                && !prompt.is_empty()
+            {
+                let enhanced = crate::commands::enhanced_prompt(&prompt, &card);
+                let mut rewritten = false;
+                if let Some(msgs) = body_json.get_mut("messages").and_then(|m| m.as_array_mut()) {
+                    if let Some(last_user) = msgs
+                        .iter_mut()
+                        .rev()
+                        .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
+                    {
+                        match last_user.get_mut("content") {
+                            Some(serde_json::Value::String(s)) => {
+                                *s = enhanced.clone();
+                                rewritten = true;
+                            }
+                            Some(serde_json::Value::Array(parts)) => {
+                                if let Some(text_part) = parts.iter_mut().rev().find(|p| {
+                                    p.get("type").and_then(|t| t.as_str()) == Some("text")
+                                }) {
+                                    if let Some(t) = text_part.get_mut("text") {
+                                        *t = serde_json::Value::String(enhanced.clone());
+                                        rewritten = true;
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
                 }
-                return response
-                    .body(Body::from_stream(ReceiverStream::new(rx)))
-                    .unwrap_or_else(|_| json_error(StatusCode::INTERNAL_SERVER_ERROR, "command_error", "Failed to construct streaming response"));
-            } else {
-                let body = crate::commands::non_streaming_body(wire, &model, &card);
-                return Response::builder()
-                    .status(StatusCode::OK)
-                    .header("content-type", "application/json")
-                    .body(Body::from(serde_json::to_vec(&body).unwrap_or_default()))
-                    .unwrap_or_else(|_| json_error(StatusCode::INTERNAL_SERVER_ERROR, "command_error", "Failed to construct response"));
+                if rewritten {
+                    body_str = serde_json::to_string(&body_json).unwrap_or(body_str);
+                    body_bytes = axum::body::Bytes::from(body_str.clone().into_bytes());
+                    tracing::info!(command = "fix", "Non-blocking /fix: enhanced prompt forwarded upstream");
+                    answer_locally = false;
+                } else {
+                    tracing::warn!("Non-blocking /fix could not rewrite the message; answering locally instead");
+                }
+            }
+
+            if answer_locally {
+                let wire = match provider {
+                    Provider::Anthropic => crate::commands::WireProvider::Anthropic,
+                    Provider::Gemini => crate::commands::WireProvider::Gemini,
+                    Provider::OpenAI => crate::commands::WireProvider::OpenAI,
+                };
+                let is_streaming = body_json.get("stream").and_then(|v| v.as_bool()).unwrap_or(false);
+
+                if is_streaming {
+                    let (tx, rx) = tokio::sync::mpsc::channel::<Result<axum::body::Bytes, std::io::Error>>(10);
+                    let sse = crate::commands::streaming_body(wire, &model, &card);
+                    tokio::spawn(async move {
+                        let _ = tx.send(Ok(axum::body::Bytes::from(sse))).await;
+                    });
+                    let mut response = Response::builder().status(StatusCode::OK);
+                    if let Some(h) = response.headers_mut() {
+                        h.insert(
+                            axum::http::HeaderName::from_static("content-type"),
+                            axum::http::HeaderValue::from_static("text/event-stream"),
+                        );
+                    }
+                    return response
+                        .body(Body::from_stream(ReceiverStream::new(rx)))
+                        .unwrap_or_else(|_| json_error(StatusCode::INTERNAL_SERVER_ERROR, "command_error", "Failed to construct streaming response"));
+                } else {
+                    let body = crate::commands::non_streaming_body(wire, &model, &card);
+                    return Response::builder()
+                        .status(StatusCode::OK)
+                        .header("content-type", "application/json")
+                        .body(Body::from(serde_json::to_vec(&body).unwrap_or_default()))
+                        .unwrap_or_else(|_| json_error(StatusCode::INTERNAL_SERVER_ERROR, "command_error", "Failed to construct response"));
+                }
             }
         }
     }
