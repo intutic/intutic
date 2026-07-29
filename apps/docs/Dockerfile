@@ -27,6 +27,15 @@ COPY packages/theme/ ./packages/theme/
 COPY apps/docs/ ./apps/docs/
 COPY tsconfig.base.json ./tsconfig.base.json
 
+# Set explicit Open Source build flags for public docs.intutic.ai deployment
+ENV INTUTIC_OPEN_SOURCE=true
+ENV INTUTIC_MODE=oss
+ENV INTUTIC_ENTERPRISE_BUILD=false
+# Fail the build outright if OSS gating is ever off — see the guard in
+# apps/docs/.vitepress/config.ts. Without this the failure mode is a silently
+# published site full of paid-tier pages.
+ENV INTUTIC_REQUIRE_OSS=true
+
 # Build theme first, so that custom variables and synced assets exist
 RUN pnpm --filter=@intutic/theme run build
 RUN pnpm --filter=@intutic/docs run build
