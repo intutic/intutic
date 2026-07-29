@@ -68,8 +68,19 @@ pub fn detect(text: &str) -> Option<(Command, String)> {
     None
 }
 
+/// The caller's position in a multi-agent graph, from request headers.
+#[derive(Debug, Clone, Default)]
+pub struct GraphContext {
+    pub graph_id: String,
+    pub depth: u32,
+    pub parent_session_id: String,
+}
+
 /// Facet inventory built from what the proxy can see locally: the DLP/WASM/
-/// policy config and the SOPs on disk for the caller's role.
+/// policy config, the SOPs on disk for the caller's role, the skills and MCP
+/// servers declared in the workspace, and — when present — the caller's graph
+/// position, live loop status, and memory chunks returned by the control
+/// plane's `/fix` enhancement.
 pub struct Inventory {
     pub role: String,
     pub dlp_scan_input: bool,
@@ -78,6 +89,64 @@ pub struct Inventory {
     pub hook_gate: bool,
     pub policy_enforced: bool,
     pub applicable_sops: Vec<Sop>,
+    pub skills: Vec<String>,
+    pub mcp_servers: Vec<String>,
+    pub graph: Option<GraphContext>,
+    /// (loop_run_id, status) when the request carries `x-loop-run-id`.
+    pub loop_run: Option<(String, String)>,
+    /// (provider, chunk text) pairs from workspace memory providers.
+    pub memory_chunks: Vec<(String, String)>,
+}
+
+const MAX_ANCESTOR_WALK: usize = 8;
+
+/// Walk up from the working directory looking for `rel`; first hit wins.
+fn find_up(rel: &[&str]) -> Option<std::path::PathBuf> {
+    let cwd = std::env::current_dir().ok()?;
+    cwd.ancestors().take(MAX_ANCESTOR_WALK).find_map(|dir| {
+        let mut p = dir.to_path_buf();
+        for seg in rel {
+            p.push(seg);
+        }
+        p.exists().then_some(p)
+    })
+}
+
+/// Skill names bundled in the workspace (`.agents/skills/<name>/`).
+pub fn discover_skills() -> Vec<String> {
+    let Some(dir) = find_up(&[".agents", "skills"]) else {
+        return Vec::new();
+    };
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_dir())
+        .filter_map(|e| e.file_name().into_string().ok())
+        .collect();
+    out.sort();
+    out
+}
+
+/// MCP server names declared in the workspace (`.mcp.json` → `mcpServers`).
+pub fn discover_mcp_servers() -> Vec<String> {
+    let Some(path) = find_up(&[".mcp.json"]) else {
+        return Vec::new();
+    };
+    let Ok(raw) = std::fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = json
+        .get("mcpServers")
+        .and_then(|s| s.as_object())
+        .map(|o| o.keys().cloned().collect())
+        .unwrap_or_default();
+    out.sort();
+    out
 }
 
 impl Inventory {
@@ -96,8 +165,25 @@ impl Inventory {
             sops_enforced: enforced,
             harness_known: true,
             harness_config_synced: true,
-            // Surfaces the proxy cannot see locally are left as "not used" so
-            // they neither inflate nor deflate the local pre-check.
+            // Local `.mcp.json` declares servers but no scopes, so any MCP
+            // surface scores as unscoped — which is the honest reading: an
+            // MCP tool without explicit scoping is the risk the rubric flags.
+            mcp_total: (!self.mcp_servers.is_empty()).then_some(self.mcp_servers.len() as u32),
+            mcp_scoped: 0,
+            skills_total: (!self.skills.is_empty()).then_some(self.skills.len() as u32),
+            skills_sourced: self.skills.len() as u32, // discovered on disk = sourced
+            graph_present: self.graph.as_ref().map(|_| true),
+            graph_workspace_scoped: true, // proxy namespaces all graph keys (TD-208)
+            loops_configured: self.loop_run.is_some(),
+            loops_bounded: self.loop_run.is_some(),
+            memory_total: (!self.memory_chunks.is_empty())
+                .then_some(self.memory_chunks.iter().map(|(p, _)| p).collect::<std::collections::HashSet<_>>().len() as u32),
+            memory_governed: self
+                .memory_chunks
+                .iter()
+                .map(|(p, _)| p)
+                .collect::<std::collections::HashSet<_>>()
+                .len() as u32, // routed through the control plane = governed
             ..Default::default()
         }
     }
@@ -131,7 +217,19 @@ pub fn render_fix_card(prompt: &str, inv: &Inventory) -> String {
     out.push_str(&format!("| WASM rules | {} |\n", if inv.wasm_rule_count > 0 { format!("✅ {} loaded", inv.wasm_rule_count) } else { "—".into() }));
     out.push_str(&format!("| Hook gate | {} |\n", on_off(inv.hook_gate)));
     out.push_str(&format!("| Policy enforcement | {} |\n", on_off(inv.policy_enforced)));
-    out.push_str(&format!("| Role SOPs (`{}`) | {} |\n\n", inv.role, if inv.applicable_sops.is_empty() { "—".into() } else { format!("✅ {}", inv.applicable_sops.len()) }));
+    out.push_str(&format!("| Role SOPs (`{}`) | {} |\n", inv.role, if inv.applicable_sops.is_empty() { "—".into() } else { format!("✅ {}", inv.applicable_sops.len()) }));
+    out.push_str(&format!("| Skills | {} |\n", if inv.skills.is_empty() { "—".into() } else { format!("🎓 {}", inv.skills.join(", ")) }));
+    out.push_str(&format!("| MCP servers | {} |\n\n", if inv.mcp_servers.is_empty() { "—".into() } else { format!("🔌 {}", inv.mcp_servers.join(", ")) }));
+
+    // Memory context from workspace providers, ranked by the control plane's
+    // judge. Present only when the control plane returned chunks.
+    if !inv.memory_chunks.is_empty() {
+        out.push_str("#### Memory context\n\n");
+        for (provider, text) in &inv.memory_chunks {
+            out.push_str(&format!("- **{}**: {}\n", provider, text.replace('\n', " ")));
+        }
+        out.push('\n');
+    }
 
     // Inline the SOP text that applies — so the enhanced prompt carries the
     // policy the agent must follow, not just a count.
@@ -189,8 +287,29 @@ pub fn render_draw_card(prompt: &str, inv: &Inventory) -> String {
         out.push_str(&format!("**Prompt:** {}\n\n", prompt.lines().next().unwrap_or(prompt)));
     }
 
+    if let Some(g) = &inv.graph {
+        out.push_str(&format!(
+            "**Graph:** `{}` · depth {}{}\n\n",
+            g.graph_id,
+            g.depth,
+            if g.parent_session_id.is_empty() { String::new() } else { format!(" · parent `{}`", g.parent_session_id) }
+        ));
+    }
+    if let Some((lr_id, status)) = &inv.loop_run {
+        out.push_str(&format!("**Loop run:** `{}` — status {}\n\n", lr_id, status));
+    }
+
     out.push_str("```mermaid\nflowchart TD\n");
     out.push_str("  U[\"User prompt\"] --> P{\"Intutic proxy\"}\n");
+    for (i, skill) in inv.skills.iter().enumerate() {
+        out.push_str(&format!("  A[\"Agent\"] -.->|skill| K{i}[\"🎓 {}\"]\n", escape_mermaid(skill)));
+    }
+    for (i, server) in inv.mcp_servers.iter().enumerate() {
+        out.push_str(&format!("  A -.->|mcp| M{i}[\"🔌 {}\"]\n", escape_mermaid(server)));
+    }
+    if !inv.skills.is_empty() || !inv.mcp_servers.is_empty() {
+        out.push_str("  U --> A\n  A --> P\n");
+    }
     if inv.dlp_scan_input {
         out.push_str("  P -->|input DLP| DLP[\"Secrets redacted/blocked\"]\n  DLP --> POL\n");
     } else {
@@ -244,7 +363,24 @@ fn recommendations(inv: &Inventory) -> Vec<String> {
     if inv.applicable_sops.is_empty() {
         r.push(format!("Write a **role SOP** for `{}` under `.intutic/sops` to constrain tool use.", inv.role));
     }
+    if !inv.mcp_servers.is_empty() {
+        r.push(format!(
+            "Scope your **MCP servers** ({}) — declare per-tool scopes so an agent cannot use more of a connector than its task needs.",
+            inv.mcp_servers.join(", ")
+        ));
+    }
+    if inv.memory_chunks.is_empty() {
+        r.push("Connect a **memory provider** (mem0, Supermemory, AgentMemory) in the dashboard to enhance prompts with governed memory.".to_string());
+    }
     r
+}
+
+/// The non-blocking `/fix` rewrite: the user's own prompt, followed by the
+/// synthesis card as context the model is told to honour.
+pub fn enhanced_prompt(prompt: &str, card: &str) -> String {
+    format!(
+        "{prompt}\n\n---\n\nThe Intutic proxy pre-checked this prompt. Honour the inlined governance and use the memory context if relevant:\n\n{card}"
+    )
 }
 
 fn on_off(b: bool) -> &'static str {
@@ -369,9 +505,8 @@ mod tests {
         assert!(detect("draw me a diagram").is_none());
     }
 
-    #[test]
-    fn fix_card_reports_missing_primitives() {
-        let inv = Inventory {
+    fn bare_inventory() -> Inventory {
+        Inventory {
             role: "engineer".into(),
             dlp_scan_input: false,
             dlp_scan_output: false,
@@ -379,26 +514,66 @@ mod tests {
             hook_gate: false,
             policy_enforced: false,
             applicable_sops: vec![],
-        };
-        let card = render_fix_card("write a script", &inv);
+            skills: vec![],
+            mcp_servers: vec![],
+            graph: None,
+            loop_run: None,
+            memory_chunks: vec![],
+        }
+    }
+
+    #[test]
+    fn fix_card_reports_missing_primitives() {
+        let card = render_fix_card("write a script", &bare_inventory());
         assert!(card.contains("Recommendations"));
         assert!(card.contains("input DLP"));
         assert!(card.contains("not sent to your LLM provider"));
     }
 
     #[test]
+    fn fix_card_carries_memory_chunks_and_skills() {
+        let mut inv = bare_inventory();
+        inv.skills = vec!["intutic-rule-author".into()];
+        inv.mcp_servers = vec!["jira".into()];
+        inv.memory_chunks = vec![("mem0".into(), "prefers pnpm over npm".into())];
+        let card = render_fix_card("set up the repo", &inv);
+        assert!(card.contains("Memory context"));
+        assert!(card.contains("prefers pnpm over npm"));
+        assert!(card.contains("intutic-rule-author"));
+        assert!(card.contains("Scope your **MCP servers**"));
+    }
+
+    #[test]
     fn draw_card_is_mermaid() {
-        let inv = Inventory {
-            role: "engineer".into(),
-            dlp_scan_input: true,
-            dlp_scan_output: true,
-            wasm_rule_count: 1,
-            hook_gate: true,
-            policy_enforced: true,
-            applicable_sops: vec![],
-        };
+        let mut inv = bare_inventory();
+        inv.dlp_scan_input = true;
+        inv.dlp_scan_output = true;
+        inv.wasm_rule_count = 1;
+        inv.hook_gate = true;
+        inv.policy_enforced = true;
         let card = render_draw_card("build a graph", &inv);
         assert!(card.contains("```mermaid"));
         assert!(card.contains("flowchart TD"));
+    }
+
+    #[test]
+    fn draw_card_shows_graph_loop_skills_and_tools() {
+        let mut inv = bare_inventory();
+        inv.skills = vec!["rule-author".into()];
+        inv.mcp_servers = vec!["notion".into()];
+        inv.graph = Some(GraphContext { graph_id: "g_review".into(), depth: 2, parent_session_id: "ses_parent".into() });
+        inv.loop_run = Some(("lr_42".into(), "RUNNING".into()));
+        let card = render_draw_card("refactor", &inv);
+        assert!(card.contains("g_review"));
+        assert!(card.contains("lr_42"));
+        assert!(card.contains("rule-author"));
+        assert!(card.contains("notion"));
+    }
+
+    #[test]
+    fn enhanced_prompt_keeps_the_user_prompt_first() {
+        let e = enhanced_prompt("do the thing", "### card");
+        assert!(e.starts_with("do the thing"));
+        assert!(e.contains("### card"));
     }
 }
