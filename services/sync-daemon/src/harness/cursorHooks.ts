@@ -101,6 +101,7 @@ try {
 
 const PROTECTED_PATHS = ${JSON.stringify(PROTECTED_PATHS)};
 
+let _intuticSessionId = '';
 function logEvent(verdict, toolName, reason) {
   try {
     const ts = new Date().toISOString();
@@ -112,6 +113,7 @@ function logEvent(verdict, toolName, reason) {
       harnessType: 'cursor',
       timestamp: ts,
       incidentId,
+      ...(_intuticSessionId ? { sessionId: _intuticSessionId } : {}),
     }) + '\\n';
     fs.appendFileSync(${JSON.stringify(hookEventsLog)}, entry, { flag: 'a' });
     if (_intuticKey) {
@@ -132,6 +134,7 @@ process.stdin.on('data', (c) => { raw += c; });
 process.stdin.on('end', () => {
   try {
     const ctx = JSON.parse(raw);
+    _intuticSessionId = ctx.session_id || ctx.sessionId || ctx.conversation_id || ctx.conversationId || ctx.task_id || ctx.taskId || '';
     const event = (ctx.event || '').toLowerCase();
     const input = ctx.input || ctx.tool_input || ctx;
 

@@ -113,11 +113,12 @@ try {
 
 const HOOK_EVENTS_LOG = path.join(os.homedir(), '.intutic', 'events', 'cline-hook-events.jsonl');
 
+let _intuticSessionId = '';
 function logEvent(verdict, toolName, reason) {
   try {
     const ts = new Date().toISOString();
     const incidentId = crypto.createHash('sha1').update(ts + toolName + _intuticWsId).digest('hex').slice(0, 16);
-    const entry = JSON.stringify({ event: verdict === 'blocked' ? 'tool_blocked' : 'tool_allowed', toolName, reason: reason || '', workspaceId: _intuticWsId, harnessType: 'cline', timestamp: ts, incidentId }) + '\\n';
+    const entry = JSON.stringify({ event: verdict === 'blocked' ? 'tool_blocked' : 'tool_allowed', toolName, reason: reason || '', workspaceId: _intuticWsId, harnessType: 'cline', timestamp: ts, incidentId, ...(_intuticSessionId ? { sessionId: _intuticSessionId } : {}) }) + '\\n';
     try { fs.appendFileSync(HOOK_EVENTS_LOG, entry, { flag: 'a' }); } catch {}
     if (_intuticKey) {
       try {
@@ -139,6 +140,7 @@ process.stdin.on('data', (c) => { raw += c; });
 process.stdin.on('end', () => {
   try {
     const ctx = JSON.parse(raw);
+    _intuticSessionId = ctx.session_id || ctx.sessionId || ctx.conversation_id || ctx.conversationId || ctx.task_id || ctx.taskId || '';
     const tool = (ctx.tool_name || '').toLowerCase();
     const input = ctx.tool_input || {};
     const inputStr = JSON.stringify(input);
