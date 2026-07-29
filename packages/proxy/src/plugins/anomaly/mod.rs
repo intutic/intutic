@@ -20,6 +20,27 @@
 //!
 //! The practical reason is latency, not licensing: this runs inline on every
 //! request, so a detector that blocks on I/O blocks the user's agent.
+//!
+//! # Enforcement posture: deterministic kills, heuristic advises
+//!
+//! Detectors that check a *condition* (budget exceeded, forbidden succession,
+//! DLP escalation) emit [`AnomalyFinding::kill`]; detectors that make a
+//! *judgement* (transition plausibility, token waste, hallucination and
+//! injection heuristics) emit [`AnomalyFinding::steer`] and never block. This
+//! is the industry-consensus split, not a house quirk: OWASP LLM01 puts
+//! enforcement weight on deterministic controls and treats detection filters
+//! as one advisory layer; Lakera, LLM Guard, Azure Prompt Shields and AWS
+//! Bedrock Guardrails all decouple heuristic detection from enforcement
+//! (flag/annotate/DETECT modes), and published data shows why — pattern-based
+//! injection detectors collapse below 60% accuracy on benign prompts that
+//! merely contain trigger words (NotInject), and even Meta's tuned classifier
+//! runs 3–5% false positives. A blocking heuristic at that FPR teaches users
+//! to disable the guardrail, which ends with less protection than advising.
+//!
+//! Promotion rule: a heuristic (or a high-confidence subtier of one) may
+//! graduate to `kill` only after advisory telemetry demonstrates a false
+//! positive rate in the 0.1–1% band commercial blocking detectors operate at.
+//! Do not promote on argument alone.
 
 use crate::wasm::context::{RequestContext, Verdict};
 
