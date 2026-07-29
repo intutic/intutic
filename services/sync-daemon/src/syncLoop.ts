@@ -41,6 +41,8 @@ import { shouldCaptureThisIteration, captureAndUpload } from './configReader.js'
 import { watch } from 'chokidar'
 import Redis from 'ioredis'
 import { TrajectoryMonitor } from './trajectoryMonitor.js'
+import { collectAgentReport, reportAgent } from './agentReporter.js'
+import { startHarnessSession, endAllOpenSessions } from './sessionReporter.js'
 
 // ─── Public interfaces ───────────────────────────────────────────────
 
@@ -315,6 +317,9 @@ export async function startSyncLoop(options: SyncLoopOptions): Promise<void> {
   fsWatcher?.close()
   driftWatcher?.stop()
   if (drainSafetyTimer) clearInterval(drainSafetyTimer)
+  // Mark this run's harness sessions ended so the dashboard's live list
+  // reflects reality.
+  await endAllOpenSessions(controlPlaneUrl, apiKey)
 }
 
 // ─── Single iteration ────────────────────────────────────────────────
@@ -417,6 +422,36 @@ async function runSyncIteration(ctx: IterationContext): Promise<SyncResult> {
     if (harnessHashes.length > 0) {
       await reportStatus(controlPlaneUrl, apiKey, workspaceId, harness, harnessHashes)
     }
+  }
+
+  // 5b. Register each harness as a durable agent with its facets, so the
+  // dashboard agent graph + posture ring stay live. Best-effort: a failed
+  // report never blocks the sync loop.
+  for (const harness of harnesses) {
+    const filename = HARNESS_FILES[harness]
+    const configSynced = filename
+      ? !fileHashes.some((f) => f.filePath === filename && f.drifted)
+      : false
+    const report = await collectAgentReport({
+      workspaceRoot,
+      harnessType: harness,
+      configSynced,
+      dlpEnabled: true, // the daemon-managed proxy ships DLP on by default
+      policyEnforced: Boolean(controlPlaneUrl),
+    })
+    await reportAgent(controlPlaneUrl, apiKey, workspaceId, report)
+
+    // 5c. Open a real session for the harness (once per daemon run — the
+    // reporter dedupes). This is what switches on branch/commit capture and
+    // the task-context cascade; without it sessions only ever existed as
+    // server-minted synthetic rows.
+    await startHarnessSession({
+      controlPlaneUrl,
+      apiKey,
+      workspaceId,
+      harnessType: harness,
+      workspaceRoot,
+    })
   }
 
   // 6. Update local integrity store

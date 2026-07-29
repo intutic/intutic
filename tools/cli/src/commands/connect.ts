@@ -46,6 +46,10 @@ import { SyncWsClient,
   drainHookEvents,
   syncOfflineTraces,
   TrajectoryMonitor,
+  collectAgentReport,
+  reportAgent,
+  startHarnessSession,
+  endAllOpenSessions,
 } from '@intutic/sync-daemon'
 import { watch } from 'chokidar'
 import Redis from 'ioredis'
@@ -958,6 +962,28 @@ export async function runConnect(opts: {
       try {
         await syncOfflineTraces(controlPlaneUrl, safeCreds.apiKey)
       } catch {}
+      // Register agents + open one real session per harness (the reporter
+      // dedupes sessions per run). connect's inline loop bypassed both,
+      // leaving the dashboard graph empty for the primary user path.
+      for (const harnessType of safeConfig.harnesses) {
+        try {
+          const report = await collectAgentReport({
+            workspaceRoot: process.cwd(),
+            harnessType: harnessType as any,
+            configSynced: true,
+            dlpEnabled: true,
+            policyEnforced: true,
+          })
+          await reportAgent(controlPlaneUrl, safeCreds.apiKey, safeCreds.workspaceId, report)
+          await startHarnessSession({
+            controlPlaneUrl,
+            apiKey: safeCreds.apiKey,
+            workspaceId: safeCreds.workspaceId,
+            harnessType: harnessType as any,
+            workspaceRoot: process.cwd(),
+          })
+        } catch {}
+      }
       // Run compliance probes on each iteration
       await runProbes()
     } catch (err) {
@@ -982,6 +1008,7 @@ export async function runConnect(opts: {
   fsWatcher?.close()
   if (drainSafetyTimer) clearInterval(drainSafetyTimer)
   wsClient.close()
+  await endAllOpenSessions(controlPlaneUrl, safeCreds.apiKey)
 
   log.success('Sync daemon stopped.')
 }
