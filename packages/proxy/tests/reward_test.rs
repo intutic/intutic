@@ -410,6 +410,28 @@ async fn tool_sequence_trims_to_the_newest_entries() {
         let again = store.record_tool_sequence(&session, &[], 20).await.unwrap();
         assert_eq!(again, got, "[{name}] empty append is a pure read");
 
+        // The key must carry a TTL. It had none: the list was length-capped by
+        // LTRIM, but the key *count* grew without bound — one key per session
+        // id ever seen, kept forever. TTL -1 (persistent) is the regression.
+        if name == "valkey" {
+            if let Some(valkey) = valkey_conn().await {
+                let mut conn = valkey.as_ref().clone();
+                let ttl: i64 = redis::cmd("TTL")
+                    .arg(format!("v2:session:{}:tools", session))
+                    .query_async(&mut conn)
+                    .await
+                    .unwrap_or(-3);
+                assert!(
+                    ttl > 0,
+                    "[{name}] tool-sequence key must expire; TTL was {ttl} (-1 = persistent, the bug)"
+                );
+                assert!(
+                    ttl <= 86_400,
+                    "[{name}] TTL should be at most the documented day, got {ttl}"
+                );
+            }
+        }
+
         if let Some(valkey) = valkey_conn().await {
             let mut conn = valkey.as_ref().clone();
             let _: Result<(), _> = conn.del(format!("v2:session:{}:tools", session)).await;
