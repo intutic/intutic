@@ -72,7 +72,7 @@ impl NotificationClient {
 
     /// Drain this node's graph queue.
     ///
-    /// `key` is `"{graphId}:{nodeId}"`. Each node reads its own queue: the
+    /// `key` is `"{workspaceId}:{graphId}:{nodeId}"`. Each node reads its own queue: the
     /// producer fans a finding out to one queue per registered sibling, so
     /// nobody can consume another's copy.
     pub async fn drain_graph_notifications(

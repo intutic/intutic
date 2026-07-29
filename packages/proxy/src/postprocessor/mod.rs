@@ -57,11 +57,11 @@ impl ResponsePostProcessor {
     /// Check for pending notifications and return formatted governance block.
     ///
     /// Drains the session queue (`gov:notify:{sessionId}`), this node's graph
-    /// queue (`gov:notify:graph:{graphId}:{nodeId}`) and the workspace queue
+    /// queue (`gov:notify:graph:{workspaceId}:{graphId}:{nodeId}`) and the workspace queue
     /// (`gov:notify:workspace:{workspaceId}`), merges them, and returns the
     /// top-priority notifications.
     ///
-    /// `graph_key` is `"{graphId}:{nodeId}"`, or `None` when the request is not
+    /// `graph_key` is `"{workspaceId}:{graphId}:{nodeId}"`, or `None` when the request is not
     /// part of a multi-agent graph. Each node has its own graph queue because
     /// broadcast fans out at publish time — a single shared queue would let the
     /// first sibling to poll consume everyone else's copy.
