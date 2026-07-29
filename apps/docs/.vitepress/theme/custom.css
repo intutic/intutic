@@ -1,8 +1,10 @@
 @import "@intutic/theme/css";
 
 :root {
-  --vp-font-family-base: var(--font-sans);
-  --vp-font-family-mono: var(--font-mono);
+  /* Matches the website (intutic-website/styles.css): hero/body use Inter,
+     code and package pills use JetBrains Mono. Keep the two in sync. */
+  --vp-font-family-base: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --vp-font-family-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
   --vp-c-brand-1: var(--color-accent);
   --vp-c-brand-2: var(--color-accent-hover);
