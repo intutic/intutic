@@ -29,7 +29,19 @@ const log = createLogger('trajectory-monitor')
 export interface TraceEvent {
   sessionId: string
   workspaceId: string
+  /**
+   * DEPRECATED (TD-207): has always carried the task type, not a tool name.
+   * Kept because deployed daemons key summary metrics off it. Prefer `tools`.
+   */
   toolName: string
+  /** The task type this request was classified as ("coding", ...). */
+  taskType?: string
+  /**
+   * Tool calls newly observed on this request — the per-turn delta the proxy
+   * computes, not the request body's cumulative history. Absent on events from
+   * pre-1.9 proxies.
+   */
+  tools?: string[]
   model: string
   inputTokens: number
   outputTokens: number
@@ -112,7 +124,16 @@ export class TrajectoryBuffer {
    * Compute a trajectory summary from the current buffer.
    */
   toSummary(activeSopIds: string[], budgetUtilization: number): TrajectorySummaryPayload {
-    const tools = this.events.map((e) => e.toolName)
+    // Real tool calls, flattened across the window's events. Falls back to
+    // the legacy per-event toolName only when NO event carries a tools array —
+    // i.e. an old proxy — because toolName has always held the task type
+    // (TD-207) and mixing the two vocabularies in one list would make
+    // uniqueTools and the consecutive-repeat scan meaningless.
+    const flattenedToolCalls = this.events.flatMap((e) => e.tools ?? [])
+    const anyToolArrays = this.events.some((e) => e.tools !== undefined)
+    const tools = anyToolArrays
+      ? flattenedToolCalls
+      : this.events.map((e) => e.toolName).filter(Boolean)
     const uniqueTools = [...new Set(tools)]
     const totalTokens = this.events.reduce(
       (sum, e) => sum + e.inputTokens + e.outputTokens + (e.reasoningTokens ?? 0),
@@ -130,7 +151,9 @@ export class TrajectoryBuffer {
     const windowMinutes = Math.max(1, (windowEndMs - windowStartMs) / 60_000)
 
     const tokenVelocity = totalTokens / windowMinutes
-    const toolCallVelocity = this.events.length / windowMinutes
+    // Tool calls per minute — previously LLM requests per minute, which only
+    // coincided with the name when every request carried exactly one call.
+    const toolCallVelocity = tools.length / windowMinutes
 
     // Detect consecutive identical calls
     let maxConsecutive = 0
@@ -156,7 +179,7 @@ export class TrajectoryBuffer {
       workspaceId: this.workspaceId,
       windowStartedAt: this.events[0]?.timestamp ?? new Date().toISOString(),
       windowEndedAt: this.events[this.events.length - 1]?.timestamp ?? new Date().toISOString(),
-      toolCallCount: this.events.length,
+      toolCallCount: tools.length,
       uniqueTools,
       totalTokens,
       modelSwitches,

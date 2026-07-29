@@ -290,6 +290,23 @@ impl LocalStore for ValkeyStore {
         Ok(sequence)
     }
 
+    async fn swap_extracted_tool_count(&self, session_id: &str, new_count: u64) -> u64 {
+        let mut conn = self.conn();
+        let key = format!("v2:session:{}:toolcount", session_id);
+        let prev: Option<u64> = redis::cmd("GETSET")
+            .arg(&key)
+            .arg(new_count)
+            .query_async(&mut conn)
+            .await
+            .unwrap_or(None);
+        // Same sliding TTL as the sequence itself: the two describe one
+        // session and must expire together, or a fresh sequence would be
+        // diffed against a stale count.
+        let _: Result<(), redis::RedisError> =
+            conn.expire(&key, TOOL_SEQUENCE_TTL_SECS).await;
+        prev.unwrap_or(0)
+    }
+
     async fn workspace_credential(
         &self,
         workspace_id: &str,
@@ -356,7 +373,17 @@ impl LocalStore for ValkeyStore {
             let live_event = serde_json::json!({
                 "sessionId": trace.session_id,
                 "workspaceId": trace.workspace_id,
+                // DEPRECATED, and a documented lie kept for deployed daemons:
+                // this field has always carried the task type, and old
+                // trajectoryMonitor builds key three summary metrics off it.
+                // Removing or "fixing" it under them would silently change
+                // what their numbers mean. New consumers read `tools` and
+                // `taskType`; drop this once no pre-1.9 daemon remains.
                 "toolName": trace.task_type,
+                "taskType": trace.task_type,
+                // The per-turn delta — tool calls newly observed on THIS
+                // request, not the request body's cumulative history.
+                "tools": trace.tools,
                 "model": trace.model,
                 "inputTokens": trace.raw_input_tokens,
                 "outputTokens": trace.output_tokens,
