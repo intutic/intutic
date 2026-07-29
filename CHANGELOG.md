@@ -5,6 +5,73 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0] - 2026-07-29
+
+### Changed
+
+- **Advisory anomaly findings no longer block requests.** Six heuristic
+  detection paths (tool-transition plausibility, tool-contract drift,
+  diversity collapse, context growth, token-waste heuristics, a single
+  prompt-injection technique) now advise — logged, broadcast to graph siblings
+  and traced — while the request proceeds. Deterministic detectors (loops,
+  forbidden successions, budget breaches, credential sweeps, denied tools)
+  still return 403. Previously every finding blocked, which had six advisory
+  detectors hard-refusing requests they were written to merely steer.
+- **`trace:live` events carry real per-turn tool calls.** A `tools` array
+  (the calls newly observed on that request) and `taskType` join the payload;
+  `toolName` is deprecated — it has always carried the task type — and is kept
+  only for older sync-daemons. The stored tool sequence no longer duplicates
+  the conversation history into itself on every request.
+- **All graph state is workspace-namespaced.** Graph membership, spend,
+  broadcast budgets and notification queues now include the workspace in
+  their keys, and the response cache's exact-match hash is workspace-salted —
+  two tenants reusing a graph id on shared infrastructure are isolated by
+  construction rather than by id uniqueness.
+
+### Fixed
+
+- `MissingPredecessorDetector` stopped evaluating at its first rule, so
+  sessions that never ran `deploy` had the `publish` and `release` ordering
+  invariants silently unchecked.
+- Tool-sequence keys in Valkey never expired; they now carry a 24h sliding
+  TTL refreshed on write.
+- `@modelcontextprotocol/sdk` moved to `^1.30.0`, taking `@hono/node-server`
+  to 2.x (GHSA-frvp-7c67-39w9).
+
+## [1.8.0] - 2026-07-28
+
+### Added
+
+- **Graph guardrails.** Node identity from OpenTelemetry GenAI attributes over
+  W3C Baggage (with `X-Intutic-*` fallbacks), an 18-detector hot-path anomaly
+  registry covering 11 of the 12 runtime anomaly categories, sibling broadcast
+  of findings with loop suppression and rate ceilings, graph coordinates on
+  every trace, and role-scoped SOPs from `.intutic/sops/*.md` whose
+  `deny_tools` front matter is enforced rather than advisory.
+- **Tool-definition pinning.** SHA-256 over each tool's name, description and
+  input schema, pinned per workspace and surviving restarts — the MCP
+  rug-pull defence.
+- New public package `@intutic/anomaly-taxonomy` (Apache-2.0): the 12-category
+  runtime anomaly taxonomy as types and constants, declared once and drift-
+  checked against the Rust proxy's copy at build time.
+
+### Fixed
+
+- **DLP redaction actually redacts before forwarding.** Secrets matching
+  redact-action patterns (AWS keys, GitHub tokens, bearer tokens, SSNs) were
+  detected and logged as redacted, but the original body was forwarded to the
+  provider. The redacted body is now what leaves the machine, and a redaction
+  that would produce invalid JSON refuses the request instead of forwarding
+  either version.
+
+### Breaking
+
+- **`intutic-clawde` (Python) now requires Python >= 3.10** (was 3.9). The
+  patched releases of `requests` (2.33.0) and `urllib3` (2.7.0) — carrying
+  fixes for CVE-2026-25645, CVE-2026-44431 and CVE-2026-44432 — themselves
+  require 3.10, so keeping the 3.9 floor meant shipping known-vulnerable
+  transports. Python 3.9 reached end of life in October 2025.
+
 ## [1.7.2] - 2026-07-27
 
 ### Fixed
