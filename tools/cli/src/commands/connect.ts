@@ -349,6 +349,13 @@ export async function runConnect(opts: {
         INTUTIC_WORKSPACE_ID: safeCreds.workspaceId,
         INTUTIC_API_KEY: safeCreds.apiKey,
         CONFIG_PATH: node_path.join(safeConfig.workspaceRoot, 'config.yaml'),
+        // Workspace policy: admins can disallow local Obsidian/Logseq/Foam
+        // vaults from feeding /fix. Applied at spawn; a policy change takes
+        // effect on the next connect. Vault content never leaves the machine
+        // under either setting — this only governs whether the search runs.
+        ...(safeConfig.settings?.allowLocalMemoryVaults === false
+          ? { INTUTIC_LOCAL_VAULTS: 'off' }
+          : {}),
       }
       
       proxyProc = spawn(exeCmd, exeArgs, {
@@ -507,7 +514,10 @@ export async function runConnect(opts: {
       }
 
       localConfigVersion = syncConfig.configVersion
-      saveConfig({ ...safeConfig, configVersion: localConfigVersion })
+      // Mirror workspace settings locally so spawn-time policies (like
+      // allowLocalMemoryVaults) apply on the next connect without a fetch.
+      safeConfig.settings = syncConfig.settings
+      saveConfig({ ...safeConfig, configVersion: localConfigVersion, settings: syncConfig.settings })
     }
 
     // c. Compute file hashes + update integrity store
@@ -973,6 +983,7 @@ export async function runConnect(opts: {
             configSynced: true,
             dlpEnabled: true,
             policyEnforced: true,
+            allowLocalVaults: syncConfig.settings?.allowLocalMemoryVaults,
           })
           await reportAgent(controlPlaneUrl, safeCreds.apiKey, safeCreds.workspaceId, report)
           await startHarnessSession({
