@@ -19,7 +19,7 @@ features:
     details: Four enforcement actions — BYPASS, ENHANCE, HIJACK, KILL — evaluated per tool call in under 50ms. SOPs define the rules; the circuit breaker intercepts, rewrites, or blocks actions before they reach your infrastructure.
   - icon: 🔍
     title: DLP & Threat Detection
-    details: Detect secrets in prompts, data exfiltration, prompt injection, tool abuse, token waste, SQL injection, and unauthorized operations. Threats are flagged and blocked before they leave the proxy.
+    details: Detect secrets in prompts, data exfiltration, prompt injection, tool abuse, token waste, SQL injection, and unauthorized operations. Threats are flagged — and deterministic violations blocked — before they leave the proxy.
   - icon: 💰
     title: FinOps Ledger
     details: Track every token, every model, every dollar. Per-model cost breakdowns, local session token metering, and customizable spending caps.
