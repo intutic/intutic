@@ -69,6 +69,31 @@ pub struct IntuticSettings {
     /// `/fix` and `/draw` command behaviour.
     #[serde(default)]
     pub commands: CommandsConfig,
+    /// Local memory vaults searched by `/fix`.
+    #[serde(default)]
+    pub memory: MemoryConfig,
+}
+
+/// Local markdown memory vaults (Obsidian, Logseq, Foam, or any notes folder).
+///
+/// This is the local-first counterpart to the cloud memory providers: search
+/// runs on the developer's machine, so a private vault never leaves it.
+#[derive(Debug, Deserialize, Clone)]
+pub struct MemoryConfig {
+    /// Master switch for local vault search.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Vault directories to search. `~` is expanded. A vault found by walking
+    /// up from the working directory (one carrying a `.obsidian`, `.logseq` or
+    /// `.foam` marker) is searched even when this list is empty.
+    #[serde(default)]
+    pub vaults: Vec<String>,
+}
+
+impl Default for MemoryConfig {
+    fn default() -> Self {
+        Self { enabled: true, vaults: Vec::new() }
+    }
 }
 
 /// Settings for the `/fix` and `/draw` blocking commands.

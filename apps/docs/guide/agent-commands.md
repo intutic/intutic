@@ -21,13 +21,54 @@ model reply. The card:
 5. Lists **recommendations** for whatever guardrail is off — e.g. "enable output
    DLP", "write a role SOP under `.intutic/sops`".
 
-It never leaves your machine. When a control plane is connected, `/fix`
-additionally enhances the card with a **Memory context** section: your
+It never leaves your machine.
+
+### Memory context
+
+`/fix` enriches the card with a **Memory context** section drawn from two
+independent sources.
+
+**Local vaults (open core, offline).** Your markdown notes are searched on your
+own machine — no network, no model call, no control plane. Obsidian, Logseq and
+Foam vaults are detected automatically by their marker directory
+(`.obsidian`, `.logseq`, `.foam`) when the vault is at or above your working
+directory; anything else is named explicitly:
+
+```yaml
+# config.yaml
+intutic_settings:
+  memory:
+    enabled: true
+    vaults:
+      - ~/Documents/ObsidianVault
+      - ~/notes            # any folder of .md files works
+```
+
+Search is deterministic keyword matching, ranked so that a note matching two of
+your terms beats one repeating a single term. It is bounded by construction —
+capped files per search, oversized notes skipped, marker and dot directories
+never walked — so a large vault costs milliseconds. In blocking `/fix` the
+snippets never leave your machine at all; in non-blocking mode the rewritten
+prompt still passes input DLP, so a token pasted into a note is redacted before
+egress.
+
+**Cloud providers (Cloud tier).** When a control plane is connected, your
 workspace's memory providers (mem0, Supermemory, AgentMemory, or any provider
-via the generic HTTP connector) are searched with the prompt, the chunks are
-ranked by the LLM-as-judge (with a deterministic fallback when no judge is
-reachable), and the winners are inlined with their provider attribution. A
-provider that is down contributes nothing rather than blocking the command.
+via the generic HTTP connector) are also searched, the chunks are ranked by the
+LLM-as-judge (with a deterministic fallback when no judge is reachable), and the
+winners are inlined with their provider attribution. A provider that is down
+contributes nothing rather than blocking the command.
+
+Both sources render in the same section, labelled by origin —
+`vault:MyNotes/architecture` for a local note, `mem0` for a cloud provider.
+
+::: tip Obsidian, two ways
+A local vault is read directly by the proxy, as above — the private, offline
+path, and the one most people want. If instead your vault is already synced to
+a hosted memory service, connect that service as a Cloud provider and it is
+searched through the same path as any other provider; no Obsidian-specific
+configuration is involved.
+:::
 
 ## `/draw` — visualize the agent
 
