@@ -258,6 +258,12 @@ pub fn governance_block_for_role(role: &str) -> Option<String> {
     render(&all_sops(), role)
 }
 
+/// Every SOP loaded from disk, for inventory surfaces like the `/fix` command
+/// that report what governance is configured rather than enforce it.
+pub fn loaded_sops() -> Vec<Sop> {
+    all_sops()
+}
+
 /// Tool names forbidden for a node in this role, from every SOP that applies.
 ///
 /// Empty means nothing is forbidden — the default, and the correct one. Open

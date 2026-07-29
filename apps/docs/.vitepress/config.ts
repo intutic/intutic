@@ -103,6 +103,7 @@ if (!IS_OSS) {
       { text: 'Developer Sessions (Cloud)', link: '/guide/agent-top' },
       { text: 'Intelligence Engine (Cloud)', link: '/guide/intelligence' },
       { text: 'Activity Logs (Cloud)', link: '/guide/traces' },
+      { text: 'Agents (Cloud)', link: '/guide/agents' },
       { text: 'Agent Guidelines (Cloud)', link: '/guide/sops' },
       { text: 'Review Queue (Cloud)', link: '/guide/decisions' },
       { text: 'Budgets & FinOps (Cloud)', link: '/guide/budgets' },
@@ -119,6 +120,7 @@ sidebarGuide.push({
   items: [
     { text: 'Custom Filters (Open-Core)', link: '/guide/wasm-rules' },
     { text: 'Graph Guardrails (Open-Core)', link: '/guide/graph-guardrails' },
+    { text: 'Prompt Commands: /fix & /draw (Open-Core)', link: '/guide/agent-commands' },
     // Routing ships in open-core. Enterprise builds already list this page under
     // 'Using Intutic' as 'Intelligent Model Routing (Cloud)', so this entry is
     // OSS-only to keep the page from appearing twice in the enterprise sidebar.
