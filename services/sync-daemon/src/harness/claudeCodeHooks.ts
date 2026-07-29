@@ -226,7 +226,7 @@ const PROTECTED_PATHS = [
  * Uses synchronous append (O_APPEND is atomic for single-write < PIPE_BUF).
  * The sync-daemon drains this file on each cycle and POSTs to the control plane.
  */
-function logEvent(verdict, toolName, reason) {
+function logEvent(verdict, toolName, reason, sessionId) {
   try {
     const ts = new Date().toISOString();
     const incidentId = crypto.createHash('sha1').update(ts + toolName + _intuticWsId).digest('hex').slice(0, 16);
@@ -238,6 +238,11 @@ function logEvent(verdict, toolName, reason) {
       harnessType: ${JSON.stringify(harnessType)},
       timestamp: ts,
       incidentId,
+      // TD-209: Claude Code's PreToolUse contract puts session_id on stdin;
+      // it was parsed and dropped, so trust decay and enforcement logging fell
+      // back to the synthetic per-workspace session and could never attribute
+      // a block to the person whose agent made it.
+      ...(sessionId ? { sessionId } : {}),
     }) + '\\n';
     // Path B: reliable file append (sync-daemon drains on FSEvents change)
     fs.appendFileSync(${JSON.stringify(hookEventsLog)}, entry, { flag: 'a' });
@@ -274,6 +279,7 @@ process.stdin.on('end', () => {
   try {
     const ctx = JSON.parse(inputData);
     const toolName = (ctx.tool_name || ctx.toolName || '').toLowerCase();
+    const sessionId = ctx.session_id || ctx.sessionId || '';
     const toolInput = ctx.tool_input || ctx.toolInput || {};
     const toolInputStr = JSON.stringify(toolInput);
 
@@ -287,7 +293,7 @@ process.stdin.on('end', () => {
           const reason = \`Attempt to modify governance-protected path: "\${targetPath}". \` +
             'To change governance policy, update your SOP via the Intutic control plane.';
           console.error(\`[Intutic Guardrail] BLOCKED: \${reason}\`);
-          logEvent('blocked', toolName, reason);
+          logEvent('blocked', toolName, reason, sessionId);
           process.exit(2);
         }
       }
@@ -299,18 +305,18 @@ process.stdin.on('end', () => {
       if (toolInputStr.includes(pattern)) {
         const reason = \`Policy violation matching pattern: "\${pattern}"\`;
         console.error(\`[Intutic Guardrail] Blocked execution of tool "\${toolName}" due to \${reason}\`);
-        logEvent('blocked', toolName, reason);
+        logEvent('blocked', toolName, reason, sessionId);
         process.exit(2);
       }
     }
 
-    logEvent('allowed', toolName, '');
+    logEvent('allowed', toolName, '', sessionId);
     process.exit(0);
   } catch (err) {
     // Fail CLOSED — any hook execution error blocks the tool call.
     // The sync daemon will rewrite this hook on the next sync cycle.
     console.error('[Intutic Guardrail] Hook error (blocking for safety):', err);
-    logEvent('blocked', 'unknown', String(err));
+    logEvent('blocked', 'unknown', String(err), '');
     process.exit(2);
   }
 });

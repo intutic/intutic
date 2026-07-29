@@ -1812,9 +1812,45 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         ) {
             continue;
         }
+        // ── DLP on forwarded headers (TD-211) ────────────────────────
+        //
+        // The strip-list above removes the auth headers this proxy manages,
+        // but a client can put a secret in ANY header — a debug header
+        // carrying an AWS key, a cookie carrying a JWT — and headers were
+        // never scanned; CLAUDE.md §3 required it and only the body path
+        // existed. Same doctrine as the body: block-action patterns refuse
+        // the request, everything else is redacted in place. Values are tiny,
+        // so this is noise-level cost next to the body scan.
+        let value_str = String::from_utf8_lossy(value.as_bytes());
+        let header_findings = if state.config.intutic_settings.dlp.enabled
+            && state.config.intutic_settings.dlp.scan_input
+        {
+            dlp::scan(&value_str)
+        } else {
+            Vec::new()
+        };
+        if header_findings.iter().any(|f| f.action == "block") {
+            tracing::warn!(workspace_id = %workspace_id, header = %name_str, "DLP BLOCK action on forwarded header");
+            return json_error(
+                StatusCode::BAD_REQUEST,
+                "dlp_policy_violation",
+                "A request header contains content blocked by DLP policy (e.g., a private key). Remove the sensitive value and retry.",
+            );
+        }
+        let forwarded_value: std::borrow::Cow<str> = if header_findings.is_empty() {
+            value_str
+        } else {
+            tracing::warn!(
+                workspace_id = %workspace_id,
+                header = %name_str,
+                patterns = ?header_findings.iter().map(|f| f.pattern_name.as_str()).collect::<Vec<_>>(),
+                "DLP redacted a forwarded header value"
+            );
+            std::borrow::Cow::Owned(dlp::redact(&value_str, &header_findings))
+        };
         if let (Ok(n), Ok(v)) = (
             reqwest::header::HeaderName::from_bytes(name.as_ref()),
-            reqwest::header::HeaderValue::from_bytes(value.as_bytes()),
+            reqwest::header::HeaderValue::from_bytes(forwarded_value.as_bytes()),
         ) {
             fwd_headers.insert(n, v);
         }
@@ -2124,6 +2160,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         let new_tool_calls_clone = new_tool_calls.clone();
         let prompt_text_clone = prompt_text.clone();
         let provider_clone = provider.clone();
+        let dlp_scan_output = state.config.intutic_settings.dlp.enabled
+            && state.config.intutic_settings.dlp.scan_output;
         let loop_run_id_clone = loop_run_id_header.clone();
         let control_plane_url_clone = std::env::var("CONTROL_PLANE_URL").unwrap_or_default();
         let judge_active_clone = judge_active;
@@ -2142,7 +2180,11 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             let mut accumulated_content = String::new();
             let mut prompt_tokens = 0;
             let mut completion_tokens = 0;
-            let mut buffer = String::new();
+            // Bytes, not String: lossy-decoding per network chunk mangles a
+            // multibyte character bisected by a chunk boundary. '\n' is ASCII, so
+            // per-line decoding below cannot split a character.
+            let mut buffer: Vec<u8> = Vec::new();
+            let mut dlp_stream_redactions: Vec<String> = Vec::new();
             let mut current_event_type = String::new();
             let mut current_data = String::new();
 
@@ -2155,12 +2197,33 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             while let Some(chunk_res) = stream.next().await {
                 match chunk_res {
                     Ok(bytes) => {
-                        let text_chunk = String::from_utf8_lossy(&bytes);
-                        buffer.push_str(&text_chunk);
+                        buffer.extend_from_slice(&bytes);
 
-                        while let Some(pos) = buffer.find('\n') {
-                            let line = buffer[..pos].trim().to_string();
-                            buffer = buffer[(pos + 1)..].to_string();
+                        while let Some(pos) = buffer.iter().position(|&b| b == b'\n') {
+                            let line_bytes: Vec<u8> = buffer.drain(..=pos).collect();
+                            let mut line = String::from_utf8_lossy(&line_bytes[..line_bytes.len() - 1])
+                                .trim()
+                                .to_string();
+
+                            // ── Output DLP (TD-210) ─────────────────────────
+                            // Scrubbed BEFORE the line is forwarded and BEFORE
+                            // it is parsed into accumulated_content, so the
+                            // client, the judge, the semantic cache and the
+                            // trace all see the redacted text. Streaming
+                            // previously bypassed output DLP entirely — the
+                            // branch returned before Step 7.
+                            if dlp_scan_output {
+                                if let Some((scrubbed, names)) =
+                                    crate::dlp::scrub_stream_text(&line)
+                                {
+                                    line = scrubbed;
+                                    for n in names {
+                                        if !dlp_stream_redactions.contains(&n) {
+                                            dlp_stream_redactions.push(n);
+                                        }
+                                    }
+                                }
+                            }
 
                             if is_same_provider {
                                 // Intercept end-of-stream markers to inject governance notifications
@@ -2515,6 +2578,15 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
 
             if judge_active_clone {
                 tracing::info!(handles_count = %chunk_handles.len(), "Waiting for chunk evaluation handles");
+                if !dlp_stream_redactions.is_empty() {
+                    tracing::warn!(
+                        workspace_id = %workspace_id_clone,
+                        session_id = %session_id_clone,
+                        patterns = ?dlp_stream_redactions,
+                        "Output DLP redacted secrets from a streamed response"
+                    );
+                }
+
                 for h in chunk_handles {
                     let _ = h.await;
                 }

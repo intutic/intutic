@@ -20,7 +20,7 @@ The proxy calls `evaluate(offset, len)` with a JSON-serialized `RequestContext`:
   "estimated_input_tokens": 1200,
   "budget_remaining_usd": 4.25,
   "risk_tier": "Low",
-  "dlp_findings": [{ "category": "secret", "pattern_name": "aws_key", "action": "block", "offset": 0, "length": 20 }],
+  "dlp_findings": [{ "category": "secret", "pattern_name": "aws_access_key", "action": "redact", "offset": 0, "length": 20 }],
   "tool_sequence": ["read_file", "bash"]
 }
 ```
