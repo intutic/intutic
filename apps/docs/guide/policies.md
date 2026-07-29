@@ -24,19 +24,23 @@ The DLP gate scans request payloads and tool outputs for sensitive data before f
 - Database connection strings
 - Private keys and certificates
 
-### Enforcement Modes
+### Enforcement
 
-Configure DLP behavior using the `INTUTIC_DLP_MODE` environment variable:
+The action is **per pattern, not per mode**, and is fixed by what the pattern
+is: private keys and Anthropic API keys **block** (the request is refused with
+a DLP error); everything else **redacts** — the match is replaced with
+`[REDACTED_*]` and the redacted body is what reaches your provider.
 
-| Mode | Action | Description |
-|------|--------|-------------|
-| **Block** | Reject request | The request is rejected entirely with a DLP error |
-| **Redact** | Mask & forward | Sensitive data is replaced with masks (e.g., `sk-proj-****`) and the request continues |
-| **Log** | Observe only | The incident is logged in the dashboard but the request proceeds unchanged |
+DLP is configured in `config.yaml` under `intutic_settings.dlp`:
 
-::: tip
-Start with `log` mode to understand your DLP exposure, then switch to `redact` or `block` once you've reviewed the findings.
-:::
+| Setting | Default | Effect |
+|---------|---------|--------|
+| `enabled` | `true` | Master switch |
+| `scan_input` | `true` | Scan request bodies before forwarding |
+| `scan_output` | `true` | Scan (non-streaming) response bodies; findings are redacted |
+
+There is no log-only mode today; every finding is also recorded in the trace
+and available to WASM rules as `dlp_findings`.
 
 ---
 
