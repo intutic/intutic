@@ -13,6 +13,7 @@ import { resolveContext } from './context-resolver'
 import { BudgetChecker } from './budget-checker'
 import { CircuitBreaker } from './circuit-breaker'
 import { ClawdeEventEmitter } from './event-emitter'
+import { deriveIdentity, identityHeaders, type GraphIdentity } from './graph-identity'
 
 export class ClawdeClient {
   private apiKey: string
@@ -21,6 +22,9 @@ export class ClawdeClient {
   private autoContext: boolean
   private timeout: number
   private retries: number
+
+  /** This client's position in the agent graph — see `graph-identity`. */
+  private identity: GraphIdentity
 
   private budgetChecker: BudgetChecker
   private circuitBreakerWrapper: CircuitBreaker
@@ -36,6 +40,10 @@ export class ClawdeClient {
     this.autoContext = options.autoContext ?? true
     this.timeout = options.timeout ?? 30000
     this.retries = options.retries ?? 2
+
+    // Inherited from the process that spawned this one, so an agent that runs
+    // another agent is recorded as its parent without either of them being told.
+    this.identity = deriveIdentity(options.graphIdentity)
 
     this.budgetChecker = new BudgetChecker(this.baseUrl, this.apiKey)
     this.circuitBreakerWrapper = new CircuitBreaker(this)
@@ -93,6 +101,10 @@ export class ClawdeClient {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${this.apiKey}`,
           'X-Intutic-Context': JSON.stringify(context),
+          // Without these the proxy sees graph_id == session_id, treats every
+          // request as a graph of one, and skips membership, fleet spend and
+          // node counting entirely.
+          ...identityHeaders(this.identity),
         }
 
         if (params.max_cost_usd !== undefined) {

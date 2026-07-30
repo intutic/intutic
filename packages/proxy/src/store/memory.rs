@@ -187,6 +187,17 @@ pub struct MemoryStore {
     cache_counters: Mutex<HashMap<String, HashMap<String, i64>>>,
     cache_savings: Mutex<HashMap<String, f64>>,
     session_chunks: Mutex<HashMap<String, Vec<String>>>,
+    /// Loop-run spend and ceiling, keyed by run id.
+    ///
+    /// A run genuinely can span processes, and this map cannot see the others.
+    /// But the common open-core case is one proxy on one developer's machine
+    /// with no Valkey, and returning `(None, None)` there meant a workflow
+    /// budget could never be exceeded no matter what the run cost — the
+    /// detector's input did not exist. Aggregating what this process *can* see
+    /// is a floor on the truth, and a floor that crosses the ceiling is still a
+    /// real breach.
+    workflow_spend: Mutex<HashMap<String, f64>>,
+    workflow_budgets: Mutex<HashMap<String, f64>>,
     /// `None` = ephemeral. Set only by [`MemoryStore::durable`].
     snapshot_path: Option<PathBuf>,
 }
@@ -707,16 +718,39 @@ impl LocalStore for MemoryStore {
         false
     }
 
-    /// `None` — a loop run spans processes, so its cost cannot be aggregated
-    /// in per-process memory.
-    async fn add_workflow_spend(&self, _loop_run_id: &str, _amount: f64) -> Option<f64> {
-        None
+    /// Aggregates what this process has seen of the run.
+    ///
+    /// Under-counts a run split across processes, which is the safe direction:
+    /// the total can only be higher than what is recorded here, so a breach
+    /// reported from this number is always a real one.
+    async fn add_workflow_spend(&self, loop_run_id: &str, amount: f64) -> Option<f64> {
+        let mut spend = lock(&self.workflow_spend, "workflow-spend").ok()?;
+        let total = spend.entry(loop_run_id.to_string()).or_insert(0.0);
+        *total += amount;
+        Some(*total)
     }
 
-    /// `(None, None)` — no spend signal and no ceiling, which reads as
-    /// "unbudgeted" rather than "zero budget, already spent".
-    async fn workflow_budget(&self, _loop_run_id: &str) -> (Option<f64>, Option<f64>) {
-        (None, None)
+    async fn set_workflow_budget_if_absent(&self, loop_run_id: &str, budget: f64) -> bool {
+        let Ok(mut budgets) = lock(&self.workflow_budgets, "workflow-budget") else {
+            return false;
+        };
+        if budgets.contains_key(loop_run_id) {
+            return false;
+        }
+        budgets.insert(loop_run_id.to_string(), budget);
+        true
+    }
+
+    /// `None` for the ceiling means "nobody capped this run", never "capped at
+    /// zero" — the latter would refuse every request in an uncapped workflow.
+    async fn workflow_budget(&self, loop_run_id: &str) -> (Option<f64>, Option<f64>) {
+        let spend = lock(&self.workflow_spend, "workflow-spend")
+            .ok()
+            .and_then(|m| m.get(loop_run_id).copied());
+        let budget = lock(&self.workflow_budgets, "workflow-budget")
+            .ok()
+            .and_then(|m| m.get(loop_run_id).copied());
+        (spend, budget)
     }
 
     /// `ttl_secs` ignored — chunks are read back within the same request that
@@ -853,5 +887,41 @@ mod graph_tests {
         assert_eq!(s.graph_spend("ws", "g").await, None);
         assert_eq!(s.add_graph_spend("ws", "g", 1.0, 60).await, None);
         assert!(s.graph_members("ws", "g").await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn workflow_budget_is_tracked_without_a_control_plane() {
+        // Open core has no control plane, so nothing wrote the ceiling and this
+        // store returned (None, None) unconditionally — WorkflowBudgetDetector
+        // had no input it could ever act on.
+        let store = MemoryStore::default();
+
+        assert_eq!(store.workflow_budget("lr_1").await, (None, None));
+
+        assert!(store.set_workflow_budget_if_absent("lr_1", 5.0).await);
+        store.add_workflow_spend("lr_1", 2.0).await;
+        store.add_workflow_spend("lr_1", 1.5).await;
+
+        let (spend, budget) = store.workflow_budget("lr_1").await;
+        assert_eq!(budget, Some(5.0));
+        assert_eq!(spend, Some(3.5));
+    }
+
+    #[tokio::test]
+    async fn an_existing_ceiling_is_never_overwritten() {
+        // The control plane's value is the authority; a per-proxy default must
+        // not quietly replace an operator's explicit budget.
+        let store = MemoryStore::default();
+        assert!(store.set_workflow_budget_if_absent("lr_1", 100.0).await);
+        assert!(!store.set_workflow_budget_if_absent("lr_1", 5.0).await);
+        assert_eq!(store.workflow_budget("lr_1").await.1, Some(100.0));
+    }
+
+    #[tokio::test]
+    async fn runs_do_not_share_a_budget() {
+        let store = MemoryStore::default();
+        store.set_workflow_budget_if_absent("lr_1", 5.0).await;
+        store.add_workflow_spend("lr_1", 4.0).await;
+        assert_eq!(store.workflow_budget("lr_2").await, (None, None));
     }
 }

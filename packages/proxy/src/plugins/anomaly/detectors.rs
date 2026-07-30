@@ -199,13 +199,21 @@ impl AnomalyDetector for TransitionProbabilityDetector {
     }
 
     fn detect(&self, ctx: &RequestContext) -> Option<AnomalyFinding> {
-        let seq = &ctx.tool_sequence;
+        // Abstract actions are synthesised by `actions::classify`, not called by
+        // the harness, so they are not transitions this chain should score —
+        // every one of them would look like an unheard-of pair and drag the
+        // average toward a false finding.
+        let seq: Vec<&String> = ctx
+            .tool_sequence
+            .iter()
+            .filter(|t| !super::actions::is_action(t))
+            .collect();
         if seq.len() < 2 {
             return None;
         }
         let total: f64 = seq
             .windows(2)
-            .map(|w| Self::probability(&w[0], &w[1]))
+            .map(|w| Self::probability(w[0], w[1]))
             .sum();
         let avg = total / (seq.len() - 1) as f64;
         if avg >= self.min_probability {
@@ -228,10 +236,14 @@ impl AnomalyDetector for TransitionProbabilityDetector {
 ///
 /// These are the invariants a single node cannot check for itself, because the
 /// node that deploys is usually not the node that tested.
+/// Expressed in the `action:` vocabulary that [`super::actions`] synthesises. The
+/// rules used to name bare `deploy`/`publish`/`release`, which no harness has ever
+/// emitted — they emit `Bash` and put the deploy in the command string — so this
+/// detector had no reachable input and `SCOPE_VIOLATION` had no producer.
 const REQUIRED_PREDECESSORS: &[(&str, &str)] = &[
-    ("deploy", "run_tests"),
-    ("publish", "run_tests"),
-    ("release", "run_tests"),
+    ("action:deploy", "action:run_tests"),
+    ("action:publish", "action:run_tests"),
+    ("action:release", "action:run_tests"),
 ];
 
 pub struct MissingPredecessorDetector {
@@ -281,9 +293,9 @@ impl AnomalyDetector for MissingPredecessorDetector {
 
 /// A tool that must not run *after* another has run.
 const FORBIDDEN_SUCCESSIONS: &[(&str, &str)] = &[
-    ("pii_export", "db_write"),
-    ("pii_export", "http_post"),
-    ("secret_read", "http_post"),
+    ("action:pii_export", "action:db_write"),
+    ("action:pii_export", "action:http_post"),
+    ("action:secret_read", "action:http_post"),
 ];
 
 pub struct ForbiddenSuccessionDetector {
@@ -953,7 +965,7 @@ mod tests {
     #[test]
     fn missing_predecessor_blocks_deploy_without_tests() {
         let d = MissingPredecessorDetector::default();
-        let ctx = ctx_with_sequence(&["build", "deploy"]);
+        let ctx = ctx_with_sequence(&["Bash", "action:deploy"]);
         let hit = d.detect(&ctx).unwrap();
         assert_eq!(hit.kind, AnomalyKind::ScopeViolation);
     }
@@ -961,7 +973,7 @@ mod tests {
     #[test]
     fn missing_predecessor_allows_deploy_after_tests() {
         let d = MissingPredecessorDetector::default();
-        let ctx = ctx_with_sequence(&["run_tests", "build", "deploy"]);
+        let ctx = ctx_with_sequence(&["action:run_tests", "Bash", "action:deploy"]);
         assert!(d.detect(&ctx).is_none());
     }
 
@@ -975,8 +987,8 @@ mod tests {
         // survived.
         let d = MissingPredecessorDetector::default();
 
-        for tool in ["publish", "release"] {
-            let ctx = ctx_with_sequence(&["build", tool]);
+        for tool in ["action:publish", "action:release"] {
+            let ctx = ctx_with_sequence(&["Bash", tool]);
             let hit = d
                 .detect(&ctx)
                 .unwrap_or_else(|| panic!("'{tool}' without run_tests must be caught"));
@@ -988,8 +1000,8 @@ mod tests {
     #[test]
     fn missing_predecessor_allows_later_rules_when_satisfied() {
         let d = MissingPredecessorDetector::default();
-        for tool in ["publish", "release"] {
-            let ctx = ctx_with_sequence(&["run_tests", "build", tool]);
+        for tool in ["action:publish", "action:release"] {
+            let ctx = ctx_with_sequence(&["action:run_tests", "Bash", tool]);
             assert!(d.detect(&ctx).is_none(), "'{tool}' after run_tests is fine");
         }
     }
@@ -998,14 +1010,14 @@ mod tests {
     fn predecessor_must_come_before_not_after() {
         // Tests running *after* the deploy do not retroactively make it safe.
         let d = MissingPredecessorDetector::default();
-        let ctx = ctx_with_sequence(&["deploy", "run_tests"]);
+        let ctx = ctx_with_sequence(&["action:deploy", "action:run_tests"]);
         assert!(d.detect(&ctx).is_some());
     }
 
     #[test]
     fn forbidden_succession_blocks_write_after_pii_export() {
         let d = ForbiddenSuccessionDetector::default();
-        let ctx = ctx_with_sequence(&["pii_export", "transform", "db_write"]);
+        let ctx = ctx_with_sequence(&["action:pii_export", "Bash", "action:db_write"]);
         assert!(d.detect(&ctx).unwrap().kill);
     }
 

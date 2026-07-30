@@ -581,6 +581,16 @@ impl LocalStore for ValkeyStore {
             .ok()
     }
 
+    async fn set_workflow_budget_if_absent(&self, loop_run_id: &str, budget: f64) -> bool {
+        let mut conn = self.conn();
+        // NX so a control-plane-set ceiling always wins. No TTL, for the same
+        // reason the spend counter has none: expiring the ceiling mid-run would
+        // silently uncap a workflow that was capped.
+        conn.set_nx::<_, _, bool>(loop_budget_key(loop_run_id), budget)
+            .await
+            .unwrap_or(false)
+    }
+
     async fn workflow_budget(&self, loop_run_id: &str) -> (Option<f64>, Option<f64>) {
         let mut conn = self.conn();
         let spend = conn

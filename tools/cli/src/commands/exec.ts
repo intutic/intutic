@@ -20,6 +20,13 @@
 
 import { spawn } from 'node:child_process'
 import { loadCredentials, loadConfig } from '../config/store.js'
+import {
+  deriveIdentity,
+  identityEnv,
+  identityHeaders,
+  identityPathPrefix,
+  type GraphIdentity,
+} from '../lib/graphIdentity.js'
 import { log } from '../lib/logger.js'
 import pc from 'picocolors'
 
@@ -30,7 +37,11 @@ import pc from 'picocolors'
  * @param devMode  - retained for call-site compatibility; the proxy is always local
  * @returns Record of env vars to inject
  */
-export function buildProxyEnv(apiKey: string, devMode: boolean): Record<string, string> {
+export function buildProxyEnv(
+  apiKey: string,
+  devMode: boolean,
+  identity?: GraphIdentity,
+): Record<string, string> {
   // The local proxy is the default, and for open core it is the only proxy
   // there is. This used to point at a remote host unless --dev was passed, so
   // `intutic exec` sent both the agent's traffic and OPENAI_API_KEY off the
@@ -38,11 +49,17 @@ export function buildProxyEnv(apiKey: string, devMode: boolean): Record<string, 
   // either. `intutic start` binds :4000; that is what these should reach.
   //
   // Set INTUTIC_PROXY_URL to point at a proxy you run somewhere else.
-  const proxyHost = (process.env.INTUTIC_PROXY_URL ?? 'http://localhost:4000').replace(/\/+$/, '')
-  const proxyUrl = `${proxyHost}/v1`
+  const rawHost = (process.env.INTUTIC_PROXY_URL ?? 'http://localhost:4000').replace(/\/+$/, '')
   void devMode
 
-  return {
+  // Graph identity rides in the base URL. Harnesses append their own path to
+  // whatever host they are given, so a prefix here reaches the proxy from every
+  // one of them — including the many that offer no way to set a header. The
+  // proxy strips it before routing, so upstream sees the path the harness meant.
+  const proxyHost = identity ? `${rawHost}${identityPathPrefix(identity)}` : rawHost
+  const proxyUrl = `${proxyHost}/v1`
+
+  const env: Record<string, string> = {
     // OpenAI-compatible (covers LiteLLM, LangChain, CrewAI, ADK, Aider)
     OPENAI_API_BASE: proxyUrl,
     // OpenAI SDK v1+ (covers Python SDK, Pydantic-AI, Agent SDK)
@@ -59,6 +76,24 @@ export function buildProxyEnv(apiKey: string, devMode: boolean): Record<string, 
     // Intutic-native
     INTUTIC_API_KEY: apiKey,
   }
+
+  if (identity) {
+    // Passed down so a nested `intutic exec` — an agent spawning an agent —
+    // derives itself as this node's child without anything tracking the graph
+    // centrally.
+    Object.assign(env, identityEnv(identity))
+
+    // Claude Code is the one harness that can send arbitrary headers, and the
+    // proxy prefers headers over the path. Anything already configured is kept:
+    // clobbering a user's own headers to add telemetry would be a poor trade.
+    const existing = process.env.ANTHROPIC_CUSTOM_HEADERS
+    const ours = Object.entries(identityHeaders(identity))
+      .map(([k, v]) => `${k}: ${v}`)
+      .join('\n')
+    env.ANTHROPIC_CUSTOM_HEADERS = existing ? `${existing}\n${ours}` : ours
+  }
+
+  return env
 }
 
 /**
@@ -87,8 +122,10 @@ export async function runExec(commandAndArgs: string[]): Promise<void> {
   const config = loadConfig()
   const devMode = config?.devMode ?? process.env.INTUTIC_DEV === '1'
 
-  // Build env
-  const proxyEnv = buildProxyEnv(creds.apiKey, devMode)
+  // Build env. A nested `intutic exec` inherits identity from its parent and
+  // becomes a child node; a top-level one starts a new graph.
+  const identity = deriveIdentity()
+  const proxyEnv = buildProxyEnv(creds.apiKey, devMode, identity)
   const childEnv = { ...process.env, ...proxyEnv }
 
   const [exe, ...args] = commandAndArgs
@@ -97,6 +134,11 @@ export async function runExec(commandAndArgs: string[]): Promise<void> {
   log.info(`Launching: ${pc.bold(exe)} ${args.join(' ')}`)
   log.dim(`Proxy: ${proxyEnv.OPENAI_API_BASE}`)
   log.dim(`API Key: ${creds.apiKey.slice(0, 8)}...${creds.apiKey.slice(-4)}`)
+  log.dim(
+    identity.depth === 0
+      ? `Graph: ${identity.graphId} (root)`
+      : `Graph: ${identity.graphId} · node ${identity.nodeId} · depth ${identity.depth}`,
+  )
   console.log('')
 
   // Spawn the child process with inherited stdio (full interactivity)

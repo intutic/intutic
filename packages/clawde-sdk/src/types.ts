@@ -5,6 +5,13 @@ export interface ClawdeClientOptions {
   autoContext?: boolean             // Default: true — auto-detect Jira/git/PD
   timeout?: number                  // Default: 30000ms
   retries?: number                  // Default: 2
+  /**
+   * This client's position in the agent graph. Omit and it is inherited from the
+   * environment, so a spawned agent is automatically a child of its spawner.
+   * Supply it when one process drives several logical agents and the environment
+   * cannot describe the shape.
+   */
+  graphIdentity?: Partial<import('./graph-identity').GraphIdentity>
 }
 
 export interface ChatMessage {

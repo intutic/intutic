@@ -44,6 +44,7 @@
 
 use crate::wasm::context::{RequestContext, Verdict};
 
+pub mod actions;
 pub mod broadcast;
 pub mod detectors;
 

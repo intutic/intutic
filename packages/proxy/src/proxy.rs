@@ -579,7 +579,7 @@ fn extract_wasm_tool_calls(body: &serde_json::Value) -> Vec<crate::wasm::context
 /// history has shrunk (harness compaction), which calls are new is unknowable
 /// and the delta is empty: a missed observation is recoverable noise, while a
 /// re-appended duplicate is amplified signal in every sequence detector.
-fn per_turn_tool_delta(prev_count: usize, extracted: &[String]) -> Vec<String> {
+fn per_turn_tool_delta<T: Clone>(prev_count: usize, extracted: &[T]) -> Vec<T> {
     if prev_count <= extracted.len() {
         extracted[prev_count..].to_vec()
     } else {
@@ -587,7 +587,39 @@ fn per_turn_tool_delta(prev_count: usize, extracted: &[String]) -> Vec<String> {
     }
 }
 
+/// One tool call as it appeared in the request, with the arguments the ordering
+/// rules need to classify it. The arguments used to be discarded here, which is
+/// why `SCOPE_VIOLATION`'s rules named a vocabulary nothing produced.
+#[derive(Debug, Clone)]
+struct ToolInvocation {
+    name: String,
+    input: serde_json::Value,
+}
+
+/// Names only — what the sequence detectors and the trace record consume.
 fn extract_request_tool_calls(body: &serde_json::Value) -> Vec<String> {
+    extract_request_tool_invocations(body)
+        .into_iter()
+        .map(|t| t.name)
+        .collect()
+}
+
+/// Expand a per-turn delta into the sequence actually recorded: each concrete
+/// call, followed by the abstract actions it performs.
+///
+/// Interleaved rather than kept in a parallel list, because the ordering rules
+/// are about *when* something happened relative to everything else, and one
+/// sequence is the only place that relation survives.
+fn expand_tool_actions(invocations: &[ToolInvocation]) -> Vec<String> {
+    let mut out = Vec::with_capacity(invocations.len());
+    for call in invocations {
+        out.push(call.name.clone());
+        out.extend(crate::plugins::anomaly::actions::classify(&call.name, &call.input));
+    }
+    out
+}
+
+fn extract_request_tool_invocations(body: &serde_json::Value) -> Vec<ToolInvocation> {
     let mut tool_names = Vec::new();
     if let Some(messages) = body.get("messages").and_then(|m| m.as_array()) {
         for msg in messages {
@@ -598,16 +630,30 @@ fn extract_request_tool_calls(body: &serde_json::Value) -> Vec<String> {
                         .and_then(|f| f.get("name"))
                         .and_then(|n| n.as_str())
                     {
-                        tool_names.push(name.to_string());
+                        // OpenAI puts the arguments in a JSON *string*, so parse
+                        // it; an unparseable one still yields the call itself.
+                        let input = tc
+                            .get("function")
+                            .and_then(|f| f.get("arguments"))
+                            .map(|a| match a.as_str() {
+                                Some(raw) => serde_json::from_str(raw).unwrap_or_else(|_| {
+                                    serde_json::Value::String(raw.to_string())
+                                }),
+                                None => a.clone(),
+                            })
+                            .unwrap_or(serde_json::Value::Null);
+                        tool_names.push(ToolInvocation { name: name.to_string(), input });
                     } else if let Some(name) = tc.get("name").and_then(|n| n.as_str()) {
-                        tool_names.push(name.to_string());
+                        let input = tc.get("input").cloned().unwrap_or(serde_json::Value::Null);
+                        tool_names.push(ToolInvocation { name: name.to_string(), input });
                     }
                 }
             }
             if let Some(role) = msg.get("role").and_then(|r| r.as_str()) {
                 if role == "tool" || role == "function" {
                     if let Some(name) = msg.get("name").and_then(|n| n.as_str()) {
-                        tool_names.push(name.to_string());
+                        let input = msg.get("content").cloned().unwrap_or(serde_json::Value::Null);
+                        tool_names.push(ToolInvocation { name: name.to_string(), input });
                     }
                 }
             }
@@ -615,13 +661,14 @@ fn extract_request_tool_calls(body: &serde_json::Value) -> Vec<String> {
                 if let Some(arr) = content.as_array() {
                     for block in arr {
                         if let Some(block_type) = block.get("type").and_then(|t| t.as_str()) {
-                            if block_type == "tool_use" {
+                            if block_type == "tool_use" || block_type == "tool_result" {
                                 if let Some(name) = block.get("name").and_then(|n| n.as_str()) {
-                                    tool_names.push(name.to_string());
-                                }
-                            } else if block_type == "tool_result" {
-                                if let Some(name) = block.get("name").and_then(|n| n.as_str()) {
-                                    tool_names.push(name.to_string());
+                                    let input = block
+                                        .get("input")
+                                        .or_else(|| block.get("content"))
+                                        .cloned()
+                                        .unwrap_or(serde_json::Value::Null);
+                                    tool_names.push(ToolInvocation { name: name.to_string(), input });
                                 }
                             }
                         }
@@ -664,7 +711,13 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     }
 
     // ── Extract basic request metadata ────────────────────────────────
-    let uri_path = request.uri().path().to_string();
+    //
+    // Graph identity may ride in a `/_i/{graph}/{node}/{parent}/{depth}` prefix,
+    // because most harnesses accept a base URL and nothing else. Strip it first
+    // so provider detection, protocol detection and the upstream URL below all
+    // see the path the caller actually meant.
+    let (path_identity, uri_path) =
+        crate::graph::split_identity_path(request.uri().path());
     let provider = Provider::from_path(&uri_path);
     let protocol = crate::protocol::detect(&uri_path);
     let headers = request.headers().clone();
@@ -1657,7 +1710,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             .await
             .is_some_and(|pinned| pinned != tool_signature);
 
-    let request_tool_calls = extract_request_tool_calls(&body_json);
+    let request_tool_calls = extract_request_tool_invocations(&body_json);
     // The extractor walks the request's full message history, and harnesses
     // resend that history every turn — so the raw extract is cumulative, and
     // appending it wholesale duplicated the entire history into the stored
@@ -1671,17 +1724,27 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         .store
         .swap_extracted_tool_count(&session_id, request_tool_calls.len() as u64)
         .await as usize;
-    let new_tool_calls = per_turn_tool_delta(prev_count, &request_tool_calls);
+    let new_invocations = per_turn_tool_delta(prev_count, &request_tool_calls);
+    // Names only for the trace record and the downstream detectors that reason
+    // about what the harness called.
+    let new_tool_calls: Vec<String> = new_invocations.iter().map(|t| t.name.clone()).collect();
+    // The stored sequence also carries the abstract actions each call performed
+    // — `git push` is a deploy — because that is the vocabulary the ordering
+    // rules are written in, and nothing was translating into it.
     let tool_sequence = state
         .store
-        .record_tool_sequence(&session_id, &new_tool_calls, TOOL_SEQUENCE_CAP)
+        .record_tool_sequence(
+            &session_id,
+            &expand_tool_actions(&new_invocations),
+            TOOL_SEQUENCE_CAP,
+        )
         .await
         .unwrap_or_default();
 
     // Where this request sits in a multi-agent graph. Falls back to a
     // graph-of-one keyed on the session, so an uninstrumented single-agent
     // harness behaves exactly as before.
-    let node = crate::graph::identity_from_headers(&headers, &session_id);
+    let node = crate::graph::identity_from_request(&headers, path_identity.as_ref(), &session_id);
 
     // Address of this node's own graph notification queue. `None` when the
     // request is not part of a real graph — a graph of one has no siblings to
@@ -1692,6 +1755,18 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // visible.
     // Kept separately because the trace below takes ownership of the header.
     let workflow_run_id = loop_run_id_header.clone();
+    // Give the run a ceiling if nothing else has. Without a control plane
+    // nothing writes this key, so the detector's input never existed and a
+    // workflow could not breach a budget however much it spent. Set-if-absent,
+    // so an operator's explicit budget always wins.
+    if let (Some(id), Some(default_budget)) = (
+        workflow_run_id.as_deref(),
+        state.config.intutic_settings.workflow.default_budget_usd,
+    ) {
+        if default_budget > 0.0 {
+            state.store.set_workflow_budget_if_absent(id, default_budget).await;
+        }
+    }
     let (workflow_spend, workflow_budget) = match workflow_run_id.as_deref() {
         Some(id) => state.store.workflow_budget(id).await,
         None => (None, None),
