@@ -772,6 +772,12 @@ impl ControlPlaneCache for NullControlPlaneCache {
     /// set a cap, so there is nothing unverifiable about the answer — this is a
     /// definite "no cap", not a failed lookup. Standalone spend stays bounded
     /// by `local_spend`'s on-disk daily cap.
+    /// Standalone open core has no control-plane budget keys; `local_spend`'s
+    /// on-disk daily cap bounds spend instead.
+    async fn daily_budget(&self, _workspace_id: &str) -> Option<(f64, Option<f64>)> {
+        None
+    }
+
     async fn hard_block(&self, _workspace_id: &str) -> HardCapStatus {
         HardCapStatus::Clear
     }

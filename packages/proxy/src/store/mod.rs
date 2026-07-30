@@ -523,6 +523,16 @@ pub trait ControlPlaneCache: Send + Sync + 'static {
     /// [`HardCapStatus`] for why this is not `bool`.
     async fn hard_block(&self, workspace_id: &str) -> HardCapStatus;
 
+    /// Daily spend and limit for a workspace, as `(spend, limit)`.
+    ///
+    /// `auth_context` folds these into the record it returns, but the
+    /// control-plane fallback path in `handle_proxy` establishes identity only —
+    /// without this it would leave `max_budget: None`, and `check_budget` is a no-op
+    /// on `None`, silently skipping the pre-flight budget check for exactly the
+    /// requests that took the fallback. Returns `None` when unknown, which the
+    /// caller must treat as "no pre-flight opinion", not "no limit".
+    async fn daily_budget(&self, workspace_id: &str) -> Option<(f64, Option<f64>)>;
+
     /// Status of a governed loop run, if the control plane is tracking it.
     async fn loop_status(&self, loop_run_id: &str) -> Option<String>;
 
