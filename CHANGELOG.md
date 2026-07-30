@@ -5,6 +5,46 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Loop governance never fired.** A user could set a per-loop budget and press
+  Kill in the dashboard, and the agent kept running. The control plane wrote loop
+  state as a JSON blob at `intutic:loop:{id}` while the proxy read flat scalars
+  `:budget` and `:spend`, nothing wrote the budget scalar at all, and nothing set
+  the `x-loop-run-id` header the proxy needed to identify the run. The proxy now
+  resolves the active loop from a workspace pointer when the header is absent, the
+  budget is published as a bare decimal (it is parsed as `Option<f64>`, so a JSON
+  value silently became `None`), and `store::valkey::loop_key_contract` pins the
+  key strings in Rust so the two sides cannot drift apart again. Verified against
+  a live cluster: 403 `LOOP_RUN_TERMINATED` after Kill, 403
+  `WORKFLOW_BUDGET_BREACH` over budget.
+- `intutic doctor`'s daemon-log check read `~/.intutic/daemon.log`, which nothing
+  writes — the installer logs to `sync-daemon.log` and `mcp-daemon.log`.
+- Dropped the sync daemon's dead ContextGraph scan and BrainIndexer, and three
+  proxy/CLI wires that no longer connected to anything.
+
+### Documentation
+
+- **Removed claims of Docker/V8 agent isolation.** The competitor-comparison
+  pages carry no paid-tier badge, so they render in the public docs build, and all
+  three asserted that agent execution is isolated in Docker containers or V8
+  isolates. Nothing containerizes an agent: what ships is a wasmtime WASM sandbox
+  for policy rules (16 MB, 1,000,000 fuel, 5 ms) and SOP hook scripts in a frozen
+  `node:vm` context. Corrected in prose as well as the comparison tables.
+  The 1.10.0 entry below claims this cleanup was already done — it was not; that
+  sweep fixed some references and missed the comparison pages entirely.
+- Also removed the outbound-block-list and container-interceptor claims, neither
+  of which has an implementation.
+- **`guide/drift-detection.md` rewritten.** It documented compliance-score drift
+  windows, drift direction, `behavioral_drift_event` records and embedding-based
+  vector drift — none of which exist; that work was removed when the product
+  narrowed to circuit-breaker scope. The page now covers the three mechanisms
+  that are real (SOP staleness, per-developer cost baselines, proxy sequence
+  anomalies) and says plainly that the drift scoring was removed, so a reader who
+  remembers it is not left guessing.
+
 ## [1.10.0] - 2026-07-29
 
 ### Added
