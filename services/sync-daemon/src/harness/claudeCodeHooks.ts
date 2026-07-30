@@ -218,7 +218,6 @@ const PROTECTED_PATHS = [
   '.claude/settings.local.json',
   '.intutic/hooks',
   '.intutic/integrity.json',
-  '.intutic/context_integrity.json',
 ];
 
 /**
