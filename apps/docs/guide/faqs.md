@@ -275,9 +275,9 @@ Intutic's active resilience and loop steering are supported by three newly optim
 *   **The Optimization:** Suggestion config edits are dynamically generated using cheap evaluator prompts targeted specifically to the trace anomaly context, bypassing static boilerplate templates.
 *   **Safety Guards:** Suggested config patches are audited against the workspace's active `VALIDATED` security policies to block forbidden operations (e.g. enabling `child_process`) and parsed to verify JSON, YAML, and Markdown format safety before saving.
 
-#### Post-Flight Output Analysis & Semantic Drift Monitoring
-*   **Output Compliance Inspections**: When execution traces complete, an asynchronous post-flight evaluator checks completions against active workspace SOP guidelines to detect and log deviations.
-*   **Behavioral Drift Tracking**: The governance engine maps active guidelines and developer interactions into semantic vector spaces, tracking average trajectory centroids over time to alert teams if agent output begins to drift from established compliance boundaries.
+#### Post-Completion Analysis
+*   **LLM Probe Verdicts**: Completed traces are probed against the active workspace SOP; each probe records a verdict and structured violations, which is what drives the compliance score on the trace.
+*   **Cost Baselines**: An hourly sweep computes a median-cost baseline per (SOP, developer) from the trailing 14 days, published only once at least 20 traces support it. `TOKEN_WASTE` is raised against that baseline, so a run is compared to its own history rather than a global threshold.
 
 #### Sync-Daemon Overwrite Recovery
 *   **The Optimization:** If a base SOP version update rewrites `.cursorrules`, the control plane sync payload returns all active, approved suggestions. The local sync-daemon automatically re-overlays these active suggestions on top of the newly written baseline rules, preventing applied edits from being wiped out.
