@@ -10,7 +10,7 @@
  * 2. Control plane auth (via stored credentials)
  * 3. Sync daemon running (PID file or process grep)
  * 4. Harness config files intact (SHA-256 hash check)
- * 5. Daemon log readable (~/.intutic/daemon.log)
+ * 5. Daemon log readable (~/.intutic/logs/{sync,mcp}-daemon.log)
  * 6. Valkey connectivity (proxy /health or TCP probe port 6379)
  * 7. CA cert trust (~/.intutic/ca.crt + OS trust store)
  *
@@ -45,7 +45,19 @@ interface CheckResult {
 const PROXY_HEALTH_URL = 'http://127.0.0.1:4000/health'
 const PROXY_TIMEOUT_MS = 3_000
 const CONTROL_PLANE_TIMEOUT_MS = 5_000
-const DAEMON_LOG_PATH = join(homedir(), '.intutic', 'daemon.log')
+/**
+ * Where the daemons actually log. The check previously looked at
+ * `~/.intutic/daemon.log`, which nothing has ever written — `intutic daemon
+ * install` points launchd/systemd at `~/.intutic/logs/{sync,mcp}-daemon.log`
+ * (install-daemon.ts:81-87), or `/Library/Logs/Intutic` for a system install.
+ * So this check reported a failure on every healthy machine.
+ */
+const DAEMON_LOG_CANDIDATES = [
+  join(homedir(), '.intutic', 'logs', 'sync-daemon.log'),
+  join(homedir(), '.intutic', 'logs', 'mcp-daemon.log'),
+  '/Library/Logs/Intutic/sync-daemon.log',
+  '/Library/Logs/Intutic/mcp-daemon.log',
+]
 const DAEMON_PID_PATH = join(homedir(), '.intutic', 'daemon.pid')
 const CA_CERT_PATH = join(homedir(), '.intutic', 'ca.crt')
 const VALKEY_PROBE_TIMEOUT_MS = 2_000
@@ -267,27 +279,27 @@ function checkHarnessConfigs(): CheckResult {
  * Check 5: Daemon log readable.
  */
 function checkDaemonLog(): CheckResult {
-  try {
-    accessSync(DAEMON_LOG_PATH, constants.R_OK)
-
-    // Try to read last few bytes to confirm it's not empty
-    const content = readFileSync(DAEMON_LOG_PATH, 'utf-8')
-    const lines = content.trim().split('\n')
-    const lastLine = lines[lines.length - 1] || ''
-    const truncated = lastLine.length > 80 ? lastLine.slice(0, 80) + '…' : lastLine
-
-    return {
-      name: 'Daemon Log',
-      passed: true,
-      detail: `Readable at ${DAEMON_LOG_PATH} (${lines.length} lines)`,
+  for (const candidate of DAEMON_LOG_CANDIDATES) {
+    try {
+      accessSync(candidate, constants.R_OK)
+      const content = readFileSync(candidate, 'utf-8')
+      const lines = content.trim().split('\n')
+      return {
+        name: 'Daemon Log',
+        passed: true,
+        detail: `Readable at ${candidate} (${lines.length} lines)`,
+      }
+    } catch {
+      // Try the next location.
     }
-  } catch {
-    return {
-      name: 'Daemon Log',
-      passed: false,
-      detail: `Not found or not readable at ${DAEMON_LOG_PATH}`,
-      remediation: 'The log file is created when `intutic connect` runs. Start the daemon first.',
-    }
+  }
+
+  return {
+    name: 'Daemon Log',
+    passed: false,
+    detail: `No readable daemon log found (looked in ${DAEMON_LOG_CANDIDATES.join(', ')})`,
+    remediation:
+      'Logs appear once a daemon is installed and running. Run `intutic daemon install`, then check its status.',
   }
 }
 
