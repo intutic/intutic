@@ -129,7 +129,7 @@ sidebarGuide.push({
     ] : []),
     ...(!IS_OSS ? [
       { text: 'SOP Optimizer (Cloud)', link: '/guide/metaclaw' },
-      { text: 'Drift Detection (Cloud)', link: '/guide/drift-detection' },
+      { text: 'Off-Pattern Detection (Cloud)', link: '/guide/drift-detection' },
       { text: 'Slash Commands (Cloud)', link: '/guide/slash-commands' },
       { text: 'Stream Alerts (Cloud)', link: '/guide/inline-streams' },
     ] : []),

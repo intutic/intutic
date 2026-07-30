@@ -1,35 +1,45 @@
-# Drift Detection <Badge type="warning" text="Cloud / Team" />
+# Detecting When Agents Go Off-Pattern <Badge type="warning" text="Cloud / Team" />
 
-Monitor agent behavior over time and detect when agents deviate from expected patterns.
+Catch agents that stop matching their guidelines, start costing far more than
+their own history, or fall into a runaway tool loop.
 
-## What Is Drift?
+## What This Covers
 
-Drift occurs when an AI agent's behavior changes over time — even without any configuration changes. This can happen due to model updates, prompt variations, or evolving usage patterns. Intutic monitors for drift so you can catch problems before they impact productivity or compliance.
+Three independent mechanisms, each with a different trigger:
+
+| Mechanism | Trigger | Where it runs |
+|-----------|---------|---------------|
+| **SOP staleness** | Agents stop matching an SOP at all | Hourly control-plane sweep |
+| **Cost baselines** | A run costs far more than its own historical median | Inline, on every classified trace |
+| **Sequence anomalies** | Runaway or implausible tool sequences | Rust proxy, sub-millisecond fast path |
+
+::: info Behavioral drift scoring is not part of the product
+Earlier versions of this page described compliance-score drift windows,
+positive/negative drift direction, `behavioral_drift_event` records, and
+embedding-based vector drift against a rolling centroid. **None of those ship.**
+That work was removed when the product narrowed to circuit-breaker scope, and the
+page was not updated at the time. What replaced it in practice is staleness
+detection, described below: rather than scoring how far behaviour has moved, the
+system notices when agents no longer reach for a guideline at all — which is the
+signal that actually precedes a guideline going wrong.
+:::
 
 ---
 
-## How Drift Detection Works
+## SOP Staleness
 
-The drift detection system runs periodically (every 5 minutes by default) and compares current agent behavior against established baselines.
+An SOP that agents have stopped matching is usually one whose scope no longer
+describes the work being done. The hourly sweep flags any active SOP whose last
+match is older than the staleness window, and enqueues it for review:
 
-### Compliance Score Drift
+1. **Detection** — `last_match_at` is null, or older than the configured window
+2. **Enqueue** — a review signal is queued for the workspace
+3. **Refinement** — if the dream cycle is enabled (`DREAM_CYCLE_ENABLED=true`),
+   the SOP is rewritten against its real usage evidence: days idle, matches in the
+   last 30 days, and the average compliance score it achieved when it did match
 
-The primary drift detection method:
-
-1. **Window Average** — Calculates the average compliance score across recent traces over a rolling 7-day window
-2. **Baseline Comparison** — Compares against the stored baseline compliance score for each active SOP
-3. **Divergence Check** — If the deviation exceeds the threshold (default 15%), a drift event is logged
-
-### Drift Direction
-
-| Direction | Meaning |
-|-----------|---------|
-| **Positive Drift** | Compliance scores are *increasing* — agents are becoming more compliant than the baseline |
-| **Negative Drift** | Compliance scores are *decreasing* — agents are deviating from expected behavior |
-
-::: warning
-Negative drift typically requires attention. It may indicate that agents are finding ways around governance rules, or that SOPs need updating to match current usage patterns.
-:::
+The refinement prompt is given only measured facts. It is explicitly instructed
+not to infer findings the evidence does not state.
 
 ---
 
@@ -49,45 +59,24 @@ This lineage allows Intutic to:
 
 ---
 
-## Drift Events
-
-When drift is detected, a `behavioral_drift_event` is created containing:
-
-| Field | Description |
-|-------|-------------|
-| **SOP** | The SOP where drift was detected |
-| **Direction** | Positive or negative drift |
-| **Deviation** | The percentage deviation from baseline |
-| **Window** | The time window analyzed |
-| **Traces** | The number of traces in the analysis window |
-
-Drift events appear in the dashboard's anomaly feed and can trigger alerts or escalation workflows.
-
----
-
-## Advanced: Vector Drift Detection
-
-For more subtle behavioral changes, Intutic supports vector-based drift detection using trace profile embeddings:
-
-1. The system collects recent traces (models used, compliance scores, enforcement actions, token costs)
-2. These are embedded into vector representations
-3. Cosine distance is calculated against the baseline centroid
-4. If the distance exceeds the threshold (default 0.15), a vector drift event is logged
-
-::: info
-Vector drift detection captures behavioral changes that aren't visible in simple compliance score averages — such as shifts in model selection patterns or cost profiles.
-:::
-
----
-
----
-
 ## Developer-Specific Baselines <Badge type="tip" text="Enterprise" />
 
 In multi-developer environments, a single global baseline for an SOP can be too broad because developers have distinct usage patterns. Intutic dynamically calculates **Developer-Specific Baselines**:
 
-- **Personalized Reference** — The `driftDetectorCron` calculates individual compliance scores and median token spend baselines for each active developer (User-SOP pair).
-- **Intelligent Fallback** — When evaluating token waste and behavior anomalies, Intutic compares execution traces against the developer's historical baseline first. If no developer-specific baseline exists, the system automatically falls back to the workspace-wide SOP baseline.
+- **Personalized Reference** — An hourly sweep computes a **median cost** baseline
+  for each active (SOP, developer) pair from the trailing 14 days of traces, plus
+  a workspace-wide baseline per SOP.
+- **Intelligent Fallback** — When evaluating token waste, Intutic compares a trace
+  against the developer's own baseline first, then falls back to the SOP-wide
+  baseline if the developer has none.
+- **Minimum sample size** — A baseline is published only once at least 20 traces
+  support it. Below that, a legitimate second run trivially looks like several
+  times the first, and the check would fire on noise.
+
+::: tip Why median, not mean
+Agent costs are long-tailed. A couple of very expensive runs would drag a mean
+upward until nothing ever looked anomalous again.
+:::
 
 ---
 
@@ -103,14 +92,15 @@ transition plausibility never blocks on its own.
 
 ---
 
-## Responding to Drift
+## Responding
 
-When drift is detected:
-
-1. **Review the drift event** in the dashboard anomaly feed
-2. **Examine recent traces** to understand what changed
-3. **Update SOPs** if the drift indicates rules need refinement
-4. **Reset baselines** if the drift represents a desired behavioral change
+1. **Review the anomaly** in the dashboard anomaly feed
+2. **Examine recent traces** to see what changed
+3. **Update the SOP** if agents have outgrown its scope — a stale SOP is a scope
+   problem more often than a compliance problem
+4. **Expect baselines to re-level on their own**: they are recomputed hourly from a
+   trailing window, so a deliberate, sustained change in cost becomes the new
+   normal without any manual reset
 
 ---
 

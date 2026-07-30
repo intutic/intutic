@@ -4,7 +4,7 @@ Weights & Biases Weave is a developer tool built to trace LLM application graphs
 
 ## The Core Difference
 
-W&B Weave is designed for **model tracing**. It monitors call hierarchies, logging prompt inputs and responses to evaluate alignment and quality metrics. Intutic is designed for **active security containment**. It isolates agent runs inside sandboxed Docker containers or V8 isolates, enforcing network controls and execution gates in real time.
+W&B Weave is designed for **model tracing**. It monitors call hierarchies, logging prompt inputs and responses to evaluate alignment and quality metrics. Intutic is designed for **active enforcement**. It sits inline on the agent's traffic and applies execution gates in real time, blocking a request before it reaches the model rather than reporting on it afterwards.
 
 If your agent attempts to establish an unauthorized SSH connection to your internal servers, W&B Weave will log the API trajectory. Intutic intercepts the socket connection at the container boundaries and terminates the run.
 
@@ -15,9 +15,9 @@ If your agent attempts to establish an unauthorized SSH connection to your inter
 | Capability | Intutic | W&B Weave |
 |-----------|---------|-----------|
 | **Core Value** | Active containment & sandbox security | Trajectory tracing & prompt evaluation |
-| **Isolation Model** | Docker / V8 Sandbox Isolation | Not available |
-| **Network Policies** | Outbound block lists, domain firewall gates | N/A |
-| **Enforcement Path** | Real-time proxy & container interceptors | Async telemetry listener |
+| **Isolation Model** | WASM (wasmtime) policy sandbox — 16 MB, 1,000,000 fuel, 5 ms; SOP hook scripts in a frozen V8 context (node:vm, 100 ms) | Not available |
+| **Egress Control** | All agent LLM traffic forced through the governing proxy | N/A |
+| **Enforcement Path** | Real-time inline proxy — requests are blocked before they reach the model | Async telemetry listener |
 | **Rule Engine** | Dynamic WASM modules & custom security scripts | Prompt evaluation workflows |
 | **Target Workload** | Autonomous coding agents (Cursor, Claude Code) | Chat applications, RAG pipelines |
 
