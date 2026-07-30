@@ -103,7 +103,13 @@ export class GovernanceEmitter {
       ],
     })
 
-    const url = `${this.controlPlaneUrl}/api/v1/telemetry/enqueue`
+    // POST /api/v1/hook-events — the batch governance-event ingest whose
+    // BatchHookEventsSchema this payload already matches exactly. Path A used
+    // to post to /api/v1/telemetry/enqueue, an endpoint that never existed in
+    // the control plane; because httpPost resolved on any response, every
+    // tool_allowed/tool_blocked event 404'd silently and the 'Path A failed'
+    // warning never fired.
+    const url = `${this.controlPlaneUrl}/api/v1/hook-events`
     await httpPost(url, this.apiKey, payload)
   }
 
@@ -133,7 +139,16 @@ function httpPost(url: string, apiKey: string, body: string): Promise<void> {
       (res) => {
         // Drain response body to free socket
         res.resume()
-        res.on('end', resolve)
+        res.on('end', () => {
+          // Reject on error statuses so a wrong or removed endpoint surfaces as
+          // a caller-visible failure instead of silently succeeding.
+          const status = res.statusCode ?? 0
+          if (status >= 400) {
+            reject(new Error(`HTTP POST ${url} returned ${status}`))
+            return
+          }
+          resolve()
+        })
       }
     )
     req.on('error', reject)

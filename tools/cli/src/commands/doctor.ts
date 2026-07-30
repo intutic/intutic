@@ -105,7 +105,11 @@ async function checkControlPlane(): Promise<CheckResult> {
     }
   }
 
-  const url = `${creds.controlPlaneUrl}/api/v1/health`
+  // /api/v1/auth/me, not /api/v1/health: the latter never existed, so the
+  // 404 fell through to the "Reachable (HTTP 404)" branch below and this check
+  // reported PASS without ever validating the API key. /auth/me is
+  // authenticated, so a revoked key correctly surfaces as 401.
+  const url = `${creds.controlPlaneUrl}/api/v1/auth/me`
 
   try {
     const controller = new AbortController()
@@ -136,10 +140,13 @@ async function checkControlPlane(): Promise<CheckResult> {
       }
     }
 
+    // Reachable but unexpected: report honestly rather than passing. A 404
+    // here means the endpoint moved — that is a real finding, not a pass.
     return {
       name: 'Control Plane Auth',
-      passed: true,
-      detail: `Reachable at ${creds.controlPlaneUrl} (HTTP ${res.status})`,
+      passed: false,
+      detail: `Unexpected response from ${creds.controlPlaneUrl} (HTTP ${res.status})`,
+      remediation: 'Control plane reachable but the auth probe failed. Check the control-plane version.',
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'

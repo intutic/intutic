@@ -76,29 +76,42 @@ impl RequestPreProcessor {
             return None;
         }
 
-        // 3. Check quality gate (calls control plane for scoring)
-        match quality_gate::check(
-            &self.http_client,
-            &self.control_plane_url,
-            session_id,
-            workspace_id,
-            &last_message,
-            model,
-            protocol,
-            api_key,
-        )
-        .await
-        {
-            Ok(Some(gate_response)) => {
-                debug!(session_id, "Prompt gated by quality check");
-                Some(gate_response)
-            }
-            Ok(None) => None, // Quality OK, proceed
-            Err(e) => {
-                warn!(error = %e, session_id, "Quality gate failed, proceeding");
-                None // Fail-open
+        // 3. Prompt quality gate — DISABLED.
+        //
+        // quality_gate::check posts to POST /api/v1/prompt-quality/score, whose
+        // control-plane service was deleted in the non-circuit-breaker strip.
+        // The gate fails open, so nothing was ever blocked — but every proxied
+        // request paid a control-plane round trip (5s-timeout client) to collect
+        // a 404. `/fix` is the surviving prompt-quality surface.
+        //
+        // Kept behind a flag rather than deleted so restoring the endpoint is a
+        // one-line change; quality_gate.rs stays compiled and tested.
+        if std::env::var("INTUTIC_PROMPT_QUALITY_GATE").as_deref() == Ok("true") {
+            match quality_gate::check(
+                &self.http_client,
+                &self.control_plane_url,
+                session_id,
+                workspace_id,
+                &last_message,
+                model,
+                protocol,
+                api_key,
+            )
+            .await
+            {
+                Ok(Some(gate_response)) => {
+                    debug!(session_id, "Prompt gated by quality check");
+                    return Some(gate_response);
+                }
+                Ok(None) => return None, // Quality OK, proceed
+                Err(e) => {
+                    warn!(error = %e, session_id, "Quality gate failed, proceeding");
+                    return None; // Fail-open
+                }
             }
         }
+
+        None
     }
 }
 

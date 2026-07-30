@@ -183,6 +183,12 @@ export async function runConnect(opts: {
       harnesses: [],
       configVersion: 0,
       devMode: opts.dev || false,
+      // workspaceRoot must be set here: step 2.5 path.join()s it, and
+      // path.join(undefined) throws a TypeError that nothing catches. That
+      // crash is what made `intutic daemon install` produce a crash-looping
+      // service on any machine without ~/.intutic/config.json (the launchd
+      // plist runs `connect --workspace-id --api-key` with KeepAlive=true).
+      workspaceRoot: process.cwd(),
     } as any
   }
 
