@@ -196,15 +196,29 @@ PUT /api/v1/workspace/settings
 
 Send `null` to turn it off, which is the default.
 
-::: warning Check your CI keys first
-A key used by a pipeline belongs to a member who may never sign in interactively.
-Enabling a window refuses those keys as soon as it passes, so either give CI a key
-owned by an account that does complete SSO logins, or leave the window off and keep
-using the manual deactivation step.
-:::
-
 Signing in through SSO re-stamps the timestamp and restores the keys; no
 re-issuing is needed.
+
+### Automation keys
+
+Mark a key as **for automation** when you create it (Settings &rarr; API Keys) and
+the window does not apply to it — no person signs in for a pipeline. Such a key is
+still revocable, and it still stops working the moment its owner is deactivated, so
+it is exempt from the recency policy only, not from offboarding.
+
+Set this on your CI keys before enabling a window, or those pipelines will start
+failing when it elapses.
+
+### Undoing a deactivation
+
+Deactivation refuses a member's keys rather than revoking them, so reversing it
+restores access with no re-issuing:
+
+```
+POST /api/v1/members/:memberId/reactivate
+```
+
+or **Settings &rarr; Team Members &rarr; Reactivate** on an inactive member.
 
 ## Password Management
 
