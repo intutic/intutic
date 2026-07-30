@@ -22,7 +22,7 @@ The doctor runs these checks in order:
 | # | Check | What it verifies | Pass condition |
 |---|---|---|---|
 | 1 | **Proxy** | `GET http://127.0.0.1:4000/health` | HTTP 200 within 3s |
-| 2 | **Control Plane Auth** | `GET {controlPlaneUrl}/api/v1/health` with stored API key | HTTP 200 (non-401/403) |
+| 2 | **Control Plane Auth** | `GET {controlPlaneUrl}/api/v1/auth/me` with stored API key | HTTP 200 (non-401/403) |
 | 3 | **Sync Daemon** | PID file at `~/.intutic/daemon.pid`, or process scan | Process is alive |
 | 4 | **Harness Configs** | SHA-256 hashes vs `~/.intutic/integrity.json` | All hashes match |
 | 5 | **Daemon Log** | `~/.intutic/daemon.log` exists and is readable | File is readable |
