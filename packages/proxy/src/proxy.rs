@@ -33,7 +33,7 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 use crate::config::ProxyConfig;
 use crate::config::SnipCompactorConfig;
 use crate::dlp;
-use crate::metering::check_budget;
+use crate::metering::{check_budget, VirtualKeyRecord};
 use crate::pricing;
 use crate::protocol::Protocol;
 use crate::routing::reward::{RewardEngine, RewardMode, RewardSignals};
@@ -178,6 +178,76 @@ struct PolicyCheckResponse {
 // call site. Grouping them into a struct would add a type whose only purpose is
 // to satisfy the argument-count threshold.
 #[allow(clippy::too_many_arguments)]
+/// Validate a virtual key directly against the control plane.
+///
+/// The cache the proxy authenticates from (`v2:auth:apikey:{prefix}`) is written
+/// only by the control plane's API-key middleware, and proxy auth runs before any
+/// control-plane call — so the proxy cannot warm its own cache. A key used only
+/// against the proxy therefore never validated, and a session whose control-plane
+/// traffic paused past the cache TTL began failing mid-run (TD-219).
+///
+/// Called only on a cache MISS, so the steady-state hot path is unchanged: one
+/// Valkey GET, no HTTP. Hitting this endpoint also warms the cache as a side
+/// effect, so the miss does not repeat.
+///
+/// Returns:
+/// - `Ok(Some(record))` — the control plane recognised the key
+/// - `Ok(None)`         — the control plane rejected it (401/403): a real no
+/// - `Err(())`          — could not ask. The caller must fail CLOSED, exactly as
+///                        it does for an unreachable cache; admitting a key we
+///                        could not validate would be an authentication bypass.
+async fn validate_key_via_control_plane(
+    client: &Client,
+    control_plane_url: &str,
+    token: &str,
+) -> Result<Option<VirtualKeyRecord>, ()> {
+    let url = format!("{}/api/v1/auth/key-context", control_plane_url);
+    let resp = client
+        .get(&url)
+        .header("authorization", format!("Bearer {}", token))
+        .timeout(std::time::Duration::from_millis(1500))
+        .send()
+        .await
+        .map_err(|e| {
+            tracing::warn!(error = %e, "Control-plane key validation request failed");
+        })?;
+
+    let status = resp.status();
+    if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
+        return Ok(None);
+    }
+    if !status.is_success() {
+        tracing::warn!(%status, "Control-plane key validation returned an unexpected status");
+        return Err(());
+    }
+
+    let body: serde_json::Value = resp.json().await.map_err(|e| {
+        tracing::warn!(error = %e, "Control-plane key validation returned unparseable JSON");
+    })?;
+    let Some(workspace_id) = body.get("workspaceId").and_then(|v| v.as_str()) else {
+        tracing::warn!("Control-plane key validation response had no workspaceId");
+        return Err(());
+    };
+
+    // Budget fields are intentionally left unset: this path establishes identity
+    // only. The hard-cap gate immediately below in `handle_proxy` reads spend and
+    // limits from the cache itself, so budgets stay enforced by their own gate
+    // rather than by a value guessed here.
+    Ok(Some(VirtualKeyRecord {
+        token: token.to_string(),
+        key_name: None,
+        team_id: Some(workspace_id.to_string()),
+        user_id: body
+            .get("memberId")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        max_budget: None,
+        spend: 0.0,
+        models: Vec::new(),
+        expires: None,
+    }))
+}
+
 async fn policy_check(
     client: &Client,
     control_plane_url: &str,
@@ -1203,13 +1273,66 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // ── Step 2.5: Validate virtual key and check budget (Valkey) ─────
     let key_record = match state.control_plane.auth_context(raw_token).await {
         ControlPlaneAuth::Known(k) => Some(*k),
+        // A cache miss is not a rejection. The cache is written only by the control
+        // plane's API-key middleware, and this check runs before any
+        // control-plane call, so the proxy cannot warm its own cache — a key used
+        // exclusively against the proxy would never validate, and a session whose
+        // control-plane traffic paused past the cache TTL would start failing
+        // mid-run (TD-219). Ask the control plane directly before giving up; that
+        // call also warms the cache, so the miss does not repeat.
         ControlPlaneAuth::Rejected => {
-            tracing::warn!(token = %key_prefix, "Virtual key not found in cache");
-            return json_error(
-                StatusCode::UNAUTHORIZED,
-                "unauthorized",
-                "Virtual API key is invalid, expired, or revoked.",
-            );
+            let cp_url = state
+                .config
+                .intutic_settings
+                .policy
+                .control_plane_url
+                .as_deref();
+            match cp_url {
+                Some(url) => {
+                    match validate_key_via_control_plane(&state.http_client, url, raw_token).await {
+                        Ok(Some(record)) => {
+                            tracing::debug!(
+                                token = %key_prefix,
+                                "Virtual key absent from cache but confirmed by the control plane"
+                            );
+                            Some(record)
+                        }
+                        Ok(None) => {
+                            tracing::warn!(token = %key_prefix, "Control plane rejected the virtual key");
+                            return json_error(
+                                StatusCode::UNAUTHORIZED,
+                                "unauthorized",
+                                "Virtual API key is invalid, expired, or revoked.",
+                            );
+                        }
+                        // Could not reach the control plane to confirm. Fail
+                        // CLOSED with a retryable status, matching the
+                        // `Unavailable` branch below — admitting an
+                        // unvalidated key is an authentication bypass.
+                        Err(()) => {
+                            tracing::error!(
+                                token = %key_prefix,
+                                "Virtual key absent from cache and the control plane could not be reached"
+                            );
+                            return json_error(
+                                StatusCode::SERVICE_UNAVAILABLE,
+                                "AUTH_UNVERIFIABLE",
+                                "Your API key could not be validated against the control plane, so this request was not admitted. Retry shortly.",
+                            );
+                        }
+                    }
+                }
+                // No control-plane URL configured, so there is nothing to ask and
+                // the cache is the only authority. Unchanged behaviour: reject.
+                None => {
+                    tracing::warn!(token = %key_prefix, "Virtual key not found in cache");
+                    return json_error(
+                        StatusCode::UNAUTHORIZED,
+                        "unauthorized",
+                        "Virtual API key is invalid, expired, or revoked.",
+                    );
+                }
+            }
         }
         // Fail CLOSED, and with a retryable status. Admitting a key we could
         // not validate is an authentication bypass — OWASP's canonical test for

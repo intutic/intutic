@@ -155,6 +155,57 @@ Adjust a member's role at any time. Changes take effect immediately.
 
 ---
 
+## Offboarding <Badge type="danger" text="Enterprise" />
+
+Intutic does **not** implement SCIM, so nothing reconciles your workspace against
+your identity provider. That has a consequence worth planning for.
+
+::: danger Removing someone at the IdP does not stop their agents
+API keys authenticate on their own: Intutic checks the key hash and whether the
+member is active, never whether an SSO session is still valid. So a developer
+removed in Okta or Entra can no longer sign in to the dashboard, but any agent
+still running with their key **keeps working**.
+:::
+
+### Do this when someone leaves
+
+Deactivate the member in Intutic as well:
+
+```
+DELETE /api/v1/members/:memberId
+```
+
+or **Settings &rarr; Team Members &rarr; Deactivate**. This takes effect
+immediately — every key the member holds stops authenticating at the control plane
+and at the proxy on the next request, not after a cache expiry.
+
+Deactivation does not revoke the keys, only refuses them, so reactivating the
+member restores their access without reissuing anything.
+
+### Making IdP removal sufficient
+
+If you would rather not depend on the manual step, set an SSO-recency window under
+**Settings &rarr; Single Sign-On**: a key is refused once its owner has not
+completed an SSO login inside that window. Removal at the identity provider then
+expires their keys on its own.
+
+```
+PUT /api/v1/workspace/settings
+{ "ssoKeyMaxIdleDays": 30 }
+```
+
+Send `null` to turn it off, which is the default.
+
+::: warning Check your CI keys first
+A key used by a pipeline belongs to a member who may never sign in interactively.
+Enabling a window refuses those keys as soon as it passes, so either give CI a key
+owned by an account that does complete SSO logins, or leave the window off and keep
+using the manual deactivation step.
+:::
+
+Signing in through SSO re-stamps the timestamp and restores the keys; no
+re-issuing is needed.
+
 ## Password Management
 
 Change your account password from **Settings → Security → Change Password**.
