@@ -135,6 +135,70 @@ Setting `active: false` via PATCH triggers the full offboarding cascade (see bel
 
 ---
 
+## Groups and Nesting
+
+Groups are real resources with real membership, and a member may be a **User or
+another Group** (RFC 7643 §4.2) — so a directory's own shape survives the sync:
+
+```
+Engineering  (mappedRole: ADMIN)
+└── Platform
+    └── Platform-Oncall
+        └── jane@corp.com   ← inherits ADMIN
+```
+
+A grant on any ancestor reaches every member below it, at any depth.
+
+### Granting a role
+
+Set `mappedRole` in the Intutic group extension. A group **without** one is
+structural: it nests and organises, and grants nothing.
+
+```json
+{
+  "schemas": ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+  "displayName": "Engineering",
+  "urn:ietf:params:scim:schemas:extension:intutic:2.0:Group": { "mappedRole": "ADMIN" }
+}
+```
+
+A member covered by several mapped groups gets the **strongest** role, ordered
+`OWNER > ADMIN > EM > DEVELOPER > VIEWER`. Strongest-wins rather than last-write-wins,
+because the alternative makes someone's role depend on the order your IdP happened to
+sync.
+
+### Nesting a group inside another
+
+Send the child in `members` with `"type": "Group"`:
+
+```json
+{
+  "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+  "Operations": [
+    { "op": "add", "path": "members", "value": [{ "value": "scg_platform", "type": "Group" }] }
+  ]
+}
+```
+
+A group may sit under **several parents** — membership is a list, not a single parent
+pointer — so a shared team can appear under both "Engineering" and "Oncall".
+
+::: warning Cycles are rejected
+An edge that would close a loop (`A` contains `B` contains `A`) is refused with a 400.
+Two administrators editing independently can otherwise produce one, and a cycle would
+make membership resolution non-terminating.
+:::
+
+### Grants are reversible
+
+Removing a member from a granting group, detaching a nested subtree, or deleting the
+group all **withdraw** the grant and restore the role the member held beforehand. A
+role an admin assigned directly is never touched by group logic — absence of a grant
+withdraws a grant, it does not demote someone by hand.
+
+An `OWNER` is never demoted by group logic, whatever the directory says, so a
+misconfiguration cannot remove your last owner.
+
 ### PUT /scim/v2/Users/:id — Replace User
 
 Some providers are configured to replace rather than patch (RFC 7644 §3.5.1). A
