@@ -54,7 +54,7 @@ Every LLM request from your agents flows through the Intutic proxy. The proxy is
 
 ### Proxy Response Post-Processor
 
-The proxy gateway contains a dedicated Rust post-processing engine (`response_postprocessor.rs` / `notification_client.rs`). It acts as a consumer for workspace-level Valkey notification queues (`gov:notify:workspace:{workspaceId}`) and session-specific queues (`gov:notify:{sessionId}`).
+The proxy gateway contains a dedicated Rust post-processing engine (`packages/proxy/src/postprocessor/` — `mod.rs`, `formatter.rs`, `notification_client.rs`). It acts as a consumer for workspace-level Valkey notification queues (`gov:notify:workspace:{workspaceId}`) and session-specific queues (`gov:notify:{sessionId}`).
 
 When the proxy intercepts a streaming or block response from an LLM provider:
 1. It queries Valkey to drain any pending policy or budget notifications queued for that session.

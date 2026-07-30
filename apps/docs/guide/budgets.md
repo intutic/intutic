@@ -137,13 +137,17 @@ This returns a clear breakdown containing:
 
 ---
 
-## CFO FinOps Ledger & Chargebacks (Enterprise)
+## Usage Reporting (Enterprise)
 
-For large-scale enterprise environments, Intutic includes a dedicated **CFO FinOps Dashboard** mapping agent costs directly to financial business structures:
+Intutic keeps an append-only cost ledger — `execution_traces` forbids UPDATE and DELETE at the database level — and exposes it for reporting:
 
-- **General Ledger (GL) Mapping:** Automatically maps API usage costs to corporate cost centers (such as department codes, project IDs, or client billing codes).
-- **Chargeback Re-invoicing:** Computes aggregated chargeback reports at the end of every period, matching plan tiers (e.g. `ent_sub`), consumption metrics, and customized overage rates.
-- **Async Report Exports:** Generate and download detailed corporate financial PDF and CSV reports compiled through background worker jobs.
+- **Workspace Summary:** Actual cost, raw cost before routing, routing savings, input and output token totals, and call count for a daily, weekly or monthly window (`/api/v1/usage/summary`).
+- **Per-Model Breakdown:** Cost and tokens grouped by requested model (`/api/v1/usage/models`).
+- **Event-Level Detail:** The individual billed calls behind those totals (`/api/v1/usage/events`).
+
+::: info Chargebacks and GL mapping are not part of the product
+Cost-center GL mapping, period-end chargeback re-invoicing and the async PDF/CSV report workers were removed when the product narrowed to circuit-breaker scope, and their tables were dropped. The endpoints above are what ships.
+:::
 
 ### Resolving Budget Alerts
 Security and FinOps administrators can review all active budget breaches on the **Incidents Page**. When resolving a breach, administrators can record:

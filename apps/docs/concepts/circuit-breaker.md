@@ -69,7 +69,7 @@ if (budgetBlock) {
 
 The proxy also does a **local budget check** before even calling the control plane — checking `v2:budget:hard_block:{workspace_id}` directly from its own Valkey connection. This means budget blocks take effect with zero network round-trips.
 
-→ Source: [metering.rs](../../../packages/proxy/src/metering.rs) (proxy-side), [evaluate.ts](https://github.com/intutic/intutic/tree/main/services/control-plane/src/routes/evaluate.ts) (control-plane-side)
+→ Source: [metering.rs](../../../packages/proxy/src/metering.rs) (proxy-side); `routes/evaluate.ts` in the control plane, which is not open source
 
 ---
 

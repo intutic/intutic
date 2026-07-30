@@ -19,7 +19,7 @@ If your agent attempts to execute a shell command that deletes a configuration f
 | **Enforcement Layer** | Synchronous terminal/proxy gateway (<50ms) | Model API gateway or async content scanner |
 | **Sandbox Isolation** | WASM (wasmtime) policy sandbox — 16 MB, 1,000,000 fuel, 5 ms; SOP hook scripts in a frozen V8 context (node:vm, 100 ms) | Not available |
 | **Agent Integrations** | 18 AI coding harnesses (Claude Code, Cursor, etc.) | Standard chatbot SDK integrations |
-| **FinOps & ROI** | seat reclamation, ledger chargebacks | Basic model usage statistics |
+| **FinOps & ROI** | Append-only cost ledger with per-model breakdown; daily and monthly caps enforced with KILL | Basic model usage statistics |
 
 ---
 

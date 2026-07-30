@@ -6,7 +6,7 @@ Weights & Biases Weave is a developer tool built to trace LLM application graphs
 
 W&B Weave is designed for **model tracing**. It monitors call hierarchies, logging prompt inputs and responses to evaluate alignment and quality metrics. Intutic is designed for **active enforcement**. It sits inline on the agent's traffic and applies execution gates in real time, blocking a request before it reaches the model rather than reporting on it afterwards.
 
-If your agent attempts to establish an unauthorized SSH connection to your internal servers, W&B Weave will log the API trajectory. Intutic intercepts the socket connection at the container boundaries and terminates the run.
+If your agent's next step is a tool call an SOP forbids, W&B Weave will log the API trajectory. Intutic sees that tool call in the request, matches it against the SOP in force, and kills the request before the model ever answers.
 
 ---
 

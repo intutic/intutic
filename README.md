@@ -167,7 +167,7 @@ Because Intutic evaluates prompts pre-flight, you can run interactive governance
 
 ```bash
 /intutic status   # View active session spend and compliance score
-/intutic rules    # List active WASM & Markdown SOP rules
+/intutic sops     # List active SOPs for this workspace
 ```
 
 ---
