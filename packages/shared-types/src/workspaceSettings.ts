@@ -23,6 +23,19 @@ export type { McpProxyFailBehavior, McpProxyMode, BypassEnforcementTier }
  * DEFAULT_WORKSPACE_SETTINGS by the control-plane GET handler and the
  * sync-daemon before writing runtime.env.
  */
+/** BYOC trace-storage configuration (mirrors the control plane's WorkspaceByocConfig). */
+export interface ByocStorageConfig {
+  provider: 'gcs' | 's3' | 'disabled'
+  bucketName?: string
+  prefix?: string
+  projectId?: string
+  region?: string
+  accessKeyId?: string
+  secretAccessKey?: string
+  credentials?: string
+  mode?: 'mirror' | 'primary'
+}
+
 export interface WorkspaceSettings {
   /**
    * Whether developers' local markdown vaults (Obsidian/Logseq/Foam) may feed
@@ -35,6 +48,13 @@ export interface WorkspaceSettings {
    * workspace policy rather than purely personal preference.
    */
   allowLocalMemoryVaults: boolean
+
+  /**
+   * Bring-your-own-cloud trace storage. Optional — absent means Intutic-managed
+   * storage. Previously accessed only through `as unknown as` casts; typed here
+   * so the settings UI and the control plane share one shape.
+   */
+  byocStorage?: ByocStorageConfig
 
   /**
    * What the MCP governance proxy does when the Intutic control plane is
@@ -88,19 +108,6 @@ export interface WorkspaceSettings {
     ff_metaclaw_evolution?: boolean
   }
 
-  /**
-   * TD-126 — Autonomous Skill Transfer
-   *
-   * When `true`, this workspace participates in the cross-workspace SOP
-   * propagation system:
-   * - High-performing validated SOPs (Gödel score ≥ 0.85) from this workspace
-   *   may be cloned to other opt-in workspaces as DRAFT SOPs.
-   * - This workspace will receive propagated SOPs from other opt-in workspaces
-   *   provided no structurally similar SOP already exists (Jaccard ≥ 0.70).
-   *
-   * Defaults to `false` (opt-in only).
-   */
-  enableAutonomousSkillTransfer?: boolean
 
   /**
    * Whether to automatically delete local skills/rules segments that fail
@@ -135,7 +142,6 @@ export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
     ff_response_cache_exact: false,
     ff_response_cache_semantic: false,
   },
-  enableAutonomousSkillTransfer: false,
   enableLocalSkillAuditDelete: false,
   banditKeywords: {
     testing: ['test', 'spec', 'assert', 'vitest', 'jest', 'unittest'],

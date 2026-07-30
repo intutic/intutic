@@ -468,49 +468,13 @@ async function runSyncIteration(ctx: IterationContext): Promise<SyncResult> {
     files: newFiles,
   })
 
-  // 6b. ContextGraph Indexing Scan & Sync (WS1: LLD #16)
-  if (adapterId) {
-    try {
-      const { BrainIndexer } = await import('./brainIndexer.js')
-      const { loadContextIntegrity, saveContextIntegrity } = await import('./integrityStore.js')
-
-      const scanResult = await BrainIndexer.scanWorkspace(workspaceRoot)
-      const contextIntegrity = await loadContextIntegrity(workspaceRoot)
-      const delta = BrainIndexer.computeDelta(scanResult, contextIntegrity)
-
-      if (delta.upserted.length > 0 || delta.deleted.length > 0) {
-        const syncUrl = `${controlPlaneUrl}/api/v1/context/sync`
-        const res = await fetch(syncUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({
-            adapterId,
-            delta,
-          }),
-          signal: AbortSignal.timeout(15_000),
-        })
-
-        if (res.ok) {
-          const newContextFiles: Record<string, string> = {}
-          for (const [filePath, file] of Object.entries(scanResult.files)) {
-            newContextFiles[filePath] = file.hash
-          }
-          await saveContextIntegrity(workspaceRoot, {
-            lastSyncAt: newIso(),
-            configVersion: config.configVersion,
-            files: newContextFiles,
-          })
-        } else {
-          console.warn(`[sync-daemon] ContextGraph sync failed: ${res.status} ${res.statusText}`)
-        }
-      }
-    } catch (err) {
-      console.warn('[sync-daemon] ContextGraph sync error:', err)
-    }
-  }
+  // 6b. ContextGraph indexing — REMOVED.
+  //
+  // This block scanned the whole workspace every sync cycle and POSTed the
+  // delta to /api/v1/context/sync, an ingest stripped from the control plane
+  // with the Context Graph feature (commit 9cfc0200). Worse than dead: the
+  // integrity file is only written on a 2xx, so every cycle re-scanned and
+  // re-posted the same delta forever on every developer machine.
 
   // 6c. Hook event drain is now FSEvents-driven (see startSyncLoop).
   //     No per-iteration drain needed here; the chokidar watcher handles it.
