@@ -172,12 +172,6 @@ struct PolicyCheckResponse {
     policy_id: Option<String>,
 }
 
-/// POST /api/v1/policy/check on the control plane.
-/// Returns Ok(()) if allowed, Err with reason string if denied.
-// Eight request-scoped values forwarded to a single control-plane call, with one
-// call site. Grouping them into a struct would add a type whose only purpose is
-// to satisfy the argument-count threshold.
-#[allow(clippy::too_many_arguments)]
 /// Validate a virtual key directly against the control plane.
 ///
 /// The cache the proxy authenticates from (`v2:auth:apikey:{prefix}`) is written
@@ -191,11 +185,11 @@ struct PolicyCheckResponse {
 /// effect, so the miss does not repeat.
 ///
 /// Returns:
-/// - `Ok(Some(record))` — the control plane recognised the key
-/// - `Ok(None)`         — the control plane rejected it (401/403): a real no
-/// - `Err(())`          — could not ask. The caller must fail CLOSED, exactly as
-///                        it does for an unreachable cache; admitting a key we
-///                        could not validate would be an authentication bypass.
+/// - `Ok(Some(record))` — the control plane recognised the key.
+/// - `Ok(None)` — the control plane rejected it (401/403): a real no.
+/// - `Err(())` — could not ask. The caller must fail CLOSED, exactly as it does for
+///   an unreachable cache; admitting a key we could not validate would be an
+///   authentication bypass.
 async fn validate_key_via_control_plane(
     client: &Client,
     control_plane_url: &str,
@@ -216,11 +210,52 @@ async fn validate_key_via_control_plane(
     if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
         return Ok(None);
     }
+    // A rate-limit answer says nothing about the key. Retry once, honouring
+    // Retry-After when it is short, rather than reporting a valid key as
+    // unverifiable — every proxy pod shares one source IP, so one noisy client
+    // could otherwise deny validation to everybody behind the same egress.
+    if status == StatusCode::TOO_MANY_REQUESTS {
+        let wait_ms = resp
+            .headers()
+            .get("retry-after")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<u64>().ok())
+            .map(|secs| secs.min(2) * 1000)
+            .unwrap_or(250);
+        tracing::warn!(wait_ms, "Control-plane key validation rate-limited; retrying once");
+        tokio::time::sleep(std::time::Duration::from_millis(wait_ms)).await;
+        let retry = client
+            .get(&url)
+            .header("authorization", format!("Bearer {}", token))
+            .timeout(std::time::Duration::from_millis(1500))
+            .send()
+            .await
+            .map_err(|e| {
+                tracing::warn!(error = %e, "Control-plane key validation retry failed");
+            })?;
+        let retry_status = retry.status();
+        if retry_status == StatusCode::UNAUTHORIZED || retry_status == StatusCode::FORBIDDEN {
+            return Ok(None);
+        }
+        if !retry_status.is_success() {
+            tracing::warn!(%retry_status, "Control-plane key validation still failing after retry");
+            return Err(());
+        }
+        return parse_key_context(retry, token).await;
+    }
     if !status.is_success() {
         tracing::warn!(%status, "Control-plane key validation returned an unexpected status");
         return Err(());
     }
 
+    parse_key_context(resp, token).await
+}
+
+/// Turn a 200 from `/auth/key-context` into an identity-only key record.
+async fn parse_key_context(
+    resp: reqwest::Response,
+    token: &str,
+) -> Result<Option<VirtualKeyRecord>, ()> {
     let body: serde_json::Value = resp.json().await.map_err(|e| {
         tracing::warn!(error = %e, "Control-plane key validation returned unparseable JSON");
     })?;
@@ -248,6 +283,12 @@ async fn validate_key_via_control_plane(
     }))
 }
 
+/// POST /api/v1/policy/check on the control plane.
+/// Returns Ok(()) if allowed, Err with reason string if denied.
+// Eight request-scoped values forwarded to a single control-plane call, with one
+// call site. Grouping them into a struct would add a type whose only purpose is
+// to satisfy the argument-count threshold.
+#[allow(clippy::too_many_arguments)]
 async fn policy_check(
     client: &Client,
     control_plane_url: &str,
@@ -1281,16 +1322,40 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         // mid-run (TD-219). Ask the control plane directly before giving up; that
         // call also warms the cache, so the miss does not repeat.
         ControlPlaneAuth::Rejected => {
-            let cp_url = state
-                .config
-                .intutic_settings
-                .policy
-                .control_plane_url
-                .as_deref();
+            // Only virtual keys are eligible for the fallback. The control-plane
+            // endpoint also accepts dashboard session JWTs through the shared auth
+            // middleware, and admitting one here would let a session token act as
+            // an LLM proxy credential. That endpoint rejects non-vk_ tokens too;
+            // this is the second half of the check, so neither side alone is
+            // load-bearing.
+            let cp_url = if raw_token.starts_with("vk_") {
+                state
+                    .config
+                    .intutic_settings
+                    .policy
+                    .control_plane_url
+                    .as_deref()
+            } else {
+                None
+            };
             match cp_url {
                 Some(url) => {
                     match validate_key_via_control_plane(&state.http_client, url, raw_token).await {
-                        Ok(Some(record)) => {
+                        Ok(Some(mut record)) => {
+                            // Identity came from the control plane; budgets still
+                            // come from the cache, so this path enforces the same
+                            // pre-flight check as the cached one. Without it
+                            // `max_budget` stays None and `check_budget` is a no-op
+                            // — silently exempting exactly the requests that took
+                            // the fallback.
+                            if let Some(ws) = record.team_id.as_deref() {
+                                if let Some((spend, limit)) =
+                                    state.control_plane.daily_budget(ws).await
+                                {
+                                    record.spend = spend;
+                                    record.max_budget = limit.or(Some(100.0));
+                                }
+                            }
                             tracing::debug!(
                                 token = %key_prefix,
                                 "Virtual key absent from cache but confirmed by the control plane"
@@ -1362,6 +1427,38 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         // on-disk daily cap instead of a control-plane budget.
         ControlPlaneAuth::Unmanaged => None,
     };
+
+    // ── Step 2.6: bind the request to the identity we just authenticated ─────
+    //
+    // `workspace_id` was derived from the token's suffix or the x-workspace-id
+    // header (`extract_workspace_id`), both attacker-controlled. The cache lookup
+    // keys on the token's first 12 characters only, and the workspace suffix of a
+    // `vk_<32hex>_<workspace>` key sits OUTSIDE that prefix — so a holder of a
+    // legitimate key in their own workspace could swap the suffix, hit their own
+    // warm cache entry, and have every downstream gate run against the workspace
+    // they typed: provider credentials, hard caps, semantic cache (salted with
+    // workspace_id) and the published trace. The full token is never hashed here,
+    // so only the cold path caught it.
+    //
+    // The authenticated record is the authority. Adopt its workspace, and refuse a
+    // request that asked for a different one.
+    if let Some(ref key) = key_record {
+        if let Some(ref authed_ws) = key.team_id {
+            if workspace_id != "unknown" && workspace_id != *authed_ws {
+                tracing::warn!(
+                    requested = %workspace_id,
+                    authenticated = %authed_ws,
+                    "Rejecting request whose workspace does not match its API key"
+                );
+                return json_error(
+                    StatusCode::FORBIDDEN,
+                    "workspace_mismatch",
+                    "This API key does not belong to the requested workspace.",
+                );
+            }
+            workspace_id = authed_ws.clone();
+        }
+    }
 
     if let Some(ref key) = key_record {
         let prompt_tokens = (body_str.len() as f64 / 4.0).max(1.0) as u32;

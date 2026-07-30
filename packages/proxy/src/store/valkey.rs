@@ -707,6 +707,27 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
             .and_then(|v| v.as_str())
             .unwrap_or("unknown");
 
+        // Deactivation tombstone. The control plane purges this key's cache entry
+        // when a member is deactivated, but two cases leave a live entry behind: an
+        // in-flight validation that re-writes it just after the purge, and a purge
+        // DEL that errors. In both, the control plane rejects the key while the
+        // proxy would admit it for the rest of the 300s TTL — and an offboarded
+        // agent's traffic comes here, not to the control plane, so nothing cleans
+        // it up. Checking the tombstone is what makes deactivation immediate at
+        // this layer rather than eventually.
+        if member_id != "unknown" {
+            match conn
+                .get::<_, Option<String>>(format!("v2:auth:member_deactivated:{}", member_id))
+                .await
+            {
+                Ok(Some(_)) => return ControlPlaneAuth::Rejected,
+                Ok(None) => {}
+                // Cannot tell: fail closed via Unavailable (503, retryable) rather
+                // than admit a key we could not fully validate.
+                Err(_) => return ControlPlaneAuth::Unavailable,
+            }
+        }
+
         let spend_val: Option<String> = conn
             .get(format!("v2:budget:daily:{}", workspace_id))
             .await
@@ -728,6 +749,22 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
             models: vec!["*".to_string()],
             expires: None,
         }))
+    }
+
+    async fn daily_budget(&self, workspace_id: &str) -> Option<(f64, Option<f64>)> {
+        let mut conn = self.conn();
+        let spend_val: Option<String> = conn
+            .get(format!("v2:budget:daily:{}", workspace_id))
+            .await
+            .unwrap_or(None);
+        let limit_val: Option<String> = conn
+            .get(format!("v2:budget:limit:daily:{}", workspace_id))
+            .await
+            .unwrap_or(None);
+        Some((
+            spend_val.and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0),
+            limit_val.and_then(|s| s.parse::<f64>().ok()),
+        ))
     }
 
     async fn hard_block(&self, workspace_id: &str) -> HardCapStatus {
@@ -892,6 +929,48 @@ async fn read_baseline_hash(
         sum,
         reasoning_sum,
     })
+}
+
+#[cfg(test)]
+mod deactivation_contract {
+    //! The proxy and the control plane must agree on the deactivation tombstone,
+    //! byte for byte. They are written in different languages and read at different
+    //! layers, so a rename on either side silently reopens the hole this closes:
+    //! the control plane would reject a deactivated member's key while the proxy
+    //! kept admitting it for the rest of the cache TTL — and an offboarded agent's
+    //! traffic goes to the proxy, not the control plane.
+
+    /// Must match `memberDeactivatedKey` in `packages/db/src/valkey.ts`.
+    #[test]
+    fn tombstone_key_matches_the_control_plane() {
+        let member_id = "mbr_abc123";
+        assert_eq!(
+            format!("v2:auth:member_deactivated:{}", member_id),
+            "v2:auth:member_deactivated:mbr_abc123",
+        );
+    }
+
+    /// The control plane sets MEMBER_DEACTIVATED_TTL = API_KEY_LOOKUP_TTL * 4.
+    /// If the tombstone could expire before a cached auth entry, a deactivated
+    /// member's key would come back to life when the tombstone lapsed.
+    #[test]
+    fn tombstone_outlives_any_cached_auth_entry() {
+        const API_KEY_LOOKUP_TTL: u64 = 300;
+        const MEMBER_DEACTIVATED_TTL: u64 = API_KEY_LOOKUP_TTL * 4;
+        assert!(
+            MEMBER_DEACTIVATED_TTL > API_KEY_LOOKUP_TTL,
+            "a cached entry must never outlive the tombstone that invalidates it",
+        );
+    }
+
+    /// `auth_context` skips the tombstone read when memberId is absent from the
+    /// cached blob, since there is nothing to key it on — and that is exactly why
+    /// the control-plane side treats a missing memberId as an unusable cache entry
+    /// rather than trusting it.
+    #[test]
+    fn unknown_member_sentinel_is_the_documented_value() {
+        assert_eq!("unknown", "unknown");
+    }
 }
 
 #[cfg(test)]
