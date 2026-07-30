@@ -35,3 +35,10 @@ docs/runbooks/
 docs/proposals/
 docs/recents/
 docs/reference/
+
+# Build output that is never copied into an image but is still transferred as
+# build context. `target/` is 10GB here; shipping it to the daemon on every
+# build is what timed out a control-plane push in the enterprise repo on
+# 2026-07-30 ("failed to copy: write: broken pipe").
+target
+release-artifacts
