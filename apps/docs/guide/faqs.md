@@ -41,7 +41,7 @@ It is a hybrid system divided between the **Local Rust Proxy** and the **Remote 
 *   Developers can define personal, local-only guidelines in `.intutic/sops/` subdirectories.
 *   The sync daemon compiles and merges these local guidelines directly into `.cursorrules`, `CLAUDE.md`, or `.windsurfrules` in real-time.
 *   Outbound prompts and streams are evaluated against these files using the local WASM rules engine. If a rule is violated, warnings are printed directly in the terminal client.
-*   This setup protects developer privacy: local rule deviations are kept entirely offline in your workspace, while providing active stream-level interception and rule enforcement. Central database logging, deep trajectory analysis, and remote drift monitoring are only enabled when connected to the commercial control plane.
+*   This setup protects developer privacy: local rule deviations are kept entirely offline in your workspace, while providing active stream-level interception and rule enforcement. Central database logging, trajectory analysis and config-drift reporting are only enabled when connected to the commercial control plane.
 
 ---
 
@@ -225,17 +225,33 @@ In multi-agent systems where execution and checking are divided across parallel 
 
 ---
 
-### 15. Can Intutic auto-resolve anomalies like hallucinations and context drift?
+### 15. Can Intutic correct an agent mid-session, or only block it?
 
-**Yes, absolutely.** Both anomalies are resolved in-flight through targeted feedback injections:
+**It can steer as well as block.** When the control plane classifies a trace as
+anomalous, `correctivePromptService` queues a corrective instruction on
+`gov:notify:{sessionId}`, and the proxy's response post-processor drains that queue and
+merges the note into the response the agent reads. The agent adjusts on its next turn
+without a session restart.
 
-#### Auto-Resolving Hallucinations
-*   **The Issue:** The agent invents non-existent file paths, libraries, columns, or tool arguments.
-*   **The Resolution:** The proxy's AST/WASM engine evaluates the command. If a hallucinated path is caught, it appends a `[Anomaly: Hallucinated Path]` alert card advising the correct path (e.g. *“The file 'utils/helper.py' does not exist. Did you mean 'packages/id/src/utils.ts'?”*). The agent harness reads the warning and immediately corrects its command on the next turn.
+That path is real and inline. Two things it does **not** do, which earlier versions of
+this page claimed:
 
-#### Auto-Resolving Context Drift & Instruction Fatigue
-*   **The Issue:** In long sessions (e.g. 30k+ tokens), the LLM's attention is diluted, causing it to "forget" original guidelines.
-*   **The Resolution:** The proxy logs the drift. The local sync daemon dynamically re-injects and pins active rules back into the top-level system prompt for the next turn, re-focusing the model's attention weights and auto-aligning its execution path back to the workspace policies without requiring a manual session restart.
+*   **It does not detect hallucinations.** There is no engine that checks whether a file
+    path or library the agent invented actually exists. What ships is output probing —
+    a background LLM probe scores completions against the active guideline and records
+    a verdict — which finds *policy* violations, not fabricated facts.
+*   **It does not re-pin rules into the system prompt.** The corrective note is a
+    message appended to a response, not a rewrite of the agent's system prompt, and it
+    comes from the proxy rather than the sync daemon.
+
+#### What happens as a session gets long
+*   **The Issue:** In long sessions the model's attention is diluted and it drifts from
+    the guidelines it was given.
+*   **What actually ships:** the proxy's `ContextGrowthDetector` flags a session whose
+    context has ballooned, as an advisory signal rather than a block, and the corrective
+    note described above can be delivered inline. There is **no** automatic re-pinning
+    of rules into the system prompt — if a session has drifted far enough to matter, it
+    still needs restarting.
 
 ---
 
@@ -288,7 +304,7 @@ Intutic's active resilience and loop steering are supported by three newly optim
 
 Instead of acting as a simple reactive alert or blocking tool, Intutic implements a **Closed-Loop Policy Optimization & Remediation** system:
 
-1. **Telemetry & Incident Logging:** When developers run agent harnesses, all stream violations, hallucinations, and code drift incidents are logged in real-time.
+1. **Telemetry & Incident Logging:** When developers run agent harnesses, all stream violations, blocked tool calls and config-drift incidents are logged in real-time.
 2. **Background Pattern Analysis (Sleep Cycle):** A background analytical service periodically processes these incident logs to cluster them by category and evaluate their severity and frequency.
 3. **Auto-Proposed Rule Tightening:** When a recurring mistake pattern crosses safety thresholds, the platform automatically drafts a tightened rule amendment targeted at preventing that specific mistake.
 4. **Approval & Real-Time Sync:** Once approved (either manually by an administrator or automatically for high-confidence safety policies), the new rule is written to the central SOP registry. The local sync-daemon then instantly pushes these rule updates directly into the active `.cursorrules`, `CLAUDE.md`, or harness config files in the developer's workspace.
