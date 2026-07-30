@@ -124,7 +124,7 @@ The Autonomous Reasoning Engine detects 12 categories of runtime anomalies:
 | `UNAUTHORIZED_TOOL` | Calling tools outside allowed set |
 | `DATA_EXFILTRATION` | Attempting to leak sensitive data |
 | `PROMPT_INJECTION` | Malicious prompt manipulation detected |
-| `HALLUCINATION` | Model generating fabricated information |
+| `HALLUCINATION` | An agent still working for a parent that is gone — its results have nowhere to go |
 | `SCOPE_VIOLATION` | Operating outside defined task scope |
 | `BUDGET_BREACH` | Exceeding allocated budget |
 | `SPAWN_BUDGET_BREACH` | Sub-agent spawning over limits |

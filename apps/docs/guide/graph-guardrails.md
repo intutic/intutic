@@ -118,10 +118,12 @@ not belong inline on a path measured in milliseconds. The scoring itself is a
 plain threshold comparison against a 0..1 adherence score — not an embedding
 or a model call. It is out of
 scope *here* by decision rather than by omission — and covered where the plan
-lives: the control plane classifies blocked tool calls on an advisory tee and
-raises `WORKFLOW_GOAL_DRIFT` from stored-plan adherence, so all twelve
+lives: the control plane classifies every trace as it is recorded and raises
+`WORKFLOW_GOAL_DRIFT` from stored-plan adherence, so all twelve
 categories are evaluated across the platform while the hot path stays
-deterministic.
+deterministic. Every category is covered by a test that makes it *fire*, not
+merely one that counts registered detectors — a detector that exists but cannot
+be reached looks identical from the outside to one that works.
 
 Prompt injection deserves its own caveat: it is pattern matching on the
 well-known phrasings, not a classifier. Someone who rewords will get past it.
