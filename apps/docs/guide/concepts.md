@@ -95,12 +95,9 @@ Traces are the foundation for cost tracking, anomaly detection, and compliance a
 
 ## Token Waste Classification
 
-The Autonomous Reasoning Engine (ARE) auto-classifies trace data to identify inefficient token consumption. It applies **5 waste heuristic rules** (`wasteClassificationService.ts`):
-1. **Scaffolding waste** — redundant folder scans and boilerplate prints.
-2. **Context bloat** — sending excessively large file reads repetitively.
-3. **Loop waste** — repeating identical tool arguments.
-4. **Model capability waste** — using staff-grade models for junior tasks.
-5. **No-op waste** — calling tools that result in zero-length changes or redundant state checks.
+The Intelligence Engine classifies trace data to identify inefficient token consumption. `wastePatternService.ts` computes **two waste patterns**, both derived from columns that exist on `execution_traces`, and each carries a confidence reflecting how it was derived — so the UI never presents an inference as a measurement:
+1. **Context bloat** (measured, confidence 1.0) — raw input tokens minus compressed input tokens: context the compactor had to strip before the request was billed.
+2. **Oversized prompt** (heuristic, confidence 0.6) — traces whose raw input exceeds 3× the workspace median, with the excess over the median attributed as waste. A legitimately large task looks the same, hence the reduced confidence.
 
 Traces flagged with high waste metrics trigger automated configuration optimizations via the SkillOpt feedback loop.
 

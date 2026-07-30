@@ -33,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   isolates. Nothing containerizes an agent: what ships is a wasmtime WASM sandbox
   for policy rules (16 MB, 1,000,000 fuel, 5 ms) and SOP hook scripts in a frozen
   `node:vm` context. Corrected in prose as well as the comparison tables.
-  The 1.10.0 entry below claims this cleanup was already done — it was not; that
+  The 1.6.0 entry below claims this cleanup was already done — it was not; that
   sweep fixed some references and missed the comparison pages entirely.
 - Also removed the outbound-block-list and container-interceptor claims, neither
   of which has an implementation.
