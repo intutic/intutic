@@ -526,6 +526,19 @@ pub trait ControlPlaneCache: Send + Sync + 'static {
     /// Status of a governed loop run, if the control plane is tracking it.
     async fn loop_status(&self, loop_run_id: &str) -> Option<String>;
 
+    /// The loop run this caller is currently executing under, when no
+    /// `x-loop-run-id` header is present.
+    ///
+    /// Needed because nothing sets that header: the CLI exports
+    /// `INTUTIC_LOOP_RUN_ID`/`HTTP_X_LOOP_RUN_ID` into the agent's environment
+    /// and no component translates env into headers, so loop governance — the
+    /// kill gate, the budget breach detector, spend accrual and `loop_run_id`
+    /// on published traces — was unreachable in practice. The control plane
+    /// publishes a pointer keyed by the same workspace/member pair this proxy
+    /// already resolved from the API key.
+    async fn active_loop_run(&self, workspace_id: &str, member_id: Option<&str>)
+        -> Option<String>;
+
     // ── Paid-tier gates ──────────────────────────────────────────────
 
     /// Whether auto-judging is active for this session or loop run. Judging is

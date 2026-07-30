@@ -155,6 +155,13 @@ struct PolicyCheckRequest {
     provider: String,
     model: String,
     session_id: Option<String>,
+    /// The governed loop run, when this request belongs to one.
+    ///
+    /// `routes/evaluate.ts` has always denied requests whose loop is KILLED,
+    /// but that branch could never fire: this field did not exist and no
+    /// headers were forwarded, so the control plane saw no loop to check.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    loop_run_id: Option<String>,
 }
 
 #[allow(dead_code)] // policy_id retained for future structured audit logging
@@ -179,6 +186,7 @@ async fn policy_check(
     provider: &Provider,
     model: &str,
     session_id: Option<&str>,
+    loop_run_id: Option<&str>,
     timeout_ms: u64,
 ) -> Result<(), String> {
     let url = format!("{}/api/v1/policy/check", control_plane_url);
@@ -188,6 +196,7 @@ async fn policy_check(
         provider: provider.harness_name().to_string(),
         model: model.to_string(),
         session_id: session_id.map(|s| s.to_string()),
+        loop_run_id: loop_run_id.map(|s| s.to_string()),
     };
 
     let result = client
@@ -1014,8 +1023,11 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             });
 
             // Live loop status when the request carries a loop run header.
+            // Both spellings, matching the gate below — this site read only the
+            // canonical one.
             let loop_run = if let Some(lr_id) = headers
                 .get("x-loop-run-id")
+                .or_else(|| headers.get("http-x-loop-run-id"))
                 .and_then(|v| v.to_str().ok())
             {
                 state
@@ -1270,11 +1282,31 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     }
 
     // ── Step 3b: Loop execution governance check (Valkey, <1ms P99) ─────────
-    let loop_run_id_header = headers
+    //
+    // The header is the contract, but nothing sets it: the CLI exports
+    // INTUTIC_LOOP_RUN_ID / HTTP_X_LOOP_RUN_ID into the agent's environment and
+    // no component turns env into headers. With the id absent, four behaviours
+    // silently did nothing — the kill gate below, the budget-breach detector,
+    // spend accrual, and `loop_run_id` on published traces. So fall back to the
+    // active-loop pointer the control plane publishes for this workspace and
+    // member, which is the same identity pair already resolved from the API key.
+    let loop_run_id_header = match headers
         .get("x-loop-run-id")
         .or_else(|| headers.get("http-x-loop-run-id"))
         .and_then(|v| v.to_str().ok())
-        .map(|v| v.to_string());
+        .map(|v| v.to_string())
+    {
+        Some(from_header) => Some(from_header),
+        None => {
+            state
+                .control_plane
+                .active_loop_run(
+                    &workspace_id,
+                    key_record.as_ref().and_then(|k| k.user_id.as_deref()),
+                )
+                .await
+        }
+    };
 
     if let Some(ref lr_id) = loop_run_id_header {
         if let Some(status) = state.control_plane.loop_status(lr_id).await {
@@ -1708,6 +1740,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 &provider,
                 &model,
                 Some(&session_id),
+                loop_run_id_header.as_deref(),
                 policy_cfg.timeout_ms,
             )
             .await

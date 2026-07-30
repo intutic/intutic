@@ -92,6 +92,31 @@ const BROADCAST_MAX_PER_WINDOW: i64 = 10;
 /// the 500 ms budget these reads carried before the port.
 const GATE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
 
+/// Keys shared with the control plane. Centralised because these are a
+/// cross-repo contract: the control plane writes them in TypeScript and this
+/// proxy reads them in Rust, with nothing but agreement holding the two
+/// together. When they disagreed, loop governance silently enforced nothing —
+/// the blob was written and these scalars never were. The tests below pin the
+/// exact strings.
+pub(crate) fn loop_state_key(loop_run_id: &str) -> String {
+    format!("intutic:loop:{}", loop_run_id)
+}
+
+pub(crate) fn loop_spend_key(loop_run_id: &str) -> String {
+    format!("intutic:loop:{}:spend", loop_run_id)
+}
+
+pub(crate) fn loop_budget_key(loop_run_id: &str) -> String {
+    format!("intutic:loop:{}:budget", loop_run_id)
+}
+
+pub(crate) fn active_loop_key(workspace_id: &str, member_id: Option<&str>) -> String {
+    match member_id {
+        Some(mid) => format!("intutic:active_loop:{}:{}", workspace_id, mid),
+        None => format!("intutic:active_loop:{}", workspace_id),
+    }
+}
+
 fn bandit_key(workspace_id: &str) -> String {
     format!("bandit:{}", workspace_id)
 }
@@ -551,7 +576,7 @@ impl LocalStore for ValkeyStore {
         // No TTL: a loop run's lifetime is bounded by its own status, which is
         // already tracked, and expiring the spend under a live run would reset
         // its budget to zero-spent halfway through.
-        conn.incr(format!("intutic:loop:{loop_run_id}:spend"), amount)
+        conn.incr(loop_spend_key(loop_run_id), amount)
             .await
             .ok()
     }
@@ -559,12 +584,12 @@ impl LocalStore for ValkeyStore {
     async fn workflow_budget(&self, loop_run_id: &str) -> (Option<f64>, Option<f64>) {
         let mut conn = self.conn();
         let spend = conn
-            .get::<_, Option<f64>>(format!("intutic:loop:{loop_run_id}:spend"))
+            .get::<_, Option<f64>>(loop_spend_key(loop_run_id))
             .await
             .ok()
             .flatten();
         let budget = conn
-            .get::<_, Option<f64>>(format!("intutic:loop:{loop_run_id}:budget"))
+            .get::<_, Option<f64>>(loop_budget_key(loop_run_id))
             .await
             .ok()
             .flatten();
@@ -727,17 +752,30 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
     }
 
     async fn loop_status(&self, loop_run_id: &str) -> Option<String> {
-        let mut conn = self.conn();
-        let stored: Option<String> = conn
-            .get(format!("intutic:loop:{}", loop_run_id))
-            .await
-            .unwrap_or(None);
-        let raw = stored?;
+        // Gated like every other control-plane read: this sits on the request
+        // path, so a hung Valkey must fail open in bounded time rather than
+        // stall the proxy. It previously used a bare `get`, outside GATE_TIMEOUT.
+        let raw = self.get_gated(loop_state_key(loop_run_id)).await?;
         serde_json::from_str::<serde_json::Value>(&raw)
             .ok()?
             .get("status")?
             .as_str()
             .map(str::to_string)
+    }
+
+    async fn active_loop_run(&self, workspace_id: &str, member_id: Option<&str>) -> Option<String> {
+        // Most specific first. The control plane writes both on loop start:
+        // the member-scoped pointer, and a workspace-level one for requests
+        // whose key record carries no member.
+        if let Some(mid) = member_id {
+            if let Some(id) = self
+                .get_gated(active_loop_key(workspace_id, Some(mid)))
+                .await
+            {
+                return Some(id);
+            }
+        }
+        self.get_gated(active_loop_key(workspace_id, None)).await
     }
 
     async fn auto_judge_active(&self, scope: JudgeScope, id: &str) -> bool {
@@ -854,4 +892,41 @@ async fn read_baseline_hash(
         sum,
         reasoning_sum,
     })
+}
+
+#[cfg(test)]
+mod loop_key_contract {
+    use super::*;
+
+    /// These strings are a cross-repo contract with
+    /// `services/control-plane/src/services/loopGovernanceService.ts`. The
+    /// control plane wrote only the state blob while this proxy read the two
+    /// scalars, so budgets never enforced and the dashboard Kill never
+    /// reached the request path. The detector unit tests could not catch it:
+    /// they populate RequestContext directly and never touch a key name.
+    #[test]
+    fn loop_keys_match_the_control_plane() {
+        assert_eq!(loop_state_key("lr_1"), "intutic:loop:lr_1");
+        assert_eq!(loop_spend_key("lr_1"), "intutic:loop:lr_1:spend");
+        assert_eq!(loop_budget_key("lr_1"), "intutic:loop:lr_1:budget");
+    }
+
+    #[test]
+    fn active_loop_pointer_prefers_the_member_scope() {
+        assert_eq!(
+            active_loop_key("ws_1", Some("mbr_9")),
+            "intutic:active_loop:ws_1:mbr_9"
+        );
+        assert_eq!(active_loop_key("ws_1", None), "intutic:active_loop:ws_1");
+    }
+
+    /// The state key must not collide with its own scalars — a prefix bug here
+    /// would make `loop_status` parse a bare decimal as JSON and fail open.
+    #[test]
+    fn state_key_is_not_a_prefix_of_a_scalar_read() {
+        let state = loop_state_key("lr_1");
+        assert_ne!(state, loop_spend_key("lr_1"));
+        assert_ne!(state, loop_budget_key("lr_1"));
+        assert!(loop_spend_key("lr_1").starts_with(&state));
+    }
 }

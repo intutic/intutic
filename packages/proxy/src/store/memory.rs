@@ -780,6 +780,15 @@ impl ControlPlaneCache for NullControlPlaneCache {
         None
     }
 
+    /// No control plane means no loop registry, so no run to resolve.
+    async fn active_loop_run(
+        &self,
+        _workspace_id: &str,
+        _member_id: Option<&str>,
+    ) -> Option<String> {
+        None
+    }
+
     /// Judging is a control-plane feature; standalone it is never auto-active.
     /// Explicit in-prompt invocation (`/intutic judge`) is unaffected.
     async fn auto_judge_active(&self, _scope: JudgeScope, _id: &str) -> bool {
