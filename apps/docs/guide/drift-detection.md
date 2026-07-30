@@ -9,20 +9,52 @@ Three independent mechanisms, each with a different trigger:
 
 | Mechanism | Trigger | Where it runs |
 |-----------|---------|---------------|
+| **Behavioral drift** | Agents comply with an SOP measurably less than they used to | Hourly control-plane sweep |
 | **SOP staleness** | Agents stop matching an SOP at all | Hourly control-plane sweep |
 | **Cost baselines** | A run costs far more than its own historical median | Inline, on every classified trace |
 | **Sequence anomalies** | Runaway or implausible tool sequences | Rust proxy, sub-millisecond fast path |
 
-::: info Behavioral drift scoring is not part of the product
-Earlier versions of this page described compliance-score drift windows,
-positive/negative drift direction, `behavioral_drift_event` records, and
-embedding-based vector drift against a rolling centroid. **None of those ship.**
-That work was removed when the product narrowed to circuit-breaker scope, and the
-page was not updated at the time. What replaced it in practice is staleness
-detection, described below: rather than scoring how far behaviour has moved, the
-system notices when agents no longer reach for a guideline at all — which is the
-signal that actually precedes a guideline going wrong.
+::: info What changed on 2026-07-30
+This page previously said behavioral drift scoring was **not** part of the
+product. That was true at the time: the original embedding-based detector —
+vector drift against a rolling centroid, `behavioral_drift_events_v2`,
+`sop_drift_centroids` — was removed when the product narrowed to circuit-breaker
+scope, and nothing replaced it.
+
+It has since been rebuilt, deliberately without the embeddings. Drift is now a
+subtraction between two stored numbers, described below. The centroid and cosine
+-distance machinery is gone for good and is not coming back: a drift event you
+cannot show the arithmetic for is one a customer cannot dispute.
 :::
+
+---
+
+## Behavioral Drift
+
+Drift means one thing here, measured one way: **agents working under an SOP have
+become measurably more or less compliant with it than they used to be.** Not that
+the SOP's text changed, and not that an embedding moved — a sustained change in
+observed behaviour.
+
+Each trace scores its own compliance from what the platform actually did to the
+request: a clean pass scores 1.0, a redacted-and-forwarded call 0.6, a blocked
+one 0.0, less a penalty for the severity of anything the classifier found. Those
+scores roll into a per-SOP rolling average, and drift is the gap between that
+average and a stored baseline:
+
+1. **Baseline** — the first observation of an SOP *is* its baseline. The first
+   thing you ever measure cannot be a change.
+2. **Eligibility** — an SOP needs at least 20 matches in 30 days before it is
+   judged at all. A handful of samples cannot establish that behaviour moved.
+3. **Detection** — a gap of 0.15 or more raises a drift event recording the
+   score, the direction, and both sides of the comparison.
+4. **Re-baseline** — the baseline is immediately recaptured, so a given drift is
+   reported once rather than every hour forever.
+5. **Refinement** — a *degrading* SOP is queued for rewriting, ahead of stale
+   ones. An *improving* SOP is recorded and left alone: agents obeying a
+   guideline better is evidence the last rewrite worked, not a problem to fix.
+
+Improvement and degradation are both recorded; only degradation is acted on.
 
 ---
 
