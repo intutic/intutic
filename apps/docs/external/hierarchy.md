@@ -45,7 +45,7 @@ Intutic organizes user identities, development harnesses, and agent runs in a re
 graph TD
     Workspace["🏢 Workspace (Tenant Boundary)"]
     WorkspaceMember["👥 Workspace Member (User Link)"]
-    User["👤 User (SSO / SCIM Identity)"]
+    User["👤 User (SSO / Direct Identity)"]
     Harness["💻 Harness Type (Cursor, Windsurf, Claude Code)"]
     AgentSession["🤖 Agent Session (Active Run / SOP Context)"]
     ExecutionTrace["⚡ Execution Trace (LLM Query / Tool Interception)"]
