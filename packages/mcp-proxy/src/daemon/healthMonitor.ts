@@ -139,38 +139,6 @@ async function probeServer(server: McpServerConfig): Promise<McpServerHealth> {
   })
 }
 
-async function uploadSnapshots(snapshots: McpServerHealth[]): Promise<void> {
-  if (snapshots.length === 0 || !WORKSPACE_ID) return
-  const body = JSON.stringify({ mcpServers: snapshots })
-  const url = new URL('/api/v1/mcp-daemon/health-snapshot', CP_URL)
-  const isHttps = url.protocol === 'https:'
-  const lib = isHttps ? https : http
-
-  return new Promise((resolve) => {
-    const req = lib.request(
-      {
-        hostname: url.hostname,
-        port: url.port,
-        path: url.pathname,
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(body),
-          'Authorization': `Bearer ${DAEMON_API_KEY}`,
-          'x-workspace-id': WORKSPACE_ID
-        }
-      },
-      (res: any) => {
-        res.resume()
-        resolve()
-      }
-    )
-    req.on('error', () => resolve())
-    req.setTimeout(5000, () => { req.destroy(); resolve() })
-    req.write(body)
-    req.end()
-  })
-}
 
 export function registerServer(server: McpServerConfig): void {
   servers.push(server)
@@ -194,9 +162,11 @@ export function startHealthMonitor(): void {
         logger.warn({ serverName: server.name }, 'mcp_daemon.mcp_server_down')
       }
     }
-    if (snapshots.length > 0) {
-      await uploadSnapshots(snapshots)
-    }
+    // Health stays local: getLatestHealth()/latestHealth serve the proxy's
+    // own health_check. The former uploader posted to
+    // /api/v1/mcp-daemon/health-snapshot, a route stripped from the control
+    // plane — every 30s heartbeat silently 404'd and the snapshots were
+    // discarded. Restore an ingest route before re-adding an upload.
   }, HEARTBEAT_MS)
   timer.unref()
 }
