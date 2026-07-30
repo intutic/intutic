@@ -596,14 +596,6 @@ struct ToolInvocation {
     input: serde_json::Value,
 }
 
-/// Names only — what the sequence detectors and the trace record consume.
-fn extract_request_tool_calls(body: &serde_json::Value) -> Vec<String> {
-    extract_request_tool_invocations(body)
-        .into_iter()
-        .map(|t| t.name)
-        .collect()
-}
-
 /// Expand a per-turn delta into the sequence actually recorded: each concrete
 /// call, followed by the abstract actions it performs.
 ///
