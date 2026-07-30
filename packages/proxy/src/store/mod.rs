@@ -482,6 +482,16 @@ pub trait LocalStore: Send + Sync + 'static {
     /// refuse every request in a run nobody capped.
     async fn workflow_budget(&self, loop_run_id: &str) -> (Option<f64>, Option<f64>);
 
+    /// Set a loop run's ceiling, but only if it does not already have one.
+    ///
+    /// Set-if-absent, not set: in the enterprise deployment the control plane
+    /// writes this when the run starts, and that value is the authority — a
+    /// per-proxy default must never overwrite an operator's explicit budget.
+    /// In open core there is no control plane, so nothing wrote the key at all
+    /// and `WorkflowBudgetDetector` had no reachable input. Returns whether
+    /// this call was the one that set it.
+    async fn set_workflow_budget_if_absent(&self, loop_run_id: &str, budget: f64) -> bool;
+
     /// Append a judged chunk to `session:chunks:{sid}`.
     ///
     /// `ttl_secs` is `Some` on the streaming paths and `None` on the
