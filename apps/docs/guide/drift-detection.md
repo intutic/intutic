@@ -55,7 +55,11 @@ This lineage allows Intutic to:
 
 - Track which SOP version produced which compliance outcomes
 - Compare the effectiveness of different SOP versions
-- Identify when an SOP change caused a drift in agent behavior
+- Compare outcomes before and after an SOP was edited
+
+What this lineage does **not** do is score behavioural drift between versions — no
+such comparison ships. It records which version was in force so you can read the
+compliance outcomes yourself.
 
 ---
 
