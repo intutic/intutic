@@ -1,0 +1,17 @@
+# Build context for `packages/proxy` — the proxy builds from its own context
+# (see tools/scripts/deploy.sh), so the repo-root .dockerignore does not apply
+# here and, until 2026-07-30, nothing did.
+#
+# `target/` is 21GB. The Dockerfile never COPYs it — it takes only Cargo.toml,
+# Cargo.lock, src/, build.rs, assets/ and benches/ — but Docker transfers the
+# whole context to the daemon regardless of what the Dockerfile uses. So every
+# proxy build moved 21GB to save reading a few megabytes of source.
+target
+
+# Prebuilt binaries: the image compiles from source in its builder stage and
+# copies /build/target/release/intutic-proxy, so a host binary is never used.
+bin
+
+# Engineering notes and lockfile-adjacent files the build does not read.
+*.md
+.turbo
