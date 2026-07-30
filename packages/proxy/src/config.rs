@@ -72,6 +72,31 @@ pub struct IntuticSettings {
     /// Local memory vaults searched by `/fix`.
     #[serde(default)]
     pub memory: MemoryConfig,
+    /// Default ceiling for a workflow (loop run).
+    #[serde(default)]
+    pub workflow: WorkflowConfig,
+}
+
+/// Default spend ceiling for a workflow, for deployments with no control plane.
+///
+/// `WorkflowBudgetDetector` compares a loop run's spend against a ceiling written
+/// by "whoever started the run". In the enterprise deployment that is the control
+/// plane. In open core nothing wrote it, so the ceiling was always absent, which
+/// correctly reads as "unbudgeted" — and the detector could therefore never fire.
+/// This gives open core a writer without changing the enterprise behaviour: the
+/// value is only ever set if no ceiling exists.
+#[derive(Debug, Deserialize, Clone)]
+pub struct WorkflowConfig {
+    /// Ceiling in USD applied to a loop run that arrives without one. `None`
+    /// leaves runs uncapped, which is the behaviour before this setting existed.
+    #[serde(default)]
+    pub default_budget_usd: Option<f64>,
+}
+
+impl Default for WorkflowConfig {
+    fn default() -> Self {
+        Self { default_budget_usd: None }
+    }
 }
 
 /// Local markdown memory vaults (Obsidian, Logseq, Foam, or any notes folder).

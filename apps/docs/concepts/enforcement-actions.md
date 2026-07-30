@@ -128,7 +128,7 @@ The request is intercepted and modified before reaching the LLM. The most common
 
 ```typescript
 // services/control-plane/src/lib/valkeySubscriber.ts
-trace.verdict === 'dlp_redacted' → EnforcementAction.HIJACK
+trace.verdict === 'hijacked' → EnforcementAction.HIJACK
 ```
 
 **Example: DLP redaction in action**
@@ -161,9 +161,11 @@ The request is blocked entirely. The agent receives an error response explaining
 
 ```typescript
 // services/control-plane/src/lib/valkeySubscriber.ts
-// Anything other than 'allowed' or 'dlp_redacted' → KILL
-trace.verdict !== 'allowed' && trace.verdict !== 'dlp_redacted'
-  → EnforcementAction.KILL
+trace.verdict === 'killed' → EnforcementAction.KILL
+
+// An unrecognised verdict also records as KILL, deliberately: a value this service
+// cannot interpret means the proxy is ahead of the control plane, and assuming
+// BYPASS would log an unenforced call as allowed.
 ```
 
 **Example: a hook SOP that blocks destructive commands**
