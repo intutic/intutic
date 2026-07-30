@@ -515,7 +515,7 @@ The control plane includes additional routes not yet documented in detail:
 | `anomaly.ts` | `/api/v1/anomalies` | Anomaly detection and alerts |
 | `budget.ts` | `/api/v1/budgets` | Budget tier management |
 | `decisions.ts` | `/api/v1/decisions` | PCAS enforcement decision log |
-| `evaluate.ts` | `/api/v1/evaluate` | Request evaluation pipeline |
+| `evaluate.ts` | `/api/v1/policy` | Policy check and resolution |
 | `incidents.ts` | `/api/v1/incidents` | Governance incident lifecycle |
 | `keys.ts` | `/api/v1/keys` | Virtual API key management |
 | `members.ts` | `/api/v1/members` | Workspace member management |

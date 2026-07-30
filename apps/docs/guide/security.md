@@ -114,8 +114,8 @@ Some dashboard features are restricted to specific roles:
 | Review Queue | Owner, Admin, or EM |
 | Compliance Scope | Owner, Admin, or EM |
 | Custom Filters (WASM) | Owner, Admin, or EM |
-| Incidents | Owner, Admin, or EM |
 | Intelligence Engine | Owner, Admin, or EM |
+| Incidents | Owner, Admin, or EM |
 | Emergency Overrides | Owner, Admin, or EM |
 
 ---

@@ -63,7 +63,7 @@ graph TD
 * **Table (Enterprise Control Plane)**: `workspaces` (relational database schema)
 
 ### 👤 User & Workspace Member
-* **Purpose**: The developer's physical identity, created by direct provisioning or on first SSO login (SAML 2.0 or OIDC). Users are mapped to one or more workspaces with specific roles (`Owner`, `Admin`, `Member`, `Auditor`) via the membership link.
+* **Purpose**: The developer's physical identity — provisioned directly by an admin, or created on first SSO login (SAML 2.0 or OIDC). Users are mapped to one or more workspaces with specific roles (`OWNER`, `ADMIN`, `EM`, `DEVELOPER`, `VIEWER`) via the membership link.
 * **Table (Enterprise Control Plane)**: `users` + `workspace_members`
 
 ### 💻 Harness Type
