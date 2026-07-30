@@ -80,41 +80,11 @@ export async function saveIntegrity(
   await node_fs.rename(tmpPath, filePath)
 }
 
-/**
- * Load the local context integrity store from `.intutic/context_integrity.json`.
- */
-export async function loadContextIntegrity(
-  workspaceRoot: string,
-): Promise<IntegrityStore | null> {
-  const filePath = node_path.join(workspaceRoot, INTUTIC_DIR, 'context_integrity.json')
 
-  try {
-    const raw = await node_fs.readFile(filePath, 'utf-8')
-    const parsed = JSON.parse(raw) as IntegrityStore
-    if (typeof parsed.files !== 'object') {
-      return null
-    }
-    return parsed
-  } catch {
-    return null
-  }
-}
-
-/**
- * Save the context integrity store to `.intutic/context_integrity.json`.
- */
-export async function saveContextIntegrity(
-  workspaceRoot: string,
-  store: IntegrityStore,
-): Promise<void> {
-  const dir = node_path.join(workspaceRoot, INTUTIC_DIR)
-  await node_fs.mkdir(dir, { recursive: true })
-
-  const filePath = node_path.join(dir, 'context_integrity.json')
-  const tmpPath = `${filePath}.tmp`
-  const content = JSON.stringify(store, null, 2) + '\n'
-
-  await node_fs.writeFile(tmpPath, content, 'utf-8')
-  await node_fs.rename(tmpPath, filePath)
-}
+// `loadContextIntegrity` / `saveContextIntegrity` were removed on 2026-07-30. They
+// had no callers in either repo — not even tests — while
+// `.intutic/context_integrity.json` sat in three harness hook denylists as a
+// protected path. The file was never created, so those hooks guarded nothing. The
+// config integrity store above already hashes every governed file `syncLoop` writes,
+// which is what the second store would have duplicated.
 
