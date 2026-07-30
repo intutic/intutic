@@ -155,64 +155,20 @@ pub struct PolicyConfig {
     #[serde(default = "default_policy_timeout_ms")]
     pub timeout_ms: u64,
 
-    // ── Multi-region (WS-6MR) ─────────────────────────────────────────────────
-    /// The region this proxy instance is running in (e.g., "us", "eu", "apac").
-    /// Read from `INTUTIC_REGION` env var. Used to tag requests and switch
-    /// the `control_plane_url` to the matching regional endpoint.
-    #[serde(default)]
-    pub current_region: Option<String>,
-
-    /// Fallback region to use when the primary region is unreachable.
-    /// Read from `INTUTIC_FALLBACK_REGION` env var.
-    /// When set and the primary control-plane fails health checks, the proxy
-    /// re-routes policy calls to the fallback region URL instead of failing closed.
-    #[serde(default)]
-    pub fallback_region: Option<String>,
-
-    /// Control-plane URL for the fallback region.
-    /// Derived automatically from `fallback_region` using the same URL pattern as
-    /// `control_plane_url`, or set explicitly via `FALLBACK_REGION_URL`.
-    #[serde(default)]
-    pub fallback_region_url: Option<String>,
-}
-
-impl PolicyConfig {
-    /// Returns the effective control-plane URL, accounting for region overrides.
-    /// Falls back to the fallback region URL if the primary is known to be down
-    /// (proxy-side circuit-breaker must set `INTUTIC_USE_FALLBACK=1`).
-    pub fn effective_control_plane_url(&self) -> Option<&str> {
-        if std::env::var("INTUTIC_USE_FALLBACK").as_deref() == Ok("1") {
-            if let Some(ref furl) = self.fallback_region_url {
-                return Some(furl.as_str());
-            }
-        }
-        self.control_plane_url.as_deref()
-    }
+    // Multi-region failover was removed on 2026-07-30. `current_region`,
+    // `fallback_region`, `fallback_region_url` and `effective_control_plane_url()`
+    // lived here: the accessor was called only by its own tests while production
+    // read `control_plane_url` directly (proxy.rs:1226,1381,2021), and no env var
+    // it needed was set in any manifest. TD-182 recorded the transform as done; it
+    // never was. The control-plane half went the same day.
 }
 
 impl Default for PolicyConfig {
     fn default() -> Self {
-        let current_region = std::env::var("INTUTIC_REGION").ok();
-        let fallback_region = std::env::var("INTUTIC_FALLBACK_REGION").ok();
-
-        // Derive fallback URL from region name using standard URL pattern:
-        //   eu   -> https://api.eu.intutic.ai
-        //   apac -> https://api.apac.intutic.ai
-        //   us   -> https://api.intutic.ai  (no subdomain for primary)
-        let fallback_region_url = std::env::var("FALLBACK_REGION_URL").ok().or_else(|| {
-            fallback_region.as_deref().map(|r| match r {
-                "us" => "https://api.intutic.ai".to_string(),
-                other => format!("https://api.{other}.intutic.ai"),
-            })
-        });
-
         Self {
             control_plane_url: std::env::var("CONTROL_PLANE_URL").ok(),
             fail_closed: true,
             timeout_ms: 3_000,
-            current_region,
-            fallback_region,
-            fallback_region_url,
         }
     }
 }
@@ -522,144 +478,9 @@ mod tests {
 
     static ENV_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
-    #[test]
-    fn test_region_url_rewriting() {
-        let _lock = ENV_MUTEX.lock().unwrap();
-        // Temp file setup
-        let config_content = r#"
-model_list: []
-general_settings: {}
-intutic_settings:
-  policy:
-    control_plane_url: "https://api.intutic.ai"
-"#;
-        let temp_dir = std::env::temp_dir();
-        let file_path = temp_dir.join("test_config.yaml");
-        std::fs::write(&file_path, config_content).unwrap();
 
-        // 1. Unset env vars
-        std::env::remove_var("INTUTIC_REGION");
-        let config = load_config(file_path.to_str().unwrap()).unwrap();
-        assert_eq!(
-            config.intutic_settings.policy.control_plane_url.as_deref(),
-            Some("https://api.intutic.ai")
-        );
 
-        // 2. Set INTUTIC_REGION to eu
-        std::env::set_var("INTUTIC_REGION", "eu");
-        let config = load_config(file_path.to_str().unwrap()).unwrap();
-        assert_eq!(
-            config.intutic_settings.policy.control_plane_url.as_deref(),
-            Some("https://api.eu.intutic.ai")
-        );
 
-        // 3. Set INTUTIC_REGION to apac with control-plane.intutic.svc
-        let config_content_svc = r#"
-model_list: []
-general_settings: {}
-intutic_settings:
-  policy:
-    control_plane_url: "http://control-plane.intutic.svc:3001"
-"#;
-        std::fs::write(&file_path, config_content_svc).unwrap();
-        std::env::set_var("INTUTIC_REGION", "apac");
-        let config = load_config(file_path.to_str().unwrap()).unwrap();
-        assert_eq!(
-            config.intutic_settings.policy.control_plane_url.as_deref(),
-            Some("http://control-plane.intutic-apac.svc:3001")
-        );
-
-        std::env::remove_var("INTUTIC_REGION");
-        let _ = std::fs::remove_file(file_path);
-    }
-
-    /// MR4: INTUTIC_FALLBACK_REGION derives the fallback URL automatically.
-    #[test]
-    fn test_fallback_region_url_derivation() {
-        let _lock = ENV_MUTEX.lock().unwrap();
-        // eu fallback → https://api.eu.intutic.ai
-        std::env::set_var("INTUTIC_FALLBACK_REGION", "eu");
-        std::env::remove_var("FALLBACK_REGION_URL");
-        let cfg = PolicyConfig::default();
-        assert_eq!(cfg.fallback_region.as_deref(), Some("eu"));
-        assert_eq!(
-            cfg.fallback_region_url.as_deref(),
-            Some("https://api.eu.intutic.ai")
-        );
-        std::env::remove_var("INTUTIC_FALLBACK_REGION");
-
-        // apac fallback → https://api.apac.intutic.ai
-        std::env::set_var("INTUTIC_FALLBACK_REGION", "apac");
-        let cfg = PolicyConfig::default();
-        assert_eq!(
-            cfg.fallback_region_url.as_deref(),
-            Some("https://api.apac.intutic.ai")
-        );
-        std::env::remove_var("INTUTIC_FALLBACK_REGION");
-
-        // us fallback → https://api.intutic.ai (primary, no subdomain)
-        std::env::set_var("INTUTIC_FALLBACK_REGION", "us");
-        let cfg = PolicyConfig::default();
-        assert_eq!(
-            cfg.fallback_region_url.as_deref(),
-            Some("https://api.intutic.ai")
-        );
-        std::env::remove_var("INTUTIC_FALLBACK_REGION");
-
-        // Explicit FALLBACK_REGION_URL takes precedence over derivation
-        std::env::set_var("INTUTIC_FALLBACK_REGION", "eu");
-        std::env::set_var("FALLBACK_REGION_URL", "https://my-custom-eu.example.com");
-        let cfg = PolicyConfig::default();
-        assert_eq!(
-            cfg.fallback_region_url.as_deref(),
-            Some("https://my-custom-eu.example.com")
-        );
-        std::env::remove_var("INTUTIC_FALLBACK_REGION");
-        std::env::remove_var("FALLBACK_REGION_URL");
-    }
-
-    /// MR4: effective_control_plane_url() switches to fallback when INTUTIC_USE_FALLBACK=1.
-    #[test]
-    fn test_effective_control_plane_url_failover() {
-        let _lock = ENV_MUTEX.lock().unwrap();
-        std::env::remove_var("INTUTIC_USE_FALLBACK");
-        let cfg = PolicyConfig {
-            control_plane_url: Some("https://api.intutic.ai".to_string()),
-            fallback_region_url: Some("https://api.eu.intutic.ai".to_string()),
-            fallback_region: Some("eu".to_string()),
-            current_region: Some("us".to_string()),
-            fail_closed: true,
-            timeout_ms: 3_000,
-        };
-
-        // Without failover flag: returns primary URL
-        assert_eq!(
-            cfg.effective_control_plane_url(),
-            Some("https://api.intutic.ai")
-        );
-
-        // With failover flag: returns fallback URL
-        std::env::set_var("INTUTIC_USE_FALLBACK", "1");
-        assert_eq!(
-            cfg.effective_control_plane_url(),
-            Some("https://api.eu.intutic.ai")
-        );
-        std::env::remove_var("INTUTIC_USE_FALLBACK");
-    }
-
-    /// MR4: INTUTIC_REGION sets current_region in PolicyConfig::default().
-    #[test]
-    fn test_current_region_from_env() {
-        let _lock = ENV_MUTEX.lock().unwrap();
-        std::env::set_var("INTUTIC_REGION", "apac");
-        let cfg = PolicyConfig::default();
-        assert_eq!(cfg.current_region.as_deref(), Some("apac"));
-        std::env::remove_var("INTUTIC_REGION");
-
-        // Absent env var → None
-        let cfg = PolicyConfig::default();
-        assert!(cfg.current_region.is_none());
-    }
 
     /// Absent `routing:` block yields control-plane-deferred defaults.
     #[test]
