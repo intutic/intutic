@@ -38,12 +38,15 @@ SkillOpt parses agent trajectory failures and config files (like `.cursorrules`,
 
 ---
 
-## Context Gap Detection
+## Harness Config Drift
 
-Context Gap Detection identifies "unlinked" developer activities where agents execute tasks outside of standard compliance workflows.
+Local harness configuration is treated as governed state, not developer preference.
 
 ### Key Capabilities
 
-- **Orphan Command Alerts** — Flags agent tool executions that are not associated with a ticket (Linear/Jira) or pull request.
-- **SOP Auto-Suggest** — Recommends new Standard Operating Procedure guidelines if recurring untracked tool sequences are detected.
-- **Drift Identification** — Compares active developer harness states against global governance configurations to flag out-of-sync local policies.
+- **Snapshot & Diff** — Config captures are versioned per workspace, and any two snapshots can be diffed to show exactly what changed in `.cursorrules`, `CLAUDE.md`, or a hooks file.
+- **Local Restore** — The sync daemon watches those files with `chokidar`, raises a `config_tamper` event, and rewrites the file from the integrity baseline if an agent modifies or deletes it.
+
+::: info Context gap detection is not part of the product
+This section previously described orphan-command alerts against Linear/Jira tickets and SOP auto-suggest from untracked tool sequences. Both belonged to the Context Graph, which was removed when the product narrowed to circuit-breaker scope.
+:::

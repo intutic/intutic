@@ -63,7 +63,7 @@ graph TD
 * **Table (Enterprise Control Plane)**: `workspaces` (relational database schema)
 
 ### 👤 User & Workspace Member
-* **Purpose**: The developer's physical identity (synced from SCIM/SSO). Users are mapped to one or more workspaces with specific roles (`Owner`, `Admin`, `Member`, `Auditor`) via the membership link.
+* **Purpose**: The developer's physical identity, created by direct provisioning or on first SSO login (SAML 2.0 or OIDC). Users are mapped to one or more workspaces with specific roles (`Owner`, `Admin`, `Member`, `Auditor`) via the membership link.
 * **Table (Enterprise Control Plane)**: `users` + `workspace_members`
 
 ### 💻 Harness Type
@@ -91,4 +91,4 @@ In enterprise environments with multiple developers, Intutic maintains isolated 
 ### B. Centralized Audit Aggregation
 * When developers run AI agent sessions (e.g., Cursor, Claude Code, Aider), the Rust proxy gateway intercepts the execution traces.
 * Every trace log and incident record is database-tagged with **both** the developer's unique identity (`user_id` / `developerId`) and the shared organization `workspace_id`.
-* This allows security teams, managers, and SREs to view and search consolidated logs, SLA compliance scores, and compute budgets across the entire team in the **Activity Logs** (`/traces`), **Review Queue** (`/decisions`), and **SLA Tracking** (`/sla`) views without any conflict.
+* This allows security teams, managers, and SREs to view and search consolidated logs, compliance scores, and compute budgets across the entire team in the **Activity Logs** (`/traces`), **Review Queue** (`/decisions`), and **Governance Coverage** (`/governance-coverage`) views without any conflict.
