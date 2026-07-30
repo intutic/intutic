@@ -2,7 +2,7 @@
 
 Intutic features low-latency, real-time post-response stream interception to append governance notifications directly to agent output streams before they complete.
 
-This ensures critical warnings—such as exfiltration risks, severe loop detection, or goal drift anomalies—appear directly inside the developer's chat console or terminal without requiring them to check the dashboard.
+This ensures critical warnings—such as exfiltration risks, loop detection, or a blocked tool call—appear directly inside the developer's chat console or terminal without requiring them to check the dashboard.
 
 ---
 
@@ -34,7 +34,7 @@ Drained alerts are formatted into standard Markdown blocks containing GitHub-sty
 ```markdown
 --- Intutic Governance ---
 
-[CRITICAL] Anomaly: Severe Hallucination / Drift Detected
+[CRITICAL] Anomaly: Data Exfiltration Detected
 Your agent has repeatedly outputted file path assumptions that do not exist in the workspace...
 
 *Review and modify the prompt, or adjust system guidelines.*

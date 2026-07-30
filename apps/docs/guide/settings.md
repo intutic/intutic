@@ -132,7 +132,6 @@ Route governance events and alerts to external channels like Slack, webhooks, or
 Define custom routing rules filtering by event types:
 - `anomaly.detected` — Triggers when an ARE anomaly is flagged
 - `budget.threshold` — Triggers when a workspace/department budget limit is breached
-- `ssl.enforcement.violation` — Triggers when an SSL enforcement check fails
 - `trajectory.alert` — Triggers on goal drift or looped trace behaviors
 - `decision.pending` — Triggers when a hijacked action requires manual administrator review
 
