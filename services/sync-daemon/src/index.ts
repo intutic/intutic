@@ -24,7 +24,7 @@ export type { WriteResult } from './configWriter.js'
 
 export { computeFileHashes, hashFile } from './hashReporter.js'
 
-export { loadIntegrity, saveIntegrity, loadContextIntegrity, saveContextIntegrity } from './integrityStore.js'
+export { loadIntegrity, saveIntegrity } from './integrityStore.js'
 
 export { HARNESS_FILES } from './configWriter.js'
 
