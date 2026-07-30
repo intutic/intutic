@@ -141,6 +141,7 @@ if (!IS_OSS) {
     text: 'Security & Compliance',
     items: [
       { text: 'Security & Identity (Enterprise)', link: '/guide/security' },
+      { text: 'SCIM Provisioning (Enterprise)', link: '/guide/scim' },
       { text: 'Emergency Overrides (Enterprise)', link: '/guide/break-glass' },
     ],
   });

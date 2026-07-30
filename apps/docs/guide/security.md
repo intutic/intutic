@@ -157,17 +157,21 @@ Adjust a member's role at any time. Changes take effect immediately.
 
 ## Offboarding <Badge type="danger" text="Enterprise" />
 
-Intutic does **not** implement SCIM, so nothing reconciles your workspace against
-your identity provider. That has a consequence worth planning for.
+The reliable path is **SCIM 2.0 provisioning** — see the
+[SCIM guide](/guide/scim). With it configured, removing a user in your identity
+provider sends `active: false`, which runs the deprovisioning cascade here: their API
+keys are revoked, the cached auth contexts the proxy reads are purged, and their
+sessions are killed. Nothing waits on a human.
 
-::: danger Removing someone at the IdP does not stop their agents
-API keys authenticate on their own: Intutic checks the key hash and whether the
-member is active, never whether an SSO session is still valid. So a developer
-removed in Okta or Entra can no longer sign in to the dashboard, but any agent
-still running with their key **keeps working**.
+::: warning Without SCIM, IdP removal does not stop agents on its own
+API keys authenticate independently of SSO — Intutic checks the key hash and whether
+the member is active, never whether an SSO session is still valid. So a developer
+removed in Okta can no longer sign in to the dashboard, but an agent already running
+with their key keeps working until either the SSO-recency window elapses (30 days by
+default) or someone deactivates the member.
 :::
 
-### Do this when someone leaves
+### If you are not using SCIM
 
 Deactivate the member in Intutic as well:
 
@@ -184,17 +188,22 @@ member restores their access without reissuing anything.
 
 ### Making IdP removal sufficient
 
-If you would rather not depend on the manual step, set an SSO-recency window under
-**Settings &rarr; Single Sign-On**: a key is refused once its owner has not
-completed an SSO login inside that window. Removal at the identity provider then
-expires their keys on its own.
+A second layer, on by default: an SSO-recency window. A key is refused once its
+owner has not completed an SSO login inside it, so removal at the identity provider
+expires their keys even without SCIM.
+
+**The default is 30 days.** It applies only to workspaces that have an SSO provider
+configured, exempts keys marked for automation, and grants every member a full
+window from when they joined before it can refuse anything — so enabling it, or
+inheriting the default, never cuts anyone off on the spot.
 
 ```
 PUT /api/v1/workspace/settings
 { "ssoKeyMaxIdleDays": 30 }
 ```
 
-Send `null` to turn it off, which is the default.
+Send `null` to turn it off, or adjust the window under
+**Settings &rarr; Single Sign-On**.
 
 Signing in through SSO re-stamps the timestamp and restores the keys; no
 re-issuing is needed.
