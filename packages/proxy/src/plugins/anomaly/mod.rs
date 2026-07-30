@@ -428,58 +428,177 @@ mod tests {
 
 #[cfg(test)]
 mod coverage_tests {
+    use super::detectors::test_support::*;
     use super::*;
+    use crate::wasm::context::{NodeIdentity, RequestContext};
 
     /// Which taxonomy categories the hot path can actually raise.
     ///
-    /// Pinned deliberately. "Coverage" is easy to overstate — a detector that
-    /// exists but can never fire looks the same from the outside as one that
-    /// works — so this asserts the exact set and fails if a category is added
-    /// or quietly dropped.
+    /// This asserts *fireability*, not registration. The previous version of this
+    /// test counted registered detectors, and its own docstring warned about the
+    /// gap it then fell into: "a detector that exists but can never fire looks
+    /// the same from the outside as one that works". Eleven were registered;
+    /// several could not fire, because their inputs were produced by nothing —
+    /// graph identity was never set, so the four graph-shaped detectors were
+    /// unreachable, and the scope rules named tools no harness emits.
+    ///
+    /// So every category here is proved by constructing a context that makes it
+    /// fire. A detector that stops being reachable now fails the build, which is
+    /// the guard that would have caught this class years earlier.
     #[test]
-    fn hot_path_covers_eleven_of_twelve_categories() {
+    fn every_hot_path_category_can_actually_fire() {
         let registry = DetectorRegistry::with_defaults();
-        let mut covered: Vec<&str> = registry
+
+        // (category, a context that must raise it)
+        let cases: Vec<(&str, RequestContext)> = vec![
+            (
+                "LOOP_DETECTED",
+                ctx_with_sequence(&["Bash", "Bash", "Bash", "Bash", "Bash"]),
+            ),
+            (
+                "TOOL_ABUSE",
+                ctx_with_sequence(&["run_command", "run_command", "run_command"]),
+            ),
+            (
+                // Reachable only because `actions::classify` now translates
+                // `git push` into `action:deploy`.
+                "SCOPE_VIOLATION",
+                ctx_with_sequence(&["Bash", "action:deploy"]),
+            ),
+            (
+                "DATA_EXFILTRATION",
+                RequestContext {
+                    // Three distinct patterns is the escalation threshold: one
+                    // secret is a mistake, a sweep of them is an exfiltration.
+                    dlp_findings: vec![
+                        dlp("aws_key", "block"),
+                        dlp("anthropic_key", "block"),
+                        dlp("github_token", "block"),
+                    ],
+                    ..base_ctx()
+                },
+            ),
+            (
+                "PROMPT_INJECTION",
+                RequestContext {
+                    injection_findings: vec!["ignore all previous instructions".into()],
+                    ..base_ctx()
+                },
+            ),
+            (
+                "BUDGET_BREACH",
+                RequestContext { budget_remaining_usd: 0.0, ..base_ctx() },
+            ),
+            (
+                "TOKEN_WASTE",
+                // Both halves are required: a big context is only waste if the
+                // agent has been working long enough for it to have compounded.
+                RequestContext {
+                    estimated_input_tokens: 200_000,
+                    tool_sequence: vec![
+                        "Read".into(),
+                        "Grep".into(),
+                        "Write".into(),
+                        "Bash".into(),
+                        "Glob".into(),
+                    ],
+                    ..base_ctx()
+                },
+            ),
+            (
+                "UNAUTHORIZED_TOOL",
+                // The denial has to meet an actual call: a denied tool nobody
+                // invoked is a policy, not an incident.
+                RequestContext {
+                    denied_tools: vec!["Bash".into()],
+                    tool_calls: vec![crate::wasm::context::ToolCall {
+                        id: "tc_1".into(),
+                        name: "Bash".into(),
+                        arguments: serde_json::json!({"command": "rm -rf /"}),
+                    }],
+                    ..base_ctx()
+                },
+            ),
+            (
+                "WORKFLOW_BUDGET_BREACH",
+                RequestContext {
+                    workflow_spend_usd: Some(50.0),
+                    workflow_budget_usd: Some(10.0),
+                    ..base_ctx()
+                },
+            ),
+            (
+                // The four below need graph identity, which nothing set until
+                // `intutic exec` and the SDK started emitting it.
+                "SPAWN_BUDGET_BREACH",
+                RequestContext {
+                    node: NodeIdentity {
+                        graph_id: "fleet".into(),
+                        node_id: "worker".into(),
+                        graph_spend_usd: Some(500.0),
+                        graph_budget_usd: Some(10.0),
+                        ..NodeIdentity::default()
+                    },
+                    ..base_ctx()
+                },
+            ),
+            (
+                "HALLUCINATION",
+                RequestContext {
+                    node: NodeIdentity {
+                        graph_id: "fleet".into(),
+                        node_id: "worker".into(),
+                        parent_session_id: "lead".into(),
+                        parent_alive: Some(false),
+                        ..NodeIdentity::default()
+                    },
+                    ..base_ctx()
+                },
+            ),
+        ];
+
+        let mut fired: Vec<&str> = Vec::new();
+        for (category, ctx) in &cases {
+            let findings = registry.evaluate_all(ctx);
+            let kinds: Vec<&str> = findings.iter().map(|f| f.kind.as_str()).collect();
+            assert!(
+                kinds.contains(category),
+                "{category} did not fire; this context raised {kinds:?}. A category \
+                 that cannot be reached is not covered, however many detectors are \
+                 registered for it.",
+            );
+            fired.push(category);
+        }
+
+        fired.sort_unstable();
+        fired.dedup();
+
+        // Everything registered must also be provably fireable — no category may
+        // be claimed by a detector that nothing can reach.
+        let mut registered: Vec<&str> = registry
             .detectors
             .iter()
             .map(|d| d.kind().as_str())
             .collect();
-        covered.sort_unstable();
-        covered.dedup();
+        registered.sort_unstable();
+        registered.dedup();
+        assert_eq!(
+            fired, registered,
+            "every registered category needs a case here proving it can fire",
+        );
 
-        let expected = [
-            "BUDGET_BREACH",
-            "DATA_EXFILTRATION",
-            "HALLUCINATION",
-            "LOOP_DETECTED",
-            "PROMPT_INJECTION",
-            "SCOPE_VIOLATION",
-            "SPAWN_BUDGET_BREACH",
-            "TOKEN_WASTE",
-            "TOOL_ABUSE",
-            "UNAUTHORIZED_TOOL",
-            "WORKFLOW_BUDGET_BREACH",
-        ];
-        assert_eq!(covered, expected);
-
-        // The remainder, and why it is not here rather than merely missing.
-        //
-        // WORKFLOW_GOAL_DRIFT asks whether an agent is still doing what it was
-        // asked to do. That is not a pure function of one request: it needs the
-        // plan the agent was given, and a record of how far execution has strayed
-        // from it. Both live in the control plane — `storedPlans.complianceScore`,
-        // decremented per recorded deviation — and reaching them means a database
-        // lookup, which does not belong inline on the hot path.
-        //
-        // Note the scoring itself is *not* the obstacle, and earlier revisions of
-        // this comment were wrong to say it needed an embedding or a model call.
-        // The control plane's own check is a plain threshold comparison against a
-        // 0..1 score. What the proxy lacks is the plan, not the arithmetic.
-        // It is deliberately out of scope here, not overlooked.
+        // WORKFLOW_GOAL_DRIFT is the twelfth and is deliberately not here. It
+        // asks whether an agent is still doing what it was asked to do, which
+        // needs the plan it was given and a record of how far execution has
+        // strayed — both live in the control plane, and reaching them means a
+        // database lookup that does not belong inline on the hot path. The
+        // scoring is a plain threshold against a 0..1 score; what the proxy
+        // lacks is the plan, not the arithmetic. Its fireability is proved by
+        // the control plane's own suite.
         let uncovered: Vec<&str> = ALL_KINDS
             .iter()
             .map(|k| k.as_str())
-            .filter(|k| !covered.contains(k))
+            .filter(|k| !registered.contains(k))
             .collect();
         assert_eq!(uncovered, vec!["WORKFLOW_GOAL_DRIFT"]);
     }
