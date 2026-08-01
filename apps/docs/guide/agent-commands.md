@@ -72,7 +72,7 @@ configuration is involved.
 
 ## `/draw` — visualize the agent
 
-`/vdraw <your prompt>` (aliases: `@draw`, `/intutic-draw`, `@intutic draw`)
+`/draw <your prompt>` (aliases: `@draw`, `/intutic-draw`, `@intutic draw`)
 returns a Mermaid + text picture of how the request flows through the proxy: the
 DLP stages, the policy/SOP check, the role SOPs that constrain tool use, and the
 agent's likely trajectory for your prompt. Because the card is Mermaid, any
