@@ -12,7 +12,7 @@
 //!   published rubric (`posture.rs`), and appends recommendations for whatever
 //!   is missing. Deterministic and local.
 //!
-//! - **`/vdraw` (a.k.a. `@draw`)** — renders a text/Mermaid visualisation of
+//! - **`/draw` (a.k.a. `@draw`)** — renders a text/Mermaid visualisation of
 //!   the agent's guardrails, SOPs, loops/graphs and its likely trajectory for
 //!   the given prompt.
 //!
@@ -29,7 +29,7 @@ use crate::sops::Sop;
 pub enum Command {
     /// `/fix`, `@fix`, `/intutic-fix`, `@intutic fix`
     Fix,
-    /// `/vdraw`, `@draw`, `/intutic-draw`, `@intutic draw`
+    /// `/draw`, `@draw`, `/intutic-draw`, `@intutic draw`
     Draw,
 }
 
@@ -510,6 +510,44 @@ mod tests {
         }
         // The typo must not silently come back.
         assert!(detect("/vdraw").is_none(), "/vdraw was a typo and should not parse");
+    }
+
+    /// Every slash command the public reference documents must actually parse.
+    ///
+    /// `apps/docs/guide/agent-commands.md` is badged Open-Core and is where a user
+    /// looks up how to invoke these. It said `/vdraw` while its own heading said
+    /// `/draw`, and nothing connected the page to the parser, so the two disagreed
+    /// for as long as the typo lived. This is that connection.
+    #[test]
+    fn the_public_command_reference_documents_only_real_commands() {
+        let doc = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../apps/docs/guide/agent-commands.md");
+        let Ok(text) = std::fs::read_to_string(&doc) else {
+            // Building the crate outside the monorepo. Say so rather than passing quietly.
+            eprintln!("NOTE: {} not present; command-reference parity unchecked", doc.display());
+            return;
+        };
+
+        // Scope: only the two commands this module owns. The same page also documents
+        // `@intutic predict`, `@intutic judge` and friends, which are control-plane
+        // commands resolved by slashCommandService — `detect` is not their parser and
+        // asserting on them would fail for the wrong reason.
+        let mut checked = 0usize;
+        for cap in text.split('`') {
+            let token = cap.split_whitespace().next().unwrap_or("");
+            if !token.starts_with('/') || token.len() < 2 {
+                continue;
+            }
+            if !(token.contains("fix") || token.contains("draw")) {
+                continue;
+            }
+            assert!(
+                detect(token).is_some(),
+                "agent-commands.md documents `{token}`, which the parser does not accept"
+            );
+            checked += 1;
+        }
+        assert!(checked >= 2, "expected the reference to document at least /fix and /draw");
     }
 
     #[test]
