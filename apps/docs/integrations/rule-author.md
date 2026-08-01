@@ -8,7 +8,7 @@ Where the [Kitkat skill](/integrations/kitkat) teaches an agent to *operate* Int
 
 ## How it works
 
-1. **You state a rule** in the agent chat: *"never allow shell tool calls containing `rm -rf`"*.
+1. **You state a rule** in the agent chat: *"never allow shell tool calls containing `rm -rf`"* — or [`/fix`](/integrations/kitkat) tells you one is missing. When the proxy scores your governance posture and finds no custom policy, it recommends *"add a WASM rule under `~/.intutic/wasm` to codify a custom guardrail"*; that recommendation is this workflow's other entry point. Run `/fix` again after installing to confirm the score moved — if it did not, the rule is not loading, and `intutic policy list-local` plus the sandbox limits below are where to look.
 2. **The agent authors** an AssemblyScript rule against the WASM SDK's `RequestContext` contract.
 3. **Compile:** `intutic policy compile --src assembly/index.ts --out build/rule.wasm`
 4. **Dry-run:** `intutic policy test` against both a should-block and a should-allow mock — the skill requires both to pass before install.

@@ -17,7 +17,7 @@ Use the `intutic` CLI commands to manage the daemon, inspect execution traces, o
 - **Authenticate:** `intutic login` (authenticates with your Intutic control plane).
 - **Initialize Workspace:** `intutic init` (scans active developer harnesses like Claude Code or Cursor, and configures synchronization hooks).
 - **Start Connection:** `intutic connect` (spawns the sync daemon to mirror policies and boots the local interceptor proxy).
-- **Offline Spend Sync:** The sync daemon automatically reconciles offline query consumption logs (`traces-*.jsonl`) and local budgets back to the GKE control plane on reconnect.
+- **Offline Spend Sync:** The sync daemon automatically reconciles offline query consumption logs (`traces-*.jsonl`) and local budgets back to the control plane on reconnect.
 
 ### 2. Traces & Auditing
 - **Check Budget:** `intutic budget` (displays overall monthly/daily spend limits, local spend caps, and active task loops).
@@ -62,6 +62,13 @@ When interacting with LLM providers through the local proxy, prepend requests wi
   - *Note:* If no prompt is provided (e.g. `@intutic judge`), returns usage instructions.
 - **Inspect Status:** `@intutic status` (displays active session stats, average compliance, and spent budget).
 - **Inspect Budget:** `@intutic budget` (displays daily monitored limits and workspace progress).
+
+### 4. Posture & Prompt Enhancement
+- **Enhance & Diagnose:** `/fix <prompt>` (aliases: `@fix`, `/intutic-fix`, `@intutic fix`)
+  - *Description:* Rewrites the prompt and scores the workspace's governance posture against OWASP categories from what the proxy can see locally — DLP settings, WASM rules, the SOPs on disk for the caller's role, skills and MCP servers. Returns the enhanced prompt plus concrete recommendations for whatever is missing.
+  - *Note:* Blocking by default; it can be configured to pass the enhanced prompt through to the model instead. The recommendations are the handoff points into the rest of the toolchain — "add a WASM rule" is the `intutic-rule-author` skill's job, "write a role SOP" and "enable DLP" are handled here.
+- **Draw Guardrails:** `/draw` (aliases: `@draw`, `/intutic-draw`, `@intutic draw`)
+  - *Description:* Renders a Mermaid diagram plus text summary of the agent's trajectory and the guardrails currently around it. Always blocking — a visualization has nothing to forward upstream.
 
 ---
 

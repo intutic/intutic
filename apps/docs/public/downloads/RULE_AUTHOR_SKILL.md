@@ -7,13 +7,15 @@ description: Convert natural-language business rules into compiled WASM governan
 
 Use this skill whenever the user states a rule that AI agent traffic must obey — "block any agent call that touches the prod database", "kill requests once the session budget drops below $1", "never allow shell tool calls containing rm -rf". You convert the rule into an AssemblyScript policy, compile it to WebAssembly, dry-run it against mock contexts, and install it into the local Intutic proxy. The proxy hot-loads it within ~5 seconds and enforces it on every intercepted LLM request.
 
+**The other way you get here is `/fix`.** That proxy command scores the workspace's governance posture and, when it finds no custom policy, recommends: *"Add a WASM rule under `~/.intutic/wasm` to codify a custom guardrail."* When that recommendation is the prompt, the rule to author is the gap `/fix` found — ask the user which specific behaviour they want blocked rather than writing a generic rule, then run `/fix` again after installing to confirm the posture score moved. If it did not, the rule is not loading: check `intutic policy list-local` and the sandbox constraints in §2, since a rule that violates them is silently disabled.
+
 ## 1. The contract your rule sees
 
 The proxy calls `evaluate(offset, len)` with a JSON-serialized `RequestContext`:
 
 ```jsonc
 {
-  "session_id": "sess_x", "workspace_id": "wk_x", "virtual_key_prefix": "vk_x",
+  "session_id": "sess_x", "workspace_id": "ws_x", "virtual_key_prefix": "vk_x",
   "model": "claude-3-5-sonnet",
   "tools": [{ "name": "bash", "description": "run shell commands" }],
   "tool_calls": [{ "id": "t1", "name": "bash", "arguments": {} }],
