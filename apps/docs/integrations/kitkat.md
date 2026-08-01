@@ -65,3 +65,12 @@ When interacting with model providers through the Intutic proxy, agents can issu
 * **`@intutic judge <prompt>`**: Runs real-time LLM-as-a-judge compliance checkers on model responses out-of-band.
 * **`@intutic status`**: Displays active session statistics, spent token budget, and average compliance score.
 * **`@intutic budget`**: Displays daily spend limits and remaining quota.
+
+#### 4. Posture & Visualization
+
+These two are handled entirely by the proxy from what it can see on the machine — no control plane required, so they work offline and in the open-source build.
+
+* **`/fix <prompt>`** (also `@fix`, `/intutic-fix`, `@intutic fix`): Rewrites the prompt and scores the workspace's governance posture against OWASP categories, reading the DLP and WASM configuration, the SOPs on disk for the caller's role, and the skills and MCP servers in play. Returns the enhanced prompt plus specific recommendations — enable input or output DLP, add a WASM rule, write a role SOP, connect a memory provider.
+  * Blocking by default. It can be configured to forward the enhanced prompt upstream instead, in which case the recommendations still come back.
+  * A recommendation to *add a WASM rule* is the entry point to the [Rule Author skill](/integrations/rule-author).
+* **`/draw`** (also `@draw`, `/intutic-draw`, `@intutic draw`): Renders a Mermaid diagram and text summary of the agent's trajectory and the guardrails currently around it. Always blocking — there is nothing to forward upstream for a visualization.

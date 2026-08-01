@@ -56,7 +56,7 @@ pub fn detect(text: &str) -> Option<(Command, String)> {
 
     for (prefixes, cmd) in [
         (["/fix", "@fix", "/intutic-fix", "@intutic fix"], Command::Fix),
-        (["/vdraw", "@draw", "/intutic-draw", "@intutic draw"], Command::Draw),
+        (["/draw", "@draw", "/intutic-draw", "@intutic draw"], Command::Draw),
     ] {
         for p in prefixes {
             if lower == p || lower.starts_with(&format!("{p} ")) || lower.starts_with(&format!("{p}\n")) {
@@ -482,9 +482,34 @@ mod tests {
     fn detects_fix_and_draw_with_aliases() {
         assert_eq!(detect("/fix write a loop").map(|(c, _)| c), Some(Command::Fix));
         assert_eq!(detect("@fix").map(|(c, _)| c), Some(Command::Fix));
-        assert_eq!(detect("/vdraw the graph").map(|(c, _)| c), Some(Command::Draw));
+        assert_eq!(detect("/draw the graph").map(|(c, _)| c), Some(Command::Draw));
         assert_eq!(detect("@draw").map(|(c, _)| c), Some(Command::Draw));
         assert_eq!(detect("@intutic fix this").map(|(c, _)| c), Some(Command::Fix));
+    }
+
+    /// The slash form was `/vdraw` until 2026-08-01 — a typo, and one this test
+    /// asserted rather than caught, since it was written against the code instead
+    /// of against what a user would type. Nothing accepted a plain `/draw`, while
+    /// the card the command renders announces itself as "Intutic `/draw`": the
+    /// output named a command the parser rejected.
+    #[test]
+    fn every_documented_alias_actually_parses() {
+        for alias in ["/fix", "@fix", "/intutic-fix", "@intutic fix"] {
+            assert_eq!(
+                detect(alias).map(|(c, _)| c),
+                Some(Command::Fix),
+                "documented alias {alias} does not parse"
+            );
+        }
+        for alias in ["/draw", "@draw", "/intutic-draw", "@intutic draw"] {
+            assert_eq!(
+                detect(alias).map(|(c, _)| c),
+                Some(Command::Draw),
+                "documented alias {alias} does not parse"
+            );
+        }
+        // The typo must not silently come back.
+        assert!(detect("/vdraw").is_none(), "/vdraw was a typo and should not parse");
     }
 
     #[test]
