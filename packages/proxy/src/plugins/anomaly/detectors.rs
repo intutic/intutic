@@ -12,6 +12,22 @@ use super::{AnomalyDetector, AnomalyFinding, AnomalyKind};
 use crate::wasm::context::RequestContext;
 use std::collections::HashSet;
 
+/// Confidence for a threshold detector, from how far past its threshold it is.
+///
+/// These detectors are certain about the *fact* — five identical calls really
+/// did happen — and guessing about the *interpretation*, which is whether that
+/// constitutes a loop. Only the second belongs in a confidence score, so a
+/// sequence sitting exactly on the threshold reports low confidence and one far
+/// past it reports high.
+///
+/// Never reaches 1.0. A structural threshold that has never had its
+/// false-positive rate measured has not earned certainty, and the number is read
+/// by humans deciding whether to trust the finding.
+fn threshold_confidence(observed: usize, threshold: usize) -> f64 {
+    let excess = observed.saturating_sub(threshold);
+    (0.55 + 0.1 * excess as f64).min(0.95)
+}
+
 // ── Loop and cycle detection ────────────────────────────────────────────────
 
 /// Consecutive calls to one tool before it is treated as a spin.
@@ -43,12 +59,18 @@ impl AnomalyDetector for ConsecutiveRepeatDetector {
             if seq[i] == seq[i - 1] {
                 run += 1;
                 if run >= self.threshold {
-                    return Some(AnomalyFinding::kill(
+                    // Reask, not kill: five-in-a-row is a real signal and the
+                    // number five is a guess, and this has never had an FPR
+                    // measured. An agent that is genuinely stuck gets told so
+                    // and can change approach; one doing repetitive but
+                    // productive work says so and continues.
+                    return Some(AnomalyFinding::reask(
                         AnomalyKind::LoopDetected,
                         format!(
                             "Loop detected: '{}' called {} {}",
                             seq[i], run, SPIN_MARKER
                         ),
+                        threshold_confidence(run, self.threshold),
                     ));
                 }
             } else {
@@ -100,12 +122,15 @@ impl AnomalyDetector for PingPongCycleDetector {
         if !alternating {
             return None;
         }
-        Some(AnomalyFinding::kill(
+        // Reask — same reasoning as ConsecutiveRepeat. Read→Write→Read→Write is
+        // a stuck agent and is also how you edit a file you keep re-checking.
+        Some(AnomalyFinding::reask(
             AnomalyKind::LoopDetected,
             format!(
                 "Loop detected: '{}' and '{}' {} {} cycles with no other activity",
                 a, b, ALTERNATION_MARKER, self.cycles
             ),
+            threshold_confidence(self.cycles, self.cycles),
         ))
     }
 }
@@ -447,12 +472,18 @@ impl AnomalyDetector for RecursionDepthDetector {
         if ctx.node.depth <= self.max_depth {
             return None;
         }
-        Some(AnomalyFinding::kill(
+        // Reask, and this one is the least defensible of the four as a kill:
+        // `node.depth` is **asserted by the caller**, not observed by the proxy.
+        // A harness that miscounts, or a legitimately deep-but-bounded graph,
+        // was being terminated on a number nobody has validated against real
+        // traffic.
+        Some(AnomalyFinding::reask(
             AnomalyKind::LoopDetected,
             format!(
                 "Runaway recursion: graph depth {} exceeds the maximum of {}",
                 ctx.node.depth, self.max_depth
             ),
+            threshold_confidence(ctx.node.depth as usize, self.max_depth as usize),
         ))
     }
 }
@@ -1396,10 +1427,24 @@ impl AnomalyDetector for PromptInjectionDetector {
         // the places this detector exists to protect.
         let techniques = ctx.injection_findings.join(", ");
 
+        // Reask at threshold, not kill.
+        //
+        // This detector killed while the module doc four screens up said
+        // injection heuristics "emit steer and never block" — the code and its
+        // own stated posture disagreed, and the code was winning. The doc was
+        // right on the substance: NotInject shows pattern-based injection
+        // detectors falling below 60% accuracy on *benign* prompts that merely
+        // contain trigger words, and these are five regexes.
+        //
+        // "Ignore previous instructions" appearing twice in a body is worth
+        // interrupting for. It is not worth ending a task over, when the same
+        // two matches fire on someone asking how to stop their agent ignoring
+        // previous instructions.
         if ctx.injection_findings.len() >= self.kill_threshold {
-            return Some(AnomalyFinding::kill(
+            return Some(AnomalyFinding::reask(
                 AnomalyKind::PromptInjection,
                 format!("Prompt injection: {} techniques present ({techniques})", ctx.injection_findings.len()),
+                threshold_confidence(ctx.injection_findings.len(), self.kill_threshold),
             ));
         }
         Some(AnomalyFinding::steer(
@@ -1474,12 +1519,15 @@ impl AnomalyDetector for FanOutExplosionDetector {
         if count <= MAX_GRAPH_NODES {
             return None;
         }
-        Some(AnomalyFinding::kill(
+        // Reask: 50 nodes is a guess about what a healthy graph looks like, and
+        // a wide-but-intentional fan-out is a normal way to parallelise.
+        Some(AnomalyFinding::reask(
             AnomalyKind::LoopDetected,
             format!(
                 "Runaway fan-out: {} live nodes in this graph exceeds the maximum of {}",
                 count, MAX_GRAPH_NODES
             ),
+            threshold_confidence(count as usize, MAX_GRAPH_NODES as usize),
         ))
     }
 }
@@ -1565,6 +1613,13 @@ impl AnomalyDetector for CrossHarnessViolationDetector {
 pub mod test_support {
     use crate::wasm::context::{DlpFinding, NodeIdentity, RequestContext, RiskLevel};
 
+    // Re-exported here rather than imported at file scope. The detectors reach
+    // dispositions through the `AnomalyFinding::{kill, reask, steer}`
+    // constructors and never name the type, so a file-scope import would be
+    // dead weight in a release build — and every test module below already
+    // globs this one.
+    pub use crate::plugins::anomaly::Disposition;
+
     pub fn base_ctx() -> RequestContext {
         RequestContext {
             session_id: "ses_test".into(),
@@ -1639,7 +1694,7 @@ mod tests {
         assert!(d.detect(&ctx_with_sequence(&["Bash"; 4])).is_none());
         let hit = d.detect(&ctx_with_sequence(&["Bash"; 5])).unwrap();
         assert_eq!(hit.kind, AnomalyKind::LoopDetected);
-        assert!(hit.kill);
+        assert_eq!(hit.disposition, Disposition::Reask);
     }
 
     #[test]
@@ -1678,7 +1733,7 @@ mod tests {
         ctx.node.depth = 7;
         assert!(d.detect(&ctx).is_none());
         ctx.node.depth = 8;
-        assert!(d.detect(&ctx).unwrap().kill);
+        assert_eq!(d.detect(&ctx).unwrap().disposition, Disposition::Reask);
     }
 
     #[test]
@@ -1737,7 +1792,7 @@ mod tests {
     fn forbidden_succession_blocks_write_after_pii_export() {
         let d = ForbiddenSuccessionDetector::default();
         let ctx = ctx_with_sequence(&["action:pii_export", "Bash", "action:db_write"]);
-        assert!(d.detect(&ctx).unwrap().kill);
+        assert!(d.detect(&ctx).unwrap().blocks());
     }
 
     #[test]
@@ -1763,7 +1818,7 @@ mod tests {
             dlp("ssn", "redact"),
         ];
         let hit = d.detect(&ctx).expect("three distinct patterns is a sweep");
-        assert!(hit.kill);
+        assert!(hit.blocks());
         assert!(hit.reason.contains("aws_key"));
     }
 
@@ -1826,7 +1881,7 @@ mod tests {
         let mut ctx = base_ctx();
         assert!(d.detect(&ctx).is_none());
         ctx.budget_remaining_usd = 0.0;
-        assert!(d.detect(&ctx).unwrap().kill);
+        assert!(d.detect(&ctx).unwrap().blocks());
         ctx.budget_remaining_usd = -1.5;
         assert!(d.detect(&ctx).is_some());
     }
@@ -1838,7 +1893,7 @@ mod tests {
         let ctx = ctx_with_sequence(&["run_command", "run_command", "run_command"]);
         let hit = d.detect(&ctx).unwrap();
         assert_eq!(hit.kind, AnomalyKind::ToolAbuse);
-        assert!(!hit.kill, "drift steers rather than kills");
+        assert_eq!(hit.disposition, Disposition::Steer, "drift steers rather than kills");
         assert!(hit.confidence > 0.5);
     }
 
@@ -1917,7 +1972,7 @@ mod tests {
             .detect(&ctx)
             .expect("a cycle absent from the success corpus must be flagged");
         assert_eq!(hit.kind, AnomalyKind::ToolAbuse);
-        assert!(!hit.kill, "ships advisory until false-positive telemetry earns a kill");
+        assert_eq!(hit.disposition, Disposition::Steer, "ships advisory until false-positive telemetry earns a kill");
         assert!(
             hit.reason.contains("fitted"),
             "the finding must say which model judged it: {}",
@@ -2082,7 +2137,7 @@ mod graph_aggregate_tests {
         ctx.node.graph_spend_usd = Some(15.01);
         let hit = d.detect(&ctx).unwrap();
         assert_eq!(hit.kind, AnomalyKind::SpawnBudgetBreach);
-        assert!(hit.kill);
+        assert!(hit.blocks());
     }
 
     #[test]
@@ -2120,7 +2175,7 @@ mod graph_aggregate_tests {
 
         let hit = d.detect(&ctx).unwrap();
         assert_eq!(hit.kind, AnomalyKind::Hallucination);
-        assert!(!hit.kill, "an orphan is steered, not killed");
+        assert_eq!(hit.disposition, Disposition::Steer, "an orphan is steered, not killed");
         assert!(hit.reason.contains("parent-1"));
     }
 
@@ -2185,7 +2240,7 @@ mod tool_policy_tests {
         ctx.tool_calls = vec![call("kubectl")];
         let hit = d.detect(&ctx).unwrap();
         assert_eq!(hit.kind, AnomalyKind::UnauthorizedTool);
-        assert!(hit.kill);
+        assert!(hit.blocks());
         assert!(hit.reason.contains("kubectl"));
     }
 
@@ -2252,7 +2307,7 @@ mod injection_detector_tests {
         ctx.injection_findings = vec!["override-instructions".into()];
         let hit = d.detect(&ctx).unwrap();
         assert_eq!(hit.kind, AnomalyKind::PromptInjection);
-        assert!(!hit.kill);
+        assert_eq!(hit.disposition, Disposition::Steer);
     }
 
     #[test]
@@ -2261,7 +2316,7 @@ mod injection_detector_tests {
         let mut ctx = base_ctx();
         ctx.injection_findings =
             vec!["override-instructions".into(), "role-reassignment".into()];
-        assert!(d.detect(&ctx).unwrap().kill);
+        assert_eq!(d.detect(&ctx).unwrap().disposition, Disposition::Reask);
     }
 
     #[test]
@@ -2298,7 +2353,7 @@ mod workflow_and_harness_tests {
         ctx.workflow_spend_usd = Some(5.01);
         let hit = d.detect(&ctx).unwrap();
         assert_eq!(hit.kind, AnomalyKind::WorkflowBudgetBreach);
-        assert!(hit.kill);
+        assert!(hit.blocks());
     }
 
     #[test]
@@ -2324,7 +2379,7 @@ mod workflow_and_harness_tests {
         ctx.harness = "cursor".into();
         ctx.allowed_harnesses = vec!["claude-code".into()];
         let hit = d.detect(&ctx).unwrap();
-        assert!(hit.kill);
+        assert!(hit.blocks());
         assert!(hit.reason.contains("cursor"));
     }
 
@@ -2371,7 +2426,7 @@ mod fan_out_tests {
         ctx.node.graph_node_count = Some(51);
         let hit = d.detect(&ctx).unwrap();
         assert_eq!(hit.kind, AnomalyKind::LoopDetected);
-        assert!(hit.kill);
+        assert_eq!(hit.disposition, Disposition::Reask);
     }
 
     #[test]
@@ -2405,7 +2460,7 @@ mod schema_drift_tests {
         ctx.tool_contract_changed = true;
         let hit = d.detect(&ctx).unwrap();
         assert_eq!(hit.kind, AnomalyKind::ToolAbuse);
-        assert!(!hit.kill, "harnesses do renegotiate tools; this steers");
+        assert_eq!(hit.disposition, Disposition::Steer, "harnesses do renegotiate tools; this steers");
     }
 
     #[test]
@@ -2489,8 +2544,8 @@ mod plan_adherence_tests {
         );
         let hit = d.detect(&c).expect("60% off-plan must fire");
         assert_eq!(hit.kind, AnomalyKind::ScopeViolation);
-        assert!(
-            !hit.kill,
+        assert_eq!(
+            hit.disposition, Disposition::Steer,
             "ships advisory — the promotion rule requires telemetry first"
         );
     }
@@ -2615,7 +2670,7 @@ mod scope_path_tests {
         );
         let hit = d.detect(&c).expect("an out-of-scope write must fire");
         assert_eq!(hit.kind, AnomalyKind::ScopeViolation);
-        assert!(!hit.kill, "ships advisory — the promotion rule requires telemetry first");
+        assert_eq!(hit.disposition, Disposition::Steer, "ships advisory — the promotion rule requires telemetry first");
         assert!(hit.reason.contains("configmap.yaml"), "got: {}", hit.reason);
     }
 
@@ -2718,7 +2773,7 @@ mod review_gate_tests {
         let c = ctx(&["action:deploy"], &["Bash", "action:deploy"]);
         let hit = d.detect(&c).expect("a declared action must hold");
         assert_eq!(hit.kind, AnomalyKind::ScopeViolation);
-        assert!(hit.kill, "a declaration is not a guess — it blocks on first fire");
+        assert!(hit.blocks(), "a declaration is not a guess — it blocks on first fire");
         assert!(hit.reason.contains(REVIEW_HOLD_MARKER));
     }
 
@@ -2818,7 +2873,7 @@ mod landmark_cycle_tests {
             .detect(&ctx_repeat(&["Read", "Grep", "Bash"], 4))
             .expect("a 4× repeated 3-cycle must fire");
         assert_eq!(hit.kind, AnomalyKind::LoopDetected);
-        assert!(!hit.kill, "advisory — see the promotion rule");
+        assert_eq!(hit.disposition, Disposition::Steer, "advisory — see the promotion rule");
         assert!(hit.reason.contains(CYCLE_PERIOD_MARKER), "got: {}", hit.reason);
         assert!(hit.reason.contains("of 3"), "should name the period: {}", hit.reason);
     }
