@@ -7,7 +7,7 @@ Intelligent Model Routing allows organizations to dynamically optimize LLM model
 ## How It Works
 
 1. **Proxy Interception**: Every outbound prompt from your developer tools is routed through the proxy gateway.
-2. **Gateway Classification**: The proxy performs high-speed (sub-5ms) keyword matching to classify the prompt into one of five task types: `testing`, `deployment`, `review`, `debugging`, or `coding`.
+2. **Gateway Classification**: The proxy performs in-process keyword matching — no model call — to classify the prompt into one of five task types: `testing`, `deployment`, `review`, `debugging`, or `coding`.
 3. **Thompson Sampling Selection**: Intutic evaluates historical reward parameters ($\alpha, \beta$) for the `(Model × SOP Tier × Task Type)` Beta distribution to select the optimal model.
 4. **Reward Feedback**: Every routed request updates its arm's ($\alpha, \beta$) parameters in Valkey. Where the reward signal comes from depends on your deployment: [local deterministic rewards](#local-deterministic-reward-mode-open-core) in standalone open-core mode, or LLM-as-a-Judge audits in cloud-managed workspaces.
 

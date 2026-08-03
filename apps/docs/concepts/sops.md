@@ -29,7 +29,7 @@ interface SopRegistryEntry {
 
 ## SOP Formats
 
-Intutic supports two distinct formats of SOPs depending on whether the rule is meant for human-in-the-loop validation, sub-5ms local interception, or machine-enforceable runtime scripting:
+Intutic supports two distinct formats of SOPs depending on whether the rule is meant for human-in-the-loop validation, in-process local interception, or machine-enforceable runtime scripting:
 
 ### Comparison: Local Harness Rules vs. LLM-as-a-Judge
 
