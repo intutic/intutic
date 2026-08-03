@@ -350,14 +350,52 @@ export const VALID_SOP_TRANSITIONS: ReadonlyArray<{ from: SopLifecycleState; to:
 ] as const
 
 /**
- * Maps lifecycle state to enforcement mode.
+ * Maps lifecycle state to what enforcement **actually happens** today.
+ *
+ * This is rendered to the operator in the SOP transition dialog
+ * (`SopDetailDrawer.tsx`), which is its only consumer — so it is a promise made
+ * in the UI at the moment someone changes a state, and it must describe the
+ * system rather than the design.
+ *
+ * It previously said `HYPOTHESIZED: 'SHADOW'` and `REFINED: 'SHADOW'`. Neither
+ * was true, and four subsystems disagreed about these two states:
+ *
+ * | state | synced into agent context | runtime enforcement | dashboard "active" |
+ * |---|---|---|---|
+ * | `HYPOTHESIZED` | yes (`syncService.ts`) | no | no |
+ * | `REFINED` | **no** | no | **yes** (`dashboardService.ts`) |
+ * | `VALIDATED` | yes | yes | yes |
+ *
+ * Every runtime gate filters `lifecycleState = 'VALIDATED'` — `evaluate.ts`,
+ * `hookEvents.ts`, `judge.ts` (twice), `skillOptService.ts`, `sops.ts`. There is
+ * no shadow evaluation anywhere, so nothing records what a HYPOTHESIZED SOP
+ * *would* have done, and the transition out of it — described in
+ * `VALID_SOP_TRANSITIONS` as "Refine based on shadow results" — has no shadow
+ * results to refine from.
+ *
+ * `ADVISORY` is the honest name for what HYPOTHESIZED does: the SOP text is
+ * synced into the agent's governance file, so the agent reads it and is
+ * influenced by it, but no gate will stop anything.
+ *
+ * `REFINED` is `NONE` because it is in neither list — refining an SOP currently
+ * removes it from agents' context *and* leaves it unenforced, while the
+ * dashboard still counts it as active. That asymmetry is recorded as tech debt
+ * rather than silently corrected here, because widening what gets enforced is a
+ * product decision, not a docs fix.
+ *
+ * When real shadow evaluation exists, `SHADOW` becomes available again — and
+ * should be reinstated only for states where a would-have verdict is actually
+ * recorded.
  */
-export const ENFORCEMENT_BY_STATE: Record<SopLifecycleState, 'NONE' | 'SHADOW' | 'ACTIVE'> = {
+export const ENFORCEMENT_BY_STATE: Record<
+  SopLifecycleState,
+  'NONE' | 'ADVISORY' | 'SHADOW' | 'ACTIVE'
+> = {
   DRAFT: 'NONE',
   PENDING_REVIEW: 'NONE',
   GENERATED: 'NONE',
-  HYPOTHESIZED: 'SHADOW',
-  REFINED: 'SHADOW',
+  HYPOTHESIZED: 'ADVISORY',
+  REFINED: 'NONE',
   VALIDATED: 'ACTIVE',
   INVALIDATED: 'NONE',
 }
