@@ -19,6 +19,10 @@ export const E_CACHE_UNAVAILABLE = 'E_CACHE_UNAVAILABLE' as const
 
 /** Missing or invalid authentication credentials. */
 export const E_UNAUTHORIZED = 'E_UNAUTHORIZED' as const
+/** SCIM bearer token missing, unknown, expired or revoked. */
+export const E_SCIM_AUTH_FAILED = 'SCIM_AUTH_FAILED' as const
+/** SCIM create for a userName that already exists in the workspace. */
+export const E_SCIM_DUPLICATE = 'SCIM_DUPLICATE' as const
 
 /** Authenticated but insufficient permissions. */
 export const E_FORBIDDEN = 'E_FORBIDDEN' as const
@@ -138,6 +142,8 @@ export type IntuticErrorCode =
   | typeof E_CACHE_UNAVAILABLE
 
   | typeof E_UNAUTHORIZED
+  | typeof E_SCIM_AUTH_FAILED
+  | typeof E_SCIM_DUPLICATE
   | typeof E_FORBIDDEN
   | typeof E_BUDGET_EXCEEDED
   | typeof E_RATE_LIMITED

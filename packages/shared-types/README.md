@@ -8,12 +8,12 @@
 
 ## Scope
 
-20 source modules exporting ~200+ types covering:
+27 source modules exporting ~200+ types covering:
 
 | Module | Key Types |
 |--------|-----------|
-| `enums` | `EnforcementAction`, `HarnessType`, `RiskLevel`, `SopLifecycleState` |
-| `finops` | `TraceEntry`, `Attribution4D`, `TraceSummary`, `CostBreakdown` |
+| `enums` | `EnforcementAction`, `HarnessType`, `RiskLevel`, `SopLifecycleStage` |
+| `finops` | `TraceEntry`, `Attribution4D`, `BudgetEnvelope`, `CostBreakdown` |
 | `sop` | SOP lifecycle types, rule schemas, hook definitions |
 | `auth` | Session, token, credential types |
 | `identity` | SSO/OIDC provider config, cross-workspace user identity |

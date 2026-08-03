@@ -132,6 +132,9 @@ export {
   E_NOT_FOUND,
   E_CACHE_UNAVAILABLE,
   E_UNAUTHORIZED,
+  E_OFFBOARDING_IN_PROGRESS,
+  E_SCIM_DUPLICATE,
+  E_SCIM_AUTH_FAILED,
   E_FORBIDDEN,
   E_BUDGET_EXCEEDED,
   E_RATE_LIMITED,
@@ -222,6 +225,7 @@ export type {
 export {
   CreateSsoProviderSchema,
   UpdateUserProfileSchema,
+  CreateScimTokenSchema,
 } from './identity.js'
 
 export type {
@@ -231,6 +235,14 @@ export type {
   CreateSsoProviderInput,
   OidcClaims,
   UpdateUserProfileInput,
+  // SCIM 2.0 (RFC 7643/7644) and the offboarding cascade it drives.
+  ScimUserResource,
+  ScimListResponse,
+  ScimPatchOp,
+  ScimTokenInfo,
+  CreateScimTokenInput,
+  OffboardingStepResult,
+  OffboardingResult,
 } from './identity.js'
 
 // Usage

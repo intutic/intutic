@@ -60,8 +60,24 @@ impl OpenAIAdapter {
             let mut mapped_msg = json!({});
             let mut content_blocks = Vec::new();
 
+            // A tool-role message's `content` IS the tool result, and the branch
+            // below turns it into a `tool_result` block. Letting the generic
+            // handler run for it too emitted the same payload twice — once as a
+            // leading `text` block, then again as the result.
+            //
+            // Anthropic rejects that outright: the message after a `tool_use`
+            // must lead with its `tool_result`, so a text block in front breaks
+            // the pairing and the whole request 400s with "tool_use ids were
+            // found without tool_result blocks immediately after". Every
+            // OpenAI-shaped agent doing multi-turn tool use against a Claude
+            // model hit this — LangGraph, LangChain, the OpenAI SDK, Cursor —
+            // because the failure needs a *second* turn to appear and a
+            // single-turn smoke test looks fine.
+            let is_tool_output =
+                role == "tool" || (is_responses_api && role == "function_call_output");
+
             // Handle content mapping
-            if let Some(content) = msg.get("content") {
+            if let Some(content) = msg.get("content").filter(|_| !is_tool_output) {
                 if let Some(txt) = content.as_str() {
                     if !txt.is_empty() {
                         content_blocks.push(json!({
@@ -138,7 +154,7 @@ impl OpenAIAdapter {
             };
 
             // Tool execution output (role = tool / function_call_output)
-            if role == "tool" || (is_responses_api && role == "function_call_output") {
+            if is_tool_output {
                 anthropic_role = "user";
                 let tool_use_id = msg
                     .get("tool_call_id")
@@ -544,5 +560,104 @@ mod tests {
         assert!(res.is_some());
         let val = res.unwrap();
         assert_eq!(val["choices"][0]["finish_reason"], "stop");
+    }
+}
+
+#[cfg(test)]
+mod tool_result_pairing_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// A tool result must be the ONLY block in the message after a tool_use.
+    ///
+    /// The generic content handler used to emit a `text` block for every
+    /// message, tool-role ones included — so a tool result arrived as
+    /// `[text, tool_result]` with the payload duplicated and the result no
+    /// longer leading. Anthropic rejects that with "tool_use ids were found
+    /// without tool_result blocks immediately after", and the whole request
+    /// 400s.
+    ///
+    /// It needed a *second* turn to show up: a one-shot call with tools works
+    /// fine, and only a real agent loop — LangGraph, the OpenAI SDK, Cursor —
+    /// ever sends a tool result back. That is why this shipped.
+    #[test]
+    fn a_tool_result_is_the_only_block_in_its_message() {
+        let req = json!({
+            "model": "claude-haiku-4-5",
+            "messages": [
+                {"role": "user", "content": "read it"},
+                {"role": "assistant", "content": null, "tool_calls": [{
+                    "id": "call_1", "type": "function",
+                    "function": {"name": "read", "arguments": "{\"path\":\"a.py\"}"}
+                }]},
+                {"role": "tool", "tool_call_id": "call_1", "content": "42 lines"}
+            ]
+        });
+        let out = OpenAIAdapter::translate_request_to_anthropic(&req, false);
+        let msgs = out["messages"].as_array().expect("messages");
+
+        let blocks = msgs[2]["content"].as_array().expect("tool result is a block list");
+        assert_eq!(
+            blocks.len(),
+            1,
+            "the tool result message must carry exactly one block, got {blocks:?}"
+        );
+        assert_eq!(blocks[0]["type"], "tool_result");
+        assert_eq!(blocks[0]["tool_use_id"], "call_1");
+        assert_eq!(blocks[0]["content"], "42 lines");
+    }
+
+    /// And the pairing itself: tool_use in one message, its result immediately
+    /// next, with matching ids.
+    #[test]
+    fn every_tool_use_is_followed_immediately_by_its_result() {
+        let req = json!({
+            "model": "claude-haiku-4-5",
+            "messages": [
+                {"role": "assistant", "content": null, "tool_calls": [{
+                    "id": "call_a", "type": "function",
+                    "function": {"name": "bash", "arguments": "{\"command\":\"npm test\"}"}
+                }]},
+                {"role": "tool", "tool_call_id": "call_a", "content": "PASS"}
+            ]
+        });
+        let out = OpenAIAdapter::translate_request_to_anthropic(&req, false);
+        let msgs = out["messages"].as_array().unwrap();
+
+        let uses = msgs[0]["content"].as_array().unwrap();
+        assert_eq!(uses[0]["type"], "tool_use");
+        assert_eq!(uses[0]["id"], "call_a");
+
+        let results = msgs[1]["content"].as_array().unwrap();
+        assert_eq!(msgs[1]["role"], "user", "a tool result is a user-role message");
+        assert_eq!(results[0]["type"], "tool_result");
+        assert_eq!(results[0]["tool_use_id"], "call_a");
+    }
+
+    /// An ordinary text message is untouched — the guard must not swallow
+    /// content from every other role while fixing this one.
+    #[test]
+    fn ordinary_messages_keep_their_text() {
+        let req = json!({
+            "model": "claude-haiku-4-5",
+            "messages": [{"role": "user", "content": "hello"}]
+        });
+        let out = OpenAIAdapter::translate_request_to_anthropic(&req, false);
+        assert_eq!(out["messages"][0]["content"], "hello");
+    }
+
+    /// The Responses-API spelling of the same thing.
+    #[test]
+    fn a_function_call_output_is_also_a_lone_tool_result() {
+        let req = json!({
+            "model": "claude-haiku-4-5",
+            "input": [
+                {"role": "function_call_output", "tool_call_id": "fc_1", "content": "done"}
+            ]
+        });
+        let out = OpenAIAdapter::translate_request_to_anthropic(&req, true);
+        let blocks = out["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0]["type"], "tool_result");
     }
 }

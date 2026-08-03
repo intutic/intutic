@@ -46,6 +46,8 @@ export interface TraceDagNode {
 export interface TraceDagResult {
   traceId: string
   rootSessionId: string
+  /** The session the requested trace belongs to — what the DAG highlights. */
+  currentSessionId: string
   nodes: TraceDagNode[]
 }
 

@@ -175,7 +175,20 @@ async function getClient(dev?: boolean) {
     log.error('Not authenticated. This command needs an Intutic control plane, which open core does not include. To run the proxy without one: `intutic start`.')
     process.exit(1)
   }
-  const devMode = dev || process.env.INTUTIC_DEV === '1'
+  // `config?.devMode` is load-bearing and was missing here.
+  //
+  // Every other command that talks to the control plane resolves dev mode as
+  // `flag || config.devMode || INTUTIC_DEV` (sops, policy, budget, connect, exec).
+  // This one read only the flag and the env var, so a workspace configured with
+  // `devMode: true` still had `intutic loop start` resolve to https://api.intutic.ai
+  // — the loop commands, which are the governance feature, were the one family that
+  // ignored the workspace's own setting and silently addressed production.
+  //
+  // It went unnoticed because tools/cli/dist was stale: the built CLI predated this
+  // code and still read the config, so the bug only appeared once a workspace build
+  // regenerated dist from source.
+  const config = loadConfig()
+  const devMode = dev || config?.devMode || process.env.INTUTIC_DEV === '1'
   const controlPlaneUrl = resolveControlPlaneUrl(devMode)
   return createApiClient(controlPlaneUrl, creds.apiKey)
 }
@@ -307,12 +320,57 @@ export async function runLoopList(opts: { dev?: boolean }): Promise<void> {
       console.log(`  ${pc.bold('Loop Run ID')}           | ${pc.bold('Name')}           | ${pc.bold('Status')}    | ${pc.bold('Token Spend')} | ${pc.bold('Budget Limit')}`)
       console.log('  ' + '-'.repeat(85))
       for (const loop of res.loops) {
-        const statusStr = loop.status === 'ACTIVE' ? pc.green(loop.status) : loop.status === 'COMPLETED' ? pc.cyan(loop.status) : pc.red(loop.status)
+        // PENDING_REVIEW is amber, not red: it needs a person, but nothing has
+        // gone wrong. Falling through to the red branch made a held run look
+        // killed, which is the opposite of "waiting for you".
+        const statusStr =
+          loop.status === 'ACTIVE'
+            ? pc.green(loop.status)
+            : loop.status === 'COMPLETED'
+              ? pc.cyan(loop.status)
+              : loop.status === 'PENDING_REVIEW'
+                ? pc.yellow(loop.status)
+                : pc.red(loop.status)
         console.log(`  ${loop.loopRunId.padEnd(21)} | ${loop.name.padEnd(14)} | ${statusStr.padEnd(17)} | $${parseFloat(loop.totalTokenCostUsd).toFixed(4).padEnd(10)} | $${parseFloat(loop.budgetLimitUsd).toFixed(2)}`)
       }
     }
   } catch (err: any) {
     log.error(`Failed to list loops: ${err.message}`)
+  }
+}
+
+/**
+ * Approve or reject a run held for human review.
+ *
+ * The other half of `review_before:`. Without it a hold has no resolution from
+ * the terminal, and the hold is deliberately permanent — there is no reaper, so
+ * an unreviewed run stays blocked until a person acts.
+ */
+export async function runLoopReview(
+  loopRunId: string,
+  opts: { approve?: boolean; reject?: boolean; note?: string; dev?: boolean },
+): Promise<void> {
+  if (opts.approve === opts.reject) {
+    log.error('Specify exactly one of --approve or --reject.')
+    process.exit(1)
+  }
+  const action = opts.approve ? 'approve' : 'reject'
+  const client = await getClient(opts.dev)
+  try {
+    const res = await client.post<{ ok: boolean; status: string }>(
+      `/api/v1/loops/${loopRunId}/review`,
+      { action, note: opts.note },
+    )
+    if (res.ok) {
+      log.success(
+        action === 'approve'
+          ? `Loop run ${loopRunId} approved — it is ACTIVE again.`
+          : `Loop run ${loopRunId} rejected — it is KILLED.`,
+      )
+    }
+  } catch (err: any) {
+    log.error(`Failed to resolve review: ${err.message}`)
+    process.exit(1)
   }
 }
 
@@ -389,12 +447,44 @@ export async function runLoopExec(
     })
 
     child.on('close', async (code) => {
+      // A non-zero exit is the agent failing, not governance stopping it. This used
+      // to POST /kill for that case, which conflated the two: KILLED means the
+      // circuit breaker or an operator intervened, and a run marked KILLED because
+      // the wrapped process returned 1 makes budget-breach data unreadable. It also
+      // meant the outcome was never recorded anywhere — the exit code was known
+      // right here and thrown away, leaving no way to tell a successful trajectory
+      // from a failed one afterwards.
+      // A held run is not finished, it is waiting. Completing it would close the
+      // review by side effect, with nothing recorded about who decided what — and
+      // the route refuses it anyway (400). The agent exits non-zero when the proxy
+      // returns 403, so without this check every hold ends in a confusing error.
+      try {
+        const current = await client.get<{ ok: boolean; loop?: { status?: string } }>(
+          `/api/v1/loops/${loopRunId}`,
+        )
+        if (current?.loop?.status === 'PENDING_REVIEW') {
+          log.warn('This loop run is held for human review — it has not finished.')
+          log.info(`Approve or reject it:  intutic loop review ${loopRunId} --approve`)
+          // loop.env is deliberately left in place: the resumed agent needs the
+          // run id, and removing it here would orphan the run.
+          process.exit(code || 0)
+          return
+        }
+      } catch {
+        // Status unknown — fall through and record the outcome as usual rather
+        // than leaving the run open on a transient error.
+      }
+
       if (code === 0) {
-        await client.post(`/api/v1/loops/${loopRunId}/complete`).catch(() => {})
-        log.success(`Loop command execution succeeded. Wrapper loop marked COMPLETED.`)
+        await client
+          .post(`/api/v1/loops/${loopRunId}/complete`, { outcome: 'SUCCEEDED' })
+          .catch(() => {})
+        log.success('Loop command execution succeeded. Wrapper loop marked COMPLETED.')
       } else {
-        await client.post(`/api/v1/loops/${loopRunId}/kill`).catch(() => {})
-        log.warn(`Loop command execution exited with code ${code}. Wrapper loop marked KILLED.`)
+        await client
+          .post(`/api/v1/loops/${loopRunId}/complete`, { outcome: 'FAILED' })
+          .catch(() => {})
+        log.warn(`Loop command execution exited with code ${code}. Wrapper loop marked FAILED.`)
       }
       process.exit(code || 0)
     })

@@ -47,8 +47,24 @@ use crate::postprocessor::ResponsePostProcessor;
 use crate::quality::RequestPreProcessor;
 use crate::token::prediction::CostPredictionGate;
 
-/// Newest N tool calls retained per session for sequence-anomaly detection.
-const TOOL_SEQUENCE_CAP: usize = 20;
+/// Newest N sequence *entries* retained per session for sequence-anomaly detection.
+///
+/// Entries, not tool calls — the distinction became load-bearing when the recorded
+/// sequence started carrying the synthesised `action:` vocabulary alongside raw tool
+/// names. One `Bash("npm test && git push")` contributes three entries. At the previous
+/// value of 20 the effective window silently shrank from 20 tool calls to roughly 7-10,
+/// which quietly narrowed every sequence detector at the moment the vocabulary widened.
+///
+/// 60 restores and exceeds the original tool-call coverage, and gives the cycle
+/// detectors real room: ConsecutiveRepeat needs 5 in a row, PingPong inspects the last
+/// 6, ToolDiversityCollapse the last 10. A Valkey list of 60 short strings per session
+/// is not a memory consideration; the cap exists to bound unbounded growth, not to be
+/// tight.
+///
+/// This does not widen what the transition detector averages over — see
+/// `TRANSITION_SCORING_WINDOW`, which deliberately scores a trailing slice so a longer
+/// history does not dilute a short burst of implausible steps.
+const TOOL_SEQUENCE_CAP: usize = 60;
 
 /// Lifetime of a judged-chunk list on the streaming paths.
 const SESSION_CHUNK_TTL_SECS: u64 = 3_600;
@@ -393,6 +409,94 @@ fn json_error(status: StatusCode, error_type: &str, message: &str) -> Response {
     (status, axum::Json(body)).into_response()
 }
 
+/// This proxy process's identity, minted on first use and never again.
+static PROXY_INSTANCE_ID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// The id of this proxy process, stable for its whole lifetime.
+///
+/// Published on every trace as `proxy_instance_id`, and logged once at startup so
+/// an operator can tie a run of traces back to a process they can see.
+///
+/// It exists because the control plane had no working session key. Sessions are
+/// grouped from `x-session-id`, which no harness sets (see `tool_history_scope`
+/// below), so it is the literal string "unknown" for effectively all traffic and
+/// the grouping fell back to a synthetic key of workspace + harness — a permanent
+/// bucket rather than a session. That produced 353 "sessions" for 2,649 traces,
+/// one of them holding 148 traces from ten separate agent runs.
+///
+/// A proxy process is in practice one developer's working session: it is started
+/// for the run and dies with it. That is a vastly better unit than "this
+/// workspace, this harness, forever".
+///
+/// This is NOT a claim about who the agent is, and it deliberately does not touch
+/// `tool_history_scope` or `judge_session_scope`. Their scoping is load-bearing —
+/// read the doc comments there before changing anything near them.
+pub fn proxy_instance_id() -> &'static str {
+    PROXY_INSTANCE_ID.get_or_init(|| format!("proxy_{}", uuid::Uuid::new_v4()))
+}
+
+/// Scope key for the per-session tool history the sequence detectors read.
+///
+/// NOT the bare `session_id`. That comes from the `x-session-id` header, which no
+/// harness and no part of this repo actually sets, so it is the literal string
+/// "unknown" for effectively all traffic — and the store keys on it with no
+/// workspace component (`v2:session:{id}:tools`). Every agent on the proxy, across
+/// every tenant, therefore shared one global tool history. One spinning agent
+/// tripped `ConsecutiveRepeatDetector` and the resulting KILL landed on unrelated
+/// tenants for the full 24h TTL, with the 403 naming the offending tenant's tool
+/// back to them. Interleaved calls from unrelated agents also synthesised
+/// ping-pong cycles that no single agent ever performed.
+///
+/// Workspace goes first, so cross-tenant contamination is structurally impossible.
+/// Then the most specific agent-run identity available: an explicit session header
+/// if a harness ever sends one, else the loop run (the governed path always has
+/// one), else the authenticated member. Anonymous traffic inside a single workspace
+/// still shares a bucket — the correct grouping when there is genuinely nothing to
+/// tell two callers apart.
+fn tool_history_scope(
+    workspace_id: &str,
+    session_id: &str,
+    loop_run_id: Option<&str>,
+    user_id: Option<&str>,
+) -> String {
+    let agent = if session_id != "unknown" && !session_id.is_empty() {
+        session_id.to_string()
+    } else if let Some(lr) = loop_run_id {
+        format!("loop:{}", lr)
+    } else if let Some(uid) = user_id {
+        format!("member:{}", uid)
+    } else {
+        "anonymous".to_string()
+    };
+    format!("{}:{}", workspace_id, agent)
+}
+
+/// Scope key for the judge's session-keyed Valkey state — the auto-judge flag and
+/// the mid-stream chunk verdict list.
+///
+/// Same defect as `tool_history_scope` above, at a second pair of call sites that
+/// did not get the fix. `session:auto_judge:{id}` and `session:chunks:{id}` carried
+/// no workspace component, and `id` is the `x-session-id` header, which nothing
+/// sets — so both were the single global string `unknown`. Turning auto-judge on
+/// for one session turned it on for every unidentified session on the proxy, in
+/// every workspace; and chunk verdicts from concurrent requests interleaved into
+/// one list that the first `finalize` then deleted, so tenants both polluted and
+/// truncated each other's judge evidence.
+///
+/// This is deliberately NOT `tool_history_scope`. That function falls back through
+/// loop run and member id, which the control plane cannot reproduce — and both of
+/// these keys are written by the control plane
+/// (`slashCommandService.ts` for the flag, `judge.ts` for the chunk read). The key
+/// shape must be exactly what both sides can compute from the same two values, so
+/// it stays `{workspace}:{session}` and nothing more.
+///
+/// Changing this shape requires changing `slashCommandService.ts` and `judge.ts` in
+/// the same commit, or the flag is written under one key and read under another and
+/// the feature silently stops working.
+fn judge_session_scope(workspace_id: &str, session_id: &str) -> String {
+    format!("{}:{}", workspace_id, session_id)
+}
+
 fn get_model_provider(model: &str) -> Provider {
     let m = model.to_lowercase();
     if m.contains("claude") {
@@ -574,104 +678,6 @@ fn extract_wasm_tool_calls(body: &serde_json::Value) -> Vec<crate::wasm::context
 /// The tool calls newly observed this turn, given the cumulative extract and
 /// how many calls this session had already reported.
 ///
-/// Harnesses resend the full message history per request, so the extractor's
-/// output is cumulative; the delta is its suffix beyond `prev_count`. When the
-/// history has shrunk (harness compaction), which calls are new is unknowable
-/// and the delta is empty: a missed observation is recoverable noise, while a
-/// re-appended duplicate is amplified signal in every sequence detector.
-fn per_turn_tool_delta<T: Clone>(prev_count: usize, extracted: &[T]) -> Vec<T> {
-    if prev_count <= extracted.len() {
-        extracted[prev_count..].to_vec()
-    } else {
-        Vec::new()
-    }
-}
-
-/// One tool call as it appeared in the request, with the arguments the ordering
-/// rules need to classify it. The arguments used to be discarded here, which is
-/// why `SCOPE_VIOLATION`'s rules named a vocabulary nothing produced.
-#[derive(Debug, Clone)]
-struct ToolInvocation {
-    name: String,
-    input: serde_json::Value,
-}
-
-/// Expand a per-turn delta into the sequence actually recorded: each concrete
-/// call, followed by the abstract actions it performs.
-///
-/// Interleaved rather than kept in a parallel list, because the ordering rules
-/// are about *when* something happened relative to everything else, and one
-/// sequence is the only place that relation survives.
-fn expand_tool_actions(invocations: &[ToolInvocation]) -> Vec<String> {
-    let mut out = Vec::with_capacity(invocations.len());
-    for call in invocations {
-        out.push(call.name.clone());
-        out.extend(crate::plugins::anomaly::actions::classify(&call.name, &call.input));
-    }
-    out
-}
-
-fn extract_request_tool_invocations(body: &serde_json::Value) -> Vec<ToolInvocation> {
-    let mut tool_names = Vec::new();
-    if let Some(messages) = body.get("messages").and_then(|m| m.as_array()) {
-        for msg in messages {
-            if let Some(tool_calls) = msg.get("tool_calls").and_then(|tc| tc.as_array()) {
-                for tc in tool_calls {
-                    if let Some(name) = tc
-                        .get("function")
-                        .and_then(|f| f.get("name"))
-                        .and_then(|n| n.as_str())
-                    {
-                        // OpenAI puts the arguments in a JSON *string*, so parse
-                        // it; an unparseable one still yields the call itself.
-                        let input = tc
-                            .get("function")
-                            .and_then(|f| f.get("arguments"))
-                            .map(|a| match a.as_str() {
-                                Some(raw) => serde_json::from_str(raw).unwrap_or_else(|_| {
-                                    serde_json::Value::String(raw.to_string())
-                                }),
-                                None => a.clone(),
-                            })
-                            .unwrap_or(serde_json::Value::Null);
-                        tool_names.push(ToolInvocation { name: name.to_string(), input });
-                    } else if let Some(name) = tc.get("name").and_then(|n| n.as_str()) {
-                        let input = tc.get("input").cloned().unwrap_or(serde_json::Value::Null);
-                        tool_names.push(ToolInvocation { name: name.to_string(), input });
-                    }
-                }
-            }
-            if let Some(role) = msg.get("role").and_then(|r| r.as_str()) {
-                if role == "tool" || role == "function" {
-                    if let Some(name) = msg.get("name").and_then(|n| n.as_str()) {
-                        let input = msg.get("content").cloned().unwrap_or(serde_json::Value::Null);
-                        tool_names.push(ToolInvocation { name: name.to_string(), input });
-                    }
-                }
-            }
-            if let Some(content) = msg.get("content") {
-                if let Some(arr) = content.as_array() {
-                    for block in arr {
-                        if let Some(block_type) = block.get("type").and_then(|t| t.as_str()) {
-                            if block_type == "tool_use" || block_type == "tool_result" {
-                                if let Some(name) = block.get("name").and_then(|n| n.as_str()) {
-                                    let input = block
-                                        .get("input")
-                                        .or_else(|| block.get("content"))
-                                        .cloned()
-                                        .unwrap_or(serde_json::Value::Null);
-                                    tool_names.push(ToolInvocation { name: name.to_string(), input });
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    tool_names
-}
-
 // ─── Main proxy handler ──────────────────────────────────────────────
 
 /// Main proxy handler — routes all protocol variants through the governance pipeline.
@@ -834,7 +840,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
 
     if state
         .control_plane
-        .auto_judge_active(JudgeScope::Session, &session_id_hdr)
+        .auto_judge_active(
+            JudgeScope::Session,
+            &judge_session_scope(&workspace_id, &session_id_hdr),
+        )
         .await
     {
         judge_active = true;
@@ -1575,7 +1584,38 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
 
     if let Some(ref lr_id) = loop_run_id_header {
         if let Some(status) = state.control_plane.loop_status(lr_id).await {
-            if status == "KILLED" || status == "COMPLETED" {
+            // Every terminal status, enumerated negatively rather than positively:
+            // anything that is not ACTIVE has stopped, and a run that has stopped
+            // must not keep spending. FAILED joined COMPLETED and KILLED when loop
+            // runs gained an outcome; matching on the terminal set by name would
+            // have let a FAILED run go on issuing requests until someone noticed.
+            if status == "PENDING_REVIEW" {
+                // A hold is not a termination, and saying so matters: an agent
+                // reading "terminated" concludes the run is over and stops
+                // trying. This body is the only channel that reaches the model,
+                // which is the only party positioned to tell the human what to
+                // do — so it carries the reason and the way out.
+                let reason = state
+                    .store
+                    .loop_review_reason(lr_id)
+                    .await
+                    .unwrap_or_else(|| "a declared review_before: action".to_string());
+                tracing::warn!(workspace_id = %workspace_id, loop_run_id = %lr_id, reason = %reason, "Loop run held for human review — rejecting request");
+                return json_error(
+                    StatusCode::FORBIDDEN,
+                    "LOOP_RUN_PENDING_REVIEW",
+                    &format!(
+                        "Loop run {} is paused for human review. Held by: {}. \
+                         A reviewer must approve or reject it before work continues — \
+                         `intutic loop review {} --approve`, or the Held Changes tab in the dashboard.",
+                        lr_id, reason, lr_id
+                    ),
+                );
+            }
+            // Every terminal status, enumerated negatively rather than positively:
+            // anything that is not ACTIVE has stopped, and a run that has stopped
+            // must not keep spending.
+            if status != "ACTIVE" {
                 tracing::warn!(workspace_id = %workspace_id, loop_run_id = %lr_id, status = %status, "Loop execution terminated by safety rules — rejecting request");
                 return json_error(
                     StatusCode::FORBIDDEN,
@@ -1702,7 +1742,14 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             .await
             .is_some_and(|pinned| pinned != tool_signature);
 
-    let request_tool_calls = extract_request_tool_invocations(&body_json);
+    let tool_scope_id = tool_history_scope(
+        &workspace_id,
+        &session_id,
+        loop_run_id_header.as_deref(),
+        key_record.as_ref().and_then(|k| k.user_id.as_deref()),
+    );
+
+    let request_tool_calls = crate::manifest::extract_request_tool_invocations(&body_json);
     // The extractor walks the request's full message history, and harnesses
     // resend that history every turn — so the raw extract is cumulative, and
     // appending it wholesale duplicated the entire history into the stored
@@ -1714,24 +1761,42 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // sequence detector.
     let prev_count = state
         .store
-        .swap_extracted_tool_count(&session_id, request_tool_calls.len() as u64)
+        .swap_extracted_tool_count(&tool_scope_id, request_tool_calls.len() as u64)
         .await as usize;
-    let new_invocations = per_turn_tool_delta(prev_count, &request_tool_calls);
-    // Names only for the trace record and the downstream detectors that reason
-    // about what the harness called.
-    let new_tool_calls: Vec<String> = new_invocations.iter().map(|t| t.name.clone()).collect();
-    // The stored sequence also carries the abstract actions each call performed
-    // — `git push` is a deploy — because that is the vocabulary the ordering
-    // rules are written in, and nothing was translating into it.
+    let new_invocations = crate::manifest::per_turn_tool_delta(prev_count, &request_tool_calls);
+    // The per-turn delta, expanded into the same vocabulary the detectors score.
+    //
+    // This was names only, while the sequence handed to the detectors below carries
+    // the abstract actions too (`git push` is a deploy). The published trace and the
+    // evaluated sequence therefore spoke different languages, and the trace's was
+    // the poorer one — an ordering violation like "deployed without running tests"
+    // is expressed entirely in `action:` tokens, so a corpus built from the trace
+    // could never contain the thing the rules are about.
+    //
+    // They are now the same expansion, which is what makes a transition baseline
+    // fitted from stored traces applicable to the live sequence.
+    let new_tool_calls: Vec<String> = crate::manifest::expand_tool_actions(&new_invocations);
+    // What those calls actually touched. Derived from the same delta, so the
+    // manifest and the action sequence always describe one turn's work.
+    let change_manifest = crate::manifest::manifest_from_invocations(&new_invocations);
     let tool_sequence = state
         .store
-        .record_tool_sequence(
-            &session_id,
-            &expand_tool_actions(&new_invocations),
-            TOOL_SEQUENCE_CAP,
-        )
+        .record_tool_sequence(&tool_scope_id, &new_tool_calls, TOOL_SEQUENCE_CAP)
         .await
         .unwrap_or_default();
+
+    // This workspace's fitted transition model, if the control-plane sweep has
+    // published one. Parsed here rather than in the detector so the detector remains
+    // a pure function of its context; a parse failure is treated as absent, because a
+    // malformed cache entry must not be more permissive than a missing one.
+    // On `control_plane`, not `store`: a fitted model is control-plane-produced, which
+    // is also the tier boundary — a local/OSS deployment has no sweep behind it and
+    // keeps the built-in table.
+    let transition_baseline: Option<std::collections::HashMap<String, f64>> =
+        match state.control_plane.transition_baseline(&workspace_id).await {
+            Some(raw) => serde_json::from_str::<std::collections::HashMap<String, f64>>(&raw).ok(),
+            None => None,
+        };
 
     // Where this request sits in a multi-agent graph. Falls back to a
     // graph-of-one keyed on the session, so an uninstrumented single-agent
@@ -1822,9 +1887,26 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         risk_tier: crate::wasm::context::RiskLevel::Low,
         dlp_findings,
         tool_sequence,
+        // This workspace's fitted transition model, resolved here for the same reason
+        // as denied_tools below: the detector stays a pure function of the context and
+        // does no I/O of its own. Cheap — one cached GET the control-plane sweep
+        // refreshes every six hours — and `None` on any miss, which means the detector
+        // falls back to its built-in table rather than treating an absent model as
+        // permission.
+        transition_baseline,
         // Tool bans from the SOPs in force for this node's role. Resolved here
         // so the detector remains a pure function of the context.
         denied_tools: crate::sops::denied_tools_for_role(&node.agent_role),
+        // The declared plan for this role, same resolution and same reason. Empty for
+        // any workspace that has not written one, which is the overwhelming default.
+        plan_steps: crate::sops::plan_steps_for_role(&node.agent_role),
+        // Where this role may change things, and what it may not do without a
+        // human. Resolved here like the other SOP-derived fields, so detectors
+        // stay pure functions of this struct.
+        scope_paths: crate::sops::scope_paths_for_role(&node.agent_role),
+        review_before: crate::sops::review_before_for_role(&node.agent_role),
+        changes: change_manifest.clone(),
+        new_tool_calls: new_tool_calls.clone(),
         // Scanned over the whole request text, so injected content arriving
         // via a tool result from an earlier node is seen too — which is the
         // case that matters in a graph, where one node's output is the next
@@ -1887,6 +1969,16 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // happened to run first. The two original checks are preserved inside it as
     // `ConsecutiveRepeatDetector` and `TransitionProbabilityDetector`.
     let anomaly_registry = crate::plugins::anomaly::DetectorRegistry::with_defaults();
+    // Findings that did not block, carried out of this scope so the allowed-path
+    // trace can publish them.
+    //
+    // Only the *blocked* trace recorded its anomalies; every allowed-path trace
+    // hardcoded an empty list, so an advisory finding steered the agent in-band and
+    // then vanished. That makes every `steer` detector unfalsifiable from the
+    // outside — and unpromotable, since the rule in `anomaly/mod.rs` requires a
+    // measured 0.1–1% false-positive rate before a detector may escalate to `kill`,
+    // and there was no path by which an advisory finding could ever be counted.
+    let mut advisory_anomalies: Vec<String> = Vec::new();
     if !has_break_glass {
         let findings = anomaly_registry.evaluate_all(&wasm_ctx);
         if let Some(worst) = findings.first() {
@@ -1920,6 +2012,30 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             )
             .await;
 
+            // A declared review action means this run stops here until a human
+            // says otherwise. Written synchronously, not spawned: this request
+            // is already being refused, so the latency is free — and a spawn
+            // that lost the race would let the run walk through the hold it
+            // just tripped.
+            if let (Some(lr_id), Some(hold)) = (
+                loop_run_id_header.as_ref(),
+                findings.iter().find(|f| {
+                    f.reason
+                        .contains(crate::plugins::anomaly::detectors::REVIEW_HOLD_MARKER)
+                }),
+            ) {
+                // A human already cleared this exact hold. Re-holding on it would
+                // make approval look broken — see `loop_review_cleared`.
+                let already_cleared = state
+                    .store
+                    .loop_review_cleared(lr_id)
+                    .await
+                    .is_some_and(|c| c == hold.reason);
+                if !already_cleared {
+                    state.store.request_loop_review(lr_id, &hold.reason).await;
+                }
+            }
+
             // Trace the block.
             //
             // Every other trace site is on a success path, so without this the
@@ -1931,6 +2047,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             let blocked_trace = crate::telemetry::ExecutionTrace {
                 trace_id: uuid::Uuid::new_v4().to_string(),
                 session_id: session_id.clone(),
+                proxy_instance_id: proxy_instance_id().to_string(),
                 workspace_id: workspace_id.clone(),
                 virtual_key_id: key_prefix.to_string(),
                 model: model.clone(),
@@ -1949,6 +2066,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 actual_model_routed: model.clone(),
                 task_type: String::new(),
                 tools: new_tool_calls.clone(),
+                change_manifest: change_manifest.clone(),
                 reconstruction_quality: 0,
                 token_anomaly: false,
                 loop_run_id: loop_run_id_header.clone(),
@@ -1996,8 +2114,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 );
             }
 
-            // Advisory only. The findings are already logged above, already
-            // broadcast to siblings, and already traced. The request proceeds.
+            // Advisory only: logged above, broadcast to siblings, and — from here —
+            // carried onto the trace this request publishes. The request proceeds.
+            advisory_anomalies = findings.iter().map(|f| f.kind.as_str().to_string()).collect();
         }
     }
 
@@ -2177,6 +2296,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             let trace = ExecutionTrace {
                 trace_id: uuid::Uuid::new_v4().to_string(),
                 session_id: session_id.clone(),
+                proxy_instance_id: proxy_instance_id().to_string(),
                 workspace_id: workspace_id.clone(),
                 virtual_key_id: key_prefix.to_string(),
                 model: model.clone(),
@@ -2198,10 +2318,11 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 )
                 .to_string(),
                 tools: new_tool_calls.clone(),
+                change_manifest: change_manifest.clone(),
                 reconstruction_quality: 100,
                 token_anomaly: false,
                 loop_run_id: loop_run_id_header.clone(),
-                graph: crate::telemetry::GraphTrace::from_node(&node_for_trace, vec![]),
+                graph: crate::telemetry::GraphTrace::from_node(&node_for_trace, advisory_anomalies.clone()),
             };
 
             let trace_store = Arc::clone(&state.store);
@@ -2603,6 +2724,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         let trace = ExecutionTrace {
             trace_id: uuid::Uuid::new_v4().to_string(),
             session_id: session_id.clone(),
+            proxy_instance_id: proxy_instance_id().to_string(),
             workspace_id: workspace_id.clone(),
             virtual_key_id: key_prefix.to_string(),
             model: model.clone(),
@@ -2621,10 +2743,11 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             actual_model_routed: actual_model.clone(),
             task_type: task_type.clone(),
             tools: new_tool_calls.clone(),
+            change_manifest: change_manifest.clone(),
             reconstruction_quality: 100,
             token_anomaly: false,
             loop_run_id: loop_run_id_header.clone(),
-            graph: crate::telemetry::GraphTrace::from_node(&node_for_trace, vec![]),
+            graph: crate::telemetry::GraphTrace::from_node(&node_for_trace, advisory_anomalies.clone()),
         };
         let cache_store_clone = Arc::clone(&state.store);
         tokio::spawn(async move {
@@ -2692,6 +2815,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         let actual_model_clone = actual_model.clone();
         let task_type_clone = task_type.clone();
         let new_tool_calls_clone = new_tool_calls.clone();
+        let change_manifest_clone = change_manifest.clone();
         let prompt_text_clone = prompt_text.clone();
         let provider_clone = provider.clone();
         let dlp_scan_output = state.config.intutic_settings.dlp.enabled
@@ -3012,6 +3136,11 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                             let cur_index = chunk_index;
 
                                             let personal_sops_chunk = personal_sops_clone.clone();
+                                            // The model that produced this chunk. Its own clone:
+                                            // actual_model_clone is moved into the trace publish
+                                            // further down, and the judge must not depend on
+                                            // which of the two runs first.
+                                            let judge_monitored = actual_model_clone.clone();
                                             let api_key_for_chunk = client_api_key_clone.clone();
                                             let handle = spawn(async move {
 
@@ -3028,6 +3157,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                                         "workspaceId": ws_id,
                                                         "sessionId": sess_id,
                                                         "chunkContent": chunk_content,
+                                                        "monitoredModel": judge_monitored.clone(),
                                                         "contextParagraphs": context_paras,
                                                         "personalSops": personal_sops_chunk,
                                                     }))
@@ -3059,7 +3189,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                                     serde_json::to_string(&chunk_json).unwrap();
                                                 chunk_store
                                                     .push_session_chunk(
-                                                        &sess_id,
+                                                        &judge_session_scope(&ws_id, &sess_id),
                                                         &json_str,
                                                         Some(SESSION_CHUNK_TTL_SECS),
                                                     )
@@ -3145,6 +3275,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                             "workspaceId": workspace_id_clone,
                             "sessionId": session_id_clone,
                             "chunkContent": trailing,
+                            "monitoredModel": actual_model_clone.clone(),
                             "contextParagraphs": context_paras,
                         }))
                         .send()
@@ -3176,7 +3307,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     let json_str = serde_json::to_string(&chunk_json).unwrap();
                     let _ = cache_store_clone
                         .push_session_chunk(
-                            &session_id_clone,
+                            &judge_session_scope(&workspace_id_clone, &session_id_clone),
                             &json_str,
                             Some(SESSION_CHUNK_TTL_SECS),
                         )
@@ -3193,6 +3324,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                         "workspaceId": workspace_id_clone,
                         "sessionId": session_id_clone,
                         "fullContent": accumulated_content,
+                        "monitoredModel": actual_model_clone.clone(),
                         "personalSops": personal_sops_clone,
                     }))
                     .send()
@@ -3347,6 +3479,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             let trace = ExecutionTrace {
                 trace_id: uuid::Uuid::new_v4().to_string(),
                 session_id: session_id_clone,
+                proxy_instance_id: proxy_instance_id().to_string(),
                 workspace_id: workspace_id_clone,
                 virtual_key_id: key_prefix_clone,
                 model: requested_model_clone.clone(),
@@ -3365,10 +3498,11 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 actual_model_routed: actual_model_clone,
                 task_type: task_type_clone,
                 tools: new_tool_calls_clone,
+                change_manifest: change_manifest_clone.clone(),
                 reconstruction_quality,
                 token_anomaly,
                 loop_run_id: loop_run_id_clone,
-                graph: crate::telemetry::GraphTrace::from_node(&node_for_trace, vec![]),
+                graph: crate::telemetry::GraphTrace::from_node(&node_for_trace, advisory_anomalies.clone()),
             };
 
             let _ = cache_store_clone.publish_trace(&trace).await;
@@ -3549,6 +3683,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             }
         }
 
+        // Captured before the loop, which moves `actual_model` into its spawned
+        // tasks. The finalize call below still needs to say which model produced
+        // the content it is asking the judge to grade.
+        let judge_monitored_final = actual_model.clone();
         for chunk_content in parts {
             let context_paras = if paragraph_history.len() >= 2 {
                 paragraph_history[paragraph_history.len() - 2..].to_vec()
@@ -3565,6 +3703,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             let cur_index = chunk_index;
             let personal_sops_chunk = personal_sops.clone();
             let api_key_for_chunk = raw_token.to_string();
+            // Per-iteration clone: the spawn below takes ownership, so a later
+            // iteration — and the finalize call after the loop — cannot borrow the
+            // original.
+            let judge_monitored_chunk = actual_model.clone();
 
             let handle = spawn(async move {
                 let check_url = format!("{}/api/v1/judge/chunk", cp_url);
@@ -3576,6 +3718,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                         "workspaceId": ws_id,
                         "sessionId": sess_id,
                         "chunkContent": chunk_content,
+                        "monitoredModel": judge_monitored_chunk,
                         "contextParagraphs": context_paras,
                         "personalSops": personal_sops_chunk,
                     }))
@@ -3607,7 +3750,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 });
                 let json_str = serde_json::to_string(&chunk_json).unwrap();
                 let _ = chunk_store
-                    .push_session_chunk(&sess_id, &json_str, None)
+                    .push_session_chunk(&judge_session_scope(&ws_id, &sess_id), &json_str, None)
                     .await;
             });
             chunk_handles.push(handle);
@@ -3628,6 +3771,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 "workspaceId": workspace_id,
                 "sessionId": session_id,
                 "fullContent": accumulated_content,
+                "monitoredModel": judge_monitored_final,
                 "personalSops": personal_sops,
             }))
             .send()
@@ -3821,6 +3965,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     let trace = ExecutionTrace {
         trace_id: uuid::Uuid::new_v4().to_string(),
         session_id: session_id.clone(),
+        proxy_instance_id: proxy_instance_id().to_string(),
         workspace_id: workspace_id.clone(),
         virtual_key_id: key_prefix.to_string(),
         model: model.clone(),
@@ -3839,10 +3984,11 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         actual_model_routed: actual_model,
         task_type,
         tools: new_tool_calls.clone(),
+        change_manifest: change_manifest.clone(),
         reconstruction_quality,
         token_anomaly,
         loop_run_id: loop_run_id_header,
-        graph: crate::telemetry::GraphTrace::from_node(&node_for_trace, vec![]),
+        graph: crate::telemetry::GraphTrace::from_node(&node_for_trace, advisory_anomalies.clone()),
     };
 
     crate::local_spend::add_local_spend(actual_cost_usd);
@@ -4073,44 +4219,6 @@ mod tests {
         );
     }
 
-    // ── per_turn_tool_delta ─────────────────────────────────────────────
-    //
-    // Harnesses resend the whole message history each request, so the
-    // extractor's output is cumulative. Before the delta existed, that raw
-    // extract was appended to the stored sequence on every turn — duplicating
-    // the entire history into it each time, and quietly distorting every
-    // sequence detector's input.
-
-    #[test]
-    fn tool_delta_returns_only_new_calls() {
-        let extracted = vec!["Read".to_string(), "Edit".to_string(), "Bash".to_string()];
-        assert_eq!(
-            super::per_turn_tool_delta(2, &extracted),
-            vec!["Bash".to_string()],
-            "only the calls beyond the previous count are new"
-        );
-    }
-
-    #[test]
-    fn tool_delta_is_full_extract_for_a_fresh_session() {
-        let extracted = vec!["Read".to_string(), "Edit".to_string()];
-        assert_eq!(super::per_turn_tool_delta(0, &extracted), extracted);
-    }
-
-    #[test]
-    fn tool_delta_is_empty_when_nothing_changed() {
-        let extracted = vec!["Read".to_string()];
-        assert!(super::per_turn_tool_delta(1, &extracted).is_empty());
-    }
-
-    #[test]
-    fn tool_delta_is_empty_after_history_compaction() {
-        // The history shrank below what was already reported. Which tail calls
-        // are new is unknowable; guessing re-introduces the duplication this
-        // function exists to remove. Missing one turn is the safe failure.
-        let extracted = vec!["Bash".to_string()];
-        assert!(super::per_turn_tool_delta(5, &extracted).is_empty());
-    }
 
     #[tokio::test]
     async fn swap_extracted_tool_count_round_trips() {
@@ -4120,5 +4228,105 @@ mod tests {
         assert_eq!(s.swap_extracted_tool_count("ses", 5).await, 3, "returns the previous count");
         assert_eq!(s.swap_extracted_tool_count("ses", 1).await, 5, "compaction resets via the same swap");
         assert_eq!(s.swap_extracted_tool_count("other", 1).await, 0, "sessions are independent");
+    }
+
+    // Two tenants must never land in the same tool-history bucket.
+    //
+    // This is the regression that mattered: `x-session-id` is set by nothing, so
+    // `session_id` is "unknown" for effectively all traffic, and the store key
+    // carried no workspace. Every agent everywhere shared `v2:session:unknown:tools`,
+    // so one agent spinning on a tool produced a KILL for unrelated tenants — and
+    // the 403 quoted the offending tenant's tool name back to them.
+    // The judge's session state must not be shared across tenants either.
+    //
+    // Same defect as the tool history above, at a second pair of call sites that the
+    // original fix missed: `session:auto_judge:{id}` and `session:chunks:{id}`, both
+    // keyed on an `x-session-id` that nothing sets. One tenant enabling auto-judge
+    // enabled it for everyone; concurrent chunk verdicts interleaved into one list
+    // that the first finalize deleted.
+    #[test]
+    fn judge_session_state_is_never_shared_across_workspaces() {
+        let a = judge_session_scope("ws_alpha", "unknown");
+        let b = judge_session_scope("ws_beta", "unknown");
+        assert_ne!(a, b, "two workspaces must not share judge session state");
+        assert!(a.starts_with("ws_alpha:"), "workspace must lead the key: {a}");
+    }
+
+    #[test]
+    fn judge_scope_shape_matches_the_control_plane_writer() {
+        // This exact shape is rebuilt by hand in TypeScript — `autoJudgeKey` in
+        // slashCommandService.ts and the chunk list key in judge.ts. A mismatch does
+        // not error anywhere; the flag is simply written under one key and read under
+        // another, and auto-judging stops firing with no signal at all. Pinning the
+        // shape here makes a divergence a test failure instead of a silent outage.
+        assert_eq!(judge_session_scope("ws_1", "ses_9"), "ws_1:ses_9");
+    }
+
+    #[test]
+    fn tool_history_is_never_shared_across_workspaces() {
+        let a = tool_history_scope("ws_alpha", "unknown", None, None);
+        let b = tool_history_scope("ws_beta", "unknown", None, None);
+        assert_ne!(a, b, "two workspaces must not share an anonymous bucket");
+        assert!(a.starts_with("ws_alpha:"), "workspace must lead the key: {a}");
+    }
+
+    #[test]
+    fn tool_history_prefers_the_most_specific_identity_available() {
+        // An explicit session header wins when a harness sends one.
+        assert_eq!(
+            tool_history_scope("ws", "ses_real", Some("lr_1"), Some("mbr_1")),
+            "ws:ses_real"
+        );
+        // The governed path always carries a loop run, so it isolates per run.
+        assert_eq!(
+            tool_history_scope("ws", "unknown", Some("lr_1"), Some("mbr_1")),
+            "ws:loop:lr_1"
+        );
+        // Otherwise the authenticated member.
+        assert_eq!(
+            tool_history_scope("ws", "unknown", None, Some("mbr_1")),
+            "ws:member:mbr_1"
+        );
+        // Only genuinely unidentifiable callers share, and only inside one workspace.
+        assert_eq!(tool_history_scope("ws", "unknown", None, None), "ws:anonymous");
+    }
+
+    #[test]
+    fn two_loop_runs_in_one_workspace_do_not_pollute_each_other() {
+        // The case that blocked a real end-to-end run: a spin recorded under one
+        // loop must not kill the next loop's very first request.
+        assert_ne!(
+            tool_history_scope("ws", "unknown", Some("lr_first"), None),
+            tool_history_scope("ws", "unknown", Some("lr_second"), None),
+        );
+    }
+
+    /// The id has to be minted once and reused, not per call.
+    ///
+    /// A fresh id per trace would group nothing — it would be `trace_id` under
+    /// another name, and the control plane would go back to one bucket per
+    /// workspace+harness, which is the defect this replaces.
+    #[test]
+    fn the_instance_id_is_minted_once_for_the_whole_process() {
+        let first = proxy_instance_id();
+        let second = proxy_instance_id();
+        assert_eq!(first, second, "the id must be stable for the process lifetime");
+        let uuid = first
+            .strip_prefix("proxy_")
+            .expect("the id must be prefixed so it is recognisable in a log or a trace row");
+        assert!(
+            uuid::Uuid::parse_str(uuid).is_ok(),
+            "the id must carry a uuid, not a guessable counter: {first}"
+        );
+    }
+
+    #[test]
+    fn an_empty_session_header_is_treated_as_absent() {
+        // A harness sending `x-session-id:` with no value must not create a
+        // workspace-wide bucket keyed on the empty string.
+        assert_eq!(
+            tool_history_scope("ws", "", None, Some("mbr_1")),
+            "ws:member:mbr_1"
+        );
     }
 }

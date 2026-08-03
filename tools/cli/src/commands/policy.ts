@@ -149,7 +149,6 @@ export const DEFAULT_ALLOW_MOCK = JSON.stringify({
 export async function instantiateAndEvaluate(
   wasmBuffer: Uint8Array,
   mockStr: string,
-  opts: { forceAnomaly?: boolean } = {}
 ): Promise<number> {
   let instanceRef: any = null
   const imports = {
@@ -196,21 +195,16 @@ export async function instantiateAndEvaluate(
         return Math.random()
       }
     },
-    onnx_rules: {
-      runOnnxInference(modelNamePtr: number, inputDataPtr: number): number {
-        if (instanceRef && opts.forceAnomaly) {
-          const memory = instanceRef.exports.memory as WebAssembly.Memory
-          // TypedArray layout in AssemblyScript: buffer at offset 0, dataStart at offset 4
-          const dataStart = new Uint32Array(memory.buffer, inputDataPtr + 4, 1)[0]
-          // Mutate the backing buffer floats to trigger MSE reconstruction error
-          const floats = new Float32Array(memory.buffer, dataStart, 180)
-          for (let i = 0; i < floats.length; i++) {
-            floats[i] = 99.0 // force large difference from one-hot 0.0/1.0
-          }
-        }
-        return inputDataPtr
-      }
-    }
+    // The `onnx_rules.runOnnxInference` mock lived here and is gone with the host
+    // import it imitated.
+    //
+    // It was worse than the production stub it stood for. The proxy's version returned
+    // the input pointer unchanged, so the rule it backed could never fire; this one,
+    // under --force-anomaly, rewrote the input buffer to 99.0 so the reconstruction
+    // error was enormous and the rule DID fire. A rule author could watch their
+    // sequence-anomaly rule block a request in `policy test`, ship it, and have it
+    // never block anything in production. A harness that disagrees with production in
+    // the permissive direction is worse than no harness.
   }
 
   const { instance } = (await WebAssembly.instantiate(wasmBuffer, imports)) as any
@@ -246,7 +240,6 @@ export async function runPolicyTest(opts: { wasm: string; mock: string }): Promi
 
   let wasmBuffer: Buffer
   let mockStr: string
-  let forceAnomaly = false
   try {
     wasmBuffer = await fs.readFile(opts.wasm)
   } catch (err: any) {
@@ -256,17 +249,14 @@ export async function runPolicyTest(opts: { wasm: string; mock: string }): Promi
 
   try {
     mockStr = await fs.readFile(opts.mock, 'utf-8')
-    const parsed = JSON.parse(mockStr) // syntax check
-    if (parsed && parsed.mock_anomaly === true) {
-      forceAnomaly = true
-    }
+    JSON.parse(mockStr) // syntax check
   } catch (err: any) {
     log.error(`Failed to read or parse mock context JSON at "${opts.mock}": ${err.message}`)
     process.exit(1)
   }
 
   try {
-    const verdict = await instantiateAndEvaluate(wasmBuffer, mockStr, { forceAnomaly })
+    const verdict = await instantiateAndEvaluate(wasmBuffer, mockStr)
     log.info(`Dry-run evaluation executed successfully.`)
     log.field('WASM Verdict Code', String(verdict))
 

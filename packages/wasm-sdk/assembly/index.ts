@@ -289,8 +289,6 @@ function parseRequestContext(jsonBytes: Uint8Array): RequestContext {
 /**
  * User-extensible rules function.
  */
-import { evaluateSequenceAnomaly } from "./onnx_rules";
-
 function runRules(ctx: RequestContext): i32 {
   // Rule 1: Kill if any critical DLP findings exist that must be blocked
   for (let i = 0; i < ctx.dlp_findings.length; i++) {
@@ -315,10 +313,17 @@ function runRules(ctx: RequestContext): i32 {
     return 1; // Block/Kill
   }
 
-  // Rule 4: Kill if ML sequence autoencoder detects sequence anomaly
-  if (evaluateSequenceAnomaly(ctx.tool_sequence)) {
-    return 1; // Block/Kill
-  }
+  // Rule 4 was "Kill if ML sequence autoencoder detects sequence anomaly", backed by
+  // onnx_rules.ts — a complete reconstruction-error scorer with a calibrated 0.35
+  // threshold, advertised as a KILL. Its host function `runOnnxInference` returned the
+  // input pointer unchanged, so the reconstruction always equalled the input, the mean
+  // squared error was always exactly 0, and `0 > 0.35` was never true. The rule could
+  // not fire, and never had.
+  //
+  // Deleted rather than implemented: sequence deviation is now scored by the proxy's
+  // TransitionProbabilityDetector against a distribution fitted from each workspace's
+  // successful runs — real data, no ONNX runtime on the hot path, and a score that can
+  // be explained to an auditor, which a reconstruction error cannot.
 
   return 0; // Bypass/Allow
 }

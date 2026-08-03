@@ -223,6 +223,142 @@ Returns full trace detail including token counts, costs, compliance scores, anom
 
 ---
 
+<!-- ENTERPRISE_ONLY_START -->
+## `intutic integrity roots`
+
+List the sealed Merkle roots for the workspace, newest first. Roots are sealed by the control
+plane — see [Trace Integrity](/concepts/trace-integrity).
+
+```bash
+intutic integrity roots [options]
+```
+
+**Options:**
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--loop-run <id>` | Only roots sealed for this loop run | _(all)_ |
+| `--json` | Output as JSON instead of table | `false` |
+| `--dev` | Use local control plane (`http://localhost:3001`) | — |
+
+The **Signature** column reports whether the sealing key is published in the JWKS — not
+whether the signature verifies. Checking the bytes is what `verify` does.
+
+If nothing has been sealed yet the command says so and explains why: the sweep seals a loop
+run once it is terminal and has been quiet for fifteen minutes, so recent traces are recorded
+but under no root.
+
+---
+
+## `intutic integrity verify <root_id>`
+
+Re-derive one root from the traces that are in the database **now**, and check its signature
+against the published key the root itself names.
+
+```bash
+intutic integrity verify <root_id> [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON instead of a report |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**Exit status — this is the point of the command.** It is designed to be a CI step, so it is
+deliberate about which findings are failures:
+
+| Result | Exit | Meaning |
+|--------|:----:|---------|
+| Re-derivation `match` | `0` | The stored root is the root of the traces on disk. |
+| Re-derivation mismatch | `1` | A covered trace changed after sealing. |
+| `missing_traces` | `1` | A covered trace is gone. The leaf survives it, so the root still names it. |
+| Signature `valid` | `0` | Verified against the key the root names. |
+| Signature `invalid` | `1` | A key we hold **rejected** it. |
+| Signature `unverifiable` | `0` | The root names a key the JWKS does not publish — a key-retention gap, not evidence of forgery. |
+| Signature `unsigned` | `0` | The deployment seals roots without signing them, which is supported. |
+| `keys_unavailable` | `0` | The JWKS could not be fetched. No verdict was reached, so none is reported. |
+
+The distinction between **invalid** and **unverifiable** is load-bearing. A rotated-out key
+that was never added to `TRACE_SIGNING_RETIRED_KEYS` would otherwise turn every historical
+root into an apparent forgery and your pipeline red. The command never falls back to "some
+other published key that happens to verify" — a signature that checks out under a different
+key is a different claim.
+
+**Example:**
+
+```bash
+intutic integrity verify tmr_abc123
+```
+
+---
+
+## `intutic integrity chain`
+
+Walk the `previous_root` chain and report roots that have been deleted outright — the one
+form of tampering re-derivation cannot see, because the survivors all verify perfectly.
+
+```bash
+intutic integrity chain [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON instead of a report |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+A **break** — a root whose named predecessor is not the root that actually precedes it — exits
+`1` and prints both ends of the gap. An **unchained** root, one that claims no predecessor at
+all, exits `0`: nothing was claimed, so nothing is contradicted. Roots written before the
+chain existed are unchained, which is what a rolling deploy produces, and failing on them
+would make every deploy red.
+
+---
+
+## `intutic integrity config-chain`
+
+Walk the harness **config snapshot** chain and re-hash every stored body. Each snapshot in
+`harness_config_snapshots` records a `content_hash` of its own body and the `previous_hash` of
+the snapshot before it, per harness type and file path — this is the command that reads them.
+
+```bash
+intutic integrity config-chain [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON instead of a report |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+Two findings, reported separately, because they have different causes and different remedies:
+
+| Finding | Exit | Meaning |
+|---------|:----:|---------|
+| **Break** | `1` | A snapshot names a predecessor that is not the snapshot actually before it. That is what deleting a snapshot leaves behind. Both ends of the gap are printed. |
+| **Content mismatch** | `1` | A stored body no longer hashes to the `content_hash` recorded with it — the body was rewritten in place. Every link around it is still intact. |
+| **Unchained** | `0` | A snapshot mid-chain names no predecessor. Nothing was claimed, so nothing is contradicted — but a deletion at that point would go unseen. |
+
+Both checks are needed, and neither substitutes for the other. Checking only the links leaves
+an edited body undetected, because `previous_hash` describes the *predecessor* and says nothing
+about the row carrying it. Re-hashing only the bodies leaves a deleted snapshot undetected,
+because every survivor still hashes correctly.
+
+A workspace with **no snapshots** is reported as an absent chain, not a clean one, and exits
+`0` — nothing was verified, so there is nothing to have failed. If you expected snapshots, the
+sync daemon is not reaching the control plane.
+
+Only the most recent 500 snapshots are walked. When older ones exist the report says so: an
+intact window is not an intact history.
+
+<!-- ENTERPRISE_ONLY_END -->
+
+---
+
 ## `intutic skill list`
 
 Discover and list local workspace rule/skill files.
