@@ -510,10 +510,13 @@ impl LocalStore for ValkeyStore {
     async fn pinned_tool_signature(
         &self,
         workspace_id: &str,
+        harness: &str,
         signature: &str,
     ) -> Option<String> {
         let mut conn = self.conn();
-        let key = format!("tools:pin:{workspace_id}");
+        // Keyed by harness as well as workspace — see the trait doc. A
+        // workspace-wide key made every second harness look like a rug pull.
+        let key = format!("tools:pin:{workspace_id}:{harness}");
         // SET NX with no expiry: the pin is the workspace's baseline and must
         // outlive every session, or a rug pull only has to wait for the next
         // one. Clearing it is a deliberate act — re-approval — not a timeout.
