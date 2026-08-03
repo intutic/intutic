@@ -1,6 +1,6 @@
 ---
 title: Circuit Breaker
-description: How Intutic's circuit breaker evaluates every tool call in under 50ms — budget gates, loop detection, policy resolution, and graceful degradation.
+description: How Intutic's circuit breaker evaluates every tool call synchronously — budget gates, loop detection, policy resolution, and graceful degradation.
 ---
 
 # Circuit Breaker <Badge type="tip" text="Open-Core" />
@@ -8,7 +8,6 @@ description: How Intutic's circuit breaker evaluates every tool call in under 50
 The **circuit breaker** is the decision engine that evaluates every AI agent tool call and returns an [enforcement action](/concepts/enforcement-actions) — BYPASS, ENHANCE, HIJACK, or KILL. It operates on the hot path between the proxy and the LLM provider, so every millisecond matters.
 
 **Design goals:**
-- Typical evaluation in **< 50ms** (real benchmarks in T12)
 - **Fail-closed** by default — if the check can't complete, block the request
 - **Graceful degradation** — if a backend is unavailable, fall back to the next tier
 - **Zero single points of failure** — Valkey cache and Postgres each provide a degradation layer
@@ -25,19 +24,19 @@ Tool call arrives at proxy (:4000)
               ▼
      ┌────────────────┐
      │ 1. Budget Gate │ ◀── Valkey: v2:budget:hard_block:{wk_id}
-     │   (< 1ms)      │     + loop governance kill check
+     │   (in-memory)  │     + loop governance kill check
      └────────┬───────┘
               │ pass
               ▼
      ┌────────────────┐
      │ 2. Loop Breaker│ ◀── Valkey: v2:loop:{session_id}
-     │   (< 2ms)      │     sliding window of prompt hashes
+     │   (in-memory)  │     sliding window of prompt hashes
      └────────┬───────┘
               │ pass
               ▼
       ┌────────────────┐
-      │ 3. PCAS Policy │ ◀── Valkey cache (< 1ms on hit)
-      │   Resolution   │     Postgres query (< 15ms on miss)
+      │ 3. PCAS Policy │ ◀── Valkey cache on hit
+      │   Resolution   │     Postgres CTE on miss
       └────────┬───────┘
                │
                ▼
@@ -94,7 +93,7 @@ const LOOP_STATE_TTL = 3_600 // 1 hour (matches session inactivity)
 
 **Graceful degradation:** If Valkey is unavailable, returns `{ isLoop: false }` — the loop breaker fails open so it doesn't block legitimate requests when the cache is down.
 
-**Latency:** Typically < 2ms (Valkey GET + JSON parse + SET)
+**Work per check:** one Valkey GET, a JSON parse, and one SET — no database query and no model call.
 
 → Source: [loopBreakerService.ts](https://github.com/intutic/intutic/tree/main/services/control-plane/src/services/loopBreakerService.ts)
 
@@ -106,11 +105,11 @@ The most complex gate — resolves effective permissions for the user+agent pair
 
 **Resolution cascade:**
 
-| Step | Backend | Latency | What happens on failure |
-|---|---|---|---|
-| 1 | Valkey cache | < 1ms | Continue to step 2 |
-| 2 | Postgres CTE resolution | < 15ms | Continue to step 3 |
-| 3 | Synthetic empty set | 0ms | Return `fallbackMode: true` → forces HIJACK |
+| Step | Backend | What happens on failure |
+|---|---|---|
+| 1 | Valkey cache | Continue to step 2 |
+| 2 | Postgres CTE resolution | Continue to step 3 |
+| 3 | Synthetic empty set | Return `fallbackMode: true` → forces HIJACK |
 
 ```typescript
 // services/control-plane/src/services/pcasService.ts

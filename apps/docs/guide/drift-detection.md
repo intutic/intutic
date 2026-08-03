@@ -12,7 +12,7 @@ Three independent mechanisms, each with a different trigger:
 | **Behavioral drift** | Agents comply with an SOP measurably less than they used to | Hourly control-plane sweep |
 | **SOP staleness** | Agents stop matching an SOP at all | Hourly control-plane sweep |
 | **Cost baselines** | A run costs far more than its own historical median | Inline, on every classified trace |
-| **Sequence anomalies** | Runaway or implausible tool sequences | Rust proxy, sub-millisecond fast path |
+| **Sequence anomalies** | Runaway or implausible tool sequences | Rust proxy, in-process — every detector is a pure function of one request, with no I/O |
 
 ::: info What changed on 2026-07-30
 This page previously said behavioral drift scoring was **not** part of the
