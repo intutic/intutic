@@ -2019,10 +2019,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // just tripped.
             if let (Some(lr_id), Some(hold)) = (
                 loop_run_id_header.as_ref(),
-                findings.iter().find(|f| {
-                    f.reason
-                        .contains(crate::plugins::anomaly::detectors::REVIEW_HOLD_MARKER)
-                }),
+                crate::plugins::anomaly::DetectorRegistry::holding_finding(&findings),
             ) {
                 // A human already cleared this exact hold. Re-holding on it would
                 // make approval look broken — see `loop_review_cleared`.
@@ -2060,7 +2057,16 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 cache_hit: false,
                 latency_ms: start.elapsed().as_millis() as u32,
                 verdict: match worst.disposition {
-                    crate::plugins::anomaly::Disposition::Kill => "killed",
+                    // `Ask` reports as "killed" rather than gaining a sixth
+                    // string. `execution_traces.enforcement_action` is a
+                    // Postgres enum fixed at BYPASS|ENHANCE|HIJACK|REASK|KILL,
+                    // and `mapVerdict` fails closed to KILL for anything it does
+                    // not recognise — so a bare "held" would be recorded as KILL
+                    // anyway, plus a warning on every hold. The hold's identity
+                    // travels on `loop_runs.status = 'PENDING_REVIEW'`, which is
+                    // what every human surface actually reads.
+                    crate::plugins::anomaly::Disposition::Kill
+                    | crate::plugins::anomaly::Disposition::Ask => "killed",
                     crate::plugins::anomaly::Disposition::Reask => "reasked",
                     crate::plugins::anomaly::Disposition::Steer => "hijacked",
                 }
