@@ -41,7 +41,7 @@ Intutic Proxy supports two primary self-hosted deployment topologies depending o
 ```
 
 ### Option A: Dual Self-Hosted Proxy (Intutic + LiteLLM Gateway)
-* **How it works:** Intutic Proxy (Rust `:4000`) sits in front of LiteLLM (`:4001`). Intutic enforces security SOPs, WASM policies, and PCAS primitives in `<5ms`, then forwards clean requests to LiteLLM to translate and route across 100+ model providers (Bedrock, Azure, Vertex, Ollama).
+* **How it works:** Intutic Proxy (Rust `:4000`) sits in front of LiteLLM (`:4001`). Intutic enforces security SOPs, WASM policies, and PCAS primitives in-process, then forwards clean requests to LiteLLM to translate and route across 100+ model providers (Bedrock, Azure, Vertex, Ollama).
 * **Docker Compose Snippet:**
   ```yaml
   services:

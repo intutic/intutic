@@ -28,7 +28,7 @@
 //! teaches them to switch DLP off. Redaction answers with the key removed.
 
 use once_cell::sync::Lazy;
-use regex::{Regex, RegexSet};
+use regex::Regex;
 
 use crate::wasm::context::DlpFinding;
 
@@ -189,14 +189,6 @@ static PATTERNS: Lazy<Vec<DlpPattern>> = Lazy::new(|| {
         .collect()
 });
 
-/// One pass over the body decides which patterns matched at all; only those
-/// run their capturing scan. With the set now ~20 patterns, the naive loop
-/// cost one full body traversal per pattern per direction — the prefilter
-/// makes the common case (no secrets) a single traversal.
-static PREFILTER: Lazy<RegexSet> = Lazy::new(|| {
-    RegexSet::new(PATTERNS.iter().map(|p| p.regex.as_str())).unwrap()
-});
-
 struct DlpPattern {
     name: String,
     category: String,
@@ -204,11 +196,41 @@ struct DlpPattern {
     action: String,
 }
 
-/// Scan text for DLP matches
+/// Scan text for DLP matches.
+///
+/// # Why this is a plain loop and not a `RegexSet`
+///
+/// It used to be a `RegexSet` prefilter, on the reasoning that one traversal
+/// beats ~20. The arithmetic is right and the conclusion is backwards, by two
+/// orders of magnitude. Measured on a 128 KB clean body (Apple M4 Pro, release,
+/// `benches/policy_bench.rs`):
+///
+/// | strategy | total | per byte |
+/// |---|---|---|
+/// | every pattern individually, in a loop | **0.12 ms** | 0.91 ns |
+/// | the same patterns as one `RegexSet` | **19.9 ms** | 150.6 ns |
+///
+/// The set was **165× slower than the loop it replaced.** Each pattern on its
+/// own starts with a literal or a tight class — `AKIA`, `ghp_`, `sk-ant-`,
+/// `glpat-`, `-----BEGIN` — so the regex crate picks a memchr-accelerated
+/// prefilter and skips almost every byte. Union them and no common literal
+/// survives, so no prefilter applies; worse, the combined automaton over these
+/// patterns' large bounded repetitions (`{20,300}`, `{50,1000}`, `{82}`)
+/// overflows the lazy DFA's state cache and degrades to the PikeVM, which
+/// visits every byte. Nineteen accelerated passes that skip most of the input
+/// beat one unaccelerated pass that cannot.
+///
+/// This mattered in production, not just in a benchmark. The cost was linear at
+/// ~150 ns/byte, so a 32 KB request body spent ~5 ms in DLP alone — the entire
+/// latency the public docs advertised for the whole evaluation chain — and the
+/// scanner runs on the request *and* the response, so it was paid twice.
+///
+/// If this is ever revisited: measure it. `is_match` before `matches` was also
+/// tried and changed nothing (both engines are equally slow on this set) while
+/// making the dirty path ~20% worse by scanning twice.
 pub fn scan(text: &str) -> Vec<DlpFinding> {
     let mut findings = Vec::new();
-    for idx in PREFILTER.matches(text) {
-        let pattern = &PATTERNS[idx];
+    for pattern in PATTERNS.iter() {
         for mat in pattern.regex.find_iter(text) {
             findings.push(DlpFinding {
                 category: pattern.category.clone(),
@@ -397,6 +419,84 @@ mod tests {
         let redacted = redact(&text, &findings);
         assert!(!redacted.contains("hunter22secret"), "password must be gone");
         assert!(redacted.contains("db.internal:5432/app"), "host stays legible");
+    }
+
+    /// The loop and the `RegexSet` it replaced must agree on every finding.
+    ///
+    /// `scan` used to prefilter with a `RegexSet` and then run only the patterns
+    /// the set reported. That was replaced with a plain loop over every pattern
+    /// because the set measured **165× slower** on a clean body (see `scan`'s doc
+    /// comment). A speed change must not be a behaviour change, and "the other
+    /// tests still pass" does not prove that — they assert individual patterns,
+    /// not that the two strategies produce the *same list*, in the same order,
+    /// with the same offsets.
+    ///
+    /// So this reconstructs the old strategy and diffs the whole `Vec`. If anyone
+    /// reintroduces a prefilter, this is what tells them whether it is equivalent.
+    #[test]
+    fn the_loop_and_the_regexset_prefilter_agree_exactly() {
+        // Every pattern family in one body, so the comparison covers the
+        // multi-match path and not just the empty case. Assembled at runtime,
+        // per this module's convention — no contiguous credential literal.
+        let body = format!(
+            "deploy log\n\
+             aws {} ok\n\
+             gh {}_{} ok\n\
+             anthropic sk-ant-{} ok\n\
+             gitlab glpat-{} ok\n\
+             google AIza{} ok\n\
+             stripe sk_live_{} ok\n\
+             npm npm_{} ok\n\
+             hf hf_{} ok\n\
+             db postgres://{}:{}@db.internal:5432/app\n\
+             ssn 123-45-6789\n\
+             auth Bearer abc123DEF456ghi789\n\
+             key -----BEGIN OPENSSH PRIVATE KEY-----\n\
+             and a lot of ordinary prose to make the body worth scanning. {}",
+            "ASIAJEXAMPLEKEY234AB",
+            "ghp",
+            "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8",
+            "abcdefghijklmnop",
+            "aB3dE5fG7hI9jK1lM3nO",
+            "SyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6c",
+            "a1B2c3D4e5F6g7H8i9J0k1L2",
+            "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8",
+            "AbCdEfGhIjKlMnOpQrStUvWxYzAbCdEfGh",
+            "svc_user",
+            "hunter22secret",
+            "lorem ipsum dolor sit amet ".repeat(200),
+        );
+
+        // The old strategy, reconstructed verbatim.
+        let prefilter =
+            regex::RegexSet::new(PATTERNS.iter().map(|p| p.regex.as_str())).unwrap();
+        let mut via_set = Vec::new();
+        for idx in prefilter.matches(&body) {
+            let pattern = &PATTERNS[idx];
+            for mat in pattern.regex.find_iter(&body) {
+                via_set.push((
+                    pattern.name.clone(),
+                    pattern.category.clone(),
+                    pattern.action.clone(),
+                    mat.start(),
+                    mat.len(),
+                ));
+            }
+        }
+
+        let via_loop: Vec<_> = scan(&body)
+            .into_iter()
+            .map(|f| (f.pattern_name, f.category, f.action, f.offset, f.length))
+            .collect();
+
+        assert!(
+            !via_loop.is_empty(),
+            "fixture must actually trip patterns, or this test proves nothing",
+        );
+        assert_eq!(
+            via_loop, via_set,
+            "the loop and the RegexSet prefilter must produce identical findings",
+        );
     }
 
     #[test]

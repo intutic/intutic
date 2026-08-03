@@ -4,12 +4,24 @@
 //!   cargo bench --bench policy_bench
 //!   cargo bench --bench policy_bench -- --output-format bencher 2>&1 | tee docs/benchmarks/policy_v1_baseline.txt
 //!
-//! Budget targets (from ADR-003):
+//! Budget targets (from ADR-003). These are TARGETS, not measurements. The
+//! second command above writes the measured baseline; it records the hardware
+//! alongside the numbers, because a latency figure without one is not a figure.
+//!
 //!   Proxy overhead (all gates):  < 5ms  P95
 //!   Budget gate (in-memory):     < 1ms  P99
-//!   DLP scan (6 regex):          < 1ms  P99 for 4 KB input
+//!   DLP scan (19 patterns):      < 1ms  P99 for 4 KB input
 //!   Hostname filter:             < 50µs P99
 //!   WASM plugin eval:            < 5ms  P99 (fuel-limited)
+//!
+//! ADR-003 said "DLP scan (6 regex)". The scanner has carried 19 patterns since
+//! the 2026-07-29 expansion, and the count mattered: the first run of this
+//! benchmark found `dlp::scan` costing ~150 ns/byte, which put a 32 KB body over
+//! the whole-chain budget in DLP alone. See the baseline file for the finding and
+//! the fix.
+//!
+//! NOT covered by any benchmark in this directory: the 22-detector anomaly chain
+//! (`plugins::anomaly`). Treat any statement about its cost as unmeasured.
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use intutic_proxy::{
@@ -67,6 +79,39 @@ fn make_large_request() -> String {
              system that gracefully handles network partitions, timeout failures, and \
              cascading service degradation scenarios.\n"
         ));
+    }
+    serde_json::json!({
+        "model": "gpt-4o",
+        "messages": [
+            {"role": "system", "content": "You are a senior distributed systems engineer."},
+            {"role": "user", "content": content},
+        ],
+    })
+    .to_string()
+}
+
+/// Clean request body of approximately `kb` kilobytes.
+///
+/// The existing fixtures top out at ~7.6 KB, which is not a realistic upper
+/// bound for this product: an agent turn that pastes a source file, a diff, or
+/// a long conversation history routinely exceeds 32 KB, and the DLP scanner
+/// runs over the whole body on every request in both directions.
+///
+/// These cases exist because the measured points below 8 KB are near-linear in
+/// body size, and it would have been easy — and wrong — to extrapolate from
+/// them. If the cost per byte rises or falls at scale, that shows up here
+/// rather than in an assumption.
+fn make_sized_request(kb: usize) -> String {
+    let target = kb * 1024;
+    let mut content = String::with_capacity(target + 256);
+    let mut i = 0usize;
+    while content.len() < target {
+        content.push_str(&format!(
+            "Line {i}: Implement a robust error handling mechanism for the distributed \
+             system that gracefully handles network partitions, timeout failures, and \
+             cascading service degradation scenarios.\n"
+        ));
+        i += 1;
     }
     serde_json::json!({
         "model": "gpt-4o",
@@ -183,6 +228,25 @@ fn bench_dlp_scan(c: &mut Criterion) {
             });
         },
     );
+
+    // Realistic large bodies — the sizes an agent turn actually reaches.
+    //
+    // The ADR-003 budget below this benchmark's header says "< 1ms P99 for 4 KB
+    // input". These cases exist to find where that stops holding, because the
+    // published claim was never about 4 KB — it was about the request.
+    for kb in [16usize, 32, 64, 128] {
+        let body = make_sized_request(kb);
+        group.bench_with_input(
+            BenchmarkId::new(format!("clean_{kb}kb"), body.len()),
+            &body,
+            |b, body| {
+                b.iter(|| {
+                    let findings = dlp::scan(black_box(body));
+                    black_box(findings);
+                });
+            },
+        );
+    }
 
     // DLP scan + redact (dirty path)
     group.bench_with_input(

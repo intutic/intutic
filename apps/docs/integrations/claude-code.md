@@ -126,7 +126,7 @@ Exposes Intutic governance status and SOP tools (`intutic_governance_status`, `i
 ```
 
 ### 2. Governed Proxy Mode (Wrapping Downstream Tools)
-Wraps downstream MCP tools (e.g. Filesystem or Postgres) to intercept and evaluate tool execution frames in `<5ms`:
+Wraps downstream MCP tools (e.g. Filesystem or Postgres) to intercept and evaluate tool execution frames before they reach the downstream server:
 
 ```json
 {
