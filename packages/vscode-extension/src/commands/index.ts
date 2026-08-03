@@ -1,25 +1,67 @@
 import * as vscode from 'vscode'
-import * as http from 'node:http'
+import * as fs from 'node:fs'
+import * as os from 'node:os'
+import * as path from 'node:path'
 import { exec } from 'node:child_process'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+interface IntuticCreds {
+  controlPlaneUrl?: string
+  apiKey?: string
+  workspaceId?: string
+}
+
 /**
- * Fetch JSON from the local Intutic control plane (http://127.0.0.1:4000).
- * Returns null on any error — all callers degrade gracefully.
+ * Resolve the control plane from the credentials `intutic connect` writes.
+ *
+ * These views used to hardcode `http://127.0.0.1:4000` — the Rust proxy's port,
+ * not the control plane's (3001) — while requesting control-plane paths
+ * (/api/v1/sops, /api/v1/incidents, /api/v1/wasm-rules), and they sent no
+ * Authorization header at all. So every panel was empty on every machine: wrong
+ * port, and a 401 even at the right one.
+ *
+ * ~/.intutic/credentials.json already carries controlPlaneUrl, apiKey and
+ * workspaceId, so the extension can configure itself from a `intutic connect`
+ * the developer has already run. A VS Code setting overrides it.
  */
-function fetchLocal<T>(path: string): Promise<T | null> {
-  return new Promise((resolve) => {
-    const req = http.get(`http://127.0.0.1:4000${path}`, { timeout: 2000 }, (res) => {
-      let data = ''
-      res.on('data', (chunk) => { data += chunk })
-      res.on('end', () => {
-        try { resolve(JSON.parse(data) as T) } catch { resolve(null) }
-      })
+function loadCreds(): IntuticCreds | null {
+  const override = vscode.workspace.getConfiguration('intutic').get<string>('controlPlaneUrl')
+  try {
+    const file = path.join(os.homedir(), '.intutic', 'credentials.json')
+    const creds = JSON.parse(fs.readFileSync(file, 'utf-8')) as IntuticCreds
+    return { ...creds, controlPlaneUrl: override || creds.controlPlaneUrl }
+  } catch {
+    return override ? { controlPlaneUrl: override } : null
+  }
+}
+
+/**
+ * Fetch JSON from the Intutic control plane. Returns null on any error — all
+ * callers degrade gracefully into an empty panel.
+ */
+async function fetchLocal<T>(reqPath: string): Promise<T | null> {
+  const creds = loadCreds()
+  const base = creds?.controlPlaneUrl
+  if (!base) return null
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 4000)
+  try {
+    const res = await fetch(`${base.replace(/\/$/, '')}${reqPath}`, {
+      headers: {
+        ...(creds.apiKey ? { Authorization: `Bearer ${creds.apiKey}` } : {}),
+        ...(creds.workspaceId ? { 'x-workspace-id': creds.workspaceId } : {}),
+      },
+      signal: controller.signal,
     })
-    req.on('error', () => resolve(null))
-    req.on('timeout', () => { req.destroy(); resolve(null) })
-  })
+    if (!res.ok) return null
+    return (await res.json()) as T
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 /** Shared webview shell with Intutic dark-mode styling. */

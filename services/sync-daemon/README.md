@@ -41,6 +41,10 @@ Content-hash-based drift detection identifies when harness config files have bee
 
 Monitors active agent sessions and streams trajectory data (tool calls, file edits, terminal commands) to the control plane for real-time governance evaluation.
 
+### Brain Indexing
+
+Indexes harness-specific context directories (BRAIN folders, memory files, skill definitions) and uploads structured metadata to the context graph.
+
 ### Config Capture
 
 Captures point-in-time snapshots of all harness configurations for audit, compliance, and historical comparison.

@@ -95,3 +95,81 @@ describe('Claude Code PreToolUse Hooks Compiler', () => {
     await node_fs.rm(tempRoot, { recursive: true, force: true })
   })
 })
+
+// The pre-execution half of `review_before:`.
+//
+// This is the only gate in the product that can stop an action *before* it
+// happens. The proxy sees a tool call after the harness made it, so its hold
+// stops everything the run does next — valuable, but not the same thing. These
+// tests pin the difference.
+describe('review_before hook gate', () => {
+  const sop = (content: string) => [{ sopId: 's1', title: 'Deploy', content } as never]
+
+  it('parses review_before out of SOP front matter', () => {
+    const c = parseSopConstraints(
+      sop('---\nroles: deployer\nreview_before: action:deploy, Write\n---\nprose'),
+    )
+    expect(c.reviewBefore).toEqual(['action:deploy', 'Write'])
+  })
+
+  it('declares nothing when no SOP asks for a hold', () => {
+    // The safety property: nothing is ever held unless someone declared it.
+    const c = parseSopConstraints(sop('---\nroles: deployer\n---\nprose'))
+    expect(c.reviewBefore).toEqual([])
+  })
+
+  it('agrees with the proxy parser on the shared fixture', async () => {
+    // Two parsers for one directive is how a rule ends up enforced at one gate
+    // and silently ignored at the other. This reads the same file
+    // `packages/proxy/src/sops.rs` asserts against, so the two cannot drift
+    // without one of them going red. The awkward whitespace and quoting in the
+    // fixture are what they would disagree about first.
+    const raw = await node_fs.readFile(
+      node_path.resolve(__dirname, '../../../../tests/fixtures/review-before-sop.md'),
+      'utf-8',
+    )
+    expect(parseSopConstraints(sop(raw)).reviewBefore).toEqual([
+      'action:deploy',
+      'action:publish',
+      'Bash',
+    ])
+  })
+
+  it('writes a hook script that blocks a declared action', async () => {
+    const dir = await node_fs.mkdtemp(node_path.join(node_os.tmpdir(), 'intutic-hook-'))
+    await updatePreToolUseHooks(
+      dir,
+      sop('---\nreview_before: action:deploy\n---\nprose'),
+    )
+    const script = await node_fs.readFile(
+      node_path.join(dir, '.intutic', 'hooks', 'pre-tool-check.js'),
+      'utf-8',
+    )
+    await node_fs.rm(dir, { recursive: true, force: true })
+
+    expect(script).toContain('action:deploy')
+    expect(script).toContain('Held for human review')
+    // exit(2) is Claude Code's block signal. Without it the hook observes and
+    // the action proceeds — the exact inert-gate shape this feature replaces.
+    expect(script).toMatch(/Held for human review[\s\S]{0,600}process\.exit\(2\)/)
+  })
+
+  it('makes no network call on the tool path', async () => {
+    // This runs before every tool invocation. A hook that waits on HTTP makes
+    // every agent slower, so the hold is a local file write and an exit code.
+    const dir = await node_fs.mkdtemp(node_path.join(node_os.tmpdir(), 'intutic-hook-'))
+    await updatePreToolUseHooks(dir, sop('---\nreview_before: action:deploy\n---\nx'))
+    const script = await node_fs.readFile(
+      node_path.join(dir, '.intutic', 'hooks', 'pre-tool-check.js'),
+      'utf-8',
+    )
+    await node_fs.rm(dir, { recursive: true, force: true })
+
+    const holdBlock = script.slice(
+      script.indexOf('const reviewBefore'),
+      script.indexOf('SOP-compiled pattern blacklist'),
+    )
+    expect(holdBlock).not.toContain('http')
+    expect(holdBlock).toContain('writeFileSync')
+  })
+})

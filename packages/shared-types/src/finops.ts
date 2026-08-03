@@ -227,6 +227,8 @@ export interface TraceDetail {
   rawCostUsd: number
   actualCostUsd: number
   savingsUsd: number
+  /** Who re-classified this trace, if anyone. Null when it holds its insert-time value. */
+  tokenUtilityClassifiedBy?: string | null
   tokenUtility: TokenUtility | string
   tokenUtilityScore: number
   complianceScore: number
@@ -238,7 +240,25 @@ export interface TraceDetail {
   correctivePromptCard: unknown | null
   reasoningTokens?: number | null
   toolCallMetrics?: unknown | null
+  /**
+   * What this request touched (migration 105). `toolCallMetrics` is token
+   * accounting per tool; this is the files, URLs and commands they named.
+   */
+  changeManifest?: ChangeManifestEntry[] | null
   steps?: TraceStep[]
+}
+
+/**
+ * One thing an agent touched, as recorded by the proxy's change manifest.
+ * Mirrors `ChangeEntry` in `packages/proxy/src/manifest.rs`.
+ */
+export interface ChangeManifestEntry {
+  tool: string
+  op: 'write' | 'edit' | 'delete' | 'move' | 'execute' | 'read' | 'fetch' | 'unknown'
+  target: string
+  target_kind: 'path' | 'url' | 'command' | 'opaque'
+  risk?: string[]
+  bytes?: number
 }
 
 /** Filters for trace query. */

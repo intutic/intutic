@@ -217,11 +217,15 @@ impl DetectorRegistry {
             detectors: vec![
                 Box::new(ConsecutiveRepeatDetector::default()),
                 Box::new(PingPongCycleDetector::default()),
+                Box::new(LandmarkCycleDetector::default()),
                 Box::new(RecursionDepthDetector::default()),
                 Box::new(FanOutExplosionDetector::default()),
                 Box::new(TransitionProbabilityDetector::default()),
                 Box::new(MissingPredecessorDetector::default()),
                 Box::new(ForbiddenSuccessionDetector::default()),
+                Box::new(PlanAdherenceDetector::default()),
+                Box::new(ScopePathDetector::default()),
+                Box::new(ReviewGateDetector::default()),
                 Box::new(DlpEscalationDetector::default()),
                 Box::new(ToolDiversityCollapseDetector::default()),
                 Box::new(SchemaDriftDetector::default()),
@@ -424,6 +428,189 @@ mod tests {
     fn default_registry_is_populated() {
         assert!(!DetectorRegistry::default().is_empty());
     }
+
+    /// Plan adherence is reachable through the registry, not just as a struct.
+    ///
+    /// Its own unit tests instantiate the detector directly, which proves the
+    /// comparison and nothing about whether anything ever calls it. A detector
+    /// written, tested and never registered is the exact shape of defect this
+    /// module keeps finding — so the wiring gets its own assertion.
+    #[test]
+    fn a_declared_plan_is_evaluated_by_the_registry() {
+        let reg = DetectorRegistry::with_defaults();
+        let mut ctx = ctx_with_sequence(&["list_dir", "kubectl", "curl", "action:deploy"]);
+        ctx.plan_steps = vec!["list_dir".into()];
+
+        assert!(
+            reg.evaluate_all(&ctx)
+                .iter()
+                .any(|f| f.kind == AnomalyKind::ScopeViolation
+                    && f.reason.contains("declared plan")),
+            "the registry must reach PlanAdherenceDetector"
+        );
+    }
+
+    /// Scope-path checking is reachable through the registry, not just as a
+    /// struct. Same guard as the plan check above, for the same reason.
+    #[test]
+    fn a_declared_scope_path_is_evaluated_by_the_registry() {
+        use crate::manifest::{ChangeEntry, ChangeOp, TargetKind};
+        let reg = DetectorRegistry::with_defaults();
+        let mut ctx = ctx_with_sequence(&["Write"]);
+        ctx.scope_paths = vec!["packages/proxy".into()];
+        ctx.changes = vec![ChangeEntry {
+            tool: "Write".into(),
+            op: ChangeOp::Write,
+            target: "infra/kubernetes/base/configmap.yaml".into(),
+            target_kind: TargetKind::Path,
+            risk: Vec::new(),
+            bytes: None,
+        }];
+
+        assert!(
+            reg.evaluate_all(&ctx)
+                .iter()
+                .any(|f| f.kind == AnomalyKind::ScopeViolation
+                    && f.reason.contains("declared file scope")),
+            "the registry must reach ScopePathDetector"
+        );
+    }
+
+    /// And the same change with no scope declared raises nothing — the opt-in
+    /// holds through the registry.
+    #[test]
+    fn the_same_change_without_a_scope_raises_no_scope_violation() {
+        use crate::manifest::{ChangeEntry, ChangeOp, TargetKind};
+        let reg = DetectorRegistry::with_defaults();
+        let mut ctx = ctx_with_sequence(&["Write"]);
+        ctx.changes = vec![ChangeEntry {
+            tool: "Write".into(),
+            op: ChangeOp::Write,
+            target: "/etc/passwd".into(),
+            target_kind: TargetKind::Path,
+            risk: Vec::new(),
+            bytes: None,
+        }];
+        assert!(
+            !reg.evaluate_all(&ctx)
+                .iter()
+                .any(|f| f.reason.contains("declared file scope")),
+            "scope checking must be silent without a declared scope"
+        );
+    }
+
+    /// The review hold is reachable through the registry.
+    #[test]
+    fn a_declared_review_action_is_evaluated_by_the_registry() {
+        let reg = DetectorRegistry::with_defaults();
+        let mut ctx = ctx_with_sequence(&["Bash"]);
+        ctx.review_before = vec!["action:deploy".into()];
+        ctx.new_tool_calls = vec!["Bash".into(), "action:deploy".into()];
+
+        let findings = reg.evaluate_all(&ctx);
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.reason.contains(crate::plugins::anomaly::detectors::REVIEW_HOLD_MARKER)),
+            "the registry must reach ReviewGateDetector"
+        );
+        assert!(
+            DetectorRegistry::blocking_finding(&findings).is_some(),
+            "a hold must actually block, or the run continues past it"
+        );
+    }
+
+    /// The markers the reachability tests key on must stay disjoint.
+    ///
+    /// Several detectors now share `ScopeViolation`, and each is proven
+    /// reachable by a substring of its reason. If two of those substrings ever
+    /// overlap, one detector's test starts passing on another's finding — and
+    /// the detector it was written for could be unregistered entirely without
+    /// anything going red. The guard is cheap; the failure mode is invisible.
+    /// Landmark cycle detection is reachable through the registry.
+    #[test]
+    fn a_landmark_cycle_is_evaluated_by_the_registry() {
+        use crate::plugins::anomaly::detectors::CYCLE_PERIOD_MARKER;
+        let reg = DetectorRegistry::with_defaults();
+        // A period-3 cycle: invisible to every other detector on the built-in
+        // path, which `a_three_cycle_escapes_the_builtin_table_entirely` pins.
+        let ctx = ctx_with_sequence(&[
+            "Read", "Grep", "Bash", "Read", "Grep", "Bash",
+            "Read", "Grep", "Bash", "Read", "Grep", "Bash",
+        ]);
+        assert!(
+            reg.evaluate_all(&ctx)
+                .iter()
+                .any(|f| f.kind == AnomalyKind::LoopDetected
+                    && f.reason.contains(CYCLE_PERIOD_MARKER)),
+            "the registry must reach LandmarkCycleDetector"
+        );
+    }
+
+    /// The same sequence with only three entries raises nothing — the detector
+    /// declines to judge rather than guessing from too little.
+    #[test]
+    fn a_short_sequence_raises_no_cycle_finding() {
+        use crate::plugins::anomaly::detectors::CYCLE_PERIOD_MARKER;
+        let reg = DetectorRegistry::with_defaults();
+        let ctx = ctx_with_sequence(&["Read", "Grep", "Bash"]);
+        assert!(
+            !reg.evaluate_all(&ctx)
+                .iter()
+                .any(|f| f.reason.contains(CYCLE_PERIOD_MARKER))
+        );
+    }
+
+    /// Every marker a reachability test keys on must be pairwise disjoint.
+    ///
+    /// Generalised from a `ScopeViolation`-only guard once `LoopDetected` grew a
+    /// third producer. The hazard is the same in both families and worth stating
+    /// once: if two markers overlap, one detector's reachability test starts
+    /// passing on another detector's finding — so the detector it was written
+    /// for could be unregistered entirely without anything going red.
+    ///
+    /// The `LoopDetected` markers are `pub const`s interpolated into their own
+    /// format strings, so this cannot assert a phrase the code stopped emitting.
+    #[test]
+    fn all_reachability_markers_are_pairwise_disjoint() {
+        use crate::plugins::anomaly::detectors::{
+            ALTERNATION_MARKER, CYCLE_PERIOD_MARKER, REVIEW_HOLD_MARKER, SPIN_MARKER,
+        };
+        const MARKERS: [&str; 6] = [
+            "declared plan",
+            "declared file scope",
+            REVIEW_HOLD_MARKER,
+            SPIN_MARKER,
+            ALTERNATION_MARKER,
+            CYCLE_PERIOD_MARKER,
+        ];
+        for (i, a) in MARKERS.iter().enumerate() {
+            for (j, b) in MARKERS.iter().enumerate() {
+                if i != j {
+                    assert!(
+                        !a.contains(b) && !b.contains(a),
+                        "marker {a:?} and {b:?} overlap; one reachability test could \
+                         pass on the other detector's finding"
+                    );
+                }
+            }
+        }
+    }
+
+    /// And the same sequence with no plan declared stays clean — the opt-in
+    /// holds through the registry too, so enabling the feature for one
+    /// workspace cannot start flagging every other one.
+    #[test]
+    fn the_same_sequence_without_a_plan_raises_no_scope_violation() {
+        let reg = DetectorRegistry::with_defaults();
+        let ctx = ctx_with_sequence(&["list_dir", "kubectl", "curl", "action:deploy"]);
+        assert!(
+            !reg.evaluate_all(&ctx)
+                .iter()
+                .any(|f| f.reason.contains("declared plan")),
+            "plan adherence must be silent without a declared plan"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -606,13 +793,15 @@ mod coverage_tests {
     // ── blocking_finding ────────────────────────────────────────────────
     //
     // The request path returned 403 for every finding, using `kill` only to
-    // choose between two error strings. Six steer emission sites across the
-    // registry's EIGHTEEN detectors (PromptInjection has both a steer tier and
-    // a kill tier, so counting emission sites gives nineteen and counting
-    // structs gives eighteen — the registry registers eighteen) produce
-    // `kill: false`, which `to_verdict` maps to Hijack — advise, do not block.
-    // Those paths were hard-blocking requests they were written to advise on.
-    // These tests pin the corrected selection.
+    // choose between two error strings. Many detectors emit `kill: false`,
+    // which `to_verdict` maps to Hijack — advise, do not block — and those
+    // paths were hard-blocking requests they were written to advise on. These
+    // tests pin the corrected selection.
+    //
+    // No detector census here on purpose: the count in this comment was wrong
+    // twice before anyone noticed, because prose does not fail the build. What
+    // matters is enforced by `every_hot_path_category_can_actually_fire`, which
+    // does.
 
     #[test]
     fn advisory_findings_alone_do_not_block() {

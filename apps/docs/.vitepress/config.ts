@@ -301,6 +301,7 @@ export default defineConfig({
             ...(!IS_OSS ? [{ text: 'Gödel Guardrails Scoring', link: '/concepts/godel-scoring' }] : []),
             { text: 'Standard Operating Procedures', link: '/concepts/sops' },
             { text: 'Trace Telemetry Model', link: '/concepts/trace-model' },
+            ...(!IS_OSS ? [{ text: 'Trace Integrity', link: '/concepts/trace-integrity' }] : []),
           ],
         },
       ],

@@ -20,6 +20,14 @@ pub async fn connect_valkey(url: &str) -> anyhow::Result<Arc<redis::aio::Connect
 pub struct ExecutionTrace {
     pub trace_id: String,
     pub session_id: String,
+    /// The proxy process that emitted this trace — see `proxy::proxy_instance_id`.
+    ///
+    /// Always present. `session_id` above comes from `x-session-id`, which nothing
+    /// sets, so it is "unknown" for effectively all traffic and the control plane's
+    /// session grouping degenerated into a permanent workspace+harness bucket. A
+    /// proxy process is in practice one developer's working session, so this is the
+    /// grouping key that actually separates one run from the next.
+    pub proxy_instance_id: String,
     pub workspace_id: String,
     pub virtual_key_id: String,
     pub model: String,
@@ -43,7 +51,23 @@ pub struct ExecutionTrace {
     /// for them. Mirrors the OTel GenAI model: the inference span carries its
     /// own 0..N tool_call parts; it never re-lists the conversation's history.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    /// Carries the synthesised `action:` vocabulary alongside the raw names, so one
+    /// tool call can contribute more than one entry and `len()` is not a tool-call
+    /// count. That is deliberate: it is the same expansion the anomaly detectors
+    /// score, so a baseline fitted from stored traces applies to the live sequence.
     pub tools: Vec<String>,
+    /// What this request touched — the files, URLs and commands its tool calls
+    /// named, derived from argument keys the manifest recognises.
+    ///
+    /// Distinct from `tools` above, which is *behaviour* (which tool, in what
+    /// order). This is *effect*. A reviewer asking "what changed" cannot answer
+    /// it from a list of tool names.
+    ///
+    /// Empty is skipped on the wire, and the Node side turns that back into a
+    /// SQL NULL, preserving the "no tool activity" vs "nothing recognisable"
+    /// distinction the column comment describes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub change_manifest: Vec<crate::manifest::ChangeEntry>,
     pub reconstruction_quality: u8,
     pub token_anomaly: bool,
     pub loop_run_id: Option<String>,
@@ -144,6 +168,90 @@ mod tests {
             v.as_object().unwrap().len(),
             0,
             "a graph of one must contribute no keys at all"
+        );
+    }
+
+    /// A single-agent session must still report its anomalies.
+    ///
+    /// `graph_of_one_adds_no_wire_keys` pins that a lone node emits no *topology*
+    /// keys, and the early return that implements it is one obvious refactor away
+    /// from dropping the anomaly list along with them. Most sessions are graphs of
+    /// one, so that would silently discard the majority of all findings.
+    #[test]
+    fn a_graph_of_one_still_reports_its_anomalies() {
+        let g = GraphTrace::from_node(&node("ses_1", "ses_1"), vec!["SCOPE_VIOLATION".into()]);
+        let v = serde_json::to_value(&g).unwrap();
+        assert_eq!(v["anomalies"][0], "SCOPE_VIOLATION");
+    }
+
+    /// Every allowed-path trace must carry the advisory findings, not a literal
+    /// empty list.
+    ///
+    /// Only the blocked trace recorded its anomalies; all four allowed-path sites
+    /// hardcoded `vec![]`, so a `steer` finding advised the agent in-band and then
+    /// vanished — leaving every advisory detector unmeasurable, and unpromotable
+    /// under the rule in `anomaly/mod.rs` that requires an observed false-positive
+    /// rate before escalation to `kill`.
+    ///
+    /// Asserted against the source because the shape of the defect is a literal at
+    /// a call site: a behavioural test of one path would pass while another path
+    /// silently regressed.
+    #[test]
+    fn no_allowed_path_trace_hardcodes_an_empty_anomaly_list() {
+        let src = include_str!("proxy.rs");
+        assert!(
+            !src.contains("GraphTrace::from_node(&node_for_trace, vec![])"),
+            "an allowed-path trace is discarding its advisory findings"
+        );
+        assert!(
+            src.contains("GraphTrace::from_node(&node_for_trace, advisory_anomalies.clone())"),
+            "the allowed-path traces must publish the advisory findings"
+        );
+    }
+
+    /// Every trace site must carry the change manifest.
+    ///
+    /// Same shape of defect as the anomalies list above: five construction
+    /// sites, and one of them quietly passing an empty value means whole
+    /// classes of request publish no record of what they touched — with
+    /// nothing to notice, because the other four look fine.
+    ///
+    /// Asserted against the source because that is where the defect lives. A
+    /// behavioural test of one path would pass while another regressed.
+    #[test]
+    fn no_trace_site_omits_the_change_manifest() {
+        let src = include_str!("proxy.rs");
+        // Five struct fields, one per trace site. The construction itself is
+        // a `let` binding and carries no colon, so it is not counted here.
+        assert!(
+            src.matches("change_manifest:").count() >= 5,
+            "a trace site has lost its change_manifest field"
+        );
+        assert!(
+            !src.contains("change_manifest: Vec::new()")
+                && !src.contains("change_manifest: vec![]"),
+            "a trace site is discarding what the request touched"
+        );
+    }
+
+    /// Every trace site must publish the process instance id, and the same one.
+    ///
+    /// Same shape as the two tests above: five construction sites, and one of
+    /// them substituting a fresh uuid or an empty string would publish traces
+    /// the control plane cannot group with the rest of the process's own
+    /// traffic — which is the entire reason the field exists.
+    ///
+    /// Asserted against the source because that is where the defect would live.
+    /// The struct field is not optional, so the compiler already catches an
+    /// omitted site; what it cannot catch is a site filling it in with something
+    /// per-request.
+    #[test]
+    fn no_trace_site_invents_its_own_instance_id() {
+        let src = include_str!("proxy.rs");
+        assert_eq!(
+            src.matches("proxy_instance_id: proxy_instance_id()").count(),
+            5,
+            "every one of the five trace sites must publish the process id"
         );
     }
 

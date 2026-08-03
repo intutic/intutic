@@ -38,6 +38,12 @@ fn temp_rule_dir(tag: &str) -> PathBuf {
 fn test_ctx(workspace_id: &str) -> RequestContext {
     RequestContext {
         session_id: "test-session".to_string(),
+        plan_steps: Vec::new(),
+        scope_paths: Vec::new(),
+        review_before: Vec::new(),
+        changes: Vec::new(),
+        new_tool_calls: Vec::new(),
+        transition_baseline: None,
         workspace_id: workspace_id.to_string(),
         virtual_key_prefix: "vk_test".to_string(),
         model: "claude-3-5-sonnet".to_string(),

@@ -6,7 +6,7 @@
 //!
 //! Architecture: See docs/lld/02-proxy-gateway.lld.md
 
-use intutic_proxy::{config, proxy, router, routing, store, telemetry, wasm};
+use intutic_proxy::{config, proxy, router, routing, sops, store, telemetry, wasm};
 
 use std::net::SocketAddr;
 use tracing_subscriber::layer::SubscriberExt;
@@ -71,6 +71,18 @@ async fn main() -> anyhow::Result<()> {
     }
 
     tracing::info!("Intutic Proxy Gateway starting...");
+
+    // Minted here rather than on the first request, so the id is in the boot log
+    // next to everything else about this process. Every trace published from now
+    // on carries it as `proxy_instance_id`.
+    tracing::info!(
+        proxy_instance_id = proxy::proxy_instance_id(),
+        "Proxy instance id minted for this process"
+    );
+
+    // Resolve the SOP set now, so an empty one is reported at boot rather than
+    // silently at whichever request happens to arrive first.
+    sops::report_at_startup();
 
     // Load configuration
     let config_path = std::env::var("CONFIG_PATH").unwrap_or_else(|_| "config.yaml".to_string());

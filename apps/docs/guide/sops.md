@@ -129,6 +129,73 @@ You don't need to manually copy SOP rules into each agent's config. The **sync d
 
 This means changes you make in the dashboard propagate to all connected harnesses within the next sync cycle.
 
+## Where the proxy looks for SOPs
+
+Writing rules into harness config files is only half of enforcement. The other half — the
+detectors that block a denied tool, hold a run for review, or flag work drifting outside a
+declared plan — reads SOPs directly, and it reads them from disk.
+
+By default the proxy walks **up from its own working directory** looking for `.intutic/sops`.
+That is exactly right for the deployment Intutic is built around: the proxy runs on your
+machine, beside the workspace whose rules it is enforcing, so the SOPs it should apply are the
+ones sitting in the repository you are working in.
+
+::: warning A proxy that does not run beside a workspace finds no SOPs at all
+Run the same binary in a container, or as a shared gateway, and the walk starts somewhere like
+`/home/intutic` and finds nothing. There is no error, because "this workspace has no SOPs" is
+a legitimate state. Every SOP-derived control then resolves to nothing:
+
+| Front matter | What stops working |
+| :--- | :--- |
+| `deny_tools:` | denied tools are no longer blocked |
+| `plan_steps:` | drift outside the declared plan is no longer flagged |
+| `scope_paths:` | out-of-scope file access is no longer flagged |
+| `review_before:` | runs are never held for review |
+
+SOP prompt injection is a no-op as well, so the agent is never told the rules either.
+
+**Set `INTUTIC_SOPS_DIR`** to an absolute path holding your `.md` SOP files. It takes
+precedence over the walk. In Kubernetes that means mounting the SOPs as a volume and pointing
+the variable at the mount path.
+:::
+
+The proxy does not leave you to discover this from behaviour. When it starts and resolves an
+empty SOP set, it logs a **warning** naming each control that is consequently inactive, the
+directory it looked for, the working directory it searched from, and the variable that fixes
+it. If you are unsure whether policy reached a deployment, that line at startup is the answer
+— and its absence means SOPs were found.
+
+### The two deployment modes, and which one you are in
+
+| | Local proxy (what the product ships) | Containerised proxy |
+| :--- | :--- | :--- |
+| Installed by | `intutic connect` — a native per-developer binary | your own manifests |
+| Agents reach it at | `http://localhost:4000` | wherever you route them |
+| Finds SOPs by | walking up from the workspace it was started in | `INTUTIC_SOPS_DIR` only |
+| If you do nothing | your repo's `.intutic/sops` is enforced | **nothing is enforced** |
+
+The walk has no answer in a container: cwd is `/home/intutic`, no ancestor holds
+`.intutic/sops`, and an absent directory is indistinguishable from an empty one. Policy has
+to be handed to a containerised proxy explicitly.
+
+::: info What the bundled Kubernetes manifests do — and do not — do
+`infra/kubernetes/base/proxy` now delivers policy: a `proxy-sops` ConfigMap generated from
+`base/proxy/sops/*.md`, mounted read-only at `/etc/intutic-sops`, with `INTUTIC_SOPS_DIR`
+pointing at that path. It is a `configMapGenerator`, so its name carries a content hash and
+editing a SOP rolls the pod — an in-place `kubectl apply` of a plain ConfigMap would leave
+the running proxy on the old policy. Add your own SOPs by listing each `.md` file in
+`base/proxy/kustomization.yaml`; `files:` takes paths, not directories, so a file dropped
+into `sops/` is not picked up until you name it.
+
+**That pod still has no callers.** The proxy is a `ClusterIP` service with no ingress, and no
+workload in the cluster sets `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` / `GEMINI_API_ENDPOINT`
+to its address — so it enforces the mounted policy for nobody. Delivering SOPs and giving
+the service a caller are separate pieces of work, and only the first is done. Giving it a
+caller means either deploying a workload configured to route through it, or deciding what a
+hosted multi-tenant gateway would look like — who may call it, and whose SOPs it enforces.
+Neither question is answered by this repository today.
+:::
+
 <!-- ENTERPRISE_ONLY_START -->
 ## SOP Hook Scripts (Enterprise)
 
@@ -177,7 +244,7 @@ In addition to organization-wide policies synced from the centralized control pl
 * **Initialization & Scoping**: When you run `@intutic initialize`, the control plane lists both open board tickets and detected local rules folders as numbered choices.
 * **Activating SOPs**: Start the session scoping to a subset of local SOPs using option indices or names with the `--sops` flag (e.g., `@intutic start 1 --sops=3` or `@intutic start --sops=security-dlp`).
 * **Execution**: During the scoped session, the local daemon merges only the selected active local rules with corporate policies before writing them to harness files (`CLAUDE.md`, `.cursorrules`, etc.) and evaluating pre-flight prompts. If no options are specified, all detected local SOP folders are active by default.
-* **Privacy Preservation**: If a personal prose rule is violated, the anomaly is flagged in the developer's console output to offer steering guidance. `deny_tools:` front matter in the same files is enforced harder: a call to a denied tool is blocked outright (403, `UNAUTHORIZED_TOOL`), and `allow_harnesses:` restricts which harnesses a role may use, but **no incident is logged in the remote organization database/dashboard**.
+* **Privacy Preservation**: If a personal prose rule is violated, the anomaly is flagged in the developer's console output to offer steering guidance. `deny_tools:` front matter in the same files is enforced harder: a call to a denied tool is blocked outright (403, `UNAUTHORIZED_TOOL`), and `allow_harnesses:` restricts which harnesses a role may use, but **no incident is logged in the remote organization database/dashboard**. `plan_steps:` is advisory rather than blocking — it declares the steps the SOP's task should consist of, and work drifting outside them raises a `SCOPE_VIOLATION` that steers. See [Graph guardrails](/guide/graph-guardrails#did-it-stay-inside-the-plan).
 * **Sharing & Version Control**: Since these rules are standard text files, you can check them into Git version control to share with specific teammates or add the `.intutic/sops/` folder to `.gitignore` to keep them strictly private to your machine.
 
 ## Change classification

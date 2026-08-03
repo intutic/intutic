@@ -18,6 +18,7 @@ These variables configure the local client utilities, sync daemon, and proxy gat
 | `CONFIG_CAPTURE_INTERVAL` | ❌ | `5` | Sync loop cycles between local configuration snapshots |
 | `MCP_DAEMON_SOCKET` | ❌ | `~/.intutic/mcp-proxy.sock` | Daemon Unix IPC socket path |
 | `INTUTIC_WASM_DIR` | ❌ | `~/.intutic/wasm` | Overrides the local WASM rule directory; takes precedence over the `intutic_settings.wasm_local_dir` config file value |
+| `INTUTIC_SOPS_DIR` | ❌ | — | Absolute path to a directory of `.md` SOP files. Overrides the default search, which walks up from the proxy's working directory looking for `.intutic/sops`. Set this when the proxy does not run beside a workspace — a container, or a shared gateway. A blank value counts as unset. A path that is set but is not a directory is **not** silently replaced by the walk: the proxy reports it and loads no SOPs, so a typo cannot be answered with policy from somewhere else. When the resolved SOP set is empty the proxy warns at startup, naming each control that is consequently inactive — including when the directory exists but is empty, which enforces exactly as much as no directory at all. The bundled Kubernetes manifests set this to `/etc/intutic-sops` and mount the `proxy-sops` ConfigMap there; see [SOPs → where the proxy looks](/guide/sops#where-the-proxy-looks-for-sops). |
 
 ### Enterprise Control Plane (SaaS / Private VPC)
 
@@ -28,6 +29,8 @@ These variables are used exclusively in the backend control plane deployment to 
 | `DATABASE_URL` | ✅ | `postgresql://...` | Postgres database connection string (Drizzle ledger) |
 | `JWT_SECRET` | ✅ | `changeme` | Secret key for signing dashboard JWT tokens |
 | `ENCRYPTION_KEY` | ✅ | `changeme` | 32-byte hex key for encrypting credentials and tokens |
+| `TRACE_SIGNING_PRIVATE_KEY` | ❌ | — | Ed25519 PKCS#8 PEM. Signs the Merkle root sealed over each loop run's execution traces; the public half is served at `/.well-known/intutic-trace-signing.json`. Unset means roots are still sealed and re-derivable, just unattributable to this deployment by a third party. |
+| `TRACE_SIGNING_RETIRED_KEYS` | ❌ | — | Previously-active PEMs, any number of them, separated by newlines or commas or not at all (whole armoured blocks are matched). **Never used to sign** — they are published in the JWKS and used to verify roots sealed before a rotation, selected by the key id recorded on each root. Set this when you rotate `TRACE_SIGNING_PRIVATE_KEY`; without it, every root signed by the outgoing key becomes permanently unverifiable. A malformed entry here is logged and skipped rather than fatal, so one stale PEM cannot empty the JWKS. |
 | `PORT` | ❌ | `3001` | HTTP port for the control plane API service |
 | `LITELLM_ADMIN_BASE_URL`| ❌ | `http://litellm:4000` | LiteLLM helper admin URL |
 | `LITELLM_MASTER_KEY` | ❌ | — | LiteLLM helper API token |

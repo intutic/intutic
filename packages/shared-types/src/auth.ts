@@ -215,6 +215,12 @@ export const CreateApiKeyInputSchema = z.object({
   label: z.string().min(1).max(128),
   scopes: z.array(z.string()).default(['*']),
   expiresInDays: z.number().int().min(1).max(365).optional(),
+  /**
+   * Automation key: exempt from the `ssoKeyMaxIdleDays` recency gate, because its
+   * owner may never log in interactively. Still bound to the member's active flag
+   * and still revocable, so offboarding applies (TD-218).
+   */
+  isServiceAccount: z.boolean().default(false),
 })
 
 /** API key creation input. */
@@ -292,7 +298,6 @@ export interface DashboardSummary {
     pattern: string
     count: number
     severity: 'critical' | 'high' | 'medium' | 'low'
-    sopId?: string
   }>
   sopAdherence?: Array<{
     date: string

@@ -27,6 +27,18 @@ export const HOOK_EVENTS_LOG = '.intutic/events/hook-events.jsonl'
 export const SopHookConstraintsSchema = z.object({
   highRiskTools: z.array(z.string()).default([]),
   patterns: z.array(z.string()).default([]),
+  /**
+   * Actions that must not run until a human has approved the run.
+   *
+   * Distinct from `patterns`, which is a permanent denial. This is a *hold*: the
+   * action is legitimate, and someone wants to see it before it happens.
+   *
+   * This is the half of the review gate that is genuinely pre-execution. The
+   * proxy can only refuse the request *after* a harness has already run the tool
+   * — it sees the call in the next message. The hook runs before, so declaring
+   * `action:deploy` here stops the push itself, not merely everything after it.
+   */
+  reviewBefore: z.array(z.string()).default([]),
 })
 
 export type SopHookConstraints = z.infer<typeof SopHookConstraintsSchema>
@@ -41,6 +53,7 @@ export function parseSopConstraints(
 ): SopHookConstraints {
   const highRiskToolsSet = new Set<string>()
   const patternsSet = new Set<string>()
+  const reviewBeforeSet = new Set<string>()
 
   // 1. Parse from workspace settings if present
   // Treat settings as Record<string, unknown> for legacy field access (highRiskTools, patterns)
@@ -97,11 +110,27 @@ export function parseSopConstraints(
         highRiskToolsSet.add(toolMatch[1].trim())
       }
     }
+
+    // `review_before:` front matter.
+    //
+    // The same directive the proxy reads from `.intutic/sops/*.md`, parsed a
+    // second time here because the two gates live in different runtimes and
+    // there is no shared parser. Kept deliberately simple — one comma-separated
+    // line — and pinned against the Rust side by a fixture test, because two
+    // parsers for one directive is exactly how a rule ends up enforced at one
+    // gate and silently ignored at the other.
+    for (const m of content.matchAll(/^\s*review_before:\s*(.+)$/gim)) {
+      for (const token of (m[1] ?? '').split(',')) {
+        const cleaned = token.trim().replace(/^["'[]+|["'\]]+$/g, '')
+        if (cleaned) reviewBeforeSet.add(cleaned)
+      }
+    }
   }
 
   return {
     highRiskTools: Array.from(highRiskToolsSet),
     patterns: Array.from(patternsSet),
+    reviewBefore: Array.from(reviewBeforeSet),
   }
 }
 
@@ -180,6 +209,9 @@ export async function updatePreToolUseHooks(
   const hookEventsDir = node_path.join(workspaceRoot, '.intutic', 'events')
   await node_fs.mkdir(hookEventsDir, { recursive: true })
   const hookEventsLog = node_path.join(hookEventsDir, 'hook-events.jsonl')
+  // Where the hook records a review hold. The daemon watches this directory
+  // already, so no new watcher is needed to notice one.
+  const reviewRequestFile = node_path.join(hookEventsDir, 'review-request.json')
 
   const hookScriptContent = `
 /**
@@ -271,6 +303,11 @@ function logEvent(verdict, toolName, reason, sessionId) {
   } catch { /* never crash the hook */ }
 }
 
+// Where a hold is recorded for the daemon to pick up. Local file, not a network
+// call: this runs before every tool invocation, and a hook that waits on HTTP is
+// a hook that makes every agent slower.
+const REVIEW_REQUEST_FILE = ${JSON.stringify(reviewRequestFile)};
+
 // Read stdin containing Claude's tool context
 let inputData = '';
 process.stdin.on('data', (chunk) => { inputData += chunk; });
@@ -278,6 +315,9 @@ process.stdin.on('end', () => {
   try {
     const ctx = JSON.parse(inputData);
     const toolName = (ctx.tool_name || ctx.toolName || '').toLowerCase();
+    // Case preserved for review matching: an operator writes \`review_before: Write\`,
+    // and the harness calls the tool \`Write\`.
+    const rawToolName = ctx.tool_name || ctx.toolName || '';
     const sessionId = ctx.session_id || ctx.sessionId || '';
     const toolInput = ctx.tool_input || ctx.toolInput || {};
     const toolInputStr = JSON.stringify(toolInput);
@@ -298,7 +338,60 @@ process.stdin.on('end', () => {
       }
     }
 
-    // 2. SOP-compiled pattern blacklist
+    // 2. Review holds — the pre-execution half of \`review_before:\`.
+    //
+    // Unlike the pattern blacklist below, this is not a permanent denial. The
+    // action is legitimate; someone asked to see it first. Blocking here is what
+    // makes the review genuinely *pre*-acceptance: the proxy only ever learns of
+    // a tool call after the harness ran it, so its own hold stops everything
+    // *after* the push rather than the push.
+    //
+    // Entirely local — a file write and an exit code, no network call on the
+    // tool path. The daemon picks the request up and tells the control plane.
+    const reviewBefore = ${JSON.stringify(constraints.reviewBefore)};
+    if (reviewBefore.length > 0) {
+      // The same coarse mapping the proxy's classifier uses, kept minimal on
+      // purpose: a hook that tries to be clever about shell commands is a hook
+      // that blocks real work. Anything it cannot classify falls through to the
+      // proxy's own gate.
+      const actions = [];
+      if (['bash', 'shell', 'run_command', 'terminal', 'execute'].includes(toolName)) {
+        const cmd = String(toolInput.command || toolInput.cmd || toolInput.script || '').toLowerCase();
+        const map = [
+          ['action:deploy', ['git push', 'kubectl apply', 'kubectl rollout', 'helm upgrade', 'helm install', 'terraform apply', 'docker push', 'vercel deploy', 'fly deploy', 'gcloud run deploy']],
+          ['action:publish', ['npm publish', 'pnpm publish', 'yarn publish', 'cargo publish', 'twine upload', 'poetry publish', 'gem push']],
+          ['action:release', ['gh release create', 'git tag', 'npm version', 'semantic-release']],
+          ['action:db_write', ['insert into', 'update ', 'delete from', 'drop table', 'truncate ', 'alter table']],
+        ];
+        for (const [action, needles] of map) {
+          if (needles.some((n) => cmd.includes(n))) actions.push(action);
+        }
+      }
+      // Raw tool names count too: "review_before: Write" is the natural thing to
+      // write, and the eight action tokens do not cover the edit tools.
+      const candidates = [...actions, toolName, rawToolName];
+      const hit = reviewBefore.find((r) =>
+        candidates.some((c) => String(c).toLowerCase() === String(r).toLowerCase()),
+      );
+      if (hit) {
+        try {
+          node_fs.mkdirSync(node_path.dirname(REVIEW_REQUEST_FILE), { recursive: true });
+          node_fs.writeFileSync(
+            REVIEW_REQUEST_FILE,
+            JSON.stringify({ reason: hit, tool: rawToolName, sessionId, at: new Date().toISOString() }),
+          );
+        } catch {
+          // The hold still blocks even if the request file cannot be written;
+          // the proxy's gate is the backstop.
+        }
+        const reason = \`Held for human review: \${hit} — declared in review_before:\`;
+        console.error(\`[Intutic Guardrail] HELD: \${reason} Approve with: intutic loop review <id> --approve\`);
+        logEvent('blocked', toolName, reason, sessionId);
+        process.exit(2);
+      }
+    }
+
+    // 3. SOP-compiled pattern blacklist
     const patterns = ${JSON.stringify(constraints.patterns)};
     for (const pattern of patterns) {
       if (toolInputStr.includes(pattern)) {

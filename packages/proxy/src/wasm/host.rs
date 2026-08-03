@@ -85,13 +85,20 @@ pub fn register_host_imports(linker: &mut Linker<super::runner::WasmState>) -> a
         },
     )?;
 
-    linker.func_wrap(
-        "onnx_rules",
-        "runOnnxInference",
-        |_: Caller<'_, super::runner::WasmState>, _model_ptr: i32, input_ptr: i32| -> i32 {
-            input_ptr
-        },
-    )?;
+    // The `onnx_rules.runOnnxInference` host import was registered here and returned
+    // its input pointer unchanged — an identity function standing in for neural
+    // inference. Every caller therefore reconstructed its own input exactly, computed a
+    // mean squared error of 0, and compared it against a 0.35 threshold that could
+    // never be crossed. The WASM rule it backed was declared a KILL and could not fire.
+    //
+    // Removed with the rule. Sequence deviation is scored by
+    // TransitionProbabilityDetector against a per-workspace distribution fitted from
+    // successful runs, which needs no runtime here.
+    //
+    // This does narrow the host surface a user rule may import. A rule that declared
+    // `runOnnxInference` will now fail to instantiate — which `intutic policy install`
+    // rejects outright, by design. No behaviour is lost: any such rule was computing
+    // MSE 0 and could never have blocked anything.
 
     Ok(())
 }
