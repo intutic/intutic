@@ -21,26 +21,52 @@
 //! The practical reason is latency, not licensing: this runs inline on every
 //! request, so a detector that blocks on I/O blocks the user's agent.
 //!
-//! # Enforcement posture: deterministic kills, heuristic advises
+//! # Enforcement posture: conditions kill, thresholds reask, judgements advise
 //!
-//! Detectors that check a *condition* (budget exceeded, forbidden succession,
-//! DLP escalation) emit [`AnomalyFinding::kill`]; detectors that make a
-//! *judgement* (transition plausibility, token waste, hallucination and
-//! injection heuristics) emit [`AnomalyFinding::steer`] and never block. This
-//! is the industry-consensus split, not a house quirk: OWASP LLM01 puts
-//! enforcement weight on deterministic controls and treats detection filters
-//! as one advisory layer; Lakera, LLM Guard, Azure Prompt Shields and AWS
-//! Bedrock Guardrails all decouple heuristic detection from enforcement
-//! (flag/annotate/DETECT modes), and published data shows why — pattern-based
-//! injection detectors collapse below 60% accuracy on benign prompts that
-//! merely contain trigger words (NotInject), and even Meta's tuned classifier
-//! runs 3–5% false positives. A blocking heuristic at that FPR teaches users
-//! to disable the guardrail, which ends with less protection than advising.
+//! Three dispositions, chosen by what a detector actually knows:
+//!
+//! | Disposition | For | Examples |
+//! |---|---|---|
+//! | [`AnomalyFinding::kill`] | a **condition** that was violated — true by construction, so there is no false-positive rate to be wrong about | budget exhausted, denied tool, declared scope path, forbidden succession, DLP escalation |
+//! | [`AnomalyFinding::reask`] | an unmeasured **structural threshold** — a real signal plus a guess about where the line sits | consecutive repeats at 5, ping-pong at 3 cycles, recursion depth at 7, fan-out at 50 |
+//! | [`AnomalyFinding::steer`] | a **judgement** | transition plausibility, token waste, hallucination heuristics |
+//!
+//! The kill/advise ends of that split are industry consensus, not a house
+//! quirk: OWASP LLM01 puts enforcement weight on deterministic controls and
+//! treats detection filters as one advisory layer; Lakera, LLM Guard, Azure
+//! Prompt Shields and AWS Bedrock Guardrails all decouple heuristic detection
+//! from enforcement (flag/annotate/DETECT modes), and published data shows why
+//! — pattern-based injection detectors collapse below 60% accuracy on benign
+//! prompts that merely contain trigger words (NotInject), and even Meta's tuned
+//! classifier runs 3–5% false positives. A blocking heuristic at that FPR
+//! teaches users to disable the guardrail, which ends with less protection than
+//! advising.
 //!
 //! Promotion rule: a heuristic (or a high-confidence subtier of one) may
 //! graduate to `kill` only after advisory telemetry demonstrates a false
 //! positive rate in the 0.1–1% band commercial blocking detectors operate at.
 //! Do not promote on argument alone.
+//!
+//! ## Why `reask` exists — this rule was being broken in writing
+//!
+//! The promotion rule above was here, and four detectors killed in violation of
+//! it: `ConsecutiveRepeat` at 5, `PingPongCycle` at 3 cycles, `RecursionDepth`
+//! at 7 on a *caller-asserted* depth, and `FanOutExplosion` at 50 nodes. None
+//! has ever had an FPR measured, because nothing in this system records that a
+//! firing was wrong. `PromptInjection` was worse: it killed at 2 regex matches
+//! while the paragraph above said injection heuristics "emit steer and never
+//! block".
+//!
+//! Demoting them all to `steer` would have honoured the rule and lost the
+//! enforcement — a spin loop would stop being interrupted at all. `reask` is
+//! the resolution: the agent is told exactly what it tripped and gets
+//! [`REASK_MAX_ATTEMPTS`] tries to correct itself before the finding escalates
+//! to a block. An unmeasured threshold can no longer end a task on its first
+//! firing, and a genuine runaway still terminates.
+//!
+//! A detector reaching `kill` today should be able to name the declaration or
+//! condition it checks. If the answer is "a number I picked", it belongs on
+//! `reask` until there is data.
 
 use crate::wasm::context::{RequestContext, Verdict};
 
@@ -145,6 +171,46 @@ impl Severity {
     }
 }
 
+/// What a finding should *do*, as distinct from what it found.
+///
+/// This replaced a `kill: bool`. Two booleans would have allowed the
+/// meaningless "kill and also reask" state; an enum cannot represent it.
+///
+/// Declaration order is severity order, and [`Ord`] is derived from it, so
+/// `b.disposition.cmp(&a.disposition)` sorts the most severe first. Adding a
+/// variant means placing it correctly in this list, not editing a comparator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Disposition {
+    /// Advise only. The request proceeds; the agent sees a corrective card.
+    ///
+    /// This is where a *judgement* belongs — transition plausibility, token
+    /// waste, hallucination heuristics.
+    Steer,
+    /// Refuse this attempt and hand the reason back to the agent, which may
+    /// try again. Escalates to [`Disposition::Kill`] after
+    /// [`REASK_MAX_ATTEMPTS`] trips of the same finding in one session.
+    ///
+    /// This is where an unmeasured *structural threshold* belongs — "five
+    /// identical calls in a row" is a real signal and a guess about where the
+    /// line is, and the honest response to a guess is to say so and let the
+    /// agent answer.
+    Reask,
+    /// Block the request outright. No recourse in-band.
+    ///
+    /// Reserved for *conditions*: a declared policy was violated, a budget is
+    /// exhausted, a tool is denied. These are true by construction, so there is
+    /// no false-positive rate to be wrong about.
+    Kill,
+}
+
+/// How many times one agent may trip the same reask finding before it blocks.
+///
+/// Three, not one: the first reask is information the agent did not have, and
+/// an agent that corrects on the second attempt is exactly the outcome this
+/// verb exists to produce. Escalation still arrives quickly enough that a
+/// genuine runaway loop cannot spend a budget behind it.
+pub const REASK_MAX_ATTEMPTS: u32 = 3;
+
 /// A single detector's output.
 #[derive(Debug, Clone)]
 pub struct AnomalyFinding {
@@ -155,8 +221,9 @@ pub struct AnomalyFinding {
     /// 0.0–1.0. Deterministic detectors are certain by construction and report
     /// 1.0; the graded ones express how far past threshold they are.
     pub confidence: f64,
-    /// Whether this should stop the request or merely steer it.
-    pub kill: bool,
+    /// Whether this should stop the request, ask the agent to correct itself,
+    /// or merely steer it.
+    pub disposition: Disposition,
 }
 
 impl AnomalyFinding {
@@ -165,7 +232,20 @@ impl AnomalyFinding {
             kind,
             reason: reason.into(),
             confidence: 1.0,
-            kill: true,
+            disposition: Disposition::Kill,
+        }
+    }
+
+    /// Refuse this attempt and tell the agent why; escalate if it repeats.
+    ///
+    /// Confidence is carried because these are graded detectors — how far past
+    /// threshold the sequence is belongs in the message the agent reads.
+    pub fn reask(kind: AnomalyKind, reason: impl Into<String>, confidence: f64) -> Self {
+        Self {
+            kind,
+            reason: reason.into(),
+            confidence: confidence.clamp(0.0, 1.0),
+            disposition: Disposition::Reask,
         }
     }
 
@@ -174,22 +254,39 @@ impl AnomalyFinding {
             kind,
             reason: reason.into(),
             confidence: confidence.clamp(0.0, 1.0),
-            kill: false,
+            disposition: Disposition::Steer,
         }
     }
 
+    /// True when this finding stops the request outright.
+    ///
+    /// A named predicate rather than a comparison, because "does this block?"
+    /// is asked in several places and `== Disposition::Kill` invites someone to
+    /// later write `>= Disposition::Reask` and change the answer by accident.
+    pub fn blocks(&self) -> bool {
+        matches!(self.disposition, Disposition::Kill)
+    }
+
     /// Convert to the verdict the plugin pipeline understands.
+    ///
+    /// `Reask` is rendered with a full attempt budget here. This path has no
+    /// session state — it is used by [`DetectorRegistry::evaluate`], which is a
+    /// pure function. The request path counts attempts and constructs the
+    /// verdict itself; see `proxy.rs`.
     pub fn to_verdict(&self) -> Verdict {
-        if self.kill {
-            Verdict::Kill {
+        match self.disposition {
+            Disposition::Kill => Verdict::Kill {
                 reason: self.reason.clone(),
                 policy_id: Some(self.kind.as_str().to_ascii_lowercase()),
-            }
-        } else {
-            Verdict::Hijack {
+            },
+            Disposition::Reask => Verdict::Reask {
+                reason: self.reason.clone(),
+                attempts_remaining: REASK_MAX_ATTEMPTS,
+            },
+            Disposition::Steer => Verdict::Hijack {
                 reason: self.reason.clone(),
                 confidence: self.confidence,
-            }
+            },
         }
     }
 }
@@ -255,14 +352,32 @@ impl DetectorRegistry {
     /// findings are still logged, broadcast and traced by the caller.
     ///
     /// This scans for *any* killing finding rather than testing whether the
-    /// most severe one kills. `evaluate_all` sorts by severity with `kill` only
-    /// as a tiebreak, so a High-severity steer sorts above a Medium-severity
-    /// kill; testing `findings.first().kill` would let an advisory finding mask
-    /// a real block. Among killers, the most severe wins the error message.
+    /// most severe one kills. `evaluate_all` sorts by severity with disposition
+    /// only as a tiebreak, so a High-severity steer sorts above a
+    /// Medium-severity kill; testing `findings.first()` would let an advisory
+    /// finding mask a real block. Among killers, the most severe wins the error
+    /// message.
     pub fn blocking_finding(findings: &[AnomalyFinding]) -> Option<&AnomalyFinding> {
         findings
             .iter()
-            .filter(|f| f.kill)
+            .filter(|f| f.blocks())
+            .max_by_key(|f| f.kind.severity())
+    }
+
+    /// The finding that should be handed back to the agent to retry, if any.
+    ///
+    /// Same scan-everything discipline as [`Self::blocking_finding`], and for
+    /// the same reason: a reask that happens to sort below a steer must still
+    /// be found.
+    ///
+    /// The caller must check [`Self::blocking_finding`] first. A request that
+    /// trips both a kill and a reask is blocked — the kill is a condition that
+    /// was violated, and no amount of agent self-correction makes it not have
+    /// been.
+    pub fn reask_finding(findings: &[AnomalyFinding]) -> Option<&AnomalyFinding> {
+        findings
+            .iter()
+            .filter(|f| matches!(f.disposition, Disposition::Reask))
             .max_by_key(|f| f.kind.severity())
     }
 
@@ -281,7 +396,7 @@ impl DetectorRegistry {
             b.kind
                 .severity()
                 .cmp(&a.kind.severity())
-                .then(b.kill.cmp(&a.kill))
+                .then(b.disposition.cmp(&a.disposition))
         });
         findings
     }
@@ -410,11 +525,17 @@ mod tests {
     fn registry_returns_most_severe_first() {
         let reg = DetectorRegistry::with_defaults();
         // A spin loop (HIGH) alongside diversity collapse (HIGH) — both fire,
-        // and the kill outranks the steer.
+        // and the more severe disposition outranks the weaker one. The spin is
+        // a reask rather than a kill since the promotion-rule fix: five in a
+        // row is an unmeasured threshold, so it interrupts rather than blocks.
         let ctx = ctx_with_sequence(&["run_command"; 8]);
         let findings = reg.evaluate_all(&ctx);
         assert!(findings.len() >= 2, "expected multiple findings");
-        assert!(findings[0].kill, "a kill must sort ahead of a steer");
+        assert_eq!(
+            findings[0].disposition,
+            Disposition::Reask,
+            "a reask must sort ahead of a steer",
+        );
     }
 
     #[test]
@@ -816,6 +937,80 @@ mod coverage_tests {
     }
 
     #[test]
+    fn a_reask_does_not_block() {
+        // The whole point of the verb. If `blocking_finding` ever picked these
+        // up, the promotion-rule fix would have been cosmetic: the same four
+        // detectors would still be terminating tasks, just under a new name.
+        let findings = vec![AnomalyFinding::reask(
+            AnomalyKind::LoopDetected,
+            "spinning on Bash",
+            0.65,
+        )];
+        assert!(
+            DetectorRegistry::blocking_finding(&findings).is_none(),
+            "a reask must not stop the request outright",
+        );
+        assert!(
+            DetectorRegistry::reask_finding(&findings).is_some(),
+            "...but it must be found by the reask scan",
+        );
+    }
+
+    #[test]
+    fn a_kill_outranks_a_reask_on_the_same_request() {
+        // A request that trips both is blocked. The kill is a condition that was
+        // violated, and no amount of agent self-correction makes it not have
+        // been — so the reask must not be able to soften it into a retry.
+        let findings = vec![
+            AnomalyFinding::reask(AnomalyKind::LoopDetected, "spinning", 0.6),
+            AnomalyFinding::kill(AnomalyKind::DataExfiltration, "credentials in arguments"),
+        ];
+        let blocking = DetectorRegistry::blocking_finding(&findings)
+            .expect("the kill must still be found alongside a reask");
+        assert_eq!(blocking.kind, AnomalyKind::DataExfiltration);
+    }
+
+    #[test]
+    fn a_high_severity_steer_does_not_mask_a_lower_severity_reask() {
+        // Same trap as `a_high_severity_steer_does_not_mask_a_lower_severity_kill`
+        // below, one rung down. `evaluate_all` sorts by severity first, so a
+        // reask can sit behind a more severe advisory finding — and a
+        // `findings.first()` gate would silently drop the interrupt.
+        let steer = AnomalyFinding::steer(AnomalyKind::ToolAbuse, "advisory", 0.9);
+        let reasker = AnomalyFinding::reask(AnomalyKind::TokenWaste, "spinning", 0.6);
+        assert!(
+            steer.kind.severity() > reasker.kind.severity(),
+            "test premise: the steer must outrank the reask by severity",
+        );
+
+        let mut findings = vec![steer, reasker];
+        findings.sort_by(|a, b| {
+            b.kind
+                .severity()
+                .cmp(&a.kind.severity())
+                .then(b.disposition.cmp(&a.disposition))
+        });
+        assert_eq!(
+            findings[0].disposition,
+            Disposition::Steer,
+            "test premise: the steer sorts first",
+        );
+
+        let found = DetectorRegistry::reask_finding(&findings)
+            .expect("the reask must be found behind the higher-severity steer");
+        assert_eq!(found.kind, AnomalyKind::TokenWaste);
+    }
+
+    #[test]
+    fn disposition_orders_by_severity() {
+        // `evaluate_all`'s tiebreak is `b.disposition.cmp(&a.disposition)`, which
+        // is correct only if declaration order is severity order. Pin it: a
+        // variant inserted in the wrong place would silently reorder findings.
+        assert!(Disposition::Kill > Disposition::Reask);
+        assert!(Disposition::Reask > Disposition::Steer);
+    }
+
+    #[test]
     fn a_killing_finding_blocks() {
         let findings = vec![AnomalyFinding::kill(
             AnomalyKind::DataExfiltration,
@@ -828,9 +1023,9 @@ mod coverage_tests {
     #[test]
     fn a_high_severity_steer_does_not_mask_a_lower_severity_kill() {
         // The reason this scans for any killer instead of testing
-        // findings.first().kill. evaluate_all sorts by severity with kill only
-        // as a tiebreak, so the steer below sorts first — and a `worst.kill`
-        // gate would let it suppress a genuine block.
+        // findings.first(). evaluate_all sorts by severity with disposition
+        // only as a tiebreak, so the steer below sorts first — and gating on
+        // the first finding would let it suppress a genuine block.
         let steer = AnomalyFinding::steer(AnomalyKind::ToolAbuse, "advisory", 0.9);
         let killer = AnomalyFinding::kill(AnomalyKind::TokenWaste, "budget exhausted");
 
@@ -844,9 +1039,9 @@ mod coverage_tests {
             b.kind
                 .severity()
                 .cmp(&a.kind.severity())
-                .then(b.kill.cmp(&a.kill))
+                .then(b.disposition.cmp(&a.disposition))
         });
-        assert!(!findings[0].kill, "test premise: the steer sorts first");
+        assert!(!findings[0].blocks(), "test premise: the steer sorts first");
 
         let blocking = DetectorRegistry::blocking_finding(&findings)
             .expect("the kill must still be found behind the higher-severity steer");

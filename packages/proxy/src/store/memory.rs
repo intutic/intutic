@@ -198,6 +198,18 @@ pub struct MemoryStore {
     /// real breach.
     workflow_spend: Mutex<HashMap<String, f64>>,
     workflow_budgets: Mutex<HashMap<String, f64>>,
+    /// Reask trips, keyed `session|kind`.
+    ///
+    /// Implemented rather than stubbed, for the same reason as `workflow_spend`
+    /// above: a stub returning 1 would mean an agent could be reasked forever
+    /// and never escalate, so the reask verb would degrade to a steer in exactly
+    /// the deployment where nobody is watching a dashboard. Standalone is one
+    /// proxy process on one machine, so a process-local counter is not an
+    /// approximation of the session — it *is* the session.
+    ///
+    /// No TTL here. The process lifetime is shorter than the one-hour window
+    /// the Valkey path uses, so the restart is the expiry.
+    reask_attempts: Mutex<HashMap<String, u32>>,
     /// `None` = ephemeral. Set only by [`MemoryStore::durable`].
     snapshot_path: Option<PathBuf>,
 }
@@ -726,6 +738,18 @@ impl LocalStore for MemoryStore {
     /// Standalone has no control plane and therefore nobody to review anything.
     /// Holding a run here would block it with no way to release it.
     async fn request_loop_review(&self, _loop_run_id: &str, _reason: &str) {}
+
+    async fn incr_reask_attempt(&self, session_id: &str, anomaly_kind: &str) -> u32 {
+        let Ok(mut m) = lock(&self.reask_attempts, "reask_attempts") else {
+            // A poisoned lock must not escalate — see the trait doc.
+            return 1;
+        };
+        let n = m
+            .entry(format!("{session_id}|{anomaly_kind}"))
+            .or_insert(0);
+        *n = n.saturating_add(1);
+        *n
+    }
 
     async fn loop_review_reason(&self, _loop_run_id: &str) -> Option<String> {
         None
