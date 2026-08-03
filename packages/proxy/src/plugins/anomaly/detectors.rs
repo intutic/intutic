@@ -46,8 +46,8 @@ impl AnomalyDetector for ConsecutiveRepeatDetector {
                     return Some(AnomalyFinding::kill(
                         AnomalyKind::LoopDetected,
                         format!(
-                            "Loop detected: '{}' called {} times consecutively without progress",
-                            seq[i], run
+                            "Loop detected: '{}' called {} {}",
+                            seq[i], run, SPIN_MARKER
                         ),
                     ));
                 }
@@ -103,11 +103,320 @@ impl AnomalyDetector for PingPongCycleDetector {
         Some(AnomalyFinding::kill(
             AnomalyKind::LoopDetected,
             format!(
-                "Loop detected: '{}' and '{}' alternating for {} cycles with no other activity",
-                a, b, self.cycles
+                "Loop detected: '{}' and '{}' {} {} cycles with no other activity",
+                a, b, ALTERNATION_MARKER, self.cycles
             ),
         ))
     }
+}
+
+// ─── Landmark cycle detection ───────────────────────────────────────────
+
+/// How many recent anchors the cycle search looks at.
+///
+/// Long enough for `MIN_CYCLE_REPEATS` repetitions of the largest period
+/// checked, short enough that a cycle the agent broke out of thirty calls ago
+/// stops firing. Decoupled from `TOOL_SEQUENCE_CAP` for the same reason
+/// `TRANSITION_SCORING_WINDOW` is: a verdict must not depend on session age.
+const LANDMARK_WINDOW: usize = 24;
+
+/// Fewest surviving anchors before a verdict is offered at all.
+const MIN_LANDMARK_ANCHORS: usize = 8;
+
+/// Longest period searched.
+///
+/// **Coupled to `LANDMARK_WINDOW`**: a period needs `p * MIN_CYCLE_REPEATS`
+/// anchors to be observable, and 6 × 4 = 24 exactly fills the window. Raising
+/// one without the other yields a period that can never be detected — which
+/// looks like a tuning knob and is actually dead code.
+const MAX_CYCLE_PERIOD: usize = 6;
+
+/// Repetitions required before a period is believed.
+///
+/// This is the load-bearing number, and it is set by arithmetic rather than
+/// taste. The detector advertises tolerance to one substituted call; that
+/// tolerance has to actually hold at the threshold. At 4 repeats of period 3,
+/// one substitution breaks at most 2 of 9 comparisons — 7/9 = 0.78, above
+/// `CYCLE_MATCH_RATIO`. At 3 repeats it is 4/6 = 0.67, below it. Three repeats
+/// would advertise a tolerance the arithmetic does not deliver.
+const MIN_CYCLE_REPEATS: usize = 4;
+
+/// How much of the window must be on-pattern.
+///
+/// The only thing standing between hapax elision and a manufactured cycle:
+/// one-in-three calls off-pattern elides to a perfect period-2 match over the
+/// survivors, and nothing else in the pipeline objects to it.
+///
+/// The short form of that shape — `A B C A B D A B E` — is *not* what this
+/// constant rejects, despite what this comment used to claim: it leaves 6
+/// survivors and stops at the `MIN_LANDMARK_ANCHORS` gate, never reaching the
+/// coverage check. `variety_is_rejected_by_the_coverage_floor_itself` extends
+/// it to `A B C A B D A B E A B F` — 8 survivors over 12 anchors, past the
+/// anchor gate and squarely on this floor at 0.67 — and is the test that pins
+/// this number. This constant carries the entire false-positive story and was
+/// chosen by inspection; it is the one to tune against real traces.
+const CYCLE_COVERAGE_FLOOR: f64 = 0.75;
+
+/// How often the period must hold across the surviving anchors.
+const CYCLE_MATCH_RATIO: f64 = 0.75;
+
+/// Counting slots in the hapax-elision frequency table.
+///
+/// A fixed array rather than a map because this is the hot path and the real
+/// alphabet is a handful of tool names. Indexing is `id % ANCHOR_FREQ_SLOTS`, so
+/// this is the width at which two distinct tools start sharing a counter — and a
+/// shared counter promotes a genuine hapax to a survivor, which is the exact
+/// input that manufactures a phantom cycle. Named rather than inlined so the
+/// test tying it to `TOOL_SEQUENCE_CAP` can reference it.
+const ANCHOR_FREQ_SLOTS: usize = 256;
+
+/// The marker a registry-reachability test keys on. Must stay disjoint from
+/// every other marker — see `all_reachability_markers_are_pairwise_disjoint`.
+pub const CYCLE_PERIOD_MARKER: &str = "repeating on a period of";
+
+/// Markers for the two older `LoopDetected` producers.
+///
+/// Consts rather than literals in the test, and **interpolated into the format
+/// strings below**, so a reworded finding cannot leave a reachability test
+/// asserting a string the code no longer emits — which would pass while proving
+/// nothing.
+pub const SPIN_MARKER: &str = "times consecutively without progress";
+pub const ALTERNATION_MARKER: &str = "alternating for";
+
+/// Project a tool sequence onto its *anchors*: concrete tool calls only,
+/// case-folded, interned to small integers.
+///
+/// This projection is the whole design, and it is why the detector is stable
+/// where `PingPongCycleDetector` is not.
+///
+/// `expand_tool_actions` interleaves each tool name with the synthesised
+/// `action:` tokens its arguments happen to match. Whether a given `Bash` call
+/// emits `action:run_tests` depends on the command string, so the *period of
+/// the recorded sequence changes turn to turn* for behaviour that never
+/// changed. Stripping actions removes that instability by construction rather
+/// than trying to absorb it with a threshold.
+///
+/// Interning also gives exactness for free. Hashing here would be a
+/// compression trick for a problem this detector does not have — the alphabet
+/// is a handful of tool names within one session — and a hash collision would
+/// surface as a phantom cycle: a false `LOOP_DETECTED` with no way to debug it.
+///
+/// Integer identity cannot collide *here*, but it is not collision-free by
+/// itself: the caller counts occurrences in an `ANCHOR_FREQ_SLOTS`-wide table
+/// indexed modulo that width, so identity holds only while every id stays below
+/// it. Ids are dense from 0, one per distinct anchor, so the condition is simply
+/// that a recorded sequence carry fewer than `ANCHOR_FREQ_SLOTS` distinct tools
+/// — which `TOOL_SEQUENCE_CAP` (60) guarantees outright. That coupling spans two
+/// files and nothing in the type system states it, so
+/// `the_anchor_frequency_table_covers_every_id_the_cap_can_produce` asserts it.
+///
+/// Returns the id stream alongside the symbol table, because the finding has to
+/// name tools in the operator's vocabulary and only this function knows the
+/// mapping.
+///
+/// # This projection is private to this detector
+///
+/// `MissingPredecessorDetector` and `ForbiddenSuccessionDetector` are expressed
+/// **entirely** in `action:` tokens — `action:deploy` requires a prior
+/// `action:run_tests`. Reusing the anchor projection in either of them deletes
+/// their rules silently, with every test still passing because their fixtures
+/// would be projected away too.
+fn anchor_projection(seq: &[String]) -> (Vec<u16>, Vec<String>) {
+    let mut symbols: Vec<String> = Vec::new();
+    let mut out: Vec<u16> = Vec::with_capacity(seq.len());
+    for tok in seq {
+        if tok.starts_with(crate::plugins::anomaly::actions::ACTION_PREFIX) {
+            continue;
+        }
+        let id = match symbols.iter().position(|s| s.eq_ignore_ascii_case(tok)) {
+            Some(i) => i,
+            None => {
+                symbols.push(tok.clone());
+                symbols.len() - 1
+            }
+        };
+        // A session with more than u16::MAX distinct tools is not a thing;
+        // saturating keeps this total rather than panicking on the hot path.
+        out.push(id.min(u16::MAX as usize) as u16);
+    }
+    (out, symbols)
+}
+
+/// Repetition that survives noise — the gap-tolerant counterpart to the two
+/// exact-match cycle detectors above.
+///
+/// Those two are defeated by a single stray call. `PingPongCycleDetector` takes
+/// an exact tail slice, so `A B A B A B X` — one unrelated call after three
+/// clean cycles — erases the match permanently; it has no sliding window and no
+/// memory. `ConsecutiveRepeatDetector` needs literal adjacency. Between them
+/// they cover period 1 and period 2 in perfectly clean sequences, and nothing
+/// else: a `Read → Grep → Bash` cycle running forever raises nothing at all on
+/// the built-in path, which `a_three_cycle_escapes_the_builtin_table_entirely`
+/// has pinned as a fact for as long as it has existed.
+///
+/// This detector scores **normalised autocorrelation** over the anchor
+/// projection: for each candidate period `p`, what fraction of positions equal
+/// the position `p` earlier. A cycle holding three quarters of the time counts.
+///
+/// # The two kinds of noise, and why only one is absorbed by the ratio
+///
+/// A **substitution** — one call replaced by another — breaks at most two
+/// comparisons at a given lag, which `CYCLE_MATCH_RATIO` forgives.
+///
+/// An **insertion** shifts every subsequent position, so autocorrelation at the
+/// original lag collapses entirely; no ratio saves it. That is what hapax
+/// elision handles: an anchor occurring exactly once in the window cannot
+/// participate in any repetition, so removing it can only reveal a cycle the
+/// noise was hiding.
+///
+/// **The honest limit:** elision only removes anchors seen *once*. An interloper
+/// appearing **twice** in the window survives and destroys the alignment —
+/// `A B A B X A B X A B` does not fire. So: tolerant of one stray call,
+/// brittle to two. A true Δ-indexed pair-and-vote scheme is insertion-tolerant
+/// by construction and was deliberately not taken, because it costs a vote
+/// splitting heuristic and a threshold nobody can state in a sentence.
+///
+/// # The window is only as meaningful as its scope
+///
+/// This reads whatever `record_tool_sequence` accumulated under
+/// `tool_history_scope`, and that scope is not always one task. Harnesses do
+/// not set `x-session-id`, so it resolves to:
+///
+/// - `loop:{run}` when a loop run is active — **one window per run**, which is
+///   the case this detector is tuned for; and
+/// - `member:{user}` or `anonymous` otherwise — **one window across every task
+///   that user ever runs**, with no boundary between them.
+///
+/// In the second case two unrelated tasks that each happen to do `read → edit`
+/// concatenate into what looks like a long alternation. `CYCLE_COVERAGE_FLOOR`
+/// is the only thing standing between that and a false positive, which is a
+/// second reason it is the constant to tune first. Verified against real
+/// traffic: ten separate governed runs of one identical six-step procedure
+/// stayed below `MIN_LANDMARK_ANCHORS` per run and did not fire — but they
+/// would have looked like a period-6 cycle had they shared a window.
+///
+/// # Advisory, and probably permanently
+///
+/// `Read → View → Write` repeated eight times is a perfect period-3 cycle *and*
+/// a productive agent editing eight files. The anchor stream cannot tell them
+/// apart — that is a category error in the signal, not a threshold that needs
+/// tuning. So this ships `steer` and may never earn `kill` under the promotion
+/// rule. The discriminator, when there is one, is a fitted transition baseline
+/// scoring `Read→View→Write` as ordinary; that model is absent in exactly the
+/// deployments this detector exists for, so the two are deliberately not
+/// coupled. Both emit, and the reason strings do the work.
+pub struct LandmarkCycleDetector;
+
+impl Default for LandmarkCycleDetector {
+    fn default() -> Self {
+        Self
+    }
+}
+
+impl AnomalyDetector for LandmarkCycleDetector {
+    fn kind(&self) -> AnomalyKind {
+        AnomalyKind::LoopDetected
+    }
+
+    fn detect(&self, ctx: &RequestContext) -> Option<AnomalyFinding> {
+        // Reads the rolling window, never `new_tool_calls`. The delta is fed by
+        // a mutating GETSET executed before enforcement, so a detector reading
+        // it fires exactly once — correct for a one-shot hold, wrong for a
+        // cycle check that must hold across the retries a steer produces.
+        let (anchors, symbols) = anchor_projection(&ctx.tool_sequence);
+        if anchors.len() < MIN_LANDMARK_ANCHORS {
+            return None;
+        }
+        let window = &anchors[anchors.len().saturating_sub(LANDMARK_WINDOW)..];
+
+        let mut freq = [0u16; ANCHOR_FREQ_SLOTS];
+        for &id in window {
+            let slot = (id as usize) % freq.len();
+            freq[slot] = freq[slot].saturating_add(1);
+        }
+        let survivors: Vec<u16> = window
+            .iter()
+            .copied()
+            .filter(|&id| freq[(id as usize) % freq.len()] > 1)
+            .collect();
+
+        if survivors.len() < MIN_LANDMARK_ANCHORS {
+            return None;
+        }
+        let coverage = survivors.len() as f64 / window.len() as f64;
+        if coverage < CYCLE_COVERAGE_FLOOR {
+            return None;
+        }
+
+        let n = survivors.len();
+        for p in 1..=MAX_CYCLE_PERIOD {
+            // A period is only observable with enough repetitions to make the
+            // advertised substitution tolerance real.
+            if n < MIN_LANDMARK_ANCHORS.max(p * MIN_CYCLE_REPEATS) {
+                continue;
+            }
+            let comparable = n - p;
+            if comparable == 0 {
+                continue;
+            }
+            let matches = (p..n).filter(|&i| survivors[i] == survivors[i - p]).count();
+            let score = matches as f64 / comparable as f64;
+            if score < CYCLE_MATCH_RATIO {
+                continue;
+            }
+
+            // Name the cycle in the vocabulary the operator reads, not interned
+            // ids. Taken from the survivor tail so it is the cycle as most
+            // recently run, and so it can only name tools the period was
+            // actually scored over.
+            let cycle = describe_cycle(&symbols, &survivors, p);
+            // Both counts are anchors — `action:` tokens were stripped before
+            // any of this ran — so an operator scrolling a raw transcript sees a
+            // longer window than `window.len()` reports. Saying what is counted
+            // is preferred over reporting the raw span: the raw span would be a
+            // second number derived from the projection, correct only as long as
+            // someone keeps it in sync, while these two are the numbers the
+            // verdict was actually computed from.
+            return Some(AnomalyFinding::steer(
+                AnomalyKind::LoopDetected,
+                format!(
+                    "Loop detected: {} of the last {} concrete tool calls (synthesised action: steps not counted) are {} {} ({}), matching {:.0}% of the time",
+                    survivors.len(),
+                    window.len(),
+                    CYCLE_PERIOD_MARKER,
+                    p,
+                    cycle,
+                    score * 100.0
+                ),
+                score,
+            ));
+        }
+        None
+    }
+}
+
+/// Render the last `period` surviving anchors as `a → b → c`, for the finding.
+///
+/// Drawn from the hapax-elided survivors — the exact stream the period was
+/// scored over — and not from the raw anchor tail. The tail let the description
+/// name a tool that elision had removed from the analysis: `A B A B A B A B A B
+/// X` fires at period 2 and used to render `B → X`, pointing an operator at the
+/// one call provably not in the cycle.
+///
+/// Not deduped, and the doc no longer says "distinct": a period-3 cycle of
+/// `A A B` is `A → A → B`, and collapsing repeats would render a period-3
+/// verdict as two names.
+fn describe_cycle(symbols: &[String], survivors: &[u16], period: usize) -> String {
+    if survivors.len() < period {
+        return String::new();
+    }
+    survivors[survivors.len() - period..]
+        .iter()
+        // `symbols` is the table these ids were minted from, so the fallback is
+        // unreachable; it is here so a malformed id cannot panic the hot path.
+        .map(|&id| symbols.get(id as usize).map(String::as_str).unwrap_or("?"))
+        .collect::<Vec<&str>>()
+        .join(" → ")
 }
 
 /// Depth beyond which a graph is treated as runaway recursion.
@@ -153,11 +462,52 @@ impl AnomalyDetector for RecursionDepthDetector {
 /// Average transition score below which a sequence is treated as drifting.
 const MIN_TRANSITION_PROBABILITY: f64 = 0.35;
 
-/// Scores each `A → B` step against a fixed table of plausible transitions.
+/// How many of the most recent transitions the plausibility average is taken over.
 ///
-/// The table is **hardcoded on purpose**. A fitted matrix would be a learned
-/// parameter, which is a different tier of functionality and a different
-/// deployment story; keeping this fixed makes the detector a pure function.
+/// Decoupled from `TOOL_SEQUENCE_CAP` so that retention and sensitivity can be tuned
+/// separately. The retained history grew to 60 for the cycle detectors, and without
+/// this the same change would have silently made *this* detector less sensitive for
+/// every long-running session — the mean over 59 pairs is harder to drag below the
+/// threshold than the mean over 19, so a verdict would have depended on how long the
+/// session happened to have been running.
+///
+/// The guarantee is invariance, not burst detection: identical recent behaviour yields
+/// an identical verdict regardless of how much older history sits behind it. This
+/// detector reports a mean and is therefore about *sustained* implausibility — a short
+/// burst inside an otherwise ordinary window will not move it, and should not.
+/// `ConsecutiveRepeatDetector` and `PingPongCycleDetector` are the burst detectors, and
+/// they read the full retained history.
+const TRANSITION_SCORING_WINDOW: usize = 20;
+
+/// Score for a step a fitted model has never observed, where it *does* know the
+/// predecessor.
+///
+/// Below `MIN_TRANSITION_PROBABILITY`, and that is the point: in a distribution built
+/// from runs that succeeded, a transition never once seen is the most surprising thing
+/// available. The hardcoded table scored the same step 0.50 — comfortably above the
+/// threshold — so an agent doing something genuinely novel looked safer than one doing
+/// a known-dubious thing. Not zero, because one unseen step inside an otherwise ordinary
+/// sequence should pull the average down, not condemn the request on its own.
+const UNSEEN_TRANSITION: f64 = 0.10;
+
+/// Scores each `A → B` step of the tool sequence for plausibility.
+///
+/// Prefers this workspace's fitted model, carried on `RequestContext`, and falls back
+/// to the built-in table when there is none.
+///
+/// This doc used to say the table was hardcoded on purpose, because "a fitted matrix
+/// would be a learned parameter, which is a different tier of functionality". The
+/// second half of that is still true and is exactly how this is built: the fitting
+/// happens in the control plane, over successful runs, and the proxy reads a cached
+/// result. What changed is the conclusion. A table of fifteen hand-written pairs scored
+/// everything it had not heard of at 0.50 — above the 0.35 threshold — so on any harness
+/// outside two vocabularies the detector could not fire at all except through
+/// repetition, which `ConsecutiveRepeatDetector` already covers. It was not a
+/// conservative default; it was an inert one.
+///
+/// The detector remains a pure function of one context: the model is resolved on the
+/// request path and handed in as plain data, the same way `denied_tools` and the graph
+/// aggregates already are. The module's stated line is about latency, not learning.
 pub struct TransitionProbabilityDetector {
     min_probability: f64,
 }
@@ -171,7 +521,51 @@ impl Default for TransitionProbabilityDetector {
 }
 
 impl TransitionProbabilityDetector {
-    fn probability(from: &str, to: &str) -> f64 {
+    /// Probability of `from → to`, preferring this workspace's fitted model.
+    ///
+    /// The built-in table below is a fallback, not the answer. It is fifteen pairs
+    /// covering two harness vocabularies, and for anything outside them it returned
+    /// 0.50 — above the 0.35 threshold, so the detector could not fire on an unknown
+    /// harness except through repetition, which another detector already catches.
+    ///
+    /// The fitted model closes that: `UNSEEN_TRANSITION` is *low*, because in a model
+    /// built from what actually succeeds, a transition never once observed is the
+    /// definition of surprising. Under the hardcoded table the same transition scored
+    /// 0.50 and novelty read as normality — backwards for an anomaly detector.
+    fn probability_with(
+        baseline: Option<&std::collections::HashMap<String, f64>>,
+        from: &str,
+        to: &str,
+    ) -> f64 {
+        if let Some(model) = baseline {
+            // Case-folded on both sides of the lookup.
+            //
+            // The fit folds too, so this is belt and braces for one specific
+            // window: a cache published by a pre-fold sweep still holds keys like
+            // "action:run_tests Bash", and without folding here that entry would
+            // be the one a capitalised call resolves to — the split this fixes,
+            // preserved for the life of the cache. Every other tool-name
+            // comparison in this file already uses eq_ignore_ascii_case.
+            let key = format!("{} {}", from, to).to_ascii_lowercase();
+            if let Some(p) = model.get(&key) {
+                return *p;
+            }
+            // The model exists and has never seen this step.
+            //
+            // Only trusted when the model knows this predecessor at all. A `from` the
+            // corpus never contains says nothing about its successors — the sweep
+            // publishes a predecessor only after MIN_FROM_OBSERVATIONS, so an unknown
+            // one means "not enough evidence", not "never happens". Scoring that as
+            // surprising would flag every tool a team adopted since the last sweep.
+            let prefix = format!("{} ", from).to_ascii_lowercase();
+            if model.keys().any(|k| k.to_ascii_lowercase().starts_with(&prefix)) {
+                return UNSEEN_TRANSITION;
+            }
+        }
+        Self::builtin_probability(from, to)
+    }
+
+    fn builtin_probability(from: &str, to: &str) -> f64 {
         match (from, to) {
             ("list_dir", "view_file") => 0.90,
             ("grep_search", "view_file") => 0.90,
@@ -199,21 +593,40 @@ impl AnomalyDetector for TransitionProbabilityDetector {
     }
 
     fn detect(&self, ctx: &RequestContext) -> Option<AnomalyFinding> {
-        // Abstract actions are synthesised by `actions::classify`, not called by
-        // the harness, so they are not transitions this chain should score —
-        // every one of them would look like an unheard-of pair and drag the
-        // average toward a false finding.
-        let seq: Vec<&String> = ctx
-            .tool_sequence
-            .iter()
-            .filter(|t| !super::actions::is_action(t))
-            .collect();
+        let baseline = ctx.transition_baseline.as_ref();
+
+        // Abstract actions are synthesised by `actions::classify`, not called by the
+        // harness, so the built-in table has no entry for any of them and scoring
+        // them would drag the average toward a false finding.
+        //
+        // A fitted model is different: it was built from the same expanded sequence,
+        // so `action:` tokens are first-class in it — and they are where the ordering
+        // rules live ("deployed without running tests" is entirely action tokens).
+        // Filtering them out against a fitted model would discard its most meaningful
+        // steps, so the filter applies only to the fallback path.
+        let full: Vec<&String> = if baseline.is_some() {
+            ctx.tool_sequence.iter().collect()
+        } else {
+            ctx.tool_sequence
+                .iter()
+                .filter(|t| !super::actions::is_action(t))
+                .collect()
+        };
+        // Score the trailing slice, not the whole retained history. This reports a
+        // mean, so a longer window dilutes a short burst of implausible steps — an
+        // agent that works normally for fifty calls then goes off the rails for six
+        // would score *better* than one that did the same six alone.
+        let seq: Vec<&String> = if full.len() > TRANSITION_SCORING_WINDOW {
+            full[full.len() - TRANSITION_SCORING_WINDOW..].to_vec()
+        } else {
+            full
+        };
         if seq.len() < 2 {
             return None;
         }
         let total: f64 = seq
             .windows(2)
-            .map(|w| Self::probability(w[0], w[1]))
+            .map(|w| Self::probability_with(baseline, w[0], w[1]))
             .sum();
         let avg = total / (seq.len() - 1) as f64;
         if avg >= self.min_probability {
@@ -222,8 +635,14 @@ impl AnomalyDetector for TransitionProbabilityDetector {
         Some(AnomalyFinding::steer(
             AnomalyKind::ToolAbuse,
             format!(
-                "Anomalous tool sequence: average transition plausibility {:.2} is below {:.2}",
-                avg, self.min_probability
+                "Anomalous tool sequence: average transition plausibility {:.2} is below {:.2} ({})",
+                avg,
+                self.min_probability,
+                if baseline.is_some() {
+                    "fitted from this workspace's successful runs"
+                } else {
+                    "built-in table; no fitted model for this workspace"
+                }
             ),
             1.0 - avg,
         ))
@@ -297,6 +716,287 @@ const FORBIDDEN_SUCCESSIONS: &[(&str, &str)] = &[
     ("action:pii_export", "action:http_post"),
     ("action:secret_read", "action:http_post"),
 ];
+
+// ── Plan adherence ──────────────────────────────────────────────────────────
+
+/// Fraction of observed steps that may fall outside the declared plan before it is
+/// treated as drift.
+///
+/// Not zero. A plan is written by a person describing a task, and a real run picks up
+/// incidental steps a plan would not think to list — reading a file to find out where
+/// something lives before editing it. Firing on the first unlisted step would make the
+/// check useless on any plan not written by someone watching a transcript.
+const PLAN_DEVIATION_TOLERANCE: f64 = 0.4;
+
+/// Work outside the plan the SOP declared for this task.
+///
+/// This is TD-221, and it is genuinely distinct from everything else here.
+/// `denied_tools` is a global ban — "this role may never call `Bash`".
+/// `MissingPredecessorDetector` is an ordering invariant — "do not deploy before
+/// testing". Neither answers "the SOP said this task was these steps; is that what
+/// happened?"
+///
+/// The registry deleted the previous attempt because it read a `SessionContext.sopSteps`
+/// that nothing in the product ever wrote — the check existed, its input did not. The
+/// missing half was assumed to need an extractor that could pull ordered steps out of
+/// SOP prose. It does not: SOPs already carry structured front matter, so a plan is a
+/// declared list (`plan_steps:`), parsed by the same three-line list reader that already
+/// handles `deny_tools:` and `allow_harnesses:`.
+///
+/// Opt-in by construction. An empty plan means no plan was declared and the detector
+/// returns None — the reason an allowlist over tools is safe here and nowhere else in
+/// this file.
+///
+/// Steers rather than kills, and will stay that way until advisory telemetry earns
+/// otherwise: a plan is a human's description of intent, and disagreeing with it is
+/// evidence of drift, not proof of it.
+pub struct PlanAdherenceDetector {
+    tolerance: f64,
+}
+
+impl Default for PlanAdherenceDetector {
+    fn default() -> Self {
+        Self {
+            tolerance: PLAN_DEVIATION_TOLERANCE,
+        }
+    }
+}
+
+impl AnomalyDetector for PlanAdherenceDetector {
+    fn kind(&self) -> AnomalyKind {
+        AnomalyKind::ScopeViolation
+    }
+
+    fn detect(&self, ctx: &RequestContext) -> Option<AnomalyFinding> {
+        if ctx.plan_steps.is_empty() || ctx.tool_sequence.is_empty() {
+            return None;
+        }
+
+        // Case-insensitive, matching `UnauthorizedToolDetector`. A plan written
+        // `bash` against a harness that calls `Bash` would otherwise mark every
+        // such step off-plan — and here that error runs toward noise: it invents
+        // a deviation rather than missing one, and sends a reviewer to a
+        // transcript where nothing is wrong.
+        let plan: HashSet<String> = ctx
+            .plan_steps
+            .iter()
+            .map(|s| s.to_ascii_lowercase())
+            .collect();
+        let offplan: Vec<&str> = ctx
+            .tool_sequence
+            .iter()
+            .filter(|t| !plan.contains(&t.to_ascii_lowercase()))
+            .map(|s| s.as_str())
+            .collect();
+
+        if offplan.is_empty() {
+            return None;
+        }
+        let ratio = offplan.len() as f64 / ctx.tool_sequence.len() as f64;
+        if ratio <= self.tolerance {
+            return None;
+        }
+
+        // Name the steps, not just the count. "3 steps outside the plan" sends a
+        // reviewer back to the transcript; naming them is often the whole diagnosis.
+        // Deduped and capped so a long run does not produce an unreadable finding.
+        let mut named: Vec<&str> = offplan.clone();
+        named.sort_unstable();
+        named.dedup();
+        let shown = named.len().min(5);
+        let suffix = if named.len() > shown { ", …" } else { "" };
+
+        Some(AnomalyFinding::steer(
+            AnomalyKind::ScopeViolation,
+            format!(
+                "Work outside the declared plan: {:.0}% of steps are unlisted ({}{})",
+                ratio * 100.0,
+                named[..shown].join(", "),
+                suffix
+            ),
+            ratio.min(1.0),
+        ))
+    }
+}
+
+/// Did the agent change things outside the area it was scoped to?
+///
+/// The third `ScopeViolation` producer, and the one that reads *effects* rather
+/// than behaviour. `PlanAdherenceDetector` asks whether the steps matched the
+/// declared plan; this asks whether the files matched the declared scope.
+///
+/// Three deliberate differences from its sibling, each of which would be a bug
+/// if copied across:
+///
+/// - **No tolerance ratio.** A plan is a human's approximate description of a
+///   task, so `PLAN_DEVIATION_TOLERANCE` exists to forgive the incidental step.
+///   A path scope is a boundary. One write outside it is one write outside it,
+///   and averaging it away is how a boundary stops being one.
+/// - **Mutations only.** Reading a file outside the scope is not a change.
+///   Folding reads in would make every scoped SOP fire on almost every request
+///   until someone switched the feature off.
+/// - **Paths only.** A shell command string is never judged as if it were a
+///   path; `grep -r credentials src/` names no target the scope can rule on.
+///
+/// Advisory (`steer`) on first ship, per the promotion rule in `mod.rs`: the
+/// scope is human-written prose about a codebase, and a boundary someone drew
+/// slightly too tight should steer the agent, not stop it.
+pub struct ScopePathDetector;
+
+impl Default for ScopePathDetector {
+    fn default() -> Self {
+        Self
+    }
+}
+
+/// Is `target` inside any declared scope?
+///
+/// Prefix match on path segments, so `packages/proxy` covers
+/// `packages/proxy/src/main.rs` but not `packages/proxy-extras/x.rs` — the
+/// naive `starts_with` would wrongly admit the second. Leading `./` is
+/// normalised because harnesses disagree about it, and comparison is
+/// case-insensitive to match every other matcher in this module.
+fn is_within_scope(target: &str, scopes: &[String]) -> bool {
+    let norm = |s: &str| {
+        s.trim_start_matches("./")
+            .trim_start_matches('/')
+            .trim_end_matches('/')
+            .to_ascii_lowercase()
+    };
+    let t = norm(target);
+    scopes.iter().any(|s| {
+        let s = norm(s);
+        s.is_empty() || t == s || t.starts_with(&format!("{s}/"))
+    })
+}
+
+impl AnomalyDetector for ScopePathDetector {
+    fn kind(&self) -> AnomalyKind {
+        AnomalyKind::ScopeViolation
+    }
+
+    fn detect(&self, ctx: &RequestContext) -> Option<AnomalyFinding> {
+        if ctx.scope_paths.is_empty() {
+            return None;
+        }
+
+        let mutations: Vec<&crate::manifest::ChangeEntry> = ctx
+            .changes
+            .iter()
+            .filter(|e| {
+                e.op.is_mutation()
+                    && e.target_kind == crate::manifest::TargetKind::Path
+                    && !e.target.is_empty()
+            })
+            .collect();
+        if mutations.is_empty() {
+            return None;
+        }
+
+        let mut outside: Vec<&str> = mutations
+            .iter()
+            .filter(|e| !is_within_scope(&e.target, &ctx.scope_paths))
+            .map(|e| e.target.as_str())
+            .collect();
+        if outside.is_empty() {
+            return None;
+        }
+        let ratio = outside.len() as f64 / mutations.len() as f64;
+
+        outside.sort_unstable();
+        outside.dedup();
+        let shown = outside.len().min(5);
+        let suffix = if outside.len() > shown { ", …" } else { "" };
+
+        Some(AnomalyFinding::steer(
+            AnomalyKind::ScopeViolation,
+            format!(
+                "Changed files outside its declared file scope: {}{} (scope: {})",
+                outside[..shown].join(", "),
+                suffix,
+                ctx.scope_paths.join(", ")
+            ),
+            ratio.min(1.0),
+        ))
+    }
+}
+
+/// Should this run stop and wait for a human?
+///
+/// The one detector whose verdict is not really about this request. Everything
+/// else here decides whether to allow, advise on, or refuse *this* call. This
+/// one refuses the call as a way of stopping the *run*, so that a person can
+/// look at what the agent has done before it does anything more.
+///
+/// # Why it kills on first fire
+///
+/// The promotion rule in this module says a detector ships advisory until
+/// telemetry shows a 0.1–1% false-positive rate. That rule governs heuristics,
+/// and this is not one: it fires only when an operator wrote
+/// `review_before: action:deploy` in an SOP. Its precedent is
+/// `UnauthorizedToolDetector`, which likewise blocks on first fire off a
+/// declared `deny_tools:` list. A declaration is not a guess, and there is no
+/// false-positive rate to measure for "the thing you asked to be asked about".
+///
+/// Nothing here exists until someone declares it. An empty `review_before`
+/// returns `None` before anything else runs.
+///
+/// # It reads the delta, not the window
+///
+/// `ctx.new_tool_calls` is this turn's new calls only. `ctx.tool_sequence` is
+/// the cumulative rolling window, and reading it here would be a serious bug:
+/// after a human approves, the window still contains the call that caused the
+/// hold, the detector fires again, and the run re-holds itself — forever, with
+/// approval appearing simply not to work. See the module doc in `manifest.rs`
+/// for the counter that makes the delta safe.
+pub struct ReviewGateDetector;
+
+impl Default for ReviewGateDetector {
+    fn default() -> Self {
+        Self
+    }
+}
+
+/// The marker every held finding carries, so the request path can recognise one
+/// among the other findings without re-running the match.
+pub const REVIEW_HOLD_MARKER: &str = "held for human review";
+
+impl AnomalyDetector for ReviewGateDetector {
+    fn kind(&self) -> AnomalyKind {
+        AnomalyKind::ScopeViolation
+    }
+
+    fn detect(&self, ctx: &RequestContext) -> Option<AnomalyFinding> {
+        if ctx.review_before.is_empty() || ctx.new_tool_calls.is_empty() {
+            return None;
+        }
+
+        let mut hits: Vec<&str> = ctx
+            .new_tool_calls
+            .iter()
+            .filter(|t| {
+                ctx.review_before
+                    .iter()
+                    .any(|r| r.eq_ignore_ascii_case(t))
+            })
+            .map(|s| s.as_str())
+            .collect();
+        if hits.is_empty() {
+            return None;
+        }
+        hits.sort_unstable();
+        hits.dedup();
+
+        Some(AnomalyFinding::kill(
+            AnomalyKind::ScopeViolation,
+            format!(
+                "Run {}: {} — declared in review_before:",
+                REVIEW_HOLD_MARKER,
+                hits.join(", ")
+            ),
+        ))
+    }
+}
 
 pub struct ForbiddenSuccessionDetector {
     rules: &'static [(&'static str, &'static str)],
@@ -868,6 +1568,12 @@ pub mod test_support {
     pub fn base_ctx() -> RequestContext {
         RequestContext {
             session_id: "ses_test".into(),
+            plan_steps: Vec::new(),
+            scope_paths: Vec::new(),
+            review_before: Vec::new(),
+            changes: Vec::new(),
+            new_tool_calls: Vec::new(),
+            transition_baseline: None,
             workspace_id: "ws_test".into(),
             virtual_key_prefix: "vk_test".into(),
             model: "claude-sonnet-4".into(),
@@ -894,6 +1600,19 @@ pub mod test_support {
     pub fn ctx_with_sequence(seq: &[&str]) -> RequestContext {
         RequestContext {
             tool_sequence: seq.iter().map(|s| s.to_string()).collect(),
+            ..base_ctx()
+        }
+    }
+
+    /// A context whose request touched these things.
+    ///
+    /// The manifest counterpart to `ctx_with_sequence`: that one describes
+    /// behaviour, this one describes effect. Any detector reading `ctx.changes`
+    /// should build its fixtures here rather than reaching into `base_ctx`
+    /// directly, so a future field on `ChangeEntry` is one edit, not ten.
+    pub fn ctx_with_changes(changes: &[crate::manifest::ChangeEntry]) -> RequestContext {
+        RequestContext {
+            changes: changes.to_vec(),
             ..base_ctx()
         }
     }
@@ -1128,6 +1847,211 @@ mod tests {
         let d = TransitionProbabilityDetector::default();
         let ctx = ctx_with_sequence(&["list_dir", "view_file", "replace_file_content"]);
         assert!(d.detect(&ctx).is_none());
+    }
+
+    /// Build a context carrying a fitted model, as the proxy resolves one per request.
+    ///
+    /// Keys are lowercased here because that is what the sweep now publishes: it
+    /// folds case when counting pairs, so one tool cannot be split across two
+    /// spellings. Tests stay free to write `"Read View"` for readability, and
+    /// still exercise the same keys production sees.
+    fn ctx_with_baseline(seq: &[&str], model: &[(&str, f64)]) -> RequestContext {
+        let mut ctx = ctx_with_sequence(seq);
+        ctx.transition_baseline = Some(
+            model
+                .iter()
+                .map(|(k, v)| (k.to_ascii_lowercase(), *v))
+                .collect::<std::collections::HashMap<String, f64>>(),
+        );
+        ctx
+    }
+
+    #[test]
+    fn a_three_cycle_escapes_the_builtin_table_entirely() {
+        // The hole this whole change exists to close, pinned as a fact rather than an
+        // argument. `Read → Grep → Bash` repeated forever is caught by nothing:
+        // no two adjacent entries are equal (ConsecutiveRepeat), the tail is not a
+        // two-tool alternation (PingPong), there are three distinct tools
+        // (ToolDiversityCollapse), and none of the pairs is in the built-in table, so
+        // every one scores the 0.50 default and the average clears 0.35.
+        let seq = &[
+            "Read", "Grep", "Bash", "Read", "Grep", "Bash", "Read", "Grep", "Bash",
+        ];
+        let ctx = ctx_with_sequence(seq);
+        assert!(ConsecutiveRepeatDetector::default().detect(&ctx).is_none());
+        assert!(PingPongCycleDetector::default().detect(&ctx).is_none());
+        assert!(ToolDiversityCollapseDetector::default().detect(&ctx).is_none());
+        assert!(
+            TransitionProbabilityDetector::default().detect(&ctx).is_none(),
+            "the built-in table scores unknown pairs 0.50, which is above the threshold"
+        );
+    }
+
+    #[test]
+    fn a_fitted_model_catches_what_the_builtin_table_cannot() {
+        // Same sequence, against a model fitted from this workspace's successful runs.
+        // All three tools appear there as predecessors — a team whose agents use Read,
+        // Grep and Bash has them in its corpus — but never in this order. Each step is
+        // therefore a known predecessor with an unobserved successor, scores
+        // UNSEEN_TRANSITION, and the average falls below the threshold. Novelty finally
+        // reads as surprising instead of as 0.50.
+        //
+        // Note what this does NOT claim: a sequence of tools the corpus has never seen
+        // at all still falls back to the built-in table and will not fire. That is the
+        // deliberate trade made in `an_unknown_predecessor_is_not_treated_as_surprising`
+        // — refusing to condemn a newly adopted tool costs some detection on a wholly
+        // novel vocabulary, and the false-positive direction is the worse one for a
+        // control that will eventually be promoted to a kill.
+        let model = &[
+            ("Read View", 0.9_f64),
+            ("Grep View", 0.85),
+            ("Bash View", 0.6),
+            ("View Write", 0.8),
+            ("Write Read", 0.7),
+        ];
+        let ctx = ctx_with_baseline(
+            &["Read", "Grep", "Bash", "Read", "Grep", "Bash", "Read", "Grep", "Bash"],
+            model,
+        );
+        let hit = TransitionProbabilityDetector::default()
+            .detect(&ctx)
+            .expect("a cycle absent from the success corpus must be flagged");
+        assert_eq!(hit.kind, AnomalyKind::ToolAbuse);
+        assert!(!hit.kill, "ships advisory until false-positive telemetry earns a kill");
+        assert!(
+            hit.reason.contains("fitted"),
+            "the finding must say which model judged it: {}",
+            hit.reason
+        );
+    }
+
+    /// Capitalisation must not decide whether work looks anomalous.
+    ///
+    /// Observed in the dev cluster: `action:run_tests -> bash` carried 24
+    /// observations and `action:run_tests -> Bash` carried 2, because the sweep
+    /// counted pairs by exact string while harnesses disagree about the case of
+    /// the same tool. The lookup here is an exact map hit, so the same agent
+    /// doing the same thing scored 0.5 under one spelling and 0.0417 under the
+    /// other — a 12x swing, and low enough to drag the window mean toward a
+    /// false finding. Every other tool-name comparison in this file already used
+    /// `eq_ignore_ascii_case`; this path did not.
+    #[test]
+    fn capitalisation_does_not_change_a_transition_score() {
+        let model = &[("action:run_tests bash", 0.5_f64)];
+
+        let lower = TransitionProbabilityDetector::probability_with(
+            ctx_with_baseline(&[], model).transition_baseline.as_ref(),
+            "action:run_tests",
+            "bash",
+        );
+        let upper = TransitionProbabilityDetector::probability_with(
+            ctx_with_baseline(&[], model).transition_baseline.as_ref(),
+            "action:run_tests",
+            "Bash",
+        );
+        assert_eq!(
+            lower, upper,
+            "the same transition scored differently for `bash` and `Bash`"
+        );
+        assert_eq!(lower, 0.5, "and both must be the fitted value, not the unseen floor");
+    }
+
+    #[test]
+    fn a_fitted_model_accepts_the_work_it_was_fitted_from() {
+        let model = &[
+            ("Read View", 0.9_f64),
+            ("View Write", 0.8),
+            ("Write Read", 0.7),
+        ];
+        let ctx = ctx_with_baseline(&["Read", "View", "Write", "Read"], model);
+        assert!(TransitionProbabilityDetector::default().detect(&ctx).is_none());
+    }
+
+    #[test]
+    fn an_unknown_predecessor_is_not_treated_as_surprising() {
+        // The false-positive this would otherwise create. The sweep only publishes a
+        // predecessor once it has enough observations, so a `from` the model has never
+        // heard of means "not enough evidence yet", not "never happens" — every tool a
+        // team adopted since the last sweep would otherwise be flagged on sight.
+        // Falls back to the built-in table for those steps.
+        let model = &[("Read View", 0.9_f64)];
+        let ctx = ctx_with_baseline(&["BrandNewTool", "AnotherNewTool", "ThirdNewTool"], model);
+        assert!(
+            TransitionProbabilityDetector::default().detect(&ctx).is_none(),
+            "tools absent from the corpus must not be condemned for being new"
+        );
+    }
+
+    #[test]
+    fn the_verdict_does_not_depend_on_how_long_the_session_has_been_running() {
+        // The property the scoring window exists to guarantee, and the regression it
+        // prevents. Retention grew from 20 to 60 entries for the cycle detectors; had
+        // this detector kept averaging over everything retained, the same recent
+        // behaviour would score differently depending only on session age — a mean over
+        // 59 pairs is far harder to drag below the threshold than one over 19.
+        //
+        // Same trailing behaviour, three different amounts of prior history, one verdict.
+        // Every tool below is a KNOWN predecessor in the model — the trailing steps are
+        // unseen *successions* of familiar tools, not an unfamiliar vocabulary. That
+        // distinction is deliberate: a wholly novel vocabulary falls back to the
+        // built-in table by design, per
+        // `an_unknown_predecessor_is_not_treated_as_surprising`.
+        let model = &[
+            ("Read View", 0.95_f64),
+            ("View Write", 0.95),
+            ("Write Read", 0.95),
+            ("Grep View", 0.9),
+            ("Bash View", 0.9),
+        ];
+
+        let mut verdicts = Vec::new();
+        for history in [0usize, 5, 15] {
+            let mut seq: Vec<&str> = Vec::new();
+            for _ in 0..history {
+                seq.extend_from_slice(&["Read", "View", "Write"]);
+            }
+            for _ in 0..7 {
+                seq.extend_from_slice(&["Read", "Grep", "Bash"]);
+            }
+            let ctx = ctx_with_baseline(&seq, model);
+            verdicts.push(TransitionProbabilityDetector::default().detect(&ctx).is_some());
+        }
+        assert!(
+            verdicts.iter().all(|v| *v == verdicts[0]),
+            "verdict changed with session length alone: {verdicts:?}"
+        );
+        assert!(verdicts[0], "unseen successions of familiar tools should be flagged");
+    }
+
+    #[test]
+    fn sustained_ordinary_work_is_never_flagged_however_long_it_runs() {
+        // The other side: capping the slice must not manufacture a finding out of a
+        // long run of perfectly normal work.
+        let model = &[("Read View", 0.95_f64), ("View Write", 0.95), ("Write Read", 0.95)];
+        for history in [1usize, 5, 20] {
+            let mut seq: Vec<&str> = Vec::new();
+            for _ in 0..history {
+                seq.extend_from_slice(&["Read", "View", "Write"]);
+            }
+            let ctx = ctx_with_baseline(&seq, model);
+            assert!(
+                TransitionProbabilityDetector::default().detect(&ctx).is_none(),
+                "flagged ordinary work at history={history}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_missing_model_is_never_more_permissive_than_a_present_one() {
+        // Absence must mean "use the built-in table", not "allow". A workspace with no
+        // fitted model still gets the original behaviour, so the sweep failing to run
+        // can never silently disable the detector.
+        let ctx = ctx_with_sequence(&["run_command", "run_command", "run_command"]);
+        assert!(ctx.transition_baseline.is_none());
+        assert!(
+            TransitionProbabilityDetector::default().detect(&ctx).is_some(),
+            "the built-in table must still fire when no model is fitted"
+        );
     }
 
     #[test]
@@ -1518,5 +2442,606 @@ mod tool_poisoning_tests {
             hit.reason.contains("model-visible instructions"),
             "and say why a description change matters"
         );
+    }
+}
+
+#[cfg(test)]
+mod plan_adherence_tests {
+    use super::test_support::*;
+    use super::*;
+
+    fn ctx(plan: &[&str], seq: &[&str]) -> RequestContext {
+        let mut c = ctx_with_sequence(seq);
+        c.plan_steps = plan.iter().map(|s| s.to_string()).collect();
+        c
+    }
+
+    /// The load-bearing default. Nobody writes a plan until they want one, and
+    /// until then this detector must be silent — an empty plan means "nothing
+    /// declared, nothing to compare against", never "deny everything unlisted".
+    #[test]
+    fn no_declared_plan_is_silent() {
+        let d = PlanAdherenceDetector::default();
+        let c = ctx(&[], &["Bash", "rm", "curl", "kubectl", "Write"]);
+        assert!(
+            d.detect(&c).is_none(),
+            "a workspace that never wrote a plan must never be flagged"
+        );
+    }
+
+    #[test]
+    fn a_run_that_follows_its_plan_is_quiet() {
+        let d = PlanAdherenceDetector::default();
+        let c = ctx(
+            &["Read", "Edit", "action:run_tests"],
+            &["Read", "Edit", "Read", "action:run_tests"],
+        );
+        assert!(d.detect(&c).is_none());
+    }
+
+    /// The point of the detector: work the plan never mentioned.
+    #[test]
+    fn work_outside_the_plan_is_flagged() {
+        let d = PlanAdherenceDetector::default();
+        let c = ctx(
+            &["Read", "Edit"],
+            &["Read", "Edit", "action:deploy", "kubectl", "curl"],
+        );
+        let hit = d.detect(&c).expect("60% off-plan must fire");
+        assert_eq!(hit.kind, AnomalyKind::ScopeViolation);
+        assert!(
+            !hit.kill,
+            "ships advisory — the promotion rule requires telemetry first"
+        );
+    }
+
+    /// A plan is a plan, not a transcript. Real runs read a file they did not
+    /// list or check a status mid-way, and flagging that would make the
+    /// detector useless long before it made it accurate.
+    #[test]
+    fn incidental_steps_below_tolerance_are_tolerated() {
+        let d = PlanAdherenceDetector::default();
+        let c = ctx(
+            &["Read", "Edit", "action:run_tests"],
+            &["Read", "Edit", "Glob", "Read", "action:run_tests"],
+        );
+        assert!(
+            d.detect(&c).is_none(),
+            "1 unlisted step in 5 is 20%, under the 40% tolerance"
+        );
+    }
+
+    /// Naming the steps is most of the diagnosis. A bare percentage sends a
+    /// reviewer back to the transcript to work out which ones they were.
+    #[test]
+    fn the_off_plan_steps_are_named() {
+        let d = PlanAdherenceDetector::default();
+        let c = ctx(&["Read"], &["Read", "kubectl", "curl", "action:deploy"]);
+        let r = d.detect(&c).unwrap().reason;
+        assert!(r.contains("kubectl"), "got: {r}");
+        assert!(r.contains("curl"), "got: {r}");
+        assert!(r.contains("action:deploy"), "got: {r}");
+        assert!(!r.contains("Read"), "an on-plan step must not be named: {r}");
+    }
+
+    /// Same rule as `UnauthorizedToolDetector`. A plan written in lowercase
+    /// against a harness that calls `Bash` must not read as 100% deviation.
+    #[test]
+    fn matching_is_case_insensitive() {
+        let d = PlanAdherenceDetector::default();
+        let c = ctx(&["bash", "read"], &["Bash", "Read", "Bash"]);
+        assert!(d.detect(&c).is_none());
+    }
+
+    /// A declared plan with no observed steps yet has nothing to say. This is
+    /// every session's first request.
+    #[test]
+    fn a_plan_with_no_observed_steps_is_quiet() {
+        let d = PlanAdherenceDetector::default();
+        let c = ctx(&["Read", "Edit"], &[]);
+        assert!(d.detect(&c).is_none());
+    }
+
+    /// Confidence must track how far off-plan the run is, or every deviation
+    /// arrives at the reviewer looking equally urgent — which is what the
+    /// audit-budget ranking spends confidence on.
+    #[test]
+    fn confidence_scales_with_deviation() {
+        let d = PlanAdherenceDetector::default();
+        let mild = d
+            .detect(&ctx(&["Read"], &["Read", "a", "b"]))
+            .expect("2 of 3 off-plan fires");
+        let severe = d
+            .detect(&ctx(&["Read"], &["a", "b", "c"]))
+            .expect("3 of 3 off-plan fires");
+        assert!(
+            severe.confidence > mild.confidence,
+            "{} should exceed {}",
+            severe.confidence,
+            mild.confidence
+        );
+        assert!(severe.confidence <= 1.0);
+    }
+}
+
+#[cfg(test)]
+mod scope_path_tests {
+    use super::test_support::*;
+    use super::*;
+    use crate::manifest::{ChangeEntry, ChangeOp, TargetKind};
+
+    fn change(op: ChangeOp, target: &str) -> ChangeEntry {
+        ChangeEntry {
+            tool: "Write".into(),
+            op,
+            target: target.into(),
+            target_kind: TargetKind::Path,
+            risk: Vec::new(),
+            bytes: None,
+        }
+    }
+
+    fn ctx(scopes: &[&str], changes: Vec<ChangeEntry>) -> RequestContext {
+        let mut c = ctx_with_changes(&changes);
+        c.scope_paths = scopes.iter().map(|s| s.to_string()).collect();
+        c
+    }
+
+    /// The load-bearing default. No scope declared, no opinion — a workspace
+    /// that never writes one is never affected.
+    #[test]
+    fn no_scope_paths_declared_means_no_finding() {
+        let d = ScopePathDetector;
+        let c = ctx(&[], vec![change(ChangeOp::Write, "/etc/passwd")]);
+        assert!(d.detect(&c).is_none());
+    }
+
+    #[test]
+    fn a_write_inside_the_declared_scope_is_silent() {
+        let d = ScopePathDetector;
+        let c = ctx(
+            &["packages/proxy"],
+            vec![change(ChangeOp::Write, "packages/proxy/src/main.rs")],
+        );
+        assert!(d.detect(&c).is_none());
+    }
+
+    #[test]
+    fn a_write_outside_the_declared_scope_steers() {
+        let d = ScopePathDetector;
+        let c = ctx(
+            &["packages/proxy"],
+            vec![change(ChangeOp::Write, "infra/kubernetes/base/configmap.yaml")],
+        );
+        let hit = d.detect(&c).expect("an out-of-scope write must fire");
+        assert_eq!(hit.kind, AnomalyKind::ScopeViolation);
+        assert!(!hit.kill, "ships advisory — the promotion rule requires telemetry first");
+        assert!(hit.reason.contains("configmap.yaml"), "got: {}", hit.reason);
+    }
+
+    /// The likeliest regression: folding reads in would make every scoped SOP
+    /// fire on nearly every request, and the feature would be switched off.
+    #[test]
+    fn a_read_outside_scope_is_not_a_scope_violation() {
+        let d = ScopePathDetector;
+        let c = ctx(
+            &["packages/proxy"],
+            vec![change(ChangeOp::Read, "services/control-plane/src/app.ts")],
+        );
+        assert!(d.detect(&c).is_none(), "reading is not changing");
+    }
+
+    /// A boundary is a boundary. Unlike plan adherence, one violation among
+    /// many compliant changes still reports — averaging it away is how a scope
+    /// stops meaning anything.
+    #[test]
+    fn a_single_violation_among_many_compliant_changes_still_fires() {
+        let d = ScopePathDetector;
+        let mut changes: Vec<ChangeEntry> = (0..9)
+            .map(|i| change(ChangeOp::Edit, &format!("packages/proxy/src/f{i}.rs")))
+            .collect();
+        changes.push(change(ChangeOp::Delete, ".github/workflows/deploy.yml"));
+        let hit = d.detect(&ctx(&["packages/proxy"], changes)).expect("1 in 10 must still fire");
+        assert!(hit.reason.contains("deploy.yml"));
+    }
+
+    /// A prefix match on raw strings would admit this. `packages/proxy` must
+    /// not cover `packages/proxy-extras`.
+    #[test]
+    fn a_sibling_directory_sharing_a_prefix_is_outside_scope() {
+        let d = ScopePathDetector;
+        let c = ctx(
+            &["packages/proxy"],
+            vec![change(ChangeOp::Write, "packages/proxy-extras/src/x.rs")],
+        );
+        assert!(d.detect(&c).is_some(), "a shared prefix is not containment");
+    }
+
+    #[test]
+    fn leading_slashes_and_case_do_not_defeat_the_scope() {
+        let d = ScopePathDetector;
+        let c = ctx(
+            &["Packages/Proxy"],
+            vec![change(ChangeOp::Write, "./packages/proxy/src/main.rs")],
+        );
+        assert!(d.detect(&c).is_none());
+    }
+
+    /// A shell command names no path the scope can rule on. Judging one as a
+    /// path would flag `grep -r x src/` as a change to `src/`.
+    #[test]
+    fn a_command_is_never_judged_against_the_scope() {
+        let d = ScopePathDetector;
+        let mut c = ctx(&["packages/proxy"], vec![]);
+        c.changes = vec![ChangeEntry {
+            tool: "Bash".into(),
+            op: ChangeOp::Execute,
+            target: "rm -rf infra/".into(),
+            target_kind: TargetKind::Command,
+            risk: Vec::new(),
+            bytes: None,
+        }];
+        assert!(d.detect(&c).is_none());
+    }
+
+    #[test]
+    fn a_scope_with_no_changes_is_quiet() {
+        let d = ScopePathDetector;
+        assert!(d.detect(&ctx(&["packages/proxy"], vec![])).is_none());
+    }
+}
+
+#[cfg(test)]
+mod review_gate_tests {
+    use super::test_support::*;
+    use super::*;
+
+    fn ctx(declared: &[&str], delta: &[&str]) -> RequestContext {
+        let mut c = base_ctx();
+        c.review_before = declared.iter().map(|s| s.to_string()).collect();
+        c.new_tool_calls = delta.iter().map(|s| s.to_string()).collect();
+        c
+    }
+
+    /// Nothing is ever held unless someone declared it. This is the whole
+    /// safety property: no heuristic can block a person's work.
+    #[test]
+    fn no_review_before_declared_means_no_hold() {
+        let d = ReviewGateDetector;
+        let c = ctx(&[], &["Bash", "action:deploy", "action:publish"]);
+        assert!(d.detect(&c).is_none());
+    }
+
+    #[test]
+    fn a_declared_action_holds_the_request() {
+        let d = ReviewGateDetector;
+        let c = ctx(&["action:deploy"], &["Bash", "action:deploy"]);
+        let hit = d.detect(&c).expect("a declared action must hold");
+        assert_eq!(hit.kind, AnomalyKind::ScopeViolation);
+        assert!(hit.kill, "a declaration is not a guess — it blocks on first fire");
+        assert!(hit.reason.contains(REVIEW_HOLD_MARKER));
+    }
+
+    #[test]
+    fn an_undeclared_action_passes() {
+        let d = ReviewGateDetector;
+        let c = ctx(&["action:publish"], &["Bash", "action:deploy"]);
+        assert!(d.detect(&c).is_none());
+    }
+
+    #[test]
+    fn raw_tool_names_are_matched_too() {
+        // The action vocabulary has eight tokens and covers none of the edit
+        // tools, so `review_before: Write` has to work or the feature is a trap.
+        let d = ReviewGateDetector;
+        assert!(d.detect(&ctx(&["Write"], &["Write"])).is_some());
+        assert!(d.detect(&ctx(&["write"], &["Write"])).is_some(), "case must not matter");
+    }
+
+    /// **The deadlock guard.**
+    ///
+    /// The hold must read the per-turn delta, never the cumulative window.
+    /// Harnesses resend the whole history every turn, so a detector scoring
+    /// `tool_sequence` would find the same `action:deploy` after a human
+    /// approved it, hold the run again, and keep doing so forever — with
+    /// approval appearing simply not to work.
+    #[test]
+    fn the_hold_fires_on_the_per_turn_delta_only() {
+        let d = ReviewGateDetector;
+        let mut c = base_ctx();
+        c.review_before = vec!["action:deploy".into()];
+        c.new_tool_calls = vec![]; // nothing new this turn
+        c.tool_sequence = vec!["Bash".into(), "action:deploy".into()]; // still in history
+        assert!(
+            d.detect(&c).is_none(),
+            "a call already seen must not re-hold the run"
+        );
+    }
+
+    /// And the same, asserted against the source, so nobody later "simplifies"
+    /// the detector onto the cumulative sequence. The behavioural test above
+    /// would still pass if `new_tool_calls` were merely populated from the
+    /// window at the call site.
+    #[test]
+    fn the_request_path_feeds_the_hold_the_delta() {
+        let src = include_str!("../../proxy.rs");
+        assert!(
+            src.contains("new_tool_calls: new_tool_calls.clone()"),
+            "RequestContext.new_tool_calls must carry the per-turn delta"
+        );
+    }
+
+    #[test]
+    fn several_declared_actions_in_one_turn_are_all_named() {
+        let d = ReviewGateDetector;
+        let c = ctx(
+            &["action:deploy", "action:publish"],
+            &["Bash", "action:deploy", "Bash", "action:publish"],
+        );
+        let r = d.detect(&c).unwrap().reason;
+        assert!(r.contains("action:deploy") && r.contains("action:publish"));
+    }
+}
+
+#[cfg(test)]
+mod landmark_cycle_tests {
+    use super::test_support::*;
+    use super::*;
+
+    fn seq(items: &[&str]) -> RequestContext {
+        ctx_with_sequence(items)
+    }
+
+    /// Repeat a pattern `times` over, producing a raw sequence.
+    fn repeat(pattern: &[&str], times: usize) -> Vec<String> {
+        pattern
+            .iter()
+            .cycle()
+            .take(pattern.len() * times)
+            .map(|s| s.to_string())
+            .collect()
+    }
+
+    fn ctx_repeat(pattern: &[&str], times: usize) -> RequestContext {
+        let owned = repeat(pattern, times);
+        let refs: Vec<&str> = owned.iter().map(|s| s.as_str()).collect();
+        ctx_with_sequence(&refs)
+    }
+
+    /// The headline. A period-3 cycle is invisible to every built-in detector —
+    /// `a_three_cycle_escapes_the_builtin_table_entirely` has pinned that as a
+    /// fact. This is the detector that sees it.
+    #[test]
+    fn a_period_three_cycle_is_caught() {
+        let d = LandmarkCycleDetector;
+        let hit = d
+            .detect(&ctx_repeat(&["Read", "Grep", "Bash"], 4))
+            .expect("a 4× repeated 3-cycle must fire");
+        assert_eq!(hit.kind, AnomalyKind::LoopDetected);
+        assert!(!hit.kill, "advisory — see the promotion rule");
+        assert!(hit.reason.contains(CYCLE_PERIOD_MARKER), "got: {}", hit.reason);
+        assert!(hit.reason.contains("of 3"), "should name the period: {}", hit.reason);
+    }
+
+    /// One stray call erases a completed cycle for `PingPongCycleDetector`,
+    /// permanently and at any length. Pinning the defeat and the fix together.
+    #[test]
+    fn an_interloper_does_not_erase_a_cycle() {
+        let c = seq(&["A", "B", "A", "B", "A", "B", "A", "B", "X", "A", "B"]);
+        assert!(
+            PingPongCycleDetector::default().detect(&c).is_none(),
+            "the exact-tail matcher is defeated by the interloper"
+        );
+        let hit = LandmarkCycleDetector.detect(&c).expect("but the cycle is still there");
+        assert!(hit.reason.contains(CYCLE_PERIOD_MARKER));
+    }
+
+    /// The invariance property, and the reason the anchor projection exists.
+    ///
+    /// `expand_tool_actions` emits `action:` tokens conditionally on argument
+    /// content, so the *recorded* period of unchanged behaviour moves turn to
+    /// turn. The verdict must not.
+    #[test]
+    fn action_emission_does_not_change_the_verdict() {
+        let bare = ctx_repeat(&["Bash", "Write"], 6);
+        let with_actions = seq(&[
+            "Bash", "action:run_tests", "Write",
+            "Bash", "Write",                       // this turn matched no pattern
+            "Bash", "action:run_tests", "Write",
+            "Bash", "action:run_tests", "Write",
+            "Bash", "Write",
+            "Bash", "action:run_tests", "Write",
+        ]);
+
+        let a = LandmarkCycleDetector.detect(&bare).expect("bare fires");
+        let b = LandmarkCycleDetector.detect(&with_actions).expect("interleaved fires");
+        assert_eq!(
+            a.confidence, b.confidence,
+            "conditional action emission must not move the verdict"
+        );
+        assert_eq!(a.reason, b.reason, "nor the reported period");
+    }
+
+    /// An `action:`-interleaved spin is invisible to every other repetition
+    /// detector: no two adjacent entries are equal, and there are exactly two
+    /// distinct values where the diversity check needs fewer than two.
+    #[test]
+    fn an_interleaved_spin_is_visible_to_nothing_else() {
+        let c = ctx_repeat(&["Bash", "action:run_tests"], 8);
+        assert!(
+            ConsecutiveRepeatDetector::default().detect(&c).is_none(),
+            "no adjacent duplicates — the repeat detector cannot see it"
+        );
+        assert!(
+            ToolDiversityCollapseDetector::default().detect(&c).is_none(),
+            "two distinct values clears the diversity floor"
+        );
+        let hit = LandmarkCycleDetector.detect(&c).expect("a spin is a period-1 cycle");
+        assert!(hit.reason.contains("of 1"), "got: {}", hit.reason);
+    }
+
+    /// Hapax elision turns `A B C A B D A B E` into `A B A B A B`, a perfect
+    /// period-2 match over the survivors. It does not fire — but the gate that
+    /// stops it is `MIN_LANDMARK_ANCHORS`, not the coverage floor: 6 survivors
+    /// is short of 8 and the function returns before coverage is computed.
+    /// `variety_is_rejected_by_the_coverage_floor_itself` is the one that
+    /// reaches the floor.
+    #[test]
+    fn genuine_variety_is_not_a_cycle() {
+        let c = seq(&["A", "B", "C", "A", "B", "D", "A", "B", "E"]);
+        assert!(
+            LandmarkCycleDetector.detect(&c).is_none(),
+            "one in three calls off-pattern is variety, not a loop"
+        );
+    }
+
+    /// **The false-positive test that matters most**, and the only thing pinning
+    /// `CYCLE_COVERAGE_FLOOR`.
+    ///
+    /// Same one-in-three-off-pattern shape, extended by one repetition so it
+    /// clears every earlier gate and the floor is the sole reason it is
+    /// rejected. Worked exactly: 12 anchors, all inside `LANDMARK_WINDOW`, so
+    /// the window is all 12. A and B occur 4 times each and survive; C, D, E, F
+    /// occur once each and elide. Survivors = 8, which meets
+    /// `MIN_LANDMARK_ANCHORS` exactly, so that gate is passed rather than hit.
+    /// Coverage = 8/12 = 0.67, under the 0.75 floor. Remove the floor and the
+    /// survivors `A B A B A B A B` score a flawless 6/6 at period 2 and it
+    /// fires — which is the whole false-positive story in one fixture.
+    #[test]
+    fn variety_is_rejected_by_the_coverage_floor_itself() {
+        let raw = ["A", "B", "C", "A", "B", "D", "A", "B", "E", "A", "B", "F"];
+        assert!(
+            LandmarkCycleDetector.detect(&seq(&raw)).is_none(),
+            "one in three calls off-pattern is variety, not a loop"
+        );
+
+        // Then restate the arithmetic, so a future edit to the fixture that
+        // quietly parks it behind an earlier gate — where it would still pass
+        // the assertion above while pinning nothing — fails loudly. Asserted
+        // after the behaviour so that lowering the floor breaks the verdict
+        // first rather than tripping this self-check.
+        let (anchors, _) =
+            anchor_projection(&raw.iter().map(|s| s.to_string()).collect::<Vec<String>>());
+        assert_eq!(anchors.len(), 12, "the whole fixture is anchors");
+        let survivors = anchors
+            .iter()
+            .filter(|&&id| anchors.iter().filter(|&&o| o == id).count() > 1)
+            .count();
+        assert_eq!(survivors, 8, "must clear MIN_LANDMARK_ANCHORS, not stop at it");
+        assert!(
+            (survivors as f64 / anchors.len() as f64) < CYCLE_COVERAGE_FLOOR,
+            "and must land under the floor, which is the gate under test"
+        );
+    }
+
+    #[test]
+    fn case_differences_do_not_hide_a_cycle() {
+        // Would defeat PingPong's exact String equality.
+        let c = seq(&["bash", "Write", "BASH", "write", "Bash", "WRITE", "bAsH", "wRiTe"]);
+        assert!(LandmarkCycleDetector.detect(&c).is_some());
+    }
+
+    #[test]
+    fn a_short_sequence_is_not_judged() {
+        assert!(LandmarkCycleDetector.detect(&seq(&["A", "B", "A", "B"])).is_none());
+    }
+
+    /// Smallest period wins, so `ABAB` reports 2 rather than 4.
+    #[test]
+    fn the_smallest_period_is_reported() {
+        let hit = LandmarkCycleDetector.detect(&ctx_repeat(&["A", "B"], 6)).unwrap();
+        assert!(hit.reason.contains("of 2"), "got: {}", hit.reason);
+    }
+
+    /// The stated limit, pinned so nobody reads the doc comment as promising
+    /// more: elision removes anchors seen once, so an interloper appearing
+    /// twice survives and breaks the alignment.
+    #[test]
+    fn a_repeated_interloper_defeats_it_and_that_is_documented() {
+        let c = seq(&["A", "B", "A", "B", "X", "A", "B", "X", "A", "B"]);
+        assert!(
+            LandmarkCycleDetector.detect(&c).is_none(),
+            "tolerant of one stray call, brittle to two — see the doc comment"
+        );
+    }
+
+    /// The description may only name tools the cycle was scored over.
+    ///
+    /// Every other test here asserts the period (`of N`) and nothing else, which
+    /// is how this survived: `A B … A B X` fires at period 2 over the survivors
+    /// `A B … A B`, and rendering the *raw* anchor tail put `X` — the one call
+    /// hapax elision removed from the analysis — into the operator's finding as
+    /// half the cycle.
+    #[test]
+    fn the_description_cannot_name_an_elided_tool() {
+        let c = seq(&["A", "B", "A", "B", "A", "B", "A", "B", "A", "B", "X"]);
+        let hit = LandmarkCycleDetector.detect(&c).expect("period 2 over the survivors");
+        assert!(hit.reason.contains("of 2"), "got: {}", hit.reason);
+        assert!(
+            hit.reason.contains("(A → B)"),
+            "must render the cycle that was actually scored: {}",
+            hit.reason
+        );
+        assert!(
+            !hit.reason.contains('X'),
+            "an elided anchor took no part in the cycle and must not be named: {}",
+            hit.reason
+        );
+    }
+
+    /// The two counts in the finding are anchors, not recorded tool calls. This
+    /// fixture is 16 recorded calls and reports 8, because the `action:` half is
+    /// stripped before anything is scored — so the string has to say what it
+    /// counted, or the number misreports the window to whoever reads it against
+    /// a raw transcript.
+    #[test]
+    fn the_counts_disclose_that_action_steps_are_not_counted() {
+        let c = ctx_repeat(&["Bash", "action:run_tests"], 8);
+        assert_eq!(c.tool_sequence.len(), 16, "16 recorded calls");
+        let hit = LandmarkCycleDetector.detect(&c).unwrap();
+        assert!(hit.reason.contains("8 of the last 8"), "got: {}", hit.reason);
+        assert!(
+            hit.reason.contains("action: steps not counted"),
+            "a count over anchors must say so: {}",
+            hit.reason
+        );
+    }
+
+    /// **The cross-file coupling nothing else states.**
+    ///
+    /// The elision table has `ANCHOR_FREQ_SLOTS` counters and is indexed
+    /// `id % ANCHOR_FREQ_SLOTS`. `anchor_projection` mints ids densely from 0,
+    /// one per distinct tool, so that modulo is the identity map exactly while a
+    /// recorded sequence cannot carry `ANCHOR_FREQ_SLOTS` distinct tools —
+    /// which `TOOL_SEQUENCE_CAP` in `proxy.rs` guarantees at 60 and nothing
+    /// enforces. Raise that cap past 256 and two distinct tools share a counter,
+    /// a genuine one-off is promoted to a survivor, and the detector
+    /// manufactures a cycle out of variety. Asserted against the source because
+    /// the constant is private to that module.
+    #[test]
+    fn the_anchor_frequency_table_covers_every_id_the_cap_can_produce() {
+        let src = include_str!("../../proxy.rs");
+        let decl = src
+            .lines()
+            .find(|l| l.trim_start().starts_with("const TOOL_SEQUENCE_CAP"))
+            .expect("TOOL_SEQUENCE_CAP must still be declared in proxy.rs");
+        let cap: usize = decl
+            .split('=')
+            .nth(1)
+            .map(|v| v.trim().trim_end_matches(';').replace('_', ""))
+            .and_then(|v| v.parse().ok())
+            .expect("TOOL_SEQUENCE_CAP must be a plain integer literal");
+        assert!(
+            cap <= ANCHOR_FREQ_SLOTS,
+            "TOOL_SEQUENCE_CAP is {cap} but the elision table has only {ANCHOR_FREQ_SLOTS} \
+             counters, so two distinct tools can fold onto one and manufacture a cycle"
+        );
+    }
+
+    #[test]
+    fn a_sequence_of_only_actions_is_not_judged() {
+        // Anchors project to nothing; must not divide by zero or fire.
+        let c = ctx_repeat(&["action:run_tests"], 12);
+        assert!(LandmarkCycleDetector.detect(&c).is_none());
     }
 }

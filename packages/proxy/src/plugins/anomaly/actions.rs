@@ -27,10 +27,17 @@
 
 /// Marks a synthesised action so it can never be confused with a real tool name.
 ///
-/// [`SequenceAnomalyDetector`](super::detectors::SequenceAnomalyDetector) learns
-/// transition probabilities between tools actually called, so it filters these
-/// out — a synthetic token in that chain would be a transition no harness ever
-/// made.
+/// [`TransitionProbabilityDetector`](super::detectors::TransitionProbabilityDetector)
+/// treats these two ways. Against its built-in table it filters them out, because that
+/// table only knows real tool names and a synthetic token would look like a transition
+/// no harness ever made. Against a model fitted from this workspace's own history it
+/// keeps them, because that model was built from the same expanded sequence — and the
+/// ordering rules live in this vocabulary, so dropping the action tokens would discard
+/// its most meaningful steps.
+///
+/// This doc previously named a `SequenceAnomalyDetector` that "learns transition
+/// probabilities". No such type existed; the learning it described was added later, in
+/// the control-plane sweep.
 pub const ACTION_PREFIX: &str = "action:";
 
 /// True for entries this module synthesised rather than a harness reporting them.
@@ -123,7 +130,7 @@ const DB_WRITE_PATTERNS: &[&str] = &[
 ];
 
 /// Path fragments that indicate credential material.
-const SECRET_PATH_FRAGMENTS: &[&str] = &[
+pub(crate) const SECRET_PATH_FRAGMENTS: &[&str] = &[
     ".env",
     "credentials",
     "id_rsa",
@@ -140,16 +147,16 @@ const SECRET_PATH_FRAGMENTS: &[&str] = &[
 ];
 
 /// Path fragments that indicate personal data leaving the system.
-const PII_PATH_FRAGMENTS: &[&str] = &["customer", "users.csv", "pii", "personal", "gdpr", "payroll"];
+pub(crate) const PII_PATH_FRAGMENTS: &[&str] = &["customer", "users.csv", "pii", "personal", "gdpr", "payroll"];
 
 /// Tool names harnesses use for "run a shell command".
-const SHELL_TOOLS: &[&str] = &["bash", "shell", "run_command", "runcommand", "terminal", "execute", "exec"];
+pub(crate) const SHELL_TOOLS: &[&str] = &["bash", "shell", "run_command", "runcommand", "terminal", "execute", "exec"];
 
 /// Tool names harnesses use for "read a file".
-const READ_TOOLS: &[&str] = &["read", "readfile", "view", "cat", "open_file", "str_replace_editor"];
+pub(crate) const READ_TOOLS: &[&str] = &["read", "readfile", "view", "cat", "open_file", "str_replace_editor"];
 
 /// Tool names harnesses use for "fetch a URL".
-const FETCH_TOOLS: &[&str] = &["webfetch", "fetch", "http_request", "browser", "web_search"];
+pub(crate) const FETCH_TOOLS: &[&str] = &["webfetch", "fetch", "http_request", "browser", "web_search"];
 
 /// Concatenate the string-ish values of a tool's arguments, lowercased.
 ///
@@ -183,7 +190,7 @@ fn matches_any(haystack: &str, patterns: &[&str]) -> bool {
     patterns.iter().any(|p| haystack.contains(p))
 }
 
-fn tool_is(name: &str, group: &[&str]) -> bool {
+pub(crate) fn tool_is(name: &str, group: &[&str]) -> bool {
     let lower = name.to_lowercase();
     group.iter().any(|t| lower == *t || lower.ends_with(t))
 }

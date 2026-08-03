@@ -126,6 +126,18 @@ pub struct RequestContext {
     pub risk_tier: RiskLevel,
     pub dlp_findings: Vec<DlpFinding>,
     pub tool_sequence: Vec<String>,
+    /// Fitted `P(to | from)` for this workspace, keyed `"from to"`.
+    ///
+    /// Resolved on the request path, like `denied_tools` below, so the detector stays
+    /// a pure function of this struct and does no I/O of its own — the stated line for
+    /// this module is about latency, and a lookup in an already-populated map costs
+    /// nothing.
+    ///
+    /// `None` means no fitted model for this workspace: too little history, the sweep
+    /// has not run, or this is a local/OSS deployment with no control plane. The
+    /// detector then uses its built-in table. Absent must never read as permissive.
+    #[serde(default)]
+    pub transition_baseline: Option<std::collections::HashMap<String, f64>>,
     /// Tool names this node's SOPs forbid, resolved for its role.
     ///
     /// Resolved on the request path so the detector stays a pure function.
@@ -134,6 +146,38 @@ pub struct RequestContext {
     /// never "deny everything unlisted".
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub denied_tools: Vec<String>,
+    /// The steps this node's SOPs declare its task should consist of.
+    ///
+    /// Resolved on the request path like `denied_tools`, so the detector stays a pure
+    /// function. Empty means no plan was declared — which must read as "nothing to
+    /// check", never as "deny everything unlisted". Plan adherence is opt-in.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub plan_steps: Vec<String>,
+    /// Repo paths this node's SOPs allow it to change. Empty means unrestricted —
+    /// the same fail-open default as `denied_tools`, for the same reason.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scope_paths: Vec<String>,
+    /// Actions this node's SOPs require a human to approve before the run
+    /// continues. Empty means none, and nothing about the hold exists until an
+    /// operator declares one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub review_before: Vec<String>,
+    /// What this request's tool calls actually touched.
+    ///
+    /// Derived on the request path from the same per-turn delta the sequence
+    /// comes from, so a detector reading it stays a pure function of this struct.
+    /// This is *effect*; `tool_sequence` above is behaviour.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub changes: Vec<crate::manifest::ChangeEntry>,
+    /// This turn's new tool calls only, expanded into the action vocabulary.
+    ///
+    /// Deliberately separate from `tool_sequence`, which is the cumulative
+    /// rolling window. A check that must fire *once* per action — the review
+    /// hold — has to read the delta: scoring the window would re-fire on every
+    /// request until it rolled over, which after a human approves means the run
+    /// re-holds itself forever.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub new_tool_calls: Vec<String>,
     /// Prompt-injection patterns matched in this request's text.
     ///
     /// Pattern names, not the matched text — the matched span is attacker
@@ -193,6 +237,12 @@ mod tests {
     fn ctx() -> RequestContext {
         RequestContext {
             session_id: "ses_1".into(),
+            plan_steps: Vec::new(),
+            scope_paths: Vec::new(),
+            review_before: Vec::new(),
+            changes: Vec::new(),
+            new_tool_calls: Vec::new(),
+            transition_baseline: None,
             workspace_id: "ws_1".into(),
             virtual_key_prefix: "vk_1".into(),
             model: "claude-sonnet-4".into(),

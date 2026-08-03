@@ -50,6 +50,28 @@ export interface WorkspaceSettings {
   allowLocalMemoryVaults: boolean
 
   /**
+   * Days of SSO inactivity after which a member's API keys stop authenticating.
+   *
+   * `null` disables the gate. Defaults to 30 days. SCIM provisioning was removed,
+   * so nothing reconciles membership against the identity provider: without this,
+   * removing a developer at the IdP stops their dashboard login but not their
+   * agents, because API-key auth never consults SSO (TD-218). Setting it makes IdP
+   * removal expire the keys on its own.
+   *
+   * Opt-in on purpose — a CI key belongs to a member who may never log in
+   * interactively, and enabling this globally would break those pipelines.
+   */
+  ssoKeyMaxIdleDays: number | null
+
+  /**
+   * ISO timestamp of when `ssoKeyMaxIdleDays` was switched on, set by the settings
+   * endpoint. The gate grants one full window from this point before it refuses
+   * anything, so enabling it ramps rather than cutting off members who have no
+   * recorded SSO login yet. Cleared when the gate is turned off.
+   */
+  ssoKeyGateEnabledAt: string | null
+
+  /**
    * Bring-your-own-cloud trace storage. Optional — absent means Intutic-managed
    * storage. Previously accessed only through `as unknown as` casts; typed here
    * so the settings UI and the control plane share one shape.
@@ -135,6 +157,14 @@ export interface WorkspaceSettings {
 export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
   mcpProxyFailBehavior: 'open',
   allowLocalMemoryVaults: true,
+  // ON by default. Without it, removing a developer at the identity provider stops
+  // their dashboard login but not their agents, and nothing reconciles membership.
+  // 30 days is long enough that an ordinary working month keeps a key alive, and
+  // short enough that an offboarded developer's agents stop within a sprint. Set to
+  // null to disable. Automation keys are exempt (api_keys.is_service_account), and
+  // the gate only applies to workspaces that actually have an SSO provider.
+  ssoKeyMaxIdleDays: 30,
+  ssoKeyGateEnabledAt: null,
   mcpProxyMode:         'per-session',
   bypassEnforcementTier: 'rewrite',
   featureFlags: {

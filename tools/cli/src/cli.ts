@@ -258,6 +258,58 @@ traces
     await runTracesInspect(traceId, opts)
   })
 
+// ── Trace integrity ────────────────────────────────────────────────────────
+
+const integrity = program
+  .command('integrity')
+  .description(
+    'Verify sealed trace roots — list, re-derive, walk the root chain, and walk the config snapshot chain'
+  )
+
+integrity
+  .command('roots')
+  .description('List sealed Merkle roots for the workspace, newest first')
+  .option('--loop-run <id>', 'Only roots sealed for this loop run')
+  .option('--json', 'Output as JSON instead of table')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runIntegrityRoots } = await import('./commands/integrity.js')
+    await runIntegrityRoots(opts)
+  })
+
+integrity
+  .command('verify <root_id>')
+  .description('Re-derive a root from the live traces and check its signature (exit 1 on mismatch)')
+  .option('--json', 'Output as JSON instead of a report')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (rootId, opts) => {
+    const { runIntegrityVerify } = await import('./commands/integrity.js')
+    await runIntegrityVerify(rootId, opts)
+  })
+
+integrity
+  .command('chain')
+  .description('Walk the previous_root chain and report deleted roots (exit 1 on a break)')
+  .option('--json', 'Output as JSON instead of a report')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runIntegrityChain } = await import('./commands/integrity.js')
+    await runIntegrityChain(opts)
+  })
+
+integrity
+  .command('config-chain')
+  .description(
+    'Walk the harness config snapshot chain and re-hash each stored body ' +
+    '(exit 1 on a break or a content mismatch)'
+  )
+  .option('--json', 'Output as JSON instead of a report')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runIntegrityConfigChain } = await import('./commands/integrity.js')
+    await runIntegrityConfigChain(opts)
+  })
+
 // ── Daemon persistence (WS-5 — Q3 Layer 4) ─────────────────────────────────
 
 const daemon = program
@@ -415,6 +467,18 @@ loopCmd
   .action(async (loopRunId, opts) => {
     const { runLoopKill } = await import('./commands/skill.js')
     await runLoopKill(loopRunId, opts)
+  })
+
+loopCmd
+  .command('review <loopRunId>')
+  .description('Approve or reject a loop run held for human review')
+  .option('--approve', 'Release the hold; the run resumes')
+  .option('--reject', 'Refuse the hold; the run is killed')
+  .option('--note <note>', 'Why, recorded against the run')
+  .option('--dev', 'Target the local control plane')
+  .action(async (loopRunId, opts) => {
+    const { runLoopReview } = await import('./commands/skill.js')
+    await runLoopReview(loopRunId, opts)
   })
 
 loopCmd

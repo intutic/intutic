@@ -49,6 +49,60 @@ A paginated list of execution traces showing:
 
 Data comes from `GET /api/v1/usage/events` with `page`, `limit`, and optional `session_id` parameters.
 
+### Trace Integrity
+
+Sits on the Traces page, directly below the trace list, and covers two separate
+records: the sealed Merkle roots over what an agent *did*, and the harness config
+snapshot chain over what it was *told to do*. They are shown together and never
+merged into one verdict — each can be tampered with independently, and the
+remedies differ.
+
+**Sealed roots.** One row per root from `GET /api/v1/integrity/roots`, newest
+first (the server caps the page at 50). The Signature column on an unchecked row
+reports only whether the key the root names is published — the listing does not
+carry the signature itself, so *"Key published"* is the strongest true statement
+available before a check, and *"Unverifiable — key not published"* is amber
+rather than red because it is a key-retention gap, not a rejected signature.
+
+**Verify** re-derives one root: it reads `GET /api/v1/integrity/roots/{rootId}`
+and `POST /api/v1/integrity/roots/{rootId}/recompute`, then checks the signature
+**in the browser** against `/.well-known/intutic-trace-signing.json`. The verdict
+is `Match`, `Mismatch`, or `Missing traces`, and a failing verdict names the
+trace ids rather than only counting them.
+
+**Harness config snapshot chain.** A second block under the roots table, from
+`GET /api/v1/integrity/config-chain` — the same walk `intutic integrity
+config-chain` runs, in the same vocabulary. It checks both halves of the chain,
+and reports what it finds as one of four states:
+
+| State | What it means |
+|-------|---------------|
+| **Intact** | Across the walked snapshots, every one names the snapshot that actually precedes it and every stored body still hashes to its recorded `content_hash`. |
+| **Nothing verified — no snapshots** | The workspace has no config snapshots. Amber, never green: an absent chain is not a clean one. If configs should be captured here, the sync daemon is not reaching the control plane. |
+| **_n_ broken links** | A snapshot names a predecessor that is not the snapshot before it — what deleting a snapshot leaves behind. Both ends are named: the snapshot doing the naming, the hash it named, and the snapshot that actually precedes it. |
+| **_n_ content mismatches** | A stored body no longer hashes to the `content_hash` recorded with it — the body was rewritten in place. |
+
+A break and a content mismatch are reported as **separate findings**, with their
+own counts, even when both are present. They have different causes and different
+remedies, and a link walk alone cannot see an edited body just as a re-hash alone
+cannot see a deleted snapshot.
+
+Two states deliberately do **not** read as failures. A snapshot naming no
+predecessor mid-chain is reported below the verdict as a gap, not a break —
+nothing was claimed, so nothing contradicts, though a deletion at that point
+would go unseen. And when snapshots older than the most recent 500 fall outside
+the walk, the panel says so: an intact window is not an intact history.
+
+::: tip A 409 here is an answer, not an outage
+`/api/v1/integrity/config-chain` returns **409** precisely when it found a break
+or an edited body, with the walk in the response body. The panel renders that as
+a finding. The "Could not walk the config snapshot chain" card appears only for a
+request that genuinely failed — and it carries no verdict, because an unreachable
+control plane says nothing about the chain.
+:::
+
+Concepts and the underlying construction: [Trace integrity](/concepts/trace-integrity).
+
 ### Agent Guidelines (SOP Registry)
 
 Lists all SOPs in your workspace with:

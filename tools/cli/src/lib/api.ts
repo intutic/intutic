@@ -23,6 +23,15 @@ export interface ApiClient {
   login(email: string, password: string): Promise<{ accessToken: string; refreshToken: string; workspaceId: string; email: string; memberId: string }>
   /** Generic GET request for arbitrary API paths. */
   get<T>(path: string): Promise<T>
+  /**
+   * GET that hands back the status instead of throwing on it.
+   *
+   * For endpoints where a non-2xx *is* the answer: `/api/v1/integrity/chain`
+   * returns 409 with the whole chain walk in the body when a root names a
+   * predecessor that is not there. `get()` throws on any non-2xx, which would
+   * leave the caller digging the break out of an error message.
+   */
+  getWithStatus<T>(path: string): Promise<{ status: number; body: T }>
   /** Generic POST request for arbitrary API paths. */
   post<T>(path: string, body?: unknown): Promise<T>
   /** Generic PUT request for arbitrary API paths. */
@@ -96,6 +105,20 @@ export function createApiClient(controlPlaneUrl: string, apiKey: string): ApiCli
 
     async get<T>(path: string): Promise<T> {
       return request<T>('GET', path)
+    },
+
+    async getWithStatus<T>(path: string): Promise<{ status: number; body: T }> {
+      const res = await fetch(`${controlPlaneUrl}${path}`, { method: 'GET', headers })
+      const text = await res.text()
+      let body: unknown
+      try {
+        body = JSON.parse(text)
+      } catch {
+        // Kept rather than discarded: a proxy's HTML error page is the thing
+        // that explains a status the caller did not expect.
+        body = { error: text }
+      }
+      return { status: res.status, body: body as T }
     },
 
     async post<T>(path: string, body?: unknown): Promise<T> {

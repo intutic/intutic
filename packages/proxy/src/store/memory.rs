@@ -723,6 +723,18 @@ impl LocalStore for MemoryStore {
     /// Under-counts a run split across processes, which is the safe direction:
     /// the total can only be higher than what is recorded here, so a breach
     /// reported from this number is always a real one.
+    /// Standalone has no control plane and therefore nobody to review anything.
+    /// Holding a run here would block it with no way to release it.
+    async fn request_loop_review(&self, _loop_run_id: &str, _reason: &str) {}
+
+    async fn loop_review_reason(&self, _loop_run_id: &str) -> Option<String> {
+        None
+    }
+
+    async fn loop_review_cleared(&self, _loop_run_id: &str) -> Option<String> {
+        None
+    }
+
     async fn add_workflow_spend(&self, loop_run_id: &str, amount: f64) -> Option<f64> {
         let mut spend = lock(&self.workflow_spend, "workflow-spend").ok()?;
         let total = spend.entry(loop_run_id.to_string()).or_insert(0.0);
@@ -839,6 +851,13 @@ impl ControlPlaneCache for NullControlPlaneCache {
     /// Standalone has nothing to break out of — policies come from local config.
     async fn break_glass_valid(&self, _token: &str) -> bool {
         false
+    }
+
+    async fn transition_baseline(&self, _workspace_id: &str) -> Option<String> {
+        // The standalone store has no control plane behind it, so there is no fitted
+        // model — the built-in table is the whole detector in local/OSS mode. That is
+        // the intended tier boundary, not a gap.
+        None
     }
 
     async fn wasm_plugins(&self, _workspace_id: &str) -> anyhow::Result<Option<String>> {

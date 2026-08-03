@@ -19,6 +19,60 @@ function httpGetJson<T>(url: string): Promise<T | null> {
 
 // ── Status bar registration ───────────────────────────────────────────────────
 
+/**
+ * Fetch from the control plane using the credentials `intutic connect` wrote.
+ * Separate from the proxy's /healthz probe above: the proxy (127.0.0.1:4000)
+ * reports local governance liveness, while incidents live in the control plane.
+ */
+async function fetchControlPlane<T>(reqPath: string): Promise<T | null> {
+  try {
+    const os = await import('node:os')
+    const fsp = await import('node:fs/promises')
+    const nodePath = await import('node:path')
+    const override = vscode.workspace
+      .getConfiguration('intutic')
+      .get<string>('controlPlaneUrl')
+    let base = override
+    let apiKey: string | undefined
+    let workspaceId: string | undefined
+    try {
+      const raw = await fsp.readFile(
+        nodePath.join(os.homedir(), '.intutic', 'credentials.json'),
+        'utf-8',
+      )
+      const creds = JSON.parse(raw) as {
+        controlPlaneUrl?: string
+        apiKey?: string
+        workspaceId?: string
+      }
+      base = override || creds.controlPlaneUrl
+      apiKey = creds.apiKey
+      workspaceId = creds.workspaceId
+    } catch {
+      // No credentials yet — fall through with the override (if any).
+    }
+    if (!base) return null
+
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 4000)
+    try {
+      const res = await fetch(`${base.replace(/\/$/, '')}${reqPath}`, {
+        headers: {
+          ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+          ...(workspaceId ? { 'x-workspace-id': workspaceId } : {}),
+        },
+        signal: controller.signal,
+      })
+      if (!res.ok) return null
+      return (await res.json()) as T
+    } finally {
+      clearTimeout(timer)
+    }
+  } catch {
+    return null
+  }
+}
+
 export function registerStatusBar(context: vscode.ExtensionContext) {
   const statusBarItem = vscode.window.createStatusBarItem(
     vscode.StatusBarAlignment.Right,
@@ -54,18 +108,29 @@ export function registerStatusBar(context: vscode.ExtensionContext) {
       return
     }
 
-    // Proxy is online — try to fetch open incident count
-    const incidentsResp = await httpGetJson<
-      { items?: unknown[]; total?: number } | unknown[]
-    >('http://127.0.0.1:4000/api/v1/incidents?status=open&limit=1')
+    // Proxy is online — try the open incident count from the CONTROL PLANE.
+    // This used to request /api/v1/incidents from the proxy's port (4000),
+    // which does not serve control-plane routes, and without auth — so the
+    // count was always 0 and the badge never appeared.
+    const incidentsResp = await fetchControlPlane<
+      { items?: unknown[]; total?: number; meta?: { total?: number } } | unknown[]
+    >('/api/v1/incidents?status=OPEN&limit=1')
 
     let openCount = 0
     if (incidentsResp) {
       if (Array.isArray(incidentsResp)) {
         openCount = incidentsResp.length
       } else if (typeof incidentsResp === 'object' && incidentsResp !== null) {
-        const r = incidentsResp as { total?: number; items?: unknown[] }
-        openCount = r.total ?? r.items?.length ?? 0
+        // GET /api/v1/incidents answers {data, meta:{total,page,limit}}. The old
+        // code looked for `total`/`items` at the top level, neither of which
+        // that route has ever returned, so the count stayed 0 regardless.
+        const r = incidentsResp as {
+          meta?: { total?: number }
+          data?: unknown[]
+          total?: number
+          items?: unknown[]
+        }
+        openCount = r.meta?.total ?? r.total ?? r.data?.length ?? r.items?.length ?? 0
       }
     }
 

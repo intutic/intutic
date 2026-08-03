@@ -110,6 +110,12 @@ mod tests {
     fn base_ctx() -> RequestContext {
         RequestContext {
             session_id: "sess-budget".into(),
+            plan_steps: Vec::new(),
+            scope_paths: Vec::new(),
+            review_before: Vec::new(),
+            changes: Vec::new(),
+            new_tool_calls: Vec::new(),
+            transition_baseline: None,
             workspace_id: "ws-1".into(),
             virtual_key_prefix: "vk-test".into(),
             model: "gpt-4o".into(),

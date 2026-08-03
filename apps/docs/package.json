@@ -1,6 +1,6 @@
 {
   "name": "@intutic/docs",
-  "version": "1.10.0",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
   "description": "Intutic Developer Portal \u2014 Control and governance framework for AI Agents",
@@ -12,7 +12,7 @@
   "devDependencies": {
     "@intutic/theme": "workspace:*",
     "markdown-it-mathjax3": "^5.2.0",
-    "vitepress": "^1.6.3",
+    "vitepress": "^1.6.4",
     "vue": "^3.5.13"
   }
 }

@@ -398,6 +398,141 @@ breaks, and the pressure is then to switch governance off rather than fix the
 list. **An SOP with no `deny_tools` forbids nothing**, so adding this to an
 existing set changes nothing until you say what to block.
 
+### Did it stay inside the plan?
+
+`deny_tools` answers "may this role ever do that?". `plan_steps` answers a
+different question — "for the task this SOP governs, is the agent still doing
+that task?":
+
+```markdown
+---
+roles: deployer
+plan_steps: Read, Edit, action:run_tests, action:deploy
+---
+- Deploys are: read the manifest, edit it, run the tests, ship it.
+```
+
+Steps may be tool names (`Read`, `Bash`) or the action vocabulary
+(`action:run_tests`, `action:deploy`), because a plan is more naturally written
+as what the agent should *do* than as which tool it reaches for. Matching
+ignores case.
+
+Work drifting outside the plan raises a `SCOPE_VIOLATION` — advisory, so it
+steers rather than blocks, until the false-positive rate earns more.
+
+### Where may it change things?
+
+`plan_steps` bounds *what* the task consists of. `scope_paths` bounds *where* it
+may happen:
+
+```markdown
+---
+roles: deployer
+scope_paths: infra/, packages/proxy
+---
+- Deploys touch infra and the proxy. Nothing else.
+```
+
+A write, edit, delete or move to a file outside those directories raises a
+`SCOPE_VIOLATION`. Matching is on path segments, so `packages/proxy` covers
+everything beneath it but not the sibling `packages/proxy-extras`.
+
+Three things keep this from being the allowlist trap:
+
+- **Opt-in.** No `scope_paths`, no check.
+- **Changes only.** *Reading* a file outside the scope is not flagged — agents
+  legitimately read widely and edit narrowly, and flagging reads would make the
+  feature unusable within a day.
+- **No tolerance.** Unlike `plan_steps`, one write outside the scope reports.
+  A plan is an approximate description; a boundary is a boundary.
+
+This works because the proxy records a **change manifest** for every request —
+the files, URLs and commands its tool calls actually named, derived from the
+argument keys, not guessed. You can see it per request in the trace detail view.
+
+### Stop and ask me first
+
+`deny_tools` refuses something forever. `review_before` does something different:
+it holds the whole run until a person looks.
+
+```markdown
+---
+roles: deployer
+review_before: action:deploy, action:publish
+---
+- A human signs off before anything ships.
+```
+
+The run moves to `PENDING_REVIEW`, every subsequent request is refused with
+`LOOP_RUN_PENDING_REVIEW`, and it stays that way until someone resolves it:
+
+```bash
+intutic loop review <loop-run-id> --approve
+```
+
+Or from **Decisions → Held Changes**, which lists held runs with the change
+manifest inline, ranked by risk rather than by when they were held.
+
+Entries can be action tokens (`action:deploy`, `action:publish`,
+`action:release`, `action:db_write`) or raw tool names (`Write`, `Bash`).
+
+**Nothing is ever held unless you declare it.** There is no heuristic here and
+no threshold — a run stops only because an SOP said this action needs a person.
+
+::: warning Where the hold takes effect
+Two gates enforce this, and they are not equivalent.
+
+**The harness hook** (Claude Code and the other harnesses the daemon
+configures) blocks the tool call *before it runs*. The `git push` does not
+happen.
+
+**The proxy** only learns of a tool call after the harness has already made it,
+so its hold stops everything the run does *next* — not the action itself. That
+is still valuable, and it works for every harness with no local install, but it
+is a stop, not a prevention.
+
+So: reviewed before it happens where Intutic is installed; stopped immediately
+after, everywhere else.
+:::
+
+::: danger SOPs are read by the proxy next to your workspace
+Every rule on this page — `deny_tools`, `allow_harnesses`, `plan_steps`,
+`scope_paths`, `review_before` — is read from `.intutic/sops/` **relative to the
+proxy process's working directory**.
+
+That works because the proxy is designed to run on your machine, beside your
+repo: `intutic connect` installs a local binary and agents are pointed at
+`http://localhost:4000`.
+
+A proxy running somewhere with no workspace — a shared gateway in a cluster, a
+container without your repo mounted — finds no SOPs and therefore enforces
+none of them. It will not warn you: an empty policy set is indistinguishable
+from "nothing is forbidden", which is deliberately the safe default everywhere
+else. If you deploy the proxy as a shared gateway, policy has to be delivered
+to it; that is not wired up today.
+:::
+
+::: warning Role-scoped holds are advisory
+`roles:` comes from a request header, which an agent can set to anything. A
+role-scoped `review_before` is bypassable by claiming a different role. Write it
+**unscoped** — no `roles:` line — to make it binding, since unscoped SOPs apply
+to every role including an invented one.
+:::
+
+There is no timeout on a hold, deliberately. An unreviewed run stays blocked
+rather than quietly resuming; the queue surfaces anything left waiting.
+
+Three things keep this from becoming the allowlist trap described above:
+
+- **A plan is opt-in.** No `plan_steps`, no check. An empty list means "nothing
+  declared", never "deny everything unlisted", so adding this to an existing SOP
+  set changes nothing until you write one.
+- **It tolerates incidental work.** A run that reads a file the plan didn't
+  mention is not flagged; roughly two in five steps must be off-plan before it
+  fires. A plan is a plan, not a transcript.
+- **It's scoped to the role.** A reviewer is never measured against a deployer's
+  plan.
+
 Your own system prompt is preserved and left last, closest to the task —
 governance is the frame it sits inside, not a replacement for it. Anthropic
 system blocks keep their array structure so `cache_control` markers survive;

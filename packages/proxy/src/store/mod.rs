@@ -475,6 +475,26 @@ pub trait LocalStore: Send + Sync + 'static {
     /// measured against.
     async fn add_workflow_spend(&self, loop_run_id: &str, amount: f64) -> Option<f64>;
 
+    /// Hold a loop run for human review, recording why.
+    ///
+    /// On `LocalStore` rather than `ControlPlaneCache` because the proxy is the
+    /// writer here — the cache trait is deliberately the read-only view of what
+    /// the control plane publishes. The proxy already writes loop-scoped keys
+    /// this way for spend.
+    ///
+    /// Idempotent: the first reason to arrive wins, so concurrent replicas
+    /// tripping the same hold do not overwrite each other's message.
+    async fn request_loop_review(&self, loop_run_id: &str, reason: &str);
+
+    /// Why a run is being held, for the 403 body. `None` when it is not held.
+    async fn loop_review_reason(&self, loop_run_id: &str) -> Option<String>;
+
+    /// Actions a human has already cleared on this run, if any.
+    ///
+    /// Read before writing a hold, so an approved action cannot re-trip it when
+    /// a fresh session re-presents the whole history as new.
+    async fn loop_review_cleared(&self, loop_run_id: &str) -> Option<String>;
+
     /// A loop run's cost so far, and the ceiling it was started with.
     ///
     /// The ceiling is written by whoever started the run, so `None` means no
@@ -569,6 +589,16 @@ pub trait ControlPlaneCache: Send + Sync + 'static {
     async fn break_glass_valid(&self, token: &str) -> bool;
 
     // ── WASM rule distribution ───────────────────────────────────────
+
+    /// Fitted tool-transition probabilities for a workspace, as a raw JSON object
+    /// mapping `"from to"` to a probability in 0..1.
+    ///
+    /// Produced by the control-plane transition sweep over that workspace's
+    /// SUCCESSFUL runs, not computed here — fitting a distribution is not something
+    /// the request path should do. `None` means the workspace has no fitted model
+    /// (too little history, or the sweep has not run), and the detector falls back
+    /// to its built-in table rather than treating an absent model as a permissive one.
+    async fn transition_baseline(&self, workspace_id: &str) -> Option<String>;
 
     /// Plugin descriptors for a workspace, as a raw JSON array.
     async fn wasm_plugins(&self, workspace_id: &str) -> anyhow::Result<Option<String>>;

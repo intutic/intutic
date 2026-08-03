@@ -110,6 +110,21 @@ pub(crate) fn loop_budget_key(loop_run_id: &str) -> String {
     format!("intutic:loop:{}:budget", loop_run_id)
 }
 
+/// The review hold. Present means "waiting on a human", whatever the blob says.
+/// Written by the proxy on the request path, cleared by the control plane when a
+/// human resolves it. Deliberately has no TTL: a hold that expires releases
+/// itself, which is the one failure this feature must not have.
+pub(crate) fn loop_review_key(loop_run_id: &str) -> String {
+    format!("intutic:loop:{}:review", loop_run_id)
+}
+
+/// Actions already cleared by a human on this run. See the control plane's
+/// `loopReviewedKey` for why this exists — it stops an approved action
+/// re-tripping the hold when a new session re-presents the whole history.
+pub(crate) fn loop_reviewed_key(loop_run_id: &str) -> String {
+    format!("intutic:loop:{}:reviewed", loop_run_id)
+}
+
 pub(crate) fn active_loop_key(workspace_id: &str, member_id: Option<&str>) -> String {
     match member_id {
         Some(mid) => format!("intutic:active_loop:{}:{}", workspace_id, mid),
@@ -571,6 +586,35 @@ impl LocalStore for ValkeyStore {
         true
     }
 
+    async fn request_loop_review(&self, loop_run_id: &str, reason: &str) {
+        let mut conn = self.conn();
+        // SET NX: the first reason wins. Concurrent replicas tripping the same
+        // hold must not overwrite each other's message, and re-tripping must not
+        // reset anything. No TTL — a hold that expires releases itself.
+        let _: Result<bool, redis::RedisError> = redis::cmd("SET")
+            .arg(loop_review_key(loop_run_id))
+            .arg(reason)
+            .arg("NX")
+            .query_async(&mut conn)
+            .await;
+    }
+
+    async fn loop_review_reason(&self, loop_run_id: &str) -> Option<String> {
+        let mut conn = self.conn();
+        conn.get::<_, Option<String>>(loop_review_key(loop_run_id))
+            .await
+            .ok()
+            .flatten()
+    }
+
+    async fn loop_review_cleared(&self, loop_run_id: &str) -> Option<String> {
+        let mut conn = self.conn();
+        conn.get::<_, Option<String>>(loop_reviewed_key(loop_run_id))
+            .await
+            .ok()
+            .flatten()
+    }
+
     async fn add_workflow_spend(&self, loop_run_id: &str, amount: f64) -> Option<f64> {
         let mut conn = self.conn();
         // No TTL: a loop run's lifetime is bounded by its own status, which is
@@ -641,6 +685,27 @@ impl ValkeyControlPlaneCache {
         let mut conn = self.conn();
         match tokio::time::timeout(GATE_TIMEOUT, conn.get::<_, Option<String>>(&key)).await {
             Ok(Ok(v)) => v,
+            _ => None,
+        }
+    }
+
+    /// Read two keys in one round trip, under the same gate.
+    ///
+    /// Exists so the loop gate can consult the state blob and the review hold
+    /// without paying twice. Two sequential `get_gated` calls would double both
+    /// the latency and the timeout budget on a path taken by every request of
+    /// every governed run.
+    async fn mget_gated(
+        &self,
+        a: String,
+        b: String,
+    ) -> Option<(Option<String>, Option<String>)> {
+        let mut conn = self.conn();
+        let mut cmd = redis::cmd("MGET");
+        cmd.arg(&a).arg(&b);
+        let fut = cmd.query_async::<_, (Option<String>, Option<String>)>(&mut conn);
+        match tokio::time::timeout(GATE_TIMEOUT, fut).await {
+            Ok(Ok(v)) => Some(v),
             _ => None,
         }
     }
@@ -802,8 +867,35 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
         // Gated like every other control-plane read: this sits on the request
         // path, so a hung Valkey must fail open in bounded time rather than
         // stall the proxy. It previously used a bare `get`, outside GATE_TIMEOUT.
-        let raw = self.get_gated(loop_state_key(loop_run_id)).await?;
-        serde_json::from_str::<serde_json::Value>(&raw)
+        //
+        // The hold is checked in the same round trip as the state blob, so a run
+        // held on the previous request is refused on this one even though the
+        // status write is still travelling through the trace pipeline. One MGET,
+        // same latency as the single GET it replaced — this must not become two
+        // sequential reads on the request path.
+        let pair: Option<(Option<String>, Option<String>)> = self
+            .mget_gated(loop_state_key(loop_run_id), loop_review_key(loop_run_id))
+            .await;
+        let (raw, held) = pair?;
+
+        if held.is_some() {
+            // A terminal status still wins: a rejected run is KILLED, and saying
+            // PENDING_REVIEW would invite someone to approve something already
+            // refused.
+            let status = raw.as_deref().and_then(|r| {
+                serde_json::from_str::<serde_json::Value>(r)
+                    .ok()?
+                    .get("status")?
+                    .as_str()
+                    .map(str::to_string)
+            });
+            return match status.as_deref() {
+                Some("COMPLETED") | Some("FAILED") | Some("KILLED") => status,
+                _ => Some("PENDING_REVIEW".to_string()),
+            };
+        }
+
+        serde_json::from_str::<serde_json::Value>(&raw?)
             .ok()?
             .get("status")?
             .as_str()
@@ -835,6 +927,16 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
 
     async fn break_glass_valid(&self, token: &str) -> bool {
         self.get_gated(format!("bg:token:{}", token)).await.is_some()
+    }
+
+    async fn transition_baseline(&self, workspace_id: &str) -> Option<String> {
+        // Deliberately swallows the error into None, unlike `wasm_plugins` above.
+        // A missing or unreachable baseline means "score with the built-in table",
+        // which is exactly what None already means here — there is no third outcome
+        // to report, and a Result would invite a caller to fail the request over a
+        // cache miss on an advisory heuristic.
+        let mut conn = self.conn();
+        conn.get(format!("v2:transition:{}", workspace_id)).await.ok().flatten()
     }
 
     async fn wasm_plugins(&self, workspace_id: &str) -> anyhow::Result<Option<String>> {
@@ -1017,5 +1119,56 @@ mod loop_key_contract {
         assert_ne!(state, loop_spend_key("lr_1"));
         assert_ne!(state, loop_budget_key("lr_1"));
         assert!(loop_spend_key("lr_1").starts_with(&state));
+    }
+
+    /// The loop gate must consult the state blob and the hold in ONE round trip.
+    ///
+    /// This sits on the request path of every governed run. Two sequential
+    /// `get_gated` calls would double both the latency and the timeout budget
+    /// there — and the change would look harmless in review, because the
+    /// behaviour is identical and only the cost differs. Asserted against the
+    /// source because a behavioural test cannot see the difference.
+    #[test]
+    fn the_loop_gate_reads_the_hold_in_one_round_trip() {
+        let src = include_str!("valkey.rs");
+        let body_start = src
+            .find("async fn loop_status(&self, loop_run_id: &str) -> Option<String> {")
+            .expect("loop_status must exist");
+        let body_end = body_start
+            + src[body_start..]
+                .find("\n    }\n")
+                .expect("loop_status must terminate");
+        let body = &src[body_start..body_end];
+
+        assert!(
+            body.contains("mget_gated"),
+            "loop_status must read the state blob and the review hold together"
+        );
+        // `self.get_gated(` and not `get_gated(` — the latter is a substring of
+        // `mget_gated(` and would match the very call this test wants.
+        assert_eq!(
+            body.matches("self.get_gated(").count(),
+            0,
+            "a second single-key read on this path doubles the gate's cost per request"
+        );
+    }
+
+    /// The hold key and the state key must not collide, or writing one would
+    /// destroy the other. Same class of check as the spend/budget key test.
+    #[test]
+    fn the_review_keys_are_distinct_from_the_state_key() {
+        let id = "lr_1";
+        let keys = [
+            loop_state_key(id),
+            loop_review_key(id),
+            loop_reviewed_key(id),
+        ];
+        assert_eq!(keys[0], "intutic:loop:lr_1");
+        assert_eq!(keys[1], "intutic:loop:lr_1:review");
+        assert_eq!(keys[2], "intutic:loop:lr_1:reviewed");
+        let mut sorted = keys.to_vec();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), 3, "loop keys must not collide");
     }
 }
