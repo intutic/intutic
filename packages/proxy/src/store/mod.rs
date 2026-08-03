@@ -519,9 +519,16 @@ pub trait LocalStore: Send + Sync + 'static {
 
     /// Count one reask against a session, returning how many it has now had.
     ///
-    /// Scoped per `(session, anomaly kind)` so correcting one problem does not
+    /// Scoped per `(session, detector)` so correcting one problem does not
     /// consume the allowance for a different one, and TTL'd so yesterday's
     /// three reasks cannot block today's first request.
+    ///
+    /// **Per detector, not per anomaly kind.** It was per kind, and that was
+    /// wrong in a way the type system could not catch: five detectors report
+    /// `LoopDetected`, four of which reask, so they shared one three-strike
+    /// budget. An agent that spun twice and then legitimately fanned out wide
+    /// hit the ceiling on its second *distinct* correction — punishing exactly
+    /// the agent that did what it was asked.
     ///
     /// Returns the count **including** this trip, so the first ever call
     /// returns 1. The caller escalates when it reaches
@@ -532,7 +539,7 @@ pub trait LocalStore: Send + Sync + 'static {
     /// "escalate" — would turn a Valkey outage into a wave of blocked agents.
     /// Under-counting means an agent gets more chances than configured when the
     /// cache is down, which is the harmless direction.
-    async fn incr_reask_attempt(&self, session_id: &str, anomaly_kind: &str) -> u32;
+    async fn incr_reask_attempt(&self, session_id: &str, detector_id: &str) -> u32;
 
     /// A loop run's cost so far, and the ceiling it was started with.
     ///
