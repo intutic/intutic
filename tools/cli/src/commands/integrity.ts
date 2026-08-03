@@ -369,9 +369,50 @@ function formatTimestamp(iso: string | null): string {
 }
 
 /** Pad a string to a fixed width (right-pad with spaces). */
-function pad(str: string, width: number): string {
-  if (str.length >= width) return str.slice(0, width)
-  return str + ' '.repeat(width - str.length)
+/**
+ * ANSI escapes are zero-width. Measuring and slicing raw string length counts
+ * them, so a coloured cell is both mis-padded and cut mid-escape.
+ *
+ * `pc.yellow('unverifiable')` is 22 characters of which 12 are visible. Against
+ * a 13-wide column the old `slice(0, width)` cut after `ESC[33munver`, leaving a
+ * truncated word and an unterminated escape sequence that bleeds colour into
+ * everything after it. It looked fine locally only because picocolors disables
+ * colour when stdout is not a TTY — so the bug was invisible in a pipe and
+ * present in every real terminal.
+ */
+const ANSI = /\u001b\[[0-9;]*m/g
+
+function visibleLength(str: string): number {
+  return str.replace(ANSI, '').length
+}
+
+/** Cut to `width` VISIBLE characters, keeping escapes and closing any left open. */
+function truncateVisible(str: string, width: number): string {
+  let out = ''
+  let seen = 0
+  let i = 0
+  let coloured = false
+  while (i < str.length && seen < width) {
+    ANSI.lastIndex = i
+    const m = ANSI.exec(str)
+    if (m && m.index === i) {
+      out += m[0]
+      coloured = m[0] !== '\u001b[39m' && m[0] !== '\u001b[0m'
+      i += m[0].length
+      continue
+    }
+    out += str[i]
+    seen += 1
+    i += 1
+  }
+  // Never leave a colour open — it would tint the border and every later row.
+  return coloured ? out + '\u001b[0m' : out
+}
+
+export function padCell(str: string, width: number): string {
+  const visible = visibleLength(str)
+  if (visible >= width) return truncateVisible(str, width)
+  return str + ' '.repeat(width - visible)
 }
 
 /** Render a simple table with borders. */
@@ -381,7 +422,7 @@ function renderTable(headers: string[], widths: number[], rows: string[][]): voi
   const bot = '└' + widths.map((w) => '─'.repeat(w + 2)).join('┴') + '┘'
 
   const fmtRow = (cells: string[]) =>
-    '│ ' + cells.map((c, i) => pad(c, widths[i])).join(' │ ') + ' │'
+    '│ ' + cells.map((c, i) => padCell(c, widths[i])).join(' │ ') + ' │'
 
   console.log(top)
   console.log(fmtRow(headers))
