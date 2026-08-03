@@ -253,6 +253,40 @@ function stubFetch(routes: Array<[string, number, unknown]>) {
   })
 }
 
+describe('table padding is ANSI-aware', () => {
+  // The bug this pins shipped and reached CI. `pad` sliced raw string length, so
+  // `pc.yellow('unverifiable')` — 22 characters, 12 visible — was cut to 13 raw
+  // characters: `ESC[33munver`. The word was destroyed and the escape left open,
+  // bleeding colour into the table border and every row after it.
+  //
+  // It passed locally for the worst possible reason: picocolors disables colour
+  // when stdout is not a TTY, so the pipe a test runs in hid it while every real
+  // colour terminal showed it. Forcing colour is the whole point of this block.
+  const YELLOW = '\u001b[33m'
+  const RESET = '\u001b[39m'
+
+  it('keeps a coloured cell whole when its visible width fits', async () => {
+    const { padCell } = await import('./integrity.js')
+    const cell = `${YELLOW}unverifiable${RESET}`
+    const out = padCell(cell, 13)
+    expect(out).toContain('unverifiable')
+    expect(out.replace(/\u001b\[[0-9;]*m/g, '')).toHaveLength(13)
+  })
+
+  it('cuts by visible characters, not raw ones, and never leaves colour open', async () => {
+    const { padCell } = await import('./integrity.js')
+    const out = padCell(`${YELLOW}unverifiable${RESET}`, 6)
+    expect(out.replace(/\u001b\[[0-9;]*m/g, '')).toBe('unveri')
+    // An unterminated escape tints the border and everything downstream.
+    expect(out.endsWith('\u001b[0m') || out.endsWith(RESET)).toBe(true)
+  })
+
+  it('pads an uncoloured cell to the same visible width', async () => {
+    const { padCell } = await import('./integrity.js')
+    expect(padCell('ok', 5)).toBe('ok   ')
+  })
+})
+
 describe('command exit status', () => {
   let exitCode: number | null
 
