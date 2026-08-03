@@ -683,16 +683,27 @@ impl LocalStore for MemoryStore {
     async fn pinned_tool_signature(
         &self,
         workspace_id: &str,
+        harness: &str,
         signature: &str,
     ) -> Option<String> {
         let mut guard = self.tool_signatures.lock().ok()?;
         if guard.is_empty() {
             *guard = load_tool_pins();
         }
-        match guard.get(workspace_id) {
+        // Keyed by harness as well as workspace — see the trait doc.
+        //
+        // This changes the on-disk key shape, so pins written by an older build
+        // are not found and each harness re-pins on its next request. That is the
+        // correct migration: the old key held one harness's tool set under a name
+        // that claimed to cover all of them, so carrying it forward would keep
+        // exactly the false positive this fixes. Re-pinning costs one
+        // trust-on-first-use window per harness, which is the same window a fresh
+        // install has.
+        let key = format!("{workspace_id}\u{1f}{harness}");
+        match guard.get(&key) {
             Some(existing) => Some(existing.clone()),
             None => {
-                guard.insert(workspace_id.to_string(), signature.to_string());
+                guard.insert(key, signature.to_string());
                 save_tool_pins(&guard);
                 Some(signature.to_string())
             }

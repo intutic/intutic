@@ -411,8 +411,30 @@ pub trait LocalStore: Send + Sync + 'static {
     /// Returns the pinned signature, which is `signature` itself on the first
     /// request. `None` when the store cannot remember, in which case a rug
     /// pull is simply not detectable and no claim is made that it is.
-    async fn pinned_tool_signature(&self, workspace_id: &str, signature: &str)
-        -> Option<String>;
+    ///
+    /// # Scoped per harness, not per workspace
+    ///
+    /// The tool set is a property of the harness. Claude Code and Cursor
+    /// advertise genuinely different tools, so a workspace-wide pin meant
+    /// whichever harness arrived first pinned, and every request from any other
+    /// harness reported drift forever — a permanent false positive in the
+    /// expected configuration, since this product ships eighteen harness
+    /// integrations.
+    ///
+    /// Per-harness is also the correct granularity on the merits: a rug pull is
+    /// *one* server changing what it serves, and the harness is the finest
+    /// origin the proxy can observe. It cannot see individual MCP servers behind
+    /// the harness, which is the residual limit — see the module notes on
+    /// cross-origin escalation.
+    ///
+    /// `harness` comes from the route (`Provider::harness_name`), not from a
+    /// caller-supplied header, so it cannot be spoofed into a fresh pin.
+    async fn pinned_tool_signature(
+        &self,
+        workspace_id: &str,
+        harness: &str,
+        signature: &str,
+    ) -> Option<String>;
 
     /// How many nodes are currently live in a graph.
     ///
