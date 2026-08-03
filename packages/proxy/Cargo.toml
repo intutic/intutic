@@ -139,3 +139,7 @@ harness = false
 [[bench]]
 name = "wasm_bench"
 harness = false
+
+[[bench]]
+name = "anomaly_bench"
+harness = false
