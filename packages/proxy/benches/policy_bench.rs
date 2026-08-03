@@ -20,8 +20,8 @@
 //! the whole-chain budget in DLP alone. See the baseline file for the finding and
 //! the fix.
 //!
-//! NOT covered by any benchmark in this directory: the 22-detector anomaly chain
-//! (`plugins::anomaly`). Treat any statement about its cost as unmeasured.
+//! The 22-detector anomaly chain has its own benchmark now — `anomaly_bench` —
+//! which did not exist when this comment first said it was uncovered.
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use intutic_proxy::{
