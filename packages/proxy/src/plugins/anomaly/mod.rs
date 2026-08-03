@@ -224,6 +224,18 @@ pub struct AnomalyFinding {
     /// Whether this should stop the request, ask the agent to correct itself,
     /// or merely steer it.
     pub disposition: Disposition,
+    /// Which detector raised this — see [`AnomalyDetector::id`].
+    ///
+    /// **Written by the registry, not by the detector.** The constructors leave
+    /// it empty and [`DetectorRegistry::evaluate_all`] stamps it from
+    /// `detector.id()`. One write site cannot drift; twenty-two can, and a
+    /// detector that stamped the wrong slug would silently merge its findings
+    /// with another's everywhere this value is used as a key.
+    ///
+    /// Empty means the finding was built outside the registry — test fixtures do
+    /// this. Callers keying on it must treat empty as "unattributed" rather than
+    /// as a valid group.
+    pub detector_id: &'static str,
 }
 
 impl AnomalyFinding {
@@ -233,6 +245,7 @@ impl AnomalyFinding {
             reason: reason.into(),
             confidence: 1.0,
             disposition: Disposition::Kill,
+            detector_id: "",
         }
     }
 
@@ -246,6 +259,7 @@ impl AnomalyFinding {
             reason: reason.into(),
             confidence: confidence.clamp(0.0, 1.0),
             disposition: Disposition::Reask,
+            detector_id: "",
         }
     }
 
@@ -255,6 +269,7 @@ impl AnomalyFinding {
             reason: reason.into(),
             confidence: confidence.clamp(0.0, 1.0),
             disposition: Disposition::Steer,
+            detector_id: "",
         }
     }
 
@@ -295,6 +310,27 @@ impl AnomalyFinding {
 ///
 /// Implementations must be side-effect free and must not block.
 pub trait AnomalyDetector: Send + Sync {
+    /// Stable identity for *this detector*, distinct from its taxonomy kind.
+    ///
+    /// [`AnomalyKind`] is deliberately shared — five detectors report
+    /// `LoopDetected` and five report `ScopeViolation`, because their
+    /// enforcement pathway is identical and a second vocabulary would drift
+    /// from the platform's. But sixteen of twenty-two detectors share a kind
+    /// with at least one sibling, so the kind cannot answer *which detector
+    /// fired*, and several things need to know:
+    ///
+    /// * the reask escalation counter, which must give each detector its own
+    ///   allowance — see the note on `incr_reask_attempt`;
+    /// * sibling broadcast, which claims a slot per category and would
+    ///   otherwise let one `LoopDetected` finding silence the other four;
+    /// * any future attribution of a score, false positive or regression to the
+    ///   detector responsible for it.
+    ///
+    /// Must be a stable snake_case slug, unique across the registry, and must
+    /// **not** change once it has been persisted anywhere — it is an identifier,
+    /// not a label. Uniqueness is enforced by a test.
+    fn id(&self) -> &'static str;
+
     fn kind(&self) -> AnomalyKind;
     fn detect(&self, ctx: &RequestContext) -> Option<AnomalyFinding>;
 }
@@ -390,7 +426,17 @@ impl DetectorRegistry {
         let mut findings: Vec<AnomalyFinding> = self
             .detectors
             .iter()
-            .filter_map(|d| d.detect(ctx))
+            .filter_map(|d| {
+                // Stamp attribution here — the single write site. Letting each
+                // detector set its own `detector_id` in its constructor call
+                // would put twenty-two copies of the same fact in the tree, and
+                // one that drifted would silently merge its findings with
+                // another detector's wherever the id is used as a key.
+                d.detect(ctx).map(|mut f| {
+                    f.detector_id = d.id();
+                    f
+                })
+            })
             .collect();
         findings.sort_by(|a, b| {
             b.kind
@@ -999,6 +1045,67 @@ mod coverage_tests {
         let found = DetectorRegistry::reask_finding(&findings)
             .expect("the reask must be found behind the higher-severity steer");
         assert_eq!(found.kind, AnomalyKind::TokenWaste);
+    }
+
+    /// Every registered detector must have a unique, non-empty id.
+    ///
+    /// A duplicate is silent and expensive: `detector_id` keys the reask
+    /// escalation counter and sibling broadcast, so two detectors sharing a slug
+    /// would merge their allowances and one would suppress the other — which is
+    /// precisely the bug that keying on `AnomalyKind` produced, reintroduced one
+    /// layer down.
+    ///
+    /// Empty is checked separately because the constructors default to `""`, so
+    /// a detector added without an `id()` would otherwise pass the uniqueness
+    /// check for exactly as long as it was the only one missing.
+    #[test]
+    fn every_detector_id_is_unique_and_non_empty() {
+        let reg = DetectorRegistry::with_defaults();
+        let ids: Vec<&'static str> = reg.detectors.iter().map(|d| d.id()).collect();
+
+        assert_eq!(ids.len(), 22, "registry size changed — update this test deliberately");
+
+        for id in &ids {
+            assert!(!id.is_empty(), "a registered detector has no id");
+            assert!(
+                id.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "id {id:?} must be a snake_case slug — it is an identifier, not a label",
+            );
+        }
+
+        let unique: std::collections::HashSet<_> = ids.iter().collect();
+        assert_eq!(
+            unique.len(),
+            ids.len(),
+            "duplicate detector id — these would share a reask allowance and a \
+             broadcast slot. ids: {ids:?}",
+        );
+    }
+
+    /// `evaluate_all` must stamp attribution onto every finding it returns.
+    ///
+    /// The constructors leave `detector_id` empty on purpose, so a finding that
+    /// escaped the registry unstamped would carry `""` — and `""` is a perfectly
+    /// good Valkey key. Every reask in the process would then share one
+    /// allowance, which is the original bug with no detector name on it at all.
+    #[test]
+    fn evaluate_all_stamps_the_detector_id() {
+        let reg = DetectorRegistry::with_defaults();
+        let ctx = ctx_with_sequence(&["run_command"; 8]);
+        let findings = reg.evaluate_all(&ctx);
+
+        assert!(!findings.is_empty(), "fixture must trip something");
+        for f in &findings {
+            assert!(
+                !f.detector_id.is_empty(),
+                "finding {:?} left the registry unattributed",
+                f.kind.as_str(),
+            );
+        }
+        assert!(
+            findings.iter().any(|f| f.detector_id == "consecutive_repeat"),
+            "the spin detector must be identifiable by name, not just by kind",
+        );
     }
 
     #[test]
