@@ -48,6 +48,10 @@ impl Default for ConsecutiveRepeatDetector {
 }
 
 impl AnomalyDetector for ConsecutiveRepeatDetector {
+    fn id(&self) -> &'static str {
+        "consecutive_repeat"
+    }
+
     fn kind(&self) -> AnomalyKind {
         AnomalyKind::LoopDetected
     }
@@ -100,6 +104,10 @@ impl Default for PingPongCycleDetector {
 }
 
 impl AnomalyDetector for PingPongCycleDetector {
+    fn id(&self) -> &'static str {
+        "ping_pong_cycle"
+    }
+
     fn kind(&self) -> AnomalyKind {
         AnomalyKind::LoopDetected
     }
@@ -339,6 +347,10 @@ impl Default for LandmarkCycleDetector {
 }
 
 impl AnomalyDetector for LandmarkCycleDetector {
+    fn id(&self) -> &'static str {
+        "landmark_cycle"
+    }
+
     fn kind(&self) -> AnomalyKind {
         AnomalyKind::LoopDetected
     }
@@ -464,6 +476,10 @@ impl Default for RecursionDepthDetector {
 }
 
 impl AnomalyDetector for RecursionDepthDetector {
+    fn id(&self) -> &'static str {
+        "recursion_depth"
+    }
+
     fn kind(&self) -> AnomalyKind {
         AnomalyKind::LoopDetected
     }
@@ -619,6 +635,10 @@ impl TransitionProbabilityDetector {
 }
 
 impl AnomalyDetector for TransitionProbabilityDetector {
+    fn id(&self) -> &'static str {
+        "transition_probability"
+    }
+
     fn kind(&self) -> AnomalyKind {
         AnomalyKind::ToolAbuse
     }
@@ -709,6 +729,10 @@ impl Default for MissingPredecessorDetector {
 }
 
 impl AnomalyDetector for MissingPredecessorDetector {
+    fn id(&self) -> &'static str {
+        "missing_predecessor"
+    }
+
     fn kind(&self) -> AnomalyKind {
         AnomalyKind::ScopeViolation
     }
@@ -794,6 +818,10 @@ impl Default for PlanAdherenceDetector {
 }
 
 impl AnomalyDetector for PlanAdherenceDetector {
+    fn id(&self) -> &'static str {
+        "plan_adherence"
+    }
+
     fn kind(&self) -> AnomalyKind {
         AnomalyKind::ScopeViolation
     }
@@ -902,6 +930,10 @@ fn is_within_scope(target: &str, scopes: &[String]) -> bool {
 }
 
 impl AnomalyDetector for ScopePathDetector {
+    fn id(&self) -> &'static str {
+        "scope_path"
+    }
+
     fn kind(&self) -> AnomalyKind {
         AnomalyKind::ScopeViolation
     }
@@ -993,6 +1025,10 @@ impl Default for ReviewGateDetector {
 pub const REVIEW_HOLD_MARKER: &str = "held for human review";
 
 impl AnomalyDetector for ReviewGateDetector {
+    fn id(&self) -> &'static str {
+        "review_gate"
+    }
+
     fn kind(&self) -> AnomalyKind {
         AnomalyKind::ScopeViolation
     }
@@ -1042,6 +1078,10 @@ impl Default for ForbiddenSuccessionDetector {
 }
 
 impl AnomalyDetector for ForbiddenSuccessionDetector {
+    fn id(&self) -> &'static str {
+        "forbidden_succession"
+    }
+
     fn kind(&self) -> AnomalyKind {
         AnomalyKind::ScopeViolation
     }
@@ -1099,6 +1139,10 @@ impl Default for DlpEscalationDetector {
 }
 
 impl AnomalyDetector for DlpEscalationDetector {
+    fn id(&self) -> &'static str {
+        "dlp_escalation"
+    }
+
     fn kind(&self) -> AnomalyKind {
         AnomalyKind::DataExfiltration
     }
@@ -1149,6 +1193,10 @@ impl Default for ToolDiversityCollapseDetector {
 }
 
 impl AnomalyDetector for ToolDiversityCollapseDetector {
+    fn id(&self) -> &'static str {
+        "tool_diversity_collapse"
+    }
+
     fn kind(&self) -> AnomalyKind {
         AnomalyKind::TokenWaste
     }
@@ -1197,6 +1245,10 @@ impl Default for ContextGrowthDetector {
 }
 
 impl AnomalyDetector for ContextGrowthDetector {
+    fn id(&self) -> &'static str {
+        "context_growth"
+    }
+
     fn kind(&self) -> AnomalyKind {
         AnomalyKind::TokenWaste
     }
@@ -1230,6 +1282,10 @@ const BUDGET_FLOOR_USD: f64 = 0.0;
 pub struct BudgetExhaustionDetector;
 
 impl AnomalyDetector for BudgetExhaustionDetector {
+    fn id(&self) -> &'static str {
+        "budget_exhaustion"
+    }
+
     fn kind(&self) -> AnomalyKind {
         AnomalyKind::BudgetBreach
     }
@@ -1262,6 +1318,10 @@ const SPAWN_BUDGET_MULTIPLIER: f64 = 1.5;
 pub struct SpawnBudgetBreachDetector;
 
 impl AnomalyDetector for SpawnBudgetBreachDetector {
+    fn id(&self) -> &'static str {
+        "spawn_budget_breach"
+    }
+
     fn kind(&self) -> AnomalyKind {
         AnomalyKind::SpawnBudgetBreach
     }
@@ -1304,6 +1364,10 @@ impl AnomalyDetector for SpawnBudgetBreachDetector {
 pub struct OrphanExecutionDetector;
 
 impl AnomalyDetector for OrphanExecutionDetector {
+    fn id(&self) -> &'static str {
+        "orphan_execution"
+    }
+
     fn kind(&self) -> AnomalyKind {
         AnomalyKind::Hallucination
     }
@@ -1349,6 +1413,10 @@ impl AnomalyDetector for OrphanExecutionDetector {
 pub struct UnauthorizedToolDetector;
 
 impl AnomalyDetector for UnauthorizedToolDetector {
+    fn id(&self) -> &'static str {
+        "unauthorized_tool"
+    }
+
     fn kind(&self) -> AnomalyKind {
         AnomalyKind::UnauthorizedTool
     }
@@ -1413,6 +1481,10 @@ impl Default for PromptInjectionDetector {
 }
 
 impl AnomalyDetector for PromptInjectionDetector {
+    fn id(&self) -> &'static str {
+        "prompt_injection"
+    }
+
     fn kind(&self) -> AnomalyKind {
         AnomalyKind::PromptInjection
     }
@@ -1478,6 +1550,10 @@ impl AnomalyDetector for PromptInjectionDetector {
 pub struct SchemaDriftDetector;
 
 impl AnomalyDetector for SchemaDriftDetector {
+    fn id(&self) -> &'static str {
+        "schema_drift"
+    }
+
     fn kind(&self) -> AnomalyKind {
         AnomalyKind::ToolAbuse
     }
@@ -1510,6 +1586,10 @@ const MAX_GRAPH_NODES: u32 = 50;
 pub struct FanOutExplosionDetector;
 
 impl AnomalyDetector for FanOutExplosionDetector {
+    fn id(&self) -> &'static str {
+        "fan_out_explosion"
+    }
+
     fn kind(&self) -> AnomalyKind {
         AnomalyKind::LoopDetected
     }
@@ -1544,6 +1624,10 @@ impl AnomalyDetector for FanOutExplosionDetector {
 pub struct WorkflowBudgetBreachDetector;
 
 impl AnomalyDetector for WorkflowBudgetBreachDetector {
+    fn id(&self) -> &'static str {
+        "workflow_budget_breach"
+    }
+
     fn kind(&self) -> AnomalyKind {
         AnomalyKind::WorkflowBudgetBreach
     }
@@ -1581,6 +1665,10 @@ impl AnomalyDetector for WorkflowBudgetBreachDetector {
 pub struct CrossHarnessViolationDetector;
 
 impl AnomalyDetector for CrossHarnessViolationDetector {
+    fn id(&self) -> &'static str {
+        "cross_harness_violation"
+    }
+
     fn kind(&self) -> AnomalyKind {
         AnomalyKind::UnauthorizedTool
     }

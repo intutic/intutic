@@ -48,11 +48,19 @@ fn payload(ctx: &RequestContext, finding: &AnomalyFinding, timestamp: &str) -> O
     };
 
     serde_json::to_string(&serde_json::json!({
-        // Deterministic id: same graph, same node, same category within one
-        // second collapses to one notification rather than N copies of the
-        // same fact.
+        // Deterministic id: same graph, same node, same detector collapses to
+        // one notification rather than N copies of the same fact.
+        //
+        // Keyed on the detector rather than the category, for the same reason
+        // the broadcast claim is — two detectors that share an `AnomalyKind`
+        // are reporting different things, and collapsing them here would
+        // discard one of the two on the consumer's side even when both were
+        // successfully broadcast.
         "notification_id": format!(
-            "graph-{}-{}-{}", ctx.node.graph_id, ctx.node.node_id, finding.kind.as_str()
+            "graph-{}-{}-{}",
+            ctx.node.graph_id,
+            ctx.node.node_id,
+            if finding.detector_id.is_empty() { finding.kind.as_str() } else { finding.detector_id }
         ),
         "session_id": ctx.session_id,
         "workspace_id": ctx.workspace_id,
@@ -109,7 +117,28 @@ pub async fn broadcast_findings(
         // context, becomes part of that sibling's next request, and each hop
         // makes one observation look independently corroborated. That is the
         // amplification this whole feature has to avoid being an instance of.
-        if !store.claim_broadcast(&ctx.workspace_id, &ctx.node.graph_id, finding.kind.as_str()).await {
+        // Claimed per DETECTOR, not per kind.
+        //
+        // It was per kind, and that quietly suppressed real findings: five
+        // detectors report `LoopDetected`, so the first one to fire in a window
+        // silenced the other four for the whole graph. A sibling would learn
+        // "there is a loop" and never learn "and the graph has sixty live
+        // nodes" — two different facts collapsed by a shared taxonomy value.
+        //
+        // The dedup exists to stop the *same* observation ricocheting between
+        // siblings, which is still exactly what this does; and the rate ceiling
+        // that bounds a pathological graph is `BROADCAST_MAX_PER_WINDOW`, which
+        // is unaffected.
+        //
+        // `detector_id` is empty only for findings built outside the registry
+        // (test fixtures). Falling back to the kind keeps those deduping as
+        // before rather than all sharing the empty-string slot.
+        let claim_key = if finding.detector_id.is_empty() {
+            finding.kind.as_str()
+        } else {
+            finding.detector_id
+        };
+        if !store.claim_broadcast(&ctx.workspace_id, &ctx.node.graph_id, claim_key).await {
             continue;
         }
         let Some(body) = payload(ctx, finding, timestamp) else {

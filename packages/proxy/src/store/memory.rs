@@ -750,13 +750,13 @@ impl LocalStore for MemoryStore {
     /// Holding a run here would block it with no way to release it.
     async fn request_loop_review(&self, _loop_run_id: &str, _reason: &str) {}
 
-    async fn incr_reask_attempt(&self, session_id: &str, anomaly_kind: &str) -> u32 {
+    async fn incr_reask_attempt(&self, session_id: &str, detector_id: &str) -> u32 {
         let Ok(mut m) = lock(&self.reask_attempts, "reask_attempts") else {
             // A poisoned lock must not escalate — see the trait doc.
             return 1;
         };
         let n = m
-            .entry(format!("{session_id}|{anomaly_kind}"))
+            .entry(format!("{session_id}|{detector_id}"))
             .or_insert(0);
         *n = n.saturating_add(1);
         *n

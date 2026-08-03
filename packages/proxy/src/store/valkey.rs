@@ -125,14 +125,19 @@ pub(crate) fn loop_reviewed_key(loop_run_id: &str) -> String {
     format!("intutic:loop:{}:reviewed", loop_run_id)
 }
 
-/// How many times this session has been reasked about one anomaly kind.
+/// How many times this session has been reasked by one detector.
 ///
-/// Per-kind, not per-session: an agent told to stop spinning and then told its
-/// fan-out is too wide has two separate problems, and consuming one allowance
-/// with the other would escalate on the second distinct correction rather than
-/// on a repeated failure to correct.
-fn reask_attempt_key(session_id: &str, anomaly_kind: &str) -> String {
-    format!("intutic:reask:{}:{}", session_id, anomaly_kind)
+/// Per **detector**, not per anomaly kind and not per session. An agent told to
+/// stop spinning and then told its fan-out is too wide has two separate
+/// problems, and consuming one allowance with the other escalates on the second
+/// distinct correction rather than on a repeated failure to correct.
+///
+/// Keying on the kind looked like it achieved that and did not: five detectors
+/// report `LoopDetected`, four of which reask, so `ConsecutiveRepeat`,
+/// `PingPong`, `RecursionDepth` and `FanOutExplosion` shared one three-strike
+/// budget. Two spins plus one wide fan-out was a hard block.
+fn reask_attempt_key(session_id: &str, detector_id: &str) -> String {
+    format!("intutic:reask:{}:{}", session_id, detector_id)
 }
 
 /// Lifetime of a reask allowance.
@@ -620,9 +625,9 @@ impl LocalStore for ValkeyStore {
             .await;
     }
 
-    async fn incr_reask_attempt(&self, session_id: &str, anomaly_kind: &str) -> u32 {
+    async fn incr_reask_attempt(&self, session_id: &str, detector_id: &str) -> u32 {
         let mut conn = self.conn();
-        let key = reask_attempt_key(session_id, anomaly_kind);
+        let key = reask_attempt_key(session_id, detector_id);
 
         let n: Result<i64, redis::RedisError> = redis::cmd("INCR")
             .arg(&key)
@@ -634,7 +639,7 @@ impl LocalStore for ValkeyStore {
             // alternative direction turns a cache outage into blocked agents.
             tracing::warn!(
                 session_id = %session_id,
-                anomaly = %anomaly_kind,
+                detector = %detector_id,
                 "Reask counter unavailable; treating this as the first attempt"
             );
             return 1;

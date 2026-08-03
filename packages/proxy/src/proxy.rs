@@ -2132,9 +2132,20 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // gets to interrupt instead, with the reason attached, and escalates
             // only if the agent keeps doing the same thing.
             if let Some(r) = crate::plugins::anomaly::DetectorRegistry::reask_finding(&findings) {
+                // Keyed on the DETECTOR, not the kind.
+                //
+                // It was the kind, and that was a real defect: five detectors
+                // report `LoopDetected`, four of which reask. They shared one
+                // three-strike budget, so an agent that spun twice and then
+                // fanned out wide was blocked on its second *distinct*
+                // correction rather than on a repeated failure to correct —
+                // exactly the outcome this counter is scoped to prevent.
+                //
+                // `detector_id` is stamped by `evaluate_all`, so a finding that
+                // reached here always carries one.
                 let attempts = state
                     .store
-                    .incr_reask_attempt(&session_id, r.kind.as_str())
+                    .incr_reask_attempt(&session_id, r.detector_id)
                     .await;
 
                 if attempts >= crate::plugins::anomaly::REASK_MAX_ATTEMPTS {
@@ -4393,20 +4404,41 @@ mod tests {
     /// spinning, and then told its fan-out is too wide, gets blocked on the
     /// second *distinct* correction rather than on a repeated failure to
     /// correct — punishing exactly the agent that did what it was asked.
+    ///
+    /// This originally keyed on the **anomaly kind**, and asserted that
+    /// `LOOP_DETECTED` and `PROMPT_INJECTION` had separate allowances. That was
+    /// true and beside the point: five detectors report `LoopDetected`, four of
+    /// which reask, so the four loop-family detectors shared one budget and the
+    /// scenario the doc comment described was exactly what happened. The old
+    /// test could not see it, because the API only took a kind.
+    ///
+    /// Now keyed on `detector_id`, and the case that matters is asserted below.
     #[tokio::test]
-    async fn reask_allowances_are_per_kind_and_per_session() {
+    async fn reask_allowances_are_per_detector_and_per_session() {
         use crate::store::LocalStore;
         let s = crate::store::MemoryStore::new();
 
-        assert_eq!(s.incr_reask_attempt("ses_a", "LOOP_DETECTED").await, 1);
-        assert_eq!(s.incr_reask_attempt("ses_a", "LOOP_DETECTED").await, 2);
+        assert_eq!(s.incr_reask_attempt("ses_a", "consecutive_repeat").await, 1);
+        assert_eq!(s.incr_reask_attempt("ses_a", "consecutive_repeat").await, 2);
+
+        // THE CASE THE OLD KEY GOT WRONG. `fan_out_explosion` and
+        // `consecutive_repeat` both report LOOP_DETECTED. Under the old key this
+        // returned 3 and blocked the request.
         assert_eq!(
-            s.incr_reask_attempt("ses_a", "PROMPT_INJECTION").await,
+            s.incr_reask_attempt("ses_a", "fan_out_explosion").await,
             1,
-            "a different anomaly kind starts its own allowance",
+            "two detectors sharing an AnomalyKind must not share an allowance — \
+             spinning twice then fanning out wide is two corrections, not three \
+             failures to correct",
+        );
+
+        assert_eq!(
+            s.incr_reask_attempt("ses_a", "prompt_injection").await,
+            1,
+            "a detector with its own kind, likewise",
         );
         assert_eq!(
-            s.incr_reask_attempt("ses_b", "LOOP_DETECTED").await,
+            s.incr_reask_attempt("ses_b", "consecutive_repeat").await,
             1,
             "a different session starts its own allowance",
         );
