@@ -125,7 +125,13 @@ describe('review_before hook gate', () => {
     // without one of them going red. The awkward whitespace and quoting in the
     // fixture are what they would disagree about first.
     const raw = await node_fs.readFile(
-      node_path.resolve(__dirname, '../../../../tests/fixtures/review-before-sop.md'),
+      // Inside packages/proxy, not the repo root. Both this package and the
+      // proxy are in the open-core sync set; the repo root is not, so a
+      // root-level fixture compiled fine here and broke the public build.
+      node_path.resolve(
+        __dirname,
+        '../../../../packages/proxy/tests/fixtures/review-before-sop.md',
+      ),
       'utf-8',
     )
     expect(parseSopConstraints(sop(raw)).reviewBefore).toEqual([

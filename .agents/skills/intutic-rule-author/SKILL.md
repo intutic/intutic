@@ -37,7 +37,7 @@ Sandbox constraints — violating them silently disables the rule (the proxy **f
 
 - 5 ms wall-clock budget, 1,000,000 fuel, 16 MB memory.
 - Keep logic simple: no unbounded loops over `arguments`, no recursion, no I/O (none exists in the sandbox).
-- Host imports are limited to `env.log_info`, `env.trace`, `env.abort`, `env.seed`, and the `onnx_rules.runOnnxInference` stub.
+- Host imports are limited to `env.log_info`, `env.trace`, `env.abort` and `env.seed`. A rule that imports anything else fails to instantiate, and `intutic policy install` rejects it.
 
 ## 3. Compile
 
