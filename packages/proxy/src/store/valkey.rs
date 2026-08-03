@@ -125,6 +125,24 @@ pub(crate) fn loop_reviewed_key(loop_run_id: &str) -> String {
     format!("intutic:loop:{}:reviewed", loop_run_id)
 }
 
+/// How many times this session has been reasked about one anomaly kind.
+///
+/// Per-kind, not per-session: an agent told to stop spinning and then told its
+/// fan-out is too wide has two separate problems, and consuming one allowance
+/// with the other would escalate on the second distinct correction rather than
+/// on a repeated failure to correct.
+fn reask_attempt_key(session_id: &str, anomaly_kind: &str) -> String {
+    format!("intutic:reask:{}:{}", session_id, anomaly_kind)
+}
+
+/// Lifetime of a reask allowance.
+///
+/// One hour, matching the loop-state and anomaly-promotion windows, so a
+/// pattern has to be sustained *within one working session*. An agent that
+/// trips the same thing once an hour is background noise, not a runaway, and
+/// must not accumulate its way into a block.
+const REASK_WINDOW_SECS: u64 = 3600;
+
 pub(crate) fn active_loop_key(workspace_id: &str, member_id: Option<&str>) -> String {
     match member_id {
         Some(mid) => format!("intutic:active_loop:{}:{}", workspace_id, mid),
@@ -597,6 +615,42 @@ impl LocalStore for ValkeyStore {
             .arg("NX")
             .query_async(&mut conn)
             .await;
+    }
+
+    async fn incr_reask_attempt(&self, session_id: &str, anomaly_kind: &str) -> u32 {
+        let mut conn = self.conn();
+        let key = reask_attempt_key(session_id, anomaly_kind);
+
+        let n: Result<i64, redis::RedisError> = redis::cmd("INCR")
+            .arg(&key)
+            .query_async(&mut conn)
+            .await;
+
+        let Ok(n) = n else {
+            // Counter unreachable. Report "first time" — see the trait doc: the
+            // alternative direction turns a cache outage into blocked agents.
+            tracing::warn!(
+                session_id = %session_id,
+                anomaly = %anomaly_kind,
+                "Reask counter unavailable; treating this as the first attempt"
+            );
+            return 1;
+        };
+
+        // Set the TTL only on the key we just created. Refreshing it on every
+        // trip would make a slow drip immortal: an agent tripping this once
+        // every 59 minutes would keep the window alive forever and eventually
+        // escalate, which is exactly the "background noise" case the window
+        // exists to forgive.
+        if n == 1 {
+            let _: Result<bool, redis::RedisError> = redis::cmd("EXPIRE")
+                .arg(&key)
+                .arg(REASK_WINDOW_SECS)
+                .query_async(&mut conn)
+                .await;
+        }
+
+        n.clamp(1, u32::MAX as i64) as u32
     }
 
     async fn loop_review_reason(&self, loop_run_id: &str) -> Option<String> {

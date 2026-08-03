@@ -29,11 +29,26 @@ export type RiskLevel = typeof RiskLevel[keyof typeof RiskLevel]
 // ─── Enforcement Action ──────────────────────────────────────────────
 // HLD §3.3, LLD §3.1 — enforcement_action_type enum
 
-/** PCAS enforcement action applied to a tool call. */
+/**
+ * PCAS enforcement action applied to a tool call.
+ *
+ * Listed in increasing severity. `REASK` sits between `HIJACK` and `KILL`:
+ * the attempt is refused and the reason handed back to the agent, which may
+ * retry a bounded number of times before the finding escalates to a block.
+ *
+ * It exists because the proxy's promotion rule
+ * (`packages/proxy/src/plugins/anomaly/mod.rs`) forbids a heuristic from
+ * killing until its false-positive rate has been measured, and five detectors
+ * were doing exactly that. Demoting them to `HIJACK` would have honoured the
+ * rule and lost the enforcement; `REASK` keeps both.
+ *
+ * Mirrors `enforcement_action_type` — see migration 114.
+ */
 export const EnforcementAction = {
   BYPASS: 'BYPASS',
   ENHANCE: 'ENHANCE',
   HIJACK: 'HIJACK',
+  REASK: 'REASK',
   KILL: 'KILL',
 } as const
 

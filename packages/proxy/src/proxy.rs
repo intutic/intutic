@@ -2059,7 +2059,12 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 actual_cost_usd: 0.0,
                 cache_hit: false,
                 latency_ms: start.elapsed().as_millis() as u32,
-                verdict: if worst.kill { "killed" } else { "hijacked" }.to_string(),
+                verdict: match worst.disposition {
+                    crate::plugins::anomaly::Disposition::Kill => "killed",
+                    crate::plugins::anomaly::Disposition::Reask => "reasked",
+                    crate::plugins::anomaly::Disposition::Steer => "hijacked",
+                }
+                .to_string(),
                 harness_type: provider.harness_name().to_string(),
                 created_at: now,
                 requested_model: model.clone(),
@@ -2110,6 +2115,73 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                         "Request blocked by anomaly policy [{}]: {}",
                         k.kind.as_str(),
                         k.reason
+                    ),
+                );
+            }
+
+            // Reask: refuse this attempt, hand back the reason, let the agent retry.
+            //
+            // Checked *after* the kill scan, never before. A request that trips
+            // both a declared condition and a structural threshold is blocked —
+            // the condition was violated and no amount of self-correction makes
+            // it not have been.
+            //
+            // These are the detectors that used to kill in violation of the
+            // promotion rule in `anomaly/mod.rs`: a threshold nobody has measured
+            // an FPR for should not be able to end a task on first contact. So it
+            // gets to interrupt instead, with the reason attached, and escalates
+            // only if the agent keeps doing the same thing.
+            if let Some(r) = crate::plugins::anomaly::DetectorRegistry::reask_finding(&findings) {
+                let attempts = state
+                    .store
+                    .incr_reask_attempt(&session_id, r.kind.as_str())
+                    .await;
+
+                if attempts >= crate::plugins::anomaly::REASK_MAX_ATTEMPTS {
+                    // Out of chances. The agent has been told this three times
+                    // and has not changed course, which is the evidence the
+                    // first firing did not have.
+                    tracing::warn!(
+                        workspace_id = %workspace_id,
+                        session_id = %session_id,
+                        anomaly = %r.kind.as_str(),
+                        attempts,
+                        "Reask allowance exhausted — escalating to block"
+                    );
+                    return json_error(
+                        StatusCode::FORBIDDEN,
+                        "policy_denied",
+                        &format!(
+                            "Request blocked by anomaly policy [{}] after {} attempts: {}",
+                            r.kind.as_str(),
+                            attempts,
+                            r.reason
+                        ),
+                    );
+                }
+
+                let remaining = crate::plugins::anomaly::REASK_MAX_ATTEMPTS - attempts;
+                tracing::info!(
+                    workspace_id = %workspace_id,
+                    session_id = %session_id,
+                    anomaly = %r.kind.as_str(),
+                    attempts,
+                    remaining,
+                    "Reasking the agent"
+                );
+                // 409, not 403. The distinction is the whole point of the verb:
+                // 403 says "you may not do this", 409 says "not in this state" —
+                // and the state is one the agent can change by itself. A harness
+                // that retries on conflict does the right thing here by default,
+                // where retrying a 403 would just replay the refusal.
+                return json_error(
+                    StatusCode::CONFLICT,
+                    "policy_reask",
+                    &format!(
+                        "{} — revise your approach and try again ({} attempt{} left before this is blocked)",
+                        r.reason,
+                        remaining,
+                        if remaining == 1 { "" } else { "s" },
                     ),
                 );
             }
@@ -4219,6 +4291,62 @@ mod tests {
         );
     }
 
+
+    /// The reask ladder must terminate. This is the half that can go wrong.
+    ///
+    /// Demoting the four unmeasured structural detectors from `kill` to `reask`
+    /// is only defensible if a genuine runaway still stops. If this counter
+    /// never reaches the ceiling — wrong key, TTL refreshed on every trip,
+    /// counter reset per request — then `reask` is a `steer` wearing a costume,
+    /// and a spin loop runs until the budget gate happens to catch it.
+    ///
+    /// Asserts the boundary exactly: attempt 3 of 3 is what
+    /// `proxy.rs` compares with `>= REASK_MAX_ATTEMPTS`, so the third trip
+    /// blocks and the first two do not.
+    #[tokio::test]
+    async fn reask_attempts_accumulate_and_reach_the_escalation_ceiling() {
+        use crate::plugins::anomaly::REASK_MAX_ATTEMPTS;
+        use crate::store::LocalStore;
+        let s = crate::store::MemoryStore::new();
+
+        assert_eq!(
+            s.incr_reask_attempt("ses_a", "LOOP_DETECTED").await,
+            1,
+            "the first trip must report 1, not 0 — the hot path compares this \
+             against REASK_MAX_ATTEMPTS directly",
+        );
+        assert_eq!(s.incr_reask_attempt("ses_a", "LOOP_DETECTED").await, 2);
+        assert_eq!(
+            s.incr_reask_attempt("ses_a", "LOOP_DETECTED").await,
+            REASK_MAX_ATTEMPTS,
+            "the third trip must hit the ceiling and escalate to a block",
+        );
+    }
+
+    /// Two problems are not one problem's worth of allowance.
+    ///
+    /// Scoping the counter to the session alone would mean an agent told to stop
+    /// spinning, and then told its fan-out is too wide, gets blocked on the
+    /// second *distinct* correction rather than on a repeated failure to
+    /// correct — punishing exactly the agent that did what it was asked.
+    #[tokio::test]
+    async fn reask_allowances_are_per_kind_and_per_session() {
+        use crate::store::LocalStore;
+        let s = crate::store::MemoryStore::new();
+
+        assert_eq!(s.incr_reask_attempt("ses_a", "LOOP_DETECTED").await, 1);
+        assert_eq!(s.incr_reask_attempt("ses_a", "LOOP_DETECTED").await, 2);
+        assert_eq!(
+            s.incr_reask_attempt("ses_a", "PROMPT_INJECTION").await,
+            1,
+            "a different anomaly kind starts its own allowance",
+        );
+        assert_eq!(
+            s.incr_reask_attempt("ses_b", "LOOP_DETECTED").await,
+            1,
+            "a different session starts its own allowance",
+        );
+    }
 
     #[tokio::test]
     async fn swap_extracted_tool_count_round_trips() {

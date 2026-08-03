@@ -4,6 +4,21 @@ use serde::{Deserialize, Serialize};
 
 /// Enforcement verdict returned by each WASM plugin.
 /// Maps to shared-types EnforcementAction enum.
+///
+/// # The ladder
+///
+/// In increasing severity: `Bypass` → `Enhance` → `Hijack` → `Reask` → `Kill`.
+///
+/// `Reask` was added because the gap between `Hijack` (silently rewrite and
+/// proceed) and `Kill` (terminate, no recourse) was doing too much work. A
+/// heuristic that has never had its false-positive rate measured should not be
+/// able to end someone's task, but "advise and continue" is too weak for a spin
+/// loop. `Reask` is the rung in between: tell the agent exactly what it tripped
+/// and let it correct itself, escalating to `Kill` only if it keeps doing it.
+///
+/// The shape is borrowed from Guardrails AI's `on_fail` ladder
+/// (`noop | filter | fix | reask | fix_reask | refrain | exception`), which
+/// arrived at the same conclusion from the validator side.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Verdict {
     /// Allow the request to proceed unmodified
@@ -12,6 +27,15 @@ pub enum Verdict {
     Enhance { context: String },
     /// Hold the request, render a decision card for human review
     Hijack { reason: String, confidence: f64 },
+    /// Refuse this attempt, tell the agent why, and let it try again.
+    ///
+    /// `attempts_remaining` is how many further tries this agent has on this
+    /// finding before it escalates to [`Verdict::Kill`]. Zero means the next
+    /// occurrence blocks — it does **not** mean this one did.
+    Reask {
+        reason: String,
+        attempts_remaining: u32,
+    },
     /// Block the request immediately
     Kill {
         reason: String,

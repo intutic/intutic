@@ -495,6 +495,23 @@ pub trait LocalStore: Send + Sync + 'static {
     /// a fresh session re-presents the whole history as new.
     async fn loop_review_cleared(&self, loop_run_id: &str) -> Option<String>;
 
+    /// Count one reask against a session, returning how many it has now had.
+    ///
+    /// Scoped per `(session, anomaly kind)` so correcting one problem does not
+    /// consume the allowance for a different one, and TTL'd so yesterday's
+    /// three reasks cannot block today's first request.
+    ///
+    /// Returns the count **including** this trip, so the first ever call
+    /// returns 1. The caller escalates when it reaches
+    /// [`REASK_MAX_ATTEMPTS`](crate::plugins::anomaly::REASK_MAX_ATTEMPTS).
+    ///
+    /// Failure returns 1, not an error: an unreachable counter must degrade to
+    /// "this is the first time", because the alternative — degrading to
+    /// "escalate" — would turn a Valkey outage into a wave of blocked agents.
+    /// Under-counting means an agent gets more chances than configured when the
+    /// cache is down, which is the harmless direction.
+    async fn incr_reask_attempt(&self, session_id: &str, anomaly_kind: &str) -> u32;
+
     /// A loop run's cost so far, and the ceiling it was started with.
     ///
     /// The ceiling is written by whoever started the run, so `None` means no
