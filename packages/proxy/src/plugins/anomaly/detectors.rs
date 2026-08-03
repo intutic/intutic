@@ -991,7 +991,7 @@ impl AnomalyDetector for ScopePathDetector {
 /// one refuses the call as a way of stopping the *run*, so that a person can
 /// look at what the agent has done before it does anything more.
 ///
-/// # Why it kills on first fire
+/// # Why it holds on first fire
 ///
 /// The promotion rule in this module says a detector ships advisory until
 /// telemetry shows a 0.1–1% false-positive rate. That rule governs heuristics,
@@ -1054,7 +1054,17 @@ impl AnomalyDetector for ReviewGateDetector {
         hits.sort_unstable();
         hits.dedup();
 
-        Some(AnomalyFinding::kill(
+        // `ask`, not `kill`. Behaviourally identical on this request — `Ask`
+        // blocks — but it now says *why* in the type rather than by
+        // interpolating REVIEW_HOLD_MARKER into prose for the request path to
+        // match back out with `.contains()`.
+        //
+        // The format string below must stay BYTE-IDENTICAL. Clearing a hold
+        // compares full string equality: the control plane stores this reason as
+        // the cleared-watermark and the proxy compares it before re-holding, so
+        // changing one character would make every already-approved run re-hold
+        // itself — the exact failure the watermark exists to prevent.
+        Some(AnomalyFinding::ask(
             AnomalyKind::ScopeViolation,
             format!(
                 "Run {}: {} — declared in review_before:",

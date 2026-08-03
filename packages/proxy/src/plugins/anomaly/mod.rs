@@ -195,12 +195,36 @@ pub enum Disposition {
     /// line is, and the honest response to a guess is to say so and let the
     /// agent answer.
     Reask,
+    /// Stop this attempt **and hold the whole run** until a human decides.
+    ///
+    /// Above `Reask` because self-correction cannot satisfy a declared review
+    /// requirement — the operator asked to be asked, and an agent rephrasing
+    /// itself is not a human approving. Below `Kill` because a hold is
+    /// recoverable: a request that trips both must report as killed, since the
+    /// kill has no approval path.
+    ///
+    /// Raised only from an operator declaration (`review_before:`), which is
+    /// why [`AnomalyFinding::ask`] takes no confidence — there is nothing to
+    /// grade.
+    Ask,
     /// Block the request outright. No recourse in-band.
     ///
     /// Reserved for *conditions*: a declared policy was violated, a budget is
     /// exhausted, a tool is denied. These are true by construction, so there is
     /// no false-positive rate to be wrong about.
     Kill,
+}
+
+impl Disposition {
+    /// Wire value, for telemetry and the control plane.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Steer => "STEER",
+            Self::Reask => "REASK",
+            Self::Ask => "ASK",
+            Self::Kill => "KILL",
+        }
+    }
 }
 
 /// How many times one agent may trip the same reask finding before it blocks.
@@ -249,6 +273,24 @@ impl AnomalyFinding {
         }
     }
 
+    /// Stop this attempt and hold the run for a human.
+    ///
+    /// No confidence parameter, deliberately, and hardcoded to 1.0 like
+    /// [`Self::kill`]: a hold fires only off an operator declaration, so there
+    /// is no false-positive rate to grade. Taking a confidence would invite a
+    /// future detector to hold a run on a guess, which is the one thing this
+    /// verb must not become — a human's attention is the scarcest resource the
+    /// product spends.
+    pub fn ask(kind: AnomalyKind, reason: impl Into<String>) -> Self {
+        Self {
+            kind,
+            reason: reason.into(),
+            confidence: 1.0,
+            disposition: Disposition::Ask,
+            detector_id: "",
+        }
+    }
+
     /// Refuse this attempt and tell the agent why; escalate if it repeats.
     ///
     /// Confidence is carried because these are graded detectors — how far past
@@ -279,7 +321,14 @@ impl AnomalyFinding {
     /// is asked in several places and `== Disposition::Kill` invites someone to
     /// later write `>= Disposition::Reask` and change the answer by accident.
     pub fn blocks(&self) -> bool {
-        matches!(self.disposition, Disposition::Kill)
+        // `Ask` is load-bearing here, not a nicety.
+        //
+        // The review hold used to be an `AnomalyFinding::kill`, so the request
+        // that tripped `review_before: action:deploy` was refused and the deploy
+        // did not happen. If `Ask` did not block, that request would fall
+        // through and be served — the hold would be recorded and the deploy
+        // would go out anyway, on the very request the hold exists to stop.
+        matches!(self.disposition, Disposition::Kill | Disposition::Ask)
     }
 
     /// Convert to the verdict the plugin pipeline understands.
@@ -290,7 +339,11 @@ impl AnomalyFinding {
     /// verdict itself; see `proxy.rs`.
     pub fn to_verdict(&self) -> Verdict {
         match self.disposition {
-            Disposition::Kill => Verdict::Kill {
+            // `Ask` maps to Kill, not to Hijack. `Verdict::Hijack` is documented
+            // as "hold the request, render a decision card for human review" and
+            // nothing has ever acted on it, so routing a real hold there would
+            // add a second inert control beside the first.
+            Disposition::Kill | Disposition::Ask => Verdict::Kill {
                 reason: self.reason.clone(),
                 policy_id: Some(self.kind.as_str().to_ascii_lowercase()),
             },
@@ -415,6 +468,34 @@ impl DetectorRegistry {
             .iter()
             .filter(|f| matches!(f.disposition, Disposition::Reask))
             .max_by_key(|f| f.kind.severity())
+    }
+
+    /// The finding that should hold this run for a human, if any.
+    ///
+    /// Replaces an inline substring match on the *reason prose* — the request
+    /// path used to find a hold with
+    /// `findings.iter().find(|f| f.reason.contains(REVIEW_HOLD_MARKER))`, which
+    /// meant only `ReviewGateDetector` could ever raise one, and it did so by
+    /// interpolating a literal into a human-readable sentence and matching it
+    /// back out. Any detector can now hold by returning [`AnomalyFinding::ask`].
+    ///
+    /// **No back-compatibility arm for the old marker.** One was drafted and
+    /// dropped: an `AnomalyFinding` never crosses a process or storage boundary
+    /// — the registry's detector list is a fixed vec with no registration API,
+    /// `broadcast_findings` is write-only, nothing deserialises a finding back,
+    /// and WASM plugins return a `Verdict` on a separate path entirely. During a
+    /// rolling deploy an old replica evaluates its own findings with its own
+    /// inline matcher, so old findings never reach this code. The arm would have
+    /// been unreachable the day it shipped, and its test would have passed
+    /// against code nothing calls.
+    ///
+    /// `find`, not `max_by_key`: `evaluate_all` returns findings already sorted
+    /// most-severe-first, and the hold write is `SET NX` so re-tripping is
+    /// idempotent.
+    pub fn holding_finding(findings: &[AnomalyFinding]) -> Option<&AnomalyFinding> {
+        findings
+            .iter()
+            .find(|f| matches!(f.disposition, Disposition::Ask))
     }
 
     /// Run every detector and return all findings, most severe first.
@@ -980,6 +1061,81 @@ mod coverage_tests {
             DetectorRegistry::blocking_finding(&findings).is_none(),
             "steer-only findings must not stop the request"
         );
+    }
+
+    /// Any detector can hold a run — that is the whole point of the change.
+    ///
+    /// Before this, the request path found a hold by scanning finding *reasons*
+    /// for the literal "held for human review", so `ReviewGateDetector` was the
+    /// only thing in the system that could ever raise one, and it did so by
+    /// interpolating a marker into a human-readable sentence.
+    #[test]
+    fn any_detector_can_raise_a_hold() {
+        // Deliberately a kind ReviewGateDetector never uses, and a reason that
+        // does not contain the old marker. Under the substring matcher this
+        // finding was invisible.
+        let findings = vec![AnomalyFinding::ask(
+            AnomalyKind::DataExfiltration,
+            "a human declared this needs approval",
+        )];
+        let hold = DetectorRegistry::holding_finding(&findings)
+            .expect("an Ask must be found regardless of its wording or kind");
+        assert_eq!(hold.kind, AnomalyKind::DataExfiltration);
+        assert!(
+            !hold.reason.contains(crate::plugins::anomaly::detectors::REVIEW_HOLD_MARKER),
+            "test premise: this finding is invisible to the old substring matcher",
+        );
+    }
+
+    /// A hold must still stop the request it was raised on.
+    ///
+    /// The hold used to be a `kill`, so tripping `review_before: action:deploy`
+    /// refused the request and the deploy did not happen. If `Ask` stopped
+    /// blocking, the hold would be recorded and the deploy would go out anyway —
+    /// on the very request the hold exists to stop.
+    #[test]
+    fn a_hold_blocks_the_request_that_raised_it() {
+        let findings = vec![AnomalyFinding::ask(AnomalyKind::ScopeViolation, "held")];
+        assert!(findings[0].blocks(), "an Ask must block");
+        assert!(
+            DetectorRegistry::blocking_finding(&findings).is_some(),
+            "and must be found by the blocking scan the 403 is driven from",
+        );
+    }
+
+    /// A kill outranks a hold on the same request.
+    ///
+    /// A hold is recoverable — a human can approve it. A kill is not. Reporting
+    /// the hold would offer an approval path for a request that has none.
+    #[test]
+    fn a_kill_outranks_a_hold() {
+        assert!(Disposition::Kill > Disposition::Ask);
+        assert!(Disposition::Ask > Disposition::Reask);
+    }
+
+    /// The review-hold reason must not move, ever.
+    ///
+    /// Clearing a hold compares FULL string equality: the control plane stores
+    /// this exact reason as the cleared-watermark, and the proxy compares it
+    /// before deciding whether to re-hold. One changed character makes every
+    /// already-approved run re-hold itself — the precise failure the watermark
+    /// exists to prevent, and it would present as "approval is broken".
+    #[test]
+    fn the_review_hold_reason_is_byte_stable() {
+        use crate::plugins::anomaly::detectors::{ReviewGateDetector, REVIEW_HOLD_MARKER};
+        let mut ctx = ctx_with_sequence(&[]);
+        ctx.review_before = vec!["action:deploy".into()];
+        ctx.new_tool_calls = vec!["action:deploy".into()];
+
+        let f = ReviewGateDetector
+            .detect(&ctx)
+            .expect("a declared action must hold");
+        assert_eq!(
+            f.reason,
+            format!("Run {REVIEW_HOLD_MARKER}: action:deploy — declared in review_before:"),
+            "the stored cleared-watermark is compared against this string verbatim",
+        );
+        assert_eq!(f.disposition, Disposition::Ask);
     }
 
     #[test]
