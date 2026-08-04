@@ -35,6 +35,15 @@ pub enum Verdict {
     Reask {
         reason: String,
         attempts_remaining: u32,
+        /// Which rule or detector asked for the retry.
+        ///
+        /// The reask counter is keyed on this, for the reason `proxy.rs`
+        /// documents at the anomaly path: a shared allowance blocks an agent on
+        /// its second *distinct* correction rather than on a repeated failure
+        /// to correct, which is the opposite of what the ladder is for. A WASM
+        /// rule reaching this rung therefore has to be attributable, and only
+        /// the registry knows the rule id — the runner does not.
+        policy_id: Option<String>,
     },
     /// Block the request immediately
     Kill {
