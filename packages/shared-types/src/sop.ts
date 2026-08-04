@@ -377,11 +377,12 @@ export const VALID_SOP_TRANSITIONS: ReadonlyArray<{ from: SopLifecycleState; to:
  * synced into the agent's governance file, so the agent reads it and is
  * influenced by it, but no gate will stop anything.
  *
- * `REFINED` is `NONE` because it is in neither list — refining an SOP currently
- * removes it from agents' context *and* leaves it unenforced, while the
- * dashboard still counts it as active. That asymmetry is recorded as tech debt
- * rather than silently corrected here, because widening what gets enforced is a
- * product decision, not a docs fix.
+ * `REFINED` was `NONE` and is now `ADVISORY`. It was in neither the sync list
+ * nor any enforcement filter, so moving an SOP forward from HYPOTHESIZED —
+ * the designed next step — silently removed it from every agent's context while
+ * the dashboard went on counting it as active. Refining a guideline un-deployed
+ * it. `syncService` now includes it alongside HYPOTHESIZED, and the dashboard
+ * counts advisory SOPs separately from enforced ones.
  *
  * When real shadow evaluation exists, `SHADOW` becomes available again — and
  * should be reinstated only for states where a would-have verdict is actually
@@ -395,7 +396,7 @@ export const ENFORCEMENT_BY_STATE: Record<
   PENDING_REVIEW: 'NONE',
   GENERATED: 'NONE',
   HYPOTHESIZED: 'ADVISORY',
-  REFINED: 'NONE',
+  REFINED: 'ADVISORY',
   VALIDATED: 'ACTIVE',
   INVALIDATED: 'NONE',
 }
