@@ -128,6 +128,16 @@ export interface WorkspaceSettings {
     ff_response_cache_semantic?: boolean
     /** Phase 5 — MetaClaw prompt evolution engine (Enterprise only) */
     ff_metaclaw_evolution?: boolean
+    /**
+     * Evaluate every detector, record what it would have done, and allow the
+     * request anyway. Read by the proxy from `workspace:feature_flags:{ws}`.
+     *
+     * Declaring it here is not enough on its own — the PUT schema in
+     * `routes/workspace.ts` must list it too, because that `z.object` strips
+     * unknown keys. `ff_metaclaw_evolution` above was declared here and omitted
+     * there, so it has never been settable either.
+     */
+    ff_shadow_enforcement?: boolean
   }
 
 
@@ -171,6 +181,10 @@ export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
     ff_bandit_routing: false,
     ff_response_cache_exact: false,
     ff_response_cache_semantic: false,
+    ff_metaclaw_evolution: false,
+    // Off by default, and the proxy resolves an absent flag to false as well —
+    // an unreachable flag service must never silently disable enforcement.
+    ff_shadow_enforcement: false,
   },
   enableLocalSkillAuditDelete: false,
   banditKeywords: {
