@@ -53,7 +53,7 @@ const CACHE_TTL: Duration = Duration::from_secs(30);
 const MAX_INJECTED_BYTES: usize = 8 * 1024;
 
 /// One policy document, the roles it applies to, and anything it forbids.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Sop {
     pub title: String,
     pub body: String,
@@ -614,8 +614,8 @@ fn empty_sops_warning(source: &SopsSource, cwd: &Path) -> String {
         ),
     };
     format!(
-        "No SOPs resolved — every SOP-derived control is inert: the deny_tools, \
-         plan_steps, scope_paths and review_before detectors can never fire, and no \
+        "No SOPs resolved — every SOP-derived control is inert: nothing declared \
+         through {ENFORCING_FIELDS} can fire, and no \
          governance block is injected into any request. {looked}. Point \
          {SOPS_DIR_ENV} at a directory of .md SOP files — a mounted policy volume \
          in a cluster, where the cwd walk finds nothing."
@@ -634,12 +634,95 @@ fn empty_sops_warning(source: &SopsSource, cwd: &Path) -> String {
 /// Prose is not enforcement. A SOP with a body and no declarations is a
 /// document the agent may read and ignore, which is the whole reason the
 /// enforceable fields exist.
+#[cfg(test)]
+mod enforceability_tests {
+    use super::*;
+
+    /// An ordering-only SOP enforces something, and used to be told it did not.
+    ///
+    /// `is_enforceable` checked five of the nine declarative fields. The four it
+    /// missed — `requires_before`, `forbid_after`, `max_calls`, `forbid_with` —
+    /// are the ones Phase 4 added, and I added them without extending this. So
+    /// a policy that declares only ordering rules loads, resolves per role, and
+    /// *does* block a deploy without a prior test run, while the boot log says
+    /// "every SOP-derived control is inert".
+    ///
+    /// That is worse than a cosmetic mislabel. This warning exists to catch a
+    /// one-character typo (`review_befor:`) that loads clean and enforces
+    /// nothing; an operator who has learned it cries wolf will not read it on
+    /// the day it is right.
+    #[test]
+    fn an_ordering_only_sop_counts_as_enforceable() {
+        let ordering = Sop {
+            requires_before: vec![(
+                "action:run_tests".into(),
+                "action:deploy".into(),
+                false,
+            )],
+            ..Default::default()
+        };
+        assert!(is_enforceable(&ordering), "requires_before enforces an order");
+
+        let ceiling = Sop {
+            max_calls: vec![("action:deploy".into(), 1usize)],
+            ..Default::default()
+        };
+        assert!(is_enforceable(&ceiling), "max_calls is a hard ceiling that kills");
+
+        let forbid = Sop {
+            forbid_after: vec![("action:secret_read".into(), "action:http_post".into(), false)],
+            ..Default::default()
+        };
+        assert!(is_enforceable(&forbid), "forbid_after is the exfiltration rule");
+
+        let taint = Sop {
+            forbid_with: vec![("secrets()".into(), "action:http_post".into())],
+            ..Default::default()
+        };
+        assert!(is_enforceable(&taint), "forbid_with is co-occurrence taint");
+    }
+
+    /// And prose alone still is not enforcement, or the warning means nothing.
+    #[test]
+    fn a_prose_only_sop_is_still_inert() {
+        assert!(!is_enforceable(&Sop::default()));
+    }
+}
+
+/// The front-matter keys that make an SOP enforceable, named once.
+///
+/// Three messages enumerated this list by hand and two had drifted:
+/// `is_enforceable` gained four fields in Phase 4 and neither warning was
+/// updated, so an operator running an ordering-only policy was told which keys
+/// to use and the four that would have worked were not among them. Parallel
+/// lists that disagree is the same defect class as the tool-name lists in
+/// `actions.rs` — one place, or they drift.
+const ENFORCING_FIELDS: &str = "deny_tools, allow_harnesses, plan_steps, scope_paths, \
+     review_before, requires_before, forbid_after, max_calls or forbid_with";
+
+/// Does this SOP declare anything the proxy can act on?
+///
+/// **Every declarative field belongs here.** It listed five of nine, and the
+/// four missing ones — `requires_before`, `forbid_after`, `max_calls`,
+/// `forbid_with` — were the ordering rules added in Phase 4, added without
+/// extending this. So a policy declaring only ordering rules loaded, resolved
+/// per role, blocked what it said it would, and was told at boot that "every
+/// SOP-derived control is inert".
+///
+/// That matters more than a mislabel, because of what this warning is *for*: it
+/// catches a one-character typo (`review_befor:`) that parses clean and enforces
+/// nothing. An operator who has learned it cries wolf will not read it on the
+/// day it is right.
 fn is_enforceable(sop: &Sop) -> bool {
     !sop.deny_tools.is_empty()
         || !sop.allow_harnesses.is_empty()
         || !sop.plan_steps.is_empty()
         || !sop.scope_paths.is_empty()
         || !sop.review_before.is_empty()
+        || !sop.requires_before.is_empty()
+        || !sop.forbid_after.is_empty()
+        || !sop.max_calls.is_empty()
+        || !sop.forbid_with.is_empty()
 }
 
 /// What to say when policy loaded but none of it can fire.
@@ -658,9 +741,8 @@ fn inert_sops_warning(source: &SopsSource, titles: &[String]) -> String {
     format!(
         "{} SOP(s) loaded and NONE declares anything enforceable — every \
          SOP-derived control is inert despite policy being present. Affected: {}. \
-         An SOP enforces something only through deny_tools, allow_harnesses, \
-         plan_steps, scope_paths or review_before in its front matter; prose alone \
-         is advisory. Check for a misspelled key — an unrecognised one is ignored \
+         An SOP enforces something only through {ENFORCING_FIELDS} in its front \
+         matter; prose alone is advisory. Check for a misspelled key — an unrecognised one is ignored \
          silently, by design, so it loads clean. Source: {}.",
         titles.len(),
         titles.join(", "),
