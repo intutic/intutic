@@ -409,6 +409,8 @@ impl DetectorRegistry {
                 Box::new(TransitionProbabilityDetector::default()),
                 Box::new(MissingPredecessorDetector::default()),
                 Box::new(ForbiddenSuccessionDetector::default()),
+                Box::new(CallCeilingDetector::default()),
+                Box::new(TaintCooccurrenceDetector::default()),
                 Box::new(PlanAdherenceDetector::default()),
                 Box::new(ScopePathDetector::default()),
                 Box::new(ReviewGateDetector::default()),
@@ -1230,7 +1232,7 @@ mod coverage_tests {
         let reg = DetectorRegistry::with_defaults();
         let ids: Vec<&'static str> = reg.ids();
 
-        assert_eq!(ids.len(), 22, "registry size changed — update this test deliberately");
+        assert_eq!(ids.len(), 24, "registry size changed — update this test deliberately");
 
         for id in &ids {
             assert!(!id.is_empty(), "a registered detector has no id");

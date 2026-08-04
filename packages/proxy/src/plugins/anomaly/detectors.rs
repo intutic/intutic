@@ -749,18 +749,21 @@ impl AnomalyDetector for MissingPredecessorDetector {
         // detector's built-in table — with one shared vec and an "any rules
         // declared?" gate it would, and that failure removes enforcement while
         // looking like configuration working.
-        let declared: Vec<(&str, &str)> = ctx
+        let declared: Vec<(&str, &str, bool)> = ctx
             .requires_before
             .iter()
-            .map(|(before, after)| (after.as_str(), before.as_str()))
+            .map(|(before, after, adj)| (after.as_str(), before.as_str(), *adj))
             .collect();
-        let rules: &[(&str, &str)] = if declared.is_empty() {
-            self.rules
+        // Built-ins carry `false` — they have always meant "somewhere before".
+        let builtin: Vec<(&str, &str, bool)> =
+            self.rules.iter().map(|(t, p)| (*t, *p, false)).collect();
+        let rules: &[(&str, &str, bool)] = if declared.is_empty() {
+            &builtin
         } else {
             &declared
         };
 
-        for (tool, prerequisite) in rules {
+        for (tool, prerequisite, adjacent) in rules {
             // `else { continue }`, not `?`. The `?` returned `None` from the
             // whole function rather than skipping the rule, so evaluation
             // stopped at the first rule whose tool was absent from the
@@ -777,7 +780,13 @@ impl AnomalyDetector for MissingPredecessorDetector {
             let Some(used) = seq.iter().position(|t| t.eq_ignore_ascii_case(tool)) else {
                 continue;
             };
-            if seq[..used].iter().any(|t| t.eq_ignore_ascii_case(prerequisite)) {
+            // `~>` tightens "somewhere before" to "immediately before".
+            let satisfied = if *adjacent {
+                used > 0 && seq[used - 1].eq_ignore_ascii_case(prerequisite)
+            } else {
+                seq[..used].iter().any(|t| t.eq_ignore_ascii_case(prerequisite))
+            };
+            if satisfied {
                 continue;
             }
             return Some(AnomalyFinding::kill(
@@ -1102,6 +1111,109 @@ impl AnomalyDetector for ReviewGateDetector {
     }
 }
 
+/// At most N calls to a declared tool or action in one run.
+///
+/// Purely declaration-driven: `max_calls` empty means nothing to check, and
+/// there is no built-in table. Unlike the succession detectors this has no
+/// sensible default — "how many times may this run deploy" is a question only
+/// the operator can answer, and inventing a number would be the guess the
+/// promotion rule exists to forbid.
+///
+/// Kills rather than reasks, for the same reason the other declaration-driven
+/// detectors do: a declared ceiling is a condition, not an estimate. There is no
+/// false-positive rate to be wrong about.
+#[derive(Default)]
+pub struct CallCeilingDetector;
+
+impl AnomalyDetector for CallCeilingDetector {
+    fn id(&self) -> &'static str {
+        "call_ceiling"
+    }
+
+    fn kind(&self) -> AnomalyKind {
+        AnomalyKind::ScopeViolation
+    }
+
+    fn detect(&self, ctx: &RequestContext) -> Option<AnomalyFinding> {
+        for (token, max) in &ctx.max_calls {
+            let seen = ctx
+                .tool_sequence
+                .iter()
+                .filter(|t| t.eq_ignore_ascii_case(token))
+                .count();
+            if seen > *max {
+                return Some(AnomalyFinding::kill(
+                    AnomalyKind::ScopeViolation,
+                    format!(
+                        "Call ceiling exceeded: '{token}' ran {seen} times against a declared \
+                         maximum of {max}"
+                    ),
+                ));
+            }
+        }
+        None
+    }
+}
+
+/// A DLP category and a tool or action that must not appear in the same request.
+///
+/// # Why co-occurrence and not succession
+///
+/// `dlp_findings` is a scan of the whole request body. It reports that a secret
+/// is **present**, not which tool call carried it — there is an `offset` into
+/// the body, and no mapping from that to a position in the tool sequence.
+///
+/// Expressing this as an ordering rule would therefore imply a sequence position
+/// nothing in the data supports. The honest form is the weaker one: *these two
+/// things are in the same request*. An operator who writes
+/// `forbid_with: secrets(), action:http_post` is saying "no request that
+/// contains a credential may also post to the network", which is exactly what
+/// can be checked.
+#[derive(Default)]
+pub struct TaintCooccurrenceDetector;
+
+impl AnomalyDetector for TaintCooccurrenceDetector {
+    fn id(&self) -> &'static str {
+        "taint_cooccurrence"
+    }
+
+    fn kind(&self) -> AnomalyKind {
+        AnomalyKind::DataExfiltration
+    }
+
+    fn detect(&self, ctx: &RequestContext) -> Option<AnomalyFinding> {
+        if ctx.forbid_with.is_empty() || ctx.dlp_findings.is_empty() {
+            return None;
+        }
+
+        for (taint, token) in &ctx.forbid_with {
+            // `secrets()` covers the scanner's `secret` and `credential`
+            // categories: an operator writing "no secrets" means a database URL
+            // with a password in it as much as an AWS key, and forcing them to
+            // know our internal category split would be a trap.
+            let matches_taint = |c: &str| match taint.as_str() {
+                "secrets()" => c == "secret" || c == "credential",
+                "pii()" => c == "pii",
+                _ => false,
+            };
+            if !ctx.dlp_findings.iter().any(|f| matches_taint(&f.category)) {
+                continue;
+            }
+            if !ctx.tool_sequence.iter().any(|t| t.eq_ignore_ascii_case(token)) {
+                continue;
+            }
+            return Some(AnomalyFinding::kill(
+                AnomalyKind::DataExfiltration,
+                format!(
+                    "Declared taint rule: this request carries {taint} material and also \
+                     performs '{token}'"
+                ),
+            ));
+        }
+        None
+    }
+}
+
 pub struct ForbiddenSuccessionDetector {
     rules: &'static [(&'static str, &'static str)],
 }
@@ -1129,25 +1241,32 @@ impl AnomalyDetector for ForbiddenSuccessionDetector {
         // Own field, own fallback — see the note in `MissingPredecessorDetector`.
         // Declaring rules here cannot disarm that detector's built-ins, and vice
         // versa, because neither reads the other's list.
-        let declared: Vec<(&str, &str)> = ctx
+        let declared: Vec<(&str, &str, bool)> = ctx
             .forbid_after
             .iter()
-            .map(|(first, then)| (first.as_str(), then.as_str()))
+            .map(|(first, then, adj)| (first.as_str(), then.as_str(), *adj))
             .collect();
-        let rules: &[(&str, &str)] = if declared.is_empty() {
-            self.rules
+        let builtin: Vec<(&str, &str, bool)> =
+            self.rules.iter().map(|(f, t)| (*f, *t, false)).collect();
+        let rules: &[(&str, &str, bool)] = if declared.is_empty() {
+            &builtin
         } else {
             &declared
         };
 
-        for (first, then) in rules {
+        for (first, then, adjacent) in rules {
             // Case-insensitive, matching every other declaration-driven detector.
             let Some(first_at) = seq.iter().position(|t| t.eq_ignore_ascii_case(first)) else {
                 continue;
             };
-            let violated = seq[first_at + 1..]
-                .iter()
-                .any(|t| t.eq_ignore_ascii_case(then));
+            // `~>` narrows the window to the single next step.
+            let violated = if *adjacent {
+                seq.get(first_at + 1).is_some_and(|t| t.eq_ignore_ascii_case(then))
+            } else {
+                seq[first_at + 1..]
+                    .iter()
+                    .any(|t| t.eq_ignore_ascii_case(then))
+            };
             if !violated {
                 continue;
             }
@@ -1771,6 +1890,8 @@ pub mod test_support {
             review_before: Vec::new(),
             requires_before: Vec::new(),
             forbid_after: Vec::new(),
+            max_calls: Vec::new(),
+            forbid_with: Vec::new(),
             changes: Vec::new(),
             new_tool_calls: Vec::new(),
             transition_baseline: None,
@@ -1951,12 +2072,139 @@ mod tests {
     ///
     /// Two fields, read independently, make that structurally impossible. This
     /// test is what keeps it that way.
+    /// `~>` means adjacent, `->` means anywhere-after.
+    ///
+    /// The tightening only matters if it actually narrows: a `~>` rule that
+    /// behaved like `->` would silently be a weaker rule than the operator
+    /// asked for, which is the direction that removes enforcement.
+    #[test]
+    fn the_squiggly_arrow_requires_adjacency() {
+        // Something in between, so the two operators must disagree.
+        let mut ctx = ctx_with_sequence(&["action:secret_read", "Read", "action:http_post"]);
+
+        ctx.forbid_after = vec![("action:secret_read".into(), "action:http_post".into(), false)];
+        assert!(
+            ForbiddenSuccessionDetector::default().detect(&ctx).is_some(),
+            "`->` must fire: the post comes after the read, with a step between",
+        );
+
+        ctx.forbid_after = vec![("action:secret_read".into(), "action:http_post".into(), true)];
+        assert!(
+            ForbiddenSuccessionDetector::default().detect(&ctx).is_none(),
+            "`~>` must NOT fire: the two are not adjacent",
+        );
+
+        // Remove the step between and `~>` fires.
+        let mut adj = ctx_with_sequence(&["action:secret_read", "action:http_post"]);
+        adj.forbid_after = vec![("action:secret_read".into(), "action:http_post".into(), true)];
+        assert!(
+            ForbiddenSuccessionDetector::default().detect(&adj).is_some(),
+            "`~>` must fire when they are adjacent",
+        );
+    }
+
+    /// The same tightening on the requires side.
+    #[test]
+    fn requires_before_honours_adjacency_too() {
+        let mut ctx = ctx_with_sequence(&["action:run_tests", "Read", "action:deploy"]);
+
+        ctx.requires_before = vec![("action:run_tests".into(), "action:deploy".into(), false)];
+        assert!(
+            MissingPredecessorDetector::default().detect(&ctx).is_none(),
+            "`->` is satisfied: tests ran somewhere before the deploy",
+        );
+
+        ctx.requires_before = vec![("action:run_tests".into(), "action:deploy".into(), true)];
+        assert!(
+            MissingPredecessorDetector::default().detect(&ctx).is_some(),
+            "`~>` is NOT satisfied: something ran between the tests and the deploy",
+        );
+    }
+
+    /// A declared call ceiling.
+    #[test]
+    fn a_call_ceiling_fires_only_past_the_declared_maximum() {
+        let mut ctx = ctx_with_sequence(&["action:deploy", "action:deploy", "action:deploy"]);
+
+        // No declaration means nothing to check — there is no built-in ceiling,
+        // because "how many deploys is too many" is not ours to guess.
+        assert!(CallCeilingDetector.detect(&ctx).is_none());
+
+        ctx.max_calls = vec![("action:deploy".into(), 3)];
+        assert!(
+            CallCeilingDetector.detect(&ctx).is_none(),
+            "exactly at the ceiling is not over it",
+        );
+
+        ctx.max_calls = vec![("action:deploy".into(), 2)];
+        let hit = CallCeilingDetector.detect(&ctx).expect("three exceeds two");
+        assert!(hit.blocks(), "a declared ceiling is a condition, not an estimate");
+        assert!(hit.reason.contains("3 times"));
+    }
+
+    /// Taint co-occurrence, and the two ways it must stay quiet.
+    #[test]
+    fn taint_cooccurrence_needs_both_the_finding_and_the_token() {
+        let mut ctx = ctx_with_sequence(&["Bash", "action:http_post"]);
+        ctx.forbid_with = vec![("secrets()".into(), "action:http_post".into())];
+
+        // The rule is declared and the action happened — but no secret was found.
+        assert!(
+            TaintCooccurrenceDetector.detect(&ctx).is_none(),
+            "without a DLP finding there is no taint to act on",
+        );
+
+        ctx.dlp_findings = vec![crate::wasm::context::DlpFinding {
+            category: "secret".into(),
+            pattern_name: "aws_access_key".into(),
+            action: "redact".into(),
+            offset: 0,
+            length: 20,
+        }];
+        let hit = TaintCooccurrenceDetector
+            .detect(&ctx)
+            .expect("a secret plus a declared-forbidden action must fire");
+        assert!(hit.blocks());
+        assert_eq!(hit.kind, AnomalyKind::DataExfiltration);
+
+        // A secret present but the forbidden action absent is not a violation:
+        // reading a credential is permitted, sending it is not.
+        let mut quiet = ctx_with_sequence(&["Bash", "Read"]);
+        quiet.forbid_with = ctx.forbid_with.clone();
+        quiet.dlp_findings = ctx.dlp_findings.clone();
+        assert!(TaintCooccurrenceDetector.detect(&quiet).is_none());
+    }
+
+    /// `secrets()` covers the scanner's `credential` category too.
+    ///
+    /// An operator writing "no secrets" means a database URL with a password in
+    /// it as much as an AWS key. Forcing them to know our internal split between
+    /// `secret` and `credential` would be a trap — they would write one rule and
+    /// silently get half the coverage.
+    #[test]
+    fn secrets_covers_the_credential_category() {
+        let mut ctx = ctx_with_sequence(&["action:http_post"]);
+        ctx.forbid_with = vec![("secrets()".into(), "action:http_post".into())];
+        ctx.dlp_findings = vec![crate::wasm::context::DlpFinding {
+            category: "credential".into(),
+            pattern_name: "db_connection_string".into(),
+            action: "redact".into(),
+            offset: 0,
+            length: 30,
+        }];
+        assert!(TaintCooccurrenceDetector.detect(&ctx).is_some());
+
+        // ...and pii() does not, because those are different declarations.
+        ctx.forbid_with = vec![("pii()".into(), "action:http_post".into())];
+        assert!(TaintCooccurrenceDetector.detect(&ctx).is_none());
+    }
+
     #[test]
     fn declaring_one_rule_kind_does_not_disarm_the_other_builtins() {
         // Deploy with no prior test — a built-in `requires_before` violation.
         let mut ctx = ctx_with_sequence(&["Bash", "action:deploy"]);
         // ...while the workspace declares only a FORBID rule, about something else.
-        ctx.forbid_after = vec![("action:pii_export".into(), "action:http_post".into())];
+        ctx.forbid_after = vec![("action:pii_export".into(), "action:http_post".into(), false)];
 
         let hit = MissingPredecessorDetector::default()
             .detect(&ctx)
@@ -1966,7 +2214,7 @@ mod tests {
         // And symmetrically: declaring a requires rule must not disarm the
         // built-in forbid table.
         let mut ctx2 = ctx_with_sequence(&["action:secret_read", "action:http_post"]);
-        ctx2.requires_before = vec![("action:lint".into(), "action:merge".into())];
+        ctx2.requires_before = vec![("action:lint".into(), "action:merge".into(), false)];
         assert!(
             ForbiddenSuccessionDetector::default().detect(&ctx2).is_some(),
             "the built-in forbid_after table must still apply",
@@ -1983,7 +2231,7 @@ mod tests {
             "test premise: the built-ins do not cover this sequence",
         );
 
-        ctx.requires_before = vec![("sign_artifact".into(), "release_artifact".into())];
+        ctx.requires_before = vec![("sign_artifact".into(), "release_artifact".into(), false)];
         let hit = MissingPredecessorDetector::default()
             .detect(&ctx)
             .expect("a declared rule must be enforced");
@@ -2001,14 +2249,14 @@ mod tests {
     #[test]
     fn declared_rules_match_regardless_of_case() {
         let mut ctx = ctx_with_sequence(&["Bash", "action:deploy"]);
-        ctx.requires_before = vec![("ACTION:RUN_TESTS".into(), "Action:Deploy".into())];
+        ctx.requires_before = vec![("ACTION:RUN_TESTS".into(), "Action:Deploy".into(), false)];
         assert!(
             MissingPredecessorDetector::default().detect(&ctx).is_some(),
             "a rule differing only in case must still match",
         );
 
         let mut ctx2 = ctx_with_sequence(&["action:secret_read", "action:http_post"]);
-        ctx2.forbid_after = vec![("Action:Secret_Read".into(), "ACTION:HTTP_POST".into())];
+        ctx2.forbid_after = vec![("Action:Secret_Read".into(), "ACTION:HTTP_POST".into(), false)];
         assert!(
             ForbiddenSuccessionDetector::default().detect(&ctx2).is_some(),
             "same for forbid_after",

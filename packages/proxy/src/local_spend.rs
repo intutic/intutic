@@ -201,9 +201,33 @@ pub fn log_offline_trace(trace: &serde_json::Value) {
 mod tests {
     use super::*;
 
+    /// Serialises the tests in this module.
+    ///
+    /// They share two pieces of process-global state: the `SPEND_CACHE` static,
+    /// and `HOME` — which each sets to its own directory so it does not touch a
+    /// developer's real `~/.intutic`. Run concurrently, one test's `HOME` and
+    /// cache entry leak into the other's assertions.
+    ///
+    /// This was a real flake, not a hypothetical: the tests passed alone and
+    /// failed on every parallel run, and it only surfaced when an unrelated test
+    /// file changed the thread scheduling. A flaky guard is worse than no guard —
+    /// it teaches people to re-run until green, which is the habit that lets a
+    /// real failure through.
+    static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Take the lock, tolerating a previous test having panicked while holding it.
+    fn guard() -> std::sync::MutexGuard<'static, ()> {
+        TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     #[test]
     fn test_local_spend_functions() {
-        // Use a Mutex-like serial execution approach: run sequentially in a single test
+        let _lock = guard();
+        // Reset the shared cache so this test starts from a known state whatever
+        // ran before it.
+        if let Ok(mut g) = SPEND_CACHE.lock() {
+            *g = None;
+        }
         std::env::set_var("HOME", "/tmp/intutic_test_home");
         let dir = intutic_dir();
         let _ = fs::remove_dir_all(&dir);
@@ -269,6 +293,7 @@ mod tests {
     /// supposed to reset, so it would report a developer as still capped.
     #[test]
     fn a_day_rollover_invalidates_the_cache() {
+        let _lock = guard();
         std::env::set_var("HOME", "/tmp/intutic_rollover_home");
         let dir = intutic_dir();
         let _ = fs::remove_dir_all(&dir);
