@@ -4,8 +4,33 @@
 //!   docker compose up -d valkey
 //!   cargo bench --bench policy_e2e_bench
 //!
-//! This benchmark measures the REAL proxy overhead including async I/O to
-//! Valkey — validating the ADR-003 "<5ms P95" claim under realistic conditions.
+//! # READ THIS BEFORE QUOTING ANY NUMBER FROM HERE
+//!
+//! This file says it "measures the REAL proxy overhead". It does not, and three
+//! things are wrong with it. They are recorded rather than silently fixed
+//! because correcting them properly is the paired A/B harness that does not yet
+//! exist, and a benchmark that is honestly labelled is better than one quietly
+//! patched into looking right.
+//!
+//! 1. **It never calls the proxy.** `bench_full_chain_e2e` issues
+//!    `redis::cmd("GET")` / `PUBLISH` directly — a hand-written re-implementation
+//!    of the gate sequence. Two lines of real `intutic_proxy::` code execute in
+//!    the whole file. Nothing in either repo boots the proxy for a test:
+//!    `build_router` has exactly one caller, `main.rs`.
+//! 2. **It measures a key schema production does not use.** It seeds and reads
+//!    `v2:vk:{token}`; the real auth path reads `v2:auth:apikey:{prefix}` and
+//!    then a second key. `v2:vk:` appears nowhere in `src/`. So the "VK lookup"
+//!    figure describes a lookup that never happens.
+//! 3. **It ignores `VALKEY_URL`**, which every integration test and the pre-push
+//!    hook honour — and the hook runs Valkey on 6380, so this bench cannot see it.
+//!
+//! What it *does* measure honestly is round-trip cost to a local Valkey, which is
+//! a useful floor and nothing more.
+//!
+//! The instinct this file gets right, and which must survive into the A/B
+//! harness: it **panics** when Valkey is absent rather than degrading to
+//! in-memory. A benchmark that quietly measures the wrong thing is worse than
+//! one that refuses to run.
 //!
 //! If Valkey is not available on 127.0.0.1:6379, the benchmark **panics** with
 //! a clear message (it cannot degrade to in-memory — that's what policy_bench does).
