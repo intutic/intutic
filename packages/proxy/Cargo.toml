@@ -143,3 +143,9 @@ harness = false
 [[bench]]
 name = "anomaly_bench"
 harness = false
+
+# Not criterion: it reports mean +/- sigma and cannot express percentiles or
+# concurrency, and the tail is exactly what a latency claim hides.
+[[bench]]
+name = "ab_latency_bench"
+harness = false
