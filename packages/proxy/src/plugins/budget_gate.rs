@@ -113,6 +113,8 @@ mod tests {
             plan_steps: Vec::new(),
             scope_paths: Vec::new(),
             review_before: Vec::new(),
+            requires_before: Vec::new(),
+            forbid_after: Vec::new(),
             changes: Vec::new(),
             new_tool_calls: Vec::new(),
             transition_baseline: None,

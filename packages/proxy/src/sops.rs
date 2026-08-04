@@ -119,6 +119,17 @@ pub struct Sop {
     /// why it is declaration-only and has no heuristic behind it: nothing
     /// blocks a person's work unless a person asked for it to.
     pub review_before: Vec<String>,
+    /// Ordering rules this SOP declares: `A -> B` means B must not run unless A
+    /// ran before it. Parsed from `requires_before:`.
+    ///
+    /// Stored as parsed pairs rather than raw strings so an unparseable rule is
+    /// rejected once, at load, instead of failing to match silently forever on
+    /// the hot path — the difference between a warning an operator can see and a
+    /// guardrail that quietly does nothing.
+    pub requires_before: Vec<(String, String)>,
+    /// Ordering rules this SOP forbids: `A -> B` means B must not run *after* A.
+    /// Parsed from `forbid_after:`.
+    pub forbid_after: Vec<(String, String)>,
 }
 
 impl Sop {
@@ -155,6 +166,11 @@ struct FrontMatter {
     plan_steps: Vec<String>,
     scope_paths: Vec<String>,
     review_before: Vec<String>,
+    requires_before: Vec<(String, String)>,
+    forbid_after: Vec<(String, String)>,
+    /// Rules that failed to parse, kept so they can be reported rather than
+    /// dropped. A malformed ordering rule must not read as "no rule declared".
+    rule_errors: Vec<String>,
     body: String,
 }
 
@@ -200,6 +216,9 @@ fn parse_front_matter(raw: &str) -> FrontMatter {
             .collect()
     };
 
+    let requires = parse_rules(front, "requires_before:");
+    let forbids = parse_rules(front, "forbid_after:");
+
     FrontMatter {
         roles: list("roles:", true),
         // Harness names are lowercase by convention (`claude-code`, `cursor`).
@@ -219,8 +238,76 @@ fn parse_front_matter(raw: &str) -> FrontMatter {
         // tool names are accepted here too — see the detector — so case is kept
         // and the comparison ignores it.
         review_before: list("review_before:", false),
+        requires_before: requires.0,
+        forbid_after: forbids.0,
+        rule_errors: {
+            let mut e = requires.1;
+            e.extend(forbids.1);
+            e
+        },
         body: body.trim_start_matches("\n---").trim().to_string(),
     }
+}
+
+/// Parse one `A -> B` ordering rule.
+///
+/// Both sides read left-to-right as sequence order, so the same arrow means the
+/// same thing in both keys: `requires_before: A -> B` is "A must precede B", and
+/// `forbid_after: A -> B` is "B must not follow A". A rule that read in one
+/// direction for one key and the other for the other key would be a trap nobody
+/// could remember, and an ordering rule pointed backwards fails silently.
+///
+/// Returns `Err(reason)` rather than dropping the rule. An ordering rule that
+/// cannot match is indistinguishable from no rule at all once it reaches the hot
+/// path, so the only place it can be reported is here.
+fn parse_rule(raw: &str) -> Result<(String, String), String> {
+    let Some((lhs, rhs)) = raw.split_once("->") else {
+        return Err(format!("{raw:?}: expected `A -> B`"));
+    };
+    let lhs = lhs.trim();
+    let rhs = rhs.trim();
+    if lhs.is_empty() || rhs.is_empty() {
+        return Err(format!("{raw:?}: both sides must be non-empty"));
+    }
+    for side in [lhs, rhs] {
+        // A token with whitespace is a shell command, not a tool or an action.
+        //
+        // This is the single most likely authoring mistake: the rules are about
+        // `action:deploy`, but the thing an operator has in mind is `git push`.
+        // A command never matches — no harness emits a tool by that name, and
+        // `classify` synthesises only the eight `action:` tokens — so such a rule
+        // compiles, loads, and silently never fires. Refusing it here is the only
+        // moment anyone finds out.
+        if side.split_whitespace().count() > 1 {
+            return Err(format!(
+                "{side:?} looks like a shell command. Ordering rules name tools \
+                 (`Bash`) or actions (`action:deploy`), never commands — \
+                 `classify` in plugins::anomaly::actions maps commands onto the \
+                 eight action tokens, and a rule naming the command itself can \
+                 never match."
+            ));
+        }
+    }
+    Ok((lhs.to_string(), rhs.to_string()))
+}
+
+/// Parse every `A -> B` under one front-matter key, splitting good from bad.
+fn parse_rules(front: &str, key: &str) -> (Vec<(String, String)>, Vec<String>) {
+    let mut ok = Vec::new();
+    let mut errs = Vec::new();
+    for raw in front
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix(key))
+        .flat_map(|v| v.split(','))
+        .map(|r| r.trim().trim_matches(['"', '\'', '[', ']']).trim().to_string())
+        .filter(|r| !r.is_empty())
+    {
+        match parse_rule(&raw) {
+            Ok(pair) => ok.push(pair),
+            Err(e) => errs.push(format!("{key} {e}")),
+        }
+    }
+    (ok, errs)
 }
 
 fn read_dir_sops(dir: &Path) -> Vec<Sop> {
@@ -247,8 +334,24 @@ fn read_dir_sops(dir: &Path) -> Vec<Sop> {
                 && fm.plan_steps.is_empty()
                 && fm.scope_paths.is_empty()
                 && fm.review_before.is_empty()
+                && fm.requires_before.is_empty()
+                && fm.forbid_after.is_empty()
+                && fm.rule_errors.is_empty()
             {
                 return None;
+            }
+            // Report unparseable ordering rules at load, once, naming the file.
+            //
+            // A rule that cannot parse is indistinguishable from no rule at all
+            // by the time it reaches a detector — the vec is simply shorter — so
+            // this is the only moment anyone can find out. The SOP is still
+            // loaded: dropping the whole file because one rule had a typo would
+            // silently disarm the rules that were fine.
+            for err in &fm.rule_errors {
+                tracing::warn!(
+                    sop = %path.display(),
+                    "Ignoring unparseable ordering rule: {err}"
+                );
             }
             Some(Sop {
                 title: path.file_stem()?.to_str()?.to_string(),
@@ -259,6 +362,8 @@ fn read_dir_sops(dir: &Path) -> Vec<Sop> {
                 plan_steps: fm.plan_steps,
                 scope_paths: fm.scope_paths,
                 review_before: fm.review_before,
+                requires_before: fm.requires_before,
+                forbid_after: fm.forbid_after,
             })
         })
         .collect();
@@ -605,6 +710,44 @@ pub fn plan_steps_for_role(role: &str) -> Vec<String> {
     collect_plan_steps(&all_sops(), role)
 }
 
+/// Ordering rules declared for `role`, as `(before, after)` pairs.
+///
+/// Two separate collectors rather than one tagged list, and that is the design
+/// rather than an accident. Each detector reads only its own field, so declaring
+/// a `forbid_after:` rule cannot disarm the built-in `requires_before` table —
+/// with a single combined list and a kind filter, an "any rules declared?" gate
+/// would do exactly that, and the failure would be silent in the direction that
+/// removes enforcement.
+fn collect_requires_before(sops: &[Sop], role: &str) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = sops
+        .iter()
+        .filter(|s| s.applies_to(role))
+        .flat_map(|s| s.requires_before.iter().cloned())
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+pub fn requires_before_for_role(role: &str) -> Vec<(String, String)> {
+    collect_requires_before(&all_sops(), role)
+}
+
+fn collect_forbid_after(sops: &[Sop], role: &str) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = sops
+        .iter()
+        .filter(|s| s.applies_to(role))
+        .flat_map(|s| s.forbid_after.iter().cloned())
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+pub fn forbid_after_for_role(role: &str) -> Vec<(String, String)> {
+    collect_forbid_after(&all_sops(), role)
+}
+
 fn collect_plan_steps(sops: &[Sop], role: &str) -> Vec<String> {
     // Deliberately NOT deduped or sorted, unlike the deny/harness collectors. A plan is
     // a sequence; sorting it would destroy the only ordering information it carries,
@@ -771,6 +914,8 @@ mod tests {
             plan_steps: Vec::new(),
             scope_paths: Vec::new(),
             review_before: Vec::new(),
+            requires_before: Vec::new(),
+            forbid_after: Vec::new(),
         }
     }
 
@@ -864,6 +1009,8 @@ mod tests {
                 plan_steps: Vec::new(),
                 scope_paths: Vec::new(),
                 review_before: Vec::new(),
+            requires_before: Vec::new(),
+            forbid_after: Vec::new(),
             })
             .collect();
         let out = render(&big, "any").unwrap();
@@ -1141,7 +1288,109 @@ mod discovery_tests {
             plan_steps: fm.plan_steps,
             scope_paths: fm.scope_paths,
             review_before: fm.review_before,
+            requires_before: fm.requires_before,
+            forbid_after: fm.forbid_after,
         }
+    }
+
+    #[test]
+    fn ordering_rules_parse_from_front_matter() {
+        let s = sop_from_raw(
+            "ship",
+            "---\n\
+             requires_before: action:run_tests -> action:deploy, action:lint -> action:merge\n\
+             forbid_after: action:secret_read -> action:http_post\n\
+             ---\n# body\n",
+        );
+        assert_eq!(
+            s.requires_before,
+            vec![
+                ("action:run_tests".to_string(), "action:deploy".to_string()),
+                ("action:lint".to_string(), "action:merge".to_string()),
+            ],
+        );
+        assert_eq!(
+            s.forbid_after,
+            vec![("action:secret_read".to_string(), "action:http_post".to_string())],
+        );
+    }
+
+    /// Both keys read left-to-right as sequence order.
+    ///
+    /// `requires_before: A -> B` is "A must precede B"; `forbid_after: A -> B` is
+    /// "B must not follow A". If the arrow meant one thing in one key and the
+    /// reverse in the other, nobody could remember which — and an ordering rule
+    /// pointed backwards does not error, it silently never matches.
+    #[test]
+    fn the_arrow_means_sequence_order_in_both_keys() {
+        let s = sop_from_raw(
+            "x",
+            "---\nrequires_before: A -> B\nforbid_after: C -> D\n---\nbody\n",
+        );
+        // requires: A comes first, B is the thing being guarded.
+        assert_eq!(s.requires_before[0], ("A".into(), "B".into()));
+        // forbid: C comes first, D is the thing that must not follow.
+        assert_eq!(s.forbid_after[0], ("C".into(), "D".into()));
+    }
+
+    /// A rule naming a shell command is refused, loudly.
+    ///
+    /// This is the single most likely authoring mistake. The rules are about
+    /// `action:deploy`, but the thing an operator has in mind is `git push` —
+    /// and a command never matches, because no harness emits a tool by that name
+    /// and `classify` synthesises only the eight `action:` tokens. Such a rule
+    /// would compile, load, sit in front matter looking correct, and never fire.
+    ///
+    /// Rejecting at parse is the only moment anyone finds out.
+    #[test]
+    fn a_rule_naming_a_shell_command_is_rejected() {
+        let err = parse_rule("git push -> action:deploy").expect_err("must be refused");
+        assert!(err.contains("shell command"), "{err}");
+        assert!(err.contains("action:"), "the message must name the vocabulary: {err}");
+
+        // And the correct form is accepted.
+        assert!(parse_rule("action:run_tests -> action:deploy").is_ok());
+        // Raw tool names are fine — succession over tools is legitimate.
+        assert!(parse_rule("Read -> Write").is_ok());
+    }
+
+    #[test]
+    fn a_malformed_rule_is_reported_not_silently_dropped() {
+        // No arrow at all, and an empty side.
+        assert!(parse_rule("action:deploy").is_err());
+        assert!(parse_rule("-> action:deploy").is_err());
+        assert!(parse_rule("action:deploy ->").is_err());
+
+        // The SOP still loads: one bad rule must not disarm the good ones beside
+        // it. The bad rule lands in rule_errors, which the loader logs.
+        let fm = parse_front_matter(
+            "---\nrequires_before: action:run_tests -> action:deploy, nonsense\n---\nbody\n",
+        );
+        assert_eq!(fm.requires_before.len(), 1, "the valid rule survives");
+        assert_eq!(fm.rule_errors.len(), 1, "the invalid one is recorded");
+    }
+
+    /// A file whose ONLY content is ordering rules must load.
+    ///
+    /// `read_dir_sops` skips a file with no body and no directives. Adding a new
+    /// directive without adding it to that emptiness check means a policy whose
+    /// entire content is `forbid_after:` is dropped on load, and the rule that
+    /// reads it never fires — with nothing to notice, because the file is on
+    /// disk and looks fine. That exact bug is documented at the check itself.
+    #[test]
+    fn a_sop_declaring_only_ordering_rules_is_not_dropped() {
+        // Same tempdir convention as the other loader tests in this file.
+        let dir = std::env::temp_dir().join(format!("intutic-rules-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        std::fs::write(
+            dir.join("ordering.md"),
+            "---\nforbid_after: action:secret_read -> action:http_post\n---\n",
+        )
+        .expect("write");
+        let sops = read_dir_sops(&dir);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(sops.len(), 1, "a rules-only SOP must load");
+        assert_eq!(sops[0].forbid_after.len(), 1);
     }
 
     fn enforcing_sop(title: &str) -> Sop {
@@ -1356,6 +1605,8 @@ mod deny_tests {
             plan_steps: Vec::new(),
             scope_paths: Vec::new(),
             review_before: Vec::new(),
+            requires_before: Vec::new(),
+            forbid_after: Vec::new(),
         }
     }
 
@@ -1439,6 +1690,8 @@ mod harness_policy_tests {
                 plan_steps: Vec::new(),
                 scope_paths: Vec::new(),
                 review_before: Vec::new(),
+            requires_before: Vec::new(),
+            forbid_after: Vec::new(),
             },
             Sop {
                 title: "b".into(),
@@ -1449,6 +1702,8 @@ mod harness_policy_tests {
                 plan_steps: Vec::new(),
                 scope_paths: Vec::new(),
                 review_before: Vec::new(),
+            requires_before: Vec::new(),
+            forbid_after: Vec::new(),
             },
         ];
         assert_eq!(collect_harnesses(&sops, "reviewer"), vec!["claude-code"]);
@@ -1497,6 +1752,8 @@ mod plan_step_tests {
                 plan_steps: vec!["Read".into(), "Edit".into(), "action:deploy".into()],
                 scope_paths: Vec::new(),
                 review_before: Vec::new(),
+            requires_before: Vec::new(),
+            forbid_after: Vec::new(),
             },
             Sop {
                 title: "review".into(),
@@ -1507,6 +1764,8 @@ mod plan_step_tests {
                 plan_steps: vec!["Grep".into()],
                 scope_paths: Vec::new(),
                 review_before: Vec::new(),
+            requires_before: Vec::new(),
+            forbid_after: Vec::new(),
             },
         ];
         assert_eq!(
@@ -1530,6 +1789,8 @@ mod plan_step_tests {
             plan_steps: vec!["action:deploy".into()],
             scope_paths: Vec::new(),
             review_before: Vec::new(),
+            requires_before: Vec::new(),
+            forbid_after: Vec::new(),
         }];
         assert!(collect_plan_steps(&sops, "reviewer").is_empty());
         assert!(collect_plan_steps(&sops, "").is_empty());
@@ -1605,6 +1866,8 @@ mod scope_and_review_tests {
             plan_steps: vec![],
             scope_paths: vec!["infra".into()],
             review_before: vec!["action:deploy".into()],
+            requires_before: Vec::new(),
+            forbid_after: Vec::new(),
         }];
         assert!(collect_scope_paths(&sops, "reviewer").is_empty());
         assert!(collect_review_before(&sops, "reviewer").is_empty());
@@ -1622,6 +1885,8 @@ mod scope_and_review_tests {
             plan_steps: vec![],
             scope_paths: vec![scope.to_string()],
             review_before: vec![],
+            requires_before: Vec::new(),
+            forbid_after: Vec::new(),
         };
         let sops = vec![mk("packages/proxy"), mk("infra"), mk("packages/proxy")];
         assert_eq!(collect_scope_paths(&sops, "anyone"), vec!["infra", "packages/proxy"]);
