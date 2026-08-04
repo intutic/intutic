@@ -44,6 +44,18 @@ pub const BFCL_FILES: &[(&str, &str)] = &[
 
 pub const NOTINJECT: &str = include_str!("../corpus/notinject/notinject.jsonl");
 
+/// Benign tool and parameter descriptions — the corpus `TD-274` was held open
+/// for, on the claim that no public set of them existed.
+///
+/// 2,711 tool descriptions and 8,042 parameter descriptions, deduplicated, from
+/// the fourteen BFCL v3 splits that carry function schemas. Note *which*
+/// splits: the five multi-turn files already vendored here come from the
+/// dataset's `possible_answer` path and hold only `{ground_truth, id}`, so they
+/// contain no descriptions at all. The schemas live in the single-turn splits.
+///
+/// External and not chosen by Intutic, same as the other two corpora. Apache-2.0.
+pub const TOOL_DESCRIPTIONS: &str = include_str!("../corpus/tooldesc/tooldesc.jsonl");
+
 /// One benign trajectory: an id and the calls it made, in order.
 #[derive(Debug, Clone)]
 pub struct Seed {
