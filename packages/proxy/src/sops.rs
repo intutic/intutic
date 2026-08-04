@@ -797,6 +797,40 @@ mod enforceability_tests {
     fn a_prose_only_sop_is_still_inert() {
         assert!(!is_enforceable(&Sop::default()));
     }
+
+    /// `risk_tier:` is the one declaration this warning used to misreport.
+    ///
+    /// No proxy detector reads it, so `is_enforceable` is right to return
+    /// false — but the field is placed on `RequestContext` and handed to WASM
+    /// rules, which may act on it. Telling that workspace "every SOP-derived
+    /// control is inert" invites someone to delete a declaration that is doing
+    /// something, which is the wrong direction to be wrong in.
+    #[test]
+    fn the_inert_warning_says_where_risk_tier_does_reach() {
+        let sop = Sop {
+            title: "tiers".to_string(),
+            risk_tier: Some(RiskLevel::High),
+            ..Default::default()
+        };
+        assert!(
+            !is_enforceable(&sop),
+            "risk_tier must stay outside is_enforceable — making it enforceable \
+             would silence this warning for a policy the proxy cannot act on, \
+             and catching that is the only reason the warning exists"
+        );
+
+        let msg = inert_sops_warning(&SopsSource::NotFound, &["tiers".to_string()], true);
+        assert!(msg.contains("risk_tier"), "the warning must name the field: {msg}");
+        assert!(
+            msg.contains("WASM"),
+            "the warning must say where it does reach: {msg}"
+        );
+
+        // And a SOP with no risk_tier gets the plain message, with no dangling
+        // note about a field it never declared.
+        let plain = inert_sops_warning(&SopsSource::NotFound, &["prose".to_string()], false);
+        assert!(!plain.contains("risk_tier"), "unwanted addendum: {plain}");
+    }
 }
 
 /// The front-matter keys that make an SOP enforceable, named once.
@@ -847,16 +881,36 @@ fn is_enforceable(sop: &Sop) -> bool {
 /// a control that looks installed and reaches nothing. Here it is worse than
 /// usual, because the operator did the work — they wrote the policy, mounted it,
 /// and watched it load.
-fn inert_sops_warning(source: &SopsSource, titles: &[String]) -> String {
+fn inert_sops_warning(source: &SopsSource, titles: &[String], any_risk_tier: bool) -> String {
+    // `risk_tier:` is the one field this message used to misreport. No detector
+    // in the proxy reads it, so `is_enforceable` correctly returns false — but
+    // it IS placed on `RequestContext` and delivered to WASM rules, which may
+    // well act on it. Saying "every SOP-derived control is inert" to a
+    // workspace whose WASM rule gates on exactly that field is wrong in the
+    // direction that matters: it invites someone to delete a declaration that
+    // is doing something.
+    //
+    // The predicate stays as it is. Making `risk_tier` enforceable would
+    // silence this warning for a policy that genuinely enforces nothing through
+    // the proxy, and catching that is the only reason the warning exists.
+    let addendum = if any_risk_tier {
+        " Note: `risk_tier:` IS declared here. No proxy detector reads it, which \
+         is why this warning fired — but it is delivered to WASM rules, so a \
+         custom rule gating on it is still acting on this policy."
+    } else {
+        ""
+    };
     format!(
-        "{} SOP(s) loaded and NONE declares anything enforceable — every \
-         SOP-derived control is inert despite policy being present. Affected: {}. \
+        "{} SOP(s) loaded and NONE declares anything the proxy's own detectors \
+         can act on — every SOP-derived control is inert despite policy being \
+         present. Affected: {}. \
          An SOP enforces something only through {ENFORCING_FIELDS} in its front \
          matter; prose alone is advisory. Check for a misspelled key — an unrecognised one is ignored \
-         silently, by design, so it loads clean. Source: {}.",
+         silently, by design, so it loads clean. Source: {}.{}",
         titles.len(),
         titles.join(", "),
-        source.label()
+        source.label(),
+        addendum
     )
 }
 
@@ -875,7 +929,11 @@ fn report_resolution(source: &SopsSource, cwd: &Path, sops: &[Sop]) {
         .map(|s| s.title.clone())
         .collect();
     if inert.len() == count {
-        tracing::warn!(source = source.label(), "{}", inert_sops_warning(source, &inert));
+        let any_risk_tier = sops
+            .iter()
+            .filter(|s| !is_enforceable(s))
+            .any(|s| s.risk_tier.is_some());
+        tracing::warn!(source = source.label(), "{}", inert_sops_warning(source, &inert, any_risk_tier));
         return;
     }
     if !inert.is_empty() {
