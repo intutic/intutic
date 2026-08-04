@@ -49,7 +49,7 @@ Tool call arrives
 2. **DLP Scanner** — scans for secrets, PII, and sensitive data. If found → `HIJACK` (redact and forward) or `KILL` (block entirely)
 3. **PCAS Policy Resolution** — resolves effective permissions from the organization policy hierarchy, with Valkey caching and Postgres fallback
 4. **SOP Hook Executor** — runs any hook-type SOPs in a V8 sandbox. Hooks can return `allow`, `block`, `modify`, or `warn`
-5. **SSL Enforcement** — three-layer runtime enforcement (scheduling, structural, logical)
+5. **SSL Enforcement** — implemented (scheduling, structural, logical) but **not currently reachable**: its only caller is `circuitBreakerService`, which no entry point invokes. SSL graphs are reported on, not enforced. Tracked as `TD-300`.
 
 The **strictest verdict wins** — if any layer returns KILL, the request is killed regardless of what other layers decide.
 
@@ -208,8 +208,8 @@ The enforcement action system is defined across these components:
 | `valkeySubscriber.ts` | Proxy verdict → `EnforcementAction` mapping | Enterprise Control Plane |
 | `pcasService.ts` | PCAS permission resolution (Valkey → Postgres cascade) | Enterprise Control Plane |
 | `sopHookExecutor.ts` | V8-sandboxed hook execution with `allow`/`block`/`modify`/`warn` verdicts | Enterprise Control Plane |
-| `sslEnforcementService.ts` | Three-layer SSL enforcement (scheduling, structural, logical) | Enterprise Control Plane |
-| `loopBreakerService.ts` | Sliding-window loop detection → KILL on repetitive failures | Enterprise Control Plane |
+| `sslEnforcementService.ts` | SSL compliance **reporting**. The three enforcement layers exist but have no live caller (`TD-300`) | Enterprise Control Plane |
+| `loopBreakerService.ts` | Sliding-window loop detection. Reachable only from `circuitBreakerService` and therefore **not live**; the proxy's own loop detectors are what run | Enterprise Control Plane |
 | `finopsService.ts` | Budget gate enforcement + cost tracking per action | Enterprise Control Plane |
 
 ---

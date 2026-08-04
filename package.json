@@ -13,6 +13,7 @@
     "typecheck": "turbo run typecheck",
     "docs": "turbo run docs",
     "lint:styles": "node tools/scripts/check-styles.js",
+    "lint:latency-claims": "node tools/scripts/check-latency-claims.js",
     "prepare": "node tools/scripts/install-hooks.js"
   },
   "devDependencies": {

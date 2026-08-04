@@ -1,6 +1,6 @@
 ---
 title: Circuit Breaker
-description: How Intutic's circuit breaker evaluates every tool call synchronously — budget gates, loop detection, policy resolution, and graceful degradation.
+description: How Intutic's circuit breaker evaluates every tool call in-process — budget gates, loop detection, policy resolution, and graceful degradation.
 ---
 
 # Circuit Breaker <Badge type="tip" text="Open-Core" />
@@ -8,6 +8,7 @@ description: How Intutic's circuit breaker evaluates every tool call synchronous
 The **circuit breaker** is the decision engine that evaluates every AI agent tool call and returns an [enforcement action](/concepts/enforcement-actions) — BYPASS, ENHANCE, HIJACK, or KILL. It operates on the hot path between the proxy and the LLM provider, so every millisecond matters.
 
 **Design goals:**
+- Evaluation is in-process with no model call. Cost is measured per payload size in `packages/proxy/benches` — there is no single figure, because it is dominated by request size.
 - **Fail-closed** by default — if the check can't complete, block the request
 - **Graceful degradation** — if a backend is unavailable, fall back to the next tier
 - **Zero single points of failure** — Valkey cache and Postgres each provide a degradation layer
@@ -24,19 +25,19 @@ Tool call arrives at proxy (:4000)
               ▼
      ┌────────────────┐
      │ 1. Budget Gate │ ◀── Valkey: v2:budget:hard_block:{wk_id}
-     │   (in-memory)  │     + loop governance kill check
+     │  (Valkey GET)  │     + loop governance kill check
      └────────┬───────┘
               │ pass
               ▼
      ┌────────────────┐
      │ 2. Loop Breaker│ ◀── Valkey: v2:loop:{session_id}
-     │   (in-memory)  │     sliding window of prompt hashes
+     │ (GET+parse+SET)│     sliding window of prompt hashes
      └────────┬───────┘
               │ pass
               ▼
       ┌────────────────┐
-      │ 3. PCAS Policy │ ◀── Valkey cache on hit
-      │   Resolution   │     Postgres CTE on miss
+      │ 3. PCAS Policy │ ◀── Valkey cache (single GET on hit)
+      │   Resolution   │     Postgres query (one CTE on miss)
       └────────┬───────┘
                │
                ▼
@@ -56,7 +57,7 @@ The fastest check — a single Valkey key lookup.
 - The policy check reads this key — if present → `KILL` immediately
 - Also checks loop-level budget caps: if a loop run (`loop_run_id`) has status `KILLED` → deny
 
-**Latency:** Typically < 1ms (single Valkey GET)
+**Cost:** A single Valkey GET. No model call, no Postgres round trip.
 
 ```typescript
 // services/control-plane/src/routes/evaluate.ts
@@ -93,7 +94,7 @@ const LOOP_STATE_TTL = 3_600 // 1 hour (matches session inactivity)
 
 **Graceful degradation:** If Valkey is unavailable, returns `{ isLoop: false }` — the loop breaker fails open so it doesn't block legitimate requests when the cache is down.
 
-**Work per check:** one Valkey GET, a JSON parse, and one SET — no database query and no model call.
+**Cost:** One Valkey GET, a JSON parse, and a SET. No model call.
 
 → Source: [loopBreakerService.ts](https://github.com/intutic/intutic/tree/main/services/control-plane/src/services/loopBreakerService.ts)
 
@@ -105,11 +106,11 @@ The most complex gate — resolves effective permissions for the user+agent pair
 
 **Resolution cascade:**
 
-| Step | Backend | What happens on failure |
-|---|---|---|
-| 1 | Valkey cache | Continue to step 2 |
-| 2 | Postgres CTE resolution | Continue to step 3 |
-| 3 | Synthetic empty set | Return `fallbackMode: true` → forces HIJACK |
+| Step | Backend | Latency | What happens on failure |
+|---|---|---|---|
+| 1 | Valkey cache | in-memory lookup | Continue to step 2 |
+| 2 | Postgres CTE resolution | single query, on cache miss only | Continue to step 3 |
+| 3 | Synthetic empty set | 0ms | Return `fallbackMode: true` → forces HIJACK |
 
 ```typescript
 // services/control-plane/src/services/pcasService.ts
@@ -132,7 +133,7 @@ return { allowedTools: [], deniedTools: [], budgetRemaining: 0, fallbackMode: tr
 
 **Fallback mode:** When Postgres is unavailable, the service returns `fallbackMode: true` with an empty permission set. The circuit breaker can then escalate to `HIJACK` — restricting the agent to safe operations rather than blocking entirely.
 
-**Cache TTL:** 5 minutes (`PCAS_CACHE_TTL`). On a warm cache, this gate completes in < 1ms.
+**Cache TTL:** 5 minutes (`PCAS_CACHE_TTL`). On a warm cache this gate is a single Valkey GET; on a miss it is one Postgres query.
 
 → Source: [pcasService.ts](https://github.com/intutic/intutic/tree/main/services/control-plane/src/services/pcasService.ts)
 
@@ -170,7 +171,7 @@ Beyond the three hot-path gates, the circuit breaker can invoke additional evalu
 | Layer | What it does | Runs on |
 |---|---|---|
 | **SOP Hook Executor** | V8-sandboxed hook scripts — `allow`/`block`/`modify`/`warn` | PRE_TOOL, POST_TOOL, PRE_RESPONSE, POST_RESPONSE |
-| **SSL Enforcement** | Three-layer enforcement (scheduling → structural → logical) | Tool calls matching active SSL graphs |
+| **SSL Compliance Reporting** | Reports which SSL graph steps a session followed | Read-only. The three enforcement layers are implemented but **not wired to any live decision point** — see the note below |
 | **DLP Scanner** | Regex-based secret/PII detection in prompts | Every request (proxy-side, pre-forwarding) |
 | **SnipCompactor** | Token compression — collapse repetitions, truncate JSON | Every request (proxy-side, pre-forwarding) |
 

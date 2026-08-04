@@ -48,7 +48,7 @@ Intutic is designed **AI-first**: AI coding agents (such as Claude Code, Antigra
 
 ### In-Stream Slash Commands (`@intutic` / `/intutic`)
 
-When interacting with model providers through the Intutic proxy, agents can issue commands directly inside prompt payloads by prepending `@intutic` or `/intutic`. The proxy intercepts these commands **pre-flight**, executes the governance action, and returns formatted response blocks without the request ever reaching the provider:
+When interacting with model providers through the Intutic proxy, agents can issue commands directly inside prompt payloads by prepending `@intutic` or `/intutic`. The proxy intercepts these commands **pre-flight**, before the request reaches the provider, executes the governance action, and returns formatted response blocks:
 
 #### 1. Cost & Task Attribution
 * **`@intutic initialize`**: Queries linked task providers (Linear, Jira, GitHub Issues) and recommends open ticket candidates for the current session.

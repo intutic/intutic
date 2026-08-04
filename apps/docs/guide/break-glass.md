@@ -70,7 +70,7 @@ X-Intutic-Break-Glass: bg_xxxxxxx
 ```
 
 For the configured duration, the proxy will:
-1. Validate the token in Valkey (<1ms latency).
+1. Validate the token in Valkey (a single GET).
 2. Skip custom WASM registry checks.
 3. Skip control plane policy pre-checks.
 4. Log the bypass event and associated developer in the audit trail.

@@ -14,7 +14,7 @@ Arize AX **observes** what your AI systems do — traces, evaluations, latency, 
 |-----------|---------|----------|
 | **Primary function** | Runtime enforcement (circuit breaker) | Observability and evaluation |
 | **Where it sits** | In the tool-call path — synchronous enforcement | After execution — async tracing and analysis |
-| **Enforcement** | BYPASS / ENHANCE / HIJACK / KILL, decided before the call proceeds | No enforcement — observation only |
+| **Enforcement** | BYPASS / ENHANCE / HIJACK / KILL, synchronous and in-process | No enforcement — observation only |
 | **Tracing** | Tool-call-level audit logs with enforcement decisions | Full LLM trace with spans, evaluations, and annotations |
 | **Scope** | AI coding agents (18 harness integrations) | Any LLM application (RAG, agents, chatbots) |
 | **DLP & threat detection** | Secrets redaction, SQL injection, prompt injection — blocked at proxy | Hallucination detection, toxicity scoring — flagged post-hoc |
@@ -35,7 +35,7 @@ Intutic tells you what was **blocked and why**. Arize tells you what **happened 
 
 - Your AI agents interact with infrastructure — files, databases, APIs, git
 - You need to **prevent** destructive actions, not just observe them
-- You want policy enforcement that runs **locally**, in the request path rather than after it
+- You want policy enforcement that runs **locally**, in-process, with no model call
 - You need coverage across **18 AI coding harnesses**
 
 ## When You Need Arize AX
