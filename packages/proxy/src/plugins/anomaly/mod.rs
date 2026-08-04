@@ -350,6 +350,8 @@ impl AnomalyFinding {
             Disposition::Reask => Verdict::Reask {
                 reason: self.reason.clone(),
                 attempts_remaining: REASK_MAX_ATTEMPTS,
+                // The same id the request path keys the counter on.
+                policy_id: Some(self.detector_id.to_string()),
             },
             Disposition::Steer => Verdict::Hijack {
                 reason: self.reason.clone(),

@@ -138,19 +138,44 @@ impl PluginRegistry {
         }
         modules.sort_by_key(|m| m.priority);
 
+        // A reask from an earlier rule is held, not returned immediately: a
+        // later rule may still block, and a block outranks a retry. Returning
+        // the first reask would let a low-priority advisory rule mask a
+        // high-priority refusal simply by sorting first.
+        let mut pending_reask: Option<Verdict> = None;
+
         for m in modules {
             let verdict = evaluate_wasm_rule(&self.engine, &m.module, ctx).await;
-            if let Verdict::Kill { reason, policy_id } = verdict {
-                // The runner has no rule identity — attribute the block here
-                // so logs and incidents name the rule that fired.
-                return Verdict::Kill {
-                    reason,
-                    policy_id: policy_id.or_else(|| Some(m.rule_id.clone())),
-                };
+            match verdict {
+                // The runner has no rule identity — attribute here so logs and
+                // incidents name the rule that fired.
+                Verdict::Kill { reason, policy_id } => {
+                    return Verdict::Kill {
+                        reason,
+                        policy_id: policy_id.or_else(|| Some(m.rule_id.clone())),
+                    };
+                }
+                // Attributed for the same reason, and one more: the request
+                // path keys the reask counter on this id. An unattributed reask
+                // would make every rule share one three-strike allowance, so an
+                // agent corrected once by two different rules would be blocked
+                // on its second *distinct* correction rather than on a repeated
+                // failure to correct — the exact inversion the counter exists to
+                // prevent, already documented for `detector_id` in proxy.rs.
+                Verdict::Reask { reason, attempts_remaining, policy_id } => {
+                    if pending_reask.is_none() {
+                        pending_reask = Some(Verdict::Reask {
+                            reason,
+                            attempts_remaining,
+                            policy_id: policy_id.or_else(|| Some(m.rule_id.clone())),
+                        });
+                    }
+                }
+                _ => {}
             }
         }
 
-        Verdict::Bypass
+        pending_reask.unwrap_or(Verdict::Bypass)
     }
 
     /// Rescan the local rules directory at most every 5 s (same TTL pattern

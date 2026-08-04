@@ -2394,13 +2394,75 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     if !has_break_glass {
         let wasm_verdict = state.wasm_registry.evaluate(&state.control_plane, &wasm_ctx).await;
         tracing::info!(workspace_id = %workspace_id, verdict = ?wasm_verdict, "WASM evaluation verdict");
-        if let crate::wasm::context::Verdict::Kill { reason, .. } = wasm_verdict {
-            tracing::warn!(workspace_id = %workspace_id, reason = %reason, "WASM custom rule blocked this request");
-            return json_error(
-                StatusCode::FORBIDDEN,
-                "policy_denied",
-                &format!("Request blocked by custom WASM governance rule: {}", reason),
-            );
+        match wasm_verdict {
+            crate::wasm::context::Verdict::Kill { reason, .. } => {
+                tracing::warn!(workspace_id = %workspace_id, reason = %reason, "WASM custom rule blocked this request");
+                return json_error(
+                    StatusCode::FORBIDDEN,
+                    "policy_denied",
+                    &format!("Request blocked by custom WASM governance rule: {}", reason),
+                );
+            }
+            // A WASM rule reaching the reask rung takes the same ladder the
+            // anomaly detectors take, rather than a second one beside it: same
+            // counter, same ceiling, same 409-then-403 escalation. Two ladders
+            // with two budgets would mean an agent's allowance depended on which
+            // half of the system refused it.
+            //
+            // Keyed on the rule id, which the registry attributed. Sharing one
+            // budget across rules would block an agent on its second *distinct*
+            // correction instead of a repeated failure to correct — the
+            // inversion documented at the anomaly path below.
+            //
+            // `shadow_enforcement` suppresses the counter as well as the
+            // refusal, for the reason stated there: a workspace leaving shadow
+            // mode must not arrive with its agents part-way to a hard block for
+            // corrections nobody ever asked them to make.
+            crate::wasm::context::Verdict::Reask { reason, policy_id, .. }
+                if !shadow_enforcement =>
+            {
+                let rule_id = policy_id.unwrap_or_else(|| "wasm".to_string());
+                let attempts = state.store.incr_reask_attempt(&session_id, &rule_id).await;
+
+                if attempts >= crate::plugins::anomaly::REASK_MAX_ATTEMPTS {
+                    tracing::warn!(
+                        workspace_id = %workspace_id,
+                        session_id = %session_id,
+                        rule_id = %rule_id,
+                        attempts,
+                        "WASM reask allowance exhausted — escalating to block"
+                    );
+                    return json_error(
+                        StatusCode::FORBIDDEN,
+                        "policy_denied",
+                        &format!(
+                            "Request blocked by custom WASM governance rule [{rule_id}] after {attempts} attempts: {reason}"
+                        ),
+                    );
+                }
+
+                let remaining = crate::plugins::anomaly::REASK_MAX_ATTEMPTS - attempts;
+                tracing::info!(
+                    workspace_id = %workspace_id,
+                    session_id = %session_id,
+                    rule_id = %rule_id,
+                    attempts,
+                    remaining,
+                    "WASM rule reasked the agent"
+                );
+                // 409 for the same reason as the anomaly path: 403 says "you may
+                // not do this", 409 says "not in this state" — and the state is
+                // one the agent can change itself.
+                return json_error(
+                    StatusCode::CONFLICT,
+                    "policy_reask",
+                    &format!(
+                        "{reason} ({remaining} attempt{} left before this is blocked)",
+                        if remaining == 1 { "" } else { "s" },
+                    ),
+                );
+            }
+            _ => {}
         }
     }
 

@@ -525,5 +525,145 @@ function runRules(ctx: RequestContext): i32 {
   // successful runs — real data, no ONNX runtime on the hot path, and a score that can
   // be explained to an auditor, which a reconstruction error cannot.
 
+  // ── Starter rules ───────────────────────────────────────────────────────
+  //
+  // Six rules covering the context fields with no other consumer, so each is
+  // simultaneously a worked example and the coverage test for the family it
+  // reads. Every one has a `mocks/<name>.block.json` and
+  // `mocks/<name>.allow.json` beside it, asserted in both directions by
+  // `__tests__/starterRules.test.ts` — which is the discipline SKILL.md asks
+  // of you, so the library models it rather than only describing it.
+  //
+  // Delete the ones you do not want. They are ordered cheapest-first: each
+  // returns before the next runs, and the whole file shares one 5 ms budget.
+
+  const contract = ruleToolContractPinned(ctx);
+  if (contract != 0) return contract;
+
+  const orphan = ruleOrphanedNode(ctx);
+  if (orphan != 0) return orphan;
+
+  const graphBudget = ruleGraphBudgetGuard(ctx);
+  if (graphBudget != 0) return graphBudget;
+
+  const harness = ruleHarnessAllowlist(ctx);
+  if (harness != 0) return harness;
+
+  const exfil = ruleInjectionThenEgress(ctx);
+  if (exfil != 0) return exfil;
+
+  const tier = ruleRiskTierCeiling(ctx);
+  if (tier != 0) return tier;
+
   return 0; // Bypass/Allow
+}
+
+// ─── Starter rule library ─────────────────────────────────────────────────
+//
+// Each returns 0 (allow), 1 (block) or 3 (reask). 2 is deprecated: the guest
+// never receives the request body, so the REDACT it named was never expressible.
+
+/**
+ * A tool's schema changed mid-session — the rug-pull.
+ *
+ * An MCP server can serve one description at connect time and another later.
+ * Nothing else in the SDK reads this flag, and no declarative rule can express
+ * it, so without this rule the signal reaches nobody.
+ *
+ * Blocks rather than reasks: the agent cannot correct a server changing its
+ * contract underneath it, so there is nothing to retry.
+ */
+export function ruleToolContractPinned(ctx: RequestContext): i32 {
+  return ctx.tool_contract_changed ? 1 : 0;
+}
+
+/**
+ * The parent of this node is gone.
+ *
+ * A node whose parent died is doing work nobody is waiting for, and is the
+ * usual shape of a runaway fan-out that keeps spending.
+ *
+ * Note the tri-state: `-1` means unknown, and unknown is NOT dead. Treating it
+ * as dead would block every single-agent session, since a root node has no
+ * parent to be alive.
+ */
+export function ruleOrphanedNode(ctx: RequestContext): i32 {
+  if (ctx.parent_alive == 0 && ctx.depth > 0) return 1;
+  return 0;
+}
+
+/**
+ * The graph as a whole has spent its budget.
+ *
+ * Per-node budgets do not bound a fan-out: ten nodes each under their own
+ * ceiling can be far over the graph's.
+ *
+ * The same `-1` discipline, and it matters more here — a graph whose cost was
+ * never aggregated is not a graph that has spent nothing, and treating unknown
+ * as zero would block graphs that have done nothing wrong.
+ */
+export function ruleGraphBudgetGuard(ctx: RequestContext): i32 {
+  if (ctx.graph_spend_usd < 0 || ctx.graph_budget_usd < 0) return 0; // unknown
+  if (ctx.graph_budget_usd == 0) return 0;                          // unbounded
+  return ctx.graph_spend_usd >= ctx.graph_budget_usd ? 1 : 0;
+}
+
+/**
+ * This request arrived on a harness the SOPs do not permit for this role.
+ *
+ * `harness` is resolved from the route, not claimed by the caller, so it is one
+ * of the few identity signals here that is trustworthy.
+ *
+ * Empty `allowed_harnesses` means unrestricted, not "permit nothing" — the
+ * inversion would block every workspace that never declared the key.
+ */
+export function ruleHarnessAllowlist(ctx: RequestContext): i32 {
+  if (ctx.allowed_harnesses.length == 0) return 0;
+  if (ctx.harness.length == 0) return 0;
+  for (let i = 0; i < ctx.allowed_harnesses.length; i++) {
+    if (ctx.allowed_harnesses[i].toLowerCase() == ctx.harness.toLowerCase()) return 0;
+  }
+  return 1;
+}
+
+/**
+ * A prompt-injection pattern matched, and this same turn is trying to egress.
+ *
+ * This is the conjunction `forbid_with:` cannot express — that key knows DLP
+ * taint, not injection findings — and it is the clearest illustration of when
+ * to reach for a WASM rule over front matter.
+ *
+ * Keyed on `new_tool_calls`, not `tool_sequence`. The latter is cumulative, so
+ * a rule reading it re-fires every subsequent turn for an egress that already
+ * happened, which is how an approved hold gets re-held forever.
+ *
+ * Reasks rather than blocks: injection findings are pattern matches on
+ * untrusted text and do produce false positives, so the agent is told what it
+ * tripped and given the chance to proceed without the egress.
+ */
+export function ruleInjectionThenEgress(ctx: RequestContext): i32 {
+  if (ctx.injection_findings.length == 0) return 0;
+  for (let i = 0; i < ctx.new_tool_calls.length; i++) {
+    const t = ctx.new_tool_calls[i];
+    if (t == "action:http_post" || t == "action:pii_export") return 3; // reask
+  }
+  return 0;
+}
+
+/**
+ * Critical-risk work is held to a stricter bar.
+ *
+ * `risk_tier` has no consumer inside the proxy — it is delivered here and
+ * nowhere else — so until this rule existed a workspace declaring it got a
+ * startup warning saying nothing could act on it.
+ *
+ * Reasks: the tier describes the SOP, not the request, so the agent may well
+ * have a legitimate reason to proceed and should get to say so.
+ */
+export function ruleRiskTierCeiling(ctx: RequestContext): i32 {
+  if (ctx.risk_tier != "Critical") return 0;
+  for (let i = 0; i < ctx.new_tool_calls.length; i++) {
+    if (ctx.new_tool_calls[i] == "action:deploy") return 3; // reask
+  }
+  return 0;
 }

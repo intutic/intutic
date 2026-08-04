@@ -260,3 +260,57 @@ async fn a_rule_that_cannot_link_is_refused_at_load_rather_than_bypassed_per_req
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A WASM rule can reach the reask rung, and `2` still kills.
+///
+/// The guest ABI was narrower than the enum it maps onto. `runner.rs` sent
+/// `0 -> Bypass`, `1 -> Kill`, `2 -> Kill` behind an unresolved comment asking
+/// what `2` should mean, and everything else to a silent `Bypass`. So a rule
+/// returning `2` believing it redacted got a kill, and one returning `3`
+/// believing it reasked got an allow — neither reported to its author.
+///
+/// `2` cannot mean redaction and never could: the guest is never given the
+/// request body, so there is nothing for it to redact. It is retained as a kill
+/// for compatibility, because an already-installed rule returning it must not
+/// change meaning, and deprecated by name.
+#[tokio::test]
+async fn a_wasm_rule_can_reask_and_two_still_kills() {
+    let valkey = control_plane();
+    let dir = temp_rule_dir("verdicts");
+    let registry = PluginRegistry::new(dir.to_str()).await.unwrap();
+    let ctx = test_ctx("test-ws-verdicts");
+
+    // 3 = Reask, attributed to the rule that asked for it — the counter is
+    // keyed on that id, so an unattributed reask would share one allowance
+    // across every rule.
+    std::fs::write(dir.join("10_reask.wasm"), rule_wasm(3)).unwrap();
+    registry.force_local_rescan().await;
+    match registry.evaluate(&valkey, &ctx).await {
+        Verdict::Reask { policy_id, .. } => {
+            assert_eq!(policy_id.as_deref(), Some("local:10_reask.wasm"));
+        }
+        other => panic!("expected Reask from verdict code 3, got {other:?}"),
+    }
+    std::fs::remove_file(dir.join("10_reask.wasm")).unwrap();
+
+    // 2 still kills, so an installed rule does not change meaning.
+    std::fs::write(dir.join("10_legacy.wasm"), rule_wasm(2)).unwrap();
+    registry.force_local_rescan().await;
+    assert!(matches!(
+        registry.evaluate(&valkey, &ctx).await,
+        Verdict::Kill { .. }
+    ));
+    std::fs::remove_file(dir.join("10_legacy.wasm")).unwrap();
+
+    // A kill still outranks a reask regardless of priority order: the reask
+    // rule sorts first and must not short-circuit ahead of the block.
+    std::fs::write(dir.join("10_reask.wasm"), rule_wasm(3)).unwrap();
+    std::fs::write(dir.join("90_kill.wasm"), rule_wasm(1)).unwrap();
+    registry.force_local_rescan().await;
+    assert!(
+        matches!(registry.evaluate(&valkey, &ctx).await, Verdict::Kill { .. }),
+        "a reask must not mask a block from a lower-priority rule"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

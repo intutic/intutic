@@ -116,23 +116,49 @@ pub async fn evaluate_wasm_rule(engine: &Engine, module: &Module, ctx: &RequestC
                     reason: "Blocked by custom WASM governance rule".to_string(),
                     policy_id: None,
                 },
+                // `2` was specified as REDACT and can never have meant it.
+                //
+                // The guest is deliberately never given the request body —
+                // `RequestContext` carries no prompt and no raw payload — so
+                // there is nothing for a rule to redact. That is why the comment
+                // that stood here was an unresolved argument with itself rather
+                // than a decision.
+                //
+                // Retained as a kill, because an already-installed rule
+                // returning `2` must not change meaning under an upgrade, and
+                // named in the log so its author can move to `1`. New rules are
+                // refused this code at `intutic policy install`.
                 2 => {
-                    // Verdict::Enhance or Redact?
-                    // LLD says:
-                    // 0 -> ALLOW
-                    // 1 -> BLOCK
-                    // 2 -> REDACT (strip matching fields)
-                    // If we return a Kill, let's treat 1 or 2 as Kill for now,
-                    // or let evaluate determine.
-                    // Wait, let's support block for both 1 and 2 to be safe,
-                    // or map 2 to a redacted state or just Kill with reason.
+                    tracing::warn!(
+                        "WASM rule returned deprecated verdict code 2 (REDACT). The guest \
+                         never receives the request body, so redaction was never expressible; \
+                         treating it as a block. Return 1 to block, or 3 to reask."
+                    );
                     Verdict::Kill {
-                        reason: "Blocked by custom WASM governance rule (DLP)".to_string(),
+                        reason: "Blocked by custom WASM governance rule (legacy code 2)".to_string(),
                         policy_id: None,
                     }
                 }
+                // `3` = reask: refuse this attempt, tell the agent why, let it
+                // retry. `attempts_remaining` is a placeholder — only the
+                // request path knows how many tries are left, because only it
+                // has incremented the counter. `policy_id` is filled in by the
+                // registry, the only layer that knows the rule id.
+                3 => Verdict::Reask {
+                    reason: "Refused by custom WASM governance rule — revise and retry"
+                        .to_string(),
+                    attempts_remaining: 0,
+                    policy_id: None,
+                },
                 _ => {
-                    tracing::warn!("WASM plugin returned unknown verdict code: {}", verdict_val);
+                    // Still fail-open, but loud and specific. A rule returning
+                    // an unmapped code was silently allowed, so an author who
+                    // invented a rung got no signal at all.
+                    tracing::warn!(
+                        code = verdict_val,
+                        "WASM rule returned an unmapped verdict code; allowing. Valid codes \
+                         are 0 (allow), 1 (block) and 3 (reask)."
+                    );
                     Verdict::Bypass
                 }
             }
