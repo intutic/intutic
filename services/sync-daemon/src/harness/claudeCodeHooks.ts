@@ -48,6 +48,38 @@ export type SopHookConstraints = z.infer<typeof SopHookConstraintsSchema>
  * Extracts constraints from SOP registry entries.
  * Looks inside SOP markdown content for structured JSON/YAML blocks or parses settings.
  */
+/**
+ * The front-matter key this harness re-parses, lowercased once.
+ *
+ * The Rust side owns this directive; the TS side reads it a second time because
+ * the two gates run in different runtimes with no shared parser, and a fixture
+ * test pins them together.
+ */
+const REVIEW_BEFORE_KEY = 'review_before:'
+
+/**
+ * Strip surrounding quotes and brackets in one linear pass.
+ *
+ * Replaces `/^["'[]+|["'\]]+$/g`, which CodeQL flagged as polynomial: the
+ * trailing alternative is `+` anchored to end-of-string, so a token that is a
+ * long run of quote characters and never reaches the end makes the engine
+ * retry from every position. `content` is SOP text, and an agent that can write
+ * a SOP file chooses it — so that was a denial of service against the daemon
+ * doing the governing.
+ *
+ * Mirrors Rust's `trim_matches(['"', '\'', '[', ']'])` in `sops.rs`, which is
+ * what this parser is pinned against, and which was never a regex.
+ */
+function trimQuotesAndBrackets(value: string): string {
+  const isTrimmable = (c: string): boolean =>
+    c === '"' || c === "'" || c === '[' || c === ']'
+  let start = 0
+  let end = value.length
+  while (start < end && isTrimmable(value[start]!)) start++
+  while (end > start && isTrimmable(value[end - 1]!)) end--
+  return value.slice(start, end)
+}
+
 export function parseSopConstraints(
   sops: SyncSopEntry[],
   settings?: Record<string, unknown> | import('@intutic/shared-types').WorkspaceSettings,
@@ -120,9 +152,24 @@ export function parseSopConstraints(
     // line — and pinned against the Rust side by a fixture test, because two
     // parsers for one directive is exactly how a rule ends up enforced at one
     // gate and silently ignored at the other.
-    for (const m of content.matchAll(/^\s*review_before:\s*(.+)$/gim)) {
-      for (const token of (m[1] ?? '').split(',')) {
-        const cleaned = token.trim().replace(/^["'[]+|["'\]]+$/g, '')
+    //
+    // Scanned line by line rather than with `/^\s*review_before:\s*(.+)$/gim`,
+    // and trimmed with a linear pass rather than `/^["'[]+|["'\]]+$/g`. Both
+    // regexes were polynomial on input this function does not control: `content`
+    // is SOP file text, and an agent that can write a SOP file chooses it. A run
+    // of whitespace that never reaches `review_before:` makes the first
+    // backtrack from every start position, and a run of quotes that never
+    // reaches end-of-string does the same to the second — so a crafted SOP could
+    // hang the sync daemon, which is the process enforcing governance.
+    //
+    // The replacement is also closer to the Rust side it is pinned against:
+    // `sops.rs` uses `trim()` and `trim_matches(['"', '\'', '[', ']'])`, neither
+    // of which is a regex.
+    for (const rawLine of content.split('\n')) {
+      const line = rawLine.trimStart()
+      if (!line.toLowerCase().startsWith(REVIEW_BEFORE_KEY)) continue
+      for (const token of line.slice(REVIEW_BEFORE_KEY.length).split(',')) {
+        const cleaned = trimQuotesAndBrackets(token.trim())
         if (cleaned) reviewBeforeSet.add(cleaned)
       }
     }
