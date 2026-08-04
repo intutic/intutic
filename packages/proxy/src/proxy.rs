@@ -2371,8 +2371,34 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                             threshold = estimate.threshold_usd,
                             "Cost prediction gate triggered"
                         );
+                        // A streaming client gets a structured error, not a
+                        // synthetic 200.
+                        //
+                        // The gate answers with a fake assistant turn so the
+                        // user reads the reason in their chat, which is the
+                        // right call for a normal request. For `"stream": true`
+                        // it is not: a single non-SSE JSON blob on a stream the
+                        // client is parsing as `text/event-stream` is a parse
+                        // failure, not a message. A non-200 is the one thing
+                        // every client already handles on a streaming request.
+                        let wants_stream = body_json
+                            .get("stream")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                        if wants_stream {
+                            return json_error(
+                                StatusCode::PAYMENT_REQUIRED,
+                                "COST_GATE_EXCEEDED",
+                                &format!(
+                                    "This request is estimated to cost ${:.4}, which exceeds the \
+                                     workspace cost-prediction threshold of ${:.4}.",
+                                    estimate.estimated_cost_usd,
+                                    estimate.threshold_usd.unwrap_or_default(),
+                                ),
+                            );
+                        }
                         let gate_response =
-                            CostPredictionGate::format_gate_response(&estimate, &model);
+                            CostPredictionGate::format_gate_response(&estimate, &model, &protocol);
                         return Response::builder()
                             .status(StatusCode::OK)
                             .header("content-type", "application/json")
