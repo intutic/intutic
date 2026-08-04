@@ -167,6 +167,12 @@ const sidebarReference = [
     items: [
       { text: 'CLI (Open-Core)', link: '/reference/cli' },
       { text: 'CLI Doctor (Open-Core)', link: '/reference/cli-doctor' },
+      // Unconditional, and deliberately distinct from the Cloud "SOP Format"
+      // page below: the front-matter rules are enforced by the open-core proxy,
+      // and until this page existed they were documented nowhere a public
+      // reader could reach — the only page that covered SOPs at all is
+      // Cloud-badged and therefore excluded from this build entirely.
+      { text: 'SOP Front Matter (Open-Core)', link: '/reference/sop-front-matter' },
       ...(!IS_OSS ? [
         { text: 'REST API (Cloud)', link: '/reference/api' },
         { text: 'SOP Format (Cloud)', link: '/reference/sop-format' },

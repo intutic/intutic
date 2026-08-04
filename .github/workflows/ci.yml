@@ -52,6 +52,16 @@ jobs:
       - name: Verify no unsupported latency claim in published docs
         run: pnpm lint:latency-claims
 
+      # The four ordering keys ship enforcing, with kills, and were documented
+      # nowhere a reader of this repo could open. And the CLI's install-time
+      # validation offered a host import the proxy never registered, so a rule
+      # using randomness installed clean and then failed open on every request.
+      - name: Verify every SOP front-matter key is documented and accounted for
+        run: pnpm lint:sop-keys
+
+      - name: Verify WASM host imports agree across the proxy and the CLI
+        run: pnpm lint:wasm-host-imports
+
   typecheck:
     name: Typecheck (TS Workspaces) - Run TypeScript typecheck
     runs-on: ubuntu-latest

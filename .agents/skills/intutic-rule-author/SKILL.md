@@ -37,7 +37,8 @@ Sandbox constraints — violating them silently disables the rule (the proxy **f
 
 - 5 ms wall-clock budget, 1,000,000 fuel, 16 MB memory.
 - Keep logic simple: no unbounded loops over `arguments`, no recursion, no I/O (none exists in the sandbox).
-- Host imports are limited to `env.log_info`, `env.trace`, `env.abort` and `env.seed`. A rule that imports anything else fails to instantiate, and `intutic policy install` rejects it.
+- Host imports are limited to `env.log_info`, `env.trace` and `env.abort`. A rule importing anything else cannot link, so it is refused at `intutic policy install` and refused again when the proxy loads it.
+- **`Math.random()` is unavailable.** AssemblyScript compiles it to an `env.seed` import the proxy does not provide. This list previously named `env.seed`, and a rule using randomness installed clean and then failed to link on every request — enforcing nothing, silently. Beyond the missing import, a verdict that samples is not a verdict: the same request would get different answers, and the audit trail would not explain either.
 
 ## 3. Compile
 
