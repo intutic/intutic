@@ -27,9 +27,12 @@ COPY packages/theme/ ./packages/theme/
 COPY apps/docs/ ./apps/docs/
 COPY tsconfig.base.json ./tsconfig.base.json
 
-# Set explicit Open Source build flags for public docs.intutic.ai deployment
-ENV INTUTIC_OPEN_SOURCE=true
-ENV INTUTIC_MODE=oss
+# Open Source build flags for the public docs.intutic.ai deployment.
+#
+# INTUTIC_OPEN_SOURCE and INTUTIC_MODE used to sit here too. Nothing in either
+# repo ever read them, so they advertised four gates where two existed — and
+# the two decorative ones would have kept passing if the real gating were
+# deleted. Removed, matching the enterprise Dockerfile.
 ENV INTUTIC_ENTERPRISE_BUILD=false
 # Fail the build outright if OSS gating is ever off — see the guard in
 # apps/docs/.vitepress/config.ts. Without this the failure mode is a silently
