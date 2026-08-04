@@ -72,6 +72,45 @@ accepted and silently never fired. The eight actions are:
 
 Matching ignores case, so `Action:Deploy` works.
 
+#### `~>` when they must be adjacent
+
+`->` means "somewhere before"; `~>` tightens it to "immediately before". The
+same arrow works in both keys:
+
+```markdown
+forbid_after: action:secret_read ~> action:http_post
+```
+
+That forbids posting *directly* after reading a credential, and permits it if
+something happened in between. Use `->` unless you specifically mean adjacency —
+it is the stronger rule.
+
+#### Count bounds
+
+```markdown
+max_calls: action:deploy <= 3, Bash <= 50
+```
+
+At most N calls to that tool or action in one run. There is no built-in ceiling
+and no default: how many deploys is too many is a question only you can answer,
+and a number we invented would be exactly the guess our own promotion rule
+forbids.
+
+#### Taint
+
+```markdown
+forbid_with: secrets(), action:http_post
+forbid_with: pii(), action:db_write
+```
+
+"A request carrying this kind of material may not also do that." `secrets()`
+covers credentials as well as keys — a database URL with a password in it counts.
+
+Note the shape: this is **co-occurrence, not ordering**. The DLP scanner reports
+that a secret is *present in the request*, not which tool call carried it, so a
+rule claiming the secret came *before* the post would assert a sequence position
+the data does not support. We check what we can actually know.
+
 #### These rules replace the defaults for their own key
 
 The proxy ships built-in ordering rules — deploy/publish/release each require

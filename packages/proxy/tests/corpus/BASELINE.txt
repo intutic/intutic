@@ -38,6 +38,7 @@ Corpus: 1000 BFCL seeds (1000 with at least one parsed call), 339 NotInject prom
   detector_id                  | measured           | benign_fired | mutant_cases
   -----------------------------|--------------------|--------------|-------------
   budget_exhaustion            | not-measured       |            0 |            0
+  call_ceiling                 | not-measured       |            0 |            0
   consecutive_repeat           | external-bfcl      |            2 |            1
   context_growth               | not-measured       |            0 |            0
   cross_harness_violation      | not-measured       |            0 |            0
@@ -55,6 +56,7 @@ Corpus: 1000 BFCL seeds (1000 with at least one parsed call), 339 NotInject prom
   schema_drift                 | not-measured       |            0 |            0
   scope_path                   | not-measured       |            0 |            0
   spawn_budget_breach          | not-measured       |            0 |            0
+  taint_cooccurrence           | not-measured       |            0 |            0
   tool_diversity_collapse      | external-bfcl      |            0 |            1
   transition_probability       | external-bfcl      |            2 |            0
   unauthorized_tool            | not-measured       |            0 |            0

@@ -43,6 +43,8 @@ fn test_ctx(workspace_id: &str) -> RequestContext {
         review_before: Vec::new(),
         requires_before: Vec::new(),
         forbid_after: Vec::new(),
+        max_calls: Vec::new(),
+        forbid_with: Vec::new(),
         changes: Vec::new(),
         new_tool_calls: Vec::new(),
         transition_baseline: None,

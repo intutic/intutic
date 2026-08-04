@@ -126,10 +126,14 @@ pub struct Sop {
     /// rejected once, at load, instead of failing to match silently forever on
     /// the hot path — the difference between a warning an operator can see and a
     /// guardrail that quietly does nothing.
-    pub requires_before: Vec<(String, String)>,
+    pub requires_before: Vec<(String, String, bool)>,
+    /// At most N calls to this tool or action in one run.
+    pub max_calls: Vec<(String, usize)>,
+    /// `(taint, token)` — these two must not co-occur in one request.
+    pub forbid_with: Vec<(String, String)>,
     /// Ordering rules this SOP forbids: `A -> B` means B must not run *after* A.
     /// Parsed from `forbid_after:`.
-    pub forbid_after: Vec<(String, String)>,
+    pub forbid_after: Vec<(String, String, bool)>,
 }
 
 impl Sop {
@@ -166,8 +170,10 @@ struct FrontMatter {
     plan_steps: Vec<String>,
     scope_paths: Vec<String>,
     review_before: Vec<String>,
-    requires_before: Vec<(String, String)>,
-    forbid_after: Vec<(String, String)>,
+    requires_before: Vec<(String, String, bool)>,
+    forbid_after: Vec<(String, String, bool)>,
+    max_calls: Vec<(String, usize)>,
+    forbid_with: Vec<(String, String)>,
     /// Rules that failed to parse, kept so they can be reported rather than
     /// dropped. A malformed ordering rule must not read as "no rule declared".
     rule_errors: Vec<String>,
@@ -218,6 +224,10 @@ fn parse_front_matter(raw: &str) -> FrontMatter {
 
     let requires = parse_rules(front, "requires_before:");
     let forbids = parse_rules(front, "forbid_after:");
+    // `max_calls:` splits on commas (each item is `A <= N`); `forbid_with:`
+    // does NOT, because a comma is its own separator between taint and token.
+    let counts = parse_items(front, "max_calls:", true, parse_count_bound);
+    let cooccur = parse_items(front, "forbid_with:", false, parse_cooccurrence);
 
     FrontMatter {
         roles: list("roles:", true),
@@ -240,9 +250,13 @@ fn parse_front_matter(raw: &str) -> FrontMatter {
         review_before: list("review_before:", false),
         requires_before: requires.0,
         forbid_after: forbids.0,
+        max_calls: counts.0,
+        forbid_with: cooccur.0,
         rule_errors: {
             let mut e = requires.1;
             e.extend(forbids.1);
+            e.extend(counts.1);
+            e.extend(cooccur.1);
             e
         },
         body: body.trim_start_matches("\n---").trim().to_string(),
@@ -260,9 +274,20 @@ fn parse_front_matter(raw: &str) -> FrontMatter {
 /// Returns `Err(reason)` rather than dropping the rule. An ordering rule that
 /// cannot match is indistinguishable from no rule at all once it reaches the hot
 /// path, so the only place it can be reported is here.
-fn parse_rule(raw: &str) -> Result<(String, String), String> {
-    let Some((lhs, rhs)) = raw.split_once("->") else {
-        return Err(format!("{raw:?}: expected `A -> B`"));
+/// Parse `A -> B` or `A ~> B`, returning `(before, after, adjacent)`.
+///
+/// `~>` is a **tightening** of `->`, not a different kind of rule: it says the
+/// two must be *adjacent* rather than merely ordered. Reusing the same key with
+/// a stricter arrow keeps one concept in one place — a separate
+/// `forbid_directly_after:` key would make an operator learn two names for one
+/// idea and then guess which the built-ins use.
+fn parse_ordering(raw: &str) -> Result<(String, String, bool), String> {
+    let (lhs, rhs, adjacent) = if let Some((l, r)) = raw.split_once("~>") {
+        (l, r, true)
+    } else if let Some((l, r)) = raw.split_once("->") {
+        (l, r, false)
+    } else {
+        return Err(format!("{raw:?}: expected `A -> B` or `A ~> B`"));
     };
     let lhs = lhs.trim();
     let rhs = rhs.trim();
@@ -288,11 +313,93 @@ fn parse_rule(raw: &str) -> Result<(String, String), String> {
             ));
         }
     }
-    Ok((lhs.to_string(), rhs.to_string()))
+    Ok((lhs.to_string(), rhs.to_string(), adjacent))
+}
+
+/// Split one front-matter key into comma-free items, then parse each.
+fn parse_items<T>(
+    front: &str,
+    key: &str,
+    split_on_comma: bool,
+    f: impl Fn(&str) -> Result<T, String>,
+) -> (Vec<T>, Vec<String>) {
+    let mut ok = Vec::new();
+    let mut errs = Vec::new();
+    for raw in front
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix(key))
+        .flat_map(|v| {
+            if split_on_comma {
+                v.split(',').map(str::to_string).collect::<Vec<_>>()
+            } else {
+                vec![v.to_string()]
+            }
+        })
+        .map(|r| r.trim().trim_matches(['"', '\'', '[', ']']).trim().to_string())
+        .filter(|r| !r.is_empty())
+    {
+        match f(&raw) {
+            Ok(v) => ok.push(v),
+            Err(e) => errs.push(format!("{key} {e}")),
+        }
+    }
+    (ok, errs)
+}
+
+/// Parse `A <= N` — at most N calls to A in one run.
+///
+/// The one bound an operator can state without knowing anything about our
+/// internals: "this run should not call the deploy path eleven times."
+fn parse_count_bound(raw: &str) -> Result<(String, usize), String> {
+    let Some((lhs, rhs)) = raw.split_once("<=") else {
+        return Err(format!("{raw:?}: expected `A <= N`"));
+    };
+    let token = lhs.trim();
+    if token.is_empty() {
+        return Err(format!("{raw:?}: the tool or action must be named"));
+    }
+    if token.split_whitespace().count() > 1 {
+        return Err(format!(
+            "{token:?} looks like a shell command. Count bounds name tools \
+             (`Bash`) or actions (`action:deploy`), never commands."
+        ));
+    }
+    let n: usize = rhs
+        .trim()
+        .parse()
+        .map_err(|_| format!("{raw:?}: {:?} is not a whole number", rhs.trim()))?;
+    Ok((token.to_string(), n))
+}
+
+/// Parse `secrets(), action:http_post` — two things that must not co-occur.
+///
+/// Taint, expressed as **co-occurrence rather than succession**, and the
+/// distinction is a limit of what we can honestly know. `dlp_findings` is the
+/// scan of the whole request body: it says a secret is *present*, not which tool
+/// call carried it. Writing this as an ordering rule would imply a position in
+/// the sequence that nothing in the data supports — the exact "shipping it as if
+/// it were real" failure. So the rule is "these two together, in this request".
+fn parse_cooccurrence(raw: &str) -> Result<(String, String), String> {
+    let Some((lhs, rhs)) = raw.split_once(',') else {
+        return Err(format!("{raw:?}: expected `taint(), token` — e.g. `secrets(), action:http_post`"));
+    };
+    let taint = lhs.trim().to_ascii_lowercase();
+    if !matches!(taint.as_str(), "secrets()" | "pii()") {
+        return Err(format!(
+            "{:?}: the left side must be `secrets()` or `pii()` — the only two \
+             categories the DLP scanner reports",
+            lhs.trim()
+        ));
+    }
+    let token = rhs.trim();
+    if token.is_empty() {
+        return Err(format!("{raw:?}: the right side must name a tool or action"));
+    }
+    Ok((taint, token.to_string()))
 }
 
 /// Parse every `A -> B` under one front-matter key, splitting good from bad.
-fn parse_rules(front: &str, key: &str) -> (Vec<(String, String)>, Vec<String>) {
+fn parse_rules(front: &str, key: &str) -> (Vec<(String, String, bool)>, Vec<String>) {
     let mut ok = Vec::new();
     let mut errs = Vec::new();
     for raw in front
@@ -302,8 +409,8 @@ fn parse_rules(front: &str, key: &str) -> (Vec<(String, String)>, Vec<String>) {
         .map(|r| r.trim().trim_matches(['"', '\'', '[', ']']).trim().to_string())
         .filter(|r| !r.is_empty())
     {
-        match parse_rule(&raw) {
-            Ok(pair) => ok.push(pair),
+        match parse_ordering(&raw) {
+            Ok(t) => ok.push(t),
             Err(e) => errs.push(format!("{key} {e}")),
         }
     }
@@ -336,6 +443,8 @@ fn read_dir_sops(dir: &Path) -> Vec<Sop> {
                 && fm.review_before.is_empty()
                 && fm.requires_before.is_empty()
                 && fm.forbid_after.is_empty()
+                && fm.max_calls.is_empty()
+                && fm.forbid_with.is_empty()
                 && fm.rule_errors.is_empty()
             {
                 return None;
@@ -364,6 +473,8 @@ fn read_dir_sops(dir: &Path) -> Vec<Sop> {
                 review_before: fm.review_before,
                 requires_before: fm.requires_before,
                 forbid_after: fm.forbid_after,
+                max_calls: fm.max_calls,
+                forbid_with: fm.forbid_with,
             })
         })
         .collect();
@@ -718,8 +829,8 @@ pub fn plan_steps_for_role(role: &str) -> Vec<String> {
 /// with a single combined list and a kind filter, an "any rules declared?" gate
 /// would do exactly that, and the failure would be silent in the direction that
 /// removes enforcement.
-fn collect_requires_before(sops: &[Sop], role: &str) -> Vec<(String, String)> {
-    let mut out: Vec<(String, String)> = sops
+fn collect_requires_before(sops: &[Sop], role: &str) -> Vec<(String, String, bool)> {
+    let mut out: Vec<(String, String, bool)> = sops
         .iter()
         .filter(|s| s.applies_to(role))
         .flat_map(|s| s.requires_before.iter().cloned())
@@ -729,12 +840,12 @@ fn collect_requires_before(sops: &[Sop], role: &str) -> Vec<(String, String)> {
     out
 }
 
-pub fn requires_before_for_role(role: &str) -> Vec<(String, String)> {
+pub fn requires_before_for_role(role: &str) -> Vec<(String, String, bool)> {
     collect_requires_before(&all_sops(), role)
 }
 
-fn collect_forbid_after(sops: &[Sop], role: &str) -> Vec<(String, String)> {
-    let mut out: Vec<(String, String)> = sops
+fn collect_forbid_after(sops: &[Sop], role: &str) -> Vec<(String, String, bool)> {
+    let mut out: Vec<(String, String, bool)> = sops
         .iter()
         .filter(|s| s.applies_to(role))
         .flat_map(|s| s.forbid_after.iter().cloned())
@@ -744,8 +855,30 @@ fn collect_forbid_after(sops: &[Sop], role: &str) -> Vec<(String, String)> {
     out
 }
 
-pub fn forbid_after_for_role(role: &str) -> Vec<(String, String)> {
+pub fn forbid_after_for_role(role: &str) -> Vec<(String, String, bool)> {
     collect_forbid_after(&all_sops(), role)
+}
+
+pub fn max_calls_for_role(role: &str) -> Vec<(String, usize)> {
+    let mut out: Vec<(String, usize)> = all_sops()
+        .iter()
+        .filter(|s| s.applies_to(role))
+        .flat_map(|s| s.max_calls.iter().cloned())
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+pub fn forbid_with_for_role(role: &str) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = all_sops()
+        .iter()
+        .filter(|s| s.applies_to(role))
+        .flat_map(|s| s.forbid_with.iter().cloned())
+        .collect();
+    out.sort();
+    out.dedup();
+    out
 }
 
 fn collect_plan_steps(sops: &[Sop], role: &str) -> Vec<String> {
@@ -916,6 +1049,8 @@ mod tests {
             review_before: Vec::new(),
             requires_before: Vec::new(),
             forbid_after: Vec::new(),
+            max_calls: Vec::new(),
+            forbid_with: Vec::new(),
         }
     }
 
@@ -1011,6 +1146,8 @@ mod tests {
                 review_before: Vec::new(),
             requires_before: Vec::new(),
             forbid_after: Vec::new(),
+            max_calls: Vec::new(),
+            forbid_with: Vec::new(),
             })
             .collect();
         let out = render(&big, "any").unwrap();
@@ -1290,6 +1427,8 @@ mod discovery_tests {
             review_before: fm.review_before,
             requires_before: fm.requires_before,
             forbid_after: fm.forbid_after,
+            max_calls: fm.max_calls,
+            forbid_with: fm.forbid_with,
         }
     }
 
@@ -1305,13 +1444,13 @@ mod discovery_tests {
         assert_eq!(
             s.requires_before,
             vec![
-                ("action:run_tests".to_string(), "action:deploy".to_string()),
-                ("action:lint".to_string(), "action:merge".to_string()),
+                ("action:run_tests".to_string(), "action:deploy".to_string(), false),
+                ("action:lint".to_string(), "action:merge".to_string(), false),
             ],
         );
         assert_eq!(
             s.forbid_after,
-            vec![("action:secret_read".to_string(), "action:http_post".to_string())],
+            vec![("action:secret_read".to_string(), "action:http_post".to_string(), false)],
         );
     }
 
@@ -1328,9 +1467,9 @@ mod discovery_tests {
             "---\nrequires_before: A -> B\nforbid_after: C -> D\n---\nbody\n",
         );
         // requires: A comes first, B is the thing being guarded.
-        assert_eq!(s.requires_before[0], ("A".into(), "B".into()));
+        assert_eq!(s.requires_before[0], ("A".into(), "B".into(), false));
         // forbid: C comes first, D is the thing that must not follow.
-        assert_eq!(s.forbid_after[0], ("C".into(), "D".into()));
+        assert_eq!(s.forbid_after[0], ("C".into(), "D".into(), false));
     }
 
     /// A rule naming a shell command is refused, loudly.
@@ -1344,22 +1483,22 @@ mod discovery_tests {
     /// Rejecting at parse is the only moment anyone finds out.
     #[test]
     fn a_rule_naming_a_shell_command_is_rejected() {
-        let err = parse_rule("git push -> action:deploy").expect_err("must be refused");
+        let err = parse_ordering("git push -> action:deploy").expect_err("must be refused");
         assert!(err.contains("shell command"), "{err}");
         assert!(err.contains("action:"), "the message must name the vocabulary: {err}");
 
         // And the correct form is accepted.
-        assert!(parse_rule("action:run_tests -> action:deploy").is_ok());
+        assert!(parse_ordering("action:run_tests -> action:deploy").is_ok());
         // Raw tool names are fine — succession over tools is legitimate.
-        assert!(parse_rule("Read -> Write").is_ok());
+        assert!(parse_ordering("Read -> Write").is_ok());
     }
 
     #[test]
     fn a_malformed_rule_is_reported_not_silently_dropped() {
         // No arrow at all, and an empty side.
-        assert!(parse_rule("action:deploy").is_err());
-        assert!(parse_rule("-> action:deploy").is_err());
-        assert!(parse_rule("action:deploy ->").is_err());
+        assert!(parse_ordering("action:deploy").is_err());
+        assert!(parse_ordering("-> action:deploy").is_err());
+        assert!(parse_ordering("action:deploy ->").is_err());
 
         // The SOP still loads: one bad rule must not disarm the good ones beside
         // it. The bad rule lands in rule_errors, which the loader logs.
@@ -1607,6 +1746,8 @@ mod deny_tests {
             review_before: Vec::new(),
             requires_before: Vec::new(),
             forbid_after: Vec::new(),
+            max_calls: Vec::new(),
+            forbid_with: Vec::new(),
         }
     }
 
@@ -1692,6 +1833,8 @@ mod harness_policy_tests {
                 review_before: Vec::new(),
             requires_before: Vec::new(),
             forbid_after: Vec::new(),
+            max_calls: Vec::new(),
+            forbid_with: Vec::new(),
             },
             Sop {
                 title: "b".into(),
@@ -1704,6 +1847,8 @@ mod harness_policy_tests {
                 review_before: Vec::new(),
             requires_before: Vec::new(),
             forbid_after: Vec::new(),
+            max_calls: Vec::new(),
+            forbid_with: Vec::new(),
             },
         ];
         assert_eq!(collect_harnesses(&sops, "reviewer"), vec!["claude-code"]);
@@ -1754,6 +1899,8 @@ mod plan_step_tests {
                 review_before: Vec::new(),
             requires_before: Vec::new(),
             forbid_after: Vec::new(),
+            max_calls: Vec::new(),
+            forbid_with: Vec::new(),
             },
             Sop {
                 title: "review".into(),
@@ -1766,6 +1913,8 @@ mod plan_step_tests {
                 review_before: Vec::new(),
             requires_before: Vec::new(),
             forbid_after: Vec::new(),
+            max_calls: Vec::new(),
+            forbid_with: Vec::new(),
             },
         ];
         assert_eq!(
@@ -1791,6 +1940,8 @@ mod plan_step_tests {
             review_before: Vec::new(),
             requires_before: Vec::new(),
             forbid_after: Vec::new(),
+            max_calls: Vec::new(),
+            forbid_with: Vec::new(),
         }];
         assert!(collect_plan_steps(&sops, "reviewer").is_empty());
         assert!(collect_plan_steps(&sops, "").is_empty());
@@ -1868,6 +2019,8 @@ mod scope_and_review_tests {
             review_before: vec!["action:deploy".into()],
             requires_before: Vec::new(),
             forbid_after: Vec::new(),
+            max_calls: Vec::new(),
+            forbid_with: Vec::new(),
         }];
         assert!(collect_scope_paths(&sops, "reviewer").is_empty());
         assert!(collect_review_before(&sops, "reviewer").is_empty());
@@ -1887,6 +2040,8 @@ mod scope_and_review_tests {
             review_before: vec![],
             requires_before: Vec::new(),
             forbid_after: Vec::new(),
+            max_calls: Vec::new(),
+            forbid_with: Vec::new(),
         };
         let sops = vec![mk("packages/proxy"), mk("infra"), mk("packages/proxy")];
         assert_eq!(collect_scope_paths(&sops, "anyone"), vec!["infra", "packages/proxy"]);

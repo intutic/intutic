@@ -186,7 +186,7 @@ pub struct RequestContext {
     /// operator declares one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub review_before: Vec<String>,
-    /// Ordering rules this node's SOPs declare: `(before, after)` — `after` must
+    /// Ordering rules this node's SOPs declare: `(before, after, adjacent)` — `after` must
     /// not run unless `before` ran first.
     ///
     /// Resolved on the request path like `review_before` above, so the detector
@@ -196,11 +196,24 @@ pub struct RequestContext {
     /// nothing must not end up with less enforcement than before this field
     /// existed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub requires_before: Vec<(String, String)>,
-    /// Ordering rules this node's SOPs forbid: `(first, then)` — `then` must not
-    /// run *after* `first`. Same built-ins-as-floor rule as `requires_before`.
+    pub requires_before: Vec<(String, String, bool)>,
+    /// Ordering rules this node's SOPs forbid: `(first, then, adjacent)` —
+    /// `then` must not run after `first`, or immediately after it when
+    /// `adjacent`. Same built-ins-as-floor rule as `requires_before`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub forbid_after: Vec<(String, String)>,
+    pub forbid_after: Vec<(String, String, bool)>,
+    /// `(token, max)` — at most `max` calls to `token` in this run.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub max_calls: Vec<(String, usize)>,
+    /// `(taint, token)` — a DLP category and a tool/action that must not appear
+    /// in the same request.
+    ///
+    /// Co-occurrence rather than succession, deliberately: `dlp_findings` is a
+    /// scan of the whole body and says a secret is *present*, not which call
+    /// carried it. Expressing this as an ordering rule would imply a sequence
+    /// position nothing in the data supports.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub forbid_with: Vec<(String, String)>,
     /// What this request's tool calls actually touched.
     ///
     /// Derived on the request path from the same per-turn delta the sequence
@@ -281,6 +294,8 @@ mod tests {
             review_before: Vec::new(),
             requires_before: Vec::new(),
             forbid_after: Vec::new(),
+            max_calls: Vec::new(),
+            forbid_with: Vec::new(),
             changes: Vec::new(),
             new_tool_calls: Vec::new(),
             transition_baseline: None,
