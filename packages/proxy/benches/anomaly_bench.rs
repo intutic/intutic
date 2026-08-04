@@ -12,6 +12,13 @@
 //! fast path". That claim has now been removed from the docs, and this benchmark
 //! is what would have to exist before anything like it goes back.
 //!
+//! This sentence was false for the day it was committed. The retraction it
+//! describes had missed 36 sites, `guide/drift-detection.md` among them — so a
+//! doc comment here asserted a docs edit that had not happened, which is the
+//! defect this whole file exists to guard against, aimed at its own
+//! remediation. It is true now because `pnpm lint:latency-claims` fails the
+//! build otherwise, not because someone checked.
+//!
 //! The first run of the sibling `policy_bench` found `dlp::scan` costing ~150
 //! ns/byte, which put a 32 KB request body over the entire advertised latency
 //! budget in one gate. A benchmark nobody runs is not coverage; treat every
