@@ -555,31 +555,13 @@ async fn fetch_provider_credential(
 fn extract_tools(body: &serde_json::Value) -> Vec<crate::wasm::context::ToolSchema> {
     let mut schemas = Vec::new();
 
-    /// One `{name, description}` object, wherever it was found.
-    fn push_schema(schemas: &mut Vec<crate::wasm::context::ToolSchema>, obj: &serde_json::Value) {
-        if let Some(name) = obj.get("name").and_then(|n| n.as_str()) {
-            schemas.push(crate::wasm::context::ToolSchema {
-                name: name.to_string(),
-                description: obj
-                    .get("description")
-                    .and_then(|d| d.as_str())
-                    .map(|s| s.to_string()),
-            });
-        }
-    }
-
     if let Some(tools) = body.get("tools").and_then(|t| t.as_array()) {
-        for t in tools {
-            // Gemini: `tools: [{ functionDeclarations: [ {...}, {...} ] }]`.
-            // Checked first because such an entry carries no top-level `name`
-            // and no `function`, so it fell through both branches below and the
-            // request reported zero tools.
-            if let Some(decls) = t.get("functionDeclarations").and_then(|d| d.as_array()) {
-                for d in decls {
-                    push_schema(&mut schemas, d);
-                }
-                continue;
-            }
+        // `tool_objects` unwraps Gemini's `functionDeclarations` nesting, which
+        // carries no top-level `name` and no `function` and so fell through both
+        // branches below — leaving `ctx.tools` empty on every `/v1beta/` request.
+        // Shared with `tool_pin::signature`, which had the same gap for the same
+        // reason: there, every Gemini array hashed to one constant.
+        for t in crate::tool_pin::tool_objects(tools) {
             if let Some(name) = t.get("name").and_then(|n| n.as_str()) {
                 let description = t
                     .get("description")
@@ -2000,7 +1982,21 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         tool_calls: extract_wasm_tool_calls(&body_json),
         estimated_input_tokens: (body_str.len() / 4) as u32,
         budget_remaining_usd: local_budget_remaining,
-        risk_tier: crate::wasm::context::RiskLevel::Low,
+        // Declared by the applicable SOPs, not hardcoded.
+        //
+        // This was `RiskLevel::Low` unconditionally, at the field's only
+        // producer. The WASM SDK documents `risk_tier` as `Low | Medium | High
+        // | Critical` and tells rule authors they can gate on it, and the SDK's
+        // `mock_context.json` supplies `"Critical"` — so a rule written
+        // `if (ctx.risk_tier == "Critical") return BLOCK` validated locally,
+        // shipped, and never fired once.
+        //
+        // Resolved from front matter rather than inferred: the proxy has no
+        // basis for guessing a severity band, and `mod.rs:45-48` forbids
+        // inventing one. `None` renders as `Low`, so a workspace that declares
+        // nothing behaves exactly as before.
+        risk_tier: crate::sops::risk_tier_for_role(&node.agent_role)
+            .unwrap_or(crate::wasm::context::RiskLevel::Low),
         dlp_findings,
         tool_sequence,
         // This workspace's fitted transition model, resolved here for the same reason
@@ -4846,6 +4842,24 @@ mod tests {
             assert!(local_budget_enforced(), "{on:?} must not disable enforcement");
         }
         std::env::remove_var("INTUTIC_LOCAL_BUDGET_ENFORCE");
+    }
+
+    /// The context's risk tier must be resolved, not hardcoded.
+    ///
+    /// Reverting the wiring to `RiskLevel::Low` breaks no test, because nothing
+    /// drives `handle_proxy`'s context construction — which is precisely how
+    /// the field sat hardcoded while the SDK documented it as gateable and the
+    /// SDK's own mock context supplied `"Critical"`. The parse and max-across-
+    /// SOPs logic is covered in `sops.rs`; this covers the one line joining
+    /// them, the only part that was ever wrong.
+    #[test]
+    fn the_request_context_resolves_its_risk_tier_from_sops() {
+        let src = include_str!("proxy.rs");
+        let needle = ["risk_tier: crate::sops::risk_tier_for", "_role("].concat();
+        assert!(
+            src.contains(&needle),
+            "RequestContext.risk_tier is not resolved from SOP declarations",
+        );
     }
 
     /// Every response path must accrue spend, and there is more than one.

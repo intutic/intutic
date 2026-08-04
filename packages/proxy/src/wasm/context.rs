@@ -43,8 +43,13 @@ pub enum Verdict {
     },
 }
 
-/// Risk level from PCAS permission resolution
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Risk level from PCAS permission resolution.
+///
+/// `Ord` is derived and the variant order is the severity order, so
+/// `sops::risk_tier_for_role` can take a `max()` across every SOP applying to a
+/// role — two SOPs, one HIGH and one LOW, describe work that is HIGH, and
+/// taking either arbitrarily would make the answer depend on directory order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum RiskLevel {
     Low,
     Medium,
