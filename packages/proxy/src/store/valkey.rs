@@ -184,6 +184,31 @@ pub struct ValkeyStore {
     update_script: redis::Script,
 }
 
+/// The workspace's daily spend counter, as the **control plane** names it.
+///
+/// This read `v2:budget:daily:{ws}` and the control plane writes
+/// `v2:budget:{ws}:daily` — the segments transposed. Nothing wrote what this
+/// read, so `spend` parsed as `0.0` on every request forever, `max_budget` fell
+/// through to its `Some(100.0)` default, and `metering::check_budget` computed
+/// `remaining = 100.0` on every call. The 429 could only fire on a *single*
+/// request estimated above ~$83. A workspace with a $20 daily cap spent without
+/// limit, and every log reported success.
+///
+/// A GET against a key nobody writes is indistinguishable from a GET against a
+/// key not yet set, which is why nothing at runtime could report this. Pinned
+/// against the TypeScript builders by
+/// `services/control-plane/__tests__/unit/valkeyKeyParity.test.ts`.
+///
+/// Written by `finopsService.incrementSpend` (`workspaceBudgetDailyKey`).
+fn budget_daily_key(workspace_id: &str) -> String {
+    format!("v2:budget:{}:daily", workspace_id)
+}
+
+/// The workspace's configured daily cap. Written by `budgetDailyLimitKey`.
+fn budget_daily_limit_key(workspace_id: &str) -> String {
+    format!("v2:budget:{}:daily_limit", workspace_id)
+}
+
 impl ValkeyStore {
     pub fn new(conn: Arc<ConnectionManager>) -> Self {
         Self {
@@ -867,11 +892,11 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
         }
 
         let spend_val: Option<String> = conn
-            .get(format!("v2:budget:daily:{}", workspace_id))
+            .get(budget_daily_key(workspace_id))
             .await
             .unwrap_or(None);
         let limit_val: Option<String> = conn
-            .get(format!("v2:budget:limit:daily:{}", workspace_id))
+            .get(budget_daily_limit_key(workspace_id))
             .await
             .unwrap_or(None);
 
@@ -892,11 +917,11 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
     async fn daily_budget(&self, workspace_id: &str) -> Option<(f64, Option<f64>)> {
         let mut conn = self.conn();
         let spend_val: Option<String> = conn
-            .get(format!("v2:budget:daily:{}", workspace_id))
+            .get(budget_daily_key(workspace_id))
             .await
             .unwrap_or(None);
         let limit_val: Option<String> = conn
-            .get(format!("v2:budget:limit:daily:{}", workspace_id))
+            .get(budget_daily_limit_key(workspace_id))
             .await
             .unwrap_or(None);
         Some((
@@ -1029,11 +1054,18 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
     ) -> Option<TokenBaseline> {
         let mut conn = self.conn();
         // Workspace-specific first, then the global rollup.
-        let ws_key = format!("tok:baseline:{}:{}:coding:{}", workspace_id, model, bucket);
+        //
+        // No task segment. This read `:coding:` as a literal while the writer
+        // keyed on the trace's own task type, so only a coding trace could ever
+        // have produced a readable baseline — and the writer had no caller at
+        // all, so none did. A task-aware baseline needs the task type at
+        // *predict* time, which is before the request has been classified, so
+        // the agnostic key is the one this reader can actually use.
+        let ws_key = format!("tok:baseline:{}:{}:{}", workspace_id, model, bucket);
         if let Some(stats) = read_baseline_hash(&mut conn, &ws_key).await {
             return Some(stats);
         }
-        let global_key = format!("tok:baseline:global:{}:coding:{}", model, bucket);
+        let global_key = format!("tok:baseline:global:{}:{}", model, bucket);
         read_baseline_hash(&mut conn, &global_key).await
     }
 
