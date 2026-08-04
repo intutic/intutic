@@ -72,9 +72,60 @@ pub struct ExecutionTrace {
     pub token_anomaly: bool,
     pub loop_run_id: Option<String>,
 
+    /// Every detector finding raised on this request, attributed.
+    ///
+    /// Distinct from `graph.anomalies`, which is a `Vec<String>` of taxonomy
+    /// kinds and cannot answer *which detector* fired — sixteen of twenty-two
+    /// detectors share a kind with a sibling. That column is kept as-is because
+    /// the control plane already reads it and the wire shape must not move.
+    ///
+    /// **Carried on the allowed path as well as the blocked one**, which is the
+    /// whole point. A blocked request is one the system already judged; the
+    /// findings that need their false-positive rate measured are the advisory
+    /// and reask ones on requests that *proceeded*. Recording only blocked
+    /// findings would build a corpus of exactly the detectors `anomaly/mod.rs`
+    /// says have no FPR to measure, and none of the ones it says do.
+    ///
+    /// Empty is skipped, so a clean request's wire shape is unchanged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub findings: Vec<FindingWire>,
+
     /// Where in the graph this request happened. Flattened onto the wire.
     #[serde(flatten)]
     pub graph: GraphTrace,
+}
+
+/// One detector finding, on the wire.
+///
+/// The fields a consumer needs to route, rank and later adjudicate a finding
+/// without re-deriving anything: who raised it (`detector_id`), what it is
+/// (`kind`), how bad (`severity`), what it did (`disposition`), how sure
+/// (`confidence`) and why (`reason`).
+///
+/// `detector_id` is the field that makes this worth having. Without it a
+/// consumer sees `LOOP_DETECTED` and cannot tell a spin loop from a runaway
+/// fan-out, so it can neither attribute a false positive nor score a detector.
+#[derive(Debug, Clone, Serialize)]
+pub struct FindingWire {
+    pub detector_id: String,
+    pub kind: String,
+    pub severity: String,
+    pub disposition: String,
+    pub confidence: f64,
+    pub reason: String,
+}
+
+impl FindingWire {
+    pub fn from_finding(f: &crate::plugins::anomaly::AnomalyFinding) -> Self {
+        Self {
+            detector_id: f.detector_id.to_string(),
+            kind: f.kind.as_str().to_string(),
+            severity: f.kind.severity().as_str().to_string(),
+            disposition: f.disposition.as_str().to_string(),
+            confidence: f.confidence,
+            reason: f.reason.clone(),
+        }
+    }
 }
 
 /// The graph coordinates of one traced request.
@@ -288,5 +339,60 @@ mod tests {
         let v = serde_json::to_value(GraphTrace::from_node(&node("g", "n"), vec![])).unwrap();
         assert_eq!(v["graph_id"], "g");
         assert!(v.get("anomalies").is_none());
+    }
+
+    /// The wire finding must carry what `graph.anomalies` structurally cannot.
+    ///
+    /// `anomalies` is a `Vec<String>` of taxonomy kinds, and sixteen of
+    /// twenty-two detectors share a kind with a sibling — so a consumer reading
+    /// it sees `LOOP_DETECTED` and cannot tell a spin loop from a runaway
+    /// fan-out. Without `detector_id` and `disposition` on the wire, no
+    /// false-positive rate can ever be attributed to a detector, which is the
+    /// measurement the promotion rule in `anomaly/mod.rs` requires before any
+    /// heuristic may graduate to `kill`.
+    #[test]
+    fn a_wire_finding_carries_its_detector_and_disposition() {
+        use crate::plugins::anomaly::{AnomalyFinding, AnomalyKind, Disposition};
+
+        let mut f = AnomalyFinding::reask(AnomalyKind::LoopDetected, "spinning on Bash", 0.65);
+        f.detector_id = "consecutive_repeat";
+        let w = FindingWire::from_finding(&f);
+
+        assert_eq!(w.detector_id, "consecutive_repeat");
+        assert_eq!(w.kind, "LOOP_DETECTED");
+        assert_eq!(w.disposition, "REASK");
+        assert_eq!(w.severity, "HIGH");
+
+        // A sibling detector reporting the SAME kind must be distinguishable —
+        // this is the whole reason the field exists.
+        let mut g = AnomalyFinding::reask(AnomalyKind::LoopDetected, "fan-out too wide", 0.7);
+        g.detector_id = "fan_out_explosion";
+        let w2 = FindingWire::from_finding(&g);
+        assert_eq!(w2.kind, w.kind, "test premise: the kinds collide");
+        assert_ne!(w2.detector_id, w.detector_id, "the detectors must not");
+
+        // And the disposition survives, so a consumer can tell an advisory
+        // firing from one that blocked — the difference between a measurable
+        // false positive and an enforcement action.
+        let mut k = AnomalyFinding::kill(AnomalyKind::BudgetBreach, "no headroom");
+        k.detector_id = "budget_exhaustion";
+        assert_eq!(FindingWire::from_finding(&k).disposition, "KILL");
+        assert_eq!(Disposition::Ask.as_str(), "ASK");
+    }
+
+    /// Findings are skipped on the wire when empty, so a clean request's trace
+    /// is byte-identical to what it was before this field existed.
+    #[test]
+    fn an_empty_finding_list_is_omitted_from_the_wire() {
+        #[derive(Serialize)]
+        struct Probe {
+            #[serde(default, skip_serializing_if = "Vec::is_empty")]
+            findings: Vec<FindingWire>,
+        }
+        let v = serde_json::to_value(Probe { findings: vec![] }).unwrap();
+        assert!(
+            v.as_object().unwrap().get("findings").is_none(),
+            "a clean request must not gain a field",
+        );
     }
 }
