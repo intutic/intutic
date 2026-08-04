@@ -36,6 +36,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
+use crate::wasm::context::RiskLevel;
 
 /// How long a resolved set is reused before the directory is re-read.
 ///
@@ -119,6 +120,19 @@ pub struct Sop {
     /// why it is declaration-only and has no heuristic behind it: nothing
     /// blocks a person's work unless a person asked for it to.
     pub review_before: Vec<String>,
+    /// Severity band, declared in front matter as `risk_tier: HIGH`.
+    ///
+    /// Feeds `RequestContext.risk_tier`, which the WASM SDK documents as
+    /// `Low | Medium | High | Critical` and which customer rules are told they
+    /// can gate on. Before this it was hardcoded `Low` at its single producer,
+    /// so a rule written `if (ctx.risk_tier == "Critical") return BLOCK` was
+    /// validated locally against the SDK's mock context — which supplies
+    /// `"Critical"` — and then never fired once in production.
+    ///
+    /// Declared, not inferred. The proxy has no basis for guessing a severity
+    /// band, and the promotion rule forbids inventing one; the control plane
+    /// already models this exact field on `sop_registry.riskTier`.
+    pub risk_tier: Option<RiskLevel>,
     /// Ordering rules this SOP declares: `A -> B` means B must not run unless A
     /// ran before it. Parsed from `requires_before:`.
     ///
@@ -174,6 +188,8 @@ struct FrontMatter {
     forbid_after: Vec<(String, String, bool)>,
     max_calls: Vec<(String, usize)>,
     forbid_with: Vec<(String, String)>,
+    /// The severity band this SOP declares, if any. `None` means unstated.
+    risk_tier: Option<RiskLevel>,
     /// Rules that failed to parse, kept so they can be reported rather than
     /// dropped. A malformed ordering rule must not read as "no rule declared".
     rule_errors: Vec<String>,
@@ -189,6 +205,29 @@ impl FrontMatter {
     /// than discarded.
     fn body_only(raw: &str) -> Self {
         Self { body: raw.trim().to_string(), ..Self::default() }
+    }
+}
+
+/// `risk_tier: HIGH` in front matter, or `None` if unstated or unrecognised.
+///
+/// Case-insensitive, like every other declaration comparison in this module.
+/// An unrecognised value returns `None` rather than a default: silently reading
+/// `risk_tier: HGIH` as `Low` is how a declared band becomes a control the
+/// operator believes is set and the code never sees.
+fn parse_risk_tier(front: &str) -> Option<RiskLevel> {
+    let raw = front
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix("risk_tier:"))
+        .next()?
+        .trim()
+        .trim_matches(['"', '\''])
+        .to_ascii_lowercase();
+    match raw.as_str() {
+        "low" => Some(RiskLevel::Low),
+        "medium" => Some(RiskLevel::Medium),
+        "high" => Some(RiskLevel::High),
+        "critical" => Some(RiskLevel::Critical),
+        _ => None,
     }
 }
 
@@ -248,6 +287,7 @@ fn parse_front_matter(raw: &str) -> FrontMatter {
         // tool names are accepted here too — see the detector — so case is kept
         // and the comparison ignores it.
         review_before: list("review_before:", false),
+        risk_tier: parse_risk_tier(front),
         requires_before: requires.0,
         forbid_after: forbids.0,
         max_calls: counts.0,
@@ -471,6 +511,7 @@ fn read_dir_sops(dir: &Path) -> Vec<Sop> {
                 plan_steps: fm.plan_steps,
                 scope_paths: fm.scope_paths,
                 review_before: fm.review_before,
+                risk_tier: fm.risk_tier,
                 requires_before: fm.requires_before,
                 forbid_after: fm.forbid_after,
                 max_calls: fm.max_calls,
@@ -637,6 +678,52 @@ fn empty_sops_warning(source: &SopsSource, cwd: &Path) -> String {
 #[cfg(test)]
 mod enforceability_tests {
     use super::*;
+
+    /// A declared severity band must survive parsing and resolve as the max.
+    ///
+    /// `RequestContext.risk_tier` was `RiskLevel::Low` hardcoded at its only
+    /// producer, while the WASM SDK documents the field as
+    /// `Low | Medium | High | Critical` and tells rule authors they can gate on
+    /// it — and the SDK's `mock_context.json` supplies `"Critical"`. So a rule
+    /// written `if (ctx.risk_tier == "Critical") return BLOCK` validated
+    /// locally, shipped, and never fired once.
+    #[test]
+    fn a_declared_risk_tier_parses_and_the_highest_wins() {
+        let parse = |raw: &str| parse_front_matter(raw).risk_tier;
+
+        assert_eq!(parse("---\nrisk_tier: HIGH\n---\nbody"), Some(RiskLevel::High));
+        assert_eq!(parse("---\nrisk_tier: critical\n---\nbody"), Some(RiskLevel::Critical));
+        assert_eq!(parse("---\nrisk_tier: \"Medium\"\n---\nbody"), Some(RiskLevel::Medium));
+
+        // Unstated is None, not a silent Low — the caller renders the default,
+        // so "declared low" and "declared nothing" stay distinguishable here.
+        assert_eq!(parse("---\ndeny_tools: curl\n---\nbody"), None);
+
+        // And a typo is None rather than a quiet default. Reading `HGIH` as Low
+        // is how a declared band becomes a control the operator believes is set
+        // and the code never sees.
+        assert_eq!(parse("---\nrisk_tier: HGIH\n---\nbody"), None);
+    }
+
+    /// Two SOPs applying to one role: the work is as risky as the riskiest.
+    #[test]
+    fn the_highest_declared_band_wins_across_sops() {
+        let mut low = Sop { risk_tier: Some(RiskLevel::Low), ..Default::default() };
+        low.roles = vec!["implementer".into()];
+        let mut high = Sop { risk_tier: Some(RiskLevel::Critical), ..Default::default() };
+        high.roles = vec!["implementer".into()];
+
+        let best = [low, high]
+            .iter()
+            .filter(|s| s.applies_to("implementer"))
+            .filter_map(|s| s.risk_tier)
+            .max();
+        assert_eq!(
+            best,
+            Some(RiskLevel::Critical),
+            "taking either arbitrarily would make the answer depend on directory order",
+        );
+    }
 
     /// An ordering-only SOP enforces something, and used to be told it did not.
     ///
@@ -922,6 +1009,24 @@ fn collect_requires_before(sops: &[Sop], role: &str) -> Vec<(String, String, boo
     out
 }
 
+/// The highest severity band declared by any SOP applicable to this role.
+///
+/// `None` when no applicable SOP states one — which the caller renders as
+/// `Low`, the same value the field carried unconditionally before. That keeps
+/// the default behaviour identical for anyone who has declared nothing, and
+/// makes the field mean something for anyone who has.
+///
+/// Max rather than first: two SOPs both applying to a role, one HIGH and one
+/// LOW, describe work that is HIGH. Taking either arbitrarily would make the
+/// answer depend on directory order.
+pub fn risk_tier_for_role(role: &str) -> Option<RiskLevel> {
+    all_sops()
+        .iter()
+        .filter(|s| s.applies_to(role))
+        .filter_map(|s| s.risk_tier)
+        .max()
+}
+
 pub fn requires_before_for_role(role: &str) -> Vec<(String, String, bool)> {
     collect_requires_before(&all_sops(), role)
 }
@@ -1121,6 +1226,7 @@ mod tests {
 
     fn sop(title: &str, roles: &[&str]) -> Sop {
         Sop {
+            risk_tier: None,
             title: title.into(),
             body: format!("- rule for {title}"),
             roles: roles.iter().map(|r| r.to_string()).collect(),
@@ -1218,6 +1324,7 @@ mod tests {
     fn oversized_sop_sets_are_bounded_and_say_so() {
         let big: Vec<Sop> = (0..40)
             .map(|i| Sop {
+                risk_tier: None,
                 title: format!("sop-{i:02}"),
                 body: "x".repeat(500),
                 roles: vec![],
@@ -1499,6 +1606,7 @@ mod discovery_tests {
     fn sop_from_raw(title: &str, raw: &str) -> Sop {
         let fm = parse_front_matter(raw);
         Sop {
+            risk_tier: None,
             title: title.into(),
             body: fm.body,
             roles: fm.roles,
@@ -1818,6 +1926,7 @@ mod deny_tests {
 
     fn with_denies(roles: &[&str], denies: &[&str]) -> Sop {
         Sop {
+            risk_tier: None,
             title: "policy".into(),
             body: "- prose".into(),
             roles: roles.iter().map(|r| r.to_string()).collect(),
@@ -1905,6 +2014,7 @@ mod harness_policy_tests {
     fn harnesses_are_collected_per_role() {
         let sops = vec![
             Sop {
+                risk_tier: None,
                 title: "a".into(),
                 body: "x".into(),
                 roles: vec!["reviewer".into()],
@@ -1919,6 +2029,7 @@ mod harness_policy_tests {
             forbid_with: Vec::new(),
             },
             Sop {
+                risk_tier: None,
                 title: "b".into(),
                 body: "x".into(),
                 roles: vec!["deployer".into()],
@@ -1971,6 +2082,7 @@ mod plan_step_tests {
     fn collection_preserves_declared_order() {
         let sops = vec![
             Sop {
+                risk_tier: None,
                 title: "deploy".into(),
                 body: "x".into(),
                 roles: vec!["deployer".into()],
@@ -1985,6 +2097,7 @@ mod plan_step_tests {
             forbid_with: Vec::new(),
             },
             Sop {
+                risk_tier: None,
                 title: "review".into(),
                 body: "x".into(),
                 roles: vec!["reviewer".into()],
@@ -2012,6 +2125,7 @@ mod plan_step_tests {
     #[test]
     fn a_plan_does_not_leak_across_roles() {
         let sops = vec![Sop {
+            risk_tier: None,
             title: "deploy".into(),
             body: "x".into(),
             roles: vec!["deployer".into()],
@@ -2091,6 +2205,7 @@ mod scope_and_review_tests {
     #[test]
     fn scopes_do_not_leak_across_roles() {
         let sops = vec![Sop {
+            risk_tier: None,
             title: "deploy".into(),
             body: "x".into(),
             roles: vec!["deployer".into()],
@@ -2112,6 +2227,7 @@ mod scope_and_review_tests {
     #[test]
     fn scopes_from_several_sops_are_merged_and_deduped() {
         let mk = |scope: &str| Sop {
+            risk_tier: None,
             title: scope.into(),
             body: "x".into(),
             roles: vec![],
