@@ -27,6 +27,7 @@ import { exec } from 'node:child_process'
 import { promisify } from 'node:util'
 import { createLogger } from '@intutic/logger'
 import { newIso } from '@intutic/id'
+import { UNIVERSAL_PROTECTED_PATHS } from './protectedPaths.js'
 
 const log = createLogger('sync-openclaw-hooks')
 const execAsync = promisify(exec)
@@ -36,16 +37,9 @@ const OPENCLAW_CONFIG = path.join(os.homedir(), '.openclaw', 'openclaw.json')
 
 /** Governance-sensitive paths that the hook gate protects. */
 const PROTECTED_PATHS = [
-  '.gemini/settings.json',
-  '.intutic/hooks',
-  '.intutic/integrity.json',
-  '.intutic/events',
-  '.claude/settings.json',
-  '.cursor/hooks.json',
-  '.codeium/windsurf/hooks.json',
-  '.cline/hooks',
-  '.agents/plugins/intutic-governance',
-  '.openhands/hooks.json',
+  // Universal: every harness protects every harness's config —
+  // the threat is an agent under one disarming another.
+  ...UNIVERSAL_PROTECTED_PATHS,
   '.openclaw/openclaw.json',
 ]
 

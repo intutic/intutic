@@ -20,6 +20,7 @@ import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { newIso } from '@intutic/id'
 import { hardenGoosePlugin, unharden } from './gooseHardener.js'
+import { UNIVERSAL_PROTECTED_PATHS } from './protectedPaths.js'
 
 const log = createLogger('sync-goose-hooks')
 
@@ -27,13 +28,9 @@ const PLUGIN_DIR = path.join(os.homedir(), '.agents', 'plugins', 'intutic-govern
 const GOOSE_CONFIG = path.join(os.homedir(), '.config', 'goose', 'config.yaml')
 
 const PROTECTED_PATHS = [
-  '.agents/plugins/intutic-governance',
-  '.intutic/hooks',
-  '.intutic/integrity.json',
-  '.claude/settings.json',
-  '.cursor/hooks.json',
-  '.cline/hooks',
-  '.openhands/hooks.json',
+  // Universal: every harness protects every harness's config —
+  // the threat is an agent under one disarming another.
+  ...UNIVERSAL_PROTECTED_PATHS,
 ]
 
 /**

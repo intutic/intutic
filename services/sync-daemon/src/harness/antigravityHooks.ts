@@ -34,6 +34,7 @@ import * as path from 'node:path'
 import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { newIso } from '@intutic/id'
+import { UNIVERSAL_PROTECTED_PATHS } from './protectedPaths.js'
 
 const log = createLogger('sync-antigravity-hooks')
 
@@ -42,16 +43,9 @@ const GEMINI_SETTINGS = path.join(os.homedir(), '.gemini', 'settings.json')
 
 /** Governance-sensitive paths that the hook gate protects. */
 const PROTECTED_PATHS = [
-  '.gemini/settings.json',
-  '.intutic/hooks',
-  '.intutic/integrity.json',
-  '.intutic/events',
-  '.claude/settings.json',
-  '.cursor/hooks.json',
-  '.codeium/windsurf/hooks.json',
-  '.cline/hooks',
-  '.agents/plugins/intutic-governance',
-  '.openhands/hooks.json',
+  // Universal: every harness protects every harness's config —
+  // the threat is an agent under one disarming another.
+  ...UNIVERSAL_PROTECTED_PATHS,
 ]
 
 // ─── Bash hook script template ────────────────────────────────────────────────

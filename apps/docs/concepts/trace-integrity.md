@@ -172,11 +172,15 @@ Checking it either way would invent a break at the edge of the page, and an alar
 that always fires is an alarm nobody reads.
 
 ::: warning The chain is only as long as the walk
-The walk covers the most recent 500 roots per workspace, and **both** a break and
-an unchained root return 409. A root written by an instance predating the chain —
-which is what a rolling deploy produces — is unchained, so the endpoint can
-answer 409 on a condition this system defines as benign. Read `breaks` rather
-than the status code if you need to tell the two apart.
+The walk covers the most recent 500 roots per workspace. A break older than that
+window is outside what this endpoint can see, so a 200 means "no break in the
+last 500 roots", not "no break ever".
+
+The status code distinguishes the two states: **409 on a genuine break only**.
+An unchained root — what an instance predating the chain writes during a rolling
+deploy — answers 200, because nothing was claimed and so nothing is
+contradicted. Both facts still travel in the body, in `breaks` and
+`unchainedRootIds`.
 :::
 
 From the command line, `intutic integrity chain` performs the same walk and exits
@@ -391,8 +395,8 @@ the operator of rewriting history over their own key management.
 | `GET /api/v1/integrity/roots/:rootId` | One root and the trace ids it covers. |
 | `GET /api/v1/integrity/roots/:rootId/proof/:traceId` | Merkle inclusion proof for one trace. **409** if the leaves no longer rebuild the root. |
 | `POST /api/v1/integrity/roots/:rootId/recompute` | Re-derive from live rows. Always 200 — the verdict is the answer. |
-| `GET /api/v1/integrity/chain` | Walk the `previous_root` chain. **409** on a break or an unchained root. |
-| `GET /api/v1/integrity/config-chain` | Walk the harness config snapshot chain. Optional `?harnessType=`. **409** on a break or an edited body. |
+| `GET /api/v1/integrity/chain` | Walk the `previous_root` chain. **409** on a genuine break only — an unchained root answers 200. |
+| `GET /api/v1/integrity/config-chain` | Walk the harness config snapshot chain. Optional `?harnessType=`. **409** on a contradicted claim only — an unchained snapshot answers 200. |
 | `GET /api/v1/integrity/traces/:traceId/leaf` | The canonical preimage and leaf hash, recomputed. |
 | `GET /.well-known/intutic-trace-signing.json` | Public signing keys (JWKS), active and retired. Unauthenticated. |
 

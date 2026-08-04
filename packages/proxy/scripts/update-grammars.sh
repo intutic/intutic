@@ -61,33 +61,66 @@ for lang in "${LANGS[@]}"; do
         continue
     fi
 
-    # Fetch latest commit SHA on default branch from GitHub API
-    api_url="https://api.github.com/repos/${repo}/commits/HEAD"
-    response="$(curl -sf -H "Accept: application/vnd.github.v3+json" "${api_url}" 2>/dev/null || echo '{}')"
-    latest_sha="$(echo "${response}" | jq -r '.sha // "unknown"' | cut -c1-8)"
-    latest_date="$(echo "${response}" | jq -r '.commit.author.date // "unknown"' | cut -c1-10)"
-    latest_msg="$(echo "${response}" | jq -r '.commit.message // "unknown"' | head -1 | cut -c1-60)"
+    # Compare like with like.
+    #
+    # This used to fetch commits/HEAD and compare its first 8 characters against
+    # the pinned value. Every pin in GRAMMAR_PINS.toml is a *tag* — "v0.23.6"
+    # against "bffb65a8" — so the equality could never hold, all five grammars
+    # reported "update available" on every quarterly run, and the workflow
+    # opened an issue about it every time. A check that always fires is a check
+    # nobody reads. Worse, --bump would then write a commit SHA into a field the
+    # file documents as a tag, and the compare URL it printed was a real GitHub
+    # link, so the output looked entirely plausible.
+    #
+    # GRAMMAR_PINS.toml says the sha field accepts either a tag or a full commit
+    # SHA, so honour both: 40 hex characters is compared against HEAD, anything
+    # else against the newest upstream release tag.
+    if [[ "${pinned_sha}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+        api_url="https://api.github.com/repos/${repo}/commits/HEAD"
+        response="$(curl -sf -H "Accept: application/vnd.github.v3+json" "${api_url}" 2>/dev/null || echo '{}')"
+        latest_ref="$(echo "${response}" | jq -r '.sha // "unknown"')"
+        latest_date="$(echo "${response}" | jq -r '.commit.author.date // "unknown"' | cut -c1-10)"
+        latest_msg="$(echo "${response}" | jq -r '.commit.message // "unknown"' | head -1 | cut -c1-60)"
+    else
+        # Newest release tag; fall back to the tag list for repos that publish
+        # tags without GitHub Releases.
+        response="$(curl -sf -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${repo}/releases/latest" 2>/dev/null || echo '{}')"
+        latest_ref="$(echo "${response}" | jq -r '.tag_name // "unknown"')"
+        latest_date="$(echo "${response}" | jq -r '.published_at // "unknown"' | cut -c1-10)"
+        latest_msg="$(echo "${response}" | jq -r '.name // ""' | head -1 | cut -c1-60)"
 
-    if [ "${latest_sha}" = "unknown" ]; then
+        if [ "${latest_ref}" = "unknown" ] || [ -z "${latest_ref}" ]; then
+            tags_response="$(curl -sf -H "Accept: application/vnd.github.v3+json" \
+                "https://api.github.com/repos/${repo}/tags" 2>/dev/null || echo '[]')"
+            latest_ref="$(echo "${tags_response}" | jq -r '.[0].name // "unknown"')"
+            latest_date="unknown"
+            latest_msg="newest tag (repo publishes no releases)"
+        fi
+    fi
+
+    if [ "${latest_ref}" = "unknown" ] || [ -z "${latest_ref}" ]; then
         echo "  ${lang}: ⚠ could not fetch upstream (rate-limited or no auth)"
         continue
     fi
 
-    if [ "${pinned_sha:0:8}" = "${latest_sha:0:8}" ]; then
+    # Full-string comparison. Truncating to 8 characters made "v0.23.6" and
+    # "v0.23.60" compare equal, on top of never matching a SHA in the first place.
+    if [ "${pinned_sha}" = "${latest_ref}" ]; then
         echo "  ${lang}: ✅ up to date (${pinned_sha})"
     else
         UPDATES_AVAILABLE=$((UPDATES_AVAILABLE + 1))
         echo "  ${lang}: 📦 update available"
         echo "       pinned: ${pinned_sha}"
-        echo "       latest: ${latest_sha} (${latest_date})"
+        echo "       latest: ${latest_ref} (${latest_date})"
         echo "       msg:    ${latest_msg}"
-        echo "       diff:   https://github.com/${repo}/compare/${pinned_sha}...${latest_sha}"
+        echo "       diff:   https://github.com/${repo}/compare/${pinned_sha}...${latest_ref}"
         echo ""
 
         if [ "${BUMP_LANG}" = "${lang}" ]; then
-            echo "  🔧 Bumping ${lang} to ${latest_sha}..."
+            echo "  🔧 Bumping ${lang} to ${latest_ref}..."
             # Update the SHA in GRAMMAR_PINS.toml (in-place sed)
-            sed -i.bak "s/^${lang}.*sha = \"${pinned_sha}\"/${lang} = { repo = \"${repo}\", sha = \"${latest_sha}\" }/" "${PINS}"
+            sed -i.bak "s/^${lang}.*sha = \"${pinned_sha}\"/${lang} = { repo = \"${repo}\", sha = \"${latest_ref}\" }/" "${PINS}"
             rm -f "${PINS}.bak"
             echo "  ✅ Updated GRAMMAR_PINS.toml for ${lang}"
             echo "  ⚠  Run 'bash scripts/download-grammars.sh' to rebuild the .wasm file"
