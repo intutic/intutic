@@ -185,6 +185,21 @@ jobs:
           cargo test --test snip_test -- --nocapture 2>&1 | grep -E '(\[TD-|test result|FAILED|running)'
           cargo test
 
+      # The external corpus gate: measured false positives on 1,000 published
+      # benign trajectories, plus mutation liveness for the detectors a public
+      # corpus can reach.
+      #
+      # Deliberately its own step, and deliberately unpiped. The step above
+      # survives its `| grep` only because the bare `cargo test` on the next line
+      # re-runs everything; a piped gate would report the grep's exit status and
+      # a failing corpus would land as green.
+      #
+      # No `paths:` filter either. The thresholds this gate watches are private
+      # consts spread across detectors.rs, actions.rs, injection.rs and proxy.rs
+      # — any path filter would let the one edit that matters skip the check.
+      - name: Anomaly corpus gate (external FPR + mutation liveness)
+        run: cd packages/proxy && cargo test --test anomaly_corpus_test
+
   python:
     name: Python SDK (intutic-clawde) - Run pytest
     runs-on: ubuntu-latest

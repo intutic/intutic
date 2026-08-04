@@ -435,6 +435,17 @@ impl DetectorRegistry {
         self.detectors.is_empty()
     }
 
+    /// Every registered detector's stable id.
+    ///
+    /// `detectors` is private, so an integration test under `tests/` cannot
+    /// enumerate the registry. Without this it would have to hardcode the list
+    /// and compare against [`Self::len`] — which still passes when a detector is
+    /// *renamed*, and [`AnomalyDetector::id`] says a rename is exactly what must
+    /// not happen silently: "it is an identifier, not a label".
+    pub fn ids(&self) -> Vec<&'static str> {
+        self.detectors.iter().map(|d| d.id()).collect()
+    }
+
     /// The finding that should stop the request, if any.
     ///
     /// `None` means every finding was advisory and the request proceeds — the
@@ -1217,7 +1228,7 @@ mod coverage_tests {
     #[test]
     fn every_detector_id_is_unique_and_non_empty() {
         let reg = DetectorRegistry::with_defaults();
-        let ids: Vec<&'static str> = reg.detectors.iter().map(|d| d.id()).collect();
+        let ids: Vec<&'static str> = reg.ids();
 
         assert_eq!(ids.len(), 22, "registry size changed — update this test deliberately");
 
