@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "asc assembly/index.ts -o build/rule.wasm --optimize --exportRuntime --debug --sourceMap"
+    "build": "asc assembly/index.ts -o build/rule.wasm --optimize --exportRuntime --debug --sourceMap",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json"
   },
   "dependencies": {
     "assemblyscript-json": "^1.1.0"
