@@ -680,6 +680,87 @@ fn extract_wasm_tool_calls(body: &serde_json::Value) -> Vec<crate::wasm::context
 ///
 // ─── Main proxy handler ──────────────────────────────────────────────
 
+/// Whether the on-disk daily cap may actually refuse a request.
+///
+/// The escape hatch for a fix that changes behaviour. Until now the streaming
+/// path accrued no spend, so for an all-streaming client — Claude Code and
+/// Cursor both — `get_local_spend()` never left zero and this cap could not
+/// fire however much the day cost. Making accrual correct means the cap starts
+/// biting, and it will bite hardest on exactly the workspaces that have been
+/// quietly over it for months.
+///
+/// `INTUTIC_LOCAL_BUDGET_ENFORCE=0` turns the refusal off while leaving accrual
+/// on, so the numbers stay true and nobody has to redeploy to get unblocked.
+/// Default is enforce: an escape hatch that defaults open is not an escape
+/// hatch, it is the inert control again.
+fn local_budget_enforced() -> bool {
+    !matches!(
+        std::env::var("INTUTIC_LOCAL_BUDGET_ENFORCE").as_deref(),
+        Ok("0") | Ok("false") | Ok("no")
+    )
+}
+
+/// Accrue one completed request's cost against every ceiling the proxy owns.
+///
+/// # Why this is a function and not three lines in a branch
+///
+/// It was three lines in a branch, and there are two branches. `add_local_spend`,
+/// `add_workflow_spend` and `add_graph_spend` each had exactly one call site,
+/// all of them in the non-streaming path, all of them *after* the streaming
+/// branch returns. The streaming finalizer computed `actual_cost_usd`, wrote it
+/// into the published trace, and accrued none of it.
+///
+/// So the dashboard showed the money and the local counters read zero. What went
+/// inert, precisely:
+///
+/// - **The local daily cap.** `get_local_spend` sums only the file
+///   `add_local_spend` writes, and that becomes `budget_remaining_usd`, which
+///   `BudgetGatePlugin` compares against the estimate. For an all-streaming
+///   client — which Claude Code and Cursor both are — the counter never moved
+///   off zero and the cap could not fire.
+/// - **The graph budget.** `graph:{ws}:{gid}:spend` has no other writer in
+///   either repo, so a fan-out of streaming workers accumulated nothing.
+///
+/// The workflow budget is the exception worth naming: its *detector* was equally
+/// blind, but the published trace still reaches `recordUsageEvent` →
+/// `addLoopCost`, which kills the run and is enforced by the loop-status gate.
+/// That path is asynchronous and needs a connected control plane — which is
+/// exactly what a standalone deployment does not have, and standalone is the
+/// mode where `local_spend` is the *only* cost control.
+async fn accrue_spend(
+    store: &Arc<dyn LocalStore>,
+    actual_cost_usd: f64,
+    workspace_id: &str,
+    graph_id: &str,
+    has_graph: bool,
+    workflow_run_id: Option<&str>,
+    trace: &crate::telemetry::ExecutionTrace,
+) {
+    crate::local_spend::add_local_spend(actual_cost_usd);
+
+    // Accumulate against the graph as well as the machine, so fan-out is
+    // visible: eight workers each inside their own budget can still put the
+    // graph far past what was intended for the whole task.
+    if let (Some(lr), true) = (workflow_run_id, actual_cost_usd > 0.0) {
+        store.add_workflow_spend(lr, actual_cost_usd).await;
+    }
+
+    if has_graph && actual_cost_usd > 0.0 {
+        store
+            .add_graph_spend(
+                workspace_id,
+                graph_id,
+                actual_cost_usd,
+                crate::plugins::anomaly::broadcast::NODE_TTL_SECS,
+            )
+            .await;
+    }
+
+    if let Ok(trace_val) = serde_json::to_value(trace) {
+        crate::local_spend::log_offline_trace(&trace_val);
+    }
+}
+
 /// Main proxy handler — routes all protocol variants through the governance pipeline.
 ///
 /// This single handler is mounted on all four LLM provider paths (see router.rs).
@@ -1958,11 +2039,22 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // Evaluate native budget gate
     let budget_plugin = crate::plugins::budget_gate::BudgetGatePlugin::new();
     if let crate::wasm::context::Verdict::Kill { reason, .. } = budget_plugin.evaluate(&wasm_ctx) {
-        tracing::warn!(workspace_id = %workspace_id, reason = %reason, "Offline budget cap exceeded — rejecting request");
-        return json_error(
-            StatusCode::TOO_MANY_REQUESTS,
-            "OVERAGE_HARD_CAP_EXCEEDED",
-            &format!("Daily spend cap exceeded: {}", reason),
+        if local_budget_enforced() {
+            tracing::warn!(workspace_id = %workspace_id, reason = %reason, "Offline budget cap exceeded — rejecting request");
+            return json_error(
+                StatusCode::TOO_MANY_REQUESTS,
+                "OVERAGE_HARD_CAP_EXCEEDED",
+                &format!("Daily spend cap exceeded: {}", reason),
+            );
+        }
+        // Would have blocked, and the operator asked us not to. Logged at warn
+        // so the escape hatch is visible in exactly the situation it exists for
+        // — a silent bypass would be the defect this whole change is about,
+        // reintroduced as a feature.
+        tracing::warn!(
+            workspace_id = %workspace_id,
+            reason = %reason,
+            "Offline budget cap exceeded but INTUTIC_LOCAL_BUDGET_ENFORCE=0 — allowing"
         );
     }
 
@@ -3678,6 +3770,21 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         graph: crate::telemetry::GraphTrace::from_node(&node_for_trace, advisory_anomalies.clone()),
             };
 
+            // Accrue BEFORE publishing, and on the same values the trace
+            // carries — the published trace is what the control plane
+            // reconciles from, and it must not be able to report a cost the
+            // local counters never saw.
+            accrue_spend(
+                &cache_store_clone,
+                actual_cost_usd,
+                &trace.workspace_id,
+                &node_for_trace.graph_id,
+                graph_key_clone.is_some(),
+                trace.loop_run_id.as_deref(),
+                &trace,
+            )
+            .await;
+
             let _ = cache_store_clone.publish_trace(&trace).await;
         });
 
@@ -4165,29 +4272,16 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         graph: crate::telemetry::GraphTrace::from_node(&node_for_trace, advisory_anomalies.clone()),
     };
 
-    crate::local_spend::add_local_spend(actual_cost_usd);
-
-    // Accumulate against the graph as well as the machine, so fan-out is
-    // visible: eight workers each inside their own budget can still put the
-    // graph far past what was intended for the whole task.
-    if let (Some(lr), true) = (workflow_run_id.as_deref(), actual_cost_usd > 0.0) {
-        state.store.add_workflow_spend(lr, actual_cost_usd).await;
-    }
-
-    if graph_key.is_some() && actual_cost_usd > 0.0 {
-        state
-            .store
-            .add_graph_spend(
-                &wasm_ctx.workspace_id,
-                &wasm_ctx.node.graph_id,
-                actual_cost_usd,
-                crate::plugins::anomaly::broadcast::NODE_TTL_SECS,
-            )
-            .await;
-    }
-    if let Ok(trace_val) = serde_json::to_value(&trace) {
-        crate::local_spend::log_offline_trace(&trace_val);
-    }
+    accrue_spend(
+        &state.store,
+        actual_cost_usd,
+        &trace.workspace_id,
+        &wasm_ctx.node.graph_id,
+        graph_key.is_some(),
+        trace.loop_run_id.as_deref(),
+        &trace,
+    )
+    .await;
 
     let trace_store = Arc::clone(&state.store);
     spawn(async move {
@@ -4642,6 +4736,79 @@ mod tests {
         assert_eq!(
             tool_history_scope("ws", "", None, Some("mbr_1")),
             "ws:member:mbr_1"
+        );
+    }
+
+    /// The escape hatch must default closed.
+    ///
+    /// An env-var kill switch that reads absent-as-disabled would ship the
+    /// enforcement gap it exists to make recoverable, which is the failure this
+    /// whole effort is about. Only an explicit opt-out disables it.
+    #[test]
+    fn the_local_budget_escape_hatch_defaults_to_enforcing() {
+        // Serialised implicitly: this is the only test touching this variable.
+        std::env::remove_var("INTUTIC_LOCAL_BUDGET_ENFORCE");
+        assert!(local_budget_enforced(), "absent must mean enforce");
+
+        for off in ["0", "false", "no"] {
+            std::env::set_var("INTUTIC_LOCAL_BUDGET_ENFORCE", off);
+            assert!(!local_budget_enforced(), "{off} must disable enforcement");
+        }
+        for on in ["1", "true", "yes", ""] {
+            std::env::set_var("INTUTIC_LOCAL_BUDGET_ENFORCE", on);
+            assert!(local_budget_enforced(), "{on:?} must not disable enforcement");
+        }
+        std::env::remove_var("INTUTIC_LOCAL_BUDGET_ENFORCE");
+    }
+
+    /// Every response path must accrue spend, and there is more than one.
+    ///
+    /// `add_local_spend`, `add_workflow_spend` and `add_graph_spend` each had
+    /// exactly one call site, all in the non-streaming branch, all after the
+    /// streaming branch returns. The streaming finalizer computed
+    /// `actual_cost_usd`, put it in the trace, and accrued none of it — so the
+    /// local daily cap and the graph budget were blind to streaming traffic,
+    /// which is what Claude Code and Cursor always send.
+    ///
+    /// A structural test rather than a behavioural one, and deliberately so:
+    /// what went wrong was not a wrong value, it was a *branch that did not
+    /// call the thing*. Driving the real finalizer needs an upstream, a stream
+    /// and a store; asserting that both branches route through one accrual
+    /// point catches the same class for the cost of reading the file.
+    #[test]
+    fn both_response_paths_accrue_spend() {
+        let src = include_str!("proxy.rs");
+
+        // The primitives live in exactly one place now, so a fourth response
+        // path cannot pick up two of the three and miss the others.
+        //
+        // Needles assembled at runtime: written as literals, this test's own
+        // source counts as a call site and the assertion measures itself.
+        for prim in [
+            ["crate::local_spend::add_local", "_spend("].concat(),
+            [".add_workflow", "_spend("].concat(),
+            [".add_graph", "_spend("].concat(),
+        ] {
+            let prim = prim.as_str();
+            let n = src.matches(prim).count();
+            assert_eq!(n, 1, "{prim} has {n} call sites; it must live only in accrue_spend");
+        }
+
+        let streaming = src
+            .find("    if is_streaming {")
+            .expect("the streaming branch moved — update this test deliberately");
+        let non_streaming = src
+            .find("    // ── Step 7: DLP scan — output (non-streaming flow)")
+            .expect("the non-streaming flow marker moved");
+        assert!(streaming < non_streaming, "test premise: streaming returns first");
+
+        assert!(
+            src[streaming..non_streaming].contains("accrue_spend("),
+            "the streaming finalizer does not accrue spend",
+        );
+        assert!(
+            src[non_streaming..].contains("accrue_spend("),
+            "the non-streaming path does not accrue spend",
         );
     }
 }
