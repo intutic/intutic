@@ -113,6 +113,19 @@ pub struct FeatureFlags {
     pub bandit_routing: bool,
     pub response_cache_exact: bool,
     pub response_cache_semantic: bool,
+    /// Evaluate every detector, record what it would have done, and **allow the
+    /// request anyway**.
+    ///
+    /// For a workspace that wants to see what enforcement would cost before
+    /// enabling it, and for measuring a detector's false-positive rate on
+    /// traffic that was never actually blocked.
+    ///
+    /// Defaults to false, like every other flag, and `None` from the control
+    /// plane means no control plane — so an unreachable flag service can never
+    /// silently disable enforcement. That direction matters more here than for
+    /// the others: the failure mode of a mis-resolved shadow flag is a proxy
+    /// that governs nothing while reporting that it did.
+    pub shadow_enforcement: bool,
 }
 
 /// Result of asking the control plane about a virtual key.

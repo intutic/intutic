@@ -113,6 +113,16 @@ pub struct FindingWire {
     pub disposition: String,
     pub confidence: f64,
     pub reason: String,
+    /// True when the workspace was in shadow mode, so this finding was recorded
+    /// but **did not take effect**.
+    ///
+    /// Separate from `disposition`, which stays truthful about what the detector
+    /// decided. Encoding shadow into the disposition instead — a `WOULD_HAVE`
+    /// value — would have made every consumer's match on `KILL` silently miss
+    /// the shadowed kills, and would have destroyed the very thing being
+    /// measured: which verdict the detector actually reached.
+    #[serde(default)]
+    pub shadowed: bool,
 }
 
 impl FindingWire {
@@ -124,7 +134,14 @@ impl FindingWire {
             disposition: f.disposition.as_str().to_string(),
             confidence: f.confidence,
             reason: f.reason.clone(),
+            shadowed: false,
         }
+    }
+
+    /// Mark every finding as recorded-but-not-enforced.
+    pub fn shadowed(mut self) -> Self {
+        self.shadowed = true;
+        self
     }
 }
 
@@ -378,6 +395,69 @@ mod tests {
         k.detector_id = "budget_exhaustion";
         assert_eq!(FindingWire::from_finding(&k).disposition, "KILL");
         assert_eq!(Disposition::Ask.as_str(), "ASK");
+    }
+
+    /// Shadow must be OFF unless someone deliberately turned it on.
+    ///
+    /// This is the property that decides whether shadow mode is safe to ship at
+    /// all. Every other flag defaulting wrong costs a feature; this one
+    /// defaulting wrong means a proxy that governs nothing while reporting that
+    /// it did — enforcement silently disabled, with findings still flowing so
+    /// the dashboards look normal.
+    ///
+    /// `FeatureFlags::default()` is what a *present but unparseable* flag
+    /// payload resolves to, and `is_some_and` is what an absent one resolves
+    /// through. Both must land on false.
+    #[test]
+    fn shadow_enforcement_is_off_by_default_and_when_unresolvable() {
+        use crate::store::FeatureFlags;
+
+        assert!(
+            !FeatureFlags::default().shadow_enforcement,
+            "a malformed flag payload must not disable enforcement",
+        );
+
+        // No control plane at all — the standalone/open-core case.
+        let none: Option<FeatureFlags> = None;
+        assert!(
+            !none.is_some_and(|f| f.shadow_enforcement),
+            "an absent control plane must not disable enforcement",
+        );
+
+        // And a payload that sets the other flags but not this one.
+        let partial = FeatureFlags {
+            bandit_routing: true,
+            response_cache_exact: true,
+            response_cache_semantic: true,
+            ..FeatureFlags::default()
+        };
+        assert!(!partial.shadow_enforcement);
+    }
+
+    /// A shadowed finding keeps its real disposition.
+    ///
+    /// The tempting alternative was a `WOULD_HAVE` disposition. It destroys the
+    /// measurement: every consumer matching on `KILL` silently misses the
+    /// shadowed kills, and the record no longer says which verdict the detector
+    /// actually reached — which is the only thing shadow mode is for.
+    #[test]
+    fn a_shadowed_finding_still_reports_what_it_would_have_done() {
+        use crate::plugins::anomaly::{AnomalyFinding, AnomalyKind};
+
+        let mut f = AnomalyFinding::kill(AnomalyKind::BudgetBreach, "no headroom");
+        f.detector_id = "budget_exhaustion";
+        let w = FindingWire::from_finding(&f).shadowed();
+
+        assert!(w.shadowed, "the finding must be marked as not-enforced");
+        assert_eq!(
+            w.disposition, "KILL",
+            "and must still say KILL — a consumer asking 'what would enforcement \
+             have cost' needs the verdict, not a placeholder",
+        );
+        assert_eq!(w.detector_id, "budget_exhaustion");
+
+        // The default is enforced, not shadowed.
+        assert!(!FindingWire::from_finding(&f).shadowed);
     }
 
     /// Findings are skipped on the wire when empty, so a clean request's trace

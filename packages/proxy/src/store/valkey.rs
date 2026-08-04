@@ -812,6 +812,7 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
             bandit_routing: flag("ff_bandit_routing"),
             response_cache_exact: flag("ff_response_cache_exact"),
             response_cache_semantic: flag("ff_response_cache_semantic"),
+            shadow_enforcement: flag("ff_shadow_enforcement"),
         })
     }
 

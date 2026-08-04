@@ -329,6 +329,10 @@ async fn feature_flags_parse_from_control_plane_payload() {
             bandit_routing: true,
             response_cache_exact: false, // omitted → false, not an error
             response_cache_semantic: true,
+            // Same "omitted → false" rule, and it matters more for this one:
+            // a shadow flag that defaulted true would silently disable
+            // enforcement for every workspace whose payload predates it.
+            shadow_enforcement: false,
         })
     );
 
