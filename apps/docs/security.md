@@ -41,7 +41,7 @@ Developer → AI Agent → Intutic Proxy (:4000) → LLM Provider
 ```
 
 1. Every LLM request from an AI agent is routed through the **local Intutic proxy** on port 4000
-2. The proxy evaluates tool calls against SOPs in the **WASM policy engine** (hard 5 ms execution ceiling, fail-open past it)
+2. The proxy evaluates tool calls against SOPs in the **WASM policy engine** (sandboxed, with an enforced 5 ms wasmtime timeout)
 3. Verdicts and telemetry stay **on the local machine**. Bandit routing state is written to your own Valkey; nothing is transmitted to Intutic or anyone else
 4. The proxy **never stores prompts or completions** — only structured telemetry (tool names, verdicts, token counts, timing)
 

@@ -4,7 +4,7 @@ Portkey is an AI gateway built for LLM observability, caching, and routing. It l
 
 ## The Core Difference
 
-Portkey **observes** LLM traffic after the fact. Intutic **intercepts** tool calls in real time and decides whether to allow, modify, or block them — before the call reaches its destination.
+Portkey **observes** LLM traffic after the fact. Intutic **intercepts** tool calls in real time and decides whether to allow, modify, or block them — before the request leaves the machine.
 
 If your AI agent tries to `rm -rf /`, Portkey will log it. Intutic will kill it.
 
@@ -13,7 +13,7 @@ If your AI agent tries to `rm -rf /`, Portkey will log it. Intutic will kill it.
 | Capability | Intutic | Portkey |
 |-----------|---------|---------|
 | **Enforcement model** | Synchronous — blocks before execution | Async — logs after execution |
-| **Execution path** | Synchronous — the call is held until the verdict returns | N/A (post-hoc) |
+| **Latency overhead** | Measured per payload size in `packages/proxy/benches`; not a single published figure | N/A (post-hoc) |
 | **Circuit breaker actions** | BYPASS / ENHANCE / HIJACK / KILL | Not available |
 | **Custom policy rules** | WASM sandbox — run your own rules | JSON config guardrails |
 | **Model routing** | Thompson Sampling bandit (cost + quality) | Round-robin, fallback chains |

@@ -149,6 +149,18 @@ To set a blanket limit to protect your wallet across all sessions and agents run
 ```
 If the daily aggregated sum of all runs in the local spend ledger exceeds `$10.00`, the proxy blocks all outbound requests until midnight.
 
+::: warning This became true in 2026-08
+Streaming responses were not written to the local spend ledger, so for a client that always
+streams — Claude Code and Cursor both do — the daily total never moved and this cap could not
+fire however much the day cost. Streaming now accrues like any other response.
+
+If that lands badly on a machine that has been over its cap unnoticed, set
+`INTUTIC_LOCAL_BUDGET_ENFORCE=0` to keep recording spend while allowing requests through.
+The proxy logs a warning on every request it would otherwise have blocked, so the bypass is
+never silent. Raising `max_daily_budget_usd` is the better fix; the variable is for the hour
+you need to keep working.
+:::
+
 #### Checking Budgets in Chat (Slash Command)
 While pair-programming inside the agent chat window (like Cursor or Claude Code), check your budget status at any point by prepending the budget command:
 ```markdown
@@ -164,7 +176,7 @@ Intutic enforces financial controls differently based on connection state to ens
 
 #### Connected / SaaS Mode (Active Centralized Enforcement)
 *   **Central Workspace Limits:** Daily monitored LLM volume limits and active budget thresholds are managed at the workspace level.
-*   **Valkey Fast-Path Interception:** The corporate control plane caches live billing limits and cumulative usage counters in Valkey. On every request, the proxy does a fast-path cache precheck (`check_workspace_hard_block`) in under `<1ms` p99 latency.
+*   **Valkey Fast-Path Interception:** The corporate control plane caches live billing limits and cumulative usage counters in Valkey. On every request, the proxy does a cache precheck (`check_workspace_hard_block`) — a single Valkey GET.
 *   **Fail-Closed Protection:** If the cache layer is unreachable, spend cannot be verified, and the budget gate fails closed — the request is rejected with `503 BUDGET_UNVERIFIABLE` rather than admitted on an unverifiable budget. This is deliberately the opposite of the usual rate-limiter convention: a spend cap is a financial control that you explicitly opted into, so the cost of wrongly allowing is unbounded, while the cost of wrongly denying is a retry. Note this applies only to control-plane-managed workspaces; standalone has no central cap to verify and is bounded by the local daily cap instead.
 *   **Real-time Ledger Rollups:** Once upstream completions finish, actual token costs are recorded centrally, and cumulative workspace counters are updated to maintain global enforcement.
 

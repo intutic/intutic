@@ -1,6 +1,6 @@
 # Model Context Protocol (MCP) Governance Proxy <Badge type="tip" text="Open-Core" />
 
-The `@intutic/mcp-governance-proxy` package (`intutic-mcp-proxy`) is a transparent, high-performance stdio proxy for Model Context Protocol (MCP) servers. It intercepts, evaluates, and logs JSON-RPC 2.0 tool execution frames before forwarding them to downstream MCP servers.
+The `@intutic/mcp-governance-proxy` package (`intutic-mcp-proxy`) is a transparent stdio proxy for Model Context Protocol (MCP) servers. It intercepts, evaluates, and logs JSON-RPC 2.0 tool execution frames in-process before forwarding them to downstream MCP servers.
 
 ---
 

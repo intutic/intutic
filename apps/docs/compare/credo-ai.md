@@ -14,7 +14,7 @@ Credo AI owns the **governance system of record** — policy creation, risk asse
 |-----------|---------|----------|
 | **Primary function** | Runtime enforcement (circuit breaker) | Governance, risk & compliance (GRC) |
 | **Where it sits** | In the tool-call path between agent and infrastructure | Above the execution layer — policy and audit |
-| **Enforcement** | Synchronous — BYPASS / ENHANCE / HIJACK / KILL, decided before the call proceeds | Policy definition and assessment — no runtime blocking |
+| **Enforcement** | Synchronous — BYPASS / ENHANCE / HIJACK / KILL, in-process | Policy definition and assessment — no runtime blocking |
 | **Scope** | AI coding agents (18 harness integrations) | All AI systems (models, pipelines, applications) |
 | **DLP & threat detection** | Secrets redaction, SQL injection, prompt injection | Risk scoring and bias detection |
 | **Compliance output** | Enforcement audit logs (who, what, when, blocked/allowed) | Compliance reports, model cards, risk registers |

@@ -6,7 +6,7 @@ LangSmith is a powerful developer platform designed for tracing, debugging, and 
 
 LangSmith is built for **post-hoc analysis**. It records trace graphs, logs outputs, and provides tools to run evaluations against offline test datasets. Intutic is built for **live runtime containment**. It intercepts tool calls and LLM completions, applying safety filters, cost limits, and security constraints in the active execution path.
 
-If your agent runs into an infinite loop, LangSmith will record a detailed visualization of the $500 token spike. Intutic's warm-path budget gate pre-check intercepts the loop and kills the session in under 1ms.
+If your agent runs into an infinite loop, LangSmith will record a detailed visualization of the $500 token spike. Intutic's budget gate pre-check intercepts the loop and kills the session before the request reaches the provider.
 
 ---
 
@@ -15,7 +15,7 @@ If your agent runs into an infinite loop, LangSmith will record a detailed visua
 | Capability | Intutic | LangSmith |
 |-----------|---------|-----------|
 | **Primary Purpose** | Active security containment & cost enforcement | Passive tracing, debugging, and offline evaluations |
-| **Execution Path** | Synchronous interceptor — the call is held until the verdict returns | Asynchronous logging listener |
+| **Execution Path** | Synchronous interceptor (under 50ms) | Asynchronous logging listener |
 | **Cost Control** | Real-time budget gates (kills runaway loops) | Cost estimation after request completes |
 | **Tool-Call Security** | Active blocks on shell commands, files, APIs | Post-hoc audit trail of executed tools |
 | **Policy Definition** | Standardized SOP schemas and WASM rules | Evaluator prompt tests ran against logs |

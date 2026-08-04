@@ -4,7 +4,7 @@ layout: home
 hero:
   name: Intutic
   text: The circuit breaker for AI agents
-  tagline: Intutic sits in the tool-call path between your AI agents and production. Every file write, API call, and shell command is held until the evaluation chain returns a verdict — blocking bad actions and steering agentic loops before they reach your infrastructure.
+  tagline: Intutic sits in the tool-call path between your AI agents and production. Every file write, API call, and shell command passes through a deterministic, in-process evaluation chain — blocking bad actions and steering agentic loops in real time.
   actions:
     - theme: brand
       text: Get Started
@@ -16,7 +16,7 @@ hero:
 features:
   - icon: 🔴
     title: Circuit Breaker
-    details: Four enforcement actions — BYPASS, ENHANCE, HIJACK, KILL — evaluated synchronously per tool call, on the request path rather than after the fact. SOPs define the rules; the circuit breaker intercepts, rewrites, or blocks actions before they reach your infrastructure.
+    details: Four enforcement actions — BYPASS, ENHANCE, HIJACK, KILL — evaluated per tool call, in-process, with no model call. SOPs define the rules; the circuit breaker intercepts, rewrites, or blocks actions before they reach your infrastructure.
   - icon: 🔍
     title: DLP & Threat Detection
     details: Detect secrets in prompts, data exfiltration, prompt injection, tool abuse, token waste, SQL injection, and unauthorized operations. Threats are flagged — and deterministic violations blocked — before they leave the proxy.

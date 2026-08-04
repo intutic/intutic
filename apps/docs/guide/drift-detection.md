@@ -12,7 +12,7 @@ Three independent mechanisms, each with a different trigger:
 | **Behavioral drift** | Agents comply with an SOP measurably less than they used to | Hourly control-plane sweep |
 | **SOP staleness** | Agents stop matching an SOP at all | Hourly control-plane sweep |
 | **Cost baselines** | A run costs far more than its own historical median | Inline, on every classified trace |
-| **Sequence anomalies** | Runaway or implausible tool sequences | Rust proxy, in-process — every detector is a pure function of one request, with no I/O |
+| **Sequence anomalies** | Runaway or implausible tool sequences | Rust proxy, in-process, no model call |
 
 ::: info What changed on 2026-07-30
 This page previously said behavioral drift scoring was **not** part of the
@@ -118,7 +118,7 @@ upward until nothing ever looked anomalous again.
 
 ## Real-Time Sequence Anomaly Detection <Badge type="tip" text="Enterprise" />
 
-To intercept anomalous behaviors (such as infinite tool execution loops, abnormal command bursts, or forbidden transition paths) before they generate high costs or damage systems, the Rust Proxy evaluates a **fast-path sequence classifier** (<1ms overhead):
+To intercept anomalous behaviors (such as infinite tool execution loops, abnormal command bursts, or forbidden transition paths) before they generate high costs or damage systems, the Rust Proxy evaluates a **sequence classifier** in-process, with no model call:
 
 1. **Valkey Queue Tracking** — The proxy maintains a sliding window of the last 20 tool calls executed during a session.
 2. **Repetition Filtering** — If a single tool name is repeated consecutively 5 or more times, the proxy terminates the request immediately with a `Verdict::Kill`.
