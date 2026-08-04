@@ -20,21 +20,16 @@ import * as path from 'node:path'
 import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { newIso } from '@intutic/id'
+import { UNIVERSAL_PROTECTED_PATHS } from './protectedPaths.js'
 
 const log = createLogger('sync-windsurf-hooks')
 
 const WINDSURF_USER_DIR = path.join(os.homedir(), '.codeium', 'windsurf')
 
 const PROTECTED_PATHS = [
-  '.codeium/windsurf/hooks.json',
-  '.windsurf/hooks.json',
-  '.intutic/hooks',
-  '.intutic/integrity.json',
-  '.claude/settings.json',
-  '.cursor/hooks.json',
-  '.cline/hooks',
-  '.agents/plugins/intutic-governance',
-  '.openhands/hooks.json',
+  // Universal: every harness protects every harness's config —
+  // the threat is an agent under one disarming another.
+  ...UNIVERSAL_PROTECTED_PATHS,
 ]
 
 function buildHooksConfig(hookScriptPath: string) {
@@ -126,7 +121,11 @@ process.stdin.on('end', () => {
     const targetPath = input.path || input.file || input.target || '';
     for (const p of PROTECTED_PATHS) {
       if (String(targetPath).includes(p)) {
-        const reason = 'Attempt to modify protected path "' + targetPath + '"';
+        // "governance-protected", not "protected". hookEvents.resolveSeverity
+        // keys CRITICAL off that exact substring, and this was the one harness
+        // of twelve that omitted it, so a Windsurf agent caught tampering with
+        // governance config was filed MEDIUM.
+        const reason = 'Attempt to modify governance-protected path "' + targetPath + '"';
         process.stderr.write('[Intutic Governance] BLOCKED: ' + reason + '\\n');
         logEvent('blocked', 'edit', reason);
         process.exit(2);

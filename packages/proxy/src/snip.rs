@@ -69,12 +69,17 @@ pub fn compact(text: &str, config: &SnipCompactorConfig) -> (String, f64) {
             0.0
         };
         let ratio = final_ratio.max(0.0);
+        // Content identity for the cache-hit-rate audit (TD-160). Computed on
+        // the compaction path itself, not inside the cache, so the rate is
+        // measurable before anyone decides whether to turn the cache on.
+        let input_hash = crate::snip_code::fnv1a_hash(text);
         tracing::info!(
             snip.input_type = "json",
             snip.strategy = "json_aware",
             snip.input_bytes = text.len(),
             snip.output_bytes = truncated.len(),
             snip.compression_ratio = ratio,
+            snip.input_hash = input_hash,
             "snip.compacted"
         );
         return (truncated, ratio);
@@ -97,12 +102,14 @@ pub fn compact(text: &str, config: &SnipCompactorConfig) -> (String, f64) {
                     };
                     if ratio > 0.05 {
                         let (input_type, strategy) = lang_telemetry(lang);
+                        let input_hash = crate::snip_code::fnv1a_hash(text);
                         tracing::info!(
                             snip.input_type = input_type,
                             snip.strategy = strategy,
                             snip.input_bytes = text.len(),
                             snip.output_bytes = truncated.len(),
                             snip.compression_ratio = ratio,
+                            snip.input_hash = input_hash,
                             "snip.compacted"
                         );
                         return (truncated, ratio);
@@ -145,12 +152,14 @@ pub fn compact(text: &str, config: &SnipCompactorConfig) -> (String, f64) {
     }
     .max(0.0);
 
+    let input_hash = crate::snip_code::fnv1a_hash(text);
     tracing::info!(
         snip.input_type = "text",
         snip.strategy = "text_rules",
         snip.input_bytes = text.len(),
         snip.output_bytes = result.len(),
         snip.compression_ratio = ratio,
+        snip.input_hash = input_hash,
         "snip.compacted"
     );
 

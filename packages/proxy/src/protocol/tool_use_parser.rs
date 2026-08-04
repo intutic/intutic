@@ -4,6 +4,34 @@
 //! Only detects the initial `content_block_start` / `tool_calls` delta —
 //! full argument accumulation is tracked as TD-TOOLUSE-001 for Phase 5.
 //!
+//! # Not wired, on purpose — and TD-150 should not have claimed otherwise
+//!
+//! `parse_sse_chunk` has no caller outside this file's own tests. That is a
+//! deliberate position rather than an oversight, and it is recorded here
+//! because TD-150 was marked resolved on the strength of this module existing.
+//!
+//! What the proxy uses instead is `manifest::extract_request_tool_invocations`,
+//! which reads tool calls out of the *request* body — the conversation history
+//! the client sends back on the following turn. That path is strictly stronger
+//! for every purpose the proxy currently has:
+//!
+//! - It yields the full argument object. This module yields the tool name and
+//!   whatever partial JSON happened to land in one chunk.
+//! - It feeds `new_tool_calls`, which reaches every `ExecutionTrace` including
+//!   the streaming one, so streaming responses are not blind in telemetry.
+//! - Enforcement here is pre-request. A tool invocation observed while the
+//!   response streams has already been emitted to the client; there is nothing
+//!   left to gate. The next request is where the proxy can still act, and that
+//!   is exactly where the request-body extractor sees it.
+//!
+//! The one thing this module could add is same-turn visibility of a tool call
+//! in a session's *final* response, which no subsequent request ever carries.
+//! Recording that is worth doing once argument accumulation exists — a bare
+//! tool name is not enough to classify against a manifest. Until then, wiring
+//! it would add a weaker duplicate of a signal the proxy already has.
+//!
+//! The code stays because it is correct and tested and TD-TOOLUSE-001 needs it.
+//!
 //! # Supported providers
 //!
 //! | Provider  | Detection trigger |

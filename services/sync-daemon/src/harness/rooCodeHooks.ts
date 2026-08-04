@@ -21,17 +21,17 @@ import * as path from 'node:path'
 import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { newIso } from '@intutic/id'
+import { UNIVERSAL_PROTECTED_PATHS } from './protectedPaths.js'
 
 const log = createLogger('sync-roo-code-hooks')
 
 /** Governance-sensitive paths that the hook gate protects. */
 const PROTECTED_PATHS = [
+  // Universal: every harness protects every harness's config —
+  // the threat is an agent under one disarming another.
+  ...UNIVERSAL_PROTECTED_PATHS,
   path.join(os.homedir(), '.claude', 'settings.json'),
   path.join(os.homedir(), '.claude', 'settings.local.json'),
-  '.claude/settings.json',
-  '.claude/settings.local.json',
-  '.intutic/hooks',
-  '.intutic/integrity.json',
   '.roorules/hooks',
 ]
 
