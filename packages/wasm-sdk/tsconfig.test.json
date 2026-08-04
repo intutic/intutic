@@ -1,0 +1,22 @@
+{
+  // Scoped to `__tests__/` only.
+  //
+  // `assembly/` is AssemblyScript, not TypeScript — it uses `i32`, `f64`,
+  // `bool`, `load<u8>` and other types `tsc` has never heard of, and it is
+  // compiled by `asc` (see asconfig.json). Pointing tsc at it would produce
+  // hundreds of errors describing a language mismatch rather than a defect.
+  //
+  // The tests here are ordinary TypeScript that read `assembly/index.ts` as
+  // text, so they are the part tsc can meaningfully check. `asc` itself is
+  // exercised by the compile test in contextParity.test.ts.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["node", "vitest/globals"]
+  },
+  "include": ["__tests__/**/*.ts", "vitest.config.ts"]
+}
