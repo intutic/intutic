@@ -423,6 +423,7 @@ impl DetectorRegistry {
                 Box::new(OrphanExecutionDetector::default()),
                 Box::new(UnauthorizedToolDetector::default()),
                 Box::new(PromptInjectionDetector::default()),
+                Box::new(ToolPoisoningDetector::default()),
                 Box::new(WorkflowBudgetBreachDetector::default()),
                 Box::new(CrossHarnessViolationDetector::default()),
             ],
@@ -1232,7 +1233,7 @@ mod coverage_tests {
         let reg = DetectorRegistry::with_defaults();
         let ids: Vec<&'static str> = reg.ids();
 
-        assert_eq!(ids.len(), 24, "registry size changed — update this test deliberately");
+        assert_eq!(ids.len(), 25, "registry size changed — update this test deliberately");
 
         for id in &ids {
             assert!(!id.is_empty(), "a registered detector has no id");

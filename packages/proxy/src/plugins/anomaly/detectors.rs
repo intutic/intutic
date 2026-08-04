@@ -1642,6 +1642,71 @@ const INJECTION_KILL_THRESHOLD: usize = 2;
 ///
 /// Graded rather than absolute, because the false-positive cost is real —
 /// people say "ignore the previous suggestion" to agents in earnest.
+/// Instructions hidden in a **tool description**, as opposed to in the
+/// conversation.
+///
+/// Reads `ctx.tools`, which the request path has populated since
+/// `extract_tools` was written (`proxy.rs:1883`) and which, until now, **no
+/// detector read**. The field was live, carried on every request, and reached
+/// nothing.
+///
+/// # Why this steers rather than reasks
+///
+/// `Reask` returns 409 and asks the agent to try again, escalating to 403 after
+/// three attempts. That is the right verb when the agent can change course. It
+/// cannot here: the poisoned text belongs to a third-party server's static tool
+/// array, identical on every retry. Reasking would not be a correction loop, it
+/// would be a guaranteed three-strike block — enforcement shipped without the
+/// false-positive telemetry the promotion rule (`mod.rs:45-48`) requires first.
+///
+/// So it steers, the finding lands in `detector_findings` on allowed requests,
+/// and promotion waits for adjudications rather than for an argument.
+#[derive(Default)]
+pub struct ToolPoisoningDetector;
+
+impl AnomalyDetector for ToolPoisoningDetector {
+    fn id(&self) -> &'static str {
+        "tool_poisoning"
+    }
+
+    /// Reuses `PromptInjection` rather than adding a variant, per `TD-273`: a
+    /// taxonomy value is not an identity, and `detector_id` is what
+    /// distinguishes this from `prompt_injection` everywhere it matters.
+    fn kind(&self) -> AnomalyKind {
+        AnomalyKind::PromptInjection
+    }
+
+    fn detect(&self, ctx: &RequestContext) -> Option<AnomalyFinding> {
+        let mut hits: Vec<String> = Vec::new();
+        for tool in &ctx.tools {
+            let Some(desc) = tool.description.as_deref() else {
+                continue;
+            };
+            for technique in crate::tool_poison::scan(desc) {
+                // The tool NAME and the pattern name only. The description is
+                // attacker-controlled text and this reason string travels into
+                // telemetry and into sibling agents' context — quoting it would
+                // deliver the payload to the places this detector protects.
+                hits.push(format!("{}: {technique}", tool.name));
+            }
+        }
+        if hits.is_empty() {
+            return None;
+        }
+        hits.sort();
+        hits.dedup();
+        Some(AnomalyFinding::steer(
+            AnomalyKind::PromptInjection,
+            format!(
+                "Tool description carries model-directed instructions ({}). The description \
+                 reaches the model unchanged — this is a report, not a block.",
+                hits.join("; ")
+            ),
+            0.6,
+        ))
+    }
+}
+
 pub struct PromptInjectionDetector {
     kill_threshold: usize,
 }
@@ -3197,6 +3262,39 @@ mod scope_path_tests {
             vec![change(ChangeOp::Read, "services/control-plane/src/app.ts")],
         );
         assert!(d.detect(&c).is_none(), "reading is not changing");
+    }
+
+    /// The scope boundary must see the tool that does most of the editing.
+    ///
+    /// This goes through `manifest_from_invocations` rather than constructing a
+    /// `ChangeEntry` directly, because the defect it guards lived in the
+    /// classification, not the detector: `str_replace_editor` was in
+    /// `READ_TOOLS`, the manifest recorded `ChangeOp::Read`, and the filter to
+    /// `op.is_mutation()` dropped it before this detector ever compared a path.
+    ///
+    /// A test that hands the detector a `ChangeEntry::Write` passes either way
+    /// and proves nothing — which is exactly why the one above it did.
+    #[test]
+    fn an_out_of_scope_edit_through_the_text_editor_tool_fires() {
+        use crate::manifest::{manifest_from_invocations, InvocationSource, ToolInvocation};
+
+        let changes = manifest_from_invocations(&[ToolInvocation {
+            name: "str_replace_editor".into(),
+            input: serde_json::json!({
+                "command": "str_replace",
+                "path": "infra/kubernetes/base/configmap.yaml",
+                "old_str": "replicas: 1",
+                "new_str": "replicas: 0",
+            }),
+            source: InvocationSource::Call,
+        }]);
+
+        let c = ctx(&["packages/proxy"], changes);
+        let hit = ScopePathDetector
+            .detect(&c)
+            .expect("an out-of-scope edit must fire whichever tool made it");
+        assert_eq!(hit.kind, AnomalyKind::ScopeViolation);
+        assert!(hit.reason.contains("configmap.yaml"), "got: {}", hit.reason);
     }
 
     /// A boundary is a boundary. Unlike plan adherence, one violation among

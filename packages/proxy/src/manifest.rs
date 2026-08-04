@@ -84,15 +84,31 @@ pub fn per_turn_tool_delta<T: Clone>(prev_count: usize, extracted: &[T]) -> Vec<
 /// are about *when* something happened relative to everything else, and one
 /// sequence is the only place that relation survives.
 ///
-/// Deliberately blind to `InvocationSource`, unlike the manifest. A `Read`
-/// whose *result* contains an AWS key really is a secret read, and
-/// `action:secret_read` firing on it is the behaviour the detectors were tuned
-/// against. Narrowing this to `Call` would silently lower firing rates across
-/// the whole taxonomy.
+/// The **actions** are deliberately blind to `InvocationSource`, unlike the
+/// manifest. A `Read` whose *result* contains an AWS key really is a secret
+/// read, and `action:secret_read` firing on it is the behaviour the detectors
+/// were tuned against. Narrowing that to `Call` would silently lower firing
+/// rates across the whole taxonomy.
+///
+/// The **name** is not, and the difference is not a nuance. A result is the
+/// same run reporting back, not a second run, so emitting the name for both
+/// put every call into the sequence twice. `CallCeilingDetector` counts raw
+/// occurrences and *kills*, so a declared `action:deploy <= 3` fired on the
+/// second deploy — a rule whose own justification is that "there is no
+/// false-positive rate to be wrong about", served by a counter that was.
+///
+/// Note what this still does not make exact: an action token can be emitted by
+/// a call *and* by a result whose content re-matches the same pattern, so a
+/// ceiling counts occurrences of evidence rather than invocations. That is the
+/// documented intent above — new information in a result must count — but it
+/// means a ceiling should be read as a bound on observed activity, not on
+/// syscalls.
 pub fn expand_tool_actions(invocations: &[ToolInvocation]) -> Vec<String> {
     let mut out = Vec::with_capacity(invocations.len());
     for call in invocations {
-        out.push(call.name.clone());
+        if call.source == InvocationSource::Call {
+            out.push(call.name.clone());
+        }
         out.extend(crate::plugins::anomaly::actions::classify(
             &call.name,
             &call.input,
@@ -104,6 +120,17 @@ pub fn expand_tool_actions(invocations: &[ToolInvocation]) -> Vec<String> {
 pub fn extract_request_tool_invocations(body: &serde_json::Value) -> Vec<ToolInvocation> {
     let mut tool_names = Vec::new();
     if let Some(messages) = body.get("messages").and_then(|m| m.as_array()) {
+        // Anthropic names a tool exactly once, on the `tool_use` block opening
+        // the call. The `tool_result` answering it carries `tool_use_id` and no
+        // name at all, so the name has to be resolved from here or the result
+        // block cannot be attributed to anything and gets dropped — which is
+        // what happened, silently, for every Anthropic request.
+        //
+        // A separate pass rather than accumulating as we go: nothing in the
+        // format guarantees a call precedes its result in the array, only that
+        // both are present when the harness resends the history.
+        let names_by_id = anthropic_tool_use_names(messages);
+
         for msg in messages {
             if let Some(tool_calls) = msg.get("tool_calls").and_then(|tc| tc.as_array()) {
                 for tc in tool_calls {
@@ -157,14 +184,24 @@ pub fn extract_request_tool_invocations(body: &serde_json::Value) -> Vec<ToolInv
                     for block in arr {
                         if let Some(block_type) = block.get("type").and_then(|t| t.as_str()) {
                             if block_type == "tool_use" || block_type == "tool_result" {
-                                if let Some(name) = block.get("name").and_then(|n| n.as_str()) {
+                                let name = block
+                                    .get("name")
+                                    .and_then(|n| n.as_str())
+                                    .map(str::to_string)
+                                    .or_else(|| {
+                                        block
+                                            .get("tool_use_id")
+                                            .and_then(|i| i.as_str())
+                                            .and_then(|id| names_by_id.get(id).cloned())
+                                    });
+                                if let Some(name) = name {
                                     let input = block
                                         .get("input")
                                         .or_else(|| block.get("content"))
                                         .cloned()
                                         .unwrap_or(serde_json::Value::Null);
                                     tool_names.push(ToolInvocation {
-                                        name: name.to_string(),
+                                        name,
                                         input,
                                         source: if block_type == "tool_use" {
                                             InvocationSource::Call
@@ -181,6 +218,35 @@ pub fn extract_request_tool_invocations(body: &serde_json::Value) -> Vec<ToolInv
         }
     }
     tool_names
+}
+
+/// `tool_use_id` → tool name, over every Anthropic `tool_use` block in a body.
+///
+/// Only Anthropic needs this. OpenAI repeats the name on the result message
+/// (`{"role":"tool","name":…}`), which is why result-sourced classification was
+/// live for OpenAI traffic and dead for Anthropic's while one doc comment
+/// described both.
+fn anthropic_tool_use_names(
+    messages: &[serde_json::Value],
+) -> std::collections::HashMap<String, String> {
+    let mut out = std::collections::HashMap::new();
+    for msg in messages {
+        let Some(blocks) = msg.get("content").and_then(|c| c.as_array()) else {
+            continue;
+        };
+        for block in blocks {
+            if block.get("type").and_then(|t| t.as_str()) != Some("tool_use") {
+                continue;
+            }
+            if let (Some(id), Some(name)) = (
+                block.get("id").and_then(|i| i.as_str()),
+                block.get("name").and_then(|n| n.as_str()),
+            ) {
+                out.insert(id.to_string(), name.to_string());
+            }
+        }
+    }
+    out
 }
 
 // ─── The change manifest ────────────────────────────────────────────────
@@ -391,7 +457,9 @@ fn entry(tool: &str, op: ChangeOp, target: String, kind: TargetKind, bytes: Opti
 /// harness reporting what a tool returned, and reading a file's contents as if
 /// they were arguments invents changes nothing made.
 pub fn manifest_from_invocations(invocations: &[ToolInvocation]) -> Vec<ChangeEntry> {
-    use crate::plugins::anomaly::actions::{tool_is, FETCH_TOOLS, READ_TOOLS, SHELL_TOOLS};
+    use crate::plugins::anomaly::actions::{
+        editor_op, tool_is, EditorOp, EDITOR_TOOLS, FETCH_TOOLS, READ_TOOLS, SHELL_TOOLS,
+    };
 
     let mut out: Vec<ChangeEntry> = Vec::new();
     for call in invocations {
@@ -417,7 +485,16 @@ pub fn manifest_from_invocations(invocations: &[ToolInvocation]) -> Vec<ChangeEn
             }
         }
 
-        let (op, keys, kind) = if tool_is(name, WRITE_TOOLS) {
+        // Checked first, and by its argument rather than its name: this is the
+        // one tool whose name says nothing about whether it mutates.
+        let (op, keys, kind) = if tool_is(name, EDITOR_TOOLS) {
+            let op = match editor_op(&call.input) {
+                EditorOp::View => ChangeOp::Read,
+                EditorOp::Create => ChangeOp::Write,
+                EditorOp::Modify => ChangeOp::Edit,
+            };
+            (op, PATH_KEYS, TargetKind::Path)
+        } else if tool_is(name, WRITE_TOOLS) {
             (ChangeOp::Write, PATH_KEYS, TargetKind::Path)
         } else if tool_is(name, EDIT_TOOLS) {
             (ChangeOp::Edit, PATH_KEYS, TargetKind::Path)
@@ -522,6 +599,89 @@ mod tests {
         assert!(inv.iter().all(|i| i.source == InvocationSource::Call));
         // The OpenAI arguments string must be parsed, not left as a string.
         assert_eq!(inv[0].input["file_path"], "/a.rs");
+    }
+
+    /// The same thing, in the shape Anthropic actually puts on the wire.
+    ///
+    /// The test below this one passes, and proves nothing about Anthropic
+    /// traffic: it hand-builds a `tool_result` block carrying a `name`, and a
+    /// real one never does. Anthropic identifies the tool by `tool_use_id`
+    /// referring back to the `tool_use` block that opened the call —
+    /// `{"type":"tool_result","tool_use_id":"toolu_…","content":…}` and nothing
+    /// else. The extractor required `name`, so every one of those blocks was
+    /// dropped before classification.
+    ///
+    /// The consequence is not symmetric across harnesses. OpenAI puts results
+    /// in `{"role":"tool","name":…}` messages, which the branch above handles,
+    /// so result-sourced classification has been live for OpenAI traffic the
+    /// whole time and dead for Anthropic's. Both were described by one doc
+    /// comment claiming detector firing rates "were tuned with that included".
+    #[test]
+    fn a_real_anthropic_tool_result_contributes_to_the_action_sequence() {
+        let body = json!({"messages": [
+            {"role": "assistant", "content": [
+                {"type": "tool_use", "id": "toolu_01A", "name": "Read",
+                 "input": {"file_path": "notes.md"}},
+            ]},
+            {"role": "user", "content": [
+                // No `name`. This is the whole shape, not an abridged one.
+                {"type": "tool_result", "tool_use_id": "toolu_01A",
+                 "content": "AWS creds in ~/.aws/credentials"},
+            ]},
+        ]});
+        let inv = extract_request_tool_invocations(&body);
+        assert_eq!(inv.len(), 2, "the result block must survive extraction: {inv:?}");
+        assert_eq!(inv[1].source, InvocationSource::Result);
+        assert_eq!(inv[1].name, "Read", "the name comes from the tool_use it answers");
+
+        let seq = expand_tool_actions(&inv);
+        assert!(
+            seq.iter().any(|t| t == "action:secret_read"),
+            "a result-sourced secret read must classify on Anthropic traffic too: {seq:?}",
+        );
+    }
+
+    /// One call that ran once must appear in the sequence once.
+    ///
+    /// `expand_tool_actions` pushes `call.name` for every invocation, and a
+    /// harness sends two invocations per call: the call and its result. So each
+    /// `Bash` landed in the sequence as two `Bash` entries, and
+    /// `CallCeilingDetector` counts raw occurrences — a declared
+    /// `action:deploy <= 3` killed on the second deploy, not the fourth.
+    ///
+    /// The ceiling is a `kill`, justified in its own doc comment on the grounds
+    /// that "a declared ceiling is a condition, not an estimate. There is no
+    /// false-positive rate to be wrong about." That is true of the rule and was
+    /// false of the counter feeding it.
+    ///
+    /// The blindness to `InvocationSource` above is still right for the
+    /// *actions* — a Read whose output contains an AWS key is a secret read.
+    /// It was never right for the *name*: a result is the same run reporting
+    /// back, not a second run.
+    #[test]
+    fn a_result_does_not_count_as_a_second_call() {
+        let inv = vec![
+            ToolInvocation {
+                name: "Bash".into(),
+                input: json!({"command": "git push origin main"}),
+                source: InvocationSource::Call,
+            },
+            ToolInvocation {
+                name: "Bash".into(),
+                input: json!("Everything up-to-date"),
+                source: InvocationSource::Result,
+            },
+        ];
+        let seq = expand_tool_actions(&inv);
+        assert_eq!(
+            seq.iter().filter(|t| *t == "Bash").count(),
+            1,
+            "one run, one entry: {seq:?}",
+        );
+        assert!(
+            seq.iter().any(|t| t == "action:deploy"),
+            "the call's own actions must survive: {seq:?}",
+        );
     }
 
     /// The tag must not have narrowed the action vocabulary.
@@ -668,6 +828,62 @@ mod tests {
         )]);
         assert_eq!(m.len(), 2);
         assert!(m.iter().all(|e| e.op == ChangeOp::Move));
+    }
+
+    /// Anthropic's text editor tool is polymorphic, and it was filed as a read.
+    ///
+    /// `str_replace_editor` takes a `command` — `view`, `create`, `str_replace`,
+    /// `insert`, `undo_edit` — and four of those five write to the file. It sat
+    /// in `READ_TOOLS` regardless, so every edit made through the tool Claude
+    /// actually uses to edit files was recorded as `ChangeOp::Read`.
+    ///
+    /// That is not a cosmetic mislabel. `ScopePathDetector` filters to
+    /// `op.is_mutation()`, so a declared `scope_paths` boundary could not see a
+    /// single one of those writes: the one tool most likely to breach a scope
+    /// was the one tool exempt from the check.
+    ///
+    /// It missed `EDIT_TOOLS` too, and silently — `tool_is` matches on
+    /// `ends_with`, and `"str_replace_editor"` does not end with `"str_replace"`.
+    /// Two lists, both wrong, neither loud about it.
+    #[test]
+    fn the_text_editor_tool_is_classified_by_its_command_not_its_name() {
+        for (command, expected) in [
+            ("view", ChangeOp::Read),
+            ("create", ChangeOp::Write),
+            ("str_replace", ChangeOp::Edit),
+            ("insert", ChangeOp::Edit),
+            ("undo_edit", ChangeOp::Edit),
+        ] {
+            let m = manifest_from_invocations(&[call(
+                "str_replace_editor",
+                serde_json::json!({"command": command, "path": "/repo/src/a.rs"}),
+            )]);
+            assert_eq!(m.len(), 1, "{command}");
+            assert_eq!(m[0].op, expected, "str_replace_editor command={command}");
+        }
+    }
+
+    /// An unrecognised or absent `command` must land on the mutation side.
+    ///
+    /// The two errors are not symmetric. Calling an edit a read disarms the
+    /// scope check entirely and nothing reports it; calling a read an edit costs
+    /// one advisory finding a human dismisses. A harness that renames the
+    /// commands, or a call whose arguments arrive in a shape we did not
+    /// anticipate, must fail toward the visible error.
+    #[test]
+    fn an_unknown_editor_command_is_treated_as_a_mutation() {
+        for input in [
+            serde_json::json!({"path": "/repo/src/a.rs"}),
+            serde_json::json!({"command": "rewrite_everything", "path": "/repo/src/a.rs"}),
+        ] {
+            let m = manifest_from_invocations(&[call("str_replace_editor", input.clone())]);
+            assert_eq!(m.len(), 1, "{input}");
+            assert!(
+                m[0].op.is_mutation(),
+                "an unknown editor command must fail toward the visible error, got {:?} for {input}",
+                m[0].op,
+            );
+        }
     }
 
     #[test]

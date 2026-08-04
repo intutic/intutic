@@ -16,12 +16,17 @@ WHAT `measured` MEANS
                       words. NOTE: this measures `injection::scan`, not the
                       detector — PromptInjectionDetector returns None the moment
                       its findings list is empty, so it is a pass-through.
+  external-tooldesc   measured against 10,753 real tool and parameter descriptions
+                      from 14 BFCL v3 splits. This is the corpus TD-274 was held
+                      open for, on the claim that no public set of them existed.
+                      Recall is NOT measured — there is no vendored corpus of real
+                      poisoned descriptions, so no detection rate is claimed.
   not-measured        the detector reads a field no public corpus supplies (graph
                       depth, workflow budget, DLP findings), or fires only on an
                       operator declaration and therefore has no false-positive
                       rate to measure at all.
 
-Sixteen of twenty-two are not-measured. That is the honest reach of a public
+18 of 25 are not-measured. That is the honest reach of a public
 corpus, and it is written down rather than averaged away.
 
 WHAT THIS DOES NOT SUPPORT
@@ -33,7 +38,8 @@ WHAT THIS DOES NOT SUPPORT
     completion — short, clean, and unlike agentic coding traffic. Any rate here
     is a lower bound.
 
-Corpus: 1000 BFCL seeds (1000 with at least one parsed call), 339 NotInject prompts.
+Corpus: 1000 BFCL seeds (1000 with at least one parsed call), 339 NotInject prompts,
+10753 benign tool and parameter descriptions.
 
   detector_id                  | measured           | benign_fired | mutant_cases
   -----------------------------|--------------------|--------------|-------------
@@ -58,6 +64,7 @@ Corpus: 1000 BFCL seeds (1000 with at least one parsed call), 339 NotInject prom
   spawn_budget_breach          | not-measured       |            0 |            0
   taint_cooccurrence           | not-measured       |            0 |            0
   tool_diversity_collapse      | external-bfcl      |            0 |            1
+  tool_poisoning               | external-tooldesc  |            0 |            0
   transition_probability       | external-bfcl      |            2 |            0
   unauthorized_tool            | not-measured       |            0 |            0
   workflow_budget_breach       | not-measured       |            0 |            0
