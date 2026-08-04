@@ -1978,6 +1978,19 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // outside — and unpromotable, since the rule in `anomaly/mod.rs` requires a
     // measured 0.1–1% false-positive rate before a detector may escalate to `kill`,
     // and there was no path by which an advisory finding could ever be counted.
+    // Feature flags. `None` *is* "no control plane manages this workspace" —
+    // there is no separate presence flag to forget to consult.
+    //
+    // Resolved here rather than at its old site further down, because the
+    // anomaly block below needs `shadow_enforcement`. One read, reused — the
+    // alternative was a second control-plane round trip on every request.
+    let feature_flags = state.control_plane.feature_flags(&workspace_id).await;
+
+    // Shadow mode: evaluate everything, record what it would have done, allow
+    // the request. `is_some_and` means no control plane resolves to `false`, so
+    // an unreachable flag service can never silently switch enforcement off.
+    let shadow_enforcement = feature_flags.is_some_and(|f| f.shadow_enforcement);
+
     let mut advisory_anomalies: Vec<String> = Vec::new();
     // The same findings, attributed. `advisory_anomalies` above is kind strings
     // and cannot say which detector fired; this can. Kept as a second buffer
@@ -2022,8 +2035,13 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // is already being refused, so the latency is free — and a spawn
             // that lost the race would let the run walk through the hold it
             // just tripped.
+            //
+            // Skipped entirely under shadow. A hold stops the whole run until a
+            // human clears it — the single most disruptive thing this system
+            // does — so a mode whose contract is "change nothing, just watch"
+            // must not place one. The finding is still recorded below.
             if let (Some(lr_id), Some(hold)) = (
-                loop_run_id_header.as_ref(),
+                loop_run_id_header.as_ref().filter(|_| !shadow_enforcement),
                 crate::plugins::anomaly::DetectorRegistry::holding_finding(&findings),
             ) {
                 // A human already cleared this exact hold. Re-holding on it would
@@ -2089,6 +2107,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 findings: findings
                     .iter()
                     .map(crate::telemetry::FindingWire::from_finding)
+                    .map(|w| if shadow_enforcement { w.shadowed() } else { w })
                     .collect(),
                 graph: crate::telemetry::GraphTrace::from_node(
                     &wasm_ctx.node,
@@ -2123,6 +2142,18 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // genuine block whenever an advisory finding happened to outrank it.
             if let Some(k) = crate::plugins::anomaly::DetectorRegistry::blocking_finding(&findings)
             {
+                if shadow_enforcement {
+                    // Would have blocked. The finding is already on the trace
+                    // below with its true disposition and `shadowed: true`, so
+                    // what enforcement *would* have cost this workspace is
+                    // recorded — and the request proceeds.
+                    tracing::info!(
+                        workspace_id = %workspace_id,
+                        detector = %k.detector_id,
+                        anomaly = %k.kind.as_str(),
+                        "SHADOW: would have blocked this request"
+                    );
+                } else {
                 return json_error(
                     StatusCode::FORBIDDEN,
                     "policy_denied",
@@ -2132,6 +2163,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                         k.reason
                     ),
                 );
+                }
             }
 
             // Reask: refuse this attempt, hand back the reason, let the agent retry.
@@ -2146,7 +2178,14 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // an FPR for should not be able to end a task on first contact. So it
             // gets to interrupt instead, with the reason attached, and escalates
             // only if the agent keeps doing the same thing.
-            if let Some(r) = crate::plugins::anomaly::DetectorRegistry::reask_finding(&findings) {
+            // `!shadow_enforcement` guards the counter too, not just the return.
+            // Consuming a reask allowance for a request that was never refused
+            // would mean a workspace leaving shadow mode arrives with its
+            // agents already part-way to a hard block for corrections nobody
+            // ever asked them to make.
+            if let Some(r) = crate::plugins::anomaly::DetectorRegistry::reask_finding(&findings)
+                .filter(|_| !shadow_enforcement)
+            {
                 // Keyed on the DETECTOR, not the kind.
                 //
                 // It was the kind, and that was a real defect: five detectors
@@ -2218,6 +2257,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             advisory_findings = findings
                 .iter()
                 .map(crate::telemetry::FindingWire::from_finding)
+                .map(|w| if shadow_enforcement { w.shadowed() } else { w })
                 .collect();
         }
     }
@@ -2345,10 +2385,6 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     }
 
     // Step 6: Forward to upstream LLM provider
-
-    // Feature flags. `None` *is* "no control plane manages this workspace" —
-    // there is no separate presence flag to forget to consult.
-    let feature_flags = state.control_plane.feature_flags(&workspace_id).await;
 
     let ff_response_cache_exact = feature_flags.is_some_and(|f| f.response_cache_exact);
     let ff_response_cache_semantic = feature_flags.is_some_and(|f| f.response_cache_semantic);
