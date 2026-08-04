@@ -85,6 +85,88 @@ class RequestContext {
   /** Cost of the loop run this belongs to, and its ceiling. `-1` = unknown. */
   workflow_spend_usd: f64 = -1;
   workflow_budget_usd: f64 = -1;
+
+  // ── Declared SOP policy ─────────────────────────────────────────────────
+  //
+  // The rules the operator wrote in SOP front matter, as the proxy resolved
+  // them for this node. The proxy's own detectors already enforce these; they
+  // are here so a rule can *refine* a declaration rather than restate it —
+  // "the operator forbade this succession, and I also want it at High risk".
+  //
+  // Empty means the operator declared nothing under that key. For
+  // `requires_before` and `forbid_after` that does NOT mean "no rule": the
+  // proxy falls back to its built-in floor, which a rule here cannot see.
+
+  /** Steps the SOP's task should consist of. Drift outside them is steered. */
+  plan_steps: string[] = [];
+  /** Paths the work should stay within. */
+  scope_paths: string[] = [];
+  /** Tokens whose call holds the run for human review. */
+  review_before: string[] = [];
+  /** `A -> B`: A must precede B. Third element is true for `~>` (adjacent). */
+  requires_before: OrderingRule[] = [];
+  /** `A -> B`: B must not follow A. Third element is true for `~>`. */
+  forbid_after: OrderingRule[] = [];
+  /** `A <= N`: at most N calls of A. */
+  max_calls: CallCeiling[] = [];
+  /** `taint(), token`: the two must not appear in one request. */
+  forbid_with: TaintRule[] = [];
+
+  // ── This turn, and what changed ─────────────────────────────────────────
+
+  // `tools` is declared at the top of this class already — it existed as a
+  // field the whole time and simply had no parser, which is why the parity
+  // test flagged it. Only the parsing was missing.
+  /**
+   * Only the calls new since the previous turn, in order.
+   *
+   * `tool_sequence` is cumulative, so a rule keyed on it re-fires on every
+   * subsequent turn for a call that already happened — which is how a hold
+   * that has been approved gets re-held forever. Key on this instead when the
+   * question is "did it just do X".
+   */
+  new_tool_calls: string[] = [];
+  /** File/resource changes this turn, as the manifest resolved them. */
+  changes: ChangeEntry[] = [];
+  /** A tool's schema changed mid-session — the rug-pull signal. */
+  tool_contract_changed: bool = false;
+  /** How many nodes the graph has seen. `-1` = unknown. */
+  graph_node_count: i32 = -1;
+
+  // `transition_baseline` is deliberately NOT parsed. It is a
+  // map of transition -> frequency that the guest would have to walk under a
+  // 5 ms budget, for a statistic a rule has no business re-deriving. The host
+  // acts on it. `__tests__/contextParity.test.ts` records the exemption so its
+  // absence is a decision rather than the oversight the other twelve were.
+}
+
+/** `A -> B` with `adjacent` true when written `A ~> B`. */
+class OrderingRule {
+  from: string = "";
+  to: string = "";
+  adjacent: bool = false;
+}
+
+/** `A <= N`. */
+class CallCeiling {
+  token: string = "";
+  limit: i32 = 0;
+}
+
+/** `taint(), token` — `secrets()` or `pii()` paired with a tool or action. */
+class TaintRule {
+  taint: string = "";
+  token: string = "";
+}
+
+/** One entry from the change manifest. */
+class ChangeEntry {
+  tool: string = "";
+  op: string = "";
+  target: string = "";
+  target_kind: string = "";
+  risk: string = "";
+  bytes: i32 = 0;
 }
 
 let activeBuffer: Uint8Array | null = null;
@@ -283,7 +365,125 @@ function parseRequestContext(jsonBytes: Uint8Array): RequestContext {
     }
   }
 
+  // ── Declared SOP policy, this turn's delta, and the change manifest ──────
+  //
+  // All of this was sent by the host and unreadable by a rule until now. The
+  // failure was silent: a field the guest does not parse reads as its default,
+  // and for a policy list the default is empty, which is indistinguishable
+  // from "the operator declared nothing".
+
+  ctx.plan_steps = parseStringArray(jsonObj, "plan_steps");
+  ctx.scope_paths = parseStringArray(jsonObj, "scope_paths");
+  ctx.review_before = parseStringArray(jsonObj, "review_before");
+  ctx.new_tool_calls = parseStringArray(jsonObj, "new_tool_calls");
+
+  ctx.requires_before = parseOrderingRules(jsonObj, "requires_before");
+  ctx.forbid_after = parseOrderingRules(jsonObj, "forbid_after");
+
+  // `max_calls` and `forbid_with` are arrays of 2-tuples. AssemblyScript has no
+  // tuple type, so they arrive positionally: [token, limit] and [taint, token].
+  const ceilings = jsonObj.getArr("max_calls");
+  if (ceilings) {
+    const rows = ceilings.valueOf();
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      if (row === null || !row.isArr) continue;
+      const pair = (<JSON.Arr>row).valueOf();
+      if (pair.length < 2) continue;
+      const c = new CallCeiling();
+      c.token = pair[0].toString();
+      const lim = pair[1];
+      c.limit = lim.isInteger ? i32(parseInt(lim.toString())) : 0;
+      ctx.max_calls.push(c);
+    }
+  }
+
+  const taints = jsonObj.getArr("forbid_with");
+  if (taints) {
+    const rows = taints.valueOf();
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      if (row === null || !row.isArr) continue;
+      const pair = (<JSON.Arr>row).valueOf();
+      if (pair.length < 2) continue;
+      const t = new TaintRule();
+      t.taint = pair[0].toString();
+      t.token = pair[1].toString();
+      ctx.forbid_with.push(t);
+    }
+  }
+
+  const changesArr = jsonObj.getArr("changes");
+  if (changesArr) {
+    const rows = changesArr.valueOf();
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      if (row === null || !row.isObj) continue;
+      const o = <JSON.Obj>row;
+      const c = new ChangeEntry();
+      const tool = o.getString("tool");
+      if (tool) c.tool = tool.valueOf();
+      const op = o.getString("op");
+      if (op) c.op = op.valueOf();
+      const target = o.getString("target");
+      if (target) c.target = target.valueOf();
+      const kind = o.getString("target_kind");
+      if (kind) c.target_kind = kind.valueOf();
+      const risk = o.getString("risk");
+      if (risk) c.risk = risk.valueOf();
+      const bytes = o.getInteger("bytes");
+      if (bytes) c.bytes = i32(bytes.valueOf());
+      ctx.changes.push(c);
+    }
+  }
+
+  const contractChanged = jsonObj.getBool("tool_contract_changed");
+  if (contractChanged) ctx.tool_contract_changed = contractChanged.valueOf();
+
+  const nodeCount = jsonObj.getInteger("graph_node_count");
+  if (nodeCount) ctx.graph_node_count = i32(nodeCount.valueOf());
+
+  const toolsArr = jsonObj.getArr("tools");
+  if (toolsArr) {
+    const rows = toolsArr.valueOf();
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      if (row === null || !row.isObj) continue;
+      const o = <JSON.Obj>row;
+      const ts = new ToolSchema();
+      const name = o.getString("name");
+      if (name) ts.name = name.valueOf();
+      const desc = o.getString("description");
+      if (desc) ts.description = desc.valueOf();
+      ctx.tools.push(ts);
+    }
+  }
+
   return ctx;
+}
+
+/** Parse `[[from, to, adjacent], …]` — the wire shape of an ordering rule. */
+function parseOrderingRules(obj: JSON.Obj, key: string): OrderingRule[] {
+  const out: OrderingRule[] = [];
+  const arr = obj.getArr(key);
+  if (!arr) return out;
+  const rows = arr.valueOf();
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if (row === null || !row.isArr) continue;
+    const parts = (<JSON.Arr>row).valueOf();
+    if (parts.length < 2) continue;
+    const r = new OrderingRule();
+    r.from = parts[0].toString();
+    r.to = parts[1].toString();
+    // The third element is the `~>` adjacency flag. Absent on an older host,
+    // where every rule was the non-adjacent form.
+    if (parts.length > 2 && parts[2].isBool) {
+      r.adjacent = (<JSON.Bool>parts[2]).valueOf();
+    }
+    out.push(r);
+  }
+  return out;
 }
 
 /**
