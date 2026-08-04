@@ -46,9 +46,16 @@ export async function loadCredentials(): Promise<IntuticCredentials | null> {
 
   if (creds.apiKey === 'keychain') {
     const token = await retrieveToken(creds.workspaceId)
-    if (token) {
-      creds.apiKey = token
+    if (!token) {
+      // The sentinel is a pointer, not a credential. Handing it back as the
+      // API key sent the literal string "keychain" as a bearer token on every
+      // request, so the user saw 401s from a machine that reported itself
+      // logged in — and `intutic login` rewrote the same sentinel. Reporting
+      // "not authenticated" is both true and actionable; every caller already
+      // handles null by telling the user to log in.
+      return null
     }
+    creds.apiKey = token
   }
   return creds
 }

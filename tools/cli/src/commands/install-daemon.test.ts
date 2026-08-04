@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   buildPlist,
   buildMcpPlist,
@@ -112,4 +115,43 @@ describe('Daemon Installer Configuration Builder', () => {
       }
     })
   })
+})
+
+describe('every daemon entry point is reachable from the CLI', () => {
+  // `installMcpDaemon` and `uninstallMcpDaemon` were written, exported and
+  // covered by the builder tests above, and no command ever called them: every
+  // route through `daemon install` / `install-daemon` landed on the sync-daemon
+  // function, so the MCP proxy daemon could not be installed at all (TD-153).
+  // The builder tests could not catch it — they test the plist string, not
+  // whether anything asks for one.
+  //
+  // Both sides of this are read from source at runtime. Nothing is hardcoded,
+  // so a fifth entry point added later is covered without editing this test.
+  const here = dirname(fileURLToPath(import.meta.url))
+  const moduleSrc = readFileSync(join(here, 'install-daemon.ts'), 'utf8')
+  // Comments stripped before matching. The first version of this test passed
+  // for `installMcpDaemon` while the wiring was neutralised, because a comment
+  // in cli.ts named the function — prose about a call is not a call.
+  const cliSrc = readFileSync(join(here, '..', 'cli.ts'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '')
+
+  const entryPoints = [...moduleSrc.matchAll(/export async function ((?:un)?install\w*)/g)].map((m) => m[1]!)
+
+  it('finds the install/uninstall entry points to check', () => {
+    // Guard against the regex silently matching nothing, which would make
+    // every assertion below vacuous.
+    expect(entryPoints.length).toBeGreaterThanOrEqual(4)
+  })
+
+  for (const name of entryPoints) {
+    it(`cli.ts can reach ${name}`, () => {
+      // Word-boundary matched, not `toContain`: "uninstallMcpDaemon" contains
+      // "installMcpDaemon", so a substring check reported the install route as
+      // wired whenever the uninstall route was — which it did on the first run
+      // of this test.
+      const referenced = new RegExp(`\\b${name}\\b`).test(cliSrc)
+      expect(referenced, `${name} is exported but no CLI command calls it`).toBe(true)
+    })
+  }
 })

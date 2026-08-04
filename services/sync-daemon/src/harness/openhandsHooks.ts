@@ -17,18 +17,14 @@ import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import { createLogger } from '@intutic/logger'
 import { newIso } from '@intutic/id'
+import { UNIVERSAL_PROTECTED_PATHS } from './protectedPaths.js'
 
 const log = createLogger('sync-openhands-hooks')
 
 const PROTECTED_PATHS = [
-  '.openhands/hooks.json',
-  '.intutic/hooks',
-  '.intutic/integrity.json',
-  '.claude/settings.json',
-  '.cursor/hooks.json',
-  '.codeium/windsurf/hooks.json',
-  '.cline/hooks',
-  '.agents/plugins/intutic-governance',
+  // Universal: every harness protects every harness's config —
+  // the threat is an agent under one disarming another.
+  ...UNIVERSAL_PROTECTED_PATHS,
 ]
 
 /**

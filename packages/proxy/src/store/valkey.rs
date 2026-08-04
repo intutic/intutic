@@ -1150,10 +1150,25 @@ mod deactivation_contract {
     /// Must match `memberDeactivatedKey` in `packages/db/src/valkey.ts`.
     #[test]
     fn tombstone_key_matches_the_control_plane() {
-        let member_id = "mbr_abc123";
+        // Reads the production line, not a re-typed copy of it.
+        //
+        // This asserted that the tombstone format string interpolated its
+        // argument — that a format macro works. It named the control plane in
+        // its own title and never consulted
+        // it, so versioning the auth namespace on the TypeScript side would
+        // leave it green while every deactivation tombstone became unreadable.
+        //
+        // The cross-language half lives in the control plane, which can see
+        // both: `__tests__/unit/valkeyKeyParity.test.ts` derives the expected
+        // template from `memberDeactivatedKey` and greps this file for it. What
+        // is checkable from here is that the source contains exactly one such
+        // literal, so that test has a single unambiguous thing to match.
+        let src = include_str!("valkey.rs");
+        let needle = ["v2:auth:member_", "deactivated:{}"].concat();
         assert_eq!(
-            format!("v2:auth:member_deactivated:{}", member_id),
-            "v2:auth:member_deactivated:mbr_abc123",
+            src.matches(&needle).count(),
+            1,
+            "exactly one tombstone key literal, or the parity test cannot pin it",
         );
     }
 
@@ -1162,11 +1177,23 @@ mod deactivation_contract {
     /// member's key would come back to life when the tombstone lapsed.
     #[test]
     fn tombstone_outlives_any_cached_auth_entry() {
-        const API_KEY_LOOKUP_TTL: u64 = 300;
-        const MEMBER_DEACTIVATED_TTL: u64 = API_KEY_LOOKUP_TTL * 4;
+        // The relationship is asserted where both constants are visible.
+        //
+        // This declared its own `API_KEY_LOOKUP_TTL = 300` and
+        // `MEMBER_DEACTIVATED_TTL = 300 * 4` and then asserted `1200 > 300`.
+        // Arithmetic on local copies, not a contract: shortening the real
+        // tombstone TTL in the control plane would leave this passing while a
+        // deactivated member's cached key came back to life the moment the
+        // tombstone lapsed.
+        //
+        // Both constants live in `packages/db/src/valkey.ts`, which is where
+        // the ordering is now asserted. This side keeps only what it can see:
+        // that the proxy reads the tombstone at all, on the auth path.
+        let src = include_str!("valkey.rs");
+        let needle = ["v2:auth:member_", "deactivated:"].concat();
         assert!(
-            MEMBER_DEACTIVATED_TTL > API_KEY_LOOKUP_TTL,
-            "a cached entry must never outlive the tombstone that invalidates it",
+            src.contains(&needle),
+            "the proxy no longer reads the deactivation tombstone",
         );
     }
 

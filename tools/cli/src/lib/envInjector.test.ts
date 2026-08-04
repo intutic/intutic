@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest'
+import { readFileSync, readdirSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { injectBaseUrlEnvVars, removeBaseUrlEnvVars } from './envInjector.js'
 import os from 'node:os'
 import { execSync } from 'node:child_process'
@@ -35,4 +38,35 @@ describe('Environment Variable Injector', () => {
       expect(openaiValAfter).toBe('')
     }
   })
+})
+
+describe('the injector is reachable from a command', () => {
+  // envInjector shipped under a ✅ RESOLVED marker with this test file beside
+  // it and no caller anywhere in `src/` — the tests exercised the functions
+  // directly, which is exactly why nobody noticed there was no way for a user
+  // to invoke them (TD-041). Testing a function is not the same as shipping it.
+  const here = dirname(fileURLToPath(import.meta.url))
+  const commandsDir = join(here, '..', 'commands')
+
+  const commandSrc = readdirSync(commandsDir)
+    .filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts'))
+    .map((f) => readFileSync(join(commandsDir, f), 'utf8'))
+    .join('\n')
+    // Prose naming a function is not a call.
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '')
+
+  const exported = [...readFileSync(join(here, 'envInjector.ts'), 'utf8')
+    .matchAll(/export async function (\w+)/g)].map((m) => m[1]!)
+
+  it('finds the exported entry points to check', () => {
+    expect(exported.length).toBeGreaterThanOrEqual(2)
+  })
+
+  for (const name of exported) {
+    it(`some command calls ${name}`, () => {
+      const called = new RegExp(`\\b${name}\\b`).test(commandSrc)
+      expect(called, `${name} is exported and tested but no command calls it`).toBe(true)
+    })
+  }
 })

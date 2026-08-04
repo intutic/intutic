@@ -22,6 +22,7 @@ import * as path from 'node:path'
 import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { newIso } from '@intutic/id'
+import { UNIVERSAL_PROTECTED_PATHS } from './protectedPaths.js'
 
 const log = createLogger('sync-hermes-hooks')
 
@@ -30,16 +31,9 @@ const HERMES_CONFIG = path.join(os.homedir(), '.hermes', 'config.yaml')
 
 /** Governance-sensitive paths that the hook gate protects. */
 const PROTECTED_PATHS = [
-  '.gemini/settings.json',
-  '.intutic/hooks',
-  '.intutic/integrity.json',
-  '.intutic/events',
-  '.claude/settings.json',
-  '.cursor/hooks.json',
-  '.codeium/windsurf/hooks.json',
-  '.cline/hooks',
-  '.agents/plugins/intutic-governance',
-  '.openhands/hooks.json',
+  // Universal: every harness protects every harness's config —
+  // the threat is an agent under one disarming another.
+  ...UNIVERSAL_PROTECTED_PATHS,
   '.hermes/config.yaml',
   '.hermes/skills/intutic-governance',
 ]

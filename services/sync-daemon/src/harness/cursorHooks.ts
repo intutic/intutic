@@ -20,6 +20,7 @@ import * as path from 'node:path'
 import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { newIso } from '@intutic/id'
+import { UNIVERSAL_PROTECTED_PATHS } from './protectedPaths.js'
 
 const log = createLogger('sync-cursor-hooks')
 
@@ -57,14 +58,9 @@ function buildHooksConfig(hookScriptPath: string) {
  * Any write/edit targeting these paths is blocked.
  */
 const PROTECTED_PATHS = [
-  '.cursor/hooks.json',
-  '.claude/settings.json',
-  '.cline/hooks',
-  '.intutic/hooks',
-  '.intutic/integrity.json',
-  '.codeium/windsurf/hooks.json',
-  '.agents/plugins/intutic-governance',
-  '.openhands/hooks.json',
+  // Universal: every harness protects every harness's config —
+  // the threat is an agent under one disarming another.
+  ...UNIVERSAL_PROTECTED_PATHS,
 ]
 
 /**

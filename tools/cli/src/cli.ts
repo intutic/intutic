@@ -196,6 +196,33 @@ program
     await runStart(opts)
   })
 
+const envCmd = program
+  .command('env')
+  .description('Persist or clear the proxy base-URL environment variables')
+
+envCmd
+  .command('persist')
+  .description(
+    'Write ANTHROPIC_BASE_URL / OPENAI_BASE_URL at the OS level so they survive a restart.\n' +
+    '  macOS: launchctl setenv    Linux: ~/.bashrc    Windows: setx\n' +
+    '\n' +
+    '  Opt-in on purpose: on macOS this reaches every GUI app you launch afterwards.\n' +
+    '  For a single command instead, use \'intutic exec\'.'
+  )
+  .option('--proxy-url <url>', 'Proxy base URL to point the variables at', 'http://localhost:4000')
+  .action(async (opts) => {
+    const { runEnvPersist } = await import('./commands/env.js')
+    await runEnvPersist({ proxyUrl: opts.proxyUrl })
+  })
+
+envCmd
+  .command('clear')
+  .description('Remove the variables written by \'intutic env persist\'')
+  .action(async () => {
+    const { runEnvClear } = await import('./commands/env.js')
+    await runEnvClear()
+  })
+
 program
   .command('connect')
   .description('Start sync daemon — bidirectional config sync with control plane (requires an account)')
@@ -333,9 +360,15 @@ daemon
   .option('--binary-path <path>', 'Path to intutic CLI binary (defaults to current process)')
   .option('--dry-run', 'Print what would be done without writing files')
   .option('--system', 'Install as a system-level service (LaunchDaemon on macOS, systemd system unit on Linux)')
+  .option('--mcp', 'Install the MCP proxy daemon instead of the sync-daemon')
   .action(async (opts) => {
-    const { installDaemon } = await import('./commands/install-daemon.js')
-    await installDaemon({
+    // `installMcpDaemon` and `buildMcpPlist` were written, tested and exported,
+    // and then nothing called them: every route into install-daemon.ts landed
+    // on `installDaemon`, so the MCP proxy daemon could not be installed by any
+    // command the CLI offered (TD-153). This flag is that missing route.
+    const { installDaemon, installMcpDaemon } = await import('./commands/install-daemon.js')
+    const install = opts.mcp ? installMcpDaemon : installDaemon
+    await install({
       workspaceId:     opts.workspaceId,
       apiKey:          opts.apiKey,
       controlPlaneUrl: opts.controlPlaneUrl,
@@ -351,9 +384,11 @@ daemon
   .description('Remove the sync-daemon system service and stop it permanently.')
   .option('--dry-run', 'Print what would be done without writing files')
   .option('--system', 'Uninstall the system-level service')
+  .option('--mcp', 'Uninstall the MCP proxy daemon instead of the sync-daemon')
   .action(async (opts) => {
-    const { uninstallDaemon } = await import('./commands/install-daemon.js')
-    await uninstallDaemon({ dryRun: opts.dryRun, system: opts.system })
+    const { uninstallDaemon, uninstallMcpDaemon } = await import('./commands/install-daemon.js')
+    const uninstall = opts.mcp ? uninstallMcpDaemon : uninstallDaemon
+    await uninstall({ dryRun: opts.dryRun, system: opts.system })
   })
 
 daemon
@@ -407,9 +442,11 @@ program
   .description('Shortcut for \'intutic daemon uninstall\'')
   .option('--dry-run', 'Print what would be done without writing files')
   .option('--system', 'Uninstall the system-level service')
+  .option('--mcp', 'Uninstall the MCP proxy daemon instead of the sync-daemon')
   .action(async (opts) => {
-    const { uninstallDaemon } = await import('./commands/install-daemon.js')
-    await uninstallDaemon({ dryRun: opts.dryRun, system: opts.system })
+    const { uninstallDaemon, uninstallMcpDaemon } = await import('./commands/install-daemon.js')
+    const uninstall = opts.mcp ? uninstallMcpDaemon : uninstallDaemon
+    await uninstall({ dryRun: opts.dryRun, system: opts.system })
   })
 
 // ── Skill commands ─────────────────────────────────────────────────────────

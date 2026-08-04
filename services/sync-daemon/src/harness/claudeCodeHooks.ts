@@ -17,6 +17,7 @@ import * as node_os from 'node:os'
 import { z } from 'zod'
 import type { SyncSopEntry } from '@intutic/shared-types'
 import { createLogger } from '@intutic/logger'
+import { UNIVERSAL_PROTECTED_PATHS } from './protectedPaths.js'
 
 const log = createLogger('sync-claude-hooks')
 
@@ -244,12 +245,11 @@ try {
 // Governance-sensitive paths that no agent may modify.
 // Editing these files is how privilege escalation occurs.
 const PROTECTED_PATHS = [
+  // Universal: every harness protects every harness's config —
+  // the threat is an agent under one disarming another.
+  ...UNIVERSAL_PROTECTED_PATHS,
   path.join(os.homedir(), '.claude', 'settings.json'),
   path.join(os.homedir(), '.claude', 'settings.local.json'),
-  '.claude/settings.json',
-  '.claude/settings.local.json',
-  '.intutic/hooks',
-  '.intutic/integrity.json',
 ];
 
 /**
@@ -338,6 +338,42 @@ process.stdin.on('end', () => {
       }
     }
 
+    // 1b. Shell bypass guard.
+    //
+    // The protected-path check above only inspects file-path arguments, so a
+    // Bash call carrying the same intent as a command string walked straight
+    // past it — and this generator registers a Bash PreToolUse matcher, so the
+    // hook fires and then does nothing about it. claudeDesktopHooks and
+    // piHooks both carry this guard; Claude Code, the primary harness, did not.
+    //
+    // What that leaves open: \`chflags nouchg .intutic/hooks/pre-tool-check.js\`
+    // makes the hook itself immutable, and \`printf '{}' > ~/.claude/settings.json\`
+    // empties the settings that register it. Either disarms governance without
+    // ever touching a path argument.
+    if (['bash', 'shell', 'run_command', 'terminal', 'execute'].includes(toolName)) {
+      const shellCmd = String(toolInput.command || toolInput.cmd || toolInput.script || '');
+      const BYPASS_PATTERNS = [
+        'chflags nouchg',
+        'chattr -i',
+        'rm -rf .intutic',
+        'rm -rf ~/.claude',
+        'CLAUDE_CODE_HOOKS=',
+        '.claude/settings.json',
+        '.claude/settings.local.json',
+        '.intutic/hooks',
+        '.intutic/integrity.json',
+      ];
+      for (const pattern of BYPASS_PATTERNS) {
+        if (shellCmd.includes(pattern)) {
+          const reason = 'Shell command targets a governance-protected path or matches a ' +
+            'bypass pattern: "' + pattern + '"';
+          console.error('[Intutic Guardrail] BLOCKED: ' + reason);
+          logEvent('blocked', toolName, reason, sessionId);
+          process.exit(2);
+        }
+      }
+    }
+
     // 2. Review holds — the pre-execution half of \`review_before:\`.
     //
     // Unlike the pattern blacklist below, this is not a permanent denial. The
@@ -353,14 +389,21 @@ process.stdin.on('end', () => {
       // The same coarse mapping the proxy's classifier uses, kept minimal on
       // purpose: a hook that tries to be clever about shell commands is a hook
       // that blocks real work. Anything it cannot classify falls through to the
-      // proxy's own gate.
+      // proxy's own gate — but only as an *observation*: this hook is what runs
+      // before the tool executes, while the proxy sees the call in the next
+      // request's history, after it happened. So a needle missing here is a
+      // review_before SOP that watches instead of holding.
+      //
+      // These lists mirror the proxy's actions.rs, and hookActionParity.test.ts
+      // fails if they diverge in either direction: a needle only the hook knows
+      // would hold a call the proxy then allows, which reads as a spurious hold.
       const actions = [];
       if (['bash', 'shell', 'run_command', 'terminal', 'execute'].includes(toolName)) {
         const cmd = String(toolInput.command || toolInput.cmd || toolInput.script || '').toLowerCase();
         const map = [
-          ['action:deploy', ['git push', 'kubectl apply', 'kubectl rollout', 'helm upgrade', 'helm install', 'terraform apply', 'docker push', 'vercel deploy', 'fly deploy', 'gcloud run deploy']],
-          ['action:publish', ['npm publish', 'pnpm publish', 'yarn publish', 'cargo publish', 'twine upload', 'poetry publish', 'gem push']],
-          ['action:release', ['gh release create', 'git tag', 'npm version', 'semantic-release']],
+          ['action:deploy', ['git push', 'kubectl apply', 'kubectl rollout', 'helm upgrade', 'helm install', 'terraform apply', 'docker push', 'serverless deploy', 'fly deploy', 'vercel deploy', 'gcloud run deploy', 'aws deploy', 'aws s3 sync', 'eb deploy']],
+          ['action:publish', ['npm publish', 'pnpm publish', 'yarn publish', 'cargo publish', 'twine upload', 'poetry publish', 'gem push', 'docker manifest push']],
+          ['action:release', ['gh release create', 'git tag', 'npm version', 'cargo release', 'goreleaser release', 'semantic-release']],
           ['action:db_write', ['insert into', 'update ', 'delete from', 'drop table', 'truncate ', 'alter table']],
         ];
         for (const [action, needles] of map) {

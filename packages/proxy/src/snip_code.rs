@@ -519,7 +519,14 @@ fn lang_cache_key(lang: CodeLanguage) -> u8 {
 }
 
 /// FNV-1a 64-bit hash of a string — fast, zero-allocation, no deps.
-fn fnv1a_hash(s: &str) -> u64 {
+///
+/// Exposed to `snip` so every `snip.compacted` line can carry a content
+/// identity. Without it the "same-content hit rate" half of TD-160 could not
+/// be measured at all: the only hash previously computed was inside the cache
+/// path, gated on `use_cache` — the very flag the measurement is supposed to
+/// decide. Non-reversible and 64-bit; it links identical chunks to each other
+/// and reveals nothing about their contents.
+pub(crate) fn fnv1a_hash(s: &str) -> u64 {
     const FNV_OFFSET: u64 = 14_695_981_039_346_656_037;
     const FNV_PRIME: u64 = 1_099_511_628_211;
     let mut h = FNV_OFFSET;
