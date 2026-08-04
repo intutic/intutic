@@ -270,7 +270,17 @@ export interface DashboardSummary {
   anomalyCount24h: number
   /** SOP health summary. */
   sopHealth: {
+    /** Enforced — `VALIDATED` only. Every runtime gate filters on that state. */
     totalActive: number
+    /**
+     * Synced into agent context and read by the model, but enforced by nothing:
+     * `HYPOTHESIZED` and `REFINED`.
+     *
+     * Separate from `totalActive` because folding them in overstates what is
+     * enforced, and dropping them understates what is deployed — this field
+     * exists because the count previously did both at once.
+     */
+    totalAdvisory: number
     totalStale: number
     totalInvalidated: number
   }
