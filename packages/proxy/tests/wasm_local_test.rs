@@ -25,6 +25,24 @@ fn rule_wasm(verdict: i32) -> Vec<u8> {
     wat::parse_str(&wat).expect("fixture WAT must compile")
 }
 
+/// A rule that is a valid module but imports a host function the proxy does not
+/// register. It carries the full guest ABI and would kill, if it could link.
+///
+/// `env.seed` specifically: AssemblyScript emits that import for anything
+/// reaching `Math.random()`, and the CLI's install-time validation shim used to
+/// provide it while `host.rs` never has. So this exact module shape passed
+/// `intutic policy install` and then failed to instantiate on every request.
+fn rule_wasm_with_unregistered_import(verdict: i32) -> Vec<u8> {
+    let wat = format!(
+        r#"(module
+             (import "env" "seed" (func $seed (result f64)))
+             (memory (export "memory") 1)
+             (func (export "allocate") (param i32) (result i32) (i32.const 8))
+             (func (export "evaluate") (param i32 i32) (result i32) (i32.const {verdict})))"#
+    );
+    wat::parse_str(&wat).expect("fixture WAT must compile")
+}
+
 fn temp_rule_dir(tag: &str) -> PathBuf {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -182,6 +200,63 @@ async fn registry_hot_picks_up_local_rules_and_attributes_kills() {
     std::fs::remove_file(dir.join("50_allow.wasm")).unwrap();
     registry.force_local_rescan().await;
     assert_eq!(registry.evaluate(&valkey, &ctx).await, Verdict::Bypass);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+/// A rule that cannot link is refused at load, not silently bypassed per request.
+///
+/// `Module::from_binary` compiles without resolving imports, so a rule importing
+/// a host function the proxy does not register used to load cleanly, appear in
+/// `intutic policy list-local`, and then fail `linker.instantiate` on every
+/// single request — where the runner's fail-open turned it into `Bypass`. The
+/// operator saw an installed rule enforcing nothing, forever, with only a `warn`
+/// per request to say so.
+///
+/// Failing at load is the whole point: a link error is permanent, not transient,
+/// so it must not be treated like the runtime traps fail-open exists for.
+#[tokio::test]
+async fn a_rule_that_cannot_link_is_refused_at_load_rather_than_bypassed_per_request() {
+    let valkey = control_plane();
+    let dir = temp_rule_dir("unlinkable");
+    let registry = PluginRegistry::new(dir.to_str()).await.unwrap();
+    let ctx = test_ctx("test-ws-unlinkable");
+
+    // A rule that WOULD kill, but imports `env.seed`, which the host does not provide.
+    std::fs::write(
+        dir.join("10_needs_seed.wasm"),
+        rule_wasm_with_unregistered_import(1),
+    )
+    .unwrap();
+    registry.force_local_rescan().await;
+
+    // evaluate() FIRST: force_local_rescan only marks the dir dirty, and the
+    // rescan runs on the next evaluation. Calling plugin_count() before this
+    // reads the pre-rescan state and returns 0 no matter what is on disk --
+    // which is how the first version of this test passed while the rule it was
+    // written to reject was loading perfectly well.
+    assert_eq!(
+        registry.evaluate(&valkey, &ctx).await,
+        Verdict::Bypass,
+        "an unloadable rule must not affect the verdict"
+    );
+    assert_eq!(
+        registry.plugin_count().await,
+        0,
+        "a rule importing a host function the proxy does not register was loaded; \
+         it can never run, so keeping it converts a permanent failure into a \
+         silent per-request bypass"
+    );
+
+    // The same module shape, minus the bad import, still loads and still kills —
+    // so the check above is rejecting the import, not the fixture.
+    std::fs::remove_file(dir.join("10_needs_seed.wasm")).unwrap();
+    std::fs::write(dir.join("10_ok.wasm"), rule_wasm(1)).unwrap();
+    registry.force_local_rescan().await;
+    assert!(matches!(
+        registry.evaluate(&valkey, &ctx).await,
+        Verdict::Kill { .. }
+    ));
+    assert_eq!(registry.plugin_count().await, 1);
 
     let _ = std::fs::remove_dir_all(&dir);
 }

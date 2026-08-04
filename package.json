@@ -14,6 +14,8 @@
     "docs": "turbo run docs",
     "lint:styles": "node tools/scripts/check-styles.js",
     "lint:latency-claims": "node tools/scripts/check-latency-claims.js",
+    "lint:sop-keys": "node tools/scripts/check-sop-keys.js",
+    "lint:wasm-host-imports": "node tools/scripts/check-wasm-host-imports.js",
     "prepare": "node tools/scripts/install-hooks.js"
   },
   "devDependencies": {

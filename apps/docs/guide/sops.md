@@ -148,9 +148,14 @@ a legitimate state. Every SOP-derived control then resolves to nothing:
 | Front matter | What stops working |
 | :--- | :--- |
 | `deny_tools:` | denied tools are no longer blocked |
+| `allow_harnesses:` | a role may use any harness |
 | `plan_steps:` | drift outside the declared plan is no longer flagged |
 | `scope_paths:` | out-of-scope file access is no longer flagged |
 | `review_before:` | runs are never held for review |
+| `requires_before:` | your ordering rules stop applying — the built-in floor still does |
+| `forbid_after:` | as above |
+| `max_calls:` | call ceilings stop applying, and there is no built-in floor |
+| `forbid_with:` | taint co-occurrence stops being refused |
 
 SOP prompt injection is a no-op as well, so the agent is never told the rules either.
 

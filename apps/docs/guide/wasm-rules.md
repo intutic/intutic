@@ -58,18 +58,23 @@ Intutic provides an AssemblyScript Rules SDK (`@intutic/wasm-sdk`) that provides
 ```typescript
 import { JSON } from "assemblyscript-json/assembly";
 
-// Standard request context structure
+// An excerpt. The host sends considerably more than this — session and graph
+// identity, the rolling tool sequence and this turn's delta, DLP and injection
+// findings, every SOP-derived policy field, and the harness the request arrived
+// on. `packages/wasm-sdk/assembly/index.ts` carries the full class; treat that
+// file as the contract rather than this excerpt.
 export class RequestContext {
   session_id: string = "";
   workspace_id: string = "";
-  virtual_key_prefix: string = "";
   model: string = "";
   tools: ToolSchema[] = [];
   tool_calls: ToolCall[] = [];
   estimated_input_tokens: i32 = 0;
   budget_remaining_usd: f64 = 0.0;
-  risk_tier: string = "";
+  risk_tier: string = "";        // Low | Medium | High | Critical
   dlp_findings: DlpFinding[] = [];
+  tool_sequence: string[] = [];  // session history, oldest first
+  // …and the rest — see the SDK.
 }
 ```
 
@@ -91,14 +96,18 @@ export function allocate(size: i32): i32 {
 
 // Evaluation entry point
 export function evaluate(offset: i32, len: i32): i32 {
-  // 1. Read JSON bytes from heap
-  let jsonStr = "";
-  for (let i = 0; i < len; i++) {
-    jsonStr += String.fromCharCode(load<u8>(offset + i));
-  }
+  // 1. Read JSON bytes from the heap.
+  //
+  // Read into the Uint8Array the allocator already handed the host, and let
+  // JSON.parse take the bytes. Building the string character by character —
+  // which this example used to do — allocates once per byte, and the tip above
+  // is a warning against exactly that: it is how a rule exhausts its fuel on a
+  // large context and is silently skipped.
+  const buf = activeBuffer;
+  if (buf == null) return 0;
+  const jsonObj = <JSON.Obj>JSON.parse(buf);
 
-  // 2. Parse request context
-  const jsonObj = <JSON.Obj>JSON.parse(jsonStr);
+  // 2. Read the field you need
   const budget = jsonObj.getFloat("budget_remaining_usd");
 
   // 3. Block if budget is exhausted

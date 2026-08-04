@@ -2,6 +2,27 @@
 
 use wasmtime::{Caller, Linker};
 
+/// Every host function a rule may import, declared once.
+///
+/// This exists because the list had already drifted: the CLI's install-time
+/// validation shim in `tools/cli/src/commands/policy.ts` offered a fourth
+/// import, `seed`, which this module has never registered. AssemblyScript emits
+/// `env.seed` for anything reaching `Math.random()`, so such a rule passed
+/// `intutic policy install` — the command whose entire job is to refuse rules
+/// that cannot instantiate — and then failed to link on every request, where
+/// the runner's fail-open turned it into `Bypass`. An installed rule enforcing
+/// nothing, permanently, reported only as a per-request `warn`.
+///
+/// `seed` is deliberately absent rather than added. A governance verdict that
+/// samples is not a verdict: the same request gets different answers, "why was
+/// I blocked?" becomes unanswerable, and the replay corpus assumes determinism.
+/// Wasmtime with fuel is otherwise fully deterministic, so this is the only
+/// nondeterminism anyone could introduce.
+///
+/// `tools/scripts/check-wasm-host-imports.js` asserts this list and the CLI's
+/// agree. One place, or they drift — which is exactly what happened.
+pub const HOST_IMPORTS: &[&str] = &["log_info", "abort", "trace"];
+
 /// Registers host function imports into the linker.
 pub fn register_host_imports(linker: &mut Linker<super::runner::WasmState>) -> anyhow::Result<()> {
     linker.func_wrap(
