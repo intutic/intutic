@@ -9,6 +9,19 @@ export type NotificationChannel = 'slack' | 'email' | 'webhook'
 export type NotificationEventType =
   // ── Core governance events (already wired) ──
   | 'anomaly.detected'
+  /**
+   * One attributed detector finding from the proxy, allowed or blocked.
+   *
+   * Distinct from `anomaly.detected`, which is raised by the control plane's own
+   * classifier after the fact and only for requests that produced an incident.
+   * This one fires for every finding on every trace — including the advisory and
+   * reask ones on requests that proceeded — which is what makes "see everything,
+   * block nothing" possible.
+   *
+   * Carries `detectorId`, so a rule can target one detector rather than a whole
+   * taxonomy kind that sixteen of twenty-two detectors share.
+   */
+  | 'anomaly.finding'
   | 'incident.created'
   | 'incident.escalated'
   | 'sop.status_changed'

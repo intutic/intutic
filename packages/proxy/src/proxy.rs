@@ -1979,6 +1979,11 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // measured 0.1–1% false-positive rate before a detector may escalate to `kill`,
     // and there was no path by which an advisory finding could ever be counted.
     let mut advisory_anomalies: Vec<String> = Vec::new();
+    // The same findings, attributed. `advisory_anomalies` above is kind strings
+    // and cannot say which detector fired; this can. Kept as a second buffer
+    // rather than replacing the first because the kind list is an existing wire
+    // field the control plane already reads.
+    let mut advisory_findings: Vec<crate::telemetry::FindingWire> = Vec::new();
     if !has_break_glass {
         let findings = anomaly_registry.evaluate_all(&wasm_ctx);
         if let Some(worst) = findings.first() {
@@ -2081,6 +2086,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 reconstruction_quality: 0,
                 token_anomaly: false,
                 loop_run_id: loop_run_id_header.clone(),
+                findings: findings
+                    .iter()
+                    .map(crate::telemetry::FindingWire::from_finding)
+                    .collect(),
                 graph: crate::telemetry::GraphTrace::from_node(
                     &wasm_ctx.node,
                     findings.iter().map(|f| f.kind.as_str().to_string()).collect(),
@@ -2206,6 +2215,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // Advisory only: logged above, broadcast to siblings, and — from here —
             // carried onto the trace this request publishes. The request proceeds.
             advisory_anomalies = findings.iter().map(|f| f.kind.as_str().to_string()).collect();
+            advisory_findings = findings
+                .iter()
+                .map(crate::telemetry::FindingWire::from_finding)
+                .collect();
         }
     }
 
@@ -2411,7 +2424,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 reconstruction_quality: 100,
                 token_anomaly: false,
                 loop_run_id: loop_run_id_header.clone(),
-                graph: crate::telemetry::GraphTrace::from_node(&node_for_trace, advisory_anomalies.clone()),
+                findings: advisory_findings.clone(),
+        graph: crate::telemetry::GraphTrace::from_node(&node_for_trace, advisory_anomalies.clone()),
             };
 
             let trace_store = Arc::clone(&state.store);
@@ -2836,7 +2850,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             reconstruction_quality: 100,
             token_anomaly: false,
             loop_run_id: loop_run_id_header.clone(),
-            graph: crate::telemetry::GraphTrace::from_node(&node_for_trace, advisory_anomalies.clone()),
+            findings: advisory_findings.clone(),
+        graph: crate::telemetry::GraphTrace::from_node(&node_for_trace, advisory_anomalies.clone()),
         };
         let cache_store_clone = Arc::clone(&state.store);
         tokio::spawn(async move {
@@ -3591,7 +3606,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 reconstruction_quality,
                 token_anomaly,
                 loop_run_id: loop_run_id_clone,
-                graph: crate::telemetry::GraphTrace::from_node(&node_for_trace, advisory_anomalies.clone()),
+                findings: advisory_findings.clone(),
+        graph: crate::telemetry::GraphTrace::from_node(&node_for_trace, advisory_anomalies.clone()),
             };
 
             let _ = cache_store_clone.publish_trace(&trace).await;
@@ -4077,6 +4093,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         reconstruction_quality,
         token_anomaly,
         loop_run_id: loop_run_id_header,
+        findings: advisory_findings.clone(),
         graph: crate::telemetry::GraphTrace::from_node(&node_for_trace, advisory_anomalies.clone()),
     };
 
