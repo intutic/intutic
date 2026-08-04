@@ -72,6 +72,8 @@ fn clean_ctx(sequence: Vec<String>) -> RequestContext {
         review_before: Vec::new(),
         requires_before: Vec::new(),
         forbid_after: Vec::new(),
+        max_calls: Vec::new(),
+        forbid_with: Vec::new(),
         changes: Vec::new(),
         new_tool_calls: Vec::new(),
         injection_findings: Vec::new(),
@@ -114,8 +116,10 @@ fn declared_ctx(sequence: Vec<String>) -> RequestContext {
     // Declared ordering rules, so the succession detectors take the declared
     // branch here rather than their built-in tables — which is what a workspace
     // that configured its SOPs actually pays.
-    ctx.requires_before = vec![("action:run_tests".into(), "action:deploy".into())];
-    ctx.forbid_after = vec![("action:secret_read".into(), "action:http_post".into())];
+    ctx.requires_before = vec![("action:run_tests".into(), "action:deploy".into(), false)];
+    ctx.forbid_after = vec![("action:secret_read".into(), "action:http_post".into(), false)];
+    ctx.max_calls = vec![("action:deploy".into(), 3usize)];
+    ctx.forbid_with = vec![("secrets()".into(), "action:http_post".into())];
     ctx.allowed_harnesses = vec!["claude-code".into(), "cursor".into()];
     ctx.transition_baseline = Some(
         [

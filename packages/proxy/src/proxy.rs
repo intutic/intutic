@@ -1909,6 +1909,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         // detectors stay pure functions of this struct.
         requires_before: crate::sops::requires_before_for_role(&node.agent_role),
         forbid_after: crate::sops::forbid_after_for_role(&node.agent_role),
+        max_calls: crate::sops::max_calls_for_role(&node.agent_role),
+        forbid_with: crate::sops::forbid_with_for_role(&node.agent_role),
         changes: change_manifest.clone(),
         new_tool_calls: new_tool_calls.clone(),
         // Scanned over the whole request text, so injected content arriving
