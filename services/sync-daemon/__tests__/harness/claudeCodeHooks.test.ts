@@ -179,3 +179,61 @@ describe('review_before hook gate', () => {
     expect(holdBlock).toContain('writeFileSync')
   })
 })
+
+describe('review_before parsing without regex backtracking', () => {
+  /**
+   * CodeQL alerts #29 and #30 flagged the two regexes this parser used as
+   * "polynomial regular expression used on uncontrolled data" — and the data
+   * really is uncontrolled: `content` is SOP text, and an agent that can write
+   * a SOP file chooses it.
+   *
+   * MEASURED BEFORE CHANGING ANYTHING, and the finding did not reproduce. The
+   * old `/^\s*review_before:\s*(.+)$/gim` parses 8 MB of adversarial
+   * whitespace in 12 ms, and the old quote-trim is flat to 80k characters.
+   * V8 prefilters the literal that follows `\s*`, and the trim's leading
+   * alternative short-circuits, so neither degrades in practice. A timing test
+   * here would have passed against the unfixed code — the first version of
+   * this block did exactly that, and proved nothing.
+   *
+   * The rewrite is kept anyway, on two grounds that do not depend on the alert
+   * being exploitable: it removes regex from a hot parser entirely, and it
+   * mirrors the Rust side it is pinned against — `sops.rs` uses `trim()` and
+   * `trim_matches(['"', '\'', '[', ']'])`, never a regex. A clean security tab
+   * is also worth something: a real alert is easier to see without two
+   * permanent false positives beside it.
+   *
+   * So these assert BEHAVIOUR, which is what actually changed hands here.
+   */
+  const sop = (content: string) => [{ sopId: 's1', title: 'Deploy', content } as never]
+
+  it('strips surrounding quotes and brackets exactly as the Rust parser does', () => {
+    const c = parseSopConstraints(sop('---\nreview_before: "action:deploy", [Bash], \'Write\'\n---\n'))
+    expect(c.reviewBefore).toEqual(['action:deploy', 'Bash', 'Write'])
+  })
+
+  it('keeps quotes that are inside a token rather than around it', () => {
+    // A linear trim walks in from both ends and stops; it must not strip
+    // characters the Rust `trim_matches` would leave alone.
+    const c = parseSopConstraints(sop('---\nreview_before: say"hi"\n---\n'))
+    // Rust's trim_matches walks in from both ends and stops at the first
+    // non-trim character, so the inner quote survives and the trailing one does not.
+    expect(c.reviewBefore).toEqual(['say"hi'])
+  })
+
+  it('reads the key on an indented line, and ignores lines that only look like it', () => {
+    const c = parseSopConstraints(
+      sop('---\n    review_before: action:deploy\nnot_review_before: action:merge\n---\n'),
+    )
+    expect(c.reviewBefore).toEqual(['action:deploy'])
+  })
+
+  it('handles a large SOP without pathological slowdown', () => {
+    // Not a ReDoS assertion — see above, the old code was fine too. This is a
+    // plain sanity bound so an accidentally quadratic rewrite would show up.
+    const payload = `${' '.repeat(200_000)}x\nreview_before: action:deploy\n`
+    const started = Date.now()
+    const c = parseSopConstraints(sop(payload))
+    expect(c.reviewBefore).toEqual(['action:deploy'])
+    expect(Date.now() - started).toBeLessThan(2000)
+  })
+})
