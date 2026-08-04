@@ -153,7 +153,45 @@ pub(crate) const PII_PATH_FRAGMENTS: &[&str] = &["customer", "users.csv", "pii",
 pub(crate) const SHELL_TOOLS: &[&str] = &["bash", "shell", "run_command", "runcommand", "terminal", "execute", "exec"];
 
 /// Tool names harnesses use for "read a file".
-pub(crate) const READ_TOOLS: &[&str] = &["read", "readfile", "view", "cat", "open_file", "str_replace_editor"];
+pub(crate) const READ_TOOLS: &[&str] = &["read", "readfile", "view", "cat", "open_file"];
+
+/// Tool names for the polymorphic text editor, whose `command` argument — not
+/// its name — decides whether a call reads or writes.
+///
+/// `str_replace_editor` was in `READ_TOOLS`, and it is the tool Claude uses to
+/// *edit files*. Four of its five commands write. Nothing about the name says
+/// so, which is how it ended up filed under reading and stayed there.
+pub(crate) const EDITOR_TOOLS: &[&str] =
+    &["str_replace_editor", "text_editor", "texteditor", "str_replace_based_edit_tool"];
+
+/// What a text-editor call does, as opposed to what its name suggests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EditorOp {
+    View,
+    Create,
+    Modify,
+}
+
+/// Read the `command` argument of a text-editor call.
+///
+/// Absent and unrecognised both resolve to `Modify`, and the asymmetry is
+/// deliberate. Calling an edit a read removes it from `ScopePathDetector`'s
+/// mutation filter and the boundary silently stops applying to the tool most
+/// likely to cross it. Calling a read an edit costs one advisory finding
+/// somebody dismisses. Only one of those two errors is recoverable by a human
+/// looking at the output, so an unknown command fails toward that one.
+pub(crate) fn editor_op(input: &serde_json::Value) -> EditorOp {
+    match input
+        .get("command")
+        .and_then(|v| v.as_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("view") => EditorOp::View,
+        Some("create") => EditorOp::Create,
+        _ => EditorOp::Modify,
+    }
+}
 
 /// Tool names harnesses use for "fetch a URL".
 pub(crate) const FETCH_TOOLS: &[&str] = &["webfetch", "fetch", "http_request", "browser", "web_search"];
@@ -241,6 +279,20 @@ pub fn classify(tool_name: &str, input: &serde_json::Value) -> Vec<String> {
         }
         if matches_any(&args, DB_WRITE_PATTERNS) {
             actions.push("db_write");
+        }
+    } else if tool_is(tool_name, EDITOR_TOOLS) {
+        // Only a `view` is a read. A `create` or `str_replace` naming a secret
+        // path is writing one, not reading one, and emitting `secret_read`
+        // there would arm the (secret_read → http_post) exfiltration rule on a
+        // sequence that read no secret — a false positive on the sharpest rule
+        // in the set, which is the fastest way to get it switched off.
+        if editor_op(input) == EditorOp::View {
+            if matches_any(&args, SECRET_PATH_FRAGMENTS) {
+                actions.push("secret_read");
+            }
+            if matches_any(&args, PII_PATH_FRAGMENTS) {
+                actions.push("pii_export");
+            }
         }
     } else if tool_is(tool_name, READ_TOOLS) {
         if matches_any(&args, SECRET_PATH_FRAGMENTS) {
