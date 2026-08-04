@@ -141,6 +141,17 @@ export const DEFAULT_ALLOW_MOCK = JSON.stringify({
 })
 
 /**
+ * Every host function the proxy registers, declared once on this side.
+ *
+ * `tools/scripts/check-wasm-host-imports.js` asserts this equals
+ * `HOST_IMPORTS` in `packages/proxy/src/wasm/host.rs`. The two had already
+ * drifted — this side offered `seed`, the proxy never has — and the drift was
+ * invisible because it only surfaced as a per-request warning in a process
+ * nobody was reading.
+ */
+export const HOST_IMPORT_NAMES = ['log_info', 'abort', 'trace'] as const
+
+/**
  * Instantiate a compiled WASM rule with the standard host imports and run
  * `evaluate` against a JSON-serialized RequestContext. Returns the raw
  * verdict code (0=ALLOW, 1=BLOCK, 2=REDACT). Throws on any instantiation or
@@ -191,9 +202,17 @@ export async function instantiateAndEvaluate(
           console.log(`[WASM Trace Pointer] ${message}`)
         }
       },
-      seed() {
-        return Math.random()
-      }
+      // `seed()` used to be here, and the comment above — asserting this set
+      // mirrors the proxy's — was false two lines later. `host.rs` has never
+      // registered it. AssemblyScript emits `env.seed` for anything reaching
+      // `Math.random()`, so a rule using randomness validated here, installed,
+      // and then failed to link in the proxy on every request, where fail-open
+      // turned it into a silent allow. Removing it cannot make enforcement
+      // worse: such a rule was already fully bypassed, and now it is refused
+      // loudly at install instead of quietly at runtime.
+      //
+      // Not added to the proxy instead, deliberately: a governance verdict that
+      // samples is not a verdict. The same request would get different answers.
     },
     // The `onnx_rules.runOnnxInference` mock lived here and is gone with the host
     // import it imitated.

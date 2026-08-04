@@ -217,36 +217,58 @@ Some constraints are only expressible over the sequence — "tests before deploy
 is meaningless to a single node in isolation, because the node that deploys is
 usually not the node that tested.
 
-As a local SOP:
+**Both of the examples below are already enforced, with no configuration at
+all.** `action:deploy` requiring `action:run_tests`, and `action:db_write` after
+`action:pii_export`, are two of the built-in floors the proxy ships with. You do
+not have to write them; you can only add to them.
 
-```markdown
-## Graph Invariants
+To declare your own, write them in SOP front matter — no toolchain, and the rule
+stays readable in review:
 
-1. NEVER call `deploy` unless `run_tests` appears earlier in the session.
-2. NEVER call `db_write` after `pii_export` in the same session.
-3. A node that has produced a `KILL` verdict must not be retried by a sibling.
+```yaml
+---
+requires_before: action:run_tests -> action:deploy
+forbid_after: action:pii_export -> action:db_write
+max_calls: action:deploy <= 1
+---
 ```
 
-And on the hot path, where it is enforced rather than requested. `tool_sequence`
-is the session's tool history, oldest first — the graph's edge list so far:
+Both arrows read left-to-right as sequence order: `requires_before: A -> B` is
+"A must precede B", `forbid_after: A -> B` is "B must not follow A". Use `~>`
+instead of `->` when the two must be *directly* adjacent. Declaring a rule under
+either key replaces that detector's built-in floor, so a declaration cannot
+silently disarm the other detector's.
+
+See [SOP front matter](/reference/sop-front-matter) for every key, the eight
+`action:` tokens, and what each rejects at load.
+
+Reach for a WASM rule when the condition is one the declarative form cannot
+express — a comparison, a conjunction, or anything reading tool arguments:
 
 ```typescript
 // AssemblyScript — see Custom Filters for the full rule harness.
+// `tool_sequence` is the session's tool history, oldest first.
 const seq = ctx.tool_sequence;
 
-// Deploy without a test anywhere earlier in the graph.
-if (seq.indexOf("deploy") >= 0 && seq.indexOf("run_tests") < 0) {
-  return 1; // BLOCK
-}
-
-// PII left the boundary, and now something wants to write.
-const exported = seq.indexOf("pii_export");
-if (exported >= 0 && seq.indexOf("db_write") > exported) {
+// Deploy at High risk with no test anywhere earlier — the conjunction is the
+// part front matter cannot state.
+if (
+  seq.indexOf("action:deploy") >= 0 &&
+  seq.indexOf("action:run_tests") < 0 &&
+  ctx.risk_tier == "High"
+) {
   return 1; // BLOCK
 }
 
 return 0; // ALLOW
 ```
+
+Note the `action:` prefix on every token. `classify` synthesises exactly eight
+of them — `run_tests`, `deploy`, `publish`, `release`, `secret_read`,
+`pii_export`, `http_post`, `db_write` — and a rule naming the bare verb, or the
+command an operator has in mind (`git push`), matches nothing and fails silently.
+Front matter refuses such a token at load; a WASM rule has no such check, so this
+is the one place the toolchain buys you less safety, not more.
 
 Because the rule reads the session rather than the turn, it holds however the
 graph reorders itself — which is the point, since the ordering of a graph is not

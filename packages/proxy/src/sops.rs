@@ -435,6 +435,29 @@ fn parse_cooccurrence(raw: &str) -> Result<(String, String), String> {
     if token.is_empty() {
         return Err(format!("{raw:?}: the right side must name a tool or action"));
     }
+    // The same guard `parse_ordering` and `parse_count_bound` already carry, and
+    // for the same reason — it was the one of the three siblings written without
+    // it. Two failures it lets through, both silent:
+    //
+    //   forbid_with: secrets(), rm -rf
+    //   forbid_with: secrets(), action:http_post, pii(), action:http_post
+    //
+    // The first is a command, and no harness emits a tool by that name. The
+    // second is the sharper one: `forbid_with:` deliberately does NOT split on
+    // commas — the comma separates the two *sides* of one rule — so a second
+    // rule written on the same line is swallowed into the first rule's token.
+    // Both produced a token matching nothing, so the rule loaded, warned
+    // nothing, and could never fire. Given the asymmetry with `max_calls:`
+    // directly above it, two rules on one line is the likeliest way to write
+    // this key wrong.
+    if token.split_whitespace().count() > 1 {
+        return Err(format!(
+            "{token:?} is not a single tool or action token. Write one rule per \
+             line — `forbid_with:` does not split on commas, because the comma \
+             separates `taint(), token`, so a second rule on this line becomes \
+             part of the first rule's token and can never match."
+        ));
+    }
     Ok((taint, token.to_string()))
 }
 
@@ -1641,6 +1664,78 @@ mod discovery_tests {
         assert_eq!(
             s.forbid_after,
             vec![("action:secret_read".to_string(), "action:http_post".to_string(), false)],
+        );
+    }
+
+    /// `max_calls:` and `forbid_with:` had no front-matter parse test at all —
+    /// every assertion built the `Sop` struct directly, so `parse_count_bound`
+    /// and `parse_cooccurrence` were never driven through `parse_front_matter`.
+    ///
+    /// These two tests pin the comma asymmetry that makes them different, and
+    /// they fail in opposite directions under the same one-character mutation:
+    /// flip either `split_on_comma` flag and exactly one of them breaks.
+    #[test]
+    fn max_calls_parses_from_front_matter_and_splits_on_commas() {
+        let s = sop_from_raw(
+            "ship",
+            "---\nmax_calls: action:deploy <= 1, Bash <= 20\n---\n# body\n",
+        );
+        assert_eq!(
+            s.max_calls,
+            vec![("action:deploy".to_string(), 1), ("Bash".to_string(), 20)],
+            "a comma separates two ceilings, so this line is two rules"
+        );
+    }
+
+    #[test]
+    fn forbid_with_parses_from_front_matter_and_does_not_split_on_commas() {
+        let s = sop_from_raw(
+            "ship",
+            "---\nforbid_with: secrets(), action:http_post\n---\n# body\n",
+        );
+        assert_eq!(
+            s.forbid_with,
+            vec![("secrets()".to_string(), "action:http_post".to_string())],
+            "here the comma separates the two SIDES of one rule, not two rules"
+        );
+    }
+
+    /// The asymmetry above has a sharp edge: because `forbid_with:` does not
+    /// split on commas, a second rule written on the same line is swallowed
+    /// into the first rule's token.
+    ///
+    /// `secrets(), action:http_post, pii(), action:http_post` used to parse as
+    /// ONE rule whose token was the literal string
+    /// `"action:http_post, pii(), action:http_post"` — which matches no tool
+    /// name and no action token, so it could never fire. It loaded, warned
+    /// nothing, and enforced nothing. Given the asymmetry, writing two taint
+    /// rules on one line is the single most likely authoring mistake for this
+    /// key, and it was the one mistake nothing caught.
+    #[test]
+    fn two_taint_rules_on_one_line_are_rejected_rather_than_silently_inert() {
+        let s = sop_from_raw(
+            "ship",
+            "---\nforbid_with: secrets(), action:http_post, pii(), action:http_post\n---\n# body\n",
+        );
+        assert!(
+            s.forbid_with.is_empty(),
+            "a second rule on the same line was folded into the first rule's \
+             token, producing a rule that can never match: {:?}",
+            s.forbid_with
+        );
+    }
+
+    /// `parse_ordering` and `parse_count_bound` both refuse a token carrying
+    /// whitespace, because an operator thinks in commands (`rm -rf`) while every
+    /// rule is about tools and `action:` tokens. `parse_cooccurrence` was
+    /// written without the same guard — two of three siblings had it.
+    #[test]
+    fn forbid_with_rejects_a_shell_command_token() {
+        let s = sop_from_raw("ship", "---\nforbid_with: secrets(), rm -rf\n---\n# body\n");
+        assert!(
+            s.forbid_with.is_empty(),
+            "a shell command can never match: {:?}",
+            s.forbid_with
         );
     }
 
