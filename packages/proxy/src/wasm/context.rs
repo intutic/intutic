@@ -186,6 +186,21 @@ pub struct RequestContext {
     /// operator declares one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub review_before: Vec<String>,
+    /// Ordering rules this node's SOPs declare: `(before, after)` — `after` must
+    /// not run unless `before` ran first.
+    ///
+    /// Resolved on the request path like `review_before` above, so the detector
+    /// stays a pure function. **Empty means "use the built-in table", not "check
+    /// nothing"** — which is the opposite of every other declaration field here,
+    /// and deliberate: the built-ins are the floor, and a workspace that declares
+    /// nothing must not end up with less enforcement than before this field
+    /// existed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub requires_before: Vec<(String, String)>,
+    /// Ordering rules this node's SOPs forbid: `(first, then)` — `then` must not
+    /// run *after* `first`. Same built-ins-as-floor rule as `requires_before`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub forbid_after: Vec<(String, String)>,
     /// What this request's tool calls actually touched.
     ///
     /// Derived on the request path from the same per-turn delta the sequence
@@ -264,6 +279,8 @@ mod tests {
             plan_steps: Vec::new(),
             scope_paths: Vec::new(),
             review_before: Vec::new(),
+            requires_before: Vec::new(),
+            forbid_after: Vec::new(),
             changes: Vec::new(),
             new_tool_calls: Vec::new(),
             transition_baseline: None,

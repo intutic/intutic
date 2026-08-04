@@ -739,7 +739,28 @@ impl AnomalyDetector for MissingPredecessorDetector {
 
     fn detect(&self, ctx: &RequestContext) -> Option<AnomalyFinding> {
         let seq = &ctx.tool_sequence;
-        for (tool, prerequisite) in self.rules {
+
+        // Declared rules REPLACE the built-ins for this detector; the built-ins
+        // are the floor when nothing is declared.
+        //
+        // Read from `ctx.requires_before` alone, never from a combined list with
+        // a kind filter. `ForbiddenSuccessionDetector` reads its own field the
+        // same way, so declaring a `forbid_after:` rule cannot disarm this
+        // detector's built-in table — with one shared vec and an "any rules
+        // declared?" gate it would, and that failure removes enforcement while
+        // looking like configuration working.
+        let declared: Vec<(&str, &str)> = ctx
+            .requires_before
+            .iter()
+            .map(|(before, after)| (after.as_str(), before.as_str()))
+            .collect();
+        let rules: &[(&str, &str)] = if declared.is_empty() {
+            self.rules
+        } else {
+            &declared
+        };
+
+        for (tool, prerequisite) in rules {
             // `else { continue }`, not `?`. The `?` returned `None` from the
             // whole function rather than skipping the rule, so evaluation
             // stopped at the first rule whose tool was absent from the
@@ -747,10 +768,16 @@ impl AnomalyDetector for MissingPredecessorDetector {
             // ("release", …), any session that never ran `deploy` had its
             // `publish` and `release` rules silently unchecked.
             // ForbiddenSuccessionDetector below already does this correctly.
-            let Some(used) = seq.iter().position(|t| t == tool) else {
+            //
+            // Case-insensitive, like every other declaration-driven detector in
+            // this file. It was exact `==` while `deny_tools`, `scope_paths` and
+            // `review_before` all compare case-insensitively — harmless while the
+            // rules were hardcoded lowercase constants, and a silent trap the
+            // moment an operator writes `action:Deploy` in front matter.
+            let Some(used) = seq.iter().position(|t| t.eq_ignore_ascii_case(tool)) else {
                 continue;
             };
-            if seq[..used].iter().any(|t| t == prerequisite) {
+            if seq[..used].iter().any(|t| t.eq_ignore_ascii_case(prerequisite)) {
                 continue;
             }
             return Some(AnomalyFinding::kill(
@@ -1098,11 +1125,29 @@ impl AnomalyDetector for ForbiddenSuccessionDetector {
 
     fn detect(&self, ctx: &RequestContext) -> Option<AnomalyFinding> {
         let seq = &ctx.tool_sequence;
-        for (first, then) in self.rules {
-            let Some(first_at) = seq.iter().position(|t| t == first) else {
+
+        // Own field, own fallback — see the note in `MissingPredecessorDetector`.
+        // Declaring rules here cannot disarm that detector's built-ins, and vice
+        // versa, because neither reads the other's list.
+        let declared: Vec<(&str, &str)> = ctx
+            .forbid_after
+            .iter()
+            .map(|(first, then)| (first.as_str(), then.as_str()))
+            .collect();
+        let rules: &[(&str, &str)] = if declared.is_empty() {
+            self.rules
+        } else {
+            &declared
+        };
+
+        for (first, then) in rules {
+            // Case-insensitive, matching every other declaration-driven detector.
+            let Some(first_at) = seq.iter().position(|t| t.eq_ignore_ascii_case(first)) else {
                 continue;
             };
-            let violated = seq[first_at + 1..].iter().any(|t| t == then);
+            let violated = seq[first_at + 1..]
+                .iter()
+                .any(|t| t.eq_ignore_ascii_case(then));
             if !violated {
                 continue;
             }
@@ -1724,6 +1769,8 @@ pub mod test_support {
             plan_steps: Vec::new(),
             scope_paths: Vec::new(),
             review_before: Vec::new(),
+            requires_before: Vec::new(),
+            forbid_after: Vec::new(),
             changes: Vec::new(),
             new_tool_calls: Vec::new(),
             transition_baseline: None,
@@ -1891,6 +1938,81 @@ mod tests {
         let d = ForbiddenSuccessionDetector::default();
         let ctx = ctx_with_sequence(&["action:pii_export", "Bash", "action:db_write"]);
         assert!(d.detect(&ctx).unwrap().blocks());
+    }
+
+    /// Declaring rules for ONE detector must not disarm the OTHER's built-ins.
+    ///
+    /// This is the trap a single `succession_rules` vec with a kind filter walks
+    /// into: an "any rules declared?" gate sees a non-empty list and takes the
+    /// declared branch for *both* detectors, so a workspace that declares one
+    /// `forbid_after:` rule silently loses the built-in
+    /// `action:deploy → action:run_tests` requirement — enforcement removed by an
+    /// act of configuration that looks like it added some.
+    ///
+    /// Two fields, read independently, make that structurally impossible. This
+    /// test is what keeps it that way.
+    #[test]
+    fn declaring_one_rule_kind_does_not_disarm_the_other_builtins() {
+        // Deploy with no prior test — a built-in `requires_before` violation.
+        let mut ctx = ctx_with_sequence(&["Bash", "action:deploy"]);
+        // ...while the workspace declares only a FORBID rule, about something else.
+        ctx.forbid_after = vec![("action:pii_export".into(), "action:http_post".into())];
+
+        let hit = MissingPredecessorDetector::default()
+            .detect(&ctx)
+            .expect("the built-in requires_before table must still apply");
+        assert!(hit.blocks());
+
+        // And symmetrically: declaring a requires rule must not disarm the
+        // built-in forbid table.
+        let mut ctx2 = ctx_with_sequence(&["action:secret_read", "action:http_post"]);
+        ctx2.requires_before = vec![("action:lint".into(), "action:merge".into())];
+        assert!(
+            ForbiddenSuccessionDetector::default().detect(&ctx2).is_some(),
+            "the built-in forbid_after table must still apply",
+        );
+    }
+
+    /// A declared rule replaces the built-ins for its own detector.
+    #[test]
+    fn a_declared_ordering_rule_is_enforced() {
+        let mut ctx = ctx_with_sequence(&["build", "release_artifact"]);
+        // Nothing in the built-in table mentions these tokens at all.
+        assert!(
+            MissingPredecessorDetector::default().detect(&ctx).is_none(),
+            "test premise: the built-ins do not cover this sequence",
+        );
+
+        ctx.requires_before = vec![("sign_artifact".into(), "release_artifact".into())];
+        let hit = MissingPredecessorDetector::default()
+            .detect(&ctx)
+            .expect("a declared rule must be enforced");
+        assert!(hit.blocks());
+        assert!(hit.reason.contains("release_artifact"));
+    }
+
+    /// Declared rules are matched case-insensitively.
+    ///
+    /// Both succession detectors used exact `==` while `deny_tools`,
+    /// `scope_paths` and `review_before` all compare case-insensitively. Harmless
+    /// while the rules were hardcoded lowercase constants; a silent trap the
+    /// moment an operator writes `Action:Deploy` in front matter, because the
+    /// rule loads, looks right, and never fires.
+    #[test]
+    fn declared_rules_match_regardless_of_case() {
+        let mut ctx = ctx_with_sequence(&["Bash", "action:deploy"]);
+        ctx.requires_before = vec![("ACTION:RUN_TESTS".into(), "Action:Deploy".into())];
+        assert!(
+            MissingPredecessorDetector::default().detect(&ctx).is_some(),
+            "a rule differing only in case must still match",
+        );
+
+        let mut ctx2 = ctx_with_sequence(&["action:secret_read", "action:http_post"]);
+        ctx2.forbid_after = vec![("Action:Secret_Read".into(), "ACTION:HTTP_POST".into())];
+        assert!(
+            ForbiddenSuccessionDetector::default().detect(&ctx2).is_some(),
+            "same for forbid_after",
+        );
     }
 
     #[test]
