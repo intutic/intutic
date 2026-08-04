@@ -78,6 +78,37 @@ export class RequestContext {
 }
 ```
 
+### The starter rules
+
+The template ships six working rules in `runRules()`, each with a should-block
+and should-allow mock in `assembly/mocks/` and a test asserting both. Keep the
+ones you want, delete the rest.
+
+| Rule | Reads | Verdict |
+| :--- | :--- | :--- |
+| `ruleToolContractPinned` | `tool_contract_changed` | block — a server changing its schema mid-session is not something the agent can correct |
+| `ruleOrphanedNode` | `parent_alive`, `depth` | block — work nobody is waiting for |
+| `ruleGraphBudgetGuard` | `graph_spend_usd`, `graph_budget_usd` | block — per-node budgets do not bound a fan-out |
+| `ruleHarnessAllowlist` | `harness`, `allowed_harnesses` | block — arrived on a harness the SOPs do not permit |
+| `ruleInjectionThenEgress` | `injection_findings`, `new_tool_calls` | **reask** — pattern matches do produce false positives |
+| `ruleRiskTierCeiling` | `risk_tier`, `new_tool_calls` | **reask** — the tier describes the SOP, not this request |
+
+Each was chosen to read a field family nothing else consumes, so the rule is
+also the coverage test for it — delete the parser for `tool_contract_changed`
+and that rule stops blocking its own mock.
+
+Two of them are worth reading before you write anything of your own, because
+they show the mistake the context invites:
+
+- `ruleGraphBudgetGuard` treats `-1` as **unknown, not zero**. A graph whose
+  cost was never aggregated has not spent nothing, and reading the sentinel as
+  zero blocks graphs that have done nothing wrong.
+- `ruleHarnessAllowlist` treats an empty list as **unrestricted, not "permit
+  nothing"**. The inversion blocks every workspace that never declared the key.
+
+The allow mocks are the sharper half of the suite: each is a near-miss aimed at
+exactly that inversion.
+
 ### 2. Write the Rule
 
 Write your rule logic in `assembly/index.ts` using the SDK:

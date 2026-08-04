@@ -154,7 +154,7 @@ export const HOST_IMPORT_NAMES = ['log_info', 'abort', 'trace'] as const
 /**
  * Instantiate a compiled WASM rule with the standard host imports and run
  * `evaluate` against a JSON-serialized RequestContext. Returns the raw
- * verdict code (0=ALLOW, 1=BLOCK, 2=REDACT). Throws on any instantiation or
+ * verdict code (0=ALLOW, 1=BLOCK, 3=REASK; 2 is a deprecated block). Throws on any instantiation or
  * ABI failure — callers decide how to surface it.
  */
 export async function instantiateAndEvaluate(
@@ -283,10 +283,17 @@ export async function runPolicyTest(opts: { wasm: string; mock: string }): Promi
       log.success('Result: BYPASS / ALLOW')
     } else if (verdict === 1) {
       log.warn('Result: BLOCK / KILL')
+    } else if (verdict === 3) {
+      log.warn('Result: REASK — the agent is told why and may retry')
     } else if (verdict === 2) {
-      log.warn('Result: REDACT / BLOCK')
+      log.warn('Result: BLOCK (deprecated code 2)')
+      log.info('  2 was specified as REDACT and never could be: a rule is not given')
+      log.info('  the request body, so there is nothing to redact. The proxy treats it')
+      log.info('  as a block. Return 1 to block, or 3 to reask.')
     } else {
-      log.error(`Result: Unknown verdict code ${verdict}`)
+      log.error(`Result: unmapped verdict code ${verdict}`)
+      log.info('  Valid codes are 0 (allow), 1 (block) and 3 (reask). The proxy allows')
+      log.info('  anything else, so a rule returning this enforces nothing.')
     }
   } catch (err: any) {
     log.error(`Execution error during WASM policy test: ${err.message}`)
@@ -398,7 +405,19 @@ export async function runPolicyInstall(opts: {
   // Refuse to install a rule that cannot instantiate or evaluate — a broken
   // rule enforces nothing (the proxy sandbox fails open).
   try {
-    await instantiateAndEvaluate(wasmBuffer, DEFAULT_ALLOW_MOCK)
+    const validationVerdict = await instantiateAndEvaluate(wasmBuffer, DEFAULT_ALLOW_MOCK)
+    // Refuse a code the proxy does not map. Everything outside {0,1,2,3} is
+    // allowed at runtime with a warning, so a rule inventing a rung installs
+    // clean and then enforces nothing — the same silent shape as a rule that
+    // cannot link. 2 is accepted here because already-installed rules use it,
+    // but it is deprecated and reported as such.
+    if (![0, 1, 2, 3].includes(validationVerdict)) {
+      log.error(
+        `Rule returned verdict code ${validationVerdict}, which the proxy does not map — ` +
+          'it would be allowed on every request. Valid codes: 0 allow, 1 block, 3 reask.'
+      )
+      process.exit(1)
+    }
   } catch (err: any) {
     log.error(`Rule failed validation and was NOT installed: ${err.message}`)
     process.exit(1)
