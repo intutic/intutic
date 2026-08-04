@@ -43,6 +43,15 @@ jobs:
       - name: Run Style Lint (Design System Check)
         run: pnpm lint:styles
 
+      # This repo had no claim gates at all, which is why the Phase 0 latency
+      # retraction never held here: five comparison pages, the homepage and the
+      # security page were still advertising figures like "kills the session in
+      # under 1ms" long after the first benchmark run disproved the last such
+      # number published. A retraction nothing enforces is a retraction that
+      # comes back.
+      - name: Verify no unsupported latency claim in published docs
+        run: pnpm lint:latency-claims
+
   typecheck:
     name: Typecheck (TS Workspaces) - Run TypeScript typecheck
     runs-on: ubuntu-latest

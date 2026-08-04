@@ -36,92 +36,6 @@ From the dashboard, navigate to the **SOPs** page and click **New SOP**. You'll 
 
 The new SOP starts in `DRAFT` state.
 
-### Ordering rules
-
-Two front-matter keys let you say what order things must happen in. Both read
-**left to right as sequence order**, so the arrow means the same thing in each:
-
-```markdown
----
-roles: deployer
-requires_before: action:run_tests -> action:deploy
-forbid_after: action:secret_read -> action:http_post
----
-```
-
-- `requires_before: A -> B` — **B must not run unless A ran first.** Deploying
-  without having run tests is the canonical case.
-- `forbid_after: A -> B` — **B must not run after A.** Posting to the network
-  after reading a credential is the canonical case.
-
-Separate several rules with commas. Both keys are checked against the whole
-session's tool sequence, not just the current turn.
-
-#### Name actions, not commands
-
-Rules name **tools** (`Bash`, `Write`) or **actions** (`action:deploy`), never
-shell commands. The proxy classifies a command like `git push` into
-`action:deploy` before any rule sees it, so a rule that says `git push` can never
-match anything.
-
-Writing a command is refused at load with a message saying so, rather than
-accepted and silently never fired. The eight actions are:
-
-`action:run_tests` · `action:deploy` · `action:publish` · `action:release` ·
-`action:http_post` · `action:db_write` · `action:secret_read` · `action:pii_export`
-
-Matching ignores case, so `Action:Deploy` works.
-
-#### `~>` when they must be adjacent
-
-`->` means "somewhere before"; `~>` tightens it to "immediately before". The
-same arrow works in both keys:
-
-```markdown
-forbid_after: action:secret_read ~> action:http_post
-```
-
-That forbids posting *directly* after reading a credential, and permits it if
-something happened in between. Use `->` unless you specifically mean adjacency —
-it is the stronger rule.
-
-#### Count bounds
-
-```markdown
-max_calls: action:deploy <= 3, Bash <= 50
-```
-
-At most N calls to that tool or action in one run. There is no built-in ceiling
-and no default: how many deploys is too many is a question only you can answer,
-and a number we invented would be exactly the guess our own promotion rule
-forbids.
-
-#### Taint
-
-```markdown
-forbid_with: secrets(), action:http_post
-forbid_with: pii(), action:db_write
-```
-
-"A request carrying this kind of material may not also do that." `secrets()`
-covers credentials as well as keys — a database URL with a password in it counts.
-
-Note the shape: this is **co-occurrence, not ordering**. The DLP scanner reports
-that a secret is *present in the request*, not which tool call carried it, so a
-rule claiming the secret came *before* the post would assert a sequence position
-the data does not support. We check what we can actually know.
-
-#### These rules replace the defaults for their own key
-
-The proxy ships built-in ordering rules — deploy/publish/release each require
-tests first, and a few source→sink pairs are forbidden. Declaring
-`requires_before:` replaces the built-in *requirements*; declaring
-`forbid_after:` replaces the built-in *prohibitions*. **Declaring one does not
-disable the other**, so adding a forbid rule never quietly removes the
-tests-before-deploy requirement.
-
-Declaring neither leaves both built-in sets active. The defaults are the floor.
-
 ### Writing effective content
 
 SOP content is standard Markdown. Be specific and actionable:
@@ -237,8 +151,6 @@ a legitimate state. Every SOP-derived control then resolves to nothing:
 | `plan_steps:` | drift outside the declared plan is no longer flagged |
 | `scope_paths:` | out-of-scope file access is no longer flagged |
 | `review_before:` | runs are never held for review |
-| `requires_before:` | ordering requirements are no longer checked |
-| `forbid_after:` | forbidden sequences are no longer blocked |
 
 SOP prompt injection is a no-op as well, so the agent is never told the rules either.
 
