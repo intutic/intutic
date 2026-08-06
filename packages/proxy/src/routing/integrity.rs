@@ -277,11 +277,28 @@ pub fn score(facts: &ResponseFacts<'_>) -> Integrity {
     }
 
     let Some(body) = facts.body else {
-        // No body and no terminal-event signal: nothing was measured. Clean is
-        // the right answer — see the docstring — but it is a *default*, not an
-        // observation, and `measured` says so for the callers that must not
-        // credit an arm they never scored.
-        return Integrity::unmeasured();
+        // No body. Termination is then the only check available — and a stream
+        // that delivered its terminal event is a real observation on it, not an
+        // absence of one.
+        //
+        // This used to return `unmeasured()` unconditionally, which made the
+        // streaming path asymmetric in the worst possible direction: a
+        // truncated stream took the early return above and was stored as 60,
+        // while a clean stream fell through to here and was stored as NULL. So
+        // `banditRewardCron`'s `AVG(response_integrity)` — which ignores NULLs —
+        // averaged an arm's *failures alone*. A model serving 10,000 streams
+        // with 5 truncations scored exactly 60, and one serving 10,000 clean
+        // streams scored nothing at all and was skipped for having measured
+        // zero. Repairing the inert 100 and replacing it with a mean over
+        // failures would have been worse than leaving it.
+        //
+        // `Some(false)` cannot reach here — the truncation check above owns it.
+        return match facts.done_received {
+            Some(true) => Integrity::clean(),
+            // Nothing to go on at all: no body, no terminal-event signal.
+            None => Integrity::unmeasured(),
+            Some(false) => unreachable!("truncation is decided above"),
+        };
     };
 
     let mut score = RIS_MAX;
@@ -455,21 +472,55 @@ mod tests {
         assert!(r.measured, "it WAS measured — the terminal event is the observation");
     }
 
-    /// A completed stream has nothing left to check, and must not read as an
-    /// observation.
+    /// Nothing at all is unmeasured. A completed stream is not nothing.
     ///
-    /// `score` is 100 here and 100 for a body that was checked and found clean.
-    /// Collapsing those is how the reward cron came to credit arms for
-    /// perfection nobody observed — `measured` is what separates them.
+    /// **This test previously asserted the opposite** — that `body: None,
+    /// done_received: Some(true)` must come back `measured: false`, on the
+    /// reasoning that a completed stream "has nothing left to check" and that a
+    /// 100 earned from a body check and a 100 earned from no check should not
+    /// collapse. The distinction is real; the conclusion drawn from it was
+    /// wrong, and it was wrong in a way that made the reward worse than the
+    /// hardcoded 100 it had just replaced.
+    ///
+    /// SQL `AVG` ignores NULLs. Marking a clean stream unmeasured stored NULL
+    /// for it while a truncated stream stored 60, so `banditRewardCron`'s
+    /// `AVG(response_integrity)` averaged **an arm's failures alone**: 9,995
+    /// clean streams and 5 truncations scored exactly 60.0, and an arm with no
+    /// truncations at all measured zero rows and was skipped entirely, so it
+    /// never learned. Repairing an inert 100 by replacing it with a mean over
+    /// failures is not a repair.
+    ///
+    /// A stream that delivered its terminal event **was** observed — on the one
+    /// check a body-less path can run. That the check is narrower than a body
+    /// inspection is a matter of confidence, not of whether it happened, and
+    /// `measured` answers whether it happened. What must stay unmeasured is the
+    /// case with genuinely no signal: no body *and* no terminal event.
     #[test]
-    fn nothing_to_check_is_unmeasured_not_clean() {
-        let f = ResponseFacts { body: None, request: None, done_received: Some(true) };
-        let r = score(&f);
+    fn nothing_at_all_is_unmeasured_but_a_finished_stream_is_not() {
+        // No body, no terminal event: nothing was looked at.
+        let nothing = ResponseFacts { body: None, request: None, done_received: None };
+        let r = score(&nothing);
         assert_eq!(r.score, RIS_MAX);
         assert_eq!(r.fault, None);
-        assert!(!r.measured, "an unscored response must not claim to have been scored");
+        assert!(
+            !r.measured,
+            "with no body and no terminal event nothing was observed, and crediting an arm \
+             here is exactly the defect `measured` exists to prevent"
+        );
 
-        // And a real check reports the opposite.
+        // A finished stream: narrow, but a real observation.
+        let finished = score(&ResponseFacts {
+            body: None,
+            request: None,
+            done_received: Some(true),
+        });
+        assert!(
+            finished.measured,
+            "a delivered terminal event is an observation; storing NULL for it leaves \
+             AVG(response_integrity) computed over the arm's truncations alone"
+        );
+
+        // And a real body check reports measured too, at the same score.
         let body = json!({"content": [{"type": "text", "text": "fine"}]});
         let checked = score(&ResponseFacts {
             body: Some(&body),
@@ -477,6 +528,7 @@ mod tests {
             done_received: None,
         });
         assert!(checked.measured);
+        assert_eq!(checked.score, finished.score);
     }
 
     /// `None` means "not a stream", not "the stream is fine". Treating it as a
@@ -566,5 +618,51 @@ mod tests {
         ] {
             assert_eq!(f.as_str(), s);
         }
+    }
+}
+
+#[cfg(test)]
+mod streaming_symmetry_tests {
+    use super::*;
+
+    /// Both stream outcomes must be measured, or the mean is over failures only.
+    ///
+    /// The reward cron computes `AVG(response_integrity)`, and SQL `AVG` ignores
+    /// NULLs. So if a truncated stream stores 60 and a clean one stores NULL,
+    /// an arm's mean integrity is the mean of the requests that went wrong — an
+    /// arm with 9,995 clean streams and 5 truncations scores exactly 60. That is
+    /// worse than the hardcoded 100 this scorer was repaired to replace.
+    #[test]
+    fn a_clean_stream_is_measured_not_merely_unrecorded() {
+        let clean = score(&ResponseFacts { body: None, request: None, done_received: Some(true) });
+        assert!(
+            clean.measured,
+            "a stream that delivered its terminal event was observed; storing NULL for it \
+             leaves AVG(response_integrity) averaging the arm's truncations alone"
+        );
+        assert_eq!(clean.score, RIS_MAX);
+        assert!(clean.fault.is_none());
+
+        let truncated =
+            score(&ResponseFacts { body: None, request: None, done_received: Some(false) });
+        assert!(truncated.measured);
+        assert!(truncated.score < clean.score, "truncation must cost something");
+
+        // The asymmetry is the defect: both are observations of the same check.
+        assert_eq!(
+            clean.measured, truncated.measured,
+            "a stream check that only records one of its two outcomes biases every mean built on it"
+        );
+    }
+
+    /// No body and no terminal signal is still nothing.
+    #[test]
+    fn absent_signal_stays_unmeasured() {
+        let none = score(&ResponseFacts { body: None, request: None, done_received: None });
+        assert!(
+            !none.measured,
+            "with no body and no terminal event there is nothing to have measured, and \
+             crediting an arm here is the defect the `measured` flag exists to prevent"
+        );
     }
 }
