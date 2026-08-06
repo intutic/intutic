@@ -150,3 +150,85 @@ export const PolicyVerdictSchema = z.object({
 
 /** Inferred type for a policy verdict. */
 export type PolicyVerdictInput = z.infer<typeof PolicyVerdictSchema>
+
+// ─── Triage queue responses ──────────────────────────────────────────
+
+/**
+ * The three triage-inbox response shapes, shared between the control plane and
+ * the dashboard.
+ *
+ * These were declared locally in `apps/dashboard/src/hooks/useIncidents.ts` — a
+ * second, hand-maintained copy of shapes the server already defines. That is the
+ * drift this repo has been bitten by twice, and it bit here too: the server has
+ * always returned `audit` on `/api/v1/trajectory/alerts`, the local copy omitted
+ * it, and the drift-alerts tab silently dropped its review-budget disclosure.
+ *
+ * `snake_case` where the API is snake_case and camelCase where it is camelCase,
+ * deliberately: these describe the wire, not an idealised model, and quietly
+ * renaming fields here would move the divergence rather than remove it.
+ */
+
+/** A bounded review queue stating its own coverage. */
+export interface ReviewBudget {
+  budget: number
+  matched: number
+  withheld: number
+  /** True when the queue held rows back; the UI discloses only then. */
+  overBudget: boolean
+}
+
+/** Pagination plus the review budget, on list endpoints that rank and bound. */
+export interface ListMeta {
+  total: number
+  page: number
+  limit: number
+  /** Absent from older control planes; the UI degrades to no banner. */
+  audit?: ReviewBudget
+}
+
+/** `GET /api/v1/incidents` row. */
+export interface IncidentRow {
+  incident_id: string
+  workspace_id: string
+  trace_id: string | null
+  session_id: string | null
+  severity: string
+  anomaly_type: string
+  description: string | null
+  resolution_status: string | null
+  resolved_by: string | null
+  resolved_at: string | null
+  escalation_chain: Record<string, unknown> | null
+  created_at: string
+}
+
+/** `GET /api/v1/trajectory/alerts` row. */
+export interface TrajectoryAlertRow {
+  alertId: string
+  sessionId: string
+  workspaceId: string
+  alertType: string
+  severity: string
+  state: string
+  verdict: string
+  confidence: string
+  summary: string
+  heuristicTriggers: Array<{ rule?: string; message?: string } | string>
+  llmReasoning: string | null
+  interventionAction: string | null
+  monitorMode: string
+  trajectoryWindow: Record<string, unknown>
+  createdAt: string
+}
+
+/** `GET /api/v1/anomalies` row. */
+export interface AnomalyRow {
+  trace_id: string
+  session_id: string
+  timestamp: string
+  anomaly_type: string
+  confidence: number
+  model: string | null
+  enforcement_action: string | null
+  compliance_score: number
+}

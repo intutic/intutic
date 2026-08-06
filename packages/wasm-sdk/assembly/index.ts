@@ -19,7 +19,7 @@ class DlpFinding {
   length: i32 = 0;
 }
 
-class RequestContext {
+export class RequestContext {
   session_id: string = "";
   workspace_id: string = "";
   virtual_key_prefix: string = "";
@@ -178,13 +178,15 @@ export function allocate(size: i32): i32 {
 }
 
 /**
- * Main evaluation entry point called by the proxy.
- * Maps to: evaluate(offset, len) -> i32 (0 = Bypass/Allow, 1 = Block/Kill, 2 = Redact)
+ * Reads the host's payload out of guest memory and parses it.
+ *
+ * Factored out of `evaluate` so a standalone rule — one of the drop-in
+ * directories under `rules/` — can reuse the buffer handling without copying
+ * it. The `activeBuffer` fallback below is load-bearing: `allocate` hands the
+ * host a pointer into a guest-owned array, and if that array has been collected
+ * or resized the bytes must be read back out of linear memory directly.
  */
-export function evaluate(offset: i32, len: i32): i32 {
-  trace("WASM: Starting evaluation");
-  
-  // Retrieve or recreate the Uint8Array holding the JSON payload
+export function readContext(offset: i32, len: i32): RequestContext {
   let jsonBytes = activeBuffer;
   if (jsonBytes === null || jsonBytes.length != len) {
     trace("WASM: activeBuffer is null or size mismatch, copying from memory");
@@ -193,14 +195,23 @@ export function evaluate(offset: i32, len: i32): i32 {
       jsonBytes[i] = load<u8>(offset + i);
     }
   }
-  
-  trace("WASM: read JSON bytes, length: " + jsonBytes.length.toString());
-  
-  // Parse RequestContext
-  const ctx = parseRequestContext(jsonBytes);
+  return parseRequestContext(jsonBytes);
+}
+
+/**
+ * Main evaluation entry point called by the proxy.
+ *
+ * Verdict codes: **0 allow · 1 block · 3 reask**. This docblock used to name 2
+ * as a redaction rung. The guest is handed the RequestContext, never the request
+ * body, so redaction was never expressible — the proxy maps 2 to a block, and a
+ * rule returning it believing otherwise is blocking. `intutic policy install`
+ * refuses any code outside {0,1,2,3} and warns on 2, which it still accepts so
+ * that rules which already shipped keep their meaning.
+ */
+export function evaluate(offset: i32, len: i32): i32 {
+  trace("WASM: Starting evaluation");
+  const ctx = readContext(offset, len);
   trace("WASM: parsed RequestContext");
-  
-  // Apply safety rules
   return runRules(ctx);
 }
 
@@ -211,6 +222,26 @@ function readString(offset: i32, len: i32): string {
     str += String.fromCharCode(load<u8>(offset + i));
   }
   return str;
+}
+
+/**
+ * Reads a numeric field whichever JSON form it arrived in.
+ *
+ * `getFloat` returns null for a value the parser typed as an Integer, and JSON
+ * has no way to mark `50` as a float — so every WHOLE-NUMBER budget, spend and
+ * cost silently read as the -1 unknown sentinel. A rule gating on
+ * `workflow_budget_usd` did nothing whenever the budget happened to be a round
+ * number, which is most of the time someone sets one by hand.
+ *
+ * Returns `NaN` when the field is genuinely absent, so the caller keeps its own
+ * default rather than being handed a 0 that means "unset".
+ */
+function numberOf(obj: JSON.Obj, key: string): f64 {
+  const f = obj.getFloat(key);
+  if (f != null) return f.valueOf();
+  const i = obj.getInteger(key);
+  if (i != null) return f64(i.valueOf());
+  return NaN;
 }
 
 /** Read a JSON string array, or an empty array when absent. */
@@ -251,8 +282,8 @@ function parseRequestContext(jsonBytes: Uint8Array): RequestContext {
   const estimated_input_tokens = jsonObj.getInteger("estimated_input_tokens");
   if (estimated_input_tokens) ctx.estimated_input_tokens = i32(estimated_input_tokens.valueOf());
 
-  const budget_remaining_usd = jsonObj.getFloat("budget_remaining_usd");
-  if (budget_remaining_usd) ctx.budget_remaining_usd = budget_remaining_usd.valueOf();
+  const budget_remaining_usd = numberOf(jsonObj, "budget_remaining_usd");
+  if (!isNaN(budget_remaining_usd)) ctx.budget_remaining_usd = budget_remaining_usd;
 
   const risk_tier = jsonObj.getString("risk_tier");
   if (risk_tier) ctx.risk_tier = risk_tier.toString();
@@ -277,11 +308,11 @@ function parseRequestContext(jsonBytes: Uint8Array): RequestContext {
 
   // Absent or JSON null leaves the -1 sentinel in place, which is the
   // difference between "we did not measure" and "it measured zero".
-  const graph_spend_usd = jsonObj.getFloat("graph_spend_usd");
-  if (graph_spend_usd) ctx.graph_spend_usd = graph_spend_usd.valueOf();
+  const graph_spend_usd = numberOf(jsonObj, "graph_spend_usd");
+  if (!isNaN(graph_spend_usd)) ctx.graph_spend_usd = graph_spend_usd;
 
-  const graph_budget_usd = jsonObj.getFloat("graph_budget_usd");
-  if (graph_budget_usd) ctx.graph_budget_usd = graph_budget_usd.valueOf();
+  const graph_budget_usd = numberOf(jsonObj, "graph_budget_usd");
+  if (!isNaN(graph_budget_usd)) ctx.graph_budget_usd = graph_budget_usd;
 
   const parent_alive = jsonObj.getBool("parent_alive");
   if (parent_alive) ctx.parent_alive = parent_alive.valueOf() ? 1 : 0;
@@ -289,11 +320,11 @@ function parseRequestContext(jsonBytes: Uint8Array): RequestContext {
   const harness = jsonObj.getString("harness");
   if (harness) ctx.harness = harness.toString();
 
-  const workflow_spend_usd = jsonObj.getFloat("workflow_spend_usd");
-  if (workflow_spend_usd) ctx.workflow_spend_usd = workflow_spend_usd.valueOf();
+  const workflow_spend_usd = numberOf(jsonObj, "workflow_spend_usd");
+  if (!isNaN(workflow_spend_usd)) ctx.workflow_spend_usd = workflow_spend_usd;
 
-  const workflow_budget_usd = jsonObj.getFloat("workflow_budget_usd");
-  if (workflow_budget_usd) ctx.workflow_budget_usd = workflow_budget_usd.valueOf();
+  const workflow_budget_usd = numberOf(jsonObj, "workflow_budget_usd");
+  if (!isNaN(workflow_budget_usd)) ctx.workflow_budget_usd = workflow_budget_usd;
 
   ctx.denied_tools = parseStringArray(jsonObj, "denied_tools");
   ctx.injection_findings = parseStringArray(jsonObj, "injection_findings");

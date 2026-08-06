@@ -61,8 +61,21 @@ export interface TraceEntry {
   /** Raw input tokens before compression. */
   rawInputTokens: number
 
-  /** Input tokens after compression. */
+  /**
+   * Input tokens after compression.
+   *
+   * Written equal to `rawInputTokens` by every proxy trace path — the input
+   * compressor is not wired. Do not derive a saving from the difference.
+   */
   compressedInputTokens: number
+
+  /**
+   * Bytes the SnipCompactor removed from the response body.
+   *
+   * The measured saving, in bytes rather than tokens, and response-side: it
+   * reduces the *next* turn's prompt, not this trace's input count.
+   */
+  toolResultBytesSaved?: number
 
   /** Output tokens generated. */
   outputTokens: number
@@ -223,6 +236,7 @@ export interface TraceDetail {
   complexityScore: number
   rawInputTokens: number
   compressedInputTokens: number
+  toolResultBytesSaved?: number
   outputTokens: number
   rawCostUsd: number
   actualCostUsd: number

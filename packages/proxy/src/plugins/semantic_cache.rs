@@ -268,7 +268,27 @@ pub async fn check_cache(
 
 /// Writes a response to exact and semantic cache.
 #[allow(clippy::too_many_arguments)]
+/// Where a response came from, and therefore whether it may be cached.
+///
+/// A parameter rather than a convention, because "remember not to cache the
+/// mirrored one" is exactly the kind of rule that holds until someone adds a
+/// third call site. A mirrored response is one the caller **discarded** — it was
+/// produced by a model the user did not ask for and never received. Caching it
+/// would later serve a discarded model's output to a real user as though they
+/// had asked for it, and nothing downstream would show that had happened.
+///
+/// This is the sharpest hazard in the routing plan, so it is enforced here at
+/// the one place that writes, not at each place that calls.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResponseProvenance {
+    /// Returned to the caller. Cacheable.
+    Served,
+    /// Produced by a mirrored request and thrown away. Never cacheable.
+    Mirrored,
+}
+
 pub async fn write_cache(
+    provenance: ResponseProvenance,
     store: &Arc<dyn LocalStore>,
     http_client: &reqwest::Client,
     workspace_id: &str,
@@ -279,6 +299,18 @@ pub async fn write_cache(
     completion_tokens: u32,
     ff_semantic: bool,
 ) -> Result<(), anyhow::Error> {
+    if provenance == ResponseProvenance::Mirrored {
+        // Not an error: mirroring is expected to reach here and be refused.
+        // Refusing at the write is what makes the guarantee structural — a new
+        // call site inherits it without knowing it exists.
+        tracing::debug!(
+            workspace_id = %workspace_id,
+            model = %model_name,
+            "Refusing to cache a mirrored response"
+        );
+        return Ok(());
+    }
+
     let prompt_text = extract_prompt_text(body_json);
     if prompt_text.is_empty() {
         return Ok(());
@@ -444,6 +476,61 @@ pub fn construct_mock_response(
 
 #[cfg(test)]
 mod tests {
+    use super::ResponseProvenance;
+
+    /// The sharpest hazard in the routing plan, asserted at the source.
+    ///
+    /// A mirrored response was produced by a model the user did not ask for and
+    /// never received. Caching it would later serve a discarded model's output
+    /// to a real user as though they had asked for it — and nothing downstream
+    /// would show that had happened, because a cache hit looks identical
+    /// whichever model filled the entry.
+    ///
+    /// The guarantee is structural: `write_cache` takes the provenance, so a new
+    /// call site inherits the refusal without knowing it exists. That is the
+    /// difference between this and a comment saying "do not cache mirrored
+    /// responses", which holds until someone adds the third caller.
+    #[test]
+    fn write_cache_takes_provenance_so_the_guard_cannot_be_forgotten() {
+        let src = include_str!("semantic_cache.rs");
+
+        // The parameter is FIRST, so a call site cannot omit it and compile.
+        assert!(
+            src.contains("pub async fn write_cache(\n    provenance: ResponseProvenance,"),
+            "provenance must be the first parameter of write_cache; moving it later \
+             lets a new call site default it by position"
+        );
+
+        // And it must actually refuse, not merely record.
+        assert!(
+            src.contains("if provenance == ResponseProvenance::Mirrored {"),
+            "write_cache accepts a provenance it does not act on"
+        );
+        let refusal = src
+            .split("if provenance == ResponseProvenance::Mirrored {")
+            .nth(1)
+            .expect("guard present");
+        let body = &refusal[..refusal.find('}').unwrap_or(refusal.len())];
+        assert!(
+            body.contains("return Ok(())"),
+            "the mirrored branch must return before writing, got: {body}"
+        );
+    }
+
+    /// Every caller says which it is, explicitly.
+    #[test]
+    fn every_call_site_states_its_provenance() {
+        let proxy = include_str!("../proxy.rs");
+        let calls = proxy.matches("semantic_cache::write_cache(").count();
+        let stated = proxy.matches("ResponseProvenance::Served").count()
+            + proxy.matches("ResponseProvenance::Mirrored").count();
+        assert!(calls > 0, "no call sites found — this test asserted nothing");
+        assert_eq!(
+            calls, stated,
+            "{calls} write_cache call(s) but {stated} stated provenance"
+        );
+    }
+
     use super::*;
     use serde_json::json;
 

@@ -30,7 +30,21 @@ The proxy processes every request through an ordered plugin chain:
 
 ### Model Selection
 
-- **Thompson Sampling bandit**: Selects the optimal model per-task based on historical cost, latency, and quality signals
+- **Thompson Sampling bandit**: selects a model per task cell from observed
+  **availability and latency**.
+
+  Two corrections to what this said before. It claimed selection was based on
+  "historical cost, latency, and quality signals". `RewardSignals`
+  (`src/routing/reward.rs:32`) carries `upstream_ok`, `latency_ms`,
+  `token_anomaly`, `raw_cost_usd` and `actual_cost_usd` — and the cost pair does
+  not move the reward: `cheaper_routed_model_earns_no_bonus` asserts a cheaper
+  route earns nothing, deliberately. There is **no quality signal at all**: a
+  cheap model returning a confidently wrong answer, quickly, scores a perfect
+  1.0.
+
+  So the router today optimises for *responding*, not for responding *well* or
+  *cheaply*. Do not describe it as saving money or preserving quality until
+  there is a measurement behind either word.
 
 ### Network Enforcement
 
