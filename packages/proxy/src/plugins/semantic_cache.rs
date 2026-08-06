@@ -476,7 +476,10 @@ pub fn construct_mock_response(
 
 #[cfg(test)]
 mod tests {
-    use super::ResponseProvenance;
+    // No `use super::ResponseProvenance` here: the two source-text tests below
+    // name it only inside string literals, and `use super::*` further down
+    // covers every test that uses it as a type. Importing it explicitly was an
+    // unused import, and this crate is held to zero warnings.
 
     /// The sharpest hazard in the routing plan, asserted at the source.
     ///
