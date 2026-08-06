@@ -110,9 +110,9 @@ describe('the gate catches what it was widened to catch', () => {
 
 describe('the gate refuses to pass while asserting nothing', () => {
   it('fails when a named root is missing', async () => {
-    // The likelier state than "all trees present": the marketing site is a
-    // separate repository. A note plus exit 0 is indistinguishable from a
-    // clean run of full coverage.
+    // A note plus exit 0 is indistinguishable from a clean run of full
+    // coverage, and every root is now either in this repository or was named on
+    // the command line — so absence is a mistake, not the ordinary state.
     const r = await runGate([root, join(root, 'does-not-exist')])
     expect(r.status, r.out).toBe(1)
     expect(r.out).toContain('not checked out')
@@ -121,26 +121,33 @@ describe('the gate refuses to pass while asserting nothing', () => {
   it('fails when no root exists at all', async () => {
     const r = await runGate([join(root, 'nope')])
     expect(r.status, r.out).toBe(1)
-    // The missing-root check fires first now, so this is the message. The
-    // "asserted nothing" backstop below is what catches the case where someone
-    // waives the missing roots and there is consequently nothing left to scan.
+    // The missing-root check fires first, so this is the message a caller sees.
     expect(r.out).toContain('not checked out')
   })
 
-  it('still fails when the waiver leaves nothing to scan', async () => {
-    // INTUTIC_CLAIM_ROOTS_OPTIONAL downgrades a missing root to a warning. It
-    // must not downgrade a run that ends up covering zero files — that is a
-    // gate reporting PASS having opened nothing.
-    const r = await runGate([join(root, 'nope')], { INTUTIC_CLAIM_ROOTS_OPTIONAL: '1' })
-    expect(r.status, r.out).toBe(1)
-    expect(r.out).toContain('asserted nothing')
-  })
-
-  it('downgrades a missing root only when explicitly told to', async () => {
+  it('has no environment variable that waives a missing root', async () => {
+    // There was one. `INTUTIC_CLAIM_ROOTS_OPTIONAL=1` printed a warning and then
+    // printed `[PASS]`, which is note-and-pass respelled as configuration — and
+    // it existed only to let CI survive a default root that CI could never have.
+    // That root is gone, so the waiver is too, and this asserts it did not
+    // survive as an undocumented escape.
     await write('a.md', 'nothing to see\n')
     const r = await runGate([root, join(root, 'nope')], { INTUTIC_CLAIM_ROOTS_OPTIONAL: '1' })
+    expect(r.status, `the waiver still works:\n${r.out}`).toBe(1)
+    expect(r.out).toContain('not checked out')
+  })
+
+  it('names the roots it opened, so a pass cannot read as broader than it is', async () => {
+    // The single property that lets this gate be scoped to one repository
+    // honestly. It used to report "N published tree(s)" — a count that says
+    // nothing about WHICH, so a run covering the wrong tree looked identical to
+    // one covering the right one.
+    await write('a.md', 'nothing to see\n')
+    const r = await runGate([root])
     expect(r.status, r.out).toBe(0)
-    expect(r.out, 'partial coverage must be stated, not silent').toContain('partial coverage')
+    expect(r.out, 'the PASS line must name what it scanned').toContain('[PASS]')
+    expect(r.out).toContain(root.split('/').pop()!)
+    expect(r.out, 'a bare count is not a scope').not.toMatch(/published tree\(s\)/)
   })
 
   it('scans .html as well as .md', async () => {
