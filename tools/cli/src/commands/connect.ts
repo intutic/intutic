@@ -821,7 +821,7 @@ export async function runConnect(opts: {
   // developer was stopped, and the decision that was supposed to become a
   // learned rule never reached the control plane. The block working is what made
   // it invisible.
-  const runDrain = async () => {
+  const drainOnce = async () => {
     try {
       const drained = await drainHookEvents(safeConfig.workspaceRoot, controlPlaneUrl, safeCreds.apiKey)
       if (drained > 0) {
@@ -839,6 +839,41 @@ export async function runConnect(opts: {
       }
     } catch (err) {
       log.warn(`[sync-daemon] Review hold drain error (non-fatal): ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
+  /**
+   * Serialises drains, and coalesces the ones that arrive during one.
+   *
+   * `runDrain` is bound to `change` and `add` on **two** watched files and to a
+   * 60-second timer, and each drain reads a log and then truncates it. Those are
+   * separate awaits, so two overlapping runs both read the same lines before
+   * either truncates and the same governance events are POSTed twice — a hook
+   * incident counted once by the agent and twice by the control plane. A hook
+   * writing to both `.intutic/events/` files in the same tick is enough on its
+   * own, and that is the ordinary case: a held tool call writes the review
+   * request and the event log together.
+   *
+   * The latch matters as much as the flag. Dropping an overlapping request
+   * outright would lose the write that triggered it whenever it landed after
+   * this pass had already read the file, so the drain would wait for the next
+   * event or the 60s poll — the exact delay the watcher exists to remove.
+   */
+  let draining = false
+  let drainRequestedAgain = false
+  const runDrain = async () => {
+    if (draining) {
+      drainRequestedAgain = true
+      return
+    }
+    draining = true
+    try {
+      do {
+        drainRequestedAgain = false
+        await drainOnce()
+      } while (drainRequestedAgain)
+    } finally {
+      draining = false
     }
   }
 
