@@ -908,7 +908,10 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
         // A mismatch returns `Rejected` rather than denying, because `Rejected`
         // is this codebase's "not answered from cache" signal — the caller falls
         // through to `validate_key_via_control_plane`, which checks the whole
-        // token authoritatively and raises the 401 itself. An entry with no
+        // token authoritatively and raises the 401 itself. That endpoint tries
+        // every key sharing the prefix, so a collision resolves rather than
+        // 401-ing a valid key — the prefix is only 36 bits of entropy, which is
+        // not as remote as it sounds. An entry with no
         // verifier predates this field, so it takes the same path: one
         // control-plane round trip per key until the cache turns over, rather
         // than the hole staying open.

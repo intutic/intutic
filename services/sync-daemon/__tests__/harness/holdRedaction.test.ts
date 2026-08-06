@@ -20,6 +20,8 @@ import {
   buildContextSnapshot,
   emitRedactor,
   MAX_STRING,
+  MAX_ARRAY,
+  MAX_DEPTH,
   MAX_SNAPSHOT_BYTES,
 } from '../../src/harness/holdRedaction.js'
 
@@ -225,19 +227,83 @@ describe('the emitted form is what runs', () => {
     expect(emitted, 'an import survived into the emitted hook').not.toMatch(/\brequire\(|\bimport\s/)
   })
 
-  it('actually evaluates and redacts once emitted', () => {
-    // The real check: run the emitted text the way the hook will.
-    const run = new Function(`${emitted}
+  /** Runs the emitted text the way the hook will, and returns the snapshot. */
+  const runEmitted = (command: string): Record<string, unknown> =>
+    (
+      new Function(`${emitted}
       return __intuticSnapshot({
         tool: 'Bash',
-        toolInput: { command: ${JSON.stringify(`aws configure set key ${AWS}`)} },
+        toolInput: { command: ${JSON.stringify(command)} },
         cwd: '/repo',
         reason: 'action:deploy',
       });`) as () => Record<string, unknown>
-    const snapshot = run()
+    )()
+
+  it('actually evaluates and redacts once emitted', () => {
+    const snapshot = runEmitted(`aws configure set key ${AWS}`)
     const text = JSON.stringify(snapshot)
     expect(text).not.toContain(AWS)
     expect(text).toContain('[redacted]')
     expect(snapshot['tool']).toBe('Bash')
+  })
+
+  it('reaches the assignment path through the emitted text too', () => {
+    // The case above is an AWS key, which only exercises SECRET_VALUE — a plain
+    // array of regexes. The assignment path added four more bindings (`NAME`,
+    // `NAME_IS_SECRET`, `VALUE_END`, `redactAssignments`), and until this test
+    // existed NONE of them was reached by anything that evaluates the emitted
+    // source. If one later drifts to module scope, the hook throws a
+    // ReferenceError inside the hold-write catch and silently produces no
+    // snapshot — the exact failure this file's history records — while the
+    // structural assertion above still passes, because it checks a fixed list of
+    // six names that would not include the new one.
+    const secret = 'correcthorsebatterystaple'
+    const snapshot = runEmitted(`deploy --token=${secret}`)
+    const text = JSON.stringify(snapshot)
+    expect(text, 'the assignment path did not run inside the emitted hook').not.toContain(secret)
+    expect(text).toContain('--token=[redacted]')
+  })
+
+  it('runs every branch of the redactor inside the emitted hook', () => {
+    // A missing binding only throws when the path that reads it executes, so
+    // the guarantee is branch coverage of the EMITTED text — not a scan of it.
+    // (Scanning was tried: identifier-shaped text inside a regex literal, such
+    // as the `AKIA` in the AWS pattern, is indistinguishable from a reference.)
+    //
+    // Every arm of `redactSecrets` in one snapshot: a string carrying both a
+    // shaped credential and an assignment, a secret-named key, an array past
+    // MAX_ARRAY, nesting past MAX_DEPTH, and a non-JSON value. Any binding that
+    // drifts to module scope fails here rather than silently producing no
+    // snapshot inside the hold-write catch.
+    const deep = (n: number): unknown => (n === 0 ? 'floor' : { [`l${n}`]: deep(n - 1) })
+    const run = new Function(`${emitted}
+      return __intuticSnapshot({
+        tool: 'Bash',
+        toolInput: ${JSON.stringify({
+          command: `aws configure set key ${AWS} && deploy --token=correcthorsebatterystaple`,
+          password: 'looks-innocent',
+          many: Array.from({ length: MAX_ARRAY + 5 }, (_, i) => `item-${i}`),
+          nested: deep(MAX_DEPTH + 2),
+          size: 42,
+          enabled: true,
+          nothing: null,
+        })},
+        cwd: '/repo',
+        reason: 'action:deploy',
+      });`) as () => Record<string, unknown>
+
+    const snapshot = run()
+    const text = JSON.stringify(snapshot)
+    const input = snapshot['toolInput'] as Record<string, unknown>
+
+    expect(text, 'the shaped-credential arm').not.toContain(AWS)
+    expect(text, 'the assignment arm').not.toContain('correcthorsebatterystaple')
+    expect(text).toContain('--token=[redacted]')
+    expect(input['password'], 'the secret-key arm').toBe('[redacted]')
+    expect(JSON.stringify(input['many']), 'the array-cap arm').toContain('more elided')
+    expect(text, 'the depth-limit arm').toContain('[depth limit]')
+    expect(input['size'], 'numbers pass through').toBe(42)
+    expect(input['enabled'], 'booleans pass through').toBe(true)
+    expect(input['nothing'], 'null becomes null, not a marker').toBeNull()
   })
 })
