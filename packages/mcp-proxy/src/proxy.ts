@@ -130,9 +130,22 @@ export class McpGovernanceProxy {
 
     /**
      * Helper: call control plane REST API.
-     * Returns null on any error (graceful degradation — never crashes the MCP server).
+     *
+     * Never throws — a failure here degrades a tool's answer, it does not crash
+     * the MCP server.
+     *
+     * 403 is reported separately from every other failure. Collapsing it into
+     * `null` told the agent "Could not reach control plane" when the control
+     * plane had answered clearly and immediately, which is the kind of message
+     * that sends someone debugging their network for an hour. It matters more
+     * now that the incident and anomaly reads are role-gated server-side: a
+     * DEVELOPER or VIEWER key reaches this path routinely and legitimately.
      */
-    async function callControlPlane(path: string): Promise<unknown> {
+    type ControlPlaneResult =
+      | { ok: true; data: unknown }
+      | { ok: false; reason: 'forbidden' | 'unreachable' }
+
+    async function callControlPlane(path: string): Promise<ControlPlaneResult> {
       try {
         const res = await fetch(`${cpUrl}${path}`, {
           headers: {
@@ -141,11 +154,19 @@ export class McpGovernanceProxy {
           },
           signal: AbortSignal.timeout(5000),
         })
-        if (!res.ok) return null
-        return res.json()
+        if (res.status === 403) return { ok: false, reason: 'forbidden' }
+        if (!res.ok) return { ok: false, reason: 'unreachable' }
+        return { ok: true, data: await res.json() }
       } catch {
-        return null
+        return { ok: false, reason: 'unreachable' }
       }
+    }
+
+    /** Renders a failed call as text for the agent, naming the actual cause. */
+    function describeFailure(result: { reason: 'forbidden' | 'unreachable' }, what: string): string {
+      return result.reason === 'forbidden'
+        ? `Your Intutic role is not permitted to ${what}. This needs the OWNER, ADMIN or EM role.`
+        : `Could not reach control plane to ${what}.`
     }
 
     // Tool: intutic_governance_status
@@ -154,10 +175,18 @@ export class McpGovernanceProxy {
       'Returns the current governance status and health of the Intutic control plane for this workspace.',
       {},
       async () => {
-        const health = await callControlPlane('/healthz') as Record<string, unknown> | null
-        const status = health
-          ? { connected: true, controlPlane: cpUrl, workspaceId, ...health }
-          : { connected: false, controlPlane: cpUrl, workspaceId, error: 'Control plane unreachable' }
+        const health = await callControlPlane('/healthz')
+        const status = health.ok
+          ? { connected: true, controlPlane: cpUrl, workspaceId, ...(health.data as Record<string, unknown>) }
+          : {
+              connected: false,
+              controlPlane: cpUrl,
+              workspaceId,
+              error:
+                health.reason === 'forbidden'
+                  ? 'Control plane rejected this API key'
+                  : 'Control plane unreachable',
+            }
 
         return {
           content: [{ type: 'text' as const, text: JSON.stringify(status, null, 2) }],
@@ -171,12 +200,12 @@ export class McpGovernanceProxy {
       'Lists Standard Operating Procedures (SOPs) active in this workspace.',
       { limit: z.number().int().min(1).max(50).default(10).describe('Number of SOPs to return (1–50)') },
       async ({ limit }) => {
-        const data = await callControlPlane(
+        const result = await callControlPlane(
           `/api/v1/sops?workspaceId=${workspaceId}&limit=${limit}`
-        ) as Record<string, unknown> | null
-        const text = data
-          ? JSON.stringify(data, null, 2)
-          : 'Could not reach control plane to list SOPs.'
+        )
+        const text = result.ok
+          ? JSON.stringify(result.data, null, 2)
+          : describeFailure(result, 'list SOPs')
 
         return {
           content: [{ type: 'text' as const, text }],
@@ -190,12 +219,12 @@ export class McpGovernanceProxy {
       'Lists recent governance incidents (policy violations, blocked tool calls) in this workspace.',
       { limit: z.number().int().min(1).max(50).default(10).describe('Number of incidents to return (1–50)') },
       async ({ limit }) => {
-        const data = await callControlPlane(
+        const result = await callControlPlane(
           `/api/v1/incidents?workspaceId=${workspaceId}&limit=${limit}`
-        ) as Record<string, unknown> | null
-        const text = data
-          ? JSON.stringify(data, null, 2)
-          : 'Could not reach control plane to list incidents.'
+        )
+        const text = result.ok
+          ? JSON.stringify(result.data, null, 2)
+          : describeFailure(result, 'list incidents')
 
         return {
           content: [{ type: 'text' as const, text }],

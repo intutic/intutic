@@ -11,6 +11,7 @@ import * as node_https from 'node:https'
 import * as node_http from 'node:http'
 import { createStderrLogger as createLogger } from './stderrLog.js'
 import { callDaemonSocket } from './daemonClient.js'
+import type { ResolvedPolicy } from './daemon/policyCache.js'
 
 const log = createLogger('mcp-proxy-policy')
 
@@ -24,6 +25,39 @@ export interface SopRule {
   action: 'block' | 'warn' | 'require_approval'
   /** Human-readable reason reported back to harness */
   reason: string
+}
+
+/**
+ * Is this unvalidated object actually a policy rule?
+ *
+ * The daemon caches `sopRules` as `Record<string, unknown>[]` — it filters the
+ * control plane's response to plain objects and validates nothing further. The
+ * client then used `as SopRule[]`, behind a `Promise<any>` that hid the
+ * mismatch entirely.
+ *
+ * That matters because these drive blocking decisions: a rule missing
+ * `toolPattern` reaches `new RegExp(undefined)` and matches everything, and a
+ * rule with an unrecognised `action` falls through every branch and enforces
+ * nothing. Neither is a shape the control plane intends to send — which is the
+ * argument for dropping the malformed ones loudly rather than trusting a cast.
+ */
+/**
+ * Exported because it is the contract between this package and whatever
+ * produces rules for it, not merely an internal helper. `policyCache`'s snapshot
+ * seed has to satisfy it, and a test that asserted against a *copy* of this
+ * predicate would prove nothing about the real one — which is precisely the
+ * two-copies-of-one-rule failure the harness gates were just rebuilt to remove.
+ */
+export function isSopRule(value: unknown): value is SopRule {
+  if (typeof value !== 'object' || value === null) return false
+  const r = value as Record<string, unknown>
+  return (
+    typeof r['id'] === 'string' &&
+    typeof r['toolPattern'] === 'string' &&
+    typeof r['reason'] === 'string' &&
+    (r['argPattern'] === undefined || typeof r['argPattern'] === 'string') &&
+    (r['action'] === 'block' || r['action'] === 'warn' || r['action'] === 'require_approval')
+  )
 }
 
 interface SopRulesResponse {
@@ -92,15 +126,42 @@ export class PolicyClient {
   async refresh(): Promise<void> {
     if (this.mcpProxyMode === 'daemon') {
       try {
-        const policy = await callDaemonSocket('policy.get', { workspaceId: this.workspaceId })
+        // The socket returns whatever the daemon serialised, so the caller
+        // names the shape it expects. `policy.get` is answered by `resolvePolicy`
+        // in the daemon's own policyCache, which is where this type comes from —
+        // not an assertion, the actual producer's return type.
+        const policy = await callDaemonSocket<ResolvedPolicy | null>('policy.get', {
+          workspaceId: this.workspaceId,
+        })
         if (policy) {
-          this.rules = (policy.sopRules || []) as SopRule[]
+          const candidates = policy.sopRules ?? []
+          // An explicit loop rather than `.filter(isSopRule)`: TypeScript will
+          // not narrow `Record<string, unknown>[]` to `SopRule[]` through a type
+          // predicate, because an interface has no implicit index signature.
+          const accepted: SopRule[] = []
+          for (const candidate of candidates) {
+            if (isSopRule(candidate)) accepted.push(candidate)
+          }
+          this.rules = accepted
+          const dropped = candidates.length - accepted.length
+          if (dropped > 0) {
+            log.warn(
+              { action: 'policy_rules_malformed', dropped, kept: this.rules.length },
+              'Dropped malformed SOP rules from the daemon — they cannot be enforced',
+            )
+          }
           this.lastFetchAt = Date.now()
           log.info({ action: 'policy_refreshed_from_daemon', ruleCount: this.rules.length }, 'SOP rules refreshed from daemon')
           return
         }
-      } catch (err: any) {
-        log.warn({ action: 'policy_daemon_failed', err: err.message }, 'Failed to refresh policy from daemon socket — falling back to HTTP')
+      } catch (err) {
+        log.warn(
+          {
+            action: 'policy_daemon_failed',
+            err: err instanceof Error ? err.message : String(err),
+          },
+          'Failed to refresh policy from daemon socket — falling back to HTTP',
+        )
       }
     }
 
