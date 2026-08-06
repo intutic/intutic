@@ -131,7 +131,49 @@ export function createApiClient(controlPlaneUrl: string, apiKey: string): ApiCli
   }
 }
 
-function toonDecode(toon: string): Record<string, unknown>[] {
+/**
+ * Split one encoded TOON row into cells, unescaping as it goes.
+ *
+ * MUST stay behaviourally identical to `splitCells` in the control plane's
+ * `services/control-plane/src/lib/toon.ts` and in `apps/dashboard/src/lib/api.ts`.
+ * This is the read side of a wire format whose only writer is that encoder.
+ *
+ * A single left-to-right pass, not a chain of `.replace()` calls. The decoder
+ * this replaces substituted a NUL placeholder for `\|` before splitting on `|`,
+ * which cannot express the `\\` the encoder emits for a literal backslash:
+ * given `x\\|y` the regex pairs the SECOND backslash with the delimiter and
+ * swallows it, so two columns merge and every later column shifts one place
+ * left. On an incidents row that silently rewrites `severity` to the trace id
+ * and `workspace_id` to null — a CRITICAL incident stops printing as CRITICAL.
+ * The value is attacker-reachable: `routes/incidents.ts` builds `description`
+ * from the hook event's `reason`, which any holder of a workspace API key sets
+ * on `POST /api/v1/hook-events`.
+ *
+ * A lone backslash before anything other than `\`, `|` or `n` is kept literal
+ * rather than dropped, so a payload from a control plane that predates the
+ * encoder fix degrades to a stale value rather than a discarded character.
+ */
+function splitCells(line: string): string[] {
+  const cells: string[] = []
+  let cur = ''
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]
+    if (ch === '\\') {
+      const next = line[i + 1]
+      if (next === '\\') { cur += '\\'; i++; continue }
+      if (next === '|') { cur += '|'; i++; continue }
+      if (next === 'n') { cur += '\n'; i++; continue }
+      cur += '\\'
+      continue
+    }
+    if (ch === '|') { cells.push(cur); cur = ''; continue }
+    cur += ch
+  }
+  cells.push(cur)
+  return cells
+}
+
+export function toonDecode(toon: string): Record<string, unknown>[] {
   const lines = toon.trimEnd().split('\n')
   if (lines.length < 1) return []
   const header = lines[0]
@@ -142,10 +184,7 @@ function toonDecode(toon: string): Record<string, unknown>[] {
   const rows: Record<string, unknown>[] = []
   for (const line of lines.slice(1)) {
     if (!line.trim()) continue
-    const cells = line
-      .replace(/\\\|/g, '\x00')
-      .split('|')
-      .map((c) => c.split('\x00').join('|').replace(/\\n/g, '\n'))
+    const cells = splitCells(line)
     const obj: Record<string, unknown> = {}
     for (let i = 0; i < cols.length; i++) {
       const raw = cells[i] ?? '-'
