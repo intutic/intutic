@@ -383,3 +383,16 @@ export {
   type Operator,
   type FieldKind,
 } from './rulePredicateDsl.js'
+
+export {
+  TOON_THRESHOLD_ROWS,
+  TOON_MAX_CELL_CHARS,
+  TOON_MAGIC,
+  extractColumns,
+  serializeCell,
+  toonEncode,
+  toonDecode,
+  shouldToon,
+  toonEncodeToolResult,
+  toonDecodeToolResult,
+} from './toon.js'

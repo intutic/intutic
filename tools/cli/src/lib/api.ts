@@ -13,6 +13,7 @@ import type {
   DaemonStatus,
   SopHashReport,
 } from '@intutic/shared-types'
+import { toonDecode as sharedToonDecode } from '@intutic/shared-types'
 
 /** API client for control plane communication. */
 export interface ApiClient {
@@ -132,90 +133,19 @@ export function createApiClient(controlPlaneUrl: string, apiKey: string): ApiCli
 }
 
 /**
- * Split one encoded TOON row into cells, unescaping as it goes.
+ * Decodes a TOON payload, normalising "not TOON" to an empty list.
  *
- * MUST stay behaviourally identical to `splitCells` in the control plane's
- * `services/control-plane/src/lib/toon.ts` and in `apps/dashboard/src/lib/api.ts`.
- * This is the read side of a wire format whose only writer is that encoder.
+ * The format lives in `@intutic/shared-types`, imported rather than copied. It
+ * used to be a private `splitCells` here, byte-identical to one in the dashboard
+ * and a third in the control plane, with a comment in each saying they must not
+ * diverge. They did — an escaping fix reached the encoder and the control
+ * plane's own decoder, which nothing calls, while these two kept the old code
+ * and a CRITICAL incident carried on printing as its trace id.
  *
- * A single left-to-right pass, not a chain of `.replace()` calls. The decoder
- * this replaces substituted a NUL placeholder for `\|` before splitting on `|`,
- * which cannot express the `\\` the encoder emits for a literal backslash:
- * given `x\\|y` the regex pairs the SECOND backslash with the delimiter and
- * swallows it, so two columns merge and every later column shifts one place
- * left. On an incidents row that silently rewrites `severity` to the trace id
- * and `workspace_id` to null — a CRITICAL incident stops printing as CRITICAL.
- * The value is attacker-reachable: `routes/incidents.ts` builds `description`
- * from the hook event's `reason`, which any holder of a workspace API key sets
- * on `POST /api/v1/hook-events`.
- *
- * A lone backslash before anything other than `\`, `|` or `n` is kept literal
- * rather than dropped, so a payload from a control plane that predates the
- * encoder fix degrades to a stale value rather than a discarded character.
+ * The shared decoder returns `null` for input that is not TOON; this surface has
+ * always returned a list, and its caller assigns the result straight onto the
+ * response object, so the shape is preserved here rather than pushed outward.
  */
-function splitCells(line: string): string[] {
-  const cells: string[] = []
-  let cur = ''
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i]
-    if (ch === '\\') {
-      const next = line[i + 1]
-      if (next === '\\') { cur += '\\'; i++; continue }
-      if (next === '|') { cur += '|'; i++; continue }
-      if (next === 'n') { cur += '\n'; i++; continue }
-      cur += '\\'
-      continue
-    }
-    if (ch === '|') { cells.push(cur); cur = ''; continue }
-    cur += ch
-  }
-  cells.push(cur)
-  return cells
-}
-
 export function toonDecode(toon: string): Record<string, unknown>[] {
-  const lines = toon.trimEnd().split('\n')
-  if (lines.length < 1) return []
-  const header = lines[0]
-  if (!header.startsWith('TOON|')) return []
-  const colsStr = header.slice(5) // 'TOON|'.length
-  if (colsStr === '(empty)') return []
-  const cols = colsStr.split(',')
-  const rows: Record<string, unknown>[] = []
-  for (const line of lines.slice(1)) {
-    if (!line.trim()) continue
-    const cells = splitCells(line)
-    const obj: Record<string, unknown> = {}
-    for (let i = 0; i < cols.length; i++) {
-      const raw = cells[i] ?? '-'
-      if (raw === '-') {
-        obj[cols[i]] = null
-        continue
-      }
-      if (raw === 't') {
-        obj[cols[i]] = true
-        continue
-      }
-      if (raw === 'f') {
-        obj[cols[i]] = false
-        continue
-      }
-      const num = Number(raw)
-      if (!isNaN(num) && raw !== '') {
-        obj[cols[i]] = num
-        continue
-      }
-      if (raw.startsWith('{') || raw.startsWith('[')) {
-        try {
-          obj[cols[i]] = JSON.parse(raw)
-          continue
-        } catch {
-          /* fall through */
-        }
-      }
-      obj[cols[i]] = raw
-    }
-    rows.push(obj)
-  }
-  return rows
+  return sharedToonDecode(toon) ?? []
 }
