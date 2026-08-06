@@ -15,6 +15,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import { toonDecode } from './api.js'
+import { toonEncode } from '@intutic/shared-types'
 
 /**
  * One incidents row exactly as `routes/incidents.ts` shapes it and
@@ -94,5 +95,43 @@ describe('toonDecode — backslash handling', () => {
   it('leaves values without a backslash exactly as before', () => {
     const rows = toonDecode('TOON|a,b,c\nhello|-|t\n')
     expect(rows[0]).toEqual({ a: 'hello', b: null, c: true })
+  })
+})
+
+describe('the fixtures above are still what the encoder emits', () => {
+  it('round-trips a real incidents row through the shared encoder', () => {
+    // The rows above are hand-written wire bytes. That is the right way to pin a
+    // DECODER — it fails if the decoder regresses, independently of the encoder.
+    // But it also means an ENCODER change leaves these fixtures pinning bytes
+    // nothing produces any more, and this file would keep passing against a
+    // format that no longer exists.
+    //
+    // Verified: breaking `escapeCell` in @intutic/shared-types fails the control
+    // plane's round-trip tests and leaves every test in this file green.
+    //
+    // So this one asserts the two agree. It is the only test here that will
+    // notice the encoder moving.
+    const row = {
+      anomaly_type: 'HOOK_GATE_BLOCK',
+      created_at: '2026-08-05T00:00:00.000Z',
+      description: '[Hook Gate] Tool "Bash" blocked. Reason: exfil \\',
+      escalation_chain: 'oncall',
+      incident_id: 'inc_1',
+      resolution_status: 'OPEN',
+      resolved_at: null,
+      resolved_by: null,
+      review_priority: 91,
+      session_id: 'sess_1',
+      severity: 'CRITICAL',
+      trace_id: 'tr_1',
+      workspace_id: 'ws_victim',
+    }
+    expect(
+      toonEncode([row]),
+      'the encoder no longer produces the bytes these fixtures assume',
+    ).toBe(encodedIncident('exfil \\\\'))
+
+    // And the decoder gets the original value back out.
+    expect(toonDecode(toonEncode([row]))[0]).toEqual(row)
   })
 })
