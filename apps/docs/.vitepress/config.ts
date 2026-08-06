@@ -176,7 +176,6 @@ const sidebarReference = [
       ...(!IS_OSS ? [
         { text: 'REST API (Cloud)', link: '/reference/api' },
         { text: 'SOP Format (Cloud)', link: '/reference/sop-format' },
-        { text: 'SOP Library (Cloud)', link: '/reference/sop-library' },
       ] : []),
       { text: 'clawde SDK (Open-Core)', link: '/reference/clawde-sdk' },
       { text: 'Configuration (Open-Core)', link: '/reference/configuration' },
