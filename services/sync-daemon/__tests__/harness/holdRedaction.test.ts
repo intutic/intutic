@@ -84,6 +84,65 @@ describe('credential shapes are scrubbed', () => {
   })
 })
 
+describe('the assignment form reaches the names it advertises', () => {
+  // The pattern this replaced required a character before its keyword
+  // alternation, so the keyword could only ever be an *infix* of the identifier.
+  // `MY_API_KEY=` redacted; every one of the plain forms below did not — the
+  // first three were the examples its own comment offered. They reached
+  // `.intutic/events/` in plaintext.
+  const VALUE = 'correcthorsebatterystaple'
+
+  it.each([
+    ['a long-option flag', `deploy --token=${VALUE}`],
+    ['a bare environment assignment', `PASSWORD=${VALUE} ./run.sh`],
+    ['a JSON-ish pair', `{"secret": "${VALUE}"}`],
+    ['a passphrase, not a password', `gpg --passphrase=${VALUE}`],
+    ['a credential flag', `login --credential=${VALUE}`],
+    ['a colon separator', `DATABASE_PASSWORD:${VALUE}`],
+    ['an Authorization bearer header', `curl -H 'authorization: Bearer ${VALUE}'`],
+    ['an Authorization basic header', `curl -H "Authorization: Basic ${VALUE}"`],
+    // A boring name must not shadow a secret packed into the same unbroken run.
+    // Matching name-then-value leaves the scan positioned just past the
+    // separator when a name is declined, so the inner assignment still gets its
+    // own turn; consuming the value would have swallowed it.
+    ['a secret nested behind an innocent one', `psql --set=PGPASSWORD=${VALUE}`],
+  ])('redacts %s', (_label, command) => {
+    expect(JSON.stringify(redactSecrets({ command }))).not.toContain(VALUE)
+  })
+
+  it('keeps the key name and separator so the hold stays reviewable', () => {
+    // A snapshot exists to be reviewed. Replacing the whole match with a bare
+    // `[redacted]` tells the reviewer that something was held and not what.
+    const out = redactSecrets({ command: `deploy --token=${VALUE} --region=us-east-1` })
+    expect((out as { command: string }).command).toBe(
+      'deploy --token=[redacted] --region=us-east-1',
+    )
+  })
+
+  it('leaves a value too short to be a credential', () => {
+    // Below the 8-character floor, redacting costs more context than it buys.
+    const input = { command: 'deploy --token=abc' }
+    expect(redactSecrets(input)).toEqual(input)
+  })
+
+  it('redacts a large argument in bounded time', () => {
+    // Not a performance nicety — a correctness bound. The old pattern put two
+    // unbounded runs either side of its keyword alternation, so every start
+    // offset enumerated every split point of the identifier: 59 KB took 566 ms
+    // and 469 KB took 38 SECONDS. `scrub` redacts before it truncates, and
+    // MAX_SNAPSHOT_BYTES is applied later still, so neither cap bounds this —
+    // an ordinary `Write` of a few hundred KB stalled the hook synchronously.
+    //
+    // The ceiling is deliberately loose. It is here to catch a return to
+    // quadratic behaviour, which overshoots it by three orders of magnitude, not
+    // to police a slow CI runner.
+    const hostile = { command: 'key'.repeat(400_000) }
+    const started = performance.now()
+    redactSecrets(hostile)
+    expect(performance.now() - started).toBeLessThan(2_000)
+  })
+})
+
 describe('the snapshot stays bounded', () => {
   it('keeps both ends of a long string, not just the head', () => {
     const long = 'A'.repeat(MAX_STRING * 2) + 'THE-TARGET'
