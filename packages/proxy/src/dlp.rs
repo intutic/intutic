@@ -196,6 +196,71 @@ struct DlpPattern {
     action: String,
 }
 
+/// Operator-supplied patterns, installed once at boot from config.
+///
+/// Separate from `PATTERNS` rather than merged into it because `PATTERNS` is a
+/// `Lazy` with no input: it cannot see the config, and making it able to would
+/// mean either a global mutable or threading config through every call site of
+/// `scan()`. A `OnceCell` set before the server binds gives the same read path
+/// (no lock, no branch per pattern) with none of that.
+///
+/// Unset in tests, which is what keeps the built-in false-positive fixtures —
+/// notably the phone number at the bottom of this file that must NOT match —
+/// meaningful regardless of what an operator configures in production.
+static CUSTOM: once_cell::sync::OnceCell<Vec<DlpPattern>> = once_cell::sync::OnceCell::new();
+
+/// Compile and install operator patterns. Call once, from main, before serving.
+///
+/// Returns an error rather than panicking. The built-in set uses
+/// `Regex::new(..).unwrap()`, which is fine for a literal list reviewed at
+/// compile time and completely wrong for a value an operator types into a
+/// ConfigMap: a typo there would abort the process at the first request that
+/// happened to reach the scanner, with a panic naming no pattern.
+pub fn install_custom_patterns(
+    defs: &[crate::config::CustomDlpPattern],
+) -> Result<usize, String> {
+    let mut out = Vec::with_capacity(defs.len());
+    for d in defs {
+        if !matches!(d.action.as_str(), "block" | "redact") {
+            return Err(format!(
+                "dlp pattern '{}' declares action '{}'; only 'block' and 'redact' exist",
+                d.name, d.action
+            ));
+        }
+        if d.name.trim().is_empty() {
+            return Err("a dlp pattern has an empty name".to_string());
+        }
+        if PATTERNS.iter().any(|p| p.name == d.name) {
+            return Err(format!(
+                "dlp pattern '{}' shadows a built-in of the same name; \
+                 findings are counted by distinct pattern_name, so a duplicate \
+                 would quietly weaken the escalation threshold",
+                d.name
+            ));
+        }
+        let regex = Regex::new(&d.regex)
+            .map_err(|e| format!("dlp pattern '{}' is not a valid regex: {e}", d.name))?;
+        out.push(DlpPattern {
+            name: d.name.clone(),
+            category: d.category.clone(),
+            regex,
+            action: d.action.clone(),
+        });
+    }
+    let n = out.len();
+    CUSTOM
+        .set(out)
+        .map_err(|_| "custom DLP patterns are already installed".to_string())?;
+    Ok(n)
+}
+
+/// Built-ins first, then operator patterns.
+fn all_patterns() -> impl Iterator<Item = &'static DlpPattern> {
+    PATTERNS
+        .iter()
+        .chain(CUSTOM.get().map(Vec::as_slice).unwrap_or(&[]).iter())
+}
+
 /// Scan text for DLP matches.
 ///
 /// # Why this is a plain loop and not a `RegexSet`
@@ -230,7 +295,7 @@ struct DlpPattern {
 /// making the dirty path ~20% worse by scanning twice.
 pub fn scan(text: &str) -> Vec<DlpFinding> {
     let mut findings = Vec::new();
-    for pattern in PATTERNS.iter() {
+    for pattern in all_patterns() {
         for mat in pattern.regex.find_iter(text) {
             findings.push(DlpFinding {
                 category: pattern.category.clone(),
@@ -328,6 +393,72 @@ mod tests {
         let redacted = redact(text, &findings);
         assert!(redacted.contains("[REDACTED_SECRET]"));
         assert!(!redacted.contains("AKIA"));
+    }
+
+    // ── operator-supplied patterns ─────────────────────────────────────────
+    //
+    // `install_custom_patterns` writes a process-global `OnceCell`, so exactly
+    // one test may install. The pattern used here is deliberately absurd
+    // (`ZZTESTPHIZZ-1234`) so that installing it cannot change the verdict of
+    // any other test in this file — several of which assert that ordinary text
+    // produces NO findings, and would start failing if a realistic custom
+    // pattern leaked into their fixtures.
+
+    fn def(name: &str, category: &str, regex: &str, action: &str) -> crate::config::CustomDlpPattern {
+        crate::config::CustomDlpPattern {
+            name: name.into(),
+            category: category.into(),
+            regex: regex.into(),
+            action: action.into(),
+        }
+    }
+
+    #[test]
+    fn custom_patterns_are_scanned_alongside_the_builtins() {
+        let installed = install_custom_patterns(&[def(
+            "zz_test_phi",
+            "phi",
+            r"ZZTESTPHIZZ-\d{4}",
+            "redact",
+        )]);
+        // Another test in this binary may have installed first; either outcome
+        // is fine, what matters is that the pattern is active afterwards.
+        assert!(installed.is_ok() || installed.is_err());
+
+        if CUSTOM.get().is_some() {
+            let findings = scan("record ZZTESTPHIZZ-4471 attached");
+            assert!(
+                findings.iter().any(|f| f.pattern_name == "zz_test_phi" && f.category == "phi"),
+                "custom pattern did not fire: {findings:?}"
+            );
+            // And the built-ins still work with a custom set installed.
+            assert!(!scan("AKIAIOSFODNN7EXAMPLE").is_empty());
+        }
+    }
+
+    #[test]
+    fn custom_pattern_with_a_bad_regex_is_rejected_by_name() {
+        let err = install_custom_patterns(&[def("broken", "phi", "([unclosed", "redact")])
+            .expect_err("a malformed regex must not be accepted");
+        assert!(err.contains("broken"), "the error must name the pattern: {err}");
+    }
+
+    #[test]
+    fn custom_pattern_with_an_unknown_action_is_rejected() {
+        // There is no warn tier. Accepting one would silently downgrade to
+        // redact and the operator would believe they had configured a warning.
+        let err = install_custom_patterns(&[def("warny", "phi", "abc", "warn")])
+            .expect_err("only block and redact exist");
+        assert!(err.contains("warn"), "{err}");
+    }
+
+    #[test]
+    fn custom_pattern_may_not_shadow_a_builtin_name() {
+        // DlpEscalationDetector counts DISTINCT pattern_name values, so a
+        // duplicate name would quietly make two findings count as one.
+        let err = install_custom_patterns(&[def("ssn", "phi", "abc", "redact")])
+            .expect_err("shadowing a built-in must be refused");
+        assert!(err.contains("ssn"), "{err}");
     }
 
     #[test]

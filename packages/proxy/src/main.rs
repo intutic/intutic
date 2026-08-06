@@ -6,7 +6,7 @@
 //!
 //! Architecture: See docs/lld/02-proxy-gateway.lld.md
 
-use intutic_proxy::{config, proxy, router, routing, sops, store, telemetry, wasm};
+use intutic_proxy::{config, dlp, proxy, router, routing, sops, store, telemetry, wasm};
 
 use std::net::SocketAddr;
 use tracing_subscriber::layer::SubscriberExt;
@@ -88,6 +88,21 @@ async fn main() -> anyhow::Result<()> {
     let config_path = std::env::var("CONFIG_PATH").unwrap_or_else(|_| "config.yaml".to_string());
     let config = config::load_config(&config_path)?;
     tracing::info!("Config loaded from {}", config_path);
+
+    // Install operator DLP patterns before anything can serve a request.
+    //
+    // Fail the boot on a bad pattern rather than starting a proxy whose
+    // operator believes it is enforcing rules it silently dropped. A DLP
+    // scanner that is quietly missing half its patterns is worse than one that
+    // refuses to start, because nothing downstream can tell the difference.
+    match dlp::install_custom_patterns(&config.intutic_settings.dlp.patterns) {
+        Ok(0) => {}
+        Ok(n) => tracing::info!(count = n, "DLP: operator patterns installed from config"),
+        Err(e) => {
+            tracing::error!(error = %e, "DLP: refusing to start");
+            anyhow::bail!(e);
+        }
+    }
 
     // ── Storage backend ───────────────────────────────────────────────
     //
