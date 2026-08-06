@@ -7,8 +7,6 @@ model_list:
   - model_name: gpt-4o
     litellm_params:
       model: openai/gpt-4o
-      api_base: "http://127.0.0.1:4001"
-      api_key: "mock-key"
 
   - model_name: gemini-2.0-flash
     litellm_params:
@@ -32,22 +30,8 @@ intutic_settings:
     scan_output: true
 
   policy:
-    # Control plane is OPTIONAL and deliberately unset here.
-    #
-    # Open core ships no control plane (services/ contains only sync-daemon), so
-    # pointing this at the hosted API means every request is policy-checked
-    # against an endpoint you have no credentials for. Combined with
-    # `fail_closed: true` below, that returns 403 on *every* request — the proxy
-    # is unusable out of the box. Left unset, the policy pre-check is skipped
-    # entirely and the proxy runs fully standalone.
-    #
-    # To connect a control plane, uncomment this or set the CONTROL_PLANE_URL
-    # env var, which takes precedence over this file either way.
-    #
-    # control_plane_url: "https://api.intutic.ai"
-
-    # Only consulted when a control plane is configured. With none set, there is
-    # nothing to fail against and this has no effect.
+    # Will be overridden by CONTROL_PLANE_URL env var if set
+    control_plane_url: "https://api.intutic.ai"
     fail_closed: true
     timeout_ms: 3000
 
@@ -60,14 +44,44 @@ intutic_settings:
   # routing:
   #   enabled: true
   #   candidate_models: ["claude-3-5-sonnet", "gpt-4o", "gemini-2.0-flash"]
-  #   # Uncomment to restore the pre-1.6.0 behavior of pinning every
-  #   # Anthropic-bound request to a single model (see CHANGELOG.md):
+  #   # Uncomment to restore the pre-v1.6 behavior of pinning every
+  #   # Anthropic-bound request to a single model:
   #   # anthropic_model_override: "claude-opus-4-8"
+  #
+  #   # off | shadow | enforce. Default enforce, so an existing config keeps
+  #   # routing — a router that silently stops routing is the worse failure
+  #   # direction. `shadow` selects in full and serves the model the caller
+  #   # asked for anyway, recording what it WOULD have picked.
+  #   #
+  #   # Shadow yields reach and counterfactual cost ("we would have downgraded
+  #   # 34% of requests, $X/mo") and NOTHING about quality — the other model
+  #   # never ran. Only mirroring measures that.
+  #   #
+  #   # In a control-plane-managed workspace the ff_shadow_routing flag is
+  #   # authoritative. It is a separate flag from ff_bandit_routing on purpose:
+  #   # once that key exists for a workspace, this file is ignored for it
+  #   # forever, so a config toggle could not roll shadow back.
+  #   mode: shadow
+  #
+  #   # Fraction of eligible requests to ALSO issue to the routed candidate,
+  #   # scoring its response off the latency path and discarding it. This is
+  #   # the only thing here that measures quality rather than reach.
+  #   #
+  #   # EVERY MIRRORED REQUEST IS BILLED TWICE. Start at 0.01, not the 0.05
+  #   # ceiling. The ceiling is enforced in code regardless of what is written
+  #   # here, so a typo adding a zero costs a rounding error rather than the
+  #   # month; concurrency is capped at 4 in flight; streaming is never
+  #   # mirrored.
+  #   mirror_sample_rate: 0.01
+  #
   #   reward:
   #     enabled: true
   #     latency_slo_ms: 30000
   #     latency_penalty: 0.3
   #     token_anomaly_penalty: 0.2
+  #     # Two-sided since v1.11: cheaper earns, costlier loses. Safe only
+  #     # because response integrity is scored — rewarding cheapness without a
+  #     # quality signal is how a router learns to save money by being wrong.
   #     cost_penalty: 0.2
 
   # Directory scanned for locally installed WASM rules (default ~/.intutic/wasm;
