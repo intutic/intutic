@@ -17,7 +17,6 @@
 
 import * as https from 'node:https'
 import * as tls from 'node:tls'
-import * as net from 'node:net'
 import * as crypto from 'node:crypto'
 import { createLogger } from '@intutic/logger'
 
@@ -95,7 +94,7 @@ export function checkHostContainment(hostname: string, workspaceId: string, port
       }
     })
 
-    req.on('error', (err: any) => {
+    req.on('error', (err: NodeJS.ErrnoException) => {
       if (resolved) return
       resolved = true
       // Connection refused, connection reset, or timeout means traffic did not reach the real endpoint directly.
@@ -103,6 +102,11 @@ export function checkHostContainment(hostname: string, workspaceId: string, port
       resolve({
         host: hostname,
         contained: true,
+        // `||`, not `??`, and deliberately. `??` only falls through on
+        // null/undefined, so an ErrnoException carrying `code: ''` would report
+        // `error: ''` and discard the message that says what actually happened.
+        // An empty code is the one case where these differ, and falling through
+        // is the behaviour worth having.
         error: err.code || err.message,
       })
     })

@@ -17,17 +17,61 @@ import * as node_os from 'node:os'
 import { z } from 'zod'
 import type { SyncSopEntry } from '@intutic/shared-types'
 import { createLogger } from '@intutic/logger'
-import { UNIVERSAL_PROTECTED_PATHS } from './protectedPaths.js'
+import { emitJsGate } from './gateBody.js'
+import { emitRedactor } from './holdRedaction.js'
 
 const log = createLogger('sync-claude-hooks')
+
+/**
+ * Coerces an unvalidated settings value to a string array, dropping anything else.
+ *
+ * `settings.json` is a file the user edits by hand, so `permissions.deny` being
+ * an array of strings is a convention, not a guarantee. Spreading a bare string
+ * would splice it into the deny list one character at a time.
+ */
+function toStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []
+}
+
 
 /** Path to the local hook event log file appended by generated hook scripts. */
 export const HOOK_EVENTS_LOG = '.intutic/events/hook-events.jsonl'
 
+/** Basename of the review-hold log. One record per line, appended. */
+export const REVIEW_REQUESTS_BASENAME = 'review-requests.jsonl'
+
+/** Path to the review-hold log, relative to the workspace root. */
+export const REVIEW_REQUESTS_LOG = `.intutic/events/${REVIEW_REQUESTS_BASENAME}`
+
+/**
+ * Record version written by the hook and expected by the drain.
+ *
+ * Bumped when the shape changes. The drain rejects anything it does not
+ * recognise rather than guessing, because a half-understood hold produces a
+ * decision row that looks complete and is not.
+ */
+export const REVIEW_REQUEST_VERSION = 1
+
 // Zod schema to parse SOP evaluation criteria and tool restrictions
+/**
+ * Keeps the strings and drops everything else, instead of rejecting the array.
+ *
+ * `z.array(z.string())` fails the WHOLE object on one bad element, and
+ * `safeParse` failing here discards the entire block — every valid pattern and
+ * every valid hold along with the one bad entry. That is TD-310's shape one
+ * layer down: a batch rejected as a unit because of a single member, with the
+ * loss silent.
+ *
+ * A malformed entry is dropped and the rest of the policy still compiles.
+ */
+const stringList = z.preprocess(
+  (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string') : v),
+  z.array(z.string()).default([]),
+)
+
 export const SopHookConstraintsSchema = z.object({
-  highRiskTools: z.array(z.string()).default([]),
-  patterns: z.array(z.string()).default([]),
+  highRiskTools: stringList,
+  patterns: stringList,
   /**
    * Actions that must not run until a human has approved the run.
    *
@@ -39,7 +83,7 @@ export const SopHookConstraintsSchema = z.object({
    * — it sees the call in the next message. The hook runs before, so declaring
    * `action:deploy` here stops the push itself, not merely everything after it.
    */
-  reviewBefore: z.array(z.string()).default([]),
+  reviewBefore: stringList,
 })
 
 export type SopHookConstraints = z.infer<typeof SopHookConstraintsSchema>
@@ -98,6 +142,12 @@ export function parseSopConstraints(
     if (Array.isArray(s['patterns'])) {
       (s['patterns'] as unknown[]).forEach((p) => typeof p === 'string' && patternsSet.add(p))
     }
+    // Same omission, second delivery path. Settings and the SOP block are both
+    // ways the control plane hands down a constraint; dropping it in one of them
+    // makes the behaviour depend on which route happened to carry it.
+    if (Array.isArray(s['reviewBefore'])) {
+      (s['reviewBefore'] as unknown[]).forEach((r) => typeof r === 'string' && reviewBeforeSet.add(r))
+    }
   }
 
   // 2. Parse from SOP content
@@ -116,6 +166,15 @@ export function parseSopConstraints(
           if (validated.success) {
             validated.data.highRiskTools.forEach((t) => highRiskToolsSet.add(t))
             validated.data.patterns.forEach((p) => patternsSet.add(p))
+            // `reviewBefore` was declared on the schema, validated here, and
+            // then not copied — so a hold delivered through this block parsed
+            // clean and reached nothing. Only the front-matter `review_before:`
+            // line ever populated the set.
+            //
+            // This block is the seam the learning loop writes through, so the
+            // omission was the difference between a learned rule enforcing and
+            // a learned rule being reported as installed while doing nothing.
+            validated.data.reviewBefore.forEach((r) => reviewBeforeSet.add(r))
           }
         } catch {
           // Ignore parsing failures
@@ -228,7 +287,7 @@ export async function updatePreToolUseHooks(
     hooks: [
       {
         type: 'command',
-        command: `node ${node_path.join(workspaceRoot, '.intutic', 'hooks', 'pre-tool-check.js')}`,
+        command: `node ${node_path.join(workspaceRoot, '.intutic', 'hooks', 'claude-code-check.js')}`,
         timeout: 10,
         statusMessage: 'Verifying tool execution against Intutic SOP policy...',
       },
@@ -259,7 +318,12 @@ export async function updatePreToolUseHooks(
   const hookEventsLog = node_path.join(hookEventsDir, 'hook-events.jsonl')
   // Where the hook records a review hold. The daemon watches this directory
   // already, so no new watcher is needed to notice one.
-  const reviewRequestFile = node_path.join(hookEventsDir, 'review-request.json')
+  //
+  // Append-only JSONL, not a single `.json`. It was one file written with
+  // `writeFileSync`, so a second hold in the same drain window silently
+  // destroyed the first — and holds cluster, because an agent that trips one
+  // review rule usually trips it again on the next step.
+  const reviewRequestFile = node_path.join(hookEventsDir, REVIEW_REQUESTS_BASENAME)
 
   const hookScriptContent = `
 /**
@@ -289,15 +353,20 @@ try {
   });
 } catch { /* runtime.env not yet written — use defaults */ }
 
-// Governance-sensitive paths that no agent may modify.
-// Editing these files is how privilege escalation occurs.
-const PROTECTED_PATHS = [
-  // Universal: every harness protects every harness's config —
-  // the threat is an agent under one disarming another.
-  ...UNIVERSAL_PROTECTED_PATHS,
-  path.join(os.homedir(), '.claude', 'settings.json'),
-  path.join(os.homedir(), '.claude', 'settings.local.json'),
-];
+// Governance-sensitive paths and command shapes that no agent may reach.
+//
+// This block used to be hand-built here, and it read \`...UNIVERSAL_PROTECTED_PATHS,\`
+// with no \${} — so the identifier was emitted as literal source text into a
+// script that never imports it. Node threw ReferenceError on line 30 of the
+// generated file, before the gate did anything: the protected-path check, the
+// shell-bypass check and the review_before hold were all dead for Claude Code,
+// the harness most people run. A PreToolUse hook exiting 1 is a hook error, not
+// a block, so tool calls proceeded ungoverned and nothing said so.
+//
+// It is emitted from harness/gateBody.ts now. That does not make the escaping
+// easier; it makes there be one of it, with one set of tests.
+${emitJsGate({ harness: 'claude-code', contract: 'exit2' })}
+${emitRedactor()}
 
 /**
  * Appends a governance event to the local hook-events log.
@@ -309,7 +378,9 @@ function logEvent(verdict, toolName, reason, sessionId) {
     const ts = new Date().toISOString();
     const incidentId = crypto.createHash('sha1').update(ts + toolName + _intuticWsId).digest('hex').slice(0, 16);
     const entry = JSON.stringify({
-      event: verdict === 'blocked' ? 'tool_blocked' : 'tool_allowed',
+      // Passed through, not collapsed to two values: the advisory tier emits
+      // 'tool_flagged', and a ternary here silently recorded it as an allow.
+      event: verdict,
       toolName,
       reason: reason || '',
       workspaceId: _intuticWsId,
@@ -369,57 +440,18 @@ process.stdin.on('end', () => {
     const toolInput = ctx.tool_input || ctx.toolInput || {};
     const toolInputStr = JSON.stringify(toolInput);
 
-    // 1. Protected-path guard — block any file-modification tool targeting
-    //    governance-sensitive paths regardless of SOP pattern list.
-    if (['edit', 'write', 'multiedit'].includes(toolName)) {
-      const targetPath = toolInput.path || toolInput.file_path ||
-        toolInput.new_path || toolInput.target || '';
-      for (const p of PROTECTED_PATHS) {
-        if (targetPath.includes(p) || String(targetPath).startsWith(p)) {
-          const reason = \`Attempt to modify governance-protected path: "\${targetPath}". \` +
-            'To change governance policy, update your SOP via the Intutic control plane.';
-          console.error(\`[Intutic Guardrail] BLOCKED: \${reason}\`);
-          logEvent('blocked', toolName, reason, sessionId);
-          process.exit(2);
-        }
-      }
-    }
-
-    // 1b. Shell bypass guard.
+    // Protected paths and shell-bypass patterns, from the shared gate.
     //
-    // The protected-path check above only inspects file-path arguments, so a
-    // Bash call carrying the same intent as a command string walked straight
-    // past it — and this generator registers a Bash PreToolUse matcher, so the
-    // hook fires and then does nothing about it. claudeDesktopHooks and
-    // piHooks both carry this guard; Claude Code, the primary harness, did not.
-    //
-    // What that leaves open: \`chflags nouchg .intutic/hooks/pre-tool-check.js\`
-    // makes the hook itself immutable, and \`printf '{}' > ~/.claude/settings.json\`
-    // empties the settings that register it. Either disarms governance without
-    // ever touching a path argument.
-    if (['bash', 'shell', 'run_command', 'terminal', 'execute'].includes(toolName)) {
-      const shellCmd = String(toolInput.command || toolInput.cmd || toolInput.script || '');
-      const BYPASS_PATTERNS = [
-        'chflags nouchg',
-        'chattr -i',
-        'rm -rf .intutic',
-        'rm -rf ~/.claude',
-        'CLAUDE_CODE_HOOKS=',
-        '.claude/settings.json',
-        '.claude/settings.local.json',
-        '.intutic/hooks',
-        '.intutic/integrity.json',
-      ];
-      for (const pattern of BYPASS_PATTERNS) {
-        if (shellCmd.includes(pattern)) {
-          const reason = 'Shell command targets a governance-protected path or matches a ' +
-            'bypass pattern: "' + pattern + '"';
-          console.error('[Intutic Guardrail] BLOCKED: ' + reason);
-          logEvent('blocked', toolName, reason, sessionId);
-          process.exit(2);
-        }
-      }
-    }
+    // Both checks used to be gated on the tool name: paths only for
+    // edit/write/multiedit, commands only for a fixed list of five shell tool
+    // names. Any tool outside those lists walked past both. The shared gate keys
+    // on the *arguments* instead, so a tool name nobody anticipated is no longer
+    // a way through.
+    const targetPath = toolInput.path || toolInput.file_path || toolInput.filePath ||
+      toolInput.new_path || toolInput.target || toolInput.notebook_path || '';
+    const shellCmd = String(toolInput.command || toolInput.cmd || toolInput.script || '');
+    intuticGate(rawToolName, targetPath, shellCmd,
+      (v, t, r) => logEvent(v, t, r, sessionId), _intuticWsId);
 
     // 2. Review holds — the pre-execution half of \`review_before:\`.
     //
@@ -465,18 +497,50 @@ process.stdin.on('end', () => {
       );
       if (hit) {
         try {
-          node_fs.mkdirSync(node_path.dirname(REVIEW_REQUEST_FILE), { recursive: true });
-          node_fs.writeFileSync(
+          // \`fs\` and \`path\`, not the daemon's \`node_fs\` / \`node_path\` aliases.
+          // Those are this module's import names; the emitted script binds
+          // \`const fs = require('fs')\`. The original write used the daemon's
+          // names, so every hold threw ReferenceError into the catch below and
+          // the request file was never created at all — the reason it had no
+          // reader is that it had no writer either.
+          fs.mkdirSync(path.dirname(REVIEW_REQUEST_FILE), { recursive: true });
+          // Appended, never overwritten. This wrote a single .json with
+          // writeFileSync, so two holds inside one drain window left only the
+          // second — and holds cluster, because an agent that trips a review
+          // rule usually trips it again on its next step.
+          //
+          // The snapshot is redacted here rather than in the daemon. Doing it
+          // on the way out would mean the plaintext had already been written to
+          // .intutic/events/, and a file that exists is a file that ends up in
+          // a bug report.
+          fs.appendFileSync(
             REVIEW_REQUEST_FILE,
-            JSON.stringify({ reason: hit, tool: rawToolName, sessionId, at: new Date().toISOString() }),
+            JSON.stringify({
+              v: ${REVIEW_REQUEST_VERSION},
+              holdId: 'hold_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10),
+              reason: hit,
+              tool: rawToolName,
+              sessionId: sessionId,
+              workspaceId: _intuticWsId,
+              at: new Date().toISOString(),
+              context: __intuticSnapshot({
+                tool: rawToolName,
+                toolInput: toolInput,
+                cwd: process.cwd(),
+                reason: hit,
+              }),
+            }) + '\\n',
           );
-        } catch {
-          // The hold still blocks even if the request file cannot be written;
-          // the proxy's gate is the backstop.
+        } catch (e) {
+          // The hold still blocks even if the record cannot be written — the
+          // exit code below is what stops the tool. But say so: a hold that
+          // blocks and is never recorded is a developer stopped for a reason
+          // nobody can review, which is the worst of both outcomes.
+          console.error('[Intutic Guardrail] could not record the hold: ' + (e && e.message ? e.message : e));
         }
         const reason = \`Held for human review: \${hit} — declared in review_before:\`;
         console.error(\`[Intutic Guardrail] HELD: \${reason} Approve with: intutic loop review <id> --approve\`);
-        logEvent('blocked', toolName, reason, sessionId);
+        logEvent('tool_blocked', toolName, reason, sessionId);
         process.exit(2);
       }
     }
@@ -487,24 +551,29 @@ process.stdin.on('end', () => {
       if (toolInputStr.includes(pattern)) {
         const reason = \`Policy violation matching pattern: "\${pattern}"\`;
         console.error(\`[Intutic Guardrail] Blocked execution of tool "\${toolName}" due to \${reason}\`);
-        logEvent('blocked', toolName, reason, sessionId);
+        logEvent('tool_blocked', toolName, reason, sessionId);
         process.exit(2);
       }
     }
 
-    logEvent('allowed', toolName, '', sessionId);
+    logEvent('tool_allowed', toolName, '', sessionId);
     process.exit(0);
   } catch (err) {
     // Fail CLOSED — any hook execution error blocks the tool call.
     // The sync daemon will rewrite this hook on the next sync cycle.
     console.error('[Intutic Guardrail] Hook error (blocking for safety):', err);
-    logEvent('blocked', 'unknown', String(err), '');
+    logEvent('tool_blocked', 'unknown', String(err), '');
     process.exit(2);
   }
 });
 `.trim()
 
-  await node_fs.writeFile(node_path.join(hookScriptDir, 'pre-tool-check.js'), hookScriptContent, 'utf-8')
+  // Named after its writer. This and cursorHooks both emitted
+  // `pre-tool-check.js` into `<root>/.intutic/hooks/`, so on any machine running
+  // both harnesses the second writer silently overwrote the first and one
+  // harness ran the other's gate. `generatedGateBehaviour.test.ts` asserts the
+  // artifact set is a partition, so the collision cannot come back unnoticed.
+  await node_fs.writeFile(node_path.join(hookScriptDir, 'claude-code-check.js'), hookScriptContent, 'utf-8')
 
   // Write local settings config
   const localClaudeDir = node_path.join(workspaceRoot, '.claude')
@@ -567,7 +636,13 @@ process.stdin.on('end', () => {
     ...existingGlobal,
     permissions: {
       ...(existingGlobal.permissions as Record<string, unknown>),
-      deny: Array.from(new Set([...((existingGlobal.permissions as any)?.deny || []), ...denyRules])),
+      // `permissions` comes from the user's settings.json, so its shape is a
+      // claim rather than a guarantee — narrow instead of asserting. A `deny`
+      // that is not an array (someone hand-edited it to a string) would
+      // otherwise spread character by character into the deny list.
+      deny: Array.from(
+        new Set([...toStringArray((existingGlobal.permissions as Record<string, unknown> | undefined)?.['deny']), ...denyRules]),
+      ),
     },
     hooks: {
       ...(existingGlobal.hooks as Record<string, unknown>),
@@ -595,16 +670,30 @@ process.stdin.on('end', () => {
  * @param apiKey           - Workspace API key (Bearer token)
  * @returns number of events drained (0 if log was empty or network failed)
  */
-export async function drainHookEvents(
-  workspaceRoot: string,
-  controlPlaneUrl: string,
-  apiKey: string,
-): Promise<number> {
-  const logPath = node_path.join(workspaceRoot, '.intutic', 'events', 'hook-events.jsonl')
-
+/**
+ * Drains one append-only JSONL log to a control-plane endpoint.
+ *
+ * Extracted because there are two of these now — hook events and review holds —
+ * and the delivery semantics below are the part that must not diverge. TD-310
+ * was exactly that: a batch the control plane could never accept was retained
+ * and re-sent every cycle, so the log never drained again and every later event
+ * behind it was lost, silently. A second hand-written copy of this logic is a
+ * second chance to get that wrong.
+ *
+ * @returns the number of records delivered; 0 on any failure.
+ */
+async function drainJsonlLog(opts: {
+  logPath: string
+  endpoint: string
+  apiKey: string
+  /** Wraps the parsed records into the request body the endpoint expects. */
+  bodyFor: (records: unknown[]) => unknown
+  /** Noun used in log lines, e.g. "hook events". */
+  label: string
+}): Promise<number> {
   let raw: string
   try {
-    raw = await node_fs.readFile(logPath, 'utf-8')
+    raw = await node_fs.readFile(opts.logPath, 'utf-8')
   } catch {
     return 0 // File doesn't exist yet — nothing to drain
   }
@@ -612,48 +701,143 @@ export async function drainHookEvents(
   const lines = raw.trim().split('\n').filter(Boolean)
   if (lines.length === 0) return 0
 
-  const events: unknown[] = []
+  const records: unknown[] = []
   for (const line of lines) {
     try {
-      events.push(JSON.parse(line))
+      records.push(JSON.parse(line))
     } catch {
-      log.warn({ line }, 'Skipping malformed hook event log line')
+      log.warn({ line, label: opts.label }, 'Skipping malformed log line')
     }
   }
 
-  if (events.length === 0) {
-    await node_fs.writeFile(logPath, '', 'utf-8')
+  if (records.length === 0) {
+    await node_fs.writeFile(opts.logPath, '', 'utf-8')
     return 0
   }
 
   try {
     // Use native fetch (Node 18+ — required minimum for this monorepo)
-    const response = await fetch(`${controlPlaneUrl}/api/v1/hook-events`, {
+    const response = await fetch(opts.endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
+        'Authorization': `Bearer ${opts.apiKey}`,
       },
-      body: JSON.stringify({ events }),
+      body: JSON.stringify(opts.bodyFor(records)),
       signal: AbortSignal.timeout(10_000),
     })
 
     if (response.ok) {
-      // Truncate the log — events successfully delivered
-      await node_fs.writeFile(logPath, '', 'utf-8')
-      log.info({ count: events.length }, 'Hook events drained to control plane')
-      return events.length
-    } else {
-      log.warn(
-        { status: response.status, count: events.length },
-        'Control plane rejected hook events — retaining log for next cycle',
+      // Truncate the log — records successfully delivered
+      await node_fs.writeFile(opts.logPath, '', 'utf-8')
+      log.info({ count: records.length, label: opts.label }, 'Drained to control plane')
+      return records.length
+    }
+
+    // A 4xx will never succeed on retry, and retaining the log means re-sending
+    // the identical rejected batch on every cycle from now on. That does not
+    // delay delivery of these records — it stops delivery of *all* later ones,
+    // silently, because the log never drains again.
+    //
+    // This was live: adding an event type to the gates without adding it to the
+    // control plane's enum made one ordinary advisory event poison every batch
+    // behind it. The control plane now drops unknown events instead of
+    // rejecting the batch, so this path should be unreachable for that cause —
+    // but "should be unreachable" is exactly what was believed before, and the
+    // cost of being wrong is the whole pipeline.
+    //
+    // So: move the batch aside rather than dropping or retrying it. Nothing is
+    // lost, a human can inspect it, and the live log drains.
+    if (response.status >= 400 && response.status < 500) {
+      const rejectedPath = opts.logPath.replace(/\.jsonl$/, '.rejected.jsonl')
+      let body = ''
+      try {
+        body = (await response.text()).slice(0, 500)
+      } catch {
+        // The status is the part that matters; a missing body must not throw here.
+      }
+      try {
+        await node_fs.appendFile(rejectedPath, lines.join('\n') + '\n', 'utf-8')
+        await node_fs.writeFile(opts.logPath, '', 'utf-8')
+      } catch (err) {
+        // If we cannot set it aside, retaining is better than losing it.
+        log.error(
+          { err, status: response.status, label: opts.label },
+          'Could not quarantine rejected batch — retaining log',
+        )
+        return 0
+      }
+      log.error(
+        { status: response.status, count: records.length, rejectedPath, body, label: opts.label },
+        'Control plane rejected the batch with a client error — quarantined so the log can ' +
+          'keep draining. These records were NOT delivered.',
       )
       return 0
     }
+
+    // 5xx or anything else: transient. Retain and retry, which is what the
+    // retention behaviour was actually designed for.
+    log.warn(
+      { status: response.status, count: records.length, label: opts.label },
+      'Control plane rejected the batch — retaining log for next cycle',
+    )
+    return 0
   } catch (err) {
     // Network failure — retain log for retry on next cycle
-    log.warn({ err, count: events.length }, 'Failed to drain hook events — will retry on next sync cycle')
+    log.warn(
+      { err, count: records.length, label: opts.label },
+      'Failed to drain — will retry on next sync cycle',
+    )
     return 0
   }
+}
+
+/**
+ * Drains the local hook-events log file and POSTs all accumulated governance
+ * events to the control plane in a single batch request.
+ *
+ * Called by the sync-daemon's main loop (syncLoop.ts) on every cycle, after
+ * the main sync operations. On success, the log file is truncated to prevent
+ * unbounded growth. On network failure, events remain in the log and will be
+ * retried on the next cycle.
+ */
+export async function drainHookEvents(
+  workspaceRoot: string,
+  controlPlaneUrl: string,
+  apiKey: string,
+): Promise<number> {
+  return drainJsonlLog({
+    logPath: node_path.join(workspaceRoot, '.intutic', 'events', 'hook-events.jsonl'),
+    endpoint: `${controlPlaneUrl}/api/v1/hook-events`,
+    apiKey,
+    bodyFor: (events) => ({ events }),
+    label: 'hook events',
+  })
+}
+
+/**
+ * Drains review holds — the pre-execution half of `review_before:`.
+ *
+ * The hook writes a hold and exits 2, which stops the tool before it runs. That
+ * file had no reader: the comment beside the write claimed "the daemon picks the
+ * request up and tells the control plane", and no daemon code opened it. So the
+ * hold blocked the action and the decision behind it went nowhere — which is
+ * also why the decision-mining queue had four route readers and no writer.
+ *
+ * This is the writer. It is observe-only: a delivered hold becomes a row and a
+ * review card, and nothing about it changes what any harness blocks.
+ */
+export async function drainReviewRequests(
+  workspaceRoot: string,
+  controlPlaneUrl: string,
+  apiKey: string,
+): Promise<number> {
+  return drainJsonlLog({
+    logPath: node_path.join(workspaceRoot, '.intutic', 'events', REVIEW_REQUESTS_BASENAME),
+    endpoint: `${controlPlaneUrl}/api/v1/decisions`,
+    apiKey,
+    bodyFor: (holds) => ({ holds }),
+    label: 'review holds',
+  })
 }
 

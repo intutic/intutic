@@ -54,7 +54,7 @@ The proxy calls \`evaluate(offset, len)\` with a JSON-serialized \`RequestContex
 }
 \`\`\`
 
-\`risk_tier\` is one of \`Low | Medium | High | Critical\`. Return an \`i32\` verdict: \`0\` = ALLOW, \`1\` = BLOCK, \`2\` = REDACT (treated as block).
+\`risk_tier\` is one of \`Low | Medium | High | Critical\`. Return an \`i32\` verdict: \`0\` = ALLOW, \`1\` = BLOCK, \`3\` = REASK (refuse this attempt, tell the agent why, let it retry). \`2\` is deprecated — the guest never receives the request body, so redaction was never expressible; the proxy maps it to a block. Prefer \`3\` over \`1\` for any finding that is a pattern match, because pattern matches produce false positives.
 
 ## 2. Author
 

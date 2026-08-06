@@ -23,7 +23,7 @@ import * as path from 'node:path'
 import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { newIso } from '@intutic/id'
-import { UNIVERSAL_PROTECTED_PATHS } from './protectedPaths.js'
+import { emitShellGate, SHELL_EXTRACT } from './gateBody.js'
 
 const log = createLogger('sync-pi-hooks')
 
@@ -34,14 +34,6 @@ const PI_HOOKS_CONFIG = path.join(os.homedir(), '.pi', 'hooks.json')
 const PI_MODELS_CONFIG = path.join(os.homedir(), '.pi', 'models.json')
 
 /** Governance-sensitive paths that the hook gate protects. */
-const PROTECTED_PATHS = [
-  // Universal: every harness protects every harness's config —
-  // the threat is an agent under one disarming another.
-  ...UNIVERSAL_PROTECTED_PATHS,
-  '.pi/hooks.json',
-  '.pi/models.json',
-]
-
 // ─── Pi hook entry types ──────────────────────────────────────────────────────
 
 interface PiHookCommand {
@@ -100,19 +92,39 @@ INTUTIC_API_KEY="\${INTUTIC_API_KEY:-}"
 INTUTIC_WORKSPACE_ID="\${INTUTIC_WORKSPACE_ID:-${workspaceId}}"
 
 INPUT="$(cat)"
-TOOL_NAME="$(echo "$INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('tool_name',''))" 2>/dev/null || true)"
-SESSION_ID="$(echo "$INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('session_id',d.get('sessionId','')))" 2>/dev/null || true)"
-TARGET_PATH="$(echo "$INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); i=d.get('tool_input',{}); print(i.get('path',i.get('file_path','')))" 2>/dev/null || true)"
-COMMAND="$(echo "$INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); i=d.get('tool_input',{}); print(i.get('command',i.get('cmd','')))" 2>/dev/null || true)"
+${SHELL_EXTRACT}
 
 HOOK_EVENTS_LOG="${hookEventsLog}"
 
 log_event() {
   local verdict="$1" tool="$2" reason="$3"
+  # \`tool\`, \`reason\` and \`SESSION_ID\` carry agent-controlled text — the tool
+  # name, the target path quoted into the block reason, and a field lifted
+  # straight out of the hook's stdin — and all three are spliced into the JSON
+  # string below. Escape first: one unescaped quote yields a line JSON.parse
+  # rejects, and drainHookEvents drops malformed lines then wipes the log on a
+  # successful drain, so the record of a block is destroyed rather than delayed.
+  # A crafted path could otherwise close the string and forge fields.
+  tool="\${tool//\\\\/\\\\\\\\}";     tool="\${tool//\\"/\\\\\\"}"
+  reason="\${reason//\\\\/\\\\\\\\}"; reason="\${reason//\\"/\\\\\\"}"
+  # Every C0 control character, not just newline and carriage return. JSON
+  # forbids all of U+0000-U+001F unescaped, so a plain TAB in a filename — no
+  # adversary required — was still enough to produce a line JSON.parse rejects.
+  # (NUL cannot appear in a bash variable, so the range starts at \\x01.)
+  tool="\${tool//[\$'\\x01'-\$'\\x1f']/ }"; reason="\${reason//[\$'\\x01'-\$'\\x1f']/ }"
+  # The workspace id is spliced into the same JSON string. It comes from
+  # runtime.env on disk rather than from the agent, so it is lower risk — but a
+  # value with a quote in it breaks every audit line the same way, and "lower
+  # risk" is not "cannot happen" for a file the operator edits by hand.
+  local ws="\${INTUTIC_WORKSPACE_ID}"
+  ws="\${ws//\\\\/\\\\\\\\}"; ws="\${ws//\\"/\\\\\\"}"; ws="\${ws//[\$'\\x01'-\$'\\x1f']/ }"
+  local sid="\$SESSION_ID"
+  sid="\${sid//\\\\/\\\\\\\\}"; sid="\${sid//\\"/\\\\\\"}"
+  sid="\${sid//\$'\\n'/ }";     sid="\${sid//\$'\\r'/ }"
   local ts; ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   # incidentId = sha1(timestamp + toolName + workspaceId).slice(0,16)
   local incident_id; incident_id="$(printf '%s' "\${ts}\${tool}\${INTUTIC_WORKSPACE_ID}" | sha1sum 2>/dev/null | cut -c1-16 || echo "$(date +%s)")"
-  local entry="{\\"event\\":\\"toolGovernance\\",\\"verdict\\":\\"\${verdict}\\",\\"toolName\\":\\"\${tool}\\",\\"reason\\":\\"\${reason}\\",\\"workspaceId\\":\\"\${INTUTIC_WORKSPACE_ID}\\",\\"harnessType\\":\\"pi\\",\\"incidentId\\":\\"\${incident_id}\\",\\"timestamp\\":\\"\${ts}\\"\${SESSION_ID:+,\\"sessionId\\":\\"\${SESSION_ID}\\"}}"
+  local entry="{\\"event\\":\\"\${verdict}\\",\\"toolName\\":\\"\${tool}\\",\\"reason\\":\\"\${reason}\\",\\"workspaceId\\":\\"\${ws}\\",\\"harnessType\\":\\"pi\\",\\"incidentId\\":\\"\${incident_id}\\",\\"timestamp\\":\\"\${ts}\\"\${sid:+,\\"sessionId\\":\\"\${sid}\\"}}"
   # Path B: reliable file append (sync-daemon drains on FSEvents change)
   printf '%s\\n' "\$entry" >> "\$HOOK_EVENTS_LOG" 2>/dev/null || true
   # Path A: fire-and-forget HTTP POST (near-real-time dashboard, non-blocking)
@@ -125,41 +137,7 @@ log_event() {
   fi
 }
 
-PROTECTED_PATHS=(
-${PROTECTED_PATHS.map((p) => `  "${p}"`).join('\n')}
-)
-
-# 1. Protected-path guard
-for p in "\${PROTECTED_PATHS[@]}"; do
-  if echo "$TARGET_PATH" | grep -qF "$p"; then
-    REASON="Attempt to modify governance-protected path \\"$TARGET_PATH\\""
-    echo "[Intutic Governance] BLOCKED: $REASON" >&2
-    log_event "tool_blocked" "$TOOL_NAME" "$REASON"
-    exit 2
-  fi
-done
-
-# 2. Bash/shell command guard — block governance bypass patterns
-if [ -n "$COMMAND" ]; then
-  BYPASS_PATTERNS=(
-    "chflags nouchg"
-    "chattr -i"
-    "rm -rf .intutic"
-    "rm -rf .pi/hooks"
-    "rm -rf .pi/models"
-    "PI_PRE_TOOL_HOOK="
-    "rm -rf .gemini/settings"
-  )
-  for pattern in "\${BYPASS_PATTERNS[@]}"; do
-    if echo "$COMMAND" | grep -qF "$pattern"; then
-      REASON="Shell command matches governance bypass pattern: \\"$pattern\\""
-      echo "[Intutic Governance] BLOCKED: $REASON" >&2
-      log_event "tool_blocked" "$TOOL_NAME" "$REASON"
-      exit 2
-    fi
-  done
-fi
-
+${emitShellGate({ harness: "pi" })}
 log_event "tool_allowed" "$TOOL_NAME" ""
 exit 0
 `
@@ -316,9 +294,9 @@ export async function writePiHooks(
 
   const envSnippet = [
     `# Intutic pi governance env`,
-    `INTUITIC_PI_HOOK=~/.intutic/hooks/pi-check.sh`,
-    `INTUITIC_PI_HOOKS_CONFIG=~/.pi/hooks.json`,
-    `INTUITIC_PI_MODELS_CONFIG=~/.pi/models.json`,
+    `INTUTIC_PI_HOOK=~/.intutic/hooks/pi-check.sh`,
+    `INTUTIC_PI_HOOKS_CONFIG=~/.pi/hooks.json`,
+    `INTUTIC_PI_MODELS_CONFIG=~/.pi/models.json`,
     `OPENAI_BASE_URL=${proxyUrl}`,
     `ANTHROPIC_BASE_URL=${proxyUrl}`,
   ].join('\n') + '\n'

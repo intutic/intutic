@@ -73,6 +73,33 @@ export function buildProtectedPaths(workspaceRoot: string): string[] {
   ]
 }
 
+/**
+ * Resolves the workspace id for an incident or a restore.
+ *
+ * Reads `~/.intutic/env/runtime.env` — the file `runtimeEnv.ts` actually writes.
+ * The previous inline version looked in `<workspaceRoot>/.intutic/runtime-env`,
+ * which nothing has ever written, so the fallback could not succeed and every
+ * tamper incident on a machine without `INTUTIC_WORKSPACE_ID` exported was filed
+ * against an empty or 'unknown' workspace.
+ */
+async function resolveWorkspaceId(workspaceRoot: string): Promise<string> {
+  const fromEnv = process.env.INTUTIC_WORKSPACE_ID || ''
+  if (fromEnv) return fromEnv
+  for (const envPath of [
+    path.join(os.homedir(), '.intutic', 'env', 'runtime.env'),
+    path.join(workspaceRoot, '.intutic', 'env', 'runtime.env'),
+  ]) {
+    try {
+      const content = await fs.readFile(envPath, 'utf8')
+      const match = content.match(/^INTUTIC_WORKSPACE_ID=(.*)$/m)
+      if (match?.[1]?.trim()) return match[1].trim()
+    } catch {
+      // Try the next location; absence is normal before the first sync.
+    }
+  }
+  return 'unknown'
+}
+
 // ─── Public entry point ──────────────────────────────────────────────
 
 /**
@@ -100,20 +127,7 @@ export async function guardSettingsFile(
         'SECURITY: Immutable Goose governance file was modified — OS immutable flag bypassed. Emitting incident.',
       )
       
-      // Resolve workspace ID from process env or local runtime-env file
-      let workspaceId = process.env.INTUTIC_WORKSPACE_ID || '';
-      if (!workspaceId) {
-        try {
-          const envPath = path.join(workspaceRoot, '.intutic', 'runtime-env');
-          const content = await fs.readFile(envPath, 'utf8');
-          const match = content.match(/INTUTIC_WORKSPACE_ID=(.+)/);
-          if (match && match[1]) {
-            workspaceId = match[1].trim();
-          }
-        } catch {
-          workspaceId = 'unknown';
-        }
-      }
+      const workspaceId = await resolveWorkspaceId(workspaceRoot)
 
       // Emit incident to control plane via local hook-events queue
       try {
@@ -134,8 +148,16 @@ export async function guardSettingsFile(
 
       return true
     }
-    // Not immutable (install in progress or first write) — restore normally
-    await writeGooseHooks(proxyUrl)
+    // Not immutable (install in progress or first write) — restore normally.
+    //
+    // All three arguments, not just the URL. `writeGooseHooks` is
+    // `(proxyUrl, workspaceRoot, workspaceId)` and the last two default to
+    // `os.homedir()` and `''`, so calling it with the URL alone rebuilt the
+    // plugin with its events log pointing at the home directory instead of the
+    // workspace, stamped with an empty workspace id. Every goose
+    // restore-after-tamper — the moment the audit trail matters most — wrote its
+    // record where nothing drains it.
+    await writeGooseHooks(proxyUrl, workspaceRoot, await resolveWorkspaceId(workspaceRoot))
     return true
   }
 

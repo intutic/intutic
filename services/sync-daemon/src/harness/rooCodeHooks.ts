@@ -21,19 +21,12 @@ import * as path from 'node:path'
 import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { newIso } from '@intutic/id'
+import { emitJsGate } from './gateBody.js'
 import { UNIVERSAL_PROTECTED_PATHS } from './protectedPaths.js'
 
 const log = createLogger('sync-roo-code-hooks')
 
 /** Governance-sensitive paths that the hook gate protects. */
-const PROTECTED_PATHS = [
-  // Universal: every harness protects every harness's config —
-  // the threat is an agent under one disarming another.
-  ...UNIVERSAL_PROTECTED_PATHS,
-  path.join(os.homedir(), '.claude', 'settings.json'),
-  path.join(os.homedir(), '.claude', 'settings.local.json'),
-  '.roorules/hooks',
-]
 
 // ─── Node.js hook script template ─────────────────────────────────────────────
 
@@ -92,7 +85,7 @@ function loadRuntimeEnv() {
 }
 
 // ── Governance-sensitive paths ────────────────────────────────────────────────
-const PROTECTED_PATHS = ${JSON.stringify(PROTECTED_PATHS)};
+${emitJsGate({ harness: "roo-code", contract: 'stdout-cancel' })}
 
 // ── Dual-path logEvent ────────────────────────────────────────────────────────
 const HOOK_EVENTS_LOG = ${JSON.stringify(hookEventsLog)};
@@ -105,7 +98,9 @@ function logEvent(env, verdict, toolName, reason) {
     .digest('hex').slice(0, 16);
 
   const entry = {
-    event: verdict === 'blocked' ? 'tool_blocked' : 'tool_allowed',
+    // Passed through, not collapsed to two values: the advisory tier emits
+      // 'tool_flagged', and a ternary here silently recorded it as an allow.
+      event: verdict,
     toolName,
     reason: reason || '',
     workspaceId: env.INTUTIC_WORKSPACE_ID,
@@ -146,13 +141,13 @@ function logEvent(env, verdict, toolName, reason) {
 }
 
 function block(env, toolName, reason) {
-  logEvent(env, 'blocked', toolName, reason);
+  logEvent(env, 'tool_blocked', toolName, reason);
   process.stdout.write(JSON.stringify({ cancel: true, errorMessage: reason }));
   process.exit(0);
 }
 
 function allow(env, toolName) {
-  logEvent(env, 'allowed', toolName, '');
+  logEvent(env, 'tool_allowed', toolName, '');
   process.stdout.write(JSON.stringify({ cancel: false }));
   process.exit(0);
 }
@@ -165,47 +160,30 @@ process.stdin.on('end', () => {
   try {
     const ctx = JSON.parse(inputData);
     _intuticSessionId = ctx.session_id || ctx.sessionId || ctx.conversation_id || ctx.conversationId || ctx.task_id || ctx.taskId || '';
-    const toolName = (ctx.tool_name || ctx.toolName || '').toLowerCase();
+    const toolName = (ctx.tool_name || ctx.toolName || '').toLowerCase()
+    // Case preserved for the gate. A BLOCK: SOP compiles to a tool-name
+    // pattern the operator wrote as they see it (Bash, Write) and this
+    // harness lowercases the tool for its own matching. Handing the gate the
+    // lowercased form means every SOP tool rule silently matches nothing here
+    // while appearing active everywhere else.
+    const rawToolName = ctx.tool_name || ctx.toolName || '';
     const toolInput = ctx.tool_input || ctx.toolInput || {};
     const toolInputStr = JSON.stringify(toolInput);
 
-    // 1. Protected-path guard
-    if (['edit', 'write', 'multiedit'].includes(toolName)) {
-      const targetPath = toolInput.path || toolInput.file_path ||
-        toolInput.new_path || toolInput.target || '';
-      for (const p of PROTECTED_PATHS) {
-        if (targetPath.includes(p) || String(targetPath).startsWith(p)) {
-          const reason = 'Attempt to modify governance-protected path: "' + targetPath + '". ' +
-            'To change governance policy, update your SOP via the Intutic control plane.';
-          block(runtimeEnv, toolName, reason);
-          return;
-        }
-      }
-    }
-
-    // 2. Bash/shell command bypass guard
-    if (toolName === 'bash') {
-      const cmd = toolInput.command || toolInput.cmd || '';
-      const BYPASS_PATTERNS = [
-        'chflags nouchg',
-        'chattr -i',
-        'rm -rf .intutic',
-        'rm -rf .roorules',
-      ];
-      for (const pattern of BYPASS_PATTERNS) {
-        if (cmd.includes(pattern)) {
-          const reason = 'Shell command matches governance bypass pattern: "' + pattern + '"';
-          block(runtimeEnv, toolName, reason);
-          return;
-        }
-      }
-    }
+    // Roo Code ignores the exit code and reads a cancel object from stdout, so
+    // the shared gate is emitted with the stdout-cancel contract. Getting that
+    // wrong is invisible in review — the gate would exit 2 into a harness that
+    // never looks at it, and every call would proceed.
+    const targetPath = toolInput.path || toolInput.file_path || toolInput.filePath ||
+      toolInput.new_path || toolInput.target || toolInput.notebook_path || '';
+    const command = toolInput.command || toolInput.cmd || toolInput.script || '';
+    intuticGate(rawToolName, targetPath, command, (v, t, r) => logEvent(runtimeEnv, v, t, r), runtimeEnv.INTUTIC_WORKSPACE_ID);
 
     allow(runtimeEnv, toolName);
   } catch (err) {
     // Fail closed on parse error
     const env = runtimeEnv;
-    logEvent(env, 'blocked', 'unknown', String(err));
+    logEvent(env, 'tool_blocked', 'unknown', String(err));
     process.stdout.write(JSON.stringify({ cancel: true, errorMessage: '[Intutic] Hook error: ' + String(err) }));
     process.exit(0);
   }
@@ -231,7 +209,7 @@ function buildRooRulesContent(): string {
     '',
     'The following paths must not be modified by any agent:',
     '',
-    ...PROTECTED_PATHS.map((p) => `- \`${p}\``),
+    ...UNIVERSAL_PROTECTED_PATHS.map((p) => `- \`${p}\``),
     '',
     '### Hook Events',
     '',

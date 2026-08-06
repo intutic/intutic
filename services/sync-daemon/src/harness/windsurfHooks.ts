@@ -20,17 +20,12 @@ import * as path from 'node:path'
 import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { newIso } from '@intutic/id'
-import { UNIVERSAL_PROTECTED_PATHS } from './protectedPaths.js'
+import { emitJsGate } from './gateBody.js'
 
 const log = createLogger('sync-windsurf-hooks')
 
 const WINDSURF_USER_DIR = path.join(os.homedir(), '.codeium', 'windsurf')
 
-const PROTECTED_PATHS = [
-  // Universal: every harness protects every harness's config —
-  // the threat is an agent under one disarming another.
-  ...UNIVERSAL_PROTECTED_PATHS,
-]
 
 function buildHooksConfig(hookScriptPath: string) {
   return {
@@ -79,7 +74,7 @@ try {
   });
 } catch {}
 
-const PROTECTED_PATHS = ${JSON.stringify(PROTECTED_PATHS)};
+${emitJsGate({ harness: "windsurf", contract: 'exit2' })}
 
 let _intuticSessionId = '';
 function logEvent(verdict, toolName, reason) {
@@ -87,7 +82,9 @@ function logEvent(verdict, toolName, reason) {
     const ts = new Date().toISOString();
     const incidentId = crypto.createHash('sha1').update(ts + toolName + _intuticWsId).digest('hex').slice(0, 16);
     const entry = JSON.stringify({
-      event: verdict === 'blocked' ? 'tool_blocked' : 'tool_allowed',
+      // Passed through, not collapsed to two values: the advisory tier emits
+      // 'tool_flagged', and a ternary here silently recorded it as an allow.
+      event: verdict,
       toolName, reason: reason || '',
       workspaceId: _intuticWsId,
       harnessType: 'windsurf',
@@ -116,44 +113,29 @@ process.stdin.on('end', () => {
     const ctx = JSON.parse(raw);
     _intuticSessionId = ctx.session_id || ctx.sessionId || ctx.conversation_id || ctx.conversationId || ctx.task_id || ctx.taskId || '';
     const event = (ctx.event || '').toLowerCase();
-    const input = ctx.input || ctx;
+    // tool_input is included deliberately: Windsurf sends "input", but every
+    // other harness sends "tool_input", and reading only the former meant a
+    // payload in the common shape produced an empty command and target — so the
+    // gate ran, found nothing to look at, and allowed everything.
+    const input = ctx.input || ctx.tool_input || ctx.toolInput || ctx;
 
-    const targetPath = input.path || input.file || input.target || '';
-    for (const p of PROTECTED_PATHS) {
-      if (String(targetPath).includes(p)) {
-        // "governance-protected", not "protected". hookEvents.resolveSeverity
-        // keys CRITICAL off that exact substring, and this was the one harness
-        // of twelve that omitted it, so a Windsurf agent caught tampering with
-        // governance config was filed MEDIUM.
-        const reason = 'Attempt to modify governance-protected path "' + targetPath + '"';
-        process.stderr.write('[Intutic Governance] BLOCKED: ' + reason + '\\n');
-        logEvent('blocked', 'edit', reason);
-        process.exit(2);
-      }
-    }
+    const targetPath = input.path || input.file_path || input.filePath || input.file ||
+      input.target || input.notebook_path || '';
+    const command = input.command || input.cmd || input.script || '';
+    const toolName = ctx.tool_name || ctx.toolName || event || 'tool';
 
-    // Scan shell commands for governance bypass patterns
-    const command = input.command || input.cmd || '';
-    const dangerPatterns = [
-      /chflags\\s+nouchg/,
-      /chattr\\s+-i\\s+/,
-      /chmod\\s+[0-9]*[2367][0-9]*\\s+.*hooks/,
-    ];
-    for (const pat of dangerPatterns) {
-      if (pat.test(command)) {
-        const reason = 'Command matches bypass pattern: "' + command + '"';
-        process.stderr.write('[Intutic Governance] BLOCKED: ' + reason + '\\n');
-        logEvent('blocked', 'bash', reason);
-        process.exit(2);
-      }
-    }
+    // The block reason now comes from the shared gate and always contains
+    // "governance rule". hookEvents.resolveSeverity keys CRITICAL off the
+    // "governance-protected" substring, and this was the one harness of twelve
+    // that omitted it — so a Windsurf agent caught tampering was filed MEDIUM.
+    intuticGate(toolName, targetPath, command, logEvent, _intuticWsId);
 
-    logEvent('allowed', event || 'tool', '');
+    logEvent('tool_allowed', toolName, '');
     process.exit(0);
   } catch (err) {
     const errMsg = String(err);
     process.stderr.write('[Intutic Governance] Hook error (fail-closed): ' + errMsg + '\\n');
-    logEvent('blocked', 'unknown', errMsg);
+    logEvent('tool_blocked', 'unknown', errMsg);
     process.exit(2);
   }
 });

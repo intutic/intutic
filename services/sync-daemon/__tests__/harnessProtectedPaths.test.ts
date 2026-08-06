@@ -1,162 +1,148 @@
-// Every harness's protected-path list must cover every harness's config.
+// One list, one evaluator — enforced structurally.
 //
-// There were eleven lists and no two agreed. The Claude-family lists carried
-// only Claude paths, so an agent under Claude Code could rewrite
-// `.cursor/hooks.json`, `.openhands/hooks.json`, `.gemini/settings.json` or the
-// governance plugin directory unopposed. The other nine omitted
-// `.claude/settings.local.json` — which Claude Code loads at *higher*
-// precedence than the `settings.json` they all did protect. Whichever harness
-// an agent ran under, it could disarm a different one.
+// This file used to read each harness's own `const PROTECTED_PATHS` out of its
+// source and check it was a superset of the shared list. That was the right test
+// for a world with eleven hand-maintained copies, and it had a bug that world
+// made invisible: coverage was keyed on *finding* the constant, so a harness
+// that declared none was indistinguishable from a file that was not a harness.
+// `clineHooks` hand-rolled `PROTECTED_PATH_FRAGMENTS` with four of the twelve
+// paths missing and never appeared in the results. Its `.endsWith('Hooks.ts')`
+// filter separately excluded both `*HooksWriter.ts` files.
 //
-// This is a source-level test on purpose. The lists are module-private consts
-// embedded into generated hook scripts via `JSON.stringify`, so there is nothing
-// to import; and the failure being guarded is drift between files, which is
-// exactly what reading the files can see. Same technique as
-// `changeManifestParity` in the control plane.
+// There is now one list and one emitted evaluator, so the superset question is
+// gone. What replaces it is the inverse: **no writer may reintroduce a private
+// copy**. That is a negative assertion, and a negative assertion cannot be
+// defeated by failing to match — which is exactly how the old one failed.
+//
+// Whether the gates actually *behave* is `generatedGateBehaviour.test.ts`, which
+// runs every emitted artifact against every fixture. This file is only about
+// structure.
 import { describe, it, expect } from 'vitest'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { UNIVERSAL_PROTECTED_PATHS } from '../src/harness/protectedPaths.js'
+import {
+  GOVERNANCE_BYPASS_PATTERNS,
+  protectedPathShellPatterns,
+} from '../src/harness/protectedPaths.js'
+import { GATES, NO_GATE } from './harness/gateRegistry.js'
 
 const HARNESS_DIR = join(__dirname, '../src/harness')
 
-/** Every harness module that declares a protected-path list. */
-function harnessesWithLists(): Array<{ file: string; paths: string[]; spreads: boolean }> {
-  const out: Array<{ file: string; paths: string[]; spreads: boolean }> = []
-  for (const file of readdirSync(HARNESS_DIR)) {
-    if (!file.endsWith('Hooks.ts')) continue
-    const src = readFileSync(join(HARNESS_DIR, file), 'utf-8')
-    const m = src.match(/const PROTECTED_PATHS[^=]*=\s*\[([\s\S]*?)\n\]/)
-    if (!m) continue // this harness declares none — covered separately below
-    const body = m[1]!
-    const literals = [...body.matchAll(/'([^']+)'/g)].map((x) => x[1]!)
-    // A harness may spread the shared const instead of restating it. Resolved
-    // against the *imported* const, not a copy of it — so this still reads the
-    // real file and the real list, and a harness that quietly stopped spreading
-    // it fails here.
-    const spreads = body.includes('...UNIVERSAL_PROTECTED_PATHS')
-    out.push({
-      file,
-      paths: spreads ? [...UNIVERSAL_PROTECTED_PATHS, ...literals] : literals,
-      spreads,
-    })
-  }
-  return out
+/**
+ * Every file in the harness directory, minus the shared machinery.
+ *
+ * Deliberately NOT `*Hooks.ts`-shaped. A filename filter is how the previous
+ * version of this suite went blind: it excluded both `*HooksWriter.ts` files, so
+ * neither half of the double-gate defect was ever scanned, and it also missed
+ * `aiderConfigMerger.ts`, `gooseHardener.ts`, `mcpAutoWrite.ts` and
+ * `cursorHooksJson.ts` — one of which turned out to be writing another writer's
+ * artifact. Everything is in scope unless it is named here as shared code.
+ */
+const SHARED_MACHINERY = new Set(['protectedPaths.ts', 'gateBody.ts'])
+
+function harnessFiles(): string[] {
+  return readdirSync(HARNESS_DIR).filter(
+    (f) => f.endsWith('.ts') && !f.endsWith('.d.ts') && !SHARED_MACHINERY.has(f),
+  )
 }
 
 describe('harness protected paths', () => {
-  it('finds the harness lists at all', () => {
-    // Guards the regex above. If it stopped matching, every assertion below
-    // would iterate nothing and report perfect coverage — a green build
-    // asserting that lists nobody read are correct.
-    const found = harnessesWithLists()
-    expect(found.length, 'no harness lists parsed — the extraction broke').toBeGreaterThanOrEqual(8)
+  it('finds the harness writers at all', () => {
+    // Guards the filter above. If it stopped matching, every assertion below
+    // would iterate nothing and report perfect compliance — a green build
+    // asserting that files nobody read are correct.
+    expect(harnessFiles().length, 'no harness writers found — the filter broke').toBeGreaterThanOrEqual(12)
   })
 
-  it.each(harnessesWithLists().map((h) => [h.file, h.paths] as const))(
-    '%s covers every universal protected path',
-    (file, paths) => {
-      const missing = UNIVERSAL_PROTECTED_PATHS.filter(
-        (u) => !paths.some((p) => p === u || p.endsWith(`/${u}`) || p.endsWith(u)),
-      )
-      expect(
-        missing,
-        `${file} does not protect: ${missing.join(', ')} — an agent under this ` +
-          `harness could disarm the governance of another`,
-      ).toEqual([])
-    },
-  )
-
-  /**
-   * The specific override that made this urgent.
-   *
-   * Claude Code reads `.claude/settings.local.json` *after* `.claude/settings.json`
-   * and it wins. A list protecting only the latter stops the obvious edit and
-   * leaves the effective one open.
-   */
-  it('every harness protects the higher-precedence Claude override', () => {
-    for (const { file, paths } of harnessesWithLists()) {
-      expect(
-        paths.some((p) => p.includes('settings.local.json')),
-        `${file} protects settings.json but not settings.local.json, which overrides it`,
-      ).toBe(true)
-    }
-  })
-
-  /**
-   * And they must share the const rather than restate it.
-   *
-   * Eleven hand-maintained copies is how this drifted in the first place; a
-   * harness that passes the superset check today by listing every path inline
-   * is one edit away from being wrong again.
-   */
-  it('every harness spreads the shared list rather than copying it', () => {
-    for (const { file, spreads } of harnessesWithLists()) {
-      expect(spreads, `${file} restates the paths instead of spreading the shared const`).toBe(true)
-    }
-  })
-
-  /**
-   * The block reason must carry the word the severity classifier keys on.
-   *
-   * `hookEvents.ts` resolves severity with
-   * `if (reason.toLowerCase().includes('governance-protected')) return 'CRITICAL'`.
-   * Eleven harnesses emit exactly that phrase. `windsurfHooks` emitted
-   * "Attempt to modify protected path" — one word short — so a Windsurf agent
-   * caught tampering with governance config was filed MEDIUM rather than
-   * CRITICAL, and whatever routes on CRITICAL never saw it.
-   *
-   * A magic substring shared between twelve generators and one classifier is
-   * the same fragility as the protected-path lists above; this is the assertion
-   * that keeps them honest until it is a shared constant on both sides.
-   */
-  it('every harness block reason carries the CRITICAL severity keyword', () => {
-    const KEYWORD = 'governance-protected'
-    for (const file of readdirSync(HARNESS_DIR)) {
-      if (!file.endsWith('Hooks.ts')) continue
+  it('no writer keeps a private protected-path or bypass list', () => {
+    // The whole point. Eleven copies of a security control is eleven chances for
+    // one to be wrong, and every one of them was.
+    const banned: Array<[RegExp, string]> = [
+      [/const\s+PROTECTED_PATH/, 'a private protected-path list'],
+      [/const\s+BYPASS_PATTERNS/, 'a private bypass-pattern list'],
+      [/const\s+dangerPatterns/, 'a private danger-pattern list'],
+    ]
+    const offenders: string[] = []
+    for (const file of harnessFiles()) {
       const src = readFileSync(join(HARNESS_DIR, file), 'utf-8')
-      if (!src.includes('protected path')) continue // this harness blocks no paths
+      for (const [probe, what] of banned) {
+        if (probe.test(src)) offenders.push(`${file} declares ${what}`)
+      }
+    }
+    expect(
+      offenders,
+      `These writers hold their own copy of a shared security control. Use ` +
+        `staticFloorPatterns() via harness/gateBody.ts instead — a second copy ` +
+        `is how the first eleven drifted.`,
+    ).toEqual([])
+  })
+
+  it('every gate writer emits the shared evaluator', () => {
+    // The positive half. Without it, a writer could satisfy the negative
+    // assertion above by having no guard at all.
+    // Every gate, with no exemptions — including the Python one. openWebui
+    // enforces less than the others by design, but it enforces *the same table*,
+    // and an exemption here is how a harness stops being checked at all.
+    const missing: string[] = []
+    for (const g of GATES) {
+      const file = g.module.split('/').pop()!.replace(/\.js$/, '.ts')
+      const src = readFileSync(join(HARNESS_DIR, file), 'utf-8')
+      if (!/emitShellGate|emitJsGate|emitPythonGate/.test(src)) missing.push(file)
+    }
+    expect(
+      missing,
+      `These writers emit a gate that does not come from harness/gateBody.ts.`,
+    ).toEqual([])
+  })
+
+  it('accounts for every harness writer in the registry', () => {
+    const covered = new Set([
+      ...GATES.map((g) => g.module.split('/').pop()!.replace(/\.js$/, '.ts')),
+      ...NO_GATE.map((n) => n.file),
+    ])
+    expect(harnessFiles().filter((f) => !covered.has(f))).toEqual([])
+  })
+
+  /**
+   * The block reason must carry the words the severity classifier keys on.
+   *
+   * `hookEvents.ts:412` resolves severity with
+   * `if (reason.toLowerCase().includes('governance-protected')) return 'CRITICAL'`,
+   * and `:420` classifies the anomaly kind on that or on "bypass pattern". This
+   * was already a live defect once: `windsurfHooks` emitted "Attempt to modify
+   * protected path" — one word short — so a Windsurf agent caught tampering with
+   * governance config was filed MEDIUM, and whatever routes on CRITICAL never
+   * saw it.
+   *
+   * The coupling survived the rewrite in a new form. Reasons now travel with the
+   * rule through the `.rules` wire format instead of being built at block time,
+   * so this asserts on the rule table — one place, thirteen gates.
+   */
+  it('every rule reason carries the keyword the severity classifier reads', () => {
+    for (const p of protectedPathShellPatterns()) {
       expect(
-        src.includes(KEYWORD),
-        `${file} emits a protected-path block reason without "${KEYWORD}" — ` +
-          `hookEvents.resolveSeverity downgrades it from CRITICAL to MEDIUM`,
-      ).toBe(true)
+        p.reason.toLowerCase(),
+        `${p.id} would be filed MEDIUM instead of CRITICAL by hookEvents.resolveSeverity`,
+      ).toContain('governance-protected')
+    }
+    for (const p of GOVERNANCE_BYPASS_PATTERNS) {
+      expect(
+        p.reason.toLowerCase(),
+        `${p.id} would not be classified UNAUTHORIZED_TOOL by hookEvents.resolveSeverity`,
+      ).toContain('bypass pattern')
     }
   })
 
   /**
-   * Registering a Bash matcher without a shell guard is a hook that fires and
-   * does nothing.
+   * A reason containing a tab would silently truncate the rule.
    *
-   * The protected-path check inspects file-path arguments only, so the same
-   * intent expressed as a command string walks straight past it.
-   * `claudeCodeHooks` registered `Bash` as a PreToolUse matcher and had no
-   * bypass-pattern guard — while `claudeDesktopHooks` and `piHooks` both did.
-   * Claude Code is the primary harness, so the gap was widest exactly where it
-   * mattered most.
-   *
-   * What it left open: `chflags nouchg .intutic/hooks/pre-tool-check.js` makes
-   * the hook itself immutable, and `printf '{}' > ~/.claude/settings.json`
-   * empties the settings that register it. Neither touches a path argument.
+   * The `.rules` projection is tab-separated with `source` last, so a tab in the
+   * reason shifts the source into the reason column and the rule stops matching
+   * anything. `toRulesLine` strips them; this asserts nobody is relying on that.
    */
-  it('every harness that gates Bash also guards shell bypass patterns', () => {
-    for (const file of readdirSync(HARNESS_DIR)) {
-      if (!file.endsWith('Hooks.ts')) continue
-      const src = readFileSync(join(HARNESS_DIR, file), 'utf-8')
-
-      // Does this generator gate shell execution at all?
-      const gatesShell =
-        /hookEntry\('Bash'\)/.test(src) ||
-        /beforeShellExecution/.test(src) ||
-        /'bash', 'shell'/.test(src)
-      if (!gatesShell) continue
-
-      expect(
-        /chflags nouchg|BYPASS_PATTERNS|dangerPatterns/.test(src),
-        `${file} gates shell execution but carries no bypass-pattern guard — the ` +
-          `protected-path check reads path arguments only, so a command string ` +
-          `expressing the same intent is unopposed`,
-      ).toBe(true)
+  it('no rule reason contains a tab', () => {
+    for (const p of [...protectedPathShellPatterns(), ...GOVERNANCE_BYPASS_PATTERNS]) {
+      expect(p.reason, `${p.id} has a tab in its reason`).not.toMatch(/\t/)
     }
   })
 })

@@ -20,7 +20,7 @@ import * as path from 'node:path'
 import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { newIso } from '@intutic/id'
-import { UNIVERSAL_PROTECTED_PATHS } from './protectedPaths.js'
+import { emitJsGate } from './gateBody.js'
 
 const log = createLogger('sync-cursor-hooks')
 
@@ -54,16 +54,6 @@ function buildHooksConfig(hookScriptPath: string) {
 }
 
 /**
- * Governance-sensitive paths — mirrors the list in claudeCodeHooks.ts.
- * Any write/edit targeting these paths is blocked.
- */
-const PROTECTED_PATHS = [
-  // Universal: every harness protects every harness's config —
-  // the threat is an agent under one disarming another.
-  ...UNIVERSAL_PROTECTED_PATHS,
-]
-
-/**
  * The pre-tool-check.js script content — receives JSON context from Cursor
  * on stdin, exits 0 to allow or exits 2 to block.
  */
@@ -95,7 +85,7 @@ try {
   });
 } catch {}
 
-const PROTECTED_PATHS = ${JSON.stringify(PROTECTED_PATHS)};
+${emitJsGate({ harness: 'cursor', contract: 'exit2' })}
 
 let _intuticSessionId = '';
 function logEvent(verdict, toolName, reason) {
@@ -103,7 +93,9 @@ function logEvent(verdict, toolName, reason) {
     const ts = new Date().toISOString();
     const incidentId = crypto.createHash('sha1').update(ts + toolName + _intuticWsId).digest('hex').slice(0, 16);
     const entry = JSON.stringify({
-      event: verdict === 'blocked' ? 'tool_blocked' : 'tool_allowed',
+      // Passed through, not collapsed to two values: the advisory tier emits
+      // 'tool_flagged', and a ternary here silently recorded it as an allow.
+      event: verdict,
       toolName, reason: reason || '',
       workspaceId: _intuticWsId,
       harnessType: 'cursor',
@@ -134,43 +126,28 @@ process.stdin.on('end', () => {
     const event = (ctx.event || '').toLowerCase();
     const input = ctx.input || ctx.tool_input || ctx;
 
-    // For file edits: check target path
-    const targetPath = input.path || input.file || input.target || '';
-    if (event === 'beforefileedit' || (input.path && input.path.length > 0)) {
-      for (const p of PROTECTED_PATHS) {
-        if (String(targetPath).includes(p)) {
-          const reason = 'Attempt to modify governance-protected path "' + targetPath + '"';
-          process.stderr.write('[Intutic Governance] BLOCKED: ' + reason + '\\n');
-          logEvent('blocked', 'edit', reason);
-          process.exit(2);
-        }
-      }
-    }
+    // Every spelling any harness uses, matching the bash extractor. A field name
+    // this list misses is a path guard that silently does not run — and the
+    // caller controls which spelling it sends.
+    const targetPath = input.path || input.file_path || input.filePath || input.file ||
+      input.target || input.notebook_path || '';
+    const command = input.command || input.cmd || input.script || '';
+    const toolName = ctx.tool_name || ctx.toolName || event || 'tool';
 
-    // Shell execution: scan command for dangerous patterns
-    const command = input.command || input.cmd || '';
-    const dangerPatterns = [
-      /chmod\\s+[0-9]*7[0-9]*\\s+.*hooks/,  // chmod on hook files
-      /chattr\\s+-i\\s+/,                    // remove immutable flag
-      /chflags\\s+nouchg/,                   // macOS remove uchg
-    ];
-    for (const pat of dangerPatterns) {
-      if (pat.test(command)) {
-        const reason = 'Command matches governance bypass pattern: "' + command + '"';
-        process.stderr.write('[Intutic Governance] BLOCKED: ' + reason + '\\n');
-        logEvent('blocked', 'bash', reason);
-        process.exit(2);
-      }
-    }
+    // The protected-path check used to be gated on \`event === 'beforefileedit'
+    // || input.path\`, so a shell command naming a protected path was only
+    // caught if it also carried a path argument. The shared gate tests the
+    // command and the target independently.
+    intuticGate(toolName, targetPath, command, logEvent, _intuticWsId);
 
     // Allow
-    logEvent('allowed', event || 'tool', '');
+    logEvent('tool_allowed', toolName, '');
     process.exit(0);
   } catch (err) {
     // Fail CLOSED
     const errMsg = String(err);
     process.stderr.write('[Intutic Governance] Hook error (fail-closed): ' + errMsg + '\\n');
-    logEvent('blocked', 'unknown', errMsg);
+    logEvent('tool_blocked', 'unknown', errMsg);
     process.exit(2);
   }
 });
@@ -198,7 +175,9 @@ export async function writeCursorHooks(
   // Ensure hook events log directory exists
   await fs.mkdir(path.join(workspaceRoot, '.intutic', 'events'), { recursive: true })
 
-  const hookScriptPath = path.join(hookScriptDir, 'pre-tool-check.js')
+  // Named after its writer — see the note in claudeCodeHooks.ts. Both emitted
+  // `pre-tool-check.js` here and silently overwrote each other.
+  const hookScriptPath = path.join(hookScriptDir, 'cursor-check.js')
 
   // Write the hook script
   const tmpScript = hookScriptPath + '.cursor-tmp'

@@ -59,8 +59,8 @@ describe('Sync Offline Traces', () => {
     mockServer = createMockServer()
     await new Promise<void>((resolve) => {
       mockServer.server.listen(0, '127.0.0.1', () => {
-        const addr = mockServer.server.address() as any
-        serverPort = addr.port
+        const addr = mockServer.server.address()
+        serverPort = typeof addr === 'object' && addr !== null ? addr.port : 0
         mockServer.url = `http://127.0.0.1:${serverPort}`
         resolve()
       })
@@ -75,7 +75,9 @@ describe('Sync Offline Traces', () => {
     await mockServer.close()
     try {
       fs.rmSync('/tmp/intutic_test_home', { recursive: true, force: true })
-    } catch {}
+    } catch {
+      // A leftover temp directory is not worth failing a run over.
+    }
   })
 
   it('should read, upload, and truncate traces file on success', async () => {

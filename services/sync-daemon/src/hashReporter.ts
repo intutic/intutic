@@ -52,7 +52,7 @@ export async function computeFileHashes(
         canonicalHash: canonical,
         drifted,
       })
-    } catch (err) {
+    } catch {
       // File doesn't exist or isn't readable — report empty hash, not drifted
       results.push({
         filePath: relativePath,

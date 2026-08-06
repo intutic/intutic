@@ -21,18 +21,11 @@ import * as path from 'node:path'
 import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { newIso } from '@intutic/id'
-import { UNIVERSAL_PROTECTED_PATHS } from './protectedPaths.js'
+import { emitJsGate } from './gateBody.js'
 
 const log = createLogger('sync-claude-desktop-hooks')
 
 /** Governance-sensitive paths that the hook gate protects (mirrors claudeCodeHooks). */
-const PROTECTED_PATHS = [
-  // Universal: every harness protects every harness's config —
-  // the threat is an agent under one disarming another.
-  ...UNIVERSAL_PROTECTED_PATHS,
-  path.join(os.homedir(), '.claude', 'settings.json'),
-  path.join(os.homedir(), '.claude', 'settings.local.json'),
-]
 
 /** Resolve the OS-specific claude_desktop_config.json path. */
 function resolveClaudeDesktopConfigPath(): string {
@@ -101,7 +94,7 @@ function loadRuntimeEnv() {
 }
 
 // ── Governance-sensitive paths ────────────────────────────────────────────────
-const PROTECTED_PATHS = ${JSON.stringify(PROTECTED_PATHS)};
+${emitJsGate({ harness: "claude-desktop", contract: 'exit2' })}
 
 // ── Dual-path logEvent ────────────────────────────────────────────────────────
 const HOOK_EVENTS_LOG = ${JSON.stringify(hookEventsLog)};
@@ -114,7 +107,9 @@ function logEvent(env, verdict, toolName, reason) {
     .digest('hex').slice(0, 16);
 
   const entry = {
-    event: verdict === 'blocked' ? 'tool_blocked' : 'tool_allowed',
+    // Passed through, not collapsed to two values: the advisory tier emits
+      // 'tool_flagged', and a ternary here silently recorded it as an allow.
+      event: verdict,
     toolName,
     reason: reason || '',
     workspaceId: env.INTUTIC_WORKSPACE_ID,
@@ -162,49 +157,31 @@ process.stdin.on('end', () => {
   try {
     const ctx = JSON.parse(inputData);
     _intuticSessionId = ctx.session_id || ctx.sessionId || ctx.conversation_id || ctx.conversationId || ctx.task_id || ctx.taskId || '';
-    const toolName = (ctx.tool_name || ctx.toolName || '').toLowerCase();
+    const toolName = (ctx.tool_name || ctx.toolName || '').toLowerCase()
+    // Case preserved for the gate. A BLOCK: SOP compiles to a tool-name
+    // pattern the operator wrote as they see it (Bash, Write) and this
+    // harness lowercases the tool for its own matching. Handing the gate the
+    // lowercased form means every SOP tool rule silently matches nothing here
+    // while appearing active everywhere else.
+    const rawToolName = ctx.tool_name || ctx.toolName || '';
     const toolInput = ctx.tool_input || ctx.toolInput || {};
     const toolInputStr = JSON.stringify(toolInput);
 
-    // 1. Protected-path guard
-    if (['edit', 'write', 'multiedit'].includes(toolName)) {
-      const targetPath = toolInput.path || toolInput.file_path ||
-        toolInput.new_path || toolInput.target || '';
-      for (const p of PROTECTED_PATHS) {
-        if (targetPath.includes(p) || String(targetPath).startsWith(p)) {
-          const reason = 'Attempt to modify governance-protected path: "' + targetPath + '". ' +
-            'To change governance policy, update your SOP via the Intutic control plane.';
-          console.error('[Intutic Guardrail] BLOCKED: ' + reason);
-          logEvent(runtimeEnv, 'blocked', toolName, reason);
-          process.exit(2);
-        }
-      }
-    }
+    // Both guards used to be gated on the tool name — paths only for
+    // edit/write/multiedit, commands only for a tool literally called "bash".
+    // A harness that names its shell tool anything else (run_command, terminal,
+    // execute) walked past both. The shared gate keys on the *arguments*, so a
+    // tool name nobody anticipated is no longer a bypass.
+    const targetPath = toolInput.path || toolInput.file_path || toolInput.filePath ||
+      toolInput.new_path || toolInput.target || toolInput.notebook_path || '';
+    const command = toolInput.command || toolInput.cmd || toolInput.script || '';
+    intuticGate(rawToolName, targetPath, command, (v, t, r) => logEvent(runtimeEnv, v, t, r), runtimeEnv.INTUTIC_WORKSPACE_ID);
 
-    // 2. Bash/shell command bypass guard
-    if (toolName === 'bash') {
-      const cmd = toolInput.command || toolInput.cmd || '';
-      const BYPASS_PATTERNS = [
-        'chflags nouchg',
-        'chattr -i',
-        'rm -rf .intutic',
-        'CLAUDE_DESKTOP_HOOKS=',
-      ];
-      for (const pattern of BYPASS_PATTERNS) {
-        if (cmd.includes(pattern)) {
-          const reason = 'Shell command matches governance bypass pattern: "' + pattern + '"';
-          console.error('[Intutic Guardrail] BLOCKED: ' + reason);
-          logEvent(runtimeEnv, 'blocked', toolName, reason);
-          process.exit(2);
-        }
-      }
-    }
-
-    logEvent(runtimeEnv, 'allowed', toolName, '');
+    logEvent(runtimeEnv, 'tool_allowed', toolName, '');
     process.exit(0);
   } catch (err) {
     console.error('[Intutic Guardrail] Hook error (blocking for safety):', err);
-    logEvent(runtimeEnv, 'blocked', 'unknown', String(err));
+    logEvent(runtimeEnv, 'tool_blocked', 'unknown', String(err));
     process.exit(2);
   }
 });
