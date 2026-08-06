@@ -126,8 +126,13 @@ pub async fn evaluate_wasm_rule(engine: &Engine, module: &Module, ctx: &RequestC
                 //
                 // Retained as a kill, because an already-installed rule
                 // returning `2` must not change meaning under an upgrade, and
-                // named in the log so its author can move to `1`. New rules are
-                // refused this code at `intutic policy install`.
+                // named in the log so its author can move to `1`.
+                //
+                // `intutic policy install` still ACCEPTS this code — it must, or
+                // reinstalling an existing rule would fail — but it warns. This
+                // comment used to claim install refused it, which was simply
+                // untrue: install checked membership of {0,1,2,3} and said
+                // nothing about 2.
                 2 => {
                     tracing::warn!(
                         "WASM rule returned deprecated verdict code 2 (REDACT). The guest \

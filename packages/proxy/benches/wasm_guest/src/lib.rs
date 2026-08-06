@@ -24,13 +24,20 @@ struct RequestContext {
     sensitivity_tier: String,
 }
 
-/// Verdict codes matching the proxy's enum:
-///   0 = Bypass (no action)
-///   1 = Allow  (explicit allow)
-///   2 = Modify (rewrite request)
-///   3 = Deny   (block request)
+/// Verdict codes, as the proxy's runner actually maps them.
+///
+/// This block previously declared a table matching nothing in the codebase —
+/// it called 1 an explicit allow, 2 a rewrite, and 3 a denial. The real mapping
+/// is below, and the consequence was not cosmetic: the old `VERDICT_DENY`
+/// constant held 3, which the runner maps to a **Reask**, so the benchmark
+/// measuring "the blocking path" was measuring the retry path.
+///
+///   0 = Bypass — allow
+///   1 = Kill   — block
+///   2 = deprecated; mapped to Kill and logged
+///   3 = Reask  — refuse this attempt, let the agent retry
 const VERDICT_BYPASS: i32 = 0;
-const VERDICT_DENY: i32 = 3;
+const VERDICT_BLOCK: i32 = 1;
 
 /// WASM entrypoint: evaluate governance rule.
 ///
@@ -43,18 +50,18 @@ pub extern "C" fn evaluate(ptr: *const u8, len: usize) -> i32 {
     let slice = unsafe { std::slice::from_raw_parts(ptr, len) };
     let json_str = match std::str::from_utf8(slice) {
         Ok(s) => s,
-        Err(_) => return VERDICT_DENY,
+        Err(_) => return VERDICT_BLOCK,
     };
 
     // Parse the request context
     let ctx: RequestContext = match serde_json::from_str(json_str) {
         Ok(c) => c,
-        Err(_) => return VERDICT_DENY,
+        Err(_) => return VERDICT_BLOCK,
     };
 
     // Simple rule: deny if estimated cost > $10
     if ctx.estimated_cost_usd > 10.0 {
-        return VERDICT_DENY;
+        return VERDICT_BLOCK;
     }
 
     // Simple rule: deny if sensitivity is "critical" and model is not approved
@@ -62,7 +69,7 @@ pub extern "C" fn evaluate(ptr: *const u8, len: usize) -> i32 {
         && !ctx.model.contains("claude")
         && !ctx.model.contains("gpt-4o")
     {
-        return VERDICT_DENY;
+        return VERDICT_BLOCK;
     }
 
     VERDICT_BYPASS

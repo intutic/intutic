@@ -22,6 +22,7 @@ import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { WASM_HOST_IMPORTS } from '@intutic/shared-types'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const sdkRoot = join(here, '..')
@@ -42,24 +43,43 @@ const RULES: Array<{ name: string; blockVerdict: Verdict; why: string }> = [
 let wasmPath: string
 
 /**
- * Host imports mirroring the proxy's set exactly — `log_info`, `abort`,
- * `trace`, and nothing else. Notably no `seed`: a rule reaching
- * `Math.random()` must fail here the same way it fails in the proxy, or this
- * harness would validate rules the proxy then silently bypasses.
+ * Host imports built from `WASM_HOST_IMPORTS`, not listed again here.
+ *
+ * This harness used to hardcode `{ log_info, abort, trace }` under a docstring
+ * claiming it "mirrors the proxy's set exactly" — the fifth such copy, and one
+ * the parity linter did not read. Any of them could have re-added `seed` with
+ * no signal, which is exactly how the original bypass happened: a rule reaching
+ * `Math.random()` validated here and then failed to link in the proxy, where a
+ * link error becomes a silent allow.
+ *
+ * Deriving the set means a host import added in Rust makes this fail loudly
+ * (missing implementation) rather than quietly validating rules the proxy
+ * cannot run.
  */
+const HOST_IMPL: Record<string, (...a: number[]) => void> = {
+  log_info: () => {},
+  abort: (_m: number, _f: number, line: number, col: number) => {
+    throw new Error(`AssemblyScript abort at ${line}:${col}`)
+  },
+  trace: () => {},
+}
+
 function evaluate(mockPath: string): number {
   const bytes = readFileSync(wasmPath)
   const mod = new WebAssembly.Module(bytes)
   let instance: WebAssembly.Instance | null = null
-  const imports = {
-    env: {
-      log_info: () => {},
-      abort: (_m: number, _f: number, line: number, col: number) => {
-        throw new Error(`AssemblyScript abort at ${line}:${col}`)
-      },
-      trace: () => {},
-    },
+  const env: WebAssembly.ModuleImports = {}
+  for (const name of WASM_HOST_IMPORTS) {
+    const impl = HOST_IMPL[name]
+    if (!impl) {
+      throw new Error(
+        `${name} is a host import the proxy registers and this harness does not implement. ` +
+          'Add it to HOST_IMPL — a rule using it would validate here and fail to link in the proxy.',
+      )
+    }
+    env[name] = impl
   }
+  const imports = { env }
   instance = new WebAssembly.Instance(mod, imports)
   const ex = instance.exports as Record<string, unknown>
 

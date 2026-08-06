@@ -6,6 +6,25 @@
 use serde::Deserialize;
 use std::path::Path;
 
+/// What the router does with the model it selects.
+///
+/// `Enforce` is the `Default` so an existing config keeps its behaviour. A
+/// router that silently stops routing is the worse of the two failure
+/// directions — the operator sees no change and assumes it is still working.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum RoutingMode {
+    /// Do not route at all. Distinct from `enabled: false`, which also skips
+    /// the reward loop; `Off` is for turning routing off while leaving the rest
+    /// of the machinery observable.
+    Off,
+    /// Select, record, and serve the requested model anyway.
+    Shadow,
+    #[default]
+    Enforce,
+}
+
+
 /// Top-level configuration structure
 #[derive(Debug, Deserialize, Clone)]
 pub struct ProxyConfig {
@@ -313,8 +332,33 @@ pub struct RoutingConfig {
 
     /// When set, any Anthropic-bound model is rewritten to this ID after
     /// routing. `None` (the default) leaves the routed model untouched.
+    ///
+    /// Note this fires AFTER selection, so a workspace using it gets no reward
+    /// signal: crediting the chosen arm with a different model's behaviour is
+    /// worse than learning nothing. See `override_fired` in proxy.rs.
     #[serde(default)]
     pub anthropic_model_override: Option<String>,
+
+    /// What routing does with its selection.
+    ///
+    /// `Shadow` runs `route_model` in full and records what it would have
+    /// picked, while the request is served with the model the caller asked for.
+    /// That yields reach and exposure — "we would have downgraded 34% of
+    /// requests, $X/mo" — and **nothing about quality**, because the other model
+    /// never ran. Only mirroring can measure that.
+    #[serde(default)]
+    pub mode: RoutingMode,
+
+    /// Fraction of eligible requests to mirror, in `[0.0, 0.05]`.
+    ///
+    /// Mirroring issues the SAME request to the routed candidate as well,
+    /// serves the requested model's response, and scores the candidate's off the
+    /// latency path. It is the only thing in the plan that produces real quality
+    /// evidence — shadow cannot, because the cheap model never ran.
+    ///
+    /// Capped at 5%: every mirrored request is paid for twice.
+    #[serde(default)]
+    pub mirror_sample_rate: f64,
 
     #[serde(default)]
     pub reward: RewardConfig,
@@ -326,6 +370,12 @@ impl Default for RoutingConfig {
             enabled: None,
             candidate_models: default_candidate_models(),
             anthropic_model_override: None,
+            // Enforce: an existing config keeps routing. A router that silently
+            // stops routing is the worse failure direction.
+            mode: RoutingMode::default(),
+            // No mirroring unless asked for. Every mirrored request is paid for
+            // twice, so it must be opted into rather than defaulted on.
+            mirror_sample_rate: 0.0,
             reward: RewardConfig::default(),
         }
     }

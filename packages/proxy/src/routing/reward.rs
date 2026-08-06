@@ -40,14 +40,47 @@ pub struct RewardSignals {
     pub raw_cost_usd: f64,
     /// Estimated cost of the *routed* model's response.
     pub actual_cost_usd: f64,
+    /// Response Integrity Score, 0–100. 100 means clean OR not measured.
+    ///
+    /// The only signal here that says anything about the *answer*. Everything
+    /// above describes delivery: whether the call succeeded, how long it took,
+    /// and whether the metering added up. Without this a cheap model returning
+    /// a confidently wrong answer, quickly, scored a perfect reward.
+    ///
+    /// It detects malformed, truncated and unusable responses — **not**
+    /// wrong-but-well-formed ones, which is most of the real harm from
+    /// downgrading. The reward is guarded against unusable answers, not worse
+    /// ones.
+    pub response_integrity: u8,
 }
+
+/// A clean, equal-cost response's score.
+///
+/// Deliberately below 1.0 so the two-sided cost term has room to move upward.
+/// At 1.0 the clamp eats every cheapness bonus and the term is a silent no-op
+/// for the exact case it exists to reward.
+pub const NO_FAULT_BASELINE: f64 = 0.8;
+
+/// How much a fully-faulted response loses.
+///
+/// Larger than `cost_penalty` (0.2) on purpose: no price advantage may buy back
+/// a response the agent cannot use.
+pub const QUALITY_WEIGHT: f64 = 0.5;
 
 /// Deterministic reward in `[0, 1]`. Upstream failure is always 0.
 pub fn compute_reward(s: &RewardSignals, cfg: &RewardConfig) -> f64 {
     if !s.upstream_ok {
         return 0.0;
     }
-    let mut r = 1.0;
+    // The no-fault baseline, NOT 1.0.
+    //
+    // This is what makes the cost term below do anything. `r` starting at 1.0
+    // and clamping at 1.0 means a clean cheap response's bonus is entirely
+    // eaten by the clamp — the change would look shipped and be a no-op for
+    // exactly the case it targets. At 0.8: equal-cost clean scores 0.8, cheap
+    // rises toward 1.0, costly falls toward 0.6.
+    let mut r = NO_FAULT_BASELINE;
+
     if s.latency_ms > cfg.latency_slo_ms && cfg.latency_slo_ms > 0 {
         let over = s.latency_ms as f64 / cfg.latency_slo_ms as f64 - 1.0;
         r -= cfg.latency_penalty * over.min(1.0);
@@ -55,11 +88,28 @@ pub fn compute_reward(s: &RewardSignals, cfg: &RewardConfig) -> f64 {
     if s.token_anomaly {
         r -= cfg.token_anomaly_penalty;
     }
+
+    // Quality, scaled to the same range as the other penalties. A response the
+    // integrity check faulted loses more than any price advantage can return —
+    // see `quality_fault_outweighs_any_price_advantage`.
+    let integrity = (s.response_integrity as f64 / 100.0).clamp(0.0, 1.0);
+    r -= QUALITY_WEIGHT * (1.0 - integrity);
+
     if s.raw_cost_usd > 0.0 {
-        // ratio > 1 means the bandit routed to a costlier model than requested.
+        // TWO-SIDED. `cheaper_routed_model_earns_no_bonus` asserted the
+        // opposite, deliberately, so this is a product reversal rather than a
+        // bug fix — and it is only safe now that `response_integrity` exists,
+        // because rewarding cheapness without a quality signal is how a router
+        // learns to save money by being wrong.
+        //
+        // The asymmetry is deliberate: +cost_penalty needs ratio→0, while
+        // −cost_penalty arrives at ratio=2. Cheap is capped; expensive is
+        // punished fast.
         let ratio = s.actual_cost_usd / s.raw_cost_usd;
-        r -= cfg.cost_penalty * (ratio - 1.0).clamp(0.0, 1.0);
+        let signed = (1.0 - ratio).clamp(-1.0, 1.0);
+        r += cfg.cost_penalty * signed;
     }
+
     r.clamp(0.0, 1.0)
 }
 
@@ -259,6 +309,7 @@ mod tests {
             token_anomaly: false,
             raw_cost_usd: 0.01,
             actual_cost_usd: 0.01,
+            response_integrity: crate::routing::integrity::RIS_MAX,
         }
     }
 
@@ -271,13 +322,25 @@ mod tests {
             token_anomaly: false,
             raw_cost_usd: 0.01,
             actual_cost_usd: 0.001,
+            response_integrity: crate::routing::integrity::RIS_MAX,
         };
         assert_eq!(compute_reward(&s, &cfg), 0.0);
     }
 
+    /// A clean, equal-cost response scores the no-fault baseline, not 1.0.
+    ///
+    /// The rebase is the load-bearing part of the two-sided cost term. At a 1.0
+    /// baseline the clamp eats every cheapness bonus, so the term would be a
+    /// silent no-op for exactly the case it exists to reward — shipped-looking
+    /// and inert.
     #[test]
-    fn clean_success_is_full_reward() {
-        assert_eq!(compute_reward(&ok_signals(), &default_cfg()), 1.0);
+    fn clean_success_is_the_no_fault_baseline() {
+        let r = compute_reward(&ok_signals(), &default_cfg());
+        assert!(
+            (r - NO_FAULT_BASELINE).abs() < 1e-9,
+            "expected the {NO_FAULT_BASELINE} baseline, got {r}"
+        );
+        assert!(r < 1.0, "a 1.0 baseline leaves no headroom for a cheapness bonus");
     }
 
     #[test]
@@ -287,7 +350,7 @@ mod tests {
             latency_ms: cfg.latency_slo_ms,
             ..ok_signals()
         };
-        assert_eq!(compute_reward(&s, &cfg), 1.0);
+        assert_eq!(compute_reward(&s, &cfg), NO_FAULT_BASELINE);
     }
 
     #[test]
@@ -298,19 +361,19 @@ mod tests {
             latency_ms: cfg.latency_slo_ms * 2,
             ..ok_signals()
         };
-        assert!((compute_reward(&s, &cfg) - 0.7).abs() < 1e-9);
+        assert!((compute_reward(&s, &cfg) - (NO_FAULT_BASELINE - 0.3)).abs() < 1e-9);
         // 10× SLO → still capped at the full penalty.
         let s = RewardSignals {
             latency_ms: cfg.latency_slo_ms * 10,
             ..ok_signals()
         };
-        assert!((compute_reward(&s, &cfg) - 0.7).abs() < 1e-9);
+        assert!((compute_reward(&s, &cfg) - (NO_FAULT_BASELINE - 0.3)).abs() < 1e-9);
         // 1.5× SLO → half the penalty.
         let s = RewardSignals {
             latency_ms: cfg.latency_slo_ms + cfg.latency_slo_ms / 2,
             ..ok_signals()
         };
-        assert!((compute_reward(&s, &cfg) - 0.85).abs() < 1e-9);
+        assert!((compute_reward(&s, &cfg) - (NO_FAULT_BASELINE - 0.15)).abs() < 1e-9);
     }
 
     #[test]
@@ -320,18 +383,38 @@ mod tests {
             token_anomaly: true,
             ..ok_signals()
         };
-        assert!((compute_reward(&s, &cfg) - 0.8).abs() < 1e-9);
+        // Penalties are relative to the baseline now, not to 1.0.
+        assert!(
+            (compute_reward(&s, &cfg) - (NO_FAULT_BASELINE - cfg.token_anomaly_penalty)).abs()
+                < 1e-9
+        );
     }
 
     #[test]
-    fn cheaper_routed_model_earns_no_bonus() {
+    /// **A deliberate product reversal.**
+    ///
+    /// This test asserted the opposite — that a cheaper route earns nothing —
+    /// as a specification, not an oversight. Rewriting an asserted spec is only
+    /// legitimate if the replacement states the new invariant as explicitly as
+    /// the old one did, so: a cheaper route now earns MORE than an equal-cost
+    /// one, and it is safe to reward that only because `response_integrity`
+    /// exists. Rewarding cheapness without a quality signal is how a router
+    /// learns to save money by being wrong.
+    fn cheaper_routed_model_earns_a_bonus() {
         let cfg = default_cfg();
-        let s = RewardSignals {
+        let cheap = RewardSignals {
             raw_cost_usd: 0.02,
             actual_cost_usd: 0.001,
             ..ok_signals()
         };
-        assert_eq!(compute_reward(&s, &cfg), 1.0);
+        let equal = ok_signals();
+        let r_cheap = compute_reward(&cheap, &cfg);
+        let r_equal = compute_reward(&equal, &cfg);
+        assert!(
+            r_cheap > r_equal,
+            "a 20x cheaper clean route scored {r_cheap}, no better than {r_equal}"
+        );
+        assert!(r_cheap <= 1.0);
     }
 
     #[test]
@@ -341,16 +424,25 @@ mod tests {
         let s = RewardSignals {
             raw_cost_usd: 0.01,
             actual_cost_usd: 0.02,
+            response_integrity: crate::routing::integrity::RIS_MAX,
             ..ok_signals()
         };
-        assert!((compute_reward(&s, &cfg) - 0.8).abs() < 1e-9);
+        // Baseline minus the full cost penalty. The asymmetry is deliberate:
+        // −cost_penalty arrives at ratio 2, while +cost_penalty needs ratio→0.
+        // Cheap is capped; expensive is punished fast.
+        assert!(
+            (compute_reward(&s, &cfg) - (NO_FAULT_BASELINE - cfg.cost_penalty)).abs() < 1e-9
+        );
         // 100× cost → still capped.
         let s = RewardSignals {
             raw_cost_usd: 0.01,
             actual_cost_usd: 1.0,
+            response_integrity: crate::routing::integrity::RIS_MAX,
             ..ok_signals()
         };
-        assert!((compute_reward(&s, &cfg) - 0.8).abs() < 1e-9);
+        assert!(
+            (compute_reward(&s, &cfg) - (NO_FAULT_BASELINE - cfg.cost_penalty)).abs() < 1e-9
+        );
     }
 
     #[test]
@@ -359,9 +451,65 @@ mod tests {
         let s = RewardSignals {
             raw_cost_usd: 0.0,
             actual_cost_usd: 0.5,
+            response_integrity: crate::routing::integrity::RIS_MAX,
             ..ok_signals()
         };
-        assert_eq!(compute_reward(&s, &cfg), 1.0);
+        // No requested-model cost to compare against, so no cost term either
+        // way — neither bonus nor penalty. The baseline stands.
+        assert_eq!(compute_reward(&s, &cfg), NO_FAULT_BASELINE);
+    }
+
+    /// The invariant that makes the two-sided cost term safe to ship.
+    ///
+    /// Without it, C3 is a router that learns to buy cheap failures: a
+    /// 20×-cheaper model that returns something the agent cannot use would earn
+    /// the full cheapness bonus, and the bandit would converge on it.
+    #[test]
+    fn quality_fault_outweighs_any_price_advantage() {
+        let cfg = default_cfg();
+        let cheap_and_broken = RewardSignals {
+            raw_cost_usd: 0.02,
+            actual_cost_usd: 0.001,
+            response_integrity: 0,
+            ..ok_signals()
+        };
+        let clean_equal_cost = ok_signals();
+        let broken = compute_reward(&cheap_and_broken, &cfg);
+        let clean = compute_reward(&clean_equal_cost, &cfg);
+        assert!(
+            broken < clean,
+            "a 20x cheaper UNUSABLE response scored {broken}, at or above a clean \
+             equal-cost one at {clean} — the router would learn to buy failures"
+        );
+    }
+
+    /// A partial fault still costs more than it can earn back.
+    #[test]
+    fn a_partial_fault_is_not_bought_back_by_price() {
+        let cfg = default_cfg();
+        // 40/100: one truncation. Cheap enough to earn nearly the full bonus.
+        let s = RewardSignals {
+            raw_cost_usd: 0.02,
+            actual_cost_usd: 0.0001,
+            response_integrity: 40,
+            ..ok_signals()
+        };
+        assert!(compute_reward(&s, &cfg) < compute_reward(&ok_signals(), &cfg));
+    }
+
+    /// Not measured must not read as broken.
+    ///
+    /// A proxy too old to send the score sends nothing, and the ingest defaults
+    /// it to 100. Treating an absent score as 0 would drag every arm in every
+    /// such workspace to the floor.
+    #[test]
+    fn an_unmeasured_response_is_not_penalised() {
+        let cfg = default_cfg();
+        let s = RewardSignals {
+            response_integrity: crate::routing::integrity::RIS_MAX,
+            ..ok_signals()
+        };
+        assert_eq!(compute_reward(&s, &cfg), NO_FAULT_BASELINE);
     }
 
     #[test]
@@ -375,6 +523,7 @@ mod tests {
             token_anomaly: true,
             raw_cost_usd: 0.01,
             actual_cost_usd: 0.05,
+            response_integrity: crate::routing::integrity::RIS_MAX,
             upstream_ok: true,
         };
         assert_eq!(compute_reward(&s, &cfg), 0.0);

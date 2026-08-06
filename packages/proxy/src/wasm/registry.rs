@@ -14,6 +14,37 @@ use crate::store::ControlPlaneCache;
 use super::local_loader;
 use super::runner::evaluate_wasm_rule;
 
+/// How a rule's verdict is treated.
+///
+/// `Enforce` is `#[serde(other)]`-free and the `Default`, so a descriptor
+/// written before this field existed keeps its meaning rather than silently
+/// falling into shadow — a rule that stops enforcing without saying so is the
+/// worse of the two failure directions.
+#[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum RuleMode {
+    #[default]
+    #[serde(rename = "ENFORCE", alias = "enforce")]
+    Enforce,
+    /// Evaluate and report; the request proceeds unchanged.
+    #[serde(rename = "SHADOW", alias = "shadow")]
+    Shadow,
+}
+
+/// One shadowed rule's outcome on one request.
+///
+/// Carries the real verdict, not a `WOULD_HAVE` sentinel — the same reasoning
+/// `FindingWire.shadowed` documents: encoding shadow into the verdict makes
+/// every consumer matching on the real value silently miss the shadowed ones,
+/// and destroys the thing being measured.
+#[derive(Debug, Clone, Serialize)]
+pub struct ShadowReport {
+    pub rule_id: String,
+    pub name: String,
+    /// False on a bypass. Both are reported; the bypasses are the denominator.
+    pub would_act: bool,
+    pub verdict: String,
+}
+
 #[derive(Deserialize, Serialize, Clone)]
 pub struct WasmPluginDescriptor {
     #[serde(rename = "ruleId")]
@@ -21,6 +52,9 @@ pub struct WasmPluginDescriptor {
     pub name: String,
     pub sha256: String,
     pub priority: u32,
+    /// Absent on older descriptors, which must continue to enforce.
+    #[serde(default)]
+    pub mode: RuleMode,
 }
 
 #[derive(Clone)]
@@ -29,6 +63,7 @@ pub struct LoadedModule {
     pub name: String,
     pub sha256: String,
     pub priority: u32,
+    pub mode: RuleMode,
     pub module: Module,
 }
 
@@ -108,10 +143,36 @@ impl PluginRegistry {
     /// list (stable sort — ties keep Valkey rules first). Because KILL
     /// short-circuits and there is no verdict that overrides a block, the
     /// union is most-restrictive-wins: local rules can only add restrictions.
+    /// What a shadowed rule would have done, for the caller to record.
+    ///
+    /// Returned rather than logged only, because a shadow period that produces
+    /// no counted evidence cannot support a promotion decision — and promotion
+    /// is gated on exactly that evidence. A `tracing::info!` line is not a
+    /// denominator.
+    pub async fn evaluate_with_shadow(
+        &self,
+        control_plane: &Arc<dyn ControlPlaneCache>,
+        ctx: &RequestContext,
+    ) -> (Verdict, Vec<ShadowReport>) {
+        let mut shadow = Vec::new();
+        let verdict = self.evaluate_inner(control_plane, ctx, &mut shadow).await;
+        (verdict, shadow)
+    }
+
     pub async fn evaluate(
         &self,
         control_plane: &Arc<dyn ControlPlaneCache>,
         ctx: &RequestContext,
+    ) -> Verdict {
+        let mut sink = Vec::new();
+        self.evaluate_inner(control_plane, ctx, &mut sink).await
+    }
+
+    async fn evaluate_inner(
+        &self,
+        control_plane: &Arc<dyn ControlPlaneCache>,
+        ctx: &RequestContext,
+        shadow_out: &mut Vec<ShadowReport>,
     ) -> Verdict {
         let workspace_id = &ctx.workspace_id;
 
@@ -146,6 +207,41 @@ impl PluginRegistry {
 
         for m in modules {
             let verdict = evaluate_wasm_rule(&self.engine, &m.module, ctx).await;
+
+            // A shadowed rule reports and falls through. It is evaluated exactly
+            // as an enforcing one — same engine, same fuel, same timeout — so
+            // what the shadow report says is what enforcement would do, rather
+            // than what a cheaper approximation would.
+            //
+            // No WOULD_HAVE sentinel verdict: telemetry.rs rejected that shape
+            // deliberately, because a synthetic value hides shadowed events from
+            // every consumer that matches on the real one. The real verdict goes
+            // in the log line and the request is left alone.
+            if m.mode == RuleMode::Shadow {
+                // EVERY evaluation is reported, including the bypasses. The
+                // would-have-blocked count is only meaningful against a
+                // denominator, and reporting solely the blocks would make a
+                // rule that fires on one request in a thousand look identical
+                // to one that fires on the only request it ever saw.
+                let would_act = !matches!(verdict, Verdict::Bypass);
+                if would_act {
+                    tracing::info!(
+                        rule_id = %m.rule_id,
+                        rule = %m.name,
+                        shadowed = true,
+                        verdict = ?verdict,
+                        "WASM rule would have acted; shadow mode, request unchanged"
+                    );
+                }
+                shadow_out.push(ShadowReport {
+                    rule_id: m.rule_id.clone(),
+                    name: m.name.clone(),
+                    would_act,
+                    verdict: format!("{verdict:?}"),
+                });
+                continue;
+            }
+
             match verdict {
                 // The runner has no rule identity — attribute here so logs and
                 // incidents name the rule that fired.
@@ -309,17 +405,32 @@ impl PluginRegistry {
                         name: desc.name,
                         sha256: desc.sha256,
                         priority: desc.priority,
+                        mode: desc.mode,
                         module: module.clone(),
                     });
                 } else {
                     let bin_bytes = control_plane.wasm_binary(&desc.sha256).await?;
                     if let Some(bytes) = bin_bytes {
                         let module = Module::from_binary(&self.engine, &bytes)?;
+                        // Same check the local loader runs. Without it a rule
+                        // pushed from the dashboard installs, counts as active,
+                        // and then fails to link on every request — which the
+                        // runner turns into Bypass. The operator sees a rule
+                        // listed and enforcing nothing.
+                        if let Err(e) = super::host::check_imports_resolvable(&module) {
+                            tracing::error!(
+                                rule = %desc.name,
+                                sha256 = %desc.sha256,
+                                "Refusing control-plane WASM rule: {e}"
+                            );
+                            continue;
+                        }
                         new_modules.push(LoadedModule {
                             rule_id: desc.rule_id,
                             name: desc.name,
                             sha256: desc.sha256,
                             priority: desc.priority,
+                            mode: desc.mode,
                             module,
                         });
                     } else {
@@ -338,5 +449,89 @@ impl PluginRegistry {
         );
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A descriptor written before `mode` existed must keep enforcing.
+    ///
+    /// The default matters more than it looks. Defaulting to `Shadow` would
+    /// take every already-installed cloud rule out of enforcement on upgrade,
+    /// silently — a fleet that stops governing and reports nothing, which is the
+    /// worse of the two failure directions.
+    #[test]
+    fn a_descriptor_without_mode_enforces() {
+        let d: WasmPluginDescriptor = serde_json::from_str(
+            r#"{"ruleId":"r1","name":"n","sha256":"abc","priority":100}"#,
+        )
+        .expect("a descriptor without mode must still parse");
+        assert_eq!(d.mode, RuleMode::Enforce);
+    }
+
+    #[test]
+    fn mode_round_trips_in_both_spellings() {
+        for (json, expected) in [
+            (r#""SHADOW""#, RuleMode::Shadow),
+            (r#""shadow""#, RuleMode::Shadow),
+            (r#""ENFORCE""#, RuleMode::Enforce),
+            (r#""enforce""#, RuleMode::Enforce),
+        ] {
+            let m: RuleMode = serde_json::from_str(json).unwrap();
+            assert_eq!(m, expected, "{json} did not parse as expected");
+        }
+    }
+
+    /// The control plane sends `SHADOW`; the proxy must read it as shadow.
+    /// A mismatch here means a rule an operator believes is observing is
+    /// actually blocking.
+    #[test]
+    fn a_shadow_descriptor_parses_as_shadow() {
+        let d: WasmPluginDescriptor = serde_json::from_str(
+            r#"{"ruleId":"r1","name":"n","sha256":"abc","priority":100,"mode":"SHADOW"}"#,
+        )
+        .unwrap();
+        assert_eq!(d.mode, RuleMode::Shadow);
+    }
+
+    /// A shadow report carries the real verdict, not a sentinel.
+    ///
+    /// `telemetry.rs` rejected a `WOULD_HAVE` disposition for the detectors for
+    /// this reason: a synthetic value makes every consumer matching the real one
+    /// silently miss the shadowed events, and destroys the thing being measured.
+    #[test]
+    fn a_shadow_report_keeps_the_real_verdict() {
+        let r = ShadowReport {
+            rule_id: "r1".into(),
+            name: "n".into(),
+            would_act: true,
+            verdict: format!(
+                "{:?}",
+                Verdict::Kill { reason: "x".into(), policy_id: None }
+            ),
+        };
+        assert!(r.verdict.contains("Kill"), "the real verdict must survive: {}", r.verdict);
+        assert!(!r.verdict.contains("WOULD_HAVE"));
+    }
+
+    /// Bypasses are reported too, because they are the denominator.
+    ///
+    /// Reporting only the blocks would make a rule that fires on one request in
+    /// a thousand indistinguishable from one that fired on the only request it
+    /// ever saw — and promotion is gated on that ratio.
+    #[test]
+    fn a_bypass_is_still_reported() {
+        let r = ShadowReport {
+            rule_id: "r1".into(),
+            name: "n".into(),
+            would_act: false,
+            verdict: format!("{:?}", Verdict::Bypass),
+        };
+        assert!(!r.would_act);
+        // Serialised, so the control plane can count it.
+        let json = serde_json::to_string(&r).unwrap();
+        assert!(json.contains("would_act"));
     }
 }

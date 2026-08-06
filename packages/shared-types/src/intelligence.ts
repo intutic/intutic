@@ -29,7 +29,14 @@ export interface SslActivationResult {
 export interface SslGraphJson {
   scheduling_layer: {
     triggers: string[]
-    activation_rules: Record<string, string>
+    // An array, matching what is actually stored. This was
+    // `Record<string, string>` while `sslCompilerService` declared its own
+    // `SslGraphJson` with `string[]` and its LLM prompt asked for
+    // `"activation_rules": ["string"]` — so every graph in the database has an
+    // array here and the shared type described none of them. The mismatch was
+    // invisible because nothing reads the field and the read path casts through
+    // `as unknown as SslGraphJson`.
+    activation_rules: string[]
   }
   structural_layer: {
     steps: SslStep[]
@@ -209,22 +216,27 @@ export function getInputBucket(inputTokens: number): InputTokenBucket {
 // LLD #48: Auto-Classification & Optimization
 // ============================================
 
-export type WasteCategory =
-  | 'NONE'
-  | 'TOKEN_WASTE'
-  | 'LOOP_WASTE'
-  | 'RETRY_WASTE'
-  | 'CONTEXT_BLOAT'
-  | 'MODEL_MISMATCH'
+/**
+ * The waste types the detector can actually emit.
+ *
+ * This was a six-member `WasteCategory` — `TOKEN_WASTE`, `LOOP_WASTE`,
+ * `RETRY_WASTE`, `CONTEXT_BLOAT`, `MODEL_MISMATCH`, `NONE` — and **nothing in
+ * either repo ever produced one of those values**. It was the third of three
+ * disagreeing vocabularies: this one, the strings `wastePatternService` writes,
+ * and a fourth set in the seed. A shared type nothing produces is not a
+ * contract, it is a description of a product that was never built.
+ *
+ * One member, because one detector ships. `context_bloat` was removed with the
+ * always-zero figure that fed it; loop detection, tool misuse and outlier-cost
+ * analysis were never implemented.
+ */
+export type WasteType = 'oversized_prompt'
 
-export interface TokenUtilityResult {
-  utility: 'USEFUL' | 'WASTED' | 'AMBIGUOUS'
-  score: number
-  wasteCategory: WasteCategory
-  confidence: number
-  reason: string
-}
+// `TokenUtilityResult` stood here, carrying a `wasteCategory` from that enum.
+// It had no producer and no consumer. `execution_traces.token_utility` is the
+// live classification and it is a plain USEFUL/WASTED/AMBIGUOUS column.
 
+/** Input to trace classification. Currently type-only — no runtime consumer. */
 export interface TraceClassificationContext {
   traceId: string
   workspaceId: string
@@ -244,7 +256,7 @@ export interface TraceClassificationContext {
 export interface WastePattern {
   patternId: string
   workspaceId: string
-  wasteType: WasteCategory
+  wasteType: WasteType
   period: '24h' | '7d' | '30d'
   affectedTraces: number
   totalTokens: number

@@ -3298,16 +3298,14 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // streams-are-never-mirrored rule all live in `should_mirror`.
     if let Some((url, headers, body, candidate)) = mirror_plan {
         let roll: f64 = rand::random::<f64>();
-        // The slot IS the decision. `should_mirror` hands back the only
-        // `MirrorSlot` that can exist, so there is no way to mirror without
-        // holding one and no way to hold one without having been permitted.
-        if let Some(slot) = crate::routing::mirror::should_mirror(
+        if crate::routing::mirror::should_mirror(
             state.config.intutic_settings.routing.mirror_sample_rate,
             is_streaming,
             &model,
             &candidate,
             roll,
         ) {
+            let slot = crate::routing::mirror::MirrorSlot;
             let client = state.http_client.as_ref().clone();
             let ws = workspace_id.clone();
             let req_json = body_json.clone();

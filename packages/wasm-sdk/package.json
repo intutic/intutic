@@ -12,6 +12,7 @@
     "assemblyscript-json": "^1.1.0"
   },
   "devDependencies": {
+    "@intutic/shared-types": "workspace:*",
     "assemblyscript": "^0.27.29"
   }
 }

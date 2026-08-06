@@ -151,6 +151,7 @@ export {
   E_PROVIDER_DISABLED,
   E_PROVIDER_IN_USE,
   E_FEATURE_NOT_AVAILABLE,
+  E_SSL_NOT_ENFORCED,
   isIntuticError,
 } from './errors.js'
 export type { IntuticErrorCode } from './errors.js'
@@ -164,6 +165,11 @@ export type {
   CreateSessionInput,
   CreateTraceInput,
   PolicyVerdictInput,
+  ReviewBudget,
+  ListMeta,
+  IncidentRow,
+  TrajectoryAlertRow,
+  AnomalyRow,
 } from './api-contracts.js'
 
 export {
@@ -313,7 +319,6 @@ export type {
   CostPrediction,
   TokenBaseline,
   // LLD #48 — Auto-Classification & Optimization
-  TokenUtilityResult,
   TraceClassificationContext,
   WastePattern,
   OptimizationRecommendation,
@@ -342,7 +347,7 @@ export {
   type InputTokenBucket,
   getInputBucket,
   // LLD #48
-  type WasteCategory,
+  type WasteType,
   type RecommendationType,
 } from './intelligence.js'
 
@@ -358,3 +363,23 @@ export * from './taskManagement.js'
 
 
 
+
+export {
+  WASM_HOST_IMPORTS,
+  unsupportedWasmImports,
+  explainWasmImport,
+  type WasmHostImport,
+} from './wasmHost.js'
+
+export {
+  FIELDS as RULE_DSL_FIELDS,
+  OPERATORS as RULE_DSL_OPERATORS,
+  RENDERABLE_VERDICTS,
+  PredicateError,
+  validatePredicate,
+  renderRule,
+  type Predicate,
+  type Condition,
+  type Operator,
+  type FieldKind,
+} from './rulePredicateDsl.js'

@@ -111,6 +111,17 @@ pub struct CachedResponse {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct FeatureFlags {
     pub bandit_routing: bool,
+    /// Run routing in shadow: select, record, serve the requested model anyway.
+    ///
+    /// **Its own flag, not a mode field on the routing config.** Once
+    /// `ff_bandit_routing` exists as a key for a workspace, `config.yaml` is
+    /// ignored for that workspace forever — so "enable the flag and set a
+    /// config toggle" cannot be rolled back by editing the config, which is the
+    /// only lever a self-hosted operator has in that state.
+    ///
+    /// Read independently of `bandit_routing`, so shadow can be turned on for a
+    /// workspace that has never enforced.
+    pub shadow_routing: bool,
     pub response_cache_exact: bool,
     pub response_cache_semantic: bool,
     /// Evaluate every detector, record what it would have done, and **allow the

@@ -2016,6 +2016,42 @@ pub mod test_support {
 
 #[cfg(test)]
 mod tests {
+    /// The shapes the reference page tells operators to write must actually work.
+    ///
+    /// Both of these were documented wrong, and both failed in the direction
+    /// that is hardest to attribute: the control fires on *every* request, so it
+    /// reads as an over-eager product rather than a misconfiguration.
+    ///
+    /// `scope_paths: src/**` matched nothing — there is no glob expansion, so
+    /// `src/main.rs` is neither equal to `src/**` nor prefixed by `src/**/`, and
+    /// every write read as out of scope.
+    #[test]
+    fn documented_scope_paths_shape_matches_files_under_it() {
+        let scopes = vec!["src".to_string(), "docs".to_string()];
+        assert!(is_within_scope("src/main.rs", &scopes));
+        assert!(is_within_scope("./src/nested/deep.rs", &scopes));
+        assert!(is_within_scope("docs/guide.md", &scopes));
+        assert!(!is_within_scope("secrets/.env", &scopes));
+        // The prefix must be a path segment, not a string prefix: `srcfoo` is
+        // not inside `src`.
+        assert!(!is_within_scope("srcfoo/a.rs", &scopes));
+    }
+
+    /// The glob form this page used to document, pinned as NOT working — so
+    /// that if glob support is ever added, this test fails and the doc gets
+    /// updated with it rather than silently becoming wrong in the other
+    /// direction.
+    #[test]
+    fn glob_scope_paths_still_match_nothing() {
+        let scopes = vec!["src/**".to_string()];
+        assert!(
+            !is_within_scope("src/main.rs", &scopes),
+            "glob expansion appears to have been added — update \
+             apps/docs/reference/sop-front-matter.md, which currently tells \
+             operators globs do not work"
+        );
+    }
+
     use super::test_support::*;
     use super::*;
 

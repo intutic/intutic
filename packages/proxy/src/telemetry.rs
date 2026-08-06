@@ -34,6 +34,58 @@ pub struct ExecutionTrace {
     pub provider: String,
     pub raw_input_tokens: u32,
     pub compressed_input_tokens: u32,
+    /// Bytes the SnipCompactor removed from this **response** body.
+    ///
+    /// Separate from `compressed_input_tokens` on purpose. Compaction runs after
+    /// the model replies, so its benefit lands in the next turn's prompt and is
+    /// already inside that turn's `raw_input_tokens` — reporting it as an
+    /// input-side delta here would double-count. The pair above are written
+    /// equal on every trace path, which is why the dashboard's "Context
+    /// Redundancy" slice was structurally always zero; this is the field that
+    /// actually carries a measured saving.
+    #[serde(default)]
+    pub tool_result_bytes_saved: u64,
+    /// What each shadowed WASM rule would have done on this request.
+    ///
+    /// Empty on nearly every trace, which is why it is `skip_serializing_if`:
+    /// a workspace with no shadowed rule should not pay for the field on every
+    /// request. Promotion out of shadow is gated on a counted false-positive
+    /// rate, and this is the only place that count can come from — a log line
+    /// is not a denominator.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub wasm_shadow_reports: Vec<crate::wasm::registry::ShadowReport>,
+    /// Response Integrity Score, 0–100. 100 is clean.
+    ///
+    /// The router's only quality signal. Before it, `upstream_ok` plus latency
+    /// plus a token *metering* discrepancy was the whole view — so a cheap model
+    /// returning a confidently wrong answer, quickly, scored a perfect reward,
+    /// and the session lock made that sample persist for the session's life.
+    ///
+    /// It detects malformed, truncated and unusable responses. It does NOT
+    /// detect wrong-but-well-formed ones, which is most of the real harm from
+    /// downgrading — no copy may claim routing preserves quality.
+    ///
+    /// No serde default here: `ExecutionTrace` is serialise-only, so one would
+    /// be decoration. The "absent means not measured, which reads as clean"
+    /// rule belongs on the consumer, and defaulting it to 0 there would make
+    /// every historical trace look like a total failure and drag every arm's
+    /// reward to the floor.
+    /// What the router WOULD have selected, when routing is in shadow mode.
+    ///
+    /// `None` in every other mode, and when shadow picked the requested model
+    /// anyway. Recorded rather than only logged: shadow's whole output is reach
+    /// and counterfactual cost, and neither is computable from a log line.
+    ///
+    /// Carries the real model name, not a sentinel — the same reasoning
+    /// `FindingWire.shadowed` documents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routing_shadow_model: Option<String>,
+    pub response_integrity: u8,
+    /// The first failing check, named. A bare score is not auditable: an
+    /// operator seeing 40 cannot tell a truncation from a bad tool call, and the
+    /// two have opposite remedies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quality_fault: Option<String>,
     pub output_tokens: u32,
     pub raw_cost_usd: f64,
     pub actual_cost_usd: f64,

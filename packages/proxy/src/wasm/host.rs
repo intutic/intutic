@@ -1,6 +1,6 @@
 //! Host function imports for WASM plugins.
 
-use wasmtime::{Caller, Linker};
+use wasmtime::{Caller, Linker, Module};
 
 /// Every host function a rule may import, declared once.
 ///
@@ -22,6 +22,45 @@ use wasmtime::{Caller, Linker};
 /// `tools/scripts/check-wasm-host-imports.js` asserts this list and the CLI's
 /// agree. One place, or they drift — which is exactly what happened.
 pub const HOST_IMPORTS: &[&str] = &["log_info", "abort", "trace"];
+
+/// Reject a module that names a host import the proxy does not provide.
+///
+/// Lives here rather than in `local_loader` because there are two loaders.
+/// It guarded only the local-disk path, so a rule pushed from the dashboard
+/// compiled clean, counted as an active plugin, and then failed to link on
+/// every request — landing in the runner's `Ok(Err(_)) => Verdict::Bypass`
+/// arm. Same defect, different route, and the cloud route is the one an
+/// operator cannot inspect.
+///
+/// `Module::from_binary` compiles without resolving imports, so a rule
+/// importing `env.seed` — which AssemblyScript emits for `Math.random()` —
+/// used to load cleanly, count as an active plugin, and appear in
+/// `intutic policy list-local`. It then failed `linker.instantiate` on *every*
+/// request, and the runner's fail-open converted that into `Bypass`. The
+/// operator had an installed rule enforcing nothing, permanently.
+///
+/// A link failure is not the transient condition fail-open exists for. It is a
+/// property of the file and will hold for every request that file is present
+/// for, so the honest moment to report it is once, at load.
+pub fn check_imports_resolvable(module: &Module) -> anyhow::Result<()> {
+    for import in module.imports() {
+        // `env` is the only module the linker defines; anything else is
+        // unresolvable by construction.
+        let known = import.module() == "env"
+            && HOST_IMPORTS.contains(&import.name());
+        if !known {
+            anyhow::bail!(
+                "imports `{}.{}`, which the proxy does not provide. Available \
+                 host imports: {}. A rule that cannot link never runs — it \
+                 would be skipped on every request rather than enforcing.",
+                import.module(),
+                import.name(),
+                HOST_IMPORTS.join(", "),
+            );
+        }
+    }
+    Ok(())
+}
 
 /// Registers host function imports into the linker.
 pub fn register_host_imports(linker: &mut Linker<super::runner::WasmState>) -> anyhow::Result<()> {
@@ -122,4 +161,71 @@ pub fn register_host_imports(linker: &mut Linker<super::runner::WasmState>) -> a
     // MSE 0 and could never have blocked anything.
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wasmtime::Engine;
+
+    /// Builds a module importing exactly one function, from WAT.
+    ///
+    /// Hand-written rather than a checked-in `.wasm`, and deliberately not
+    /// compiled with `asc`: a test that needs the AssemblyScript toolchain turns
+    /// a missing-toolchain problem into a skipped assertion, and this is the
+    /// assertion that stops a rule enforcing nothing.
+    fn module_importing(engine: &Engine, module_name: &str, func: &str) -> Module {
+        let wat = format!(r#"(module (import "{module_name}" "{func}" (func)))"#);
+        Module::new(engine, wat).expect("fixture module should compile")
+    }
+
+    /// The bypass: `env.seed` is what AssemblyScript emits for `Math.random()`,
+    /// the proxy has never registered it, and `Module::from_binary` compiles
+    /// without resolving imports. So such a rule loaded, counted as an active
+    /// plugin, and failed to link on every request — which the runner turns into
+    /// `Verdict::Bypass`. It enforced nothing, and nothing said so.
+    #[test]
+    fn rejects_an_import_the_host_does_not_register() {
+        let engine = Engine::default();
+        let err = check_imports_resolvable(&module_importing(&engine, "env", "seed"))
+            .expect_err("a rule importing env.seed must be refused at load");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("env") && msg.contains("seed"),
+            "the failure must name the import so an author can act on it, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn rejects_an_import_from_a_module_other_than_env() {
+        let engine = Engine::default();
+        // WASI is not linked. A rule reaching for the filesystem must not load.
+        assert!(
+            check_imports_resolvable(&module_importing(
+                &engine,
+                "wasi_snapshot_preview1",
+                "fd_write"
+            ))
+            .is_err()
+        );
+    }
+
+    /// The other half. A check that refuses everything would also pass the test
+    /// above, and would take every real rule offline.
+    #[test]
+    fn accepts_every_import_the_host_actually_registers() {
+        let engine = Engine::default();
+        for name in HOST_IMPORTS {
+            check_imports_resolvable(&module_importing(&engine, "env", name)).unwrap_or_else(|e| {
+                panic!("env.{name} is registered by this module but rejected at load: {e}")
+            });
+        }
+    }
+
+    #[test]
+    fn a_module_importing_nothing_is_fine() {
+        let engine = Engine::default();
+        let module = Module::new(&engine, "(module)").unwrap();
+        assert!(check_imports_resolvable(&module).is_ok());
+    }
 }

@@ -113,6 +113,15 @@ export const E_OFFBOARDING_IN_PROGRESS = 'OFFBOARDING_IN_PROGRESS' as const
 /** Feature is not available on the current plan tier. */
 export const E_FEATURE_NOT_AVAILABLE = 'FEATURE_NOT_AVAILABLE' as const
 
+/**
+ * A session has no SSL graph, so there is nothing to audit it against.
+ *
+ * Distinct from "compliant" on purpose. The compliance report used to score an
+ * unseeded session 1.0 — a perfect result for a session that was never enforced —
+ * which made the unenforced sessions rank best in a workspace's audit history.
+ */
+export const E_SSL_NOT_ENFORCED = 'SSL_NOT_ENFORCED' as const
+
 // ─── WS4 — Enterprise Identity & Compliance (LLD #19) ───────────────
 
 /**
@@ -172,6 +181,7 @@ export type IntuticErrorCode =
   | typeof E_PROVIDER_IN_USE
   | typeof E_OFFBOARDING_IN_PROGRESS
   | typeof E_FEATURE_NOT_AVAILABLE
+  | typeof E_SSL_NOT_ENFORCED
   // WS4 — Enterprise Identity & Compliance (LLD #19)
   | typeof E_ATTENUATION_CAP_VIOLATION
   // WS5 — Monetization & Financial Ledger (LLD #20)
