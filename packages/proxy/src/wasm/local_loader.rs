@@ -98,37 +98,6 @@ pub fn parse_priority(file_name: &str) -> (u32, String) {
     (DEFAULT_PRIORITY, stem.to_string())
 }
 
-/// Reject a module that names a host import the proxy does not provide.
-///
-/// `Module::from_binary` compiles without resolving imports, so a rule
-/// importing `env.seed` — which AssemblyScript emits for `Math.random()` —
-/// used to load cleanly, count as an active plugin, and appear in
-/// `intutic policy list-local`. It then failed `linker.instantiate` on *every*
-/// request, and the runner's fail-open converted that into `Bypass`. The
-/// operator had an installed rule enforcing nothing, permanently.
-///
-/// A link failure is not the transient condition fail-open exists for. It is a
-/// property of the file and will hold for every request that file is present
-/// for, so the honest moment to report it is once, at load.
-fn check_imports_resolvable(module: &Module) -> anyhow::Result<()> {
-    for import in module.imports() {
-        // `env` is the only module the linker defines; anything else is
-        // unresolvable by construction.
-        let known = import.module() == "env"
-            && super::host::HOST_IMPORTS.contains(&import.name());
-        if !known {
-            anyhow::bail!(
-                "imports `{}.{}`, which the proxy does not provide. Available \
-                 host imports: {}. A rule that cannot link never runs — it \
-                 would be skipped on every request rather than enforcing.",
-                import.module(),
-                import.name(),
-                super::host::HOST_IMPORTS.join(", "),
-            );
-        }
-    }
-    Ok(())
-}
 
 /// Compile every rule file in the given signature set (from
 /// [`scan_signatures`]). Fail-open per file: a corrupt or mid-copy file is
@@ -162,7 +131,7 @@ pub fn load_local_modules(
             .and_then(|bytes| {
                 let sha256 = hex::encode(Sha256::digest(&bytes));
                 let module = Module::from_binary(engine, &bytes)?;
-                check_imports_resolvable(&module)?;
+                super::host::check_imports_resolvable(&module)?;
                 Ok((sha256, module))
             });
 
@@ -174,6 +143,10 @@ pub fn load_local_modules(
                     name,
                     sha256,
                     priority,
+                    // A locally-installed rule always enforces. Shadow is for generated
+                    // rules, which arrive from the control plane; a developer who ran
+                    // `intutic policy install` meant it.
+                    mode: super::registry::RuleMode::Enforce,
                     module,
                 });
             }
