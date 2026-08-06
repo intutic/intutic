@@ -15,7 +15,7 @@ If your agent runs into an infinite loop, LangSmith will record a detailed visua
 | Capability | Intutic | LangSmith |
 |-----------|---------|-----------|
 | **Primary Purpose** | Active security containment & cost enforcement | Passive tracing, debugging, and offline evaluations |
-| **Execution Path** | Synchronous interceptor (under 50ms) | Asynchronous logging listener |
+| **Execution Path** | Synchronous interceptor — the call blocks on the verdict | Asynchronous logging listener |
 | **Cost Control** | Real-time budget gates (kills runaway loops) | Cost estimation after request completes |
 | **Tool-Call Security** | Active blocks on shell commands, files, APIs | Post-hoc audit trail of executed tools |
 | **Policy Definition** | Standardized SOP schemas and WASM rules | Evaluator prompt tests ran against logs |

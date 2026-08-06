@@ -14,10 +14,27 @@ The Intelligence Engine automatically flags inefficient token spend.
 
 ### Types of Waste Detected
 
-- **Loop Detection** — Identifies redundant tool invocations (e.g., repeatedly calling `view_file` or `run_command` with identical inputs) where the agent is stuck in an execution cycle.
-- **Redundant Context** — Identifies prompts that repeatedly append massive files or logs that have not changed across execution steps.
-- **Tool Misuse** — Identifies scenarios where lower-cost tools (e.g., `grep_search` or `list_dir`) could have been used instead of high-token operations.
-- **Outlier Cost** — Detects anomalies where a single request consumes an excessive portion of the workspace budget.
+One detector ships today.
+
+- **Oversized Prompt** *(heuristic, confidence 0.6)* — Traces whose raw input exceeds
+  three times the workspace median. The excess over the median is attributed as waste.
+  A legitimately large task looks identical, which is why the confidence is moderate and
+  why the panel labels this **heuristic** rather than **measured**.
+
+A second detector, **Redundant Context**, has been removed. It compared raw against
+compressed input tokens, and the proxy writes those equal on every trace path, so it was
+structurally incapable of firing — while shipping as *measured*, at confidence 1.0.
+
+The compactor's real saving is now recorded and shown, but it is **not waste**, and it is
+not on this page. It appears on the dashboard's efficiency tab as *tool output trimmed*,
+in **bytes**, beside the token chart rather than inside it. Two reasons: the figure is
+byte-denominated and everything here is priced per token, and it is a saving already
+realised, whereas this page lists waste still outstanding. It is also **response-side** —
+the compactor runs after the model replies, so the benefit lands in the next turn's
+prompt rather than reducing the request it was measured on.
+
+Loop detection, tool misuse and outlier-cost analysis are not implemented. This page
+previously described all four as shipping.
 
 ::: tip Waste Classification
 Telemetry is classified under the **Waste Patterns** tab on the Intelligence page. Recommendations are automatically calculated to help you adjust agent context limits and prompt guidelines.

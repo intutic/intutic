@@ -42,7 +42,8 @@ export const continueAdapter: IHarnessAdapter = {
 
   async writeConfig(_workspaceRoot: string, _sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
     // Merge apiBase into each model entry in config.yaml
-    let raw = ''
+    // Both branches below assign, so an initialiser here would always be dead.
+    let raw: string
     try { raw = await readFile(CONFIG_YAML, 'utf-8') } catch { raw = '' }
 
     // Inject apiBase under each `- name:` model entry.

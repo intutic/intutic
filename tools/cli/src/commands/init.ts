@@ -8,7 +8,7 @@
  * @module
  */
 
-import { existsSync, statSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { join, resolve, dirname } from 'node:path'
 import { log } from '../lib/logger.js'
 import { loadCredentials, saveConfig } from '../config/store.js'

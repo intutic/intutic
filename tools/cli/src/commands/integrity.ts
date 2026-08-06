@@ -380,6 +380,7 @@ function formatTimestamp(iso: string | null): string {
  * colour when stdout is not a TTY — so the bug was invisible in a pipe and
  * present in every real terminal.
  */
+// eslint-disable-next-line no-control-regex -- ESC (\u001b) opens every SGR colour sequence; matching it is this pattern's whole purpose.
 const ANSI = /\u001b\[[0-9;]*m/g
 
 function visibleLength(str: string): number {
