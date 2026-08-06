@@ -51,9 +51,6 @@ import { writeN8nHooks } from './harness/n8nHooks.js'
 import { writeHermesHooks } from './harness/hermesHooks.js'
 import { writeOpenclawHooks } from './harness/openclawHooks.js'
 import { writePiHooks } from './harness/piHooks.js'
-import { writeCursorHooksJson } from './harness/cursorHooksJson.js'
-import { writeGooseHooks as writeGooseHooksNative } from './harness/gooseHooksWriter.js'
-import { writeOpenHandsHooks as writeOpenHandsHooksNative } from './harness/openhandsHooksWriter.js'
 
 // ─── Harness config file mapping ─────────────────────────────────────
 
@@ -164,7 +161,7 @@ export async function writeConfigFiles(
         })
       }
     }
-  } catch (err) {
+  } catch {
     // ignore directory read errors (e.g. if sops folder doesn't exist)
   }
 
@@ -190,19 +187,29 @@ export async function writeConfigFiles(
       continue
     }
 
-    // Phase 4 WS-4C — native hook script writers
-    if (harness === 'cursor') {
-      try { await writeCursorHooksJson(workspaceRoot) } catch (e) {
-        console.warn('[sync-daemon] writeCursorHooksJson failed (non-fatal):', e) }
-    }
-    if (harness === 'goose') {
-      try { await writeGooseHooksNative(workspaceRoot) } catch (e) {
-        console.warn('[sync-daemon] writeGooseHooksNative failed (non-fatal):', e) }
-    }
-    if (harness === 'openhands') {
-      try { await writeOpenHandsHooksNative(workspaceRoot) } catch (e) {
-        console.warn('[sync-daemon] writeOpenHandsHooksNative failed (non-fatal):', e) }
-    }
+    // cursor is deliberately absent here, for the same reason goose and
+    // openhands are below.
+    //
+    // `cursorHooksJson` was a second writer of `.cursor/hooks.json`, and the two
+    // disagreed about the file's schema: `cursorHooks` writes an object per
+    // event carrying `failClosed: true`, while `cursorHooksJson.mergeHooks`
+    // tested `Array.isArray(existing[event])`, found false, and REPLACED it with
+    // a bare `{command}` array. So it silently dropped fail-closed and repointed
+    // the user-level shell and MCP gates at `~/.intutic/hooks/cursor-check.js`,
+    // a path no writer produces. `cursorHooks` already registers a superset of
+    // its events at both levels, so it is deleted rather than repaired.
+    // goose and openhands are deliberately absent here.
+    //
+    // They each used to get a *second* gate from this call site —
+    // gooseHooksWriter.ts and openhandsHooksWriter.ts — installed alongside the
+    // one their own writer produces. The two had contradictory models: the
+    // survivors enforce locally and fail closed, these POSTed every tool call to
+    // the control plane and failed open on any error or timeout. For openhands
+    // both wrote `.openhands/hooks.json`, so whichever ran last silently won.
+    //
+    // Deleted rather than deprecated: two modules exporting the same symbol for
+    // one harness *is* the defect. And they are not replaced by calls to the
+    // survivors here — a second call site is how this started.
 
     // Phase 2 deferred or unknown harness
     if (!filename) {

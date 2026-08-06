@@ -13,7 +13,6 @@
 
 import chokidar from 'chokidar'
 import * as node_path from 'node:path'
-import * as node_os from 'node:os'
 import { HARNESS_FILES } from '../configWriter.js'
 import type { HarnessType } from '@intutic/shared-types'
 import { createLogger } from '@intutic/logger'

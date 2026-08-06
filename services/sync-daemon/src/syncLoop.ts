@@ -33,16 +33,44 @@ import type {
 import { writeConfigFiles, HARNESS_FILES, applyConfigEdits } from './configWriter.js'
 import { computeFileHashes } from './hashReporter.js'
 import { loadIntegrity, saveIntegrity } from './integrityStore.js'
-import { drainHookEvents } from './harness/claudeCodeHooks.js'
+import {
+  drainHookEvents,
+  drainReviewRequests,
+  REVIEW_REQUESTS_LOG,
+} from './harness/claudeCodeHooks.js'
 import { writeRuntimeEnv } from './lib/runtimeEnv.js'
+import { refreshPolicySnapshot } from './lib/policySnapshot.js'
 import { runComplianceProbes } from './lib/complianceProbes.js'
 import { startWatcher } from './watcher/driftWatcher.js'
 import { shouldCaptureThisIteration, captureAndUpload } from './configReader.js'
 import { watch } from 'chokidar'
-import Redis from 'ioredis'
+// Named import, not default: this package is ESM ("type": "module") and under
+// Node16 resolution the default import of ioredis's CJS typings resolves to the
+// module namespace, which is neither constructable nor usable as a type. The
+// named export is the class itself. (The old `new (Redis as any)(...)` cast
+// silenced exactly this, at the cost of also erasing the instance type.)
+import { Redis } from 'ioredis'
 import { TrajectoryMonitor } from './trajectoryMonitor.js'
 import { collectAgentReport, reportAgent } from './agentReporter.js'
 import { startHarnessSession, endAllOpenSessions } from './sessionReporter.js'
+import type { TraceEvent } from './trajectoryMonitor.js'
+
+/** Narrow an unknown thrown value to a printable message. */
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
+/**
+ * Structural guard for trace events arriving over the `trace:live:*` Valkey
+ * channel. The payload is JSON off the wire, so it is genuinely unknown here;
+ * `handleTraceEvent` indexes `sessionId`/`workspaceId` immediately and a
+ * malformed publish would otherwise fault inside the buffer bookkeeping.
+ */
+function isTraceEvent(value: unknown): value is TraceEvent {
+  if (typeof value !== 'object' || value === null) return false
+  const e = value as Record<string, unknown>
+  return typeof e['sessionId'] === 'string' && typeof e['workspaceId'] === 'string'
+}
 
 // ─── Public interfaces ───────────────────────────────────────────────
 
@@ -64,8 +92,6 @@ export interface SyncLoopOptions {
   onSync?: (result: SyncResult) => void
   /** AbortSignal to gracefully stop the loop. */
   signal?: AbortSignal
-  /** Adapter identifier for ContextGraph sync. */
-  adapterId?: string
 }
 
 /** Result of a single sync iteration. */
@@ -109,12 +135,11 @@ export async function startSyncLoop(options: SyncLoopOptions): Promise<void> {
     pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
     onSync,
     signal,
-    adapterId,
   } = options
 
   // Step -1: Start the Trajectory Monitor & Valkey Subscriber
   let trajectoryMonitor: TrajectoryMonitor | null = null
-  let trajectorySubscriber: any = null
+  let trajectorySubscriber: Redis | null = null
 
   if (process.env.VALKEY_URL || apiKey) {
     const valkeyUrl = process.env.VALKEY_URL ?? 'redis://127.0.0.1:6379'
@@ -128,12 +153,16 @@ export async function startSyncLoop(options: SyncLoopOptions): Promise<void> {
 
     try {
       await trajectoryMonitor.start()
-      trajectorySubscriber = new (Redis as any)(valkeyUrl)
+      trajectorySubscriber = new Redis(valkeyUrl)
       await trajectorySubscriber.psubscribe('trace:live:*')
-      
-      trajectorySubscriber.on('pmessage', (pattern: string, channel: string, message: string) => {
+
+      trajectorySubscriber.on('pmessage', (_pattern: string, _channel: string, message: string) => {
         try {
-          const event = JSON.parse(message)
+          const event: unknown = JSON.parse(message)
+          if (!isTraceEvent(event)) {
+            console.warn('[sync-daemon] Discarding malformed trajectory trace event')
+            return
+          }
           trajectoryMonitor?.handleTraceEvent(event)
         } catch (err) {
           // Non-blocking warning
@@ -160,6 +189,14 @@ export async function startSyncLoop(options: SyncLoopOptions): Promise<void> {
     console.warn('[sync-daemon] Could not write runtime env file (non-fatal):', err)
   }
 
+  // Step 0b: Refresh the policy snapshot every gate reads.
+  //
+  // Deliberately here beside writeRuntimeEnv, and deliberately NOT inside
+  // writeConfigFiles: that path is gated on the config version, so a snapshot
+  // written there would go stale by construction on every cycle where the
+  // version did not move. Policy changes without the config version changing.
+  await refreshPolicySnapshot({ controlPlaneUrl, apiKey, workspaceId })
+
   // Try to sync offline traces back to PostgreSQL
   try {
     await syncOfflineTraces(controlPlaneUrl, apiKey)
@@ -171,6 +208,10 @@ export async function startSyncLoop(options: SyncLoopOptions): Promise<void> {
   // Drains immediately when the hook-events.jsonl file changes (written by hook scripts).
   // Falls back to a 60s safety-net interval for NFS/Docker mounts where inotify may not fire.
   const hookEventsLog = `${workspaceRoot}/.intutic/events/hook-events.jsonl`
+  // The review-hold log, watched alongside it. Two named files rather than the
+  // directory: a directory watch would also fire on `.rejected.jsonl`, which the
+  // drain itself writes, and a drain that retriggers itself is a loop.
+  const reviewHoldsLog = `${workspaceRoot}/${REVIEW_REQUESTS_LOG}`
   let fsWatcher: ReturnType<typeof watch> | null = null
   let drainSafetyTimer: ReturnType<typeof setInterval> | null = null
 
@@ -183,10 +224,20 @@ export async function startSyncLoop(options: SyncLoopOptions): Promise<void> {
     } catch (err) {
       console.warn('[sync-daemon] Hook event drain error (non-fatal):', err)
     }
+    // Separate try: a failure draining events must not skip the holds. They go
+    // to different endpoints and one being down says nothing about the other.
+    try {
+      const held = await drainReviewRequests(workspaceRoot, controlPlaneUrl, apiKey)
+      if (held > 0) {
+        console.log(`[sync-daemon] Drained ${held} review hold(s) to control plane`)
+      }
+    } catch (err) {
+      console.warn('[sync-daemon] Review hold drain error (non-fatal):', err)
+    }
   }
 
   try {
-    fsWatcher = watch(hookEventsLog, { ignoreInitial: true, persistent: false })
+    fsWatcher = watch([hookEventsLog, reviewHoldsLog], { ignoreInitial: true, persistent: false })
     fsWatcher.on('change', runDrain)
     fsWatcher.on('add', runDrain)
   } catch {
@@ -254,7 +305,6 @@ export async function startSyncLoop(options: SyncLoopOptions): Promise<void> {
         workspaceId,
         workspaceRoot,
         onSync,
-        adapterId,
       })
 
       // Update cached state for drift handler
@@ -271,6 +321,9 @@ export async function startSyncLoop(options: SyncLoopOptions): Promise<void> {
           mcpProxyMode: result.settings?.mcpProxyMode,
           bypassEnforcementTier: result.settings?.bypassEnforcementTier,
         })
+        // Same reasoning as Step 0b: policy rides the sync cycle, not the
+        // config version.
+        await refreshPolicySnapshot({ controlPlaneUrl, apiKey, workspaceId })
       }
 
       // Start the drift watcher on first successful sync (once harnesses are known)
@@ -330,7 +383,6 @@ interface IterationContext {
   workspaceId: string
   workspaceRoot: string
   onSync?: (result: SyncResult) => void
-  adapterId?: string
 }
 
 /**
@@ -343,7 +395,7 @@ interface IterationContext {
  * 6. Call onSync callback
  */
 async function runSyncIteration(ctx: IterationContext): Promise<SyncResult> {
-  const { controlPlaneUrl, apiKey, workspaceId, workspaceRoot, onSync, adapterId } = ctx
+  const { controlPlaneUrl, apiKey, workspaceId, workspaceRoot, onSync } = ctx
 
   // 1. Fetch config from control plane
   const config = await fetchConfig(controlPlaneUrl, apiKey, workspaceId)
@@ -637,8 +689,8 @@ export async function syncOfflineTraces(controlPlaneUrl: string, apiKey: string)
       // Rename to avoid write race conditions with the Rust proxy
       try {
         fs.renameSync(originalPath, syncingPath)
-      } catch (renameErr: any) {
-        console.error(`[sync-daemon] Failed to lock/rename file ${file}:`, renameErr.message)
+      } catch (renameErr) {
+        console.error(`[sync-daemon] Failed to lock/rename file ${file}:`, errorMessage(renameErr))
         continue
       }
 
@@ -675,19 +727,19 @@ export async function syncOfflineTraces(controlPlaneUrl: string, apiKey: string)
         // Successfully synced this sharded file, delete it
         fs.unlinkSync(syncingPath)
         console.log(`[sync-daemon] Successfully synced ${traces.length} offline traces back from ${file}.`)
-      } catch (err: any) {
-        console.error(`[sync-daemon] Failed to sync offline traces back from ${file}:`, err.message)
+      } catch (err) {
+        console.error(`[sync-daemon] Failed to sync offline traces back from ${file}:`, errorMessage(err))
         // Revert rename on failure to allow retry on next cycle
         try {
           if (fs.existsSync(syncingPath)) {
             fs.renameSync(syncingPath, originalPath)
           }
-        } catch (revertErr: any) {
-          console.error(`[sync-daemon] Failed to revert rename for ${file}:`, revertErr.message)
+        } catch (revertErr) {
+          console.error(`[sync-daemon] Failed to revert rename for ${file}:`, errorMessage(revertErr))
         }
       }
     }
-  } catch (err: any) {
-    console.error(`[sync-daemon] Failed to scan offline traces directory:`, err.message)
+  } catch (err) {
+    console.error(`[sync-daemon] Failed to scan offline traces directory:`, errorMessage(err))
   }
 }
