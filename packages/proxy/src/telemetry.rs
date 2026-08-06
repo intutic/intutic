@@ -89,6 +89,16 @@ pub struct ExecutionTrace {
     /// `RIS_MAX`, the column was `NOT NULL DEFAULT 100`, and `COUNT(...)` could
     /// therefore never be less than the row count — so the skip could not fire
     /// and every arm was credited with perfection nobody observed.
+    ///
+    /// `skip_serializing_if`, like `routing_shadow_model` and `quality_fault`
+    /// above and below it. Without it serde emits `"response_integrity": null`,
+    /// and the sync-back route's zod schema had this field as `.optional()` —
+    /// which accepts `undefined` and **rejects `null`**. A rejected trace is
+    /// skipped with a warning and the route still answers 200, so every
+    /// unmeasured trace would have been dropped at ingest while the sync
+    /// reported success. `loop_run_id` below emits null deliberately and its
+    /// schema says `.nullish()`; this one did not follow that.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub response_integrity: Option<u8>,
     /// The first failing check, named. A bare score is not auditable: an
     /// operator seeing 40 cannot tell a truncation from a bad tool call, and the
