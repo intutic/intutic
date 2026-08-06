@@ -45,9 +45,7 @@ impl RequestPreProcessor {
         let last_message = get_last_user_message(messages)?;
 
         // 1. Check for /intutic or @intutic slash commands
-        let intutic_pos = last_message
-            .find("/intutic")
-            .or_else(|| last_message.find("@intutic"));
+        let intutic_pos = find_slash_command(&last_message);
         if let Some(pos) = intutic_pos {
             let command_line = last_message[pos..].trim();
             let parts: Vec<&str> = command_line.split_whitespace().collect();
@@ -113,6 +111,46 @@ impl RequestPreProcessor {
 
         None
     }
+}
+
+/// Locate a `/intutic` or `@intutic` command, if the message actually contains one.
+///
+/// This used to be `last_message.find("/intutic")` — a bare substring search over
+/// the whole message. That matches inside ordinary prose and, worse, inside
+/// paths. Our own Artifact Registry is
+/// `us-central1-docker.pkg.dev/intutic/intutic/...`, so *any* prompt naming a
+/// container image was intercepted and answered with
+/// "Command Failed: `/intutic` returned status 400" instead of reaching the
+/// model. Observed twice while building a demo that deploys our own images. Any
+/// customer whose registry, repo path, or docs URL contains `/intutic` hits it
+/// too, and the `--force` bypass below cannot help — it is checked afterwards.
+///
+/// A slash command is a command because of where it sits, not merely because
+/// the characters appear somewhere. Require the start of the message or the
+/// start of a line, allowing leading whitespace, and require that what follows
+/// is a boundary rather than more word characters — so `/intuticfoo` is not a
+/// command either.
+fn find_slash_command(message: &str) -> Option<usize> {
+    for prefix in ["/intutic", "@intutic"] {
+        let mut from = 0usize;
+        while let Some(rel) = message[from..].find(prefix) {
+            let pos = from + rel;
+
+            // Everything before it on this line must be whitespace.
+            let line_start = message[..pos].rfind('\n').map_or(0, |i| i + 1);
+            let at_line_start = message[line_start..pos].trim().is_empty();
+
+            // And it must not run straight into more word characters.
+            let after = message[pos + prefix.len()..].chars().next();
+            let boundary = after.is_none_or(|c| !c.is_alphanumeric() && c != '_' && c != '-');
+
+            if at_line_start && boundary {
+                return Some(pos);
+            }
+            from = pos + prefix.len();
+        }
+    }
+    None
 }
 
 fn get_last_user_message(messages: &serde_json::Value) -> Option<String> {
@@ -188,4 +226,70 @@ pub fn format_as_llm_response(text: &str, protocol: &crate::protocol::Protocol) 
     };
 
     serde_json::to_vec(&response).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod slash_command_tests {
+    use super::find_slash_command;
+
+    // The string that actually broke a live demo: our own Artifact Registry
+    // path. Before the boundary check this was intercepted and the request
+    // never reached the model.
+    const AR_PATH: &str =
+        "Deploy us-central1-docker.pkg.dev/intutic/intutic/sockshop/catalogue:0.3.5";
+
+    #[test]
+    fn a_registry_path_is_not_a_command() {
+        assert_eq!(find_slash_command(AR_PATH), None);
+    }
+
+    #[test]
+    fn prose_mentioning_the_path_is_not_a_command() {
+        assert_eq!(
+            find_slash_command("The image lives at docker.pkg.dev/intutic/intutic/proxy."),
+            None
+        );
+    }
+
+    #[test]
+    fn a_docs_url_is_not_a_command() {
+        assert_eq!(find_slash_command("see https://example.com/intutic/setup"), None);
+    }
+
+    #[test]
+    fn a_command_at_the_start_is_found() {
+        assert_eq!(find_slash_command("/intutic status"), Some(0));
+        assert_eq!(find_slash_command("@intutic judge"), Some(0));
+    }
+
+    #[test]
+    fn a_command_on_its_own_line_is_found() {
+        let msg = "please review this\n/intutic status";
+        assert_eq!(find_slash_command(msg), Some(msg.find("/intutic").unwrap()));
+    }
+
+    #[test]
+    fn leading_whitespace_is_allowed() {
+        let msg = "  \t/intutic help";
+        assert_eq!(find_slash_command(msg), Some(msg.find("/intutic").unwrap()));
+    }
+
+    #[test]
+    fn a_bare_command_with_no_args_is_found() {
+        assert_eq!(find_slash_command("/intutic"), Some(0));
+    }
+
+    #[test]
+    fn a_longer_word_is_not_a_command() {
+        // `/intuticorn` is not `/intutic`.
+        assert_eq!(find_slash_command("/intuticorn is a word"), None);
+        assert_eq!(find_slash_command("/intutic-extra"), None);
+    }
+
+    #[test]
+    fn a_real_command_later_in_the_message_still_wins_over_a_path_earlier() {
+        let msg = "pull docker.pkg.dev/intutic/intutic/proxy\n/intutic status";
+        let pos = find_slash_command(msg).expect("the line-start command should be found");
+        assert_eq!(&msg[pos..pos + 15], "/intutic status");
+    }
 }
