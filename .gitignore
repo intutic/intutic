@@ -40,11 +40,20 @@ coverage/
 # Rust proxy service
 target/
 **/*.rs.bk
-# The workspace root Cargo.lock is the ONE Cargo actually resolves against
-# (root Cargo.toml declares packages/proxy as a [workspace] member), so it is
-# committed to pin release builds. packages/proxy/Cargo.lock is inert — Cargo
-# never reads a member lockfile — and is deliberately untracked.
-packages/proxy/Cargo.lock
+# packages/proxy/Cargo.lock IS tracked, and must be.
+#
+# This used to be ignored, with the reasoning that Cargo never reads a member
+# lockfile — true for a build run from the repo, and false for the one that
+# ships. The proxy image is built with `packages/proxy` as its Docker context,
+# so inside the image there is no workspace root and the Dockerfile's
+# `COPY Cargo.toml Cargo.lock ./` needs a lockfile right here. Ignoring it meant
+# a clean checkout could not build the proxy at all — the build fails with
+# `"/Cargo.lock": not found`.
+#
+# The enterprise tree fixed this and the fix landed in one repo. That left the
+# defect in the open-core repo — the one anyone can actually clone. `.gitignore`
+# is a root file and the parity gate compares directories, so nothing could
+# have caught it.
 # Standalone bench fixture crate — not a workspace member, never tracked.
 packages/proxy/benches/wasm_guest/Cargo.lock
 
