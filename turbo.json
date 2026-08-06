@@ -2,37 +2,74 @@
   "$schema": "https://turbo.build/schema.json",
   "tasks": {
     "build": {
-      "dependsOn": ["^build"],
-      "outputs": ["dist/**"]
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        "dist/**"
+      ]
     },
     "test": {
-      "dependsOn": ["build"]
+      "dependsOn": [
+        "build"
+      ]
     },
     "test:integration": {
-      "dependsOn": ["build"]
+      "dependsOn": [
+        "build"
+      ]
     },
     "test:cross": {
-      "dependsOn": ["build"]
+      "dependsOn": [
+        "build"
+      ]
     },
     "test:e2e": {
-      "dependsOn": ["build"]
+      "dependsOn": [
+        "build"
+      ]
     },
     "bench": {
-      "dependsOn": ["build"]
+      "dependsOn": [
+        "build"
+      ]
     },
     "lint": {},
     "typecheck": {
-      "dependsOn": ["^build"]
+      "dependsOn": [
+        "^build"
+      ]
     },
     "docs": {
-      "dependsOn": ["build"],
-      "outputs": ["docs/api/**"]
+      "dependsOn": [
+        "build"
+      ],
+      "outputs": [
+        "docs/api/**"
+      ]
     },
     "dev": {
       "cache": false,
       "persistent": true
+    },
+    "@intutic/wasm-sdk#build": {
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        "build/**"
+      ]
     }
   },
   "ui": "stream",
-  "globalPassThroughEnv": ["VITE_*", "DATABASE_URL", "VALKEY_URL", "JWT_SECRET", "ENCRYPTION_KEY", "NODE_ENV", "RESEND_API_KEY", "RESEND_FROM_ADDRESS"]
+  "globalPassThroughEnv": [
+    "VITE_*",
+    "DATABASE_URL",
+    "VALKEY_URL",
+    "JWT_SECRET",
+    "ENCRYPTION_KEY",
+    "NODE_ENV",
+    "RESEND_API_KEY",
+    "RESEND_FROM_ADDRESS"
+  ]
 }

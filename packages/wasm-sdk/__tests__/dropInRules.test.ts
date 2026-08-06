@@ -20,7 +20,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { readFileSync, existsSync, readdirSync, rmSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { WASM_HOST_IMPORTS } from '@intutic/shared-types'
@@ -67,20 +67,85 @@ afterAll(() => {
   if (outDir) rmSync(outDir, { recursive: true, force: true })
 })
 
-function compile(slug: string): string {
-  const out = join(outDir, `${slug}.wasm`)
-  // The exact invocation `rule.ts` documents, and the same flags
-  // `buildCompileArgs` in the CLI produces. If these drift, a rule that passes
-  // here can still fail for a user following the README.
-  const res = spawnSync(
-    'npx',
-    ['asc', join('rules', slug, 'rule.ts'), '-o', out, '--optimize', '--exportRuntime'],
-    { cwd: sdkRoot, encoding: 'utf8' },
-  )
-  if (res.status !== 0 || !existsSync(out)) {
-    throw new Error(`asc failed for ${slug}:\n${res.stdout}\n${res.stderr}`)
-  }
-  return out
+/**
+ * Runs a child process without blocking the event loop.
+ *
+ * `spawnSync` is what this used to call, and it made the suite fail while every
+ * assertion passed. Vitest's worker talks to the runner over birpc, and an
+ * in-flight `onTaskUpdate` reply is only read when the loop reaches its poll
+ * phase. Consecutive synchronous test bodies yield microtasks and never get
+ * there, so a file whose compiles cumulatively block past birpc's hardcoded 60s
+ * timeout reports `Timeout calling "onTaskUpdate"` as an unhandled error —
+ * *after* printing a green result, since pending update promises are only
+ * awaited once `runFiles` returns. Vitest 3.2.6 passes no timeout to either RPC
+ * factory, so there is no setting to raise.
+ *
+ * That is why this was invisible locally and fatal in CI: one `asc` compile is
+ * ~1.4s here and 8–38s on a two-core runner, which put this file at 171s and
+ * `generatedRules` at 267s — the only two of the four to cross the line, and
+ * exactly two errors were reported.
+ *
+ * A further consequence worth naming: under `spawnSync` the per-test timeouts
+ * below could never fire, because the timer could not run either. They are live
+ * now, so a genuinely stuck compile fails as a timeout instead of as a puzzle.
+ */
+function runProcess(
+  cmd: string,
+  args: string[],
+  cwd: string,
+): Promise<{ status: number; stdout: string; stderr: string; signal: NodeJS.Signals | null }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] })
+    let stdout = ''
+    let stderr = ''
+    child.stdout.setEncoding('utf8')
+    child.stderr.setEncoding('utf8')
+    child.stdout.on('data', (d: string) => { stdout += d })
+    child.stderr.on('data', (d: string) => { stderr += d })
+    child.on('error', reject)
+    // Signal death becomes -1 plus the signal rather than a flattened number, so
+    // "killed" can never read as a compiler verdict.
+    child.on('close', (code, signal) =>
+      resolve({ status: code === null ? -1 : code, stdout, stderr, signal }),
+    )
+  })
+}
+
+/**
+ * One compile per slug, shared by every test that needs it.
+ *
+ * Three tests below compile each slug and they all write to the same
+ * `outDir/<slug>.wasm`, so this was 18 invocations of `asc` to produce 6
+ * distinct artifacts — the single largest cost in the file. Deduplicating loses
+ * no assertion: identical source, identical flags, identical output. It is
+ * memoised on the *promise* rather than the path so concurrent callers join the
+ * in-flight compile instead of racing to write the same file.
+ */
+const compiled = new Map<string, Promise<string>>()
+
+function compile(slug: string): Promise<string> {
+  const existing = compiled.get(slug)
+  if (existing) return existing
+  const started = (async () => {
+    const out = join(outDir, `${slug}.wasm`)
+    // The exact invocation `rule.ts` documents, and the same flags
+    // `buildCompileArgs` in the CLI produces. If these drift, a rule that passes
+    // here can still fail for a user following the README.
+    const res = await runProcess(
+      'npx',
+      ['asc', join('rules', slug, 'rule.ts'), '-o', out, '--optimize', '--exportRuntime'],
+      sdkRoot,
+    )
+    if (res.status !== 0 || !existsSync(out)) {
+      throw new Error(
+        `asc failed for ${slug}${res.signal ? ` (killed by ${res.signal})` : ''}:\n` +
+          `${res.stdout}\n${res.stderr}`,
+      )
+    }
+    return out
+  })()
+  compiled.set(slug, started)
+  return started
 }
 
 function evaluate(wasmPath: string, mockPath: string): number {
@@ -131,6 +196,50 @@ describe('drop-in rule library', () => {
     expect(slugs.length, 'packages/wasm-sdk/rules/ is empty').toBeGreaterThanOrEqual(6)
   })
 
+  it('compiles without blocking the event loop', async () => {
+    // Every other assertion in this file passed while the suite still exited 1.
+    //
+    // Vitest's worker answers the runner over birpc, and it can only read a
+    // reply when the event loop reaches its poll phase. `spawnSync` never lets
+    // it, so once a file's compiles cumulatively blocked past birpc's hardcoded
+    // 60s the run reported `Timeout calling "onTaskUpdate"` — as an *unhandled
+    // error*, after printing a green result, because pending update promises are
+    // only awaited once `runFiles` returns.
+    //
+    // That threshold is only crossed on CI's slower compiles, so the failure
+    // cannot be reproduced here. The property underneath it can: a timer that
+    // fires during a compile proves the loop reached poll, which is the same
+    // thing the RPC reply needs. Under `spawnSync` this counts zero.
+    //
+    // `runProcess` is called directly rather than `compile`, whose memo would
+    // return an already-resolved promise and measure nothing.
+    expect(slugs.length, 'no rule to compile').toBeGreaterThan(0)
+    let ticks = 0
+    const timer = setInterval(() => { ticks += 1 }, 10)
+    try {
+      const res = await runProcess(
+        'npx',
+        [
+          'asc',
+          join('rules', slugs[0]!, 'rule.ts'),
+          '-o',
+          join(outDir, '__loop_probe.wasm'),
+          '--optimize',
+          '--exportRuntime',
+        ],
+        sdkRoot,
+      )
+      expect(res.status, `the probe compile itself failed:\n${res.stderr}`).toBe(0)
+    } finally {
+      clearInterval(timer)
+    }
+    expect(
+      ticks,
+      'the event loop was blocked for the whole compile, so a worker RPC reply ' +
+        'could not have been read either — this is the spawnSync regression',
+    ).toBeGreaterThan(0)
+  }, 120_000)
+
   it('has an expectation pinned for every rule present', () => {
     // A new rule added without an entry in EXPECTED would otherwise be compiled
     // and never asserted.
@@ -144,14 +253,14 @@ describe('drop-in rule library', () => {
     }
   })
 
-  it.each(slugs)('%s compiles on its own and refuses its block case', (slug) => {
-    const wasm = compile(slug)
+  it.each(slugs)('%s compiles on its own and refuses its block case', async (slug) => {
+    const wasm = await compile(slug)
     const verdict = evaluate(wasm, join(rulesDir, slug, 'block.json'))
     expect(verdict, `${slug} allowed the context it exists to refuse`).toBe(EXPECTED[slug])
   }, 120_000)
 
-  it.each(slugs)('%s allows every near-miss it ships', (slug) => {
-    const wasm = compile(slug)
+  it.each(slugs)('%s allows every near-miss it ships', async (slug) => {
+    const wasm = await compile(slug)
     for (const mock of allowMocks(slug)) {
       const verdict = evaluate(wasm, join(rulesDir, slug, mock))
       expect(
@@ -218,8 +327,8 @@ describe('drop-in rule library', () => {
     ).toBeLessThanOrEqual(4)
   })
 
-  it.each(slugs)('%s never returns the deprecated code 2', (slug) => {
-    const wasm = compile(slug)
+  it.each(slugs)('%s never returns the deprecated code 2', async (slug) => {
+    const wasm = await compile(slug)
     for (const mock of ['block.json', ...allowMocks(slug)]) {
       const v = evaluate(wasm, join(rulesDir, slug, mock))
       expect(v, `${slug} returned 2 on ${mock}; the proxy maps 2 to a block`).not.toBe(2)
