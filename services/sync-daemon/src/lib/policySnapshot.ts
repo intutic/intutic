@@ -112,6 +112,34 @@ const CANARY_TOOLS = [
 ]
 
 /**
+ * Strips a repeated character from one end of a string, in linear time.
+ *
+ * `s.replace(/\$+$/, '')` is the obvious spelling and it is quadratic. The
+ * quantifier is greedy and the anchor is at the *end*, so on a string that does
+ * not finish with the character, every start offset consumes the whole run and
+ * then backtracks through it: measured on `'$'.repeat(n) + 'a'`, 20 KB took
+ * 130 ms and 80 KB took 2 seconds. A string that *does* end with it matches at
+ * the first offset and returns instantly, which is why the obvious test for
+ * this passes — CodeQL flagged all three call sites as `js/polynomial-redos`.
+ *
+ * Two of them run over `toolPattern`, which arrives from the control plane and
+ * is authored per workspace, on the path that decides whether a policy rule
+ * ships to the blocking gate.
+ */
+function stripEnd(s: string, ch: string): string {
+  let end = s.length
+  while (end > 0 && s[end - 1] === ch) end -= 1
+  return s.slice(0, end)
+}
+
+/** The same, from the front. Anchored at the start, so this one is linear. */
+function stripStart(s: string, ch: string): string {
+  let i = 0
+  while (i < s.length && s[i] === ch) i += 1
+  return s.slice(i)
+}
+
+/**
  * Decides whether a control-plane rule is safe to put on a blocking path.
  *
  * Returns the reason for rejection, or `null` if the rule is fine. Rejections
@@ -124,7 +152,7 @@ export function validateRule(toolPattern: string, ruleId: string): string | null
 
   // Anchors are meaningless once wrapped for token matching, and are the most
   // common thing a SOP author writes out of habit.
-  const stripped = raw.replace(/^\^+/, '').replace(/\$+$/, '')
+  const stripped = stripEnd(stripStart(raw, '^'), '$')
   if (!stripped) return 'toolPattern was only anchors'
 
   const wrapped = ` (${stripped}) `
@@ -176,7 +204,7 @@ function toGuardPattern(
     return null
   }
 
-  const stripped = rule.toolPattern.trim().replace(/^\^+/, '').replace(/\$+$/, '')
+  const stripped = stripEnd(stripStart(rule.toolPattern.trim(), '^'), '$')
   return {
     id: `sop.${rule.id}`,
     // Wrapped in spaces so the pattern matches a whole tool token: the gate
@@ -203,7 +231,7 @@ export async function fetchResolvedPolicy(
   opts: PolicySnapshotOptions,
 ): Promise<ResolvedPolicy | null> {
   const url =
-    `${opts.controlPlaneUrl.replace(/\/+$/, '')}/api/v1/policy/resolve` +
+    `${stripEnd(opts.controlPlaneUrl, '/')}/api/v1/policy/resolve` +
     `?workspaceId=${encodeURIComponent(opts.workspaceId)}`
   try {
     const res = await fetch(url, {

@@ -67,15 +67,63 @@ export function redactSecrets(value: unknown, depth = 0): unknown {
     /AIza[0-9A-Za-z_-]{30,}/g, // Google
     /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, // JWT
     /-----BEGIN[A-Z ]*PRIVATE KEY-----[\s\S]*?-----END[A-Z ]*PRIVATE KEY-----/g,
-    // Assignment forms: --token=..., PASSWORD=..., "secret": "..."
-    /\b[A-Za-z_][A-Za-z0-9_-]*(pass(word)?|secret|token|key|credential)[A-Za-z0-9_-]*\b\s*[:=]\s*["']?[^\s"',;]{8,}/gi,
     // Bare basic-auth in a URL.
     /\/\/[^/\s:@]+:[^/\s:@]+@/g,
   ]
 
+  // Assignment forms — `--token=…`, `PASSWORD=…`, `"secret": "…"`,
+  // `Authorization: Bearer …`. Matched in two steps, name first and value
+  // second, for two independent reasons.
+  //
+  // **Cost.** The single regex this replaces put two unbounded runs either side
+  // of the keyword alternation — `[A-Za-z0-9_-]*(token|…)[A-Za-z0-9_-]*` — so
+  // every start offset enumerated every split point of the identifier and the
+  // whole thing went quadratic. Measured on `'key'.repeat(n)`: 59 KB took 566 ms
+  // and 469 KB took 38 *seconds*, synchronously, inside a `PreToolUse` hook. The
+  // size caps do not bound it: `scrub` redacts the whole string and truncates to
+  // MAX_STRING only afterwards, and MAX_SNAPSHOT_BYTES applies later still. A
+  // `Write` carrying a few hundred KB of file content was enough. Matching the
+  // name alone is bounded by the identifier run, and the value is walked once,
+  // by hand, only after the name has been found interesting — 1.2 MB in ~25 ms.
+  //
+  // **Reach.** That same mandatory `[A-Za-z_]` before the alternation meant the
+  // keyword could only ever be an *infix* of the identifier, never the whole of
+  // it. So `MY_API_KEY=` redacted and `PASSWORD=`, `--token=`, `--credential=`,
+  // `passphrase=` and `"secret":` did not — all three of the forms the old
+  // comment offered as its examples passed through to disk in plaintext.
+  const NAME = /\b([A-Za-z_][A-Za-z0-9_-]*)(["']?\s*[:=]\s*["']?(?:Bearer\s+|Basic\s+)?)/g
+  const NAME_IS_SECRET = /pass(word|phrase)?|secret|token|key|credential|auth(orization)?/i
+  const VALUE_END = /[\s"',;]/
+
+  const redactAssignments = (s: string): string => {
+    let out = ''
+    let copied = 0
+    let m: RegExpExecArray | null
+    NAME.lastIndex = 0
+    while ((m = NAME.exec(s)) !== null) {
+      // Declining leaves `lastIndex` just past the separator rather than past a
+      // consumed value, so a boring name cannot shadow a secret packed into the
+      // same unbroken run — `--set=PGPASSWORD=…` still redacts.
+      if (!NAME_IS_SECRET.test(m[1] as string)) continue
+      let end = NAME.lastIndex
+      while (end < s.length && !VALUE_END.test(s[end] as string)) end += 1
+      // Too short to be a credential, and short enough that redacting it would
+      // cost more context than it protects.
+      if (end - NAME.lastIndex < 8) continue
+      out += s.slice(copied, NAME.lastIndex) + '[redacted]'
+      copied = end
+      NAME.lastIndex = end
+    }
+    // The name and separator survive. A snapshot exists to be reviewed, and
+    // `--token=[redacted]` tells the reviewer what was held; a bare
+    // `[redacted]` swallowing the key name does not.
+    return copied === 0 ? s : out + s.slice(copied)
+  }
+
   const scrub = (s: string): string => {
     let out = s
     for (const re of SECRET_VALUE) out = out.replace(re, '[redacted]')
+    out = redactAssignments(out)
     if (out.length > MAX_STRING) {
       // Keep both ends. A command's verb is at the front and its target is at
       // the back; truncating the tail throws away the half that identifies what
