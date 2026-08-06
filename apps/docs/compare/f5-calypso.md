@@ -19,7 +19,7 @@ If your AI coding agent tries to run a bash command that recursively deletes a r
 | **Execution Layer** | Local-first gateway proxy + local IDE daemon hooks | Centralized enterprise proxy gateway (Cloud/SaaS) |
 | **WASM Rule Engine** | Yes — compile custom policies into WebAssembly sandboxes | No — JSON policy templates and standard content filters |
 | **Agent Integrations** | 18 AI coding harnesses (Claude Code, Cursor, etc.) out-of-the-box | SDK wrapper and standard chatbot endpoint routing |
-| **Sandbox Isolation** | WASM (wasmtime) policy sandbox — 16 MB, 1,000,000 fuel, 5 ms; SOP hook scripts in a frozen V8 context (node:vm, 100 ms) | Not available |
+| **Sandbox Isolation** | WASM (wasmtime) policy sandbox — 16 MB, 1,000,000 fuel, 5 ms, explicit host-import allowlist | Not available |
 
 ---
 

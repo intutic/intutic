@@ -115,8 +115,18 @@ The host calls the guest's main evaluation entrypoint:
 export function evaluate(requestContextJson: ArrayBuffer): i32
 ```
 
-### D. Host Logging
-Guest rules can write log entries back to the host console using the imported host function `log_info(msg_ptr, len)`. These logs are piped directly into the Rust proxy's structured `tracing::info!` output.
+### D. Host Imports
+A rule may import exactly three functions, all from `env`: `log_info(ptr, len)`,
+which is piped into the proxy's structured `tracing::info!` output, plus
+AssemblyScript's own `trace` and `abort`.
+
+**Nothing else resolves.** A rule importing anything beyond these is refused at
+`intutic policy install`, refused by the control plane if pushed from the
+dashboard, and refused again when the proxy loads it.
+
+In particular `Math.random()` is unavailable — AssemblyScript compiles it to an
+`env.seed` import the proxy deliberately does not provide. A governance verdict
+that can differ on identical input cannot be audited.
 
 ---
 
@@ -128,6 +138,11 @@ The guest function returns an integer verdict that dictates how the proxy gates 
 |:---:|---|---|
 | **`0`** | `ALLOW` | The request is marked clean and continues down the pipeline. |
 | **`1`** | `BLOCK` | The request is rejected immediately. The proxy short-circuits the connection and returns a block response: `{ "error": "Blocked by WASM rule policy" }`. |
-| **`2`** | `REDACT` | Currently treated as a block: the request is rejected with a DLP-flavored reason. In-flight payload redaction is not implemented. |
+| **`3`** | `REASK` | The attempt is refused, the agent is told why, and it may retry. Prefer this over `BLOCK` for any finding that is a pattern match — pattern matches produce false positives, and a block a human has to unpick costs more than a retry. |
+| **`2`** | *deprecated* | Was documented as `REDACT`. The guest never receives the request body, so redaction was never expressible; the proxy maps `2` to a block and logs it. `intutic policy install` still accepts it so already-installed rules keep their meaning, but warns. Return `1` or `3`. |
+
+Anything else is **allowed** with a warning in the proxy log. A rule inventing a
+rung enforces nothing, which is why `intutic policy install` refuses codes
+outside this table.
 
 *Note: If multiple rules are active, the runner evaluates all instances sequentially and returns the **most restrictive** verdict.*

@@ -52,7 +52,13 @@ function macosInject(key: string, value: string): void {
 }
 
 function macosRemove(key: string): void {
-  try { execSync(`launchctl unsetenv ${key}`, { stdio: 'pipe' }) } catch {}
+  try {
+    execSync(`launchctl unsetenv ${key}`, { stdio: 'pipe' })
+  } catch {
+    // Removal is idempotent by contract: `launchctl unsetenv` exits non-zero when
+    // the key was never set (or the user session has no launchd domain, e.g. over
+    // ssh). Both mean "already absent", which is the state the caller asked for.
+  }
 }
 
 function linuxInjectUser(key: string, value: string): void {
@@ -61,7 +67,16 @@ function linuxInjectUser(key: string, value: string): void {
   const line   = `export ${key}="${sanitizeShellValue(value)}" ${marker}`
 
   let content = ''
-  try { content = fs.readFileSync(rcFile, 'utf8') } catch {}
+  try {
+    content = fs.readFileSync(rcFile, 'utf8')
+  } catch {
+    // A missing ~/.bashrc is the normal first-run case: `content` stays '' and the
+    // write below creates the file.
+    // CAUTION: this also swallows non-ENOENT read failures (EACCES, EISDIR, a
+    // symlink loop), and the write below then replaces the user's .bashrc with the
+    // single export line. Narrowing this to ENOENT would be a behaviour change, so
+    // it is deliberately left alone here rather than fixed as lint cleanup.
+  }
 
   // Remove existing entry for this key
   const lines = content.split('\n').filter(l => !l.includes(marker))
@@ -76,7 +91,11 @@ function linuxRemoveUser(key: string): void {
     const content = fs.readFileSync(rcFile, 'utf8')
     const filtered = content.split('\n').filter(l => !l.includes(marker)).join('\n')
     fs.writeFileSync(rcFile, filtered + '\n', { mode: 0o644 })
-  } catch {}
+  } catch {
+    // Nothing to remove if ~/.bashrc does not exist, and an unwritable rc file must
+    // not fail an uninstall: the marker line is inert shell state, so leaving it in
+    // place is strictly better than aborting the rest of the removal sequence.
+  }
 }
 
 function windowsInject(key: string, value: string): void {
@@ -84,7 +103,12 @@ function windowsInject(key: string, value: string): void {
 }
 
 function windowsRemove(key: string): void {
-  try { execSync(`reg delete HKCU\\Environment /v ${key} /f`, { stdio: 'pipe' }) } catch {}
+  try {
+    execSync(`reg delete HKCU\\Environment /v ${key} /f`, { stdio: 'pipe' })
+  } catch {
+    // `reg delete` exits 1 with "unable to find the specified registry key or value"
+    // when the value is already gone. Removal is idempotent, so absence is success.
+  }
 }
 
 /**

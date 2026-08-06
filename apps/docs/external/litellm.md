@@ -46,7 +46,7 @@ When the local gateway is connected to the commercial **Intutic Control Plane**,
 ```
 
 ### Hot-Path: Intutic Proxy Gateway (Rust)
-All production completions flow exclusively through the high-performance Rust proxy. It terminates TLS, runs inline V8/WASM filters, and handles direct streaming to model providers. Completion content **never** passes through Python runtimes on the hot-path.
+All production completions flow exclusively through the high-performance Rust proxy. It terminates TLS, runs inline WASM filters, and handles direct streaming to model providers. Completion content **never** passes through Python runtimes on the hot-path.
 
 ### Off-Hot-Path: LiteLLM Helper (Python)
 The commercial control plane deploys an internal Python `litellm` container. It sits entirely off the hot-path and acts as an administrative coordinator for the Node.js control plane:

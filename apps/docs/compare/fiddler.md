@@ -17,7 +17,7 @@ If your agent attempts to execute a shell command that deletes a configuration f
 | **Primary Scope** | Action & Tool-Call Interception | Prompt Content & Model Text Evaluation |
 | **Interception Point** | System commands, files, database, and network | LLM prompt inputs and model text outputs |
 | **Enforcement Layer** | Synchronous terminal/proxy gateway, in-process | Model API gateway or async content scanner |
-| **Sandbox Isolation** | WASM (wasmtime) policy sandbox — 16 MB, 1,000,000 fuel, 5 ms; SOP hook scripts in a frozen V8 context (node:vm, 100 ms) | Not available |
+| **Sandbox Isolation** | WASM (wasmtime) policy sandbox — 16 MB, 1,000,000 fuel, 5 ms, explicit host-import allowlist | Not available |
 | **Agent Integrations** | 18 AI coding harnesses (Claude Code, Cursor, etc.) | Standard chatbot SDK integrations |
 | **FinOps & ROI** | Append-only cost ledger with per-model breakdown; daily and monthly caps enforced with KILL | Basic model usage statistics |
 
@@ -27,7 +27,7 @@ If your agent attempts to execute a shell command that deletes a configuration f
 
 - **You are deploying autonomous agents** that interact with local developer filesystems, command lines, or databases.
 - **You need to protect infrastructure** from destructive shell execution (e.g. `rm -rf`, raw database updates).
-- **You want policy evaluated in a sandbox you can trust** — rules run as WASM under wasmtime with hard memory, fuel and time limits, and SOP hook scripts run in a frozen V8 context.
+- **You want policy evaluated in a sandbox you can trust** — rules run as WASM under wasmtime with hard memory, fuel and time limits, and an explicit host-import allowlist.
 - **You want to manage engineering seats** and compute limits dynamically.
 
 ## When to Choose Fiddler AI

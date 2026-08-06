@@ -8,7 +8,7 @@
  * @module
  */
 
-import { readFileSync, writeFileSync, unlinkSync, mkdirSync, constants } from 'node:fs'
+import { readFileSync, writeFileSync, unlinkSync, mkdirSync, chmodSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { IntuticCredentials, IntuticConfig, IntegrityStore } from '@intutic/shared-types'
 import { getCredentialsPath, getConfigPath, getIntegrityPath } from './paths.js'
@@ -35,6 +35,15 @@ function writeJsonFile(filePath: string, data: unknown, mode?: number): void {
     encoding: 'utf-8',
     mode: mode ?? 0o644,
   })
+  if (mode !== undefined) {
+    // `mode` on writeFileSync is the *creation* mode — open(2) ignores it when
+    // the file already exists. A credentials file first written by an older
+    // build (or created under a looser umask) therefore kept its original,
+    // possibly group/world-readable permissions on every subsequent login.
+    // Re-apply the requested mode explicitly so the 0o600 promise in this
+    // module's docstring is true for existing files as well as new ones.
+    chmodSync(filePath, mode)
+  }
 }
 
 // ─── Credentials ─────────────────────────────────────────────────────

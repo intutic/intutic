@@ -202,33 +202,34 @@ Neither question is answered by this repository today.
 :::
 
 <!-- ENTERPRISE_ONLY_START -->
-## SOP Hook Scripts (Enterprise)
+## SOP Hook Scripts — withdrawn
 
-For programmatic policy control, Intutic supports **Hook SOPs** written in Javascript. They run inside the control plane's secure V8 isolate sandboxes.
+This page previously documented **Hook SOPs**: JavaScript policy scripts said to run
+"inside the control plane's secure V8 isolate sandboxes", in a "fully air-gapped sandbox".
+That section has been withdrawn and the implementation deleted. It is recorded here rather
+than quietly removed, because the feature was described to readers as shipped and safe.
 
-* **Phases**: Rules run during `PRE_TOOL`, `POST_TOOL`, `PRE_RESPONSE`, or `POST_RESPONSE`.
-* **APIs**: The sandboxed script has access to a global `intutic` object containing context properties:
-  - `intutic.toolName` — Name of the tool called (e.g. `execute_command`)
-  - `intutic.toolArguments` — Stringified or structured arguments passed to the tool
-  - `intutic.verdict({ action: 'block' | 'allow', reason: '...' })` — Emits enforcement verdict
-* **Security & Constraints**:
-  - Max script size: `64 KB`
-  - Max CPU execution time: `100 ms`
-  - Fully air-gapped sandbox: No `require`, `process`, `fs`, or network capabilities. Standard `JSON`, `Math`, `Date`, and `console.log` are permitted.
+What the implementation actually was:
 
-```javascript
-// Example: Block destructive SQL operations inside database tools
-if (intutic.toolName === 'execute_db_query' && 
-    (intutic.toolArguments.toLowerCase().includes('drop table') || 
-     intutic.toolArguments.toLowerCase().includes('truncate'))) {
-  intutic.verdict({
-    action: 'block',
-    reason: 'Destructive database operations are blocked by corporate security policy'
-  });
-} else {
-  intutic.verdict({ action: 'allow' });
-}
-```
+- **Not a V8 isolate.** It used Node's built-in `vm` module. `isolated-vm` was never a
+  dependency of this repository. Node's own documentation states that `vm` is not a security
+  mechanism and must not be used to run untrusted code.
+- **Not air-gapped.** The sandbox context received the control plane's own `Object`, `Array`,
+  `RegExp`, `Map` and `Set`. A script could reach `Object.prototype` through them and mutate
+  the host process. The `Object.freeze` calls covered only the injected `intutic` and
+  `console` shims, not the intrinsics passed alongside them.
+- **Fail-open on every error**, including the CPU timeout — a script that ran too long was
+  allowed, not blocked. The documented limits were real, but their consequence was not.
+- **The documented API did not match the code.** The example above read `intutic.toolName`;
+  the executor exposed `intutic.context.toolName`. The example as printed would have thrown.
+
+There was also no way to create one. The `sop_type` and `hook_phase` columns exist, but no
+route, UI or front-matter key could set them — only an unlisted seed script, `PRE_TOOL` only.
+So no hook script has ever run against a real tool call.
+
+If programmatic policy is wanted, use [WASM rules](./wasm-rules.md), which execute in a real
+sandbox with an explicit host-import allowlist. The deleted executor remains in git history
+should anyone want to redo it properly, with a genuine isolate and a fail-closed timeout.
 <!-- ENTERPRISE_ONLY_END -->
 
 ## SOP Pointer References

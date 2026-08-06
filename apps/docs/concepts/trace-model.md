@@ -37,7 +37,7 @@ interface ExecutionTrace {
   // Token Utility & Classification
   tokenUtility: 'USEFUL' | 'WASTED' | 'AMBIGUOUS';
   tokenUtilityScore: number;     // Utility index value (0.0 to 1.0)
-  wasteCategory: 'NONE' | 'TOKEN_WASTE' | 'LOOP_WASTE' | 'RETRY_WASTE' | 'CONTEXT_BLOAT' | 'MODEL_MISMATCH';
+  // `wasteCategory` was documented here for a column that does not exist.
   
   // Enforcement & Compliance
   complianceScore: number;       // Trust/rule alignment score (0.0 to 1.0)
@@ -80,39 +80,45 @@ Cost savings are generated in two ways:
 
 ---
 
-## Token Utility & Waste Classification
+## Token Utility
 
-Every trace is processed by a deterministic 5-rule heuristic engine to classify token utility. If confidence for a rule falls below **0.7**, the trace is flagged as `AMBIGUOUS` for manual or LLM-as-a-judge follow-up.
+`tokenUtility` is a column on `execution_traces` with three values — `USEFUL`,
+`WASTED`, `AMBIGUOUS` — and one writer: a human, through the usage route. It is
+not derived automatically.
 
-### The Classification Pipeline
+::: warning This section previously described an automatic classifier
+It documented a five-rule pipeline — kill enforcement, anomaly detection,
+baseline overshoot, model mismatch, low compliance — writing a `wasteCategory`
+of `TOKEN_WASTE`, `LOOP_WASTE`, `RETRY_WASTE`, `CONTEXT_BLOAT` or
+`MODEL_MISMATCH`.
 
-```
-[ Incoming Trace ]
-        │
-        ├── Rule 1: Was request KILLED? ────────────> Yes: WASTED (Confidence 1.0)
-        │
-        ├── Rule 2: Anomaly detected? ──────────────> Yes: WASTED (Confidence 0.85)
-        │
-        ├── Rule 3: Output > 150% of baseline? ─────> Yes: WASTED (Confidence 0.80)
-        │
-        ├── Rule 4: Expensive model, tiny task? ────> Yes: AMBIGUOUS (Model Mismatch)
-        │
-        └── Rule 5: Low rule alignment compliance? ──> Yes: AMBIGUOUS (Token Waste)
-                │
-                └── Default ────────────────────────> USEFUL (Confidence 0.90)
-```
+None of it exists. There is no `waste_category` column, and no code path in
+either repository has ever produced one of those five values. The trace
+classifier that *does* run at ingest (`traceIngestClassifier.ts`) writes anomaly
+fields — `anomalyDetected`, `anomalySeverity`, `anomalyConfidenceScore`,
+`taxonomyMetadata` — and does not touch `tokenUtility` at all.
 
-#### Rule 1: Kill Enforcement
-If the trace shows an `enforcementAction` of `KILL`, the request was blocked mid-run by security policies. Zero value was generated, so all tokens are classified as `WASTED` with a utility score of `0.0`.
+This matters beyond the documentation: the routing reward reads
+`tokenUtility`, and because nothing sets it at insert, the ratio it computes is
+`1.0` for every arm in managed deployments. That is tracked as a routing defect,
+not a documentation one.
+:::
 
-#### Rule 2: Anomaly Detections
-If anomaly patterns such as `LOOP_DETECTED` or `HALLUCINATION` are flagged on the trace, the utility is set to `WASTED` and the category is marked as `LOOP_WASTE` or `TOKEN_WASTE`.
+### What is actually recorded
 
-#### Rule 3: Baseline Overshoot
-The system tracks rolling token averages in Valkey (`tok:baseline:*`) grouped by model, task type, and prompt length bucket. If a trace output exceeds the 95th percentile baseline by $>150\%$, the extra tokens are flagged as `TOKEN_WASTE`.
+| Field | Written by | Meaning |
+|---|---|---|
+| `tokenUtility` | a human, via `POST /api/v1/usage/…` | `USEFUL` / `WASTED` / `AMBIGUOUS` |
+| `tokenUtilityScore` | insert-time default | not derived; carries its default |
+| `anomalyDetected` | `traceIngestClassifier` at ingest | anomaly type, if one fired |
+| `anomalyConfidenceScore` | `traceIngestClassifier` at ingest | 0.0–1.0 |
+| `taxonomyMetadata` | `traceIngestClassifier` at ingest | every probe, not just the winner |
+| `complianceScore` | the proxy | 0.0–1.0 rule alignment |
+| `toolResultBytesSaved` | the proxy | bytes the compactor removed from the response |
 
-#### Rule 4: Model Mismatch
-If an expensive reasoning model (such as `gpt-4o` or `o1`) is utilized for a trivial task ($<500$ input tokens, $<200$ output tokens), it triggers a `MODEL_MISMATCH` warning. The trace is marked `AMBIGUOUS` to flag potential optimization opportunities.
+### Waste patterns
 
-#### Rule 5: Low Compliance
-If alignment compliance scores fall below `0.5`, the tokens are flagged as potential `TOKEN_WASTE` since they were spent on non-SOP aligned activities.
+Separately from per-trace utility, `wastePatterns` aggregates a workspace's
+traffic on a schedule. One detector ships: **oversized prompt**, a heuristic at
+confidence 0.6 flagging traces whose raw input exceeds three times the workspace
+median. See the [Intelligence Engine](/guide/intelligence) guide.

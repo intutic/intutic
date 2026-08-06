@@ -110,8 +110,10 @@ export async function ensureValkey(port = 6379): Promise<EnsureValkeyResult> {
           return { running: true, via: 'docker' }
         }
         log.warn('Started the container but nothing answered on the port.')
-      } catch (err: any) {
-        log.warn(`Could not start Valkey via Docker: ${err.message}`)
+      } catch (err) {
+        log.warn(
+          `Could not start Valkey via Docker: ${err instanceof Error ? err.message : String(err)}`,
+        )
       }
     }
   }
@@ -141,8 +143,8 @@ export async function ensureValkey(port = 6379): Promise<EnsureValkeyResult> {
         return { running: true, via: 'native' }
       }
       log.warn(`Spawned ${nativeCmd} but nothing answered on the port.`)
-    } catch (err: any) {
-      log.warn(`Could not spawn ${nativeCmd}: ${err.message}`)
+    } catch (err) {
+      log.warn(`Could not spawn ${nativeCmd}: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
 

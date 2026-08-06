@@ -4,9 +4,26 @@ import * as os from 'node:os'
 import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { log } from '../lib/logger.js'
+import {
+  WASM_HOST_IMPORTS,
+  unsupportedWasmImports,
+  explainWasmImport,
+} from '@intutic/shared-types'
 import { loadCredentials, loadConfig } from '../config/store.js'
 import { resolveControlPlaneUrl } from '../config/paths.js'
 import { createApiClient } from '../lib/api.js'
+import type { EnforcementAction, InterventionMode, RiskCategory } from '@intutic/shared-types'
+
+/**
+ * Message of a caught value.
+ *
+ * `catch` binds `unknown` — a thrown non-Error (or an Error subclass with no
+ * message) is not hypothetical here, since `abort` below and the WASM runtime
+ * both throw across the host boundary.
+ */
+function errMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
 
 async function getClient(dev?: boolean) {
   const creds = await loadCredentials()
@@ -38,8 +55,8 @@ export async function runPolicyEnable(policyId: string, opts: { dev?: boolean })
       log.error(`Failed to enable policy: ${policyId}`)
       process.exit(1)
     }
-  } catch (err: any) {
-    log.error(`Failed to enable policy: ${err.message}`)
+  } catch (err) {
+    log.error(`Failed to enable policy: ${errMessage(err)}`)
     process.exit(1)
   }
 }
@@ -62,8 +79,8 @@ export async function runPolicyDisable(policyId: string, opts: { dev?: boolean }
       log.error(`Failed to disable policy: ${policyId}`)
       process.exit(1)
     }
-  } catch (err: any) {
-    log.error(`Failed to disable policy: ${err.message}`)
+  } catch (err) {
+    log.error(`Failed to disable policy: ${errMessage(err)}`)
     process.exit(1)
   }
 }
@@ -96,10 +113,40 @@ export async function runPolicyRollback(
       log.error(`Failed to rollback policy: ${policyId}`)
       process.exit(1)
     }
-  } catch (err: any) {
-    log.error(`Failed to rollback policy: ${err.message}`)
+  } catch (err) {
+    log.error(`Failed to rollback policy: ${errMessage(err)}`)
     process.exit(1)
   }
+}
+
+/**
+ * A compliance policy exactly as `GET /api/v1/policies` serializes it: the
+ * `pcas_policies` columns (`packages/db/src/schema.ts`) after a JSON round
+ * trip, so timestamps arrive as ISO strings and nullable columns as `null`.
+ *
+ * `intutic policy export` prints these verbatim and is the documented way to
+ * get policies out of a workspace, which makes this the shape a caller piping
+ * the export into another tool depends on. Written out rather than left as
+ * `any[]` for that reason: a column rename on the control plane should be a
+ * visible change here, not a silently different file on someone's disk.
+ */
+export interface CompliancePolicy {
+  policyId: string
+  workspaceId: string
+  name: string
+  description: string | null
+  riskCategory: RiskCategory | null
+  /** Glob matched against the tool name the agent is calling. */
+  targetToolPattern: string
+  enforcementAction: EnforcementAction
+  interventionMode: InterventionMode | null
+  priority: number | null
+  /** Free-form JSON match conditions — the column is `jsonb` with no schema. */
+  conditions: unknown
+  isActive: boolean | null
+  currentVersion: number
+  createdAt: string
+  updatedAt: string
 }
 
 export async function runPolicyExport(opts: { all?: boolean; dev?: boolean }): Promise<void> {
@@ -109,15 +156,15 @@ export async function runPolicyExport(opts: { all?: boolean; dev?: boolean }): P
 
   const client = await getClient(opts.dev)
   try {
-    const res = await client.get<{ ok: boolean; policies: any[] }>('/api/v1/policies')
+    const res = await client.get<{ ok: boolean; policies: CompliancePolicy[] }>('/api/v1/policies')
     if (res && res.ok && Array.isArray(res.policies)) {
       console.log(JSON.stringify(res.policies, null, 2))
     } else {
       log.error('Failed to export policies.')
       process.exit(1)
     }
-  } catch (err: any) {
-    log.error(`Failed to export policies: ${err.message}`)
+  } catch (err) {
+    log.error(`Failed to export policies: ${errMessage(err)}`)
     process.exit(1)
   }
 }
@@ -149,7 +196,114 @@ export const DEFAULT_ALLOW_MOCK = JSON.stringify({
  * invisible because it only surfaced as a per-request warning in a process
  * nobody was reading.
  */
-export const HOST_IMPORT_NAMES = ['log_info', 'abort', 'trace'] as const
+export const HOST_IMPORT_NAMES = WASM_HOST_IMPORTS
+
+/**
+ * The guest side of the ABI, resolved from a module's exports.
+ *
+ * These are exactly the three things the proxy runner needs of a rule
+ * (`packages/proxy/src/wasm/runner.rs`): linear memory to pass the context
+ * through, an allocator to reserve space in it, and the entry point.
+ *
+ * Every lookup that produces one is checked at run time — a `.wasm` file can
+ * export anything or nothing, and the compiler cannot know which. Declaring
+ * the shape and asserting a module has it are separate jobs; `resolveGuestAbi`
+ * does the second and names whichever piece is missing.
+ */
+export interface WasmGuestAbi {
+  /** Guest linear memory. Every pointer crossing the boundary indexes into it. */
+  memory: WebAssembly.Memory
+  /** `allocate(size) -> ptr`, or AssemblyScript's `__new(size, 0) -> ptr`. */
+  allocate(size: number): number
+  /** The rule entry point: `evaluate(ptr, len) -> i32` verdict code. */
+  evaluate(offset: number, length: number): number
+}
+
+/**
+ * A callable export, or null when the module does not export that name (or
+ * exports it as a global/table/memory instead of a function).
+ *
+ * The variadic signature is the widest thing every guest function here fits;
+ * `resolveGuestAbi` immediately narrows each one to its real arity by way of
+ * the `WasmGuestAbi` members it assigns them to.
+ */
+function exportedFunction(
+  exports: WebAssembly.Exports,
+  name: string,
+): ((...args: number[]) => number) | null {
+  const value = exports[name]
+  return typeof value === 'function' ? (value as (...args: number[]) => number) : null
+}
+
+/** Resolve the guest ABI, throwing a message that names the missing export. */
+function resolveGuestAbi(instance: WebAssembly.Instance): WasmGuestAbi {
+  const { exports } = instance
+
+  const memory = exports.memory
+  if (!(memory instanceof WebAssembly.Memory)) {
+    // Previously read as `exports.memory as WebAssembly.Memory` and dereferenced,
+    // so a module without a memory export failed with "Cannot read properties of
+    // undefined (reading 'buffer')" instead of saying what was wrong.
+    throw new Error(
+      "WASM module does not export 'memory'. Compile with AssemblyScript's " +
+        'default settings (`--exportRuntime`) so the host can read what the rule returns.',
+    )
+  }
+
+  // Accept exactly the allocator exports the proxy runner accepts
+  // (packages/proxy/src/wasm/runner.rs: `allocate`, then `__new`) — anything
+  // looser would validate rules the proxy then silently fails open on.
+  let allocate: (size: number) => number
+  const allocateExport = exportedFunction(exports, 'allocate')
+  if (allocateExport) {
+    allocate = allocateExport
+  } else {
+    const newExport = exportedFunction(exports, '__new')
+    if (!newExport) {
+      throw new Error("WASM module is missing 'allocate' or '__new' memory helpers.")
+    }
+    allocate = (size) => newExport(size, 0)
+  }
+
+  const evaluate = exportedFunction(exports, 'evaluate')
+  if (!evaluate) {
+    throw new Error("WASM module is missing 'evaluate' function export.")
+  }
+
+  return { memory, allocate, evaluate }
+}
+
+/**
+ * Read `len` UTF-8 bytes at `ptr` out of guest memory, or null if that range is
+ * not wholly inside it.
+ */
+function readGuestUtf8(memory: WebAssembly.Memory, ptr: number, len: number): string | null {
+  const size = memory.buffer.byteLength
+  if (!Number.isInteger(ptr) || !Number.isInteger(len) || ptr < 0 || len < 0 || ptr + len > size) {
+    return null
+  }
+  return Buffer.from(memory.buffer, ptr, len).toString('utf-8')
+}
+
+/**
+ * Read an AssemblyScript string — UTF-16LE, with a 4-byte little-endian byte
+ * length in the header immediately before the pointer — out of guest memory.
+ * Returns null if the pointer or the length it declares is out of bounds.
+ *
+ * That bounds check is the point of the helper. The two copies of this loop it
+ * replaces trusted the header, which is a value the guest writes: a rule
+ * aborting with a bogus pointer could name a 4 GB string and send the CLI into
+ * a multi-billion-iteration loop building it one char at a time. The proxy host
+ * checks the same range and logs the raw pointer when it does not fit
+ * (`packages/proxy/src/wasm/host.rs`).
+ */
+function readGuestString(memory: WebAssembly.Memory, ptr: number): string | null {
+  const size = memory.buffer.byteLength
+  if (!Number.isInteger(ptr) || ptr < 4 || ptr > size) return null
+  const byteLength = new DataView(memory.buffer).getUint32(ptr - 4, true)
+  if (byteLength % 2 !== 0 || ptr + byteLength > size) return null
+  return Buffer.from(memory.buffer, ptr, byteLength).toString('utf16le')
+}
 
 /**
  * Instantiate a compiled WASM rule with the standard host imports and run
@@ -157,49 +311,101 @@ export const HOST_IMPORT_NAMES = ['log_info', 'abort', 'trace'] as const
  * verdict code (0=ALLOW, 1=BLOCK, 3=REASK; 2 is a deprecated block). Throws on any instantiation or
  * ABI failure — callers decide how to surface it.
  */
+/**
+ * Re-exported so existing callers and tests keep one import site.
+ *
+ * The implementations live in `@intutic/shared-types` because three surfaces
+ * need them — this CLI, the control plane's upload endpoint, and the SDK test
+ * harness — and each having its own copy is precisely how `seed` came to be
+ * offered here and never registered by the proxy.
+ */
+export const unsupportedImports = unsupportedWasmImports
+export const explainUnsupportedImport = explainWasmImport
+
+/**
+ * Instantiates a compiled rule with the proxy's host imports and evaluates it
+ * against one mock context, returning the raw verdict code.
+ *
+ * The import set here is the proxy's, not a convenient superset: a rule that
+ * links in this sandbox must link in the proxy, or install validation passes
+ * something the proxy then silently bypasses.
+ */
 export async function instantiateAndEvaluate(
   wasmBuffer: Uint8Array,
   mockStr: string,
 ): Promise<number> {
-  let instanceRef: any = null
-  const imports = {
+  let instanceRef: WebAssembly.Instance | null = null
+
+  /**
+   * Guest memory, or null before `WebAssembly.instantiate` has resolved.
+   *
+   * The null is load-bearing, not defensive padding: AssemblyScript's start
+   * function runs during instantiation and can call `abort` or `trace` from
+   * there, so a host import can be invoked before there is an instance to read
+   * memory from.
+   */
+  const guestMemory = (): WebAssembly.Memory | null => {
+    const memory = instanceRef?.exports.memory
+    return memory instanceof WebAssembly.Memory ? memory : null
+  }
+
+  const imports: WebAssembly.Imports = {
     env: {
       // Mirrors the proxy's host import set (packages/proxy/src/wasm/host.rs)
       // — a rule that links in the proxy must link here too, or install
       // validation would reject rules the sandbox runs fine (and vice versa).
       log_info(message: number, len: number) {
-        if (instanceRef && message) {
-          const memory = instanceRef.exports.memory as WebAssembly.Memory
-          const bytes = new Uint8Array(memory.buffer, message, len)
-          console.log(`[WASM Log] ${Buffer.from(bytes).toString('utf-8')}`)
-        }
+        const memory = guestMemory()
+        if (!memory || !message) return
+        const text = readGuestUtf8(memory, message, len)
+        console.log(
+          text === null
+            ? `[WASM Log] <out of bounds: ptr=${message} len=${len}>`
+            : `[WASM Log] ${text}`,
+        )
       },
+      // `fileName` is part of AssemblyScript's fixed abort ABI and deliberately
+      // unused: it points at the source path, which is only populated under
+      // --debug and is a bare pointer otherwise. Not renamed to `_fileName`
+      // because it is a real parameter of a foreign ABI and the name documents
+      // the slot; `args: 'after-used'` means an unused parameter before two used
+      // ones is not reported anyway.
       abort(message: number, fileName: number, line: number, column: number) {
-        let errorMsg = 'AssemblyScript abort'
-        if (instanceRef && message) {
-          const memory = instanceRef.exports.memory as WebAssembly.Memory
-          const size = new Uint32Array(memory.buffer, message - 4, 1)[0]
-          const memView16 = new Uint16Array(memory.buffer)
-          const chars: string[] = []
-          for (let i = 0; i < size / 2; i++) {
-            chars.push(String.fromCharCode(memView16[(message / 2) + i]))
-          }
-          errorMsg = chars.join('')
-        }
-        throw new Error(`WASM Abort: ${errorMsg} (at line ${line}, col ${column})`)
+        const memory = guestMemory()
+        const text = memory && message ? readGuestString(memory, message) : null
+        throw new Error(`WASM Abort: ${text ?? 'AssemblyScript abort'} (at line ${line}, col ${column})`)
       },
-      trace(message: number, n: number) {
-        if (instanceRef && message) {
-          const memory = instanceRef.exports.memory as WebAssembly.Memory
-          const size = new Uint32Array(memory.buffer, message - 4, 1)[0]
-          const memView16 = new Uint16Array(memory.buffer)
-          const chars: string[] = []
-          for (let i = 0; i < size / 2; i++) {
-            chars.push(String.fromCharCode(memView16[(message / 2) + i]))
-          }
-          console.log(`[WASM Trace] ${chars.join('')}`)
+      /**
+       * AssemblyScript's `trace(message, n, a0..a4)`: `n` says how many of the
+       * five f64 slots carry a value.
+       *
+       * The five slots were absent from this signature and `n` was accepted and
+       * dropped, so a rule calling `trace("tokens left", 1, remaining)` printed
+       * "tokens left" here and nothing else — the number the author was tracing
+       * never reached the output of the command whose whole job is to show them
+       * what their rule does. The proxy at least logs `n`
+       * (`packages/proxy/src/wasm/host.rs`).
+       */
+      trace(
+        message: number,
+        n: number,
+        a0: number,
+        a1: number,
+        a2: number,
+        a3: number,
+        a4: number,
+      ) {
+        const memory = guestMemory()
+        const text = memory && message ? readGuestString(memory, message) : null
+        // A module may declare a narrower `env.trace`, in which case JS passes
+        // undefined for the slots it did not declare; drop anything non-finite.
+        const count = Number.isInteger(n) ? Math.min(Math.max(n, 0), 5) : 0
+        const values = [a0, a1, a2, a3, a4].slice(0, count).filter((v) => Number.isFinite(v))
+        const suffix = values.length > 0 ? ` ${values.join(' ')}` : ''
+        if (text === null) {
+          console.log(`[WASM Trace Pointer] ${message} (n=${n})${suffix}`)
         } else {
-          console.log(`[WASM Trace Pointer] ${message}`)
+          console.log(`[WASM Trace] ${text}${suffix}`)
         }
       },
       // `seed()` used to be here, and the comment above — asserting this set
@@ -226,32 +432,43 @@ export async function instantiateAndEvaluate(
     // the permissive direction is worse than no harness.
   }
 
-  const { instance } = (await WebAssembly.instantiate(wasmBuffer, imports)) as any
-  instanceRef = instance
-  const jsonBytes = Buffer.from(mockStr)
-
-  // Accept exactly the allocator exports the proxy runner accepts
-  // (packages/proxy/src/wasm/runner.rs: `allocate`, then `__new`) — anything
-  // looser would validate rules the proxy then silently fails open on.
-  let offset = 0
-  if (typeof instance.exports.allocate === 'function') {
-    offset = (instance.exports.allocate as Function)(jsonBytes.length)
-  } else if (typeof instance.exports.__new === 'function') {
-    offset = (instance.exports.__new as Function)(jsonBytes.length, 0)
-  } else {
-    throw new Error("WASM module is missing 'allocate' or '__new' memory helpers.")
+  // `Uint8Array` means `Uint8Array<ArrayBufferLike>`, and `BufferSource` demands
+  // `ArrayBufferView<ArrayBuffer>` — a view over a SharedArrayBuffer is not one,
+  // so the parameter type callers actually use (`Buffer` from `fs.readFile`) does
+  // not fit `WebAssembly.instantiate`. The old `as any` on the result hid that
+  // mismatch by silently selecting the `Module` overload instead, which returns a
+  // bare `Instance` with no `.instance` property: the destructuring below was
+  // reading a field the declared type does not have. Copy into a plainly-backed
+  // array rather than narrowing the parameter, which would reject `Buffer`. One
+  // copy of a rule binary, once per validation.
+  // Compile first and inspect the import section, so an unprovided import is
+  // named rather than surfacing as V8's "Import #3 module=env function=seed
+  // error: function import requires a callable". Same outcome either way — the
+  // instantiate below would throw — but a rule author needs to know it was
+  // `Math.random()`.
+  const compiled = await WebAssembly.compile(new Uint8Array(wasmBuffer))
+  const unsupported = unsupportedImports(compiled)
+  if (unsupported.length > 0) {
+    throw new Error(
+      `rule imports ${unsupported.length} function(s) the proxy sandbox does not provide:\n` +
+        unsupported.map((n) => `    ${explainUnsupportedImport(n)}`).join('\n') +
+        `\n  Available: ${HOST_IMPORT_NAMES.map((n) => `env.${n}`).join(', ')}.`,
+    )
   }
 
-  const memory = instance.exports.memory as WebAssembly.Memory
-  const memView = new Uint8Array(memory.buffer, offset, jsonBytes.length)
+  const instance = await WebAssembly.instantiate(compiled, imports)
+  instanceRef = instance
+  const abi = resolveGuestAbi(instance)
+
+  const jsonBytes = Buffer.from(mockStr)
+  const offset = abi.allocate(jsonBytes.length)
+
+  // Re-read `abi.memory.buffer` here rather than caching a view: `allocate` can
+  // grow the memory, which detaches every ArrayBuffer taken before the call.
+  const memView = new Uint8Array(abi.memory.buffer, offset, jsonBytes.length)
   memView.set(jsonBytes)
 
-  const evaluate = instance.exports.evaluate as Function
-  if (typeof evaluate !== 'function') {
-    throw new Error("WASM module is missing 'evaluate' function export.")
-  }
-
-  return evaluate(offset, jsonBytes.length)
+  return abi.evaluate(offset, jsonBytes.length)
 }
 
 export async function runPolicyTest(opts: { wasm: string; mock: string }): Promise<void> {
@@ -261,16 +478,16 @@ export async function runPolicyTest(opts: { wasm: string; mock: string }): Promi
   let mockStr: string
   try {
     wasmBuffer = await fs.readFile(opts.wasm)
-  } catch (err: any) {
-    log.error(`Failed to read WASM file at "${opts.wasm}": ${err.message}`)
+  } catch (err) {
+    log.error(`Failed to read WASM file at "${opts.wasm}": ${errMessage(err)}`)
     process.exit(1)
   }
 
   try {
     mockStr = await fs.readFile(opts.mock, 'utf-8')
     JSON.parse(mockStr) // syntax check
-  } catch (err: any) {
-    log.error(`Failed to read or parse mock context JSON at "${opts.mock}": ${err.message}`)
+  } catch (err) {
+    log.error(`Failed to read or parse mock context JSON at "${opts.mock}": ${errMessage(err)}`)
     process.exit(1)
   }
 
@@ -295,8 +512,8 @@ export async function runPolicyTest(opts: { wasm: string; mock: string }): Promi
       log.info('  Valid codes are 0 (allow), 1 (block) and 3 (reask). The proxy allows')
       log.info('  anything else, so a rule returning this enforces nothing.')
     }
-  } catch (err: any) {
-    log.error(`Execution error during WASM policy test: ${err.message}`)
+  } catch (err) {
+    log.error(`Execution error during WASM policy test: ${errMessage(err)}`)
     process.exit(1)
   }
 }
@@ -397,8 +614,8 @@ export async function runPolicyInstall(opts: {
   let wasmBuffer: Buffer
   try {
     wasmBuffer = await fs.readFile(opts.wasm)
-  } catch (err: any) {
-    log.error(`Failed to read WASM file at "${opts.wasm}": ${err.message}`)
+  } catch (err) {
+    log.error(`Failed to read WASM file at "${opts.wasm}": ${errMessage(err)}`)
     process.exit(1)
   }
 
@@ -411,6 +628,16 @@ export async function runPolicyInstall(opts: {
     // clean and then enforces nothing — the same silent shape as a rule that
     // cannot link. 2 is accepted here because already-installed rules use it,
     // but it is deprecated and reported as such.
+    if (validationVerdict === 2) {
+      // Accepted, because refusing it would break reinstalling a rule that
+      // already shipped — but never silently. The guest never receives the
+      // request body, so redaction was never expressible, and the proxy maps 2
+      // to a block. An author who believes they are redacting is blocking.
+      log.warn(
+        'Rule returned verdict code 2 (REDACT), which is deprecated. The proxy treats it ' +
+          'as a block. Return 1 to block, or 3 to reask.'
+      )
+    }
     if (![0, 1, 2, 3].includes(validationVerdict)) {
       log.error(
         `Rule returned verdict code ${validationVerdict}, which the proxy does not map — ` +
@@ -418,8 +645,8 @@ export async function runPolicyInstall(opts: {
       )
       process.exit(1)
     }
-  } catch (err: any) {
-    log.error(`Rule failed validation and was NOT installed: ${err.message}`)
+  } catch (err) {
+    log.error(`Rule failed validation and was NOT installed: ${errMessage(err)}`)
     process.exit(1)
   }
 
@@ -436,8 +663,8 @@ export async function runPolicyInstall(opts: {
   try {
     await fs.mkdir(dir, { recursive: true })
     await fs.writeFile(dest, wasmBuffer)
-  } catch (err: any) {
-    log.error(`Failed to install rule to "${dest}": ${err.message}`)
+  } catch (err) {
+    log.error(`Failed to install rule to "${dest}": ${errMessage(err)}`)
     process.exit(1)
   }
 
@@ -477,8 +704,8 @@ export async function runPolicyListLocal(): Promise<void> {
       const { priority, name } = parseRuleFileName(file)
       const sha256 = createHash('sha256').update(bytes).digest('hex')
       log.field(name, `priority=${priority} size=${stat.size}B mtime=${stat.mtime.toISOString()} sha256=${sha256.slice(0, 16)}…`)
-    } catch (err: any) {
-      log.warn(`${file}: unreadable (${err.message})`)
+    } catch (err) {
+      log.warn(`${file}: unreadable (${errMessage(err)})`)
     }
   }
 }

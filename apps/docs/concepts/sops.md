@@ -14,13 +14,15 @@ interface SopRegistryEntry {
   workspaceId: string;         // Owning workspace reference
   title: string;               // Human-readable title
   version: string;             // SemVer string (default: 1.0.0)
-  markdownContent: string;     // The natural language rule or V8 script body
+  markdownContent: string;     // The natural language rule body
   contentHash: string;         // SHA-256 integrity hash of content
   riskTier: 'LOW' | 'MEDIUM' | 'HIGH';
   complexityTier: 'TIER_1' | 'TIER_2' | 'TIER_3';
   isActive: boolean;           // Active status toggle
   lifecycleState: 'DRAFT' | 'UNDER_REVIEW' | 'ACTIVE' | 'ARCHIVED';
-  sopType: 'standard' | 'hook'; // Standard markdown rule vs. executable hook script
+  // `sopType` and `hookPhase` are vestigial: the columns exist, nothing sets
+  // them, and the executor they fed has been removed (see "SOP Formats" below).
+  sopType: 'standard' | 'hook';
   hookPhase?: 'PRE_TOOL' | 'POST_TOOL' | 'PRE_RESPONSE' | 'POST_RESPONSE';
 }
 ```
@@ -29,7 +31,8 @@ interface SopRegistryEntry {
 
 ## SOP Formats
 
-Intutic supports two distinct formats of SOPs depending on whether the rule is meant for human-in-the-loop validation, in-process local interception, or machine-enforceable runtime scripting:
+Intutic supports two distinct formats of SOPs depending on whether the rule is meant for
+human-in-the-loop validation or in-process local interception:
 
 ### Comparison: Local Harness Rules vs. LLM-as-a-Judge
 
@@ -45,66 +48,17 @@ Intutic supports two distinct formats of SOPs depending on whether the rule is m
 Standard SOPs are authored in natural language markdown. They represent corporate policies (e.g., "Do not use deprecated cryptographic functions") and are used by:
 - **LLMProbe:** Running LLM-as-a-judge checks against prompt inputs and outputs.
 
-### 2. Hook SOPs
-Hook SOPs contain JavaScript code blocks executed dynamically inside Node's sandboxed V8 execution context during active agent operations.
+### 2. WASM Rules
+For programmatic enforcement, rules compile to WebAssembly and run in the proxy with an
+explicit host-import allowlist. See [WASM Rules](/guide/wasm-rules).
 
----
-
-## V8 Isolate Script execution
-
-For hook-type SOPs, scripts are executed synchronously at designated pipeline phases.
-
-### Phase Triggers
-- `PRE_TOOL`: Fires before a tool call is executed.
-- `POST_TOOL`: Fires immediately after a tool completes execution.
-- `PRE_RESPONSE`: Fires before sending request payloads to the model.
-- `POST_RESPONSE`: Fires immediately after receiving model completions.
-
-### Injected Context (`intutic.context`)
-Every script runs in a isolated context where it has read-only access to runtime metadata via the global `intutic.context` object:
-
-```typescript
-interface HookContext {
-  sessionId: string;
-  workspaceId: string;
-  toolName?: string;
-  toolArguments?: string;
-  model?: string;
-  responseContent?: string;
-  estimatedCostUsd?: number;
-  trustScore?: number;
-  metadata?: Record<string, unknown>;
-}
-```
-
-### Setting the Verdict (`intutic.verdict`)
-To enforce rules, the script must synchronously call `intutic.verdict()` with the policy outcome:
-
-```javascript
-// Example: Block unauthorized git pushes
-if (intutic.context.toolName === 'run_command') {
-  const args = intutic.context.toolArguments || '';
-  if (args.includes('git push') && args.includes('--force')) {
-    intutic.verdict({
-      action: 'block',
-      reason: 'Force push to git repositories is strictly prohibited by security policy.'
-    });
-  }
-}
-```
-
-#### Verdict Options:
-* `allow`: No action taken. Proceed with the run.
-* `block`: Terminate the operation and return the specified `reason`.
-* `modify`: Alter the request or output payload. Requires providing `modifiedContent`.
-* `warn`: Complete the run but record a policy warning in the audit logs.
-
-### Sandbox Security Constraints
-To ensure isolation and performance safety:
-- **No System Access:** No access to `require()`, `process`, `fs` (filesystem), or the network.
-- **Execution Limits:** Strict CPU timeout limit of **100ms** per execution run.
-- **Size Limits:** Maximum script size capped at **64KB**.
-- **Namespace whitelist:** Access is restricted to standard JavaScript APIs (`console.log`, `Math`, `JSON`, `Date`, etc.).
+This section previously described a third format, **Hook SOPs** — JavaScript executed "inside
+Node's sandboxed V8 execution context" — along with a phase model, an `intutic.verdict()` API
+and a list of sandbox guarantees. That feature has been removed. It ran in Node's `vm` module,
+which is not a security boundary; it received the host's own intrinsics, so a script could
+reach `Object.prototype`; it failed open on every error including the documented CPU timeout;
+and no route, UI or front-matter key could ever create one, so no hook script ever ran against
+a real tool call. WASM rules are the supported answer.
 
 ---
 
@@ -122,7 +76,10 @@ Each change projects metadata detailing the creator user, review tickets, and th
 
 ## SOP Examples Library
 
-Below are copy-pasteable examples of Standard Markdown SOPs and V8 Hook SOPs covering common security and operational guardrails:
+Below are copy-pasteable examples of Standard Markdown SOPs covering common security and
+operational guardrails. For the programmatic equivalents — blocking `rm -rf`, force pushes and
+unqualified `DELETE` — see the [starter rule library](/guide/wasm-rules), which ships rules
+that are tested in both directions rather than examples that were never executable.
 
 ### 1. Secret & Credential Redaction (Markdown SOP)
 
@@ -137,54 +94,7 @@ Save as `CLAUDE.md`, `.cursorrules`, or `.windsurfrules`:
 3. If credentials are identified in prompt context or tool outputs, mask them with `[REDACTED_SECRET]` before processing.
 ```
 
-### 2. Destructive Command & Git Guardrails (V8 Hook SOP)
-
-Executable JavaScript hook configured for phase `PRE_TOOL`:
-
-```javascript
-// Hook Phase: PRE_TOOL
-// Purpose: Intercept destructive shell commands and force-pushes
-if (intutic.context.toolName === 'run_command') {
-  const command = (intutic.context.toolArguments || '').toLowerCase();
-
-  // Block recursive file deletion
-  if (command.includes('rm -rf') || command.includes('rm -r /')) {
-    intutic.verdict({
-      action: 'block',
-      reason: 'Recursive file deletion (rm -rf) is prohibited by workspace SOP.'
-    });
-  }
-
-  // Block git force push
-  if (command.includes('git push') && (command.includes('--force') || command.includes('-f'))) {
-    intutic.verdict({
-      action: 'block',
-      reason: 'Force-pushing git branches is strictly prohibited.'
-    });
-  }
-}
-```
-
-### 3. Production Database Protection (V8 Hook SOP)
-
-Executable JavaScript hook configured for phase `PRE_TOOL`:
-
-```javascript
-// Hook Phase: PRE_TOOL
-// Purpose: Block destructive SQL operations on production connections
-if (intutic.context.toolName === 'execute_sql' || intutic.context.toolName === 'run_query') {
-  const query = (intutic.context.toolArguments || '').toUpperCase();
-
-  if (query.includes('DROP TABLE') || query.includes('TRUNCATE') || (query.includes('DELETE FROM') && !query.includes('WHERE'))) {
-    intutic.verdict({
-      action: 'block',
-      reason: 'Destructive SQL queries without a WHERE clause are blocked by database safety SOP.'
-    });
-  }
-}
-```
-
-### 4. Code Quality & Steering Rule (Markdown SOP)
+### 2. Code Quality & Steering Rule (Markdown SOP)
 
 ```markdown
 # SOP: Code Quality & Safety Wrappers

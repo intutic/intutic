@@ -17,10 +17,7 @@ import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import * as os from 'node:os'
 import { execFileSync } from 'node:child_process'
-import { createLogger } from '@intutic/logger'
 import { loadConfig } from '../config/store.js'
-
-const log = createLogger('cli-install-daemon')
 
 // ── Error definitions ──────────────────────────────────────────────────
 
@@ -168,6 +165,35 @@ ${argStrings.join('\n')}
 `
 }
 
+/**
+ * Resolve the argv used to launch the MCP daemon from a service definition.
+ *
+ * Both launchd and systemd exec the program directly rather than through a
+ * shell, and neither searches PATH: launchd requires an absolute path in
+ * `ProgramArguments[0]`, and systemd rejects a unit whose `ExecStart` does not
+ * start with an absolute path. So `which` is run for its *output* — the
+ * absolute location — not merely as a presence check.
+ *
+ * Falls back to running the bundled daemon entry point under the current Node
+ * when `intutic-mcp-daemon` is not installed on PATH.
+ */
+function resolveMcpDaemonExec(daemonPath: string): string[] {
+  const fallback = [process.execPath, daemonPath]
+  try {
+    // stderr is dropped so a "not found" message never reaches the CLI output;
+    // `which` exits non-zero in that case and the catch below handles it.
+    const resolved = execFileSync('which', ['intutic-mcp-daemon'], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+      .split('\n')[0]
+      .trim()
+    return path.isAbsolute(resolved) ? [resolved] : fallback
+  } catch {
+    return fallback
+  }
+}
+
 export function buildMcpPlist(
   opts: Required<Pick<InstallDaemonOptions, 'workspaceId' | 'apiKey' | 'controlPlaneUrl'>>,
   system = false
@@ -177,13 +203,7 @@ export function buildMcpPlist(
   const workspaceRoot = config?.workspaceRoot ?? process.cwd()
   const daemonPath = path.join(workspaceRoot, 'packages', 'mcp-proxy', 'dist', 'daemon', 'index.js')
 
-  let execArgs: string[] = []
-  try {
-    execFileSync('which', ['intutic-mcp-daemon'], { stdio: 'ignore' })
-    execArgs = ['intutic-mcp-daemon']
-  } catch {
-    execArgs = [process.execPath, daemonPath]
-  }
+  const execArgs = resolveMcpDaemonExec(daemonPath)
 
   const programArgsXml = execArgs.map(arg => `    <string>${arg}</string>`).join('\n')
   const runAtLoad = system ? '' : '\n  <key>RunAtLoad</key>\n  <true/>'
@@ -258,7 +278,13 @@ async function installMacos(
 
   try {
     execFileSync('launchctl', ['unload', '-w', paths.targetPath], { stdio: 'ignore' })
-  } catch {}
+  } catch {
+    // Best-effort: this unload exists only to release a previously installed
+    // agent before its plist is overwritten. On a first install there is no
+    // plist and nothing loaded, so launchctl exits non-zero — the expected
+    // case, not a failure. A real problem surfaces at the `load` below, which
+    // is deliberately not wrapped.
+  }
 
   await fs.writeFile(paths.targetPath, plist, 'utf-8')
   execFileSync('launchctl', ['load', '-w', paths.targetPath])
@@ -273,7 +299,7 @@ export function buildUnit(
   system = false
 ): string {
   const paths = getPaths(system, false, 'linux')
-  let execStart = ''
+  let execStart: string
   if (opts.binaryPath.endsWith('.js') || opts.binaryPath.endsWith('.ts')) {
     execStart = `${process.execPath} ${opts.binaryPath}`
   } else if (opts.binaryPath.includes('node') && !opts.binaryPath.endsWith('intutic')) {
@@ -320,13 +346,7 @@ export function buildMcpUnit(
   const workspaceRoot = config?.workspaceRoot ?? process.cwd()
   const daemonPath = path.join(workspaceRoot, 'packages', 'mcp-proxy', 'dist', 'daemon', 'index.js')
 
-  let execStart = ''
-  try {
-    execFileSync('which', ['intutic-mcp-daemon'], { stdio: 'ignore' })
-    execStart = 'intutic-mcp-daemon'
-  } catch {
-    execStart = `${process.execPath} ${daemonPath}`
-  }
+  const execStart = resolveMcpDaemonExec(daemonPath).join(' ')
 
   return `[Unit]
 Description=Intutic MCP Daemon — Persistent policy and telemetry cache for MCP harnesses
@@ -420,8 +440,22 @@ export async function uninstallDaemon(opts: UninstallDaemonOptions = {}): Promis
     case 'darwin': {
       console.log(`\n🗑  Removing Launch${system ? 'Daemon' : 'Agent'}: ${paths.targetPath}`)
       if (!opts.dryRun) {
-        try { execFileSync('launchctl', ['unload', '-w', paths.targetPath], { stdio: 'ignore' }) } catch {}
-        try { await fs.unlink(paths.targetPath) } catch {}
+        try {
+          execFileSync('launchctl', ['unload', '-w', paths.targetPath], { stdio: 'ignore' })
+        } catch {
+          // Best-effort: uninstall is idempotent. launchctl exits non-zero when
+          // the agent is already unloaded or was never loaded, and in both cases
+          // the desired end state is reached. The plist removal below is what
+          // actually has to happen, so it must not be skipped on this failure.
+        }
+        try {
+          await fs.unlink(paths.targetPath)
+        } catch {
+          // Best-effort: ENOENT means an earlier uninstall already removed the
+          // plist, which is success for this command. Other errors (EACCES on a
+          // /Library/LaunchDaemons plist) are already pre-empted by the
+          // checkRootPrivileges call above.
+        }
       }
       console.log(`✅ Launch${system ? 'Daemon' : 'Agent'} removed.`)
       break
@@ -430,11 +464,22 @@ export async function uninstallDaemon(opts: UninstallDaemonOptions = {}): Promis
       console.log(`\n🗑  Removing systemd ${system ? 'system' : 'user'} unit: ${paths.targetPath}`)
       if (!opts.dryRun) {
         const cmdArgs = system ? [] : ['--user']
-        try { execFileSync('systemctl', [...cmdArgs, 'disable', '--now', paths.unitName!], { stdio: 'ignore' }) } catch {}
+        try {
+          execFileSync('systemctl', [...cmdArgs, 'disable', '--now', paths.unitName!], { stdio: 'ignore' })
+        } catch {
+          // Best-effort: `disable --now` exits non-zero when the unit is not
+          // enabled, not loaded, or absent entirely — all of which mean the work
+          // this call was going to do is already done. The unit file removal
+          // below is the part that must still run.
+        }
         try {
           await fs.unlink(paths.targetPath)
           execFileSync('systemctl', [...cmdArgs, 'daemon-reload'], { stdio: 'ignore' })
-        } catch {}
+        } catch {
+          // Best-effort: ENOENT means the unit file is already gone, and the
+          // reload is deliberately inside the same block — if nothing was
+          // removed there is no change for systemd to pick up.
+        }
       }
       console.log(`✅ systemd ${system ? 'system' : 'user'} unit removed.`)
       break
@@ -492,8 +537,8 @@ export async function daemonStop(): Promise<void> {
           try {
             execFileSync('launchctl', ['unload', paths.targetPath], { stdio: 'ignore' })
             console.log(`✅ Successfully stopped ${system ? 'system' : 'user'} sync-daemon.`)
-          } catch (e: any) {
-            console.log(`❌ Failed to stop ${system ? 'system' : 'user'} sync-daemon: ${e.message}`)
+          } catch (e) {
+            console.log(`❌ Failed to stop ${system ? 'system' : 'user'} sync-daemon: ${e instanceof Error ? e.message : String(e)}`)
           }
         }
       }
@@ -508,8 +553,8 @@ export async function daemonStop(): Promise<void> {
             const cmdArgs = system ? [] : ['--user']
             execFileSync('systemctl', [...cmdArgs, 'stop', paths.unitName!], { stdio: 'ignore' })
             console.log(`✅ Successfully stopped ${system ? 'system' : 'user'} sync-daemon unit.`)
-          } catch (e: any) {
-            console.log(`❌ Failed to stop ${system ? 'system' : 'user'} sync-daemon unit: ${e.message}`)
+          } catch (e) {
+            console.log(`❌ Failed to stop ${system ? 'system' : 'user'} sync-daemon unit: ${e instanceof Error ? e.message : String(e)}`)
           }
         }
       }
@@ -528,8 +573,8 @@ export async function daemonStart(): Promise<void> {
           try {
             execFileSync('launchctl', ['load', '-w', paths.targetPath], { stdio: 'ignore' })
             console.log(`✅ Successfully started ${system ? 'system' : 'user'} sync-daemon.`)
-          } catch (e: any) {
-            console.log(`❌ Failed to start ${system ? 'system' : 'user'} sync-daemon: ${e.message}`)
+          } catch (e) {
+            console.log(`❌ Failed to start ${system ? 'system' : 'user'} sync-daemon: ${e instanceof Error ? e.message : String(e)}`)
           }
         }
       }
@@ -544,8 +589,8 @@ export async function daemonStart(): Promise<void> {
             const cmdArgs = system ? [] : ['--user']
             execFileSync('systemctl', [...cmdArgs, 'start', paths.unitName!], { stdio: 'ignore' })
             console.log(`✅ Successfully started ${system ? 'system' : 'user'} sync-daemon unit.`)
-          } catch (e: any) {
-            console.log(`❌ Failed to start ${system ? 'system' : 'user'} sync-daemon unit: ${e.message}`)
+          } catch (e) {
+            console.log(`❌ Failed to start ${system ? 'system' : 'user'} sync-daemon unit: ${e instanceof Error ? e.message : String(e)}`)
           }
         }
       }
@@ -579,7 +624,14 @@ export async function installMcpDaemon(opts: InstallDaemonOptions): Promise<void
       }
       await fs.mkdir(paths.targetDir, { recursive: true })
       await fs.mkdir(paths.logsDir, { recursive: true })
-      try { execFileSync('launchctl', ['unload', '-w', paths.targetPath], { stdio: 'ignore' }) } catch {}
+      try {
+        execFileSync('launchctl', ['unload', '-w', paths.targetPath], { stdio: 'ignore' })
+      } catch {
+        // Best-effort: releases a previously installed MCP agent before its
+        // plist is overwritten. Nothing is loaded on a first install, so a
+        // non-zero exit here is the normal path. The `load` below is unwrapped
+        // and will report a genuine failure.
+      }
       await fs.writeFile(paths.targetPath, plist, 'utf-8')
       execFileSync('launchctl', ['load', '-w', paths.targetPath])
       console.log(`\n✅ MCP Launch${system ? 'Daemon' : 'Agent'} installed and started.`)
@@ -622,8 +674,22 @@ export async function uninstallMcpDaemon(opts: UninstallDaemonOptions = {}): Pro
     case 'darwin': {
       console.log(`\n🗑  Removing MCP Launch${system ? 'Daemon' : 'Agent'}: ${paths.targetPath}`)
       if (!opts.dryRun) {
-        try { execFileSync('launchctl', ['unload', '-w', paths.targetPath], { stdio: 'ignore' }) } catch {}
-        try { await fs.unlink(paths.targetPath) } catch {}
+        try {
+          execFileSync('launchctl', ['unload', '-w', paths.targetPath], { stdio: 'ignore' })
+        } catch {
+          // Best-effort: uninstall is idempotent. An MCP agent that is already
+          // unloaded (or never was) makes launchctl exit non-zero while leaving
+          // the desired end state in place, and the plist removal below still
+          // has to run.
+        }
+        try {
+          await fs.unlink(paths.targetPath)
+        } catch {
+          // Best-effort: ENOENT means a previous uninstall already removed the
+          // plist, which is the outcome this command wants. Permission failures
+          // on the /Library/LaunchDaemons copy are pre-empted by the
+          // checkRootPrivileges call above.
+        }
       }
       console.log(`✅ MCP Launch${system ? 'Daemon' : 'Agent'} removed.`)
       break
@@ -632,11 +698,22 @@ export async function uninstallMcpDaemon(opts: UninstallDaemonOptions = {}): Pro
       console.log(`\n🗑  Removing MCP systemd ${system ? 'system' : 'user'} unit: ${paths.targetPath}`)
       if (!opts.dryRun) {
         const cmdArgs = system ? [] : ['--user']
-        try { execFileSync('systemctl', [...cmdArgs, 'disable', '--now', paths.unitName!], { stdio: 'ignore' }) } catch {}
+        try {
+          execFileSync('systemctl', [...cmdArgs, 'disable', '--now', paths.unitName!], { stdio: 'ignore' })
+        } catch {
+          // Best-effort: a unit that is not enabled, not loaded, or absent makes
+          // `disable --now` exit non-zero, and each of those already satisfies
+          // what this call was for. Removal of the unit file below must not be
+          // skipped because of it.
+        }
         try {
           await fs.unlink(paths.targetPath)
           execFileSync('systemctl', [...cmdArgs, 'daemon-reload'], { stdio: 'ignore' })
-        } catch {}
+        } catch {
+          // Best-effort: ENOENT means the unit file is already gone. The reload
+          // shares this block on purpose — with nothing removed there is no
+          // change for systemd to reload.
+        }
       }
       console.log(`✅ MCP systemd ${system ? 'system' : 'user'} unit removed.`)
       break
@@ -692,8 +769,8 @@ export async function mcpDaemonStop(): Promise<void> {
           try {
             execFileSync('launchctl', ['unload', paths.targetPath], { stdio: 'ignore' })
             console.log(`✅ Successfully stopped MCP Launch${system ? 'Daemon' : 'Agent'}.`)
-          } catch (e: any) {
-            console.log(`❌ Failed to stop MCP Launch${system ? 'Daemon' : 'Agent'}: ${e.message}`)
+          } catch (e) {
+            console.log(`❌ Failed to stop MCP Launch${system ? 'Daemon' : 'Agent'}: ${e instanceof Error ? e.message : String(e)}`)
           }
         }
       }
@@ -708,8 +785,8 @@ export async function mcpDaemonStop(): Promise<void> {
             const cmdArgs = system ? [] : ['--user']
             execFileSync('systemctl', [...cmdArgs, 'stop', paths.unitName!], { stdio: 'ignore' })
             console.log(`✅ Successfully stopped MCP ${system ? 'system' : 'user'} unit.`)
-          } catch (e: any) {
-            console.log(`❌ Failed to stop MCP ${system ? 'system' : 'user'} unit: ${e.message}`)
+          } catch (e) {
+            console.log(`❌ Failed to stop MCP ${system ? 'system' : 'user'} unit: ${e instanceof Error ? e.message : String(e)}`)
           }
         }
       }
@@ -728,8 +805,8 @@ export async function mcpDaemonStart(): Promise<void> {
           try {
             execFileSync('launchctl', ['load', '-w', paths.targetPath], { stdio: 'ignore' })
             console.log(`✅ Successfully started MCP Launch${system ? 'Daemon' : 'Agent'}.`)
-          } catch (e: any) {
-            console.log(`❌ Failed to start MCP Launch${system ? 'Daemon' : 'Agent'}: ${e.message}`)
+          } catch (e) {
+            console.log(`❌ Failed to start MCP Launch${system ? 'Daemon' : 'Agent'}: ${e instanceof Error ? e.message : String(e)}`)
           }
         }
       }
@@ -744,8 +821,8 @@ export async function mcpDaemonStart(): Promise<void> {
             const cmdArgs = system ? [] : ['--user']
             execFileSync('systemctl', [...cmdArgs, 'start', paths.unitName!], { stdio: 'ignore' })
             console.log(`✅ Successfully started MCP ${system ? 'system' : 'user'} unit.`)
-          } catch (e: any) {
-            console.log(`❌ Failed to start MCP ${system ? 'system' : 'user'} unit: ${e.message}`)
+          } catch (e) {
+            console.log(`❌ Failed to start MCP ${system ? 'system' : 'user'} unit: ${e instanceof Error ? e.message : String(e)}`)
           }
         }
       }

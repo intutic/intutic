@@ -19,13 +19,17 @@
  *
  * Usage: node tools/scripts/check-wasm-host-imports.js
  */
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const hostRs = join(repoRoot, 'packages', 'proxy', 'src', 'wasm', 'host.rs')
-const policyTs = join(repoRoot, 'tools', 'cli', 'src', 'commands', 'policy.ts')
+// The single TypeScript mirror. The CLI, the control plane's upload endpoint
+// and the SDK's test harness all import it rather than declaring their own —
+// four copies is how `seed` came to be offered by one of them and registered by
+// none.
+const sharedTs = join(repoRoot, 'packages', 'shared-types', 'src', 'wasmHost.ts')
 
 /** Pull a string-array literal out of a source file by declaration name. */
 function extractList(file, pattern, label) {
@@ -46,9 +50,9 @@ const proxy = extractList(
   'HOST_IMPORTS',
 )
 const cli = extractList(
-  policyTs,
-  /export const HOST_IMPORT_NAMES\s*=\s*\[([\s\S]*?)\]/,
-  'HOST_IMPORT_NAMES',
+  sharedTs,
+  /export const WASM_HOST_IMPORTS\s*=\s*\[([\s\S]*?)\]/,
+  'WASM_HOST_IMPORTS',
 )
 
 // Also verify the proxy's declaration matches what it actually registers, so
@@ -62,6 +66,34 @@ const declaredNotRegistered = proxy.filter((n) => !registered.includes(n))
 const registeredNotDeclared = registered.filter((n) => !proxy.includes(n))
 
 let failed = false
+
+// Comparing two lists only catches drift between the two files it reads. The
+// live defect was a THIRD copy — and then a fourth, and a fifth: the control
+// plane's upload validator and the SDK's test harness each hardcoded
+// `{ log_info, abort, trace }`. Neither was covered, so either could have
+// re-added `seed` with no signal. Rather than adding a reader per copy, refuse
+// any new copy.
+const COPY_SITES = [
+  ['tools', 'cli', 'src', 'commands', 'policy.ts'],
+  ['services', 'control-plane', 'src', 'routes', 'wasmRules.ts'],
+  ['packages', 'wasm-sdk', '__tests__', 'starterRules.test.ts'],
+]
+for (const parts of COPY_SITES) {
+  const file = join(repoRoot, ...parts)
+  if (!existsSync(file)) continue
+  const text = readFileSync(file, 'utf8')
+  // An object literal or array naming all three at once is a re-declaration.
+  const declaresOwn =
+    /log_info[\s\S]{0,120}abort[\s\S]{0,120}trace/.test(text) &&
+    !/WASM_HOST_IMPORTS|HOST_IMPORT_NAMES/.test(text)
+  if (declaresOwn) {
+    console.error(`✖ ${parts.join('/')} declares its own host-import set.`)
+    console.error('  Import WASM_HOST_IMPORTS from @intutic/shared-types instead — a copy')
+    console.error('  here can drift from the proxy with no signal, which is the defect')
+    console.error('  this gate exists to prevent.')
+    failed = true
+  }
+}
 
 if (extraInCli.length > 0) {
   console.error(`✖ the CLI offers host imports the proxy does not register: ${extraInCli.join(', ')}`)

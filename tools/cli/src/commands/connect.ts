@@ -42,6 +42,7 @@ import { SyncWsClient,
   injectMcpServer,
   guardSettingsFile,
   writeRuntimeEnv,
+  refreshPolicySnapshot,
   runComplianceProbes,
   drainHookEvents,
   syncOfflineTraces,
@@ -52,7 +53,13 @@ import { SyncWsClient,
   endAllOpenSessions,
 } from '@intutic/sync-daemon'
 import { watch } from 'chokidar'
-import Redis from 'ioredis'
+// Named, not default: under `module: Node16` TypeScript resolves ioredis's
+// default export to the module namespace rather than the class, so `new
+// Redis(...)` is not constructable and `Redis` is not a type. That is what the
+// `new (Redis as any)(...)` below was working around, at the cost of also
+// giving up the client's type. `packages/mcp-proxy` already imports it this
+// way; both forms are the same class at run time.
+import { Redis } from 'ioredis'
 import * as net from 'node:net'
 import { spawn, execSync, ChildProcess } from 'node:child_process'
 import { createWriteStream } from 'node:fs'
@@ -62,7 +69,7 @@ const DEFAULT_POLL_INTERVAL = 30_000
 function isPortInUse(port: number): Promise<boolean> {
   return new Promise((resolve) => {
     const server = net.createServer()
-    server.once('error', (err: any) => {
+    server.once('error', (err: NodeJS.ErrnoException) => {
       if (err.code === 'EADDRINUSE') {
         resolve(true)
       } else {
@@ -192,8 +199,14 @@ export async function runConnect(opts: {
 
   let config = loadConfig()
   if (!config && opts.workspaceId && opts.apiKey) {
+    // `IntuticConfig`, not `as any`. This literal used to carry a
+    // `workspaceId` too, which the type does not declare and nothing reads —
+    // `init.ts`, the only other writer of ~/.intutic/config.json, has never
+    // written one, and every consumer takes the workspace id from the
+    // credentials instead. The cast was there to admit it, so it went with the
+    // cast. The workspace id from --workspace-id still reaches everything that
+    // needs it, via `creds` above.
     config = {
-      workspaceId: opts.workspaceId,
       harnesses: [],
       configVersion: 0,
       devMode: opts.dev || false,
@@ -203,7 +216,7 @@ export async function runConnect(opts: {
       // service on any machine without ~/.intutic/config.json (the launchd
       // plist runs `connect --workspace-id --api-key` with KeepAlive=true).
       workspaceRoot: process.cwd(),
-    } as any
+    }
   }
 
   if (!config) {
@@ -235,7 +248,7 @@ export async function runConnect(opts: {
 
   // Start the Trajectory Monitor & Valkey Subscriber
   let trajectoryMonitor: TrajectoryMonitor | null = null
-  let trajectorySubscriber: any = null
+  let trajectorySubscriber: Redis | null = null
 
   const valkeyUrl = process.env.VALKEY_URL ?? 'redis://127.0.0.1:6379'
   trajectoryMonitor = new TrajectoryMonitor({
@@ -248,7 +261,7 @@ export async function runConnect(opts: {
 
   try {
     await trajectoryMonitor.start()
-    trajectorySubscriber = new (Redis as any)(valkeyUrl)
+    trajectorySubscriber = new Redis(valkeyUrl)
     await trajectorySubscriber.psubscribe('trace:live:*')
     
     trajectorySubscriber.on('pmessage', (pattern: string, channel: string, message: string) => {
@@ -305,7 +318,10 @@ export async function runConnect(opts: {
   const proxyPort = parseInt(process.env.PORT || '4000', 10)
   let exeCmd = 'cargo'
   let exeArgs = ['run', '--manifest-path', node_path.join(safeConfig.workspaceRoot, 'packages', 'proxy', 'Cargo.toml')]
-  let proxyEnv: any = {}
+  // Populated only on the branch that actually spawns the proxy; the DR
+  // re-spawn below reuses it and is guarded by `proxyProc`, which is null
+  // whenever this is still empty.
+  let proxyEnv: NodeJS.ProcessEnv = {}
 
   try {
     const inUse = await isPortInUse(proxyPort)
@@ -351,8 +367,8 @@ export async function runConnect(opts: {
                 const downloadedPath = await downloadProxyBinary(globalBinPath)
                 exeCmd = downloadedPath
                 exeArgs = []
-              } catch (downloadErr: any) {
-                log.warn(`Auto-download failed: ${downloadErr.message}`)
+              } catch (downloadErr) {
+                log.warn(`Auto-download failed: ${downloadErr instanceof Error ? downloadErr.message : String(downloadErr)}`)
                 log.dim('Falling back to cargo run...')
               }
             }
@@ -425,12 +441,12 @@ export async function runConnect(opts: {
             try {
               execSync(`certutil -addstore Root "${caCertPath}"`, { stdio: 'ignore' })
               log.success('Successfully trusted SSL CA certificate.')
-            } catch (err: any) {
-              log.warn(`Failed to auto-trust SSL certificate on Windows: ${err.message}`)
+            } catch (err) {
+              log.warn(`Failed to auto-trust SSL certificate on Windows: ${err instanceof Error ? err.message : String(err)}`)
             }
           }
-        } catch (err: any) {
-          log.warn(`Could not verify or auto-trust CA certificate: ${err.message}`)
+        } catch (err) {
+          log.warn(`Could not verify or auto-trust CA certificate: ${err instanceof Error ? err.message : String(err)}`)
         }
       }
     }
@@ -488,7 +504,21 @@ export async function runConnect(opts: {
           }
         }
       } catch (err) {
-        // ignore directory read errors
+        // Only a missing `.intutic/sops` is unremarkable — most workspaces have
+        // none, and `readdir` ENOENTs on the first line of the block.
+        //
+        // Everything else was being swallowed with it, and the block goes on to
+        // read every SOP file: an unreadable file or a permissions error dropped
+        // that SOP from `localSopEntries`, and the harness configs written a few
+        // lines below were then generated *without* it, silently. Governance
+        // content going missing is the failure this whole function exists to
+        // prevent, so it does not get to be quiet.
+        const code = err instanceof Error ? (err as NodeJS.ErrnoException).code : undefined
+        if (code !== 'ENOENT') {
+          log.warn(
+            `Failed to load local SOPs from .intutic/sops — harness configs will be written without them: ${err instanceof Error ? err.message : String(err)}`
+          )
+        }
       }
 
       const combinedSops = [...syncConfig.sops, ...localSopEntries]
@@ -608,14 +638,20 @@ export async function runConnect(opts: {
         try {
           execSync('docker info', { stdio: 'ignore' })
           dockerActive = true
-        } catch {}
+        } catch {
+          // Deliberate swallow: `docker info` exiting non-zero IS the answer we
+          // asked for — Docker is not installed or its daemon is down. That is a
+          // normal state on machines running Valkey natively, not an error to
+          // report. dockerActive stays false and we fall through to the native
+          // binary / downloaded-static healing paths below.
+        }
 
         if (dockerActive) {
           try {
             execSync('docker start intutic-valkey', { stdio: 'ignore' })
             log.info('[DR] Successfully sent container start command to intutic-valkey.')
-          } catch (err: any) {
-            log.warn(`[DR] Docker container start failed: ${err.message}`)
+          } catch (err) {
+            log.warn(`[DR] Docker container start failed: ${err instanceof Error ? err.message : String(err)}`)
           }
         } else {
           let hasNativeBinary = false
@@ -628,7 +664,13 @@ export async function runConnect(opts: {
               execSync('which redis-server', { stdio: 'ignore' })
               nativeCmd = 'redis-server'
               hasNativeBinary = true
-            } catch {}
+            } catch {
+              // Deliberate swallow: this is the last of three probes (docker,
+              // valkey-server, redis-server). `which` failing just means the
+              // binary is not on PATH, which is the question we asked.
+              // hasNativeBinary stays false and healing falls through to the
+              // downloaded static binary under ~/.intutic/bin.
+            }
           }
 
           if (hasNativeBinary) {
@@ -636,8 +678,8 @@ export async function runConnect(opts: {
               const proc = spawn(nativeCmd, ['--port', '6379', '--daemonize', 'yes'], { stdio: 'ignore', detached: true })
               proc.unref()
               log.info(`[DR] Successfully spawned native ${nativeCmd} in background.`)
-            } catch (err: any) {
-              log.warn(`[DR] Native daemon spawn failed: ${err.message}`)
+            } catch (err) {
+              log.warn(`[DR] Native daemon spawn failed: ${err instanceof Error ? err.message : String(err)}`)
             }
           } else {
             // Downloaded static
@@ -647,8 +689,8 @@ export async function runConnect(opts: {
               const proc = spawn(globalValkeyBinPath, ['--port', '6379', '--daemonize', 'yes'], { stdio: 'ignore', detached: true })
               proc.unref()
               log.info('[DR] Successfully spawned downloaded static Valkey server in background.')
-            } catch (err: any) {
-              log.warn(`[DR] Static binary spawn failed: ${err.message}`)
+            } catch (err) {
+              log.warn(`[DR] Static binary spawn failed: ${err instanceof Error ? err.message : String(err)}`)
             }
           }
         }
@@ -792,6 +834,24 @@ export async function runConnect(opts: {
     log.warn(`Could not write runtime env file (non-fatal): ${err instanceof Error ? err.message : String(err)}`)
   }
 
+  // Seed the policy snapshot before the first sync cycle rather than after it.
+  //
+  // Without this, every fresh install runs its first poll interval with no
+  // snapshot — the gates enforce the static floor and nothing else. Seeding here
+  // narrows that window to "the fetch failed, and we said so" instead of "always,
+  // briefly". `refreshPolicySnapshot` never throws.
+  const seeded = await refreshPolicySnapshot({
+    controlPlaneUrl,
+    apiKey: safeCreds.apiKey,
+    workspaceId: safeCreds.workspaceId,
+  })
+  if (!seeded) {
+    log.warn(
+      'Could not seed the policy snapshot — governance rules from the control plane ' +
+        'will not apply until the next successful sync. Built-in protections are unaffected.',
+    )
+  }
+
   // Sync offline traces back to PostgreSQL on startup
   try {
     await syncOfflineTraces(controlPlaneUrl, safeCreds.apiKey)
@@ -855,13 +915,18 @@ export async function runConnect(opts: {
       }, 1000)
     }).catch(() => {})
   } catch (err) {
-    // ignore
+    // Nothing in the block above is expected to throw — the `readFile` has its
+    // own catch and `scanLocalSops` resolves to [] on failure — so this is the
+    // outer guard for the one thing that can: `node_path.join` on an undefined
+    // workspaceRoot, the TypeError that used to crash-loop the launchd service.
+    // Reported rather than swallowed, because reaching it means the startup
+    // context report never happened and the dashboard is missing this daemon.
+    log.warn(`Failed to send initial context report: ${err instanceof Error ? err.message : String(err)}`)
   }
 
   // FSEvents-driven hook event drain
   const hookEventsLog = node_path.join(safeConfig.workspaceRoot, '.intutic', 'events', 'hook-events.jsonl')
   let fsWatcher: ReturnType<typeof watch> | null = null
-  let drainSafetyTimer: ReturnType<typeof setInterval> | null = null
 
   try {
     await node_fs.mkdir(node_path.dirname(hookEventsLog), { recursive: true })
@@ -869,11 +934,16 @@ export async function runConnect(opts: {
     fsWatcher.on('change', runDrain)
     fsWatcher.on('add', runDrain)
   } catch (err) {
-    // chokidar unavailable - rely on fallback
+    // A real fallback, not a swallow: `drainSafetyTimer` below drains every 60 s
+    // regardless. But losing the FSEvents watcher turns a near-immediate drain
+    // into a up-to-60-second one, which is the difference between a hook
+    // incident showing up while the agent is still running and after it exited.
+    // Say so, at dim, so the degradation is diagnosable.
+    log.dim(`Hook-event watcher unavailable, falling back to the 60s drain poll: ${err instanceof Error ? err.message : String(err)}`)
   }
 
   // 60-second safety-net drain poll
-  drainSafetyTimer = setInterval(runDrain, 60_000)
+  const drainSafetyTimer = setInterval(runDrain, 60_000)
 
   // Run initial compliance check on startup
   await runProbes()
@@ -1002,7 +1072,13 @@ export async function runConnect(opts: {
       // Sync offline traces back on every iteration
       try {
         await syncOfflineTraces(controlPlaneUrl, safeCreds.apiKey)
-      } catch {}
+      } catch (err) {
+        // Non-fatal by design: a backlog of offline traces must never stop the
+        // sync iteration — the next tick retries the same backlog. But it is not
+        // a no-op either, so report it the way the identical startup call above
+        // does, at dim level because this runs every poll interval.
+        log.dim(`Offline trace sync failed (will retry next poll): ${err instanceof Error ? err.message : String(err)}`)
+      }
       // Register agents + open one real session per harness (the reporter
       // dedupes sessions per run). connect's inline loop bypassed both,
       // leaving the dashboard graph empty for the primary user path.
@@ -1010,7 +1086,7 @@ export async function runConnect(opts: {
         try {
           const report = await collectAgentReport({
             workspaceRoot: process.cwd(),
-            harnessType: harnessType as any,
+            harnessType,
             configSynced: true,
             dlpEnabled: true,
             policyEnforced: true,
@@ -1021,10 +1097,18 @@ export async function runConnect(opts: {
             controlPlaneUrl,
             apiKey: safeCreds.apiKey,
             workspaceId: safeCreds.workspaceId,
-            harnessType: harnessType as any,
+            harnessType,
             workspaceRoot: process.cwd(),
           })
-        } catch {}
+        } catch (err) {
+          // Per-harness isolation is deliberate: one harness failing to register
+          // must not stop the others or abort the poll iteration. Silence was
+          // not deliberate — fetchConfig already succeeded above, so a failure
+          // here means the control plane accepted the config read and rejected
+          // the agent report, which is exactly the "dashboard graph is empty"
+          // symptom this loop was added to fix. Report it so it is diagnosable.
+          log.dim(`Agent report/session for harness '${harnessType}' failed: ${err instanceof Error ? err.message : String(err)}`)
+        }
       }
       // Run compliance probes on each iteration
       await runProbes()
@@ -1048,7 +1132,7 @@ export async function runConnect(opts: {
   // Cleanup watcher, intervals, and WS connection on exit
   watcher.stop()
   fsWatcher?.close()
-  if (drainSafetyTimer) clearInterval(drainSafetyTimer)
+  clearInterval(drainSafetyTimer)
   wsClient.close()
   await endAllOpenSessions(controlPlaneUrl, safeCreds.apiKey)
 

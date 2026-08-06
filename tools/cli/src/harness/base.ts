@@ -9,7 +9,7 @@
  */
 
 import { join } from 'node:path'
-import { access, readFile, writeFile, rename, mkdir } from 'node:fs/promises'
+import { access, writeFile, rename, mkdir } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { HarnessType, SyncSopEntry } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'

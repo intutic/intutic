@@ -50,8 +50,8 @@ export async function runSopsPush(name: string, opts: { dev?: boolean }): Promis
       const content = await fs.readFile(join(sopsDir, file), 'utf-8')
       markdownContent += content + '\n\n'
     }
-  } catch (err: any) {
-    log.error(`Error reading SOP files: ${err.message}`)
+  } catch (err) {
+    log.error(`Error reading SOP files: ${err instanceof Error ? err.message : String(err)}`)
     process.exit(1)
   }
 
@@ -89,8 +89,8 @@ export async function runSopsPush(name: string, opts: { dev?: boolean }): Promis
       log.error('Failed to create SOP on the control plane.')
       process.exit(1)
     }
-  } catch (err: any) {
-    log.error(`Failed to push SOP to control plane: ${err.message}`)
+  } catch (err) {
+    log.error(`Failed to push SOP to control plane: ${err instanceof Error ? err.message : String(err)}`)
     process.exit(1)
   }
 }

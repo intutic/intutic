@@ -7,7 +7,10 @@ import {
   installedFileName,
   instantiateAndEvaluate,
   parseRuleFileName,
-  DEFAULT_ALLOW_MOCK
+  DEFAULT_ALLOW_MOCK,
+  HOST_IMPORT_NAMES,
+  unsupportedImports,
+  explainUnsupportedImport
 } from './policy.js'
 
 describe('parseRuleFileName', () => {
@@ -88,5 +91,74 @@ describe('instantiateAndEvaluate', () => {
     }
     const verdict = await instantiateAndEvaluate(wasmBuffer, DEFAULT_ALLOW_MOCK)
     expect(verdict).toBe(0)
+  })
+})
+
+/**
+ * Builds a minimal, valid WASM module whose only content is one function import.
+ *
+ * Hand-encoded rather than compiled. A checked-in `.wasm` fixture is a binary
+ * nobody can read in review, and compiling one with `asc` at test time would
+ * make this depend on the SDK building — turning a toolchain problem into a
+ * silent pass on the one assertion that stops a rule enforcing nothing.
+ */
+function moduleImporting(module: string, name: string): Uint8Array<ArrayBuffer> {
+  const str = (v: string) => [v.length, ...[...v].map((c) => c.charCodeAt(0))]
+  // One type: () -> f64, which is `seed`'s signature. The import section is all
+  // this reads; the type only has to be valid.
+  const typeSection = [0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7c]
+  const entry = [...str(module), ...str(name), 0x00, 0x00]
+  const importSection = [0x02, entry.length + 1, 0x01, ...entry]
+  return Uint8Array.from([
+    0x00, 0x61, 0x73, 0x6d, // \0asm
+    0x01, 0x00, 0x00, 0x00, // version 1
+    ...typeSection,
+    ...importSection,
+  ])
+}
+
+describe('host import enforcement', () => {
+  /**
+   * The bypass this closes: `env.seed` was offered by the CLI's validation shim
+   * and never registered by the proxy. A rule reaching `Math.random()` — which
+   * AssemblyScript compiles to `env.seed` — passed `policy test` and
+   * `policy install`, then failed to instantiate in the proxy. The proxy's WASM
+   * runner fails OPEN on every error path, so the rule enforced nothing and
+   * nothing said so.
+   */
+  it('names an import the sandbox does not provide', async () => {
+    const mod = await WebAssembly.compile(moduleImporting('env', 'seed'))
+    expect(unsupportedImports(mod)).toEqual(['env.seed'])
+  })
+
+  it.each([...HOST_IMPORT_NAMES])('accepts env.%s, which the proxy registers', async (name) => {
+    const mod = await WebAssembly.compile(moduleImporting('env', name))
+    expect(unsupportedImports(mod)).toEqual([])
+  })
+
+  it('rejects an import from a module other than env', async () => {
+    const mod = await WebAssembly.compile(moduleImporting('wasi_snapshot_preview1', 'fd_write'))
+    expect(unsupportedImports(mod)).toEqual(['wasi_snapshot_preview1.fd_write'])
+  })
+
+  it('fails validation naming the import, not with a V8 LinkError', async () => {
+    // The outcome was already a rejection — instantiation cannot succeed without
+    // the import. What was missing is any way for the author to learn the cause
+    // was `Math.random()`.
+    await expect(
+      instantiateAndEvaluate(moduleImporting('env', 'seed'), DEFAULT_ALLOW_MOCK)
+    ).rejects.toThrow(/env\.seed/)
+  })
+
+  it('explains why randomness in particular is refused', () => {
+    const why = explainUnsupportedImport('env.seed')
+    expect(why).toMatch(/Math\.random/)
+    expect(why, 'the reason must be stated, or it reads as an oversight').toMatch(/audit/i)
+  })
+
+  it('offers the available imports in the failure', async () => {
+    await expect(
+      instantiateAndEvaluate(moduleImporting('env', 'seed'), DEFAULT_ALLOW_MOCK)
+    ).rejects.toThrow(/env\.log_info/)
   })
 })

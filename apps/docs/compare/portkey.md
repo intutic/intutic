@@ -74,6 +74,38 @@ const response = await openai.chat.completions.create({
 - You need coverage across **18 AI coding harnesses** out of the box
 - You want to write **custom WASM rules** for domain-specific enforcement
 
+## Measured false-positive rate
+
+Enforcement that fires on benign work gets switched off, so the number that matters
+is how often it does.
+
+**2 of 1,000 benign trajectories (0.2%)** trip a detector, plus **0 of 339** benign
+prompts carrying injection trigger words.
+
+The corpora are external and were not chosen by us: [BFCL v3
+multi-turn](https://gorilla.cs.berkeley.edu/leaderboard.html) (Apache-2.0) and
+[NotInject](https://huggingface.co/datasets/leolee99/NotInject) (MIT), vendored with
+checksums rather than fetched at test time. The assertion pins the two firing
+trajectories **by name**, not by count — a count still passes when one seed stops
+firing and another starts. It runs unpiped, so the gate cannot go green on a
+swallowed failure, and it runs on every push through the versioned `pre-push` hook
+rather than only in CI. Source: `packages/proxy/tests/anomaly_corpus_test.rs`.
+
+Three limits, because a rate without them is marketing:
+
+- **It is a lower bound.** BFCL is API-orchestration traffic filtered to successful
+  completion — short (median 6 calls) and clean. Every sequence detector's exposure
+  grows with trajectory length, and agentic coding runs are far longer.
+- **It covers 7 of 25 detectors.** Six against the two corpora above, plus one
+  measured against 10,753 real tool and parameter descriptions. The other eighteen
+  read fields no public corpus supplies — graph depth, workflow budget, DLP findings —
+  or fire only on an operator declaration and so have no false-positive rate to
+  measure at all. The split is generated from the registry at test time into
+  `packages/proxy/tests/corpus/BASELINE.txt`, and a gate fails this page if the two
+  disagree.
+- **It says nothing about recall.** Nothing in the corpus records a missed catch, so
+  recall is unmeasurable from this data in principle, not merely unmeasured.
+
 ## When to Choose Portkey
 
 - You only need request-level observability and caching for LLM API calls
