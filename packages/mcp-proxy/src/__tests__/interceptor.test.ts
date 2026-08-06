@@ -218,7 +218,10 @@ describe('ToolCallInterceptor', () => {
       const interceptor = new ToolCallInterceptor(policy, emitter, false)
 
       // Circular references cause JSON.stringify / scanning to throw or error
-      const circular: any = {}
+      // A self-referencing object needs a type that can hold itself. `any` was
+      // hiding that this is expressible.
+      type Circular = { self?: Circular }
+      const circular: Circular = {}
       circular.self = circular
 
       const decision = await interceptor.decide('Read', circular)

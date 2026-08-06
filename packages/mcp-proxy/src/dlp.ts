@@ -28,8 +28,11 @@ const DLP_PATTERNS: Array<{ regex: RegExp; description: string }> = [
   { regex: /AIza[A-Za-z0-9\-_]{35}/, description: 'Google API key pattern' },
   { regex: /ghp_[A-Za-z0-9]{36}/, description: 'GitHub personal access token' },
   { regex: /ghs_[A-Za-z0-9]{36}/, description: 'GitHub server token' },
-  { regex: /xoxb-[A-Za-z0-9\-]{50,}/, description: 'Slack bot token' },
-  { regex: /xoxp-[A-Za-z0-9\-]{50,}/, description: 'Slack user token' },
+  // `-` is last in these classes, where it is already a literal — the escape
+  // was a no-op. It stays a class member either way; see the Slack cases in
+  // __tests__/dlp.test.ts, which pin the hyphen-spanning token shape.
+  { regex: /xoxb-[A-Za-z0-9-]{50,}/, description: 'Slack bot token' },
+  { regex: /xoxp-[A-Za-z0-9-]{50,}/, description: 'Slack user token' },
   { regex: /AKIA[A-Z0-9]{16}/, description: 'AWS Access Key ID' },
   // High-entropy strings that look like secrets (≥40 chars of hex or base64)
   { regex: /[0-9a-f]{40,}/, description: 'High-entropy hex string (possible secret)' },
