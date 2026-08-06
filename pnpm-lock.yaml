@@ -178,6 +178,9 @@ importers:
         specifier: ^1.1.0
         version: 1.1.0
     devDependencies:
+      '@intutic/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
       assemblyscript:
         specifier: ^0.27.29
         version: 0.27.37
@@ -261,6 +264,12 @@ importers:
       typescript:
         specifier: ^5.5
         version: 5.9.3
+      vitest:
+        specifier: ^3
+        version: 3.2.6(@types/node@22.19.21)(jiti@2.7.0)(jsdom@26.1.0)(tsx@4.22.4)
+
+  tools/gate-tests:
+    devDependencies:
       vitest:
         specifier: ^3
         version: 3.2.6(@types/node@22.19.21)(jiti@2.7.0)(jsdom@26.1.0)(tsx@4.22.4)
