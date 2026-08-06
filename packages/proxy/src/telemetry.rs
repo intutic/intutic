@@ -80,7 +80,16 @@ pub struct ExecutionTrace {
     /// `FindingWire.shadowed` documents.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub routing_shadow_model: Option<String>,
-    pub response_integrity: u8,
+    /// The Response Integrity Score, or `None` when nothing was measured.
+    ///
+    /// Optional rather than defaulting to 100, because "checked and clean" and
+    /// "never checked" are different claims and the reward cron distinguishes
+    /// them: it counts measured traces and skips an arm it never scored. While
+    /// this was `u8` the error and early-return paths wrote a hardcoded
+    /// `RIS_MAX`, the column was `NOT NULL DEFAULT 100`, and `COUNT(...)` could
+    /// therefore never be less than the row count — so the skip could not fire
+    /// and every arm was credited with perfection nobody observed.
+    pub response_integrity: Option<u8>,
     /// The first failing check, named. A bare score is not auditable: an
     /// operator seeing 40 cannot tell a truncation from a bad tool call, and the
     /// two have opposite remedies.

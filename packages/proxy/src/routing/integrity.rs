@@ -84,11 +84,26 @@ pub struct Integrity {
     pub score: u8,
     /// The first failing check. `None` on a clean response.
     pub fault: Option<QualityFault>,
+    /// Whether anything was actually looked at.
+    ///
+    /// `score` is 100 both for "checked, and it was clean" and for "there was
+    /// nothing to check". Those are not the same claim, and collapsing them is
+    /// how the bandit came to credit arms for perfection nobody observed: the
+    /// reward cron counts measured traces, and with an unmeasured response
+    /// indistinguishable from a clean one it could never find an arm to skip.
+    pub measured: bool,
 }
 
 impl Integrity {
+    /// Checked, and nothing was wrong.
     pub fn clean() -> Self {
-        Self { score: RIS_MAX, fault: None }
+        Self { score: RIS_MAX, fault: None, measured: true }
+    }
+
+    /// Nothing was checked. Scores like a clean response — this is a quality
+    /// signal, not a transport check — but says so.
+    pub fn unmeasured() -> Self {
+        Self { score: RIS_MAX, fault: None, measured: false }
     }
 }
 
@@ -173,6 +188,15 @@ fn response_tool_calls(body: &Value) -> Vec<(String, Option<Value>, Option<Strin
 }
 
 /// Whether the response says it was cut off.
+/// Truncation that needs no body: the stream's terminal event never arrived.
+///
+/// Split out from `is_truncated` because the streaming call site has no body to
+/// pass, and `score` must be able to answer this before it gives up for lack of
+/// one. `None` means "not a stream", not "fine".
+fn is_truncated_stream(done_received: Option<bool>) -> bool {
+    done_received == Some(false)
+}
+
 fn is_truncated(body: &Value, done_received: Option<bool>) -> bool {
     // Streaming: the terminal event never arrived. Only meaningful when the
     // caller actually tracked it — `None` means "not a stream", not "fine".
@@ -229,8 +253,35 @@ fn has_content(body: &Value) -> bool {
 /// transport. Scoring an unparseable body as a fault would attribute the
 /// proxy's own parse failure to the model, which is the wrong arm.
 pub fn score(facts: &ResponseFacts<'_>) -> Integrity {
+    // Truncation is decided FIRST, because it is the only check a stream can
+    // answer and the streaming path has no body to give.
+    //
+    // This used to sit after the `body` early-return below. The streaming call
+    // site passes `body: None, done_received: Some(..)` — the assembled body is
+    // not reconstructable there — so the early return fired before
+    // `done_received` was ever read, and **every streaming response scored a
+    // hardcoded 100 with no fault**. Agent harnesses stream by default, so the
+    // quality signal that the whole routing reward rests on was inert for the
+    // dominant traffic shape, while the comment at the call site said
+    // `done_received` was "the signal that matters here".
+    //
+    // The existing truncation test passed `body: Some(..)` and so never
+    // exercised the production shape; `body_none_still_scores_truncation` below
+    // pins it.
+    if is_truncated_stream(facts.done_received) {
+        return Integrity {
+            score: RIS_MAX.saturating_sub(PENALTY_TRUNCATED),
+            fault: Some(QualityFault::Truncated),
+            measured: true,
+        };
+    }
+
     let Some(body) = facts.body else {
-        return Integrity::clean();
+        // No body and no terminal-event signal: nothing was measured. Clean is
+        // the right answer — see the docstring — but it is a *default*, not an
+        // observation, and `measured` says so for the callers that must not
+        // credit an arm they never scored.
+        return Integrity::unmeasured();
     };
 
     let mut score = RIS_MAX;
@@ -282,7 +333,7 @@ pub fn score(facts: &ResponseFacts<'_>) -> Integrity {
         fault = fault.or(Some(QualityFault::Degenerate));
     }
 
-    Integrity { score, fault }
+    Integrity { score, fault, measured: true }
 }
 
 #[cfg(test)]
@@ -377,6 +428,55 @@ mod tests {
             done_received: Some(false),
         };
         assert_eq!(score(&f).fault, Some(QualityFault::Truncated));
+    }
+
+    /// The shape the streaming path actually passes.
+    ///
+    /// The test above supplies a body. The production streaming call site cannot
+    /// — the assembled body is not reconstructable there — so it passes
+    /// `body: None, done_received: Some(..)`, and for as long as the `body`
+    /// early-return came first, `done_received` was discarded and **every
+    /// streaming response scored a hardcoded 100 with no fault**. Agent
+    /// harnesses stream by default, so the signal the entire routing reward
+    /// rests on was inert for the dominant traffic shape, with a comment at the
+    /// call site asserting the opposite.
+    ///
+    /// A test that supplies a body cannot catch that, which is why it did not.
+    #[test]
+    fn body_none_still_scores_truncation() {
+        let f = ResponseFacts { body: None, request: None, done_received: Some(false) };
+        let r = score(&f);
+        assert_eq!(
+            r.fault,
+            Some(QualityFault::Truncated),
+            "a stream that never terminated must fault even with no body to inspect",
+        );
+        assert!(r.score < RIS_MAX, "and it must cost the arm something: {}", r.score);
+        assert!(r.measured, "it WAS measured — the terminal event is the observation");
+    }
+
+    /// A completed stream has nothing left to check, and must not read as an
+    /// observation.
+    ///
+    /// `score` is 100 here and 100 for a body that was checked and found clean.
+    /// Collapsing those is how the reward cron came to credit arms for
+    /// perfection nobody observed — `measured` is what separates them.
+    #[test]
+    fn nothing_to_check_is_unmeasured_not_clean() {
+        let f = ResponseFacts { body: None, request: None, done_received: Some(true) };
+        let r = score(&f);
+        assert_eq!(r.score, RIS_MAX);
+        assert_eq!(r.fault, None);
+        assert!(!r.measured, "an unscored response must not claim to have been scored");
+
+        // And a real check reports the opposite.
+        let body = json!({"content": [{"type": "text", "text": "fine"}]});
+        let checked = score(&ResponseFacts {
+            body: Some(&body),
+            request: Some(&REQ()),
+            done_received: None,
+        });
+        assert!(checked.measured);
     }
 
     /// `None` means "not a stream", not "the stream is fine". Treating it as a

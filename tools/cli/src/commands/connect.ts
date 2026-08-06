@@ -45,6 +45,8 @@ import { SyncWsClient,
   refreshPolicySnapshot,
   runComplianceProbes,
   drainHookEvents,
+  drainReviewRequests,
+  REVIEW_REQUESTS_LOG,
   syncOfflineTraces,
   TrajectoryMonitor,
   collectAgentReport,
@@ -811,7 +813,14 @@ export async function runConnect(opts: {
     }
   }
 
-  // Helper to drain hook events (WS-A)
+  // Drains BOTH logs, matching `services/sync-daemon/src/syncLoop.ts`.
+  //
+  // This drained hook events only. `intutic connect` runs the daemon in-process,
+  // so under the CLI runtime a `review_before` hold still blocked the tool
+  // locally and then sat in `.intutic/events/review-requests.jsonl` forever: the
+  // developer was stopped, and the decision that was supposed to become a
+  // learned rule never reached the control plane. The block working is what made
+  // it invisible.
   const runDrain = async () => {
     try {
       const drained = await drainHookEvents(safeConfig.workspaceRoot, controlPlaneUrl, safeCreds.apiKey)
@@ -820,6 +829,16 @@ export async function runConnect(opts: {
       }
     } catch (err) {
       log.warn(`[sync-daemon] Hook event drain error (non-fatal): ${err instanceof Error ? err.message : String(err)}`)
+    }
+    // Separate try: the two go to different endpoints, and one being down says
+    // nothing about the other.
+    try {
+      const held = await drainReviewRequests(safeConfig.workspaceRoot, controlPlaneUrl, safeCreds.apiKey)
+      if (held > 0) {
+        log.info(`[sync-daemon] Drained ${held} review hold(s) to control plane`)
+      }
+    } catch (err) {
+      log.warn(`[sync-daemon] Review hold drain error (non-fatal): ${err instanceof Error ? err.message : String(err)}`)
     }
   }
 
@@ -924,13 +943,17 @@ export async function runConnect(opts: {
     log.warn(`Failed to send initial context report: ${err instanceof Error ? err.message : String(err)}`)
   }
 
-  // FSEvents-driven hook event drain
+  // FSEvents-driven drain, watching BOTH logs.
+  //
+  // Watching only hook events meant a review hold waited for the 60s safety
+  // timer at best — and, before `runDrain` learned to drain holds at all, never.
   const hookEventsLog = node_path.join(safeConfig.workspaceRoot, '.intutic', 'events', 'hook-events.jsonl')
+  const reviewHoldsLog = node_path.join(safeConfig.workspaceRoot, REVIEW_REQUESTS_LOG)
   let fsWatcher: ReturnType<typeof watch> | null = null
 
   try {
     await node_fs.mkdir(node_path.dirname(hookEventsLog), { recursive: true })
-    fsWatcher = watch(hookEventsLog, { ignoreInitial: true, persistent: false })
+    fsWatcher = watch([hookEventsLog, reviewHoldsLog], { ignoreInitial: true, persistent: false })
     fsWatcher.on('change', runDrain)
     fsWatcher.on('add', runDrain)
   } catch (err) {

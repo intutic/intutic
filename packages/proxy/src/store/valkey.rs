@@ -185,6 +185,11 @@ fn marker_key(workspace_id: &str) -> String {
     format!("bandit:reward_mode:{}", workspace_id)
 }
 
+/// Mirror evidence, per workspace. Fields are `<candidate>:<metric>`.
+fn mirror_key(workspace_id: &str) -> String {
+    format!("bandit:mirror_outcomes:{}", workspace_id)
+}
+
 fn outage_key(workspace_id: &str) -> String {
     format!("bandit:outage_failures:{}", workspace_id)
 }
@@ -335,6 +340,32 @@ impl LocalStore for ValkeyStore {
     async fn clear_outage_failures(&self, workspace_id: &str) -> anyhow::Result<()> {
         let mut conn = self.conn();
         let _: () = conn.del(outage_key(workspace_id)).await?;
+        Ok(())
+    }
+
+    async fn record_mirror_outcome(
+        &self,
+        workspace_id: &str,
+        candidate_model: &str,
+        faulted: bool,
+        measured: bool,
+        cost_usd: f64,
+    ) -> anyhow::Result<()> {
+        let mut conn = self.conn();
+        let key = mirror_key(workspace_id);
+        // `calls` and `measured` are tracked separately for the same reason the
+        // trace column is nullable: a call that produced no score must not be
+        // counted as a clean one, or the fault rate is diluted by silence.
+        let _: () = conn.hincr(&key, format!("{candidate_model}:calls"), 1).await?;
+        if measured {
+            let _: () = conn.hincr(&key, format!("{candidate_model}:measured"), 1).await?;
+        }
+        if faulted {
+            let _: () = conn.hincr(&key, format!("{candidate_model}:faults"), 1).await?;
+        }
+        // Micro-dollars, so the counter stays integral.
+        let micros = (cost_usd * 1_000_000.0).round() as i64;
+        let _: () = conn.hincr(&key, format!("{candidate_model}:cost_micros"), micros).await?;
         Ok(())
     }
 
