@@ -27,12 +27,22 @@ const brandSrc = path.resolve(themeDir, './assets/brand');
 const bgSrc = path.resolve(themeDir, './assets/bg');
 
 // Dest 1: apps/dashboard
-const dashboardPublic = path.resolve(themeDir, '../../apps/dashboard/public');
-if (fs.existsSync(dashboardPublic)) {
+//
+// Guarded on the APP existing, not on `public/` existing, and the directory is
+// created rather than required. Everything below is now generated — the tracked
+// copies were 65 duplicates of files in this package — so `public/` may
+// legitimately be absent on a clean checkout. The previous guard tested
+// `public/` itself, which meant that in exactly that situation the sync
+// silently did nothing and the dashboard built with no fonts, no logo and no
+// hero video, with nothing in the log to say so.
+const dashboardRoot = path.resolve(themeDir, '../../apps/dashboard');
+const dashboardPublic = path.join(dashboardRoot, 'public');
+if (fs.existsSync(dashboardRoot)) {
+  fs.mkdirSync(dashboardPublic, { recursive: true });
   copyDir(fontsSrc, path.join(dashboardPublic, './fonts'));
   copyDir(brandSrc, path.join(dashboardPublic, './assets/brand'));
   copyDir(bgSrc, path.join(dashboardPublic, './assets/bg'));
-  
+
   const faviconSrc = path.join(brandSrc, 'logo-mark-white.svg');
   if (fs.existsSync(faviconSrc)) {
     fs.copyFileSync(faviconSrc, path.join(dashboardPublic, 'favicon.svg'));
