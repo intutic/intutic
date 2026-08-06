@@ -291,6 +291,42 @@ impl Default for SnipCompactorConfig {
     }
 }
 
+/// An operator-supplied DLP pattern.
+///
+/// The built-in set in `dlp.rs` is deliberately narrow: every pattern there is
+/// anchored on a literal prefix or magic substring, because a false positive in
+/// a secret scanner teaches people to switch it off. That doctrine excludes a
+/// whole class of things operators legitimately need to stop — PHI, customer
+/// identifiers, internal record formats — which are shaped by *their* schema,
+/// not by a vendor's.
+///
+/// Those cannot ship in the binary, and until now there was no way to add them
+/// at all: `DlpConfig` was three booleans, `PATTERNS` was a `Lazy` built once,
+/// and there was no env var, config key, or control-plane source. Adding one
+/// pattern meant editing Rust and cutting a release.
+#[derive(Debug, Deserialize, Clone)]
+pub struct CustomDlpPattern {
+    /// Stable identifier. Appears in `DlpFinding.pattern_name`, so the
+    /// escalation detector counts distinct names — reuse one and two findings
+    /// collapse into one for threshold purposes.
+    pub name: String,
+    /// Grouping used by SOP taint rules (`pii()`, `phi()`) and by the redaction
+    /// placeholder, which is `[REDACTED_{CATEGORY}]`, uppercased.
+    pub category: String,
+    /// Rust `regex` crate syntax. Note: no lookaround. Use inline group flags
+    /// such as `(?i: ... )` for case-insensitivity.
+    pub regex: String,
+    /// `block` or `redact`. Those are the only two the enforcer implements —
+    /// there is no warn or mask tier — so anything else is rejected at boot
+    /// rather than silently treated as one of them.
+    #[serde(default = "default_redact_action")]
+    pub action: String,
+}
+
+fn default_redact_action() -> String {
+    "redact".to_string()
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct DlpConfig {
     #[serde(default = "default_true")]
@@ -299,6 +335,10 @@ pub struct DlpConfig {
     pub scan_input: bool,
     #[serde(default = "default_true")]
     pub scan_output: bool,
+    /// Operator patterns, appended to the built-in set. Compiled once at boot;
+    /// a bad regex is a named startup failure, never a panic at first scan.
+    #[serde(default)]
+    pub patterns: Vec<CustomDlpPattern>,
 }
 
 impl Default for DlpConfig {
@@ -307,6 +347,7 @@ impl Default for DlpConfig {
             enabled: true,
             scan_input: true,
             scan_output: true,
+            patterns: Vec::new(),
         }
     }
 }
