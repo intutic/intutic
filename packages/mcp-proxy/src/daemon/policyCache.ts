@@ -25,8 +25,23 @@ const valkey = new Redis(VALKEY_URL, {
   maxRetriesPerRequest: 3,
 })
 
-valkey.on('error', (err: any) => {
-  logger.warn({ err: err.message }, 'policyCache Valkey connection error')
+/**
+ * Renders a connection error as one line. Not just `err.message`: Node's
+ * dual-stack connect reports a refused Valkey as an AggregateError holding one
+ * child error per address family, and an AggregateError's own `.message` is the
+ * empty string — so the most common outage there is logged `"err":""` and told
+ * an operator nothing. Message text only, so a credentialed VALKEY_URL cannot
+ * reach the log through an error property bag.
+ */
+function describeConnectionError(err: Error): string {
+  if (err instanceof AggregateError && err.errors.length > 0) {
+    return err.errors.map((e: unknown) => (e instanceof Error ? e.message : String(e))).join('; ')
+  }
+  return err.message || err.name
+}
+
+valkey.on('error', (err: Error) => {
+  logger.warn({ err: describeConnectionError(err) }, 'policyCache Valkey connection error')
 })
 
 export interface ResolvedPolicy {
@@ -51,6 +66,41 @@ function isStale(entry: ResolvedPolicy): boolean {
   return Date.now() - entry.cachedAt > getPolicyTtlMs()
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** The policy fields the control plane sends, once they have been checked. */
+type PolicyResponseBody = Pick<ResolvedPolicy, 'sopRules' | 'dlpPatterns' | 'interventionMode'>
+
+/**
+ * Validates a `GET /api/v1/policy/resolve` body. The response is `unknown` at
+ * this boundary — it crosses the network — so every field is checked rather
+ * than asserted. Returns null when the body is not JSON or not an object;
+ * individual fields fall back to their empty value.
+ */
+function parsePolicyResponse(raw: string): PolicyResponseBody | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  if (!isRecord(parsed)) return null
+
+  const sopRules         = parsed['sopRules']
+  const dlpPatterns      = parsed['dlpPatterns']
+  const interventionMode = parsed['interventionMode']
+
+  return {
+    sopRules:    Array.isArray(sopRules) ? sopRules.filter(isRecord) : [],
+    dlpPatterns: Array.isArray(dlpPatterns)
+      ? dlpPatterns.filter((p): p is string => typeof p === 'string')
+      : [],
+    interventionMode: typeof interventionMode === 'string' ? interventionMode : 'BYPASS',
+  }
+}
+
 async function fetchFromControlPlane(workspaceId: string): Promise<ResolvedPolicy | null> {
   return new Promise((resolve) => {
     const path = `/api/v1/policy/resolve?workspaceId=${encodeURIComponent(workspaceId)}`
@@ -59,15 +109,41 @@ async function fetchFromControlPlane(workspaceId: string): Promise<ResolvedPolic
     const req  = lib.request(
       { hostname: url.hostname, port: url.port, path: url.pathname + url.search, method: 'GET',
         headers: { 'Authorization': `Bearer ${getDaemonApiKey()}`, 'Accept': 'application/json' } },
-      (res: any) => {
+      (res: http.IncomingMessage) => {
+        // Without an encoding the stream yields Buffers, and `data += chunk`
+        // then stringifies each one in isolation — a multi-byte UTF-8 character
+        // split across a chunk boundary becomes U+FFFD and the JSON.parse below
+        // fails. setEncoding makes the decoder span chunks, which is also what
+        // makes the `chunk: string` annotation true rather than wishful.
+        res.setEncoding('utf8')
+        const statusCode = res.statusCode ?? 0
         let data = ''
-        res.on('data', (c: string) => { data += c })
+        res.on('data', (chunk: string) => { data += chunk })
         res.on('end', () => {
-          try {
-            const parsed = JSON.parse(data) as Partial<ResolvedPolicy>
-            resolve({ workspaceId, sopRules: parsed.sopRules ?? [], dlpPatterns: parsed.dlpPatterns ?? [],
-              interventionMode: parsed.interventionMode ?? 'BYPASS', cachedAt: Date.now() })
-          } catch { resolve(null) }
+          // An error body parses as JSON too. `{"error":"unauthorized"}` used to
+          // become a policy with no sopRules and interventionMode BYPASS, which
+          // resolvePolicy then cached for the full TTL and socketServer read as
+          // `allowed: true` — an expired daemon key silently turned enforcement
+          // off. A non-2xx is a failure to resolve, so it returns null, the same
+          // as the transport failures below.
+          if (statusCode < 200 || statusCode >= 300) {
+            logger.warn({ workspaceId, statusCode }, 'policy_cache.fetch_http_error')
+            resolve(null)
+            return
+          }
+          const parsed = parsePolicyResponse(data)
+          if (!parsed) {
+            logger.warn({ workspaceId }, 'policy_cache.fetch_unparseable_body')
+            resolve(null)
+            return
+          }
+          resolve({
+            workspaceId,
+            sopRules:         parsed.sopRules,
+            dlpPatterns:      parsed.dlpPatterns,
+            interventionMode: parsed.interventionMode,
+            cachedAt:         Date.now(),
+          })
         })
       }
     )
@@ -75,6 +151,96 @@ async function fetchFromControlPlane(workspaceId: string): Promise<ResolvedPolic
     req.setTimeout(5000, () => { req.destroy(); resolve(null) })
     req.end()
   })
+}
+
+/**
+ * Seeds the LRU from the policy snapshot the sync daemon writes locally.
+ *
+ * # What this removes
+ *
+ * `resolvePolicy`'s cold path is a blocking HTTP GET with a 5s socket timeout,
+ * taken on the daemon's first request for a workspace after every restart. The
+ * sync daemon already writes the same policy to
+ * `~/.intutic/hooks/policy-snapshot.json` every cycle, so on the machine's own
+ * workspace that round trip is avoidable.
+ *
+ * # Two things that make the obvious version wrong
+ *
+ * **It reads `sopRules`, not `rules`.** The snapshot carries both. `rules` is the
+ * *gate* projection — patterns rewritten as space-padded EREs, `{source,
+ * severity, subject}`, `warn` rules already dropped. Those pass this module's
+ * `parsePolicyResponse` (it only checks that entries are objects) and are then
+ * rejected wholesale by `isSopRule` in `../policy.ts`, which requires
+ * `toolPattern` and `action`. The result would be a cache that reports entries,
+ * logs nothing above `debug`, and enforces **nothing** — strictly worse than the
+ * blocking fetch, and invisible.
+ *
+ * **`cachedAt` comes from the snapshot, not from now.** Stamping `Date.now()` on
+ * a file written days ago (the sync daemon may be stopped — the snapshot writer
+ * anticipates exactly that) would present stale policy as fresh and suppress the
+ * refresh for a full TTL. Carrying the real write time means a stale snapshot
+ * seeds the cache *and* is immediately recognised as stale, so the first request
+ * returns instantly and triggers a background refresh — which is the actual goal.
+ *
+ * Never throws. This runs inside the daemon's `main()`, whose rejections become
+ * `process.exit(1)`, and the daemon is a KeepAlive LaunchAgent — so a throw here
+ * would be a restart loop rather than an error.
+ *
+ * @returns the workspaceId seeded, or null if nothing usable was found.
+ */
+export async function seedFromSnapshot(snapshotPath?: string): Promise<string | null> {
+  try {
+    const { readFile } = await import('node:fs/promises')
+    const os = await import('node:os')
+    const path = await import('node:path')
+    const file =
+      snapshotPath ??
+      process.env['INTUTIC_POLICY_SNAPSHOT'] ??
+      path.join(os.homedir(), '.intutic', 'hooks', 'policy-snapshot.json')
+
+    const parsed: unknown = JSON.parse(await readFile(file, 'utf-8'))
+    if (!isRecord(parsed)) return null
+
+    const workspaceId = parsed['workspaceId']
+    if (typeof workspaceId !== 'string' || !workspaceId) return null
+
+    // Absent `sopRules` means an older snapshot that carries only the gate
+    // projection. Seed nothing rather than seed an empty policy: an empty
+    // policy is indistinguishable from "no rules configured" downstream, and
+    // this path exists to avoid a slow answer, never to invent a wrong one.
+    const raw = parsed['sopRules']
+    if (!Array.isArray(raw)) {
+      logger.debug({ file }, 'policy_cache.seed_skipped_no_sop_rules')
+      return null
+    }
+
+    const generatedAt = parsed['generatedAt']
+    const cachedAt =
+      typeof generatedAt === 'string' && !Number.isNaN(Date.parse(generatedAt))
+        ? Date.parse(generatedAt)
+        : 0 // unknown age reads as maximally stale, never as fresh
+
+    const entry: ResolvedPolicy = {
+      workspaceId,
+      sopRules: raw.filter(isRecord),
+      dlpPatterns: [],
+      interventionMode:
+        typeof parsed['interventionMode'] === 'string' ? parsed['interventionMode'] : 'TRANSPARENT',
+      cachedAt,
+    }
+
+    evictIfFull()
+    lru.set(workspaceId, entry)
+    logger.info(
+      { workspaceId, ruleCount: entry.sopRules.length, ageMs: cachedAt ? Date.now() - cachedAt : null },
+      'policy_cache.seeded_from_snapshot',
+    )
+    return workspaceId
+  } catch {
+    // No snapshot, unreadable, or malformed. The cold HTTP path still works;
+    // this is an optimisation, and an optimisation must never be load-bearing.
+    return null
+  }
 }
 
 /**
@@ -100,7 +266,14 @@ export async function resolvePolicy(workspaceId: string): Promise<ResolvedPolicy
         lru.set(workspaceId, fresh)
         try {
           await valkey.set(`mcp_daemon:policy:${workspaceId}`, JSON.stringify(fresh), 'PX', getPolicyTtlMs())
-        } catch {}
+        } catch {
+          // Valkey unreachable. This write only shares the refreshed policy
+          // with sibling daemons; the in-process LRU above already holds it,
+          // so resolution stays correct and the peers simply take an HTTP miss.
+          // Deliberately not logged — this runs on a background refresh every
+          // TTL per workspace and would flood the log while Valkey is down.
+          // The connection-level 'error' handler above reports the outage once.
+        }
       }
     })
     return cached
@@ -115,7 +288,13 @@ export async function resolvePolicy(workspaceId: string): Promise<ResolvedPolicy
       lru.set(workspaceId, parsed)
       return parsed
     }
-  } catch {}
+  } catch {
+    // Valkey unreachable, or the cached value is not parseable JSON (written
+    // by an older ResolvedPolicy shape). Either way this is only a cache tier:
+    // falling through to the control-plane fetch below yields the same answer,
+    // just slower. Swallowing here is what keeps the daemon serving policy
+    // during a Valkey outage.
+  }
 
   // Cache miss in Valkey too — fetch synchronously
   logger.debug({ workspaceId }, 'policy_cache.miss')
@@ -125,7 +304,12 @@ export async function resolvePolicy(workspaceId: string): Promise<ResolvedPolicy
     lru.set(workspaceId, fresh)
     try {
       await valkey.set(`mcp_daemon:policy:${workspaceId}`, JSON.stringify(fresh), 'PX', getPolicyTtlMs())
-    } catch {}
+    } catch {
+      // Valkey unreachable. Write-through to the shared tier is an
+      // optimisation, not a correctness step: `fresh` is already in the LRU
+      // and is returned below. Failing the caller's policy resolution because
+      // a cache write failed would take the daemon down with Valkey.
+    }
   }
   return fresh
 }

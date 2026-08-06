@@ -7,9 +7,6 @@
 import * as net from 'node:net'
 import * as path from 'node:path'
 import * as os from 'node:os'
-import { createStderrLogger as createLogger } from './stderrLog.js'
-
-const log = createLogger('mcp-proxy-daemon-client')
 
 function getSocketPath(): string {
   return process.env['MCP_DAEMON_SOCKET'] ??
@@ -19,7 +16,10 @@ function getSocketPath(): string {
 /**
  * Sends a JSON-RPC request to the mcp-daemon Unix domain socket.
  */
-export function callDaemonSocket(method: string, params: Record<string, unknown>): Promise<any> {
+export function callDaemonSocket<T = unknown>(
+  method: string,
+  params: Record<string, unknown>,
+): Promise<T> {
   return new Promise((resolve, reject) => {
     const socket = net.createConnection(getSocketPath())
     socket.setEncoding('utf8')

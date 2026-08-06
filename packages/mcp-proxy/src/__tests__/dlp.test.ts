@@ -38,6 +38,45 @@ describe('scanToolInput', () => {
     expect(result.findings.some((f) => f.description.includes('AWS'))).toBe(true)
   })
 
+  // Slack token fixtures are assembled at runtime and never written as a
+  // contiguous literal — GitHub push protection blocks format-valid `xoxb-`
+  // strings on push. The scanned value is identical, so the tests still bite.
+  //
+  // These assert on the finding's *description* rather than on `f.pattern`
+  // (which is `regex.source`) on purpose: the token shape is the contract,
+  // the regex text is an implementation detail.
+  const slackBody = ['2345678901', '2345678901234', 'AbCdEfGhIjKlMnOpQrStUvWxYz'].join('-')
+
+  it('detects Slack bot tokens', () => {
+    const result = scanToolInput({ env: 'SLACK_BOT_TOKEN=' + 'xoxb' + '-' + slackBody })
+    expect(result.hasFinding).toBe(true)
+    expect(result.findings.some((f) => f.description === 'Slack bot token')).toBe(true)
+  })
+
+  it('detects Slack user tokens', () => {
+    const result = scanToolInput({ env: 'SLACK_USER_TOKEN=' + 'xoxp' + '-' + slackBody })
+    expect(result.hasFinding).toBe(true)
+    expect(result.findings.some((f) => f.description === 'Slack user token')).toBe(true)
+  })
+
+  it('spans the internal hyphen separators of a Slack token body', () => {
+    // Pins `-` as a member of the token-body character class. A real Slack
+    // token is hyphen-delimited, so if the hyphen ever stopped being matched
+    // the scanner would only ever see the first ~10-char segment and would
+    // silently stop detecting Slack tokens entirely.
+    const body = 'a-'.repeat(25) // exactly 50 chars, 25 of them hyphens
+    expect(body).toHaveLength(50)
+    const result = scanToolInput({ token: 'xoxb' + '-' + body })
+    expect(result.findings.some((f) => f.description === 'Slack bot token')).toBe(true)
+  })
+
+  it('does not flag a Slack-prefixed body shorter than the 50-char minimum', () => {
+    const body = 'a-'.repeat(24) + 'a' // 49 chars
+    expect(body).toHaveLength(49)
+    const result = scanToolInput({ token: 'xoxb' + '-' + body })
+    expect(result.findings.some((f) => f.description.includes('Slack'))).toBe(false)
+  })
+
   it('detects PEM private keys', () => {
     const result = scanToolInput({ cert: '-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAK...' })
     expect(result.hasFinding).toBe(true)

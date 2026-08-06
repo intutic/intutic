@@ -2,15 +2,18 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import * as http from 'node:http'
 import * as net from 'node:net'
 
+/** Type-only view of the module under test; the value import is dynamic (see below). */
+type PolicyCacheModule = typeof import('../../daemon/policyCache.js')
+
 describe('policyCache Unit Tests', () => {
   let mockServer: http.Server
   let port: number
   let requestCount = 0
   let latestWorkspaceId: string | null = null
 
-  let resolvePolicy: any
-  let invalidatePolicy: any
-  let getCacheStats: any
+  let resolvePolicy: PolicyCacheModule['resolvePolicy']
+  let invalidatePolicy: PolicyCacheModule['invalidatePolicy']
+  let getCacheStats: PolicyCacheModule['getCacheStats']
 
   beforeAll(async () => {
     mockServer = http.createServer((req, res) => {
@@ -46,7 +49,7 @@ describe('policyCache Unit Tests', () => {
     })
 
     // Import after process.env is set to ensure it uses the mock URL
-    const mod = await import('../../daemon/policyCache.js')
+    const mod: PolicyCacheModule = await import('../../daemon/policyCache.js')
     resolvePolicy = mod.resolvePolicy
     invalidatePolicy = mod.invalidatePolicy
     getCacheStats = mod.getCacheStats
@@ -65,9 +68,11 @@ describe('policyCache Unit Tests', () => {
     const wsId = 'ws_test_cache_miss'
     const policy = await resolvePolicy(wsId)
     expect(policy).not.toBeNull()
-    expect(policy!.workspaceId).toBe(wsId)
-    expect(policy!.sopRules).toHaveLength(1)
-    expect(policy!.sopRules[0]!.id).toBe('rule_1')
+    expect(policy?.workspaceId).toBe(wsId)
+    expect(policy?.sopRules).toHaveLength(1)
+    // ResolvedPolicy.sopRules is Record<string, unknown>[], so rule fields are
+    // reached by index and land as `unknown` — which toBe() compares fine.
+    expect(policy?.sopRules[0]?.['id']).toBe('rule_1')
     expect(requestCount).toBe(1)
     expect(latestWorkspaceId).toBe(wsId)
   })

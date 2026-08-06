@@ -22,6 +22,7 @@
     "LICENSE"
   ],
   "scripts": {
+    "lint": "eslint src",
     "build": "tsc",
     "dev": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
