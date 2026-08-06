@@ -20,9 +20,14 @@ const logger = createLogger('mcp-proxy.healthMonitor')
 const HEARTBEAT_MS = 30_000
 const PROBE_TIMEOUT = 5_000
 
-const CP_URL          = process.env['CONTROL_PLANE_URL'] ?? 'http://localhost:3001'
-const DAEMON_API_KEY  = process.env['INTUTIC_API_KEY']   ?? ''
-const WORKSPACE_ID    = process.env['INTUTIC_WORKSPACE_ID'] ?? ''
+// CP_URL / INTUTIC_API_KEY / INTUTIC_WORKSPACE_ID are deliberately not read
+// here. They existed only for uploadSnapshots(), removed in 514eff7c because
+// its target route (/api/v1/mcp-daemon/health-snapshot) is not in the control
+// plane. The only outbound request left in this module is probeServer(), which
+// hits third-party MCP servers named in the user's local harness config —
+// attaching the Intutic workspace credential to those would send it to hosts
+// Intutic does not control. If snapshot upload comes back, the key belongs on
+// the control-plane request, not on the probe.
 
 export interface McpServerConfig {
   name:     string
@@ -42,6 +47,35 @@ export interface McpServerHealth {
 const servers: McpServerConfig[] = []
 const latestHealth = new Map<string, McpServerHealth>()
 let timer: ReturnType<typeof setInterval> | null = null
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/**
+ * Pulls the server map out of a parsed harness config. The file is written by
+ * Claude Code / Claude Desktop / Cursor, not by us, so its contents are
+ * `unknown` until checked: `mcpServers` (or the older `mcp`) may be absent, or
+ * be a scalar or an array rather than an object.
+ */
+function readServerMap(parsed: unknown): Record<string, unknown> {
+  if (!isRecord(parsed)) return {}
+  const map = parsed['mcpServers'] ?? parsed['mcp']
+  return isRecord(map) ? map : {}
+}
+
+/**
+ * Derives a probe URL from one entry of a harness config's server map.
+ * Returns '' when the entry declares neither a usable `url` nor `command`.
+ */
+function entryToUrl(entry: unknown): string {
+  if (!isRecord(entry)) return ''
+  const url = entry['url']
+  if (typeof url === 'string' && url.length > 0) return url
+  const command = entry['command']
+  if (typeof command === 'string' && command.length > 0) return `stdio://${command}`
+  return ''
+}
 
 function discoverServers(): McpServerConfig[] {
   const discovered: McpServerConfig[] = []
@@ -65,18 +99,11 @@ function discoverServers(): McpServerConfig[] {
     try {
       if (!fs.existsSync(configPath)) continue
       const raw = fs.readFileSync(configPath, 'utf8')
-      const parsed = JSON.parse(raw)
-      const mcpServers = parsed.mcpServers ?? parsed.mcp ?? {}
-      for (const [name, entry] of Object.entries(mcpServers)) {
+      const parsed: unknown = JSON.parse(raw)
+      for (const [name, entry] of Object.entries(readServerMap(parsed))) {
         if (name === 'intutic') continue // Skip self
-        const serverEntry = entry as any
-        
-        let url = ''
-        if (serverEntry.url) {
-          url = serverEntry.url
-        } else if (serverEntry.command) {
-          url = `stdio://${serverEntry.command}`
-        }
+
+        const url = entryToUrl(entry)
 
         if (url && !discovered.some(s => s.name === name)) {
           discovered.push({
@@ -86,7 +113,14 @@ function discoverServers(): McpServerConfig[] {
           })
         }
       }
-    } catch {}
+    } catch {
+      // This config path belongs to a harness the user may not have installed,
+      // so an unreadable or malformed file is the expected case, not an error:
+      // discovery probes Claude Code, Claude Desktop and Cursor locations and
+      // most machines have only one. Skip this path and keep discovering the
+      // others — a parse failure on one config must not cost us the servers
+      // declared in the rest.
+    }
   }
 
   return discovered
@@ -162,7 +196,7 @@ export function startHealthMonitor(): void {
         logger.warn({ serverName: server.name }, 'mcp_daemon.mcp_server_down')
       }
     }
-    // Health stays local: getLatestHealth()/latestHealth serve the proxy's
+    // Health stays local: getHealthSnapshot()/latestHealth serve the proxy's
     // own health_check. The former uploader posted to
     // /api/v1/mcp-daemon/health-snapshot, a route stripped from the control
     // plane — every 30s heartbeat silently 404'd and the snapshots were
