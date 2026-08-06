@@ -156,7 +156,11 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             packages/proxy/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          # The proxy's own lockfile, not the workspace root's. This job builds
+          # `packages/proxy`, and that crate is now pinned by
+          # `packages/proxy/Cargo.lock` — keying the cache on the root lockfile
+          # meant a proxy dependency change did not invalidate it.
+          key: ${{ runner.os }}-cargo-${{ hashFiles('packages/proxy/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
 
