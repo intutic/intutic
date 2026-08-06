@@ -68,6 +68,7 @@
     }
   },
   "scripts": {
+    "lint": "eslint src",
     "build": "tsc",
     "dev": "tsx watch src/index.ts",
     "typecheck": "tsc --noEmit",
