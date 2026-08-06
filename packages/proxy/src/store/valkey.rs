@@ -27,6 +27,28 @@ use crate::metering::VirtualKeyRecord;
 use crate::routing::bandit::BanditArmState;
 use crate::telemetry::ExecutionTrace;
 
+/// Lowercase hex SHA-256, matching the control plane's `hashKeySha256`.
+fn sha256_hex(raw: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(raw.as_bytes());
+    hex::encode(h.finalize())
+}
+
+/// Compares two byte strings without an early return.
+///
+/// Both operands here are hex digests of the same fixed length, so the length
+/// check leaks nothing an attacker does not already know. The fold is what
+/// matters: `==` on `&[u8]` may stop at the first differing byte, and this
+/// comparison sits on the request path where an attacker controls one side and
+/// can time it.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
 /// Atomic read-modify-write of one arm inside `bandit:{ws}`.
 ///
 /// KEYS[1] = bandit hash key, ARGV[1] = arm field, ARGV[2] = reward,
@@ -863,6 +885,41 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
         let Ok(auth_json) = serde_json::from_str::<serde_json::Value>(&auth_str) else {
             return ControlPlaneAuth::Unavailable;
         };
+
+        // Prove the caller holds the whole token, not just the cache key.
+        //
+        // This entry is keyed by the token's first 12 characters and, until this
+        // check existed, a hit was admitted on that prefix alone — nothing here
+        // ever looked at the rest of the token. Those 12 characters are not a
+        // secret: the control plane returns them from `listApiKeys` as a "safe
+        // projection", the dashboard renders them in its settings panel, the
+        // public `POST /api/v1/policy/check` route accepts them in a request
+        // body, and **this file's own caller logs them at warn level** — see the
+        // `tracing::warn!(token = %key_prefix, …)` sites in `proxy.rs`. So
+        // read access to production logs was LLM proxy access for as long as an
+        // entry stayed warm.
+        //
+        // `tokenVerifier` is SHA-256 of the full plaintext token, written by the
+        // control plane's API-key middleware, which performs the same check on
+        // its own REST surface. A fast hash is right here: the input is a
+        // machine-generated token of at least 128 bits, so there is nothing to
+        // brute-force, and this runs on the request hot path.
+        //
+        // A mismatch returns `Rejected` rather than denying, because `Rejected`
+        // is this codebase's "not answered from cache" signal — the caller falls
+        // through to `validate_key_via_control_plane`, which checks the whole
+        // token authoritatively and raises the 401 itself. An entry with no
+        // verifier predates this field, so it takes the same path: one
+        // control-plane round trip per key until the cache turns over, rather
+        // than the hole staying open.
+        let verifier_ok = auth_json
+            .get("tokenVerifier")
+            .and_then(|v| v.as_str())
+            .is_some_and(|stored| constant_time_eq(stored.as_bytes(), sha256_hex(token).as_bytes()));
+        if !verifier_ok {
+            return ControlPlaneAuth::Rejected;
+        }
+
         let Some(workspace_id) = auth_json.get("workspaceId").and_then(|v| v.as_str()) else {
             return ControlPlaneAuth::Unavailable;
         };
@@ -1137,6 +1194,89 @@ async fn read_baseline_hash(
         sum,
         reasoning_sum,
     })
+}
+
+#[cfg(test)]
+mod token_verifier {
+    //! The cache key is a published prefix, so the entry must prove more than it.
+    //!
+    //! `auth_context` looks the entry up by `token[..12]`, and those twelve
+    //! characters are handed out deliberately: the control plane returns them as
+    //! a "safe projection", the dashboard prints them, and `proxy.rs` logs them
+    //! at warn level. Admitting on the key alone made log-read access equal to
+    //! proxy access for the lifetime of a warm entry.
+
+    use super::{constant_time_eq, sha256_hex};
+
+    /// Must match the control plane's `hashKeySha256`, which is plain lowercase
+    /// hex SHA-256 of the token. A different encoding on either side turns every
+    /// cache hit into a control-plane round trip — a silent performance cliff
+    /// rather than a visible break, which is why this pins the digest itself.
+    #[test]
+    fn digest_matches_the_control_plane_encoding() {
+        // SHA-256 of "abc", the standard vector.
+        assert_eq!(
+            sha256_hex("abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        assert_eq!(sha256_hex("abc").len(), 64, "lowercase hex, not base64");
+    }
+
+    #[test]
+    fn a_forged_tail_does_not_match_a_real_prefix() {
+        // The attack: the first 12 characters are known, the rest is guessed.
+        let real = "vk_0123456789abcdef_ws_victim";
+        let forged = "vk_0123456789_the_rest_is_guessed";
+        assert_eq!(&real[..12], &forged[..12], "the premise: prefixes collide");
+        assert!(
+            !constant_time_eq(sha256_hex(real).as_bytes(), sha256_hex(forged).as_bytes()),
+            "a shared prefix must not produce a shared verifier",
+        );
+    }
+
+    #[test]
+    fn the_whole_token_matches_itself() {
+        let t = "vk_0123456789abcdef_ws_victim";
+        assert!(constant_time_eq(
+            sha256_hex(t).as_bytes(),
+            sha256_hex(t).as_bytes()
+        ));
+    }
+
+    /// The comparison must not return early on the first differing byte.
+    #[test]
+    fn comparison_examines_every_byte() {
+        // Differing in the LAST byte must be as false as differing in the first,
+        // and neither may short-circuit. `==` on slices is permitted to stop at
+        // the first mismatch, which is what this replaces.
+        assert!(!constant_time_eq(b"aaaaaaaa", b"aaaaaaab"));
+        assert!(!constant_time_eq(b"baaaaaaa", b"aaaaaaaa"));
+        assert!(!constant_time_eq(b"short", b"longer_value"));
+        assert!(constant_time_eq(b"identical", b"identical"));
+    }
+
+    /// An entry written before `tokenVerifier` existed must not be usable.
+    ///
+    /// Read as source text because the alternative — admitting a verifier-less
+    /// entry "for compatibility" — is precisely how this hole would be reopened
+    /// during a rollout, and it would look like a considerate migration.
+    #[test]
+    fn a_missing_verifier_is_not_a_pass() {
+        let src = include_str!("valkey.rs");
+        let guard = src
+            .split("let verifier_ok = auth_json")
+            .nth(1)
+            .expect("the verifier check is present in auth_context");
+        let body = &guard[..guard.find("if !verifier_ok").unwrap_or(guard.len())];
+        assert!(
+            body.contains("is_some_and"),
+            "an absent tokenVerifier must fail the check, not skip it: {body}"
+        );
+        assert!(
+            src.contains("if !verifier_ok {\n            return ControlPlaneAuth::Rejected;"),
+            "a mismatch must return Rejected, which falls through to the control plane",
+        );
+    }
 }
 
 #[cfg(test)]
