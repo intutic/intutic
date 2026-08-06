@@ -16,7 +16,7 @@ import { loadCredentials } from '../config/store.js'
 import { resolveControlPlaneUrl } from '../config/paths.js'
 import { createApiClient } from '../lib/api.js'
 import pc from 'picocolors'
-import type { TraceSummary, TraceListResult, TraceDetail } from '@intutic/shared-types'
+import type { TraceListResult, TraceDetail } from '@intutic/shared-types'
 
 // ─── Types ──────────────────────────────────────────────────────────
 

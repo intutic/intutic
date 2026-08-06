@@ -15,7 +15,7 @@ If your agent's next step is a tool call an SOP forbids, W&B Weave will log the 
 | Capability | Intutic | W&B Weave |
 |-----------|---------|-----------|
 | **Core Value** | Active containment & sandbox security | Trajectory tracing & prompt evaluation |
-| **Isolation Model** | WASM (wasmtime) policy sandbox — 16 MB, 1,000,000 fuel, 5 ms; SOP hook scripts in a frozen V8 context (node:vm, 100 ms) | Not available |
+| **Isolation Model** | WASM (wasmtime) policy sandbox — 16 MB, 1,000,000 fuel, 5 ms, explicit host-import allowlist | Not available |
 | **Egress Control** | All agent LLM traffic forced through the governing proxy | N/A |
 | **Enforcement Path** | Real-time inline proxy — requests are blocked before they reach the model | Async telemetry listener |
 | **Rule Engine** | Dynamic WASM modules & custom security scripts | Prompt evaluation workflows |

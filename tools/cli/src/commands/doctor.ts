@@ -10,7 +10,8 @@
  * 2. Control plane auth (via stored credentials)
  * 3. Sync daemon running (PID file or process grep)
  * 4. Harness config files intact (SHA-256 hash check)
- * 5. Daemon log readable (~/.intutic/daemon.log)
+ * 5. Daemon log readable and non-empty (installed log path, or the legacy
+ *    ~/.intutic/daemon.log)
  * 6. Valkey connectivity (proxy /health or TCP probe port 6379)
  * 7. CA cert trust (~/.intutic/ca.crt + OS trust store)
  *
@@ -30,6 +31,7 @@ import pc from 'picocolors'
 import { log } from '../lib/logger.js'
 import { loadCredentials, loadConfig, loadIntegrity } from '../config/store.js'
 import { isSyncDaemonRunning } from '../lib/process.js'
+import { getPaths } from './install-daemon.js'
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -45,7 +47,12 @@ interface CheckResult {
 const PROXY_HEALTH_URL = 'http://127.0.0.1:4000/health'
 const PROXY_TIMEOUT_MS = 3_000
 const CONTROL_PLANE_TIMEOUT_MS = 5_000
-const DAEMON_LOG_PATH = join(homedir(), '.intutic', 'daemon.log')
+/**
+ * Historical location. Nothing in the CLI or the daemon has ever written here —
+ * `intutic install-daemon` points the service at getPaths().logPath — so it is
+ * kept only so an old install still gets a hit.
+ */
+const LEGACY_DAEMON_LOG_PATH = join(homedir(), '.intutic', 'daemon.log')
 const DAEMON_PID_PATH = join(homedir(), '.intutic', 'daemon.pid')
 const CA_CERT_PATH = join(homedir(), '.intutic', 'ca.crt')
 const VALKEY_PROBE_TIMEOUT_MS = 2_000
@@ -257,30 +264,109 @@ function checkHarnessConfigs(): CheckResult {
 }
 
 /**
- * Check 5: Daemon log readable.
+ * Every place a sync-daemon log can legitimately be, most likely first: the
+ * per-user service, the system service, then the legacy path.
+ */
+function daemonLogCandidates(): string[] {
+  return [
+    getPaths(false, false).logPath,
+    getPaths(true, false).logPath,
+    LEGACY_DAEMON_LOG_PATH,
+  ]
+}
+
+/**
+ * How long ago the newest entry was written, taken from the `time` field pino
+ * puts on every line (`@intutic/logger` configures it as an ISO string; plain
+ * pino uses epoch milliseconds, so both are accepted).
+ *
+ * Returns null when the last line is not a pino record — a stack trace
+ * continuation, or plain text from the service supervisor — in which case the
+ * caller simply omits the age.
+ *
+ * The line itself is deliberately never printed. `intutic doctor` output is
+ * written to be pasted into a support thread, and daemon logs carry workspace
+ * identifiers and request metadata.
+ */
+function describeLastEntryAge(lastLine: string): string | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(lastLine)
+  } catch {
+    return null
+  }
+  if (typeof parsed !== 'object' || parsed === null) return null
+
+  const time = (parsed as { time?: unknown }).time
+  if (typeof time !== 'string' && typeof time !== 'number') return null
+
+  const writtenAt = new Date(time).getTime()
+  if (Number.isNaN(writtenAt)) return null
+
+  const minutes = Math.floor((Date.now() - writtenAt) / 60_000)
+  if (minutes < 0) return null
+  if (minutes < 1) return 'last entry just now'
+  if (minutes < 60) return `last entry ${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `last entry ${hours}h ago`
+  return `last entry ${Math.floor(hours / 24)}d ago`
+}
+
+/**
+ * Check 5: Daemon log present, readable, and actually being written to.
  */
 function checkDaemonLog(): CheckResult {
-  try {
-    accessSync(DAEMON_LOG_PATH, constants.R_OK)
+  const candidates = daemonLogCandidates()
 
-    // Try to read last few bytes to confirm it's not empty
-    const content = readFileSync(DAEMON_LOG_PATH, 'utf-8')
-    const lines = content.trim().split('\n')
-    const lastLine = lines[lines.length - 1] || ''
-    const truncated = lastLine.length > 80 ? lastLine.slice(0, 80) + '…' : lastLine
-
-    return {
-      name: 'Daemon Log',
-      passed: true,
-      detail: `Readable at ${DAEMON_LOG_PATH} (${lines.length} lines)`,
+  const logPath = candidates.find((candidate) => {
+    try {
+      accessSync(candidate, constants.R_OK)
+      return true
+    } catch {
+      return false
     }
-  } catch {
+  })
+
+  if (!logPath) {
     return {
       name: 'Daemon Log',
       passed: false,
-      detail: `Not found or not readable at ${DAEMON_LOG_PATH}`,
+      detail: `Not found or not readable at ${candidates.join(', ')}`,
       remediation: 'The log file is created when `intutic connect` runs. Start the daemon first.',
     }
+  }
+
+  let content: string
+  try {
+    content = readFileSync(logPath, 'utf-8')
+  } catch (err) {
+    return {
+      name: 'Daemon Log',
+      passed: false,
+      detail: `Found ${logPath} but could not read it — ${err instanceof Error ? err.message : String(err)}`,
+      remediation: `Check the file's permissions: ls -l ${logPath}`,
+    }
+  }
+
+  // An empty log means the daemon has never logged a line — a real fault that
+  // used to be reported as a pass with a misleading "1 lines".
+  const lines = content.trim().split('\n').filter((line) => line.length > 0)
+  if (lines.length === 0) {
+    return {
+      name: 'Daemon Log',
+      passed: false,
+      detail: `Empty at ${logPath} — the daemon has not written anything`,
+      remediation: 'The daemon has a log file but has never logged. Restart it with `intutic connect` and re-run doctor.',
+    }
+  }
+
+  const age = describeLastEntryAge(lines[lines.length - 1])
+  const suffix = age ? `, ${age}` : ''
+
+  return {
+    name: 'Daemon Log',
+    passed: true,
+    detail: `Readable at ${logPath} (${lines.length} lines${suffix})`,
   }
 }
 

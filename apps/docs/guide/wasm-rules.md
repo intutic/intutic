@@ -47,6 +47,37 @@ To prevent memory corruption and guest engine crashes under multi-turn garbage c
 :::
 
 
+
+## Host imports
+
+A rule may import exactly three functions, all from `env`:
+
+| Import | Signature | What it does |
+| :--- | :--- | :--- |
+| `log_info` | `(ptr: usize, len: usize) => void` | Writes a line to the proxy's log. |
+| `trace` | `(msg, n, a0..a4) => void` | AssemblyScript's `trace()`. |
+| `abort` | `(msg, file, line, col) => void` | AssemblyScript's abort path. Terminates the rule. |
+
+**Nothing else resolves.** A rule importing anything beyond these is refused at
+`intutic policy install`, refused again by the control plane if pushed from the
+dashboard, and refused a third time when the proxy loads it.
+
+::: danger `Math.random()` is unavailable
+AssemblyScript compiles it to an `env.seed` import that the proxy does not
+provide — and that is deliberate, not an oversight. A governance verdict that
+can differ on identical input cannot be audited, and the replay and mutation
+corpus gates both assume determinism.
+
+This mattered: `env.seed` was once offered by the CLI's validation sandbox and
+registered by no proxy. A rule using randomness passed `policy test`, passed
+`policy install`, and then failed to link on every request — where the runner
+turns a link error into an allow. It enforced nothing, silently. If you need
+variation, derive it from the request context.
+:::
+
+If you see a rule listed as active and never firing, check the proxy log for a
+link error before assuming the logic is wrong.
+
 ---
 
 ## Creating a Custom Filter
@@ -55,28 +86,77 @@ To prevent memory corruption and guest engine crashes under multi-turn garbage c
 
 Intutic provides an AssemblyScript Rules SDK (`@intutic/wasm-sdk`) that provides standard types and parsing helpers.
 
-```typescript
-import { JSON } from "assemblyscript-json/assembly";
+Every field below is delivered on every request. The excerpt this page used to
+show carried ten of them and pointed at the SDK for "the rest" — which is how a
+rule author ends up not knowing that `forbid_after`, `changes` or
+`injection_findings` are already in their hand.
 
-// An excerpt. The host sends considerably more than this — session and graph
-// identity, the rolling tool sequence and this turn's delta, DLP and injection
-// findings, every SOP-derived policy field, and the harness the request arrived
-// on. `packages/wasm-sdk/assembly/index.ts` carries the full class; treat that
-// file as the contract rather than this excerpt.
-export class RequestContext {
-  session_id: string = "";
-  workspace_id: string = "";
-  model: string = "";
-  tools: ToolSchema[] = [];
-  tool_calls: ToolCall[] = [];
-  estimated_input_tokens: i32 = 0;
-  budget_remaining_usd: f64 = 0.0;
-  risk_tier: string = "";        // Low | Medium | High | Critical
-  dlp_findings: DlpFinding[] = [];
-  tool_sequence: string[] = [];  // session history, oldest first
-  // …and the rest — see the SDK.
-}
-```
+### Identity and request
+
+| Field | Type | What it is |
+| :--- | :--- | :--- |
+| `session_id` | `string` | The agent session this request belongs to. |
+| `workspace_id` | `string` | Owning workspace. |
+| `virtual_key_prefix` | `string` | Which virtual key authenticated the call. |
+| `model` | `string` | Model the agent asked for. |
+| `harness` | `string` | The agent that sent it — `claude-code`, `cursor`, … |
+| `estimated_input_tokens` | `i32` | Prompt size for this turn. |
+
+### Tools
+
+| Field | Type | What it is |
+| :--- | :--- | :--- |
+| `tools` | `ToolSchema[]` | Tools declared on this request. Name and description only — **not** the input schema. |
+| `tool_calls` | `ToolCall[]` | Calls in this turn's message. |
+| `tool_sequence` | `string[]` | Session history, oldest first. Includes this turn. |
+| `new_tool_calls` | `string[]` | This turn's delta. **Use this, not `tool_sequence`, for a hold** — matching on history re-fires the hold forever. |
+| `tool_contract_changed` | `bool` | A server changed a tool's contract mid-session. |
+| `transition_baseline` | `map` | Observed transition frequencies. Absent early in a session. |
+
+### Findings
+
+| Field | Type | What it is |
+| :--- | :--- | :--- |
+| `dlp_findings` | `DlpFinding[]` | Secrets and sensitive data matched in this request. **Carries no position in the tool sequence** — see `forbid_with` below. |
+| `injection_findings` | `string[]` | Prompt-injection pattern matches. Pattern matches produce false positives; prefer `REASK` over `KILL`. |
+| `changes` | `ChangeEntry[]` | The change manifest — what this run has written. |
+
+### Policy, from the SOP front matter
+
+Declaring these in a SOP makes the proxy's own detectors enforce them. They are
+**also** handed to your rule, so a WASM rule can refine a declarative one.
+
+| Field | Type | Declared as |
+| :--- | :--- | :--- |
+| `denied_tools` | `string[]` | `deny_tools:` |
+| `allowed_harnesses` | `string[]` | `allow_harnesses:` |
+| `plan_steps` | `string[]` | `plan_steps:` |
+| `scope_paths` | `string[]` | `scope_paths:` |
+| `review_before` | `string[]` | `review_before:` |
+| `requires_before` | `(string, string)[]` | `requires_before: A -> B` |
+| `forbid_after` | `(string, string, bool)[]` | `forbid_after: A -> B`. The bool is adjacency — `~>` means "immediately after". |
+| `max_calls` | `(string, i32)[]` | `max_calls: Tool <= N` |
+| `forbid_with` | `(string, string)[]` | `forbid_with: secrets(), action:http_post` — **co-occurrence, not flow**, because `dlp_findings` carries no sequence position. |
+| `risk_tier` | `string` | `risk_tier:` — `Low` \| `Medium` \| `High` \| `Critical`. No proxy detector reads it; it exists for your rules. |
+
+### Budget and graph
+
+| Field | Type | What it is |
+| :--- | :--- | :--- |
+| `budget_remaining_usd` | `f64` | Workspace budget left. |
+| `workflow_spend_usd` | `f64?` | Spend on this workflow. Absent outside a workflow. |
+| `workflow_budget_usd` | `f64?` | Its ceiling. Absent outside a workflow. |
+| `node` | `NodeIdentity` | Position in the agent graph — id, parent, depth, liveness, node count. |
+
+::: warning Unknown is not zero
+The optional numerics arrive as `-1` when the host has nothing to send, not `0`.
+A rule written `if (ctx.workflow_spend_usd > ctx.workflow_budget_usd)` reads
+"unknown" as "under budget"; one written `if (remaining < 10)` reads it as
+"broke" and blocks every request outside a workflow. Check for `-1` first.
+
+The same shape bites on empty lists: an empty `allowed_harnesses` means
+**unrestricted**, not "permit nothing".
+:::
 
 ### The starter rules
 

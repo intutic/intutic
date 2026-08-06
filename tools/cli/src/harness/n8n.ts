@@ -18,6 +18,60 @@ import { HarnessType } from '@intutic/shared-types'
 import type { SyncSopEntry } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
 
+// ─── n8n REST payloads ──────────────────────────────────────────────
+//
+// These describe the subset of the n8n public API this adapter touches. Every
+// field is optional because the response is unvalidated JSON from a server
+// whose version we do not control — the code below supplies a default for each
+// one it needs rather than trusting the shape.
+
+/** Entry in the `data` array of `GET /api/v1/workflows`. */
+interface N8nWorkflowListEntry {
+  id: string
+  name?: string
+}
+
+interface N8nWorkflowListResponse {
+  data?: N8nWorkflowListEntry[]
+}
+
+/**
+ * Workflow `settings` blob. n8n keeps its own keys here (executionOrder,
+ * timezone, error workflow, …) which this adapter does not interpret but must
+ * round-trip, hence the index signature.
+ */
+interface N8nWorkflowSettings {
+  variables?: Record<string, string>
+  [key: string]: unknown
+}
+
+/** Workflow as returned by `GET /api/v1/workflows/{id}`. */
+interface N8nWorkflowDetail {
+  id?: string
+  name?: string
+  /** Opaque to this adapter — round-tripped unchanged. */
+  nodes?: unknown[]
+  connections?: Record<string, unknown>
+  settings?: N8nWorkflowSettings
+  staticData?: unknown
+}
+
+/**
+ * Body accepted by `PUT /api/v1/workflows/{id}`.
+ *
+ * The n8n public API validates this body with `additionalProperties: false`,
+ * so it must carry the writable fields and nothing else. Read-only fields that
+ * come back on the GET (`id`, `active`, `createdAt`, `updatedAt`, `tags`,
+ * `versionId`, …) make the request fail with HTTP 400.
+ */
+interface N8nWorkflowUpdateBody {
+  name: string
+  nodes: unknown[]
+  connections: Record<string, unknown>
+  settings: N8nWorkflowSettings
+  staticData?: unknown
+}
+
 // Format SOPs for n8n parameters
 function buildSopsMarkdown(sops: SyncSopEntry[]): string {
   if (sops.length === 0) return ''
@@ -63,7 +117,7 @@ export const n8nAdapter: IHarnessAdapter = {
         throw new Error(`Failed to list workflows: ${listRes.statusText}`)
       }
 
-      const listData = (await listRes.json()) as { data?: Array<{ id: string; name: string }> }
+      const listData = (await listRes.json()) as N8nWorkflowListResponse
       const workflows = listData.data || []
 
       if (workflows.length === 0) {
@@ -71,6 +125,7 @@ export const n8nAdapter: IHarnessAdapter = {
       }
 
       // 2. Inject parameters into variables of each workflow
+      let updated = 0
       for (const w of workflows) {
         const detailRes = await fetch(`${n8nUrl}/api/v1/workflows/${w.id}`, {
           headers: getHeaders(),
@@ -79,26 +134,54 @@ export const n8nAdapter: IHarnessAdapter = {
 
         if (!detailRes.ok) continue
 
-        const detail = (await detailRes.json()) as any
-        const settings = detail.settings || {}
-        const variables = settings.variables || {}
+        const detail = (await detailRes.json()) as N8nWorkflowDetail
 
-        // Inject Intutic values
-        variables.intutic_proxy_url = proxyUrl
-        variables.intutic_governance_rules = sopsMarkdown
-        settings.variables = variables
-        detail.settings = settings
+        // Inject Intutic values, preserving the workflow's own settings and
+        // any variables it already had.
+        const settings: N8nWorkflowSettings = {
+          ...detail.settings,
+          variables: {
+            ...detail.settings?.variables,
+            intutic_proxy_url: proxyUrl,
+            intutic_governance_rules: sopsMarkdown,
+          },
+        }
+
+        // Only the writable fields — see N8nWorkflowUpdateBody. Echoing the
+        // whole GET payload back (which is what this used to do) is rejected
+        // by the API's additionalProperties check.
+        const body: N8nWorkflowUpdateBody = {
+          name: detail.name ?? w.name ?? 'Untitled',
+          nodes: detail.nodes ?? [],
+          connections: detail.connections ?? {},
+          settings,
+        }
+        if (detail.staticData !== undefined) {
+          body.staticData = detail.staticData
+        }
 
         // Save updated workflow
-        await fetch(`${n8nUrl}/api/v1/workflows/${w.id}`, {
+        const updateRes = await fetch(`${n8nUrl}/api/v1/workflows/${w.id}`, {
           method: 'PUT',
           headers: getHeaders(),
-          body: JSON.stringify(detail),
+          body: JSON.stringify(body),
           signal: AbortSignal.timeout(5000),
         })
+
+        if (!updateRes.ok) {
+          console.warn(
+            `[n8n-adapter] workflow ${w.id} was not updated: HTTP ${updateRes.status} ${updateRes.statusText}`,
+          )
+          continue
+        }
+        updated++
       }
 
-      return `n8n:${workflows.length}_workflows`
+      // Reporting a write that every workflow rejected as a success left the
+      // sync daemon recording a config version it had never applied.
+      if (updated === 0) return null
+
+      return `n8n:${updated}_workflows`
     } catch (err) {
       console.warn(`[n8n-adapter] failed to sync parameters:`, err)
       return null
@@ -115,7 +198,7 @@ export const n8nAdapter: IHarnessAdapter = {
 
       if (!listRes.ok) return null
 
-      const listData = (await listRes.json()) as { data?: Array<{ id: string }> }
+      const listData = (await listRes.json()) as N8nWorkflowListResponse
       const workflows = listData.data || []
       if (workflows.length === 0) return null
 
@@ -128,8 +211,8 @@ export const n8nAdapter: IHarnessAdapter = {
 
       if (!detailRes.ok) return null
 
-      const detail = (await detailRes.json()) as any
-      const rules = detail.settings?.variables?.intutic_governance_rules || ''
+      const detail = (await detailRes.json()) as N8nWorkflowDetail
+      const rules = detail.settings?.variables?.intutic_governance_rules ?? ''
       if (!rules) return null
 
       return createHash('sha256').update(rules, 'utf-8').digest('hex')

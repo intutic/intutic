@@ -17,13 +17,31 @@ ignore it.
 | :--- | :--- | :--- |
 | `deny_tools:` | `Bash, WebFetch` | Blocks the tool outright (403). |
 | `allow_harnesses:` | `claude-code, cursor` | Restricts which harnesses a role may use. |
-| `plan_steps:` | `investigate, patch, test` | Work drifting outside the declared steps is steered. |
-| `scope_paths:` | `src/**, docs/**` | File access outside these paths is steered. |
+| `plan_steps:` | `Read, Edit, Bash, action:run_tests` | Work drifting outside the declared steps is steered. |
+| `scope_paths:` | `src, docs` | File access outside these paths is steered. |
 | `review_before:` | `action:deploy` | Holds the run for human approval. |
 | `requires_before:` | `A -> B` | B is refused unless A appeared earlier. |
 | `forbid_after:` | `A -> B` | B is refused if A appeared earlier. |
 | `max_calls:` | `A <= N` | Refuses the N+1th call of A. |
 | `forbid_with:` | `taint(), token` | Refuses the two together in one request. |
+
+::: warning Two shapes that look right and match nothing
+
+**`plan_steps:` takes tool names, not prose.** The detector lowercases the list
+and filters the session's tool sequence for entries that are not in it — and
+that sequence holds real tool names (`Read`, `Edit`, `Bash`) and the eight
+`action:` tokens, never verbs. A plan of `investigate, patch, test` puts *every*
+step off-plan, past the 0.4 deviation tolerance, so the detector steers on every
+request. This page documented exactly that example.
+
+**`scope_paths:` takes path prefixes, not globs.** There is no glob expansion.
+A scope is matched by equality or by `prefix/`, so `src/**` matches nothing:
+`src/main.rs` is neither equal to `src/**` nor prefixed by `src/**/`. Every
+write then reads as out of scope. Write `src`, not `src/**`.
+
+Both failures point the same way — the control fires on everything rather than
+nothing, which reads as an over-eager product rather than a misconfiguration.
+:::
 
 `risk_tier:` is also parsed, but **no proxy detector reads it** — it is passed to
 [WASM rules](/guide/wasm-rules), which may act on it. A SOP declaring only

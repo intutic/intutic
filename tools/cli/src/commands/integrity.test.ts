@@ -270,12 +270,14 @@ describe('table padding is ANSI-aware', () => {
     const cell = `${YELLOW}unverifiable${RESET}`
     const out = padCell(cell, 13)
     expect(out).toContain('unverifiable')
+    // eslint-disable-next-line no-control-regex -- strips ESC-prefixed SGR codes so the assertion measures VISIBLE width, which is what padCell must get right.
     expect(out.replace(/\u001b\[[0-9;]*m/g, '')).toHaveLength(13)
   })
 
   it('cuts by visible characters, not raw ones, and never leaves colour open', async () => {
     const { padCell } = await import('./integrity.js')
     const out = padCell(`${YELLOW}unverifiable${RESET}`, 6)
+    // eslint-disable-next-line no-control-regex -- strips ESC-prefixed SGR codes so the assertion measures VISIBLE width, which is what padCell must get right.
     expect(out.replace(/\u001b\[[0-9;]*m/g, '')).toBe('unveri')
     // An unterminated escape tints the border and everything downstream.
     expect(out.endsWith('\u001b[0m') || out.endsWith(RESET)).toBe(true)

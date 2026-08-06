@@ -6,13 +6,53 @@
 
 import { existsSync } from 'node:fs'
 import * as fs from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { dirname, join } from 'node:path'
 import { spawn } from 'node:child_process'
 import { log } from '../lib/logger.js'
 import { loadCredentials, loadConfig } from '../config/store.js'
-import { resolveControlPlaneUrl } from '../config/paths.js'
+import { getIntuticDir, resolveControlPlaneUrl } from '../config/paths.js'
 import { createApiClient } from '../lib/api.js'
 import pc from 'picocolors'
+
+// ─── Shared response shapes ──────────────────────────────────────────
+
+/**
+ * One row of the local skill/rule-file inventory reported to the control
+ * plane by `POST /api/v1/workspaces/:id/skills/report`.
+ */
+interface SkillReportEntry {
+  /** Path relative to the workspace root, e.g. `CLAUDE.md`. */
+  filePath: string
+  /** Line count of the file as scanned. */
+  linesCount: number
+  /** Audit findings in this file; always 0 for `skill list`, which only counts. */
+  issuesDetected: number
+}
+
+/**
+ * A loop run as returned by `GET /api/v1/loops`.
+ *
+ * `totalTokenCostUsd` and `budgetLimitUsd` are strings, not numbers: both are
+ * Postgres `numeric` columns, which the driver hands back as strings to keep
+ * the scale exact — hence the `parseFloat` at every use site.
+ */
+export interface LoopRunSummary {
+  loopRunId: string
+  name: string
+  /**
+   * PENDING_REVIEW is the only non-ACTIVE status that is not terminal — see
+   * `LoopRunDetails` in the control plane's loopGovernanceService.
+   */
+  status: 'ACTIVE' | 'PENDING_REVIEW' | 'COMPLETED' | 'FAILED' | 'KILLED'
+  totalTokenCostUsd: string
+  budgetLimitUsd: string
+}
+
+/** Envelope of `GET /api/v1/loops`. */
+export interface LoopListResponse {
+  ok: boolean
+  loops: LoopRunSummary[]
+}
 
 // ─── Skill Commands ──────────────────────────────────────────────────
 
@@ -29,7 +69,7 @@ export async function runSkillList(): Promise<void> {
     'rules.md',
   ]
 
-  const skillsReport: any[] = []
+  const skillsReport: SkillReportEntry[] = []
   let found = 0
 
   for (const file of filesToScan) {
@@ -60,8 +100,9 @@ export async function runSkillList(): Promise<void> {
       const client = await getClient(config?.devMode)
       await client.post(`/api/v1/workspaces/${creds.workspaceId}/skills/report`, { skills: skillsReport })
       log.dim('Reported local skills to Intutic control plane.')
-    } catch (err) {
-      // Non-blocking
+    } catch {
+      // Non-blocking: discovery already printed everything the user asked for,
+      // and the report is a convenience for the dashboard.
     }
   }
 }
@@ -93,14 +134,14 @@ export async function runSkillAudit(): Promise<void> {
   ]
 
   let issues = 0
-  const skillsReport: any[] = []
+  const skillsReport: SkillReportEntry[] = []
 
   for (const file of filesToScan) {
     const fullPath = join(workspaceRoot, file)
     if (existsSync(fullPath)) {
       const content = await fs.readFile(fullPath, 'utf8')
       let fileIssues = 0
-      let contentLines = content.split('\n')
+      const contentLines = content.split('\n')
       let fileUpdated = false
 
       // 1. Audit for secrets (AWS, Intutic, generic keys)
@@ -114,7 +155,7 @@ export async function runSkillAudit(): Promise<void> {
       }
 
       // 2. Audit for unsafe wildcard commands (e.g. rm -rf *, sh *)
-      if (content.match(/rm\s+-rf\s+[\*\/]/)) {
+      if (content.match(/rm\s+-rf\s+[*/]/)) {
         log.warn(`[${file}] Unsafe recursive delete wildcard patterns (rm -rf *) found.`)
         fileIssues++
       }
@@ -127,7 +168,7 @@ export async function runSkillAudit(): Promise<void> {
       if (fileIssues > 0 && enableLocalSkillAuditDelete) {
         const filteredLines = contentLines.filter((line) => {
           const isSecret = line.match(/vk_[a-zA-Z0-9]{30,}/) || line.match(/sk-live-[a-zA-Z0-9]{30,}/)
-          const isUnsafeCmd = line.match(/rm\s+-rf\s+[\*\/]/) || line.match(/curl\s+|wget\s+/)
+          const isUnsafeCmd = line.match(/rm\s+-rf\s+[*/]/) || line.match(/curl\s+|wget\s+/)
           if (isSecret || isUnsafeCmd) {
             fileUpdated = true
             return false
@@ -199,7 +240,7 @@ async function resolveLocalSops(sopsArg?: string): Promise<string[]> {
   const workspaceRoot = config?.workspaceRoot ?? process.cwd()
   const sopsDir = join(workspaceRoot, '.intutic', 'sops')
 
-  let dirs: string[] = []
+  let dirs: string[]
   try {
     const entries = await fs.readdir(sopsDir, { withFileTypes: true })
     dirs = entries.filter((e) => e.isDirectory()).map((e) => e.name)
@@ -270,13 +311,13 @@ export async function runLoopStart(opts: {
       log.info(`Budget limit: $${res.loop.budgetLimitUsd} USD`)
 
       // Write loop env file locally
-      const loopEnvPath = join(process.env.HOME || '', '.intutic', 'env', 'loop.env')
+      const loopEnvPath = join(getIntuticDir(), 'env', 'loop.env')
       await fs.mkdir(dirname(loopEnvPath), { recursive: true }).catch(() => {})
       await fs.writeFile(loopEnvPath, `INTUTIC_LOOP_RUN_ID=${res.loop.loopRunId}\n`)
       log.dim(`Wrote run context to ~/.intutic/env/loop.env`)
     }
-  } catch (err: any) {
-    log.error(`Failed to register loop: ${err.message}`)
+  } catch (err) {
+    log.error(`Failed to register loop: ${err instanceof Error ? err.message : String(err)}`)
   }
 }
 
@@ -288,11 +329,11 @@ export async function runLoopComplete(loopRunId: string, opts: { dev?: boolean }
     if (res.ok) {
       log.success(`Loop run ${loopRunId} completed.`)
       // Clean env
-      const loopEnvPath = join(process.env.HOME || '', '.intutic', 'env', 'loop.env')
+      const loopEnvPath = join(getIntuticDir(), 'env', 'loop.env')
       await fs.rm(loopEnvPath, { force: true })
     }
-  } catch (err: any) {
-    log.error(`Failed to complete loop: ${err.message}`)
+  } catch (err) {
+    log.error(`Failed to complete loop: ${err instanceof Error ? err.message : String(err)}`)
   }
 }
 
@@ -303,11 +344,11 @@ export async function runLoopKill(loopRunId: string, opts: { dev?: boolean }): P
     const res = await client.post<{ ok: boolean }>(`/api/v1/loops/${loopRunId}/kill`)
     if (res.ok) {
       log.warn(`Loop run ${loopRunId} marked as KILLED.`)
-      const loopEnvPath = join(process.env.HOME || '', '.intutic', 'env', 'loop.env')
+      const loopEnvPath = join(getIntuticDir(), 'env', 'loop.env')
       await fs.rm(loopEnvPath, { force: true })
     }
-  } catch (err: any) {
-    log.error(`Failed to kill loop: ${err.message}`)
+  } catch (err) {
+    log.error(`Failed to kill loop: ${err instanceof Error ? err.message : String(err)}`)
   }
 }
 
@@ -315,7 +356,7 @@ export async function runLoopList(opts: { dev?: boolean }): Promise<void> {
   log.header('Intutic — Workspace Loop Runs')
   const client = await getClient(opts.dev)
   try {
-    const res = await client.get<{ ok: boolean; loops: any[] }>('/api/v1/loops')
+    const res = await client.get<LoopListResponse>('/api/v1/loops')
     if (res.ok && res.loops) {
       console.log(`  ${pc.bold('Loop Run ID')}           | ${pc.bold('Name')}           | ${pc.bold('Status')}    | ${pc.bold('Token Spend')} | ${pc.bold('Budget Limit')}`)
       console.log('  ' + '-'.repeat(85))
@@ -334,8 +375,8 @@ export async function runLoopList(opts: { dev?: boolean }): Promise<void> {
         console.log(`  ${loop.loopRunId.padEnd(21)} | ${loop.name.padEnd(14)} | ${statusStr.padEnd(17)} | $${parseFloat(loop.totalTokenCostUsd).toFixed(4).padEnd(10)} | $${parseFloat(loop.budgetLimitUsd).toFixed(2)}`)
       }
     }
-  } catch (err: any) {
-    log.error(`Failed to list loops: ${err.message}`)
+  } catch (err) {
+    log.error(`Failed to list loops: ${err instanceof Error ? err.message : String(err)}`)
   }
 }
 
@@ -368,8 +409,8 @@ export async function runLoopReview(
           : `Loop run ${loopRunId} rejected — it is KILLED.`,
       )
     }
-  } catch (err: any) {
-    log.error(`Failed to resolve review: ${err.message}`)
+  } catch (err) {
+    log.error(`Failed to resolve review: ${err instanceof Error ? err.message : String(err)}`)
     process.exit(1)
   }
 }
@@ -488,14 +529,8 @@ export async function runLoopExec(
       }
       process.exit(code || 0)
     })
-  } catch (err: any) {
-    log.error(`Loop execution wrapper failed: ${err.message}`)
+  } catch (err) {
+    log.error(`Loop execution wrapper failed: ${err instanceof Error ? err.message : String(err)}`)
     process.exit(1)
   }
-}
-
-function dirname(filePath: string): string {
-  const parts = filePath.split('/')
-  parts.pop()
-  return parts.join('/')
 }
