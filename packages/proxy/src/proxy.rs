@@ -4030,14 +4030,34 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             };
             let token_anomaly = prompt_discrepancy || completion_discrepancy;
 
-            // Streaming: the assembled body may not be reconstructable, but
-            // `done_received` is the signal that matters here — a stream that
-            // never terminated is a truncated response however it parsed.
+            // A same-provider stream that ended without its terminal event
+            // ([DONE] / message_stop) was truncated — learn it as a failed pull
+            // instead of crediting a clean success. Cross-provider streams are
+            // re-emitted through the translation branch without terminal
+            // tracking, so `done_received` is false there by construction and
+            // says nothing about the response; treat them as complete.
+            //
+            // Computed once, here, and used by both the integrity score and the
+            // local reward below. It used to be defined *after* the integrity
+            // call, which passed the raw `done_received` instead — so two
+            // adjacent pieces of code answered the same question opposite ways,
+            // and every cross-provider stream was scored Truncated on a response
+            // that completed perfectly. That is a 0.2 reward penalty on exactly
+            // the cheaper arms the bandit exists to explore, and dashboards
+            // reading 100% truncation for all cross-provider routing.
+            let stream_complete = done_received || !is_same_provider;
+
+            // Streaming: the assembled body is not reconstructable here, so
+            // termination is the only check available — and it is a real one in
+            // both directions. Passing `Some(..)` rather than `None` is what
+            // makes a clean stream *measured*; scoring only the truncations
+            // would leave `AVG(response_integrity)` computed over an arm's
+            // failures alone.
             let integrity = crate::routing::integrity::score(
                 &crate::routing::integrity::ResponseFacts {
                     body: None,
                     request: None,
-                    done_received: Some(done_received),
+                    done_received: Some(stream_complete),
                 },
             );
 
@@ -4053,12 +4073,6 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 final_completion_tokens,
             );
 
-            // A same-provider stream that ended without its terminal event
-            // ([DONE] / message_stop) was truncated — learn it as a failed
-            // pull instead of crediting a clean success. Cross-provider
-            // streams are re-emitted without terminal tracking; treat them
-            // as complete.
-            let stream_complete = done_received || !is_same_provider;
             if reward_eligible {
                 reward_engine_clone
                     .record(
