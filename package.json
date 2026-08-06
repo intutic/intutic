@@ -9,14 +9,19 @@
     "test:cross": "turbo run test:cross",
     "test:e2e": "turbo run test:e2e",
     "bench": "turbo run bench",
-    "lint": "turbo run lint && pnpm lint:styles",
+    "lint": "turbo run lint && pnpm lint:styles && pnpm lint:claims",
     "typecheck": "turbo run typecheck",
     "docs": "turbo run docs",
     "lint:styles": "node tools/scripts/check-styles.js",
     "lint:latency-claims": "node tools/scripts/check-latency-claims.js",
     "lint:sop-keys": "node tools/scripts/check-sop-keys.js",
     "lint:wasm-host-imports": "node tools/scripts/check-wasm-host-imports.js",
-    "prepare": "node tools/scripts/install-hooks.js"
+    "prepare": "node tools/scripts/install-hooks.js",
+    "lint:claims": "node tools/scripts/check-latency-claims.js && node tools/scripts/check-sop-keys.js && node tools/scripts/check-wasm-host-imports.js && node tools/scripts/check-detector-coverage-claims.js && node tools/scripts/check-wasm-context-docs.js && node tools/scripts/check-wasm-verdict-codes.js && node tools/scripts/check-rule-dsl-fields.js",
+    "lint:detector-coverage": "node tools/scripts/check-detector-coverage-claims.js",
+    "lint:wasm-context-docs": "node tools/scripts/check-wasm-context-docs.js",
+    "lint:wasm-verdicts": "node tools/scripts/check-wasm-verdict-codes.js",
+    "lint:rule-dsl": "node tools/scripts/check-rule-dsl-fields.js"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
