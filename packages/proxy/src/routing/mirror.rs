@@ -441,3 +441,100 @@ mod tests {
         assert_eq!(usage_of(&json!({})), (0, 0));
     }
 }
+
+#[cfg(test)]
+mod evidence_is_kept {
+    //! Mirroring bills a second upstream call. Discarding the result makes that
+    //! pure cost.
+    //!
+    //! `run_mirror` has always returned a `MirrorOutcome`, and the spawn in
+    //! `proxy.rs` dropped it — so the only trace of a mirrored call was a
+    //! `tracing::info!` line. C6 and C7 were deferred "pending mirror-measured
+    //! data" while that data was being thrown away one line after it was
+    //! computed.
+    //!
+    //! The call site is what records it, so this asserts on the source: a
+    //! behavioural test would need a live store, and the property that actually
+    //! broke is "nobody calls the recorder".
+
+    #[test]
+    fn the_mirror_spawn_records_its_outcome() {
+        let proxy = include_str!("../proxy.rs");
+        assert!(
+            proxy.contains("record_mirror_outcome("),
+            "the mirror spawn discards its outcome again — mirroring is then \
+             pure cost, and C6/C7 wait on evidence that is never kept",
+        );
+        // Bound to the mirror spawn specifically, not merely present in the file.
+        let spawn = proxy
+            .split("mirror::run_mirror(")
+            .nth(1)
+            .expect("the mirror is still invoked from proxy.rs");
+        let window = &spawn[..spawn.len().min(2_000)];
+        assert!(
+            window.contains("record_mirror_outcome("),
+            "the recorder must be in the mirror spawn, not merely somewhere in the file",
+        );
+    }
+
+    /// A non-2xx is not the candidate's fault, and must not be recorded as one.
+    #[test]
+    fn an_unscoreable_call_is_not_recorded_as_a_fault() {
+        let proxy = include_str!("../proxy.rs");
+        let spawn = proxy.split("mirror::run_mirror(").nth(1).unwrap();
+        let window = &spawn[..spawn.len().min(2_000)];
+        assert!(
+            window.contains("if let Some(o) = outcome"),
+            "recording must be conditional on an outcome existing: `None` means the \
+             upstream refused, which says nothing about the candidate's quality",
+        );
+    }
+}
+
+#[cfg(test)]
+mod streaming_parity {
+    //! Agent harnesses stream by default, so anything set only on the
+    //! non-streaming builder is absent from the traffic that matters.
+    //!
+    //! Two things were: the substitution disclosure header, and the shadow
+    //! counterfactual. Both are asserted here on the source, because the
+    //! difference is which branch of `proxy.rs` sets them rather than any value
+    //! a unit test could observe.
+
+    /// A customer who asked for Opus and got Haiku must be told, on every shape.
+    #[test]
+    fn the_routed_from_header_is_set_on_both_paths() {
+        let proxy = include_str!("../proxy.rs");
+        let n = proxy.matches("x-intutic-routed-from").count();
+        assert!(
+            n >= 2,
+            "`x-intutic-routed-from` appears {n} time(s): it was set on the \
+             non-streaming builder only, so silent substitution stayed silent \
+             for the dominant traffic shape",
+        );
+    }
+
+    /// Shadow mode's entire output is the counterfactual.
+    #[test]
+    fn the_streaming_trace_carries_the_shadow_counterfactual() {
+        let proxy = include_str!("../proxy.rs");
+        assert!(
+            proxy.contains("routing_shadow_model: shadow_selection_clone"),
+            "the streaming trace hardcoded `None` with a comment claiming routing \
+             was never reached — `shadow_selection` is decided long before that \
+             branch, so shadow mode recorded nothing for streamed requests",
+        );
+        // The same comment is TRUE at the cache-hit and error-short-circuit
+        // traces, which genuinely never routed. Only the streaming one was
+        // false, so this checks adjacency rather than absence.
+        let at_streaming = proxy
+            .split("routing_shadow_model: shadow_selection_clone")
+            .next()
+            .expect("the streaming site exists");
+        let preceding = &at_streaming[at_streaming.len().saturating_sub(400)..];
+        assert!(
+            !preceding.contains("Never reached routing"),
+            "the comment asserting the opposite still sits above the corrected line",
+        );
+    }
+}
