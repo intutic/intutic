@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "lint": "eslint assembly",
     "build": "asc assembly/index.ts -o build/rule.wasm --optimize --exportRuntime --debug --sourceMap",
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.test.json"
