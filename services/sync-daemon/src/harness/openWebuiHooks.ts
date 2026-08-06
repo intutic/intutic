@@ -21,6 +21,7 @@ import * as path from 'node:path'
 import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { newIso } from '@intutic/id'
+import { emitPythonGate } from './gateBody.js'
 
 const log = createLogger('sync-open-webui-hooks')
 
@@ -38,6 +39,7 @@ Proxy: ${proxyUrl}
 Workspace: ${workspaceId}
 """
 import os
+import re
 import json
 import urllib.request
 import hashlib
@@ -97,11 +99,26 @@ def _log_event(env: dict, event: dict):
             pass
 
 
+${emitPythonGate()}
+
+
 class Filter:
     """Intutic governance inlet filter for Open WebUI."""
 
     def inlet(self, body: dict, __user__: Optional[dict] = None) -> dict:
-        """Called before every prompt — log to Intutic governance."""
+        """Called before every prompt.
+
+        This used to hardcode "tool_allowed" and return the body unconditionally
+        — it recorded, it could not refuse, and nothing distinguished that from a
+        gate that had simply never blocked anything. It can refuse now; raising
+        is how an Open WebUI filter does so.
+
+        What it refuses is narrower than the other harnesses on purpose. A prompt
+        is not a tool call: there is no path argument to guard and no command to
+        run. Text matching a protected-path or bypass rule is someone *asking
+        about* a file, so those flag rather than block. Only a policy-snapshot
+        rule whose severity is "block" stops a prompt.
+        """
         env = _load_runtime_env()
         ts = datetime.now(timezone.utc).isoformat()
         model = body.get("model", "unknown")
@@ -111,17 +128,42 @@ class Filter:
         incident_id = hashlib.sha1(
             f"{ts}{model}{workspace_id}".encode()
         ).hexdigest()[:16]
-        event = {
-            "event": "tool_allowed",
-            "toolName": f"open-webui:{model}",
-            "reason": "",
-            "workspaceId": workspace_id,
-            "harnessType": HARNESS_TYPE,
-            "timestamp": ts,
-            "incidentId": incident_id,
-            **({"sessionId": session_id} if session_id else {}),
-        }
-        _log_event(env, event)
+
+        # Concatenate the user turns only. System and assistant text is ours and
+        # the model's, not the governed party's.
+        prompt = " ".join(
+            str(m.get("content", ""))
+            for m in (body.get("messages") or [])
+            if isinstance(m, dict) and m.get("role") == "user"
+        )
+        blocks, flags, shadowed = _intutic_evaluate(prompt)
+
+        def emit(verdict, reason):
+            _log_event(env, {
+                "event": verdict,
+                "toolName": f"open-webui:{model}",
+                "reason": reason,
+                "workspaceId": workspace_id,
+                "harnessType": HARNESS_TYPE,
+                "timestamp": ts,
+                "incidentId": incident_id,
+                **({"sessionId": session_id} if session_id else {}),
+            })
+
+        for rid, reason in flags:
+            emit("tool_flagged", f"{reason} [{rid}]")
+
+        # Certain rules the workspace asked us not to act on. Reported apart
+        # from flags so a SHADOW rollout is measurable.
+        for rid, reason in shadowed:
+            emit("tool_would_block", f"{reason} [{rid}]")
+
+        if blocks:
+            rid, reason = blocks[0]
+            emit("tool_blocked", f"{reason} [{rid}]")
+            raise Exception(f"[Intutic Governance] BLOCKED: {reason} [{rid}]")
+
+        emit("tool_allowed", "")
         return body
 
     def outlet(self, body: dict, __user__: Optional[dict] = None) -> dict:

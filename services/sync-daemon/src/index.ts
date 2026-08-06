@@ -33,7 +33,15 @@ export type { WsClientOptions } from './wsClient.js'
 
 export { startWatcher } from './watcher/driftWatcher.js'
 
-export { updatePreToolUseHooks, parseSopConstraints, drainHookEvents } from './harness/claudeCodeHooks.js'
+export {
+  updatePreToolUseHooks,
+  parseSopConstraints,
+  drainHookEvents,
+  drainReviewRequests,
+  REVIEW_REQUESTS_LOG,
+  REVIEW_REQUESTS_BASENAME,
+  REVIEW_REQUEST_VERSION,
+} from './harness/claudeCodeHooks.js'
 export type { SopHookConstraints } from './harness/claudeCodeHooks.js'
 
 export { injectMcpServer } from './harness/mcpAutoWrite.js'
@@ -57,6 +65,15 @@ export { writePiHooks } from './harness/piHooks.js'
 
 // WS-A & WS-F — runtime env writer and compliance probes
 export { writeRuntimeEnv } from './lib/runtimeEnv.js'
+export {
+  refreshPolicySnapshot,
+  writePolicySnapshot,
+  fetchResolvedPolicy,
+  buildSnapshotRules,
+  validateRule,
+  DEFAULT_SNAPSHOT_DIR,
+  DESTRUCTIVE_TIER_SEVERITY,
+} from './lib/policySnapshot.js'
 export { runComplianceProbes } from './lib/complianceProbes.js'
 export { getActiveAgentProcesses } from './lib/processPoller.js'
 
