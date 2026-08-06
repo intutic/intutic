@@ -1193,7 +1193,12 @@ impl AnomalyDetector for TaintCooccurrenceDetector {
             // know our internal category split would be a trap.
             let matches_taint = |c: &str| match taint.as_str() {
                 "secrets()" => c == "secret" || c == "credential",
-                "pii()" => c == "pii",
+                // An operator writing `pii()` means personal data, and does not
+                // care which internal bucket a pattern was filed under. PHI is
+                // PII, so `pii()` covers both; `phi()` exists for the narrower
+                // case where a rule is specifically about health information.
+                "pii()" => c == "pii" || c == "phi",
+                "phi()" => c == "phi",
                 _ => false,
             };
             if !ctx.dlp_findings.iter().any(|f| matches_taint(&f.category)) {
