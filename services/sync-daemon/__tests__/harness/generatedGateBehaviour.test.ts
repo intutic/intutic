@@ -398,6 +398,16 @@ for (const g of GATES) {
       expect(wasBlocked(g, r), `${g.name} blocked \`npm run build\``).toBe(false)
     })
 
+
+    // Explicit budget, not the file's 15s default. Each case runs a real gate,
+    // and a bash gate forks roughly 35 processes per invocation — one `python3`
+    // plus a `grep` per subject per rule. That is ~1s on this machine and far
+    // more on a two-core runner, so the three fan-out tests below sit near the
+    // default and one of them crossed it in CI at 15.1s while 338 of 339 other
+    // tests passed. The assertions are unchanged; only the wall clock is, and
+    // the failure mode stays a loud timeout rather than a silent skip.
+    const FAN_OUT_TIMEOUT = 120_000
+
     it('blocks every protected path, by iteration', async () => {
       // A loop, not a representative. `.intutic/events` was protected by 5 of 11
       // harnesses precisely because a representative stood in for the list.
@@ -406,7 +416,7 @@ for (const g of GATES) {
         assertCleanExit(g, r, `rm of ${p}`)
         expect(wasBlocked(g, r), `${g.name} allowed \`rm -rf ${p}\``).toBe(true)
       })
-    })
+    }, FAN_OUT_TIMEOUT)
 
     it('blocks a protected path given as a file argument', async () => {
       const r = await runGate(g, { file_path: '/w/.claude/settings.local.json' }, { tool: 'Write' })
@@ -430,7 +440,7 @@ for (const g of GATES) {
               `positive here teaches developers to disable the hook.`,
         ).toBe(wantBlock)
       })
-    })
+    }, FAN_OUT_TIMEOUT)
 
     it('guards a foreign harness kill-switch, not only its own', async () => {
       // Each writer used to guard only its own env variable, so eight of nine
@@ -476,7 +486,7 @@ for (const g of GATES) {
           `${g.name} wrongly blocked ${JSON.stringify(m)} via ${pat.id}`,
         ).toBe(false)
       })
-    })
+    }, FAN_OUT_TIMEOUT)
 
     it('honours the escape hatch for snapshot rules and refuses it for the floor', async () => {
       // The half that must work: a developer wrongly blocked by a new rule can
