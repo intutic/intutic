@@ -4083,9 +4083,19 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             let trace = ExecutionTrace {
                 response_integrity: integrity.measured.then_some(integrity.score),
                 quality_fault: integrity.fault.map(|f| f.as_str().to_string()),
-                // Streaming path: rules evaluated on the request, reports
-                // captured on the non-streaming trace only for now.
-                wasm_shadow_reports: Vec::new(),
+                // The same reports the non-streaming trace carries. They are
+                // computed once, before the streaming split, off the request
+                // context -- so they were already in scope here and were simply
+                // being thrown away.
+                //
+                // This mattered far more than "only for now" suggested. Agent
+                // harnesses stream by default, so discarding them here meant
+                // `rule_candidates.shadow_evaluations` only ever counted the
+                // minority traffic shape: a shadowed rule would take much longer
+                // to reach the 200-evaluation bar than the operator was told, or
+                // never reach it, and the promotion gate would go on answering
+                // `ready: false` for a reason nothing surfaced.
+                wasm_shadow_reports: wasm_shadow_reports.clone(),
                 // Streaming: the compactor needs a complete body, so it does not run
                 // on this path. Zero here is a real absence, not an unmeasured one.
                 tool_result_bytes_saved: 0,
