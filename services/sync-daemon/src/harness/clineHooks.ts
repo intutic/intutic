@@ -18,6 +18,7 @@ import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import { createLogger } from '@intutic/logger'
 import { newIso } from '@intutic/id'
+import { emitJsGate } from './gateBody.js'
 
 const log = createLogger('sync-cline-hooks')
 
@@ -31,21 +32,6 @@ const GOVERNED_TOOLS = [
   'delete_file',
   'rename_file',
   'read_file',  // watch for exfiltration patterns
-]
-
-/**
- * Governance-sensitive paths that must never be agent-modified.
- * Mirrors the protected path list in claudeCodeHooks.ts.
- */
-const PROTECTED_PATH_FRAGMENTS = [
-  '.cline/hooks',
-  '.intutic/hooks',
-  '.intutic/integrity.json',
-  '.claude/settings.json',
-  '.cursor/hooks.json',
-  '.codeium/windsurf/hooks.json',
-  '.agents/plugins/intutic-governance',
-  '.openhands/hooks.json',
 ]
 
 /**
@@ -118,8 +104,20 @@ function logEvent(verdict, toolName, reason) {
   try {
     const ts = new Date().toISOString();
     const incidentId = crypto.createHash('sha1').update(ts + toolName + _intuticWsId).digest('hex').slice(0, 16);
-    const entry = JSON.stringify({ event: verdict === 'blocked' ? 'tool_blocked' : 'tool_allowed', toolName, reason: reason || '', workspaceId: _intuticWsId, harnessType: 'cline', timestamp: ts, incidentId, ...(_intuticSessionId ? { sessionId: _intuticSessionId } : {}) }) + '\\n';
-    try { fs.appendFileSync(HOOK_EVENTS_LOG, entry, { flag: 'a' }); } catch {}
+    const entry = JSON.stringify({ // Passed through, not collapsed to two values: the advisory tier emits
+      // 'tool_flagged', and a ternary here silently recorded it as an allow.
+      event: verdict, toolName, reason: reason || '', workspaceId: _intuticWsId, harnessType: 'cline', timestamp: ts, incidentId, ...(_intuticSessionId ? { sessionId: _intuticSessionId } : {}) }) + '\\n';
+    // mkdir first. This was a bare appendFileSync inside a swallowing catch, so
+    // on any machine where nothing else had created ~/.intutic/events the append
+    // threw ENOENT and was discarded — every Cline audit line, including blocks,
+    // silently dropped. The other writers create this directory from the
+    // TypeScript side; Cline's writer only creates .cline/hooks, so its log
+    // existed only by luck.
+    try {
+      const _dir = path.dirname(HOOK_EVENTS_LOG);
+      if (!fs.existsSync(_dir)) fs.mkdirSync(_dir, { recursive: true });
+      fs.appendFileSync(HOOK_EVENTS_LOG, entry, { flag: 'a' });
+    } catch {}
     if (_intuticKey) {
       try {
         const body = JSON.stringify({ events: [JSON.parse(entry)] });
@@ -133,7 +131,7 @@ function logEvent(verdict, toolName, reason) {
   } catch {}
 }
 
-const PROTECTED_PATHS = ${JSON.stringify(PROTECTED_PATH_FRAGMENTS)};
+${emitJsGate({ harness: 'cline', contract: 'stdout-cancel' })}
 
 let raw = '';
 process.stdin.on('data', (c) => { raw += c; });
@@ -141,32 +139,34 @@ process.stdin.on('end', () => {
   try {
     const ctx = JSON.parse(raw);
     _intuticSessionId = ctx.session_id || ctx.sessionId || ctx.conversation_id || ctx.conversationId || ctx.task_id || ctx.taskId || '';
-    const tool = (ctx.tool_name || '').toLowerCase();
+    const tool = (ctx.tool_name || '').toLowerCase()
+    // Case preserved for the gate. A BLOCK: SOP compiles to a tool-name
+    // pattern the operator wrote as they see it (Bash, Write) and this
+    // harness lowercases the tool for its own matching. Handing the gate the
+    // lowercased form means every SOP tool rule silently matches nothing here
+    // while appearing active everywhere else.
+    const rawToolName = ctx.tool_name || '';
     const input = ctx.tool_input || {};
     const inputStr = JSON.stringify(input);
 
-    // Protected-path guard: block any write/edit/delete targeting governance files
-    const targetPath = input.path || input.file_path || input.target || input.source || '';
-    if (['write_to_file','str_replace_based_edit_tool','replace_in_file','create_file','delete_file','rename_file'].includes(tool)) {
-      for (const p of PROTECTED_PATHS) {
-        if (String(targetPath).includes(p)) {
-          logEvent('blocked', tool, 'Blocked: attempt to modify governance-protected path "' + targetPath + '"');
-          process.stdout.write(JSON.stringify({
-            cancel: true,
-            errorMessage: '[Intutic Governance] Blocked: attempt to modify governance-protected path "' + targetPath + '". Update policy via the Intutic control plane.',
-          }));
-          process.exit(0);
-        }
-      }
-    }
+    // This gate had two defects that hid each other. Its path list was
+    // hand-rolled as PROTECTED_PATH_FRAGMENTS with four of the twelve universal
+    // entries missing, and harnessProtectedPaths.test.ts keyed its coverage on
+    // finding a constant named PROTECTED_PATHS — so not having one read as "not
+    // a harness" rather than "unguarded". It also had no command guard at all,
+    // and ran only for six named file tools.
+    const targetPath = input.path || input.file_path || input.filePath ||
+      input.target || input.source || input.notebook_path || '';
+    const command = input.command || input.cmd || input.script || '';
+    intuticGate(rawToolName, targetPath, command, logEvent, _intuticWsId);
 
     // Allow all other tool calls
-    logEvent('allowed', tool || 'unknown', '');
+    logEvent('tool_allowed', tool || 'unknown', '');
     process.stdout.write(JSON.stringify({ cancel: false }));
     process.exit(0);
   } catch (err) {
     // Fail CLOSED — hook parse error blocks the tool call
-    logEvent('blocked', 'unknown', String(err));
+    logEvent('tool_blocked', 'unknown', String(err));
     process.stdout.write(JSON.stringify({
       cancel: true,
       errorMessage: '[Intutic Governance] Hook error (fail-closed): ' + String(err),

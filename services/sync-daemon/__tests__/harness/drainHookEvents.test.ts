@@ -40,8 +40,13 @@ function createMockServer(): {
   captured: CapturedRequest[]
   close: () => Promise<void>
   url: string
+  /** Status the next responses carry. Mutable so a test can make the control
+   *  plane reject, which is the condition the retry logic turns on. */
+  status: number
 } {
   const captured: CapturedRequest[] = []
+
+  const state = { status: 200 }
 
   const server = node_http.createServer((req, res) => {
     let body = ''
@@ -53,6 +58,11 @@ function createMockServer(): {
         headers: req.headers as Record<string, string | string[] | undefined>,
         body,
       })
+      if (state.status !== 200) {
+        res.writeHead(state.status, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Invalid request body' }))
+        return
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ ingested: JSON.parse(body || '{}').events?.length ?? 0 }))
     })
@@ -62,6 +72,8 @@ function createMockServer(): {
     server,
     captured,
     url: '',
+    get status() { return state.status },
+    set status(v: number) { state.status = v },
     close: () => new Promise((resolve) => server.close(() => resolve())),
   }
 }
@@ -204,5 +216,61 @@ describe('drainHookEvents', () => {
     // File exists but is empty/blank — not deleted
     const stat = await node_fs.stat(eventsLog).catch(() => null)
     expect(stat).not.toBeNull()
+  })
+
+  // ── Rejection handling ─────────────────────────────────────────────
+  //
+  // The failure these exist for: a 4xx will never succeed on retry, so
+  // retaining the log means re-sending the identical rejected batch forever.
+  // That does not delay these events — it stops delivery of every *later* event
+  // too, because the log never drains again. It happened: adding `tool_flagged`
+  // to the gates without adding it to the control plane's event enum made one
+  // ordinary advisory event poison every batch behind it, silently.
+
+  it('quarantines a batch the control plane rejects with 4xx, and keeps draining', async () => {
+    mockCtx.status = 400
+    await writeEventsLog(eventsLog, [
+      { event: 'tool_flagged', toolName: 'Bash', reason: 'flagged', workspaceId: 'ws_1' },
+    ])
+
+    const count = await drainHookEvents(tmpRoot, controlPlaneUrl, 'k')
+    expect(count).toBe(0)
+
+    // The live log is empty, so the NEXT event is not stuck behind this one.
+    expect((await readEventsLog(eventsLog)).trim()).toBe('')
+
+    // And nothing was thrown away — it is set aside for inspection.
+    const rejected = await readEventsLog(eventsLog.replace(/\.jsonl$/, '.rejected.jsonl'))
+    expect(rejected, 'the rejected batch was lost rather than quarantined').toContain('tool_flagged')
+
+    // The load-bearing assertion: a later event drains normally rather than
+    // being re-poisoned by the retained one.
+    mockCtx.status = 200
+    mockCtx.captured.length = 0
+    await writeEventsLog(eventsLog, [
+      { event: 'tool_blocked', toolName: 'Bash', reason: 'blocked', workspaceId: 'ws_1' },
+    ])
+    const second = await drainHookEvents(tmpRoot, controlPlaneUrl, 'k')
+    expect(second, 'the pipeline stayed wedged after a 4xx').toBe(1)
+    expect(mockCtx.captured[0]?.body).toContain('tool_blocked')
+    expect(mockCtx.captured[0]?.body, 'the rejected batch was re-sent').not.toContain('tool_flagged')
+  })
+
+  it('retains the log on 5xx, because that one is worth retrying', async () => {
+    mockCtx.status = 503
+    await writeEventsLog(eventsLog, [
+      { event: 'tool_blocked', toolName: 'Bash', reason: 'x', workspaceId: 'ws_1' },
+    ])
+
+    const count = await drainHookEvents(tmpRoot, controlPlaneUrl, 'k')
+    expect(count).toBe(0)
+    expect(
+      await readEventsLog(eventsLog),
+      'a transient server error must not discard the batch',
+    ).toContain('tool_blocked')
+    expect(
+      await readEventsLog(eventsLog.replace(/\.jsonl$/, '.rejected.jsonl')),
+      'a 5xx must not quarantine — it is retryable',
+    ).toBe('')
   })
 })

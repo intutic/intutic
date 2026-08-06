@@ -17,15 +17,9 @@ import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import { createLogger } from '@intutic/logger'
 import { newIso } from '@intutic/id'
-import { UNIVERSAL_PROTECTED_PATHS } from './protectedPaths.js'
+import { emitShellGate, SHELL_EXTRACT } from './gateBody.js'
 
 const log = createLogger('sync-openhands-hooks')
-
-const PROTECTED_PATHS = [
-  // Universal: every harness protects every harness's config —
-  // the threat is an agent under one disarming another.
-  ...UNIVERSAL_PROTECTED_PATHS,
-]
 
 /**
  * Write .openhands/hooks.json and the pre-tool-check shell script.
@@ -62,23 +56,45 @@ export async function writeOpenHandsHooks(
 set -euo pipefail
 
 INPUT="$(cat)"
-TOOL_NAME="$(echo "$INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('tool_name',''))" 2>/dev/null || true)"
-TARGET_PATH="$(echo "$INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); i=d.get('tool_input',{}); print(i.get('path',i.get('file_path','')))" 2>/dev/null || true)"
+${SHELL_EXTRACT}
 
 HOOK_EVENTS_LOG=${JSON.stringify(hookEventsLog)}
 
 # ── Runtime credentials (sourced from ~/.intutic/env/runtime.env) ────────────────────────
+# These are defaults, and they are also the only thing standing between
+# \`set -u\` and a fatal unbound-variable error: log_event reads all three, so on
+# a machine with no runtime.env to source, an unset name kills the gate before
+# it can exit 2. Spelling matters — INTUTIC_, never INTUITIC_.
 RUNTIME_ENV="$HOME/.intutic/env/runtime.env"
-INTUITIC_HOST="https://api.intutic.ai"
-INTUITIC_API_KEY=""
-INTUITIC_WORKSPACE_ID=${JSON.stringify(workspaceId)}
+INTUTIC_HOST="https://api.intutic.ai"
+INTUTIC_API_KEY=""
+INTUTIC_WORKSPACE_ID=${JSON.stringify(workspaceId)}
 [ -f "$RUNTIME_ENV" ] && source "$RUNTIME_ENV" 2>/dev/null || true
 
 log_event() {
   local verdict="\$1" tool="\$2" reason="\$3"
+  # \`tool\` and \`reason\` carry agent-controlled text — the tool name, and the
+  # target path quoted into the block reason — and both are spliced into the
+  # JSON string below. Escape first: one unescaped quote yields a line
+  # JSON.parse rejects, and drainHookEvents drops malformed lines then wipes the
+  # log on a successful drain, so the record of a block is destroyed rather than
+  # delayed. A crafted path could otherwise close the string and forge fields.
+  tool="\${tool//\\\\/\\\\\\\\}";     tool="\${tool//\\"/\\\\\\"}"
+  reason="\${reason//\\\\/\\\\\\\\}"; reason="\${reason//\\"/\\\\\\"}"
+  # Every C0 control character, not just newline and carriage return. JSON
+  # forbids all of U+0000-U+001F unescaped, so a plain TAB in a filename — no
+  # adversary required — was still enough to produce a line JSON.parse rejects.
+  # (NUL cannot appear in a bash variable, so the range starts at \\x01.)
+  tool="\${tool//[\$'\\x01'-\$'\\x1f']/ }"; reason="\${reason//[\$'\\x01'-\$'\\x1f']/ }"
+  # The workspace id is spliced into the same JSON string. It comes from
+  # runtime.env on disk rather than from the agent, so it is lower risk — but a
+  # value with a quote in it breaks every audit line the same way, and "lower
+  # risk" is not "cannot happen" for a file the operator edits by hand.
+  local ws="\${INTUTIC_WORKSPACE_ID}"
+  ws="\${ws//\\\\/\\\\\\\\}"; ws="\${ws//\\"/\\\\\\"}"; ws="\${ws//[\$'\\x01'-\$'\\x1f']/ }"
   local ts; ts="\$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   local incident_id; incident_id="\$(printf '%s' "\${ts}\${tool}\${INTUTIC_WORKSPACE_ID}" | sha1sum 2>/dev/null | cut -c1-16 || echo \"\$(date +%s)\")"
-  local entry="{\"event\":\"\${verdict}\",\"toolName\":\"\${tool}\",\"reason\":\"\${reason}\",\"workspaceId\":\"\${INTUTIC_WORKSPACE_ID}\",\"harnessType\":\"openhands\",\"timestamp\":\"\${ts}\",\"incidentId\":\"\${incident_id}\"}"
+  local entry="{\\"event\\":\\"\${verdict}\\",\\"toolName\\":\\"\${tool}\\",\\"reason\\":\\"\${reason}\\",\\"workspaceId\\":\\"\${ws}\\",\\"harnessType\\":\\"openhands\\",\\"timestamp\\":\\"\${ts}\\",\\"incidentId\\":\\"\${incident_id}\\"}"
   # Path B: reliable file append
   printf '%s\\n' "\$entry" >> "\$HOOK_EVENTS_LOG" 2>/dev/null || true
   # Path A: fire-and-forget HTTP (non-blocking, near-real-time)
@@ -86,32 +102,12 @@ log_event() {
     curl -s -o /dev/null --max-time 3 -X POST \\
       -H "Content-Type: application/json" \\
       -H "Authorization: Bearer \$INTUTIC_API_KEY" \\
-      -d "{\"events\":[\$entry]}" \\
+      -d "{\\"events\\":[\$entry]}" \\
       "\${INTUTIC_HOST}/api/v1/hook-events" & disown 2>/dev/null || true
   fi
 }
 
-PROTECTED_PATHS=(
-  ".openhands/hooks.json"
-  ".intutic/hooks"
-  ".intutic/integrity.json"
-  ".claude/settings.json"
-  ".cursor/hooks.json"
-  ".codeium/windsurf/hooks.json"
-  ".cline/hooks"
-  ".agents/plugins/intutic-governance"
-)
-
-# Protected-path guard
-for p in "\${PROTECTED_PATHS[@]}"; do
-  if echo "$TARGET_PATH" | grep -qF "$p"; then
-    REASON="Attempt to modify governance-protected path \\"$TARGET_PATH\\""
-    echo "[Intutic Governance] BLOCKED: $REASON" >&2
-    log_event "tool_blocked" "\$TOOL_NAME" "\$REASON"
-    exit 2
-  fi
-done
-
+${emitShellGate({ harness: "openhands" })}
 log_event "tool_allowed" "\$TOOL_NAME" ""
 exit 0
 `
@@ -165,8 +161,9 @@ async function mergeOpenHandsConfig(workspaceRoot: string, proxyUrl: string): Pr
     try {
       existing = await fs.readFile(configPath, 'utf-8')
     } catch {
-      // File doesn't exist — create minimal config
-      existing = ''
+      // File doesn't exist (or is unreadable) — deliberate fail-open: fall
+      // through with `existing` at its '' initialiser so the block below
+      // creates a minimal config instead of aborting the whole sync.
     }
 
     // Inject or update [llm] section with base_url

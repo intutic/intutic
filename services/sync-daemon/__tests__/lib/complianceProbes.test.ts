@@ -3,7 +3,8 @@ import * as https from 'node:https'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { execSync } from 'node:child_process'
-import { checkHostContainment, runComplianceProbes } from '../../src/lib/complianceProbes.js'
+import * as tls from 'node:tls'
+import { checkHostContainment } from '../../src/lib/complianceProbes.js'
 
 describe('Network Compliance Probes', () => {
   const tmpDir = path.join(process.cwd(), 'node_modules', '.tmp_certs')
@@ -53,13 +54,10 @@ describe('Network Compliance Probes', () => {
       // Default key/cert if SNI doesn't match
       key: serverCertToUse.key,
       cert: serverCertToUse.cert,
-    } as any, (req, res) => {
+    } as https.ServerOptions, (req, res) => {
       res.writeHead(200)
       res.end('OK')
     })
-
-    // Import tls module for SNICallback context creation
-    const tls = require('node:tls')
 
     return new Promise<void>((resolve) => {
       server!.listen(0, '127.0.0.1', () => {
@@ -76,7 +74,9 @@ describe('Network Compliance Probes', () => {
     // 1. Clean up cert files
     try {
       fs.rmSync(tmpDir, { recursive: true, force: true })
-    } catch {}
+    } catch {
+      // A leftover temp cert directory is not worth failing a run over.
+    }
 
     // 2. Stop HTTPS server
     if (server) {

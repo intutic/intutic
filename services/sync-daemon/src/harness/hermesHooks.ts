@@ -22,7 +22,7 @@ import * as path from 'node:path'
 import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { newIso } from '@intutic/id'
-import { UNIVERSAL_PROTECTED_PATHS } from './protectedPaths.js'
+import { emitShellGate, SHELL_EXTRACT } from './gateBody.js'
 
 const log = createLogger('sync-hermes-hooks')
 
@@ -30,14 +30,6 @@ const log = createLogger('sync-hermes-hooks')
 const HERMES_CONFIG = path.join(os.homedir(), '.hermes', 'config.yaml')
 
 /** Governance-sensitive paths that the hook gate protects. */
-const PROTECTED_PATHS = [
-  // Universal: every harness protects every harness's config —
-  // the threat is an agent under one disarming another.
-  ...UNIVERSAL_PROTECTED_PATHS,
-  '.hermes/config.yaml',
-  '.hermes/skills/intutic-governance',
-]
-
 // ─── Bash hook script template ────────────────────────────────────────────────
 
 function buildHermesCheckScript(
@@ -66,18 +58,35 @@ INTUTIC_API_KEY="\${INTUTIC_API_KEY:-}"
 INTUTIC_WORKSPACE_ID="\${INTUTIC_WORKSPACE_ID:-${workspaceId}}"
 
 INPUT="$(cat)"
-TOOL_NAME="$(echo "$INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('tool_name',''))" 2>/dev/null || true)"
-TARGET_PATH="$(echo "$INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); i=d.get('tool_input',{}); print(i.get('path',i.get('file_path','')))" 2>/dev/null || true)"
-COMMAND="$(echo "$INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); i=d.get('tool_input',{}); print(i.get('command',i.get('cmd','')))" 2>/dev/null || true)"
+${SHELL_EXTRACT}
 
 HOOK_EVENTS_LOG=${JSON.stringify(hookEventsLog)}
 
 log_event() {
   local verdict="\$1" tool="\$2" reason="\$3"
+  # \`tool\` and \`reason\` carry agent-controlled text — the tool name, and the
+  # target path quoted into the block reason — and both are spliced into the
+  # JSON string below. Escape first: one unescaped quote yields a line
+  # JSON.parse rejects, and drainHookEvents drops malformed lines then wipes the
+  # log on a successful drain, so the record of a block is destroyed rather than
+  # delayed. A crafted path could otherwise close the string and forge fields.
+  tool="\${tool//\\\\/\\\\\\\\}";     tool="\${tool//\\"/\\\\\\"}"
+  reason="\${reason//\\\\/\\\\\\\\}"; reason="\${reason//\\"/\\\\\\"}"
+  # Every C0 control character, not just newline and carriage return. JSON
+  # forbids all of U+0000-U+001F unescaped, so a plain TAB in a filename — no
+  # adversary required — was still enough to produce a line JSON.parse rejects.
+  # (NUL cannot appear in a bash variable, so the range starts at \\x01.)
+  tool="\${tool//[\$'\\x01'-\$'\\x1f']/ }"; reason="\${reason//[\$'\\x01'-\$'\\x1f']/ }"
+  # The workspace id is spliced into the same JSON string. It comes from
+  # runtime.env on disk rather than from the agent, so it is lower risk — but a
+  # value with a quote in it breaks every audit line the same way, and "lower
+  # risk" is not "cannot happen" for a file the operator edits by hand.
+  local ws="\${INTUTIC_WORKSPACE_ID}"
+  ws="\${ws//\\\\/\\\\\\\\}"; ws="\${ws//\\"/\\\\\\"}"; ws="\${ws//[\$'\\x01'-\$'\\x1f']/ }"
   local ts; ts="\$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   # incidentId = sha1(timestamp + toolName + workspaceId).slice(0,16)
   local incident_id; incident_id="\$(echo -n \"\${ts}\${tool}\${INTUTIC_WORKSPACE_ID}\" | sha1sum | cut -c1-16)"
-  local entry="{\\\"event\\\":\\\"toolGovernance\\\",\\\"verdict\\\":\\\"\${verdict}\\\",\\\"toolName\\\":\\\"\${tool}\\\",\\\"reason\\\":\\\"\${reason}\\\",\\\"workspaceId\\\":\\\"\${INTUTIC_WORKSPACE_ID}\\\",\\\"harnessType\\\":\\\"hermes\\\",\\\"incidentId\\\":\\\"\${incident_id}\\\",\\\"timestamp\\\":\\\"\${ts}\\\"}"
+  local entry="{\\\"event\\\":\\\"\${verdict}\\\",\\\"toolName\\\":\\\"\${tool}\\\",\\\"reason\\\":\\\"\${reason}\\\",\\\"workspaceId\\\":\\\"\${INTUTIC_WORKSPACE_ID}\\\",\\\"harnessType\\\":\\\"hermes\\\",\\\"incidentId\\\":\\\"\${incident_id}\\\",\\\"timestamp\\\":\\\"\${ts}\\\"}"
   # Path B: reliable file append (sync-daemon drains on FSEvents change)
   printf '%s\\n' "\$entry" >> "\$HOOK_EVENTS_LOG" 2>/dev/null || true
   # Path A: fire-and-forget HTTP POST (near-real-time dashboard, non-blocking)
@@ -90,40 +99,7 @@ log_event() {
   fi
 }
 
-PROTECTED_PATHS=(
-${PROTECTED_PATHS.map((p) => `  "${p}"`).join('\n')}
-)
-
-# 1. Protected-path guard
-for p in "\${PROTECTED_PATHS[@]}"; do
-  if echo "$TARGET_PATH" | grep -qF "$p"; then
-    REASON="Attempt to modify governance-protected path \\"$TARGET_PATH\\""
-    echo "[Intutic Governance] BLOCKED: $REASON" >&2
-    log_event "tool_blocked" "$TOOL_NAME" "$REASON"
-    exit 2
-  fi
-done
-
-# 2. Bash/shell command guard — block governance bypass patterns
-if [ -n "$COMMAND" ]; then
-  BYPASS_PATTERNS=(
-    "chflags nouchg"
-    "chattr -i"
-    "rm -rf .intutic"
-    "rm -rf .hermes/config"
-    "HERMES_PRE_TOOL_HOOK="
-    "rm -rf .gemini/settings"
-  )
-  for pattern in "\${BYPASS_PATTERNS[@]}"; do
-    if echo "$COMMAND" | grep -qF "$pattern"; then
-      REASON="Shell command matches governance bypass pattern: \\"$pattern\\""
-      echo "[Intutic Governance] BLOCKED: $REASON" >&2
-      log_event "tool_blocked" "$TOOL_NAME" "$REASON"
-      exit 2
-    fi
-  done
-fi
-
+${emitShellGate({ harness: "hermes" })}
 log_event "tool_allowed" "$TOOL_NAME" ""
 exit 0
 `
@@ -269,8 +245,8 @@ export async function writeHermesHooks(
 
   const envSnippet = [
     `# Intutic Hermes governance env`,
-    `INTUITIC_HERMES_HOOK=~/.intutic/hooks/hermes-check.sh`,
-    `INTUITIC_HERMES_CONFIG=~/.hermes/config.yaml`,
+    `INTUTIC_HERMES_HOOK=~/.intutic/hooks/hermes-check.sh`,
+    `INTUTIC_HERMES_CONFIG=~/.hermes/config.yaml`,
   ].join('\n') + '\n'
 
   const envFilePath = path.join(envDir, 'hermes.env')

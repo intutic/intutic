@@ -65,13 +65,13 @@ describe('Claude Code PreToolUse Hooks Compiler', () => {
     expect(constraints.patterns).toContain('cat .env')
   })
 
-  it('writes settings.json and pre-tool-check.js to workspace root', async () => {
+  it('writes settings.json and claude-code-check.js to workspace root', async () => {
     const tempRoot = await node_fs.mkdtemp(node_path.join(node_os.tmpdir(), 'intutic-hooks-test-'))
 
     await updatePreToolUseHooks(tempRoot, mockSops)
 
     // Check script creation
-    const scriptPath = node_path.join(tempRoot, '.intutic', 'hooks', 'pre-tool-check.js')
+    const scriptPath = node_path.join(tempRoot, '.intutic', 'hooks', 'claude-code-check.js')
     const scriptStat = await node_fs.stat(scriptPath)
     expect(scriptStat.isFile()).toBe(true)
 
@@ -90,7 +90,7 @@ describe('Claude Code PreToolUse Hooks Compiler', () => {
     expect(settings.permissions?.deny).toContain('Bash(*rm -rf **)')
     expect(settings.permissions?.deny).toContain('Bash(*drop database*)')
     expect(settings.hooks?.PreToolUse).toBeDefined()
-    expect(settings.hooks.PreToolUse[0].hooks[0].command).toContain('pre-tool-check.js')
+    expect(settings.hooks.PreToolUse[0].hooks[0].command).toContain('claude-code-check.js')
 
     await node_fs.rm(tempRoot, { recursive: true, force: true })
   })
@@ -148,7 +148,7 @@ describe('review_before hook gate', () => {
       sop('---\nreview_before: action:deploy\n---\nprose'),
     )
     const script = await node_fs.readFile(
-      node_path.join(dir, '.intutic', 'hooks', 'pre-tool-check.js'),
+      node_path.join(dir, '.intutic', 'hooks', 'claude-code-check.js'),
       'utf-8',
     )
     await node_fs.rm(dir, { recursive: true, force: true })
@@ -166,7 +166,7 @@ describe('review_before hook gate', () => {
     const dir = await node_fs.mkdtemp(node_path.join(node_os.tmpdir(), 'intutic-hook-'))
     await updatePreToolUseHooks(dir, sop('---\nreview_before: action:deploy\n---\nx'))
     const script = await node_fs.readFile(
-      node_path.join(dir, '.intutic', 'hooks', 'pre-tool-check.js'),
+      node_path.join(dir, '.intutic', 'hooks', 'claude-code-check.js'),
       'utf-8',
     )
     await node_fs.rm(dir, { recursive: true, force: true })
@@ -235,5 +235,87 @@ describe('review_before parsing without regex backtracking', () => {
     const c = parseSopConstraints(sop(payload))
     expect(c.reviewBefore).toEqual(['action:deploy'])
     expect(Date.now() - started).toBeLessThan(2000)
+  })
+})
+
+/**
+ * A learned hold delivered through the SOP's JSON block must actually hold.
+ *
+ * `SopHookConstraintsSchema` declares `reviewBefore`, `parseSopConstraints`
+ * validates it, and the copy step took only `highRiskTools` and `patterns`. So
+ * the field parsed clean, passed validation, and was dropped on the floor —
+ * only the front-matter `review_before:` line ever populated the set.
+ *
+ * That is the difference between the learning loop reaching enforcement and
+ * not. The control plane writes a learned rule into that fenced block; if the
+ * daemon discards it, the rule is delivered, compiled into nothing, and the
+ * operator is told a hold is in place.
+ */
+describe('reviewBefore survives the JSON block', () => {
+  const sopWith = (block: Record<string, unknown>, frontMatter = '') =>
+    [
+      frontMatter,
+      '```json',
+      JSON.stringify(block),
+      '```',
+      '',
+      '# Body',
+    ].join('\n')
+
+  const entry = (content: string) =>
+    ({
+      sopId: 'sop_test',
+      title: 'Test',
+      content,
+      contentHash: 'h',
+      harnessTargets: [],
+    }) as never
+
+  it('copies reviewBefore out of the fenced block', () => {
+    const c = parseSopConstraints([
+      entry(sopWith({ highRiskTools: [], patterns: [], reviewBefore: ['action:deploy'] })),
+    ])
+    expect(
+      c.reviewBefore,
+      'validated and then discarded — a learned hold delivered here does nothing',
+    ).toContain('action:deploy')
+  })
+
+  it('still copies the other two, so the fix did not trade one for another', () => {
+    const c = parseSopConstraints([
+      entry(
+        sopWith({
+          highRiskTools: ['Bash'],
+          patterns: ['rm -rf'],
+          reviewBefore: ['action:publish'],
+        }),
+      ),
+    ])
+    expect(c.highRiskTools).toContain('Bash')
+    expect(c.patterns).toContain('rm -rf')
+    expect(c.reviewBefore).toContain('action:publish')
+  })
+
+  it('unions the block with the front-matter line rather than replacing it', () => {
+    // Both are legitimate sources. An operator's hand-written `review_before:`
+    // must not be dropped because the control plane later learned another one.
+    const c = parseSopConstraints([
+      entry(sopWith({ reviewBefore: ['action:deploy'] }, 'review_before: action:publish\n')),
+    ])
+    expect(c.reviewBefore).toEqual(expect.arrayContaining(['action:deploy', 'action:publish']))
+  })
+
+  it('takes reviewBefore from workspace settings too', () => {
+    // The settings branch had the same omission, and settings is the other
+    // delivery path for the same constraint.
+    const c = parseSopConstraints([], { reviewBefore: ['action:release'] })
+    expect(c.reviewBefore).toContain('action:release')
+  })
+
+  it('ignores a non-string entry rather than compiling it into the hook', () => {
+    const c = parseSopConstraints([
+      entry(sopWith({ reviewBefore: ['action:deploy', 42, null] as unknown[] })),
+    ])
+    expect(c.reviewBefore).toEqual(['action:deploy'])
   })
 })

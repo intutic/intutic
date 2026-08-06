@@ -64,13 +64,16 @@ const PROCESS_SIGNATURES: Array<{
 
 export function getActiveAgentProcesses(): string[] {
   const isWindows = process.platform === 'win32'
-  let rawOutput = ''
+  let rawOutput: string
 
   try {
     rawOutput = isWindows
       ? execSync('tasklist /FO CSV /NH', { encoding: 'utf-8', timeout: 3000 })
       : execSync('ps -ax -o args', { encoding: 'utf-8', timeout: 3000 })
   } catch {
+    // Deliberate fail-open: the process table is best-effort telemetry, so a
+    // missing/blocked `ps`/`tasklist` (or the 3 s timeout) reports "no agents"
+    // rather than failing the poll. Nothing after this point can run without it.
     return []
   }
 
