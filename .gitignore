@@ -107,3 +107,8 @@ build/
 **/.vitepress/cache/
 **/.vitepress/dist/
 **/.vitepress/cache_temp/
+
+# Scratch tree for generatedRules.test.ts — rendered rules must sit two levels
+# below the SDK root to resolve `../../assembly/index`, and this deliberately
+# sits outside `rules/`, which dropInRules.test.ts enumerates.
+packages/wasm-sdk/.gen-test/
