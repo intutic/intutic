@@ -40,25 +40,33 @@ import { join, relative, resolve } from 'node:path'
 const ROOT = new URL('../..', import.meta.url).pathname
 
 /**
- * Every tree that publishes to a reader, not just the docs site.
+ * Every published tree **in this repository**.
  *
- * This scanned `apps/docs` alone, and the marketing site is a **separate repo**
- * whose only workflow is `deploy.yml` with no lint step at all. So the gate
- * existed, ran in CI, and would have flagged six lines of the homepage on sight
- * — while nine unsupported performance figures sat on the page prospects
- * actually read. A claim gate scoped to the tree least likely to be read is the
- * same defect as a control with no caller.
+ * The marketing site is a separate, private repo, and its only workflow was
+ * `deploy.yml` with no lint step at all. So this gate existed, ran in CI, and
+ * would have flagged six lines of the homepage on sight — while nine
+ * unsupported performance figures sat on the page prospects actually read. A
+ * claim gate scoped to the tree least likely to be read is the same defect as a
+ * control with no caller.
  *
- * Roots come from argv when given, so the website repo's own CI can invoke this
- * script directly rather than growing a second copy of the pattern list. A
- * second copy is how the first eleven protected-path lists drifted.
+ * The fix for that is **not** to default to a sibling checkout. That was tried,
+ * and it fails in the one place it matters: a CI runner checks out one
+ * repository, no cross-repo credential exists, and the public mirror runs this
+ * same script where granting one would be a disclosure problem — so the gate
+ * hard-failed on every PR over a tree no PR in this repo could fix.
+ *
+ * Enforcement belongs to the repo that owns the tree. `intutic/website` runs
+ * this script over itself, from a pinned checkout of the public mirror, as a
+ * prerequisite of its own deploy — so an unsupported claim blocks publication
+ * rather than annotating it. Roots come from argv precisely so it can do that
+ * without a second copy of the pattern list; a second copy is how the first
+ * eleven protected-path lists drifted.
+ *
+ * What keeps this honest here is the PASS line, which names every root it
+ * opened. A pass can state less than you hoped; it can never state more than it
+ * checked.
  */
-const DEFAULT_ROOTS = [
-  join(ROOT, 'apps/docs'),
-  // Sibling checkout. Optional, but its absence is REPORTED rather than passed
-  // over silently — see the notice below.
-  resolve(ROOT, '../intutic-website'),
-]
+const DEFAULT_ROOTS = [join(ROOT, 'apps/docs')]
 
 const argRoots = process.argv.slice(2).filter((a) => !a.startsWith('-'))
 const ROOTS = argRoots.length > 0 ? argRoots.map((r) => resolve(r)) : DEFAULT_ROOTS
@@ -159,6 +167,11 @@ function* publishedFiles(dir) {
     // `.git` matters now that a root can be a whole repo rather than a docs
     // subtree — packed refs contain arbitrary bytes that match anything.
     if (name === '.git' || name === 'dist' || name === 'build') continue
+    // The website repo obtains this gate by checking the public mirror out into
+    // `.gate` and then scanning `.`, so the mirror sits *inside* the root being
+    // scanned. Without this, that run walks the mirror's own `apps/docs` and
+    // reports enterprise documentation offences as website offences.
+    if (name === '.gate') continue
     // Build output and dependency caches are not published source. They lag the
     // source by whenever someone last ran a build, so scanning them reports
     // fixed pages as broken and unfixed ones as fine.
@@ -189,7 +202,7 @@ for (const root of ROOTS) {
       const claim = QUALITY_CLAIMS.find((re) => re.test(line))
       if (claim) {
         offences.push({
-          file: relative(ROOT, file),
+          file: relative(process.cwd(), file),
           line: i + 1,
           text: raw.trim().slice(0, 160),
           quality: true,
@@ -202,32 +215,27 @@ for (const root of ROOTS) {
       const at = line.search(hit)
       const near = line.slice(Math.max(0, at - 60), at + 60)
       if (CEILING_CONTEXT.some((re) => re.test(near))) return
-      offences.push({ file: relative(ROOT, file), line: i + 1, text: raw.trim().slice(0, 160) })
+      offences.push({ file: relative(process.cwd(), file), line: i + 1, text: raw.trim().slice(0, 160) })
     })
   }
 }
 
-// A root that is not there is reported, never silently skipped. "Nothing to
+// A root that is not there is a hard failure, never a silent skip. "Nothing to
 // scan" and "nothing wrong" produce identical output otherwise, which is the
 // failure this whole file is about.
+//
+// Every root now either lives in this repository or was named on the command
+// line, so a missing one is a real mistake — a moved docs tree, or a caller
+// passing a path that is not there — and not the ordinary state of a machine
+// that happens to have one checkout and not another.
 if (missing.length > 0) {
   for (const m of missing) console.error(`[FAIL] not checked out: ${m}`)
-  // A note and an exit 0 is the same output as a clean run, and it is the
-  // likelier state: the marketing site is a sibling repository, so the default
-  // is that a machine has one tree and not the other. Passing there means the
-  // gate reports "no unsupported claim in the published trees" having never
-  // opened the tree where the unsupported claims actually were.
   console.error(
-    '\nThis gate covers the docs site AND the marketing site, which live in ' +
-      'separate repositories.\nCheck out the missing tree beside this one, or ' +
-      'pass the roots you do want explicitly:\n' +
-      '    node tools/scripts/check-latency-claims.js apps/docs\n' +
-      'Set INTUTIC_CLAIM_ROOTS_OPTIONAL=1 to downgrade this to a warning — but ' +
-      'then the gate\nis asserting less than it appears to, which is the ' +
-      'defect it exists to prevent.',
+    '\nA root was named and is not present, so this run would have asserted less\n' +
+      'than it appears to. Pass the roots you actually want:\n' +
+      '    node tools/scripts/check-latency-claims.js apps/docs\n',
   )
-  if (!process.env.INTUTIC_CLAIM_ROOTS_OPTIONAL) process.exit(1)
-  console.error('[warn] INTUTIC_CLAIM_ROOTS_OPTIONAL set — continuing with partial coverage.')
+  process.exit(1)
 }
 if (scanned.length === 0) {
   console.error('[FAIL] no root was scanned. This gate asserted nothing.')
@@ -235,7 +243,14 @@ if (scanned.length === 0) {
 }
 
 if (offences.length === 0) {
-  console.log(`[PASS] no unsupported latency claim in ${scanned.length} published tree(s).`)
+  // Named, not counted. "2 published tree(s)" reads as coverage without saying
+  // of what, and this gate's whole history is passes that meant less than they
+  // looked like. A reader can check this line against what they expected.
+  console.log(
+    `[PASS] no unsupported latency claim in: ${scanned
+      .map((r) => relative(process.cwd(), r) || '.')
+      .join(', ')}`,
+  )
   process.exit(0)
 }
 
