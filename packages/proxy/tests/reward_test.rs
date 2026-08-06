@@ -79,6 +79,7 @@ fn success_signals() -> RewardSignals {
         token_anomaly: false,
         raw_cost_usd: 0.01,
         actual_cost_usd: 0.01,
+        response_integrity: intutic_proxy::routing::integrity::RIS_MAX,
     }
 }
 
@@ -120,10 +121,25 @@ async fn local_mode_claims_ownership_and_updates_arm() {
         let arm = arms
             .get(&arm_field())
             .unwrap_or_else(|| panic!("[{name}] arm must exist"));
-        // pulls 0 → scale 1.0; clean success reward = 1.0 → alpha 2.0, beta 1.0.
+        // pulls 0 → scale 1.0; a clean equal-cost success now scores the
+        // NO_FAULT_BASELINE of 0.8, not 1.0 — so alpha 1.8, beta 1.2.
+        //
+        // The rebase is what gives the two-sided cost term room to move upward:
+        // at a 1.0 baseline the clamp ate every cheapness bonus and the term was
+        // a silent no-op for the case it exists to reward. This test encoded the
+        // old arithmetic and was outside the `--lib routing::reward` filter, so
+        // it survived the change by not being run.
         assert_eq!(arm.pulls, 1, "[{name}]");
-        assert!((arm.alpha - 2.0).abs() < 1e-6, "[{name}] alpha={}", arm.alpha);
-        assert!((arm.beta - 1.0).abs() < 1e-6, "[{name}] beta={}", arm.beta);
+        assert!(
+            (arm.alpha - (1.0 + intutic_proxy::routing::reward::NO_FAULT_BASELINE)).abs() < 1e-6,
+            "[{name}] alpha={}",
+            arm.alpha
+        );
+        assert!(
+            (arm.beta - (2.0 - intutic_proxy::routing::reward::NO_FAULT_BASELINE)).abs() < 1e-6,
+            "[{name}] beta={}",
+            arm.beta
+        );
         assert!(!arm.last_updated.is_empty(), "[{name}]");
 
         cleanup(&ws, None).await;
@@ -333,6 +349,9 @@ async fn feature_flags_parse_from_control_plane_payload() {
             // a shadow flag that defaulted true would silently disable
             // enforcement for every workspace whose payload predates it.
             shadow_enforcement: false,
+            // Same rule again. A shadow-routing flag defaulting true would make
+            // every workspace stop routing without saying so.
+            shadow_routing: false,
         })
     );
 

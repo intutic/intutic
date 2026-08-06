@@ -319,6 +319,14 @@ export interface DashboardSummary {
     tokens: number
     percentOfTotal: number
   }>
+  /**
+   * Bytes the SnipCompactor removed from response bodies in the window.
+   *
+   * Bytes, not tokens, and deliberately outside `wastedTokenBreakdown` — the
+   * two cannot share a pie. Compaction is response-side, so its benefit lands
+   * in the next turn's prompt rather than reducing this window's input count.
+   */
+  toolOutputTrimmedBytes?: number
   costSavings?: {
     rawCostUsd: number
     actualCostUsd: number
