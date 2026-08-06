@@ -11,6 +11,7 @@
     "./css": "./dist/variables.css"
   },
   "scripts": {
+    "lint": "eslint src",
     "build": "tsc -b && node dist/build-tokens.js && node dist/tools/sync-assets.js",
     "sync": "node dist/tools/sync-assets.js"
   },
