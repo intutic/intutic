@@ -44,6 +44,51 @@ impl ResourceLimiter for WasmState {
 
 /// Evaluates a RequestContext against a loaded WASM module.
 /// Enforces a 16MB memory limit, 1,000,000 fuel limit, and a 5ms timeout.
+/// Longest reason a guest may return. A rule that needs more than this is
+/// writing prose, and the string lands in an HTTP error body and an incident
+/// description that are themselves length-capped downstream.
+const MAX_GUEST_REASON: usize = 480;
+
+/// Read an optional operator-facing reason from the guest.
+///
+/// Contract, both exports optional and read only together:
+///   `reason_ptr() -> i32`   offset of UTF-8 bytes in linear memory
+///   `reason_len() -> i32`   their length
+///
+/// Every failure path returns `None` and the caller falls back to the built-in
+/// string. A rule that lies about its own memory gets ignored, not trusted: the
+/// bounds are checked against actual memory size, the length is capped, and
+/// invalid UTF-8 is discarded rather than lossily patched — a mangled reason in
+/// an incident record is worse than an honest generic one.
+fn read_guest_reason(
+    store: &mut wasmtime::Store<WasmState>,
+    instance: &wasmtime::Instance,
+    memory: &wasmtime::Memory,
+) -> Option<String> {
+    let ptr_fn = instance.get_typed_func::<(), i32>(&mut *store, "reason_ptr").ok()?;
+    let len_fn = instance.get_typed_func::<(), i32>(&mut *store, "reason_len").ok()?;
+
+    let ptr = ptr_fn.call(&mut *store, ()).ok()?;
+    let len = len_fn.call(&mut *store, ()).ok()?;
+    if ptr <= 0 || len <= 0 {
+        return None;
+    }
+
+    let (ptr, len) = (ptr as usize, (len as usize).min(MAX_GUEST_REASON));
+    let data = memory.data(&*store);
+    let end = ptr.checked_add(len)?;
+    if end > data.len() {
+        return None;
+    }
+
+    let text = std::str::from_utf8(&data[ptr..end]).ok()?.trim();
+    if text.is_empty() {
+        return None;
+    }
+    // Control characters would corrupt a log line or an HTTP header.
+    Some(text.chars().filter(|c| !c.is_control()).collect())
+}
+
 pub async fn evaluate_wasm_rule(engine: &Engine, module: &Module, ctx: &RequestContext) -> Verdict {
     let json_bytes = match serde_json::to_vec(ctx) {
         Ok(bytes) => bytes,
@@ -105,15 +150,35 @@ pub async fn evaluate_wasm_rule(engine: &Engine, module: &Module, ctx: &RequestC
         let evaluate_fn = instance.get_typed_func::<(i32, i32), i32>(&mut store, "evaluate")?;
         let res = evaluate_fn.call(&mut store, (offset, json_bytes.len() as i32))?;
 
-        Ok(res)
+        // Optionally read a reason the guest wants the operator to see.
+        //
+        // `evaluate` returns a bare i32, so until now every custom rule blocked
+        // with the same hardcoded sentence: an author could express WHICH rule
+        // fired only through the rule id, and could not say WHY at all. An
+        // operator reading "Blocked by custom WASM governance rule" learns
+        // nothing actionable, which is a poor showing for the one extension
+        // point the product offers.
+        //
+        // Two OPTIONAL exports carry it. Absent, we fall back to the old string,
+        // so every already-installed module keeps working byte-for-byte — this
+        // must not become a flag day for rules that are already deployed.
+        //
+        // Read inside the same fuel/timeout budget as evaluate, deliberately: a
+        // guest that returns a hostile length must not be able to buy extra time
+        // by doing it after the verdict.
+        let reason = read_guest_reason(&mut store, &instance, &memory);
+
+        Ok((res, reason))
     };
 
     match tokio::time::timeout(Duration::from_millis(5), eval_future).await {
-        Ok(Ok(verdict_val)) => {
+        Ok(Ok((verdict_val, guest_reason))) => {
             match verdict_val {
                 0 => Verdict::Bypass,
                 1 => Verdict::Kill {
-                    reason: "Blocked by custom WASM governance rule".to_string(),
+                    reason: guest_reason
+                        .clone()
+                        .unwrap_or_else(|| "Blocked by custom WASM governance rule".to_string()),
                     policy_id: None,
                 },
                 // `2` was specified as REDACT and can never have meant it.
@@ -176,5 +241,121 @@ pub async fn evaluate_wasm_rule(engine: &Engine, module: &Module, ctx: &RequestC
             tracing::warn!("WASM plugin execution timed out after 5ms (fail-open)");
             Verdict::Bypass
         }
+    }
+}
+
+
+#[cfg(test)]
+mod guest_reason_tests {
+    use super::*;
+    use wasmtime::{Engine, Module, Store};
+
+    /// Build a fixture guest and read whatever reason it offers.
+    ///
+    /// Targets `read_guest_reason` rather than `evaluate_wasm_rule` on purpose:
+    /// the new logic is entirely about trusting-but-verifying guest-supplied
+    /// pointers, and a full evaluation would drag in a RequestContext with
+    /// thirty irrelevant fields without exercising one extra branch.
+    fn reason_from(wat: &str) -> Option<String> {
+        let engine = Engine::default();
+        let module = Module::new(&engine, wat).expect("fixture should compile");
+        let mut store = Store::new(&engine, WasmState { limits: Default::default() });
+        let linker = wasmtime::Linker::new(&engine);
+        let instance = linker
+            .instantiate(&mut store, &module)
+            .expect("fixture should instantiate");
+        let memory = instance.get_memory(&mut store, "memory").expect("memory export");
+        read_guest_reason(&mut store, &instance, &memory)
+    }
+
+    const REASON: &str = "image ...:latest is not pinned to an approved digest";
+
+    #[test]
+    fn a_guest_supplied_reason_is_returned() {
+        let wat = format!(
+            r#"(module
+                 (memory (export "memory") 1)
+                 (data (i32.const 64) "{REASON}")
+                 (func (export "reason_ptr") (result i32) i32.const 64)
+                 (func (export "reason_len") (result i32) i32.const {len}))"#,
+            len = REASON.len()
+        );
+        assert_eq!(reason_from(&wat).as_deref(), Some(REASON));
+    }
+
+    #[test]
+    fn a_module_without_the_exports_falls_back() {
+        // Every rule installed before this feature. They must keep working.
+        let wat = r#"(module (memory (export "memory") 1))"#;
+        assert_eq!(reason_from(wat), None);
+    }
+
+    #[test]
+    fn an_out_of_bounds_pointer_is_refused_not_trusted() {
+        let wat = r#"(module
+             (memory (export "memory") 1)
+             (func (export "reason_ptr") (result i32) i32.const 1000000)
+             (func (export "reason_len") (result i32) i32.const 32))"#;
+        assert_eq!(reason_from(wat), None);
+    }
+
+    #[test]
+    fn a_length_running_past_the_end_is_refused() {
+        // ptr is valid, ptr+len is not. The addition must be checked, not just
+        // the pointer.
+        let wat = r#"(module
+             (memory (export "memory") 1)
+             (data (i32.const 64) "hi")
+             (func (export "reason_ptr") (result i32) i32.const 65530)
+             (func (export "reason_len") (result i32) i32.const 400))"#;
+        assert_eq!(reason_from(wat), None);
+    }
+
+    #[test]
+    fn a_zero_or_negative_pointer_falls_back() {
+        for ptr in ["0", "-1"] {
+            let wat = format!(
+                r#"(module
+                     (memory (export "memory") 1)
+                     (func (export "reason_ptr") (result i32) i32.const {ptr})
+                     (func (export "reason_len") (result i32) i32.const 4))"#
+            );
+            assert_eq!(reason_from(&wat), None, "ptr={ptr}");
+        }
+    }
+
+    #[test]
+    fn an_over_long_reason_is_capped_not_rejected() {
+        // A rule writing prose still gets a usable verdict, truncated.
+        let long = "A".repeat(1200);
+        let wat = format!(
+            r#"(module
+                 (memory (export "memory") 1)
+                 (data (i32.const 8) "{long}")
+                 (func (export "reason_ptr") (result i32) i32.const 8)
+                 (func (export "reason_len") (result i32) i32.const 1200))"#
+        );
+        assert_eq!(reason_from(&wat).map(|r| r.len()), Some(MAX_GUEST_REASON));
+    }
+
+    #[test]
+    fn control_characters_are_stripped() {
+        // They would corrupt a log line or an HTTP header downstream.
+        let wat = r#"(module
+             (memory (export "memory") 1)
+             (data (i32.const 16) "bad\0a\09reason")
+             (func (export "reason_ptr") (result i32) i32.const 16)
+             (func (export "reason_len") (result i32) i32.const 12))"#;
+        assert_eq!(reason_from(wat).as_deref(), Some("badreason"));
+    }
+
+    #[test]
+    fn invalid_utf8_falls_back_rather_than_being_mangled() {
+        let wat = r#"(module
+             (memory (export "memory") 1)
+             (data (i32.const 16) "\ff\fe\fd")
+             (func (export "reason_ptr") (result i32) i32.const 16)
+             (func (export "reason_len") (result i32) i32.const 3))"#;
+        assert_eq!(reason_from(wat), None);
     }
 }
