@@ -2197,13 +2197,13 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 // Blocked before the model answered; there is no response to score.
                 // RIS_MAX means 'not measured', which is the only safe reading —
                 // 0 would drag the arm's reward down for a request it never served.
-                response_integrity: crate::routing::integrity::RIS_MAX,
+                response_integrity: None,
                 quality_fault: None,
                 // Blocked before WASM evaluation ran.
                 wasm_shadow_reports: Vec::new(),
                 // Blocked before any upstream call — nothing to compact.
                 tool_result_bytes_saved: 0,
-                // Never reached routing, so there is no counterfactual.
+                // Blocked before any upstream call — routing never ran.
                 routing_shadow_model: None,
                 trace_id: uuid::Uuid::new_v4().to_string(),
                 session_id: session_id.clone(),
@@ -2640,15 +2640,30 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
 
     // Standalone open-core mode: with no control-plane flags, routing may be
     // enabled via config.yaml. A present flag payload is always authoritative.
-    let bandit_active = match feature_flags {
-        Some(f) => f.bandit_routing || f.shadow_routing,
-        None => state
-            .config
-            .intutic_settings
-            .routing
-            .enabled
-            .unwrap_or(false),
-    };
+    // `mode: off` means off, wherever the decision to route came from.
+    //
+    // The enum documented three values and only `Shadow` was ever read: a
+    // workspace could set `mode: off` and, because `bandit_active` was derived
+    // solely from the feature flags or `routing.enabled`, keep routing AND keep
+    // enforcing. A config knob a reader would reasonably believe is a kill
+    // switch, that stops nothing.
+    //
+    // It is checked ahead of the flags deliberately. In a managed deployment the
+    // flag wins over config for whether routing is *available*; `off` is the
+    // operator saying not on this deployment, and an operator's stop must not be
+    // overridden by a remote enable.
+    let routing_off =
+        state.config.intutic_settings.routing.mode == crate::config::RoutingMode::Off;
+    let bandit_active = !routing_off
+        && match feature_flags {
+            Some(f) => f.bandit_routing || f.shadow_routing,
+            None => state
+                .config
+                .intutic_settings
+                .routing
+                .enabled
+                .unwrap_or(false),
+        };
 
     // Shadow is decided the same way routing is: the managed flag wins where one
     // exists, config elsewhere. `shadow_routing` is a SEPARATE flag rather than a
@@ -2699,7 +2714,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             let trace = ExecutionTrace {
                 // Served from cache. The cached response was already scored on the
                 // turn that produced it; re-scoring it here would double-count.
-                response_integrity: crate::routing::integrity::RIS_MAX,
+                response_integrity: None,
                 quality_fault: None,
                 // Served from cache; no rule was evaluated.
                 wasm_shadow_reports: Vec::new(),
@@ -3209,7 +3224,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         let latency_ms = start.elapsed().as_millis() as u32;
         let trace = ExecutionTrace {
             // Error or short-circuit — no response body exists to score.
-            response_integrity: crate::routing::integrity::RIS_MAX,
+            response_integrity: None,
             quality_fault: None,
             // Error or short-circuit before rule evaluation.
             wasm_shadow_reports: Vec::new(),
@@ -3313,8 +3328,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             let req_json = body_json.clone();
             let estimate: std::sync::Arc<dyn Fn(&str, u32, u32) -> f64 + Send + Sync> =
                 std::sync::Arc::new(|m: &str, p: u32, c: u32| estimate_model_cost(m, p, c));
+            let mirror_store = Arc::clone(&state.store);
+            let mirror_ws = ws.clone();
             tokio::spawn(async move {
-                crate::routing::mirror::run_mirror(
+                let outcome = crate::routing::mirror::run_mirror(
                     slot,
                     client,
                     url,
@@ -3326,6 +3343,36 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     estimate,
                 )
                 .await;
+
+                // Keep what the second call bought.
+                //
+                // `run_mirror` has always returned this and the spawn has always
+                // dropped it, so the only trace of a mirrored call was a log
+                // line. C6 and C7 — enforce per workspace on a mirror-measured
+                // fault-rate delta — were deferred "pending mirror-measured
+                // data", and that data was being thrown away one line after it
+                // was computed. Mirroring bills a second upstream call on up to
+                // 5% of traffic; discarding the result makes that pure cost.
+                //
+                // `None` means the call never produced a scoreable response (a
+                // non-2xx, or an unreachable upstream). That is not a fault of
+                // the candidate and is deliberately not recorded as one.
+                if let Some(o) = outcome {
+                    if let Err(e) = mirror_store
+                        .record_mirror_outcome(
+                            &mirror_ws,
+                            &o.candidate_model,
+                            o.integrity.fault.is_some(),
+                            o.integrity.measured,
+                            o.cost_usd,
+                        )
+                        .await
+                    {
+                        // The user's response went out long ago; a failure to
+                        // record evidence must cost them nothing.
+                        tracing::warn!(error = %e, "Failed to record mirror outcome");
+                    }
+                }
             });
         }
     }
@@ -3349,6 +3396,12 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         let graph_key_clone = graph_key.clone();
         let requested_model_clone = model.clone();
         let actual_model_clone = actual_model.clone();
+        // The counterfactual the shadow mode exists to record. `shadow_selection`
+        // is decided long before this branch, so the streaming trace's
+        // "never reached routing" was simply untrue — shadow mode's entire
+        // output was being kept for non-streaming traffic only, and agent
+        // harnesses stream by default.
+        let shadow_selection_clone = shadow_selection.clone();
         let task_type_clone = task_type.clone();
         let new_tool_calls_clone = new_tool_calls.clone();
         let change_manifest_clone = change_manifest.clone();
@@ -4045,14 +4098,34 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             };
             let token_anomaly = prompt_discrepancy || completion_discrepancy;
 
-            // Streaming: the assembled body may not be reconstructable, but
-            // `done_received` is the signal that matters here — a stream that
-            // never terminated is a truncated response however it parsed.
+            // A same-provider stream that ended without its terminal event
+            // ([DONE] / message_stop) was truncated — learn it as a failed pull
+            // instead of crediting a clean success. Cross-provider streams are
+            // re-emitted through the translation branch without terminal
+            // tracking, so `done_received` is false there by construction and
+            // says nothing about the response; treat them as complete.
+            //
+            // Computed once, here, and used by both the integrity score and the
+            // local reward below. It used to be defined *after* the integrity
+            // call, which passed the raw `done_received` instead — so two
+            // adjacent pieces of code answered the same question opposite ways,
+            // and every cross-provider stream was scored Truncated on a response
+            // that completed perfectly. That is a 0.2 reward penalty on exactly
+            // the cheaper arms the bandit exists to explore, and dashboards
+            // reading 100% truncation for all cross-provider routing.
+            let stream_complete = done_received || !is_same_provider;
+
+            // Streaming: the assembled body is not reconstructable here, so
+            // termination is the only check available — and it is a real one in
+            // both directions. Passing `Some(..)` rather than `None` is what
+            // makes a clean stream *measured*; scoring only the truncations
+            // would leave `AVG(response_integrity)` computed over an arm's
+            // failures alone.
             let integrity = crate::routing::integrity::score(
                 &crate::routing::integrity::ResponseFacts {
                     body: None,
                     request: None,
-                    done_received: Some(done_received),
+                    done_received: Some(stream_complete),
                 },
             );
 
@@ -4068,12 +4141,6 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 final_completion_tokens,
             );
 
-            // A same-provider stream that ended without its terminal event
-            // ([DONE] / message_stop) was truncated — learn it as a failed
-            // pull instead of crediting a clean success. Cross-provider
-            // streams are re-emitted without terminal tracking; treat them
-            // as complete.
-            let stream_complete = done_received || !is_same_provider;
             if reward_eligible {
                 reward_engine_clone
                     .record(
@@ -4096,16 +4163,28 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             }
 
             let trace = ExecutionTrace {
-                response_integrity: integrity.score,
+                response_integrity: integrity.measured.then_some(integrity.score),
                 quality_fault: integrity.fault.map(|f| f.as_str().to_string()),
-                // Streaming path: rules evaluated on the request, reports
-                // captured on the non-streaming trace only for now.
-                wasm_shadow_reports: Vec::new(),
+                // The same reports the non-streaming trace carries. They are
+                // computed once, before the streaming split, off the request
+                // context -- so they were already in scope here and were simply
+                // being thrown away.
+                //
+                // This mattered far more than "only for now" suggested. Agent
+                // harnesses stream by default, so discarding them here meant
+                // `rule_candidates.shadow_evaluations` only ever counted the
+                // minority traffic shape: a shadowed rule would take much longer
+                // to reach the 200-evaluation bar than the operator was told, or
+                // never reach it, and the promotion gate would go on answering
+                // `ready: false` for a reason nothing surfaced.
+                wasm_shadow_reports: wasm_shadow_reports.clone(),
                 // Streaming: the compactor needs a complete body, so it does not run
                 // on this path. Zero here is a real absence, not an unmeasured one.
                 tool_result_bytes_saved: 0,
-                // Never reached routing, so there is no counterfactual.
-                routing_shadow_model: None,
+                // Shadow mode's whole output. Decided at `shadow_selection` long
+                // before this branch, so the old "never reached routing" here was
+                // simply untrue and streamed requests recorded no counterfactual.
+                routing_shadow_model: shadow_selection_clone.clone(),
                 trace_id: uuid::Uuid::new_v4().to_string(),
                 session_id: session_id_clone,
                 proxy_instance_id: proxy_instance_id().to_string(),
@@ -4159,6 +4238,21 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         let mut response = Response::builder().status(upstream_status);
         if let Some(headers_mut) = response.headers_mut() {
             *headers_mut = resp_headers;
+
+            // Silent substitution is a trust event, and it was disclosed on the
+            // non-streaming path only. Agent harnesses stream by default, so
+            // for the dominant traffic shape a customer who asked for Opus and
+            // got Haiku had no way to know — the exact liability the header
+            // exists to remove, missing from the requests that actually carry
+            // it. Only set when the model differs, so presence is the signal.
+            if let Some((from, to)) = &routed_from_to {
+                if let Ok(v) = axum::http::HeaderValue::from_str(from) {
+                    headers_mut.insert("x-intutic-routed-from", v);
+                }
+                if let Ok(v) = axum::http::HeaderValue::from_str(to) {
+                    headers_mut.insert("x-intutic-routed-to", v);
+                }
+            }
         }
         return response
             .body(Body::from_stream(ReceiverStream::new(rx)))
@@ -4677,7 +4771,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
 
     // ── Step 8: Publish execution trace (fire-and-forget) ─────────────
     let trace = ExecutionTrace {
-        response_integrity: integrity.score,
+        response_integrity: integrity.measured.then_some(integrity.score),
         quality_fault: integrity.fault.map(|f| f.as_str().to_string()),
         // The one path that actually evaluated rules.
         wasm_shadow_reports: wasm_shadow_reports.clone(),

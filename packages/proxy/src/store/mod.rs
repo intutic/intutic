@@ -289,6 +289,26 @@ pub trait LocalStore: Send + Sync + 'static {
     /// Count one upstream failure against an arm. A cloud-cron input, written
     /// only when the local reward loop does *not* own learning for this
     /// workspace — otherwise the same failure is counted twice.
+    /// Records what a mirrored call learned, per workspace and candidate model.
+    ///
+    /// Mirroring spends real money on a second upstream call for exactly one
+    /// reason: it is the only evidence that a cheaper model would have answered
+    /// as well. That evidence went to a `tracing::info!` and nowhere else, so
+    /// C6/C7 — enforce per workspace on a mirror-measured fault-rate delta —
+    /// were waiting on data that existed only as unaggregated log lines.
+    ///
+    /// A counter hash rather than a row per call: the question is a rate, the
+    /// volume is capped at 5% of traffic, and nothing downstream needs the
+    /// individual samples.
+    async fn record_mirror_outcome(
+        &self,
+        workspace_id: &str,
+        candidate_model: &str,
+        faulted: bool,
+        measured: bool,
+        cost_usd: f64,
+    ) -> anyhow::Result<()>;
+
     async fn incr_outage_failure(&self, workspace_id: &str, arm_key: &str)
         -> anyhow::Result<()>;
 
