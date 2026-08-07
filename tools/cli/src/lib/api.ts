@@ -64,23 +64,7 @@ export function createApiClient(controlPlaneUrl: string, apiKey: string): ApiCli
       throw new Error(`API ${method} ${path} failed (${res.status}): ${text}`)
     }
 
-    const data = await res.json()
-    if (
-      data &&
-      typeof data === 'object' &&
-      'format' in data &&
-      data.format === 'toon' &&
-      typeof data.data === 'string' &&
-      typeof data.listProperty === 'string'
-    ) {
-      const decoded = toonDecode(data.data)
-      data[data.listProperty] = decoded
-      delete data.format
-      delete data.data
-      delete data.listProperty
-    }
-
-    return data as T
+    return unwrapToonEnvelope(await res.json()) as T
   }
 
   return {
@@ -149,3 +133,38 @@ export function createApiClient(controlPlaneUrl: string, apiKey: string): ApiCli
 export function toonDecode(toon: string): Record<string, unknown>[] {
   return sharedToonDecode(toon) ?? []
 }
+
+/**
+ * Move a TOON-encoded list out of its envelope and onto `listProperty`.
+ *
+ * Extracted from `request` because it was inline and therefore untestable, and
+ * it was wrong: the old code assigned the decoded rows and only THEN deleted
+ * `data`. `listProperty` names where the rows should land, and for
+ * `/api/v1/incidents` that name IS `data` — so the rows were written and
+ * immediately deleted, and any incidents response over the 20-row TOON
+ * threshold arrived as `{meta:{total:22}}`. Zero rows, no error.
+ * `/api/v1/traces` escaped only because its listProperty is `traces`.
+ *
+ * Non-TOON bodies pass through untouched.
+ */
+export function unwrapToonEnvelope(data: unknown): unknown {
+  if (
+    !data ||
+    typeof data !== 'object' ||
+    !('format' in data) ||
+    (data as Record<string, unknown>)['format'] !== 'toon'
+  ) {
+    return data
+  }
+  const body = data as Record<string, unknown>
+  const listProperty = body['listProperty']
+  if (typeof body['data'] !== 'string' || typeof listProperty !== 'string') return data
+
+  const decoded = toonDecode(body['data'])
+  delete body['format']
+  delete body['data']
+  delete body['listProperty']
+  body[listProperty] = decoded
+  return body
+}
+

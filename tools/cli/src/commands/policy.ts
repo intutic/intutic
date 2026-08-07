@@ -12,6 +12,7 @@ import {
 import { loadCredentials, loadConfig } from '../config/store.js'
 import { resolveControlPlaneUrl } from '../config/paths.js'
 import { createApiClient } from '../lib/api.js'
+import { resolveSnapshotRulesPath, SNAPSHOT_RULES_FILE } from '../lib/policySnapshot.js'
 import type { EnforcementAction, InterventionMode, RiskCategory } from '@intutic/shared-types'
 
 /**
@@ -25,7 +26,16 @@ function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
-async function getClient(dev?: boolean) {
+/**
+ * The control plane these commands talk to, and the credentials for it.
+ *
+ * Lifted out of `getClient` because `policy snapshot` needs the workspace id and
+ * the raw key rather than an API client — and resolving them a second way is how
+ * one command ends up pointed at production while its neighbour is on --dev.
+ */
+async function resolveTarget(
+  dev?: boolean,
+): Promise<{ controlPlaneUrl: string; apiKey: string; workspaceId: string }> {
   const creds = await loadCredentials()
   if (!creds) {
     log.error('Not authenticated. This command needs an Intutic control plane, which open core does not include. To run the proxy without one: `intutic start`.')
@@ -33,8 +43,16 @@ async function getClient(dev?: boolean) {
   }
   const config = loadConfig()
   const devMode = dev || config?.devMode || process.env.INTUTIC_DEV === '1'
-  const controlPlaneUrl = resolveControlPlaneUrl(devMode)
-  return createApiClient(controlPlaneUrl, creds.apiKey)
+  return {
+    controlPlaneUrl: resolveControlPlaneUrl(devMode),
+    apiKey: creds.apiKey,
+    workspaceId: creds.workspaceId,
+  }
+}
+
+async function getClient(dev?: boolean) {
+  const { controlPlaneUrl, apiKey } = await resolveTarget(dev)
+  return createApiClient(controlPlaneUrl, apiKey)
 }
 
 export async function runPolicyEnable(policyId: string, opts: { dev?: boolean }): Promise<void> {
@@ -167,6 +185,60 @@ export async function runPolicyExport(opts: { all?: boolean; dev?: boolean }): P
     log.error(`Failed to export policies: ${errMessage(err)}`)
     process.exit(1)
   }
+}
+
+/**
+ * `intutic policy snapshot` — compile this workspace's policy to disk.
+ *
+ * The snapshot is the dynamic tier: every harness gate reads
+ * `~/.intutic/hooks/policy-snapshot.rules` and enforces the compiled floor and
+ * nothing else when it is missing. Until this command existed the only thing
+ * that ever wrote it was `intutic connect`, so arming the gates meant running a
+ * daemon that also rewrites five harnesses' hook configs, starts a drift
+ * watcher and provisions Valkey. This does the one thing.
+ */
+export async function runPolicySnapshot(opts: { dev?: boolean }): Promise<void> {
+  log.header('Intutic — Refresh Policy Snapshot')
+
+  const { controlPlaneUrl, apiKey, workspaceId } = await resolveTarget(opts.dev)
+
+  // The gates consult INTUTIC_SNAPSHOT_RULES before the default path, so writing
+  // to the default while they read elsewhere would produce a snapshot nothing
+  // enforces — the precise silent failure this command exists to end.
+  const rulesPath = resolveSnapshotRulesPath()
+  const snapshotDir = path.dirname(rulesPath)
+  if (path.basename(rulesPath) !== SNAPSHOT_RULES_FILE) {
+    log.warn(
+      `INTUTIC_SNAPSHOT_RULES names "${path.basename(rulesPath)}", but the writer always produces ` +
+        `"${SNAPSHOT_RULES_FILE}" — the gates will read a file this command does not write.`
+    )
+  }
+
+  // Imported here rather than at module scope: @intutic/sync-daemon pulls in ws,
+  // ioredis and chokidar, and every other `intutic policy` subcommand would pay
+  // that startup cost without ever touching a snapshot.
+  const { refreshPolicySnapshot } = await import('@intutic/sync-daemon')
+
+  const result = await refreshPolicySnapshot({ controlPlaneUrl, apiKey, workspaceId, snapshotDir })
+
+  // `refreshPolicySnapshot` never throws — policy refresh must not be able to
+  // take down the daemon's sync loop — so null is the only failure signal it
+  // has. Reporting that as success is how a machine comes to enforce nothing
+  // while the command meant to arm it said it worked.
+  if (!result) {
+    log.error('Snapshot NOT written — GET /api/v1/policy/resolve returned nothing usable.')
+    log.field('Control plane', controlPlaneUrl)
+    log.field('Workspace', workspaceId)
+    log.info('Any previous snapshot is untouched and still enforced.')
+    log.info('Check the control plane is reachable and the key is still valid: `intutic whoami`.')
+    process.exit(1)
+  }
+
+  log.success(`Policy snapshot written — ${result.ruleCount} rule(s) now enforced by every gate.`)
+  log.field('Digest', result.digest)
+  log.field('Workspace', workspaceId)
+  log.field('Path', path.join(snapshotDir, SNAPSHOT_RULES_FILE))
+  log.info('Confirm the gates accept it with `intutic doctor`.')
 }
 
 /**
