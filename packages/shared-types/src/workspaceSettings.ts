@@ -157,6 +157,28 @@ export interface WorkspaceSettings {
     review?: string[]
     debugging?: string[]
   }
+
+  /**
+   * Container-image provenance policy, enforced at the gate before a deploy
+   * runs. Off unless explicitly enabled — a workspace that never configured
+   * this must not start refusing deploys because a default changed.
+   *
+   * The control plane has no filesystem, so it can only verify images written
+   * into the tool call itself. `unverifiableAction` decides what happens to a
+   * `kubectl apply -f manifest.yaml`, and defaults to `allow`: refusing every
+   * file-based apply would refuse the correct ones too, and a control that
+   * broad gets switched off. See imageProvenanceService.ts.
+   */
+  imageProvenance?: {
+    enabled?: boolean
+    /** Refuse any image not pinned to an `@sha256:` digest. */
+    requireDigest?: boolean
+    /** Registry prefixes that may be pulled from. Empty means any. */
+    allowedRegistries?: string[]
+    /** `repository -> approved digests`. Empty means any digest satisfies pinning. */
+    approvedDigests?: Record<string, string[]>
+    unverifiableAction?: 'allow' | 'warn' | 'block'
+  }
 }
 
 /**
@@ -192,6 +214,15 @@ export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
     deployment: ['deploy', 'release', 'kubernetes', 'docker', 'gke', 'pipeline', 'ci/cd'],
     review: ['review', 'audit', 'lint', 'eslint', 'pr'],
     debugging: ['fix', 'bug', 'issue', 'error', 'crash', 'debug'],
+  },
+  // Off, and `enabled` must be literally true to turn it on. A workspace that
+  // never configured image provenance must not begin refusing deploys.
+  imageProvenance: {
+    enabled: false,
+    requireDigest: true,
+    allowedRegistries: [],
+    approvedDigests: {},
+    unverifiableAction: 'allow',
   },
 }
 
