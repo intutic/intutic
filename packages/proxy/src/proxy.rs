@@ -6402,6 +6402,79 @@ mod tests {
     /// part that had been wrong in production: `usage.output_tokens` really is
     /// the key, and it really does carry a true count. Output was previously
     /// metered at 1 token for every Codex request.
+
+    /// A CAPTURED streamed tool call — the fixture that stayed spec-derived
+    /// through three previous passes because no model on hand emitted one.
+    ///
+    /// The demo's 3B writes tool calls as fenced JSON in the message body,
+    /// which is why the demo carries a repair shim. That is the MODEL, not the
+    /// server: llama.cpp already runs with `--jinja`, so it surfaces native
+    /// calls when the model produces them. Confirmed by deploying a 7B on the
+    /// same llama.cpp digest — same server, same request, native `tool_calls`
+    /// appeared. These bytes are that 7B's Responses stream.
+    ///
+    /// Provenance, same caveat as the other captures: llama.cpp's
+    /// implementation of the protocol, not OpenAI's. Independent
+    /// implementation, not the reference one.
+    ///
+    /// This exercises three separate assumptions that were only ever read from
+    /// the spec, and the middle one is a real hazard rather than a shape
+    /// detail.
+    #[test]
+    fn a_real_captured_responses_tool_call_stream_is_parsed_correctly() {
+        let raw = include_str!("../tests/fixtures/openai_responses_toolcall_stream.sse");
+
+        // 1. The gate's parser finds the call at `output_item.added`, which is
+        //    the earliest point it CAN be withheld — the whole reason the
+        //    streaming gate keys on it rather than on the terminal.
+        let started: Vec<_> = raw
+            .lines()
+            .filter_map(crate::protocol::tool_use_parser::parse_sse_chunk)
+            .collect();
+        assert_eq!(started.len(), 1, "expected exactly one tool-use start, got {started:?}");
+        assert_eq!(started[0].tool_name, "shell");
+
+        // 2. THE ONE THAT MATTERS. Sixteen
+        //    `response.function_call_arguments.delta` events carry a BARE
+        //    STRING `delta`, structurally identical to a text delta. If the
+        //    text extractor did not type-guard, every one of them would be
+        //    accumulated as assistant prose — feeding a serialised tool call to
+        //    the judge, the semantic cache and the trace. Until this capture
+        //    that guard was justified by the spec alone.
+        let arg_deltas = raw.matches("response.function_call_arguments.delta").count();
+        assert!(arg_deltas >= 10, "fixture should carry many argument deltas, saw {arg_deltas}");
+        let mut text = String::new();
+        for line in raw.lines() {
+            let Some(d) = line.strip_prefix("data: ") else { continue };
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(d) else { continue };
+            if let Some(t) = stream_delta_text(&v, DeltaShape::ResponsesOutputText) {
+                text.push_str(t);
+            }
+        }
+        assert!(
+            text.is_empty(),
+            "tool-call arguments leaked into accumulated text as {text:?}",
+        );
+
+        // 3. The non-streaming extractor reads the completed call off the
+        //    terminal's `output[]`, with arguments intact.
+        let terminal: serde_json::Value = raw
+            .lines()
+            .filter_map(|l| l.strip_prefix("data: "))
+            .filter_map(|d| serde_json::from_str(d).ok())
+            .find(|v: &serde_json::Value| {
+                v.get("type").and_then(|t| t.as_str()) == Some("response.completed")
+            })
+            .expect("a terminal");
+        let calls = crate::routing::integrity::response_tool_calls(
+            terminal.get("response").expect("response object"),
+        );
+        assert_eq!(calls.len(), 1, "got {calls:?}");
+        assert_eq!(calls[0].0, "shell");
+        let args = format!("{:?}", calls[0].1);
+        assert!(args.contains("kubectl apply"), "arguments were {args}");
+    }
+
     #[test]
     fn a_real_captured_successful_responses_stream_parses_end_to_end() {
         let raw = include_str!("../tests/fixtures/openai_responses_success_stream.sse");
