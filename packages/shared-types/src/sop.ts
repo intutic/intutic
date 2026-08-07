@@ -563,10 +563,37 @@ export interface DecisionEntry {
   entry_id: string
   session_id: string
   workspace_id: string
-  original_tool_call: string
-  hijacked_tool_call: string
+  /**
+   * `jsonb`, so an object — not a string.
+   *
+   * These two were typed as `string` and never were one. `recordDecision`
+   * writes structure into both columns, and the dashboard already branches on
+   * `typeof … === 'string'` at runtime, which is the tell: the code knew the
+   * type was wrong and worked around it instead of correcting it. `unknown`
+   * rather than a concrete shape because two producers write different ones —
+   * a review hold writes `{tool, source}`, and an output-DLP substitution
+   * writes `{name, arguments}`.
+   */
+  original_tool_call: unknown
+  /**
+   * The corrected call, when one exists. `null` for a review hold, which stops
+   * an action without proposing a replacement — see
+   * `POST /api/v1/decisions`.
+   */
+  hijacked_tool_call: unknown
+  /** What happened, as opposed to `status`, which is where review got to. */
+  outcome?: string
+  /** The trace this decision came from. Null when there is nothing to link. */
+  trace_id?: string | null
   rationale: string
-  status: 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED' | 'PROMOTED' | string
+  status:
+    | 'PENDING_REVIEW'
+    | 'APPROVED'
+    | 'REJECTED'
+    | 'PROMOTED'
+    /** Recorded, not pending: the proxy already substituted the call. */
+    | 'ENFORCED'
+    | string
   created_at: string | null
 }
 

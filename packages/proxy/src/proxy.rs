@@ -1428,11 +1428,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             }
 
             if answer_locally {
-                let wire = match provider {
-                    Provider::Anthropic => crate::commands::WireProvider::Anthropic,
-                    Provider::Gemini => crate::commands::WireProvider::Gemini,
-                    Provider::OpenAI => crate::commands::WireProvider::OpenAI,
-                };
+                let wire = wire_for(&protocol, &provider);
                 let is_streaming = body_json.get("stream").and_then(|v| v.as_bool()).unwrap_or(false);
 
                 if is_streaming {
@@ -3470,8 +3466,13 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             } else {
                 None
             };
-            // Anthropic content-block index the held text belongs to.
-            let mut holdback_block_index: u64 = 0;
+            // Where the held text belongs, so a flush can address it.
+            let mut holdback_addr = DeltaAddress::default();
+            // The wire shape this stream's text deltas arrive in. Resolved once
+            // from the protocol rather than re-derived from `Provider` at each
+            // site, which is what let `/v1/responses` be treated as chat
+            // completions at four separate places.
+            let stream_shape = delta_shape(&protocol_clone, &provider_clone);
 
             'upstream: while let Some(chunk_res) = stream.next().await {
                 match chunk_res {
@@ -3532,12 +3533,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                 // the withheld event's index means something
                                 // else in that shape.
                                 let (wire, denial) = if is_same_provider {
-                                    let w = match provider_clone {
-                                        Provider::Anthropic => crate::commands::WireProvider::Anthropic,
-                                        Provider::Gemini => crate::commands::WireProvider::Gemini,
-                                        Provider::OpenAI => crate::commands::WireProvider::OpenAI,
-                                    };
-                                    (w, denial)
+                                    (wire_for(&protocol_clone, &provider_clone), denial)
                                 } else {
                                     (crate::commands::WireProvider::OpenAI, denial.at_block(0))
                                 };
@@ -3581,8 +3577,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                 if let Some(rewritten) = holdback_rewrite_line(
                                     sc,
                                     &line,
-                                    &provider_clone,
-                                    &mut holdback_block_index,
+                                    stream_shape,
+                                    &mut holdback_addr,
                                 ) {
                                     line = rewritten;
                                 }
@@ -3590,12 +3586,26 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
 
                             if is_same_provider {
                                 // Intercept end-of-stream markers to inject governance notifications
-                                let is_done = if provider_clone == Provider::Anthropic {
-                                    line == "event: message_stop"
-                                } else {
-                                    line.starts_with("data:")
-                                        && line["data:".len()..].trim() == "[DONE]"
-                                };
+                                //
+                                // `!done_received` guards the whole test so a
+                                // stream carrying two terminals counts one. The
+                                // Responses arm accepts both `response.completed`
+                                // and `[DONE]`, because gateways in front of the
+                                // Responses API are known to append the
+                                // chat-completions sentinel and the proxy must
+                                // not depend on which one arrives; without that
+                                // guard, a stream carrying both would append the
+                                // governance block twice.
+                                let is_done = !done_received
+                                    && match stream_shape {
+                                        DeltaShape::AnthropicText => line == "event: message_stop",
+                                        DeltaShape::ResponsesOutputText => {
+                                            is_done_sentinel(&line)
+                                                || sse_data_type(&line).as_deref()
+                                                    == Some("response.completed")
+                                        }
+                                        _ => is_done_sentinel(&line),
+                                    };
 
                                 if is_done {
                                     done_received = true;
@@ -3628,7 +3638,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                             &held,
                                             &protocol_clone,
                                             true,
-                                            holdback_block_index,
+                                            &holdback_addr,
                                         ) {
                                             if tx
                                                 .send(Ok(axum::body::Bytes::from(b)))
@@ -3647,15 +3657,16 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                 } else if is_done {
                                     {
                                         let harness = session_id_clone.as_str();
-                                        let proto = match provider_clone {
-                                            Provider::Anthropic => {
-                                                crate::postprocessor::Protocol::Anthropic
-                                            }
-                                            Provider::Gemini => {
-                                                crate::postprocessor::Protocol::Gemini
-                                            }
-                                            _ => crate::postprocessor::Protocol::OpenAI,
-                                        };
+                                        // Keyed on the protocol, not the
+                                        // provider: the block has to be
+                                        // written in the shape the CLIENT
+                                        // asked for, and `Provider::OpenAI`
+                                        // covers two shapes that are not
+                                        // interchangeable.
+                                        let proto = postprocessor_protocol(
+                                            &protocol_clone,
+                                            &provider_clone,
+                                        );
                                         if let Ok(pp) =
                                             ResponsePostProcessor::new(Arc::clone(&cp_clone), harness, proto)
                                         {
@@ -3702,57 +3713,24 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                         if let Ok(json_val) =
                                             serde_json::from_str::<serde_json::Value>(data_part)
                                         {
-                                            if provider_clone == Provider::Anthropic {
-                                                if let Some(delta) = json_val.get("delta") {
-                                                    if let Some(t) =
-                                                        delta.get("text").and_then(|v| v.as_str())
-                                                    {
-                                                        accumulated_content.push_str(t);
-                                                    }
-                                                }
-                                                if let Some(usage) = json_val.get("usage") {
-                                                    if let Some(it) = usage
-                                                        .get("input_tokens")
-                                                        .and_then(|v| v.as_u64())
-                                                    {
-                                                        prompt_tokens = it as u32;
-                                                    }
-                                                    if let Some(ot) = usage
-                                                        .get("output_tokens")
-                                                        .and_then(|v| v.as_u64())
-                                                    {
-                                                        completion_tokens = ot as u32;
-                                                    }
-                                                }
-                                            } else {
-                                                if let Some(choices) = json_val
-                                                    .get("choices")
-                                                    .and_then(|c| c.as_array())
-                                                {
-                                                    if let Some(first) = choices.first() {
-                                                        if let Some(t) = first
-                                                            .get("delta")
-                                                            .and_then(|d| d.get("content"))
-                                                            .and_then(|v| v.as_str())
-                                                        {
-                                                            accumulated_content.push_str(t);
-                                                        }
-                                                    }
-                                                }
-                                                if let Some(usage) = json_val.get("usage") {
-                                                    if let Some(pt) = usage
-                                                        .get("prompt_tokens")
-                                                        .and_then(|v| v.as_u64())
-                                                    {
-                                                        prompt_tokens = pt as u32;
-                                                    }
-                                                    if let Some(ct) = usage
-                                                        .get("completion_tokens")
-                                                        .and_then(|v| v.as_u64())
-                                                    {
-                                                        completion_tokens = ct as u32;
-                                                    }
-                                                }
+                                            // Located through the same
+                                            // `DeltaShape` the holdback rewrote
+                                            // with, so what the client received
+                                            // and what the judge, the semantic
+                                            // cache and the trace record are
+                                            // read out of the same field.
+                                            if let Some(t) =
+                                                stream_delta_text(&json_val, stream_shape)
+                                            {
+                                                accumulated_content.push_str(t);
+                                            }
+                                            let (pt, ct) =
+                                                stream_usage(&json_val, stream_shape);
+                                            if let Some(pt) = pt {
+                                                prompt_tokens = pt;
+                                            }
+                                            if let Some(ct) = ct {
+                                                completion_tokens = ct;
                                             }
                                         }
                                     }
@@ -3779,7 +3757,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                                 &held,
                                                 &protocol_clone,
                                                 false,
-                                                holdback_block_index,
+                                                &holdback_addr,
                                             ) {
                                                 let _ = tx
                                                     .send(Ok(axum::body::Bytes::from(b)))
@@ -3789,15 +3767,15 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                         // Phase 7: Inject governance notifications before [DONE]
                                         {
                                             let harness = session_id.as_str();
-                                            let proto = match provider {
-                                                Provider::Anthropic => {
-                                                    crate::postprocessor::Protocol::Anthropic
-                                                }
-                                                Provider::Gemini => {
-                                                    crate::postprocessor::Protocol::Gemini
-                                                }
-                                                _ => crate::postprocessor::Protocol::OpenAI,
-                                            };
+                                            // Cross-provider: the client is
+                                            // reading translated OpenAI chunks
+                                            // whatever the upstream was, so the
+                                            // block is written in the client's
+                                            // shape — which for a Responses
+                                            // client is still Responses.
+                                            let proto = postprocessor_protocol(
+                                                &protocol, &provider,
+                                            );
                                             if let Ok(pp) = ResponsePostProcessor::new(
                                                 Arc::clone(&state.control_plane),
                                                 harness,
@@ -3995,7 +3973,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                 &held,
                                 &protocol_clone,
                                 is_same_provider,
-                                holdback_block_index,
+                                &holdback_addr,
                             ) {
                                 let _ = tx.send(Ok(axum::body::Bytes::from(b))).await;
                             }
@@ -4057,7 +4035,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                         &held,
                         &protocol_clone,
                         is_same_provider,
-                        holdback_block_index,
+                        &holdback_addr,
                     ) {
                         let _ = tx.send(Ok(axum::body::Bytes::from(b))).await;
                     }
@@ -4083,20 +4061,33 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 }
             }
 
+            // Reported unconditionally, and it used to be nested inside the
+            // `judge_active_clone && !gate_tripped` block below.
+            //
+            // That made the proxy's record of a redacted secret depend on
+            // whether an unrelated feature happened to be switched on. With the
+            // judge off — the normal case — a streaming DLP redaction was
+            // silent, and `dlp_stream_redactions` has no other report site.
+            // This is the list the per-line scrub fills, which is exactly where
+            // a tool call's arguments get redacted, so the events that went
+            // unlogged were the most serious ones. The holdback's own warning
+            // above is unconditional, which is what masked this: the two fire
+            // on different cases, so logs showed *some* redactions and nobody
+            // noticed a whole class was missing.
+            if !dlp_stream_redactions.is_empty() {
+                tracing::warn!(
+                    workspace_id = %workspace_id_clone,
+                    session_id = %session_id_clone,
+                    patterns = ?dlp_stream_redactions,
+                    "Output DLP redacted secrets from a streamed response"
+                );
+            }
+
             // `!gate_tripped`: the judge's finalize step appends a synthesis
             // block to the stream. The gate has already sent the terminal
             // event, so that block would land after it.
             if judge_active_clone && !gate_tripped {
                 tracing::info!(handles_count = %chunk_handles.len(), "Waiting for chunk evaluation handles");
-                if !dlp_stream_redactions.is_empty() {
-                    tracing::warn!(
-                        workspace_id = %workspace_id_clone,
-                        session_id = %session_id_clone,
-                        patterns = ?dlp_stream_redactions,
-                        "Output DLP redacted secrets from a streamed response"
-                    );
-                }
-
                 for h in chunk_handles {
                     let _ = h.await;
                 }
@@ -4205,6 +4196,22 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                             })
                                         )
                                     }
+                                    // The synthesis is a whole message, not a
+                                    // delta on one, so it goes in as its own
+                                    // output item. `output_index` 0 is safe
+                                    // here in a way it would not be for the
+                                    // governance block: this branch only runs
+                                    // with the judge active, and the judge
+                                    // withholds the upstream's terminal event
+                                    // and every chunk behind it, so the client
+                                    // has been sent no output items at all.
+                                    crate::protocol::Protocol::OpenAIResponses => {
+                                        crate::commands::responses_message_events(
+                                            &formatted_alert,
+                                            0,
+                                            "msg_intutic_judge_gov",
+                                        )
+                                    }
                                     _ => {
                                         format!(
                                             "data: {}\n\n",
@@ -4235,7 +4242,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // The gate emits its own terminal event, tailored to the block it
             // withheld; a second one here would be trailing bytes.
             if !gate_tripped && (judge_active_clone || !is_same_provider) {
-                let done_bytes = get_terminal_stream_event(&protocol_clone);
+                let done_bytes = get_terminal_stream_event(&protocol_clone, &actual_model_clone);
                 let _ = tx.send(Ok(axum::body::Bytes::from(done_bytes))).await;
             }
 
@@ -4529,6 +4536,26 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                         }
                     }
                 }
+            } else if protocol == Protocol::OpenAIResponses {
+                // A same-provider Responses body is forwarded untranslated, so
+                // its text is in `output[].content[].type == "output_text"` —
+                // there is no `choices[]` to read. Without this the judge and
+                // the semantic cache saw an empty response on every
+                // non-streaming Codex CLI request.
+                if let Some(output) = resp_json.get("output").and_then(|o| o.as_array()) {
+                    for item in output {
+                        let Some(content) = item.get("content").and_then(|c| c.as_array()) else {
+                            continue;
+                        };
+                        for part in content {
+                            if part.get("type").and_then(|t| t.as_str()) == Some("output_text") {
+                                if let Some(txt) = part.get("text").and_then(|t| t.as_str()) {
+                                    text.push_str(txt);
+                                }
+                            }
+                        }
+                    }
+                }
             } else {
                 if let Some(choices) = resp_json.get("choices").and_then(|c| c.as_array()) {
                     if let Some(first) = choices.first() {
@@ -4800,6 +4827,17 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         }
     }
 
+    // ── Output DLP, and the one place a substituted tool call can be seen ────
+    //
+    // `dlp::scan` is whole-string and structure-blind and `dlp::redact` is
+    // offset-based over that same string, so a whole-body redaction reaches
+    // inside a tool call's `arguments`. That is not incidental: the redacted
+    // body is what ships, so the call the harness executes is the redacted one.
+    // This is the only site in the proxy where the original call and the
+    // corrected call both exist at once — streaming cannot form the pair,
+    // because OpenAI dribbles `arguments` across chunks and no point in that
+    // loop holds a complete version of either.
+    let mut redaction_hijacks: Vec<crate::plugins::hijack::HijackedCall> = Vec::new();
     let final_body = if state.config.intutic_settings.dlp.enabled
         && state.config.intutic_settings.dlp.scan_output
     {
@@ -4808,7 +4846,41 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         if !findings.is_empty() {
             tracing::info!(workspace_id = %workspace_id, findings = findings.len(), "DLP findings in response — redacting");
             let redacted = dlp::redact(&resp_str, &findings);
-            redacted.into_bytes()
+            // Reparse-or-refuse, matching the request path's guard.
+            //
+            // The request path has had this since TD-210 and the response path
+            // never did, so a redaction that landed across JSON scaffolding
+            // shipped a corrupt body to the client — a confusing failure the
+            // logs recorded as a successful redaction. The three outcomes are
+            // not equal: forwarding the original leaks the secret, forwarding
+            // broken JSON breaks the client silently, and a refusal the
+            // operator can act on is the only one that is honest.
+            match serde_json::from_str::<serde_json::Value>(&redacted) {
+                Ok(after) => {
+                    if let Ok(before) =
+                        serde_json::from_str::<serde_json::Value>(&resp_str)
+                    {
+                        redaction_hijacks =
+                            crate::plugins::hijack::substituted_calls(&before, &after);
+                    }
+                    redacted.into_bytes()
+                }
+                Err(e) => {
+                    tracing::error!(
+                        workspace_id = %workspace_id,
+                        error = %e,
+                        findings = findings.len(),
+                        "Output DLP redaction produced invalid JSON — refusing rather than forwarding"
+                    );
+                    serde_json::to_vec(&crate::commands::non_streaming_body(
+                        wire_for(&protocol, &provider),
+                        &actual_model,
+                        "[Intutic] The model's response contained sensitive content that could not \
+                         be safely redacted, so it was withheld. Retry the request.",
+                    ))
+                    .unwrap_or_default()
+                }
+            }
         } else {
             final_body_bytes
         }
@@ -4912,11 +4984,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // Cross-provider bodies were translated to OpenAI above, so the
             // client is expecting that shape whatever the upstream was.
             let wire = if is_same_provider {
-                match provider {
-                    Provider::Anthropic => crate::commands::WireProvider::Anthropic,
-                    Provider::Gemini => crate::commands::WireProvider::Gemini,
-                    Provider::OpenAI => crate::commands::WireProvider::OpenAI,
-                }
+                wire_for(&protocol, &provider)
             } else {
                 crate::commands::WireProvider::OpenAI
             };
@@ -5007,6 +5075,55 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         &trace,
     )
     .await;
+
+    // ── Substituted tool calls, reported against this trace ──────────────
+    //
+    // Emitted here rather than at the redaction site so the row can carry the
+    // trace id directly. The control plane's other decision producer — the
+    // daemon's review holds — has to *reconstruct* its trace by matching on
+    // (session, time), because a hook inside a harness never sees one. The
+    // proxy does see one: it is the trace being published on the next line.
+    // Reporting a guess when the authoritative link is in hand would put a
+    // reconstructed id on a row whose whole downstream value is being
+    // replayable against the trace that produced it.
+    //
+    // Detached and never awaited, for the same reason the trace publish is: the
+    // client's response is already built, and a control plane that is slow or
+    // down must cost them nothing. A dropped report is a missing row, not a
+    // missing redaction — the redaction already shipped.
+    //
+    // Suppressed when the response gate denied, and that is not a detail. The
+    // gate runs *after* DLP and replaces the whole body with a refusal, so on
+    // that path the corrected call never shipped and nothing ran at all.
+    // Reporting it would assert a substitution the harness executed, when in
+    // fact the harness executed nothing — the same false claim the review-hold
+    // producer refuses to make by writing `null`.
+    if !redaction_hijacks.is_empty() && response_denial.is_none() {
+        let cp_url = state
+            .config
+            .intutic_settings
+            .policy
+            .control_plane_url
+            .clone()
+            .unwrap_or_default();
+        if cp_url.is_empty() {
+            tracing::warn!(
+                count = redaction_hijacks.len(),
+                "Output DLP substituted a tool call but no control plane is configured to record it"
+            );
+        } else {
+            let client = state.http_client.clone();
+            let token = raw_token.to_string();
+            let ws = workspace_id.clone();
+            let sess = session_id.clone();
+            let tid = trace.trace_id.clone();
+            let calls = std::mem::take(&mut redaction_hijacks);
+            spawn(async move {
+                crate::plugins::hijack::report(&client, &cp_url, &token, &ws, &sess, &tid, &calls)
+                    .await;
+            });
+        }
+    }
 
     let trace_store = Arc::clone(&state.store);
     spawn(async move {
@@ -5203,6 +5320,214 @@ fn load_personal_sops() -> serde_json::Value {
     serde_json::Value::Array(sops)
 }
 
+/// Where a streamed text delta lives on the wire.
+///
+/// Keyed on `Protocol`, not `Provider`, and that distinction is the whole
+/// reason this type exists. `Provider` has three variants; the wire shapes have
+/// more, because `/v1/chat/completions` and `/v1/responses` are both
+/// `Provider::OpenAI` and put their text in different places. Every site that
+/// matched on `Provider` therefore had exactly two arms — Anthropic, and
+/// "everything else assumed to be chat completions" — and silently treated a
+/// Codex CLI stream as chat completions, which matched nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DeltaShape {
+    /// Anthropic `content_block_delta` → `delta.text`.
+    AnthropicText,
+    /// OpenAI Chat Completions → `choices[0].delta.content`.
+    OpenAIChatContent,
+    /// OpenAI Responses → `response.output_text.delta` → `delta`, a bare
+    /// string rather than a nested object.
+    ResponsesOutputText,
+    /// A shape this proxy does not parse streamed text out of.
+    ///
+    /// Only Gemini reaches this, and it is a statement rather than a gap. A
+    /// `/v1beta/` request never gets to Google: the model name lives in the URL
+    /// and `extract_model` reads only `body["model"]`, so the model resolves to
+    /// `"unknown"`, `get_model_provider("unknown")` answers `Provider::OpenAI`,
+    /// `is_same_provider` is false unconditionally, and the request is posted
+    /// to OpenAI's chat-completions endpoint as a Gemini `contents` body. There
+    /// is no Gemini stream arriving here to hold back, accumulate or gate, so
+    /// adding a `candidates[].content.parts[]` arm would be parsing for a wire
+    /// format that cannot reach this code. Making Gemini work is model-from-URL
+    /// extraction, URL-verb streaming detection, query-string forwarding and a
+    /// Gemini stream translator — a feature, not a DLP fix.
+    Unparsed,
+}
+
+/// The wire shape for a same-provider stream on `protocol`.
+///
+/// `protocol` is derived from the request path and `provider` is derived from
+/// the same path, so on the same-provider path the two cannot disagree.
+/// `Protocol::Unknown` is the MITM/fallback route, which has no path to key on,
+/// and there the provider is the only signal there has ever been.
+fn delta_shape(protocol: &crate::protocol::Protocol, provider: &Provider) -> DeltaShape {
+    use crate::protocol::Protocol as P;
+    match protocol {
+        P::Anthropic => DeltaShape::AnthropicText,
+        P::OpenAIChatCompletions => DeltaShape::OpenAIChatContent,
+        P::OpenAIResponses => DeltaShape::ResponsesOutputText,
+        P::Gemini => DeltaShape::Unparsed,
+        P::Unknown => match provider {
+            Provider::Anthropic => DeltaShape::AnthropicText,
+            Provider::OpenAI => DeltaShape::OpenAIChatContent,
+            Provider::Gemini => DeltaShape::Unparsed,
+        },
+    }
+}
+
+/// The wire shape to answer a client in, for a request that arrived on
+/// `protocol`.
+///
+/// Replaces three copies of `match provider { .. }` that could not tell
+/// `/v1/chat/completions` from `/v1/responses`, because `Provider` does not
+/// carry that distinction — so a synthesised body for a Codex CLI client came
+/// out as a `chat.completion` it cannot parse.
+fn wire_for(
+    protocol: &crate::protocol::Protocol,
+    provider: &Provider,
+) -> crate::commands::WireProvider {
+    use crate::commands::WireProvider as W;
+    use crate::protocol::Protocol as P;
+    match protocol {
+        P::Anthropic => W::Anthropic,
+        P::OpenAIChatCompletions => W::OpenAI,
+        P::OpenAIResponses => W::OpenAIResponses,
+        P::Gemini => W::Gemini,
+        P::Unknown => match provider {
+            Provider::Anthropic => W::Anthropic,
+            Provider::Gemini => W::Gemini,
+            Provider::OpenAI => W::OpenAI,
+        },
+    }
+}
+
+/// The assistant text one SSE payload carries, in `shape`'s wire form.
+///
+/// Shares `DeltaShape` with `holdback_rewrite_line` so the text the client
+/// receives and the text `accumulated_content` records are read out of the same
+/// field. They used to be two independent `provider ==` matches, which is
+/// survivable only while they agree.
+fn stream_delta_text(v: &serde_json::Value, shape: DeltaShape) -> Option<&str> {
+    match shape {
+        DeltaShape::AnthropicText => v.get("delta")?.get("text")?.as_str(),
+        DeltaShape::OpenAIChatContent => {
+            v.get("choices")?.as_array()?.first()?.get("delta")?.get("content")?.as_str()
+        }
+        // Type-guarded for the same reason the rewrite is: several Responses
+        // events carry a bare-string `delta`, and only this one is assistant
+        // text. `response.function_call_arguments.delta` is a tool call's
+        // arguments, and accumulating those as prose would feed the judge and
+        // the semantic cache a serialised tool call.
+        DeltaShape::ResponsesOutputText => {
+            if v.get("type")?.as_str()? != "response.output_text.delta" {
+                return None;
+            }
+            v.get("delta")?.as_str()
+        }
+        DeltaShape::Unparsed => None,
+    }
+}
+
+/// The (prompt, completion) token counts one SSE payload carries, if any.
+///
+/// Each provider names them differently and puts them in a different place, and
+/// getting this wrong is not a reporting detail: with both counts left at zero
+/// the caller falls back to `len()/4`, which on an empty accumulation floors at
+/// **1 token**. Cost, `accrue_spend`, the budget gate and the reward engine's
+/// cost term are then all computed from that 1.
+fn stream_usage(v: &serde_json::Value, shape: DeltaShape) -> (Option<u32>, Option<u32>) {
+    let read = |u: &serde_json::Value, a: &str, b: &str| -> Option<u32> {
+        u.get(a).or_else(|| u.get(b)).and_then(|x| x.as_u64()).map(|x| x as u32)
+    };
+    match shape {
+        DeltaShape::AnthropicText => match v.get("usage") {
+            Some(u) => (read(u, "input_tokens", "prompt_tokens"), read(u, "output_tokens", "completion_tokens")),
+            None => (None, None),
+        },
+        // Responses reports usage once, nested under the terminal event's
+        // `response` object — never at the top level, which is the only place
+        // the chat-completions arm looked.
+        DeltaShape::ResponsesOutputText => {
+            match v.get("response").and_then(|r| r.get("usage")).or_else(|| v.get("usage")) {
+                Some(u) => (
+                    read(u, "input_tokens", "prompt_tokens"),
+                    read(u, "output_tokens", "completion_tokens"),
+                ),
+                None => (None, None),
+            }
+        }
+        DeltaShape::OpenAIChatContent | DeltaShape::Unparsed => match v.get("usage") {
+            Some(u) => (
+                read(u, "prompt_tokens", "input_tokens"),
+                read(u, "completion_tokens", "output_tokens"),
+            ),
+            None => (None, None),
+        },
+    }
+}
+
+/// The governance post-processor's view of the client's wire shape.
+///
+/// Same reasoning as `wire_for`: the block is appended to the stream the client
+/// is reading, so the client's protocol decides its shape, and `Provider` alone
+/// cannot tell `/v1/chat/completions` from `/v1/responses`.
+fn postprocessor_protocol(
+    protocol: &crate::protocol::Protocol,
+    provider: &Provider,
+) -> crate::postprocessor::Protocol {
+    use crate::postprocessor::Protocol as PP;
+    use crate::protocol::Protocol as P;
+    match protocol {
+        P::Anthropic => PP::Anthropic,
+        P::OpenAIChatCompletions => PP::OpenAI,
+        P::OpenAIResponses => PP::OpenAIResponses,
+        P::Gemini => PP::Gemini,
+        P::Unknown => match provider {
+            Provider::Anthropic => PP::Anthropic,
+            Provider::Gemini => PP::Gemini,
+            Provider::OpenAI => PP::OpenAI,
+        },
+    }
+}
+
+/// Whether this SSE line is the chat-completions `[DONE]` sentinel.
+fn is_done_sentinel(line: &str) -> bool {
+    line.strip_prefix("data:").map(|d| d.trim() == "[DONE]").unwrap_or(false)
+}
+
+/// The `type` field of an SSE `data:` line's JSON payload, if it has one.
+///
+/// Reads the `data:` line rather than the `event:` line on purpose. Both carry
+/// the event name in the Responses API, but the forward loop handles lines one
+/// at a time and has no memory of the `event:` line that preceded this one.
+fn sse_data_type(line: &str) -> Option<String> {
+    let data = line.strip_prefix("data:")?.trim();
+    if data.is_empty() || data == "[DONE]" {
+        return None;
+    }
+    let v: serde_json::Value = serde_json::from_str(data).ok()?;
+    v.get("type").and_then(|t| t.as_str()).map(str::to_string)
+}
+
+/// Where a flushed holdback tail has to be addressed.
+///
+/// A flush must name the block it belongs to. Anthropic needs the content-block
+/// index — with extended thinking the text block is index 1, and emitting the
+/// tail as index 0 addresses a block that was never opened. The Responses API
+/// needs more than an index: its deltas are addressed by `item_id` *and*
+/// `content_index` within an `output_index`, and a tail that names the wrong
+/// item is appended to the wrong message.
+#[derive(Debug, Clone, Default)]
+struct DeltaAddress {
+    /// Anthropic content-block index, OpenAI choice index, or the Responses
+    /// `output_index`.
+    index: u64,
+    /// Responses only: the item the released text belonged to.
+    item_id: String,
+    /// Responses only: the content part within that item.
+    content_index: u64,
+}
+
 /// Apply the output-DLP holdback to one SSE `data:` line.
 ///
 /// Rewrites the line's **text delta** so it carries only the bytes
@@ -5213,19 +5538,14 @@ fn load_personal_sops() -> serde_json::Value {
 /// does. Returning `None` rather than a copy keeps the clean path
 /// allocation-free.
 ///
-/// The delta field is located the same way the accumulation code below locates
-/// it — `delta.text` for Anthropic, `choices[0].delta.content` for everything
-/// else — so the text this releases and the text `accumulated_content` records
-/// cannot drift apart. Shapes neither of them knows (Gemini's `candidates`,
-/// the OpenAI Responses `response.output_text.delta` envelope) are left alone
-/// by both: no holdback, and no accumulation either, which is the pre-existing
-/// state of those paths and not something this change narrows.
+/// The delta field is located by `DeltaShape`, which is also what the
+/// accumulation code below uses, so the text this releases and the text
+/// `accumulated_content` records cannot drift apart. `DeltaShape::Unparsed`
+/// (Gemini) is left alone by both — see that variant for why that is a
+/// statement about reachability rather than a hole.
 ///
-/// `block_index` tracks the Anthropic content-block index the held text came
-/// from, and is updated only for lines that actually carry text. A flush must
-/// name the block it belongs to: with extended thinking the text block is
-/// index 1, and emitting the tail as index 0 would address a block that was
-/// never opened.
+/// `addr` tracks where the held text came from, and is updated only for lines
+/// that actually carry text.
 ///
 /// A rewritten line is re-serialised from a `serde_json::Value`, so its keys
 /// come back out in `serde_json`'s order rather than the upstream's. That is
@@ -5234,27 +5554,54 @@ fn load_personal_sops() -> serde_json::Value {
 fn holdback_rewrite_line(
     scrubber: &mut crate::dlp::StreamScrubber,
     line: &str,
-    provider: &Provider,
-    block_index: &mut u64,
+    shape: DeltaShape,
+    addr: &mut DeltaAddress,
 ) -> Option<String> {
     let data = line.strip_prefix("data:")?.trim();
     if data.is_empty() || data == "[DONE]" {
         return None;
     }
     let mut v: serde_json::Value = serde_json::from_str(data).ok()?;
-    let idx = v.get("index").and_then(|i| i.as_u64());
-    let slot = match provider {
-        Provider::Anthropic => v.get_mut("delta").and_then(|d| d.get_mut("text")),
-        _ => v
+    let next = match shape {
+        DeltaShape::AnthropicText | DeltaShape::OpenAIChatContent => DeltaAddress {
+            index: v.get("index").and_then(|i| i.as_u64()).unwrap_or(addr.index),
+            ..DeltaAddress::default()
+        },
+        DeltaShape::ResponsesOutputText => DeltaAddress {
+            index: v.get("output_index").and_then(|i| i.as_u64()).unwrap_or(addr.index),
+            item_id: v
+                .get("item_id")
+                .and_then(|i| i.as_str())
+                .unwrap_or(&addr.item_id)
+                .to_string(),
+            content_index: v
+                .get("content_index")
+                .and_then(|i| i.as_u64())
+                .unwrap_or(addr.content_index),
+        },
+        DeltaShape::Unparsed => return None,
+    };
+    let slot = match shape {
+        DeltaShape::AnthropicText => v.get_mut("delta").and_then(|d| d.get_mut("text")),
+        DeltaShape::OpenAIChatContent => v
             .get_mut("choices")
             .and_then(|c| c.get_mut(0))
             .and_then(|c| c.get_mut("delta"))
             .and_then(|d| d.get_mut("content")),
+        // `delta` is the string itself here, not an object with a field on it.
+        // Guarded by the event type: `response.function_call_arguments.delta`
+        // also carries a bare-string `delta`, and rewriting *that* would edit a
+        // tool call's arguments rather than assistant text.
+        DeltaShape::ResponsesOutputText => {
+            if v.get("type").and_then(|t| t.as_str()) != Some("response.output_text.delta") {
+                return None;
+            }
+            v.get_mut("delta")
+        }
+        DeltaShape::Unparsed => None,
     }?;
     let original = slot.as_str()?.to_string();
-    if let Some(i) = idx {
-        *block_index = i;
-    }
+    *addr = next;
     let released = scrubber.push(&original);
     if released == original {
         return None;
@@ -5279,8 +5626,9 @@ fn holdback_flush_bytes(
     text: &str,
     protocol: &crate::protocol::Protocol,
     same_provider: bool,
-    index: u64,
+    addr: &DeltaAddress,
 ) -> Option<String> {
+    let index = addr.index;
     if !same_provider {
         let event = serde_json::json!({
             "type": "content_block_delta",
@@ -5306,6 +5654,19 @@ fn holdback_flush_bytes(
                 "delta": { "type": "text_delta", "text": text },
             })
         ),
+        // The tail belongs to the item and content part it was held from, not
+        // to a new message: it is the end of a sentence the client has already
+        // started rendering. `item_id` is what makes it land there.
+        crate::protocol::Protocol::OpenAIResponses => format!(
+            "event: response.output_text.delta\ndata: {}\n\n",
+            serde_json::json!({
+                "type": "response.output_text.delta",
+                "item_id": addr.item_id,
+                "output_index": index,
+                "content_index": addr.content_index,
+                "delta": text,
+            })
+        ),
         _ => format!(
             "data: {}\n\n",
             serde_json::json!({
@@ -5321,12 +5682,22 @@ fn holdback_flush_bytes(
     })
 }
 
-pub fn get_terminal_stream_event(protocol: &crate::protocol::Protocol) -> &'static str {
+/// The terminal event to close a stream the proxy is ending itself.
+///
+/// Returns `String` rather than `&'static str` because the Responses arm has to
+/// carry a model name. The Responses stream's terminal is `response.completed`;
+/// `data: [DONE]` is the chat-completions sentinel and a Codex CLI client given
+/// it sees a stream that never ended — which is the truncation this function is
+/// supposed to prevent, delivered by the function itself.
+pub fn get_terminal_stream_event(protocol: &crate::protocol::Protocol, model: &str) -> String {
     match protocol {
         crate::protocol::Protocol::Anthropic => {
-            "event: content_block_stop\ndata: {\"type\": \"content_block_stop\", \"index\": 0}\n\nevent: message_stop\ndata: {\"type\": \"message_stop\"}\n\n"
+            "event: content_block_stop\ndata: {\"type\": \"content_block_stop\", \"index\": 0}\n\nevent: message_stop\ndata: {\"type\": \"message_stop\"}\n\n".to_string()
         }
-        _ => "data: [DONE]\n\n",
+        crate::protocol::Protocol::OpenAIResponses => {
+            crate::commands::responses_terminal_event(model)
+        }
+        _ => "data: [DONE]\n\n".to_string(),
     }
 }
 
@@ -5458,9 +5829,11 @@ mod tests {
         } else {
             None
         };
-        let mut block_index = 0u64;
+        let mut addr = DeltaAddress::default();
         let mut client = String::new();
         let mut accumulated = String::new();
+        let shape = delta_shape(&protocol, &provider);
+        let mut done_received = false;
 
         for (n, raw) in sse.split_inclusive('\n').enumerate() {
             if ending != Ending::Complete && n == stop_after {
@@ -5471,23 +5844,31 @@ mod tests {
                 line = scrubbed;
             }
             if let Some(s) = sc.as_mut() {
-                if let Some(rw) = holdback_rewrite_line(s, &line, &provider, &mut block_index) {
+                if let Some(rw) = holdback_rewrite_line(s, &line, shape, &mut addr) {
                     line = rw;
                 }
             }
 
-            let is_done = if provider == Provider::Anthropic {
-                line == "event: message_stop"
-            } else {
-                line.starts_with("data:") && line["data:".len()..].trim() == "[DONE]"
-            };
+            // Character-for-character the loop's own terminal test.
+            let is_done = !done_received
+                && match shape {
+                    DeltaShape::AnthropicText => line == "event: message_stop",
+                    DeltaShape::ResponsesOutputText => {
+                        is_done_sentinel(&line)
+                            || sse_data_type(&line).as_deref() == Some("response.completed")
+                    }
+                    _ => is_done_sentinel(&line),
+                };
+            if is_done {
+                done_received = true;
+            }
             let is_cbs = provider == Provider::Anthropic
                 && (line == "event: content_block_stop"
                     || (line.starts_with("data:") && line.contains("content_block_stop")));
             if is_done || is_cbs {
                 if let Some(held) = sc.as_mut().and_then(|s| s.flush()) {
                     accumulated.push_str(&held);
-                    if let Some(b) = holdback_flush_bytes(&held, &protocol, true, block_index) {
+                    if let Some(b) = holdback_flush_bytes(&held, &protocol, true, &addr) {
                         client.push_str(&b);
                     }
                 }
@@ -5499,15 +5880,7 @@ mod tests {
                 let data = stripped.trim();
                 if data != "[DONE]" && !data.is_empty() {
                     if let Ok(v) = serde_json::from_str::<serde_json::Value>(data) {
-                        let t = if provider == Provider::Anthropic {
-                            v.get("delta").and_then(|d| d.get("text"))
-                        } else {
-                            v.get("choices")
-                                .and_then(|c| c.get(0))
-                                .and_then(|c| c.get("delta"))
-                                .and_then(|d| d.get("content"))
-                        };
-                        if let Some(t) = t.and_then(|x| x.as_str()) {
+                        if let Some(t) = stream_delta_text(&v, shape) {
                             accumulated.push_str(t);
                         }
                     }
@@ -5520,7 +5893,7 @@ mod tests {
         if let Some(held) = sc.as_mut().and_then(|s| s.flush()) {
             accumulated.push_str(&held);
             if ending != Ending::ClientGone {
-                if let Some(b) = holdback_flush_bytes(&held, &protocol, true, block_index) {
+                if let Some(b) = holdback_flush_bytes(&held, &protocol, true, &addr) {
                     client.push_str(&b);
                 }
             }
@@ -5529,7 +5902,7 @@ mod tests {
     }
 
     /// What a client reassembles out of the bytes it received.
-    fn client_text(stream: &str, provider: &Provider) -> String {
+    fn client_text(stream: &str, shape: DeltaShape) -> String {
         let mut out = String::new();
         for line in stream.lines() {
             let Some(data) = line.strip_prefix("data:") else {
@@ -5542,19 +5915,53 @@ mod tests {
             let Ok(v) = serde_json::from_str::<serde_json::Value>(data) else {
                 continue;
             };
-            let t = if *provider == Provider::Anthropic {
-                v.get("delta").and_then(|d| d.get("text"))
-            } else {
-                v.get("choices")
-                    .and_then(|c| c.get(0))
-                    .and_then(|c| c.get("delta"))
-                    .and_then(|d| d.get("content"))
-            };
-            if let Some(t) = t.and_then(|x| x.as_str()) {
+            if let Some(t) = stream_delta_text(&v, shape) {
                 out.push_str(t);
             }
         }
         out
+    }
+
+    /// An OpenAI **Responses API** stream carrying `deltas` as one message.
+    ///
+    /// Spec-derived, not captured — the same provenance caveat as
+    /// `protocol::tool_use_parser`'s Responses fixtures, and stated here again
+    /// because these bytes are what every Responses assertion below is measured
+    /// against. Note the two things that make this shape distinct and that the
+    /// old `Provider`-keyed code could not express: text is a **bare string**
+    /// on `delta`, and the stream ends on `response.completed` rather than
+    /// `[DONE]`.
+    fn responses_stream(deltas: &[&str]) -> String {
+        let mut s = String::from(
+            "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"status\":\"in_progress\"}}\n\n",
+        );
+        s.push_str(&format!(
+            "event: response.output_item.added\ndata: {}\n\n",
+            serde_json::json!({
+                "type": "response.output_item.added", "output_index": 0,
+                "item": {"id":"msg_1","type":"message","status":"in_progress","role":"assistant","content":[]}
+            })
+        ));
+        for d in deltas {
+            s.push_str(&format!(
+                "event: response.output_text.delta\ndata: {}\n\n",
+                serde_json::json!({
+                    "type": "response.output_text.delta",
+                    "item_id": "msg_1", "output_index": 0, "content_index": 0, "delta": d
+                })
+            ));
+        }
+        s.push_str(&format!(
+            "event: response.completed\ndata: {}\n\n",
+            serde_json::json!({
+                "type": "response.completed",
+                "response": {
+                    "id": "resp_1", "status": "completed",
+                    "usage": {"input_tokens": 11, "output_tokens": 22, "total_tokens": 33}
+                }
+            })
+        ));
+        s
     }
 
     fn openai_stream(deltas: &[&str]) -> String {
@@ -5619,7 +6026,7 @@ mod tests {
             0,
         );
         assert!(
-            client_text(&client, &Provider::OpenAI).contains(SPLIT_WHOLE),
+            client_text(&client, DeltaShape::OpenAIChatContent).contains(SPLIT_WHOLE),
             "the defect no longer reproduces at holdback 0; either the leak was \
              closed somewhere else or `0` has stopped meaning 'the old behaviour'"
         );
@@ -5636,7 +6043,7 @@ mod tests {
             Ending::Complete,
             0,
         );
-        let text = client_text(&client, &Provider::OpenAI);
+        let text = client_text(&client, DeltaShape::OpenAIChatContent);
         assert!(!text.contains(SPLIT_WHOLE));
         assert!(text.contains("[REDACTED_SECRET]"));
     }
@@ -5652,7 +6059,7 @@ mod tests {
             Ending::Complete,
             0,
         );
-        let text = client_text(&client, &Provider::OpenAI);
+        let text = client_text(&client, DeltaShape::OpenAIChatContent);
         assert!(!text.contains(SPLIT_WHOLE), "client received: {text}");
         assert!(text.contains("[REDACTED_SECRET]"), "client received: {text}");
         assert!(text.starts_with("Here is the key: "));
@@ -5676,7 +6083,7 @@ mod tests {
             Ending::Complete,
             0,
         );
-        let text = client_text(&client, &Provider::Anthropic);
+        let text = client_text(&client, DeltaShape::AnthropicText);
         assert!(!text.contains(SPLIT_WHOLE), "client received: {text}");
         assert!(text.contains("[REDACTED_SECRET]"));
         assert_eq!(accumulated, text);
@@ -5735,6 +6142,7 @@ mod tests {
                 anthropic_stream(&[(0, &body)]),
             ),
         ] {
+            let shape = delta_shape(&protocol, &provider);
             let (client, accumulated) = replay(
                 &sse,
                 derived(),
@@ -5743,7 +6151,7 @@ mod tests {
                 Ending::Complete,
                 0,
             );
-            assert_eq!(client_text(&client, &provider), body.concat());
+            assert_eq!(client_text(&client, shape), body.concat());
             assert_eq!(accumulated, body.concat());
         }
     }
@@ -5780,7 +6188,7 @@ mod tests {
             6,
         );
         assert_eq!(
-            client_text(&client, &Provider::OpenAI),
+            client_text(&client, DeltaShape::OpenAIChatContent),
             body.concat(),
             "the holdback swallowed text the model had already produced"
         );
@@ -5815,7 +6223,7 @@ mod tests {
     #[test]
     fn non_text_events_are_left_exactly_as_they_arrived() {
         let mut sc = crate::dlp::StreamScrubber::new(derived());
-        let mut idx = 0u64;
+        let mut idx = DeltaAddress::default();
         let untouched = [
             (Provider::OpenAI, r#"data: [DONE]"#),
             (
@@ -5839,8 +6247,13 @@ mod tests {
             (Provider::OpenAI, r#"data: {"choices":[{"delta":{}}]"#),
         ];
         for (provider, line) in untouched {
+            let shape = if provider == Provider::Anthropic {
+                DeltaShape::AnthropicText
+            } else {
+                DeltaShape::OpenAIChatContent
+            };
             assert!(
-                holdback_rewrite_line(&mut sc, line, &provider, &mut idx).is_none(),
+                holdback_rewrite_line(&mut sc, line, shape, &mut idx).is_none(),
                 "rewrote a line it had no business touching: {line}"
             );
         }
@@ -5856,33 +6269,43 @@ mod tests {
     #[test]
     fn the_block_index_only_tracks_lines_that_carry_text() {
         let mut sc = crate::dlp::StreamScrubber::new(derived());
-        let mut idx = 0u64;
+        let mut idx = DeltaAddress::default();
         holdback_rewrite_line(
             &mut sc,
             r#"data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"hello"}}"#,
-            &Provider::Anthropic,
+            DeltaShape::AnthropicText,
             &mut idx,
         );
-        assert_eq!(idx, 1);
+        assert_eq!(idx.index, 1);
         holdback_rewrite_line(
             &mut sc,
             r#"data: {"type":"content_block_delta","index":7,"delta":{"type":"input_json_delta","partial_json":"{"}}"#,
-            &Provider::Anthropic,
+            DeltaShape::AnthropicText,
             &mut idx,
         );
-        assert_eq!(idx, 1, "a tool-call block moved the text block's index");
+        assert_eq!(idx.index, 1, "a tool-call block moved the text block's index");
     }
 
     /// Cross-provider streams reach the client as translated chunks, so the
     /// flush has to go through the translator too rather than assuming the
     /// chat-completions shape.
+    ///
+    /// Note what this does **not** assert. For `OpenAIResponses` the translated
+    /// chunk is still chat-completions-shaped, because
+    /// `OpenAIAdapter::translate_stream_event` ignores its `is_responses_api`
+    /// argument — a pre-existing gap documented at that function. The
+    /// assertion here is only that the flush goes through the translator and
+    /// keeps the text; it is deliberately not evidence that a cross-provider
+    /// Responses stream is correct, and it should start failing the day that
+    /// translator learns the Responses shape.
     #[test]
     fn a_cross_provider_flush_is_emitted_in_the_translated_shape() {
         for protocol in [
             crate::protocol::Protocol::OpenAIChatCompletions,
             crate::protocol::Protocol::OpenAIResponses,
         ] {
-            let bytes = holdback_flush_bytes("held tail", &protocol, false, 0)
+            let bytes =
+                holdback_flush_bytes("held tail", &protocol, false, &DeltaAddress::default())
                 .expect("a cross-provider flush must produce a chunk");
             assert!(bytes.starts_with("data: ") && bytes.ends_with("\n\n"));
             let v: serde_json::Value =
@@ -5897,16 +6320,248 @@ mod tests {
     #[test]
     fn test_terminal_stream_events() {
         assert_eq!(
-            get_terminal_stream_event(&crate::protocol::Protocol::Anthropic),
+            get_terminal_stream_event(&crate::protocol::Protocol::Anthropic, "m"),
             "event: content_block_stop\ndata: {\"type\": \"content_block_stop\", \"index\": 0}\n\nevent: message_stop\ndata: {\"type\": \"message_stop\"}\n\n"
         );
         assert_eq!(
-            get_terminal_stream_event(&crate::protocol::Protocol::OpenAIChatCompletions),
+            get_terminal_stream_event(&crate::protocol::Protocol::OpenAIChatCompletions, "m"),
             "data: [DONE]\n\n"
         );
         assert_eq!(
-            get_terminal_stream_event(&crate::protocol::Protocol::Gemini),
+            get_terminal_stream_event(&crate::protocol::Protocol::Gemini, "m"),
             "data: [DONE]\n\n"
+        );
+    }
+
+    // ── OpenAI Responses (Codex CLI) ──────────────────────────────────────
+    //
+    // Every fixture below is spec-derived, not captured — see
+    // `responses_stream`. That is stated once per module rather than once per
+    // test, but it applies to all of them.
+
+    /// The terminal event, which is the fix these tests all sit on top of.
+    ///
+    /// `[DONE]` is the chat-completions sentinel. A Responses client given it
+    /// sees a stream that never ended, so `done_received` stayed false, the
+    /// integrity scorer recorded `Truncated` on a response that completed
+    /// perfectly, and the reward engine was taught to penalise the arm.
+    #[test]
+    fn the_responses_terminal_is_response_completed_not_done() {
+        let ev = get_terminal_stream_event(&crate::protocol::Protocol::OpenAIResponses, "gpt-5");
+        assert!(ev.contains("response.completed"), "wrong terminal event: {ev}");
+        assert!(!ev.contains("[DONE]"), "emitted the chat-completions sentinel: {ev}");
+        let data = ev.lines().find_map(|l| l.strip_prefix("data: ")).expect("a data line");
+        serde_json::from_str::<serde_json::Value>(data).expect("terminal event must be JSON");
+    }
+
+    /// The straddle case, on the shape that could not see it.
+    ///
+    /// A secret split across two `response.output_text.delta` events has SSE
+    /// scaffolding through the middle of it on the wire, so the per-line scrub
+    /// matches nothing; the client concatenates the deltas and sees the whole
+    /// secret. The holdback is what closes that, and it was keyed on `Provider`
+    /// — which cannot distinguish this shape from chat completions, so it found
+    /// no delta to hold and did nothing.
+    #[test]
+    fn a_split_secret_in_a_responses_stream_is_held_back() {
+        let sse = responses_stream(&["Here is the key: ", SPLIT_HEAD, SPLIT_TAIL, ", use it."]);
+        let (client, accumulated) = replay(
+            &sse,
+            derived(),
+            Provider::OpenAI,
+            crate::protocol::Protocol::OpenAIResponses,
+            Ending::Complete,
+            0,
+        );
+        let text = client_text(&client, DeltaShape::ResponsesOutputText);
+        assert!(
+            !text.contains(SPLIT_WHOLE),
+            "the split secret reached the client: {text}"
+        );
+        assert!(text.contains("[REDACTED"), "nothing was redacted: {text}");
+        // What the trace, the judge and the semantic cache record has to be
+        // what the client got — otherwise the redaction is cosmetic.
+        assert_eq!(accumulated, text);
+    }
+
+    /// Nothing is lost on a clean Responses stream.
+    ///
+    /// The holdback's failure mode is worse than the leak it closes: a tail
+    /// that is held and never flushed truncates a live response. The Responses
+    /// flush hangs off `response.completed`, which is new, so it is asserted
+    /// directly rather than inferred from the chat-completions case.
+    #[test]
+    fn a_clean_responses_stream_is_neither_truncated_nor_rewritten() {
+        let body = ["The quick ", "brown fox ", "jumps over ", "the lazy dog."];
+        let sse = responses_stream(&body);
+        let (client, accumulated) = replay(
+            &sse,
+            derived(),
+            Provider::OpenAI,
+            crate::protocol::Protocol::OpenAIResponses,
+            Ending::Complete,
+            0,
+        );
+        assert_eq!(client_text(&client, DeltaShape::ResponsesOutputText), body.concat());
+        assert_eq!(accumulated, body.concat());
+    }
+
+    /// A flushed tail must name the item and content part it was held from.
+    ///
+    /// Responses deltas are addressed by `item_id` and `content_index`, not by
+    /// an index alone. A tail emitted with the wrong `item_id` is appended to
+    /// a different message — visible to the user as text landing in the wrong
+    /// place, which is why `DeltaAddress` carries more than a `u64`.
+    #[test]
+    fn a_responses_flush_is_addressed_to_the_item_it_was_held_from() {
+        let mut sc = crate::dlp::StreamScrubber::new(derived());
+        let mut addr = DeltaAddress::default();
+        holdback_rewrite_line(
+            &mut sc,
+            r#"data: {"type":"response.output_text.delta","item_id":"msg_seven","output_index":3,"content_index":2,"delta":"hello"}"#,
+            DeltaShape::ResponsesOutputText,
+            &mut addr,
+        );
+        assert_eq!(addr.item_id, "msg_seven");
+        assert_eq!(addr.index, 3);
+        assert_eq!(addr.content_index, 2);
+
+        let bytes = holdback_flush_bytes(
+            "tail",
+            &crate::protocol::Protocol::OpenAIResponses,
+            true,
+            &addr,
+        )
+        .expect("a same-provider Responses flush must produce an event");
+        let data = bytes.lines().find_map(|l| l.strip_prefix("data: ")).expect("a data line");
+        let v: serde_json::Value = serde_json::from_str(data).expect("valid JSON");
+        assert_eq!(v["type"], "response.output_text.delta");
+        assert_eq!(v["item_id"], "msg_seven");
+        assert_eq!(v["output_index"], 3);
+        assert_eq!(v["content_index"], 2);
+        assert_eq!(v["delta"], "tail");
+    }
+
+    /// The holdback must not touch a tool call's arguments.
+    ///
+    /// `response.function_call_arguments.delta` carries a bare-string `delta`
+    /// exactly as `response.output_text.delta` does. Matching on the field name
+    /// alone would feed a tool call's arguments through the text scrubber —
+    /// holding back the tail of a JSON document, which would break the call and
+    /// pollute `accumulated_content` with a serialised tool call.
+    #[test]
+    fn responses_tool_argument_deltas_are_not_text() {
+        let mut sc = crate::dlp::StreamScrubber::new(derived());
+        let mut addr = DeltaAddress::default();
+        let untouched = [
+            r#"data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","output_index":1,"delta":"{\"command\":\"ls\"}"}"#,
+            r#"data: {"type":"response.output_item.added","output_index":1,"item":{"id":"fc_1","type":"function_call","name":"bash","arguments":""}}"#,
+            r#"data: {"type":"response.completed","response":{"usage":{"input_tokens":1,"output_tokens":2}}}"#,
+            r#"data: {"type":"response.reasoning_summary_text.delta","item_id":"rs_1","output_index":0,"delta":"thinking"}"#,
+        ];
+        for line in untouched {
+            assert!(
+                holdback_rewrite_line(&mut sc, line, DeltaShape::ResponsesOutputText, &mut addr)
+                    .is_none(),
+                "rewrote a line it had no business touching: {line}"
+            );
+        }
+        assert_eq!(sc.flush(), None, "a non-text event entered the holdback buffer");
+        assert!(
+            addr.item_id.is_empty(),
+            "a non-text event moved the flush address to {}",
+            addr.item_id
+        );
+    }
+
+    /// Output metered at 1 token was the most expensive bug on this path.
+    ///
+    /// Responses reports usage once, nested under the terminal event's
+    /// `response` object, and names the counts `input_tokens`/`output_tokens`.
+    /// The chat-completions extractor looked for `usage.completion_tokens` at
+    /// the top level, found neither, and left both at 0 — after which the
+    /// caller's `len()/4` fallback floors at **1**. Cost, `accrue_spend`, the
+    /// budget gate and the reward engine's cost term were all computed from
+    /// that 1 on every streamed Codex CLI request.
+    #[test]
+    fn responses_usage_is_read_from_the_terminal_event() {
+        let ev: serde_json::Value = serde_json::from_str(
+            r#"{"type":"response.completed","response":{"usage":{"input_tokens":1234,"output_tokens":567,"total_tokens":1801}}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            stream_usage(&ev, DeltaShape::ResponsesOutputText),
+            (Some(1234), Some(567))
+        );
+        // The shape that shipped, on the same bytes, is the regression this
+        // guards: nothing found, so nothing metered.
+        assert_eq!(stream_usage(&ev, DeltaShape::OpenAIChatContent), (None, None));
+    }
+
+    /// Chat completions must keep reading the names it has always read. The
+    /// `or_else` fallbacks added for Responses must not reorder these.
+    #[test]
+    fn chat_completions_usage_is_unchanged() {
+        let ev: serde_json::Value =
+            serde_json::from_str(r#"{"usage":{"prompt_tokens":10,"completion_tokens":20}}"#)
+                .unwrap();
+        assert_eq!(
+            stream_usage(&ev, DeltaShape::OpenAIChatContent),
+            (Some(10), Some(20))
+        );
+        let anth: serde_json::Value =
+            serde_json::from_str(r#"{"usage":{"input_tokens":7,"output_tokens":8}}"#).unwrap();
+        assert_eq!(stream_usage(&anth, DeltaShape::AnthropicText), (Some(7), Some(8)));
+    }
+
+    /// The route decides the wire shape, not the vendor.
+    ///
+    /// `Provider::OpenAI` covers two formats that are not interchangeable, and
+    /// three separate sites used to collapse them. Codex CLI got a
+    /// `chat.completion` it cannot parse whenever the proxy answered locally —
+    /// a command reply, or the response gate's refusal.
+    #[test]
+    fn the_wire_shape_follows_the_route_not_the_provider() {
+        use crate::commands::WireProvider as W;
+        use crate::protocol::Protocol as P;
+        assert!(matches!(wire_for(&P::OpenAIResponses, &Provider::OpenAI), W::OpenAIResponses));
+        assert!(matches!(wire_for(&P::OpenAIChatCompletions, &Provider::OpenAI), W::OpenAI));
+        assert!(matches!(wire_for(&P::Anthropic, &Provider::Anthropic), W::Anthropic));
+        // The MITM/fallback route has no path to key on, so the provider is the
+        // only signal — and stays the signal it always was.
+        assert!(matches!(wire_for(&P::Unknown, &Provider::Anthropic), W::Anthropic));
+        assert!(matches!(wire_for(&P::Unknown, &Provider::OpenAI), W::OpenAI));
+    }
+
+    /// Gemini is left unparsed **on purpose**, and this test is the record.
+    ///
+    /// Adding a `candidates[].content.parts[]` arm would be parsing for a
+    /// stream that cannot arrive: a `/v1beta/` request carries its model in the
+    /// URL, `extract_model` reads only `body["model"]`, so the model is
+    /// `"unknown"`, `get_model_provider` answers `Provider::OpenAI`, and
+    /// `is_same_provider` is therefore false for every Gemini request — the
+    /// same-provider branch this shape feeds is unreachable. If Gemini is ever
+    /// made to work end to end, this assertion is where to start.
+    #[test]
+    fn gemini_streaming_is_deliberately_unparsed() {
+        use crate::protocol::Protocol as P;
+        assert_eq!(delta_shape(&P::Gemini, &Provider::Gemini), DeltaShape::Unparsed);
+        assert_eq!(delta_shape(&P::Unknown, &Provider::Gemini), DeltaShape::Unparsed);
+        let gemini_chunk: serde_json::Value = serde_json::from_str(
+            r#"{"candidates":[{"content":{"parts":[{"text":"hi"}],"role":"model"}}]}"#,
+        )
+        .unwrap();
+        assert_eq!(stream_delta_text(&gemini_chunk, DeltaShape::Unparsed), None);
+        let mut sc = crate::dlp::StreamScrubber::new(derived());
+        let mut addr = DeltaAddress::default();
+        assert!(
+            holdback_rewrite_line(
+                &mut sc,
+                &format!("data: {gemini_chunk}"),
+                DeltaShape::Unparsed,
+                &mut addr
+            )
+            .is_none()
         );
     }
 
