@@ -33,10 +33,19 @@
 //!
 //! # Supported providers
 //!
-//! | Provider  | Detection trigger |
-//! |-----------|-------------------|
-//! | Anthropic | `content_block_start` with `content_block.type == "tool_use"` |
-//! | OpenAI    | `choices[].delta.tool_calls[].function.name` present |
+//! | Wire shape          | Detection trigger |
+//! |---------------------|-------------------|
+//! | Anthropic           | `content_block_start` with `content_block.type == "tool_use"` |
+//! | OpenAI chat         | `choices[].delta.tool_calls[].function.name` present |
+//! | OpenAI Responses    | `response.output_item.added` with `item.type == "function_call"` |
+//!
+//! **Gemini's native `functionCall` parts are still not matched**, and that is
+//! deliberate rather than an omission — see `plugins::response_gate`'s module
+//! docs and `proxy::delta_shape`. A `/v1beta/` request never reaches Google in
+//! the first place (the model name lives in the URL, so `extract_model` yields
+//! `"unknown"` and the request is translated to OpenAI), so there is no Gemini
+//! stream here to parse. Teaching this module the Gemini shape would be
+//! speculative parsing for a stream that cannot arrive.
 
 use serde_json::Value;
 
@@ -47,8 +56,11 @@ use serde_json::Value;
 pub enum ToolUseSource {
     /// Anthropic streaming SSE — `content_block_start` event.
     Anthropic,
-    /// OpenAI streaming SSE — `choices[].delta.tool_calls` event.
+    /// OpenAI Chat Completions streaming SSE — `choices[].delta.tool_calls` event.
     OpenAI,
+    /// OpenAI Responses streaming SSE — `response.output_item.added` naming a
+    /// `function_call` item. Codex CLI's wire format.
+    OpenAIResponses,
 }
 
 /// A tool invocation detected in a single streaming SSE chunk.
@@ -60,8 +72,8 @@ pub struct ToolUseEvent {
     pub tool_input_json: String,
     /// Which LLM provider emitted this event.
     pub source: ToolUseSource,
-    /// The index the event claimed: Anthropic's `content_block` index, or
-    /// OpenAI's `choices[].index`.
+    /// The index the event claimed: Anthropic's `content_block` index,
+    /// OpenAI's `choices[].index`, or the Responses API's `output_index`.
     ///
     /// Load-bearing for the response gate. When a tool-use event is withheld,
     /// the refusal that replaces it has to be written at *that* index — writing
@@ -106,6 +118,9 @@ pub fn parse_sse_chunk(chunk: &str) -> Option<ToolUseEvent> {
             return Some(event);
         }
         if let Some(event) = try_parse_openai(&json) {
+            return Some(event);
+        }
+        if let Some(event) = try_parse_openai_responses(&json) {
             return Some(event);
         }
     }
@@ -201,6 +216,76 @@ fn try_parse_openai(json: &Value) -> Option<ToolUseEvent> {
     })
 }
 
+/// Try to extract a tool-use start from an OpenAI **Responses API** SSE data
+/// object — the wire format Codex CLI speaks on `/v1/responses`.
+///
+/// The Responses stream announces a call by adding an output *item* whose type
+/// is `function_call`, before any of its arguments exist:
+///
+/// ```json
+/// {
+///   "type": "response.output_item.added",
+///   "output_index": 1,
+///   "item": {
+///     "id": "fc_abc",
+///     "type": "function_call",
+///     "call_id": "call_abc",
+///     "name": "bash",
+///     "arguments": ""
+///   }
+/// }
+/// ```
+///
+/// Arguments then dribble out as `response.function_call_arguments.delta`
+/// events, exactly as chat completions dribbles `function.arguments` — so the
+/// same limit applies and is the same limit the module docs state: **name-level
+/// policy only**. Those delta events carry no `item.type`, so they do not match
+/// here, which is what keeps the gate from firing twice on one call.
+///
+/// This shape was previously invisible to the gate. `try_parse_openai` needs
+/// `choices[]`, which a Responses stream never emits, so a denied tool call
+/// streamed to Codex CLI reached the tool runner while the proxy reported the
+/// deny list as enforced.
+///
+/// # Provenance
+///
+/// Written from the published Responses streaming event schema, not from a
+/// captured Codex CLI session — no such capture exists in this repo. The
+/// failure mode of getting it wrong is bounded in one direction only: an
+/// unrecognised shape simply does not match, which is the behaviour that
+/// shipped. It cannot produce a false denial on any other event, because no
+/// other event carries `type == "response.output_item.added"`.
+fn try_parse_openai_responses(json: &Value) -> Option<ToolUseEvent> {
+    if json.get("type")?.as_str()? != "response.output_item.added" {
+        return None;
+    }
+    let item = json.get("item")?;
+    if item.get("type")?.as_str()? != "function_call" {
+        return None;
+    }
+    let name = item.get("name")?.as_str()?;
+    if name.is_empty() {
+        return None;
+    }
+    // `arguments` is a JSON *string* here, and at the `added` event it is the
+    // empty string — the same partial-input situation as chat completions.
+    let tool_input_json = item
+        .get("arguments")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    Some(ToolUseEvent {
+        tool_name: name.to_string(),
+        tool_input_json,
+        source: ToolUseSource::OpenAIResponses,
+        // `output_index`, the position this item occupies in `response.output`.
+        // The refusal is written as its own output item, so it has to know
+        // which index the withheld one claimed.
+        block_index: json.get("output_index").and_then(|i| i.as_u64()).unwrap_or(0),
+    })
+}
+
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -261,6 +346,71 @@ mod tests {
     fn ignores_openai_args_only_chunk() {
         // Name is empty string — not the start event
         assert!(parse_sse_chunk(OPENAI_ARGS_ONLY_CHUNK).is_none());
+    }
+
+    /// The Responses API announces a call with `response.output_item.added`.
+    ///
+    /// Spec-derived, not captured — see `try_parse_openai_responses`. The SSE
+    /// framing is reproduced too (`event:` line then `data:` line), because
+    /// that is what the forward loop hands `parse_sse_chunk` and a parser that
+    /// only worked on a bare `data:` line would be untested against the wire.
+    const RESPONSES_TOOL_CHUNK: &str = r#"event: response.output_item.added
+data: {"type":"response.output_item.added","output_index":1,"item":{"id":"fc_abc","type":"function_call","call_id":"call_abc","name":"bash","arguments":""}}
+
+"#;
+
+    const RESPONSES_MESSAGE_ITEM_CHUNK: &str = r#"event: response.output_item.added
+data: {"type":"response.output_item.added","output_index":0,"item":{"id":"msg_abc","type":"message","status":"in_progress","role":"assistant","content":[]}}
+
+"#;
+
+    const RESPONSES_ARGS_DELTA_CHUNK: &str = r#"event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","item_id":"fc_abc","output_index":1,"delta":"{\"command\":\"rm -rf /\"}"}
+
+"#;
+
+    const RESPONSES_TEXT_DELTA_CHUNK: &str = r#"event: response.output_text.delta
+data: {"type":"response.output_text.delta","item_id":"msg_abc","output_index":0,"content_index":0,"delta":"hello"}
+
+"#;
+
+    #[test]
+    fn detects_openai_responses_tool_use() {
+        let event = parse_sse_chunk(RESPONSES_TOOL_CHUNK).expect("should detect tool use");
+        assert_eq!(event.tool_name, "bash");
+        assert!(matches!(event.source, ToolUseSource::OpenAIResponses));
+        // `output_index`, so the refusal item lands where the withheld one was.
+        assert_eq!(event.block_index, 1);
+    }
+
+    /// An ordinary assistant message is also announced by
+    /// `response.output_item.added`. Matching on the event type alone would
+    /// deny every Responses stream that says anything at all.
+    #[test]
+    fn ignores_responses_message_item() {
+        assert!(parse_sse_chunk(RESPONSES_MESSAGE_ITEM_CHUNK).is_none());
+    }
+
+    /// Arguments arrive after the item was added. Matching here would fire the
+    /// gate a second time for one call, and the stream is already closed by
+    /// then.
+    #[test]
+    fn ignores_responses_argument_fragments() {
+        assert!(parse_sse_chunk(RESPONSES_ARGS_DELTA_CHUNK).is_none());
+    }
+
+    #[test]
+    fn ignores_responses_text_delta() {
+        assert!(parse_sse_chunk(RESPONSES_TEXT_DELTA_CHUNK).is_none());
+    }
+
+    /// A `function_call` item with no name is not a call anyone can gate — and
+    /// treating it as one would deny on an empty tool name, which matches
+    /// nothing in a deny list and would only ever be a `fail_closed` surprise.
+    #[test]
+    fn ignores_responses_function_item_without_a_name() {
+        let chunk = r#"data: {"type":"response.output_item.added","output_index":1,"item":{"id":"fc_x","type":"function_call","name":"","arguments":""}}"#;
+        assert!(parse_sse_chunk(chunk).is_none());
     }
 
     #[test]

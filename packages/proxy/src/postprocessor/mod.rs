@@ -24,11 +24,16 @@ pub struct ResponsePostProcessor {
 }
 
 /// Supported LLM provider protocols.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Protocol {
     OpenAI,
     Anthropic,
     Gemini,
+    /// OpenAI Responses API — Codex CLI.
+    ///
+    /// Present so the wrapper can *decline*, not so it can emit. See
+    /// `wrap_as_sse_content`.
+    OpenAIResponses,
 }
 
 impl ResponsePostProcessor {
@@ -74,6 +79,32 @@ impl ResponsePostProcessor {
         workspace_id: &str,
         graph_key: Option<&str>,
     ) -> Option<Vec<u8>> {
+        // 0. Protocols this cannot write into, checked BEFORE the drain.
+        //
+        // Draining is destructive. Discovering at step 5 that there is no shape
+        // to emit would consume the notifications and throw them away, so a
+        // protocol that cannot carry a governance block has to bail out here.
+        //
+        // The Responses API is that protocol, for now. Its stream is a sequence
+        // of output *items*, so an injected block is not a delta on an existing
+        // one — it is a new item, and a new item needs the `output_index` after
+        // the last one the model emitted, which this type never sees. Emitting
+        // the `chat.completion.chunk` from the OpenAI arm instead would be
+        // bytes Codex CLI cannot parse appended to a finished stream. Nothing
+        // is lost relative to what shipped: this whole path was unreachable for
+        // `/v1/responses` because its terminal event is `response.completed`
+        // and the caller only ever recognised `[DONE]`. Closing that made the
+        // path reachable, which is what makes the wrong shape a live risk and
+        // this guard necessary rather than theoretical.
+        if self.protocol == Protocol::OpenAIResponses {
+            debug!(
+                session_id,
+                workspace_id,
+                "Governance notifications are not delivered on the Responses API — left queued"
+            );
+            return None;
+        }
+
         // 1a. Atomically drain session-level notifications from Valkey
         let mut notifications = match self
             .notification_client
@@ -149,9 +180,13 @@ impl ResponsePostProcessor {
     }
 
     /// Wraps formatted text as SSE content delta events.
+    ///
+    /// `Protocol::OpenAIResponses` never reaches here — `process` returns
+    /// before the drain for it — so it deliberately has no arm of its own
+    /// rather than a wrong one.
     fn wrap_as_sse_content(&self, text: &str) -> Vec<u8> {
         match self.protocol {
-            Protocol::OpenAI | Protocol::Gemini => {
+            Protocol::OpenAI | Protocol::Gemini | Protocol::OpenAIResponses => {
                 let chunk = serde_json::json!({
                     "id": "intutic-gov",
                     "object": "chat.completion.chunk",
