@@ -2,12 +2,43 @@
 
 use super::context::{RequestContext, Verdict};
 use super::host::register_host_imports;
+use super::referenced_files::{ReferencedFiles, MAX_READS_PER_EVALUATION};
+use std::sync::Arc;
 use std::time::Duration;
 use wasmtime::{Engine, Linker, Module, ResourceLimiter, Store, StoreLimits, StoreLimitsBuilder};
 
 /// Host state passed to wasmtime Store.
 pub struct WasmState {
     pub limits: StoreLimits,
+    /// The fixed table of files this request's tool calls made readable.
+    ///
+    /// Built once per request by the registry, before any sandbox exists, and
+    /// shared by every rule that runs against that request — so the guest
+    /// cannot race the resolver, and two rules evaluating the same request
+    /// necessarily see the same bytes.
+    ///
+    /// `Arc` because the same table is handed to every rule in the list; an
+    /// empty one costs nothing, which is what a deployment that never uses the
+    /// feature pays.
+    pub files: Arc<ReferencedFiles>,
+    /// Remaining `env.read_referenced_file` calls for THIS evaluation.
+    ///
+    /// Per-`Store`, and a `Store` is per-evaluation, so a rule cannot carry
+    /// budget across requests. See [`MAX_READS_PER_EVALUATION`] for why a call
+    /// budget rather than fuel: fuel counts guest instructions and would not
+    /// price the bytes a host function copies on the guest's behalf.
+    pub file_reads_remaining: u32,
+}
+
+impl WasmState {
+    /// State for one evaluation against `files`.
+    pub fn new(limits: StoreLimits, files: Arc<ReferencedFiles>) -> Self {
+        Self {
+            limits,
+            files,
+            file_reads_remaining: MAX_READS_PER_EVALUATION,
+        }
+    }
 }
 
 impl ResourceLimiter for WasmState {
@@ -89,7 +120,24 @@ fn read_guest_reason(
     Some(text.chars().filter(|c| !c.is_control()).collect())
 }
 
-pub async fn evaluate_wasm_rule(engine: &Engine, module: &Module, ctx: &RequestContext) -> Verdict {
+/// Evaluate one rule.
+///
+/// `files` is the pre-read table of manifests this request's tool calls
+/// reference — see [`super::referenced_files`]. It is a parameter rather than
+/// something this function resolves because the read is per-*request* and this
+/// function runs per-*rule*: resolving here would multiply disk I/O by the
+/// number of installed rules, and would let two rules evaluating one request
+/// disagree about the file's contents.
+///
+/// Pass [`ReferencedFiles::empty`] when no rule asked for files. That is the
+/// case for every module that does not import `env.read_referenced_file`, which
+/// is every module that existed before it did.
+pub async fn evaluate_wasm_rule(
+    engine: &Engine,
+    module: &Module,
+    ctx: &RequestContext,
+    files: &Arc<ReferencedFiles>,
+) -> Verdict {
     let json_bytes = match serde_json::to_vec(ctx) {
         Ok(bytes) => bytes,
         Err(e) => {
@@ -103,7 +151,7 @@ pub async fn evaluate_wasm_rule(engine: &Engine, module: &Module, ctx: &RequestC
         .memory_size(16 * 1024 * 1024)
         .build();
 
-    let mut store = Store::new(engine, WasmState { limits });
+    let mut store = Store::new(engine, WasmState::new(limits, files.clone()));
     store.limiter(|state| state);
 
     // Set fuel limit of 1,000,000 units
@@ -245,6 +293,162 @@ pub async fn evaluate_wasm_rule(engine: &Engine, module: &Module, ctx: &RequestC
 }
 
 
+/// Whole-evaluation behaviour around `env.read_referenced_file`.
+///
+/// The guards themselves are tested where they live (`referenced_files` for
+/// resolution, `host` for the ABI). What is left to prove here is the property
+/// the feature is not allowed to break: a rule that predates the import must
+/// behave *identically*, whether or not files happen to be readable.
+#[cfg(test)]
+mod referenced_file_evaluation_tests {
+    use super::*;
+    use crate::wasm::referenced_files as rf;
+    use serde_json::json;
+
+    /// Fuel is required — the runner sets it, and an engine without
+    /// `consume_fuel` makes every evaluation bail to `Bypass` before it starts.
+    fn engine() -> Engine {
+        let mut config = wasmtime::Config::new();
+        config.consume_fuel(true);
+        Engine::new(&config).expect("engine")
+    }
+
+    /// Built from a legacy-shaped payload rather than a struct literal:
+    /// `RequestContext` has thirty fields and this module reads none of them.
+    fn ctx() -> RequestContext {
+        serde_json::from_value(json!({
+            "session_id": "ses_1",
+            "workspace_id": "ws_1",
+            "virtual_key_prefix": "vk_1",
+            "model": "claude-sonnet-4",
+            "tools": [],
+            "tool_calls": [{
+                "id": "call_1",
+                "name": "Bash",
+                "arguments": { "command": "kubectl apply -f deploy.yaml" }
+            }],
+            "estimated_input_tokens": 10,
+            "budget_remaining_usd": 1.0,
+            "risk_tier": "Low",
+            "dlp_findings": [],
+            "tool_sequence": []
+        }))
+        .expect("fixture context")
+    }
+
+    fn scratch(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir()
+            .join(format!("intutic-wasm-runner-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Every rule written before this feature existed: it imports `log_info`
+    /// and blocks unconditionally.
+    const LEGACY_RULE: &str = r#"(module
+         (import "env" "log_info" (func $log (param i32 i32)))
+         (memory (export "memory") 1)
+         (func (export "allocate") (param i32) (result i32) i32.const 1024)
+         (func (export "evaluate") (param i32 i32) (result i32) i32.const 1))"#;
+
+    /// Backwards compatibility, stated as an experiment rather than a promise:
+    /// the same module, the same context, once with an empty table and once
+    /// with a populated one, must produce the same verdict — and the registry
+    /// must be able to tell from the module alone that it need not read
+    /// anything at all.
+    #[tokio::test]
+    async fn a_module_that_does_not_import_the_reader_is_completely_unaffected() {
+        let engine = engine();
+        let module = Module::new(&engine, LEGACY_RULE).expect("legacy rule compiles");
+
+        assert!(
+            !crate::wasm::host::module_reads_referenced_files(&module),
+            "this predicate is what stops the request path touching the disk for such a rule"
+        );
+
+        let root = scratch("compat");
+        std::fs::write(root.join("deploy.yaml"), b"image: app:latest").unwrap();
+
+        let ctx = ctx();
+        let without = evaluate_wasm_rule(
+            &engine,
+            &module,
+            &ctx,
+            &Arc::new(ReferencedFiles::empty()),
+        )
+        .await;
+        let with = evaluate_wasm_rule(
+            &engine,
+            &module,
+            &ctx,
+            &Arc::new(rf::read_tokens(vec!["deploy.yaml".to_string()], &root)),
+        )
+        .await;
+
+        assert_eq!(
+            without,
+            Verdict::Kill {
+                reason: "Blocked by custom WASM governance rule".to_string(),
+                policy_id: None
+            }
+        );
+        assert_eq!(without, with, "a populated file table must change nothing");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A rule that *does* use the import blocks on the manifest it was given
+    /// and allows when there is nothing to read — the same module, the same
+    /// request, differing only in what the host made available.
+    #[tokio::test]
+    async fn a_rule_reading_a_referenced_manifest_reaches_a_verdict_from_it() {
+        const MANIFEST_READER: &str = r#"(module
+             (import "env" "read_referenced_file"
+               (func $read (param i32 i32 i32 i32) (result i32)))
+             (memory (export "memory") 2)
+             (data (i32.const 16) "deploy.yaml")
+             (func (export "allocate") (param i32) (result i32) i32.const 4096)
+             (func (export "evaluate") (param i32 i32) (result i32)
+               (if (result i32)
+                 (i32.gt_s
+                   (call $read (i32.const 16) (i32.const 11) (i32.const 8192) (i32.const 4096))
+                   (i32.const 0))
+                 (then (i32.const 1))
+                 (else (i32.const 0)))))"#;
+
+        let engine = engine();
+        let module = Module::new(&engine, MANIFEST_READER).expect("reader rule compiles");
+        assert!(crate::wasm::host::module_reads_referenced_files(&module));
+
+        let root = scratch("reader");
+        std::fs::write(root.join("deploy.yaml"), b"image: app:latest").unwrap();
+        let ctx = ctx();
+
+        let blocked = evaluate_wasm_rule(
+            &engine,
+            &module,
+            &ctx,
+            &Arc::new(rf::read_tokens(vec!["deploy.yaml".to_string()], &root)),
+        )
+        .await;
+        assert!(matches!(blocked, Verdict::Kill { .. }), "got {blocked:?}");
+
+        // Nothing readable: the refusal is a negative code, the rule allows,
+        // and — importantly — the evaluation completes rather than trapping.
+        let allowed = evaluate_wasm_rule(
+            &engine,
+            &module,
+            &ctx,
+            &Arc::new(ReferencedFiles::empty()),
+        )
+        .await;
+        assert_eq!(allowed, Verdict::Bypass);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
 #[cfg(test)]
 mod guest_reason_tests {
     use super::*;
@@ -259,7 +463,10 @@ mod guest_reason_tests {
     fn reason_from(wat: &str) -> Option<String> {
         let engine = Engine::default();
         let module = Module::new(&engine, wat).expect("fixture should compile");
-        let mut store = Store::new(&engine, WasmState { limits: Default::default() });
+        let mut store = Store::new(
+            &engine,
+            WasmState::new(Default::default(), Arc::new(ReferencedFiles::empty())),
+        );
         let linker = wasmtime::Linker::new(&engine);
         let instance = linker
             .instantiate(&mut store, &module)

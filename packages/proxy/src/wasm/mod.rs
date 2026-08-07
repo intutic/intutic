@@ -5,5 +5,6 @@
 pub mod context;
 pub mod host;
 pub mod local_loader;
+pub mod referenced_files;
 pub mod registry;
 pub mod runner;
