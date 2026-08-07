@@ -1,0 +1,63 @@
+event: response.created
+data: {"type":"response.created","response":{"id":"resp_CAPTURED","object":"response","status":"in_progress"}}
+
+event: response.in_progress
+data: {"type":"response.in_progress","response":{"id":"resp_CAPTURED","object":"response","status":"in_progress"}}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","item":{"id":"fc_CAPTURED","arguments":"","call_id":"call_CAPTURED","name":"shell","type":"function_call","status":"in_progress"}}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"{","item_id":"fc_CAPTURED"}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"\"","item_id":"fc_CAPTURED"}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"command","item_id":"fc_CAPTURED"}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"\":","item_id":"fc_CAPTURED"}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" \"","item_id":"fc_CAPTURED"}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"kubectl","item_id":"fc_CAPTURED"}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" apply","item_id":"fc_CAPTURED"}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" -","item_id":"fc_CAPTURED"}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"f","item_id":"fc_CAPTURED"}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" k","item_id":"fc_CAPTURED"}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"8","item_id":"fc_CAPTURED"}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"s","item_id":"fc_CAPTURED"}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"/catalog","item_id":"fc_CAPTURED"}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"ue","item_id":"fc_CAPTURED"}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":".yaml","item_id":"fc_CAPTURED"}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"\"}","item_id":"fc_CAPTURED"}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","item":{"id":"fc_CAPTURED","type":"function_call","status":"completed","arguments":"{\"command\": \"kubectl apply -f k8s/catalogue.yaml\"}","call_id":"call_CAPTURED","name":"shell"}}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"resp_CAPTURED","object":"response","created_at":1786137352,"status":"completed","model":"qwen2.5-7b-instruct","output":[{"id":"fc_CAPTURED","type":"function_call","status":"completed","arguments":"{\"command\": \"kubectl apply -f k8s/catalogue.yaml\"}","call_id":"call_CAPTURED","name":"shell"}],"usage":{"input_tokens":173,"output_tokens":28,"total_tokens":201,"input_tokens_details":{"cached_tokens":172}}},"timings":{"cache_n":172,"prompt_n":1,"prompt_ms":95.198,"prompt_per_token_ms":95.198,"prompt_per_second":10.504422361814324,"predicted_n":28,"predicted_ms":3014.42,"predicted_per_token_ms":107.65785714285714,"predicted_per_second":9.288685717318755}}
+
