@@ -499,6 +499,17 @@ impl LocalStore for MemoryStore {
         Ok(())
     }
 
+    async fn record_mirror_outcome(
+        &self,
+        _workspace_id: &str,
+        _candidate_model: &str,
+        _faulted: bool,
+        _measured: bool,
+        _cost_usd: f64,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
+
     async fn incr_outage_failure(
         &self,
         _workspace_id: &str,
