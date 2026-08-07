@@ -3601,8 +3601,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                         DeltaShape::AnthropicText => line == "event: message_stop",
                                         DeltaShape::ResponsesOutputText => {
                                             is_done_sentinel(&line)
-                                                || sse_data_type(&line).as_deref()
-                                                    == Some("response.completed")
+                                                || is_responses_terminal(&line)
                                         }
                                         _ => is_done_sentinel(&line),
                                     };
@@ -5495,6 +5494,32 @@ fn is_done_sentinel(line: &str) -> bool {
     line.strip_prefix("data:").map(|d| d.trim() == "[DONE]").unwrap_or(false)
 }
 
+/// Terminal events for an OpenAI Responses stream.
+///
+/// `response.completed` is the happy path, and was the only one recognised.
+/// The other two were found by CAPTURING A REAL STREAM rather than reading the
+/// spec: a request against a credit-exhausted key returned
+/// `event: error` followed by `event: response.failed`, a perfectly well-formed
+/// terminal that this proxy did not recognise as one.
+///
+/// Consequences of missing it, all silent: `done_received` stays false so the
+/// routing integrity scorer marks a cleanly-failed response `Truncated`; usage
+/// is never read, because that read is gated on the terminal; and the
+/// governance block is never appended. The end-of-stream backstop still flushes
+/// the DLP holdback, so nothing was truncated on the wire — the damage was to
+/// what the platform believed about the request afterwards.
+///
+/// `response.incomplete` is included from the spec and is NOT captured — it is
+/// what arrives when `max_output_tokens` is reached. Marked here so the
+/// distinction between what was observed and what was read stays visible.
+fn is_responses_terminal(line: &str) -> bool {
+    matches!(
+        sse_data_type(line).as_deref(),
+        Some("response.completed") | Some("response.failed") | Some("response.incomplete")
+    )
+}
+
+
 /// The `type` field of an SSE `data:` line's JSON payload, if it has one.
 ///
 /// Reads the `data:` line rather than the `event:` line on purpose. Both carry
@@ -5854,8 +5879,7 @@ mod tests {
                 && match shape {
                     DeltaShape::AnthropicText => line == "event: message_stop",
                     DeltaShape::ResponsesOutputText => {
-                        is_done_sentinel(&line)
-                            || sse_data_type(&line).as_deref() == Some("response.completed")
+                        is_done_sentinel(&line) || is_responses_terminal(&line)
                     }
                     _ => is_done_sentinel(&line),
                 };
@@ -6345,6 +6369,69 @@ mod tests {
     /// sees a stream that never ended, so `done_received` stayed false, the
     /// integrity scorer recorded `Truncated` on a response that completed
     /// perfectly, and the reward engine was taught to penalise the arm.
+
+    /// The only fixture in this file CAPTURED from the real API rather than
+    /// derived from the spec.
+    ///
+    /// Every other Responses fixture here was written from documentation, and
+    /// the failure mode of that is one-directional and silent: a shape we did
+    /// not anticipate simply does not match, which is exactly what shipped and
+    /// went unnoticed until `/v1/responses` was found to be governed as if it
+    /// were chat completions.
+    ///
+    /// This one is real bytes off the wire (an `sk-` key with no credits, so
+    /// the stream fails immediately). It cost nothing to obtain and it
+    /// immediately paid for itself: it ends with `event: response.failed`, a
+    /// well-formed terminal the proxy did not recognise. Response ids are
+    /// replaced; nothing else is touched.
+    #[test]
+    fn a_real_captured_responses_stream_terminates_on_response_failed() {
+        let raw = include_str!("../tests/fixtures/openai_responses_failed_stream.sse");
+
+        // The envelope our hand-written fixtures assume, confirmed against the
+        // wire: an `event:` line, then a `data:` line whose JSON `type` repeats
+        // the event name.
+        assert!(raw.contains("event: response.created"));
+        assert!(raw.contains("event: response.failed"));
+
+        let terminal: Vec<&str> = raw
+            .lines()
+            .filter(|l| is_responses_terminal(l))
+            .collect();
+        assert_eq!(
+            terminal.len(),
+            1,
+            "exactly one terminal expected in the captured stream, got {terminal:?}",
+        );
+        assert!(terminal[0].contains("response.failed"));
+
+        // The regression this fixture exists for: before `response.failed` was
+        // recognised, a cleanly-failed stream left `done_received` false, so
+        // the integrity scorer called it Truncated and usage was never read.
+        assert!(
+            !raw.lines().any(|l| sse_data_type(l).as_deref() == Some("response.completed")),
+            "this capture must NOT contain response.completed, or it proves nothing",
+        );
+    }
+
+    /// `response.completed` must still be terminal — the happy path is the one
+    /// most likely to be broken by widening the set.
+    #[test]
+    fn widening_the_terminal_set_keeps_the_happy_path() {
+        assert!(is_responses_terminal(
+            r#"data: {"type":"response.completed","response":{}}"#
+        ));
+        assert!(is_responses_terminal(
+            r#"data: {"type":"response.incomplete","response":{}}"#
+        ));
+        // A delta is not a terminal, and neither is an error event on its own —
+        // `error` is followed by `response.failed`, which is the terminal.
+        assert!(!is_responses_terminal(
+            r#"data: {"type":"response.output_text.delta","delta":"hi"}"#
+        ));
+        assert!(!is_responses_terminal(r#"data: {"type":"error","error":{}}"#));
+    }
+
     #[test]
     fn the_responses_terminal_is_response_completed_not_done() {
         let ev = get_terminal_stream_event(&crate::protocol::Protocol::OpenAIResponses, "gpt-5");
