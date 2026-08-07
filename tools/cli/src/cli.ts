@@ -127,6 +127,20 @@ policyCmd
   })
 
 policyCmd
+  .command('snapshot')
+  .description(
+    'Compile workspace policy to ~/.intutic/hooks/policy-snapshot.rules — the file every gate reads.\n' +
+    '\n' +
+    '  Does only that. \'intutic connect\' writes it too, but as one step of\n' +
+    '  starting the full sync daemon; this arms the gates without one.'
+  )
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runPolicySnapshot } = await import('./commands/policy.js')
+    await runPolicySnapshot(opts)
+  })
+
+policyCmd
   .command('export')
   .description('Export compliance policies to stdout')
   .option('--all', 'Export all policies')
