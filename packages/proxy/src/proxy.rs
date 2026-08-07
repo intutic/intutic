@@ -3368,6 +3368,12 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         let reward_cfg_clone = reward_cfg.clone();
         let original_routed_model_clone = original_routed_model.clone();
         let sop_tier_clone = sop_tier.clone();
+        // Response-gate inputs, cloned for the same reason as everything else in
+        // this block: the stream task outlives this scope. The deny list is the
+        // one the request path already resolved, so both directions enforce the
+        // same policy from the same source.
+        let response_gate_cfg = state.config.intutic_settings.response_gate.clone();
+        let denied_tools_clone = wasm_ctx.denied_tools.clone();
 
         spawn(async move {
             let mut stream = upstream_stream;
@@ -3387,8 +3393,14 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             let mut chunk_index = 0;
             let mut chunk_handles = Vec::new();
             let mut done_received = false;
+            // Set when the response gate withholds a tool-call event. Once that
+            // has happened the stream has already been closed with an in-band
+            // refusal, so everything downstream — further chunks, the judge's
+            // synthesis block, the terminal event — must be suppressed: bytes
+            // after a terminal event are not a stream any client can parse.
+            let mut gate_tripped = false;
 
-            while let Some(chunk_res) = stream.next().await {
+            'upstream: while let Some(chunk_res) = stream.next().await {
                 match chunk_res {
                     Ok(bytes) => {
                         buffer.extend_from_slice(&bytes);
@@ -3417,6 +3429,57 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                         }
                                     }
                                 }
+                            }
+
+                            // ── Response-side tool gate ─────────────────────
+                            // Above both forwarding sites, and above the
+                            // done/postprocessor logic, so a withheld line
+                            // reaches neither. This is the only moment the
+                            // proxy can still stop a forbidden call: the
+                            // request-side check sees the same call in the NEXT
+                            // request's history, after the harness ran it.
+                            //
+                            // Matches on the tool NAME only — OpenAI streams
+                            // `arguments` across later chunks, so argument-level
+                            // policy is non-streaming-only. See
+                            // `plugins::response_gate`.
+                            if let Some(denial) = crate::plugins::response_gate::gate_stream_line(
+                                &response_gate_cfg,
+                                &line,
+                                &denied_tools_clone,
+                            ) {
+                                tracing::warn!(
+                                    workspace_id = %workspace_id_clone,
+                                    session_id = %session_id_clone,
+                                    "{}",
+                                    denial.log_message()
+                                );
+                                // Cross-provider streams reach the client as
+                                // OpenAI chunks whatever the upstream was, and
+                                // the withheld event's index means something
+                                // else in that shape.
+                                let (wire, denial) = if is_same_provider {
+                                    let w = match provider_clone {
+                                        Provider::Anthropic => crate::commands::WireProvider::Anthropic,
+                                        Provider::Gemini => crate::commands::WireProvider::Gemini,
+                                        Provider::OpenAI => crate::commands::WireProvider::OpenAI,
+                                    };
+                                    (w, denial)
+                                } else {
+                                    (crate::commands::WireProvider::OpenAI, denial.at_block(0))
+                                };
+                                let tail =
+                                    crate::plugins::response_gate::refusal_tail(wire, &denial);
+                                let _ = tx.send(Ok(axum::body::Bytes::from(tail))).await;
+                                // The client did get a terminal event, so this
+                                // is a closed stream and not a truncated one.
+                                // `done_received` feeds the integrity score,
+                                // and scoring the routed model down for the
+                                // proxy's own refusal would teach the router
+                                // that the model produced a broken response.
+                                done_received = true;
+                                gate_tripped = true;
+                                break 'upstream;
                             }
 
                             if is_same_provider {
@@ -3778,7 +3841,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // not count against the routed model's latency SLO.
             let upstream_latency_ms = start.elapsed().as_millis() as u32;
 
-            if judge_active_clone {
+            // `!gate_tripped`: the judge's finalize step appends a synthesis
+            // block to the stream. The gate has already sent the terminal
+            // event, so that block would land after it.
+            if judge_active_clone && !gate_tripped {
                 tracing::info!(handles_count = %chunk_handles.len(), "Waiting for chunk evaluation handles");
                 if !dlp_stream_redactions.is_empty() {
                     tracing::warn!(
@@ -3924,7 +3990,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 }
             }
 
-            if judge_active_clone || !is_same_provider {
+            // The gate emits its own terminal event, tailored to the block it
+            // withheld; a second one here would be trailing bytes.
+            if !gate_tripped && (judge_active_clone || !is_same_provider) {
                 let done_bytes = get_terminal_stream_event(&protocol_clone);
                 let _ = tx.send(Ok(axum::body::Bytes::from(done_bytes))).await;
             }
@@ -4052,7 +4120,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 actual_cost_usd,
                 cache_hit: false,
                 latency_ms: start.elapsed().as_millis() as u32,
-                verdict: "allowed".to_string(),
+                // Same string the request-side kill uses, so an audit of
+                // blocked tool calls does not have to know which half of the
+                // turn caught it.
+                verdict: if gate_tripped { "killed" } else { "allowed" }.to_string(),
                 harness_type: provider_clone.harness_name().to_string(),
                 created_at: chrono::Utc::now().to_rfc3339(),
                 requested_model: requested_model_clone,
@@ -4531,6 +4602,54 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             done_received: None,
         });
 
+    // ── Response-side tool gate ───────────────────────────────────────
+    //
+    // Enforced on the model's own output, not only on the next request's
+    // history: by the time that history arrives the harness has already run the
+    // call, so a deny list checked there alone reports a violation rather than
+    // preventing one. Nothing has been sent yet on this path, so the whole body
+    // can be replaced.
+    //
+    // The refusal is a 200 carrying an assistant message, not a 403 — see
+    // `response_gate::refusal_body` for why, and note the streaming half has no
+    // choice in the matter, which is the deciding argument.
+    let response_denial = crate::plugins::response_gate::gate_response(
+        &state.config.intutic_settings.response_gate,
+        parsed_response.as_ref(),
+        &wasm_ctx.denied_tools,
+    );
+    let final_body = match &response_denial {
+        Some(denial) => {
+            tracing::warn!(
+                workspace_id = %workspace_id,
+                session_id = %session_id,
+                "{}",
+                denial.log_message()
+            );
+            // Cross-provider bodies were translated to OpenAI above, so the
+            // client is expecting that shape whatever the upstream was.
+            let wire = if is_same_provider {
+                match provider {
+                    Provider::Anthropic => crate::commands::WireProvider::Anthropic,
+                    Provider::Gemini => crate::commands::WireProvider::Gemini,
+                    Provider::OpenAI => crate::commands::WireProvider::OpenAI,
+                }
+            } else {
+                crate::commands::WireProvider::OpenAI
+            };
+            serde_json::to_vec(&crate::plugins::response_gate::refusal_body(
+                wire,
+                &actual_model,
+                denial,
+            ))
+            // A refusal that cannot be serialised must not fall back to the
+            // body it was refusing. An empty body is a broken response; the
+            // original is an executable forbidden tool call.
+            .unwrap_or_default()
+        }
+        None => final_body,
+    };
+
     let reconstruction_quality = if is_same_provider { 100 } else { 95 };
     let raw_cost_usd = estimate_model_cost(&model, final_prompt_tokens, final_completion_tokens);
     let actual_cost_usd =
@@ -4576,7 +4695,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         actual_cost_usd,
         cache_hit: false,
         latency_ms,
-        verdict: "allowed".to_string(),
+        // Same string the request-side kill uses, so an audit of blocked tool
+        // calls does not have to know which half of the turn caught it.
+        verdict: if response_denial.is_some() { "killed" } else { "allowed" }.to_string(),
         harness_type: provider.harness_name().to_string(),
         created_at: chrono::Utc::now().to_rfc3339(),
         requested_model: model.clone(),

@@ -94,6 +94,39 @@ pub struct IntuticSettings {
     /// Default ceiling for a workflow (loop run).
     #[serde(default)]
     pub workflow: WorkflowConfig,
+    /// Response-side tool-call gate.
+    #[serde(default)]
+    pub response_gate: ResponseGateConfig,
+}
+
+/// Refusing a forbidden tool call in the model's *response*, before the client
+/// can execute it (`plugins::response_gate`).
+///
+/// Both fields default to the safe direction. `enabled` is on because the
+/// alternative is a deny list that only takes effect one turn after the call it
+/// forbids has already run — which is what the request-side check alone gives
+/// you, and is not what an operator writing `deny_tools` believes they bought.
+///
+/// The gate is inert for any role with an empty deny list, so a default-on
+/// fail-closed gate cannot affect a workspace that has declared no policy.
+#[derive(Debug, Deserialize, Clone)]
+pub struct ResponseGateConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+
+    /// What to do when the response body will not parse and a deny list is in
+    /// force: refuse (`true`, the default) or forward it unverified.
+    ///
+    /// Streaming is unaffected — see `plugins::response_gate` for why a stream
+    /// cannot honour this without ending every stream rather than a suspect one.
+    #[serde(default = "default_true")]
+    pub fail_closed: bool,
+}
+
+impl Default for ResponseGateConfig {
+    fn default() -> Self {
+        Self { enabled: true, fail_closed: true }
+    }
 }
 
 /// Default spend ceiling for a workflow, for deployments with no control plane.
@@ -600,6 +633,42 @@ intutic_settings: {}
         assert!((routing.reward.token_anomaly_penalty - 0.2).abs() < f64::EPSILON);
         assert!((routing.reward.cost_penalty - 0.2).abs() < f64::EPSILON);
         assert!(config.intutic_settings.wasm_local_dir.is_none());
+        let _ = std::fs::remove_file(file_path);
+    }
+
+    /// The response gate must be on, and fail closed, without anyone writing a
+    /// `response_gate:` block. A gate that ships off is a gate nobody enables.
+    #[test]
+    fn test_response_gate_defaults_on_and_closed() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        std::env::remove_var("INTUTIC_REGION");
+        let file_path = std::env::temp_dir().join("test_response_gate_defaults.yaml");
+        std::fs::write(&file_path, "model_list: []\nintutic_settings: {}\n").unwrap();
+        let config = load_config(file_path.to_str().unwrap()).unwrap();
+
+        let gate = &config.intutic_settings.response_gate;
+        assert!(gate.enabled);
+        assert!(gate.fail_closed);
+        let _ = std::fs::remove_file(file_path);
+    }
+
+    /// Both switches are reachable from config.yaml, and one may be set without
+    /// silently resetting the other.
+    #[test]
+    fn test_response_gate_explicit() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        std::env::remove_var("INTUTIC_REGION");
+        let file_path = std::env::temp_dir().join("test_response_gate_explicit.yaml");
+        std::fs::write(
+            &file_path,
+            "model_list: []\nintutic_settings:\n  response_gate:\n    fail_closed: false\n",
+        )
+        .unwrap();
+        let config = load_config(file_path.to_str().unwrap()).unwrap();
+
+        let gate = &config.intutic_settings.response_gate;
+        assert!(gate.enabled, "an unspecified field must keep its default");
+        assert!(!gate.fail_closed);
         let _ = std::fs::remove_file(file_path);
     }
 
