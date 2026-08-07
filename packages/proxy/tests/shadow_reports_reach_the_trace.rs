@@ -92,3 +92,48 @@ fn the_three_paths_that_evaluated_nothing_still_report_nothing() {
         );
     }
 }
+
+/// A cross-provider stream must not be scored as truncated.
+///
+/// `done_received` is assigned `true` at exactly one place in `proxy.rs`, inside
+/// `if is_same_provider`. A cross-provider stream goes through the translation
+/// branch, which never runs that assignment, so `done_received` is `false` at
+/// end of stream *by construction* — it says nothing about the response.
+///
+/// Feeding that raw into `integrity::score` scored every cross-provider stream
+/// `Truncated`: a 0.2 reward penalty, as large as the entire cost term, applied
+/// to exactly the cheaper arms the bandit exists to explore, plus dashboards
+/// reading 100% truncation for all cross-provider routing. The bandit would
+/// have learned to avoid every cheaper model, for a fault none of them had.
+///
+/// The correct expression already existed twenty-one lines below the call site
+/// and was used for the local reward. Both now read one definition, so the two
+/// cannot answer the same question different ways again.
+///
+/// Source-text, with the same limits the module docstring above states.
+#[test]
+fn integrity_reads_stream_completion_not_the_raw_same_provider_flag() {
+    let at = PROXY_RS
+        .find("Streaming: the assembled body is not reconstructable here")
+        .expect("streaming integrity call site vanished");
+    let window = &PROXY_RS[at..at + 700];
+
+    assert!(
+        window.contains("done_received: Some(stream_complete)"),
+        "the streaming integrity call must use `stream_complete`, not the raw \
+         `done_received`, which is false for every cross-provider stream by \
+         construction and would score each one Truncated"
+    );
+
+    // And exactly one definition of it, above both consumers.
+    let defs = PROXY_RS.matches("let stream_complete = done_received || !is_same_provider;").count();
+    assert_eq!(
+        defs, 1,
+        "one definition of stream completion, read by both the integrity score and the \
+         local reward. Two definitions is how they came to disagree."
+    );
+    assert!(
+        PROXY_RS.find("let stream_complete = done_received").unwrap() < at,
+        "the definition must precede the integrity call that reads it"
+    );
+}
