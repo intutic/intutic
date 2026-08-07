@@ -6384,6 +6384,65 @@ mod tests {
     /// immediately paid for itself: it ends with `event: response.failed`, a
     /// well-formed terminal the proxy did not recognise. Response ids are
     /// replaced; nothing else is touched.
+
+    /// A CAPTURED successful Responses stream — the happy path the failed
+    /// capture could not reach.
+    ///
+    /// PROVENANCE, and the limit of what this proves: these are real bytes off
+    /// a real `/v1/responses` endpoint, but that endpoint is **llama.cpp's**
+    /// implementation, not OpenAI's. It is an independent implementation of the
+    /// same protocol rather than the reference one, so agreement here is strong
+    /// evidence the shape is right and is NOT proof OpenAI matches byte for
+    /// byte. The one fixture captured from OpenAI itself is the failed stream
+    /// alongside this; between them the envelope, the terminal and the usage
+    /// keys are confirmed against two independent servers.
+    ///
+    /// What it caught: nothing broken, which is itself the result — the
+    /// hand-written fixtures had the shape right. What it CONFIRMED is the
+    /// part that had been wrong in production: `usage.output_tokens` really is
+    /// the key, and it really does carry a true count. Output was previously
+    /// metered at 1 token for every Codex request.
+    #[test]
+    fn a_real_captured_successful_responses_stream_parses_end_to_end() {
+        let raw = include_str!("../tests/fixtures/openai_responses_success_stream.sse");
+        // 1. Every text delta is found by the same extractor the forward loop
+        //    uses. The real deltas carry `item_id` and `delta` and NOTHING
+        //    else — no `output_index`, no `content_index` — which the address
+        //    logic must tolerate rather than assume away.
+        let mut text = String::new();
+        for line in raw.lines() {
+            let Some(d) = line.strip_prefix("data: ") else { continue };
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(d) else { continue };
+            if let Some(t) = stream_delta_text(&v, DeltaShape::ResponsesOutputText) {
+                text.push_str(t);
+            }
+        }
+        assert!(
+            !text.is_empty(),
+            "no text extracted from a real stream — the extractor and the wire disagree",
+        );
+        assert!(text.contains("Hello"), "extracted text was {text:?}");
+
+        // 2. Exactly one terminal, and it is response.completed.
+        let terminals: Vec<&str> = raw.lines().filter(|l| is_responses_terminal(l)).collect();
+        assert_eq!(terminals.len(), 1, "got {terminals:?}");
+        assert!(terminals[0].contains("response.completed"));
+
+        // 3. Usage. This is the assertion that would have caught the
+        //    metered-at-1-token bug, so it asserts the VALUE, not merely the
+        //    presence of the key.
+        let usage = raw
+            .lines()
+            .filter_map(|l| l.strip_prefix("data: "))
+            .filter_map(|d| serde_json::from_str::<serde_json::Value>(d).ok())
+            .find(|v| v.get("type").and_then(|t| t.as_str()) == Some("response.completed"))
+            .and_then(|v| v.get("response").and_then(|r| r.get("usage")).cloned())
+            .expect("a real terminal must carry usage");
+        let out = usage.get("output_tokens").and_then(|t| t.as_u64()).unwrap();
+        assert!(out > 1, "output_tokens was {out} — the metering bug is back");
+        assert!(usage.get("input_tokens").and_then(|t| t.as_u64()).unwrap() > 1);
+    }
+
     #[test]
     fn a_real_captured_responses_stream_terminates_on_response_failed() {
         let raw = include_str!("../tests/fixtures/openai_responses_failed_stream.sse");
