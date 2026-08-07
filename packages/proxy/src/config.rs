@@ -713,4 +713,39 @@ intutic_settings:
         );
         let _ = std::fs::remove_file(file_path);
     }
+
+    /// `mode: off` must actually stop routing.
+    ///
+    /// The enum documented three values and only `Shadow` was ever read:
+    /// `bandit_active` came from the feature flags or `routing.enabled`, so a
+    /// workspace could set `mode: off` and keep routing AND keep enforcing. A
+    /// config knob a reader would reasonably take for a kill switch, that
+    /// stopped nothing. There was no test for `mode` at all.
+    #[test]
+    fn routing_mode_off_is_read_by_the_proxy() {
+        let proxy = include_str!("proxy.rs");
+        assert!(
+            proxy.contains("RoutingMode::Off"),
+            "`mode: off` is documented and never consulted — it must gate `bandit_active`",
+        );
+        // And it must gate the decision, not merely be mentioned.
+        assert!(
+            proxy.contains("let bandit_active = !routing_off"),
+            "`off` must short-circuit `bandit_active`, or a remote flag overrides \
+             the operator's stop",
+        );
+    }
+
+    #[test]
+    fn routing_mode_parses_all_three_values() {
+        for (raw, want) in [
+            ("off", RoutingMode::Off),
+            ("shadow", RoutingMode::Shadow),
+            ("enforce", RoutingMode::Enforce),
+        ] {
+            let got: RoutingMode =
+                serde_yaml::from_str(&format!("{raw}")).expect("mode parses");
+            assert_eq!(got, want, "`{raw}` must parse to {want:?}");
+        }
+    }
 }

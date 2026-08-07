@@ -16,6 +16,7 @@
     "./dist"
   ],
   "scripts": {
+    "lint": "eslint src",
     "build": "tsc",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"
