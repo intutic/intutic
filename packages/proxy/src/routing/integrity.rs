@@ -130,7 +130,12 @@ fn declared_tools(request: Option<&Value>) -> Vec<(String, Vec<String>)> {
 }
 
 /// Every tool call in the response, as (name, arguments-or-raw-string).
-fn response_tool_calls(body: &Value) -> Vec<(String, Option<Value>, Option<String>)> {
+///
+/// Public because `plugins::response_gate` enforces the tool deny list against
+/// the same extraction. A second implementation there would be a second opinion
+/// on what counts as a tool call, and the two disagreeing is precisely how a
+/// forbidden call gets forwarded while the scorer records nothing.
+pub fn response_tool_calls(body: &Value) -> Vec<(String, Option<Value>, Option<String>)> {
     let mut calls = Vec::new();
 
     // Anthropic: content[] blocks of type `tool_use`, `input` already an object.

@@ -4,33 +4,32 @@
 //! Only detects the initial `content_block_start` / `tool_calls` delta —
 //! full argument accumulation is tracked as TD-TOOLUSE-001 for Phase 5.
 //!
-//! # Not wired, on purpose — and TD-150 should not have claimed otherwise
+//! # Now wired — and the reason it was not is corrected here
 //!
-//! `parse_sse_chunk` has no caller outside this file's own tests. That is a
-//! deliberate position rather than an oversight, and it is recorded here
-//! because TD-150 was marked resolved on the strength of this module existing.
+//! This module used to record that it had no caller on purpose, on the grounds
+//! that "a tool invocation observed while the response streams has already been
+//! emitted to the client; there is nothing left to gate". **That was wrong.**
+//! The proxy forwards the stream itself, one line at a time, and each line is in
+//! hand before it is sent. A line can therefore be withheld — which is what
+//! `plugins::response_gate` does, calling `parse_sse_chunk` per line above the
+//! forwarding point in `proxy::handle_proxy`.
 //!
-//! What the proxy uses instead is `manifest::extract_request_tool_invocations`,
-//! which reads tool calls out of the *request* body — the conversation history
-//! the client sends back on the following turn. That path is strictly stronger
-//! for every purpose the proxy currently has:
+//! The complement is still `manifest::extract_request_tool_invocations`, which
+//! reads tool calls out of the *request* body — the conversation history the
+//! client sends back on the following turn. That path remains the stronger one
+//! for classification, and the two are not interchangeable:
 //!
-//! - It yields the full argument object. This module yields the tool name and
-//!   whatever partial JSON happened to land in one chunk.
-//! - It feeds `new_tool_calls`, which reaches every `ExecutionTrace` including
-//!   the streaming one, so streaming responses are not blind in telemetry.
-//! - Enforcement here is pre-request. A tool invocation observed while the
-//!   response streams has already been emitted to the client; there is nothing
-//!   left to gate. The next request is where the proxy can still act, and that
-//!   is exactly where the request-body extractor sees it.
+//! - The request path yields the full argument object. This module yields the
+//!   tool name and whatever partial JSON happened to land in one chunk, because
+//!   OpenAI dribbles `arguments` across later chunks. Name-level policy can be
+//!   enforced here; argument-level policy cannot.
+//! - The request path feeds `new_tool_calls`, which reaches every
+//!   `ExecutionTrace` including the streaming one, so telemetry does not depend
+//!   on this module.
+//! - Only this module can act *before* the call reaches the tool runner. The
+//!   request path sees it one turn after it ran.
 //!
-//! The one thing this module could add is same-turn visibility of a tool call
-//! in a session's *final* response, which no subsequent request ever carries.
-//! Recording that is worth doing once argument accumulation exists — a bare
-//! tool name is not enough to classify against a manifest. Until then, wiring
-//! it would add a weaker duplicate of a signal the proxy already has.
-//!
-//! The code stays because it is correct and tested and TD-TOOLUSE-001 needs it.
+//! Full argument accumulation across chunks is still TD-TOOLUSE-001.
 //!
 //! # Supported providers
 //!
@@ -61,6 +60,14 @@ pub struct ToolUseEvent {
     pub tool_input_json: String,
     /// Which LLM provider emitted this event.
     pub source: ToolUseSource,
+    /// The index the event claimed: Anthropic's `content_block` index, or
+    /// OpenAI's `choices[].index`.
+    ///
+    /// Load-bearing for the response gate. When a tool-use event is withheld,
+    /// the refusal that replaces it has to be written at *that* index — writing
+    /// it at 0 addresses the text block the model already closed, which is not
+    /// a stream any client can parse.
+    pub block_index: u64,
 }
 
 // ─── Public API ──────────────────────────────────────────────────────────────
@@ -142,6 +149,9 @@ fn try_parse_anthropic(json: &Value) -> Option<ToolUseEvent> {
         tool_name,
         tool_input_json,
         source: ToolUseSource::Anthropic,
+        // Absent `index` would be a protocol violation; 0 is the only value a
+        // single-block message could have had.
+        block_index: json.get("index").and_then(|i| i.as_u64()).unwrap_or(0),
     })
 }
 
@@ -166,7 +176,8 @@ fn try_parse_anthropic(json: &Value) -> Option<ToolUseEvent> {
 /// arrives in the first chunk; subsequent chunks carry `arguments` fragments).
 fn try_parse_openai(json: &Value) -> Option<ToolUseEvent> {
     let choices = json.get("choices")?.as_array()?;
-    let delta = choices.first()?.get("delta")?;
+    let choice = choices.first()?;
+    let delta = choice.get("delta")?;
     let tool_calls = delta.get("tool_calls")?.as_array()?;
     let first_call = tool_calls.first()?;
     let function = first_call.get("function")?;
@@ -183,6 +194,10 @@ fn try_parse_openai(json: &Value) -> Option<ToolUseEvent> {
         tool_name: name.to_string(),
         tool_input_json,
         source: ToolUseSource::OpenAI,
+        // The *choice* index, not `tool_calls[].index`: the refusal is written
+        // as a delta on the choice, and there is only ever one choice in a
+        // streamed completion.
+        block_index: choice.get("index").and_then(|i| i.as_u64()).unwrap_or(0),
     })
 }
 
@@ -213,6 +228,9 @@ mod tests {
         let event = parse_sse_chunk(ANTHROPIC_TOOL_CHUNK).expect("should detect tool use");
         assert_eq!(event.tool_name, "bash");
         assert!(matches!(event.source, ToolUseSource::Anthropic));
+        // The block the tool claimed, not the text block before it. The
+        // response gate writes its refusal here.
+        assert_eq!(event.block_index, 1);
     }
 
     #[test]
@@ -225,6 +243,18 @@ mod tests {
         let event = parse_sse_chunk(OPENAI_TOOL_CHUNK).expect("should detect tool use");
         assert_eq!(event.tool_name, "bash");
         assert!(matches!(event.source, ToolUseSource::OpenAI));
+        // The chunk declares no `choices[].index`; a streamed completion has
+        // one choice, so 0 is the only value it could have carried.
+        assert_eq!(event.block_index, 0);
+    }
+
+    /// `choices[].index` is what the refusal delta must be addressed to — not
+    /// `tool_calls[].index`, which numbers parallel calls within one choice.
+    #[test]
+    fn openai_block_index_is_the_choice_index() {
+        let chunk = r#"data: {"choices":[{"index":2,"delta":{"tool_calls":[{"index":7,"function":{"name":"bash","arguments":""}}]}}]}"#;
+        let event = parse_sse_chunk(chunk).expect("should detect tool use");
+        assert_eq!(event.block_index, 2);
     }
 
     #[test]
