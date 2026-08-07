@@ -12,7 +12,26 @@ use wasmtime::{Engine, Module};
 use super::context::{RequestContext, Verdict};
 use crate::store::ControlPlaneCache;
 use super::local_loader;
+use super::referenced_files::{self, ReferencedFiles};
 use super::runner::evaluate_wasm_rule;
+
+/// Wall-clock ceiling on reading every file one request references.
+///
+/// Separate from — and much larger than — the 5 ms guest budget, because it
+/// buys something different: the guest budget bounds untrusted code, this
+/// bounds the local filesystem. 25 ms is generous for eight cached reads and
+/// tight enough that a stalled NFS mount degrades the request to "no files
+/// readable" instead of holding it open.
+///
+/// On expiry the blocking task is abandoned, not cancelled — `spawn_blocking`
+/// work cannot be interrupted. A wedged filesystem therefore leaks one blocking
+/// thread per affected request until it recovers. Accepted: the alternative is
+/// blocking the request path on the same wedge, and a hung filesystem is a host
+/// problem the proxy can report but not fix.
+const PREFETCH_BUDGET: Duration = Duration::from_millis(25);
+
+/// Warn once, not once per request, when a rule wants files and no root is set.
+static NO_ROOT_WARNING: std::sync::Once = std::sync::Once::new();
 
 /// How a rule's verdict is treated.
 ///
@@ -65,6 +84,14 @@ pub struct LoadedModule {
     pub priority: u32,
     pub mode: RuleMode,
     pub module: Module,
+    /// Whether this rule imports `env.read_referenced_file`.
+    ///
+    /// Decided once, at load, from the module's import section — see
+    /// [`super::host::module_reads_referenced_files`]. The registry reads it to
+    /// decide whether a request needs any disk I/O *before* doing any, which is
+    /// what makes a module that does not import the function cost exactly what
+    /// it cost before the function existed.
+    pub reads_referenced_files: bool,
 }
 
 struct WorkspaceModules {
@@ -199,6 +226,19 @@ impl PluginRegistry {
         }
         modules.sort_by_key(|m| m.priority);
 
+        // Read the referenced manifests once for the whole request, not once
+        // per rule: the read is a property of the request, and two rules
+        // evaluating one request must not be able to see different bytes.
+        //
+        // Skipped entirely — not even a candidate-path scan — when no loaded
+        // rule imports the function. That is the backwards-compatibility
+        // guarantee expressed as code rather than as a promise.
+        let files = if modules.iter().any(|m| m.reads_referenced_files) {
+            self.prefetch_referenced_files(ctx).await
+        } else {
+            Arc::new(ReferencedFiles::empty())
+        };
+
         // A reask from an earlier rule is held, not returned immediately: a
         // later rule may still block, and a block outranks a retry. Returning
         // the first reask would let a low-priority advisory rule mask a
@@ -206,7 +246,7 @@ impl PluginRegistry {
         let mut pending_reask: Option<Verdict> = None;
 
         for m in modules {
-            let verdict = evaluate_wasm_rule(&self.engine, &m.module, ctx).await;
+            let verdict = evaluate_wasm_rule(&self.engine, &m.module, ctx, &files).await;
 
             // A shadowed rule reports and falls through. It is evaluated exactly
             // as an enforcing one — same engine, same fuel, same timeout — so
@@ -272,6 +312,64 @@ impl PluginRegistry {
         }
 
         pending_reask.unwrap_or(Verdict::Bypass)
+    }
+
+    /// Resolve and read the files this request's tool calls reference.
+    ///
+    /// Runs entirely outside the runner's 5 ms guest budget and on the blocking
+    /// pool, so that budget keeps meaning what it says — time spent executing
+    /// untrusted guest code — rather than quietly absorbing a disk read. The
+    /// cost lands on the request instead, bounded by [`PREFETCH_BUDGET`] and by
+    /// the per-file and per-request caps in [`referenced_files`].
+    ///
+    /// Every failure yields an empty table, so a rule sees "nothing readable"
+    /// and decides for itself. It is not a bypass: the rule still runs.
+    async fn prefetch_referenced_files(&self, ctx: &RequestContext) -> Arc<ReferencedFiles> {
+        // Cheap and pure, and the common answer is "no candidates" — done on
+        // this thread so a request with no manifest in it never touches the
+        // blocking pool.
+        let tokens = referenced_files::candidate_tokens(ctx);
+        if tokens.is_empty() {
+            return Arc::new(ReferencedFiles::empty());
+        }
+
+        let Some(root) = referenced_files::resolve_root() else {
+            NO_ROOT_WARNING.call_once(|| {
+                tracing::warn!(
+                    env = referenced_files::MANIFEST_ROOT_ENV,
+                    "a WASM rule imports env.read_referenced_file but no manifest root is \
+                     configured — every read will be refused. Set {} to the directory rules \
+                     may read manifests from.",
+                    referenced_files::MANIFEST_ROOT_ENV
+                );
+            });
+            return Arc::new(ReferencedFiles::empty());
+        };
+
+        let started = Instant::now();
+        let read = tokio::task::spawn_blocking(move || {
+            referenced_files::read_tokens(tokens, &root)
+        });
+        let files = match tokio::time::timeout(PREFETCH_BUDGET, read).await {
+            Ok(Ok(files)) => files,
+            Ok(Err(e)) => {
+                tracing::warn!(error = %e, "referenced-file prefetch task failed — no files exposed");
+                ReferencedFiles::empty()
+            }
+            Err(_) => {
+                tracing::warn!(
+                    budget_ms = PREFETCH_BUDGET.as_millis(),
+                    "referenced-file prefetch exceeded its budget — no files exposed"
+                );
+                ReferencedFiles::empty()
+            }
+        };
+        tracing::debug!(
+            readable = files.readable_count(),
+            elapsed_us = started.elapsed().as_micros(),
+            "referenced-file prefetch complete"
+        );
+        Arc::new(files)
     }
 
     /// Rescan the local rules directory at most every 5 s (same TTL pattern
@@ -406,6 +504,7 @@ impl PluginRegistry {
                         sha256: desc.sha256,
                         priority: desc.priority,
                         mode: desc.mode,
+                        reads_referenced_files: super::host::module_reads_referenced_files(module),
                         module: module.clone(),
                     });
                 } else {
@@ -431,6 +530,8 @@ impl PluginRegistry {
                             sha256: desc.sha256,
                             priority: desc.priority,
                             mode: desc.mode,
+                            reads_referenced_files:
+                                super::host::module_reads_referenced_files(&module),
                             module,
                         });
                     } else {

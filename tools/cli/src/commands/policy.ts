@@ -480,6 +480,25 @@ export async function instantiateAndEvaluate(
           console.log(`[WASM Trace] ${text}${suffix}`)
         }
       },
+      /**
+       * `env.read_referenced_file(pathPtr, pathLen, outPtr, outCap) -> i32`
+       *
+       * Always refuses here, and that is the honest answer rather than a gap:
+       * the proxy builds its readable-file table from the tool calls of a live
+       * request, and `intutic policy test` has a mock context, not a request.
+       * Pretending otherwise — serving the mock's paths off the developer's own
+       * disk — would make this harness disagree with production in the
+       * permissive direction, which is the failure the `runOnnxInference` mock
+       * below was removed for.
+       *
+       * -2 is ERR_REFUSED from `packages/proxy/src/wasm/referenced_files.rs`.
+       * A rule exercised here therefore takes its no-manifest-available branch,
+       * which is the branch worth checking anyway: it is what runs in any
+       * deployment that has not configured a manifest root.
+       */
+      read_referenced_file(_pathPtr: number, _pathLen: number, _outPtr: number, _outCap: number) {
+        return -2
+      },
       // `seed()` used to be here, and the comment above — asserting this set
       // mirrors the proxy's — was false two lines later. `host.rs` has never
       // registered it. AssemblyScript emits `env.seed` for anything reaching

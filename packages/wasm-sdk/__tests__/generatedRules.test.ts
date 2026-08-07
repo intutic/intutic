@@ -66,12 +66,18 @@ afterAll(() => {
   rmSync(join(sdkRoot, '.gen-test'), { recursive: true, force: true })
 })
 
-const HOST_IMPL: Record<string, (...a: number[]) => void> = {
+const HOST_IMPL: Record<string, (...a: number[]) => void | number> = {
   log_info: () => {},
   abort: (_m: number, _f: number, line: number, col: number) => {
     throw new Error(`AssemblyScript abort at ${line}:${col}`)
   },
   trace: () => {},
+  // Refuses every read (-2 is ERR_REFUSED in the proxy). There is no live tool
+  // call behind a fixture context, so there is no set of referenced files to
+  // serve — and inventing one off this machine's disk would make the harness
+  // disagree with production in the permissive direction, which is the one that
+  // ships rules that never fire.
+  read_referenced_file: () => -2,
 }
 
 /**

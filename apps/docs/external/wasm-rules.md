@@ -116,13 +116,25 @@ export function evaluate(requestContextJson: ArrayBuffer): i32
 ```
 
 ### D. Host Imports
-A rule may import exactly three functions, all from `env`: `log_info(ptr, len)`,
-which is piped into the proxy's structured `tracing::info!` output, plus
-AssemblyScript's own `trace` and `abort`.
+A rule may import exactly four functions, all from `env`: `log_info(ptr, len)`,
+which is piped into the proxy's structured `tracing::info!` output;
+AssemblyScript's own `trace` and `abort`; and
+`read_referenced_file(pathPtr, pathLen, outPtr, outCap) -> i32`.
 
 **Nothing else resolves.** A rule importing anything beyond these is refused at
 `intutic policy install`, refused by the control plane if pushed from the
 dashboard, and refused again when the proxy loads it.
+
+`read_referenced_file` is how a rule sees inside a manifest a tool call names —
+`kubectl apply -f k8s/deploy.yaml` gives a rule the path, and this gives it the
+contents. It is **not** a filesystem import. The proxy resolves and reads the
+candidate files itself, before the sandbox is instantiated, from paths derived
+from that request's tool-call arguments; the guest passes a path as a lookup key
+into that fixed table and can never open anything. Reads are confined to
+`INTUTIC_WASM_MANIFEST_ROOT` (unset by default, in which case nothing is
+readable), restricted to manifest extensions, refused on any `..` component or
+symlink leading out of the root, and capped at 8 files of 256 KiB. Every failure
+is a negative return value rather than a trap. See the guide for the code table.
 
 In particular `Math.random()` is unavailable — AssemblyScript compiles it to an
 `env.seed` import the proxy deliberately does not provide. A governance verdict
