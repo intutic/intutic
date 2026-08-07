@@ -29,8 +29,23 @@
  * @module
  */
 
+/**
+ * ## Why `read_referenced_file` is present
+ *
+ * It is not a filesystem import, and the distinction is the whole design. The
+ * proxy resolves and reads the file **before** the sandbox is instantiated,
+ * from paths derived from the tool call under evaluation, confined to a
+ * configured root, extension-allowlisted and size-capped. The guest passes a
+ * path as a *lookup key* into that fixed table; there is no code path from a
+ * guest string to an `open(2)`. WASI stays unavailable, and a rule still cannot
+ * name a file the agent did not.
+ *
+ * `packages/proxy/src/wasm/referenced_files.rs` documents every guard and what
+ * each one costs.
+ */
+
 /** Exactly what `env` provides to a rule. Nothing else resolves. */
-export const WASM_HOST_IMPORTS = ['log_info', 'abort', 'trace'] as const
+export const WASM_HOST_IMPORTS = ['log_info', 'abort', 'trace', 'read_referenced_file'] as const
 
 export type WasmHostImport = (typeof WASM_HOST_IMPORTS)[number]
 
@@ -59,7 +74,11 @@ export function explainWasmImport(name: string): string {
     )
   }
   if (name.startsWith('wasi_') || name.includes('fd_') || name.includes('clock_')) {
-    return `${name} — WASI is not available. Rules get the request context and nothing else.`
+    return (
+      `${name} — WASI is not available. A rule that needs to look inside a file a tool ` +
+      'call references should import env.read_referenced_file, which the host resolves, ' +
+      'confines to a configured root and reads on the rule’s behalf.'
+    )
   }
   return `${name} — not provided by the proxy sandbox.`
 }

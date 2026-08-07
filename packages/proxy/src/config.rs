@@ -372,6 +372,52 @@ pub struct DlpConfig {
     /// a bad regex is a named startup failure, never a panic at first scan.
     #[serde(default)]
     pub patterns: Vec<CustomDlpPattern>,
+    /// How many bytes of decoded response text the streaming forward loop
+    /// lags behind the model, so that a secret split across two SSE deltas is
+    /// seen whole before its first byte is forwarded.
+    ///
+    /// `None` — the default — means the bound derived from the installed
+    /// pattern set (`dlp::derive_holdback`), currently 1020 bytes. `0`
+    /// disables the holdback and restores the pre-holdback behaviour exactly,
+    /// split-pattern leak included. Any other value is a deliberate trade:
+    /// secrets longer than it can still be split undetected.
+    ///
+    /// # Why the default is on, at the full derived bound
+    ///
+    /// Both available defaults do harm, so this picks the one whose harm is
+    /// visible.
+    ///
+    /// Defaulting to `0` would ship a DLP control that reports healthy and
+    /// does not enforce — `dlp.scan_output: true` would keep meaning "output
+    /// DLP is on" while the split-delta case walked through it. That is the
+    /// failure mode this codebase warns about repeatedly, and it is invisible
+    /// by construction: nothing in a metric, a log or a dashboard
+    /// distinguishes "no secrets in the output" from "secrets we could not
+    /// see". A latency regression, by contrast, is noticed within one
+    /// request.
+    ///
+    /// Defaulting to the derived bound is not free and the cost is not small:
+    /// time-to-first-token grows by the time the model needs to produce the
+    /// holdback (2.5–4 s at 250–400 B/s for the built-in set's 1020 bytes).
+    /// Three things make it defensible rather than reckless:
+    ///
+    /// 1. It is scoped to deployments that already asked for output DLP.
+    ///    `enabled && scan_output` gates it. The deployments whose latency
+    ///    changes are exactly the ones that were being told they had a
+    ///    protection they did not have.
+    /// 2. It is not silent. `dlp::resolve_holdback` logs the effective byte
+    ///    count, the derived bound, the pattern that set it, and the
+    ///    latency consequence, once, on the first streamed response.
+    /// 3. It costs time-to-first-token only. The holdback is flushed before
+    ///    the terminal event, so the last byte and the total response time
+    ///    are unchanged. An operator who cannot pay it sets a smaller number
+    ///    and the boot log states, in bytes, what that buys.
+    ///
+    /// The alternative of picking some smaller round number as the default
+    /// was rejected: it would have neither the guarantee of the derived bound
+    /// nor the honesty of `0`, and no one could say what it protected.
+    #[serde(default)]
+    pub stream_holdback_bytes: Option<usize>,
 }
 
 impl Default for DlpConfig {
@@ -381,6 +427,7 @@ impl Default for DlpConfig {
             scan_input: true,
             scan_output: true,
             patterns: Vec::new(),
+            stream_holdback_bytes: None,
         }
     }
 }

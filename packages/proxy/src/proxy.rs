@@ -3409,6 +3409,14 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         let provider_clone = provider.clone();
         let dlp_scan_output = state.config.intutic_settings.dlp.enabled
             && state.config.intutic_settings.dlp.scan_output;
+        // Resolved here rather than inside the stream task so the one-shot
+        // "holdback is N bytes and here is what that costs you" log names a
+        // configuration, not a request.
+        let dlp_holdback_bytes = if dlp_scan_output {
+            crate::dlp::resolve_holdback(&state.config.intutic_settings.dlp)
+        } else {
+            0
+        };
         let loop_run_id_clone = loop_run_id_header.clone();
         let control_plane_url_clone = std::env::var("CONTROL_PLANE_URL").unwrap_or_default();
         let judge_active_clone = judge_active;
@@ -3452,6 +3460,18 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // synthesis block, the terminal event — must be suppressed: bytes
             // after a terminal event are not a stream any client can parse.
             let mut gate_tripped = false;
+            // ── Output DLP holdback (TD-210 follow-up) ────────────────────
+            // Decoded-text continuity across deltas. `None` when output DLP is
+            // off or the holdback is configured to 0, so those deployments run
+            // exactly the code they ran before — no buffer, no rescan, no
+            // added latency.
+            let mut dlp_holdback = if dlp_holdback_bytes > 0 {
+                Some(crate::dlp::StreamScrubber::new(dlp_holdback_bytes))
+            } else {
+                None
+            };
+            // Anthropic content-block index the held text belongs to.
+            let mut holdback_block_index: u64 = 0;
 
             'upstream: while let Some(chunk_res) = stream.next().await {
                 match chunk_res {
@@ -3535,6 +3555,39 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                 break 'upstream;
                             }
 
+                            // ── Output DLP holdback ─────────────────────────
+                            // The scrub above reads the WIRE form of this line;
+                            // the client reads the DECODED form. A secret split
+                            // across two deltas has SSE scaffolding through the
+                            // middle of it on the wire and none of it in the
+                            // client's buffer, so the scrub cannot see what the
+                            // client will. This rewrites the line's text delta
+                            // to carry only what the holdback has released,
+                            // having seen the decoded text continuously.
+                            //
+                            // Placed AFTER the gate: the gate matches the raw
+                            // line and must see it unmodified, and a line the
+                            // gate withholds must never enter the scrubber.
+                            //
+                            // Placed BEFORE both forwarding sites and before
+                            // the accumulation below, so `accumulated_content`
+                            // — and with it the judge, the semantic cache and
+                            // the trace — records the text the client actually
+                            // received. It also covers the cross-provider
+                            // branch: that branch re-reads `line` to fill
+                            // `current_data`, so the rewrite lands ahead of
+                            // both the accumulation and the translation.
+                            if let Some(sc) = dlp_holdback.as_mut() {
+                                if let Some(rewritten) = holdback_rewrite_line(
+                                    sc,
+                                    &line,
+                                    &provider_clone,
+                                    &mut holdback_block_index,
+                                ) {
+                                    line = rewritten;
+                                }
+                            }
+
                             if is_same_provider {
                                 // Intercept end-of-stream markers to inject governance notifications
                                 let is_done = if provider_clone == Provider::Anthropic {
@@ -3556,6 +3609,37 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                 } else {
                                     false
                                 };
+
+                                // ── Holdback flush: in-stream terminal path ──
+                                // Anthropic closes the text block at
+                                // content_block_stop, so the tail has to go out
+                                // while that block is still open; `[DONE]` is
+                                // the OpenAI end. A holdback that never flushes
+                                // truncates the response, which is worse than
+                                // the leak it closes, so every terminal path
+                                // flushes. `flush` is idempotent, so the
+                                // several paths need not coordinate.
+                                if is_done || is_content_block_stop {
+                                    if let Some(held) =
+                                        dlp_holdback.as_mut().and_then(|s| s.flush())
+                                    {
+                                        accumulated_content.push_str(&held);
+                                        if let Some(b) = holdback_flush_bytes(
+                                            &held,
+                                            &protocol_clone,
+                                            true,
+                                            holdback_block_index,
+                                        ) {
+                                            if tx
+                                                .send(Ok(axum::body::Bytes::from(b)))
+                                                .await
+                                                .is_err()
+                                            {
+                                                return;
+                                            }
+                                        }
+                                    }
+                                }
 
                                 let mut skip_forward = false;
                                 if judge_active_clone && (done_received || is_content_block_stop) {
@@ -3594,6 +3678,20 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                         .await
                                         .is_err()
                                     {
+                                        // Client disconnected. There is nobody
+                                        // to emit the tail to, but drain it
+                                        // into the accumulated text anyway so
+                                        // the invariant every other exit path
+                                        // holds — accumulated_content is
+                                        // everything released plus everything
+                                        // held — holds here too, and a future
+                                        // reader of this task's state is not
+                                        // handed a silently short response.
+                                        if let Some(held) =
+                                            dlp_holdback.as_mut().and_then(|s| s.flush())
+                                        {
+                                            accumulated_content.push_str(&held);
+                                        }
                                         return;
                                     }
                                 }
@@ -3668,6 +3766,26 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                     && (!current_event_type.is_empty() || !current_data.is_empty())
                                 {
                                     if current_data == "[DONE]" {
+                                        // Holdback flush before the terminal
+                                        // event: bytes after `[DONE]` are not
+                                        // a stream any client can parse, and
+                                        // the after-loop flush below would
+                                        // otherwise land there.
+                                        if let Some(held) =
+                                            dlp_holdback.as_mut().and_then(|s| s.flush())
+                                        {
+                                            accumulated_content.push_str(&held);
+                                            if let Some(b) = holdback_flush_bytes(
+                                                &held,
+                                                &protocol_clone,
+                                                false,
+                                                holdback_block_index,
+                                            ) {
+                                                let _ = tx
+                                                    .send(Ok(axum::body::Bytes::from(b)))
+                                                    .await;
+                                            }
+                                        }
                                         // Phase 7: Inject governance notifications before [DONE]
                                         {
                                             let harness = session_id.as_str();
@@ -3745,6 +3863,13 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                             if let Some(translated) = crate::protocol::openai::OpenAIAdapter::translate_stream_event(&current_event_type, &json_val, is_responses) {
                                                     let sse_line = format!("data: {}\n\n", serde_json::to_string(&translated).unwrap_or_default());
                                                     if tx.send(Ok(axum::body::Bytes::from(sse_line))).await.is_err() {
+                                                        // Client gone — same
+                                                        // reasoning as the
+                                                        // same-provider
+                                                        // disconnect above.
+                                                        if let Some(held) = dlp_holdback.as_mut().and_then(|s| s.flush()) {
+                                                            accumulated_content.push_str(&held);
+                                                        }
                                                         return;
                                                     }
                                                 }
@@ -3859,6 +3984,22 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                         }
                     }
                     Err(e) => {
+                        // Flush before the error goes out. Text the model
+                        // already produced and the holdback happens to be
+                        // sitting on is not part of the upstream's failure;
+                        // dropping it would turn a mid-stream error into a
+                        // response that is also silently short.
+                        if let Some(held) = dlp_holdback.as_mut().and_then(|s| s.flush()) {
+                            accumulated_content.push_str(&held);
+                            if let Some(b) = holdback_flush_bytes(
+                                &held,
+                                &protocol_clone,
+                                is_same_provider,
+                                holdback_block_index,
+                            ) {
+                                let _ = tx.send(Ok(axum::body::Bytes::from(b))).await;
+                            }
+                        }
                         // Mid-stream upstream failure is a failed pull — the
                         // pre-stream failure sites never see it, so record it
                         // here or the arm learns nothing from broken streams.
@@ -3893,6 +4034,54 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // round-trips and cache writes below are proxy overhead and must
             // not count against the routed model's latency SLO.
             let upstream_latency_ms = start.elapsed().as_millis() as u32;
+
+            // ── Holdback flush: end of stream ─────────────────────────────
+            // The backstop for every stream that reached here without hitting
+            // an in-loop flush: an upstream that simply ended without a
+            // terminal marker, and the cross-provider branch whose terminal
+            // event is emitted below rather than in the loop.
+            //
+            // Ahead of the judge's finalize call, so `fullContent` is the
+            // whole response; ahead of the terminal event, so the tail
+            // precedes it rather than trailing it.
+            //
+            // `gate_tripped` suppresses only the emission, not the drain. That
+            // path has already sent its own terminal event, and bytes after a
+            // terminal event are not a stream any client can parse — but the
+            // trace and the reward path downstream still deserve the whole
+            // text the model produced.
+            if let Some(held) = dlp_holdback.as_mut().and_then(|s| s.flush()) {
+                accumulated_content.push_str(&held);
+                if !gate_tripped {
+                    if let Some(b) = holdback_flush_bytes(
+                        &held,
+                        &protocol_clone,
+                        is_same_provider,
+                        holdback_block_index,
+                    ) {
+                        let _ = tx.send(Ok(axum::body::Bytes::from(b))).await;
+                    }
+                }
+            }
+            if let Some(sc) = dlp_holdback.as_ref() {
+                if !sc.redactions().is_empty() {
+                    // Distinct from the per-line warning below: this one fires
+                    // for secrets that were only visible once the deltas were
+                    // stitched back together, which is the case the per-line
+                    // scrub structurally cannot report.
+                    tracing::warn!(
+                        workspace_id = %workspace_id_clone,
+                        session_id = %session_id_clone,
+                        patterns = ?sc.redactions(),
+                        "Output DLP holdback redacted a secret spanning SSE deltas"
+                    );
+                }
+                for n in sc.redactions() {
+                    if !dlp_stream_redactions.contains(n) {
+                        dlp_stream_redactions.push(n.clone());
+                    }
+                }
+            }
 
             // `!gate_tripped`: the judge's finalize step appends a synthesis
             // block to the stream. The gate has already sent the terminal
@@ -5014,6 +5203,124 @@ fn load_personal_sops() -> serde_json::Value {
     serde_json::Value::Array(sops)
 }
 
+/// Apply the output-DLP holdback to one SSE `data:` line.
+///
+/// Rewrites the line's **text delta** so it carries only the bytes
+/// `StreamScrubber` has released, and returns the rewritten line. `None` means
+/// "forward the original, unchanged" — the line carries no text delta (a
+/// tool-call delta, a usage event, `[DONE]`, an unparseable payload), or the
+/// scrubber released exactly what it was given, which is what a zero holdback
+/// does. Returning `None` rather than a copy keeps the clean path
+/// allocation-free.
+///
+/// The delta field is located the same way the accumulation code below locates
+/// it — `delta.text` for Anthropic, `choices[0].delta.content` for everything
+/// else — so the text this releases and the text `accumulated_content` records
+/// cannot drift apart. Shapes neither of them knows (Gemini's `candidates`,
+/// the OpenAI Responses `response.output_text.delta` envelope) are left alone
+/// by both: no holdback, and no accumulation either, which is the pre-existing
+/// state of those paths and not something this change narrows.
+///
+/// `block_index` tracks the Anthropic content-block index the held text came
+/// from, and is updated only for lines that actually carry text. A flush must
+/// name the block it belongs to: with extended thinking the text block is
+/// index 1, and emitting the tail as index 0 would address a block that was
+/// never opened.
+///
+/// A rewritten line is re-serialised from a `serde_json::Value`, so its keys
+/// come back out in `serde_json`'s order rather than the upstream's. That is
+/// invisible to any client that parses the payload, which is all of them, and
+/// it is confined to lines that carry text and only while the holdback is on.
+fn holdback_rewrite_line(
+    scrubber: &mut crate::dlp::StreamScrubber,
+    line: &str,
+    provider: &Provider,
+    block_index: &mut u64,
+) -> Option<String> {
+    let data = line.strip_prefix("data:")?.trim();
+    if data.is_empty() || data == "[DONE]" {
+        return None;
+    }
+    let mut v: serde_json::Value = serde_json::from_str(data).ok()?;
+    let idx = v.get("index").and_then(|i| i.as_u64());
+    let slot = match provider {
+        Provider::Anthropic => v.get_mut("delta").and_then(|d| d.get_mut("text")),
+        _ => v
+            .get_mut("choices")
+            .and_then(|c| c.get_mut(0))
+            .and_then(|c| c.get_mut("delta"))
+            .and_then(|d| d.get_mut("content")),
+    }?;
+    let original = slot.as_str()?.to_string();
+    if let Some(i) = idx {
+        *block_index = i;
+    }
+    let released = scrubber.push(&original);
+    if released == original {
+        return None;
+    }
+    *slot = serde_json::Value::String(released);
+    Some(format!("data: {}", serde_json::to_string(&v).ok()?))
+}
+
+/// The SSE bytes that carry the holdback's remainder to the client.
+///
+/// Same shapes the judge's synthesis block uses, for the same reason: this is
+/// a text delta injected into a stream that is otherwise finished, and the
+/// clients on the other end have to accept it in the protocol they asked for.
+///
+/// Cross-provider streams reach the client as translated chunks, so the
+/// remainder is synthesised as the upstream Anthropic event the translator
+/// expects and pushed through the same translator the loop uses. Building an
+/// OpenAI chunk directly here would produce the wrong shape for a Responses
+/// API client, which is exactly the sort of protocol drift the translator
+/// exists to prevent.
+fn holdback_flush_bytes(
+    text: &str,
+    protocol: &crate::protocol::Protocol,
+    same_provider: bool,
+    index: u64,
+) -> Option<String> {
+    if !same_provider {
+        let event = serde_json::json!({
+            "type": "content_block_delta",
+            "index": index,
+            "delta": { "type": "text_delta", "text": text },
+        });
+        let translated = crate::protocol::openai::OpenAIAdapter::translate_stream_event(
+            "content_block_delta",
+            &event,
+            *protocol == crate::protocol::Protocol::OpenAIResponses,
+        )?;
+        return Some(format!(
+            "data: {}\n\n",
+            serde_json::to_string(&translated).ok()?
+        ));
+    }
+    Some(match protocol {
+        crate::protocol::Protocol::Anthropic => format!(
+            "event: content_block_delta\ndata: {}\n\n",
+            serde_json::json!({
+                "type": "content_block_delta",
+                "index": index,
+                "delta": { "type": "text_delta", "text": text },
+            })
+        ),
+        _ => format!(
+            "data: {}\n\n",
+            serde_json::json!({
+                "choices": [{
+                    "delta": { "content": text },
+                    "finish_reason": null,
+                    "index": 0
+                }],
+                "id": "intutic-dlp-holdback",
+                "object": "chat.completion.chunk"
+            })
+        ),
+    })
+}
+
 pub fn get_terminal_stream_event(protocol: &crate::protocol::Protocol) -> &'static str {
     match protocol {
         crate::protocol::Protocol::Anthropic => {
@@ -5103,6 +5410,488 @@ mod tests {
         let headers = HeaderMap::new();
         let res = extract_workspace_id(&headers, "raw_upstream_key");
         assert_eq!(res, "unknown");
+    }
+
+
+    // ── Streaming DLP holdback ────────────────────────────────────────────
+    //
+    // The defect these pin: the forward loop scrubbed the WIRE form of each
+    // SSE line and forwarded it, while the client reassembled the DECODED
+    // form. A secret split across two deltas has SSE scaffolding through the
+    // middle of it on the wire and none of it in the client's buffer, so the
+    // scrub could not see what the client would.
+
+    /// A 20-byte AWS key and the two deltas a model streams it as.
+    const SPLIT_HEAD: &str = "AKIAIOSFODNN7";
+    const SPLIT_TAIL: &str = "EXAMPLE";
+    const SPLIT_WHOLE: &str = "AKIAIOSFODNN7EXAMPLE";
+
+    /// How the replayed stream ended, matching the three exits the forward
+    /// loop actually has.
+    #[derive(Clone, Copy, PartialEq)]
+    enum Ending {
+        /// Upstream ran to its terminal event.
+        Complete,
+        /// `stream.next()` yielded `Err` partway through.
+        UpstreamError,
+        /// `tx.send` failed partway through — the client hung up.
+        ClientGone,
+    }
+
+    /// Replay of the forward loop's per-line handling, in the loop's order:
+    /// per-line wire scrub, holdback rewrite, in-stream terminal flush,
+    /// forward, accumulate — then the ending's own flush.
+    ///
+    /// This calls the same two helpers the loop calls and does nothing the
+    /// loop does not; it exists because that loop lives inside a 600-line
+    /// async block with a live upstream, a channel and a control plane on it.
+    fn replay(
+        sse: &str,
+        holdback: usize,
+        provider: Provider,
+        protocol: crate::protocol::Protocol,
+        ending: Ending,
+        stop_after: usize,
+    ) -> (String, String) {
+        let mut sc = if holdback > 0 {
+            Some(crate::dlp::StreamScrubber::new(holdback))
+        } else {
+            None
+        };
+        let mut block_index = 0u64;
+        let mut client = String::new();
+        let mut accumulated = String::new();
+
+        for (n, raw) in sse.split_inclusive('\n').enumerate() {
+            if ending != Ending::Complete && n == stop_after {
+                break;
+            }
+            let mut line = raw.trim().to_string();
+            if let Some((scrubbed, _)) = crate::dlp::scrub_stream_text(&line) {
+                line = scrubbed;
+            }
+            if let Some(s) = sc.as_mut() {
+                if let Some(rw) = holdback_rewrite_line(s, &line, &provider, &mut block_index) {
+                    line = rw;
+                }
+            }
+
+            let is_done = if provider == Provider::Anthropic {
+                line == "event: message_stop"
+            } else {
+                line.starts_with("data:") && line["data:".len()..].trim() == "[DONE]"
+            };
+            let is_cbs = provider == Provider::Anthropic
+                && (line == "event: content_block_stop"
+                    || (line.starts_with("data:") && line.contains("content_block_stop")));
+            if is_done || is_cbs {
+                if let Some(held) = sc.as_mut().and_then(|s| s.flush()) {
+                    accumulated.push_str(&held);
+                    if let Some(b) = holdback_flush_bytes(&held, &protocol, true, block_index) {
+                        client.push_str(&b);
+                    }
+                }
+            }
+
+            client.push_str(&format!("{}\n", line));
+
+            if let Some(stripped) = line.strip_prefix("data:") {
+                let data = stripped.trim();
+                if data != "[DONE]" && !data.is_empty() {
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(data) {
+                        let t = if provider == Provider::Anthropic {
+                            v.get("delta").and_then(|d| d.get("text"))
+                        } else {
+                            v.get("choices")
+                                .and_then(|c| c.get(0))
+                                .and_then(|c| c.get("delta"))
+                                .and_then(|d| d.get("content"))
+                        };
+                        if let Some(t) = t.and_then(|x| x.as_str()) {
+                            accumulated.push_str(t);
+                        }
+                    }
+                }
+            }
+        }
+
+        // The ending's flush. `Complete` and `UpstreamError` emit to the
+        // client; `ClientGone` only drains, because there is nobody left.
+        if let Some(held) = sc.as_mut().and_then(|s| s.flush()) {
+            accumulated.push_str(&held);
+            if ending != Ending::ClientGone {
+                if let Some(b) = holdback_flush_bytes(&held, &protocol, true, block_index) {
+                    client.push_str(&b);
+                }
+            }
+        }
+        (client, accumulated)
+    }
+
+    /// What a client reassembles out of the bytes it received.
+    fn client_text(stream: &str, provider: &Provider) -> String {
+        let mut out = String::new();
+        for line in stream.lines() {
+            let Some(data) = line.strip_prefix("data:") else {
+                continue;
+            };
+            let data = data.trim();
+            if data == "[DONE]" || data.is_empty() {
+                continue;
+            }
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(data) else {
+                continue;
+            };
+            let t = if *provider == Provider::Anthropic {
+                v.get("delta").and_then(|d| d.get("text"))
+            } else {
+                v.get("choices")
+                    .and_then(|c| c.get(0))
+                    .and_then(|c| c.get("delta"))
+                    .and_then(|d| d.get("content"))
+            };
+            if let Some(t) = t.and_then(|x| x.as_str()) {
+                out.push_str(t);
+            }
+        }
+        out
+    }
+
+    fn openai_stream(deltas: &[&str]) -> String {
+        let mut s = String::new();
+        for d in deltas {
+            s.push_str(&format!(
+                "data: {}\n\n",
+                serde_json::json!({
+                    "id": "chatcmpl-1",
+                    "object": "chat.completion.chunk",
+                    "choices": [{ "index": 0, "delta": { "content": d }, "finish_reason": null }]
+                })
+            ));
+        }
+        s.push_str("data: [DONE]\n\n");
+        s
+    }
+
+    fn anthropic_stream(blocks: &[(u64, &[&str])]) -> String {
+        let mut s = String::from(
+            "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":5}}}\n\n",
+        );
+        for (index, deltas) in blocks {
+            s.push_str(&format!(
+                "event: content_block_start\ndata: {}\n\n",
+                serde_json::json!({"type":"content_block_start","index":index,"content_block":{"type":"text","text":""}})
+            ));
+            for d in *deltas {
+                s.push_str(&format!(
+                    "event: content_block_delta\ndata: {}\n\n",
+                    serde_json::json!({"type":"content_block_delta","index":index,"delta":{"type":"text_delta","text":d}})
+                ));
+            }
+            s.push_str(&format!(
+                "event: content_block_stop\ndata: {}\n\n",
+                serde_json::json!({"type":"content_block_stop","index":index})
+            ));
+        }
+        s.push_str("event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n");
+        s
+    }
+
+    fn derived() -> usize {
+        crate::dlp::derive_holdback().bytes
+    }
+
+    /// The leak, reproduced through the loop's own helpers.
+    ///
+    /// This is the pre-fix behaviour: `stream_holdback_bytes: 0` is the code
+    /// that shipped, per-line scrubbing and nothing else. The unsplit control
+    /// below shows the scrubber is working — it is the *split* form it cannot
+    /// see.
+    #[test]
+    fn holdback_off_forwards_a_split_secret_to_the_client() {
+        let sse = openai_stream(&["Here is the key: ", SPLIT_HEAD, SPLIT_TAIL, ", use it."]);
+        let (client, _) = replay(
+            &sse,
+            0,
+            Provider::OpenAI,
+            crate::protocol::Protocol::OpenAIChatCompletions,
+            Ending::Complete,
+            0,
+        );
+        assert!(
+            client_text(&client, &Provider::OpenAI).contains(SPLIT_WHOLE),
+            "the defect no longer reproduces at holdback 0; either the leak was \
+             closed somewhere else or `0` has stopped meaning 'the old behaviour'"
+        );
+    }
+
+    #[test]
+    fn holdback_off_still_catches_the_unsplit_form() {
+        let sse = openai_stream(&["Here is the key: ", SPLIT_WHOLE, ", use it."]);
+        let (client, _) = replay(
+            &sse,
+            0,
+            Provider::OpenAI,
+            crate::protocol::Protocol::OpenAIChatCompletions,
+            Ending::Complete,
+            0,
+        );
+        let text = client_text(&client, &Provider::OpenAI);
+        assert!(!text.contains(SPLIT_WHOLE));
+        assert!(text.contains("[REDACTED_SECRET]"));
+    }
+
+    #[test]
+    fn the_holdback_redacts_a_secret_split_across_two_deltas() {
+        let sse = openai_stream(&["Here is the key: ", SPLIT_HEAD, SPLIT_TAIL, ", use it."]);
+        let (client, accumulated) = replay(
+            &sse,
+            derived(),
+            Provider::OpenAI,
+            crate::protocol::Protocol::OpenAIChatCompletions,
+            Ending::Complete,
+            0,
+        );
+        let text = client_text(&client, &Provider::OpenAI);
+        assert!(!text.contains(SPLIT_WHOLE), "client received: {text}");
+        assert!(text.contains("[REDACTED_SECRET]"), "client received: {text}");
+        assert!(text.starts_with("Here is the key: "));
+        assert!(text.ends_with(", use it."));
+        // The trace, the judge and the semantic cache read `accumulated`; it
+        // must be the text the client got, not the raw one.
+        assert_eq!(
+            accumulated, text,
+            "accumulated_content diverged from what the client received"
+        );
+    }
+
+    #[test]
+    fn the_holdback_redacts_a_split_secret_on_the_anthropic_wire() {
+        let sse = anthropic_stream(&[(0, &["Here is the key: ", SPLIT_HEAD, SPLIT_TAIL, "."])]);
+        let (client, accumulated) = replay(
+            &sse,
+            derived(),
+            Provider::Anthropic,
+            crate::protocol::Protocol::Anthropic,
+            Ending::Complete,
+            0,
+        );
+        let text = client_text(&client, &Provider::Anthropic);
+        assert!(!text.contains(SPLIT_WHOLE), "client received: {text}");
+        assert!(text.contains("[REDACTED_SECRET]"));
+        assert_eq!(accumulated, text);
+        // The tail must land while the block it belongs to is still open.
+        let held_pos = client
+            .find("[REDACTED_SECRET]")
+            .expect("the flush delta must be in the stream");
+        let stop_pos = client
+            .find("event: content_block_stop")
+            .expect("content_block_stop must still be there");
+        assert!(
+            held_pos < stop_pos,
+            "the held tail was emitted after the content block closed"
+        );
+    }
+
+    /// With extended thinking the text block is index 1. A flush that assumed
+    /// 0 would address a block the client never opened.
+    #[test]
+    fn the_flush_names_the_content_block_the_text_came_from() {
+        let sse = anthropic_stream(&[(1, &["Here is the key: ", SPLIT_HEAD, SPLIT_TAIL, "."])]);
+        let (client, _) = replay(
+            &sse,
+            derived(),
+            Provider::Anthropic,
+            crate::protocol::Protocol::Anthropic,
+            Ending::Complete,
+            0,
+        );
+        let flush_line = client
+            .lines()
+            .find(|l| l.contains("[REDACTED_SECRET]"))
+            .expect("flush delta missing");
+        let v: serde_json::Value =
+            serde_json::from_str(flush_line.strip_prefix("data: ").unwrap()).unwrap();
+        assert_eq!(v["index"], 1, "flush addressed the wrong content block");
+    }
+
+    // ── the terminal paths ────────────────────────────────────────────────
+    //
+    // A holdback that never flushes truncates the response, which is worse
+    // than the leak it was added to close. Every exit is covered.
+
+    #[test]
+    fn nothing_is_truncated_when_the_stream_completes() {
+        let body = ["The quick ", "brown fox ", "jumps over ", "the lazy dog."];
+        for (provider, protocol, sse) in [
+            (
+                Provider::OpenAI,
+                crate::protocol::Protocol::OpenAIChatCompletions,
+                openai_stream(&body),
+            ),
+            (
+                Provider::Anthropic,
+                crate::protocol::Protocol::Anthropic,
+                anthropic_stream(&[(0, &body)]),
+            ),
+        ] {
+            let (client, accumulated) = replay(
+                &sse,
+                derived(),
+                provider.clone(),
+                protocol,
+                Ending::Complete,
+                0,
+            );
+            assert_eq!(client_text(&client, &provider), body.concat());
+            assert_eq!(accumulated, body.concat());
+        }
+    }
+
+    #[test]
+    fn the_done_marker_survives_the_flush_and_stays_last() {
+        let sse = openai_stream(&["some text that is held back"]);
+        let (client, _) = replay(
+            &sse,
+            derived(),
+            Provider::OpenAI,
+            crate::protocol::Protocol::OpenAIChatCompletions,
+            Ending::Complete,
+            0,
+        );
+        let flush_pos = client.find("some text that is held back").unwrap();
+        let done_pos = client.find("data: [DONE]").expect("[DONE] must survive");
+        assert!(flush_pos < done_pos, "the tail was emitted after [DONE]");
+        assert!(client.trim_end().ends_with("data: [DONE]"));
+    }
+
+    #[test]
+    fn a_mid_stream_upstream_error_flushes_before_the_error_reaches_the_client() {
+        let body = ["The quick ", "brown fox ", "jumps over "];
+        let sse = openai_stream(&body);
+        // Cut after the three content lines (each delta is two lines: data +
+        // blank), before the terminal marker.
+        let (client, accumulated) = replay(
+            &sse,
+            derived(),
+            Provider::OpenAI,
+            crate::protocol::Protocol::OpenAIChatCompletions,
+            Ending::UpstreamError,
+            6,
+        );
+        assert_eq!(
+            client_text(&client, &Provider::OpenAI),
+            body.concat(),
+            "the holdback swallowed text the model had already produced"
+        );
+        assert_eq!(accumulated, body.concat());
+    }
+
+    #[test]
+    fn a_client_disconnect_drains_the_holdback_into_the_recorded_text() {
+        let body = ["The quick ", "brown fox ", "jumps over "];
+        let sse = openai_stream(&body);
+        let (_, accumulated) = replay(
+            &sse,
+            derived(),
+            Provider::OpenAI,
+            crate::protocol::Protocol::OpenAIChatCompletions,
+            Ending::ClientGone,
+            6,
+        );
+        assert_eq!(
+            accumulated,
+            body.concat(),
+            "the recorded response was a truncation of what was generated"
+        );
+    }
+
+    // ── what the holdback must not touch ──────────────────────────────────
+
+    /// The response gate matches tool-call names, the snip compactor and the
+    /// translator read the same events, and none of them may see a rewritten
+    /// line. `holdback_rewrite_line` returns `None` — forward the original —
+    /// for everything that is not a text delta.
+    #[test]
+    fn non_text_events_are_left_exactly_as_they_arrived() {
+        let mut sc = crate::dlp::StreamScrubber::new(derived());
+        let mut idx = 0u64;
+        let untouched = [
+            (Provider::OpenAI, r#"data: [DONE]"#),
+            (
+                Provider::OpenAI,
+                r#"data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"bash","arguments":"{\"cmd\":"}}]}}]}"#,
+            ),
+            (
+                Provider::OpenAI,
+                r#"data: {"usage":{"prompt_tokens":10,"completion_tokens":20}}"#,
+            ),
+            (
+                Provider::Anthropic,
+                r#"data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"a\":"}}"#,
+            ),
+            (
+                Provider::Anthropic,
+                r#"data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":3}}"#,
+            ),
+            (Provider::Anthropic, "event: content_block_stop"),
+            (Provider::OpenAI, "not an sse line at all"),
+            (Provider::OpenAI, r#"data: {"choices":[{"delta":{}}]"#),
+        ];
+        for (provider, line) in untouched {
+            assert!(
+                holdback_rewrite_line(&mut sc, line, &provider, &mut idx).is_none(),
+                "rewrote a line it had no business touching: {line}"
+            );
+        }
+        assert_eq!(
+            sc.flush(),
+            None,
+            "a non-text event was fed into the holdback buffer"
+        );
+    }
+
+    /// A tool-call index must not be mistaken for a content-block index: the
+    /// flush would then address the tool block instead of the text block.
+    #[test]
+    fn the_block_index_only_tracks_lines_that_carry_text() {
+        let mut sc = crate::dlp::StreamScrubber::new(derived());
+        let mut idx = 0u64;
+        holdback_rewrite_line(
+            &mut sc,
+            r#"data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"hello"}}"#,
+            &Provider::Anthropic,
+            &mut idx,
+        );
+        assert_eq!(idx, 1);
+        holdback_rewrite_line(
+            &mut sc,
+            r#"data: {"type":"content_block_delta","index":7,"delta":{"type":"input_json_delta","partial_json":"{"}}"#,
+            &Provider::Anthropic,
+            &mut idx,
+        );
+        assert_eq!(idx, 1, "a tool-call block moved the text block's index");
+    }
+
+    /// Cross-provider streams reach the client as translated chunks, so the
+    /// flush has to go through the translator too rather than assuming the
+    /// chat-completions shape.
+    #[test]
+    fn a_cross_provider_flush_is_emitted_in_the_translated_shape() {
+        for protocol in [
+            crate::protocol::Protocol::OpenAIChatCompletions,
+            crate::protocol::Protocol::OpenAIResponses,
+        ] {
+            let bytes = holdback_flush_bytes("held tail", &protocol, false, 0)
+                .expect("a cross-provider flush must produce a chunk");
+            assert!(bytes.starts_with("data: ") && bytes.ends_with("\n\n"));
+            let v: serde_json::Value =
+                serde_json::from_str(bytes.trim().strip_prefix("data: ").unwrap()).unwrap();
+            assert!(
+                serde_json::to_string(&v).unwrap().contains("held tail"),
+                "the translated chunk lost the text: {v}"
+            );
+        }
     }
 
     #[test]
