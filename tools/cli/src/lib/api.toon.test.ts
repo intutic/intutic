@@ -14,7 +14,7 @@
  * shift lands on the tail of the row: `severity` reads back as the trace id.
  */
 import { describe, it, expect } from 'vitest'
-import { toonDecode } from './api.js'
+import { toonDecode, unwrapToonEnvelope } from './api.js'
 import { toonEncode } from '@intutic/shared-types'
 
 /**
@@ -133,5 +133,69 @@ describe('the fixtures above are still what the encoder emits', () => {
 
     // And the decoder gets the original value back out.
     expect(toonDecode(toonEncode([row]))[0]).toEqual(row)
+  })
+})
+
+/**
+ * The envelope unwrap, which is a separate failure from the cell decoding above.
+ *
+ * `listProperty` names where the decoded rows should LAND. For
+ * `/api/v1/incidents` that name is `data` — the same key the encoded string
+ * arrived in — so the original order (assign, then delete `data`) wrote the rows
+ * and deleted them on the next line. Every incidents response over the 20-row
+ * TOON threshold reached the CLI and the dashboard as `{meta:{total:N}}`: no
+ * rows, no error, and a correct total sitting next to the empty list.
+ *
+ * `/api/v1/traces` was never affected, because its listProperty is `traces`.
+ * That is the whole reason this went unnoticed — the endpoint people tested
+ * with worked.
+ */
+describe('unwrapToonEnvelope', () => {
+  const encoded = toonEncode([
+    { incident_id: 'gi_1', severity: 'HIGH' },
+    { incident_id: 'gi_2', severity: 'LOW' },
+  ])!
+
+  it('keeps the rows when listProperty is "data" (the incidents case)', () => {
+    const out = unwrapToonEnvelope({
+      format: 'toon', listProperty: 'data', data: encoded, meta: { total: 2 },
+    }) as Record<string, unknown>
+    expect(Array.isArray(out['data'])).toBe(true)
+    expect(out['data']).toHaveLength(2)
+    expect((out['data'] as Record<string, unknown>[])[0]!['incident_id']).toBe('gi_1')
+  })
+
+  it('keeps the rows when listProperty is a different key (the traces case)', () => {
+    const out = unwrapToonEnvelope({
+      format: 'toon', listProperty: 'traces', data: encoded, total: 2,
+    }) as Record<string, unknown>
+    expect(out['traces']).toHaveLength(2)
+    expect(out['data']).toBeUndefined()
+  })
+
+  it('strips the envelope keys', () => {
+    const out = unwrapToonEnvelope({
+      format: 'toon', listProperty: 'traces', data: encoded,
+    }) as Record<string, unknown>
+    expect(out['format']).toBeUndefined()
+    expect(out['listProperty']).toBeUndefined()
+  })
+
+  it('leaves sibling keys alone', () => {
+    const out = unwrapToonEnvelope({
+      format: 'toon', listProperty: 'data', data: encoded, meta: { total: 2, page: 1 },
+    }) as Record<string, unknown>
+    expect(out['meta']).toEqual({ total: 2, page: 1 })
+  })
+
+  it.each([
+    ['a plain list body', { data: [{ a: 1 }], meta: {} }],
+    ['a non-toon format', { format: 'json', data: 'x', listProperty: 'data' }],
+    ['a toon body with no listProperty', { format: 'toon', data: 'x' }],
+    ['a toon body whose data is not a string', { format: 'toon', data: [], listProperty: 'data' }],
+    ['null', null],
+    ['a string', 'nope'],
+  ])('passes %s through untouched', (_label, input) => {
+    expect(unwrapToonEnvelope(input)).toEqual(input)
   })
 })

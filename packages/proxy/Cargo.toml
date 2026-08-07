@@ -1,6 +1,6 @@
 [package]
 name = "intutic-proxy"
-version = "2.0.0"
+version = "2.1.0"
 edition = "2021"
 authors = ["Intutic <eng@intutic.dev>"]
 description = "High-performance AI agent proxy with WebAssembly-based governance policies"
