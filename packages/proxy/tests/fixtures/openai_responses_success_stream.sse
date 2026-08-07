@@ -1,0 +1,51 @@
+event: response.created
+data: {"type":"response.created","response":{"id":"resp_CAPTURED","object":"response","status":"in_progress"}}
+
+event: response.in_progress
+data: {"type":"response.in_progress","response":{"id":"resp_CAPTURED","object":"response","status":"in_progress"}}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","item":{"content":[],"id":"msg_CAPTURED","role":"assistant","status":"in_progress","type":"message"}}
+
+event: response.content_part.added
+data: {"type":"response.content_part.added","item_id":"msg_CAPTURED","part":{"type":"output_text","text":""}}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","item_id":"msg_CAPTURED","delta":"Hello"}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","item_id":"msg_CAPTURED","delta":"!"}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","item_id":"msg_CAPTURED","delta":" How"}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","item_id":"msg_CAPTURED","delta":" can"}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","item_id":"msg_CAPTURED","delta":" I"}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","item_id":"msg_CAPTURED","delta":" assist"}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","item_id":"msg_CAPTURED","delta":" you"}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","item_id":"msg_CAPTURED","delta":" today"}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","item_id":"msg_CAPTURED","delta":"?"}
+
+event: response.output_text.done
+data: {"type":"response.output_text.done","item_id":"msg_CAPTURED","text":"Hello! How can I assist you today?"}
+
+event: response.content_part.done
+data: {"type":"response.content_part.done","item_id":"msg_CAPTURED","part":{"type":"output_text","annotations":[],"logprobs":[],"text":"Hello! How can I assist you today?"}}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","item":{"type":"message","status":"completed","id":"msg_CAPTURED","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":"Hello! How can I assist you today?"}],"role":"assistant"}}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"resp_CAPTURED","object":"response","created_at":1786118188,"status":"completed","model":"qwen2.5-coder-3b-instruct","output":[{"type":"message","status":"completed","id":"msg_CAPTURED","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":"Hello! How can I assist you today?"}],"role":"assistant"}],"usage":{"input_tokens":33,"output_tokens":10,"total_tokens":43,"input_tokens_details":{"cached_tokens":24}}},"timings":{"cache_n":24,"prompt_n":9,"prompt_ms":405.861,"prompt_per_token_ms":45.095666666666666,"prompt_per_second":22.175079645494392,"predicted_n":10,"predicted_ms":661.768,"predicted_per_token_ms":66.1768,"predicted_per_second":15.111035891732449}}
+
