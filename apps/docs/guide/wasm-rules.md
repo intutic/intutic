@@ -50,17 +50,66 @@ To prevent memory corruption and guest engine crashes under multi-turn garbage c
 
 ## Host imports
 
-A rule may import exactly three functions, all from `env`:
+A rule may import exactly four functions, all from `env`:
 
 | Import | Signature | What it does |
 | :--- | :--- | :--- |
 | `log_info` | `(ptr: usize, len: usize) => void` | Writes a line to the proxy's log. |
 | `trace` | `(msg, n, a0..a4) => void` | AssemblyScript's `trace()`. |
 | `abort` | `(msg, file, line, col) => void` | AssemblyScript's abort path. Terminates the rule. |
+| `read_referenced_file` | `(pathPtr, pathLen, outPtr, outCap) => i32` | Copies the contents of a file **this request's tool calls reference** into guest memory. |
 
 **Nothing else resolves.** A rule importing anything beyond these is refused at
 `intutic policy install`, refused again by the control plane if pushed from the
 dashboard, and refused a third time when the proxy loads it.
+
+### Reading a manifest a command references
+
+Governing `kubectl apply -f k8s/deploy.yaml` usually means asking a question
+about the *file*, not the command line. `read_referenced_file` answers it
+without giving the sandbox a filesystem.
+
+Call it with `outCap = 0` first: it returns the byte length and writes nothing,
+so you can size a buffer. Call it again with a buffer at least that large and it
+returns the same length, having copied the bytes. Any negative return is a
+refusal, never a trap:
+
+| Code | Meaning |
+| :--- | :--- |
+| `-1` | Malformed call — pointers outside your memory, a bad length, a non-UTF-8 path. |
+| `-2` | Refused. Either your request's tool calls never named this path, or it failed a path guard. |
+| `-3` | Referenced and allowed, but not on disk. |
+| `-4` | Larger than the 256 KiB cap. **No bytes are exposed** — a rule must not scan a prefix and conclude a manifest is clean. |
+| `-5` | Your buffer was smaller than the file. Nothing was written; ask for the size first. |
+| `-6` | This evaluation used its 64 reads. |
+
+What you can read is decided entirely by the host, before your rule is even
+instantiated:
+
+- **Only paths this request's tool calls name.** Derived from path arguments
+  (`file_path`, `path`, …) and from tokens inside `command`-style arguments.
+  Globs are not expanded — `*.yaml` is taken literally and simply fails to
+  resolve.
+- **Only manifest extensions**: `.yaml`, `.yml`, `.json`, `.tf`, `.tfvars`,
+  `.hcl`, `.toml`. This is why a tool call naming `/etc/shadow` produces
+  nothing to read.
+- **Only inside the configured root.** `..` is refused outright, and a symlink
+  leading out of the root is refused too, because confinement is checked against
+  the fully resolved path.
+- **At most 8 files per request, 256 KiB each.**
+
+::: warning Off unless configured
+Set `INTUTIC_WASM_MANIFEST_ROOT` to the directory rules may read manifests from.
+With no root set there is no readable file at all and every call returns `-2` —
+write your rule so that branch is a sensible outcome, because it is what runs on
+any deployment that has not opted in.
+:::
+
+::: tip This is the one thing a rule sees that is not the request
+A verdict that depends on a file is no longer reproducible from the stored
+request alone: replaying it needs the tree as it was. The proxy logs a content
+hash of everything it exposes so a replay discrepancy can at least be explained.
+:::
 
 ::: danger `Math.random()` is unavailable
 AssemblyScript compiles it to an `env.seed` import that the proxy does not

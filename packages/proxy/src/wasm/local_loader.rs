@@ -147,6 +147,10 @@ pub fn load_local_modules(
                     // rules, which arrive from the control plane; a developer who ran
                     // `intutic policy install` meant it.
                     mode: super::registry::RuleMode::Enforce,
+                    // Decided here, at load, so the request path never has to
+                    // walk an import section to find out whether it needs to
+                    // read anything from disk.
+                    reads_referenced_files: super::host::module_reads_referenced_files(&module),
                     module,
                 });
             }
