@@ -14,6 +14,7 @@
  *    ~/.intutic/daemon.log)
  * 6. Valkey connectivity (proxy /health or TCP probe port 6379)
  * 7. CA cert trust (~/.intutic/ca.crt + OS trust store)
+ * 8. Policy snapshot present, intact, and current
  *
  * No subscription checks — enforcement is server-side (covenant 13).
  *
@@ -32,10 +33,15 @@ import { log } from '../lib/logger.js'
 import { loadCredentials, loadConfig, loadIntegrity } from '../config/store.js'
 import { isSyncDaemonRunning } from '../lib/process.js'
 import { getPaths } from './install-daemon.js'
+import {
+  readPolicySnapshot,
+  SNAPSHOT_STALE_AFTER_DAYS,
+  type PolicySnapshotHealth,
+} from '../lib/policySnapshot.js'
 
 // ─── Types ───────────────────────────────────────────────────────────
 
-interface CheckResult {
+export interface CheckResult {
   name: string
   passed: boolean
   detail: string
@@ -514,6 +520,89 @@ function checkCertTrust(): CheckResult {
   }
 }
 
+/**
+ * Turns a snapshot's state into the line doctor prints.
+ *
+ * Split from the check so the mapping can be tested without a home directory:
+ * every branch here is a different thing being enforced on the machine, and
+ * getting one of them wrong is silent by construction.
+ *
+ * `passed` is false for everything except `ok`, including `stale`. A stale
+ * snapshot is still fully enforced — staleness governs alerting, not
+ * enforcement — but reaching the window means the daemon has not completed a
+ * sync in over a week, which is a fault whatever the gates are doing with the
+ * rules they still have.
+ */
+export function describePolicySnapshot(snap: PolicySnapshotHealth): CheckResult {
+  const name = 'Policy Snapshot'
+  const dropped = snap.droppedRules > 0 ? `, ${snap.droppedRules} rule(s) dropped as uncompilable` : ''
+
+  switch (snap.state) {
+    case 'ok':
+      return {
+        name,
+        passed: true,
+        detail: `${snap.ruleCount} rule(s), digest ${snap.digest}, ${snap.ageDays}d old${dropped}`,
+      }
+
+    case 'stale':
+      return {
+        name,
+        passed: false,
+        detail:
+          `${snap.ageDays} days old and still enforced (${snap.ruleCount} rule(s)) — ` +
+          `nothing has refreshed it in over ${SNAPSHOT_STALE_AFTER_DAYS} days${dropped}`,
+        remediation:
+          'The daemon has not synced. Check `intutic daemon status`, then refresh with `intutic policy snapshot`.',
+      }
+
+    case 'invalid':
+      return {
+        name,
+        passed: false,
+        detail:
+          `Failed its ${snap.workspaceId ? 'digest or workspace' : 'digest'} check at ${snap.path} — ` +
+          'every gate has DROPPED the dynamic rules, so workspace policy is enforcing nothing',
+        remediation:
+          'The file was edited or belongs to another workspace. Overwrite it with `intutic policy snapshot`.',
+      }
+
+    case 'empty':
+      return {
+        name,
+        passed: false,
+        // The writer always ships the destructive tier, so zero rules is not a
+        // quiet workspace — it is a compile that produced nothing.
+        detail: `Present at ${snap.path} but contains no rules — the policy compile produced nothing${dropped}`,
+        remediation:
+          'Check that the workspace has active BLOCK: SOPs, then rebuild it with `intutic policy snapshot`.',
+      }
+
+    case 'absent':
+      return {
+        name,
+        passed: false,
+        detail: `No snapshot at ${snap.path} — built-in protections only, workspace policy enforces nothing`,
+        remediation: 'Write it with `intutic policy snapshot`, or start the daemon with `intutic connect`.',
+      }
+  }
+}
+
+/**
+ * Check 8: Policy snapshot — the dynamic tier every harness gate reads.
+ *
+ * Absent, invalid or empty all mean the same thing on the machine: the gates
+ * fall back to the compiled floor and the workspace's own rules stop applying,
+ * with no error anywhere. That is the whole reason this check exists — the
+ * failure is invisible from every other angle in this command.
+ */
+async function checkPolicySnapshot(): Promise<CheckResult> {
+  // The workspace id is what makes a mismatch detectable. Without credentials
+  // the comparison is skipped rather than guessed, exactly as the gates skip it.
+  const creds = await loadCredentials()
+  return describePolicySnapshot(readPolicySnapshot({ expectedWorkspaceId: creds?.workspaceId }))
+}
+
 // ─── Runner ──────────────────────────────────────────────────────────
 
 export async function runDoctor(): Promise<void> {
@@ -530,6 +619,7 @@ export async function runDoctor(): Promise<void> {
   results.push(checkDaemonLog())
   results.push(await checkValkey())
   results.push(checkCertTrust())
+  results.push(await checkPolicySnapshot())
 
   // Print results
   const passed = results.filter(r => r.passed).length
