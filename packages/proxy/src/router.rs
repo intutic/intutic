@@ -64,6 +64,23 @@ async fn root_info() -> Json<serde_json::Value> {
         "service": "Intutic Proxy Gateway",
         "version": env!("CARGO_PKG_VERSION"),
         "status": "running",
-        "protocols": ["anthropic", "openai", "gemini"]
+        // Only what actually works end to end.
+        //
+        // `gemini` was listed here and does not function: `/v1beta/models/:id`
+        // is routed, but a Gemini body carries its model in the URL rather than
+        // in `model`, so `extract_model` yields `"unknown"`,
+        // `get_model_provider` answers OpenAI, `is_same_provider` is false for
+        // every Gemini request, and the body is posted to OpenAI's
+        // chat-completions endpoint — a 400. There is no Gemini stream
+        // translator either. Advertising it made an unreachable path look like
+        // a supported one, which is how it stayed unreachable: the request side
+        // was built, the response side never was.
+        //
+        // The route stays (removing it would change behaviour for anyone
+        // pointed at it), and `gemini_unsupported` says why rather than
+        // leaving its absence to be read as an oversight. See
+        // `proxy::DeltaShape::Unparsed` for the full chain.
+        "protocols": ["anthropic", "openai", "openai-responses"],
+        "gemini_unsupported": "requests to /v1beta/ are routed but not translated; the model name is not read from the URL"
     }))
 }

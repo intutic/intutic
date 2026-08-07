@@ -33,8 +33,26 @@
 //!
 //! # Wire shapes it does not see
 //!
-//! Anthropic (`content[].type == "tool_use"`, `content_block_start`) and OpenAI
-//! (`choices[].message.tool_calls[]`, `choices[].delta.tool_calls[]`) only.
+//! Anthropic (`content[].type == "tool_use"`, `content_block_start`), OpenAI
+//! chat completions (`choices[].message.tool_calls[]`,
+//! `choices[].delta.tool_calls[]`) and — since the Responses gap was closed —
+//! the OpenAI Responses API (`response.output_item.added` with
+//! `item.type == "function_call"`).
+//!
+//! The Responses shape was the serious omission, and it was missing on **both**
+//! paths, not just the streaming one:
+//!
+//! - Streaming: `try_parse_openai` needs `choices[]`, which a Responses stream
+//!   never emits, so a denied tool call reached Codex CLI's tool runner.
+//! - Non-streaming: a same-provider `/v1/responses` body is forwarded
+//!   *untranslated*, so it arrives here as `output[]` — which matched neither
+//!   arm of `routing::integrity::response_tool_calls` either. The initial
+//!   reading of this gap said non-streaming was covered because the body is
+//!   translated to `choices[]`; that is only true cross-provider.
+//!
+//! Both are closed now. That was a policy control silently off, not a missing
+//! feature — the deny list was reported as enforced on a route where nothing
+//! enforced it.
 //!
 //! **Gemini's native `functionCall` parts are not matched**, on either path,
 //! because neither of the two extractors this reuses —
@@ -296,6 +314,18 @@ pub fn refusal_tail(provider: WireProvider, denial: &Denial) -> String {
                  event: message_stop\ndata: {{\"type\": \"message_stop\"}}\n\n"
             )
         }
+        // The Responses API has neither `choices[]` nor `[DONE]`. Emitting the
+        // OpenAI arm here would cut the stream — which does stop the tool call,
+        // the security property — and then hand Codex CLI bytes it cannot
+        // parse, so the agent would see a transport failure rather than the
+        // refusal it is supposed to read next turn. The refusal is written as
+        // its own output item at the index the withheld `function_call` item
+        // claimed, then the stream is closed with `response.completed`.
+        WireProvider::OpenAIResponses => format!(
+            "{}{}",
+            crate::commands::responses_message_events(&text, idx, "msg_intutic_response_gate"),
+            crate::commands::responses_terminal_event("intutic-response-gate"),
+        ),
         // Gemini follows the OpenAI arm for the same reason
         // `get_terminal_stream_event` and `commands::streaming_body` do: the
         // proxy's Gemini streaming reaches the client as OpenAI chunks.
@@ -588,6 +618,158 @@ mod tests {
             );
         }
         assert_eq!(finish_reasons, vec!["null", "stop"], "unexpected OpenAI tail shape: {tail}");
+    }
+
+    /// Non-streaming Responses was blind too, and for a different reason than
+    /// the stream: a same-provider `/v1/responses` body is never translated, so
+    /// it reaches `gate_response` as `output[]`.
+    #[test]
+    fn denies_responses_non_streaming_tool_call() {
+        let body = serde_json::json!({
+            "id": "resp_1", "object": "response",
+            "output": [{"type": "function_call", "call_id": "c1", "name": "Bash",
+                        "arguments": "{\"command\":\"rm -rf /\"}"}]
+        });
+        let d = gate_response(&cfg(), Some(&body), &denied()).expect("must be caught");
+        assert_eq!(d.reason, DenialReason::Tools(vec!["Bash".to_string()]));
+    }
+
+    /// And the refusal body it is replaced with must be a Responses body.
+    #[test]
+    fn responses_refusal_body_is_a_response_object_with_no_tool_call() {
+        let d = Denial { reason: DenialReason::Tools(vec!["Bash".into()]), block_index: 0 };
+        let out = refusal_body(WireProvider::OpenAIResponses, "gpt-5", &d);
+        assert_eq!(out["object"], "response");
+        assert_eq!(out["output"][0]["content"][0]["type"], "output_text");
+        assert!(out["output"][0]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("Blocked tool call"));
+        let s = serde_json::to_string(&out).unwrap();
+        assert!(!s.contains("function_call"), "the refusal carried an executable call: {s}");
+        assert!(!s.contains("choices"), "emitted a chat-completions body: {s}");
+    }
+
+    // ── OpenAI Responses (Codex CLI) ──────────────────────────────────────
+
+    /// The `response.output_item.added` line Codex CLI's upstream emits when
+    /// the model reaches for a tool. Spec-derived, not captured — see
+    /// `protocol::tool_use_parser::try_parse_openai_responses`.
+    const RESPONSES_TOOL_LINE: &str = r#"data: {"type":"response.output_item.added","output_index":2,"item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"Bash","arguments":""}}"#;
+
+    /// The hole this closes: a denied tool call streamed to Codex CLI reached
+    /// the tool runner while the gate reported the deny list as enforced.
+    #[test]
+    fn stream_withholds_denied_responses_tool_start() {
+        let d = gate_stream_line(&cfg(), RESPONSES_TOOL_LINE, &denied()).expect("must be caught");
+        assert_eq!(d.reason, DenialReason::Tools(vec!["Bash".to_string()]));
+        // `output_index`, so the refusal item lands where the withheld one was.
+        assert_eq!(d.block_index, 2);
+    }
+
+    /// Ordinary Responses traffic must not be mistaken for a tool call. A false
+    /// positive here refuses a legitimate response, and `fail_closed` cannot
+    /// help — the gate would be confidently wrong rather than unsure.
+    #[test]
+    fn stream_lets_ordinary_responses_lines_through() {
+        for line in [
+            "event: response.output_text.delta",
+            r#"data: {"type":"response.created","response":{"id":"resp_1","status":"in_progress"}}"#,
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"id":"msg_1","type":"message","status":"in_progress","role":"assistant","content":[]}}"#,
+            r#"data: {"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"content_index":0,"delta":"hi"}"#,
+            r#"data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","output_index":2,"delta":"{\"cmd\":"}"#,
+            r#"data: {"type":"response.completed","response":{"id":"resp_1","status":"completed"}}"#,
+        ] {
+            assert!(
+                gate_stream_line(&cfg(), line, &denied()).is_none(),
+                "gated an ordinary Responses line: {line}"
+            );
+        }
+    }
+
+    /// An allowed tool call is not withheld — the gate enforces a deny list,
+    /// not a blanket ban on tools.
+    #[test]
+    fn stream_allows_permitted_responses_tool_start() {
+        let line = r#"data: {"type":"response.output_item.added","output_index":1,"item":{"id":"fc_2","type":"function_call","name":"read_file","arguments":""}}"#;
+        assert!(gate_stream_line(&cfg(), line, &denied()).is_none());
+    }
+
+    /// The refusal must be a Responses stream, not a chat-completions one.
+    ///
+    /// Cutting the stream is the security property and it holds either way.
+    /// This is about the other half: the agent is meant to *read* the refusal
+    /// next turn and not retry. A `chat.completion.chunk` here is bytes Codex
+    /// CLI cannot parse, so the agent would see a transport failure, retry the
+    /// same prompt, and get refused again — a paid-for loop.
+    #[test]
+    fn responses_refusal_tail_is_well_formed_and_terminates() {
+        let d = gate_stream_line(&cfg(), RESPONSES_TOOL_LINE, &denied()).unwrap();
+        let tail = refusal_tail(WireProvider::OpenAIResponses, &d);
+
+        assert!(
+            tail.contains("event: response.completed"),
+            "stream never terminates in the Responses shape: {tail}"
+        );
+        assert!(!tail.contains("[DONE]"), "emitted the chat-completions sentinel: {tail}");
+        assert!(!tail.contains("chat.completion"), "emitted a chat-completions chunk: {tail}");
+        assert!(!tail.contains("function_call"), "the tail re-emitted the tool call");
+        assert!(!tail.contains("tool_calls"), "the tail re-emitted the tool call");
+        assert!(tail.ends_with("\n\n"), "tail does not close its last event: {tail:?}");
+        assert_payloads_parse(&tail);
+
+        // The refusal claims the index the withheld item had, and carries the
+        // message the agent is supposed to read.
+        let mut types = Vec::new();
+        for line in tail.lines() {
+            let Some(data) = line.strip_prefix("data: ") else { continue };
+            let v: Value = serde_json::from_str(data).unwrap();
+            if let Some(t) = v["type"].as_str() {
+                types.push(t.to_string());
+            }
+            if let Some(i) = v.get("output_index").and_then(|i| i.as_u64()) {
+                assert_eq!(i, 2, "refusal addressed to the wrong output item: {data}");
+            }
+        }
+        assert_eq!(
+            types,
+            vec![
+                "response.output_item.added",
+                "response.content_part.added",
+                "response.output_text.delta",
+                "response.output_text.done",
+                "response.content_part.done",
+                "response.output_item.done",
+                "response.completed",
+            ],
+            "unexpected Responses tail sequence"
+        );
+        assert!(tail.contains("Blocked tool call"), "the agent is not told why");
+    }
+
+    /// Composition, on the shape where the gate used to see nothing at all: the
+    /// denied call must not appear anywhere in what the client received, and
+    /// what it did receive must still be a parseable, terminated stream.
+    #[test]
+    fn responses_stream_is_cut_before_the_tool_call_and_still_terminates() {
+        let lines = [
+            r#"data: {"type":"response.created","response":{"id":"resp_1","status":"in_progress"}}"#,
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"id":"msg_1","type":"message","status":"in_progress","role":"assistant","content":[]}}"#,
+            r#"data: {"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"content_index":0,"delta":"Let me run that."}"#,
+            RESPONSES_TOOL_LINE,
+            r#"data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","output_index":2,"delta":"{\"command\":\"rm -rf /\"}"}"#,
+            r#"data: {"type":"response.completed","response":{"id":"resp_1","status":"completed"}}"#,
+        ];
+        let (sse, tripped) = replay(&lines, WireProvider::OpenAIResponses);
+        assert!(tripped, "the denied call was never caught");
+        assert!(!sse.contains("function_call"), "the denied call reached the client: {sse}");
+        assert!(!sse.contains("rm -rf"), "the arguments reached the client: {sse}");
+        assert!(sse.contains("Let me run that."), "text before the call was dropped");
+        assert!(
+            sse.contains("event: response.completed"),
+            "the cut stream never terminates: {sse}"
+        );
+        assert_payloads_parse(&sse);
     }
 
     /// Gemini has no distinct streaming shape in this proxy — it reaches the

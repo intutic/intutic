@@ -150,6 +150,13 @@ fn declared_tools(request: Option<&Value>) -> Vec<(String, Vec<String>)> {
 /// the same extraction. A second implementation there would be a second opinion
 /// on what counts as a tool call, and the two disagreeing is precisely how a
 /// forbidden call gets forwarded while the scorer records nothing.
+///
+/// Three wire shapes, because there are three. The OpenAI Responses shape was
+/// missing, and its absence was not cosmetic: a same-provider `/v1/responses`
+/// body is forwarded untranslated (`proxy.rs`, the `is_same_provider` arm), so
+/// it reaches here as `output[]` and matched neither of the other two. Codex
+/// CLI's non-streaming tool calls were therefore invisible to both the deny
+/// list and the integrity scorer.
 pub fn response_tool_calls(body: &Value) -> Vec<(String, Option<Value>, Option<String>)> {
     let mut calls = Vec::new();
 
@@ -185,6 +192,25 @@ pub fn response_tool_calls(body: &Value) -> Vec<(String, Option<Value>, Option<S
                     },
                     None => calls.push((name, f.get("arguments").cloned(), None)),
                 }
+            }
+        }
+    }
+
+    // OpenAI Responses: `output[]` items of type `function_call`, where
+    // `arguments` is a JSON STRING as in chat completions. Note there is no
+    // `function` wrapper here — `name` and `arguments` sit on the item itself.
+    if let Some(output) = body.get("output").and_then(|o| o.as_array()) {
+        for item in output {
+            if item.get("type").and_then(|t| t.as_str()) != Some("function_call") {
+                continue;
+            }
+            let name = item.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
+            match item.get("arguments").and_then(|a| a.as_str()) {
+                Some(raw) => match serde_json::from_str::<Value>(raw) {
+                    Ok(v) => calls.push((name, Some(v), None)),
+                    Err(_) => calls.push((name, None, Some(raw.to_string()))),
+                },
+                None => calls.push((name, item.get("arguments").cloned(), None)),
             }
         }
     }
@@ -373,6 +399,63 @@ mod tests {
             {"name": "Bash", "input_schema": {"required": ["command"]}}
         ]})
     };
+
+    /// The OpenAI Responses body shape, which this extractor could not read.
+    ///
+    /// A same-provider `/v1/responses` request is forwarded untranslated, so
+    /// its body arrives here as `output[]` — not `content[]`, not `choices[]`.
+    /// Both existing arms missed it, so Codex CLI's non-streaming tool calls
+    /// were invisible to the deny list (`plugins::response_gate::gate_response`
+    /// reuses this function) and to the integrity scorer.
+    #[test]
+    fn responses_output_items_are_tool_calls() {
+        let body = json!({
+            "id": "resp_1",
+            "object": "response",
+            "output": [
+                {"type": "message", "role": "assistant",
+                 "content": [{"type": "output_text", "text": "running it"}]},
+                {"type": "function_call", "call_id": "call_1", "name": "Bash",
+                 "arguments": "{\"command\":\"ls -la\"}"}
+            ]
+        });
+        let calls = response_tool_calls(&body);
+        assert_eq!(calls.len(), 1, "expected exactly the function_call item: {calls:?}");
+        assert_eq!(calls[0].0, "Bash");
+        // `arguments` is a JSON string on the wire and must come back parsed,
+        // the same as chat completions — argument-level policy depends on it.
+        assert_eq!(calls[0].1, Some(json!({"command": "ls -la"})));
+        assert_eq!(calls[0].2, None);
+    }
+
+    /// Unparseable arguments are a hard signal, not a reason to drop the call.
+    /// Dropping it would let a denied tool through by emitting bad JSON.
+    #[test]
+    fn responses_unparseable_arguments_still_yield_the_call() {
+        let body = json!({
+            "output": [{"type": "function_call", "name": "Bash", "arguments": "{not json"}]
+        });
+        let calls = response_tool_calls(&body);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "Bash");
+        assert_eq!(calls[0].1, None);
+        assert_eq!(calls[0].2, Some("{not json".to_string()));
+    }
+
+    /// A Responses body with no tool call must stay empty. `output[]` also
+    /// carries messages and reasoning items, and counting those as calls would
+    /// deny every Codex CLI response.
+    #[test]
+    fn responses_output_without_a_function_call_is_empty() {
+        let body = json!({
+            "output": [
+                {"type": "reasoning", "summary": []},
+                {"type": "message", "role": "assistant",
+                 "content": [{"type": "output_text", "text": "no tools needed"}]}
+            ]
+        });
+        assert!(response_tool_calls(&body).is_empty());
+    }
 
     #[test]
     fn a_clean_response_scores_full() {
