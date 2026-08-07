@@ -24,6 +24,7 @@
 
 pub mod anomaly;
 pub mod budget_gate;
+pub mod response_gate;
 pub mod semantic_cache;
 
 use crate::wasm::context::{RequestContext, Verdict};
