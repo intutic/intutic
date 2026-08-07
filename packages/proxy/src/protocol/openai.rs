@@ -421,7 +421,30 @@ impl OpenAIAdapter {
         openai_resp
     }
 
-    /// Translate a streaming SSE delta event from Anthropic format to OpenAI format.
+    /// Translate a streaming SSE delta event from Anthropic format to OpenAI
+    /// **chat completions** format.
+    ///
+    /// # `_is_responses_api` is accepted and ignored, and that is a known gap
+    ///
+    /// The parameter is underscore-prefixed on purpose so nobody reads this as
+    /// handling the Responses API. It does not. Every arm below emits
+    /// `choices[].delta`, which is chat completions, so a Codex CLI client on
+    /// `/v1/responses` whose request was routed **cross-provider** receives
+    /// chunks it cannot parse. That is pre-existing and larger than a
+    /// parameter: closing it means a Responses counterpart for every event this
+    /// function translates, plus item/content indices that Anthropic's wire
+    /// format does not carry, which is a translation layer rather than a branch.
+    ///
+    /// It is deliberately **not** guessed at here. The same-provider Responses
+    /// path — the one Codex CLI actually takes when it is routed to an OpenAI
+    /// model, and the overwhelmingly common case — is handled properly in
+    /// `proxy.rs` via `DeltaShape::ResponsesOutputText`, and
+    /// `commands::responses_message_events` is the shape any future
+    /// cross-provider translation should be built out of.
+    ///
+    /// Callers that must synthesise a Responses event should therefore not go
+    /// through here: see `proxy::holdback_flush_bytes`, whose cross-provider
+    /// branch has the same limitation for the same reason.
     pub fn translate_stream_event(
         event_type: &str,
         data: &Value,

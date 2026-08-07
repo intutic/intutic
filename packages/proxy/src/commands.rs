@@ -404,10 +404,20 @@ fn escape_mermaid(s: &str) -> String {
 
 /// Which provider wire shape to emit. proxy.rs maps its private `Provider`
 /// enum onto this so this module needs no visibility into it.
+///
+/// **This is keyed on the wire format, not the vendor.** `OpenAI` and
+/// `OpenAIResponses` are both `Provider::OpenAI` and are not interchangeable:
+/// a Codex CLI client on `/v1/responses` cannot parse a `chat.completion`, and
+/// handing it one is how a synthesised body — a command reply, or the response
+/// gate's refusal — arrives as a broken stream instead of a message the agent
+/// reads. `proxy::wire_for` is the only correct way to pick one, because it
+/// keys on `Protocol` (the route) rather than on `Provider` (the vendor).
 #[derive(Debug, Clone, Copy)]
 pub enum WireProvider {
     Anthropic,
     OpenAI,
+    /// OpenAI Responses API (`/v1/responses`) — Codex CLI.
+    OpenAIResponses,
     Gemini,
 }
 
@@ -433,6 +443,26 @@ pub fn non_streaming_body(provider: WireProvider, model: &str, text: &str) -> se
             }],
             "usageMetadata": { "promptTokenCount": 0, "candidatesTokenCount": 0, "totalTokenCount": 0 }
         }),
+        // The Responses API answers with `output[]` of items, not `choices[]`,
+        // and its text lives in an `output_text` content part. Token counts are
+        // `input_tokens`/`output_tokens` here, not `prompt_tokens`/
+        // `completion_tokens` — a client reading usage off this body would
+        // otherwise find nothing.
+        WireProvider::OpenAIResponses => serde_json::json!({
+            "id": "resp_intutic_cmd",
+            "object": "response",
+            "created_at": 0,
+            "status": "completed",
+            "model": model,
+            "output": [{
+                "id": "msg_intutic_cmd",
+                "type": "message",
+                "status": "completed",
+                "role": "assistant",
+                "content": [{ "type": "output_text", "text": text, "annotations": [] }]
+            }],
+            "usage": { "input_tokens": 0, "output_tokens": 0, "total_tokens": 0 }
+        }),
         WireProvider::OpenAI => serde_json::json!({
             "id": "chatcmpl-intutic-cmd",
             "object": "chat.completion",
@@ -444,6 +474,90 @@ pub fn non_streaming_body(provider: WireProvider, model: &str, text: &str) -> se
             "usage": { "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0 }
         }),
     }
+}
+
+/// The Responses API's streaming shape for one complete assistant message.
+///
+/// Shared by `streaming_body` (a whole synthesised stream) and by
+/// `plugins::response_gate::refusal_tail` (a message appended to a stream that
+/// is already in flight), because the two differ only in what comes *before*
+/// them — and the sequence a Responses client needs to see for a message to
+/// exist at all is the same either way: the item is added, a content part is
+/// opened, text is delta'd in, then all three are closed in reverse order.
+///
+/// `output_index` is which slot in `response.output` the message occupies. A
+/// mid-stream refusal must claim its own, not reuse the index of an item the
+/// model already closed.
+///
+/// # Provenance
+///
+/// Written from the published Responses streaming event schema, not captured
+/// from a live Codex CLI session — there is no such capture in this repo. The
+/// events emitted here are the subset a client needs to reconstruct the text;
+/// `response.completed` is deliberately left to the caller, since only the
+/// caller knows whether the stream is ending.
+pub fn responses_message_events(text: &str, output_index: u64, item_id: &str) -> String {
+    let item = serde_json::json!({
+        "id": item_id,
+        "type": "message",
+        "status": "in_progress",
+        "role": "assistant",
+        "content": []
+    });
+    let part = serde_json::json!({ "type": "output_text", "text": "", "annotations": [] });
+    let added = serde_json::json!({
+        "type": "response.output_item.added", "output_index": output_index, "item": item
+    });
+    let part_added = serde_json::json!({
+        "type": "response.content_part.added",
+        "item_id": item_id, "output_index": output_index, "content_index": 0, "part": part
+    });
+    let delta = serde_json::json!({
+        "type": "response.output_text.delta",
+        "item_id": item_id, "output_index": output_index, "content_index": 0, "delta": text
+    });
+    let text_done = serde_json::json!({
+        "type": "response.output_text.done",
+        "item_id": item_id, "output_index": output_index, "content_index": 0, "text": text
+    });
+    let part_done = serde_json::json!({
+        "type": "response.content_part.done",
+        "item_id": item_id, "output_index": output_index, "content_index": 0,
+        "part": { "type": "output_text", "text": text, "annotations": [] }
+    });
+    let item_done = serde_json::json!({
+        "type": "response.output_item.done",
+        "output_index": output_index,
+        "item": {
+            "id": item_id, "type": "message", "status": "completed", "role": "assistant",
+            "content": [{ "type": "output_text", "text": text, "annotations": [] }]
+        }
+    });
+    format!(
+        "event: response.output_item.added\ndata: {added}\n\n\
+         event: response.content_part.added\ndata: {part_added}\n\n\
+         event: response.output_text.delta\ndata: {delta}\n\n\
+         event: response.output_text.done\ndata: {text_done}\n\n\
+         event: response.content_part.done\ndata: {part_done}\n\n\
+         event: response.output_item.done\ndata: {item_done}\n\n"
+    )
+}
+
+/// The Responses API's terminal event.
+///
+/// `data: [DONE]` is the chat-completions sentinel and is **not** what closes a
+/// Responses stream; a client waiting for `response.completed` and given
+/// `[DONE]` sees a stream that never ended.
+pub fn responses_terminal_event(model: &str) -> String {
+    let response = serde_json::json!({
+        "id": "resp_intutic_cmd",
+        "object": "response",
+        "status": "completed",
+        "model": model,
+        "usage": { "input_tokens": 0, "output_tokens": 0, "total_tokens": 0 }
+    });
+    let completed = serde_json::json!({ "type": "response.completed", "response": response });
+    format!("event: response.completed\ndata: {completed}\n\n")
 }
 
 /// Build the full SSE stream body carrying `text`, in the given provider's
@@ -461,6 +575,20 @@ pub fn streaming_body(provider: WireProvider, model: &str, text: &str) -> String
             let msg_delta = serde_json::json!({ "type": "message_delta", "delta": { "stop_reason": "end_turn", "stop_sequence": null }, "usage": { "output_tokens": 0 } });
             format!(
                 "event: message_start\ndata: {start}\n\nevent: content_block_start\ndata: {block_start}\n\nevent: content_block_delta\ndata: {delta}\n\nevent: content_block_stop\ndata: {block_stop}\n\nevent: message_delta\ndata: {msg_delta}\n\nevent: message_stop\ndata: {{\"type\": \"message_stop\"}}\n\n"
+            )
+        }
+        WireProvider::OpenAIResponses => {
+            let created = serde_json::json!({
+                "type": "response.created",
+                "response": {
+                    "id": "resp_intutic_cmd", "object": "response",
+                    "status": "in_progress", "model": model, "output": []
+                }
+            });
+            format!(
+                "event: response.created\ndata: {created}\n\n{}{}",
+                responses_message_events(text, 0, "msg_intutic_cmd"),
+                responses_terminal_event(model),
             )
         }
         _ => {
