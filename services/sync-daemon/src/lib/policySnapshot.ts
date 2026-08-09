@@ -37,6 +37,21 @@
  * gates refuse an agent's attempt to write the snapshot on day one, with no new
  * entry and no new code.
  *
+ * # The ` WHERE ` clause survives this pipeline now
+ *
+ * A SOP titled `BLOCK:^shell$ WHERE kubectl\s+apply(?!.*@sha256:):reason`
+ * resolves to `{toolPattern, argPattern}` at `GET /api/v1/policy/resolve`
+ * (the demo doctor's "argPattern served" check proves that half). This module
+ * used to be where the other half died: `ResolvedPolicy` did not declare
+ * `argPattern`, `toGuardPattern` did not carry it, and the rule reached all
+ * twelve tool-call gates as "block `shell` unconditionally" — simultaneously
+ * failing to enforce the argument condition and re-manufacturing the exact
+ * over-blocking (`make test` refused) the WHERE grammar was invented to
+ * eliminate. It now travels: verbatim in the JSON's `sopRules` and `rules`,
+ * base64-encoded in the `.rules` projection's seventh column (see
+ * `RULES_COLUMNS` in gateBody.ts for the encoding contract), and every gate
+ * family conditions a name-matched rule on it before firing.
+ *
  * @module
  */
 
@@ -84,10 +99,13 @@ export const SNAPSHOT_RULES = 'policy-snapshot.rules'
 export const DESTRUCTIVE_TIER_SEVERITY: 'block' | 'warn' = 'warn'
 
 /** Rules the control plane resolved for this workspace. Mirrors the
- *  `GET /api/v1/policy/resolve` response. */
+ *  `GET /api/v1/policy/resolve` response — including `argPattern`, the
+ *  ` WHERE ` clause of a SOP title. This type is where that field used to
+ *  fall on the floor: resolve served it, the type did not declare it, and the
+ *  gates enforced the rule as an unconditional tool-name block. */
 export interface ResolvedPolicy {
   workspaceId: string
-  sopRules: Array<{ id: string; toolPattern: string; action: string; reason: string }>
+  sopRules: Array<{ id: string; toolPattern: string; argPattern?: string; action: string; reason: string }>
   interventionMode: string
 }
 
@@ -204,6 +222,26 @@ function toGuardPattern(
     return null
   }
 
+  // The ` WHERE ` clause travels with the rule. It is validated only for JS
+  // compilability — it is a JS regex matched against serialized tool input,
+  // never a grep pattern, so `validateRule`'s portable-ERE discipline does not
+  // apply to it. One that does not compile is stripped (the rule ships
+  // name-only, today's behaviour) and logged, NOT dropped with its rule: the
+  // clause narrows a block, so losing the clause must widen enforcement, and
+  // losing the rule would open it.
+  let argPattern: string | undefined
+  if (rule.argPattern) {
+    try {
+      new RegExp(rule.argPattern)
+      argPattern = rule.argPattern
+    } catch {
+      log.warn(
+        { action: 'policy_rule_arg_pattern_dropped', ruleId: rule.id, argPattern: rule.argPattern },
+        'argPattern does not compile as a JS RegExp — rule shipped name-only',
+      )
+    }
+  }
+
   const stripped = stripEnd(stripStart(rule.toolPattern.trim(), '^'), '$')
   return {
     id: `sop.${rule.id}`,
@@ -222,6 +260,7 @@ function toGuardPattern(
     rationale: 'Resolved from a BLOCK: SOP title by the control plane.',
     matches: [],
     notMatches: [],
+    ...(argPattern ? { argPattern } : {}),
   }
 }
 
@@ -252,7 +291,14 @@ export async function fetchResolvedPolicy(
       sopRules: rules.filter((r): r is ResolvedPolicy['sopRules'][number] => {
         if (typeof r !== 'object' || r === null) return false
         const x = r as Record<string, unknown>
-        return typeof x.id === 'string' && typeof x.toolPattern === 'string' && typeof x.action === 'string'
+        return (
+          typeof x.id === 'string' &&
+          typeof x.toolPattern === 'string' &&
+          typeof x.action === 'string' &&
+          // Optional, but if present it must be a string — a non-string here
+          // would flow into `new RegExp` and the base64 encoder downstream.
+          (x.argPattern === undefined || typeof x.argPattern === 'string')
+        )
       }),
     }
   } catch (err) {
@@ -354,6 +400,9 @@ export async function writePolicySnapshot(
         severity: r.severity,
         ignoreCase: r.ignoreCase === true,
         reason: r.reason,
+        // Plain text here; base64 only in the `.rules` projection, where a tab
+        // separator forces the encoding. JSON needs no such armour.
+        ...(r.argPattern ? { argPattern: r.argPattern } : {}),
       })),
     },
     null,

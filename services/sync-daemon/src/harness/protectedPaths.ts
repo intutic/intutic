@@ -147,6 +147,30 @@ export interface GuardPattern {
    *  cheapest way to write a guard that never fires wrongly is to never think
    *  about the case where it would. */
   notMatches: readonly string[]
+  /**
+   * Argument-level condition from a ` WHERE ` SOP rule, as JS `RegExp` source.
+   *
+   * When present, a rule whose {@link source} has matched (for SOP rules: the
+   * tool NAME) fires only if this also matches the serialized tool input —
+   * `JSON.stringify(tool_input ?? {})`, compact, insertion order, non-ASCII
+   * intact, the exact shape `matchSopRule` in the control plane and
+   * `serialise_tool_input` in intutic-clawde match against. Without this field
+   * a `BLOCK:^shell$ WHERE kubectl\s+apply(?!.*@sha256:)` rule reached the
+   * gates as "block shell unconditionally" — over-blocking `make test` while
+   * failing to express the condition it was written for.
+   *
+   * Deliberately NOT restricted to the portable ERE subset
+   * ({@link assertPortableEre}): it never runs under grep. The JS gates compile
+   * it as a `RegExp`; the bash gates delegate the match to `python3` `re`. The
+   * supported dialect is therefore the JS ∩ Python `re` intersection —
+   * character classes, alternation, anchors, quantifiers, `\s`, lookahead and
+   * lookbehind all agree; named groups do NOT (`(?<n>…)` vs `(?P<n>…)`), nor do
+   * some Unicode escapes. A pattern one engine cannot compile is enforced
+   * name-only by that gate and reported as `rule_downgraded`, never silently
+   * dropped — the same honest-divergence stance the LangGraph port documents in
+   * its snapshot reader.
+   */
+  argPattern?: string
 }
 
 /**

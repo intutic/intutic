@@ -117,6 +117,41 @@ describe('buildSnapshotRules', () => {
     expect(rule!.subject, 'a tool rule matched against command text would never fire').toBe('tool')
   })
 
+  it('carries a WHERE clause through to the gate rule', () => {
+    // The defect this whole change repairs: resolve served argPattern, this
+    // type dropped it, and every gate enforced the rule as an unconditional
+    // tool-name block — over-blocking `make test` while never testing the
+    // condition the rule was written for.
+    const [rule] = buildSnapshotRules(
+      policy({
+        sopRules: [{
+          id: 's1', toolPattern: '^shell$', action: 'block',
+          argPattern: 'kubectl\\s+apply(?!.*@sha256:)', reason: 'pin your images',
+        }],
+      }),
+    )
+    expect(rule!.argPattern).toBe('kubectl\\s+apply(?!.*@sha256:)')
+    // The tool half still gets the portable-ERE treatment; the arg half must
+    // NOT — it is a JS regex matched against serialized input, and lookahead
+    // is most of why it exists.
+    expect(rule!.source).toBe(' (shell) ')
+  })
+
+  it('strips an un-compilable argPattern and keeps the rule name-only', () => {
+    // The clause NARROWS a block. Losing the clause widens enforcement (safe,
+    // and visible as over-blocking); losing the rule would open a hole.
+    const [rule] = buildSnapshotRules(
+      policy({
+        sopRules: [{
+          id: 's1', toolPattern: 'Bash', action: 'block',
+          argPattern: '*invalid(', reason: 'x',
+        }],
+      }),
+    )
+    expect(rule!.id).toBe('sop.s1')
+    expect(rule!.argPattern).toBeUndefined()
+  })
+
   it('ships the destructive tier at the declared severity', () => {
     const rules = buildSnapshotRules(policy())
     const rm = rules.find((r) => r.id === 'destructive.rm_rf_root')
@@ -144,7 +179,15 @@ describe('writePolicySnapshot', () => {
     const dir = mkdtempSync(join(tmpdir(), 'intutic-snap-'))
     try {
       const { digest, ruleCount } = await writePolicySnapshot(
-        policy({ sopRules: [{ id: 's1', toolPattern: 'Bash', action: 'block', reason: 'no shell' }] }),
+        policy({
+          sopRules: [
+            { id: 's1', toolPattern: 'Bash', action: 'block', reason: 'no shell' },
+            {
+              id: 's2', toolPattern: '^shell$', action: 'block',
+              argPattern: 'kubectl\\s+apply(?!.*@sha256:)', reason: 'pin your images',
+            },
+          ],
+        }),
         dir,
       )
       const jsonPath = join(dir, SNAPSHOT_JSON)
@@ -165,12 +208,25 @@ describe('writePolicySnapshot', () => {
       expect(lines.length).toBe(doc.rules.length)
       expect(createHash('sha256').update(lines.join('\n')).digest('hex').slice(0, 32)).toBe(digest)
 
-      // Every line has exactly the declared column count. A reason containing a
-      // tab would shift `source` into the reason column and the rule would
-      // silently stop matching anything.
+      // Every line has a declared column count. A reason containing a tab
+      // would shift `source` into the reason column and the rule would
+      // silently stop matching anything. Six columns without an argPattern —
+      // byte-identical to the v3 layout, which is the forward-compat
+      // contract — and seven with one.
       for (const line of lines) {
-        expect(line.split('\t').length, `wrong column count: ${line}`).toBe(6)
+        const cols = line.split('\t').length
+        expect([6, 7], `wrong column count (${cols}): ${line}`).toContain(cols)
       }
+
+      // The WHERE rule's clause rides the seventh column, base64 — the one
+      // encoding that cannot collide with the tab separator, since an
+      // argPattern is an arbitrary regex the portable-ERE rules never vetted.
+      const whereLine = lines.find((l) => l.startsWith('sop.s2\t'))!
+      const cols = whereLine.split('\t')
+      expect(cols.length).toBe(7)
+      expect(Buffer.from(cols[6]!, 'base64').toString('utf8')).toBe('kubectl\\s+apply(?!.*@sha256:)')
+      // And the name-only rule stays six columns — no trailing empty field.
+      expect(lines.find((l) => l.startsWith('sop.s1\t'))!.split('\t').length).toBe(6)
 
       // 0444. The daemon replaces this by rename and never needs write access to
       // the file itself.

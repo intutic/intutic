@@ -217,7 +217,7 @@ function gateEnv(g: GateEntry, snapshot?: boolean | string): NodeJS.ProcessEnv {
 async function runGate(
   g: GateEntry,
   toolInput: Record<string, string>,
-  opts: { tool?: string; snapshot?: boolean } = {},
+  opts: { tool?: string; snapshot?: boolean | string } = {},
 ): Promise<RunResult & { signal: NodeJS.Signals | null }> {
   const artifact = join(roots.get(g.name)!, g.artifact)
   const payload = JSON.stringify({
@@ -513,6 +513,93 @@ for (const g of GATES) {
       })
     }, FAN_OUT_TIMEOUT)
 
+    it('enforces a WHERE clause against the arguments, not just the tool name', async () => {
+      // The end-to-end repair under test: `BLOCK:^shell$ WHERE
+      // kubectl\s+apply(?!.*@sha256:)` used to reach every gate as "block the
+      // tool unconditionally" — simultaneously failing to enforce the argument
+      // condition and refusing `make test`, the exact over-blocking the WHERE
+      // grammar was invented to eliminate. The rule must fire only when the
+      // argPattern matches JSON.stringify(tool_input).
+      const snap = writeRulesFixture(join(home, `where-${g.name}.rules`), [{
+        id: 'sop.pin_deploy', source: ' (Bash) ', subject: 'tool', severity: 'block',
+        reason: 'Blocked by SOP pin_deploy', rationale: '', matches: [], notMatches: [],
+        argPattern: 'kubectl\\s+apply(?!.*@sha256:)',
+      }])
+
+      const unpinned = await runGate(g, { command: 'kubectl apply -f deploy.yaml' }, { snapshot: snap })
+      assertCleanExit(g, unpinned, 'an unpinned kubectl apply under a WHERE rule')
+      expect(wasBlocked(g, unpinned), `${g.name} allowed an unpinned kubectl apply`).toBe(true)
+
+      const pinned = await runGate(
+        g,
+        { command: 'kubectl apply -f deploy.yaml --image nginx@sha256:0a1b2c' },
+        { snapshot: snap },
+      )
+      assertCleanExit(g, pinned, 'a digest-pinned kubectl apply under a WHERE rule')
+      expect(
+        wasBlocked(g, pinned),
+        `${g.name} blocked a digest-pinned apply — the WHERE clause did not narrow the rule`,
+      ).toBe(false)
+
+      const unrelated = await runGate(g, { command: 'make test' }, { snapshot: snap })
+      assertCleanExit(g, unrelated, 'make test under a WHERE rule')
+      expect(
+        wasBlocked(g, unrelated),
+        `${g.name} blocked \`make test\` under a WHERE rule — this is the ` +
+          `over-blocking the argument condition exists to prevent`,
+      ).toBe(false)
+    })
+
+    it('still blocks unconditionally on a name-only tool rule (regression pin)', async () => {
+      // A rule with no argPattern must behave exactly as before this change.
+      const snap = writeRulesFixture(join(home, `nameonly-${g.name}.rules`), [{
+        id: 'sop.no_bash', source: ' (Bash) ', subject: 'tool', severity: 'block',
+        reason: 'Blocked by SOP no_bash', rationale: '', matches: [], notMatches: [],
+      }])
+      const r = await runGate(g, { command: 'make test' }, { snapshot: snap })
+      assertCleanExit(g, r, 'a name-only tool rule')
+      expect(
+        wasBlocked(g, r),
+        `${g.name}: a rule with no argPattern must keep blocking on the name alone`,
+      ).toBe(true)
+    })
+
+    it('downgrades an un-compilable argPattern to name-only, loudly', async () => {
+      // Fail-safe direction: the clause NARROWS a block, so a broken clause
+      // must widen enforcement back to name-only (visible as over-blocking and
+      // reported), never drop the rule (fail open) and never kill the gate
+      // (exit 1, which every harness reads as allow).
+      const snap = writeRulesFixture(join(home, `badarg-${g.name}.rules`), [{
+        id: 'sop.bad_arg', source: ' (Bash) ', subject: 'tool', severity: 'block',
+        reason: 'Blocked by SOP bad_arg', rationale: '', matches: [], notMatches: [],
+        argPattern: '*invalid(',
+      }])
+      const r = await runGate(g, { command: 'echo hi' }, { snapshot: snap })
+      assertCleanExit(g, r, 'a rule whose argPattern does not compile')
+      expect(
+        wasBlocked(g, r),
+        `${g.name}: an un-compilable argPattern must downgrade the rule to name-only, not drop it`,
+      ).toBe(true)
+      expect(
+        auditLogText(g) + r.stdout + r.stderr,
+        `${g.name} downgraded a WHERE rule silently — the operator who authored ` +
+          `the clause has to hear their narrowed rule is enforcing broad again`,
+      ).toMatch(/rule_downgraded/)
+    })
+
+    it('parses a v3 rules line with no argPattern column (forward compat pin)', async () => {
+      // Written byte-for-byte in the six-column layout the fleet already has on
+      // disk — deliberately NOT via toRulesLine, so this pin holds even if the
+      // writer changes shape again.
+      const line = ['sop.v3_rule', 'block', '-', 'tool', 'Blocked by SOP v3_rule', ' (Bash) '].join('\t')
+      const digest = createHash('sha256').update(line).digest('hex').slice(0, 32)
+      const snap = join(home, `v3-${g.name}.rules`)
+      writeFileSync(snap, `#digest ${digest}\n#generated ${new Date().toISOString()}\n${line}\n`)
+      const r = await runGate(g, { command: 'anything at all' }, { snapshot: snap })
+      assertCleanExit(g, r, 'a v3-format snapshot')
+      expect(wasBlocked(g, r), `${g.name} failed to enforce a v3-format rules line`).toBe(true)
+    })
+
     it('honours the escape hatch for snapshot rules and refuses it for the floor', async () => {
       // The half that must work: a developer wrongly blocked by a new rule can
       // get past it in a way we can see, instead of running `chflags nouchg` on
@@ -730,6 +817,35 @@ describe('Open WebUI prompt filter', () => {
       reason: 'No canary', rationale: '', matches: [], notMatches: [],
     }])
     expect((await ask('here is a canary-string', snap)).refused).toBe(false)
+  })
+
+  it('does not match a tool-subject rule against prompt text', async () => {
+    // The subject bug: the snapshot reader consumed columns 0,5,2,4,1 and
+    // skipped f[3], so a `BLOCK:Bash` rule — subject `tool`, a pattern over
+    // tool NAMES — was matched against the PROMPT, and Open WebUI refused any
+    // prompt containing the word "Bash". A prompt has no tool name; a rule
+    // about tool names has nothing here to apply to.
+    const snap = join(home, 'owui-tool.rules')
+    writeRulesFixture(snap, [{
+      id: 'sop.no_bash', source: ' (Bash) ', subject: 'tool', severity: 'block',
+      reason: 'Blocked by SOP no_bash', rationale: '', matches: [], notMatches: [],
+    }])
+    const r = await ask('how do I use the Bash tool safely?', snap)
+    expect(r.refused, `a tool-subject rule refused a prompt:\n${r.stderr}`).toBe(false)
+  })
+
+  it('skips WHERE rules entirely — a prompt has no tool arguments', async () => {
+    // An argPattern conditions the rule on tool ARGUMENTS. Ignoring the clause
+    // here would enforce a rule its author deliberately narrowed more broadly
+    // than they wrote it, against text that is not a tool call at all.
+    const snap = join(home, 'owui-arg.rules')
+    writeRulesFixture(snap, [{
+      id: 'sop.pin_deploy', source: 'canary-string', subject: 'command', severity: 'block',
+      reason: 'No canary', rationale: '', matches: [], notMatches: [],
+      argPattern: 'kubectl',
+    }])
+    const r = await ask('here is a canary-string', snap)
+    expect(r.refused, 'an argPattern rule was applied to a prompt').toBe(false)
   })
 })
 

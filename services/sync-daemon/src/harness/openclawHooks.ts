@@ -143,7 +143,7 @@ process.stdin.on('end', () => {
     const targetPath = toolInput.path || toolInput.file_path || toolInput.filePath ||
       toolInput.new_path || toolInput.target || toolInput.notebook_path || '';
     const command = toolInput.command || toolInput.cmd || toolInput.script || '';
-    intuticGate(rawToolName, targetPath, command, logEvent, _intuticWsId);
+    intuticGate(rawToolName, targetPath, command, logEvent, _intuticWsId, toolInput);
 
     logEvent('tool_allowed', toolName, '');
     process.exit(0);
