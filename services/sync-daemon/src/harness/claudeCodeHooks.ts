@@ -451,7 +451,7 @@ process.stdin.on('end', () => {
       toolInput.new_path || toolInput.target || toolInput.notebook_path || '';
     const shellCmd = String(toolInput.command || toolInput.cmd || toolInput.script || '');
     intuticGate(rawToolName, targetPath, shellCmd,
-      (v, t, r) => logEvent(v, t, r, sessionId), _intuticWsId);
+      (v, t, r) => logEvent(v, t, r, sessionId), _intuticWsId, toolInput);
 
     // 2. Review holds — the pre-execution half of \`review_before:\`.
     //

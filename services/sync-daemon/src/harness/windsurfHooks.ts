@@ -128,7 +128,7 @@ process.stdin.on('end', () => {
     // "governance rule". hookEvents.resolveSeverity keys CRITICAL off the
     // "governance-protected" substring, and this was the one harness of twelve
     // that omitted it — so a Windsurf agent caught tampering was filed MEDIUM.
-    intuticGate(toolName, targetPath, command, logEvent, _intuticWsId);
+    intuticGate(toolName, targetPath, command, logEvent, _intuticWsId, input);
 
     logEvent('tool_allowed', toolName, '');
     process.exit(0);

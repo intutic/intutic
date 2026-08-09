@@ -158,7 +158,7 @@ process.stdin.on('end', () => {
     const targetPath = input.path || input.file_path || input.filePath ||
       input.target || input.source || input.notebook_path || '';
     const command = input.command || input.cmd || input.script || '';
-    intuticGate(rawToolName, targetPath, command, logEvent, _intuticWsId);
+    intuticGate(rawToolName, targetPath, command, logEvent, _intuticWsId, input);
 
     // Allow all other tool calls
     logEvent('tool_allowed', tool || 'unknown', '');

@@ -175,7 +175,7 @@ process.stdin.on('end', () => {
     const targetPath = toolInput.path || toolInput.file_path || toolInput.filePath ||
       toolInput.new_path || toolInput.target || toolInput.notebook_path || '';
     const command = toolInput.command || toolInput.cmd || toolInput.script || '';
-    intuticGate(rawToolName, targetPath, command, (v, t, r) => logEvent(runtimeEnv, v, t, r), runtimeEnv.INTUTIC_WORKSPACE_ID);
+    intuticGate(rawToolName, targetPath, command, (v, t, r) => logEvent(runtimeEnv, v, t, r), runtimeEnv.INTUTIC_WORKSPACE_ID, toolInput);
 
     logEvent(runtimeEnv, 'tool_allowed', toolName, '');
     process.exit(0);

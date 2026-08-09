@@ -63,8 +63,17 @@ import {
  * than inferred. The previous docstring claimed it "rides on every audit line",
  * which was simply untrue — nothing emitted it anywhere, and a constant whose
  * comment describes behaviour it does not have is worse than no constant.
+ *
+ * v4: the `.rules` projection grew an `argPatternB64` column and every emitted
+ * evaluator learned to condition a matched rule on the serialized tool input
+ * (` WHERE ` SOP rules). Nothing *triggers* on this number: the daemon
+ * regenerates every gate unconditionally each sync cycle, the snapshot writer
+ * stamps it into `policy-snapshot.json` for support conversations, and
+ * `gateLivenessService` records it off events when a gate reports one. A v3
+ * gate reading a v4 snapshot and a v4 gate reading a v3 snapshot both degrade
+ * to v3 behaviour — see the encoding note on {@link RULES_COLUMNS}.
  */
-export const GATE_VERSION = 3
+export const GATE_VERSION = 4
 
 /**
  * How old a snapshot may be before a gate reports it as stale.
@@ -119,10 +128,37 @@ function jsGuardTable(name: string, patterns: readonly GuardPattern[]): string {
   return `const ${name} = [\n${rows.join('\n')}\n];`
 }
 
-/** The `.rules` snapshot record layout, defined once so the writer and both
- *  readers cannot disagree about column order. `source` is last because it is
- *  the only field that may contain arbitrary punctuation. */
-export const RULES_COLUMNS = ['id', 'severity', 'flags', 'subject', 'reason', 'source'] as const
+/**
+ * The `.rules` snapshot record layout, defined once so the writer and every
+ * reader cannot disagree about column order.
+ *
+ * `source` may contain any punctuation EXCEPT a tab — `assertPortableEre`
+ * rejects literal tabs precisely because this projection is tab-separated —
+ * so it is safe mid-record.
+ *
+ * `argPatternB64` is the ` WHERE ` clause of a SOP rule, **base64-encoded**
+ * (standard alphabet, UTF-8 source), and the encoding is not a stylistic
+ * choice. An argPattern is an arbitrary JS regex: unlike `source` it is not
+ * run through `assertPortableEre`, so it may legally contain tabs, and any
+ * escaping convention would be a second dialect every one of the four readers
+ * (bash, JS, the Open WebUI filter, and the LangGraph port) had to get
+ * byte-identically right. Base64's alphabet ([A-Za-z0-9+/=]) cannot collide
+ * with the separator, full stop.
+ *
+ * The column is OMITTED (not emitted empty) when a rule has no argPattern, so
+ * every rule that exists today serialises byte-identically to the v3 layout.
+ * Compatibility in both directions:
+ *  - a v4 gate reading a v3 file sees six fields and treats every rule as
+ *    name-only — exactly v3 behaviour;
+ *  - a v3 gate reading a v4 file: the JS and Python readers index `f[5]` and
+ *    ignore the extra field; the bash reader's final `read` variable absorbs
+ *    `source<TAB>base64`, so that one rule matches nothing rather than
+ *    crashing the gate. That last degradation (a WHERE rule inert under a
+ *    stale bash gate for one sync cycle, until the daemon — which writes both
+ *    the snapshot and the gates — regenerates them) is the cost of never
+ *    shifting the six columns every deployed reader already indexes.
+ */
+export const RULES_COLUMNS = ['id', 'severity', 'flags', 'subject', 'reason', 'source', 'argPatternB64'] as const
 
 /**
  * Serialises one rule into a `.rules` line.
@@ -136,7 +172,10 @@ export const RULES_COLUMNS = ['id', 'severity', 'flags', 'subject', 'reason', 's
  */
 export function toRulesLine(p: GuardPattern): string {
   const reason = p.reason.replace(/[\t\n\r]/g, ' ')
-  return [p.id, p.severity, p.ignoreCase ? 'i' : '-', p.subject ?? 'any', reason, p.source].join('\t')
+  const base = [p.id, p.severity, p.ignoreCase ? 'i' : '-', p.subject ?? 'any', reason, p.source].join('\t')
+  // Appended only when present — see RULES_COLUMNS for why base64, and why a
+  // rule without one must serialise byte-identically to the v3 layout.
+  return p.argPattern ? base + '\t' + Buffer.from(p.argPattern, 'utf8').toString('base64') : base
 }
 
 export interface ShellGateOptions {
@@ -274,8 +313,11 @@ INTUTIC_NTOOL="$(intutic_normalise "\${TOOL:-}")"
 # would otherwise be tested against "Write" and quietly match nothing.
 intutic_apply() {
   local rec="$1"
-  local rid rsev rflags rsubj rreason rsrc s hit
-  IFS=$'\\t' read -r rid rsev rflags rsubj rreason rsrc <<< "$rec"
+  local rid rsev rflags rsubj rreason rsrc rargb64 s hit
+  # Seven variables over a six- or seven-field record: a v3 line leaves rargb64
+  # empty, which is exactly "no argument condition". The base64 column cannot
+  # contain a tab, so the last variable never absorbs a separator.
+  IFS=$'\\t' read -r rid rsev rflags rsubj rreason rsrc rargb64 <<< "$rec"
   [ -z "$rsrc" ] && return 0
   # The escape hatch skips the DESTRUCTIVE family only. It is not a way to turn
   # off a workspace's own BLOCK: SOP rules — those are what the customer asked
@@ -307,6 +349,35 @@ intutic_apply() {
     fi
   done
   [ "$hit" = "1" ] || return 0
+  # The argument condition of a WHERE rule. The tool-name half has matched; the
+  # rule fires only if the argPattern also matches the serialized tool input —
+  # the same json.dumps(tool_input, separators=(",",":"), ensure_ascii=False)
+  # shape matchSopRule and the intutic-clawde gate port pin, produced once by
+  # the extractor above. Evaluated by python3 re, not grep: these patterns are
+  # authored as JS regexes and routinely use lookahead, which no grep has.
+  # Fail-safe direction: a pattern python cannot compile (exit 2) downgrades
+  # THIS rule to name-only — today's behaviour, plus a rule_downgraded event —
+  # rather than silently dropping the rule, which would fail open.
+  if [ -n "$rargb64" ]; then
+    _intutic_arg_rc=0
+    python3 -c '
+import sys, base64, re
+try:
+    pat = base64.b64decode(sys.argv[1], validate=True).decode("utf-8")
+except Exception:
+    sys.exit(2)
+try:
+    rx = re.compile(pat)
+except re.error:
+    sys.exit(2)
+sys.exit(0 if rx.search(sys.argv[2]) else 1)
+' "$rargb64" "\${TOOL_INPUT_JSON:-}" 2>/dev/null || _intutic_arg_rc=$?
+    if [ "$_intutic_arg_rc" = "1" ]; then
+      return 0
+    elif [ "$_intutic_arg_rc" != "0" ]; then
+      ${log} "rule_downgraded" "\${TOOL:-}" "argPattern for \${rid} did not compile in python re — rule enforced name-only" || true
+    fi
+  fi
   if [ "$rsev" = "shadow" ]; then
     ${log} "tool_would_block" "\${TOOL:-}" "\${rreason} [\${rid}]" || true
     return 0
@@ -405,7 +476,19 @@ function intuticLoadSnapshot(INTUTIC_WORKSPACE_ID) {
     // above is compiled in and unaffected, so this degrades to "today's
     // behaviour" rather than to "no gate".
     try { re = new RegExp(f[5], f[2] === 'i' ? 'i' : ''); } catch (e) { continue; }
-    out.rules.push({ id: f[0], severity: f[1], subject: f[3] || 'any', re: re, reason: f[4] });
+    // Optional seventh column: the WHERE clause, base64 so an arbitrary regex
+    // cannot collide with the tab separator. Absent in v3-format files, which
+    // is exactly "no argument condition". An argPattern that does not decode
+    // or compile downgrades THIS rule to name-only (argDowngraded) instead of
+    // dropping it — dropping a block rule because its narrowing clause is
+    // broken would fail open.
+    let argRe = null, argDowngraded = false;
+    if (f.length > 6 && f[6]) {
+      try { argRe = new RegExp(Buffer.from(f[6], 'base64').toString('utf8')); }
+      catch (e) { argDowngraded = true; }
+    }
+    out.rules.push({ id: f[0], severity: f[1], subject: f[3] || 'any', re: re, reason: f[4],
+      argRe: argRe, argDowngraded: argDowngraded });
   }
 
   // Integrity. A digest nobody recomputes is a comment, and a workspace id
@@ -448,8 +531,13 @@ function intuticLoadSnapshot(INTUTIC_WORKSPACE_ID) {
  * silently reads the wrong variable is the failure this file exists to prevent.
  * \`record\` is called as (verdict, toolName, reason) — writers whose own logger
  * takes an env argument pass a lambda.
+ *
+ * \`toolInput\` is the raw tool_input OBJECT (not a string): WHERE rules match
+ * their argPattern against JSON.stringify(tool_input) — the compact shape
+ * matchSopRule and the intutic-clawde gate port pin — and the gate serializes
+ * it itself so no writer can hand it a differently-shaped string.
  */
-function intuticGate(toolName, target, command, record, workspaceId) {
+function intuticGate(toolName, target, command, record, workspaceId, toolInput) {
   // See the shell emitter for why this exists: the alternative escape a blocked
   // developer reaches for is chflags nouchg on the hook itself. Dynamic tier
   // only — the compiled floor below is never disabled by it — and every
@@ -480,6 +568,12 @@ function intuticGate(toolName, target, command, record, workspaceId) {
     try { record('snapshot_' + snap.state, toolName, _msg); } catch (e) {}
   }
   if (disabled) snap.rules = snap.rules.filter(function (r) { return r.id.indexOf('destructive.') !== 0; });
+  // JSON.stringify(tool_input) — no replacer, no spacing — matching matchSopRule.
+  // stringify(undefined) is undefined, hence the fallbacks; a throw cannot
+  // happen on an object that came out of JSON.parse, but a gate must not bet
+  // its exit code on that.
+  var toolInputJson = '{}';
+  try { toolInputJson = JSON.stringify(toolInput == null ? {} : toolInput) || '{}'; } catch (e) {}
   const nCommand = intuticNormalise(command);
   const nTarget = intuticNormalise(target);
   const nTool = intuticNormalise(toolName);
@@ -494,6 +588,20 @@ function intuticGate(toolName, target, command, record, workspaceId) {
       : [nCommand, nTarget];
     for (const subject of subjects) {
       if (!rule.re.test(subject)) continue;
+      // The argument condition of a WHERE rule: the tool-name half has
+      // matched, and the rule fires only if the argPattern also matches the
+      // serialized tool input. A pattern that failed to compile at load time
+      // enforces name-only — today's behaviour — and says so, rather than
+      // silently vanishing (fail open) or crashing the gate (exit 1, which
+      // every harness reads as allow).
+      if (rule.argDowngraded) {
+        try {
+          record('rule_downgraded', toolName,
+            'argPattern for ' + rule.id + ' did not compile — rule enforced name-only');
+        } catch (e) {}
+      } else if (rule.argRe && !rule.argRe.test(toolInputJson)) {
+        continue;
+      }
       if (rule.severity === 'shadow') {
         // Certain rule, deliberately not acted on. Counted apart from warn.
         try { record('tool_would_block', toolName, rule.reason + ' [' + rule.id + ']'); } catch (e) {}
@@ -567,7 +675,14 @@ print(clean(d.get("tool_name", "")))
 print(first("path", "file_path", "notebook_path", "filePath"))
 print(first("command", "cmd", "script", "shell_command"))
 print(clean(d.get("session_id", d.get("sessionId", ""))))
-' 2>/dev/null || printf '\\n\\n\\n\\n')"
+# The FULL tool_input, serialized to the exact shape argPattern rules are
+# matched against everywhere: JSON.stringify(tool_input) — compact separators,
+# insertion order, non-ASCII intact. The selected fields above are whitespace-
+# collapsed for token matching; this one must NOT be, or a WHERE clause that
+# spans a key/value boundary matches here and not in the JS gates. json.dumps
+# escapes every newline, so it is still exactly one line to read back.
+print(json.dumps(i, separators=(",", ":"), ensure_ascii=False))
+' 2>/dev/null || printf '\\n\\n\\n\\n\\n')"
 
 # Each read is \`|| true\` because command substitution strips trailing newlines:
 # a tool call with no command argument yields two lines, not three, so the third
@@ -575,10 +690,15 @@ print(clean(d.get("session_id", d.get("sessionId", ""))))
 # **exit 1** — which every harness reads as a hook error and lets the call
 # through. A guard that fails open on the most ordinary input there is (a Write
 # with no shell command) is worse than no guard, because it looks present.
-{ IFS= read -r TOOL || true; IFS= read -r TARGET || true; IFS= read -r COMMAND || true; IFS= read -r SESSION_ID || true; } <<EOF_INTUTIC_FIELDS
+{ IFS= read -r TOOL || true; IFS= read -r TARGET || true; IFS= read -r COMMAND || true; IFS= read -r SESSION_ID || true; IFS= read -r TOOL_INPUT_JSON || true; } <<EOF_INTUTIC_FIELDS
 $INTUTIC_FIELDS
 EOF_INTUTIC_FIELDS
 TOOL="\${TOOL:-}"; TARGET="\${TARGET:-}"; COMMAND="\${COMMAND:-}"; SESSION_ID="\${SESSION_ID:-}"
+# Empty only when the extractor failed wholesale (malformed stdin). Defaulting
+# to the empty OBJECT rather than the empty string keeps the argPattern match
+# well-defined either way.
+TOOL_INPUT_JSON="\${TOOL_INPUT_JSON:-}"
+[ -n "$TOOL_INPUT_JSON" ] || TOOL_INPUT_JSON="{}"
 # Aliases for the names the older writers used. Kept so this extractor is a
 # drop-in for every bash gate; the canonical names are the unsuffixed ones.
 TOOL_NAME="$TOOL"; TARGET_PATH="$TARGET"
@@ -655,6 +775,22 @@ def _intutic_snapshot_rules():
                     continue
                 f = line.split("\\t")
                 if len(f) < 6 or not f[5]:
+                    continue
+                # This filter evaluates a PROMPT, not a tool call, so only
+                # rules whose subject is meaningful for prose may apply.
+                # A tool-subject rule (BLOCK:Bash compiles to subject "tool")
+                # is a pattern over tool NAMES; matched against prompt text it
+                # made Open WebUI refuse any prompt containing the word
+                # "Bash". Skipped — a prompt has no tool name. f[3] was read
+                # by the other three gate families and ignored here, which is
+                # how that shipped.
+                if f[3] == "tool":
+                    continue
+                # Likewise a WHERE rule (seventh column, base64 argPattern) is
+                # conditioned on tool ARGUMENTS that a prompt does not have.
+                # Enforcing its tool pattern against prose would apply a rule
+                # its author deliberately narrowed more broadly than written.
+                if len(f) > 6 and f[6]:
                     continue
                 try:
                     # A rule that will not compile is dropped, not fatal.

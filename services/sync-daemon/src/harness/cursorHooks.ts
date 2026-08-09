@@ -138,7 +138,7 @@ process.stdin.on('end', () => {
     // || input.path\`, so a shell command naming a protected path was only
     // caught if it also carried a path argument. The shared gate tests the
     // command and the target independently.
-    intuticGate(toolName, targetPath, command, logEvent, _intuticWsId);
+    intuticGate(toolName, targetPath, command, logEvent, _intuticWsId, input);
 
     // Allow
     logEvent('tool_allowed', toolName, '');
