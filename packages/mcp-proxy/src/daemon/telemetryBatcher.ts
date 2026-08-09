@@ -69,6 +69,11 @@ export function enqueueEvent(event: HookEvent): void {
   ring.push(event)
 }
 
+/** Events awaiting the next flush. Reported upstream by the status reporter. */
+export function pendingCount(): number {
+  return ring.length
+}
+
 async function flush(): Promise<void> {
   if (isFlushing || ring.length === 0) return
   isFlushing = true
