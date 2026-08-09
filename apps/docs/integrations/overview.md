@@ -1,6 +1,6 @@
 # Integrations Overview
 
-Intutic supports 18 AI agent harnesses out of the box. The CLI auto-detects which harnesses are present in your workspace and syncs governance rules to each one.
+Intutic supports 19 AI agent harnesses out of the box. The CLI auto-detects which harnesses are present in your workspace and syncs governance rules to each one.
 
 ## Supported Harnesses
 
@@ -24,10 +24,11 @@ Intutic supports 18 AI agent harnesses out of the box. The CLI auto-detects whic
 | [Hermes](/integrations/hermes) | `.hermes/config.yaml` | File presence | ✅ Stable |
 | [Pi](/integrations/pi) | `.pi/hooks.json` | File presence | ✅ Stable |
 | [GitHub Copilot](/integrations/github-copilot) | `.github/copilot-instructions.md` | File presence | ✅ Stable |
+| [LangGraph](/integrations/langgraph) | `.env.intutic` | `langgraph`/`langchain` in `pyproject.toml`, `requirements.txt`, or `uv.lock` | ✅ Stable |
 
 ## How integration works
 
-1. **`intutic init`** scans your workspace for all 18 harness config files
+1. **`intutic init`** scans your workspace for all 19 harness config files
 2. For each detected harness, governance rules (SOPs) are written into the harness-native config format
 3. **`intutic connect`** keeps these files in sync as SOPs change on the control plane
    (`intutic connect` needs an account. Without one, `intutic start` runs the proxy and every harness config written in step 2 still applies.)

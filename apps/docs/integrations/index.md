@@ -1,11 +1,11 @@
 ---
 title: Integrations
-description: Connect Intutic to 18 AI coding agents — IDE extensions, CLI tools, agent frameworks, and platforms. Auto-detected, zero config.
+description: Connect Intutic to 19 AI coding agents — IDE extensions, CLI tools, agent frameworks, and platforms. Auto-detected, zero config.
 ---
 
 # Integrations <Badge type="tip" text="Open-Core" />
 
-Intutic supports **18 AI agent harnesses** out of the box. Run `intutic init` in your project and the CLI auto-detects which agents are present, then syncs governance rules to each one.
+Intutic supports **19 AI agent harnesses** out of the box. Run `intutic init` in your project and the CLI auto-detects which agents are present, then syncs governance rules to each one.
 
 ```bash
 intutic init
@@ -48,6 +48,7 @@ Autonomous coding agents that run multi-step tasks with tool use.
 
 | Harness | Description | Config File |
 |---|---|---|
+| [**LangGraph**](/integrations/langgraph) | LangChain's graph-based agent framework | `.env.intutic` + SDK gate |
 | [**OpenHands**](/integrations/openhands) | Open-source AI software developer platform | `config.toml` |
 | [**Goose**](/integrations/goose) | Block's terminal agent and desktop framework | `.agents/plugins/` |
 | [**Hermes**](/integrations/hermes) | NousResearch's skill-based developer agent | `.hermes/config.yaml` |
@@ -103,7 +104,7 @@ Because every response byte passes through the proxy before the client sees it, 
 
 ## How it works
 
-All 18 harnesses share the same integration flow:
+All 19 harnesses share the same integration flow:
 
 ```
 ┌──────────────┐     ┌─────────────┐     ┌──────────────┐

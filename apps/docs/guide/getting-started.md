@@ -34,7 +34,7 @@ real time and return one of four verdicts: **BYPASS**, **ENHANCE**, **HIJACK**, 
 |---|---|
 | **Node.js** | 18 or later |
 | **npm** | 10 or later |
-| **AI coding agent** | Any of the [18 supported harnesses](/integrations/) (Cursor, Claude Code, Aider, Windsurf, Antigravity, etc.) |
+| **AI coding agent** | Any of the [19 supported harnesses](/integrations/) (Cursor, Claude Code, Aider, Windsurf, Antigravity, etc.) |
 | **Valkey** (or Redis) | *Optional.* 8.x — a shared, durable cache. `intutic start` provisions one if it can, and runs without it if it cannot |
 
 That is the whole list. **Valkey is not required**, and neither is a
@@ -370,5 +370,5 @@ intutic status
 | [**How It Works**](/guide/how-it-works) | Understand the proxy → policy engine → verdict pipeline |
 | [**Enforcement Actions**](/concepts/enforcement-actions) | Deep dive into BYPASS, ENHANCE, HIJACK, and KILL |
 | [**Custom Filters (WASM)**](/external/wasm-rules) | Create WASM policy rules for custom tool-call filtering |
-| [**Integrations**](/integrations/) | Detailed setup guides for all 18 harnesses |
+| [**Integrations**](/integrations/) | Detailed setup guides for all 19 harnesses |
 | [**CLI Reference**](/reference/cli) | Complete command reference for `@intutic/cli` |

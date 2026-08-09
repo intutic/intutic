@@ -179,4 +179,4 @@ If you discover a security vulnerability, please report it to **support@intutic.
 | [How It Works](/guide/how-it-works) | Full architecture walkthrough — proxy, policy engine, control plane |
 | [Custom Filters (WASM)](/external/wasm-rules) | WASM policy rules engine for custom tool-call filtering |
 | [CLI Reference](/reference/cli) | CLI commands, doctor diagnostic tool, and local configuration |
-| [Integrations Hub](/integrations/) | Harness setup guides for 18 supported agent tools |
+| [Integrations Hub](/integrations/) | Harness setup guides for 19 supported agent tools |

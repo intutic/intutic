@@ -78,6 +78,7 @@ export const HARNESS_FILES: Record<HarnessType, string> = {
   'claude-desktop': 'claude_desktop_config.json',
   goose: '.agents/plugins/intutic-governance/hooks/hooks.json',
   'open-webui': '.open-webui/intutic-governance-filter.py',
+  langgraph: '.env.intutic',
 }
 
 // ─── Public interface ────────────────────────────────────────────────
@@ -427,6 +428,9 @@ function formatContent(
     case 'codex':
       return formatCodex(sops, proxyUrl)
 
+    case 'langgraph':
+      return formatLanggraph(sops, proxyUrl)
+
     default:
       return formatMarkdown(sops)
   }
@@ -505,6 +509,25 @@ function formatCodex(sops: SyncSopEntry[], proxyUrl: string): string {
     `INTUTIC_PROXY_URL=${proxyUrl}\n` +
     `INTUTIC_SOP_IDS=${sopIds}\n` +
     `INTUTIC_LAST_SYNC=${newIso()}\n`
+  )
+}
+
+/**
+ * LangGraph: `.env.intutic` with proxy URL vars, plus a pointer at the
+ * SDK-side tool gate. LangGraph tools are plain Python callables in the
+ * agent's own process — there is no config or hook file this daemon could
+ * write a tool-call gate into, so the env vars govern LLM egress only and
+ * the blocking gate ships in `intutic-clawde` (`intutic_clawde.gate`).
+ */
+function formatLanggraph(sops: SyncSopEntry[], proxyUrl: string): string {
+  return (
+    formatCodex(sops, proxyUrl) +
+    '\n' +
+    '# These env vars govern LLM egress only. LangGraph tools run in your own\n' +
+    '# Python process, where no config or hook file can gate them — the\n' +
+    '# blocking tool gate ships SDK-side:\n' +
+    '#   pip install intutic-clawde\n' +
+    '#   from intutic_clawde.gate import guard_tools\n'
   )
 }
 

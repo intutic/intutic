@@ -22,14 +22,14 @@ Most teams map one workspace to one code repository. This keeps governance rules
 
 ## Harnesses
 
-A **harness** is any AI coding agent that Intutic governs. Intutic currently supports **18 harnesses**:
+A **harness** is any AI coding agent that Intutic governs. Intutic currently supports **19 harnesses**:
 
 | Category | Harnesses |
 |----------|-----------|
 | IDE agents | Cursor, Windsurf, Continue, Cline, Roo Code, GitHub Copilot |
 | CLI agents | Claude Code, Aider, Codex, Goose, Pi |
 | Platform agents | Antigravity, OpenHands, n8n, Claude Desktop, Open WebUI |
-| Specialized | OpenClaw, Hermes |
+| Specialized | OpenClaw, Hermes, LangGraph |
 
 The `intutic init` command auto-detects which harnesses are present in your repo and writes governance config into each one's native config file. See [How It Works](/guide/how-it-works) for details on per-harness routing.
 

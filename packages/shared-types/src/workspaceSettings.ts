@@ -87,7 +87,7 @@ export interface WorkspaceSettings {
    *     "Governance check failed — Intutic control plane unreachable.
    *      Tool call blocked by workspace policy."
    *
-   * Applies to 8/18 harnesses (those with MCP proxy injection — 9 config
+   * Applies to 8/19 harnesses (those with MCP proxy injection — 9 config
    * paths across 8 harnesses, see sync-daemon mcpAutoWrite.ts).
    * See TD-151 for the harnesses this does not reach.
    */

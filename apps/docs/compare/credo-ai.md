@@ -15,7 +15,7 @@ Credo AI owns the **governance system of record** — policy creation, risk asse
 | **Primary function** | Runtime enforcement (circuit breaker) | Governance, risk & compliance (GRC) |
 | **Where it sits** | In the tool-call path between agent and infrastructure | Above the execution layer — policy and audit |
 | **Enforcement** | Synchronous — BYPASS / ENHANCE / HIJACK / KILL, in-process | Policy definition and assessment — no runtime blocking |
-| **Scope** | AI coding agents (18 harness integrations) | All AI systems (models, pipelines, applications) |
+| **Scope** | AI coding agents (19 harness integrations) | All AI systems (models, pipelines, applications) |
 | **DLP & threat detection** | Secrets redaction, SQL injection, prompt injection | Risk scoring and bias detection |
 | **Compliance output** | Enforcement audit logs (who, what, when, blocked/allowed) | Compliance reports, model cards, risk registers |
 | **Integration model** | Local proxy + sync daemon | Cloud platform + API |
@@ -36,7 +36,7 @@ This gives your compliance team the governance system of record they need, and y
 - Your AI agents write files, run commands, and mutate databases
 - You need **runtime enforcement** — blocking bad actions before they execute
 - You want tool-call-level audit trails with enforcement decisions
-- You need to cover **18 AI coding harnesses** with a single policy stack
+- You need to cover **19 AI coding harnesses** with a single policy stack
 
 ## When You Need Credo AI
 

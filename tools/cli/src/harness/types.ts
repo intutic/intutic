@@ -48,4 +48,5 @@ export const HARNESS_CONFIG_FILES: Record<HarnessType, string> = {
   'claude-desktop': '',
   'goose': '',
   'open-webui': '',
+  'langgraph': '.env.intutic',
 }

@@ -128,7 +128,7 @@ export type {
 
 // ─── Harness Type ────────────────────────────────────────────────────
 // HLD §3.14, §4.5 — Supported AI agent harness integrations
-// Full matrix: HLD §3.14 Harness Onboarding Matrix (18 harnesses)
+// Full matrix: HLD §3.14 Harness Onboarding Matrix (19 harnesses)
 
 /** Supported AI agent harness/IDE integrations. */
 export const HarnessType = {
@@ -150,6 +150,7 @@ export const HarnessType = {
   GOOSE: 'goose',
   OPEN_WEBUI: 'open-webui',
   GITHUB_COPILOT: 'github-copilot',
+  LANGGRAPH: 'langgraph',
 } as const
 
 /** Union of all harness type values. */
@@ -285,7 +286,7 @@ export type WorkspaceRole = typeof WorkspaceRole[keyof typeof WorkspaceRole]
  * - `open`   (default): pass through the tool call + emit a warning event
  * - `closed`: block the tool call with a user-visible error message
  *
- * Note: `closed` only affects harnesses with MCP proxy injection (8/18 —
+ * Note: `closed` only affects harnesses with MCP proxy injection (8/19 —
  * 9 config paths across 8 harnesses, see sync-daemon mcpAutoWrite.ts).
  * For harnesses without MCP proxy injection (e.g. n8n, pi, codex,
  * open-webui), see TD-151.

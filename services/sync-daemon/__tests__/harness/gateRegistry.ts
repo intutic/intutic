@@ -259,4 +259,13 @@ export const NO_GATE: ReadonlyArray<{
     harness: 'github-copilot',
     why: 'no hook writer exists; instructions file (.github/copilot-instructions.md) only',
   },
+  {
+    file: null,
+    harness: 'langgraph',
+    why:
+      'no on-disk config/hook file exists to write a gate into — tools are plain ' +
+      'Python callables in the agent’s own process. The blocking gate ships ' +
+      'SDK-side in intutic-clawde (intutic_clawde.gate, python-raise), evaluating ' +
+      'the policy snapshot + A3 argPattern rules in-process before the tool body runs',
+  },
 ]

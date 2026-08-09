@@ -343,6 +343,7 @@ export default defineConfig({
             { text: 'Hermes', link: '/integrations/hermes' },
             { text: 'Pi', link: '/integrations/pi' },
             { text: 'GitHub Copilot', link: '/integrations/github-copilot' },
+            { text: 'LangGraph', link: '/integrations/langgraph' },
           ],
         },
       ],

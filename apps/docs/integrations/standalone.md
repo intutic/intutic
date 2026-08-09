@@ -89,56 +89,11 @@ Intutic Proxy supports two primary self-hosted deployment topologies depending o
 
 Connecting any standard LLM framework to the standalone proxy is simple. Just override the `base_url` parameter and pass your Intutic API key.
 
-### 1. LangGraph (Python)
-In LangGraph, configure the chat model instance to point to the Intutic proxy URL:
+### 1. LangGraph (Python & TypeScript)
 
-```python
-from langgraph.graph import StateGraph, START, END
-from langchain_openai import ChatOpenAI
-from typing import TypedDict
+LangGraph now has a dedicated harness adapter — see the [LangGraph integration guide](/integrations/langgraph) for the full setup: `base_url` snippets for both Python and TypeScript, the SDK-side tool gate (`intutic_clawde.gate`), and the `x-intutic-harness` trace-attribution header. The short version is the same `base_url` override as every other framework on this page, pointed at your hosted proxy.
 
-# 1. Initialize LLM pointing to the Intutic proxy gateway
-llm = ChatOpenAI(
-    model="gpt-4o",
-    base_url="https://proxy.your-domain.example/v1",  # your hosted proxy
-    api_key="your-intutic-api-key"
-)
-
-class AgentState(TypedDict):
-    input: str
-    response: str
-
-def call_model(state: AgentState):
-    # This call is governed pre-flight by Intutic
-    res = llm.invoke(state["input"])
-    return {"response": res.content}
-
-# Compile Graph
-builder = StateGraph(AgentState)
-builder.add_node("agent", call_model)
-builder.add_edge(START, "agent")
-builder.add_edge("agent", END)
-
-graph = builder.compile()
-```
-
-### 2. LangGraph (TypeScript)
-Configure the LangGraph state machine runnable context:
-
-```typescript
-import { StateGraph, START, END } from "@langchain/langgraph";
-import { ChatOpenAI } from "@langchain/openai";
-
-const model = new ChatOpenAI({
-  model: "gpt-4o",
-  configuration: {
-    baseURL: "https://proxy.your-domain.example/v1", // your hosted proxy
-    apiKey: "your-intutic-api-key",
-  }
-});
-```
-
-### 3. Amazon Bedrock AgentCore & Anthropic Managed Agents
+### 2. Amazon Bedrock AgentCore & Anthropic Managed Agents
 
 Amazon Bedrock AgentCore and Anthropic Managed Agents connect to Intutic Proxy by configuring the provider gateway endpoint:
 
@@ -155,7 +110,7 @@ llm = BedrockChat(
 )
 ```
 
-### 4. Custom & Proprietary Company Harnesses
+### 3. Custom & Proprietary Company Harnesses
 
 Any internal, microservice-based, or custom company agent framework can be governed by Intutic with zero refactoring:
 
