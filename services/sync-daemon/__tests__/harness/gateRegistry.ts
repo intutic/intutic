@@ -218,7 +218,11 @@ export const GATES: readonly GateEntry[] = [
     note:
       'Continue CLI (cn) only — the IDE extension has no hook system. The CLI also ' +
       'reads .claude/settings.json, so claude-code users may already run that gate; ' +
-      'the dedicated registration in .continue/settings.json covers users without it',
+      'the dedicated registration in .continue/settings.json covers users without it. ' +
+      'LIVE-VERIFIED LIMITS (cn 1.5.47): headless -p mode does not execute PreToolUse ' +
+      'hooks at all (marker-hook probe: tool ran, hook never fired) — interactive TUI ' +
+      'sessions are what this gate covers, headless runs are proxy-governed only; and ' +
+      "cn's dispatcher fails OPEN on hook errors ({blocked:false}) by its own design",
   },
 
   // ── JavaScript, stdout contract ─────────────────────────────────────────

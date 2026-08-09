@@ -27,7 +27,7 @@ import { exec } from 'node:child_process'
 import { promisify } from 'node:util'
 import { createLogger } from '@intutic/logger'
 import { newIso } from '@intutic/id'
-import { emitJsGate } from './gateBody.js'
+import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
 
 const log = createLogger('sync-openclaw-hooks')
 const execAsync = promisify(exec)
@@ -53,6 +53,7 @@ function buildOpenclawCheckScript(
  * Workspace: ${workspaceId}
  */
 'use strict';
+${emitJsFailClosedPrelude({ harness: 'openclaw', contract: 'exit2' })}
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
@@ -131,6 +132,9 @@ process.stdin.on('end', () => {
   try {
     const ctx = JSON.parse(inputData);
     _intuticSessionId = ctx.session_id || ctx.sessionId || ctx.conversation_id || ctx.conversationId || ctx.task_id || ctx.taskId || '';
+    // An envelope carrying none of the tool fields extracts to empty strings,
+    // which match no rule — an allow. Refused instead; see the guard itself.
+    intuticGuardEnvelope(ctx, ['tool_name', 'toolName', 'tool_input', 'toolInput'], logEvent);
     const toolName = (ctx.tool_name || ctx.toolName || '').toLowerCase()
     // Case preserved for the gate. A BLOCK: SOP compiles to a tool-name
     // pattern the operator wrote as they see it (Bash, Write) and this

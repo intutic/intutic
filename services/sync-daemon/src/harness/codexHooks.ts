@@ -28,7 +28,7 @@ import * as path from 'node:path'
 import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { newIso } from '@intutic/id'
-import { emitJsGate } from './gateBody.js'
+import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
 
 const log = createLogger('sync-codex-hooks')
 
@@ -45,6 +45,7 @@ function buildHookScript(proxyUrl: string, workspaceRoot: string, workspaceId: s
  * Proxy: ${proxyUrl}
  * Generated: ${newIso()}
  */
+${emitJsFailClosedPrelude({ harness: 'codex', contract: 'exit2' })}
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
@@ -102,6 +103,11 @@ process.stdin.on('end', () => {
   try {
     const ctx = JSON.parse(raw);
     _intuticSessionId = ctx.session_id || ctx.sessionId || '';
+    // Verified during the v5 audit: this writer did NOT have the envelope
+    // guard its registry note implied it inherited — a payload with neither a
+    // tool name nor a tool_input defaulted to toolName 'tool' with empty
+    // fields, matched no rule, and was allowed. Refused now, uniformly.
+    intuticGuardEnvelope(ctx, ['tool_name', 'toolName', 'tool_input', 'toolInput'], logEvent);
     const input = ctx.tool_input || ctx.toolInput || {};
     const toolName = ctx.tool_name || ctx.toolName || 'tool';
 
@@ -162,10 +168,23 @@ async function mergeCodexHooksJson(configPath: string, hookScriptPath: string): 
     )
   })
 
+  // Provenance lives in `description` and NOWHERE else: Codex parses
+  // hooks.json with a strict schema ("expected `description` or `hooks`") and
+  // REJECTS the entire file over an unknown top-level key. The first version
+  // of this writer stamped `_intutic_comment`/`_intutic_last_sync` here, and a
+  // live smoke against codex-cli 0.147.0 showed the gate silently never
+  // loading — "warning: failed to parse hooks config … unknown field
+  // `_intutic_comment`" — while every emitted-script test stayed green. Only
+  // fields the consumer's schema names may appear at this level, and the two
+  // legacy keys are actively deleted so a file the old writer touched heals
+  // on the next sync instead of staying rejected forever.
+  delete (existing as Record<string, unknown>)['_intutic_comment']
+  delete (existing as Record<string, unknown>)['_intutic_last_sync']
   const merged = {
     ...existing,
-    _intutic_comment: 'Intutic governance PreToolUse hook — auto-managed entries only; your own hooks are preserved.',
-    _intutic_last_sync: newIso(),
+    description:
+      'Intutic governance PreToolUse hook (auto-managed; your own hooks are preserved). ' +
+      `Last sync: ${newIso()}`,
     hooks: {
       ...existingHooks,
       PreToolUse: [

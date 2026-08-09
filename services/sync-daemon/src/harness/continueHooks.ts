@@ -15,6 +15,22 @@
  *    stdout `{"permissionDecision":"deny"}`; exit 2 is used here, the contract
  *    every other exit-2 harness shares).
  *
+ *    **LIVE-VERIFIED LIMITS (cn 1.5.47, 2026-08-10), do not oversell this
+ *    gate:**
+ *    - **Headless `-p`/`--print` mode does not execute PreToolUse hooks at
+ *      all.** Verified against a real install with a bare marker hook: the
+ *      terminal tool ran, the marker never fired, with the hook registered in
+ *      every path the bundle's own search list names. The hooks engine (and
+ *      this exact search list, including `.claude/settings.json`) is present
+ *      in the shipped bundle — headless mode simply bypasses it. Interactive
+ *      TUI sessions are the mode this registration targets; a headless `cn
+ *      -p` run is governed by the proxy layer only.
+ *    - **cn's hook engine fails OPEN on hook errors by its own design** —
+ *      the bundled dispatcher catches a failed hook event and returns
+ *      `{blocked: false}`. Our gate's own crash posture (fail-closed exit 2)
+ *      cannot override the harness swallowing the failure; that is cn's
+ *      contract, recorded here so the security matrix can say it honestly.
+ *
  *    **Overlap, stated so nobody "fixes" it:** the Continue CLI ALSO reads
  *    `.claude/settings.json`, so on a machine where claude-code is governed,
  *    `cn` may already run the claude-code gate by accident. This writer makes
@@ -39,7 +55,7 @@ import * as path from 'node:path'
 import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { newIso } from '@intutic/id'
-import { emitJsGate } from './gateBody.js'
+import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
 
 const log = createLogger('sync-continue-hooks')
 
@@ -86,6 +102,7 @@ function buildHookScript(proxyUrl: string, workspaceRoot: string, workspaceId: s
  * Proxy: ${proxyUrl}
  * Generated: ${newIso()}
  */
+${emitJsFailClosedPrelude({ harness: 'continue', contract: 'exit2' })}
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
@@ -143,6 +160,11 @@ process.stdin.on('end', () => {
   try {
     const ctx = JSON.parse(raw);
     _intuticSessionId = ctx.session_id || ctx.sessionId || '';
+    // Verified during the v5 audit: this writer did NOT have the envelope
+    // guard its Claude-Code-compatible contract implied it inherited — a
+    // payload with neither a tool name nor a tool_input defaulted to toolName
+    // 'tool' with empty fields, matched no rule, and was allowed. Refused now.
+    intuticGuardEnvelope(ctx, ['tool_name', 'toolName', 'tool_input', 'toolInput'], logEvent);
     const input = ctx.tool_input || ctx.toolInput || {};
     const toolName = ctx.tool_name || ctx.toolName || 'tool';
 

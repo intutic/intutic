@@ -17,7 +17,7 @@ import * as node_os from 'node:os'
 import { z } from 'zod'
 import type { SyncSopEntry } from '@intutic/shared-types'
 import { createLogger } from '@intutic/logger'
-import { emitJsGate } from './gateBody.js'
+import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
 import { emitRedactor } from './holdRedaction.js'
 
 const log = createLogger('sync-claude-hooks')
@@ -334,6 +334,7 @@ export async function updatePreToolUseHooks(
  * and drained to the control plane by the sync-daemon on each cycle.
  * Control plane: ${controlPlaneUrl ?? 'https://api.intutic.ai'}
  */
+${emitJsFailClosedPrelude({ harness: 'claude-code', contract: 'exit2' })}
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
@@ -432,6 +433,10 @@ process.stdin.on('data', (chunk) => { inputData += chunk; });
 process.stdin.on('end', () => {
   try {
     const ctx = JSON.parse(inputData);
+    // An envelope carrying none of the tool fields extracts to empty strings,
+    // which match no rule — an allow. Refused instead; see the guard itself.
+    intuticGuardEnvelope(ctx, ['tool_name', 'toolName', 'tool_input', 'toolInput'],
+      (v, t, r) => logEvent(v, t, r, String(ctx.session_id || ctx.sessionId || '')));
     const toolName = (ctx.tool_name || ctx.toolName || '').toLowerCase();
     // Case preserved for review matching: an operator writes \`review_before: Write\`,
     // and the harness calls the tool \`Write\`.
