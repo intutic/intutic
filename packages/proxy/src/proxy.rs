@@ -497,6 +497,23 @@ fn judge_session_scope(workspace_id: &str, session_id: &str) -> String {
     format!("{}:{}", workspace_id, session_id)
 }
 
+/// Rendered into the response when the judge could not deliver a verdict.
+///
+/// Deliberately NOT shaped like the synthesis block. A failed finalize used to
+/// be either swallowed whole (non-2xx: nothing appended, nothing logged beyond
+/// a trace line) or — when the control plane still answered 200 with its old
+/// fail-open body — rendered as "Reconciliation failed: <err>" under the same
+/// "final Security Synthesis" heading a real verdict uses, formatted to look
+/// like one. Either way the reader could not tell "judged, clean" from "judge
+/// dead". The judge's absence must be as visible as its verdict, and must not
+/// impersonate one.
+fn judge_unavailable_note(reason: &str) -> String {
+    format!(
+        "\n\n--- Intutic LLM-as-a-Judge: verdict UNAVAILABLE ---\n\nThe judge could not verify this response ({}). Treat it as unverified, not as clean.\n\n",
+        reason
+    )
+}
+
 fn get_model_provider(model: &str) -> Provider {
     let m = model.to_lowercase();
     if m.contains("claude") {
@@ -3918,18 +3935,26 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                                     .send()
                                                     .await;
 
+                                                // A check that never ran is recorded as UNAVAILABLE,
+                                                // never as `{"triggered": false}` — that is the shape
+                                                // of a clean pass, and finalize used to read these
+                                                // fabricated entries as verdicts, presenting a
+                                                // segment nothing checked as one that cleared.
+                                                // judge.ts renders UNAVAILABLE entries as UNCHECKED
+                                                // and instructs the synthesis judge to grade the
+                                                // segment itself.
                                                 let verdict = match response {
                                                     Ok(r) => {
                                                         tracing::info!(status = %r.status(), "Received response from chunk judge");
                                                         if r.status().is_success() {
-                                                            r.json::<serde_json::Value>().await.unwrap_or(serde_json::json!({"triggered": false}))
+                                                            r.json::<serde_json::Value>().await.unwrap_or(serde_json::json!({"verdict": "UNAVAILABLE", "error": "judge response unparsable — segment not checked"}))
                                                         } else {
-                                                            serde_json::json!({"triggered": false, "error": "failed request"})
+                                                            serde_json::json!({"verdict": "UNAVAILABLE", "error": "judge returned an error status — segment not checked"})
                                                         }
                                                     }
                                                     Err(e) => {
                                                         tracing::error!(error = %e, "Chunk judge request failed");
-                                                        serde_json::json!({"triggered": false, "error": "network error"})
+                                                        serde_json::json!({"verdict": "UNAVAILABLE", "error": "judge unreachable — segment not checked"})
                                                     }
                                                 };
 
@@ -4113,6 +4138,12 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                             "chunkContent": trailing,
                             "monitoredModel": actual_model_clone.clone(),
                             "contextParagraphs": context_paras,
+                            // This was the only one of the four chunk call sites
+                            // that omitted personalSops — on a same-provider
+                            // stream (where the whole body arrives here as one
+                            // trailing chunk) personal rules reached the judge
+                            // only at finalize.
+                            "personalSops": personal_sops_clone.clone(),
                         }))
                         .send()
                         .await;
@@ -4121,16 +4152,16 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                         Ok(r) => {
                             tracing::info!(status = %r.status(), "Received response from trailing chunk judge");
                             if r.status().is_success() {
-                                r.json::<serde_json::Value>()
-                                    .await
-                                    .unwrap_or(serde_json::json!({"triggered": false}))
+                                r.json::<serde_json::Value>().await.unwrap_or(
+                                    serde_json::json!({"verdict": "UNAVAILABLE", "error": "judge response unparsable — segment not checked"}),
+                                )
                             } else {
-                                serde_json::json!({"triggered": false, "error": "failed request"})
+                                serde_json::json!({"verdict": "UNAVAILABLE", "error": "judge returned an error status — segment not checked"})
                             }
                         }
                         Err(e) => {
                             tracing::error!(error = %e, "Trailing chunk judge request failed");
-                            serde_json::json!({"triggered": false, "error": "network error"})
+                            serde_json::json!({"verdict": "UNAVAILABLE", "error": "judge unreachable — segment not checked"})
                         }
                     };
 
@@ -4166,21 +4197,53 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     .send()
                     .await;
 
-                if let Ok(resp) = finalize_res {
-                    tracing::info!(status = %resp.status(), "Received finalize response");
-                    if resp.status().is_success() {
-                        if let Ok(json_data) = resp.json::<serde_json::Value>().await {
-                            tracing::info!(json = ?json_data, "Finalize JSON content");
-                            let correction_summary = json_data
-                                .get("correctionSummary")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("");
-                            if !correction_summary.is_empty() {
-                                let formatted_alert = format!(
-                                    "\n\n--- Intutic LLM-as-a-Judge final Security Synthesis ---\n\n{}\n\n",
-                                    correction_summary
-                                );
+                // Success renders the synthesis; every failure mode renders an
+                // UNAVAILABLE note. Previously a non-2xx finalize was swallowed
+                // whole — nothing appended, nothing blocked — so a dead judge
+                // and a clean verdict produced the same stream.
+                let judge_note: Option<String> = match finalize_res {
+                    Ok(resp) => {
+                        let status = resp.status();
+                        tracing::info!(status = %status, "Received finalize response");
+                        if status.is_success() {
+                            match resp.json::<serde_json::Value>().await {
+                                Ok(json_data) => {
+                                    tracing::info!(json = ?json_data, "Finalize JSON content");
+                                    let correction_summary = json_data
+                                        .get("correctionSummary")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("");
+                                    if correction_summary.is_empty() {
+                                        None
+                                    } else {
+                                        Some(format!(
+                                            "\n\n--- Intutic LLM-as-a-Judge final Security Synthesis ---\n\n{}\n\n",
+                                            correction_summary
+                                        ))
+                                    }
+                                }
+                                Err(e) => Some(judge_unavailable_note(&format!(
+                                    "unparsable finalize response: {}",
+                                    e
+                                ))),
+                            }
+                        } else {
+                            Some(judge_unavailable_note(&format!(
+                                "finalize returned HTTP {}",
+                                status
+                            )))
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, "Finalize request failed");
+                        Some(judge_unavailable_note(&format!(
+                            "finalize request failed: {}",
+                            e
+                        )))
+                    }
+                };
 
+                if let Some(formatted_alert) = judge_note {
                                 let alert_block = match protocol_clone {
                                     crate::protocol::Protocol::Anthropic => {
                                         format!(
@@ -4228,13 +4291,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                         )
                                     }
                                 };
-                                tracing::info!("Injecting synthesized warning block into stream");
+                                tracing::info!("Injecting judge synthesis/unavailability block into stream");
                                 let _ = tx.send(Ok(axum::body::Bytes::from(alert_block))).await;
-                            }
-                        }
-                    }
-                } else if let Err(e) = finalize_res {
-                    tracing::error!(error = %e, "Finalize request failed");
                 }
             }
 
@@ -4690,16 +4748,16 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     Ok(r) => {
                         tracing::info!(status = %r.status(), "Received response from non-streaming chunk judge");
                         if r.status().is_success() {
-                            r.json::<serde_json::Value>()
-                                .await
-                                .unwrap_or(serde_json::json!({"triggered": false}))
+                            r.json::<serde_json::Value>().await.unwrap_or(
+                                serde_json::json!({"verdict": "UNAVAILABLE", "error": "judge response unparsable — segment not checked"}),
+                            )
                         } else {
-                            serde_json::json!({"triggered": false, "error": "failed request"})
+                            serde_json::json!({"verdict": "UNAVAILABLE", "error": "judge returned an error status — segment not checked"})
                         }
                     }
                     Err(e) => {
                         tracing::error!(error = %e, "Non-streaming chunk judge request failed");
-                        serde_json::json!({"triggered": false, "error": "network error"})
+                        serde_json::json!({"verdict": "UNAVAILABLE", "error": "judge unreachable — segment not checked"})
                     }
                 };
 
@@ -4710,8 +4768,15 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     "verdict": verdict,
                 });
                 let json_str = serde_json::to_string(&chunk_json).unwrap();
+                // TTL matters here as much as on the streaming path: finalize
+                // DELs the list on success, but a finalize that never runs
+                // (crash, kill) would otherwise leave the key forever.
                 let _ = chunk_store
-                    .push_session_chunk(&judge_session_scope(&ws_id, &sess_id), &json_str, None)
+                    .push_session_chunk(
+                        &judge_session_scope(&ws_id, &sess_id),
+                        &json_str,
+                        Some(SESSION_CHUNK_TTL_SECS),
+                    )
                     .await;
             });
             chunk_handles.push(handle);
@@ -4738,20 +4803,52 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             .send()
             .await;
 
-        if let Ok(resp) = finalize_res {
-            tracing::info!(status = %resp.status(), "Received non-streaming finalize response");
-            if resp.status().is_success() {
-                if let Ok(json_data) = resp.json::<serde_json::Value>().await {
-                    tracing::info!(json = ?json_data, "Non-streaming finalize JSON content");
-                    let correction_summary = json_data
-                        .get("correctionSummary")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
-                    if !correction_summary.is_empty() {
-                        let formatted_alert = format!(
-                            "\n\n--- Intutic LLM-as-a-Judge final Security Synthesis ---\n\n{}\n\n",
-                            correction_summary
-                        );
+        // Success renders the synthesis; every failure mode renders an
+        // UNAVAILABLE note. Previously a non-2xx finalize was swallowed whole,
+        // so a dead judge and a clean verdict produced identical bodies.
+        let judge_note: Option<String> = match finalize_res {
+            Ok(resp) => {
+                let status = resp.status();
+                tracing::info!(status = %status, "Received non-streaming finalize response");
+                if status.is_success() {
+                    match resp.json::<serde_json::Value>().await {
+                        Ok(json_data) => {
+                            tracing::info!(json = ?json_data, "Non-streaming finalize JSON content");
+                            let correction_summary = json_data
+                                .get("correctionSummary")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("");
+                            if correction_summary.is_empty() {
+                                None
+                            } else {
+                                Some(format!(
+                                    "\n\n--- Intutic LLM-as-a-Judge final Security Synthesis ---\n\n{}\n\n",
+                                    correction_summary
+                                ))
+                            }
+                        }
+                        Err(e) => Some(judge_unavailable_note(&format!(
+                            "unparsable finalize response: {}",
+                            e
+                        ))),
+                    }
+                } else {
+                    Some(judge_unavailable_note(&format!(
+                        "finalize returned HTTP {}",
+                        status
+                    )))
+                }
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "Non-streaming finalize request failed");
+                Some(judge_unavailable_note(&format!(
+                    "finalize request failed: {}",
+                    e
+                )))
+            }
+        };
+
+        if let Some(formatted_alert) = judge_note {
                         accumulated_content.push_str(&formatted_alert);
 
                         if let Ok(mut resp_val) =
@@ -4818,11 +4915,6 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                 }
                             }
                         }
-                    }
-                }
-            }
-        } else if let Err(e) = finalize_res {
-            tracing::error!(error = %e, "Non-streaming finalize request failed");
         }
     }
 
