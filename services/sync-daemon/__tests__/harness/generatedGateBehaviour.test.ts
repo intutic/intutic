@@ -33,6 +33,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { GATES, NO_GATE, type GateEntry } from './gateRegistry.js'
+import { HarnessType } from '@intutic/shared-types'
 import {
   UNIVERSAL_PROTECTED_PATHS,
   GOVERNANCE_BYPASS_PATTERNS,
@@ -330,7 +331,7 @@ describe('gate registry completeness', () => {
     expect(writers.length, 'the harness directory scan found nothing').toBeGreaterThan(12)
     const covered = new Set([
       ...GATES.map((g) => g.module.split('/').pop()!.replace(/\.js$/, '.ts')),
-      ...NO_GATE.map((n) => n.file),
+      ...NO_GATE.filter((n) => n.file !== null).map((n) => n.file!),
     ])
     const missing = writers.filter((w) => !covered.has(w))
     expect(
@@ -338,6 +339,30 @@ describe('gate registry completeness', () => {
       `These harness writers are in neither GATES nor NO_GATE. A writer that is ` +
         `in neither is one nobody decided about — add it to the registry, or to ` +
         `NO_GATE with a reason.`,
+    ).toEqual([])
+  })
+
+  it('accounts for every HarnessType enum member', () => {
+    // The file scan above cannot see a harness that has NO writer file at all
+    // — codex and github-copilot were invisible to it for exactly that reason.
+    // This check is derived from the enum instead: every HarnessType member
+    // must be either a GATES row or an explicit NO_GATE row, so the next
+    // adapter added without a hook file goes red here until someone decides
+    // about it in writing.
+    //
+    // GATES names are camelCase test ids; enum values are kebab-case
+    // (claudeCode → claude-code, openWebui → open-webui).
+    const kebab = (s: string) => s.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)
+    const covered = new Set<string>([
+      ...GATES.map((g) => kebab(g.name)),
+      ...NO_GATE.flatMap((n) => (n.harness === null ? [] : [n.harness])),
+    ])
+    const missing = Object.values(HarnessType).filter((h) => !covered.has(h))
+    expect(
+      missing,
+      `These HarnessType members are in neither GATES nor NO_GATE. A harness ` +
+        `in neither is one nobody decided about — add a gate row, or a NO_GATE ` +
+        `entry (file: null if no writer exists) with a reason.`,
     ).toEqual([])
   })
 

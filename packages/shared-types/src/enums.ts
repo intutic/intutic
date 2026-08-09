@@ -128,7 +128,7 @@ export type {
 
 // ─── Harness Type ────────────────────────────────────────────────────
 // HLD §3.14, §4.5 — Supported AI agent harness integrations
-// Full matrix: HLD §3.14 Harness Onboarding Matrix (8 harnesses)
+// Full matrix: HLD §3.14 Harness Onboarding Matrix (18 harnesses)
 
 /** Supported AI agent harness/IDE integrations. */
 export const HarnessType = {
@@ -285,8 +285,10 @@ export type WorkspaceRole = typeof WorkspaceRole[keyof typeof WorkspaceRole]
  * - `open`   (default): pass through the tool call + emit a warning event
  * - `closed`: block the tool call with a user-visible error message
  *
- * Note: `closed` only affects harnesses with MCP proxy injection (13/17).
- * For harnesses without proxy (n8n, pi, codex, open-webui), see TD-151.
+ * Note: `closed` only affects harnesses with MCP proxy injection (8/18 —
+ * 9 config paths across 8 harnesses, see sync-daemon mcpAutoWrite.ts).
+ * For harnesses without MCP proxy injection (e.g. n8n, pi, codex,
+ * open-webui), see TD-151.
  */
 export const McpProxyFailBehavior = {
   OPEN:   'open',
@@ -299,7 +301,8 @@ export type McpProxyFailBehavior = typeof McpProxyFailBehavior[keyof typeof McpP
  * - `per-session` (default, Phase 4): new proxy process per MCP connection
  * - `daemon`      (Phase 5): long-lived daemon, per-session shims delegate via Unix socket
  *
- * See TD-153 — daemon requires macOS notarization. Per-session is the only active mode in Phase 4.
+ * See TD-153 — daemon requires macOS notarization. Both modes are active: the
+ * mcp-proxy honours `daemon` by answering policy lookups over the daemon socket.
  */
 export const McpProxyMode = {
   PER_SESSION: 'per-session',

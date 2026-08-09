@@ -87,23 +87,26 @@ export interface WorkspaceSettings {
    *     "Governance check failed — Intutic control plane unreachable.
    *      Tool call blocked by workspace policy."
    *
-   * Applies to 13/17 harnesses (those with MCP proxy injection).
-   * See TD-151 for the 4 harnesses this does not reach.
+   * Applies to 8/18 harnesses (those with MCP proxy injection — 9 config
+   * paths across 8 harnesses, see sync-daemon mcpAutoWrite.ts).
+   * See TD-151 for the harnesses this does not reach.
    */
   mcpProxyFailBehavior: McpProxyFailBehavior
 
   /**
    * MCP proxy deployment model.
    *
-   * - `'per-session'` (default, Phase 4): a new proxy process is spawned per
+   * - `'per-session'` (default): a new proxy process is spawned per
    *   MCP connection. Policy is fetched from control plane at startup with a
    *   60s in-process TTL.
-   * - `'daemon'` (Phase 5, stored but not yet active): a long-lived proxy
-   *   daemon shares policy cache across all MCP sessions. Requires macOS
-   *   notarization. See TD-153.
+   * - `'daemon'` (active): a long-lived proxy daemon shares its policy cache
+   *   across all MCP sessions. Requires macOS notarization. See TD-153.
    *
-   * In Phase 4, setting this to `'daemon'` is accepted and stored but the
-   * sync-daemon will log a warning and continue in per-session mode.
+   * The sync-daemon writes this value through verbatim to
+   * ~/.intutic/env/runtime.env (lib/runtimeEnv.ts) and the MCP proxy honours
+   * it: with `'daemon'` set, policy lookups go through the daemon's Unix
+   * socket. Caveat: daemon health telemetry is not reported — the
+   * health-snapshot route was removed and the dashboard flag is hardcoded off.
    */
   mcpProxyMode: McpProxyMode
 
