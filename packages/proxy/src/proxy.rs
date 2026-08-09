@@ -3491,6 +3491,132 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // completions at four separate places.
             let stream_shape = delta_shape(&protocol_clone, &provider_clone);
 
+            // Mid-stream judge chunking: split newly-accumulated text at a
+            // paragraph or code-fence boundary and spawn a /judge/chunk grade
+            // per segment. A macro rather than a helper because both call
+            // sites — the same-provider passthrough and the cross-provider
+            // translation branch — must mutate the same loop-local state
+            // (paragraph_history, chunk_index, chunk_handles,
+            // last_processed_len), and a macro expands against those names in
+            // scope instead of threading a dozen borrows.
+            //
+            // It used to exist only in the cross-provider branch. On a
+            // same-provider stream last_processed_len therefore stayed 0,
+            // chunk_handles stayed empty, and the whole response went to the
+            // judge as ONE trailing chunk after the client already had every
+            // byte — mid-stream inspection simply did not run on the most
+            // common topology, and finalize's "segment log" was a single
+            // entry. Same split logic, both branches, is the fix.
+            macro_rules! judge_chunk_scan {
+                () => {
+                    if judge_active_clone {
+                        let current_slice = &accumulated_content[last_processed_len..];
+                        let mut split_index = None;
+                        if let Some(pos) = current_slice.find("\n\n") {
+                            split_index = Some(pos + 2);
+                        } else if let Some(pos) = current_slice.find("```") {
+                            if pos > 0 {
+                                split_index = Some(pos);
+                            } else if let Some(pos2) = current_slice[3..].find("```") {
+                                split_index = Some(pos2 + 6);
+                            }
+                        }
+
+                        if let Some(offset) = split_index {
+                            let chunk_content = current_slice[..offset].trim().to_string();
+                            if !chunk_content.is_empty() {
+                                tracing::info!(chunk_content = %chunk_content, "Detected paragraph chunk");
+                                let context_paras = if paragraph_history.len() >= 2 {
+                                    paragraph_history[paragraph_history.len() - 2..].to_vec()
+                                } else {
+                                    paragraph_history.clone()
+                                };
+
+                                paragraph_history.push(chunk_content.clone());
+
+                                let client = http_client_clone.clone();
+                                let cp_url = control_plane_url_clone.clone();
+                                let ws_id = workspace_id_clone.clone();
+                                let sess_id = session_id_clone.clone();
+                                let chunk_store = Arc::clone(&cache_store_clone);
+                                let cur_index = chunk_index;
+
+                                let personal_sops_chunk = personal_sops_clone.clone();
+                                // The model that produced this chunk. Its own clone:
+                                // actual_model_clone is moved into the trace publish
+                                // further down, and the judge must not depend on
+                                // which of the two runs first.
+                                let judge_monitored = actual_model_clone.clone();
+                                let api_key_for_chunk = client_api_key_clone.clone();
+                                let handle = spawn(async move {
+                                    let check_url = format!("{}/api/v1/judge/chunk", cp_url);
+                                    tracing::info!(url = %check_url, "Sending chunk to judge");
+                                    let response = client
+                                        .post(&check_url)
+                                        .header(
+                                            "Authorization",
+                                            format!("Bearer {}", api_key_for_chunk),
+                                        )
+                                        .json(&serde_json::json!({
+                                            "workspaceId": ws_id,
+                                            "sessionId": sess_id,
+                                            "chunkContent": chunk_content,
+                                            "monitoredModel": judge_monitored.clone(),
+                                            "contextParagraphs": context_paras,
+                                            "personalSops": personal_sops_chunk,
+                                        }))
+                                        .send()
+                                        .await;
+
+                                    // A check that never ran is recorded as UNAVAILABLE,
+                                    // never as `{"triggered": false}` — that is the shape
+                                    // of a clean pass, and finalize used to read these
+                                    // fabricated entries as verdicts, presenting a
+                                    // segment nothing checked as one that cleared.
+                                    // judge.ts renders UNAVAILABLE entries as UNCHECKED
+                                    // and instructs the synthesis judge to grade the
+                                    // segment itself.
+                                    let verdict = match response {
+                                        Ok(r) => {
+                                            tracing::info!(status = %r.status(), "Received response from chunk judge");
+                                            if r.status().is_success() {
+                                                r.json::<serde_json::Value>().await.unwrap_or(serde_json::json!({"verdict": "UNAVAILABLE", "error": "judge response unparsable — segment not checked"}))
+                                            } else {
+                                                serde_json::json!({"verdict": "UNAVAILABLE", "error": "judge returned an error status — segment not checked"})
+                                            }
+                                        }
+                                        Err(e) => {
+                                            tracing::error!(error = %e, "Chunk judge request failed");
+                                            serde_json::json!({"verdict": "UNAVAILABLE", "error": "judge unreachable — segment not checked"})
+                                        }
+                                    };
+
+                                    tracing::info!(verdict = ?verdict, "Chunk verdict recorded");
+                                    let chunk_json = serde_json::json!({
+                                        "index": cur_index,
+                                        "content": chunk_content,
+                                        "verdict": verdict,
+                                    });
+                                    let json_str = serde_json::to_string(&chunk_json).unwrap();
+                                    chunk_store
+                                        .push_session_chunk(
+                                            &judge_session_scope(&ws_id, &sess_id),
+                                            &json_str,
+                                            Some(SESSION_CHUNK_TTL_SECS),
+                                        )
+                                        .await
+                                        .unwrap_or_default();
+                                });
+
+                                chunk_handles.push(handle);
+                                chunk_index += 1;
+                            }
+                            last_processed_len += offset;
+                        }
+                    }
+                };
+            }
+
             'upstream: while let Some(chunk_res) = stream.next().await {
                 match chunk_res {
                     Ok(bytes) => {
@@ -3751,6 +3877,15 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                         }
                                     }
                                 }
+                                // Same-provider streams chunk too. The client
+                                // has already been forwarded this delta —
+                                // mid-stream grading here is observational,
+                                // exactly as it is on the cross-provider
+                                // branch — but the per-segment verdicts land
+                                // in the finalize prompt's segment log, and
+                                // personal SOPs reach the judge per segment
+                                // instead of only at finalize.
+                                judge_chunk_scan!();
                             } else {
                                 if let Some(stripped) = line.strip_prefix("event:") {
                                     current_event_type = stripped.trim().to_string();
@@ -3872,116 +4007,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                     current_event_type.clear();
                                     current_data.clear();
                                 }
-                                if judge_active_clone {
-                                    let current_slice = &accumulated_content[last_processed_len..];
-                                    let mut split_index = None;
-                                    if let Some(pos) = current_slice.find("\n\n") {
-                                        split_index = Some(pos + 2);
-                                    } else if let Some(pos) = current_slice.find("```") {
-                                        if pos > 0 {
-                                            split_index = Some(pos);
-                                        } else if let Some(pos2) = current_slice[3..].find("```") {
-                                            split_index = Some(pos2 + 6);
-                                        }
-                                    }
-
-                                    if let Some(offset) = split_index {
-                                        let chunk_content =
-                                            current_slice[..offset].trim().to_string();
-                                        if !chunk_content.is_empty() {
-                                            tracing::info!(chunk_content = %chunk_content, "Detected paragraph chunk");
-                                            let context_paras = if paragraph_history.len() >= 2 {
-                                                paragraph_history[paragraph_history.len() - 2..]
-                                                    .to_vec()
-                                            } else {
-                                                paragraph_history.clone()
-                                            };
-
-                                            paragraph_history.push(chunk_content.clone());
-
-                                            let client = http_client_clone.clone();
-                                            let cp_url = control_plane_url_clone.clone();
-                                            let ws_id = workspace_id_clone.clone();
-                                            let sess_id = session_id_clone.clone();
-                                            let chunk_store = Arc::clone(&cache_store_clone);
-                                            let cur_index = chunk_index;
-
-                                            let personal_sops_chunk = personal_sops_clone.clone();
-                                            // The model that produced this chunk. Its own clone:
-                                            // actual_model_clone is moved into the trace publish
-                                            // further down, and the judge must not depend on
-                                            // which of the two runs first.
-                                            let judge_monitored = actual_model_clone.clone();
-                                            let api_key_for_chunk = client_api_key_clone.clone();
-                                            let handle = spawn(async move {
-
-                                                let check_url =
-                                                    format!("{}/api/v1/judge/chunk", cp_url);
-                                                tracing::info!(url = %check_url, "Sending chunk to judge");
-                                                let response = client
-                                                    .post(&check_url)
-                                                    .header(
-                                                        "Authorization",
-                                                        format!("Bearer {}", api_key_for_chunk),
-                                                    )
-                                                    .json(&serde_json::json!({
-                                                        "workspaceId": ws_id,
-                                                        "sessionId": sess_id,
-                                                        "chunkContent": chunk_content,
-                                                        "monitoredModel": judge_monitored.clone(),
-                                                        "contextParagraphs": context_paras,
-                                                        "personalSops": personal_sops_chunk,
-                                                    }))
-                                                    .send()
-                                                    .await;
-
-                                                // A check that never ran is recorded as UNAVAILABLE,
-                                                // never as `{"triggered": false}` — that is the shape
-                                                // of a clean pass, and finalize used to read these
-                                                // fabricated entries as verdicts, presenting a
-                                                // segment nothing checked as one that cleared.
-                                                // judge.ts renders UNAVAILABLE entries as UNCHECKED
-                                                // and instructs the synthesis judge to grade the
-                                                // segment itself.
-                                                let verdict = match response {
-                                                    Ok(r) => {
-                                                        tracing::info!(status = %r.status(), "Received response from chunk judge");
-                                                        if r.status().is_success() {
-                                                            r.json::<serde_json::Value>().await.unwrap_or(serde_json::json!({"verdict": "UNAVAILABLE", "error": "judge response unparsable — segment not checked"}))
-                                                        } else {
-                                                            serde_json::json!({"verdict": "UNAVAILABLE", "error": "judge returned an error status — segment not checked"})
-                                                        }
-                                                    }
-                                                    Err(e) => {
-                                                        tracing::error!(error = %e, "Chunk judge request failed");
-                                                        serde_json::json!({"verdict": "UNAVAILABLE", "error": "judge unreachable — segment not checked"})
-                                                    }
-                                                };
-
-                                                tracing::info!(verdict = ?verdict, "Chunk verdict recorded");
-                                                let chunk_json = serde_json::json!({
-                                                    "index": cur_index,
-                                                    "content": chunk_content,
-                                                    "verdict": verdict,
-                                                });
-                                                let json_str =
-                                                    serde_json::to_string(&chunk_json).unwrap();
-                                                chunk_store
-                                                    .push_session_chunk(
-                                                        &judge_session_scope(&ws_id, &sess_id),
-                                                        &json_str,
-                                                        Some(SESSION_CHUNK_TTL_SECS),
-                                                    )
-                                                    .await
-                                                    .unwrap_or_default();
-                                            });
-
-                                            chunk_handles.push(handle);
-                                            chunk_index += 1;
-                                        }
-                                        last_processed_len += offset;
-                                    }
-                                }
+                                judge_chunk_scan!();
                             }
                         }
                     }
