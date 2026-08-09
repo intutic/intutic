@@ -24,9 +24,11 @@
 //!
 //! The real guard is an end-to-end streaming request against a stub upstream
 //! with the emitted trace captured — the shape `mirror_test.rs` already uses
-//! `wiremock` for. That needs an `AppState` fixture, which no test in this crate
-//! builds today. Until one exists this holds the specific line, and says so
-//! rather than implying more.
+//! `wiremock` for. An `AppState` fixture now exists — `judge_stream_test.rs`
+//! boots the real router over a MemoryStore and observes wire traffic — so the
+//! end-to-end version of THIS assertion is buildable on that pattern; until
+//! someone writes it, this holds the specific line, and says so rather than
+//! implying more.
 //!
 //! The three remaining `Vec::new()` sites are deliberate and are asserted to
 //! stay that way: blocked-before-evaluation, served-from-cache, and
