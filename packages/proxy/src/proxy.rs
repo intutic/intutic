@@ -162,6 +162,35 @@ impl Provider {
     }
 }
 
+/// The harness this request is attributed to in traces, sessions and the
+/// tool-pin key.
+///
+/// `Provider::harness_name()` is a fabrication — it maps the wire protocol to
+/// the most common harness speaking it, which filed every OpenAI-shaped
+/// caller (LangGraph, CrewAI, a plain SDK script) under "cursor". A client
+/// that knows who it is says so with `x-intutic-harness`; absent or
+/// malformed, the fabrication stands so nothing that exists today changes
+/// shape. The value is a lowercase slug capped at 32 chars, matching the
+/// control plane's own harness-string contract (`routes/agents.ts`).
+///
+/// Client-supplied and unverifiable, exactly like the graph-identity headers
+/// — this is attribution, not authorization: the role/harness enforcement
+/// input (`allowed_harnesses_for_role`) deliberately keeps the route-derived
+/// value and says so at its own call site.
+fn resolve_harness_type(headers: &HeaderMap, provider: &Provider) -> String {
+    headers
+        .get("x-intutic-harness")
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.trim().to_ascii_lowercase())
+        .filter(|v| {
+            !v.is_empty()
+                && v.len() <= 32
+                && v.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        })
+        .unwrap_or_else(|| provider.harness_name().to_string())
+}
+
 // ─── Policy check ─────────────────────────────────────────────────────
 
 #[derive(Debug, Serialize)]
@@ -835,6 +864,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     let protocol = crate::protocol::detect(&uri_path);
     let headers = request.headers().clone();
     let method = request.method().clone();
+
+    let harness_type: String = resolve_harness_type(&headers, &provider);
 
     // ── Step 1: Extract virtual key ───────────────────────────────────
     let auth_header = headers
@@ -1849,7 +1880,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     let tool_contract_changed = !tool_signature.is_empty()
         && state
             .store
-            .pinned_tool_signature(&workspace_id, provider.harness_name(), &tool_signature)
+            .pinned_tool_signature(&workspace_id, &harness_type, &tool_signature)
             .await
             .is_some_and(|pinned| pinned != tool_signature);
 
@@ -2247,7 +2278,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     crate::plugins::anomaly::Disposition::Steer => "hijacked",
                 }
                 .to_string(),
-                harness_type: provider.harness_name().to_string(),
+                harness_type: harness_type.clone(),
                 created_at: now,
                 requested_model: model.clone(),
                 actual_model_routed: model.clone(),
@@ -2750,7 +2781,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 cache_hit: true,
                 latency_ms,
                 verdict: "allowed".to_string(),
-                harness_type: provider.harness_name().to_string(),
+                harness_type: harness_type.clone(),
                 created_at: chrono::Utc::now().to_rfc3339(),
                 requested_model: model.clone(),
                 actual_model_routed: cached_resp.model.clone(),
@@ -3260,7 +3291,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             cache_hit: false,
             latency_ms,
             verdict: "allowed".to_string(),
-            harness_type: provider.harness_name().to_string(),
+            harness_type: harness_type.clone(),
             created_at: chrono::Utc::now().to_rfc3339(),
             requested_model: model.clone(),
             actual_model_routed: actual_model.clone(),
@@ -3420,6 +3451,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         let change_manifest_clone = change_manifest.clone();
         let prompt_text_clone = prompt_text.clone();
         let provider_clone = provider.clone();
+        let harness_type_clone = harness_type.clone();
         let dlp_scan_output = state.config.intutic_settings.dlp.enabled
             && state.config.intutic_settings.dlp.scan_output;
         // Resolved here rather than inside the stream task so the one-shot
@@ -4482,7 +4514,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 // blocked tool calls does not have to know which half of the
                 // turn caught it.
                 verdict: if gate_tripped { "killed" } else { "allowed" }.to_string(),
-                harness_type: provider_clone.harness_name().to_string(),
+                harness_type: harness_type_clone,
                 created_at: chrono::Utc::now().to_rfc3339(),
                 requested_model: requested_model_clone,
                 actual_model_routed: actual_model_clone,
@@ -5166,7 +5198,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         // Same string the request-side kill uses, so an audit of blocked tool
         // calls does not have to know which half of the turn caught it.
         verdict: if response_denial.is_some() { "killed" } else { "allowed" }.to_string(),
-        harness_type: provider.harness_name().to_string(),
+        harness_type: harness_type.clone(),
         created_at: chrono::Utc::now().to_rfc3339(),
         requested_model: model.clone(),
         actual_model_routed: actual_model,
@@ -7084,6 +7116,31 @@ mod tests {
         // another, and auto-judging stops firing with no signal at all. Pinning the
         // shape here makes a divergence a test failure instead of a silent outage.
         assert_eq!(judge_session_scope("ws_1", "ses_9"), "ws_1:ses_9");
+    }
+
+    #[test]
+    fn harness_attribution_honors_the_header_and_survives_junk() {
+        let mk = |v: Option<&str>| {
+            let mut h = HeaderMap::new();
+            if let Some(v) = v {
+                h.insert("x-intutic-harness", v.parse().unwrap());
+            }
+            resolve_harness_type(&h, &Provider::OpenAI)
+        };
+        // A client that says who it is gets filed as itself…
+        assert_eq!(mk(Some("langgraph")), "langgraph");
+        assert_eq!(mk(Some("  CrewAI  ")), "crewai");
+        // …and absent or malformed, the protocol fabrication stands, so every
+        // record that exists today keeps its shape.
+        assert_eq!(mk(None), "cursor");
+        assert_eq!(mk(Some("")), "cursor");
+        assert_eq!(mk(Some("has spaces")), "cursor");
+        assert_eq!(mk(Some("../../etc/passwd")), "cursor");
+        assert_eq!(
+            mk(Some("a-33-char-slug-aaaaaaaaaaaaaaaaaa")),
+            "cursor",
+            "over the 32-char cap the control plane's harness strings carry"
+        );
     }
 
     #[test]
