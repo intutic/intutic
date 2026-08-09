@@ -100,7 +100,7 @@ Determines how aggressively the sync daemon protects harness config files from m
 | **Alert Only** | Drift creates a governance incident but does not rewrite the config |
 
 ::: info
-Bypass enforcement applies to all 18 supported harnesses. The sync daemon monitors protected configuration paths in real time.
+Bypass enforcement applies to all 19 supported harnesses. The sync daemon monitors protected configuration paths in real time.
 :::
 
 ---

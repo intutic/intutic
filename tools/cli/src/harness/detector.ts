@@ -1,7 +1,7 @@
 /**
  * Harness detector — auto-detect which AI harnesses are present.
  *
- * Instantiates all 18 adapters and checks each for presence in
+ * Instantiates all 19 adapters and checks each for presence in
  * the workspace. Returns a DetectedHarness array for reporting.
  *
  * HLD §3.14 — Harness Onboarding Matrix
@@ -29,6 +29,7 @@ import { openclawAdapter } from './openclaw.js'
 import { piAdapter } from './pi.js'
 import { hermesAdapter } from './hermes.js'
 import { githubCopilotAdapter } from './githubCopilot.js'
+import { langgraphAdapter } from './langgraph.js'
 import { join } from 'node:path'
 
 /** All registered harness adapters. */
@@ -51,6 +52,7 @@ export const ALL_ADAPTERS: IHarnessAdapter[] = [
   piAdapter,
   hermesAdapter,
   githubCopilotAdapter,
+  langgraphAdapter,
 ]
 
 /**

@@ -101,8 +101,8 @@ That's it! Your agent is now governed by real-time safety guardrails.
 | 🛡️ **Zero-Trust Tool Interception** | Intercepts dangerous commands (`rm -rf`, `git push --force`, `DROP TABLE`) before they touch your system. |
 | 🔐 **Secret DLP & Masking** | Automatically redacts API keys (`[REDACTED_SECRET]`), AWS credentials, and tokens in prompts & tool payloads. |
 | 💰 **Session Spend Ceilings** | Prevents "loop burn" by enforcing token spending ceilings per session (e.g. $5.00 limit). |
-| 🔄 **18 Harness Adapters** | Auto-detects and config-syncs 18 harnesses — Claude Code CLI, Cursor, Windsurf, Aider, Antigravity, Cline, and more. |
-| 🤖 **Single & Multi-Agent Swarms** | Governs single developer tools natively, plus any OpenAI-compatible framework (LangGraph, CrewAI, AutoGen) launched via `intutic exec` or base-URL env vars. |
+| 🔄 **19 Harness Adapters** | Auto-detects and config-syncs 19 harnesses — Claude Code CLI, Cursor, Windsurf, Aider, Antigravity, Cline, LangGraph, and more. |
+| 🤖 **Single & Multi-Agent Swarms** | Governs single developer tools natively, plus any OpenAI-compatible framework (CrewAI, AutoGen) launched via `intutic exec` or base-URL env vars. |
 | 🎯 **Local Model Routing** | Thompson-sampling bandit picks the best model per task and learns from deterministic local rewards — no LLM judge, no control plane. Enable via `intutic_settings.routing`. [Docs](https://docs.intutic.ai/guide/intelligent-routing) |
 | 🧩 **Author Your Own WASM Rules** | Compile AssemblyScript policies with `intutic policy compile` / `install` / `list-local` into `~/.intutic/wasm` — the proxy hot-reloads them within ~5s. Ships with an `intutic-rule-author` agent skill. [Docs](https://docs.intutic.ai/guide/wasm-rules) |
 
@@ -131,13 +131,13 @@ Every tool call and prompt evaluated by Intutic produces one of four **PCAS Acti
 
 ## 🔌 Supported Harnesses & Frameworks
 
-Intutic ships **18 harness adapters** that are auto-detected and config-synced without modifying your agent's source code. Anything else that speaks an OpenAI- or Anthropic-compatible API is governed the same way by pointing its base URL at the proxy:
+Intutic ships **19 harness adapters** that are auto-detected and config-synced without modifying your agent's source code. Anything else that speaks an OpenAI- or Anthropic-compatible API is governed the same way by pointing its base URL at the proxy:
 
 | Category | Supported Tools & Frameworks |
 | :--- | :--- |
 | **Single-Agent Assistants** (adapters) | **Claude Code CLI**, **Cursor**, **Windsurf**, **Aider**, **Antigravity**, **Cline**, **Roo Code**, **Codex**, **Continue**, **Claude Desktop**, **Goose**, **Pi**, **GitHub Copilot**, **OpenWebUI** |
-| **Multi-Agent Swarms** (adapters) | **OpenHands**, **OpenClaw**, **Hermes**, **n8n** |
-| **Any OpenAI-compatible framework** (no adapter needed) | **LangGraph**, **CrewAI**, **AutoGen**, and anything else honoring `OPENAI_BASE_URL` / `ANTHROPIC_BASE_URL` — launch it with `intutic exec` or export the base-URL env vars |
+| **Multi-Agent Swarms** (adapters) | **LangGraph**, **OpenHands**, **OpenClaw**, **Hermes**, **n8n** |
+| **Any OpenAI-compatible framework** (no adapter needed) | **CrewAI**, **AutoGen**, and anything else honoring `OPENAI_BASE_URL` / `ANTHROPIC_BASE_URL` — launch it with `intutic exec` or export the base-URL env vars |
 
 ---
 

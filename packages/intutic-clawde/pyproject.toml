@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "intutic-clawde"
-version = "2.1.0"
+version = "2.2.0"
 description = "Programmatic proxy connection wrappers and warm-path budget gates for Intutic"
 authors = ["Intutic <engineering@intutic.ai>"]
 readme = "README.md"
@@ -12,6 +12,9 @@ packages = [{include = "intutic_clawde"}]
 python = "^3.10"
 requests = "^2.33.0"
 urllib3 = ">=2.7.0"
+# The gate's image-integrity tier parses the Kubernetes manifests a deploy
+# command references; see intutic_clawde/gate/imagecheck.py.
+pyyaml = "^6.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^9.0.3"

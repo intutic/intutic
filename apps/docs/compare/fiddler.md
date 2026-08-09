@@ -18,7 +18,7 @@ If your agent attempts to execute a shell command that deletes a configuration f
 | **Interception Point** | System commands, files, database, and network | LLM prompt inputs and model text outputs |
 | **Enforcement Layer** | Synchronous terminal/proxy gateway, in-process | Model API gateway or async content scanner |
 | **Sandbox Isolation** | WASM (wasmtime) policy sandbox — 16 MB, 1,000,000 fuel, 5 ms, explicit host-import allowlist | Not available |
-| **Agent Integrations** | 18 AI coding harnesses (Claude Code, Cursor, etc.) | Standard chatbot SDK integrations |
+| **Agent Integrations** | 19 AI coding harnesses (Claude Code, Cursor, etc.) | Standard chatbot SDK integrations |
 | **FinOps & ROI** | Append-only cost ledger with per-model breakdown; daily and monthly caps enforced with KILL | Basic model usage statistics |
 
 ---

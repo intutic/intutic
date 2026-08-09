@@ -1,7 +1,7 @@
 # Harness Security Matrix — Intutic Compliance Scope <Badge type="tip" text="Open-Core" />
 
 > **Last updated:** Phase 3 implementation complete  
-> **Coverage:** 18 active harnesses
+> **Coverage:** 19 active harnesses
 
 This document is the canonical reference for what Intutic enforces, how, and the gaps that remain per harness.
 
@@ -11,9 +11,9 @@ This document is the canonical reference for what Intutic enforces, how, and the
 
 | Vector | Mechanism | How it blocks | Scope |
 |---|---|---|---|
-| **A — Client Hook** | Pre-tool-use gate script; blocking contract varies by harness (exit code 2, `{"cancel":true}` on stdout, or Python raise) | Blocks before tool executes | 13 generated gates: Claude Code, Claude Desktop, Cursor, Windsurf, Cline, Roo Code, OpenClaw, OpenHands, Goose, Antigravity, Hermes, Pi, and Open-WebUI (prompt-level filter) |
-| **B — Proxy Gate** | LLM request inspection at the API boundary | Blocks / audits before LLM sees the prompt | 15 of the 18 active harnesses (+ Windsurf via TLS MITM); see matrix |
-| **C — Drift Guard** | File watcher + 30s poll cycle | Detects and restores tampered governance configs | 18 paths across all harnesses |
+| **A — Client Hook** | Pre-tool-use gate script; blocking contract varies by harness (exit code 2, `{"cancel":true}` on stdout, or Python raise) | Blocks before tool executes | 13 generated gates: Claude Code, Claude Desktop, Cursor, Windsurf, Cline, Roo Code, OpenClaw, OpenHands, Goose, Antigravity, Hermes, Pi, and Open-WebUI (prompt-level filter) — plus LangGraph's SDK-side gate (`intutic_clawde.gate`, not a generated file) |
+| **B — Proxy Gate** | LLM request inspection at the API boundary | Blocks / audits before LLM sees the prompt | 16 of the 19 active harnesses (+ Windsurf via TLS MITM); see matrix |
+| **C — Drift Guard** | File watcher + 30s poll cycle | Detects and restores tampered governance configs | 19 paths across all harnesses |
 | **D — Response Gate** | Proxy-side inspection of the LLM *response* before it is forwarded to the client | Withholds a model-emitted `tool_calls[]` naming a denied tool before the client's tool runner sees it | Every harness whose LLM traffic traverses the proxy (Vector B scope); harness-agnostic, no client hook required |
 
 ### Vector D — Response Gate
@@ -52,6 +52,7 @@ Known limits, stated precisely:
 | 16 | **Hermes** | ✅ hermes-check.sh | ✅ | ✅ config.yaml | Medium | Binds tool execution hooks |
 | 17 | **Pi** | ✅ pre-tool hooks | ❌ | ✅ hooks.json | Medium | Intercepts at workspace root |
 | 18 | **GitHub Copilot** | ❌ Instructions-only | ❌ | ✅ copilot-instructions.md | Low | Merge active SOP rules |
+| 19 | **LangGraph** | ✅ SDK-side (Python raise) | ✅ base_url / `intutic exec` | ✅ .env.intutic | Medium | Gate lives in the developer's code via `intutic_clawde.gate` (`guard_tools` / `@guard`), not a generated hook file — it sees the tool call's full arguments, so argPattern rules apply; traces attributed via `x-intutic-harness` |
 
 ---
 
