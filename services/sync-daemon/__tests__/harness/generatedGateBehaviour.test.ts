@@ -1005,6 +1005,85 @@ describe('n8n workflow gate', () => {
       'the workflow gate aborted an execution without recording it — an unrecorded block is invisible to the control plane',
     ).toMatch(/tool_blocked/)
   })
+
+  // ── The LIVE shape, not the documented one ────────────────────────────────
+  //
+  // Everything above drives the gate with `nodes` as an ARRAY — the shape the
+  // external-hooks docs example uses. What `workflow.preExecute` actually
+  // receives in a running n8n (probed against the current image with an
+  // argument-dumping hook) is a Workflow class instance whose `nodes` is an
+  // OBJECT keyed by node name. The first gate handled only the array, walked
+  // zero nodes on every real execution, and allowed an offending workflow
+  // straight through while this whole file stayed green. These three pins are
+  // the regression wall for that live finding.
+
+  it('blocks an offending node when nodes is the live object-keyed shape', async () => {
+    const r = await runWorkflow({
+      id: 'wf-live',
+      name: 'Live Shape',
+      nodes: { 'Run Command': commandNode('chflags nouchg .intutic/hooks/x') },
+      connections: {},
+    })
+    expect(r.refused, 'object-keyed nodes were not evaluated — the live n8n shape is unguarded').toBe(true)
+    expect(r.stderr).toMatch(/Intutic Governance/)
+  })
+
+  it('allows a clean workflow in the live object-keyed shape', async () => {
+    const r = await runWorkflow({
+      id: 'wf-live-clean',
+      name: 'Live Shape Clean',
+      nodes: { Set: { name: 'Set', type: 'n8n-nodes-base.set', parameters: { keepOnlySet: false } } },
+      connections: {},
+    })
+    expect(r.refused, `clean object-shape workflow refused: ${r.stderr}`).toBe(false)
+  })
+
+  it('blocks against a snapshot the REAL product writer produced', async () => {
+    // The fixture writer above pads nothing; writePolicySnapshot space-pads
+    // its source patterns. Against a dot-namespaced node type the padded
+    // pattern can never match the full type, only its basename — so a live
+    // n8n allowed everything while every fixture-driven test here was green.
+    // This test closes the writer/fixture divergence by using the product
+    // writer itself.
+    const { writePolicySnapshot } = await import('../../src/lib/policySnapshot.js')
+    const dir = join(home, 'real-writer-n8n')
+    await writePolicySnapshot(
+      {
+        // Must match the id the registry bakes into the hook ('ws_test') — a
+        // mismatched snapshot is deliberately treated as foreign and dropped.
+        workspaceId: 'ws_test',
+        interventionMode: 'enforce',
+        sopRules: [{
+          id: 'sop.pin_deploy_real',
+          toolPattern: '(executeCommand|code)',
+          argPattern: 'kubectl\\s+apply(?!.*@sha256:)',
+          action: 'block',
+          reason: 'deploys must be digest-pinned',
+        }],
+      },
+      dir,
+    )
+    const snap = join(dir, 'policy-snapshot.rules')
+    const bad = await runWorkflow(
+      { id: 'w', name: 'RealWriter', nodes: { Deploy: { name: 'Deploy', type: 'n8n-nodes-base.code', parameters: { jsCode: "run('kubectl apply -f x.yaml')" } } }, connections: {} },
+      snap,
+    )
+    expect(bad.refused, 'product-writer snapshot did not block a namespaced node type').toBe(true)
+    const ok = await runWorkflow(
+      { id: 'w2', name: 'RealWriterOk', nodes: { Deploy: { name: 'Deploy', type: 'n8n-nodes-base.code', parameters: { jsCode: "run('kubectl apply -f x.yaml # img@sha256:abc')" } } }, connections: {} },
+      snap,
+    )
+    expect(ok.refused, `digest-pinned apply refused under product-writer snapshot: ${ok.stderr}`).toBe(false)
+  })
+
+  it('refuses a workflow whose nodes it cannot read at all', async () => {
+    // Not "allow because we found nothing to check" — an unreadable shape means
+    // the gate is blind, and blind must fail closed if n8n changes the
+    // contract a second time.
+    const r = await runWorkflow({ id: 'wf-alien', name: 'Alien', nodes: 42, connections: {} })
+    expect(r.refused, 'an unreadable nodes shape was allowed — the gate fails open on contract change').toBe(true)
+    expect(r.stderr).toMatch(/unrecognised workflow shape/)
+  })
 })
 
 describe('pattern portability', () => {

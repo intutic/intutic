@@ -23,7 +23,7 @@ import * as path from 'node:path'
 import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { newIso } from '@intutic/id'
-import { emitShellGate, SHELL_EXTRACT } from './gateBody.js'
+import { emitShellGate, SHELL_EXTRACT, SHELL_FAIL_CLOSED } from './gateBody.js'
 
 const log = createLogger('sync-pi-hooks')
 
@@ -80,7 +80,7 @@ function buildPiCheckScript(
 # Generated: ${newIso()}
 # Workspace: ${workspaceId}
 set -euo pipefail
-
+${SHELL_FAIL_CLOSED}
 # Source runtime credentials (never embedded in this file)
 if [ -f "${runtimeEnv}" ]; then
   # shellcheck disable=SC1090

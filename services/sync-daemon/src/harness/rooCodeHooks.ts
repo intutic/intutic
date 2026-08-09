@@ -21,7 +21,7 @@ import * as path from 'node:path'
 import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { newIso } from '@intutic/id'
-import { emitJsGate } from './gateBody.js'
+import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
 import { UNIVERSAL_PROTECTED_PATHS } from './protectedPaths.js'
 
 const log = createLogger('sync-roo-code-hooks')
@@ -54,6 +54,7 @@ function buildRooCheckScript(
  * Workspace: ${workspaceId}
  */
 'use strict';
+${emitJsFailClosedPrelude({ harness: 'roo-code', contract: 'stdout-cancel' })}
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
@@ -160,6 +161,11 @@ process.stdin.on('end', () => {
   try {
     const ctx = JSON.parse(inputData);
     _intuticSessionId = ctx.session_id || ctx.sessionId || ctx.conversation_id || ctx.conversationId || ctx.task_id || ctx.taskId || '';
+    // An envelope carrying none of the tool fields extracts to empty strings,
+    // which match no rule — an allow. Refused instead, and the refusal CANCELS
+    // (this harness ignores exit codes); see intuticGuardEnvelope.
+    intuticGuardEnvelope(ctx, ['tool_name', 'toolName', 'tool_input', 'toolInput'],
+      (v, t, r) => logEvent(runtimeEnv, v, t, r));
     const toolName = (ctx.tool_name || ctx.toolName || '').toLowerCase()
     // Case preserved for the gate. A BLOCK: SOP compiles to a tool-name
     // pattern the operator wrote as they see it (Bash, Write) and this

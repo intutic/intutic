@@ -72,8 +72,21 @@ import {
  * `gateLivenessService` records it off events when a gate reports one. A v3
  * gate reading a v4 snapshot and a v4 gate reading a v3 snapshot both degrade
  * to v3 behaviour — see the encoding note on {@link RULES_COLUMNS}.
+ *
+ * v5: the residual fail-open edges were closed. Every bash gate now converts
+ * an accidental crash (exit != 0 and != 2 under `set -euo pipefail`) into
+ * exit 2 via {@link SHELL_FAIL_CLOSED}; every bash gate refuses a stdin
+ * payload from which neither a tool name nor a tool_input could be extracted
+ * (the envelope posture githubCopilotHooks established, now uniform); every
+ * JS gate installs `uncaughtException`/`unhandledRejection` handlers as its
+ * first statements ({@link emitJsFailClosedPrelude}) so a crash outside the
+ * stdin handler refuses through the harness's own contract instead of exiting
+ * 1 (which every exit-code harness reads as "hook errored — allow"); and the
+ * malformed-envelope refusal is shared across the JS writers via
+ * `intuticGuardEnvelope`. The `.rules` format is unchanged — v4 and v5 gates
+ * read each other's snapshots byte-identically.
  */
-export const GATE_VERSION = 4
+export const GATE_VERSION = 5
 
 /**
  * How old a snapshot may be before a gate reports it as stale.
@@ -178,6 +191,64 @@ export function toRulesLine(p: GuardPattern): string {
   return p.argPattern ? base + '\t' + Buffer.from(p.argPattern, 'utf8').toString('base64') : base
 }
 
+/**
+ * The bash fail-closed prelude. Interpolated by every bash writer immediately
+ * after `set -euo pipefail`, before anything that can fail has run.
+ *
+ * The edge it closes: under `set -euo pipefail` any script bug — an unbound
+ * variable, a `read` that hits EOF outside its guard, a corrupted snapshot
+ * tripping an unguarded command — ends the script with the failing command's
+ * status, usually 1. Every harness that runs these gates treats a non-2
+ * non-zero exit as "the hook errored" and ALLOWS the call, so an accidental
+ * crash was an allow that looked like enforcement.
+ *
+ * An EXIT trap that inspects the final status, deliberately not `trap ... ERR`:
+ *
+ * - ERR does not fire on `set -u` unbound-variable deaths or on every `set -e`
+ *   exit path, and its firing rules differ between bash versions and whatever
+ *   /bin/sh a harness substitutes. EXIT always runs, in every POSIX shell.
+ * - An ERR trap also fires on every benign non-zero intermediate — a grep
+ *   no-match inside a condition, an arithmetic result of 0 — and turning those
+ *   into blocks would make the gate refuse every call, which is exactly as
+ *   broken as allowing every call. Inspecting only the FINAL exit status
+ *   sidesteps that class entirely: `set -e` semantics are untouched, and a
+ *   status the script deliberately produced (0 = allow, 2 = block, including
+ *   the python3-missing refusal in SHELL_EXTRACT) passes through unchanged.
+ *   Under `set -e` a script bug can never reach the final `exit 0`, so
+ *   "status not in {0, 2}" is exactly "the gate crashed".
+ *
+ * The trap body runs under the script's own `set -eu`, so it disarms both
+ * first — a trap that itself dies on an unset variable would exit with that
+ * failure's status and reopen the hole it exists to close. `log_event` is
+ * defined by the writer AFTER this prelude, so the trap probes for it before
+ * calling: a crash earlier than the definition still blocks, just without an
+ * audit line (stderr carries the reason either way).
+ */
+export const SHELL_FAIL_CLOSED = `
+# ── Intutic fail-closed prelude v${GATE_VERSION} ─────────────────────────────
+# Any exit status other than the two deliberate verdicts (0 = allow, 2 = block)
+# means this gate crashed rather than decided. The harness would read exit 1 as
+# "hook errored" and run the tool anyway, so a crash is converted into a block.
+# EXIT rather than ERR: ERR is unreliable across shells for set -u deaths, and
+# it fires on benign non-zero intermediates; the final status cannot lie.
+intutic_fail_closed() {
+  _intutic_exit_rc=$?
+  # The trap must not itself die on an unset variable or a failed command —
+  # that would replace the exit status it exists to correct.
+  set +eu
+  trap - EXIT
+  if [ "$_intutic_exit_rc" = "0" ] || [ "$_intutic_exit_rc" = "2" ]; then
+    exit "$_intutic_exit_rc"
+  fi
+  echo "[Intutic Governance] BLOCKED: gate crashed (exit \${_intutic_exit_rc}) — failing closed rather than allowing an unevaluated call." >&2
+  if command -v log_event >/dev/null 2>&1; then
+    log_event "tool_blocked" "\${TOOL:-unknown}" "gate crashed (exit \${_intutic_exit_rc}) — failing closed" || true
+  fi
+  exit 2
+}
+trap intutic_fail_closed EXIT
+`
+
 export interface ShellGateOptions {
   /** Harness id, as it appears in audit lines. */
   harness: string
@@ -205,6 +276,28 @@ export function emitShellGate(opts: ShellGateOptions): string {
 # The harness name and version are stamped so this file identifies itself. Both
 # were previously passed in and dropped on the floor: opts.harness was declared
 # on the option type, supplied by all thirteen writers, and read nowhere.
+
+# Refuse an unreadable envelope before any rule is consulted.
+#
+# Unparseable stdin used to degrade to empty extracted fields, which match no
+# rule — an ALLOW. Per each harness's contract this hook receives only
+# PreToolUse events, so a payload from which neither a tool name nor a
+# tool_input could be extracted is anomalous by definition: there is no such
+# thing as a legitimate PreToolUse event with no tool call in it. Refusing is
+# the posture githubCopilotHooks established for its Preview envelope, applied
+# uniformly. INTUTIC_EXTRACT_STATE is set by SHELL_EXTRACT; the refusal lives
+# here because log_event is not defined until after extraction runs.
+#
+# Scoped to the bare invocation: goose and openhands register post/stop
+# invocations of this same script WITH arguments, and those events carry no
+# tool call legitimately — refusing them would fail a hook that has nothing to
+# gate. Every PreToolUse registration invokes the script with no arguments.
+if [ -z "\${1:-}" ] && [ "\${INTUTIC_EXTRACT_STATE:-malformed}" != "ok" ]; then
+  _intutic_env_reason="unrecognised PreToolUse payload — neither a tool name nor a tool_input could be extracted from stdin; refusing rather than allowing a call the gate cannot read"
+  echo "[Intutic Governance] BLOCKED: \${_intutic_env_reason}" >&2
+  ${log} "tool_blocked" "unknown" "\${_intutic_env_reason}" || true
+  exit 2
+fi
 
 ${NORMALISE_CONTRACT.shell}
 
@@ -534,6 +627,39 @@ ${NORMALISE_CONTRACT.jsSource}
 ${JS_SNAPSHOT_LOADER}
 
 /**
+ * Refuses a parsed payload that carries no recognisable tool-call envelope.
+ *
+ * The shared gate extracts by known field names, and an envelope it does not
+ * recognise extracts to EMPTY strings — which match no rule, i.e. the gate
+ * degrades to ALLOW. These hooks receive only PreToolUse events per each
+ * harness's contract, so a payload from which neither a tool name nor a
+ * tool_input can be extracted is anomalous by definition: there is no
+ * legitimate PreToolUse event with no tool call in it. Refusing is the posture
+ * githubCopilotHooks established for its Preview envelope, now uniform.
+ *
+ * \`keys\` names the envelope fields THIS writer's extractor actually reads —
+ * cursor and windsurf accept flat payloads (fields at the top level, no
+ * tool_input wrapper), so their key lists are wider than the canonical four.
+ * A guard stricter than the extractor would refuse traffic the gate can
+ * evaluate perfectly well, and a false positive here teaches operators to
+ * disable the hook.
+ */
+function intuticGuardEnvelope(ctx, keys, record) {
+  if (ctx && typeof ctx === 'object') {
+    for (var _gi = 0; _gi < keys.length; _gi++) {
+      if (ctx[keys[_gi]] !== undefined) return;
+    }
+  }
+  const reason = '[Intutic Governance] BLOCKED: unrecognised PreToolUse payload — ' +
+    'neither a tool name nor a tool_input could be extracted. This hook receives only ' +
+    'PreToolUse events, so a payload with no tool call in it is anomalous by definition; ' +
+    'refusing rather than allowing a call the gate cannot read.';
+  try { console.error(reason); } catch (e) {}
+  try { record('tool_blocked', 'unknown', reason); } catch (e) {}
+${refuse}
+}
+
+/**
  * Evaluates one tool call. Returns normally to allow; refuses via this harness's
  * contract otherwise.
  *
@@ -643,6 +769,57 @@ ${refuse}
 }
 
 /**
+ * The JS fail-closed prelude — the FIRST statements of every emitted JS gate.
+ *
+ * The edge it closes: each writer's stdin handler wraps its work in a
+ * try/catch that fails closed, but a crash OUTSIDE that handler — a
+ * module-load failure, an unhandled promise rejection from an async path —
+ * ended the process with Node's default exit 1. Every exit-code harness reads
+ * a non-2 non-zero exit as "the hook errored" and ALLOWS the call, and the
+ * stdout-cancel harnesses saw no cancel object, which is also an allow. So a
+ * gate that crashed was indistinguishable from a gate that approved.
+ *
+ * Interpolated by the writer as the first executable code in the script —
+ * before any `require` (after `'use strict'` where the writer has one, since a
+ * directive must lead the file to take effect) — so everything that runs is
+ * covered. The one thing it cannot cover is a SyntaxError in the emitted file
+ * itself: Node rejects the whole module before any statement executes,
+ * handlers included. That residue is pinned by the behaviour tests running
+ * every emitted gate for real.
+ *
+ * Refuses through the harness's contract, like everything else: exit 2 means
+ * nothing to cline or roo-code, whose harnesses only read stdout — a crashed
+ * stdout-cancel gate must still print its cancel object.
+ */
+export function emitJsFailClosedPrelude(opts: JsGateOptions): string {
+  const crashBody =
+    opts.contract === 'stdout-cancel'
+      ? `  try {\n` +
+        `    process.stdout.write(JSON.stringify({ cancel: true, reason:\n` +
+        `      '[Intutic Governance] gate crashed — failing closed: ' + String((err && err.stack) || err) }) + '\\n');\n` +
+        `  } catch (e) { /* stdout gone too — nothing left to refuse through */ }\n` +
+        `  process.exit(0);`
+      : `  try {\n` +
+        `    process.stderr.write('[Intutic Governance] BLOCKED: gate crashed — failing closed: ' +\n` +
+        `      String((err && err.stack) || err) + '\\n');\n` +
+        `  } catch (e) { /* stderr gone too — the exit code still blocks */ }\n` +
+        `  process.exit(2);`
+  return `// ── Intutic fail-closed prelude v${GATE_VERSION} — harness: ${opts.harness} ──
+// FIRST statements on purpose, before any require: the stdin handler's catch
+// fails closed, but a crash outside it — a module-load failure, an unhandled
+// promise rejection — used to exit 1, which every exit-code harness reads as
+// "hook errored" and ALLOWS, and which prints no cancel object for the
+// stdout-cancel harnesses, also an allow. Everything that executes after this
+// line is covered; a SyntaxError in this file itself is the one thing that is
+// not, because no statement in a file that does not parse ever runs.
+function _intuticCrash(err) {
+${crashBody}
+}
+process.on('uncaughtException', _intuticCrash);
+process.on('unhandledRejection', _intuticCrash);`
+}
+
+/**
  * The single `python3` invocation that replaces the three or four each bash gate
  * used to spawn.
  *
@@ -667,12 +844,24 @@ INTUTIC_FIELDS="$(printf '%s' "$INPUT" | python3 -c '
 import sys, json
 def clean(v):
     return " ".join(str(v).split()) if isinstance(v, str) else ""
+state = "ok"
 try:
     d = json.load(sys.stdin)
 except Exception:
     d = {}
+    state = "malformed"
 if not isinstance(d, dict):
     d = {}
+    state = "malformed"
+# The envelope check githubCopilotHooks established, applied to the bash
+# family: a payload carrying none of the tool fields in any known spelling is
+# one the gate cannot evaluate, and extracting empty fields from it would
+# match no rule — an allow. Reported as a STATE and decided in the gate body,
+# because log_event is not defined yet at extraction time.
+if state == "ok" and not any(
+    k in d for k in ("tool_name", "toolName", "tool_input", "toolInput")
+):
+    state = "malformed"
 i = d.get("tool_input") or {}
 if not isinstance(i, dict):
     i = {}
@@ -682,6 +871,10 @@ def first(*keys):
         if isinstance(v, str) and v:
             return clean(v)
     return ""
+# The state line comes FIRST: the lines after it may legitimately be empty,
+# and command substitution strips trailing newlines, so the last line is the
+# only position an empty value cannot survive in.
+print(state)
 print(clean(d.get("tool_name", "")))
 print(first("path", "file_path", "notebook_path", "filePath"))
 print(first("command", "cmd", "script", "shell_command"))
@@ -693,18 +886,23 @@ print(clean(d.get("session_id", d.get("sessionId", ""))))
 # spans a key/value boundary matches here and not in the JS gates. json.dumps
 # escapes every newline, so it is still exactly one line to read back.
 print(json.dumps(i, separators=(",", ":"), ensure_ascii=False))
-' 2>/dev/null || printf '\\n\\n\\n\\n\\n')"
+' 2>/dev/null || printf '\\n\\n\\n\\n\\n\\n')"
 
 # Each read is \`|| true\` because command substitution strips trailing newlines:
-# a tool call with no command argument yields two lines, not three, so the third
+# a tool call with no command argument yields fewer lines than reads, so a late
 # read hits EOF and returns non-zero. Under \`set -e\` that killed the gate with
 # **exit 1** — which every harness reads as a hook error and lets the call
 # through. A guard that fails open on the most ordinary input there is (a Write
 # with no shell command) is worse than no guard, because it looks present.
-{ IFS= read -r TOOL || true; IFS= read -r TARGET || true; IFS= read -r COMMAND || true; IFS= read -r SESSION_ID || true; IFS= read -r TOOL_INPUT_JSON || true; } <<EOF_INTUTIC_FIELDS
+{ IFS= read -r INTUTIC_EXTRACT_STATE || true; IFS= read -r TOOL || true; IFS= read -r TARGET || true; IFS= read -r COMMAND || true; IFS= read -r SESSION_ID || true; IFS= read -r TOOL_INPUT_JSON || true; } <<EOF_INTUTIC_FIELDS
 $INTUTIC_FIELDS
 EOF_INTUTIC_FIELDS
 TOOL="\${TOOL:-}"; TARGET="\${TARGET:-}"; COMMAND="\${COMMAND:-}"; SESSION_ID="\${SESSION_ID:-}"
+# Empty means the extractor itself died (the fallback printf above): treat it
+# exactly like a payload the parser rejected. The gate body refuses on any
+# value other than "ok" — see the envelope refusal in emitShellGate.
+INTUTIC_EXTRACT_STATE="\${INTUTIC_EXTRACT_STATE:-}"
+[ -n "$INTUTIC_EXTRACT_STATE" ] || INTUTIC_EXTRACT_STATE="malformed"
 # Empty only when the extractor failed wholesale (malformed stdin). Defaulting
 # to the empty OBJECT rather than the empty string keeps the argPattern match
 # well-defined either way.
@@ -882,6 +1080,15 @@ def _intutic_evaluate(text):
  *
  * Refuses by THROWING — there is no exit code and no stdout contract in-process.
  * An internal fault also throws, which n8n treats the same way: fail closed.
+ *
+ * Verified during the v5 fail-open audit and deliberately left alone: the
+ * writer's preExecute wrapper has no try/catch around this gate (see the
+ * comment at the module.exports site in n8nHooks.ts), so a fault inside the
+ * evaluator aborts the execution exactly as a BLOCKED throw does. This is the
+ * one family whose crash posture was already closed; installing process-level
+ * exit handlers here would be actively wrong, since the gate runs inside the
+ * n8n server process, not a per-call subprocess. Pinned by the "internal
+ * fault" case in the n8n block of generatedGateFailClosed.test.ts.
  */
 export function emitN8nWorkflowGate(): string {
   const floor = staticFloorPatterns()
@@ -933,7 +1140,30 @@ function intuticGateWorkflow(workflow, record, workspaceId) {
   if (disabled) snap.rules = snap.rules.filter(function (r) { return r.id.indexOf('destructive.') !== 0; });
   const rules = INTUTIC_FLOOR.concat(snap.rules);
 
-  const nodes = (workflow && Array.isArray(workflow.nodes)) ? workflow.nodes : [];
+  // BOTH shapes, verified live, and the difference is load-bearing: the docs'
+  // external-hooks example passes a workflow whose \`nodes\` is an ARRAY, but
+  // what \`workflow.preExecute\` actually receives in a running n8n (probed
+  // against the current image with an argument-dumping hook) is a Workflow
+  // class instance whose \`nodes\` is an OBJECT keyed by node name. The first
+  // version of this gate handled only the array, iterated zero nodes on every
+  // real execution, and allowed an offending workflow straight through while
+  // every fixture-driven test — written to the docs' array shape — stayed
+  // green. A shape neither branch recognises falls through to zero nodes and
+  // is REFUSED below rather than allowed.
+  var nodes = [];
+  var nodesRecognised = false;
+  if (workflow && Array.isArray(workflow.nodes)) {
+    nodes = workflow.nodes; nodesRecognised = true;
+  } else if (workflow && workflow.nodes && typeof workflow.nodes === 'object') {
+    nodes = Object.values(workflow.nodes); nodesRecognised = true;
+  }
+  // Nothing to evaluate that we can SEE is nothing: fine. A workflow whose
+  // nodes we cannot read at all is not fine — refusing is the only posture
+  // that fails closed if n8n changes the shape again.
+  if (!nodesRecognised) {
+    try { record('tool_blocked', 'n8n:' + wfName, 'unrecognised workflow.nodes shape — failing closed'); } catch (e) {}
+    throw new Error('[Intutic Governance] BLOCKED: unrecognised workflow shape — the governance gate cannot read the workflow nodes (n8n contract change?). Failing closed.');
+  }
   for (const node of nodes) {
     if (!node || typeof node !== 'object') continue;
     const nodeType = String(node.type || '');
@@ -943,6 +1173,17 @@ function intuticGateWorkflow(workflow, record, workspaceId) {
     var paramsJson = '{}';
     try { paramsJson = JSON.stringify(node.parameters == null ? {} : node.parameters) || '{}'; } catch (e) {}
     const nType = intuticNormalise(nodeType);
+    // The padded BASENAME too, and this is load-bearing: writePolicySnapshot
+    // space-pads source patterns (/ (shell|executeCommand) /), and the
+    // per-tool gates match them against space-padded tool names. An n8n node
+    // type is dot-namespaced ("n8n-nodes-base.executeCommand"), so against
+    // the padded full type the pattern's leading space can never sit before
+    // "executeCommand" — a real product snapshot matched ZERO node types in a
+    // live server while the unit tests, whose fixture wrote unpadded
+    // patterns, stayed green. Both candidates are tested: the padded full
+    // type (for unpadded/fixture-style patterns, which match unanchored) and
+    // the padded basename (for the product writer's padded patterns).
+    const nTypeBase = intuticNormalise(nodeType.indexOf('.') >= 0 ? nodeType.slice(nodeType.lastIndexOf('.') + 1) : nodeType);
     const nParams = intuticNormalise(paramsJson);
     // Every string LEAF of the parameters, tested individually alongside the
     // whole serialization. Not redundancy: the shared patterns are written
@@ -963,7 +1204,7 @@ function intuticGateWorkflow(workflow, record, workspaceId) {
       // A node has no separate command/target — its parameters are both. A
       // 'tool' rule matches the node TYPE and nothing else, for the same
       // reason the per-tool gates never test a path pattern against "Write".
-      const subjects = rule.subject === 'tool' ? [nType] : [nParams].concat(nLeaves);
+      const subjects = rule.subject === 'tool' ? [nType, nTypeBase] : [nParams].concat(nLeaves);
       for (const subject of subjects) {
         if (!rule.re.test(subject)) continue;
         if (rule.argDowngraded) {

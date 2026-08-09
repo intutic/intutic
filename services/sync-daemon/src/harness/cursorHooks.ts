@@ -20,7 +20,7 @@ import * as path from 'node:path'
 import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { newIso } from '@intutic/id'
-import { emitJsGate } from './gateBody.js'
+import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
 
 const log = createLogger('sync-cursor-hooks')
 
@@ -66,6 +66,7 @@ function buildHookScript(proxyUrl: string, workspaceRoot: string, workspaceId: s
  * Proxy: ${proxyUrl}
  * Generated: ${newIso()}
  */
+${emitJsFailClosedPrelude({ harness: 'cursor', contract: 'exit2' })}
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
@@ -123,6 +124,13 @@ process.stdin.on('end', () => {
   try {
     const ctx = JSON.parse(raw);
     _intuticSessionId = ctx.session_id || ctx.sessionId || ctx.conversation_id || ctx.conversationId || ctx.task_id || ctx.taskId || '';
+    // Cursor accepts FLAT payloads (fields at the top level, no tool_input
+    // wrapper — that is what the \`|| ctx\` fallback below reads), so the
+    // recognisable-envelope set is exactly the extractor's field set. Narrower
+    // would refuse real traffic; an envelope with none of these extracts to
+    // empty strings, matches no rule, and used to be allowed.
+    intuticGuardEnvelope(ctx, ['tool_name', 'toolName', 'tool_input', 'toolInput', 'input', 'event',
+      'command', 'cmd', 'script', 'path', 'file_path', 'filePath', 'file', 'target', 'notebook_path'], logEvent);
     const event = (ctx.event || '').toLowerCase();
     const input = ctx.input || ctx.tool_input || ctx;
 

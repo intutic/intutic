@@ -10,6 +10,18 @@
  * change between releases; everything below is written to fail SAFE if it
  * does.
  *
+ * CONTRACT LAST RE-VERIFIED 2026-08-10 against the live docs
+ * (code.visualstudio.com/docs/agent-customization/hooks and
+ * /docs/agents/reference/hooks-reference): envelope fields, exit-2 blocking,
+ * both file locations, the `chat.hookFilesLocations` setting (whose defaults
+ * also read `.claude/settings.json`-format hooks), and the explicit Preview
+ * marking ("configuration format and behavior might change") all confirmed
+ * as described above. What is NOT verified: an end-to-end block inside a
+ * live Copilot-subscribed VS Code agent session — that requires an
+ * interactive editor with a Copilot entitlement and cannot run headlessly;
+ * until someone performs it, this gate's live status is "contract-verified,
+ * session-unverified" and the security matrix says so.
+ *
  * Fail-safe analysis, stated rather than assumed: the shared JS gate
  * (`intuticGate`) extracts the target path and command from `tool_input` by
  * known field names, and an input whose fields it does not recognise extracts
@@ -32,7 +44,7 @@ import * as path from 'node:path'
 import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { newIso } from '@intutic/id'
-import { emitJsGate } from './gateBody.js'
+import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
 
 const log = createLogger('sync-github-copilot-hooks')
 
@@ -54,6 +66,7 @@ function buildHookScript(proxyUrl: string, workspaceRoot: string, workspaceId: s
  * Proxy: ${proxyUrl}
  * Generated: ${newIso()}
  */
+${emitJsFailClosedPrelude({ harness: 'github-copilot', contract: 'exit2' })}
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
@@ -112,18 +125,15 @@ process.stdin.on('end', () => {
     const ctx = JSON.parse(raw);
     _intuticSessionId = ctx.session_id || ctx.sessionId || '';
 
-    // The Preview guard. The shared gate extracts by known field names, and an
-    // envelope it does not recognise extracts to empty strings — which match
-    // no rule and would ALLOW. On a Preview harness whose format may shift,
-    // that is a silent hole, so an unrecognised envelope is refused instead.
-    if (ctx.tool_name === undefined && ctx.toolName === undefined &&
-        ctx.tool_input === undefined && ctx.toolInput === undefined) {
-      const msg = '[Intutic Governance] BLOCKED: unrecognised PreToolUse payload — ' +
-        'the VS Code agent hooks Preview format may have changed; re-run intutic sync after upgrading.';
-      process.stderr.write(msg + '\\n');
-      logEvent('tool_blocked', 'unknown', msg);
-      process.exit(2);
-    }
+    // The Preview guard — the precedent the whole family now follows. The
+    // shared gate extracts by known field names, and an envelope it does not
+    // recognise extracts to empty strings — which match no rule and would
+    // ALLOW. On a Preview harness whose format may shift, that is a silent
+    // hole. The hand-rolled check that lived here became the shared
+    // intuticGuardEnvelope in gateBody.ts (v5), so every JS writer refuses the
+    // same envelopes with the same event; if Copilot renames the fields,
+    // re-run intutic sync after upgrading.
+    intuticGuardEnvelope(ctx, ['tool_name', 'toolName', 'tool_input', 'toolInput'], logEvent);
 
     const input = ctx.tool_input || ctx.toolInput || {};
     const toolName = ctx.tool_name || ctx.toolName || 'tool';

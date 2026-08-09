@@ -20,7 +20,7 @@ import * as path from 'node:path'
 import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { newIso } from '@intutic/id'
-import { emitJsGate } from './gateBody.js'
+import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
 
 const log = createLogger('sync-windsurf-hooks')
 
@@ -57,6 +57,7 @@ function buildHookScript(proxyUrl: string, workspaceRoot: string, workspaceId: s
  * Proxy: ${proxyUrl}
  * Generated: ${newIso()}
  */
+${emitJsFailClosedPrelude({ harness: 'windsurf', contract: 'exit2' })}
 const fs = require('fs');
 const crypto = require('crypto');
 const https = require('https');
@@ -112,6 +113,13 @@ process.stdin.on('end', () => {
   try {
     const ctx = JSON.parse(raw);
     _intuticSessionId = ctx.session_id || ctx.sessionId || ctx.conversation_id || ctx.conversationId || ctx.task_id || ctx.taskId || '';
+    // Windsurf accepts FLAT payloads (fields at the top level — the \`|| ctx\`
+    // fallback below reads them), so the recognisable-envelope set is exactly
+    // the extractor's field set. Narrower would refuse real traffic; an
+    // envelope with none of these extracts to empty strings, matches no rule,
+    // and used to be allowed.
+    intuticGuardEnvelope(ctx, ['tool_name', 'toolName', 'tool_input', 'toolInput', 'input', 'event',
+      'command', 'cmd', 'script', 'path', 'file_path', 'filePath', 'file', 'target', 'notebook_path'], logEvent);
     const event = (ctx.event || '').toLowerCase();
     // tool_input is included deliberately: Windsurf sends "input", but every
     // other harness sends "tool_input", and reading only the former meant a

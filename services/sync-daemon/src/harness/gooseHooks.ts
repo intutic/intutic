@@ -20,7 +20,7 @@ import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { newIso } from '@intutic/id'
 import { hardenGoosePlugin, unharden } from './gooseHardener.js'
-import { emitShellGate, SHELL_EXTRACT } from './gateBody.js'
+import { emitShellGate, SHELL_EXTRACT, SHELL_FAIL_CLOSED } from './gateBody.js'
 
 const log = createLogger('sync-goose-hooks')
 
@@ -81,7 +81,7 @@ export async function writeGooseHooks(proxyUrl: string, workspaceRoot = os.homed
 # Proxy: ${proxyUrl}
 # Generated: ${newIso()}
 set -euo pipefail
-
+${SHELL_FAIL_CLOSED}
 EVENT="\${1:-pre}"
 INPUT="\$(cat)"
 ${SHELL_EXTRACT}

@@ -17,7 +17,7 @@ import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import { createLogger } from '@intutic/logger'
 import { newIso } from '@intutic/id'
-import { emitShellGate, SHELL_EXTRACT } from './gateBody.js'
+import { emitShellGate, SHELL_EXTRACT, SHELL_FAIL_CLOSED } from './gateBody.js'
 
 const log = createLogger('sync-openhands-hooks')
 
@@ -54,7 +54,7 @@ export async function writeOpenHandsHooks(
 # Proxy: ${proxyUrl}
 # Generated: ${newIso()}
 set -euo pipefail
-
+${SHELL_FAIL_CLOSED}
 INPUT="$(cat)"
 ${SHELL_EXTRACT}
 
