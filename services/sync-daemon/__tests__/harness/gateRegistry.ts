@@ -222,18 +222,41 @@ export const GATES: readonly GateEntry[] = [
 /**
  * Writers that generate no gate at all, with the reason.
  *
- * The completeness check asserts `GATES ∪ NO_GATE` covers every `*Hooks.ts` in
+ * The completeness check asserts `GATES ∪ NO_GATE` covers every writer file in
  * `src/harness/`, so a harness cannot be forgotten — only *deliberately*
  * excluded, in writing, here.
+ *
+ * A file-derived check alone has a blind spot: a harness with **no writer file
+ * at all** (codex, github-copilot) appears in neither list and stays invisible.
+ * So each entry also names the `harness` it accounts for (`null` for shared
+ * infrastructure that is not a harness), and a second completeness check
+ * asserts `GATES ∪ NO_GATE` covers every `HarnessType` enum member — a new
+ * adapter without a hook file goes red until someone decides about it here.
+ * Entries with `file: null` are exactly those enum-only rows.
  */
-export const NO_GATE: ReadonlyArray<{ file: string; why: string }> = [
-  { file: 'continueHooks.ts', why: 'Continue.dev exposes no pre-tool hook mechanism' },
-  { file: 'aiderConfigMerger.ts', why: 'aider has no hook API; only a config file is merged' },
-  { file: 'gooseHardener.ts', why: 'applies immutable flags to gooseHooks’ output; emits no gate' },
-  { file: 'mcpAutoWrite.ts', why: 'registers MCP servers; not a tool-call gate' },
-  { file: 'n8nHooks.ts', why: 'n8n is a workflow runner; nodes are not agent tool calls' },
+export const NO_GATE: ReadonlyArray<{
+  file: string | null
+  harness: string | null
+  why: string
+}> = [
+  { file: 'continueHooks.ts', harness: 'continue', why: 'Continue.dev exposes no pre-tool hook mechanism' },
+  { file: 'aiderConfigMerger.ts', harness: 'aider', why: 'aider has no hook API; only a config file is merged' },
+  { file: 'gooseHardener.ts', harness: 'goose', why: 'applies immutable flags to gooseHooks’ output; emits no gate' },
+  { file: 'mcpAutoWrite.ts', harness: null, why: 'registers MCP servers; not a tool-call gate' },
+  { file: 'n8nHooks.ts', harness: 'n8n', why: 'n8n is a workflow runner; nodes are not agent tool calls' },
   {
     file: 'holdRedaction.ts',
+    harness: null,
     why: 'redaction serialised into claude-code’s gate; writes no harness config of its own',
+  },
+  {
+    file: null,
+    harness: 'codex',
+    why: 'no hook-writer file exists; config injection via .env.intutic only — no hook API wired',
+  },
+  {
+    file: null,
+    harness: 'github-copilot',
+    why: 'no hook writer exists; instructions file (.github/copilot-instructions.md) only',
   },
 ]

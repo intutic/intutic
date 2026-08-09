@@ -28,7 +28,11 @@ export interface ProxyConfig {
   failOpen: boolean
   /**
    * MCP proxy deployment model ('per-session' | 'daemon').
-   * WS-5 Q2 — stored and propagated but 'daemon' is not yet active in Phase 4.
+   * WS-5 Q2 — 'daemon' is active: when set, policy lookups are answered by the
+   * long-lived daemon over its Unix socket (see policy.ts) instead of a
+   * per-process fetch from the control plane. What is NOT active is daemon
+   * health telemetry — the health-snapshot route was removed and the dashboard
+   * flag is hardcoded off, so daemon health is not reported anywhere.
    */
   mcpProxyMode: string
   /**
@@ -121,13 +125,10 @@ export async function loadConfig(argv: string[] = process.argv.slice(2)): Promis
   const failOpen =
     (runtimeEnv['INTUTIC_MCP_FAIL_OPEN'] ?? 'true').toLowerCase() !== 'false'
 
+  // 'daemon' is honoured downstream: policy.ts routes policy lookups through
+  // the daemon's Unix socket when this is set. No warning here — the mode does
+  // what it says.
   const mcpProxyMode = runtimeEnv['INTUTIC_MCP_PROXY_MODE'] ?? 'per-session'
-  if (mcpProxyMode === 'daemon') {
-    console.warn(
-      '[mcp-proxy] INTUTIC_MCP_PROXY_MODE=daemon is stored but not yet active — '
-      + 'running in per-session mode (Phase 4). Will be activated in Phase 5.'
-    )
-  }
 
   const standalone = cli.realServerCommand.length === 0
 
