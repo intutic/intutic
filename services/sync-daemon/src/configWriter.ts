@@ -51,6 +51,8 @@ import { writeN8nHooks } from './harness/n8nHooks.js'
 import { writeHermesHooks } from './harness/hermesHooks.js'
 import { writeOpenclawHooks } from './harness/openclawHooks.js'
 import { writePiHooks } from './harness/piHooks.js'
+import { writeCodexHooks } from './harness/codexHooks.js'
+import { writeGithubCopilotHooks } from './harness/githubCopilotHooks.js'
 
 // ─── Harness config file mapping ─────────────────────────────────────
 
@@ -265,6 +267,18 @@ export async function writeConfigFiles(
       if (harness === 'n8n') {
         try { await writeN8nHooks(workspaceRoot, proxyUrl, workspaceId) } catch (e) {
           console.warn('[sync-daemon] writeN8nHooks failed (non-fatal):', e) }
+      }
+      // The .env.intutic proxy routing above governs LLM egress only; the gate
+      // is what refuses tool calls. Written alongside, same as claude-desktop.
+      if (harness === 'codex') {
+        try { await writeCodexHooks(workspaceRoot, proxyUrl, workspaceId) } catch (e) {
+          console.warn('[sync-daemon] writeCodexHooks failed (non-fatal):', e) }
+      }
+      // Preview mechanism (VS Code agent hooks) — the writer's header says so,
+      // and the gate fails closed if the stdin shape shifts.
+      if (harness === 'github-copilot') {
+        try { await writeGithubCopilotHooks(workspaceRoot, proxyUrl, workspaceId) } catch (e) {
+          console.warn('[sync-daemon] writeGithubCopilotHooks failed (non-fatal):', e) }
       }
     } catch (err) {
       console.warn(`[sync-daemon] writeConfigFiles failed for ${filename}:`, err)

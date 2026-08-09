@@ -64,12 +64,28 @@ INTUTIC_SOP_COUNT=5
 Add `source .env.intutic 2>/dev/null` to your shell profile or project's `.envrc` to auto-load on every session.
 :::
 
+## Pre-tool hooks (blocking)
+
+The `.env.intutic` routing above governs LLM egress only. Tool calls are gated
+natively: the sync-daemon writes a governance gate at
+`.intutic/hooks/codex-check.js` and registers it as a **PreToolUse hook** in
+both `~/.codex/hooks.json` (user) and `<repo>/.codex/hooks.json` (project),
+merging non-destructively so your own hooks are preserved.
+
+Codex invokes the hook before each tool call with JSON on stdin
+(`{tool_name, tool_use_id, tool_input}`); the gate evaluates the compiled
+protection floor plus your workspace's policy snapshot — including ` WHERE `
+(argPattern) rules matched against the serialized tool input — and refuses
+with exit code 2, with the reason on stderr. Every decision is appended to
+`.intutic/events/hook-events.jsonl` and drained to the control plane.
+
 ## Config details
 
 | Property | Value |
 |----------|-------|
 | Harness type | `codex` |
 | Config file | `.env.intutic` |
+| Hook files | `~/.codex/hooks.json`, `<repo>/.codex/hooks.json`, `.intutic/hooks/codex-check.js` |
 | Detection | `CODEX_HOME` env var or `codex` in `PATH` |
 | Format | Shell environment variables |
 | Write strategy | Atomic (write to `.intutic-tmp`, then rename) |

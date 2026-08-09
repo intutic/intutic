@@ -4,11 +4,30 @@ Integrate Intutic governance with [n8n](https://n8n.io) — the workflow automat
 
 ## How it works
 
-Unlike file-based harnesses, n8n relies on an importable workflow node structure to enforce governance rules. The sync-daemon automatically handles detection and config generation for n8n:
+n8n is governed at two levels. The sync-daemon automatically handles detection and config generation:
 
 1. **Detection**: The sync-daemon checks for active `n8n` processes running locally.
-2. **Workflow Generation**: It builds and writes a pre-configured, importable n8n 1.x workflow JSON to `~/.intutic/n8n/governance-workflow.json`.
-3. **Environment Setup**: It generates a `.intutic/env/n8n.env` file within the workspace, containing active webhook URLs and integration instructions.
+2. **Blocking gate (workflow-level)**: It writes an n8n *external hook* module to `~/.intutic/hooks/n8n-governance-hook.js`. Loaded via `EXTERNAL_HOOK_FILES` (see below), its `workflow.preExecute` hook runs before **every workflow execution**, evaluates each node's type and parameters against the compiled protection floor and your policy snapshot, and **throws** on a block-severity match — aborting the execution with an error naming the offending node and rule.
+3. **Workflow Generation**: It builds and writes a pre-configured, importable n8n 1.x workflow JSON to `~/.intutic/n8n/governance-workflow.json` (event forwarding — telemetry, not enforcement).
+4. **Environment Setup**: It generates a `.intutic/env/n8n.env` file within the workspace, plus `~/.intutic/n8n/INSTALL.md` with the gate's installation steps.
+
+## The blocking gate
+
+::: warning Manual, deployment-side installation
+`EXTERNAL_HOOK_FILES` is read by the **n8n server process at startup** — the
+Intutic daemon cannot set another process's environment. Until you set it and
+restart n8n, the gate does not run:
+
+```bash
+export EXTERNAL_HOOK_FILES=~/.intutic/hooks/n8n-governance-hook.js
+```
+:::
+
+Granularity is honest here: n8n's hook surface is per **workflow execution**,
+not per tool call. The gate maps the shared rule model onto it — a node's
+**type** stands in for the tool name (`subject: tool` rules match it), and the
+node's **serialized parameters** are what command/path rules and ` WHERE `
+(argPattern) rules match. One offending node aborts the whole execution.
 
 ---
 

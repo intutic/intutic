@@ -87,7 +87,7 @@ describe('harness protected paths', () => {
     for (const g of GATES) {
       const file = g.module.split('/').pop()!.replace(/\.js$/, '.ts')
       const src = readFileSync(join(HARNESS_DIR, file), 'utf-8')
-      if (!/emitShellGate|emitJsGate|emitPythonGate/.test(src)) missing.push(file)
+      if (!/emitShellGate|emitJsGate|emitPythonGate|emitN8nWorkflowGate/.test(src)) missing.push(file)
     }
     expect(
       missing,

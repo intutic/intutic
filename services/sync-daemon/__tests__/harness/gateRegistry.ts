@@ -45,8 +45,12 @@
  */
 export type HarnessModule = Record<string, (...args: unknown[]) => Promise<void>>
 
-/** How a gate refuses a call. See the module note — this is not cosmetic. */
-export type GateContract = 'exit2' | 'stdout-cancel' | 'python-raise'
+/** How a gate refuses a call. See the module note — this is not cosmetic.
+ *  `js-throw` is the workflow-level contract: the gate is an in-process module
+ *  whose preExecute function THROWS to abort — no exit code, no stdout. Its
+ *  unit is a whole workflow, so like `python-raise` it is exercised by its own
+ *  describe block rather than the per-tool matrix. */
+export type GateContract = 'exit2' | 'stdout-cancel' | 'python-raise' | 'js-throw'
 
 /** What runs the emitted artifact. */
 export type GateRunner = 'bash' | 'node' | 'python3'
@@ -179,6 +183,43 @@ export const GATES: readonly GateEntry[] = [
     migrated: true,
     note: 'its writer shells out to an installed `openclaw` binary if present',
   },
+  {
+    name: 'codex',
+    module: '../../src/harness/codexHooks.js',
+    invoke: (m, root) => m.writeCodexHooks(root, PROXY_URL, 'ws_test'),
+    artifact: '.intutic/hooks/codex-check.js',
+    runner: 'node',
+    contract: 'exit2',
+    migrated: true,
+    note:
+      'registered in ~/.codex/hooks.json and <repo>/.codex/hooks.json; the stdin ' +
+      'shape and exit-2 contract are Claude-Code-compatible, so the shared gate is a drop-in',
+  },
+  {
+    name: 'githubCopilot',
+    module: '../../src/harness/githubCopilotHooks.js',
+    invoke: (m, root) => m.writeGithubCopilotHooks(root, PROXY_URL, 'ws_test'),
+    artifact: '.intutic/hooks/github-copilot-check.js',
+    runner: 'node',
+    contract: 'exit2',
+    migrated: true,
+    note:
+      'VS Code agent hooks are a PREVIEW feature (.github/hooks/*.json + ~/.copilot/hooks). ' +
+      'The gate refuses payloads it does not recognise, so a format change fails closed',
+  },
+  {
+    name: 'continue',
+    module: '../../src/harness/continueHooks.js',
+    invoke: (m, root) => m.writeContinueHooks(root, PROXY_URL, 'ws_test'),
+    artifact: '.intutic/hooks/continue-check.js',
+    runner: 'node',
+    contract: 'exit2',
+    migrated: true,
+    note:
+      'Continue CLI (cn) only — the IDE extension has no hook system. The CLI also ' +
+      'reads .claude/settings.json, so claude-code users may already run that gate; ' +
+      'the dedicated registration in .continue/settings.json covers users without it',
+  },
 
   // ── JavaScript, stdout contract ─────────────────────────────────────────
   {
@@ -199,6 +240,23 @@ export const GATES: readonly GateEntry[] = [
     runner: 'node',
     contract: 'stdout-cancel',
     migrated: true,
+  },
+
+  // ── refuses by throwing, at workflow granularity ────────────────────────
+  {
+    name: 'n8n',
+    module: '../../src/harness/n8nHooks.js',
+    invoke: (m, root) => m.writeN8nHooks(root, PROXY_URL, 'ws_test'),
+    artifact: '.intutic/hooks/n8n-governance-hook.js',
+    runner: 'node',
+    contract: 'js-throw',
+    migrated: true,
+    note:
+      'workflow-level, not per-tool: an EXTERNAL_HOOK_FILES workflow.preExecute module ' +
+      'that receives the full Workflow and throws to abort. Node type stands in for the ' +
+      'tool name; serialized node parameters are what argPattern matches. Installation ' +
+      'is MANUAL and deployment-side (the daemon cannot set another process’s env) — ' +
+      'see the INSTALL.md the writer emits. Exercised by its own describe block.',
   },
 
   // ── refuses by raising, and refuses less on purpose ─────────────────────
@@ -227,7 +285,8 @@ export const GATES: readonly GateEntry[] = [
  * excluded, in writing, here.
  *
  * A file-derived check alone has a blind spot: a harness with **no writer file
- * at all** (codex, github-copilot) appears in neither list and stays invisible.
+ * at all** (as codex and github-copilot were before they gained writers, and
+ * langgraph still is) appears in neither list and stays invisible.
  * So each entry also names the `harness` it accounts for (`null` for shared
  * infrastructure that is not a harness), and a second completeness check
  * asserts `GATES ∪ NO_GATE` covers every `HarnessType` enum member — a new
@@ -239,25 +298,21 @@ export const NO_GATE: ReadonlyArray<{
   harness: string | null
   why: string
 }> = [
-  { file: 'continueHooks.ts', harness: 'continue', why: 'Continue.dev exposes no pre-tool hook mechanism' },
-  { file: 'aiderConfigMerger.ts', harness: 'aider', why: 'aider has no hook API; only a config file is merged' },
+  {
+    file: 'aiderConfigMerger.ts',
+    harness: 'aider',
+    why:
+      'no pre-edit hook exists. The only native mechanism is the opt-in ' +
+      '--git-commit-verify pre-commit hook — post-edit (the file is already written ' +
+      'when it runs) and blind to /run, so a gate built on it would imply more than ' +
+      'it delivers. Proxy routing and the config merger remain the coverage.',
+  },
   { file: 'gooseHardener.ts', harness: 'goose', why: 'applies immutable flags to gooseHooks’ output; emits no gate' },
   { file: 'mcpAutoWrite.ts', harness: null, why: 'registers MCP servers; not a tool-call gate' },
-  { file: 'n8nHooks.ts', harness: 'n8n', why: 'n8n is a workflow runner; nodes are not agent tool calls' },
   {
     file: 'holdRedaction.ts',
     harness: null,
     why: 'redaction serialised into claude-code’s gate; writes no harness config of its own',
-  },
-  {
-    file: null,
-    harness: 'codex',
-    why: 'no hook-writer file exists; config injection via .env.intutic only — no hook API wired',
-  },
-  {
-    file: null,
-    harness: 'github-copilot',
-    why: 'no hook writer exists; instructions file (.github/copilot-instructions.md) only',
   },
   {
     file: null,
