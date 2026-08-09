@@ -63,6 +63,11 @@ export { writeHermesHooks } from './harness/hermesHooks.js'
 export { writeOpenclawHooks } from './harness/openclawHooks.js'
 export { writePiHooks } from './harness/piHooks.js'
 
+// Formerly ungated harnesses with verified native mechanisms
+// (codex: ~/.codex/hooks.json; github-copilot: VS Code agent hooks, Preview)
+export { writeCodexHooks } from './harness/codexHooks.js'
+export { writeGithubCopilotHooks } from './harness/githubCopilotHooks.js'
+
 // WS-A & WS-F — runtime env writer and compliance probes
 export { writeRuntimeEnv } from './lib/runtimeEnv.js'
 export {

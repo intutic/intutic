@@ -34,3 +34,24 @@ intutic start
 Intutic updates `~/.continue/config.json` to insert:
 * **Models:** Sets `apiBase` to `http://localhost:4000/v1` and injects `apiKey`.
 * **System Instructions:** Custom governance prompts injected as default system messages.
+
+## Pre-tool hooks (Continue CLI only)
+
+The Continue **CLI** (`cn`) executes PreToolUse hooks; the IDE extension does
+not. The sync-daemon writes a blocking gate at
+`.intutic/hooks/continue-check.js` and registers it in
+`~/.continue/settings.json` (user) and `<repo>/.continue/settings.json`
+(project), preserving any hooks you registered yourself.
+
+The stdin contract is Claude-Code-compatible (`{tool_name, tool_input,
+tool_use_id}`) and the gate refuses with exit code 2. It enforces the
+compiled protection floor and your policy snapshot, including ` WHERE `
+(argPattern) rules against the serialized tool input.
+
+::: tip Overlap with Claude Code
+The Continue CLI also reads `.claude/settings.json`, so on a machine governed
+for Claude Code, `cn` may already run that gate. The dedicated registration in
+Continue's own settings makes governance deliberate — and covers machines that
+run Continue without Claude Code, which would otherwise have no gate at all.
+Both gates evaluate the same rules, so the overlap is harmless.
+:::

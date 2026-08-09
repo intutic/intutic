@@ -416,6 +416,16 @@ for (const g of GATES) {
       })
       return
     }
+    if (g.contract === 'js-throw') {
+      // Its unit is a whole WORKFLOW — an in-process preExecute module that
+      // throws to abort, with no exit code or stdout contract for runGate to
+      // read. Covered by the "n8n workflow gate" block at the bottom of this
+      // file — a separate shape, not a skipped one.
+      it('is covered by its own workflow block, not the tool-call matrix', () => {
+        expect(g.runner).toBe('node')
+      })
+      return
+    }
 
     it('allows an ordinary command', async () => {
       const r = await runGate(g, { command: 'npm run build' })
@@ -846,6 +856,154 @@ describe('Open WebUI prompt filter', () => {
     }])
     const r = await ask('here is a canary-string', snap)
     expect(r.refused, 'an argPattern rule was applied to a prompt').toBe(false)
+  })
+})
+
+describe('n8n workflow gate', () => {
+  const gate = GATES.find((g) => g.contract === 'js-throw')!
+  const hookFile = () => join(roots.get(gate.name)!, gate.artifact)
+
+  /**
+   * Loads the emitted external-hook module the way n8n does — `require()` on
+   * the EXTERNAL_HOOK_FILES path — and drives its `workflow.preExecute` with
+   * one workflow. Returns whether it refused (threw) and what it said.
+   *
+   * A `.cjs` driver in a package.json-less temp tree, so both the driver and
+   * the hook resolve as CommonJS regardless of this repo's module type — the
+   * same resolution an n8n deployment gives the file.
+   */
+  async function runWorkflow(
+    workflow: unknown,
+    snapshot?: string,
+  ): Promise<{ refused: boolean; stderr: string }> {
+    const driver = join(roots.get(gate.name)!, 'wf-drv.cjs')
+    writeFileSync(
+      driver,
+      [
+        'const hook = require(process.argv[2]);',
+        'const fns = hook && hook.workflow && hook.workflow.preExecute;',
+        'if (!Array.isArray(fns) || typeof fns[0] !== "function") {',
+        '  console.error("hook module has no workflow.preExecute function");',
+        '  process.exit(4);',
+        '}',
+        'const wf = JSON.parse(process.argv[3]);',
+        'Promise.resolve()',
+        '  .then(() => fns[0](wf))',
+        '  .then(() => process.exit(0),',
+        '        (e) => { console.error(String((e && e.message) || e)); process.exit(3); });',
+      ].join('\n'),
+    )
+    const res = await runProcess('node', [driver, hookFile(), JSON.stringify(workflow)], {
+      env: {
+        ...process.env,
+        HOME: roots.get(gate.name)!,
+        USERPROFILE: roots.get(gate.name)!,
+        INTUTIC_SNAPSHOT_RULES: snapshot ?? join(home, 'no-such.rules'),
+      },
+      timeoutMs: 20_000,
+    })
+    // 4 is the driver saying the module shape is wrong; surface that loudly
+    // rather than reading it as a refusal.
+    expect(res.status, `driver could not load the hook module: ${res.stderr}`).not.toBe(4)
+    return { refused: res.status !== 0, stderr: res.stderr }
+  }
+
+  const wf = (nodes: unknown[]) => ({ id: 'wf1', name: 'Test Workflow', nodes, connections: {} })
+  const commandNode = (command: string, name = 'Run Command') => ({
+    name,
+    type: 'n8n-nodes-base.executeCommand',
+    typeVersion: 1,
+    parameters: { command },
+  })
+
+  it('allows a clean workflow', async () => {
+    const r = await runWorkflow(
+      wf([
+        { name: 'Set', type: 'n8n-nodes-base.set', parameters: { values: { string: [{ name: 'a', value: 'b' }] } } },
+        commandNode('npm run build'),
+      ]),
+    )
+    expect(r.refused, `refused a clean workflow:\n${r.stderr}`).toBe(false)
+  })
+
+  it('throws on a node whose parameters hit the compiled floor, naming node and rule', async () => {
+    const r = await runWorkflow(wf([commandNode('chflags nouchg .intutic/hooks/x', 'Sneaky Node')]))
+    expect(r.refused, 'a governance-bypass command inside a node was allowed').toBe(true)
+    expect(r.stderr).toMatch(/\[Intutic Governance\] BLOCKED/)
+    expect(r.stderr, 'the refusal must name the offending node').toContain('Sneaky Node')
+    expect(r.stderr, 'the refusal must name the rule').toMatch(/\[[a-z]+\.[a-z_.-]+\]/)
+  })
+
+  it('throws on every protected path appearing in node parameters, by iteration', async () => {
+    // A loop, not a representative — the same discipline as the tool matrix.
+    for (const p of UNIVERSAL_PROTECTED_PATHS) {
+      const r = await runWorkflow(wf([commandNode(`rm -rf ${p}`)]))
+      expect(r.refused, `allowed a node running \`rm -rf ${p}\``).toBe(true)
+    }
+  }, 120_000)
+
+  it('applies destructive rules only when the snapshot supplies them', async () => {
+    const withoutSnap = await runWorkflow(wf([commandNode('rm -rf /')]))
+    expect(withoutSnap.refused, 'blocked from the floor — destructive ships via snapshot').toBe(false)
+    const withSnap = await runWorkflow(wf([commandNode('rm -rf /')]), snapshotRules)
+    expect(withSnap.refused, 'a snapshot destructive rule did not abort the workflow').toBe(true)
+  })
+
+  it('matches a tool-subject rule against the node TYPE and enforces its WHERE clause on the parameters', async () => {
+    // The n8n mapping under test: tool ≈ node type, and argPattern matches the
+    // serialized parameters JSON — the same narrowing the per-tool gates apply
+    // to JSON.stringify(tool_input).
+    const snap = writeRulesFixture(join(home, 'where-n8n-wf.rules'), [{
+      id: 'sop.pin_deploy', source: 'executeCommand', subject: 'tool', severity: 'block',
+      reason: 'Blocked by SOP pin_deploy', rationale: '', matches: [], notMatches: [],
+      argPattern: 'kubectl\\s+apply(?!.*@sha256:)',
+    }])
+
+    const unpinned = await runWorkflow(wf([commandNode('kubectl apply -f deploy.yaml')]), snap)
+    expect(unpinned.refused, 'allowed an unpinned kubectl apply node').toBe(true)
+
+    const pinned = await runWorkflow(
+      wf([commandNode('kubectl apply -f deploy.yaml --image nginx@sha256:0a1b2c')]),
+      snap,
+    )
+    expect(pinned.refused, 'blocked a digest-pinned apply — the WHERE clause did not narrow the rule').toBe(false)
+
+    const unrelated = await runWorkflow(
+      wf([{ name: 'HTTP', type: 'n8n-nodes-base.httpRequest', parameters: { url: 'https://example.com' } }]),
+      snap,
+    )
+    expect(unrelated.refused, 'a WHERE rule on executeCommand aborted a workflow with no such node').toBe(false)
+  })
+
+  it('still blocks unconditionally on a name-only node-type rule (regression pin)', async () => {
+    const snap = writeRulesFixture(join(home, 'nameonly-n8n-wf.rules'), [{
+      id: 'sop.no_exec', source: 'executeCommand', subject: 'tool', severity: 'block',
+      reason: 'Blocked by SOP no_exec', rationale: '', matches: [], notMatches: [],
+    }])
+    const r = await runWorkflow(wf([commandNode('echo hi')]), snap)
+    expect(r.refused, 'a rule with no argPattern must keep blocking on the node type alone').toBe(true)
+  })
+
+  it('does not match a tool-subject rule against node parameters', async () => {
+    // The Open WebUI subject lesson, at workflow granularity: a rule over tool
+    // NAMES must not fire because a parameter value merely mentions the name.
+    const snap = writeRulesFixture(join(home, 'toolsubj-n8n-wf.rules'), [{
+      id: 'sop.no_exec', source: 'executeCommand', subject: 'tool', severity: 'block',
+      reason: 'Blocked by SOP no_exec', rationale: '', matches: [], notMatches: [],
+    }])
+    const r = await runWorkflow(
+      wf([{ name: 'Set', type: 'n8n-nodes-base.set', parameters: { note: 'talk about executeCommand here' } }]),
+      snap,
+    )
+    expect(r.refused, 'a tool-subject rule fired on a parameter VALUE naming the type').toBe(false)
+  })
+
+  it('writes an audit line for a block', async () => {
+    await runWorkflow(wf([commandNode('chflags nouchg .intutic/hooks/x')]))
+    expect(
+      auditLogText(gate),
+      'the workflow gate aborted an execution without recording it — an unrecorded block is invisible to the control plane',
+    ).toMatch(/tool_blocked/)
   })
 })
 
