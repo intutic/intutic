@@ -18,6 +18,7 @@ import os   from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { startBatcher, stopBatcher } from './telemetryBatcher.js'
 import { startHealthMonitor, stopHealthMonitor } from './healthMonitor.js'
+import { startStatusReporter, stopStatusReporter } from './statusReporter.js'
 import { createSocketServer, getSocketPath } from './socketServer.js'
 
 const logger = createLogger('intutic-mcp-daemon')
@@ -70,6 +71,7 @@ async function main(): Promise<void> {
   // Start subsystems
   startBatcher()
   startHealthMonitor()
+  startStatusReporter()
 
   const server = createSocketServer()
   server.listen(socketPath, () => {
@@ -98,6 +100,7 @@ async function main(): Promise<void> {
     logger.info({ signal }, 'mcp_daemon.stopping')
     server.close()
     stopHealthMonitor()
+    await stopStatusReporter()
     await stopBatcher()
     // Best-effort cleanup: both files are routinely already gone (ENOENT) when
     // an operator or a service manager removed them, or when listen() never
