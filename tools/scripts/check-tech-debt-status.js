@@ -45,8 +45,16 @@ const src = readFileSync(DOC, 'utf8')
 // -only pattern split on them and then matched none, so they were skipped
 // while the summary still printed a total — a gate reporting complete coverage
 // of the subset it happened to recognise.
-const TD_ID = /^### (TD-[A-Z0-9-]+?) [—-]/
-const blocks = src.split(/\n(?=### TD-)/)
+//
+// A FOURTH id shape exists too: `### ~~TD-218~~ — title ✅ RESOLVED (date)`.
+// Strikethrough is this file's own convention for "closed, and closed enough
+// that nobody needs to click into the body" — five entries use it. The split
+// regex required `### TD-` immediately, so `### ~~TD-218~~` matched neither
+// the split boundary NOR the id pattern: the whole entry was silently
+// absorbed into whatever block preceded it, invisible to every count this
+// gate has ever printed. Both patterns now match both shapes.
+const TD_ID = /^### (?:~~)?(TD-[A-Z0-9-]+?)(?:~~)? [—-]/
+const blocks = src.split(/\n(?=### ~?~?TD-)/)
 
 const missing = []
 const unknown = []
@@ -63,7 +71,22 @@ for (const b of blocks) {
   // that fires on discussion of the thing it checks is noise, and noise is how
   // a gate gets switched off.
   const all = [...b.matchAll(/^- \*\*Status:\*\*\s*(\S+)/gm)]
+  // A strikethrough heading IS the status declaration — this repo's oldest
+  // convention, predating the `**Status:**` bullet, used on exactly five
+  // entries. Requiring the bullet on these too would demand five edits for a
+  // marker the title already carries. Everywhere else, a missing Status line
+  // stays missing: guessing resolution state from prose is the exact
+  // ambiguity this gate exists to remove (see file header — 33 by one grep,
+  // 11 by another). TD-001/002/008 hit this for real: each had a `**Status:**`
+  // bullet that flatly contradicted a later `✅ CLOSED`/`✅ STRUCK` note in the
+  // same entry — fixed by correcting the bullet itself, not by teaching this
+  // gate to average the two.
+  const strikethrough = /^### ~~/.test(b)
   if (all.length === 0) {
+    if (strikethrough) {
+      counts['✅'] = (counts['✅'] ?? 0) + 1
+      continue
+    }
     missing.push(id)
     continue
   }
