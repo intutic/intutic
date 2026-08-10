@@ -206,6 +206,10 @@ INTUTIC_FLOOR=(
   'bypass.chattr_immutable	block	-	any	Governance bypass pattern: clearing the Linux immutable attribute on a governance file	 chattr .*-[a-zA-Z]*i'
   'bypass.chmod_governance	block	-	any	Governance bypass pattern: changing permissions on a governance file	 chmod .*(hooks|\\.intutic|\\.claude|\\.cursor)'
   'bypass.env_kill_switch	block	-	any	Governance bypass pattern: setting a harness environment variable that disables its hooks	 [A-Z][A-Z0-9_]*_HOOKS?='
+  'secrets.aws_access_key	block	-	content	AWS access key ID detected in the content this call would write. Writing a live credential into a file is one commit away from shipping it; reference it from the environment instead.	(A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7]'
+  'secrets.anthropic_api_key	block	-	content	Anthropic API key detected in the content this call would write. Writing a live credential into a file is one commit away from shipping it; reference it from the environment instead.	sk-ant-[A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-]*'
+  'secrets.github_token	block	-	content	GitHub token detected in the content this call would write. Writing a live credential into a file is one commit away from shipping it; reference it from the environment instead.	gh[pousr]_[A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9]'
+  'secrets.private_key_pem	block	-	content	PEM private key material detected in the content this call would write. Writing a live credential into a file is one commit away from shipping it; reference it from the environment instead.	-----BEGIN [A-Z ]*PRIVATE KEY-----'
   'path.intutic_hooks	block	-	any	Shell command references the governance-protected path .intutic/hooks	\\.intutic/hooks'
   'path.intutic_integrity_json	block	-	any	Shell command references the governance-protected path .intutic/integrity.json	\\.intutic/integrity\\.json'
   'path.intutic_events	block	-	any	Shell command references the governance-protected path .intutic/events	\\.intutic/events'
@@ -340,6 +344,10 @@ intutic_apply() {
     tool)    _subs=("$INTUTIC_NTOOL") ;;
     command) _subs=("$INTUTIC_NCOMMAND") ;;
     target)  _subs=("$INTUTIC_NTARGET") ;;
+    # Serialized tool input, un-normalised — same subject the WHERE argPattern
+    # machinery matches. The secrets.* floor rules ride this. Guaranteed
+    # non-empty by the extractor (it defaults to "{}").
+    content) _subs=("$TOOL_INPUT_JSON") ;;
     # Each field is tested separately rather than concatenated. Joining them
     # lets a pattern match across the seam — a command ending in "chflags" and
     # an unrelated target starting with "nouchg" would trip the bypass rule
@@ -637,6 +645,10 @@ INTUTIC_FLOOR=(
   'bypass.chattr_immutable	block	-	any	Governance bypass pattern: clearing the Linux immutable attribute on a governance file	 chattr .*-[a-zA-Z]*i'
   'bypass.chmod_governance	block	-	any	Governance bypass pattern: changing permissions on a governance file	 chmod .*(hooks|\\.intutic|\\.claude|\\.cursor)'
   'bypass.env_kill_switch	block	-	any	Governance bypass pattern: setting a harness environment variable that disables its hooks	 [A-Z][A-Z0-9_]*_HOOKS?='
+  'secrets.aws_access_key	block	-	content	AWS access key ID detected in the content this call would write. Writing a live credential into a file is one commit away from shipping it; reference it from the environment instead.	(A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7]'
+  'secrets.anthropic_api_key	block	-	content	Anthropic API key detected in the content this call would write. Writing a live credential into a file is one commit away from shipping it; reference it from the environment instead.	sk-ant-[A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-]*'
+  'secrets.github_token	block	-	content	GitHub token detected in the content this call would write. Writing a live credential into a file is one commit away from shipping it; reference it from the environment instead.	gh[pousr]_[A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9]'
+  'secrets.private_key_pem	block	-	content	PEM private key material detected in the content this call would write. Writing a live credential into a file is one commit away from shipping it; reference it from the environment instead.	-----BEGIN [A-Z ]*PRIVATE KEY-----'
   'path.intutic_hooks	block	-	any	Shell command references the governance-protected path .intutic/hooks	\\.intutic/hooks'
   'path.intutic_integrity_json	block	-	any	Shell command references the governance-protected path .intutic/integrity.json	\\.intutic/integrity\\.json'
   'path.intutic_events	block	-	any	Shell command references the governance-protected path .intutic/events	\\.intutic/events'
@@ -771,6 +783,10 @@ intutic_apply() {
     tool)    _subs=("$INTUTIC_NTOOL") ;;
     command) _subs=("$INTUTIC_NCOMMAND") ;;
     target)  _subs=("$INTUTIC_NTARGET") ;;
+    # Serialized tool input, un-normalised — same subject the WHERE argPattern
+    # machinery matches. The secrets.* floor rules ride this. Guaranteed
+    # non-empty by the extractor (it defaults to "{}").
+    content) _subs=("$TOOL_INPUT_JSON") ;;
     # Each field is tested separately rather than concatenated. Joining them
     # lets a pattern match across the seam — a command ending in "chflags" and
     # an unrelated target starting with "nouchg" would trip the bypass rule
@@ -1069,6 +1085,10 @@ INTUTIC_FLOOR=(
   'bypass.chattr_immutable	block	-	any	Governance bypass pattern: clearing the Linux immutable attribute on a governance file	 chattr .*-[a-zA-Z]*i'
   'bypass.chmod_governance	block	-	any	Governance bypass pattern: changing permissions on a governance file	 chmod .*(hooks|\\.intutic|\\.claude|\\.cursor)'
   'bypass.env_kill_switch	block	-	any	Governance bypass pattern: setting a harness environment variable that disables its hooks	 [A-Z][A-Z0-9_]*_HOOKS?='
+  'secrets.aws_access_key	block	-	content	AWS access key ID detected in the content this call would write. Writing a live credential into a file is one commit away from shipping it; reference it from the environment instead.	(A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7]'
+  'secrets.anthropic_api_key	block	-	content	Anthropic API key detected in the content this call would write. Writing a live credential into a file is one commit away from shipping it; reference it from the environment instead.	sk-ant-[A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-]*'
+  'secrets.github_token	block	-	content	GitHub token detected in the content this call would write. Writing a live credential into a file is one commit away from shipping it; reference it from the environment instead.	gh[pousr]_[A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9]'
+  'secrets.private_key_pem	block	-	content	PEM private key material detected in the content this call would write. Writing a live credential into a file is one commit away from shipping it; reference it from the environment instead.	-----BEGIN [A-Z ]*PRIVATE KEY-----'
   'path.intutic_hooks	block	-	any	Shell command references the governance-protected path .intutic/hooks	\\.intutic/hooks'
   'path.intutic_integrity_json	block	-	any	Shell command references the governance-protected path .intutic/integrity.json	\\.intutic/integrity\\.json'
   'path.intutic_events	block	-	any	Shell command references the governance-protected path .intutic/events	\\.intutic/events'
@@ -1203,6 +1223,10 @@ intutic_apply() {
     tool)    _subs=("$INTUTIC_NTOOL") ;;
     command) _subs=("$INTUTIC_NCOMMAND") ;;
     target)  _subs=("$INTUTIC_NTARGET") ;;
+    # Serialized tool input, un-normalised — same subject the WHERE argPattern
+    # machinery matches. The secrets.* floor rules ride this. Guaranteed
+    # non-empty by the extractor (it defaults to "{}").
+    content) _subs=("$TOOL_INPUT_JSON") ;;
     # Each field is tested separately rather than concatenated. Joining them
     # lets a pattern match across the seam — a command ending in "chflags" and
     # an unrelated target starting with "nouchg" would trip the bypass rule
@@ -1499,6 +1523,10 @@ INTUTIC_FLOOR=(
   'bypass.chattr_immutable	block	-	any	Governance bypass pattern: clearing the Linux immutable attribute on a governance file	 chattr .*-[a-zA-Z]*i'
   'bypass.chmod_governance	block	-	any	Governance bypass pattern: changing permissions on a governance file	 chmod .*(hooks|\\.intutic|\\.claude|\\.cursor)'
   'bypass.env_kill_switch	block	-	any	Governance bypass pattern: setting a harness environment variable that disables its hooks	 [A-Z][A-Z0-9_]*_HOOKS?='
+  'secrets.aws_access_key	block	-	content	AWS access key ID detected in the content this call would write. Writing a live credential into a file is one commit away from shipping it; reference it from the environment instead.	(A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7]'
+  'secrets.anthropic_api_key	block	-	content	Anthropic API key detected in the content this call would write. Writing a live credential into a file is one commit away from shipping it; reference it from the environment instead.	sk-ant-[A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-]*'
+  'secrets.github_token	block	-	content	GitHub token detected in the content this call would write. Writing a live credential into a file is one commit away from shipping it; reference it from the environment instead.	gh[pousr]_[A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9]'
+  'secrets.private_key_pem	block	-	content	PEM private key material detected in the content this call would write. Writing a live credential into a file is one commit away from shipping it; reference it from the environment instead.	-----BEGIN [A-Z ]*PRIVATE KEY-----'
   'path.intutic_hooks	block	-	any	Shell command references the governance-protected path .intutic/hooks	\\.intutic/hooks'
   'path.intutic_integrity_json	block	-	any	Shell command references the governance-protected path .intutic/integrity.json	\\.intutic/integrity\\.json'
   'path.intutic_events	block	-	any	Shell command references the governance-protected path .intutic/events	\\.intutic/events'
@@ -1633,6 +1661,10 @@ intutic_apply() {
     tool)    _subs=("$INTUTIC_NTOOL") ;;
     command) _subs=("$INTUTIC_NCOMMAND") ;;
     target)  _subs=("$INTUTIC_NTARGET") ;;
+    # Serialized tool input, un-normalised — same subject the WHERE argPattern
+    # machinery matches. The secrets.* floor rules ride this. Guaranteed
+    # non-empty by the extractor (it defaults to "{}").
+    content) _subs=("$TOOL_INPUT_JSON") ;;
     # Each field is tested separately rather than concatenated. Joining them
     # lets a pattern match across the seam — a command ending in "chflags" and
     # an unrelated target starting with "nouchg" would trip the bypass rule
@@ -1934,6 +1966,10 @@ INTUTIC_FLOOR=(
   'bypass.chattr_immutable	block	-	any	Governance bypass pattern: clearing the Linux immutable attribute on a governance file	 chattr .*-[a-zA-Z]*i'
   'bypass.chmod_governance	block	-	any	Governance bypass pattern: changing permissions on a governance file	 chmod .*(hooks|\\.intutic|\\.claude|\\.cursor)'
   'bypass.env_kill_switch	block	-	any	Governance bypass pattern: setting a harness environment variable that disables its hooks	 [A-Z][A-Z0-9_]*_HOOKS?='
+  'secrets.aws_access_key	block	-	content	AWS access key ID detected in the content this call would write. Writing a live credential into a file is one commit away from shipping it; reference it from the environment instead.	(A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7]'
+  'secrets.anthropic_api_key	block	-	content	Anthropic API key detected in the content this call would write. Writing a live credential into a file is one commit away from shipping it; reference it from the environment instead.	sk-ant-[A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-]*'
+  'secrets.github_token	block	-	content	GitHub token detected in the content this call would write. Writing a live credential into a file is one commit away from shipping it; reference it from the environment instead.	gh[pousr]_[A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9]'
+  'secrets.private_key_pem	block	-	content	PEM private key material detected in the content this call would write. Writing a live credential into a file is one commit away from shipping it; reference it from the environment instead.	-----BEGIN [A-Z ]*PRIVATE KEY-----'
   'path.intutic_hooks	block	-	any	Shell command references the governance-protected path .intutic/hooks	\\.intutic/hooks'
   'path.intutic_integrity_json	block	-	any	Shell command references the governance-protected path .intutic/integrity.json	\\.intutic/integrity\\.json'
   'path.intutic_events	block	-	any	Shell command references the governance-protected path .intutic/events	\\.intutic/events'
@@ -2068,6 +2104,10 @@ intutic_apply() {
     tool)    _subs=("$INTUTIC_NTOOL") ;;
     command) _subs=("$INTUTIC_NCOMMAND") ;;
     target)  _subs=("$INTUTIC_NTARGET") ;;
+    # Serialized tool input, un-normalised — same subject the WHERE argPattern
+    # machinery matches. The secrets.* floor rules ride this. Guaranteed
+    # non-empty by the extractor (it defaults to "{}").
+    content) _subs=("$TOOL_INPUT_JSON") ;;
     # Each field is tested separately rather than concatenated. Joining them
     # lets a pattern match across the seam — a command ending in "chflags" and
     # an unrelated target starting with "nouchg" would trip the bypass rule

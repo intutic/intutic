@@ -61,6 +61,8 @@
  * @module
  */
 
+import { SECRET_VALUE_PATTERNS } from '@intutic/shared-types'
+
 /** Governance config that must hold still, for every harness. */
 export const UNIVERSAL_PROTECTED_PATHS: readonly string[] = [
   // Intutic's own enforcement surface.
@@ -108,7 +110,7 @@ export const UNIVERSAL_PROTECTED_PATHS: readonly string[] = [
  * Making the subject an explicit column means a rule cannot be pointed at the
  * wrong string by omission.
  */
-export type GuardSubject = 'tool' | 'command' | 'target' | 'any'
+export type GuardSubject = 'tool' | 'command' | 'target' | 'content' | 'any'
 
 export interface GuardPattern {
   /** Stable id. Appears in the block message and the audit line, so it is the
@@ -117,7 +119,11 @@ export interface GuardPattern {
   /** Portable ERE ∩ JS RegExp source. */
   source: string
   /** What {@link source} is matched against. Defaults to `any` — command and
-   *  target, but never the tool name. */
+   *  target, but never the tool name. `content` is the serialized tool input
+   *  (`JSON.stringify(tool_input)` / `$TOOL_INPUT_JSON`), un-normalised — the
+   *  same subject the WHERE argPattern machinery matches, so a content rule
+   *  sees the bytes a Write would put on disk, not a whitespace-collapsed
+   *  rendering of them. */
   subject?: GuardSubject
   /** Matched case-insensitively (`grep -iE` / the JS `i` flag). */
   ignoreCase?: boolean
@@ -411,6 +417,115 @@ export const GOVERNANCE_BYPASS_PATTERNS: readonly GuardPattern[] = assertGuardTa
 ])
 
 /**
+ * Credential VALUES in the content an agent is about to write.
+ *
+ * The gap this closes, measured before it was built: the PreToolUse gate —
+ * the only enforcement point that runs before the harness executes a tool —
+ * matched tool name, target path and command, never content. A key the model
+ * had seen anywhere in context could be written into a config file and the
+ * gate had no rule that could notice; the proxy's DLP covers the same case
+ * only when LLM traffic actually routes through the proxy, so a
+ * hooks-installed-but-unproxied workspace had zero write-direction scanning.
+ * (GitGuardian's 2025 measurement of why this matters: AI-assisted commits
+ * shipped hardcoded secrets at 3.2% against a 1.5% human baseline.)
+ *
+ * Sources live in `@intutic/shared-types` (`secretPatterns.ts`) because the
+ * pre-commit scan in `tools/cli/src/lib/gitHooks.ts` greps the SAME shapes
+ * over the staged diff — two hand-kept copies of "what is a credential" is
+ * the drift this repo keeps paying for. Fixtures stay here, where the
+ * table's self-test runs.
+ *
+ * ## Severity: block, deliberately skipping the warn-first ramp
+ *
+ * DESTRUCTIVE_COMMAND_PATTERNS shipped at warn to earn promotion on measured
+ * false positives. These four ship at block because both halves of that
+ * trade differ: the patterns are prefix-anchored value shapes already
+ * hard-blocking in production on the MCP proxy's input path with no
+ * false-positive reports, and the failure being prevented — a credential in
+ * a file, then in a commit — is not undone by an undo (the key is burned;
+ * rotation is the only remedy). A warn that lets the write proceed IS the
+ * incident.
+ *
+ * ## What this deliberately does not catch
+ *
+ * A secret split across two Writes, base64/hex-encoded values, secrets
+ * assembled by concatenation in generated code, values reached through
+ * env-var indirection, and any credential format without a distinctive
+ * prefix. Those need entropy analysis and cross-call state that belong in
+ * the proxy's DLP, not in a gate that must stay fast and false-positive-free
+ * to keep its block tier trusted. This is the same floor-vs-DLP split the
+ * warn tier's own comment draws ("arguments and paths stay out — that is
+ * DLP's job"): the floor takes the four shapes precise enough to refuse on.
+ */
+export const SECRET_CONTENT_PATTERNS: readonly GuardPattern[] = assertGuardTableSane(
+  (() => {
+    // Fixture material is runtime-assembled: the repo convention forbids
+    // contiguous credential-shaped literals in source, in every package.
+    const awsKey = 'AKIA' + 'B2C3D4E5F6G7H2J3'
+    const antKey = 'sk-ant-' + 'api03-abcdefghijklmnop'
+    const ghToken = 'ghp_' + 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8'
+    const fixtures: Record<string, { matches: string[]; notMatches: string[] }> = {
+      'secrets.aws_access_key': {
+        matches: [`{"file_path":"config.ts","content":"const key = '${awsKey}'"}`],
+        notMatches: [
+          '{"content":"AKIA is the prefix AWS uses"}',
+          '{"content":"' + 'AKIA' + 'IOSFODNN7"}', // 9-char tail: too short
+          '{"content":"' + 'akia' + 'b2c3d4e5f6g7h2j3"}', // lowercase: not the format
+        ],
+      },
+      'secrets.anthropic_api_key': {
+        matches: [`{"content":"ANTHROPIC_API_KEY=${antKey}"}`],
+        notMatches: [
+          '{"content":"sk-ant- keys must never be committed"}',
+          '{"content":"' + 'sk-ant-' + 'short"}',
+          '{"content":"ask-antelope-20-questions-about-keys"}',
+        ],
+      },
+      'secrets.github_token': {
+        matches: [`{"content":"GITHUB_TOKEN: ${ghToken}"}`],
+        notMatches: [
+          '{"content":"ghp_ prefixed tokens are PATs"}',
+          '{"content":"' + 'ghp_' + 'tooShort123"}',
+          '{"content":"' + 'ghx_' + 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"}',
+        ],
+      },
+      'secrets.private_key_pem': {
+        matches: [
+          '{"content":"-----BEGIN RSA PRIVATE KEY-----"}',
+          '{"content":"-----BEGIN PRIVATE KEY-----"}',
+        ],
+        notMatches: [
+          '{"content":"-----BEGIN CERTIFICATE-----"}',
+          '{"content":"-----BEGIN PUBLIC KEY-----"}',
+          '{"content":"the PRIVATE KEY header is five dashes"}',
+        ],
+      },
+    }
+    return SECRET_VALUE_PATTERNS.map((p): GuardPattern => {
+      const f = fixtures[p.id]
+      if (!f) throw new Error(`secretPatterns entry ${p.id} has no gate fixtures`)
+      return {
+        id: p.id,
+        source: p.source,
+        subject: 'content',
+        severity: 'block',
+        reason:
+          `${p.description} detected in the content this call would write. ` +
+          'Writing a live credential into a file is one commit away from ' +
+          'shipping it; reference it from the environment instead.',
+        rationale:
+          'See SECRET_CONTENT_PATTERNS. Value shape, not access shape: fires ' +
+          'on the credential itself appearing in writable content. Does not ' +
+          'catch encoded, split, or concatenation-assembled values — those ' +
+          "are the proxy DLP's job.",
+        matches: f.matches,
+        notMatches: f.notMatches,
+      }
+    })
+  })(),
+)
+
+/**
  * Commands that destroy the machine or its data irrecoverably.
  *
  * TD-309: none of these were blocked by any harness. They are shipped through
@@ -632,5 +747,9 @@ export function protectedPathShellPatterns(): readonly GuardPattern[] {
  *  here — they ship through the policy snapshot so they can be retracted
  *  without a release. */
 export function staticFloorPatterns(): readonly GuardPattern[] {
-  return [...GOVERNANCE_BYPASS_PATTERNS, ...protectedPathShellPatterns()]
+  return [
+    ...GOVERNANCE_BYPASS_PATTERNS,
+    ...SECRET_CONTENT_PATTERNS,
+    ...protectedPathShellPatterns(),
+  ]
 }
