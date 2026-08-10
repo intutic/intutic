@@ -3654,6 +3654,15 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             };
             // Where the held text belongs, so a flush can address it.
             let mut holdback_addr = DeltaAddress::default();
+            // Tool-call ARGUMENT deltas get whole-block buffering (see
+            // `ArgHoldback`), on the same switch as output DLP itself — args
+            // are covered whenever output scanning is on at all, because the
+            // split-secret case this closes needs no holdback-size tuning.
+            let mut arg_holdback = if dlp_scan_output {
+                Some(ArgHoldback::new())
+            } else {
+                None
+            };
             // The wire shape this stream's text deltas arrive in. Resolved once
             // from the protocol rather than re-derived from `Provider` at each
             // site, which is what let `/v1/responses` be treated as chat
@@ -3896,6 +3905,42 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                 }
                             }
 
+                            // Argument deltas: absorbed whole per tool block,
+                            // released scrubbed at block end. Same-provider
+                            // only — the flush synthesizes a wire-exact event,
+                            // and cross-provider args keep the per-line scrub
+                            // (see ArgHoldback's doc for why that scoping).
+                            // OpenAI streams tool calls back to back with no
+                            // stop event, so a block boundary can only be seen
+                            // as an index change on the NEXT block's first
+                            // line — the previous call's arguments must go out
+                            // before that line does.
+                            if is_same_provider {
+                                if let Some(ah) = arg_holdback.as_mut() {
+                                    let (flush_prev, rewritten) =
+                                        ah.process_line(&line, stream_shape);
+                                    if let Some((args, idx, item)) = flush_prev {
+                                        if let Some(b) = arg_flush_bytes(
+                                            &args,
+                                            &protocol_clone,
+                                            idx,
+                                            &item,
+                                        ) {
+                                            if tx
+                                                .send(Ok(axum::body::Bytes::from(b)))
+                                                .await
+                                                .is_err()
+                                            {
+                                                return;
+                                            }
+                                        }
+                                    }
+                                    if let Some(rw) = rewritten {
+                                        line = rw;
+                                    }
+                                }
+                            }
+
                             if is_same_provider {
                                 // Intercept end-of-stream markers to inject governance notifications
                                 //
@@ -3941,6 +3986,29 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                 // flushes. `flush` is idempotent, so the
                                 // several paths need not coordinate.
                                 if is_done || is_content_block_stop {
+                                    // The buffered argument block, if any,
+                                    // must complete BEFORE its stop event (or
+                                    // the stream terminal) is forwarded — a
+                                    // client that sees content_block_stop
+                                    // first would assemble truncated JSON.
+                                    if let Some((args, idx, item)) =
+                                        arg_holdback.as_mut().and_then(|a| a.flush())
+                                    {
+                                        if let Some(b) = arg_flush_bytes(
+                                            &args,
+                                            &protocol_clone,
+                                            idx,
+                                            &item,
+                                        ) {
+                                            if tx
+                                                .send(Ok(axum::body::Bytes::from(b)))
+                                                .await
+                                                .is_err()
+                                            {
+                                                return;
+                                            }
+                                        }
+                                    }
                                     if let Some(held) =
                                         dlp_holdback.as_mut().and_then(|s| s.flush())
                                     {
@@ -4186,6 +4254,21 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                         // sitting on is not part of the upstream's failure;
                         // dropping it would turn a mid-stream error into a
                         // response that is also silently short.
+                        // A buffered argument block the upstream died under is
+                        // not part of its failure either — released scrubbed,
+                        // or the tool call is silently truncated on top of the
+                        // error.
+                        if is_same_provider {
+                            if let Some((args, idx, item)) =
+                                arg_holdback.as_mut().and_then(|a| a.flush())
+                            {
+                                if let Some(b) =
+                                    arg_flush_bytes(&args, &protocol_clone, idx, &item)
+                                {
+                                    let _ = tx.send(Ok(axum::body::Bytes::from(b))).await;
+                                }
+                            }
+                        }
                         if let Some(held) = dlp_holdback.as_mut().and_then(|s| s.flush()) {
                             accumulated_content.push_str(&held);
                             if let Some(b) = holdback_flush_bytes(
@@ -4258,6 +4341,32 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     ) {
                         let _ = tx.send(Ok(axum::body::Bytes::from(b))).await;
                     }
+                }
+            }
+            // Stream ended without an in-stream terminal completing the tool
+            // block: release the buffered arguments, scrubbed, unless the gate
+            // already sent its own terminal (bytes after a terminal are not a
+            // stream any client can parse).
+            if is_same_provider && !gate_tripped {
+                if let Some((args, idx, item)) =
+                    arg_holdback.as_mut().and_then(|a| a.flush())
+                {
+                    if let Some(b) = arg_flush_bytes(&args, &protocol_clone, idx, &item) {
+                        let _ = tx.send(Ok(axum::body::Bytes::from(b))).await;
+                    }
+                }
+            }
+            if let Some(ah) = arg_holdback.as_ref() {
+                if !ah.redactions().is_empty() {
+                    // The split-secret case: visible only once the argument
+                    // fragments were buffered back together, which neither the
+                    // per-line scrub nor the text holdback can report.
+                    tracing::warn!(
+                        workspace_id = %workspace_id_clone,
+                        patterns = ?ah.redactions(),
+                        "DLP redacted secrets from streamed tool-call arguments; \
+                         the harness received the redacted arguments"
+                    );
                 }
             }
             if let Some(sc) = dlp_holdback.as_ref() {
@@ -5940,6 +6049,238 @@ fn holdback_rewrite_line(
     Some(format!("data: {}", serde_json::to_string(&v).ok()?))
 }
 
+/// Whole-block DLP buffering for streamed tool-call ARGUMENT deltas.
+///
+/// The text holdback above deliberately excluded argument deltas — its comment
+/// said rewriting them "would edit a tool call's arguments". But the per-line
+/// scrub already edits them (a key wholly inside one `input_json_delta` chunk
+/// is redacted in place), so the objection was already crossed; what the
+/// exclusion actually left open was the SPLIT case: a secret divided across
+/// two argument chunks is never seen whole by any scanner and reaches the
+/// harness intact — on streaming, which is Claude Code's default. The write
+/// direction's coverage claim had a hole on its most common path.
+///
+/// Arguments get a stronger treatment than text's rolling holdback: the whole
+/// argument stream for a tool block is buffered (a `StreamScrubber` with
+/// `usize::MAX` holdback releases nothing until flush), scanned as one string,
+/// and released as ONE synthesized delta when the block ends. No secret can
+/// straddle a boundary regardless of its length — the rolling holdback's
+/// window-size assumption does not exist here. The cost is that argument
+/// deltas arrive at block end instead of incrementally, which is free in
+/// practice: arguments are not user-facing prose being rendered as they
+/// stream; the harness only acts once the block completes. Memory is bounded
+/// by the arguments' own size, which `accumulated_content` already makes
+/// resident for the whole response.
+///
+/// Scoped to same-provider streams. Cross-provider argument deltas keep the
+/// per-line scrub only: the flush synthesizes a wire-exact event for the
+/// protocol the client asked for, and inventing that event through the
+/// translator for a shape it may not carry risks truncating a tool call —
+/// worse than the leak. The named risk path (Claude Code → Anthropic) is
+/// same-provider.
+///
+/// In-place fragments are emptied rather than dropped, so clients that track
+/// block structure by delta count still see the events they expect; the
+/// content arrives in the single flush delta and assembles to the same final
+/// string.
+struct ArgHoldback {
+    scrubber: crate::dlp::StreamScrubber,
+    index: u64,
+    item_id: String,
+    active: bool,
+}
+
+impl ArgHoldback {
+    fn new() -> Self {
+        Self {
+            scrubber: crate::dlp::StreamScrubber::new(usize::MAX),
+            index: 0,
+            item_id: String::new(),
+            active: false,
+        }
+    }
+
+    /// Distinct pattern names redacted out of buffered arguments.
+    fn redactions(&self) -> &[String] {
+        self.scrubber.redactions()
+    }
+
+    /// Feed one SSE line. Returns `(flush_for_previous_block, rewritten_line)`.
+    ///
+    /// `flush_for_previous_block` is `Some` when this line belongs to a
+    /// DIFFERENT tool call than the buffered one (OpenAI streams tool calls
+    /// back to back with no stop event between them) — the previous call's
+    /// scrubbed arguments, with the address they must be emitted under, and
+    /// they must go out BEFORE this line. `rewritten_line` is `Some` when the
+    /// line carried an argument fragment that was absorbed into the buffer.
+    fn process_line(
+        &mut self,
+        line: &str,
+        shape: DeltaShape,
+    ) -> (Option<(String, u64, String)>, Option<String>) {
+        let Some(data) = line.strip_prefix("data:") else {
+            return (None, None);
+        };
+        let data = data.trim();
+        if data.is_empty() || data == "[DONE]" {
+            return (None, None);
+        }
+        let Ok(mut v) = serde_json::from_str::<serde_json::Value>(data) else {
+            return (None, None);
+        };
+
+        let (new_index, new_item_id) = match shape {
+            DeltaShape::AnthropicText => {
+                if v.get("type").and_then(|t| t.as_str()) != Some("content_block_delta")
+                    || v.get("delta").and_then(|d| d.get("type")).and_then(|t| t.as_str())
+                        != Some("input_json_delta")
+                {
+                    return (None, None);
+                }
+                (
+                    v.get("index").and_then(|i| i.as_u64()).unwrap_or(0),
+                    String::new(),
+                )
+            }
+            DeltaShape::OpenAIChatContent => {
+                let Some(tc) = v
+                    .get("choices")
+                    .and_then(|c| c.get(0))
+                    .and_then(|c| c.get("delta"))
+                    .and_then(|d| d.get("tool_calls"))
+                    .and_then(|t| t.get(0))
+                else {
+                    return (None, None);
+                };
+                if tc
+                    .get("function")
+                    .and_then(|f| f.get("arguments"))
+                    .and_then(|a| a.as_str())
+                    .is_none()
+                {
+                    return (None, None);
+                }
+                (
+                    tc.get("index").and_then(|i| i.as_u64()).unwrap_or(0),
+                    String::new(),
+                )
+            }
+            DeltaShape::ResponsesOutputText => {
+                if v.get("type").and_then(|t| t.as_str())
+                    != Some("response.function_call_arguments.delta")
+                {
+                    return (None, None);
+                }
+                (
+                    v.get("output_index").and_then(|i| i.as_u64()).unwrap_or(0),
+                    v.get("item_id")
+                        .and_then(|i| i.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                )
+            }
+            DeltaShape::Unparsed => return (None, None),
+        };
+
+        let flush_prev = if self.active
+            && (new_index != self.index || new_item_id != self.item_id)
+        {
+            self.scrubber
+                .flush()
+                .map(|tail| (tail, self.index, std::mem::take(&mut self.item_id)))
+        } else {
+            None
+        };
+        self.index = new_index;
+        self.item_id = new_item_id;
+        self.active = true;
+
+        let slot = match shape {
+            DeltaShape::AnthropicText => {
+                v.get_mut("delta").and_then(|d| d.get_mut("partial_json"))
+            }
+            DeltaShape::OpenAIChatContent => v
+                .get_mut("choices")
+                .and_then(|c| c.get_mut(0))
+                .and_then(|c| c.get_mut("delta"))
+                .and_then(|d| d.get_mut("tool_calls"))
+                .and_then(|t| t.get_mut(0))
+                .and_then(|t| t.get_mut("function"))
+                .and_then(|f| f.get_mut("arguments")),
+            DeltaShape::ResponsesOutputText => v.get_mut("delta"),
+            DeltaShape::Unparsed => None,
+        };
+        let Some(slot) = slot else {
+            return (flush_prev, None);
+        };
+        let Some(fragment) = slot.as_str() else {
+            return (flush_prev, None);
+        };
+        // `usize::MAX` holdback: push absorbs everything, returns "".
+        let _ = self.scrubber.push(&fragment.to_string());
+        *slot = serde_json::Value::String(String::new());
+        let rewritten = serde_json::to_string(&v)
+            .ok()
+            .map(|s| format!("data: {s}"));
+        (flush_prev, rewritten)
+    }
+
+    /// The buffered block's scrubbed arguments, with their address. Idempotent.
+    fn flush(&mut self) -> Option<(String, u64, String)> {
+        if !self.active {
+            return None;
+        }
+        self.active = false;
+        self.scrubber
+            .flush()
+            .map(|tail| (tail, self.index, std::mem::take(&mut self.item_id)))
+    }
+}
+
+/// The SSE bytes carrying a flushed argument block to the client, wire-exact
+/// for the protocol it asked for. Same-provider only, by `ArgHoldback`'s scope.
+fn arg_flush_bytes(
+    args: &str,
+    protocol: &crate::protocol::Protocol,
+    index: u64,
+    item_id: &str,
+) -> Option<String> {
+    Some(match protocol {
+        crate::protocol::Protocol::Anthropic | crate::protocol::Protocol::Unknown => format!(
+            "event: content_block_delta\ndata: {}\n\n",
+            serde_json::json!({
+                "type": "content_block_delta",
+                "index": index,
+                "delta": { "type": "input_json_delta", "partial_json": args },
+            })
+        ),
+        crate::protocol::Protocol::OpenAIChatCompletions => format!(
+            "data: {}\n\n",
+            serde_json::json!({
+                "object": "chat.completion.chunk",
+                "choices": [{
+                    "index": 0,
+                    "delta": { "tool_calls": [{
+                        "index": index,
+                        "function": { "arguments": args },
+                    }]},
+                    "finish_reason": null,
+                }],
+            })
+        ),
+        crate::protocol::Protocol::OpenAIResponses => format!(
+            "data: {}\n\n",
+            serde_json::json!({
+                "type": "response.function_call_arguments.delta",
+                "item_id": item_id,
+                "output_index": index,
+                "delta": args,
+            })
+        ),
+        crate::protocol::Protocol::Gemini => return None,
+    })
+}
+
 /// The SSE bytes that carry the holdback's remainder to the client.
 ///
 /// Same shapes the judge's synthesis block uses, for the same reason: this is
@@ -6035,6 +6376,164 @@ pub fn get_terminal_stream_event(protocol: &crate::protocol::Protocol, model: &s
 mod tests {
     use super::*;
     use axum::http::HeaderMap;
+
+    /// The split-secret case `ArgHoldback` exists to close.
+    ///
+    /// The per-line scrub catches a key wholly inside one `input_json_delta`
+    /// chunk; a key divided across two chunks was never seen whole by any
+    /// scanner and reached the harness intact. These tests drive the exact
+    /// evasion and assert it is closed, plus the two properties a fix must
+    /// not break: benign arguments assemble byte-identical, and back-to-back
+    /// OpenAI tool calls flush the first call's buffer before the second's
+    /// first fragment goes out.
+    mod arg_holdback {
+        use super::super::*;
+
+        /// AWS-shaped key assembled at runtime — the repo convention: no
+        /// contiguous credential-shaped literal may appear in source.
+        fn fanged_key() -> String {
+            format!("{}{}", "AKIA", "B2C3D4E5F6G7H2J3")
+        }
+
+        fn anthropic_arg_line(index: u64, fragment: &str) -> String {
+            format!(
+                "data: {}",
+                serde_json::json!({
+                    "type": "content_block_delta",
+                    "index": index,
+                    "delta": { "type": "input_json_delta", "partial_json": fragment },
+                })
+            )
+        }
+
+        /// Reassemble what a client would: in-place fragments plus flushes.
+        fn assembled(lines: &[String]) -> String {
+            let mut out = String::new();
+            for line in lines {
+                let Some(data) = line.strip_prefix("data:") else { continue };
+                let Ok(v) = serde_json::from_str::<serde_json::Value>(data.trim()) else {
+                    continue;
+                };
+                if let Some(f) = v
+                    .get("delta")
+                    .and_then(|d| d.get("partial_json"))
+                    .and_then(|p| p.as_str())
+                {
+                    out.push_str(f);
+                }
+            }
+            out
+        }
+
+        #[test]
+        fn a_key_split_across_two_argument_chunks_is_redacted() {
+            let key = fanged_key();
+            let (head, tail) = key.split_at(9); // mid-key: neither half matches alone
+            let frag1 = format!("{{\"content\": \"key = {head}");
+            let frag2 = format!("{tail}\"}}");
+
+            let mut ah = ArgHoldback::new();
+            let mut forwarded: Vec<String> = Vec::new();
+
+            for frag in [frag1.as_str(), frag2.as_str()] {
+                let line = anthropic_arg_line(1, frag);
+                let (flush_prev, rewritten) =
+                    ah.process_line(&line, DeltaShape::AnthropicText);
+                assert!(flush_prev.is_none(), "single block must not self-flush");
+                forwarded.push(rewritten.expect("arg lines must be absorbed"));
+            }
+            // content_block_stop arrives → the block flushes.
+            let (args, idx, _) = ah.flush().expect("buffered block must flush");
+            assert_eq!(idx, 1);
+            forwarded.push(anthropic_arg_line(1, &args));
+
+            let out = assembled(&forwarded);
+            assert!(
+                !out.contains(&key),
+                "the split key reassembled intact — the evasion this closes"
+            );
+            assert!(out.contains("[REDACTED_SECRET]"), "got: {out}");
+            // The redacted arguments must still be JSON the harness can parse.
+            let parsed: serde_json::Value =
+                serde_json::from_str(&out).expect("redacted args must stay valid JSON");
+            assert_eq!(
+                parsed["content"].as_str().unwrap(),
+                "key = [REDACTED_SECRET]"
+            );
+        }
+
+        #[test]
+        fn benign_arguments_assemble_byte_identical() {
+            let mut ah = ArgHoldback::new();
+            let mut forwarded: Vec<String> = Vec::new();
+            for frag in ["{\"file\": \"a", ".ts\", \"content\": \"hello\"}"] {
+                let line = anthropic_arg_line(0, frag);
+                let (_, rewritten) = ah.process_line(&line, DeltaShape::AnthropicText);
+                forwarded.push(rewritten.unwrap());
+            }
+            let (args, _, _) = ah.flush().unwrap();
+            forwarded.push(anthropic_arg_line(0, &args));
+            assert_eq!(
+                assembled(&forwarded),
+                "{\"file\": \"a.ts\", \"content\": \"hello\"}"
+            );
+            assert!(ah.redactions().is_empty());
+        }
+
+        #[test]
+        fn openai_index_change_flushes_the_previous_call_first() {
+            let key = fanged_key();
+            let (head, tail) = key.split_at(8);
+            let chunk = |index: u64, args: &str| {
+                format!(
+                    "data: {}",
+                    serde_json::json!({
+                        "choices": [{ "index": 0, "delta": { "tool_calls": [{
+                            "index": index,
+                            "function": { "arguments": args },
+                        }]}}],
+                    })
+                )
+            };
+            let mut ah = ArgHoldback::new();
+            let shape = DeltaShape::OpenAIChatContent;
+            let (f, _) = ah.process_line(&chunk(0, &format!("{{\"k\":\"{head}")), shape);
+            assert!(f.is_none());
+            let (f, _) = ah.process_line(&chunk(0, &format!("{tail}\"}}")), shape);
+            assert!(f.is_none(), "same call must keep buffering");
+            // Next tool call starts: the previous call's args must flush now,
+            // redacted, addressed to the PREVIOUS index.
+            let (f, _) = ah.process_line(&chunk(1, "{\"other\":"), shape);
+            let (args, idx, _) = f.expect("index change must flush the previous call");
+            assert_eq!(idx, 0);
+            assert!(!args.contains(&key));
+            assert!(args.contains("[REDACTED_SECRET]"));
+            // And the second call's buffer is its own: flushing yields only it.
+            let (args2, idx2, _) = ah.flush().unwrap();
+            assert_eq!(idx2, 1);
+            assert_eq!(args2, "{\"other\":");
+        }
+
+        #[test]
+        fn text_deltas_are_not_absorbed() {
+            // The arg holdback must not touch assistant text — that is the
+            // text holdback's job, and double-processing would hold text back
+            // twice.
+            let line = format!(
+                "data: {}",
+                serde_json::json!({
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": { "type": "text_delta", "text": "hello" },
+                })
+            );
+            let mut ah = ArgHoldback::new();
+            let (f, rw) = ah.process_line(&line, DeltaShape::AnthropicText);
+            assert!(f.is_none());
+            assert!(rw.is_none(), "a text delta must pass through untouched");
+            assert!(ah.flush().is_none());
+        }
+    }
 
     /// The compactor's saving must leave `compress_tool_results` as a number.
     ///

@@ -66,6 +66,23 @@ interface SopRulesResponse {
 
 export class PolicyClient {
   private rules: SopRule[] = []
+  /**
+   * Workspace DLP regex sources, delivered to the scanner on every refresh.
+   * The daemon has cached these since the policy cache existed; this client
+   * received and dropped them — a workspace's custom patterns were a setting
+   * wired to nothing.
+   */
+  private dlpPatterns: string[] = []
+  /**
+   * Additive tool scoping: when non-empty, ONLY these tools may be called
+   * through this proxy. Empty means unrestricted — the same convention as
+   * `allow_harnesses` and the starter rules' allowlist inversion warnings:
+   * an empty allowlist read as "permit nothing" would block every workspace
+   * that never declared one.
+   */
+  private allowedTools: string[] = []
+  /** Operator-curated tool descriptions, applied to tools/list responses. */
+  private toolDescriptionOverrides: Record<string, string> = {}
   private lastFetchAt = 0
   private refreshTimer: NodeJS.Timeout | null = null
 
@@ -102,6 +119,36 @@ export class PolicyClient {
   /** Return the current cached rule set. */
   getRules(): readonly SopRule[] {
     return this.rules
+  }
+
+  /** Workspace DLP regex sources from the last successful refresh. */
+  getDlpPatterns(): readonly string[] {
+    return this.dlpPatterns
+  }
+
+  /** The additive tool allowlist; empty means unrestricted. */
+  getAllowedTools(): readonly string[] {
+    return this.allowedTools
+  }
+
+  /** Operator description overrides for tools/list curation. */
+  getToolDescriptionOverrides(): Readonly<Record<string, string>> {
+    return this.toolDescriptionOverrides
+  }
+
+  /** Parse the optional curation fields shared by both refresh paths. */
+  private absorbCuration(source: Record<string, unknown>): void {
+    const allowed = source['allowedTools'] ?? source['mcpAllowedTools']
+    this.allowedTools = Array.isArray(allowed)
+      ? allowed.filter((t): t is string => typeof t === 'string')
+      : []
+    const overrides = source['toolDescriptionOverrides'] ?? source['mcpToolDescriptionOverrides']
+    this.toolDescriptionOverrides = {}
+    if (typeof overrides === 'object' && overrides !== null && !Array.isArray(overrides)) {
+      for (const [k, v] of Object.entries(overrides as Record<string, unknown>)) {
+        if (typeof v === 'string') this.toolDescriptionOverrides[k] = v
+      }
+    }
   }
 
   /** Find the first matching rule for a given tool name + serialized args. */
@@ -150,6 +197,10 @@ export class PolicyClient {
               'Dropped malformed SOP rules from the daemon — they cannot be enforced',
             )
           }
+          this.dlpPatterns = (policy.dlpPatterns ?? []).filter(
+            (p): p is string => typeof p === 'string',
+          )
+          this.absorbCuration(policy as unknown as Record<string, unknown>)
           this.lastFetchAt = Date.now()
           log.info({ action: 'policy_refreshed_from_daemon', ruleCount: this.rules.length }, 'SOP rules refreshed from daemon')
           return
@@ -169,9 +220,14 @@ export class PolicyClient {
     log.debug({ action: 'policy_refresh', url }, 'Fetching SOP rules from control plane')
 
     const body = await httpGet(url, this.apiKey)
-    const parsed = JSON.parse(body) as SopRulesResponse
+    const parsed = JSON.parse(body) as SopRulesResponse & Record<string, unknown>
     const rules = Array.isArray(parsed.rules) ? parsed.rules : []
     this.rules = rules
+    const dlp = parsed['dlpPatterns']
+    this.dlpPatterns = Array.isArray(dlp)
+      ? dlp.filter((p): p is string => typeof p === 'string')
+      : []
+    this.absorbCuration(parsed)
     this.lastFetchAt = Date.now()
     log.info({ action: 'policy_refreshed', ruleCount: rules.length }, 'SOP rules refreshed')
   }

@@ -38,6 +38,7 @@ import {
   UNIVERSAL_PROTECTED_PATHS,
   GOVERNANCE_BYPASS_PATTERNS,
   DESTRUCTIVE_COMMAND_PATTERNS,
+  SECRET_CONTENT_PATTERNS,
   NORMALISE_CONTRACT,
   type GuardPattern,
 } from '../../src/harness/protectedPaths.js'
@@ -472,6 +473,30 @@ for (const g of GATES) {
           wantBlock
             ? `${g.name} allowed ${pat.id}: ${JSON.stringify(m)}`
             : `${g.name} wrongly blocked ${JSON.stringify(m)} via ${pat.id}. A false ` +
+              `positive here teaches developers to disable the hook.`,
+        ).toBe(wantBlock)
+      })
+    }, FAN_OUT_TIMEOUT)
+
+    it('blocks a Write whose content carries a credential value, and spares the counter-examples', async () => {
+      // The write direction, at the only gate that runs BEFORE the harness
+      // executes the tool. Every fixture in the secrets.* table is a full
+      // serialized tool input; it is parsed and passed as the input itself,
+      // so the gate matches the exact bytes a Write would put on disk —
+      // through the same emitted script a workspace runs, not a re-typed
+      // approximation of it.
+      const cases = SECRET_CONTENT_PATTERNS.flatMap((pat) => [
+        ...pat.matches.map((m) => ({ pat, m, wantBlock: true })),
+        ...pat.notMatches.map((m) => ({ pat, m, wantBlock: false })),
+      ])
+      await mapLimit(cases, GATE_CONCURRENCY, async ({ pat, m, wantBlock }) => {
+        const r = await runGate(g, JSON.parse(m), { tool: 'Write' })
+        assertCleanExit(g, r, `secret ${pat.id}`)
+        expect(
+          wasBlocked(g, r),
+          wantBlock
+            ? `${g.name} allowed a Write carrying ${pat.id}`
+            : `${g.name} wrongly blocked benign content via ${pat.id}. A false ` +
               `positive here teaches developers to disable the hook.`,
         ).toBe(wantBlock)
       })

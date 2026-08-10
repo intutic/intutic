@@ -24,6 +24,7 @@ import type { ProxyConfig } from './config.js'
 import { PolicyClient } from './policy.js'
 import { GovernanceEmitter } from './emitter.js'
 import { ToolCallInterceptor } from './interceptor.js'
+import { redactText as redactMcpText } from './dlp.js'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
@@ -68,6 +69,131 @@ function buildBlockResponse(id: string | number | null, reason: string): JsonRpc
  */
 function writeFrame(frame: unknown): void {
   process.stdout.write(JSON.stringify(frame) + '\n')
+}
+
+/** What the harness asked for under a given request id, awaiting its response. */
+export interface PendingRequest {
+  method: 'tools/call' | 'tools/list' | 'resources/read'
+  toolName?: string
+}
+
+/** The outcome of inspecting one server→harness line. */
+export interface ServerLineOutcome {
+  /** The line to forward — possibly rewritten. */
+  line: string
+  /** Set when result content was redacted: the tool (or resource) it came from. */
+  redactedTool?: string
+  /** Pattern descriptions redacted out of the result. */
+  redactions?: string[]
+  /** Set when a tools/list response was filtered or had descriptions overridden. */
+  curated?: { hidden: number; overridden: number }
+}
+
+/**
+ * Inspect one line of real-server output before it reaches the harness.
+ *
+ * This is the seam the byte-for-byte pipe never had: the request direction has
+ * been scanned since the interceptor existed, while the real server's stdout —
+ * tool results, resource reads, every tools/list — streamed into the agent's
+ * context untouched. A result carrying a credential put it straight into
+ * model-visible context; a `redact` Decision variant and a `tool_redacted`
+ * event existed as declared types with no producer. This function is the
+ * producer.
+ *
+ * Redaction, not blocking, on results: the call already executed, so refusing
+ * the response protects nothing — keeping the secret out of the agent's
+ * context is the only thing still at stake. If the redacted result no longer
+ * parses (a secret that spanned JSON syntax), the whole result is withheld
+ * and replaced with an error naming why — forwarding either the original or
+ * a broken body would be worse, the same fail-closed reparse rule the Rust
+ * proxy applies to non-streaming bodies.
+ *
+ * tools/list curation (the Uber-gateway mechanism): when the workspace
+ * declares an additive allowlist, tools outside it are removed from the
+ * listing — an agent that never sees a tool does not hallucinate calls to
+ * it, and the call-time block in the interceptor stays as the enforcement
+ * backstop. Operator description overrides apply to what remains, which is
+ * also the counter to a poisoned upstream description — the pin detects the
+ * change; the override controls what the agent actually reads.
+ */
+export function processServerLine(
+  raw: string,
+  pending: Map<string | number, PendingRequest>,
+  allowedTools: readonly string[],
+  overrides: Readonly<Record<string, string>>,
+): ServerLineOutcome {
+  const trimmed = raw.trim()
+  if (!trimmed) return { line: raw }
+  let msg: JsonRpcResponse & { result?: Record<string, unknown> }
+  try {
+    msg = JSON.parse(trimmed)
+  } catch {
+    return { line: raw } // not JSON-RPC (or partial) — forward untouched
+  }
+  if (msg.id === undefined || msg.id === null) return { line: raw } // notification
+  const req = pending.get(msg.id)
+  if (!req) return { line: raw }
+  pending.delete(msg.id)
+  if (!msg.result || typeof msg.result !== 'object') return { line: raw }
+
+  if (req.method === 'tools/call' || req.method === 'resources/read') {
+    const serialized = JSON.stringify(msg.result)
+    const { redacted, findings } = redactMcpText(serialized)
+    if (findings.length === 0) return { line: raw }
+    const label = req.toolName ?? req.method
+    try {
+      msg.result = JSON.parse(redacted) as Record<string, unknown>
+      return {
+        line: JSON.stringify(msg),
+        redactedTool: label,
+        redactions: findings.map((f) => f.description),
+      }
+    } catch {
+      const withheld: JsonRpcResponse = {
+        jsonrpc: '2.0',
+        id: msg.id,
+        error: {
+          code: -32603,
+          message:
+            `[Intutic Governance] Result withheld: it contained sensitive data ` +
+            `whose redaction did not survive re-parsing. The tool ran; its output ` +
+            `was not delivered. (${findings.map((f) => f.description).join('; ')})`,
+        },
+      }
+      return {
+        line: JSON.stringify(withheld),
+        redactedTool: label,
+        redactions: findings.map((f) => f.description),
+      }
+    }
+  }
+
+  if (req.method === 'tools/list') {
+    const tools = msg.result['tools']
+    if (!Array.isArray(tools)) return { line: raw }
+    let hidden = 0
+    let overridden = 0
+    let kept = tools as Array<Record<string, unknown>>
+    if (allowedTools.length > 0) {
+      kept = kept.filter((t) => {
+        const keep = typeof t['name'] === 'string' && allowedTools.includes(t['name'])
+        if (!keep) hidden += 1
+        return keep
+      })
+    }
+    for (const t of kept) {
+      const name = t['name']
+      if (typeof name === 'string' && overrides[name] !== undefined) {
+        t['description'] = overrides[name]
+        overridden += 1
+      }
+    }
+    if (hidden === 0 && overridden === 0) return { line: raw }
+    msg.result['tools'] = kept
+    return { line: JSON.stringify(msg), curated: { hidden, overridden } }
+  }
+
+  return { line: raw }
 }
 
 export class McpGovernanceProxy {
@@ -282,9 +408,51 @@ export class McpGovernanceProxy {
     process.on('SIGINT', () => shutdown('SIGINT'))
     process.on('SIGTERM', () => shutdown('SIGTERM'))
 
-    // Real server stdout → harness stdout (pass through)
-    realServer.stdout!.on('data', (chunk: Buffer) => {
-      process.stdout.write(chunk)
+    // Requests whose responses this proxy must inspect on the way back.
+    // Bounded by the number of in-flight calls; entries are removed when the
+    // response arrives (or lost with the process, which is fine — the map
+    // exists to route inspection, not to account).
+    const pending = new Map<string | number, PendingRequest>()
+
+    // Real server stdout → response inspection → harness stdout. The pipe
+    // this replaces forwarded bytes verbatim, which left the whole response
+    // direction unscanned; see processServerLine. Line-framed like the input
+    // direction (MCP stdio is newline-delimited JSON-RPC), so readline does
+    // the chunk reassembly a byte pipe never had to think about.
+    const serverRl = node_readline.createInterface({
+      input: realServer.stdout!,
+      terminal: false,
+    })
+    serverRl.on('line', (rawLine) => {
+      const outcome = processServerLine(
+        rawLine,
+        pending,
+        this.policy.getAllowedTools(),
+        this.policy.getToolDescriptionOverrides(),
+      )
+      if (outcome.redactedTool) {
+        log.warn(
+          {
+            action: 'result_redacted',
+            toolName: outcome.redactedTool,
+            redactions: outcome.redactions,
+          },
+          'Sensitive data redacted from a tool result before it reached the agent',
+        )
+        this.emitter.emit(
+          'tool_redacted',
+          outcome.redactedTool,
+          undefined,
+          `Result redacted: ${(outcome.redactions ?? []).join('; ')}`,
+        )
+      }
+      if (outcome.curated) {
+        log.info(
+          { action: 'tools_list_curated', ...outcome.curated },
+          'tools/list curated: allowlist filtering and/or description overrides applied',
+        )
+      }
+      process.stdout.write(outcome.line + '\n')
     })
 
     // Harness stdin → governance interceptor → real server stdin
@@ -302,6 +470,15 @@ export class McpGovernanceProxy {
         return
       }
 
+      // Register responses that need inspecting on the way back.
+      if (msg.id !== null && msg.id !== undefined) {
+        if (msg.method === 'tools/list') {
+          pending.set(msg.id, { method: 'tools/list' })
+        } else if (msg.method === 'resources/read') {
+          pending.set(msg.id, { method: 'resources/read' })
+        }
+      }
+
       // Intercept tools/call
       if (msg.method === 'tools/call') {
         const params = msg.params as McpToolsCallParams | undefined
@@ -317,7 +494,12 @@ export class McpGovernanceProxy {
             )
             writeFrame(buildBlockResponse(msg.id, decision.reason))
           } else {
-            // Allow: forward to real server
+            // Allow: the response now needs inspecting on the way back —
+            // registered BEFORE forwarding, or a fast server could answer
+            // into the gap.
+            if (msg.id !== null && msg.id !== undefined) {
+              pending.set(msg.id, { method: 'tools/call', toolName })
+            }
             realServer.stdin!.write(line + '\n')
           }
         }).catch((err) => {
