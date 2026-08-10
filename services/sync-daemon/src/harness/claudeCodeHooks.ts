@@ -430,6 +430,78 @@ function logEvent(verdict, toolName, reason, sessionId) {
 // a hook that makes every agent slower.
 const REVIEW_REQUEST_FILE = ${JSON.stringify(reviewRequestFile)};
 
+// Where the sync-daemon writes approved review_before bypasses it polled from
+// GET /api/v1/decisions/approved-bypasses — same directory as the policy
+// snapshot, for the same reason: \`.intutic/hooks\` is already in
+// UNIVERSAL_PROTECTED_PATHS, so every gate already refuses an agent's own
+// attempt to write here, with no new protected-path entry required.
+const APPROVED_BYPASSES_FILE = path.join(os.homedir(), '.intutic', 'hooks', 'approved-bypasses.jsonl');
+
+/**
+ * Looks for a valid, unexpired, EXACT-match approved bypass for this call.
+ *
+ * Reads the local cache only — no network call on the tool path, same
+ * discipline as the review-hold write below. Returns the matching entry, or
+ * null on ANY reason not to bypass: missing file, failed digest or workspace
+ * check, no matching line, or an entry whose \`expiresAt\` has passed. Every one
+ * of those null cases falls through to the ordinary hold — this function can
+ * only ever make enforcement MORE permissive for the one call it matches
+ * exactly, never less permissive for any other, and a failure to read it
+ * fails closed toward the hold, not open past it.
+ *
+ * The expiry check compares the entry's own \`expiresAt\` against wall-clock
+ * \`Date.now()\` — not the file's age. A cache the daemon has not refreshed in
+ * a while must not let a long-past-TTL entry through just because nothing
+ * rewrote the file; per-entry expiry is what a stale file degrades to
+ * "fewer valid bypasses", never "bypasses whose TTL no longer applies".
+ */
+function _intuticApprovedBypass(workspaceId, sopRuleId, toolNameNormalized, targetHash) {
+  let raw;
+  try {
+    raw = fs.readFileSync(APPROVED_BYPASSES_FILE, 'utf-8');
+  } catch (e) {
+    return null; // absent cache — nothing has ever been approved, or not synced yet
+  }
+  let digestLine = null;
+  let workspaceLine = null;
+  const body = [];
+  for (const line of raw.split('\\n')) {
+    if (line.indexOf('#digest ') === 0) { digestLine = line.slice(8).trim(); continue; }
+    if (line.indexOf('#workspace ') === 0) { workspaceLine = line.slice(11).trim(); continue; }
+    if (!line || line.charAt(0) === '#') continue;
+    body.push(line);
+  }
+  // Integrity, same two checks as the policy snapshot: an unverified digest is
+  // a comment, and an unchecked workspace id means another workspace's
+  // approvals would bypass rules here.
+  try {
+    const actual = crypto.createHash('sha256').update(body.join('\\n')).digest('hex').slice(0, 32);
+    if (digestLine && actual !== digestLine) return null;
+  } catch (e) {
+    return null;
+  }
+  if (workspaceLine && workspaceId && workspaceLine !== workspaceId) return null;
+
+  const now = Date.now();
+  for (const line of body) {
+    let entry;
+    try {
+      entry = JSON.parse(line);
+    } catch (e) {
+      continue; // one malformed line must not hide the rest
+    }
+    if (!entry || typeof entry !== 'object') continue;
+    if (entry.workspaceId !== workspaceId) continue;
+    if (entry.sopRuleId !== sopRuleId) continue;
+    if (entry.toolNameNormalized !== toolNameNormalized) continue;
+    if (entry.targetHash !== targetHash) continue;
+    const exp = Date.parse(entry.expiresAt);
+    if (!exp || isNaN(exp) || now >= exp) continue; // expired — fail closed toward the hold
+    return entry;
+  }
+  return null;
+}
+
 // Read stdin containing Claude's tool context
 let inputData = '';
 process.stdin.on('data', (chunk) => { inputData += chunk; });
@@ -504,6 +576,42 @@ process.stdin.on('end', () => {
         candidates.some((c) => String(c).toLowerCase() === String(r).toLowerCase()),
       );
       if (hit) {
+        // Bypass check, immediately before the hold would otherwise fire.
+        //
+        // Opt-in, short-lived and exact-match — see decisionMiningService.ts's
+        // maybeWriteReviewHoldBypass for the write side. The key material is
+        // computed the SAME way at both ends: intuticNormalise (the shared
+        // gate's own normaliser, already in scope above) on the tool name, and
+        // a sha256 of the normalised command/target pair, joined by a NUL so
+        // e.g. command="a" target="b" cannot collide with command="ab"
+        // target="". Nothing here relaxes the rule itself or matches fuzzily —
+        // a different command under the same review_before rule gets its own
+        // hash and is held exactly as before.
+        const _intuticToolNameNormalized = intuticNormalise(rawToolName);
+        const _intuticTargetHash = crypto
+          .createHash('sha256')
+          .update(intuticNormalise(shellCmd) + '\\u0000' + intuticNormalise(targetPath))
+          .digest('hex');
+        const _intuticBypass = _intuticApprovedBypass(
+          _intuticWsId,
+          hit,
+          _intuticToolNameNormalized,
+          _intuticTargetHash,
+        );
+        if (_intuticBypass) {
+          // Let it through — but LOUDLY. This is itself part of the audit
+          // trail the whole review_before/decision-review effort exists to
+          // produce: a bypass nobody can see used is no better than the
+          // silent "observe-only" gap it replaces.
+          const bypassReason =
+            \`Approved bypass for review_before:\${hit} — approved by \${_intuticBypass.decidedBy} \` +
+            \`on hold \${_intuticBypass.holdId}\`;
+          console.error(\`[Intutic Guardrail] BYPASSED: \${bypassReason}\`);
+          logEvent('hold_approved_bypass_used', toolName, bypassReason, sessionId);
+          // Deliberately no exit(2) and no new hold below: falls through to
+          // the pattern blacklist and the ordinary allow path, exactly as if
+          // review_before had not matched this one already-reviewed call.
+        } else {
         try {
           // \`fs\` and \`path\`, not the daemon's \`node_fs\` / \`node_path\` aliases.
           // Those are this module's import names; the emitted script binds
@@ -531,6 +639,11 @@ process.stdin.on('end', () => {
               sessionId: sessionId,
               workspaceId: _intuticWsId,
               at: new Date().toISOString(),
+              // Bypass-key material, computed once above and carried on the
+              // hold so the control plane can write an exact-match Valkey
+              // entry later without ever needing the raw command/target.
+              toolNameNormalized: _intuticToolNameNormalized,
+              targetHash: _intuticTargetHash,
               context: __intuticSnapshot({
                 tool: rawToolName,
                 toolInput: toolInput,
@@ -547,9 +660,10 @@ process.stdin.on('end', () => {
           console.error('[Intutic Guardrail] could not record the hold: ' + (e && e.message ? e.message : e));
         }
         const reason = \`Held for human review: \${hit} — declared in review_before:\`;
-        console.error(\`[Intutic Guardrail] HELD: \${reason} Approve with: intutic loop review <id> --approve\`);
+        console.error(\`[Intutic Guardrail] HELD: \${reason} Approve with: intutic decision approve <holdId> (or: intutic decision reject <holdId>)\`);
         logEvent('tool_blocked', toolName, reason, sessionId);
         process.exit(2);
+        }
       }
     }
 
@@ -832,8 +946,16 @@ export async function drainHookEvents(
  * hold blocked the action and the decision behind it went nowhere — which is
  * also why the decision-mining queue had four route readers and no writer.
  *
- * This is the writer. It is observe-only: a delivered hold becomes a row and a
- * review card, and nothing about it changes what any harness blocks.
+ * This is the writer. Delivering a hold always becomes a row and a review card;
+ * whether resolving it can also let the retried call through is conditional,
+ * not automatic. Approving through `POST /api/v1/decisions/:id/review` (or the
+ * Slack button) writes a short-lived, exact-match bypass ONLY when the
+ * workspace has opted in with `reviewHoldBypassEnabled`, and even then it
+ * covers only the identical call, for at most `reviewHoldBypassTtlMinutes`.
+ * A workspace that never sets that flag gets the original, unconditional
+ * observe-only behaviour. See `claudeCodeHooks.ts`'s `_intuticApprovedBypass`
+ * and `decisionMiningService.ts`'s `maybeWriteReviewHoldBypass` for the
+ * mechanism.
  */
 export async function drainReviewRequests(
   workspaceRoot: string,

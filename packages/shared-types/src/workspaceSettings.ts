@@ -182,6 +182,31 @@ export interface WorkspaceSettings {
     approvedDigests?: Record<string, string[]>
     unverifiableAction?: 'allow' | 'warn' | 'block'
   }
+
+  /**
+   * Whether an APPROVED `review_before` decision may let the *matching retried
+   * call* through the local gate, instead of only recording the decision.
+   *
+   * Off (undefined/false) by default. `POST /api/v1/decisions` and its Slack
+   * approve button have always recorded a decision — this flag governs a
+   * separate, additive effect: when true, approving a decision tied to a
+   * `review_before` hold writes a short-lived, exact-match bypass entry
+   * (workspace + SOP rule + normalised tool name + hashed target/command) to
+   * Valkey, synced to `.intutic/hooks/approved-bypasses.jsonl` and consulted by
+   * the gate immediately before it would otherwise block on that rule. It never
+   * relaxes the rule itself, never matches fuzzily, and never outlives
+   * {@link reviewHoldBypassTtlMinutes}.
+   */
+  reviewHoldBypassEnabled?: boolean
+
+  /**
+   * Minutes an approved `review_before` bypass stays valid, when
+   * {@link reviewHoldBypassEnabled} is true. Defaults to 10 when the feature is
+   * on but this is unset; capped at 60 by the settings PUT schema — a bypass is
+   * meant to let one already-reviewed retry through, not to stand up a lasting
+   * exemption.
+   */
+  reviewHoldBypassTtlMinutes?: number
 }
 
 /**
@@ -227,6 +252,12 @@ export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
     approvedDigests: {},
     unverifiableAction: 'allow',
   },
+  // Off by default — approving a review_before decision is observation-only
+  // until a workspace opts in. See the field doc for what turning it on does.
+  reviewHoldBypassEnabled: false,
+  // Only load-bearing once reviewHoldBypassEnabled is true; the value here is
+  // what "enabled but unset" resolves to.
+  reviewHoldBypassTtlMinutes: 10,
 }
 
 /**
