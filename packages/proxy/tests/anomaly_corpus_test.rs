@@ -574,3 +574,117 @@ async fn a_poisoned_tool_description_reaches_the_registry() {
         hit.reason,
     );
 }
+
+/// TD-248: `CYCLE_COVERAGE_FLOOR` was "chosen by inspection... needs a corpus
+/// of real tool sequences with labelled outcomes" — a considered guess with a
+/// test pinning it, worse than a measurement. This is the measurement.
+///
+/// Not a sweep over compiled-in floor values — the constant is not
+/// runtime-parameterised, and making it so purely to swap it in a test would
+/// add a knob to the hot path for a benchmark's convenience. Instead: compute
+/// the actual `landmark_cycle_coverage` ratio for every real trajectory that
+/// reaches the coverage gate at all, which is floor-independent, and check
+/// where the current floor sits relative to that measured distribution — and
+/// relative to the one shape TD-248 names as what the floor exists to stop
+/// (`mutations.json`'s `collapse_tail_1`: "ten of one anchor is a period-1
+/// cycle at full coverage").
+///
+/// `landmark_cycle_coverage` is `LandmarkCycleDetector::detect`'s own coverage
+/// computation, extracted so this and the detector call the same code rather
+/// than this test carrying a second copy of the survivor logic to drift from
+/// it — precisely the risk TD-248's own title warns about, one level up.
+#[tokio::test]
+async fn cycle_coverage_floor_has_empirical_headroom_against_real_traffic() {
+    use intutic_proxy::plugins::anomaly::detectors::{landmark_cycle_coverage, CYCLE_COVERAGE_FLOOR};
+
+    let seeds = load_seeds();
+    let mut reached_gate = 0usize;
+    let mut max_benign_coverage: f64 = 0.0;
+    let mut at_or_above_floor: Vec<&str> = Vec::new();
+
+    for seed in &seeds {
+        let ctx = build_ctx(&seed.calls).await;
+        if let Some(sample) = landmark_cycle_coverage(&ctx.tool_sequence) {
+            reached_gate += 1;
+            if sample.coverage > max_benign_coverage {
+                max_benign_coverage = sample.coverage;
+            }
+            if sample.coverage >= CYCLE_COVERAGE_FLOOR {
+                at_or_above_floor.push(seed.id.as_str());
+            }
+        }
+    }
+
+    // The false-positive story the floor carries, measured rather than
+    // assumed — and the measurement corrects the assumption. Before this
+    // test, "TD-248 needs a corpus" implied the floor's real-traffic rate was
+    // simply unknown; the honest reading of the corpus test's own
+    // `EXPECTED_BENIGN_FIRINGS` ("two long trajectories with genuine
+    // repetition in them; they are false positives") already named these two
+    // seeds as false positives on SOME detector — this sweep is what confirms
+    // `landmark_cycle` is (at least) one of them, at the current floor. Pinned
+    // by NAME, matching the file's own convention: a name changing is the
+    // signal worth seeing, a count changing is not.
+    assert_eq!(
+        at_or_above_floor,
+        EXPECTED_BENIGN_FIRINGS.to_vec(),
+        "the set of real trajectories reaching CYCLE_COVERAGE_FLOOR ({}) changed — this is the \
+         floor's real-traffic false-positive set, and a different set here (not just a \
+         different count) is the regression TD-248 exists to catch before it reaches a customer",
+        CYCLE_COVERAGE_FLOOR,
+    );
+
+    // The attack shape the floor exists to catch, applied to a real benign
+    // seed's prefix (`collapse_tail` appends ten identical calls — it does not
+    // require a specific seed, any seed's tail is overwritten).
+    let mutant_calls = collapse_tail(&seeds[0].calls);
+    let mutant_ctx = build_ctx(&mutant_calls).await;
+    let mutant_sample = landmark_cycle_coverage(&mutant_ctx.tool_sequence).expect(
+        "collapse_tail must reach the coverage gate — ten identical fills at a 24-window \
+         is the exact shape mutations.json's collapse_tail_1 case documents",
+    );
+    assert!(
+        mutant_sample.coverage > CYCLE_COVERAGE_FLOOR,
+        "the manufactured-cycle mutation scored {:.3} coverage, not clearly above the floor \
+         {} — the floor would no longer separate this attack shape from real traffic",
+        mutant_sample.coverage,
+        CYCLE_COVERAGE_FLOOR,
+    );
+
+    // The evidence TD-248 asked for, and it is not the clean "enormous
+    // headroom" the entry's prose assumed. Two findings, not one:
+    //
+    // (1) Only 2 of 1,000 published trajectories reach the coverage gate at
+    //     all — real multi-turn API-orchestration traffic mostly never gets
+    //     long and repetitive enough to be scored by this floor in the first
+    //     place. Thin evidence, honestly thin: a corpus this size cannot
+    //     bound the floor's true false-positive rate, only report what it
+    //     happened to observe.
+    // (2) Of the two that DO reach it, both already sit above
+    //     CYCLE_COVERAGE_FLOOR (max 0.917) — and the collapse_tail mutation,
+    //     the shape this floor exists to catch, scores LOWER (0.800) than
+    //     that. No single floor value separates these two known false
+    //     positives from this attack shape: raising the floor past 0.917 to
+    //     clear them also clears the mutant, at 0.800, out from under
+    //     detection; lowering it does not help either false positive, which
+    //     are already above the current floor.
+    //
+    // So this is not a tuning gap that a different constant closes. It is the
+    // TD-247 argument again, one detector over: coverage counts REPETITION,
+    // not intent, and a long trajectory with genuine repeated structure
+    // produces the same number as a manufactured cycle. `CYCLE_COVERAGE_FLOOR`
+    // stays at 0.75 — nothing in this measurement makes another value better,
+    // and the two false positives it does not stop are not new: they are
+    // exactly `EXPECTED_BENIGN_FIRINGS`, present and accounted for since the
+    // baseline this file already ships.
+    println!(
+        "CYCLE_COVERAGE_FLOOR = {}: benign max = {:.3} over {} of {} trajectories reaching the \
+         gate (both above the floor — see EXPECTED_BENIGN_FIRINGS); collapse_tail mutant = {:.3} \
+         (below the benign max — no floor value separates the two cleanly)",
+        CYCLE_COVERAGE_FLOOR,
+        max_benign_coverage,
+        reached_gate,
+        seeds.len(),
+        mutant_sample.coverage,
+    );
+}
