@@ -47,6 +47,8 @@ const EXPECTED: Record<string, Verdict> = {
   'harness-allowlist': 1,
   'injection-then-egress': 3,
   'risk-tier-ceiling': 3,
+  'secret-read-to-egress': 1,
+  'deploy-without-tests': 1,
 }
 
 const HOST_IMPL: Record<string, (...a: number[]) => void | number> = {
