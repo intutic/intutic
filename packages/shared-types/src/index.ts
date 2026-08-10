@@ -403,4 +403,5 @@ export {
   findPosture,
   type PosturePreset,
   type PostureKind,
+  type PreImageEntry,
 } from './posturePresets.js'

@@ -139,3 +139,25 @@ export function findPosture(kind: PostureKind, name: string): PosturePreset | un
   const set = kind === 'security' ? SECURITY_POSTURES : COST_POSTURES
   return set.find((p) => p.name === name)
 }
+
+/**
+ * One captured pre-image, as the gate writes it and the CLI reads it.
+ *
+ * Declared once and imported by both sides deliberately. The writer is an
+ * emitted JS string in the sync daemon and the reader is a CLI command in a
+ * different package — two hand-kept copies of a record format across a
+ * package boundary is precisely how a manifest starts describing restores it
+ * cannot perform.
+ */
+export interface PreImageEntry {
+  id: string
+  capturedAt: string
+  tool: string
+  /** Absolute, resolved, and inside the workspace root — the gate enforces all three. */
+  target: string
+  /** False when the flagged call CREATED the file: restoring it means deleting it. */
+  existed: boolean
+  bytes: number
+  ruleId: string
+  workspaceId: string
+}
