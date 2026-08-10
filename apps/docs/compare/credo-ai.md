@@ -21,15 +21,17 @@ Credo AI owns the **governance system of record** — policy creation, risk asse
 | **Integration model** | Local proxy + sync daemon | Cloud platform + API |
 | **Custom rules** | WASM sandbox for domain-specific enforcement | Policy templates and assessment frameworks |
 
-## Better Together
+## Better Together — What Actually Interoperates Today
 
-Intutic and Credo AI are **complementary**. Use them together for full-stack AI governance:
+Intutic and Credo AI sit at different layers, and two of the three steps below are real:
 
 1. **Define policies in Credo AI** — create governance frameworks, risk thresholds, and compliance requirements
 2. **Enforce policies with Intutic** — translate governance rules into SOPs that block, modify, or allow agent actions in real time
-3. **Export enforcement evidence to Credo AI** — send Intutic's audit logs and enforcement decisions back to Credo's compliance system as evidence of policy adherence
+3. **Export traces via OpenTelemetry** — Intutic emits standard OTLP traces (both the Rust proxy and the Node control-plane run a real trace exporter today, no metrics or logs). Any OTel-compatible collector can ingest that stream.
 
-This gives your compliance team the governance system of record they need, and your engineering team the runtime enforcement layer they need.
+What does **not** exist: a Credo-specific connector, a Credo-shaped evidence schema, or an export route that translates Intutic's enforcement decisions into Credo AI's compliance evidence format. There is no code anywhere in this codebase that produces Credo-shaped output. If you want Intutic's enforcement audit logs represented as Credo AI evidence, you would need to build that translation layer yourself against Credo's ingestion API — it is not on our roadmap with a date, it is simply not built.
+
+This gives your compliance team the governance system of record they need, and your engineering team the runtime enforcement layer they need — evidence pipelines between the two are on you today, not us.
 
 ## When You Need Intutic
 

@@ -566,4 +566,33 @@ loopCmd
   })
 
 
+// ── Decision commands ────────────────────────────────────────────────────
+//
+// The real front door for a review_before hold. See commands/decision.ts's
+// module doc for why `intutic loop review` was never the right command for
+// this — it addresses a different id space (Loop Runs, not decisions).
+const decisionCmd = program
+  .command('decision')
+  .description('Approve or reject a decision (e.g. a review_before hold) held for human review')
+
+decisionCmd
+  .command('approve <holdId>')
+  .description('Approve a held decision; may also unblock the exact retried call, if the workspace opted in')
+  .option('--reason <reason>', 'Why, recorded against the decision')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (holdId, opts) => {
+    const { runDecisionApprove } = await import('./commands/decision.js')
+    await runDecisionApprove(holdId, opts)
+  })
+
+decisionCmd
+  .command('reject <holdId>')
+  .description('Reject a held decision')
+  .option('--reason <reason>', 'Why, recorded against the decision')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (holdId, opts) => {
+    const { runDecisionReject } = await import('./commands/decision.js')
+    await runDecisionReject(holdId, opts)
+  })
+
 program.parse()

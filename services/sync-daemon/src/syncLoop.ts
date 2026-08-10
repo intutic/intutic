@@ -40,6 +40,7 @@ import {
 } from './harness/claudeCodeHooks.js'
 import { writeRuntimeEnv } from './lib/runtimeEnv.js'
 import { refreshPolicySnapshot } from './lib/policySnapshot.js'
+import { refreshApprovedBypasses } from './lib/approvedBypasses.js'
 import { runComplianceProbes } from './lib/complianceProbes.js'
 import { startWatcher } from './watcher/driftWatcher.js'
 import { shouldCaptureThisIteration, captureAndUpload } from './configReader.js'
@@ -197,6 +198,12 @@ export async function startSyncLoop(options: SyncLoopOptions): Promise<void> {
   // version did not move. Policy changes without the config version changing.
   await refreshPolicySnapshot({ controlPlaneUrl, apiKey, workspaceId })
 
+  // Step 0c: Refresh the approved review_before bypass cache, on the same
+  // cadence as the policy snapshot and for the same reason — a bypass an
+  // operator just approved has to reach the gate before the developer's very
+  // next retry, not on the next config-version bump.
+  await refreshApprovedBypasses({ controlPlaneUrl, apiKey, workspaceId })
+
   // Try to sync offline traces back to PostgreSQL
   try {
     await syncOfflineTraces(controlPlaneUrl, apiKey)
@@ -324,6 +331,8 @@ export async function startSyncLoop(options: SyncLoopOptions): Promise<void> {
         // Same reasoning as Step 0b: policy rides the sync cycle, not the
         // config version.
         await refreshPolicySnapshot({ controlPlaneUrl, apiKey, workspaceId })
+        // Same reasoning as Step 0c.
+        await refreshApprovedBypasses({ controlPlaneUrl, apiKey, workspaceId })
       }
 
       // Start the drift watcher on first successful sync (once harnesses are known)

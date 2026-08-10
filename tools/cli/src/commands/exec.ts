@@ -31,6 +31,20 @@ import { log } from '../lib/logger.js'
 import pc from 'picocolors'
 
 /**
+ * Trims trailing `/` characters without a regex.
+ *
+ * `INTUTIC_PROXY_URL` is a local environment variable, not remotely
+ * attacker-controlled — but CodeQL's static analysis flags `/\/+$/` as a
+ * polynomial-time pattern on external input regardless, and a loop is O(n)
+ * and cannot be mis-classified as a ReDoS shape by any static analyzer.
+ */
+function trimTrailingSlashes(s: string): string {
+  let end = s.length
+  while (end > 0 && s.charCodeAt(end - 1) === 47 /* '/' */) end--
+  return s.slice(0, end)
+}
+
+/**
  * Build the proxy environment variables for a child process.
  *
  * @param apiKey   - Intutic API key (intk_...)
@@ -49,7 +63,7 @@ export function buildProxyEnv(
   // either. `intutic start` binds :4000; that is what these should reach.
   //
   // Set INTUTIC_PROXY_URL to point at a proxy you run somewhere else.
-  const rawHost = (process.env.INTUTIC_PROXY_URL ?? 'http://localhost:4000').replace(/\/+$/, '')
+  const rawHost = trimTrailingSlashes(process.env.INTUTIC_PROXY_URL ?? 'http://localhost:4000')
   void devMode
 
   // Graph identity rides in the base URL. Harnesses append their own path to

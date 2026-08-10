@@ -210,7 +210,10 @@ export async function runSkillAudit(): Promise<void> {
 
 // ─── Loop Commands ───────────────────────────────────────────────────
 
-async function getClient(dev?: boolean) {
+// Exported so `commands/decision.ts` can share the exact same client
+// resolution (creds, dev-mode precedence, base URL) rather than growing a
+// second, easily-drifting copy of it.
+export async function getClient(dev?: boolean) {
   const creds = await loadCredentials()
   if (!creds) {
     log.error('Not authenticated. This command needs an Intutic control plane, which open core does not include. To run the proxy without one: `intutic start`.')
