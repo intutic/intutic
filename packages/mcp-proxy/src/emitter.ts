@@ -55,7 +55,10 @@ export class GovernanceEmitter {
 
     if (this.mcpProxyMode === 'daemon') {
       const eventPayload = {
-        event: kind === 'tool_blocked' ? 'tool_blocked' : 'tool_allowed',
+        // `tool_redacted` was declared in EventKind and collapsed to
+        // `tool_allowed` here since the type existed — a redaction the audit
+        // trail recorded as a plain allow. The kind passes through as itself.
+        event: kind,
         toolName,
         workspaceId: this.workspaceId,
         harnessType: 'mcp-governance-proxy',
@@ -91,7 +94,8 @@ export class GovernanceEmitter {
     const payload = JSON.stringify({
       events: [
         {
-          event: event.kind === 'tool_blocked' ? 'tool_blocked' : 'tool_allowed',
+          // Same collapse as the daemon path had: the kind IS the event.
+          event: event.kind,
           toolName: event.toolName,
           toolInput: event.toolInput,
           workspaceId: event.workspaceId,

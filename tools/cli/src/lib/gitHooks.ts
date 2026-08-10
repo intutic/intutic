@@ -12,6 +12,7 @@
 
 import * as node_fs from 'node:fs/promises'
 import * as node_path from 'node:path'
+import { secretPatternAlternation } from '@intutic/shared-types'
 import { log } from './logger.js'
 
 const HOOK_CONTENT = `
@@ -21,6 +22,45 @@ if command -v intutic >/dev/null 2>&1; then
   intutic sync-context --git --branch "$(git branch --show-current)" --commit "$(git rev-parse HEAD)" >/dev/null 2>&1 &
 fi
 `.trim()
+
+/** Marker line identifying a pre-commit hook as ours — the overwrite guard. */
+const PRE_COMMIT_MARKER = '# Intutic Pre-Commit Secret Scan'
+
+/**
+ * The last line before a secret enters git history.
+ *
+ * The hook gate refuses a Write whose content carries a credential value, and
+ * the proxy's DLP covers the LLM traffic — but a secret can reach the working
+ * tree by other roads (a human paste, an unproxied tool, a generator script).
+ * Until now the repo's history had no gate at all: the CLI installed
+ * post-commit and post-checkout tracking hooks only, so the commit — the step
+ * GitGuardian's 28M-leaked-secrets figure is measured at — was uninspected.
+ *
+ * Scans only ADDED lines of the staged diff, with the same
+ * `SECRET_VALUE_PATTERNS` the hook gate enforces (one source, in
+ * shared-types — two hand-kept copies of "what is a credential" is how the
+ * gate and the hook would drift). Refuses with the offending file:line and
+ * names the escape hatch: `git commit --no-verify` is deliberate, auditable
+ * in shell history, and better than teaching people to delete the hook.
+ */
+function preCommitContent(): string {
+  return `
+#!/bin/sh
+${PRE_COMMIT_MARKER}
+# Refuses a commit whose STAGED ADDITIONS carry a credential-shaped value.
+# Same patterns the Intutic hook gate enforces (see @intutic/shared-types
+# secretPatterns.ts — the single source both consumers compile).
+findings="$(git diff --cached -U0 --no-color | grep -E '^\\+' | grep -vE '^\\+\\+\\+' | grep -nE '${secretPatternAlternation()}' || true)"
+if [ -n "$findings" ]; then
+  echo "[Intutic] Commit refused: staged changes add credential-shaped content:" >&2
+  echo "$findings" | head -10 >&2
+  echo "" >&2
+  echo "Remove the secret and reference it from the environment instead." >&2
+  echo "If this is a false positive, commit with: git commit --no-verify" >&2
+  exit 1
+fi
+`.trimStart()
+}
 
 /**
  * Installs post-commit and post-checkout hooks into `.git/hooks/`.
@@ -55,7 +95,32 @@ export async function installGitHooks(workspaceRoot: string): Promise<boolean> {
     await node_fs.chmod(postCommitPath, 0o755)
     await node_fs.chmod(postCheckoutPath, 0o755)
 
-    log.info('Successfully installed Git sync hooks (post-commit, post-checkout)')
+    // Pre-commit secret scan. Unlike the two tracking hooks above, this one
+    // must NOT clobber blindly: pre-commit is where husky/lint-staged and
+    // hand-written hooks live, and silently replacing a team's hook to
+    // install ours is the exact overreach that gets governance tooling
+    // uninstalled. Ours is only written over an absent hook or a prior copy
+    // of itself (identified by marker); anything else is left standing and
+    // said so.
+    const preCommitPath = node_path.join(hooksDir, 'pre-commit')
+    let existing: string | null = null
+    try {
+      existing = await node_fs.readFile(preCommitPath, 'utf-8')
+    } catch {
+      existing = null
+    }
+    if (existing === null || existing.includes(PRE_COMMIT_MARKER)) {
+      await node_fs.writeFile(preCommitPath, preCommitContent(), { encoding: 'utf-8', mode: 0o755 })
+      await node_fs.chmod(preCommitPath, 0o755)
+      log.info('Successfully installed Git hooks (post-commit, post-checkout, pre-commit secret scan)')
+    } else {
+      log.warn(
+        'A pre-commit hook already exists and is not Intutic\'s — left untouched. ' +
+          'The staged-diff secret scan is NOT installed; add it to your existing hook ' +
+          'if you want commit-time scanning.',
+      )
+      log.info('Successfully installed Git sync hooks (post-commit, post-checkout)')
+    }
     return true
   } catch (err) {
     log.warn(`Failed to write Git hooks: ${err instanceof Error ? err.message : String(err)}`)

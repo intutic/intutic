@@ -427,6 +427,10 @@ intutic_apply() {
     tool)    _subs=("$INTUTIC_NTOOL") ;;
     command) _subs=("$INTUTIC_NCOMMAND") ;;
     target)  _subs=("$INTUTIC_NTARGET") ;;
+    # Serialized tool input, un-normalised — same subject the WHERE argPattern
+    # machinery matches. The secrets.* floor rules ride this. Guaranteed
+    # non-empty by the extractor (it defaults to "{}").
+    content) _subs=("$TOOL_INPUT_JSON") ;;
     # Each field is tested separately rather than concatenated. Joining them
     # lets a pattern match across the seam — a command ending in "chflags" and
     # an unrelated target starting with "nouchg" would trip the bypass rule
@@ -722,6 +726,11 @@ function intuticGate(toolName, target, command, record, workspaceId, toolInput) 
       rule.subject === 'tool' ? [nTool]
       : rule.subject === 'command' ? [nCommand]
       : rule.subject === 'target' ? [nTarget]
+      // The serialized tool input, un-normalised: a content rule (the
+      // secrets.* floor) matches the bytes a Write would put on disk. The
+      // same string the WHERE argPattern machinery tests, so the two content
+      // subjects cannot drift.
+      : rule.subject === 'content' ? [toolInputJson]
       : [nCommand, nTarget];
     for (const subject of subjects) {
       if (!rule.re.test(subject)) continue;

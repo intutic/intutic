@@ -405,3 +405,9 @@ export {
   type PostureKind,
   type PreImageEntry,
 } from './posturePresets.js'
+
+export {
+  SECRET_VALUE_PATTERNS,
+  secretPatternAlternation,
+  type SecretValuePattern,
+} from './secretPatterns.js'
