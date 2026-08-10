@@ -188,7 +188,11 @@ const MIN_CYCLE_REPEATS: usize = 4;
 /// anchor gate and squarely on this floor at 0.67 — and is the test that pins
 /// this number. This constant carries the entire false-positive story and was
 /// chosen by inspection; it is the one to tune against real traces.
-const CYCLE_COVERAGE_FLOOR: f64 = 0.75;
+// `pub`, not `pub(crate)`: TD-248's corpus sweep
+// (tests/anomaly_corpus_test.rs) references this constant directly rather
+// than hardcoding a second copy of "0.75" that could silently drift from the
+// one actually enforced.
+pub const CYCLE_COVERAGE_FLOOR: f64 = 0.75;
 
 /// How often the period must hold across the surviving anchors.
 const CYCLE_MATCH_RATIO: f64 = 0.75;
@@ -340,6 +344,58 @@ fn anchor_projection(seq: &[String]) -> (Vec<u16>, Vec<String>) {
 /// coupled. Both emit, and the reason strings do the work.
 pub struct LandmarkCycleDetector;
 
+/// The window this call reached the coverage check with, if it reached it at
+/// all — the anchor-gate and survivor-gate failures below `MIN_LANDMARK_ANCHORS`
+/// never produce one, matching `detect()`'s own early returns exactly.
+pub struct CycleCoverageSample {
+    /// `survivors.len() / window.len()`, before any floor is applied.
+    pub coverage: f64,
+    pub window_len: usize,
+    /// Hapax-elided anchor ids, in order — what the period search runs over.
+    pub survivors: Vec<u16>,
+    /// Interned-id → tool-name table, for naming a cycle in `survivors`.
+    pub symbols: Vec<String>,
+}
+
+/// The coverage computation `detect()` runs, pulled out so it can be measured
+/// independently of `CYCLE_COVERAGE_FLOOR` — TD-248's corpus sweep computes
+/// this once per trajectory and checks it against many candidate floors,
+/// which needs the ratio itself, not a bool already compared to one floor.
+///
+/// `detect()` below is the only other caller. One computation, not the two
+/// copies of the survivor logic that TD-248 (`CYCLE_COVERAGE_FLOOR was chosen
+/// by inspection`) itself would have called out had this function and
+/// `detect()` drifted.
+pub fn landmark_cycle_coverage(tool_sequence: &[String]) -> Option<CycleCoverageSample> {
+    let (anchors, symbols) = anchor_projection(tool_sequence);
+    if anchors.len() < MIN_LANDMARK_ANCHORS {
+        return None;
+    }
+    let window = &anchors[anchors.len().saturating_sub(LANDMARK_WINDOW)..];
+
+    let mut freq = [0u16; ANCHOR_FREQ_SLOTS];
+    for &id in window {
+        let slot = (id as usize) % freq.len();
+        freq[slot] = freq[slot].saturating_add(1);
+    }
+    let survivors: Vec<u16> = window
+        .iter()
+        .copied()
+        .filter(|&id| freq[(id as usize) % freq.len()] > 1)
+        .collect();
+
+    if survivors.len() < MIN_LANDMARK_ANCHORS {
+        return None;
+    }
+    let coverage = survivors.len() as f64 / window.len() as f64;
+    Some(CycleCoverageSample {
+        coverage,
+        window_len: window.len(),
+        survivors,
+        symbols,
+    })
+}
+
 impl Default for LandmarkCycleDetector {
     fn default() -> Self {
         Self
@@ -360,30 +416,16 @@ impl AnomalyDetector for LandmarkCycleDetector {
         // a mutating GETSET executed before enforcement, so a detector reading
         // it fires exactly once — correct for a one-shot hold, wrong for a
         // cycle check that must hold across the retries a steer produces.
-        let (anchors, symbols) = anchor_projection(&ctx.tool_sequence);
-        if anchors.len() < MIN_LANDMARK_ANCHORS {
+        let sample = landmark_cycle_coverage(&ctx.tool_sequence)?;
+        if sample.coverage < CYCLE_COVERAGE_FLOOR {
             return None;
         }
-        let window = &anchors[anchors.len().saturating_sub(LANDMARK_WINDOW)..];
-
-        let mut freq = [0u16; ANCHOR_FREQ_SLOTS];
-        for &id in window {
-            let slot = (id as usize) % freq.len();
-            freq[slot] = freq[slot].saturating_add(1);
-        }
-        let survivors: Vec<u16> = window
-            .iter()
-            .copied()
-            .filter(|&id| freq[(id as usize) % freq.len()] > 1)
-            .collect();
-
-        if survivors.len() < MIN_LANDMARK_ANCHORS {
-            return None;
-        }
-        let coverage = survivors.len() as f64 / window.len() as f64;
-        if coverage < CYCLE_COVERAGE_FLOOR {
-            return None;
-        }
+        let CycleCoverageSample {
+            window_len,
+            survivors,
+            symbols,
+            ..
+        } = sample;
 
         let n = survivors.len();
         for p in 1..=MAX_CYCLE_PERIOD {
@@ -419,7 +461,7 @@ impl AnomalyDetector for LandmarkCycleDetector {
                 format!(
                     "Loop detected: {} of the last {} concrete tool calls (synthesised action: steps not counted) are {} {} ({}), matching {:.0}% of the time",
                     survivors.len(),
-                    window.len(),
+                    window_len,
                     CYCLE_PERIOD_MARKER,
                     p,
                     cycle,
