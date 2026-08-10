@@ -7,7 +7,7 @@
  * of the detector registry it actually reaches. That caveat read **"6 of 22
  * detectors"** while `packages/proxy/tests/corpus/BASELINE.txt` — generated from
  * the live registry at test time, precisely so it cannot go stale — said **18 of
- * 25 are not-measured**, i.e. 7 of 25.
+ * 26 are not-measured**, i.e. 8 of 26.
  *
  * Both numbers were wrong, and the supporting arithmetic in the same sentence
  * ("ten read fields no trajectory carries; the rest…") only closed on 22. So a

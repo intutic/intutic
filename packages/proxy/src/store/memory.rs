@@ -537,6 +537,13 @@ impl LocalStore for MemoryStore {
         Ok(())
     }
 
+    async fn clear_session_locked_model(&self, session_id: &str) -> anyhow::Result<()> {
+        if let Some(sess) = lock(&self.sessions, "session")?.get_mut(session_id) {
+            sess.locked_model = None;
+        }
+        Ok(())
+    }
+
     async fn record_tool_sequence(
         &self,
         session_id: &str,

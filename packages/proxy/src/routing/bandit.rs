@@ -263,6 +263,50 @@ pub async fn route_model(
     Ok((best_model, resolved_sop_tier, task_type.to_string()))
 }
 
+/// Whether an upstream error says the MODEL was unservable, as opposed to the
+/// request being malformed.
+///
+/// The distinction decides fault. The error branch in `proxy.rs` treats 4xx as
+/// "the caller's fault" and only penalises arms on 5xx — which is right for a
+/// request the caller wrote, and exactly wrong for a model the ROUTER chose.
+/// When the bandit rewrites `claude-x` to a candidate the provider has
+/// decommissioned, the caller did nothing; the router did. Without this
+/// distinction that 404 passed through raw, the arm was never penalised, the
+/// session lock kept the pick, and — because a fresh session re-samples from
+/// unchanged priors — new sessions repeated it indefinitely.
+///
+/// The shape is a conjunction: a 400/404 whose body BOTH names the model AND
+/// carries a not-found/does-not-exist marker. Either alone is too loose — a
+/// 404 for a mistyped URL path never mentions a model, and plenty of 400s say
+/// "model" while complaining about temperature.
+///
+/// Matches the three providers the proxy routes across:
+/// - Anthropic: `{"type":"error","error":{"type":"not_found_error","message":"model: ..."}}`
+/// - OpenAI: `The model \`gpt-x\` does not exist or you do not have access to it.`
+/// - Gemini: `models/gemini-x is not found for API version v1beta`
+pub fn is_unservable_model_error(status: u16, body: &str) -> bool {
+    if status != 400 && status != 404 {
+        return false;
+    }
+    let b = body.to_ascii_lowercase();
+    if !b.contains("model") {
+        return false;
+    }
+    [
+        "not_found",
+        "not found",
+        "does not exist",
+        "unknown model",
+        "no such model",
+        "invalid model",
+        "decommissioned",
+        "has been deprecated",
+        "unsupported model",
+    ]
+    .iter()
+    .any(|m| b.contains(m))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -357,4 +401,42 @@ mod tests {
         assert!(selections_high_alpha > selections_high_beta);
         assert!(selections_high_alpha > 900); // Should be very high probability
     }
+
+    #[test]
+    fn unservable_shape_matches_the_three_providers() {
+        // Anthropic
+        assert!(is_unservable_model_error(
+            404,
+            r#"{"type":"error","error":{"type":"not_found_error","message":"model: claude-ancient"}}"#
+        ));
+        // OpenAI
+        assert!(is_unservable_model_error(
+            404,
+            "The model `gpt-nonexistent` does not exist or you do not have access to it."
+        ));
+        // Gemini
+        assert!(is_unservable_model_error(
+            400,
+            "models/gemini-nope is not found for API version v1beta"
+        ));
+    }
+
+    #[test]
+    fn unservable_shape_refuses_lookalikes() {
+        // A mistyped URL path: 404 with no model mention.
+        assert!(!is_unservable_model_error(404, "Not Found"));
+        // A real validation error that happens to say "model".
+        assert!(!is_unservable_model_error(
+            400,
+            "model parameter accepted; temperature must be between 0 and 1"
+        ));
+        // A 5xx is an outage, owned by the existing path.
+        assert!(!is_unservable_model_error(
+            500,
+            "model claude-x not found (internal replication lag)"
+        ));
+        // A rate limit names the model and is not about servability.
+        assert!(!is_unservable_model_error(429, "rate limit for model gpt-4o"));
+    }
+
 }

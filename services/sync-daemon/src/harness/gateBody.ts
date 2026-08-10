@@ -753,6 +753,10 @@ function intuticGate(toolName, target, command, record, workspaceId, toolInput) 
           record('tool_flagged', toolName,
             rule.reason + ' [' + rule.id + '] verb=' + nCommand.trim().split(' ')[0]);
         } catch (e) {}
+        // The rollback rung's storage half: this call was flagged and is about
+        // to proceed, which is the only instant the prior bytes still exist.
+        // No-op unless the workspace opted in.
+        try { _intuticCapturePreImage(toolName, toolInput, rule.id); } catch (e) {}
         continue;
       }
       // The rule's own reason, not a generic one: hookEvents.resolveSeverity
@@ -765,6 +769,175 @@ ${refuse}
   }
 }
 // ── end Intutic gate body ────────────────────────────────────────────────────
+`
+}
+
+
+/**
+ * Pre-image capture — the storage half of the rollback enforcement rung (TD-328).
+ *
+ * ## Why this exists and why it is here
+ *
+ * The enforcement ladder jumps from Reask (weak) to Kill (destructive). The
+ * missing rung is **Revert**: undo a flagged action's effect instead of ending
+ * the session over it. Reverting needs a pre-image, and nothing in the system
+ * had one — `ChangeEntry` records `tool`, `op`, `target` and deliberately
+ * **never the content being written**, so a manifest can say *what* changed
+ * and not *to what*.
+ *
+ * It belongs in the PreToolUse gate and nowhere else. The proxy sees tool calls
+ * the model *proposed*, before the harness runs them; only the hook fires in
+ * the instant between "this call was flagged and allowed" and "the file
+ * changed". That instant is the only place the prior bytes still exist.
+ *
+ * ## What is captured, and what is refused
+ *
+ * Only the `warn` tier — a call a guard flagged and let proceed. Blocked calls
+ * changed nothing, so there is nothing to restore; clean calls were never
+ * interesting. That keeps the volume proportional to flags rather than to
+ * edits.
+ *
+ * **Off unless asked for, and that is not this codebase's usual default.**
+ * Every other guard here is on by default because being wrong costs a false
+ * positive. This one stores the *contents* of the user's files on their disk,
+ * so being wrong costs a copy of their work nobody consented to. It follows
+ * the `mirror_sample_rate: 0.0` precedent: a capability with a real external
+ * cost is opted into, not defaulted on. `.intutic/rollback/` is gitignored by
+ * the same writer that creates it.
+ *
+ * Three ceilings, each refusing rather than truncating — a partial pre-image
+ * restores a file to a state it was never in, which is worse than no rollback:
+ *   * `MAX_PREIMAGE_BYTES` per file
+ *   * `MAX_PREIMAGE_ENTRIES` retained, oldest evicted
+ *   * only paths inside the workspace root, resolved — a capture of
+ *     `../../.ssh/id_rsa` would be an exfiltration primitive wearing a
+ *     governance badge.
+ */
+export function emitPreImageCapture(): string {
+  return `
+// ── Intutic pre-image capture (rollback rung, TD-328) ────────────────────────
+const _INTUTIC_ROLLBACK_DIR = path.join(process.cwd(), '.intutic', 'rollback');
+const _INTUTIC_MAX_PREIMAGE_BYTES = 2 * 1024 * 1024;
+const _INTUTIC_MAX_PREIMAGE_ENTRIES = 50;
+
+/** Opt-in. Absent file or absent flag means OFF — see the emitter's docstring. */
+function _intuticRollbackEnabled() {
+  try {
+    const cfg = JSON.parse(fs.readFileSync(path.join(process.cwd(), '.intutic', 'config.json'), 'utf-8'));
+    return cfg && cfg.captureRollbackPreImages === true;
+  } catch (e) { return false; }
+}
+
+/** The file path a tool call targets, or null when it targets none. */
+function _intuticTargetPath(input) {
+  if (!input || typeof input !== 'object') return null;
+  for (const k of ['file_path', 'filePath', 'path', 'notebook_path', 'target_file']) {
+    const v = input[k];
+    if (typeof v === 'string' && v.length > 0) return v;
+  }
+  return null;
+}
+
+/**
+ * Copies the CURRENT contents of a flagged call's target aside.
+ *
+ * Silent on every failure: a capture that cannot happen must never turn an
+ * allowed call into a blocked one. The gate's job is governance; this is a
+ * convenience layered on top of it, and inverting that would make the feature
+ * a new way to break the user's workflow.
+ */
+function _intuticCapturePreImage(toolName, input, ruleId) {
+  try {
+    if (!_intuticRollbackEnabled()) return;
+    const rel = _intuticTargetPath(input);
+    if (!rel) return;
+
+    const root = fs.realpathSync(process.cwd());
+    // BOTH sides resolved, or the check silently disables capture wherever the
+    // workspace path contains a symlink — which on macOS is the default for
+    // /tmp and common for home directories. Comparing a realpath'd root
+    // against an unresolved target compares /private/var/... with /var/...,
+    // so containment fails, the function returns, and nothing is captured
+    // while everything reports success. The file may not exist yet, so the
+    // deepest EXISTING ancestor is what gets resolved.
+    let abs = path.resolve(root, rel);
+    try {
+      abs = fs.realpathSync(abs);
+    } catch (e) {
+      let dir = path.dirname(abs);
+      const base = [path.basename(abs)];
+      for (;;) {
+        try { dir = fs.realpathSync(dir); break; } catch (e2) {
+          const parent = path.dirname(dir);
+          if (parent === dir) break;
+          base.unshift(path.basename(dir));
+          dir = parent;
+        }
+      }
+      abs = path.join(dir, ...base);
+    }
+    // Inside the workspace. Without this a crafted '../../.ssh/id_rsa' would
+    // have the gate copy a secret into a directory the agent can read back —
+    // an exfiltration primitive wearing a governance badge.
+    if (abs !== root && !abs.startsWith(root + path.sep)) return;
+
+    // A file that does not exist yet has no pre-image; restoring it means
+    // deleting it, which the manifest records as a creation.
+    let content = null, existed = false;
+    try {
+      const st = fs.statSync(abs);
+      if (!st.isFile()) return;
+      if (st.size > _INTUTIC_MAX_PREIMAGE_BYTES) return; // refuse, never truncate
+      content = fs.readFileSync(abs);
+      existed = true;
+    } catch (e) { existed = false; }
+
+    fs.mkdirSync(_INTUTIC_ROLLBACK_DIR, { recursive: true });
+    // The directory holds copies of the user's files; it must never be
+    // committed. Written every time because the directory may be new.
+    try {
+      fs.writeFileSync(path.join(_INTUTIC_ROLLBACK_DIR, '.gitignore'), '*\\n', 'utf-8');
+    } catch (e) {}
+
+    const id = crypto.randomBytes(8).toString('hex');
+    if (existed) fs.writeFileSync(path.join(_INTUTIC_ROLLBACK_DIR, id + '.blob'), content);
+
+    const entry = {
+      id: id,
+      capturedAt: new Date().toISOString(),
+      tool: toolName,
+      target: abs,
+      existed: existed,
+      bytes: existed ? content.length : 0,
+      ruleId: ruleId || '',
+      workspaceId: _intuticWsId,
+    };
+    fs.appendFileSync(
+      path.join(_INTUTIC_ROLLBACK_DIR, 'manifest.jsonl'),
+      JSON.stringify(entry) + '\\n',
+      { flag: 'a' }
+    );
+
+    // Evict oldest beyond the ceiling, blob and line together — a manifest
+    // line whose blob was reaped restores nothing while claiming it can.
+    try {
+      const lines = fs.readFileSync(path.join(_INTUTIC_ROLLBACK_DIR, 'manifest.jsonl'), 'utf-8')
+        .split('\\n').filter(Boolean);
+      if (lines.length > _INTUTIC_MAX_PREIMAGE_ENTRIES) {
+        const drop = lines.slice(0, lines.length - _INTUTIC_MAX_PREIMAGE_ENTRIES);
+        for (const l of drop) {
+          try { fs.unlinkSync(path.join(_INTUTIC_ROLLBACK_DIR, JSON.parse(l).id + '.blob')); } catch (e) {}
+        }
+        fs.writeFileSync(
+          path.join(_INTUTIC_ROLLBACK_DIR, 'manifest.jsonl'),
+          lines.slice(lines.length - _INTUTIC_MAX_PREIMAGE_ENTRIES).join('\\n') + '\\n',
+          'utf-8'
+        );
+      }
+    } catch (e) {}
+  } catch (e) { /* never block on a capture failure */ }
+}
+// ── end pre-image capture ────────────────────────────────────────────────────
 `
 }
 

@@ -27,6 +27,24 @@ use crate::metering::VirtualKeyRecord;
 use crate::routing::bandit::BanditArmState;
 use crate::telemetry::ExecutionTrace;
 
+/// Every Valkey key scoped to a graph, built in one place.
+///
+/// `graph_id` is client-supplied free text — it arrives on a `baggage` header
+/// and defaults to the session id — so the workspace segment is the ONLY thing
+/// separating two tenants that happen to choose the same graph id on a shared
+/// Valkey. Without it they would share a membership set, a spend counter that
+/// feeds the budget detector, a broadcast rate ceiling, and each other's
+/// notification queues, whose payloads carry tenant-identifying free text.
+///
+/// A function rather than five `format!` calls (TD-208): the invariant is
+/// testable here and a new graph key cannot be added without passing through
+/// it. The composite notification id in `broadcast.rs` carries the same
+/// workspace-first shape for the same reason.
+fn graph_key(workspace_id: &str, graph_id: &str, suffix: &str) -> String {
+    format!("graph:{workspace_id}:{graph_id}:{suffix}")
+}
+
+
 /// Lowercase hex SHA-256, matching the control plane's `hashKeySha256`.
 fn sha256_hex(raw: &str) -> String {
     use sha2::{Digest, Sha256};
@@ -250,6 +268,7 @@ impl ValkeyStore {
 }
 
 #[async_trait]
+
 impl LocalStore for ValkeyStore {
     async fn update_arm(
         &self,
@@ -401,6 +420,12 @@ impl LocalStore for ValkeyStore {
         let _: () = conn
             .hset(session_key(session_id), "lockedModel", model)
             .await?;
+        Ok(())
+    }
+
+    async fn clear_session_locked_model(&self, session_id: &str) -> anyhow::Result<()> {
+        let mut conn = self.conn();
+        let _: () = conn.hdel(session_key(session_id), "lockedModel").await?;
         Ok(())
     }
 
@@ -576,7 +601,7 @@ impl LocalStore for ValkeyStore {
 
     async fn touch_graph_node(&self, workspace_id: &str, graph_id: &str, node_id: &str, ttl_secs: u64) {
         let mut conn = self.conn();
-        let key = format!("graph:{workspace_id}:{graph_id}:nodes");
+        let key = graph_key(workspace_id, graph_id, "nodes");
         // Two writes, no read — this runs on every request in a graph, so the
         // membership read is deferred to the broadcast path.
         let _: Result<(), redis::RedisError> = conn.sadd(&key, node_id).await;
@@ -585,7 +610,7 @@ impl LocalStore for ValkeyStore {
 
     async fn graph_members(&self, workspace_id: &str, graph_id: &str) -> Vec<String> {
         let mut conn = self.conn();
-        conn.smembers(format!("graph:{workspace_id}:{graph_id}:nodes"))
+        conn.smembers(graph_key(workspace_id, graph_id, "nodes"))
             .await
             .unwrap_or_default()
     }
@@ -614,14 +639,14 @@ impl LocalStore for ValkeyStore {
 
     async fn graph_node_count(&self, workspace_id: &str, graph_id: &str) -> Option<u32> {
         let mut conn = self.conn();
-        conn.scard::<_, u32>(format!("graph:{workspace_id}:{graph_id}:nodes"))
+        conn.scard::<_, u32>(graph_key(workspace_id, graph_id, "nodes"))
             .await
             .ok()
     }
 
     async fn is_graph_member(&self, workspace_id: &str, graph_id: &str, node_id: &str) -> Option<bool> {
         let mut conn = self.conn();
-        let key = format!("graph:{workspace_id}:{graph_id}:nodes");
+        let key = graph_key(workspace_id, graph_id, "nodes");
         // An unknown graph is not the same as a dead node — if we never
         // tracked this graph, we have no opinion on who is alive in it.
         let exists: bool = conn.exists(&key).await.ok()?;
@@ -633,7 +658,7 @@ impl LocalStore for ValkeyStore {
 
     async fn add_graph_spend(&self, workspace_id: &str, graph_id: &str, amount: f64, ttl_secs: u64) -> Option<f64> {
         let mut conn = self.conn();
-        let key = format!("graph:{workspace_id}:{graph_id}:spend");
+        let key = graph_key(workspace_id, graph_id, "spend");
         let total: f64 = conn.incr(&key, amount).await.ok()?;
         // Same TTL as membership, so a finished graph's cost does not linger
         // and get attributed to a later graph that reuses the id.
@@ -643,7 +668,7 @@ impl LocalStore for ValkeyStore {
 
     async fn graph_spend(&self, workspace_id: &str, graph_id: &str) -> Option<f64> {
         let mut conn = self.conn();
-        conn.get::<_, Option<f64>>(format!("graph:{workspace_id}:{graph_id}:spend"))
+        conn.get::<_, Option<f64>>(graph_key(workspace_id, graph_id, "spend"))
             .await
             .ok()
             .flatten()
@@ -657,7 +682,7 @@ impl LocalStore for ValkeyStore {
         // the same category within it is a re-statement of a fact the graph
         // has already been told.
         let claimed: Option<String> = redis::cmd("SET")
-            .arg(format!("graph:{workspace_id}:{graph_id}:bcast:{kind}"))
+            .arg(graph_key(workspace_id, graph_id, &format!("bcast:{kind}")))
             .arg("1")
             .arg("NX")
             .arg("EX")
@@ -672,7 +697,7 @@ impl LocalStore for ValkeyStore {
         // Then the ceiling across all categories. Counted after the dedupe so
         // repeats of one category cannot consume the budget that lets a
         // genuinely different finding through.
-        let rate_key = format!("graph:{workspace_id}:{graph_id}:bcast:rate");
+        let rate_key = graph_key(workspace_id, graph_id, "bcast:rate");
         let count: i64 = conn.incr(&rate_key, 1).await.unwrap_or(0);
         if count == 1 {
             let _: Result<(), redis::RedisError> =
@@ -1467,5 +1492,50 @@ mod loop_key_contract {
         sorted.sort();
         sorted.dedup();
         assert_eq!(sorted.len(), 3, "loop keys must not collide");
+    }
+}
+
+#[cfg(test)]
+mod graph_tenancy_tests {
+    use super::*;
+
+    /// TD-208: the workspace segment is the whole tenancy boundary here.
+    ///
+    /// `graph_id` arrives as client-supplied free text on a `baggage` header
+    /// and defaults to the session id, so two tenants CAN choose the same one.
+    /// If the workspace segment were ever dropped they would share a
+    /// membership set, a spend counter feeding the budget detector, a
+    /// broadcast rate ceiling, and each other's notification queues — and
+    /// isolation would be an accident of id uniqueness rather than a property.
+    #[test]
+    fn two_tenants_sharing_a_graph_id_share_no_key() {
+        let a = "ws_alpha";
+        let b = "ws_beta";
+        let shared_graph = "graph-1"; // the collision the header makes possible
+
+        for suffix in ["nodes", "spend", "bcast:rate", "bcast:BUDGET_BREACH"] {
+            let ka = graph_key(a, shared_graph, suffix);
+            let kb = graph_key(b, shared_graph, suffix);
+            assert_ne!(
+                ka, kb,
+                "tenants {a} and {b} collide on graph key `{suffix}` — a shared spend \
+                 counter, membership set or notification queue across tenants"
+            );
+            assert!(ka.contains(a), "workspace segment missing from {ka}");
+            assert!(kb.contains(b), "workspace segment missing from {kb}");
+        }
+    }
+
+    /// The workspace comes FIRST, so a prefix scan by tenant is possible and a
+    /// graph id cannot be crafted to impersonate one.
+    #[test]
+    fn the_workspace_segment_leads_the_key() {
+        let k = graph_key("ws_alpha", "g1", "nodes");
+        assert_eq!(k, "graph:ws_alpha:g1:nodes");
+        assert!(
+            k.starts_with("graph:ws_alpha:"),
+            "workspace must lead: a trailing segment lets a crafted graph_id \
+             like `x:nodes` reshape the key"
+        );
     }
 }

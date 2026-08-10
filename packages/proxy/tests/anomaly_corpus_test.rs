@@ -40,6 +40,11 @@ const MEASURED: &[&str] = &[
     "tool_diversity_collapse",
     "transition_probability",
     "prompt_injection",
+    // Reads `tool_calls`, which every BFCL trajectory carries — the corpus can
+    // measure its false-positive rate for real. 1,000 benign trajectories of
+    // API-orchestration calls contain no code blob bundling credential access
+    // with egress, so a firing here would be a genuine false positive.
+    "code_as_action",
 ];
 
 /// Seeds that fire on unmutated input — pinned by NAME, not by count.

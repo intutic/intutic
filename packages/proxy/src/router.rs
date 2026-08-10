@@ -36,6 +36,11 @@ pub fn build_router(state: AppState) -> Router {
     Router::new()
         // Health check
         .route("/health", get(health))
+        // Guard-liveness verdicts, on demand. Same suite the startup/periodic
+        // runner executes; an operator asking "is my rule live?" gets the
+        // two-sided evidence, per guard, with latency. Local diagnostics only —
+        // it evaluates synthetic contexts and calls no upstream.
+        .route("/intutic/probes", get(run_probes))
         .route("/", get(root_info))
         .merge(proxy_routes)
         // HTTP CONNECT tunnel + Decrypted MITM requests fallback handler
@@ -82,5 +87,18 @@ async fn root_info() -> Json<serde_json::Value> {
         // `proxy::DeltaShape::Unparsed` for the full chain.
         "protocols": ["anthropic", "openai", "openai-responses"],
         "gemini_unsupported": "requests to /v1beta/ are routed but not translated; the model name is not read from the URL"
+    }))
+}
+
+/// `GET /intutic/probes` — run the guard-liveness suite and return verdicts.
+async fn run_probes() -> impl axum::response::IntoResponse {
+    let registry = crate::plugins::anomaly::DetectorRegistry::with_defaults();
+    let sops = crate::sops::loaded_sops();
+    let verdicts = crate::probes::run_guard_probes(&registry, &sops);
+    let failed = verdicts.iter().filter(|v| !v.passed).count();
+    axum::Json(serde_json::json!({
+        "probes": verdicts,
+        "total": verdicts.len(),
+        "failed": failed,
     }))
 }

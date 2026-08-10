@@ -262,6 +262,41 @@ async fn main() -> anyhow::Result<()> {
     // Ensure local CA exists for TLS MITM (generates ca.crt/ca.key if missing)
     let _ = intutic_proxy::ca_manager::ensure_ca_exists().await;
 
+    // ── Guard-liveness probes: at startup, then every 15 minutes ──
+    //
+    // The suite is in-process and upstream-free (see probes.rs), so the cost
+    // is microseconds. Startup is the run that matters most: a deployment
+    // whose guards do not fire should say so in its first seconds of log,
+    // not after its first incident. Failures log at ERROR — the operator's
+    // log stream is a surface that provably reaches someone — and the same
+    // verdicts are queryable at GET /intutic/probes.
+    tokio::spawn(async {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(900));
+        loop {
+            interval.tick().await;
+            let registry = intutic_proxy::plugins::anomaly::DetectorRegistry::with_defaults();
+            let sops = intutic_proxy::sops::loaded_sops();
+            let verdicts = intutic_proxy::probes::run_guard_probes(&registry, &sops);
+            let failed: Vec<_> = verdicts.iter().filter(|v| !v.passed).collect();
+            if failed.is_empty() {
+                tracing::info!(
+                    probes = verdicts.len(),
+                    "guard-liveness probes passed — every declared guard fired on its canary"
+                );
+            } else {
+                for v in &failed {
+                    tracing::error!(
+                        probe = %v.probe_id,
+                        guard = %v.guard,
+                        detail = %v.detail,
+                        "GUARD-LIVENESS PROBE FAILED — a declared control did not behave; \
+                         treat as an enforcement outage"
+                    );
+                }
+            }
+        }
+    });
+
     // Build router
     let app = router::build_router(state);
 

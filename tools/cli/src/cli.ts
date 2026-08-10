@@ -73,6 +73,16 @@ program
   })
 
 program
+  .command('rollback')
+  .description('List or restore pre-images captured when a guard flagged a file-writing call')
+  .option('--list', 'List captured pre-images (the default with no --id)')
+  .option('--id <id>', 'Restore the named pre-image')
+  .action(async (opts) => {
+    const { runRollback } = await import('./commands/rollback.js')
+    await runRollback(opts)
+  })
+
+program
   .command('budget')
   .description('Check remaining daily/monthly budget and list active loops')
   .option('--dev', 'Use local control plane (http://localhost:3001)')
