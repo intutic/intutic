@@ -66,6 +66,23 @@ export interface ApprovedBypassOptions {
   cacheDir?: string
 }
 
+/**
+ * Trims trailing `/` characters without a regex.
+ *
+ * `controlPlaneUrl` is operator-configured, not remotely attacker-controlled
+ * — but CodeQL's static analysis flags `/\/+$/` as a polynomial-time pattern
+ * on external input regardless of practical exploitability here, and the
+ * identical pattern already existed unflagged in `onboarding.ts` and
+ * `exec.ts` (fixed alongside this one). A loop is O(n), cannot be
+ * mis-classified as a ReDoS shape by any static analyzer, and needs no
+ * exemption to justify.
+ */
+function trimTrailingSlashes(s: string): string {
+  let end = s.length
+  while (end > 0 && s.charCodeAt(end - 1) === 47 /* '/' */) end--
+  return s.slice(0, end)
+}
+
 /** Fetches the workspace's currently-approved bypasses. Returns null on any
  *  failure — the caller keeps the previous cache file rather than replacing
  *  it with nothing, same rule `fetchResolvedPolicy` follows. */
@@ -73,7 +90,7 @@ export async function fetchApprovedBypasses(
   opts: ApprovedBypassOptions,
 ): Promise<ApprovedBypassEntry[] | null> {
   const url =
-    `${opts.controlPlaneUrl.replace(/\/+$/, '')}/api/v1/decisions/approved-bypasses` +
+    `${trimTrailingSlashes(opts.controlPlaneUrl)}/api/v1/decisions/approved-bypasses` +
     `?workspaceId=${encodeURIComponent(opts.workspaceId)}`
   try {
     const res = await fetch(url, {
