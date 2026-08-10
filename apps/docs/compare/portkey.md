@@ -96,7 +96,7 @@ Three limits, because a rate without them is marketing:
 - **It is a lower bound.** BFCL is API-orchestration traffic filtered to successful
   completion — short (median 6 calls) and clean. Every sequence detector's exposure
   grows with trajectory length, and agentic coding runs are far longer.
-- **It covers 7 of 25 detectors.** Six against the two corpora above, plus one
+- **It covers 8 of 26 detectors.** Seven against the two corpora above, plus one
   measured against 10,753 real tool and parameter descriptions. The other eighteen
   read fields no public corpus supplies — graph depth, workflow budget, DLP findings —
   or fire only on an operator declaration and so have no false-positive rate to

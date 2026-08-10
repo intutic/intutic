@@ -404,6 +404,12 @@ impl LocalStore for ValkeyStore {
         Ok(())
     }
 
+    async fn clear_session_locked_model(&self, session_id: &str) -> anyhow::Result<()> {
+        let mut conn = self.conn();
+        let _: () = conn.hdel(session_key(session_id), "lockedModel").await?;
+        Ok(())
+    }
+
     async fn record_tool_sequence(
         &self,
         session_id: &str,

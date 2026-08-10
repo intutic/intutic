@@ -2889,7 +2889,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // (mirrors the candidate-pool bypass inside route_model). Arm keys use the
     // pre-override routed model, consistent with the outage-penalty keys.
     let reward_cfg = state.config.intutic_settings.routing.reward.clone();
-    let reward_eligible = bandit_active
+    let mut reward_eligible = bandit_active
         && reward_cfg.enabled
         // Suppressed when the override served a different model than the arm
         // names. Crediting an arm for a response it did not produce is worse
@@ -2906,8 +2906,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             .any(|m| m == &original_routed_model);
 
     // Captured before `actual_model` is moved downstream, so the response can
-    // still say which model served the request.
-    let routed_from_to: Option<(String, String)> = if actual_model != model {
+    // still say which model served the request. `mut`: the unservable-model
+    // fallback clears it when the request ends up served by the model the
+    // caller asked for.
+    let mut routed_from_to: Option<(String, String)> = if actual_model != model {
         Some((model.clone(), actual_model.clone()))
     } else {
         None
@@ -3161,6 +3163,23 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 .map(|b| (upstream_url.clone(), fwd_headers.clone(), b, candidate.clone()))
         });
 
+    // ── Unservable-model fallback plan ──
+    //
+    // Captured for the same reason as the mirror plan above: the send consumes
+    // the headers. Only built when the router rewrote the model within the SAME
+    // provider — there `fwd_headers` already carries that provider's
+    // credentials and `upstream_url` is that provider's endpoint, so the
+    // original request (`body_bytes`, requested model intact) can be re-sent
+    // as-is. A cross-provider unservable pick is penalised and unlocked below
+    // but not retried: the retry would need the origin provider's credentials
+    // re-resolved, and a wrong retry is worse than a clear error.
+    let fallback_plan: Option<(String, reqwest::header::HeaderMap, Vec<u8>)> =
+        if routed_from_to.is_some() && is_same_provider {
+            Some((upstream_url.clone(), fwd_headers.clone(), body_bytes.to_vec()))
+        } else {
+            None
+        };
+
     let fwd_result = state
         .http_client
         .request(
@@ -3174,7 +3193,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         .send()
         .await;
 
-    let upstream_resp = match fwd_result {
+    let mut upstream_resp = match fwd_result {
         Ok(r) => r,
         Err(e) => {
             let desc = format!("Failed to reach LLM provider: {}", e);
@@ -3217,15 +3236,132 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         }
     };
 
-    let upstream_status = StatusCode::from_u16(upstream_resp.status().as_u16())
+    // `mut`: the unservable-model recovery below replaces the response, and a
+    // recovered body served under the dead pick's 404 is exactly the kind of
+    // half-fix this codebase collects — the caller's SDK would discard a
+    // perfectly good completion because the status said failure.
+    let mut upstream_status = StatusCode::from_u16(upstream_resp.status().as_u16())
         .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
 
     tracing::info!(status = %upstream_status, "Upstream response status received");
 
+    let mut fallback_from: Option<String> = None;
     if !upstream_resp.status().is_success() {
-        let err_status = upstream_resp.status();
-        let err_headers = upstream_resp.headers().clone();
-        let err_body = upstream_resp.text().await.unwrap_or_default();
+        let mut err_status = upstream_resp.status();
+        let mut err_headers = upstream_resp.headers().clone();
+        let mut err_body = upstream_resp.text().await.unwrap_or_default();
+
+        // ── Unservable-model recovery ──
+        //
+        // If the router rewrote the model and the upstream says THAT MODEL does
+        // not exist, the failure belongs to the router, not the caller. The
+        // "4xx is the caller's fault" rule further down is right for requests
+        // the caller wrote and exactly wrong here — and before this branch, the
+        // consequences compounded: the 404 passed through raw, the arm took no
+        // penalty (4xx produced no reward signal), the session lock kept the
+        // pick for the session's life, and a fresh session re-sampled from
+        // unchanged priors and repeated it. Config-load validation against
+        // `model_list` prevents the typo case; this is the runtime net for what
+        // validation cannot see (empty model_list, provider-side decommission).
+        //
+        // Three steps, in order — the first two run even when the retry cannot:
+        //   1. the arm learns, keyed to the model the bandit actually chose;
+        //   2. the session lock is released so the next request re-selects;
+        //   3. same-provider only: the ORIGINAL request is re-sent once, and a
+        //      success rejoins the normal response path as an unrouted request.
+        // `Option<Response>` rather than a bool flag: the borrow checker must
+        // see that every path past this block re-initialises `upstream_resp`
+        // (consumed above by `.text()`), and it cannot correlate a runtime
+        // flag with initialisation state — `if let` it can.
+        let mut recovered_resp: Option<reqwest::Response> = None;
+        if routed_from_to.is_some()
+            && crate::routing::bandit::is_unservable_model_error(err_status.as_u16(), &err_body)
+        {
+            let bad_model = original_routed_model.clone();
+            tracing::error!(
+                workspace_id = %workspace_id,
+                unservable_model = %bad_model,
+                requested_model = %model,
+                status = %err_status,
+                "Routed model is unservable upstream — penalising the arm, releasing the \
+                 session lock{}",
+                if fallback_plan.is_some() { ", retrying with the requested model" } else { "" }
+            );
+
+            // 1. Learn. Cloud cron consumes the outage hash; the local loop
+            //    takes a zero-reward pull. Both keyed to the routed arm.
+            if bandit_active
+                && state.reward_engine.cached_mode(&workspace_id) != Some(RewardMode::Local)
+            {
+                let arm_key = format!("arm:{}:{}:{}", bad_model, sop_tier, task_type);
+                let _ = state.store.incr_outage_failure(&workspace_id, &arm_key).await;
+            }
+            if reward_eligible {
+                spawn_reward_update(
+                    &state,
+                    &workspace_id,
+                    &bad_model,
+                    &sop_tier,
+                    &task_type,
+                    reward_cfg.clone(),
+                    RewardSignals {
+                        upstream_ok: false,
+                        latency_ms: start.elapsed().as_millis() as u32,
+                        token_anomaly: false,
+                        raw_cost_usd: 0.0,
+                        actual_cost_usd: 0.0,
+                        response_integrity: crate::routing::integrity::RIS_MAX,
+                    },
+                );
+            }
+
+            // 2. Unlock, so the session is not condemned to repeat the pick.
+            let _ = state.store.clear_session_locked_model(&session_id).await;
+
+            // 3. One retry, same provider only (the plan is None otherwise).
+            if let Some((f_url, f_headers, f_body)) = fallback_plan.clone() {
+                match state
+                    .http_client
+                    .request(reqwest::Method::POST, &f_url)
+                    .headers(f_headers)
+                    .body(f_body)
+                    .timeout(std::time::Duration::from_secs(120))
+                    .send()
+                    .await
+                {
+                    Ok(retry_resp) if retry_resp.status().is_success() => {
+                        recovered_resp = Some(retry_resp);
+                        // The request is now served by the model the caller
+                        // asked for: no substitution to disclose, no arm to
+                        // credit — it was penalised above, and crediting the
+                        // requested model's arm for a response the bandit did
+                        // not choose would corrupt attribution the same way
+                        // the override does.
+                        actual_model = model.clone();
+                        routed_from_to = None;
+                        reward_eligible = false;
+                        fallback_from = Some(bad_model);
+                    }
+                    Ok(retry_resp) => {
+                        // The fallback's error is the honest one to pass on:
+                        // it describes the request the caller actually wrote.
+                        err_status = StatusCode::from_u16(retry_resp.status().as_u16())
+                            .unwrap_or(StatusCode::BAD_GATEWAY);
+                        err_headers = retry_resp.headers().clone();
+                        err_body = retry_resp.text().await.unwrap_or_default();
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, "Unservable-model fallback send failed; passing the original error through");
+                    }
+                }
+            }
+        }
+
+        if let Some(r) = recovered_resp {
+            upstream_status = StatusCode::from_u16(r.status().as_u16())
+                .unwrap_or(StatusCode::OK);
+            upstream_resp = r;
+        } else {
         tracing::error!(
             status = %err_status,
             headers = ?err_headers,
@@ -3324,6 +3460,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             .body(axum::body::Body::from(err_body))
             .unwrap()
             .into_response();
+        }
     }
 
     // Copy upstream response headers back to client
@@ -4564,6 +4701,15 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     headers_mut.insert("x-intutic-routed-to", v);
                 }
             }
+                    // Disclosed like the routed-from pair, and for the same reason:
+                // a model the caller asked for being served only because the
+                // router's own pick failed is a trust event. Presence is the
+                // signal; the value names the model that could not be served.
+                if let Some(bad) = &fallback_from {
+                    if let Ok(v) = axum::http::HeaderValue::from_str(bad) {
+                        headers_mut.insert("x-intutic-routing-fallback-from", v);
+                    }
+                }
         }
         return response
             .body(Body::from_stream(ReceiverStream::new(rx)))
@@ -5309,6 +5455,15 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 headers_mut.insert("x-intutic-routed-to", v);
             }
         }
+            // Disclosed like the routed-from pair, and for the same reason:
+            // a model the caller asked for being served only because the
+            // router's own pick failed is a trust event. Presence is the
+            // signal; the value names the model that could not be served.
+            if let Some(bad) = &fallback_from {
+                if let Ok(v) = axum::http::HeaderValue::from_str(bad) {
+                    headers_mut.insert("x-intutic-routing-fallback-from", v);
+                }
+            }
     }
     response.body(Body::from(final_body)).unwrap_or_else(|_| {
         json_error(
