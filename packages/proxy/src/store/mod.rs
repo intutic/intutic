@@ -321,6 +321,16 @@ pub trait LocalStore: Send + Sync + 'static {
     async fn set_session_locked_model(&self, session_id: &str, model: &str)
         -> anyhow::Result<()>;
 
+    /// Release the session's model pin.
+    ///
+    /// The lock is set the moment the bandit selects and, until this existed,
+    /// released never. A pick the upstream cannot serve was therefore locked in
+    /// for the session's whole life: every subsequent request took the
+    /// session-lock branch, re-sent the unservable model, and failed the same
+    /// way. Called when an upstream error is attributed to the routed model, so
+    /// the next request re-selects from arms that have since been penalised.
+    async fn clear_session_locked_model(&self, session_id: &str) -> anyhow::Result<()>;
+
     // ── Tool-sequence anomaly detection ──────────────────────────────
 
     /// Append `new_tools` to the session's tool sequence, trim to the newest

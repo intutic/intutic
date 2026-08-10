@@ -396,3 +396,12 @@ export {
   toonEncodeToolResult,
   toonDecodeToolResult,
 } from './toon.js'
+
+export {
+  SECURITY_POSTURES,
+  COST_POSTURES,
+  findPosture,
+  type PosturePreset,
+  type PostureKind,
+  type PreImageEntry,
+} from './posturePresets.js'

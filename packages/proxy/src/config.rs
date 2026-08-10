@@ -446,8 +446,17 @@ pub struct RoutingConfig {
     pub enabled: Option<bool>,
 
     /// Candidate model pool for Thompson sampling. Requests for models outside
-    /// this pool bypass the bandit entirely. Names must match `model_list`
-    /// entries so provider resolution and pricing stay accurate.
+    /// this pool bypass the bandit entirely.
+    ///
+    /// When `model_list` is non-empty, candidates are validated against it at
+    /// config load and unmatched names are DROPPED with an error log — see
+    /// `load_config`. This comment used to say the names "must match
+    /// `model_list` entries" while nothing checked: `model_list` was parsed and
+    /// never read by any code, so a typo here produced a candidate the bandit
+    /// could select and the upstream would 404 — session-locked, unpenalised,
+    /// and repeated by every fresh session. With an empty `model_list`
+    /// (standalone, upstreams from env) no validation is possible and the
+    /// runtime fallback in proxy.rs is the safety net.
     #[serde(default = "default_candidate_models")]
     pub candidate_models: Vec<String>,
 
@@ -638,6 +647,46 @@ pub fn load_config(path: &str) -> anyhow::Result<ProxyConfig> {
         }
     }
 
+    // ── Candidate-pool validation: the read that makes `model_list` real ──
+    //
+    // `model_list` was parsed and consumed by nothing, while the field comment
+    // on `candidate_models` claimed the two "must match" — a textbook inert
+    // control inside the routing layer itself. When a model list exists, it is
+    // now the registry of servable models: candidates it does not contain are
+    // dropped loudly rather than left for an upstream 404 to discover.
+    //
+    // Dropped, not fatal. The proxy sits on the developer's hot path, and
+    // refusing to boot over a routing typo would block every request to make a
+    // point about a subset of them. An emptied pool disables the bandit
+    // entirely (route_model only engages when the requested model is in the
+    // pool), which is the correct fail-safe: no routing beats wrong routing.
+    if !config.model_list.is_empty() {
+        let servable: std::collections::HashSet<&str> = config
+            .model_list
+            .iter()
+            .flat_map(|m| [m.model_name.as_str(), m.litellm_params.model.as_str()])
+            .collect();
+        let routing = &mut config.intutic_settings.routing;
+        let before = routing.candidate_models.len();
+        routing.candidate_models.retain(|c| {
+            let ok = servable.contains(c.as_str());
+            if !ok {
+                tracing::error!(
+                    candidate = %c,
+                    "routing.candidate_models entry not present in model_list — dropped. \
+                     The bandit will not consider it; add it to model_list to route to it."
+                );
+            }
+            ok
+        });
+        if before > 0 && routing.candidate_models.is_empty() {
+            tracing::error!(
+                "every routing candidate was dropped by model_list validation; \
+                 bandit routing is effectively disabled for this proxy"
+            );
+        }
+    }
+
     Ok(config)
 }
 
@@ -794,5 +843,61 @@ intutic_settings:
                 serde_yaml::from_str(&format!("{raw}")).expect("mode parses");
             assert_eq!(got, want, "`{raw}` must parse to {want:?}");
         }
+    }
+
+    /// The validation that makes `model_list` a read structure.
+    ///
+    /// It was parsed and consumed by nothing while the candidate-pool comment
+    /// claimed the two "must match" — so a typo produced a candidate the
+    /// bandit could select and the upstream would 404, session-locked and
+    /// unpenalised. These drive the real loader through a temp file, because
+    /// the validation lives in `load_config`, not in serde.
+    #[test]
+    fn candidates_absent_from_a_nonempty_model_list_are_dropped() {
+        let dir = std::env::temp_dir().join("intutic-config-validation-test");
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let path = dir.join("config.yaml");
+        std::fs::write(
+            &path,
+            r#"
+model_list:
+  - model_name: real-model
+    litellm_params:
+      model: openai/real-model
+intutic_settings:
+  routing:
+    enabled: true
+    candidate_models: ["real-model", "typo-model"]
+"#,
+        )
+        .expect("write config");
+
+        let cfg = load_config(path.to_str().unwrap()).expect("loads");
+        let pool = &cfg.intutic_settings.routing.candidate_models;
+        assert_eq!(
+            pool,
+            &vec!["real-model".to_string()],
+            "a candidate model_list does not carry must be dropped, not left for \
+             an upstream 404 to discover"
+        );
+    }
+
+    #[test]
+    fn an_empty_model_list_validates_nothing() {
+        // Standalone: upstreams from env, no registry to check against. The
+        // runtime fallback in proxy.rs is the net for this shape.
+        let dir = std::env::temp_dir().join("intutic-config-validation-test-empty");
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let path = dir.join("config.yaml");
+        std::fs::write(
+            &path,
+            "intutic_settings:\n  routing:\n    candidate_models: [\"anything-goes\"]\n",
+        )
+        .expect("write config");
+        let cfg = load_config(path.to_str().unwrap()).expect("loads");
+        assert_eq!(
+            cfg.intutic_settings.routing.candidate_models,
+            vec!["anything-goes".to_string()]
+        );
     }
 }

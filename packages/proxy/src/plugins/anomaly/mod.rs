@@ -396,6 +396,16 @@ pub struct DetectorRegistry {
 }
 
 impl DetectorRegistry {
+    /// A registry holding exactly `detectors`.
+    ///
+    /// Exists for the guard-liveness probes' falsifiability test: an EMPTY
+    /// registry is the purest inert control, and the probe suite must fail
+    /// against it or the suite is measuring nothing. Production always uses
+    /// `with_defaults`.
+    pub fn new(detectors: Vec<Box<dyn AnomalyDetector>>) -> Self {
+        Self { detectors }
+    }
+
     /// The default set: every detector that is a pure function of one request
     /// context. Detectors requiring node identity beyond what a single request
     /// carries are not registered here.
@@ -413,6 +423,7 @@ impl DetectorRegistry {
                 Box::new(ForbiddenSuccessionDetector::default()),
                 Box::new(CallCeilingDetector::default()),
                 Box::new(TaintCooccurrenceDetector::default()),
+                Box::new(CodeAsActionDetector::default()),
                 Box::new(PlanAdherenceDetector::default()),
                 Box::new(ScopePathDetector::default()),
                 Box::new(ReviewGateDetector::default()),
@@ -1235,7 +1246,10 @@ mod coverage_tests {
         let reg = DetectorRegistry::with_defaults();
         let ids: Vec<&'static str> = reg.ids();
 
-        assert_eq!(ids.len(), 25, "registry size changed — update this test deliberately");
+        // 26: code_as_action joined — the in-blob analogue of forbid_with
+        // secrets()+http_post, for the one-REPL-call-bundles-everything shape
+        // that per-call gates cannot see into.
+        assert_eq!(ids.len(), 26, "registry size changed — update this test deliberately");
 
         for id in &ids {
             assert!(!id.is_empty(), "a registered detector has no id");

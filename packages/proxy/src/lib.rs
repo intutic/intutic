@@ -9,6 +9,7 @@ pub mod injection;
 pub mod metering;
 pub mod plugins;
 pub mod protocol;
+pub mod probes;
 pub mod proxy;
 pub mod router;
 pub mod snip;

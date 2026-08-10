@@ -17,7 +17,9 @@ import * as node_os from 'node:os'
 import { z } from 'zod'
 import type { SyncSopEntry } from '@intutic/shared-types'
 import { createLogger } from '@intutic/logger'
-import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
+import { emitJsGate, emitJsFailClosedPrelude,
+  emitPreImageCapture,
+} from './gateBody.js'
 import { emitRedactor } from './holdRedaction.js'
 
 const log = createLogger('sync-claude-hooks')
@@ -366,6 +368,7 @@ try {
 //
 // It is emitted from harness/gateBody.ts now. That does not make the escaping
 // easier; it makes there be one of it, with one set of tests.
+${emitPreImageCapture()}
 ${emitJsGate({ harness: 'claude-code', contract: 'exit2' })}
 ${emitRedactor()}
 

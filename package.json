@@ -17,7 +17,7 @@
     "lint:sop-keys": "node tools/scripts/check-sop-keys.js",
     "lint:wasm-host-imports": "node tools/scripts/check-wasm-host-imports.js",
     "prepare": "node tools/scripts/install-hooks.js",
-    "lint:claims": "node tools/scripts/check-latency-claims.js && node tools/scripts/check-sop-keys.js && node tools/scripts/check-wasm-host-imports.js && node tools/scripts/check-detector-coverage-claims.js && node tools/scripts/check-wasm-context-docs.js && node tools/scripts/check-wasm-verdict-codes.js && node tools/scripts/check-rule-dsl-fields.js && node tools/scripts/check-repo-weight.js && node tools/scripts/check-source-is-text.js",
+    "lint:claims": "node tools/scripts/check-latency-claims.js && node tools/scripts/check-sop-keys.js && node tools/scripts/check-wasm-host-imports.js && node tools/scripts/check-detector-coverage-claims.js && node tools/scripts/check-wasm-context-docs.js && node tools/scripts/check-wasm-verdict-codes.js && node tools/scripts/check-rule-dsl-fields.js && node tools/scripts/check-repo-weight.js && node tools/scripts/check-source-is-text.js && node tools/scripts/check-guard-reachability.js && node tools/scripts/check-tech-debt-status.js",
     "lint:detector-coverage": "node tools/scripts/check-detector-coverage-claims.js",
     "lint:wasm-context-docs": "node tools/scripts/check-wasm-context-docs.js",
     "lint:wasm-verdicts": "node tools/scripts/check-wasm-verdict-codes.js",
