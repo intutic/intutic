@@ -33,8 +33,9 @@
 //! between an agent and a capability. Enforcement is the detectors and the
 //! WASM rules, which do not consult the role. See ADR-009.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use crate::wasm::context::RiskLevel;
 
@@ -480,6 +481,67 @@ fn parse_rules(front: &str, key: &str) -> (Vec<(String, String, bool)>, Vec<Stri
     (ok, errs)
 }
 
+/// Parse one SOP's raw markdown+front-matter content into a [`Sop`], given its
+/// title. Factored out of `read_dir_sops` so the *same* parser — one
+/// definition of what `deny_tools:` front matter means — serves both the
+/// local on-disk path and the per-workspace fetch path
+/// (`fetch_workspace_sops`, LLD #64 §6 increment 4): the control plane sends
+/// raw `{title, markdownContent}` pairs rather than a pre-parsed structured
+/// shape specifically so this is the only place YAML-frontmatter parsing
+/// happens, ever.
+///
+/// `source` names where `raw` came from, for the unparseable-rule warning
+/// (a file path locally, `workspace:{id}` for a fetched SOP) — the warning
+/// exists so an operator can find the file/SOP with the typo, and "from
+/// nowhere in particular" would defeat that.
+///
+/// Returns `None` for a file/entry that parses to nothing at all: no prose
+/// and no declarative field set. A declaration-only SOP (whole content is
+/// `scope_paths:`) is still real and must not be dropped — every declarative
+/// field is checked here for exactly that reason.
+fn parse_sop_content(title: String, raw: &str, source: &str) -> Option<Sop> {
+    let fm = parse_front_matter(raw);
+    if fm.body.is_empty()
+        && fm.deny_tools.is_empty()
+        && fm.allow_harnesses.is_empty()
+        && fm.plan_steps.is_empty()
+        && fm.scope_paths.is_empty()
+        && fm.review_before.is_empty()
+        && fm.requires_before.is_empty()
+        && fm.forbid_after.is_empty()
+        && fm.max_calls.is_empty()
+        && fm.forbid_with.is_empty()
+        && fm.rule_errors.is_empty()
+    {
+        return None;
+    }
+    // Report unparseable ordering rules at load, once, naming the source.
+    //
+    // A rule that cannot parse is indistinguishable from no rule at all by the
+    // time it reaches a detector — the vec is simply shorter — so this is the
+    // only moment anyone can find out. The SOP is still loaded: dropping the
+    // whole thing because one rule had a typo would silently disarm the rules
+    // that were fine.
+    for err in &fm.rule_errors {
+        tracing::warn!(sop = %source, "Ignoring unparseable ordering rule: {err}");
+    }
+    Some(Sop {
+        title,
+        body: fm.body,
+        roles: fm.roles,
+        deny_tools: fm.deny_tools,
+        allow_harnesses: fm.allow_harnesses,
+        plan_steps: fm.plan_steps,
+        scope_paths: fm.scope_paths,
+        review_before: fm.review_before,
+        risk_tier: fm.risk_tier,
+        requires_before: fm.requires_before,
+        forbid_after: fm.forbid_after,
+        max_calls: fm.max_calls,
+        forbid_with: fm.forbid_with,
+    })
+}
+
 fn read_dir_sops(dir: &Path) -> Vec<Sop> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
@@ -492,54 +554,9 @@ fn read_dir_sops(dir: &Path) -> Vec<Sop> {
                 return None;
             }
             let raw = std::fs::read_to_string(&path).ok()?;
-            let fm = parse_front_matter(&raw);
-            // A file carrying only a declaration and no prose is still a policy.
-            // Every declarative field has to appear here: an SOP whose whole
-            // content is `scope_paths:` would otherwise be dropped on load, and
-            // the check that reads it would never fire — with nothing to notice,
-            // because the file is on disk and looks fine.
-            if fm.body.is_empty()
-                && fm.deny_tools.is_empty()
-                && fm.allow_harnesses.is_empty()
-                && fm.plan_steps.is_empty()
-                && fm.scope_paths.is_empty()
-                && fm.review_before.is_empty()
-                && fm.requires_before.is_empty()
-                && fm.forbid_after.is_empty()
-                && fm.max_calls.is_empty()
-                && fm.forbid_with.is_empty()
-                && fm.rule_errors.is_empty()
-            {
-                return None;
-            }
-            // Report unparseable ordering rules at load, once, naming the file.
-            //
-            // A rule that cannot parse is indistinguishable from no rule at all
-            // by the time it reaches a detector — the vec is simply shorter — so
-            // this is the only moment anyone can find out. The SOP is still
-            // loaded: dropping the whole file because one rule had a typo would
-            // silently disarm the rules that were fine.
-            for err in &fm.rule_errors {
-                tracing::warn!(
-                    sop = %path.display(),
-                    "Ignoring unparseable ordering rule: {err}"
-                );
-            }
-            Some(Sop {
-                title: path.file_stem()?.to_str()?.to_string(),
-                body: fm.body,
-                roles: fm.roles,
-                deny_tools: fm.deny_tools,
-                allow_harnesses: fm.allow_harnesses,
-                plan_steps: fm.plan_steps,
-                scope_paths: fm.scope_paths,
-                review_before: fm.review_before,
-                risk_tier: fm.risk_tier,
-                requires_before: fm.requires_before,
-                forbid_after: fm.forbid_after,
-                max_calls: fm.max_calls,
-                forbid_with: fm.forbid_with,
-            })
+            let title = path.file_stem()?.to_str()?.to_string();
+            let source = path.display().to_string();
+            parse_sop_content(title, &raw, &source)
         })
         .collect();
     // Stable order, so the injected block does not reshuffle between requests
@@ -996,6 +1013,215 @@ fn all_sops() -> Vec<Sop> {
     sops
 }
 
+// ── Per-workspace SOP resolution (LLD #64 §6 increment 4, TD-334) ─────────
+//
+// Everything above this point is process-global: one `.intutic/sops`
+// directory (or `INTUTIC_SOPS_DIR` override) for the whole proxy process.
+// Correct for the shipped topology — one proxy per developer, or one proxy
+// per company in an enterprise self-hosted deployment — and TD-229's own
+// finding: wrong for a shared, multi-tenant gateway, where every tenant would
+// otherwise get the same policy, or none.
+//
+// This section adds a SECOND, workspace-keyed resolution path, consulted only
+// in gateway mode (`crate::gateway::requires_vk_only()`). Outside gateway mode
+// nothing here is ever called — `all_sops_for_workspace` returns the ordinary
+// process-global `all_sops()` unchanged, so every one of the 66 tests above
+// and every existing `*_for_role` caller is unaffected.
+
+/// A workspace's raw SOP entry as `GET /api/v1/workspace/sops-policy` returns
+/// it — title + unparsed markdown, deliberately not a pre-parsed structured
+/// shape. `parse_sop_content` (the same function `read_dir_sops` uses for the
+/// local path) is the one place YAML-frontmatter parsing happens; duplicating
+/// that logic in TypeScript would be a second definition of what `deny_tools:`
+/// means that could quietly drift from this one.
+#[derive(serde::Deserialize)]
+struct WorkspaceSopEntry {
+    title: String,
+    #[serde(rename = "markdownContent")]
+    markdown_content: String,
+}
+
+#[derive(serde::Deserialize)]
+struct WorkspaceSopsResponse {
+    sops: Vec<WorkspaceSopEntry>,
+}
+
+struct WorkspaceCached {
+    sops: Vec<Sop>,
+    read_at: Instant,
+}
+
+fn workspace_cache() -> &'static Mutex<HashMap<String, WorkspaceCached>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, WorkspaceCached>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Fetch and cache one workspace's ENFORCED (`VALIDATED`) SOP set from the
+/// control plane. Re-fetches at most once per [`CACHE_TTL`] per workspace —
+/// the same discipline as the process-global `all_sops()` cache, keyed by
+/// workspace instead.
+///
+/// `token` is the SAME `vk_` virtual key that authenticated the inbound
+/// request, reused rather than inventing a separate service credential —
+/// exactly how `validate_key_via_control_plane` (`proxy.rs`) already reuses it
+/// for auth. The control plane's own auth middleware resolves the workspace
+/// from the token; this function never trusts a bare caller-supplied
+/// workspace-id string on its own to select whose policy comes back — the
+/// cache key is only ever the value the control plane itself already bound
+/// the token to when it issued the 200.
+///
+/// Fails closed toward EMPTY on any error, matching `read_dir_sops`'s own
+/// precedent (an unreadable directory also returns `Vec::new()`) rather than
+/// serving a stale cached entry past its TTL — on a shared gateway, "silently
+/// keep enforcing what this workspace's policy used to be five minutes ago"
+/// is a worse failure mode than "enforce nothing for this one request and say
+/// so in the log," because the former can mask a policy the operator just
+/// tightened (e.g. added a `deny_tools:` after an incident).
+async fn fetch_workspace_sops(
+    http_client: &reqwest::Client,
+    control_plane_url: &str,
+    workspace_id: &str,
+    token: &str,
+) -> Vec<Sop> {
+    {
+        let cache = workspace_cache().lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(c) = cache.get(workspace_id) {
+            if c.read_at.elapsed() < CACHE_TTL {
+                return c.sops.clone();
+            }
+        }
+    }
+
+    let url = format!("{control_plane_url}/api/v1/workspace/sops-policy");
+    let fetched: Option<Vec<Sop>> = async {
+        let resp = http_client
+            .get(&url)
+            .header("authorization", format!("Bearer {token}"))
+            .timeout(std::time::Duration::from_millis(2000))
+            .send()
+            .await
+            .map_err(|e| tracing::warn!(workspace_id = %workspace_id, error = %e, "workspace SOP fetch failed"))
+            .ok()?;
+        if !resp.status().is_success() {
+            tracing::warn!(workspace_id = %workspace_id, status = %resp.status(), "workspace SOP fetch returned non-success");
+            return None;
+        }
+        let body: WorkspaceSopsResponse = resp
+            .json()
+            .await
+            .map_err(|e| tracing::warn!(workspace_id = %workspace_id, error = %e, "workspace SOP response did not parse"))
+            .ok()?;
+        let mut sops: Vec<Sop> = body
+            .sops
+            .into_iter()
+            .filter_map(|entry| {
+                let source = format!("workspace:{workspace_id}:{}", entry.title);
+                parse_sop_content(entry.title, &entry.markdown_content, &source)
+            })
+            .collect();
+        sops.sort_by(|a, b| a.title.cmp(&b.title));
+        Some(sops)
+    }
+    .await;
+
+    match fetched {
+        Some(sops) => {
+            let mut cache = workspace_cache().lock().unwrap_or_else(|p| p.into_inner());
+            cache.insert(
+                workspace_id.to_string(),
+                WorkspaceCached { sops: sops.clone(), read_at: Instant::now() },
+            );
+            sops
+        }
+        None => Vec::new(),
+    }
+}
+
+/// Resolve the SOP set to enforce for a request, gateway-mode-aware.
+///
+/// Outside gateway mode (today's behaviour, unchanged for every existing
+/// deployment): always the process-global on-disk set. In gateway mode with a
+/// known workspace and credential: that workspace's own `VALIDATED` SOPs from
+/// the control plane — never the process-global set, since the whole point is
+/// that a shared gateway process must not let one workspace's on-disk (or a
+/// DIFFERENT workspace's fetched) policy leak into another's enforcement.
+///
+/// In gateway mode with an unresolved workspace (`None`/`"unknown"`) or no
+/// control-plane URL/token, returns empty rather than falling back to the
+/// process-global set — the process-global set does not belong to any
+/// particular tenant on a shared gateway, so falling back to it would be
+/// exactly the cross-tenant leak this increment exists to close.
+pub async fn all_sops_for_workspace(
+    http_client: &reqwest::Client,
+    control_plane_url: Option<&str>,
+    workspace_id: Option<&str>,
+    token: Option<&str>,
+) -> Vec<Sop> {
+    if !crate::gateway::requires_vk_only() {
+        return all_sops();
+    }
+    match (control_plane_url, workspace_id, token) {
+        (Some(cp), Some(ws), Some(tok)) if ws != "unknown" && !ws.is_empty() => {
+            fetch_workspace_sops(http_client, cp, ws, tok).await
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Every governance-context field for `role`, resolved against an explicit
+/// SOP set — the single-resolution twin of calling every `*_for_role`
+/// function separately (each of which independently calls the
+/// process-global `all_sops()`). Building this from an already-resolved slice
+/// is what lets gateway mode substitute a workspace-scoped set without
+/// touching any of the process-global-based public functions above or their
+/// 66 tests — those keep working exactly as before for every non-gateway
+/// deployment.
+pub struct GovernanceFields {
+    pub risk_tier: Option<RiskLevel>,
+    pub denied_tools: Vec<String>,
+    pub plan_steps: Vec<String>,
+    pub scope_paths: Vec<String>,
+    pub review_before: Vec<String>,
+    pub requires_before: Vec<(String, String, bool)>,
+    pub forbid_after: Vec<(String, String, bool)>,
+    pub max_calls: Vec<(String, usize)>,
+    pub forbid_with: Vec<(String, String)>,
+    pub allowed_harnesses: Vec<String>,
+    pub governance_block: Option<String>,
+}
+
+pub fn governance_fields_from(sops: &[Sop], role: &str) -> GovernanceFields {
+    let mut max_calls: Vec<(String, usize)> = sops
+        .iter()
+        .filter(|s| s.applies_to(role))
+        .flat_map(|s| s.max_calls.iter().cloned())
+        .collect();
+    max_calls.sort();
+    max_calls.dedup();
+
+    let mut forbid_with: Vec<(String, String)> = sops
+        .iter()
+        .filter(|s| s.applies_to(role))
+        .flat_map(|s| s.forbid_with.iter().cloned())
+        .collect();
+    forbid_with.sort();
+    forbid_with.dedup();
+
+    GovernanceFields {
+        risk_tier: sops.iter().filter(|s| s.applies_to(role)).filter_map(|s| s.risk_tier).max(),
+        denied_tools: collect_denies(sops, role),
+        plan_steps: collect_plan_steps(sops, role),
+        scope_paths: collect_scope_paths(sops, role),
+        review_before: collect_review_before(sops, role),
+        requires_before: collect_requires_before(sops, role),
+        forbid_after: collect_forbid_after(sops, role),
+        max_calls,
+        forbid_with,
+        allowed_harnesses: collect_harnesses(sops, role),
+        governance_block: render(sops, role),
+    }
+}
+
 /// Build the governance block for a node in a given role.
 ///
 /// Returns `None` when nothing applies, so a request with no relevant policy
@@ -1321,6 +1547,139 @@ mod tests {
             max_calls: Vec::new(),
             forbid_with: Vec::new(),
         }
+    }
+
+    // ── Per-workspace resolution (LLD #64 §6 increment 4, TD-334) ──────────
+
+    fn sop_with_risk(title: &str, roles: &[&str], risk: RiskLevel) -> Sop {
+        Sop { risk_tier: Some(risk), ..sop(title, roles) }
+    }
+
+    /// The chain `the_request_context_resolves_its_risk_tier_from_sops`
+    /// (`proxy.rs`) relies on: `governance_fields_from` must read the actual
+    /// `risk_tier` a SOP declares, not a stub or a hardcoded value — the exact
+    /// class of bug that shipped once already (`RiskLevel::Low` hardcoded at
+    /// the field's only producer, silently defeating every rule gated on it).
+    #[test]
+    fn governance_fields_from_resolves_risk_tier_from_sops() {
+        let sops = vec![sop_with_risk("deploy-policy", &["deployer"], RiskLevel::Critical)];
+        let gov = governance_fields_from(&sops, "deployer");
+        assert_eq!(gov.risk_tier, Some(RiskLevel::Critical));
+
+        // A role with no applicable SOP resolves to None, not a default —
+        // callers decide the default (proxy.rs: `.unwrap_or(RiskLevel::Low)`).
+        let gov_other = governance_fields_from(&sops, "reviewer");
+        assert_eq!(gov_other.risk_tier, None);
+    }
+
+    /// The max-across-SOPs rule (documented on `risk_tier_for_role`) must hold
+    /// for the workspace-aware resolver too — a HIGH and a LOW SOP both
+    /// applying to a role describe work that is HIGH, and taking either
+    /// arbitrarily would make the answer depend on fetch/directory order.
+    #[test]
+    fn governance_fields_from_takes_the_max_risk_tier_across_applicable_sops() {
+        let sops = vec![
+            sop_with_risk("a", &["deployer"], RiskLevel::Low),
+            sop_with_risk("b", &["deployer"], RiskLevel::High),
+        ];
+        let gov = governance_fields_from(&sops, "deployer");
+        assert_eq!(gov.risk_tier, Some(RiskLevel::High));
+    }
+
+    /// `governance_fields_from` must resolve every field from the role scope,
+    /// not just risk_tier — otherwise a gateway workspace's deny_tools/
+    /// scope_paths/etc. would silently stop being enforced even though risk_tier
+    /// alone looked fine.
+    #[test]
+    fn governance_fields_from_resolves_every_role_scoped_field() {
+        let mut s = sop("full-policy", &["deployer"]);
+        s.deny_tools = vec!["rm".to_string()];
+        s.scope_paths = vec!["infra/".to_string()];
+        s.review_before = vec!["action:deploy".to_string()];
+        s.allow_harnesses = vec!["claude-code".to_string()];
+        s.max_calls = vec![("Bash".to_string(), 3)];
+        s.forbid_with = vec![("taint".to_string(), "token".to_string())];
+        let sops = vec![s];
+
+        let gov = governance_fields_from(&sops, "deployer");
+        assert_eq!(gov.denied_tools, vec!["rm".to_string()]);
+        assert_eq!(gov.scope_paths, vec!["infra/".to_string()]);
+        assert_eq!(gov.review_before, vec!["action:deploy".to_string()]);
+        assert_eq!(gov.allowed_harnesses, vec!["claude-code".to_string()]);
+        assert_eq!(gov.max_calls, vec![("Bash".to_string(), 3)]);
+        assert_eq!(gov.forbid_with, vec![("taint".to_string(), "token".to_string())]);
+        assert!(gov.governance_block.is_some(), "an applicable SOP with a body must render a block");
+
+        // And a role with no applicable SOP gets none of it.
+        let gov_other = governance_fields_from(&sops, "reviewer");
+        assert!(gov_other.denied_tools.is_empty());
+        assert!(gov_other.governance_block.is_none());
+    }
+
+    /// `parse_sop_content` (factored out of `read_dir_sops` for reuse by the
+    /// workspace-fetch path) must still parse identically to the pre-refactor
+    /// inline closure — front matter, body, and the "declaration-only SOPs are
+    /// not empty" rule all included.
+    #[test]
+    fn parse_sop_content_parses_front_matter_and_body() {
+        let raw = "---\nroles: deployer\ndeny_tools: rm, curl\nrisk_tier: high\n---\nDo not delete production data.";
+        let parsed = parse_sop_content("my-sop".to_string(), raw, "test-source").expect("should parse");
+        assert_eq!(parsed.title, "my-sop");
+        assert_eq!(parsed.roles, vec!["deployer".to_string()]);
+        assert_eq!(parsed.deny_tools, vec!["rm".to_string(), "curl".to_string()]);
+        assert_eq!(parsed.risk_tier, Some(RiskLevel::High));
+        assert_eq!(parsed.body, "Do not delete production data.");
+    }
+
+    /// A declaration-only SOP (no prose, just a directive) must still parse —
+    /// the exact regression `read_dir_sops`'s own comment names: an SOP whose
+    /// whole content is `scope_paths:` must not be silently dropped.
+    #[test]
+    fn parse_sop_content_keeps_a_declaration_only_sop() {
+        let raw = "---\nscope_paths: infra/\n---\n";
+        let parsed = parse_sop_content("scope-only".to_string(), raw, "test-source");
+        assert!(parsed.is_some(), "a declaration-only SOP must not be dropped");
+        assert_eq!(parsed.unwrap().scope_paths, vec!["infra/".to_string()]);
+    }
+
+    /// Genuinely empty content (no prose, no declarations) parses to nothing —
+    /// the counterpart to the declaration-only case above.
+    #[test]
+    fn parse_sop_content_drops_genuinely_empty_content() {
+        assert!(parse_sop_content("empty".to_string(), "", "test-source").is_none());
+        assert!(parse_sop_content("empty2".to_string(), "---\n---\n", "test-source").is_none());
+    }
+
+    /// `all_sops_for_workspace` must never fall back to the process-global set
+    /// when gateway mode is on but the workspace/credential cannot be
+    /// resolved — falling back would leak whatever happens to be in the
+    /// process's own `.intutic/sops` (which belongs to no particular tenant on
+    /// a shared gateway) into a workspace's enforcement. Verified against the
+    /// REAL global gateway config (not a stub), the same way `gateway.rs`'s own
+    /// tests exercise `requires_vk_only()` — this crosses module boundaries on
+    /// purpose, because the leak this guards against is exactly a cross-module
+    /// invariant (gateway.rs's mode flag, honoured by sops.rs's resolver).
+    #[tokio::test]
+    async fn all_sops_for_workspace_returns_empty_not_process_global_when_unresolved() {
+        // Force gateway mode on for this test's duration. `init_gateway_config`
+        // is set-once process-wide (like `egress_policy`'s), so this can only
+        // be asserted once per test binary — acceptable here since it is the
+        // one place in this file that needs it, and every other sops.rs test
+        // runs with gateway mode at its default (off), which is what makes the
+        // "outside gateway mode, always the process-global set" half of
+        // `all_sops_for_workspace`'s contract (exercised implicitly by every
+        // *_for_role test above, all of which call the process-global path)
+        // safe to leave unperturbed.
+        crate::gateway::init_gateway_config(crate::gateway::GatewayConfig { require_vk: true });
+        assert!(crate::gateway::requires_vk_only(), "test precondition: gateway mode must be on");
+
+        let client = reqwest::Client::new();
+        // No control-plane URL, no workspace, no token — every combination of
+        // "cannot resolve" must return empty, never the process-global set.
+        assert!(all_sops_for_workspace(&client, None, None, None).await.is_empty());
+        assert!(all_sops_for_workspace(&client, Some("http://127.0.0.1:1"), None, Some("vk_x")).await.is_empty());
+        assert!(all_sops_for_workspace(&client, Some("http://127.0.0.1:1"), Some("unknown"), Some("vk_x")).await.is_empty());
+        assert!(all_sops_for_workspace(&client, Some("http://127.0.0.1:1"), Some("ws_1"), None).await.is_empty());
     }
 
     #[test]

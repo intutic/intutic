@@ -42,6 +42,7 @@ try {
 const overlays = ['dev', 'staging', 'prod']
 const failures = []
 let proxyChecked = false
+let gatewayChecked = false
 
 for (const overlay of overlays) {
   const dir = join(OVERLAYS_DIR, overlay)
@@ -91,12 +92,60 @@ for (const overlay of overlays) {
       )
     }
   }
+
+  // LLD #64 / TD-334 increment 3: the hosted-gateway ingress must stay on its
+  // OWN dedicated cert (`intutic-gateway-cert`), never merged into the
+  // primary `intutic-ingress`'s pre-shared cert — that resource already
+  // serves six live production domains (api/app/docs/intutic.ai/releases/www)
+  // and a merge would put an edit meant only for the new seventh domain in
+  // the blast radius of all of them. This is deliberately narrow — it checks
+  // the isolation invariant, not whether the gateway is "done" (it is not;
+  // see gateway-ingress.yaml's header for the remaining operator steps).
+  if (/kind:\s*Ingress/.test(rendered) && /name:\s*intutic-gateway-ingress\b/.test(rendered)) {
+    gatewayChecked = true
+    if (!/networking\.gke\.io\/managed-certificates:\s*intutic-gateway-cert\b/.test(rendered)) {
+      failures.push(
+        `overlay "${overlay}" renders intutic-gateway-ingress without its dedicated ` +
+          `intutic-gateway-cert annotation — it may have been merged onto the primary ` +
+          `ingress's pre-shared cert, risking the six already-live production domains.`,
+      )
+    }
+    if (/networking\.gke\.io\/managed-certificates:\s*intutic-gateway-cert\b/.test(rendered)
+      && /ingress\.gcp\.kubernetes\.io\/pre-shared-cert/.test(
+        // Scope this specific check to the gateway Ingress document only —
+        // the primary intutic-ingress document in the SAME rendered output
+        // legitimately carries pre-shared-cert, so a whole-output substring
+        // search would always "find" it and never fail.
+        rendered.split('---').find((doc) => /name:\s*intutic-gateway-ingress\b/.test(doc)) ?? '',
+      )
+    ) {
+      failures.push(
+        `overlay "${overlay}"'s intutic-gateway-ingress carries a pre-shared-cert ` +
+          `annotation — it should use ONLY the dedicated managed-certificates annotation.`,
+      )
+    }
+  }
+  if (/kind:\s*ManagedCertificate/.test(rendered) && /name:\s*intutic-gateway-cert\b/.test(rendered)) {
+    const doc = rendered.split('---').find((d) => /name:\s*intutic-gateway-cert\b/.test(d)) ?? ''
+    if (!/^\s*-\s*gateway\.intutic\.ai\s*$/m.test(doc)) {
+      failures.push(
+        `overlay "${overlay}"'s intutic-gateway-cert ManagedCertificate does not declare ` +
+          `gateway.intutic.ai — TLS for the gateway would never validate.`,
+      )
+    }
+  }
 }
 
 if (!proxyChecked) {
   failures.push(
     'no overlay rendered a proxy Deployment — the TD-229 regression check never ran. ' +
       'A vacuous pass here is worse than no check.',
+  )
+}
+if (!gatewayChecked) {
+  failures.push(
+    'no overlay rendered an intutic-gateway-ingress — the LLD #64 / TD-334 cert-isolation ' +
+      'check never ran. A vacuous pass here is worse than no check.',
   )
 }
 
