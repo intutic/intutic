@@ -204,8 +204,60 @@ async fn main() -> anyhow::Result<()> {
     // Install the L1 egress policy (LLD #63 §4) before the first request. The
     // mode is logged at boot so an operator running in Enforce sees it in the
     // first lines of log, not after the first denied connection.
-    let egress = egress_policy::EgressPolicy::from_config_and_env(&config.intutic_settings.egress);
-    let egress_mode = egress_policy::init_global_policy(egress);
+    //
+    // The config/env policy is the base; a central policy the sync-daemon
+    // distributed to `~/.intutic/hooks/egress-policy.json` is layered on top
+    // (mode authoritative, allow-lists unioned) so an admin can manage
+    // enforcement centrally. The file is re-read on a timer below, so a mid-
+    // session policy change reaches this running proxy without a restart.
+    let base_egress =
+        egress_policy::EgressPolicy::from_config_and_env(&config.intutic_settings.egress);
+    let egress_file = egress_policy::default_egress_policy_path();
+    let expected_ws = std::env::var("INTUTIC_WORKSPACE_ID")
+        .ok()
+        .filter(|s| !s.trim().is_empty());
+    let initial_egress =
+        match egress_policy::load_local_egress_file(&egress_file, expected_ws.as_deref()) {
+            Some(central) => {
+                tracing::info!(
+                    ?central.mode,
+                    count = central.allow.len(),
+                    "Egress: central policy loaded from {}",
+                    egress_file.display()
+                );
+                base_egress.with_central(central.mode, &central.allow)
+            }
+            None => base_egress.clone(),
+        };
+    let egress_mode = egress_policy::init_global_policy(initial_egress);
+
+    // Hot-reload the central policy on a timer, so an admin flipping the
+    // workspace to enforce/monitor reaches a running proxy this cycle. Absent or
+    // invalid file → keep the current policy (fail toward the stricter side; a
+    // stopped daemon must not relax enforcement).
+    {
+        let base = base_egress.clone();
+        let path = egress_file.clone();
+        let ws = expected_ws.clone();
+        let reload_secs = std::env::var("INTUTIC_EGRESS_RELOAD_SECS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .filter(|&s| s > 0)
+            .unwrap_or(30);
+        tokio::spawn(async move {
+            let mut interval =
+                tokio::time::interval(std::time::Duration::from_secs(reload_secs));
+            interval.tick().await; // the immediate first tick is the startup load above
+            loop {
+                interval.tick().await;
+                if let Some(central) = egress_policy::load_local_egress_file(&path, ws.as_deref()) {
+                    let merged = base.with_central(central.mode, &central.allow);
+                    egress_policy::swap_global_policy(merged);
+                }
+            }
+        });
+    }
+
     match egress_mode {
         egress_policy::EgressMode::Off => tracing::info!(
             "Egress policy: OFF — every non-AI host is tunnelled (no egress control). \
