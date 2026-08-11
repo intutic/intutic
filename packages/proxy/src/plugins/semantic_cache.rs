@@ -537,6 +537,51 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    /// TD-208 pins this with a graph-key test but not a response-cache one —
+    /// this is that missing test, for a hosted multi-tenant gateway (LLD #64
+    /// §3.2). `check_cache`/`write_cache` salt the hash input with
+    /// `workspace_id` before hashing (`format!("{workspace_id}\n{prompt}")`),
+    /// so two tenants sending byte-identical prompts land on two different
+    /// Valkey keys and can never read each other's cached completions —
+    /// including responses generated with the other tenant's injected SOPs.
+    /// The salted-hash construction is asserted directly (not just "the two
+    /// hashes differ") so a future refactor that drops the salt, rather than
+    /// merely permuting it, is caught by name.
+    #[test]
+    fn response_cache_hash_is_salted_per_workspace_not_shared() {
+        let prompt = "delete all the customer records";
+        let hash_a = compute_sha256(&format!("{}\n{}", "ws_alpha", prompt));
+        let hash_b = compute_sha256(&format!("{}\n{}", "ws_beta", prompt));
+        assert_ne!(
+            hash_a, hash_b,
+            "two workspaces with an identical prompt must not land on the same cache key"
+        );
+        // Not merely "different" — must specifically be the salted construction,
+        // so a refactor to (say) truncating or reordering the salt still fails
+        // this test even if it happens to still produce distinct hashes for
+        // this particular pair of inputs.
+        assert_eq!(hash_a, compute_sha256("ws_alpha\ndelete all the customer records"));
+        assert_eq!(hash_b, compute_sha256("ws_beta\ndelete all the customer records"));
+    }
+
+    /// The call sites are what actually matter — a correct `compute_sha256`
+    /// helper proves nothing if `check_cache`/`write_cache` stopped calling it
+    /// with the salted input. Source-level, like the sibling provenance tests
+    /// in this module, for the same reason: this is a security invariant that
+    /// must survive a refactor, not merely a snapshot of today's behaviour.
+    #[test]
+    fn cache_call_sites_salt_the_hash_with_workspace_id() {
+        let src = include_str!("semantic_cache.rs");
+        let hits = src.matches("compute_sha256(&format!(\"{workspace_id}\\n{prompt_text}\"))").count();
+        // One in check_cache, one in write_cache.
+        assert_eq!(
+            hits, 2,
+            "expected both check_cache and write_cache to salt the hash with \
+             workspace_id via compute_sha256(&format!(\"{{workspace_id}}\\n{{prompt_text}}\")); \
+             found {hits} — a cross-tenant cache leak regression"
+        );
+    }
+
     #[test]
     fn test_compute_sha256() {
         let text = "hello";

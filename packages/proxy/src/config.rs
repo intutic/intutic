@@ -100,6 +100,9 @@ pub struct IntuticSettings {
     /// L1 egress enforcement — deny/monitor/enforce + allow policy (LLD #63).
     #[serde(default)]
     pub egress: crate::egress_policy::EgressConfig,
+    /// L2 hosted-gateway front door — vk_-only enforcement (LLD #64).
+    #[serde(default)]
+    pub gateway: crate::gateway::GatewayConfig,
 }
 
 /// Refusing a forbidden tool call in the model's *response*, before the client
