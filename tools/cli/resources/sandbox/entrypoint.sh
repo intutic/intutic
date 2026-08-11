@@ -77,6 +77,32 @@ fi
 # bounding-set drop only stops them being *re-acquired*, so the agent process
 # ends up with an empty capability set and no path back to any of them. The
 # firewall above is therefore immutable from inside the sandbox.
+#
+# Attest, then exec — in that order, inside the SAME post-drop shell, so the
+# attestation call itself only has the locked-down firewall to route through
+# (LLD #63 §6, TD-333). Before this, `executionMode: 'SANDBOX'` on a session
+# was set entirely by the host-side `intutic exec` CLI, before this container
+# even started — a claim with nothing behind it. This callback can only
+# succeed from a process that got this far: firewall installed, capabilities
+# dropped. It does NOT prove entrypoint.sh itself ran unmodified — a
+# `--sandbox-image` deliberately built to skip the firewall/capsh steps above
+# but still make this call would still attest; closing that needs
+# measured/attested boot, which nothing here has. Best-effort like
+# openSandboxSession/closeSandboxSession on the host side: a failed call is
+# logged and the agent runs anyway — attestation adds visibility, it is not
+# itself a new gate (that's what sandboxRequirement='require' is for,
+# enforced client-side before this container is even launched).
+export PROXY_IP
 exec capsh \
   --drop=cap_net_admin,cap_net_raw,cap_setpcap,cap_setuid,cap_setgid \
-  --user=sandbox -- -c 'exec "$@"' intutic-sandbox "$@"
+  --user=sandbox -- -c '
+    if [ -n "${INTUTIC_SESSION_ID:-}" ] && [ -n "${INTUTIC_API_KEY:-}" ]; then
+      curl -sf -m 3 -X POST "http://'"$PROXY_IP"':${INTUTIC_SANDBOX_PROXY_PORT:-4000}/intutic/attest-sandbox" \
+        -H "Authorization: Bearer ${INTUTIC_API_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "{\"sessionId\":\"${INTUTIC_SESSION_ID}\"}" \
+        >/dev/null 2>&1 \
+      || echo "intutic-sandbox: attestation call failed (non-fatal, session stays unattested)" >&2
+    fi
+    exec "$@"
+  ' intutic-sandbox "$@"
