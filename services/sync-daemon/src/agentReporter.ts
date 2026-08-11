@@ -20,8 +20,22 @@ import { join } from 'node:path'
 import { newIso } from '@intutic/id'
 import type { HarnessType } from '@intutic/shared-types'
 
+/** Live egress-enforcement status read from the proxy's own diagnostic endpoint. */
+export interface EgressFacet {
+  mode: string
+  denied: number
+  would_deny: number
+}
+
 interface AgentFacets {
-  guardrails: { dlp: boolean; wasm_rules: number; hook_gate: boolean; pcas: boolean }
+  guardrails: {
+    dlp: boolean
+    wasm_rules: number
+    hook_gate: boolean
+    pcas: boolean
+    /** Present when the local proxy answered GET /intutic/egress (LLD #63 §4). */
+    egress?: EgressFacet
+  }
   sops: Array<{ sop_id: string; name: string; enforced: boolean }>
   budgets: { tier?: string }
   mcp_tools: Array<{ server: string; tool: string; scopes: string[] }>
@@ -45,6 +59,33 @@ async function exists(p: string): Promise<boolean> {
     return true
   } catch {
     return false
+  }
+}
+
+/**
+ * Read the local proxy's egress-enforcement status (LLD #63 §4). The proxy
+ * exposes `{mode, denied, would_deny}` at `GET /intutic/egress`, but nothing
+ * plumbed those counters off the machine — this is the wiring that carries them
+ * up so an egress denial is visible in the dashboard, not just the proxy log.
+ * Best-effort: an unreachable or non-managed proxy simply omits the facet.
+ */
+export async function fetchEgressStatus(): Promise<EgressFacet | null> {
+  // Regex-free trailing-slash trim — CodeQL flags `/\/+$/` as a polynomial
+  // pattern even on operator-env input; a loop sidesteps the category.
+  let base = process.env.INTUTIC_PROXY_URL ?? 'http://localhost:4000'
+  while (base.endsWith('/')) base = base.slice(0, -1)
+  try {
+    const res = await fetch(`${base}/intutic/egress`, { signal: AbortSignal.timeout(2000) })
+    if (!res.ok) return null
+    const body = (await res.json()) as { mode?: unknown; denied?: unknown; would_deny?: unknown }
+    if (typeof body.mode !== 'string') return null
+    return {
+      mode: body.mode,
+      denied: typeof body.denied === 'number' ? body.denied : 0,
+      would_deny: typeof body.would_deny === 'number' ? body.would_deny : 0,
+    }
+  } catch {
+    return null
   }
 }
 
@@ -157,12 +198,13 @@ export async function collectAgentReport(opts: {
   /** Workspace policy: may local vaults feed /fix? Defaults to allowed. */
   allowLocalVaults?: boolean
 }): Promise<AgentReport> {
-  const [wasmRules, sops, skills, mcpTools, vaults] = await Promise.all([
+  const [wasmRules, sops, skills, mcpTools, vaults, egress] = await Promise.all([
     countWasmRules(),
     collectSops(opts.workspaceRoot),
     collectSkills(opts.workspaceRoot),
     collectMcpTools(opts.workspaceRoot),
     detectLocalVaults(opts.workspaceRoot),
+    fetchEgressStatus(),
   ])
 
   const role = opts.agentRole ?? ''
@@ -177,6 +219,9 @@ export async function collectAgentReport(opts: {
         wasm_rules: wasmRules,
         hook_gate: true, // the daemon writes the hook gate for every harness it supports
         pcas: opts.policyEnforced,
+        // Present only when the local proxy answered; an egress denial thus
+        // becomes visible in the dashboard, not just the proxy's own log.
+        ...(egress ? { egress } : {}),
       },
       sops,
       budgets: { tier: opts.budgetTier },

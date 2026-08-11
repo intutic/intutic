@@ -226,6 +226,22 @@ export interface WorkspaceSettings {
    * developer's local infra allowances are never dropped by a central list.
    */
   egressAllow?: string[]
+
+  /**
+   * Whether agents in this workspace must run inside a sandbox (LLD #63 §6).
+   * - `'off'` (default): `intutic exec` runs on the host as before.
+   * - `'warn'`: an un-sandboxed `intutic exec` runs but prints a warning.
+   * - `'require'`: `intutic exec` refuses to run un-sandboxed and tells the
+   *   developer to add `--sandbox`.
+   *
+   * Enforced client-side by the CLI (the natural point — only it knows whether
+   * `--sandbox` was passed), the same layer as the harness-config controls. A
+   * server-side attestation (the proxy refusing traffic that cannot prove it
+   * originated in a sandbox) is a stronger follow-on, noted in the LLD.
+   * `undefined` leaves it off; open core, which has no control plane to read
+   * this from, is therefore never affected.
+   */
+  sandboxRequirement?: 'off' | 'warn' | 'require'
 }
 
 /**
