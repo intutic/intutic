@@ -2041,6 +2041,25 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         Some(format!("{}:{}:{}", workspace_id, node.graph_id, node.node_id))
     };
 
+    // Resolve the SOP set to enforce for this node's role — the process-global
+    // on-disk set everywhere (today's behaviour, unchanged), or a workspace-
+    // scoped control-plane fetch on a hosted gateway (LLD #64 §6 increment 4,
+    // TD-334 — closes TD-229's core gap: SOP policy was one process-global
+    // directory, wrong once one proxy process serves many workspaces).
+    // Resolved ONCE and reused for every SOP-derived field below plus the
+    // governance block injected further down, rather than each field
+    // independently re-resolving the set (previously up to twelve separate
+    // `all_sops()` cache-lock acquisitions for one request).
+    let control_plane_url_for_sops = std::env::var("CONTROL_PLANE_URL").ok();
+    let resolved_sops = crate::sops::all_sops_for_workspace(
+        &state.http_client,
+        control_plane_url_for_sops.as_deref(),
+        Some(workspace_id.as_str()),
+        Some(raw_token),
+    )
+    .await;
+    let gov = crate::sops::governance_fields_from(&resolved_sops, &node.agent_role);
+
     let wasm_ctx = crate::wasm::context::RequestContext {
         session_id: session_id.clone(),
         workspace_id: workspace_id.clone(),
@@ -2063,8 +2082,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         // basis for guessing a severity band, and `mod.rs:45-48` forbids
         // inventing one. `None` renders as `Low`, so a workspace that declares
         // nothing behaves exactly as before.
-        risk_tier: crate::sops::risk_tier_for_role(&node.agent_role)
-            .unwrap_or(crate::wasm::context::RiskLevel::Low),
+        risk_tier: gov.risk_tier.unwrap_or(crate::wasm::context::RiskLevel::Low),
         dlp_findings,
         tool_sequence,
         // This workspace's fitted transition model, resolved here for the same reason
@@ -2076,21 +2094,21 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         transition_baseline,
         // Tool bans from the SOPs in force for this node's role. Resolved here
         // so the detector remains a pure function of the context.
-        denied_tools: crate::sops::denied_tools_for_role(&node.agent_role),
+        denied_tools: gov.denied_tools,
         // The declared plan for this role, same resolution and same reason. Empty for
         // any workspace that has not written one, which is the overwhelming default.
-        plan_steps: crate::sops::plan_steps_for_role(&node.agent_role),
+        plan_steps: gov.plan_steps,
         // Where this role may change things, and what it may not do without a
         // human. Resolved here like the other SOP-derived fields, so detectors
         // stay pure functions of this struct.
-        scope_paths: crate::sops::scope_paths_for_role(&node.agent_role),
-        review_before: crate::sops::review_before_for_role(&node.agent_role),
+        scope_paths: gov.scope_paths,
+        review_before: gov.review_before,
         // Ordering rules, resolved the same way and for the same reason: the
         // detectors stay pure functions of this struct.
-        requires_before: crate::sops::requires_before_for_role(&node.agent_role),
-        forbid_after: crate::sops::forbid_after_for_role(&node.agent_role),
-        max_calls: crate::sops::max_calls_for_role(&node.agent_role),
-        forbid_with: crate::sops::forbid_with_for_role(&node.agent_role),
+        requires_before: gov.requires_before,
+        forbid_after: gov.forbid_after,
+        max_calls: gov.max_calls,
+        forbid_with: gov.forbid_with,
         changes: change_manifest.clone(),
         new_tool_calls: new_tool_calls.clone(),
         // Scanned over the whole request text, so injected content arriving
@@ -2101,7 +2119,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         tool_contract_changed,
         // Resolved from the route, not asserted by the caller.
         harness: provider.harness_name().to_string(),
-        allowed_harnesses: crate::sops::allowed_harnesses_for_role(&node.agent_role),
+        allowed_harnesses: gov.allowed_harnesses,
         workflow_spend_usd: workflow_spend,
         workflow_budget_usd: workflow_budget,
         node,
@@ -2120,7 +2138,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     //
     // Injected before the body is handed upstream, and only re-serialised when
     // something was actually added.
-    if let Some(block) = crate::sops::governance_block_for_role(&wasm_ctx.node.agent_role) {
+    if let Some(block) = gov.governance_block {
         if crate::sops::inject_into_body(&mut body_json, &protocol, &block) {
             body_bytes = serde_json::to_vec(&body_json)
                 .map(axum::body::Bytes::from)
@@ -7968,16 +7986,29 @@ mod tests {
     /// Reverting the wiring to `RiskLevel::Low` breaks no test, because nothing
     /// drives `handle_proxy`'s context construction — which is precisely how
     /// the field sat hardcoded while the SDK documented it as gateable and the
-    /// SDK's own mock context supplied `"Critical"`. The parse and max-across-
-    /// SOPs logic is covered in `sops.rs`; this covers the one line joining
-    /// them, the only part that was ever wrong.
+    /// SDK's own mock context supplied `"Critical"`.
+    ///
+    /// Updated for LLD #64 §6 increment 4: `risk_tier_for_role(role)` (which
+    /// called the process-global `all_sops()` directly) was replaced by
+    /// `gov.risk_tier`, resolved once via `governance_fields_from` against
+    /// `all_sops_for_workspace` — the workspace-aware resolver a hosted
+    /// gateway needs. The two-part check below covers the same ground the
+    /// original single string did, just split across the file the wiring now
+    /// lives in and the file the resolution logic moved to: this asserts the
+    /// context field is wired to the resolved value, not a hardcoded one;
+    /// `sops.rs`'s own test (`governance_fields_from_resolves_risk_tier_from_sops`)
+    /// covers that the resolution itself reads real SOP declarations, not a
+    /// stub — so together they still cover the exact same chain end to end.
     #[test]
     fn the_request_context_resolves_its_risk_tier_from_sops() {
         let src = include_str!("proxy.rs");
-        let needle = ["risk_tier: crate::sops::risk_tier_for", "_role("].concat();
         assert!(
-            src.contains(&needle),
-            "RequestContext.risk_tier is not resolved from SOP declarations",
+            src.contains("risk_tier: gov.risk_tier.unwrap_or("),
+            "RequestContext.risk_tier is not wired to the resolved governance context",
+        );
+        assert!(
+            src.contains("crate::sops::governance_fields_from(&resolved_sops"),
+            "the governance context (gov) is not built from a resolved SOP set",
         );
     }
 
