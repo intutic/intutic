@@ -207,6 +207,25 @@ export interface WorkspaceSettings {
    * exemption.
    */
   reviewHoldBypassTtlMinutes?: number
+
+  /**
+   * Central egress-enforcement posture, distributed to this workspace's proxies
+   * (LLD #63 §4). One of `'off'` | `'monitor'` | `'enforce'`. When set, the
+   * sync-daemon writes it to `.intutic/hooks/egress-policy.json` and the proxy
+   * hot-reloads it, so an admin sets the mode once here rather than in each
+   * developer's local config. Undefined leaves the proxy on its local config /
+   * `INTUTIC_EGRESS_MODE` — central management is additive, never a silent
+   * override of a deployment that never opted in.
+   */
+  egressMode?: 'off' | 'monitor' | 'enforce'
+
+  /**
+   * Central egress allow policy: exact hosts, `.suffix` domains, or CIDRs the
+   * proxy permits in `enforce`/`monitor` mode, distributed alongside
+   * {@link egressMode}. UNIONed with the proxy's local allow entries so a
+   * developer's local infra allowances are never dropped by a central list.
+   */
+  egressAllow?: string[]
 }
 
 /**

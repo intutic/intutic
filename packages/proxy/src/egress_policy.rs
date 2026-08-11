@@ -41,11 +41,13 @@
 
 use std::collections::BTreeSet;
 use std::net::IpAddr;
+use std::path::Path;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock, RwLock};
 
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 
 use crate::hostname_filter::is_ai_provider_host;
 
@@ -250,6 +252,38 @@ impl EgressPolicy {
         self.mode
     }
 
+    /// Return a copy of this policy with a central (control-plane) policy layered
+    /// on top (LLD #63 §4). The central `mode`, when present, is authoritative;
+    /// the central allow entries are **unioned** with the local ones, so a
+    /// developer's local infra allowances are never dropped by a central list.
+    /// A central `mode` of `None` (central management not configured) leaves the
+    /// local mode untouched.
+    pub fn with_central(&self, central_mode: Option<EgressMode>, central_allow: &[String]) -> EgressPolicy {
+        let mut host_rules = self.host_rules.clone();
+        let mut cidr_rules = self.cidr_rules.clone();
+        for e in central_allow {
+            let e = e.trim();
+            if e.is_empty() {
+                continue;
+            }
+            if let Some(c) = Cidr::parse(e) {
+                if !cidr_rules.contains(&c) {
+                    cidr_rules.push(c);
+                }
+            } else {
+                let lower = e.to_ascii_lowercase();
+                if !host_rules.contains(&lower) {
+                    host_rules.push(lower);
+                }
+            }
+        }
+        EgressPolicy {
+            mode: central_mode.unwrap_or(self.mode),
+            host_rules,
+            cidr_rules,
+        }
+    }
+
     /// True if `host` matches an operator allow entry (host/domain rules only;
     /// CIDR rules are checked separately against IP-literal targets).
     fn host_allowed(&self, host: &str) -> bool {
@@ -302,34 +336,127 @@ impl EgressPolicy {
     }
 }
 
+/// One central egress policy as read from the daemon-written file: the
+/// authoritative mode (or `None` = central management not configured) and the
+/// allow entries to union with local config.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CentralEgressPolicy {
+    pub mode: Option<EgressMode>,
+    pub allow: Vec<String>,
+}
+
+/// Default location of the daemon-written central egress policy:
+/// `~/.intutic/hooks/egress-policy.json` (same directory as the policy
+/// snapshot). Overridable with `INTUTIC_EGRESS_POLICY_FILE` (tests, non-default
+/// homes).
+pub fn default_egress_policy_path() -> std::path::PathBuf {
+    if let Ok(p) = std::env::var("INTUTIC_EGRESS_POLICY_FILE") {
+        if !p.trim().is_empty() {
+            return std::path::PathBuf::from(p);
+        }
+    }
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_default();
+    std::path::Path::new(&home)
+        .join(".intutic")
+        .join("hooks")
+        .join("egress-policy.json")
+}
+
+/// Parse a daemon-written `egress-policy.json` (LLD #63 §4), verifying its
+/// digest and — when a workspace id is known — its workspace. Returns the
+/// central policy it declares, or `None` on any error / mismatch. Fail-closed
+/// toward local config: a corrupt, foreign, or unparseable file degrades to
+/// "keep the config-derived policy", never to weaker enforcement than the
+/// operator configured.
+pub fn load_local_egress_file(
+    path: &Path,
+    expected_workspace: Option<&str>,
+) -> Option<CentralEgressPolicy> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let doc: serde_json::Value = serde_json::from_str(&text).ok()?;
+
+    let workspace = doc.get("workspace")?.as_str()?;
+    if let Some(expected) = expected_workspace {
+        if workspace != expected {
+            return None; // a file written for a different workspace
+        }
+    }
+    let file_digest = doc.get("digest")?.as_str()?;
+
+    // `mode` is a string (off/monitor/enforce) or JSON null (central management
+    // not configured). An unknown string is rejected rather than guessed.
+    let mode_str = doc.get("mode").and_then(|m| m.as_str());
+    let mode = match mode_str {
+        Some("off") => Some(EgressMode::Off),
+        Some("monitor") => Some(EgressMode::Monitor),
+        Some("enforce") => Some(EgressMode::Enforce),
+        None => None,
+        Some(_) => return None,
+    };
+    let allow: Vec<String> = doc
+        .get("allow")?
+        .as_array()?
+        .iter()
+        .filter_map(|v| v.as_str().map(str::to_string))
+        .collect();
+
+    // Recompute the digest over the SAME canonical string the daemon used:
+    // `mode-or-empty` then each allow entry, newline-joined (see egressPolicy.ts
+    // `egressDigestInput`). A mismatch means truncation or tampering.
+    let canonical: String = std::iter::once(mode_str.unwrap_or("").to_string())
+        .chain(allow.iter().cloned())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut h = Sha256::new();
+    h.update(canonical.as_bytes());
+    let computed = format!("{:x}", h.finalize());
+    if computed.get(..32) != Some(file_digest) {
+        return None;
+    }
+
+    Some(CentralEgressPolicy { mode, allow })
+}
+
 // ── Process-global policy ────────────────────────────────────────────────
 //
 // `handle_connect` is a free handler with no access to `AppState`, so the
-// policy lives in a `OnceLock` initialised from `main` after config load. If
-// it was never initialised (unit tests, embedders), the accessor returns a
-// default `Off` policy — i.e. today's behaviour — so nothing is ever denied by
-// an *uninitialised* policy.
+// policy lives in a process-global cell initialised from `main` after config
+// load. It is swappable behind an `RwLock<Arc<..>>` so the daemon-distributed
+// central policy can be **hot-reloaded** into a running proxy (LLD #63 §4)
+// without a restart. Uninitialised (unit tests, embedders) it reads as a
+// default `Off` policy, so nothing is ever denied by an uninitialised policy.
 
-static GLOBAL_POLICY: OnceLock<EgressPolicy> = OnceLock::new();
+static GLOBAL_POLICY: OnceLock<RwLock<Arc<EgressPolicy>>> = OnceLock::new();
 
 static DENIED_COUNT: AtomicU64 = AtomicU64::new(0);
 static WOULD_DENY_COUNT: AtomicU64 = AtomicU64::new(0);
 
-/// Install the process-wide policy. Call once, from `main`, after config load.
-/// A second call is ignored (returns the already-installed mode) so a test or
-/// embedder cannot silently swap enforcement out from under a running server.
-pub fn init_global_policy(policy: EgressPolicy) -> EgressMode {
-    let mode = policy.mode;
-    let _ = GLOBAL_POLICY.set(policy);
-    GLOBAL_POLICY.get().map(|p| p.mode).unwrap_or(mode)
+fn policy_cell() -> &'static RwLock<Arc<EgressPolicy>> {
+    GLOBAL_POLICY.get_or_init(|| RwLock::new(Arc::new(EgressPolicy::default())))
 }
 
-/// The installed policy, or a default `Off` policy if none was installed.
-pub fn global_policy() -> &'static EgressPolicy {
-    static DEFAULT_OFF: OnceLock<EgressPolicy> = OnceLock::new();
-    GLOBAL_POLICY
-        .get()
-        .unwrap_or_else(|| DEFAULT_OFF.get_or_init(EgressPolicy::default))
+/// Install the process-wide policy. Call from `main` after config load. Unlike
+/// the previous set-once version this replaces the current policy, because the
+/// same cell is later hot-reloaded by `swap_global_policy`.
+pub fn init_global_policy(policy: EgressPolicy) -> EgressMode {
+    swap_global_policy(policy)
+}
+
+/// Atomically replace the process-wide policy (hot reload). Returns the new
+/// mode so the caller can log a transition.
+pub fn swap_global_policy(policy: EgressPolicy) -> EgressMode {
+    let mode = policy.mode;
+    *policy_cell().write().unwrap() = Arc::new(policy);
+    mode
+}
+
+/// A snapshot of the current policy. Returns an owned `Arc` so the read lock is
+/// released immediately; the caller decides against the snapshot even if a
+/// reload swaps the global a moment later.
+pub fn global_policy() -> Arc<EgressPolicy> {
+    policy_cell().read().unwrap().clone()
 }
 
 /// Record that a connection was denied (`Enforce`). Kept as a counter so an
@@ -465,6 +592,78 @@ mod tests {
         // an unknown value falls back to Off, never to Enforce
         assert_eq!(EgressMode::parse_lenient("enfroce"), EgressMode::Off);
         assert_eq!(EgressMode::parse_lenient(""), EgressMode::Off);
+    }
+
+    // ── Central policy distribution (LLD #63 §4) ──────────────────────────
+
+    fn write_egress_file(dir: &std::path::Path, workspace: &str, mode_json: &str, allow: &[&str], digest_over: &str) -> std::path::PathBuf {
+        let digest = {
+            let mut h = Sha256::new();
+            h.update(digest_over.as_bytes());
+            format!("{:x}", h.finalize())[..32].to_string()
+        };
+        let allow_json = allow.iter().map(|a| format!("\"{a}\"")).collect::<Vec<_>>().join(",");
+        let text = format!(
+            "{{\"workspace\":\"{workspace}\",\"digest\":\"{digest}\",\"mode\":{mode_json},\"allow\":[{allow_json}]}}"
+        );
+        let path = dir.join(format!("egress-{}.json", digest));
+        std::fs::write(&path, text).unwrap();
+        path
+    }
+
+    #[test]
+    fn central_file_loads_and_verifies_digest() {
+        let dir = std::env::temp_dir();
+        // canonical = "enforce\ngithub.com\n10.0.0.0/8"
+        let p = write_egress_file(&dir, "wk_1", "\"enforce\"", &["github.com", "10.0.0.0/8"], "enforce\ngithub.com\n10.0.0.0/8");
+        let central = load_local_egress_file(&p, Some("wk_1")).expect("valid file loads");
+        assert_eq!(central.mode, Some(EgressMode::Enforce));
+        assert_eq!(central.allow, vec!["github.com".to_string(), "10.0.0.0/8".to_string()]);
+        std::fs::remove_file(&p).ok();
+    }
+
+    #[test]
+    fn central_file_null_mode_means_unconfigured() {
+        let dir = std::env::temp_dir();
+        let p = write_egress_file(&dir, "wk_1", "null", &[], "");
+        let central = load_local_egress_file(&p, Some("wk_1")).expect("loads");
+        assert_eq!(central.mode, None); // central management not configured
+        std::fs::remove_file(&p).ok();
+    }
+
+    #[test]
+    fn central_file_rejected_on_digest_mismatch() {
+        let dir = std::env::temp_dir();
+        // digest computed over the WRONG canonical → must be rejected (tamper/truncation)
+        let p = write_egress_file(&dir, "wk_1", "\"enforce\"", &["github.com"], "enforce\nWRONG");
+        assert!(load_local_egress_file(&p, Some("wk_1")).is_none());
+        std::fs::remove_file(&p).ok();
+    }
+
+    #[test]
+    fn central_file_rejected_for_foreign_workspace() {
+        let dir = std::env::temp_dir();
+        let p = write_egress_file(&dir, "wk_OTHER", "\"enforce\"", &[], "enforce");
+        // proxy expects wk_1 but the file is for wk_OTHER → refuse
+        assert!(load_local_egress_file(&p, Some("wk_1")).is_none());
+        // with no expected workspace, it is accepted (trusts the protected-path file)
+        assert!(load_local_egress_file(&p, None).is_some());
+        std::fs::remove_file(&p).ok();
+    }
+
+    #[test]
+    fn with_central_mode_authoritative_allow_unioned() {
+        let base = enforce(&["local.corp"]); // Enforce, allow local.corp
+        // central: monitor + allow github.com
+        let merged = base.with_central(Some(EgressMode::Monitor), &["github.com".to_string()]);
+        assert_eq!(merged.mode(), EgressMode::Monitor); // central mode wins
+        // both local and central allow entries survive
+        assert_eq!(merged.decide("local.corp", 443), EgressDecision::Allow);
+        assert_eq!(merged.decide("github.com", 443), EgressDecision::Allow);
+        // central mode None leaves local mode untouched
+        let merged2 = base.with_central(None, &["github.com".to_string()]);
+        assert_eq!(merged2.mode(), EgressMode::Enforce);
+        assert_eq!(merged2.decide("github.com", 443), EgressDecision::Allow);
     }
 
     #[test]

@@ -7,12 +7,21 @@
 # boots the microVM via the Firecracker API, runs the agent command inside the
 # guest, and tears everything down.
 #
-# Verification status (honest): the microVM + guest kernel boot on KVM through
-# exactly this API sequence is proven. Running the agent to completion *inside*
-# a fully-booted guest depends on the operator supplying a matched
-# kernel+rootfs (the rootfs must contain the agent and an sshd, like an OCI
-# sandbox image must contain the agent). The in-guest exec below uses the
-# standard Firecracker CI ssh path and is gated on that.
+# Verification status: PROVEN end-to-end on a GCE nested-virt Intel host — the
+# microVM boots to userspace, an agent runs inside it over ssh, and the
+# host-side firewall below blocks its egress to everything except the proxy
+# (reached the proxy stand-in = 200; external 1.1.1.1 = blocked).
+#
+# The kernel+rootfs are operator-supplied (the rootfs must contain the agent and
+# an sshd), but a matched pair matters: the Firecracker CI `vmlinux-6.1.102`
+# does NOT enumerate the virtio-blk root device under Firecracker (the guest
+# panics "Cannot open root device vda" despite CONFIG_VIRTIO_BLK=y — an
+# ACPI/MMIO discovery quirk), while `vmlinux-5.10.223` + `ubuntu-22.04.ext4`
+# from the same CI bucket boot cleanly. Defaulted below; override with
+# --kernel/--rootfs.
+#
+#   kernel: https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.10/x86_64/vmlinux-5.10.223
+#   rootfs: https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.10/x86_64/ubuntu-22.04.ext4
 #
 # Privileged: tap + nft + firecracker need root.
 set -uo pipefail

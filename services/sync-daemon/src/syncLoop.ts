@@ -41,6 +41,7 @@ import {
 import { writeRuntimeEnv } from './lib/runtimeEnv.js'
 import { refreshPolicySnapshot } from './lib/policySnapshot.js'
 import { refreshApprovedBypasses } from './lib/approvedBypasses.js'
+import { refreshEgressPolicy } from './lib/egressPolicy.js'
 import { runComplianceProbes } from './lib/complianceProbes.js'
 import { startWatcher } from './watcher/driftWatcher.js'
 import { shouldCaptureThisIteration, captureAndUpload } from './configReader.js'
@@ -204,6 +205,11 @@ export async function startSyncLoop(options: SyncLoopOptions): Promise<void> {
   // next retry, not on the next config-version bump.
   await refreshApprovedBypasses({ controlPlaneUrl, apiKey, workspaceId })
 
+  // Step 0d: Refresh the central egress policy, same cadence — an admin who
+  // flips the workspace to `enforce` wants it on the developer's running proxy
+  // this cycle, not on the next restart. The proxy hot-reloads the file.
+  await refreshEgressPolicy({ controlPlaneUrl, apiKey, workspaceId })
+
   // Try to sync offline traces back to PostgreSQL
   try {
     await syncOfflineTraces(controlPlaneUrl, apiKey)
@@ -333,6 +339,8 @@ export async function startSyncLoop(options: SyncLoopOptions): Promise<void> {
         await refreshPolicySnapshot({ controlPlaneUrl, apiKey, workspaceId })
         // Same reasoning as Step 0c.
         await refreshApprovedBypasses({ controlPlaneUrl, apiKey, workspaceId })
+        // Same reasoning as Step 0d.
+        await refreshEgressPolicy({ controlPlaneUrl, apiKey, workspaceId })
       }
 
       // Start the drift watcher on first successful sync (once harnesses are known)
