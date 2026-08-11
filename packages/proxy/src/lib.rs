@@ -31,6 +31,8 @@ pub mod store;
 pub mod tls_mitm;
 // WS-6NC: Network Controls + MDM Agent
 pub mod dns_interceptor;
+/// L1 egress enforcement — the deny decision consulted on every CONNECT (LLD #63)
+pub mod egress_policy;
 pub mod firewall;
 pub mod local_spend;
 pub mod mdm_agent;

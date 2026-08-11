@@ -66,7 +66,13 @@ const ROOT = new URL('../..', import.meta.url).pathname
  * opened. A pass can state less than you hoped; it can never state more than it
  * checked.
  */
-const DEFAULT_ROOTS = [join(ROOT, 'apps/docs')]
+// apps/docs is the published documentation tree; README.md is the other page a
+// prospect actually reads, and it sat outside every scan — TD-270 retracted the
+// sub-5ms claim from thirteen docs pages while the same figure stayed on the
+// README because the gate never opened it. A file root is scanned directly (see
+// the loop), so this covers the README in this repo and, since the script is
+// shared verbatim, the public mirror's README when it runs there.
+const DEFAULT_ROOTS = [join(ROOT, 'apps/docs'), join(ROOT, 'README.md')]
 
 const argRoots = process.argv.slice(2).filter((a) => !a.startsWith('-'))
 const ROOTS = argRoots.length > 0 ? argRoots.map((r) => resolve(r)) : DEFAULT_ROOTS
@@ -155,6 +161,14 @@ function asRendered(line) {
     .replace(/&gt;/gi, '>')
     .replace(/&nbsp;/gi, ' ')
     .replace(/&amp;/gi, '&')
+    // TeX/KaTeX math renders as plain text to a reader but hides a speed claim
+    // from every pattern: `under $1\text{ms}$` reads as "under 1ms" yet matches
+    // none of them. Unwrap `\text{…}` and any `\cmd{…}`, then drop the `$`
+    // delimiters, so the rendered sentence is what we scan — the same reason we
+    // decode HTML entities. faqs.md hid an "under 1ms" figure this exact way.
+    .replace(/\\text\s*\{([^}]*)\}/g, '$1')
+    .replace(/\\[a-zA-Z]+\s*\{([^}]*)\}/g, '$1')
+    .replace(/\$+/g, '')
     // Collapse runs. Stripping tags inserts one space per tag, so
     // `<span>&lt;5</span><span>ms</span>` yields `<5  ms` with TWO spaces and
     // slips past a pattern allowing one. The homepage's headline metric card is
@@ -192,7 +206,14 @@ for (const root of ROOTS) {
     continue
   }
   scanned.push(root)
-  for (const file of publishedFiles(root)) {
+  // A root may be a directory (walked) or a single published file (scanned
+  // directly), so the README can be named without pulling in the whole repo.
+  const files = statSync(root).isDirectory()
+    ? publishedFiles(root)
+    : PUBLISHED.test(root)
+      ? [root]
+      : []
+  for (const file of files) {
     const lines = readFileSync(file, 'utf-8').split('\n')
     lines.forEach((raw, i) => {
       const line = asRendered(raw)

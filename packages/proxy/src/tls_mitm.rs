@@ -20,7 +20,7 @@ use tokio_rustls::TlsAcceptor;
 use tracing::{debug, error, info};
 
 use crate::ca_manager::{ensure_ca_exists, sign_cert_for_host};
-use crate::hostname_filter::is_ai_provider_host;
+use crate::egress_policy::{global_policy, record_denied, record_would_deny, EgressDecision};
 
 /// Handle an HTTP CONNECT request.
 ///
@@ -41,12 +41,39 @@ pub async fn handle_connect(req: Request<Body>) -> Response<Body> {
     };
 
     let target = format!("{}:{}", host, port);
-    let should_mitm = is_ai_provider_host(&host);
 
-    if should_mitm {
-        info!(host = %host, "MITM: intercepting AI provider TLS connection");
-    } else {
-        debug!(host = %host, "Passthrough: transparent TCP tunnel");
+    // L1 egress decision (LLD #63 §4). AI hosts → MITM (unchanged); allowed
+    // hosts → tunnel; denied hosts (Enforce) → 403 with no tunnel opened.
+    let decision = global_policy().decide(&host, port);
+    let should_mitm = matches!(decision, EgressDecision::Mitm);
+
+    match decision {
+        EgressDecision::Mitm => {
+            info!(host = %host, "MITM: intercepting AI provider TLS connection");
+        }
+        EgressDecision::Allow => {
+            debug!(host = %host, "Passthrough: transparent TCP tunnel");
+        }
+        EgressDecision::WouldDeny => {
+            // Monitor mode: let it through, but make the blast radius visible.
+            record_would_deny();
+            tracing::warn!(
+                action = "egress_would_deny",
+                host = %host,
+                port = %port,
+                "Egress MONITOR: connection would be denied under Enforce — tunnelling and logging"
+            );
+        }
+        EgressDecision::Deny => {
+            record_denied();
+            tracing::warn!(
+                action = "egress_denied",
+                host = %host,
+                port = %port,
+                "Egress ENFORCE: connection denied — host not on the allow policy"
+            );
+            return forbidden(&host);
+        }
     }
 
     let has_upgrade = req
@@ -177,9 +204,21 @@ fn bad_gateway(msg: &str) -> Response<Body> {
         .unwrap()
 }
 
+/// Refuse a CONNECT whose target the egress policy denies. 403 rather than a
+/// silent tunnel close, so the client sees a governance decision, not a network
+/// error it might retry around.
+fn forbidden(host: &str) -> Response<Body> {
+    Response::builder()
+        .status(StatusCode::FORBIDDEN)
+        .body(Body::from(format!(
+            "403 Forbidden: egress to {host} is denied by Intutic egress policy"
+        )))
+        .unwrap()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::hostname_filter::is_ai_provider_host;
 
     #[test]
     fn test_ai_host_gets_mitm() {

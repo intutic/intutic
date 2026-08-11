@@ -1,6 +1,6 @@
 # Intutic vs W&B Weave
 
-Weights & Biases Weave is a developer tool built to trace LLM application graphs, log datasets, and evaluate prompt alignment metrics. **Intutic is an active security containment and execution isolation platform for autonomous agent fleets.**
+Weights & Biases Weave is a developer tool built to trace LLM application graphs, log datasets, and evaluate prompt alignment metrics. **Intutic is an active governance layer with opt-in egress containment (`intutic enforce`) and runtime isolation (`intutic exec --sandbox`) for autonomous agent fleets** (see [LLD #63](https://github.com/intutic/intutic)).
 
 ## The Core Difference
 
@@ -16,7 +16,7 @@ If your agent's next step is a tool call an SOP forbids, W&B Weave will log the 
 |-----------|---------|-----------|
 | **Core Value** | Active containment & sandbox security | Trajectory tracing & prompt evaluation |
 | **Isolation Model** | WASM (wasmtime) policy sandbox — 16 MB, 1,000,000 fuel, 5 ms, explicit host-import allowlist | Not available |
-| **Egress Control** | All agent LLM traffic forced through the governing proxy | N/A |
+| **Egress Control** | Opt-in default-deny egress (`intutic enforce`) forces all traffic through the governing proxy | N/A |
 | **Enforcement Path** | Real-time inline proxy — requests are blocked before they reach the model | Async telemetry listener |
 | **Rule Engine** | Dynamic WASM modules & custom security scripts | Prompt evaluation workflows |
 | **Target Workload** | Autonomous coding agents (Cursor, Claude Code) | Chat applications, RAG pipelines |
@@ -26,7 +26,7 @@ If your agent's next step is a tool call an SOP forbids, W&B Weave will log the 
 ## When to Choose Intutic
 
 - **You deploy untrusted autonomous agents** that need to execute code locally but must be walled off from sensitive networks or source code repositories.
-- **You require isolated sandbox runs** to guarantee workspace isolation and SOC 2 security compliance.
+- **You require isolated sandbox runs** (`intutic exec --sandbox`) for per-run workspace isolation whose only egress is the governing proxy.
 - **You need active, real-time protection** against unauthorized files, commands, and network connections.
 - **You want ready-to-use integrations** for 18+ agent harnesses.
 
@@ -34,7 +34,7 @@ If your agent's next step is a tool call an SOP forbids, W&B Weave will log the 
 
 - **You are optimizing RAG pipelines** and need to visualize nested LLM call graphs and dataset traces.
 - **You are fine-tuning models** and need to log training datasets and prompt evaluations.
-- **You do not require system isolation** or active firewall containment.
+- **You do not require runtime isolation** (`intutic exec --sandbox`) or opt-in firewall containment (`intutic enforce`).
 
 ---
 

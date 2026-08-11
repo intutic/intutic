@@ -41,6 +41,9 @@ pub fn build_router(state: AppState) -> Router {
         // two-sided evidence, per guard, with latency. Local diagnostics only —
         // it evaluates synthetic contexts and calls no upstream.
         .route("/intutic/probes", get(run_probes))
+        // Egress enforcement posture + live deny counts (LLD #63 §4). Makes an
+        // Enforce/Monitor decision observable rather than silent.
+        .route("/intutic/egress", get(egress_status))
         .route("/", get(root_info))
         .merge(proxy_routes)
         // HTTP CONNECT tunnel + Decrypted MITM requests fallback handler
@@ -87,6 +90,22 @@ async fn root_info() -> Json<serde_json::Value> {
         // `proxy::DeltaShape::Unparsed` for the full chain.
         "protocols": ["anthropic", "openai", "openai-responses"],
         "gemini_unsupported": "requests to /v1beta/ are routed but not translated; the model name is not read from the URL"
+    }))
+}
+
+/// `GET /intutic/egress` — the live egress posture. An operator (or a probe)
+/// can confirm the mode is what they set and watch the deny counters move.
+async fn egress_status() -> impl axum::response::IntoResponse {
+    use crate::egress_policy::{denied_count, global_policy, would_deny_count, EgressMode};
+    let mode = match global_policy().mode() {
+        EgressMode::Off => "off",
+        EgressMode::Monitor => "monitor",
+        EgressMode::Enforce => "enforce",
+    };
+    axum::Json(serde_json::json!({
+        "mode": mode,
+        "denied": denied_count(),
+        "would_deny": would_deny_count(),
     }))
 }
 

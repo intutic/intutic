@@ -159,7 +159,7 @@ Connected harnesses are scored on a four-tier system:
 | **Compute** | GKE with node auto-upgrade, workload identity, pod security standards |
 | **Secrets** | A managed secret store — never committed to source control |
 | **Monitoring** | Structured logging with trace context |
-| **Supply chain** | Dependabot, lockfile integrity, signed container images |
+| **Supply chain** | Dependabot, lockfile integrity, CodeQL on every PR |
 
 → Self-hosted deployment: [Deployment guide](/guide/how-it-works)
 → CLI configuration: [CLI Reference](/reference/cli)

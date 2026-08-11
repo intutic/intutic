@@ -97,6 +97,9 @@ pub struct IntuticSettings {
     /// Response-side tool-call gate.
     #[serde(default)]
     pub response_gate: ResponseGateConfig,
+    /// L1 egress enforcement — deny/monitor/enforce + allow policy (LLD #63).
+    #[serde(default)]
+    pub egress: crate::egress_policy::EgressConfig,
 }
 
 /// Refusing a forbidden tool call in the model's *response*, before the client

@@ -220,6 +220,33 @@ program
     await runStart(opts)
   })
 
+// L2 mandatory egress firewall (LLD #63 §5). Makes the governing proxy
+// non-optional: default-deny host egress to everything except the proxy, DNS,
+// and declared infra. apply/remove need root; generate/status do not.
+const enforceCmd = program
+  .command('enforce')
+  .description('Manage the mandatory default-deny egress firewall (forces all traffic through the proxy)')
+
+for (const [action, desc] of [
+  ['apply', 'Apply the default-deny egress firewall (root). All egress except the proxy, DNS and --allow infra is dropped.'],
+  ['remove', 'Remove the Intutic egress firewall (root).'],
+  ['status', 'Report whether the egress firewall is currently applied.'],
+  ['generate', 'Print the platform ruleset without applying it (no privilege).'],
+] as const) {
+  enforceCmd
+    .command(action)
+    .description(desc)
+    .option('--port <port>', "The proxy's listener port to permit", '4000')
+    .option('--uid <uid>', 'uid the proxy runs as, exempted from the deny (defaults to current user)')
+    .option('--allow <cidrs>', 'Comma-separated extra destination CIDRs to permit (control plane, registries, …)')
+    .option('--no-dns', 'Also deny outbound DNS (only if a local resolver serves the host)')
+    .option('--platform <os>', 'Target ruleset platform: linux | macos | windows (defaults to current OS)')
+    .action(async (opts) => {
+      const { runEnforce } = await import('./commands/enforce.js')
+      await runEnforce(action, opts)
+    })
+}
+
 const envCmd = program
   .command('env')
   .description('Persist or clear the proxy base-URL environment variables')
@@ -275,9 +302,31 @@ program
   .command('exec')
   .description('Execute a command wrapped with Intutic proxy environment variables')
   .argument('[command...]', 'Command and arguments to execute (e.g. -- claude)')
-  .action(async (commandAndArgs: string[]) => {
+  // Run the agent inside an isolated sandbox whose ONLY egress is the proxy
+  // (LLD #63 §6): cap-drop, no-new-privileges, read-only rootfs, resource caps,
+  // and a default-deny egress firewall the agent cannot undo.
+  .option('--sandbox [kind]', 'Run the agent in an isolated sandbox (kind: oci | firecracker; default oci)')
+  .option('--sandbox-image <image>', 'Sandbox image (must contain the agent + nftables + capsh)', 'intutic/sandbox:latest')
+  .option('--sandbox-memory <size>', 'Sandbox memory cap (e.g. 2g)', '2g')
+  .option('--sandbox-cpus <n>', 'Sandbox CPU cap', '2')
+  .option('--sandbox-pids <n>', 'Sandbox max process count', '512')
+  .option('--sandbox-allow <cidrs>', 'Comma-separated extra destination CIDRs the sandbox may reach')
+  .action(async (commandAndArgs: string[], opts) => {
     const { runExec } = await import('./commands/exec.js')
-    await runExec(commandAndArgs)
+    if (opts.sandbox) {
+      await runExec(commandAndArgs, {
+        kind: typeof opts.sandbox === 'string' ? opts.sandbox : 'oci',
+        image: opts.sandboxImage,
+        memory: opts.sandboxMemory,
+        cpus: opts.sandboxCpus,
+        pidsLimit: Number.parseInt(opts.sandboxPids, 10),
+        allow: opts.sandboxAllow
+          ? String(opts.sandboxAllow).split(',').map((s) => s.trim()).filter(Boolean)
+          : [],
+      })
+    } else {
+      await runExec(commandAndArgs)
+    }
   })
 
 
