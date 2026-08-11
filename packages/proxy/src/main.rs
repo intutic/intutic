@@ -6,7 +6,7 @@
 //!
 //! Architecture: See docs/lld/02-proxy-gateway.lld.md
 
-use intutic_proxy::{config, dlp, egress_policy, firewall, proxy, router, routing, sops, store, telemetry, wasm};
+use intutic_proxy::{config, dlp, egress_policy, firewall, gateway, proxy, router, routing, sops, store, telemetry, wasm};
 
 use std::net::SocketAddr;
 use tracing_subscriber::layer::SubscriberExt;
@@ -271,6 +271,27 @@ async fn main() -> anyhow::Result<()> {
             "Egress policy: ENFORCE — non-AI hosts are denied unless on the allow policy. \
              Denials are logged and counted at GET /intutic/egress."
         ),
+    }
+
+    // Install the L2 hosted-gateway front door (LLD #64 §2, TD-334 increment 2)
+    // before the first request. Off by default — a single-tenant local proxy or
+    // an enterprise self-hosted deployment keeps today's behaviour (any bearer
+    // token accepted, opportunistic credential capture for a developer's own
+    // OAuth/API key). Logged at WARN when on, since it changes what a caller
+    // can authenticate with.
+    let gateway_cfg = gateway::GatewayConfig::from_config_and_env(&config.intutic_settings.gateway);
+    let require_vk = gateway::init_gateway_config(gateway_cfg);
+    if require_vk {
+        tracing::warn!(
+            "Gateway front door: REQUIRE_VK — only vk_ virtual keys are accepted; every other \
+             bearer token is refused with 401 before workspace resolution or credential capture."
+        );
+    } else {
+        tracing::info!(
+            "Gateway front door: off — any bearer token is accepted (today's single-tenant \
+             behaviour). Set intutic_settings.gateway.require_vk or \
+             INTUTIC_GATEWAY_REQUIRE_VK=true for a shared multi-tenant gateway."
+        );
     }
 
     // Install operator DLP patterns before anything can serve a request.

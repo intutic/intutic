@@ -34,6 +34,8 @@ pub mod dns_interceptor;
 /// L1 egress enforcement — the deny decision consulted on every CONNECT (LLD #63)
 pub mod egress_policy;
 pub mod firewall;
+/// L2 hosted-gateway front door — vk_-only enforcement (LLD #64)
+pub mod gateway;
 pub mod local_spend;
 pub mod mdm_agent;
 
