@@ -9,7 +9,7 @@
 
 use axum::{
     extract::State,
-    http::Method,
+    http::{HeaderMap, Method, StatusCode},
     response::Json,
     routing::{any, get, post},
     Router,
@@ -44,6 +44,12 @@ pub fn build_router(state: AppState) -> Router {
         // Egress enforcement posture + live deny counts (LLD #63 §4). Makes an
         // Enforce/Monitor decision observable rather than silent.
         .route("/intutic/egress", get(egress_status))
+        // Sandbox attestation callback (LLD #63 §6, TD-333). A `--sandbox`
+        // container's firewall permits egress ONLY to this proxy — it cannot
+        // reach the control plane directly — so this is the one path a
+        // sandboxed agent has to attest. The proxy forwards it, authenticated
+        // with the same bearer every LLM call already carries.
+        .route("/intutic/attest-sandbox", post(attest_sandbox))
         .route("/", get(root_info))
         .merge(proxy_routes)
         // HTTP CONNECT tunnel + Decrypted MITM requests fallback handler
@@ -120,4 +126,189 @@ async fn run_probes() -> impl axum::response::IntoResponse {
         "total": verdicts.len(),
         "failed": failed,
     }))
+}
+
+/// `POST /intutic/attest-sandbox` — forwards a sandboxed agent's attestation
+/// callback to the control plane (LLD #63 §6, TD-333).
+///
+/// This exists because of what the sandbox's own firewall permits: the
+/// `entrypoint.sh` that calls this runs AFTER the container's egress firewall
+/// is installed and permits only the proxy and DNS — the sandboxed process
+/// cannot reach the control plane directly to attest itself, only through the
+/// one door its own isolation left open. That is the security property this
+/// route depends on, not merely convenience: a request reaching this handler
+/// came from something that, at minimum, resolved the proxy as its only
+/// egress path, which a host-side process spoofing "I am sandboxed" (as the
+/// pre-existing `executionMode: 'SANDBOX'` self-report from `intutic exec`
+/// could always do) has no reason to be routed through.
+///
+/// What this does NOT prove, stated plainly rather than left implicit: that
+/// the container's capability-drop and firewall-install steps in
+/// `entrypoint.sh` actually ran as written. A custom `--sandbox-image` built
+/// to skip those steps but still make this one call would still attest. Real
+/// defense against that needs measured/attested boot (TPM, confidential
+/// computing) that does not exist anywhere in this stack. What this closes is
+/// the concrete gap named in TD-333: a session recorded as `SANDBOX` because
+/// the host CLI said so, whether or not the sandboxed process ever started.
+/// What must be true before this handler forwards anything: a configured
+/// control plane, a `sessionId` in the body, and a non-empty bearer. Pure and
+/// exported so these three checks — the entire request-shape contract — are
+/// unit-testable without constructing a full `AppState` (which needs a live
+/// `wasm_registry`/`reward_engine`/`store`/`control_plane`, none of which this
+/// handler touches). Returns the forward URL and the bearer to send on
+/// success, or the exact `(status, body)` this handler should return on
+/// failure.
+fn validate_attest_request(
+    control_plane_url: Option<&str>,
+    body: &serde_json::Value,
+    headers: &HeaderMap,
+) -> Result<(String, String), (StatusCode, serde_json::Value)> {
+    let Some(control_plane_url) = control_plane_url else {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({"error": "no control plane configured"}),
+        ));
+    };
+
+    let Some(session_id) = body.get("sessionId").and_then(|v| v.as_str()) else {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            json!({"error": "sessionId required"}),
+        ));
+    };
+
+    let auth = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if auth.is_empty() {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            json!({"error": "authorization required"}),
+        ));
+    }
+
+    let url = format!(
+        "{}/api/v1/sessions/{}/attest-sandbox",
+        control_plane_url.trim_end_matches('/'),
+        session_id
+    );
+    Ok((url, auth.to_string()))
+}
+
+async fn attest_sandbox(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<serde_json::Value>,
+) -> impl axum::response::IntoResponse {
+    let control_plane_url = state
+        .config
+        .intutic_settings
+        .policy
+        .control_plane_url
+        .as_deref();
+    let (url, auth) = match validate_attest_request(control_plane_url, &body, &headers) {
+        Ok(v) => v,
+        Err((status, body)) => {
+            if status == StatusCode::SERVICE_UNAVAILABLE {
+                tracing::warn!("attest-sandbox called with no CONTROL_PLANE_URL configured");
+            }
+            return (status, axum::Json(body));
+        }
+    };
+
+    let resp = state
+        .http_client
+        .patch(&url)
+        .header("authorization", auth)
+        .timeout(std::time::Duration::from_millis(3000))
+        .send()
+        .await;
+
+    match resp {
+        Ok(r) => {
+            let status =
+                StatusCode::from_u16(r.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+            (status, axum::Json(json!({"attested": status.is_success()})))
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "attest-sandbox forward to control plane failed");
+            (
+                StatusCode::BAD_GATEWAY,
+                axum::Json(json!({"error": "control plane unreachable"})),
+            )
+        }
+    }
+}
+
+#[cfg(test)]
+mod attest_sandbox_tests {
+    use super::*;
+    use axum::http::HeaderValue;
+
+    fn headers_with_auth(bearer: &str) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        if !bearer.is_empty() {
+            h.insert(
+                "authorization",
+                HeaderValue::from_str(&format!("Bearer {bearer}")).unwrap(),
+            );
+        }
+        h
+    }
+
+    #[test]
+    fn refuses_when_no_control_plane_is_configured() {
+        let body = json!({"sessionId": "ses_1"});
+        let err = validate_attest_request(None, &body, &headers_with_auth("vk_x"))
+            .expect_err("must reject with no control plane configured");
+        assert_eq!(err.0, StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[test]
+    fn refuses_a_body_with_no_session_id() {
+        let body = json!({});
+        let err = validate_attest_request(Some("http://cp"), &body, &headers_with_auth("vk_x"))
+            .expect_err("must reject a missing sessionId");
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn refuses_a_request_with_no_authorization_header() {
+        let body = json!({"sessionId": "ses_1"});
+        let err = validate_attest_request(Some("http://cp"), &body, &HeaderMap::new())
+            .expect_err("must reject an unauthenticated request");
+        assert_eq!(err.0, StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
+    fn builds_the_forward_url_from_control_plane_and_session_id() {
+        let body = json!({"sessionId": "ses_abc123"});
+        let (url, auth) = validate_attest_request(
+            Some("http://control-plane:3001"),
+            &body,
+            &headers_with_auth("vk_x"),
+        )
+        .expect("a well-formed request must validate");
+        assert_eq!(
+            url,
+            "http://control-plane:3001/api/v1/sessions/ses_abc123/attest-sandbox"
+        );
+        assert_eq!(auth, "Bearer vk_x");
+    }
+
+    #[test]
+    fn trims_a_trailing_slash_on_the_control_plane_url_so_the_path_has_no_double_slash() {
+        let body = json!({"sessionId": "ses_1"});
+        let (url, _) = validate_attest_request(
+            Some("http://control-plane:3001/"),
+            &body,
+            &headers_with_auth("vk_x"),
+        )
+        .expect("a well-formed request must validate");
+        assert_eq!(
+            url,
+            "http://control-plane:3001/api/v1/sessions/ses_1/attest-sandbox"
+        );
+    }
 }
