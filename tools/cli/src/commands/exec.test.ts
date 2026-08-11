@@ -2,8 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import * as os from 'node:os'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
-import { buildProxyEnv, resolveSandboxRequirement } from './exec.js'
+import { buildProxyEnv, resolveSandboxRequirement, openSandboxSession, closeSandboxSession } from './exec.js'
 import type { IntuticCredentials } from '@intutic/shared-types'
+import type { GraphIdentity } from '../lib/graphIdentity.js'
 
 const creds: IntuticCredentials = {
   apiKey: 'vk_test_wk1',
@@ -61,6 +62,48 @@ describe('resolveSandboxRequirement', () => {
       json: async () => ({ settings: { sandboxRequirement: 'YOLO' } }),
     })) as unknown as typeof fetch)
     expect(await resolveSandboxRequirement(creds)).toBe('off')
+  })
+})
+
+const identity: GraphIdentity = { graphId: 'gr_test', nodeId: 'nd_test', parentId: '', depth: 0 }
+
+describe('openSandboxSession / closeSandboxSession — sandbox-usage telemetry', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it('opens a SANDBOX-mode session and returns its id', async () => {
+    let sentBody: unknown
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      sentBody = JSON.parse(init?.body as string)
+      return { ok: true, json: async () => ({ sessionId: 'ses_abc123' }) }
+    }) as unknown as typeof fetch)
+
+    const id = await openSandboxSession(creds, identity, 'docker')
+    expect(id).toBe('ses_abc123')
+    expect(sentBody).toMatchObject({
+      workspaceId: 'wk1',
+      harnessType: 'sandbox',
+      executionMode: 'SANDBOX',
+    })
+  })
+
+  it('returns null (never throws) when the control plane rejects the request', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, json: async () => ({}) })) as unknown as typeof fetch)
+    expect(await openSandboxSession(creds, identity, 'docker')).toBeNull()
+  })
+
+  it('returns null (never throws) when the control plane is unreachable', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('ECONNREFUSED') }) as unknown as typeof fetch)
+    expect(await openSandboxSession(creds, identity, 'docker')).toBeNull()
+  })
+
+  it('closeSandboxSession PATCHes the end endpoint and never throws on failure', async () => {
+    const fetchMock = vi.fn(async () => { throw new Error('down') })
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
+    await expect(closeSandboxSession(creds, 'ses_abc123')).resolves.toBeUndefined()
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/v1/sessions/ses_abc123/end'),
+      expect.objectContaining({ method: 'PATCH' }),
+    )
   })
 })
 
