@@ -19,7 +19,11 @@
  */
 
 import { spawn } from 'node:child_process'
+import * as fs from 'node:fs/promises'
+import * as path from 'node:path'
 import { loadCredentials, loadConfig } from '../config/store.js'
+import type { IntuticCredentials } from '@intutic/shared-types'
+import { getIntuticDir } from '../config/paths.js'
 import {
   deriveIdentity,
   identityEnv,
@@ -30,6 +34,59 @@ import {
 import { log } from '../lib/logger.js'
 import { selectBackend, type SandboxKind, type SandboxSpec } from '../lib/sandbox/index.js'
 import pc from 'picocolors'
+
+/** Workspace requirement for whether agents must run sandboxed (LLD #63 §6). */
+export type SandboxRequirement = 'off' | 'warn' | 'require'
+
+/**
+ * Resolve this workspace's sandbox requirement, resiliently. A best-effort
+ * control-plane fetch (short timeout) refreshes a local cache; if the control
+ * plane is unreachable we fall back to the cache, and if there is none we
+ * default to `off`. This keeps an offline developer working and keeps open core
+ * — which has no control plane to read this from — entirely unaffected.
+ *
+ * This is a client-side, advisory layer (a determined user can bypass by not
+ * using `intutic exec` at all); server-side attestation is the stronger
+ * follow-on. So failing open toward `off` on an unreachable, never-cached
+ * control plane is the honest behaviour for what this layer is.
+ */
+export async function resolveSandboxRequirement(
+  creds: IntuticCredentials,
+): Promise<SandboxRequirement> {
+  const cachePath = path.join(getIntuticDir(), 'exec-policy.json')
+  const coerce = (v: unknown): SandboxRequirement =>
+    v === 'warn' || v === 'require' ? v : 'off'
+
+  const base = trimTrailingSlashes(creds.controlPlaneUrl ?? 'https://api.intutic.ai')
+  try {
+    const res = await fetch(`${base}/api/v1/workspace/settings`, {
+      headers: {
+        Authorization: `Bearer ${creds.apiKey}`,
+        'x-workspace-id': creds.workspaceId ?? '',
+      },
+      signal: AbortSignal.timeout(2500),
+    })
+    if (res.ok) {
+      const body = (await res.json()) as { settings?: { sandboxRequirement?: unknown } }
+      const val = coerce(body?.settings?.sandboxRequirement)
+      try {
+        await fs.writeFile(cachePath, JSON.stringify({ sandboxRequirement: val, cachedAt: new Date().toISOString() }))
+      } catch {
+        /* cache write is best-effort */
+      }
+      return val
+    }
+  } catch {
+    /* fall through to the cache */
+  }
+
+  try {
+    const cached = JSON.parse(await fs.readFile(cachePath, 'utf-8')) as { sandboxRequirement?: unknown }
+    return coerce(cached?.sandboxRequirement)
+  } catch {
+    return 'off'
+  }
+}
 
 /** The hostname a container reaches the host (and so the proxy) at. */
 const PROXY_HOST_ALIAS = 'host.docker.internal'
@@ -178,6 +235,17 @@ export async function runExec(
   if (sandbox) {
     await runSandboxed(commandAndArgs, creds.apiKey, devMode, identity, sandbox)
     return
+  }
+
+  // Not sandboxed — honour the workspace's sandbox requirement (LLD #63 §6).
+  const requirement = await resolveSandboxRequirement(creds)
+  if (requirement === 'require') {
+    log.error('This workspace requires agents to run inside a sandbox.')
+    log.dim(`Re-run with the sandbox:  intutic exec --sandbox -- ${commandAndArgs.join(' ')}`)
+    process.exit(1)
+  }
+  if (requirement === 'warn') {
+    log.warn('This workspace recommends running agents in a sandbox — add --sandbox.')
   }
 
   const proxyEnv = buildProxyEnv(creds.apiKey, devMode, identity)
