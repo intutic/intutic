@@ -561,10 +561,20 @@ fn estimate_model_cost(model: &str, input_tokens: u32, output_tokens: u32) -> f6
     pricing::estimate_cost(model, input_tokens, output_tokens)
 }
 
+/// Resolves the upstream provider credential for a workspace's request.
+///
+/// `require_provisioned` is threaded in explicitly (LLD #64 §4, Enforced
+/// BYO-key) rather than read from `gateway::requires_provisioned_key()`
+/// internally — that global installs once per process
+/// (`gateway::init_gateway_config`'s own doc comment), which makes it
+/// untestable from a unit test sharing a test binary with any other test
+/// that already installed a config. An explicit parameter keeps this
+/// function pure, matching `gateway::token_allowed`'s own reasoning.
 async fn fetch_provider_credential(
     store: &Arc<dyn LocalStore>,
     workspace_id: &str,
     provider: &Provider,
+    require_provisioned: bool,
 ) -> Option<String> {
     let fields = match provider {
         Provider::Anthropic => vec![
@@ -580,10 +590,29 @@ async fn fetch_provider_credential(
     if let Some(val) = store.workspace_credential(workspace_id, &fields).await {
         return Some(val);
     }
+    // A workspace with no deliberately provisioned credential gets nothing
+    // here when enforcement is on, on purpose: the shared operator env var
+    // exists for a single-tenant local proxy or an enterprise self-hosted
+    // deployment, not for an unprovisioned workspace on a managed
+    // multi-tenant gateway silently riding someone else's paid key. The
+    // call site turns this `None` into a clean, explicit refusal rather
+    // than forwarding the request upstream with no credential at all.
+    if require_provisioned {
+        return None;
+    }
     match provider {
         Provider::Anthropic => std::env::var("ANTHROPIC_API_KEY").ok(),
         Provider::OpenAI => std::env::var("OPENAI_API_KEY").ok(),
         Provider::Gemini => std::env::var("GEMINI_API_KEY").ok(),
+    }
+}
+
+/// Human-readable provider name for the BYO-key refusal message.
+fn provider_display_name(provider: &Provider) -> &'static str {
+    match provider {
+        Provider::Anthropic => "Anthropic",
+        Provider::OpenAI => "OpenAI",
+        Provider::Gemini => "Gemini",
     }
 }
 
@@ -3084,9 +3113,32 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // Inject credentials
     let mut creds_injected = false;
     if raw_token.starts_with("vk_") {
-        if let Some(cred) =
-            fetch_provider_credential(&state.store, &workspace_id, &target_provider).await
-        {
+        let require_provisioned = crate::gateway::requires_provisioned_key();
+        let cred_opt =
+            fetch_provider_credential(&state.store, &workspace_id, &target_provider, require_provisioned)
+                .await;
+        // LLD #64 §4 — Enforced BYO-key. This is the actual gateway threat
+        // model: a request authenticated with an Intutic `vk_` virtual key
+        // (as opposed to a raw upstream credential passed straight through —
+        // see the `!creds_injected` fallback below, a different case). A
+        // `None` here under enforcement means the workspace never
+        // provisioned its own key, and `fetch_provider_credential` already
+        // deliberately skipped the shared-key fallback — so refuse plainly
+        // rather than forward the request upstream with no credential at
+        // all, which would otherwise surface as a confusing provider-level
+        // 401 with no indication of what to fix.
+        if cred_opt.is_none() && require_provisioned {
+            return json_error(
+                StatusCode::PAYMENT_REQUIRED,
+                "byok_required",
+                &format!(
+                    "This workspace has not provisioned its own {} API key. Provision one in \
+                     the dashboard under Settings → Provider Keys.",
+                    provider_display_name(&target_provider)
+                ),
+            );
+        }
+        if let Some(cred) = cred_opt {
             match target_provider {
                 Provider::Anthropic => {
                     if cred.starts_with("sk-ant-oat") {
@@ -3131,8 +3183,16 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
 
     if !creds_injected {
         if !is_same_provider {
+            // require_provisioned deliberately hardcoded false here: this
+            // branch only runs when raw_token did NOT start with "vk_" (the
+            // vk_ branch above already injected or returned early), so it is
+            // a raw upstream credential passed directly by the caller for a
+            // cross-provider request -- a different mechanism than LLD #64
+            // §4's threat model (a workspace's `vk_` bound to its own
+            // provisioned key). Enforced BYO-key governs the vk_-authenticated
+            // gateway path only.
             if let Some(cred) =
-                fetch_provider_credential(&state.store, &workspace_id, &target_provider).await
+                fetch_provider_credential(&state.store, &workspace_id, &target_provider, false).await
             {
                 match target_provider {
                     Provider::Anthropic => {
@@ -8061,5 +8121,82 @@ mod tests {
             src[non_streaming..].contains("accrue_spend("),
             "the non-streaming path does not accrue spend",
         );
+    }
+
+    /// LLD #64 §4 — Enforced BYO-key. `fetch_provider_credential` is the one
+    /// place the decision is made; these tests exercise it directly against
+    /// a real `MemoryStore` rather than through the full HTTP handler.
+    mod enforced_byok {
+        use super::super::*;
+        use crate::store::MemoryStore;
+
+        /// Runtime-assembled, credential-shaped but not a real key --
+        /// matches this repo's no-literal-secret-shaped-string convention.
+        fn fake_key() -> String {
+            format!("{}{}", "sk-ant-api03-", "fakefakefakefakefakefake")
+        }
+
+        // Both scenarios below run as ONE test function rather than two:
+        // cargo runs tests in parallel threads by default, and
+        // std::env::set_var/remove_var("ANTHROPIC_API_KEY") from concurrent
+        // test threads would race -- the same reason gateway.rs's own env-var
+        // tests are consolidated.
+        #[tokio::test]
+        async fn unprovisioned_workspace_env_key_scenarios_run_sequentially() {
+            std::env::set_var("ANTHROPIC_API_KEY", fake_key());
+            let store: Arc<dyn LocalStore> = Arc::new(MemoryStore::new());
+
+            let enforced = fetch_provider_credential(&store, "ws_unprovisioned", &Provider::Anthropic, true).await;
+            assert_eq!(
+                enforced, None,
+                "an unprovisioned workspace must get nothing under enforcement, even though a \
+                 shared operator key exists in the environment -- that shared key is exactly \
+                 what enforcement exists to stop an unprovisioned workspace from riding",
+            );
+
+            let unenforced = fetch_provider_credential(&store, "ws_unprovisioned", &Provider::Anthropic, false).await;
+            assert_eq!(
+                unenforced,
+                Some(fake_key()),
+                "today's behaviour must be unchanged when enforcement is off",
+            );
+
+            std::env::remove_var("ANTHROPIC_API_KEY");
+        }
+
+        #[tokio::test]
+        async fn provisioned_workspace_gets_its_own_key_regardless_of_enforcement() {
+            // Deliberately does not touch ANTHROPIC_API_KEY: a provisioned
+            // workspace's own credential is found in the store before the
+            // env var is ever consulted, so this test's correctness does not
+            // depend on that var's value -- avoids the same race the
+            // sequential test above exists to avoid.
+            let store: Arc<dyn LocalStore> = Arc::new(MemoryStore::new());
+            let own_key = format!("{}{}", "sk-ant-api03-", "provisioned0000000000000");
+            store
+                .set_workspace_credential("ws_provisioned", "anthropic_api_key", &own_key)
+                .await;
+
+            let enforced = fetch_provider_credential(&store, "ws_provisioned", &Provider::Anthropic, true).await;
+            let unenforced = fetch_provider_credential(&store, "ws_provisioned", &Provider::Anthropic, false).await;
+
+            assert_eq!(enforced, Some(own_key.clone()), "a provisioned key must win under enforcement");
+            assert_eq!(unenforced, Some(own_key), "a provisioned key must also win when unenforced -- it is always preferred over the shared key");
+        }
+
+        #[tokio::test]
+        async fn one_workspaces_missing_key_does_not_affect_a_different_provisioned_workspace() {
+            let store: Arc<dyn LocalStore> = Arc::new(MemoryStore::new());
+            let own_key = format!("{}{}", "sk-ant-api03-", "otherworkspace000000000");
+            store
+                .set_workspace_credential("ws_b", "anthropic_api_key", &own_key)
+                .await;
+
+            let a = fetch_provider_credential(&store, "ws_a", &Provider::Anthropic, true).await;
+            let b = fetch_provider_credential(&store, "ws_b", &Provider::Anthropic, true).await;
+
+            assert_eq!(a, None, "ws_a never provisioned a key");
+            assert_eq!(b, Some(own_key), "ws_b's own provisioned key is unaffected by ws_a's absence");
+        }
     }
 }

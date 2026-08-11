@@ -58,7 +58,7 @@ async fn spawn_stand_in() -> SocketAddr {
 
 #[tokio::test]
 async fn two_workspaces_on_one_gateway_process_get_isolated_sop_sets() {
-    init_gateway_config(GatewayConfig { require_vk: true });
+    init_gateway_config(GatewayConfig { require_vk: true, ..Default::default() });
     let addr = spawn_stand_in().await;
     let control_plane_url = format!("http://{addr}");
     let client = reqwest::Client::new();

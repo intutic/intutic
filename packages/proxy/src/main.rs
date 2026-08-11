@@ -293,6 +293,21 @@ async fn main() -> anyhow::Result<()> {
              INTUTIC_GATEWAY_REQUIRE_VK=true for a shared multi-tenant gateway."
         );
     }
+    if gateway::requires_provisioned_key() {
+        tracing::warn!(
+            "Gateway front door: REQUIRE_PROVISIONED_KEY (LLD #64 §4) — a workspace with no \
+             deliberately provisioned upstream API key is refused with 402 rather than falling \
+             back to this pod's shared provider key."
+        );
+    } else {
+        tracing::info!(
+            "Gateway front door: BYO-key enforcement off — an unprovisioned workspace rides the \
+             shared provider key (today's behaviour). Set \
+             intutic_settings.gateway.require_provisioned_key or \
+             INTUTIC_GATEWAY_REQUIRE_PROVISIONED_KEY=true to require each workspace provision \
+             its own key."
+        );
+    }
 
     // Install operator DLP patterns before anything can serve a request.
     //

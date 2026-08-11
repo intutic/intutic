@@ -1670,7 +1670,10 @@ mod tests {
         // `all_sops_for_workspace`'s contract (exercised implicitly by every
         // *_for_role test above, all of which call the process-global path)
         // safe to leave unperturbed.
-        crate::gateway::init_gateway_config(crate::gateway::GatewayConfig { require_vk: true });
+        crate::gateway::init_gateway_config(crate::gateway::GatewayConfig {
+            require_vk: true,
+            ..Default::default()
+        });
         assert!(crate::gateway::requires_vk_only(), "test precondition: gateway mode must be on");
 
         let client = reqwest::Client::new();
