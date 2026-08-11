@@ -36,14 +36,25 @@ pub struct GatewayConfig {
     /// credential capture runs. Off by default.
     #[serde(default)]
     pub require_vk: bool,
+    /// LLD #64 §4 — Enforced BYO-key. When true, a workspace with no
+    /// deliberately provisioned upstream credential (`workspace:credentials:{ws}`,
+    /// set via the dashboard's provider-key panel, never opportunistic capture)
+    /// gets refused with 402 instead of silently riding the proxy pod's own
+    /// shared `ANTHROPIC_API_KEY`/etc. Off by default: a single-tenant local
+    /// proxy or an enterprise self-hosted deployment has no reason to refuse
+    /// its own operator-configured shared key. See `fetch_provider_credential`
+    /// in `proxy.rs`.
+    #[serde(default)]
+    pub require_provisioned_key: bool,
 }
 
 impl GatewayConfig {
-    /// Build from config plus the `INTUTIC_GATEWAY_REQUIRE_VK` env var (env
-    /// wins when set to a recognised value; an unrecognised value is ignored
-    /// rather than treated as true — a typo in a *hardening* flag must not
-    /// silently soften it, but it also must never silently harden past what
-    /// config declared without an explicit, spelled-correctly opt-in).
+    /// Build from config plus the `INTUTIC_GATEWAY_REQUIRE_VK` /
+    /// `INTUTIC_GATEWAY_REQUIRE_PROVISIONED_KEY` env vars (env wins when set
+    /// to a recognised value; an unrecognised value is ignored rather than
+    /// treated as true — a typo in a *hardening* flag must not silently
+    /// soften it, but it also must never silently harden past what config
+    /// declared without an explicit, spelled-correctly opt-in).
     pub fn from_config_and_env(cfg: &GatewayConfig) -> GatewayConfig {
         let require_vk = match std::env::var("INTUTIC_GATEWAY_REQUIRE_VK") {
             Ok(v) => match v.trim().to_ascii_lowercase().as_str() {
@@ -53,7 +64,15 @@ impl GatewayConfig {
             },
             Err(_) => cfg.require_vk,
         };
-        GatewayConfig { require_vk }
+        let require_provisioned_key = match std::env::var("INTUTIC_GATEWAY_REQUIRE_PROVISIONED_KEY") {
+            Ok(v) => match v.trim().to_ascii_lowercase().as_str() {
+                "1" | "true" => true,
+                "0" | "false" => false,
+                _ => cfg.require_provisioned_key,
+            },
+            Err(_) => cfg.require_provisioned_key,
+        };
+        GatewayConfig { require_vk, require_provisioned_key }
     }
 }
 
@@ -83,6 +102,12 @@ pub fn gateway_config() -> &'static GatewayConfig {
 /// the config struct directly.
 pub fn requires_vk_only() -> bool {
     gateway_config().require_vk
+}
+
+/// True if `require_provisioned_key` is on (LLD #64 §4, Enforced BYO-key). A
+/// tiny wrapper for the same reason as `requires_vk_only` above.
+pub fn requires_provisioned_key() -> bool {
+    gateway_config().require_provisioned_key
 }
 
 /// The pure decision: is this token acceptable under the current front-door
@@ -129,21 +154,21 @@ mod tests {
     fn env_var_scenarios_run_sequentially_to_avoid_a_cross_test_race() {
         // 1. Env override true wins over config false.
         std::env::set_var("INTUTIC_GATEWAY_REQUIRE_VK", "true");
-        assert!(GatewayConfig::from_config_and_env(&GatewayConfig { require_vk: false }).require_vk);
+        assert!(GatewayConfig::from_config_and_env(&GatewayConfig { require_vk: false, ..Default::default() }).require_vk);
 
         // 2. Env override false wins over config true.
         std::env::set_var("INTUTIC_GATEWAY_REQUIRE_VK", "0");
-        assert!(!GatewayConfig::from_config_and_env(&GatewayConfig { require_vk: true }).require_vk);
+        assert!(!GatewayConfig::from_config_and_env(&GatewayConfig { require_vk: true, ..Default::default() }).require_vk);
 
         // 3. An unrecognised env value must not silently harden a config-false
         //    workspace — a typo in a hardening flag stays whatever config said.
         std::env::set_var("INTUTIC_GATEWAY_REQUIRE_VK", "yesplease");
-        assert!(!GatewayConfig::from_config_and_env(&GatewayConfig { require_vk: false }).require_vk);
+        assert!(!GatewayConfig::from_config_and_env(&GatewayConfig { require_vk: false, ..Default::default() }).require_vk);
 
         // 4. No env var set at all keeps the config value, either direction.
         std::env::remove_var("INTUTIC_GATEWAY_REQUIRE_VK");
-        assert!(!GatewayConfig::from_config_and_env(&GatewayConfig { require_vk: false }).require_vk);
-        assert!(GatewayConfig::from_config_and_env(&GatewayConfig { require_vk: true }).require_vk);
+        assert!(!GatewayConfig::from_config_and_env(&GatewayConfig { require_vk: false, ..Default::default() }).require_vk);
+        assert!(GatewayConfig::from_config_and_env(&GatewayConfig { require_vk: true, ..Default::default() }).require_vk);
     }
 
     #[test]
@@ -153,5 +178,71 @@ mod tests {
         // this feature existed.
         assert!(!requires_vk_only());
         assert!(token_allowed("sk-ant-anything", requires_vk_only()));
+    }
+
+    // ── require_provisioned_key (LLD #64 §4) ────────────────────────────
+
+    #[test]
+    fn require_provisioned_key_off_by_default() {
+        assert!(!GatewayConfig::default().require_provisioned_key);
+    }
+
+    // Same single-test consolidation as the require_vk env-var scenarios
+    // above, for the same reason: std::env::set_var/remove_var on the same
+    // key from concurrent test threads races.
+    #[test]
+    fn require_provisioned_key_env_var_scenarios_run_sequentially() {
+        std::env::set_var("INTUTIC_GATEWAY_REQUIRE_PROVISIONED_KEY", "true");
+        assert!(
+            GatewayConfig::from_config_and_env(&GatewayConfig {
+                require_vk: false,
+                require_provisioned_key: false,
+            })
+            .require_provisioned_key
+        );
+
+        std::env::set_var("INTUTIC_GATEWAY_REQUIRE_PROVISIONED_KEY", "0");
+        assert!(
+            !GatewayConfig::from_config_and_env(&GatewayConfig {
+                require_vk: false,
+                require_provisioned_key: true,
+            })
+            .require_provisioned_key
+        );
+
+        // An unrecognised value must not silently harden a config-false
+        // workspace -- same "typo in a hardening flag" discipline as require_vk.
+        std::env::set_var("INTUTIC_GATEWAY_REQUIRE_PROVISIONED_KEY", "yesplease");
+        assert!(
+            !GatewayConfig::from_config_and_env(&GatewayConfig {
+                require_vk: false,
+                require_provisioned_key: false,
+            })
+            .require_provisioned_key
+        );
+
+        std::env::remove_var("INTUTIC_GATEWAY_REQUIRE_PROVISIONED_KEY");
+        assert!(
+            !GatewayConfig::from_config_and_env(&GatewayConfig {
+                require_vk: false,
+                require_provisioned_key: false,
+            })
+            .require_provisioned_key
+        );
+        // Deliberately does NOT touch INTUTIC_GATEWAY_REQUIRE_VK here: that
+        // var is exclusively owned by
+        // `env_var_scenarios_run_sequentially_to_avoid_a_cross_test_race`
+        // above, and #[test] functions run concurrently by default -- two
+        // functions mutating the same process-global env var would
+        // reintroduce the exact race this file's existing tests already
+        // work around. The two config fields are independent by
+        // construction (separate, non-interacting `match` arms in
+        // `from_config_and_env`), so there is no runtime behavior here that
+        // needs a cross-var test to catch.
+    }
+
+    #[test]
+    fn uninitialised_global_never_requires_provisioned_key() {
+        assert!(!requires_provisioned_key());
     }
 }
