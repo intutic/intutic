@@ -28,7 +28,32 @@ import {
   type GraphIdentity,
 } from '../lib/graphIdentity.js'
 import { log } from '../lib/logger.js'
+import { selectBackend, type SandboxKind, type SandboxSpec } from '../lib/sandbox/index.js'
 import pc from 'picocolors'
+
+/** The hostname a container reaches the host (and so the proxy) at. */
+const PROXY_HOST_ALIAS = 'host.docker.internal'
+
+/** Options for a sandboxed `intutic exec`. */
+export interface SandboxExecOptions {
+  kind: SandboxKind
+  image: string
+  memory: string
+  cpus: string
+  pidsLimit: number
+  /** Extra destination CIDRs the sandbox may reach beyond the proxy + DNS. */
+  allow: string[]
+}
+
+/** The proxy port the host listens on, from INTUTIC_PROXY_URL (default 4000). */
+export function proxyPortFromEnv(): string {
+  const raw = process.env.INTUTIC_PROXY_URL ?? 'http://localhost:4000'
+  try {
+    return new URL(raw).port || '4000'
+  } catch {
+    return '4000'
+  }
+}
 
 /**
  * Trims trailing `/` characters without a regex.
@@ -55,6 +80,7 @@ export function buildProxyEnv(
   apiKey: string,
   devMode: boolean,
   identity?: GraphIdentity,
+  proxyUrlOverride?: string,
 ): Record<string, string> {
   // The local proxy is the default, and for open core it is the only proxy
   // there is. This used to point at a remote host unless --dev was passed, so
@@ -62,8 +88,12 @@ export function buildProxyEnv(
   // machine -- to a host that does not resolve, so the command could not work
   // either. `intutic start` binds :4000; that is what these should reach.
   //
-  // Set INTUTIC_PROXY_URL to point at a proxy you run somewhere else.
-  const rawHost = trimTrailingSlashes(process.env.INTUTIC_PROXY_URL ?? 'http://localhost:4000')
+  // Set INTUTIC_PROXY_URL to point at a proxy you run somewhere else. A sandbox
+  // launch overrides it with the host-gateway alias, because inside the sandbox
+  // `localhost` is the sandbox, not the host the proxy runs on.
+  const rawHost = trimTrailingSlashes(
+    proxyUrlOverride ?? process.env.INTUTIC_PROXY_URL ?? 'http://localhost:4000',
+  )
   void devMode
 
   // Graph identity rides in the base URL. Harnesses append their own path to
@@ -114,14 +144,19 @@ export function buildProxyEnv(
  * Execute a command with Intutic proxy environment variables injected.
  *
  * @param commandAndArgs - Array of command + arguments (e.g. ['claude'] or ['python', 'main.py'])
+ * @param sandbox - when set, run the command inside an isolated runtime whose
+ *   only egress is the proxy (LLD #63 §6) instead of directly on the host.
  */
-export async function runExec(commandAndArgs: string[]): Promise<void> {
+export async function runExec(
+  commandAndArgs: string[],
+  sandbox?: SandboxExecOptions,
+): Promise<void> {
   if (commandAndArgs.length === 0) {
     log.error('No command specified.')
     log.dim('Usage: intutic exec -- <command> [args...]')
     log.dim('Example: intutic exec -- claude')
     log.dim('Example: intutic exec -- aider --model openai/gpt-4o')
-    log.dim('Example: intutic exec -- python my_agent.py')
+    log.dim('Example: intutic exec --sandbox -- python my_agent.py')
     process.exit(1)
   }
 
@@ -139,6 +174,12 @@ export async function runExec(commandAndArgs: string[]): Promise<void> {
   // Build env. A nested `intutic exec` inherits identity from its parent and
   // becomes a child node; a top-level one starts a new graph.
   const identity = deriveIdentity()
+
+  if (sandbox) {
+    await runSandboxed(commandAndArgs, creds.apiKey, devMode, identity, sandbox)
+    return
+  }
+
   const proxyEnv = buildProxyEnv(creds.apiKey, devMode, identity)
   const childEnv = { ...process.env, ...proxyEnv }
 
@@ -179,4 +220,71 @@ export async function runExec(commandAndArgs: string[]): Promise<void> {
       process.exit(code ?? 0)
     }
   })
+}
+
+/**
+ * Run the agent inside an isolated sandbox whose only egress is the proxy.
+ *
+ * Inside the sandbox `localhost` is the sandbox, not the host — so the proxy
+ * env is rebuilt against the host-gateway alias, and the sandbox's egress
+ * firewall is opened to exactly that address plus DNS (and any `--sandbox-allow`
+ * CIDRs). Secrets are passed by env-var *name*, so they never appear in the
+ * container runtime's argv.
+ */
+async function runSandboxed(
+  commandAndArgs: string[],
+  apiKey: string,
+  devMode: boolean,
+  identity: GraphIdentity,
+  opts: SandboxExecOptions,
+): Promise<void> {
+  const port = proxyPortFromEnv()
+  const proxyUrlOverride = `http://${PROXY_HOST_ALIAS}:${port}`
+  const proxyEnv = buildProxyEnv(apiKey, devMode, identity, proxyUrlOverride)
+
+  // The values the runtime will read for the `--env NAME` references.
+  const env: Record<string, string> = {
+    ...proxyEnv,
+    INTUTIC_SANDBOX_PROXY_HOST: PROXY_HOST_ALIAS,
+    ...(opts.allow.length ? { INTUTIC_SANDBOX_ALLOW: opts.allow.join(',') } : {}),
+  }
+
+  const spec: SandboxSpec = {
+    command: commandAndArgs,
+    workdir: process.cwd(),
+    image: opts.image,
+    envKeys: Object.keys(env),
+    proxyHostAlias: PROXY_HOST_ALIAS,
+    allowCidrs: opts.allow,
+    memory: opts.memory,
+    cpus: opts.cpus,
+    pidsLimit: opts.pidsLimit,
+    tty: Boolean(process.stdout.isTTY),
+  }
+
+  let backend
+  try {
+    backend = selectBackend(opts.kind, env)
+  } catch (err) {
+    log.error(`Sandbox unavailable: ${err instanceof Error ? err.message : String(err)}`)
+    process.exit(1)
+  }
+
+  const health = await backend.health()
+  if (!health.available) {
+    // Honesty rule (LLD #63 §6): never silently fall back to running the agent
+    // ungoverned on the host — say what is unavailable and stop.
+    log.error(`Sandbox backend '${backend.name}' is not available: ${health.detail}`)
+    log.dim('Start Docker (or Podman), or drop --sandbox to run on the host.')
+    process.exit(1)
+  }
+
+  log.info(`Sandbox: ${backend.name} · image ${opts.image} · egress locked to the proxy`)
+  log.dim(`Proxy (from sandbox): ${proxyUrlOverride}`)
+  const [exe, ...rest] = commandAndArgs
+  log.info(`Launching in sandbox: ${pc.bold(exe)} ${rest.join(' ')}`)
+  console.log('')
+
+  const code = await backend.run(spec)
+  process.exit(code)
 }

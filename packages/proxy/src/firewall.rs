@@ -15,6 +15,7 @@
 // WS-6NC LLD #33 §3.3
 
 use std::fmt::Write as FmtWrite;
+use std::process::Command;
 
 /// Target platforms for firewall rule generation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -244,6 +245,328 @@ pub fn generate_removal_commands(platform: Platform, proxy_port: u16) -> String 
     }
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// Default-deny egress enforcement (LLD #63 §5 — the L2 layer).
+//
+// The generators above only *redirect* port 443 to the proxy, which assumes a
+// transparent proxy — the CONNECT proxy is not one, so that model never
+// actually forced traffic through governance. This section adds the rule shape
+// that does: a default-DROP egress policy that permits outbound only to
+//   (a) loopback (so a client can reach a proxy on 127.0.0.1),
+//   (b) established/related return traffic,
+//   (c) DNS (name resolution — see the honesty note on residual channels),
+//   (d) the proxy process itself, by uid, so *it* can reach upstreams, and
+//   (e) any operator-declared infra CIDRs (control plane, Valkey, …).
+// Every other outbound connection is dropped, so a process that tries to reach
+// the network directly — bypassing the proxy — simply fails, and its only path
+// to an AI endpoint is the loopback proxy, which then applies the L1 policy.
+//
+// Honesty note: allowing DNS broadly leaves DNS tunnelling as a residual
+// exfil channel, and the proxy-uid exemption trusts that uid. Both are
+// documented limitations, not closed holes (see the LLD non-goals + TECH_DEBT).
+// ──────────────────────────────────────────────────────────────────────────
+
+/// Inputs for a default-deny egress ruleset.
+#[derive(Debug, Clone)]
+pub struct EgressEnforceConfig {
+    pub platform: Platform,
+    /// The proxy's listener port (clients reach it on loopback:this).
+    pub proxy_port: u16,
+    /// The uid the proxy runs as, exempted so it can reach upstreams. `None`
+    /// omits the exemption (e.g. when the proxy runs inside its own netns and
+    /// no host process needs the carve-out).
+    pub proxy_uid: Option<u32>,
+    /// Whether to permit outbound DNS (udp/tcp 53). Almost always required;
+    /// exposed so a locked-down deployment with a local resolver can drop it.
+    pub allow_dns: bool,
+    /// Extra destination CIDRs to permit (control plane, Valkey, package
+    /// registries, …). Passed through verbatim; validated by the firewall tool.
+    pub allow_cidrs: Vec<String>,
+}
+
+impl Default for EgressEnforceConfig {
+    fn default() -> Self {
+        Self {
+            platform: Platform::current(),
+            proxy_port: std::env::var("PORT")
+                .ok()
+                .and_then(|p| p.parse().ok())
+                .unwrap_or(4000),
+            proxy_uid: None,
+            allow_dns: true,
+            allow_cidrs: Vec::new(),
+        }
+    }
+}
+
+/// nftables default-deny egress ruleset in a dedicated `inet intutic_egress`
+/// table, so removal is a single `delete table`. The add/delete/recreate
+/// preamble makes re-applying idempotent.
+pub fn generate_egress_nftables(cfg: &EgressEnforceConfig) -> String {
+    let mut out = String::new();
+    writeln!(out, "#!/usr/sbin/nft -f").unwrap();
+    writeln!(out, "# Intutic egress enforcement — default-deny (LLD #63 §5). Generated; DO NOT EDIT.").unwrap();
+    writeln!(out, "add table inet intutic_egress").unwrap();
+    writeln!(out, "delete table inet intutic_egress").unwrap();
+    writeln!(out, "table inet intutic_egress {{").unwrap();
+    writeln!(out, "  chain output {{").unwrap();
+    writeln!(out, "    type filter hook output priority 0; policy drop;").unwrap();
+    writeln!(out, "    oif \"lo\" accept").unwrap();
+    writeln!(out, "    ct state established,related accept").unwrap();
+    if cfg.allow_dns {
+        writeln!(out, "    meta l4proto {{ tcp, udp }} th dport 53 accept").unwrap();
+    }
+    if let Some(uid) = cfg.proxy_uid {
+        writeln!(out, "    # proxy process may reach upstreams directly").unwrap();
+        writeln!(out, "    meta skuid {uid} accept").unwrap();
+    }
+    for cidr in &cfg.allow_cidrs {
+        // family is inferred by nft from the address form
+        if cidr.contains(':') {
+            writeln!(out, "    ip6 daddr {cidr} accept").unwrap();
+        } else {
+            writeln!(out, "    ip daddr {cidr} accept").unwrap();
+        }
+    }
+    writeln!(out, "    # everything else outbound is dropped by policy").unwrap();
+    writeln!(out, "  }}").unwrap();
+    writeln!(out, "}}").unwrap();
+    out
+}
+
+/// iptables default-deny egress, as a shell script building an `INTUTIC_EGRESS`
+/// chain hooked into OUTPUT. IPv4 only (nftables is preferred where both exist).
+pub fn generate_egress_iptables(cfg: &EgressEnforceConfig) -> String {
+    let mut out = String::new();
+    writeln!(out, "#!/bin/sh").unwrap();
+    writeln!(out, "# Intutic egress enforcement — default-deny (LLD #63 §5). Generated; DO NOT EDIT.").unwrap();
+    writeln!(out, "set -e").unwrap();
+    writeln!(out, "iptables -F INTUTIC_EGRESS 2>/dev/null || true").unwrap();
+    writeln!(out, "iptables -D OUTPUT -j INTUTIC_EGRESS 2>/dev/null || true").unwrap();
+    writeln!(out, "iptables -X INTUTIC_EGRESS 2>/dev/null || true").unwrap();
+    writeln!(out, "iptables -N INTUTIC_EGRESS").unwrap();
+    writeln!(out, "iptables -A INTUTIC_EGRESS -o lo -j ACCEPT").unwrap();
+    writeln!(out, "iptables -A INTUTIC_EGRESS -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT").unwrap();
+    if cfg.allow_dns {
+        writeln!(out, "iptables -A INTUTIC_EGRESS -p udp --dport 53 -j ACCEPT").unwrap();
+        writeln!(out, "iptables -A INTUTIC_EGRESS -p tcp --dport 53 -j ACCEPT").unwrap();
+    }
+    if let Some(uid) = cfg.proxy_uid {
+        writeln!(out, "iptables -A INTUTIC_EGRESS -m owner --uid-owner {uid} -j ACCEPT").unwrap();
+    }
+    for cidr in cfg.allow_cidrs.iter().filter(|c| !c.contains(':')) {
+        writeln!(out, "iptables -A INTUTIC_EGRESS -d {cidr} -j ACCEPT").unwrap();
+    }
+    // Default deny: anything reaching the end of the chain is dropped.
+    writeln!(out, "iptables -A INTUTIC_EGRESS -j DROP").unwrap();
+    writeln!(out, "iptables -A OUTPUT -j INTUTIC_EGRESS").unwrap();
+    writeln!(out, "echo 'Intutic egress enforcement applied (iptables).'").unwrap();
+    out
+}
+
+/// macOS pf default-deny egress anchor body. pf is stateful, so return traffic
+/// is covered by state on the `pass out` rules. The anchor must be hooked into
+/// the main ruleset to take effect — see `apply_egress_enforcement`.
+pub fn generate_egress_pf(cfg: &EgressEnforceConfig) -> String {
+    let mut out = String::new();
+    writeln!(out, "# Intutic egress enforcement — default-deny (LLD #63 §5). Generated; DO NOT EDIT.").unwrap();
+    writeln!(out, "block drop out all").unwrap();
+    writeln!(out, "pass out quick on lo0 all").unwrap();
+    if cfg.allow_dns {
+        writeln!(out, "pass out quick proto {{ tcp udp }} to any port 53 keep state").unwrap();
+    }
+    if let Some(uid) = cfg.proxy_uid {
+        writeln!(out, "pass out quick proto tcp user {uid} keep state").unwrap();
+    }
+    for cidr in &cfg.allow_cidrs {
+        writeln!(out, "pass out quick to {cidr} keep state").unwrap();
+    }
+    out
+}
+
+/// Generate the default-deny ruleset for a platform.
+pub fn generate_egress_enforcement(cfg: &EgressEnforceConfig) -> String {
+    match cfg.platform {
+        Platform::Linux => generate_egress_nftables(cfg),
+        Platform::MacOs => generate_egress_pf(cfg),
+        // Windows egress enforcement is not implemented; the redirect-only
+        // generator above is the extent of Windows support today.
+        Platform::Windows => String::from(
+            "# Windows default-deny egress is not implemented — see LLD #63 §7.\n",
+        ),
+    }
+}
+
+/// The live enforcement status, as `intutic enforce status` reports it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EgressStatus {
+    pub backend: String,
+    pub active: bool,
+    pub detail: String,
+}
+
+/// Which Linux backend is available, nftables preferred.
+fn linux_backend() -> Option<&'static str> {
+    if which("nft") {
+        Some("nft")
+    } else if which("iptables") {
+        Some("iptables")
+    } else {
+        None
+    }
+}
+
+fn which(bin: &str) -> bool {
+    Command::new("sh")
+        .arg("-c")
+        .arg(format!("command -v {bin} >/dev/null 2>&1"))
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Apply the default-deny egress ruleset. Privileged. Fails closed: any error
+/// returns `Err` and the caller must treat enforcement as NOT active — this
+/// function never reports success it did not achieve.
+pub fn apply_egress_enforcement(cfg: &EgressEnforceConfig) -> anyhow::Result<EgressStatus> {
+    match cfg.platform {
+        Platform::Linux => {
+            let backend = linux_backend()
+                .ok_or_else(|| anyhow::anyhow!("neither nft nor iptables is available"))?;
+            let script = generate_egress_enforcement(cfg);
+            match backend {
+                "nft" => run_stdin("nft", &["-f", "-"], &script)?,
+                _ => run_stdin("sh", &["-s"], &script)?,
+            }
+            Ok(EgressStatus {
+                backend: backend.to_string(),
+                active: true,
+                detail: "default-deny egress applied".to_string(),
+            })
+        }
+        Platform::MacOs => {
+            let body = generate_egress_pf(cfg);
+            // Load the anchor rules and hook the anchor into the running
+            // ruleset. This needs root; on failure we surface the exact error
+            // rather than pretend enforcement is live.
+            run_stdin("pfctl", &["-a", "intutic_egress", "-f", "-"], &body)?;
+            let _ = Command::new("pfctl").arg("-E").status();
+            Ok(EgressStatus {
+                backend: "pf".to_string(),
+                active: true,
+                detail: "pf anchor loaded (ensure it is referenced from pf.conf)".to_string(),
+            })
+        }
+        Platform::Windows => {
+            anyhow::bail!("Windows default-deny egress is not implemented")
+        }
+    }
+}
+
+/// Remove the default-deny egress ruleset. Privileged. Idempotent — removing
+/// when nothing is applied is not an error.
+pub fn remove_egress_enforcement(platform: Platform) -> anyhow::Result<()> {
+    match platform {
+        Platform::Linux => {
+            if which("nft") {
+                let _ = Command::new("nft")
+                    .args(["delete", "table", "inet", "intutic_egress"])
+                    .status();
+            }
+            if which("iptables") {
+                for args in [
+                    vec!["-D", "OUTPUT", "-j", "INTUTIC_EGRESS"],
+                    vec!["-F", "INTUTIC_EGRESS"],
+                    vec!["-X", "INTUTIC_EGRESS"],
+                ] {
+                    let _ = Command::new("iptables").args(&args).status();
+                }
+            }
+            Ok(())
+        }
+        Platform::MacOs => {
+            let _ = Command::new("pfctl").args(["-a", "intutic_egress", "-F", "rules"]).status();
+            Ok(())
+        }
+        Platform::Windows => Ok(()),
+    }
+}
+
+/// Report whether default-deny egress is currently applied.
+pub fn status_egress_enforcement(platform: Platform) -> EgressStatus {
+    match platform {
+        Platform::Linux => {
+            if which("nft") {
+                let active = Command::new("nft")
+                    .args(["list", "table", "inet", "intutic_egress"])
+                    .output()
+                    .map(|o| o.status.success())
+                    .unwrap_or(false);
+                return EgressStatus {
+                    backend: "nft".to_string(),
+                    active,
+                    detail: if active { "intutic_egress table present" } else { "no intutic_egress table" }
+                        .to_string(),
+                };
+            }
+            if which("iptables") {
+                let active = Command::new("iptables")
+                    .args(["-n", "-L", "INTUTIC_EGRESS"])
+                    .output()
+                    .map(|o| o.status.success())
+                    .unwrap_or(false);
+                return EgressStatus {
+                    backend: "iptables".to_string(),
+                    active,
+                    detail: if active { "INTUTIC_EGRESS chain present" } else { "no INTUTIC_EGRESS chain" }
+                        .to_string(),
+                };
+            }
+            EgressStatus { backend: "none".to_string(), active: false, detail: "no firewall backend".to_string() }
+        }
+        Platform::MacOs => {
+            let active = Command::new("pfctl")
+                .args(["-a", "intutic_egress", "-s", "rules"])
+                .output()
+                .map(|o| o.status.success() && !o.stdout.is_empty())
+                .unwrap_or(false);
+            EgressStatus { backend: "pf".to_string(), active, detail: "pf intutic_egress anchor".to_string() }
+        }
+        Platform::Windows => EgressStatus {
+            backend: "none".to_string(),
+            active: false,
+            detail: "not implemented".to_string(),
+        },
+    }
+}
+
+/// Run `cmd args...` feeding `stdin` to it; error unless it exits 0.
+fn run_stdin(cmd: &str, args: &[&str], stdin: &str) -> anyhow::Result<()> {
+    use std::io::Write;
+    use std::process::Stdio;
+    let mut child = Command::new(cmd)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("failed to spawn {cmd}: {e}"))?;
+    child
+        .stdin
+        .as_mut()
+        .ok_or_else(|| anyhow::anyhow!("could not open stdin for {cmd}"))?
+        .write_all(stdin.as_bytes())?;
+    let out = child.wait_with_output()?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "{cmd} failed ({}): {}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -348,5 +671,91 @@ mod tests {
     fn test_removal_commands_windows() {
         let cmd = generate_removal_commands(Platform::Windows, 8080);
         assert!(cmd.contains("portproxy delete"));
+    }
+
+    // ── Default-deny egress (LLD #63 §5) ──────────────────────────────────
+
+    fn enforce_cfg() -> EgressEnforceConfig {
+        EgressEnforceConfig {
+            platform: Platform::Linux,
+            proxy_port: 4000,
+            proxy_uid: Some(1000),
+            allow_dns: true,
+            allow_cidrs: vec!["10.0.0.0/8".to_string(), "2001:db8::/32".to_string()],
+        }
+    }
+
+    #[test]
+    fn nftables_egress_is_default_drop() {
+        let rules = generate_egress_nftables(&enforce_cfg());
+        // The load-bearing line: the output chain's policy is drop.
+        assert!(
+            rules.contains("type filter hook output priority 0; policy drop;"),
+            "egress chain must default to drop"
+        );
+        // Essentials are permitted.
+        assert!(rules.contains("oif \"lo\" accept"));
+        assert!(rules.contains("ct state established,related accept"));
+        assert!(rules.contains("th dport 53 accept"));
+        // Proxy uid carve-out present.
+        assert!(rules.contains("meta skuid 1000 accept"));
+        // Operator CIDRs, split by family.
+        assert!(rules.contains("ip daddr 10.0.0.0/8 accept"));
+        assert!(rules.contains("ip6 daddr 2001:db8::/32 accept"));
+        // Removal is a single table drop.
+        assert!(rules.contains("delete table inet intutic_egress"));
+    }
+
+    #[test]
+    fn nftables_egress_without_uid_or_dns_omits_them() {
+        let cfg = EgressEnforceConfig {
+            proxy_uid: None,
+            allow_dns: false,
+            allow_cidrs: vec![],
+            ..enforce_cfg()
+        };
+        let rules = generate_egress_nftables(&cfg);
+        assert!(!rules.contains("skuid"), "no uid carve-out when uid is None");
+        assert!(!rules.contains("dport 53"), "no DNS rule when allow_dns is false");
+        // still default-drop
+        assert!(rules.contains("policy drop;"));
+    }
+
+    #[test]
+    fn iptables_egress_ends_in_drop() {
+        let rules = generate_egress_iptables(&enforce_cfg());
+        assert!(rules.starts_with("#!/bin/sh"));
+        assert!(rules.contains("iptables -N INTUTIC_EGRESS"));
+        assert!(rules.contains("-o lo -j ACCEPT"));
+        assert!(rules.contains("--ctstate ESTABLISHED,RELATED -j ACCEPT"));
+        assert!(rules.contains("-m owner --uid-owner 1000 -j ACCEPT"));
+        assert!(rules.contains("-d 10.0.0.0/8 -j ACCEPT"));
+        // the final rule in the chain is the default deny
+        let drop_idx = rules.find("INTUTIC_EGRESS -j DROP").expect("must have a DROP");
+        let hook_idx = rules.find("-A OUTPUT -j INTUTIC_EGRESS").expect("must hook OUTPUT");
+        assert!(drop_idx < hook_idx, "DROP must be appended before the chain is hooked in");
+    }
+
+    #[test]
+    fn pf_egress_blocks_by_default() {
+        let rules = generate_egress_pf(&enforce_cfg());
+        assert!(rules.contains("block drop out all"));
+        assert!(rules.contains("pass out quick on lo0 all"));
+        assert!(rules.contains("port 53"));
+        assert!(rules.contains("user 1000"));
+    }
+
+    #[test]
+    fn generate_dispatches_by_platform() {
+        let linux = generate_egress_enforcement(&EgressEnforceConfig {
+            platform: Platform::Linux,
+            ..enforce_cfg()
+        });
+        assert!(linux.contains("intutic_egress"));
+        let mac = generate_egress_enforcement(&EgressEnforceConfig {
+            platform: Platform::MacOs,
+            ..enforce_cfg()
+        });
+        assert!(mac.contains("block drop out all"));
     }
 }

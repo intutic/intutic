@@ -344,7 +344,7 @@ Intutic automatically detects which harnesses are active in your workspace and a
 Although both protect the same compliance boundaries, their engines and execution environments are tailored for different latency and evaluation stages:
 - **`/intutic verify <prompt>` (or `/intutic check`)**:
   - **Type**: Pre-flight prompt linter.
-  - **Latency**: Very low ($<10\text{ms}$).
+  - **Latency**: Very low — it runs client-side or in the control plane with no model call and no upstream network hop.
   - **Mechanism**: Runs client-side or control plane regex pattern matchers on the prompt input. It checks for compliance violations *before* any request is forwarded to the LLM, protecting you from sending forbidden commands or queries upstream.
 - **`/intutic judge <prompt>`**:
   - **Type**: Parallel E2E response evaluator (LLM-as-a-judge).
@@ -358,7 +358,7 @@ Although both protect the same compliance boundaries, their engines and executio
 
 Yes, absolutely. For complex governance checks that go beyond regular expressions, you can build custom sandboxed filters:
 - **AssemblyScript SDK:** Developers use the `@intutic/wasm-sdk` package to author rules in AssemblyScript. The SDK provides helper classes to read and evaluate the `intutic.context` (representing LLM prompts, tool calls, and DLP findings). Context parameters are handed over as raw binary guest buffers (`Uint8Array`) rather than guest string pointers to ensure maximum memory safety and prevent Wasmtime GC pointer corruption.
-- **Isolated WASM Sandbox:** The compiled `.wasm` binary runs inside the proxy's isolated, fuel-limited WebAssembly engine. Rules run with a strict execution overhead under $1\text{ms}$ and cannot access the filesystem or make network calls.
+- **Isolated WASM Sandbox:** The compiled `.wasm` binary runs inside the proxy's isolated, fuel-limited WebAssembly engine. Rules run under a strict wasmtime fuel and execution-timeout ceiling and cannot access the filesystem or make network calls.
 - **CLI Verification:** You can run local dry-runs to test rules using the CLI tool:
   ```bash
   intutic policy test --wasm /path/to/rule.wasm --mock /path/to/context.json
