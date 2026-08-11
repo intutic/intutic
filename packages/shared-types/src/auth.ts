@@ -260,6 +260,12 @@ export interface ApiKeyInfo {
 export interface DashboardSummary {
   /** Total active sessions in the workspace. */
   activeSessions: number
+  /**
+   * Sessions opened with `executionMode: 'SANDBOX'` in the last 30 days —
+   * `intutic exec --sandbox` runs (LLD #63 §6). A 30-day window rather than
+   * "active" because a sandbox run is typically short-lived.
+   */
+  sandboxSessions30d: number
   /** Budget utilization (current month spend vs. budget). */
   budgetUtilization: {
     spentUsd: number
