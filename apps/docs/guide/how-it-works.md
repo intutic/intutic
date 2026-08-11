@@ -173,9 +173,33 @@ The `sync-daemon` monitors this log file in real time using FSEvents/inotify (`c
 
 ---
 
+## Egress Enforcement & Runtime Isolation (opt-in)
+
+By default the proxy *mediates* the traffic pointed at it — an agent that does
+not route through it is not governed, and the [Active Network Probes](#active-network-probes)
+below exist to *detect* exactly that. Two opt-in layers turn mediation into
+enforcement, so bypass is not possible rather than merely detected:
+
+- **`intutic enforce`** installs a host-level default-deny egress firewall
+  (nftables/iptables/pf) that permits outbound only to the proxy, DNS, and
+  operator-declared infrastructure. Every other connection is dropped, so the
+  only path to the network is the governing proxy. The proxy itself can then run
+  in `enforce` mode (`intutic_settings.egress.mode`), where it denies — not just
+  inspects — any destination not on its allow policy.
+
+- **`intutic exec --sandbox`** runs an agent inside an isolated runtime — a
+  container today, a Firecracker microVM where KVM is available — with a dropped
+  capability set, a read-only root filesystem, resource caps, and its egress
+  locked to the proxy. The agent cannot reach the network except through
+  governance, and cannot alter the firewall it runs behind.
+
+Both are off by default (no change to an existing install) and are described in
+LLD #63.
+
 ## Active Network Probes
 
-To detect if a developer has bypassed the proxy gateway or disabled system-level firewall redirection:
+To detect if a developer has bypassed the proxy gateway (when host enforcement
+is not enabled):
 1. The `sync-daemon` periodically fires background HTTP requests directly to standard provider endpoints (e.g. `https://api.anthropic.com/v1/messages`) bypassing localhost routing.
 2. If this direct connection succeeds, it indicates that the network is uncontained.
 3. The daemon instantly raises a `network_bypass` incident of `CRITICAL` severity to alert administrators via the performance dashboard.

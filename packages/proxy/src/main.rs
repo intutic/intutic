@@ -6,14 +6,126 @@
 //!
 //! Architecture: See docs/lld/02-proxy-gateway.lld.md
 
-use intutic_proxy::{config, dlp, proxy, router, routing, sops, store, telemetry, wasm};
+use intutic_proxy::{config, dlp, egress_policy, firewall, proxy, router, routing, sops, store, telemetry, wasm};
 
 use std::net::SocketAddr;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
+/// Build an `EgressEnforceConfig` from `enforce` subcommand flags. Defaults the
+/// proxy uid to the current user on unix — the common single-user case where
+/// the same account runs `intutic start` and `intutic enforce apply`; override
+/// with `--uid` when the proxy runs as a different account.
+fn egress_enforce_config_from_flags(flags: &[String]) -> anyhow::Result<firewall::EgressEnforceConfig> {
+    let mut cfg = firewall::EgressEnforceConfig::default();
+    #[cfg(unix)]
+    if cfg.proxy_uid.is_none() {
+        cfg.proxy_uid = Some(unsafe { libc::getuid() });
+    }
+    let mut i = 0;
+    while i < flags.len() {
+        match flags[i].as_str() {
+            "--port" => {
+                i += 1;
+                cfg.proxy_port = flags
+                    .get(i)
+                    .ok_or_else(|| anyhow::anyhow!("--port needs a value"))?
+                    .parse()?;
+            }
+            "--uid" => {
+                i += 1;
+                cfg.proxy_uid = Some(
+                    flags
+                        .get(i)
+                        .ok_or_else(|| anyhow::anyhow!("--uid needs a value"))?
+                        .parse()?,
+                );
+            }
+            "--allow" => {
+                i += 1;
+                let v = flags
+                    .get(i)
+                    .ok_or_else(|| anyhow::anyhow!("--allow needs a comma-separated value"))?;
+                cfg.allow_cidrs.extend(
+                    v.split(',')
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(String::from),
+                );
+            }
+            "--no-dns" => cfg.allow_dns = false,
+            "--no-uid" => cfg.proxy_uid = None,
+            "--platform" => {
+                i += 1;
+                cfg.platform = match flags
+                    .get(i)
+                    .ok_or_else(|| anyhow::anyhow!("--platform needs linux|macos|windows"))?
+                    .as_str()
+                {
+                    "linux" => firewall::Platform::Linux,
+                    "macos" | "darwin" => firewall::Platform::MacOs,
+                    "windows" => firewall::Platform::Windows,
+                    other => anyhow::bail!("unknown platform '{other}'"),
+                };
+            }
+            other => anyhow::bail!("unknown flag '{other}' for enforce"),
+        }
+        i += 1;
+    }
+    Ok(cfg)
+}
+
+/// `intutic-proxy enforce <generate|apply|remove|status>` — the L2 host
+/// firewall (LLD #63 §5). `generate` prints the ruleset (no privilege);
+/// `apply`/`remove` change the host firewall (privileged); `status` reports.
+fn handle_enforce(args: &[String]) -> anyhow::Result<()> {
+    let sub = args.first().map(String::as_str).unwrap_or("status");
+    let cfg = egress_enforce_config_from_flags(args.get(1..).unwrap_or(&[]))?;
+    match sub {
+        "generate" => {
+            print!("{}", firewall::generate_egress_enforcement(&cfg));
+            Ok(())
+        }
+        "apply" => {
+            let st = firewall::apply_egress_enforcement(&cfg)?;
+            println!(
+                "egress enforcement applied — backend={} active={} ({})",
+                st.backend, st.active, st.detail
+            );
+            Ok(())
+        }
+        "remove" => {
+            firewall::remove_egress_enforcement(cfg.platform)?;
+            println!("egress enforcement removed");
+            Ok(())
+        }
+        "status" => {
+            let st = firewall::status_egress_enforcement(cfg.platform);
+            println!(
+                "{}",
+                serde_json::json!({
+                    "backend": st.backend,
+                    "active": st.active,
+                    "detail": st.detail,
+                })
+            );
+            Ok(())
+        }
+        other => anyhow::bail!("unknown enforce subcommand '{other}' (generate|apply|remove|status)"),
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Subcommand dispatch. `intutic-proxy enforce ...` manages the L2
+    // default-deny egress firewall and exits, rather than starting the server.
+    // Hand-rolled to avoid pulling clap into a binary that otherwise takes no
+    // arguments.
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    if argv.first().map(String::as_str) == Some("enforce") {
+        return handle_enforce(argv.get(1..).unwrap_or(&[]));
+    }
+
     // Read OTEL endpoint
     let otel_endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
         .unwrap_or_else(|_| "http://127.0.0.1:4317".to_string());
@@ -88,6 +200,26 @@ async fn main() -> anyhow::Result<()> {
     let config_path = std::env::var("CONFIG_PATH").unwrap_or_else(|_| "config.yaml".to_string());
     let config = config::load_config(&config_path)?;
     tracing::info!("Config loaded from {}", config_path);
+
+    // Install the L1 egress policy (LLD #63 §4) before the first request. The
+    // mode is logged at boot so an operator running in Enforce sees it in the
+    // first lines of log, not after the first denied connection.
+    let egress = egress_policy::EgressPolicy::from_config_and_env(&config.intutic_settings.egress);
+    let egress_mode = egress_policy::init_global_policy(egress);
+    match egress_mode {
+        egress_policy::EgressMode::Off => tracing::info!(
+            "Egress policy: OFF — every non-AI host is tunnelled (no egress control). \
+             Set intutic_settings.egress.mode or INTUTIC_EGRESS_MODE to monitor/enforce."
+        ),
+        egress_policy::EgressMode::Monitor => tracing::info!(
+            "Egress policy: MONITOR — nothing is denied; connections that would be denied \
+             under enforce are logged as egress_would_deny. Visible at GET /intutic/egress."
+        ),
+        egress_policy::EgressMode::Enforce => tracing::warn!(
+            "Egress policy: ENFORCE — non-AI hosts are denied unless on the allow policy. \
+             Denials are logged and counted at GET /intutic/egress."
+        ),
+    }
 
     // Install operator DLP patterns before anything can serve a request.
     //
