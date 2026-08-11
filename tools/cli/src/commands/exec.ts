@@ -311,23 +311,18 @@ async function runSandboxed(
   const proxyEnv = buildProxyEnv(creds.apiKey, devMode, identity, proxyUrlOverride)
 
   // The values the runtime will read for the `--env NAME` references.
+  //
+  // INTUTIC_SANDBOX_PROXY_PORT is separate from ANTHROPIC_BASE_URL/etc on
+  // purpose: those carry an identity path prefix (buildProxyEnv, when
+  // `identity` is set) that the proxy's /intutic/* routes don't expect —
+  // building the attest URL from host+port directly, not by trimming a path
+  // off an identity-bearing URL in shell, keeps entrypoint.sh simple and
+  // correct regardless of whether identity is present.
   const env: Record<string, string> = {
     ...proxyEnv,
     INTUTIC_SANDBOX_PROXY_HOST: PROXY_HOST_ALIAS,
+    INTUTIC_SANDBOX_PROXY_PORT: port,
     ...(opts.allow.length ? { INTUTIC_SANDBOX_ALLOW: opts.allow.join(',') } : {}),
-  }
-
-  const spec: SandboxSpec = {
-    command: commandAndArgs,
-    workdir: process.cwd(),
-    image: opts.image,
-    envKeys: Object.keys(env),
-    proxyHostAlias: PROXY_HOST_ALIAS,
-    allowCidrs: opts.allow,
-    memory: opts.memory,
-    cpus: opts.cpus,
-    pidsLimit: opts.pidsLimit,
-    tty: Boolean(process.stdout.isTTY),
   }
 
   let backend
@@ -358,7 +353,27 @@ async function runSandboxed(
   // column with no other writer for this case — reusing it needs no schema
   // change). Never blocks or fails the run: an unreachable control plane costs
   // a debug log line, not a broken `intutic exec --sandbox`.
+  //
+  // Opened before `spec` so the session id can ride into the container as
+  // INTUTIC_SESSION_ID — the entrypoint uses it to attest itself server-side
+  // (LLD #63 §6, TD-333) once its own firewall + capability drop are in
+  // effect, closing the gap where this executionMode:'SANDBOX' record was
+  // the entire, self-reported, host-side claim.
   const sessionId = await openSandboxSession(creds, identity, backend.name)
+  if (sessionId) env.INTUTIC_SESSION_ID = sessionId
+
+  const spec: SandboxSpec = {
+    command: commandAndArgs,
+    workdir: process.cwd(),
+    image: opts.image,
+    envKeys: Object.keys(env),
+    proxyHostAlias: PROXY_HOST_ALIAS,
+    allowCidrs: opts.allow,
+    memory: opts.memory,
+    cpus: opts.cpus,
+    pidsLimit: opts.pidsLimit,
+    tty: Boolean(process.stdout.isTTY),
+  }
 
   const code = await backend.run(spec)
 

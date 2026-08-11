@@ -56,6 +56,12 @@ const SHARED = [
   'packages/vscode-extension',
   'packages/wasm-sdk',
   'tools/cli/src',
+  // The sandbox base image + entrypoint (LLD #63 §6) — genuinely shared, but
+  // missed until now: this SHARED list is a manual enumeration, and a new
+  // directory outside it is invisible to the parity check by construction,
+  // not because it was judged enterprise-only. Found when TD-333's
+  // attestation change to entrypoint.sh had silently drifted between repos.
+  'tools/cli/resources',
   'tools/scripts',
   'services/sync-daemon/src',
   'services/sync-daemon/__tests__',
