@@ -884,6 +884,21 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         return json_error(StatusCode::UNAUTHORIZED, "missing_key", "No API key provided. Configure your harness to use ANTHROPIC_BASE_URL/OPENAI_BASE_URL pointing to this proxy.");
     }
 
+    // L2 hosted-gateway front door (LLD #64 §2, TD-334 increment 2). Off by
+    // default (single-tenant local proxy / enterprise self-hosted). When on
+    // (a shared multi-tenant gateway), a non-vk_ bearer is refused here —
+    // before workspace resolution or the credential-capture block below ever
+    // runs, so an unauthenticated caller cannot use an arbitrary
+    // x-workspace-id header plus any bearer token to overwrite another
+    // workspace's stored upstream credential.
+    if !crate::gateway::token_allowed(raw_token, crate::gateway::requires_vk_only()) {
+        return json_error(
+            StatusCode::UNAUTHORIZED,
+            "vk_required",
+            "This gateway accepts only Intutic virtual keys (vk_...). Provision one in the dashboard.",
+        );
+    }
+
     let mut workspace_id = extract_workspace_id(&headers, raw_token);
     if workspace_id == "unknown" {
         if let Ok(env_wid) = std::env::var("INTUTIC_WORKSPACE_ID") {
@@ -909,8 +924,17 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         raw_token
     };
 
-    // Dynamic session credential capture (for developer OAuth/Pro sessions)
-    if !raw_token.is_empty() && !raw_token.starts_with("vk_") && workspace_id != "unknown" {
+    // Dynamic session credential capture (for developer OAuth/Pro sessions).
+    // Already unreachable when the gateway front door requires vk_ (rejected
+    // above), but the condition is repeated explicitly rather than relied on
+    // implicitly — this function is thousands of lines long, and "an earlier
+    // return makes this safe" is exactly the kind of invariant that breaks
+    // silently if the two blocks are ever reordered.
+    if !crate::gateway::requires_vk_only()
+        && !raw_token.is_empty()
+        && !raw_token.starts_with("vk_")
+        && workspace_id != "unknown"
+    {
         let store = Arc::clone(&state.store);
         let wid = workspace_id.clone();
         let tok = raw_token.to_string();
