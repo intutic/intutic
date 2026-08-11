@@ -233,7 +233,7 @@ export async function runExec(
   const identity = deriveIdentity()
 
   if (sandbox) {
-    await runSandboxed(commandAndArgs, creds.apiKey, devMode, identity, sandbox)
+    await runSandboxed(commandAndArgs, creds, devMode, identity, sandbox)
     return
   }
 
@@ -301,14 +301,14 @@ export async function runExec(
  */
 async function runSandboxed(
   commandAndArgs: string[],
-  apiKey: string,
+  creds: IntuticCredentials,
   devMode: boolean,
   identity: GraphIdentity,
   opts: SandboxExecOptions,
 ): Promise<void> {
   const port = proxyPortFromEnv()
   const proxyUrlOverride = `http://${PROXY_HOST_ALIAS}:${port}`
-  const proxyEnv = buildProxyEnv(apiKey, devMode, identity, proxyUrlOverride)
+  const proxyEnv = buildProxyEnv(creds.apiKey, devMode, identity, proxyUrlOverride)
 
   // The values the runtime will read for the `--env NAME` references.
   const env: Record<string, string> = {
@@ -353,6 +353,57 @@ async function runSandboxed(
   log.info(`Launching in sandbox: ${pc.bold(exe)} ${rest.join(' ')}`)
   console.log('')
 
+  // Best-effort telemetry: a SANDBOX-mode session makes "how many runs were
+  // sandboxed" answerable (agent_sessions.executionMode already exists as a
+  // column with no other writer for this case — reusing it needs no schema
+  // change). Never blocks or fails the run: an unreachable control plane costs
+  // a debug log line, not a broken `intutic exec --sandbox`.
+  const sessionId = await openSandboxSession(creds, identity, backend.name)
+
   const code = await backend.run(spec)
+
+  if (sessionId) await closeSandboxSession(creds, sessionId)
   process.exit(code)
+}
+
+/** Opens a SANDBOX-mode session for telemetry. Returns null on any failure. */
+export async function openSandboxSession(
+  creds: IntuticCredentials,
+  identity: GraphIdentity,
+  backendName: string,
+): Promise<string | null> {
+  try {
+    const res = await fetch(`${trimTrailingSlashes(creds.controlPlaneUrl)}/api/v1/sessions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${creds.apiKey}` },
+      body: JSON.stringify({
+        workspaceId: creds.workspaceId,
+        harnessType: 'sandbox',
+        executionMode: 'SANDBOX',
+        envTaskContext: `sandbox-backend:${backendName};graph:${identity.graphId}`,
+      }),
+      signal: AbortSignal.timeout(5_000),
+    })
+    if (!res.ok) return null
+    const body = (await res.json()) as { sessionId?: string }
+    return body.sessionId ?? null
+  } catch {
+    return null
+  }
+}
+
+/** Ends a session opened by openSandboxSession. Best-effort. */
+export async function closeSandboxSession(creds: IntuticCredentials, sessionId: string): Promise<void> {
+  try {
+    await fetch(
+      `${trimTrailingSlashes(creds.controlPlaneUrl)}/api/v1/sessions/${sessionId}/end`,
+      {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${creds.apiKey}` },
+        signal: AbortSignal.timeout(5_000),
+      },
+    )
+  } catch {
+    /* best-effort */
+  }
 }
