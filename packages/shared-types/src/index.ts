@@ -181,6 +181,7 @@ export {
   UpdateRoleInputSchema,
   CreateApiKeyInputSchema,
   SignupInputSchema,
+  OrgSignupInputSchema,
   VerifyEmailInputSchema,
   ResendVerificationInputSchema,
   MagicLinkRequestInputSchema,
@@ -203,6 +204,8 @@ export type {
   DashboardSummary,
   SignupParams,
   SignupResult,
+  OrgSignupParams,
+  OrgSignupResult,
   MagicLinkRequestInput,
   MagicLinkLoginInput,
 } from './auth.js'
