@@ -36,6 +36,8 @@ pub mod egress_policy;
 pub mod firewall;
 /// L2 hosted-gateway front door — vk_-only enforcement (LLD #64)
 pub mod gateway;
+/// Self-hosted gateway heartbeat client (LLD #66, gateway phase 4)
+pub mod heartbeat;
 pub mod local_spend;
 pub mod mdm_agent;
 

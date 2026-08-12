@@ -6,7 +6,7 @@
 //!
 //! Architecture: See docs/lld/02-proxy-gateway.lld.md
 
-use intutic_proxy::{config, dlp, egress_policy, firewall, gateway, proxy, router, routing, sops, store, telemetry, wasm};
+use intutic_proxy::{config, dlp, egress_policy, firewall, gateway, heartbeat, proxy, router, routing, sops, store, telemetry, wasm};
 
 use std::net::SocketAddr;
 use tracing_subscriber::layer::SubscriberExt;
@@ -478,6 +478,31 @@ async fn main() -> anyhow::Result<()> {
         store,
         control_plane,
     };
+
+    // Self-hosted gateway heartbeat (LLD #66, gateway phase 4) — opt-in via
+    // INTUTIC_GATEWAY_TOKEN/INTUTIC_GATEWAY_ID, both set together when the
+    // dashboard's gateway registration flow provisions this deployment.
+    // Absent (the default: SaaS gateway, single-tenant local proxy, or a
+    // self-hosted deployment that hasn't opted in), this is a no-op — no
+    // background task, no outbound calls, unchanged from today.
+    match heartbeat::HeartbeatConfig::from_env() {
+        Some(hb_cfg) => {
+            tracing::info!(
+                gateway_id = %hb_cfg.gateway_id,
+                interval_secs = hb_cfg.interval.as_secs(),
+                "Self-hosted gateway heartbeat: ENABLED — reporting to {}",
+                hb_cfg.control_plane_url,
+            );
+            heartbeat::spawn_heartbeat_loop(state.http_client.clone(), hb_cfg);
+        }
+        None => {
+            tracing::info!(
+                "Self-hosted gateway heartbeat: off (INTUTIC_GATEWAY_TOKEN/INTUTIC_GATEWAY_ID \
+                 not set — this proxy is not reporting to a control plane as a registered \
+                 self-hosted gateway)."
+            );
+        }
+    }
 
     // Ensure local CA exists for TLS MITM (generates ca.crt/ca.key if missing)
     let _ = intutic_proxy::ca_manager::ensure_ca_exists().await;
