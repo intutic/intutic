@@ -644,4 +644,119 @@ decisionCmd
     await runDecisionReject(holdId, opts)
   })
 
+// ── Gateway commands (LLD #66) ───────────────────────────────────────────
+//
+// Self-hosted gateway registration/management. Previously reachable only by
+// hand-written curl against services/control-plane/src/routes/gateways.ts —
+// see commands/gateway.ts's module doc.
+const gatewayCmd = program
+  .command('gateway')
+  .description('Manage self-hosted gateway registrations (Docker / Kubernetes / bare-metal)')
+
+gatewayCmd
+  .command('register')
+  .description('Register a new self-hosted gateway and print its one-time gwk_ token')
+  .requiredOption('--name <name>', 'Display name for this gateway')
+  .requiredOption('--target <docker|kubernetes|bare_metal>', 'Deployment target')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runGatewayRegister } = await import('./commands/gateway.js')
+    await runGatewayRegister(opts)
+  })
+
+gatewayCmd
+  .command('list')
+  .description("List the org's registered gateways")
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runGatewayList } = await import('./commands/gateway.js')
+    await runGatewayList(opts)
+  })
+
+gatewayCmd
+  .command('status <gateway_id>')
+  .description('Live heartbeat-derived status for one gateway')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (gatewayId, opts) => {
+    const { runGatewayStatus } = await import('./commands/gateway.js')
+    await runGatewayStatus(gatewayId, opts)
+  })
+
+gatewayCmd
+  .command('rotate <gateway_id>')
+  .description('Issue a new gwk_ token; the old one keeps working during the rotation grace period')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (gatewayId, opts) => {
+    const { runGatewayRotate } = await import('./commands/gateway.js')
+    await runGatewayRotate(gatewayId, opts)
+  })
+
+gatewayCmd
+  .command('revoke <gateway_id>')
+  .description('Revoke a gateway immediately (kills any active rotation grace period too)')
+  .option('--reason <text>', 'Recorded in the audit log')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (gatewayId, opts) => {
+    const { runGatewayRevoke } = await import('./commands/gateway.js')
+    await runGatewayRevoke(gatewayId, opts)
+  })
+
+const gatewayConfigCmd = gatewayCmd
+  .command('config')
+  .description('Manage a gateway\'s remote config (requireVk, requireProvisionedKey)')
+
+gatewayConfigCmd
+  .command('set <gateway_id>')
+  .description('Update one or both config flags on a gateway')
+  .option('--require-vk <true|false>', 'Refuse non-vk_ bearer tokens at this gateway')
+  .option('--require-provisioned-key <true|false>', 'Refuse workspaces with no provisioned upstream key')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (gatewayId, opts) => {
+    const { runGatewayConfigSet } = await import('./commands/gateway.js')
+    await runGatewayConfigSet(gatewayId, opts)
+  })
+
+// ── Provider credentials (LLD #64 §4, LLD #67) ───────────────────────────
+//
+// Provision a workspace's own upstream provider keys — the BYO-key wizard's
+// API, previously dashboard-only. See commands/credentials.ts's module doc.
+const credentialsCmd = program
+  .command('credentials')
+  .description('Manage this workspace\'s own upstream provider API keys (BYO-key)')
+
+credentialsCmd
+  .command('list')
+  .description('Provisioning status for every registry provider')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runCredentialsList } = await import('./commands/credentials.js')
+    await runCredentialsList(opts)
+  })
+
+credentialsCmd
+  .command('set <provider>')
+  .description('Provision or rotate a provider credential (e.g. --field apiKey=sk-ant-...)')
+  .option('--field <key=value>', 'A credential field; repeat for multi-field providers', (v, prev: string[]) => [...prev, v], [] as string[])
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (provider, opts) => {
+    const { runCredentialsSet } = await import('./commands/credentials.js')
+    await runCredentialsSet(provider, opts)
+  })
+
+credentialsCmd
+  .command('unset <provider>')
+  .description('Remove a provisioned provider credential')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (provider, opts) => {
+    const { runCredentialsUnset } = await import('./commands/credentials.js')
+    await runCredentialsUnset(provider, opts)
+  })
+
 program.parse()
