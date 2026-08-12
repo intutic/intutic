@@ -110,6 +110,7 @@ if (!IS_OSS) {
       { text: 'Policies & Enforcement (Cloud)', link: '/guide/policies' },
       { text: 'Session Safety & Budgets (Cloud)', link: '/guide/loops' },
       { text: 'Settings & Config (Cloud)', link: '/guide/settings' },
+      { text: 'Organizations, Teams & Billing (Cloud)', link: '/guide/organizations' },
       { text: 'Intelligent Model Routing (Cloud)', link: '/guide/intelligent-routing' },
     ],
   });
