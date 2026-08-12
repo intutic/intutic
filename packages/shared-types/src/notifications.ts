@@ -61,6 +61,14 @@ export type NotificationEventType =
   | 'identity.offboarding.completed'
   // ── Workspace context ──
   | 'workspace.context.updated'
+  // ── Self-hosted gateway (LLD #66) ──
+  /**
+   * A registered, non-revoked self-hosted gateway has gone past
+   * GATEWAY_HEARTBEAT_TTL without a heartbeat -- fired once per member
+   * workspace of the gateway's org (gateways are org-scoped; notification
+   * rules are workspace-scoped), not once per gateway.
+   */
+  | 'gateway.stale.detected'
 
 export type NotificationStatus = 'sent' | 'failed' | 'deduplicated' | 'filtered'
 
