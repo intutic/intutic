@@ -49,6 +49,33 @@ Create and manage virtual API keys (`vk_` prefix) for programmatic access to the
 - Rotate keys on a schedule
 - Revoke compromised keys immediately
 
+### Provider Keys
+
+Provision your workspace's own upstream API key for each model provider — Anthropic, OpenAI,
+Gemini, Mistral, and OpenRouter today, with more providers pre-configurable ahead of their
+routing support (see below). Configuring your own key means requests bill against your
+provider account directly rather than Intutic's shared operator key.
+
+Each provider row shows a **Live** or **Not yet routable** badge. **Live** means the gateway
+actually forwards requests to that provider once a key is set. **Not yet routable** means the
+key is stored and ready, but the gateway does not yet route to it — routing support for a new
+provider is separate engineering work per provider, and the dashboard says so rather than
+implying a saved key is already in effect.
+
+If your workspace's gateway has BYO-key enforcement turned on, requests fail with `402
+byok_required` until a key is provisioned here for the provider being called. Also available
+from the CLI:
+
+```bash
+intutic credentials list
+intutic credentials set anthropic --field apiKey=sk-ant-...
+intutic credentials unset anthropic
+```
+
+A provider needing more than one field (e.g. Azure OpenAI: endpoint, deployment, key) takes a
+repeated `--field key=value` flag, one per field — the wizard's dynamic form and the CLI submit
+the same shape.
+
 ### On-Behalf-Of (OBO) Tokens
 
 OBO tokens are short-lived, employee-scoped credentials. OBO Scoping allows you to temporarily grant limited permission clearance to an AI agent acting on your behalf (e.g., executing commands or reading files during a debug task). This token automatically expires in 15 minutes to guarantee security.

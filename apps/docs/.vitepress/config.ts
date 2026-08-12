@@ -155,6 +155,7 @@ const sidebarExternal = [
       { text: 'WASM Rules Engine (Open-Core)', link: '/external/wasm-rules' },
       ...(!IS_OSS ? [
         { text: 'Entity Hierarchy (Enterprise)', link: '/external/hierarchy' },
+        { text: 'Self-Hosted Gateway (Enterprise)', link: '/external/self-hosted-gateway' },
         { text: 'Diagnostics Runbook (Enterprise)', link: '/external/diagnostics' },
       ] : []),
     ],
