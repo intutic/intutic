@@ -55,15 +55,23 @@ export interface ProviderDefinition {
 }
 
 /**
- * Providers whose credential is a single API key AND that the proxy
- * currently routes to. These are the exact 3 providers this system
- * supported before this registry existed — their storage format
- * (`{provider}_api_key`, a flat string field) is unchanged, so
- * `packages/proxy/src/proxy.rs`'s `fetch_provider_credential` needs no
- * changes for them. Every OTHER provider below stores its (possibly
- * multi-field) credential as a JSON blob under `{provider}_config` — a
- * format nothing in the proxy reads yet, so introducing it is zero-risk to
- * the one place that already depends on the old flat-string shape.
+ * The 3 providers this system supported before this registry existed —
+ * their storage format (`{provider}_api_key`, a flat string field) is
+ * unchanged here, matching what `packages/proxy/src/proxy.rs`'s
+ * `fetch_provider_credential` has always read for them.
+ *
+ * NOT the same question as a provider's `routingLive` flag. This constant
+ * decides *storage shape* (flat field vs. `{provider}_config` JSON blob);
+ * `routingLive` decides whether the proxy currently forwards requests to a
+ * provider at all. They agreed for exactly these 3 while this registry only
+ * covered its original scope, but multi-provider wizard phase 3 added real
+ * proxy routing for Mistral and OpenRouter *without* changing their storage
+ * format — `fetch_provider_credential` reads the JSON blob for both, never
+ * the flat field, so they stay off this list even though `routingLive` is
+ * now `true` for them. Adding a provider here changes what Valkey field
+ * `services/control-plane/src/routes/providerCredentials.ts` writes to —
+ * only do it alongside the matching proxy-side flat-field read, never for
+ * the "is this provider live" reason alone.
  */
 export const LIVE_ROUTING_PROVIDER_IDS = ['anthropic', 'openai', 'gemini'] as const
 
@@ -133,14 +141,14 @@ export const PROVIDER_REGISTRY: ProviderDefinition[] = [
     displayName: 'Mistral AI',
     docsUrl: 'https://console.mistral.ai/api-keys',
     fields: [{ key: 'apiKey', label: 'API Key', type: 'password', required: true }],
-    routingLive: false,
+    routingLive: true,
   },
   {
     id: 'openrouter',
     displayName: 'OpenRouter',
     docsUrl: 'https://openrouter.ai/keys',
     fields: [{ key: 'apiKey', label: 'API Key', type: 'password', required: true }],
-    routingLive: false,
+    routingLive: true,
   },
   {
     id: 'ollama',

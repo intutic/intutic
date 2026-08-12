@@ -122,11 +122,29 @@ fn spawn_reward_update(
 // ─── Protocol detection ──────────────────────────────────────────────
 
 /// Upstream LLM provider inferred from the request path.
+///
+/// `Mistral`/`OpenRouter` (multi-provider wizard phase 3) are distinct
+/// upstream TARGETS — different base URL, different credential — but speak
+/// the exact same OpenAI-compatible request/response wire shape `OpenAI`
+/// itself does. `wire_shape()` below is what makes that distinction usable:
+/// `is_same_provider`'s job is "does the response need cross-provider
+/// translation," which is a wire-shape question, not an upstream-identity
+/// one. Bedrock, Vertex AI, Azure OpenAI, Cohere, and Ollama are
+/// deliberately NOT here yet — see docs/lld's multi-provider wizard phase 3
+/// notes for why each is out of scope for this pass (Bedrock/Vertex need
+/// SigV4/GCP-OAuth infra this crate has none of; Azure/Ollama need a
+/// workspace-level default-provider mechanism since deployment/model names
+/// are operator-chosen with no reliable naming convention to pattern-match;
+/// Cohere's OpenAI-compatibility endpoint path wasn't confirmed against
+/// live docs during this pass, and shipping a guessed path is worse than
+/// not shipping it).
 #[derive(Debug, Clone, PartialEq)]
 enum Provider {
     Anthropic,
     OpenAI,
     Gemini,
+    Mistral,
+    OpenRouter,
 }
 
 impl Provider {
@@ -140,6 +158,20 @@ impl Provider {
         }
     }
 
+    /// The response WIRE SHAPE this provider returns, as opposed to its
+    /// upstream identity. `Mistral`/`OpenRouter` return OpenAI-shaped JSON
+    /// natively, so they collapse to `Provider::OpenAI` here even though
+    /// `upstream_base_url()`/credential lookup treat them as distinct
+    /// targets. Used by `is_same_provider` to decide whether cross-provider
+    /// response translation (built for Anthropic-shaped bodies only) should
+    /// run — it must not, for a provider that's already OpenAI-shaped.
+    fn wire_shape(&self) -> Provider {
+        match self {
+            Provider::Mistral | Provider::OpenRouter => Provider::OpenAI,
+            other => other.clone(),
+        }
+    }
+
     /// Return the base URL of the upstream provider.
     /// Reads env vars at call time so they can be overridden in tests.
     fn upstream_base_url(&self) -> String {
@@ -150,6 +182,14 @@ impl Provider {
                 .unwrap_or_else(|_| "https://api.openai.com".to_string()),
             Provider::Gemini => std::env::var("GEMINI_UPSTREAM_URL")
                 .unwrap_or_else(|_| "https://generativelanguage.googleapis.com".to_string()),
+            // https://docs.mistral.ai/api/ — stable, documented OpenAI-
+            // compatible endpoint since Mistral's API launch.
+            Provider::Mistral => std::env::var("MISTRAL_UPSTREAM_URL")
+                .unwrap_or_else(|_| "https://api.mistral.ai".to_string()),
+            // https://openrouter.ai/docs/quickstart — "drop-in OpenAI
+            // replacement" has been OpenRouter's core design since inception.
+            Provider::OpenRouter => std::env::var("OPENROUTER_UPSTREAM_URL")
+                .unwrap_or_else(|_| "https://openrouter.ai/api".to_string()),
         }
     }
 
@@ -158,6 +198,12 @@ impl Provider {
             Provider::Anthropic => "claude-code",
             Provider::OpenAI => "cursor",
             Provider::Gemini => "antigravity",
+            // Both OpenAI-wire-shaped with no more specific harness signal
+            // than OpenAI itself has — same fallback, same reasoning
+            // (resolve_harness_type's own doc comment: a client that knows
+            // who it is says so via x-intutic-harness; this is only the
+            // unset/malformed-header fallback).
+            Provider::Mistral | Provider::OpenRouter => "cursor",
         }
     }
 }
@@ -549,6 +595,19 @@ fn get_model_provider(model: &str) -> Provider {
         Provider::Anthropic
     } else if m.contains("gemini") {
         Provider::Gemini
+    } else if m.contains('/') {
+        // OpenRouter's own naming convention, documented since inception:
+        // every model is namespaced `vendor/model` (e.g.
+        // "anthropic/claude-3-opus", "mistralai/mistral-large") — no other
+        // provider in this match uses '/' in a model name, which is what
+        // makes this a reliable signal rather than a guess. Checked before
+        // the mistral-prefix arm below so a namespaced "mistralai/..." name
+        // routes to OpenRouter (the actual destination for that string),
+        // not Mistral's own direct API.
+        Provider::OpenRouter
+    } else if m.starts_with("mistral") || m.starts_with("open-mixtral") || m.starts_with("codestral")
+    {
+        Provider::Mistral
     } else {
         Provider::OpenAI
     }
@@ -576,6 +635,46 @@ async fn fetch_provider_credential(
     provider: &Provider,
     require_provisioned: bool,
 ) -> Option<String> {
+    // Mistral/OpenRouter (routingLive: false until this phase) were
+    // provisioned by the credential wizard's generalized storage
+    // (multi-provider wizard phase 1) as a `{provider}_config` JSON blob —
+    // `{"apiKey": "..."}` — not a flat field, since that storage split
+    // deliberately keeps the 3 original routingLive:true providers on flat
+    // fields (byte-compatible with what this exact function already read)
+    // while every other provider gets a blob, schema-per-provider, with no
+    // Rust-side change needed when a NEW field gets added to one later.
+    // `workspace_credential` itself is a plain flat-field reader — it has no
+    // opinion about what's inside the string it returns, so reusing it here
+    // with the blob's own field name and parsing the result is correct, not
+    // a special case grafted on.
+    match provider {
+        Provider::Mistral | Provider::OpenRouter => {
+            let config_field = match provider {
+                Provider::Mistral => "mistral_config",
+                Provider::OpenRouter => "openrouter_config",
+                _ => unreachable!(),
+            };
+            if let Some(raw) = store.workspace_credential(workspace_id, &[config_field]).await {
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&raw) {
+                    if let Some(key) = parsed.get("apiKey").and_then(|v| v.as_str()) {
+                        if !key.is_empty() {
+                            return Some(key.to_string());
+                        }
+                    }
+                }
+            }
+            if require_provisioned {
+                return None;
+            }
+            return match provider {
+                Provider::Mistral => std::env::var("MISTRAL_API_KEY").ok(),
+                Provider::OpenRouter => std::env::var("OPENROUTER_API_KEY").ok(),
+                _ => unreachable!(),
+            };
+        }
+        _ => {}
+    }
+
     let fields = match provider {
         Provider::Anthropic => vec![
             "anthropic_api_key",
@@ -586,6 +685,7 @@ async fn fetch_provider_credential(
         ],
         Provider::OpenAI => vec!["openai_api_key", "openai", "openaiKey", "authorization"],
         Provider::Gemini => vec!["gemini_api_key", "gemini", "geminiKey"],
+        Provider::Mistral | Provider::OpenRouter => unreachable!("handled above"),
     };
     if let Some(val) = store.workspace_credential(workspace_id, &fields).await {
         return Some(val);
@@ -604,6 +704,7 @@ async fn fetch_provider_credential(
         Provider::Anthropic => std::env::var("ANTHROPIC_API_KEY").ok(),
         Provider::OpenAI => std::env::var("OPENAI_API_KEY").ok(),
         Provider::Gemini => std::env::var("GEMINI_API_KEY").ok(),
+        Provider::Mistral | Provider::OpenRouter => unreachable!("handled above"),
     }
 }
 
@@ -613,6 +714,8 @@ fn provider_display_name(provider: &Provider) -> &'static str {
         Provider::Anthropic => "Anthropic",
         Provider::OpenAI => "OpenAI",
         Provider::Gemini => "Gemini",
+        Provider::Mistral => "Mistral",
+        Provider::OpenRouter => "OpenRouter",
     }
 }
 
@@ -1309,7 +1412,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                         }
                                     })
                                 }
-                                Provider::OpenAI => {
+                                Provider::OpenAI | Provider::Mistral | Provider::OpenRouter => {
                                     serde_json::json!({
                                         "id": "chatcmpl-predict",
                                         "object": "chat.completion",
@@ -2987,7 +3090,14 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     };
 
     let target_provider = get_model_provider(&actual_model);
-    let is_same_provider = target_provider == provider;
+    // Wire SHAPE, not upstream identity -- Mistral/OpenRouter are distinct
+    // targets (own base URL, own credential) that happen to speak the exact
+    // same OpenAI-compatible wire format `provider` (from_path, always
+    // Anthropic/OpenAI/Gemini) already resolved to for this request. Raw
+    // enum equality here would wrongly route them into the cross-provider
+    // branch below, which runs response translation built only for
+    // Anthropic-shaped bodies -- see `Provider::wire_shape()`'s doc comment.
+    let is_same_provider = target_provider.wire_shape() == provider.wire_shape();
 
     let host_header = headers
         .get("host")
@@ -3000,7 +3110,13 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             if !host_name.is_empty() && crate::hostname_filter::is_ai_provider_host(host_name) {
                 format!("https://{}", host_name)
             } else {
-                provider.upstream_base_url()
+                // target_provider, not provider (wire shape): when they
+                // differ -- Mistral/OpenRouter reached via the OpenAI wire
+                // path -- the actual destination's own base URL is what
+                // must be used. For the original 3 providers this branch
+                // only runs when they're already equal, so this is a no-op
+                // change for them.
+                target_provider.upstream_base_url()
             };
         let final_body = if actual_model != model {
             let mut new_body = body_json.clone();
@@ -3015,7 +3131,15 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         let target_base_url = target_provider.upstream_base_url();
         let target_path = match target_provider {
             Provider::Anthropic => "/v1/messages",
-            Provider::OpenAI => "/v1/chat/completions",
+            // Mistral/OpenRouter never actually reach this arm in practice
+            // -- wire_shape() makes is_same_provider true for both whenever
+            // they're reached via the OpenAI wire path, which is the only
+            // path that resolves to them (get_model_provider only returns
+            // them from an OpenAI-shaped request). Included for match
+            // exhaustiveness and so a future genuinely-cross-provider path
+            // (e.g. an Anthropic-wire request naming a Mistral model) still
+            // resolves to a real endpoint instead of a compile error.
+            Provider::OpenAI | Provider::Mistral | Provider::OpenRouter => "/v1/chat/completions",
             Provider::Gemini => "/v1beta/models/gemini-1.5-pro:generateContent",
         };
         let url = format!("{}{}", target_base_url, target_path);
@@ -3161,7 +3285,11 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                         v,
                     );
                 }
-                Provider::OpenAI => {
+                // Mistral and OpenRouter both use plain OpenAI-style bearer
+                // auth (https://docs.mistral.ai/api/,
+                // https://openrouter.ai/docs/quickstart) -- same arm as
+                // OpenAI itself, not a coincidence.
+                Provider::OpenAI | Provider::Mistral | Provider::OpenRouter => {
                     let bearer = format!("Bearer {}", cred);
                     if let Ok(v) = reqwest::header::HeaderValue::from_str(&bearer) {
                         fwd_headers
@@ -3218,7 +3346,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                             v,
                         );
                     }
-                    Provider::OpenAI => {
+                    Provider::OpenAI | Provider::Mistral | Provider::OpenRouter => {
                         let bearer = format!("Bearer {}", cred);
                         if let Ok(v) = reqwest::header::HeaderValue::from_str(&bearer) {
                             fwd_headers.insert(
@@ -5884,7 +6012,7 @@ fn delta_shape(protocol: &crate::protocol::Protocol, provider: &Provider) -> Del
         P::Gemini => DeltaShape::Unparsed,
         P::Unknown => match provider {
             Provider::Anthropic => DeltaShape::AnthropicText,
-            Provider::OpenAI => DeltaShape::OpenAIChatContent,
+            Provider::OpenAI | Provider::Mistral | Provider::OpenRouter => DeltaShape::OpenAIChatContent,
             Provider::Gemini => DeltaShape::Unparsed,
         },
     }
@@ -5911,7 +6039,7 @@ fn wire_for(
         P::Unknown => match provider {
             Provider::Anthropic => W::Anthropic,
             Provider::Gemini => W::Gemini,
-            Provider::OpenAI => W::OpenAI,
+            Provider::OpenAI | Provider::Mistral | Provider::OpenRouter => W::OpenAI,
         },
     }
 }
@@ -6000,7 +6128,7 @@ fn postprocessor_protocol(
         P::Unknown => match provider {
             Provider::Anthropic => PP::Anthropic,
             Provider::Gemini => PP::Gemini,
-            Provider::OpenAI => PP::OpenAI,
+            Provider::OpenAI | Provider::Mistral | Provider::OpenRouter => PP::OpenAI,
         },
     }
 }
