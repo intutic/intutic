@@ -359,6 +359,130 @@ intact window is not an intact history.
 
 ---
 
+<!-- ENTERPRISE_ONLY_START -->
+## `intutic gateway register`
+
+Register a [self-hosted gateway](/external/self-hosted-gateway) — an org's own Docker,
+Kubernetes, or bare-metal deployment of the Intutic proxy — and print its one-time management
+token.
+
+```bash
+intutic gateway register --name <name> --target <docker|kubernetes|bare_metal> [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--name <name>` | Display name for this gateway (required) |
+| `--target <docker\|kubernetes\|bare_metal>` | Deployment target (required) |
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+The printed `gwk_...` token is shown **once** and cannot be retrieved again — set it as
+`INTUTIC_GATEWAY_TOKEN` in your deployment config. This is a distinct credential type from a
+`vk_` virtual key: a control-plane management/heartbeat credential, never a data-plane
+LLM-calling key.
+
+---
+
+## `intutic gateway list`
+
+List the org's registered gateways.
+
+```bash
+intutic gateway list [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+---
+
+## `intutic gateway status <gateway_id>`
+
+Live, heartbeat-derived status for one gateway.
+
+```bash
+intutic gateway status <gateway_id> [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+Reports `online`, `degraded`, `unreachable`, or `pending`. A gateway with no heartbeat inside
+the TTL window (~90s) shows `unreachable` — a valid, self-healing status rather than an error.
+
+---
+
+## `intutic gateway rotate <gateway_id>`
+
+Issue a new `gwk_...` token. The old token keeps authenticating for a grace period (24h by
+default) so an unattended daemon has time to pick up the new one on its next restart.
+
+```bash
+intutic gateway rotate <gateway_id> [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+---
+
+## `intutic gateway revoke <gateway_id>`
+
+Revoke a gateway immediately — unlike `rotate`, this kills any active rotation grace period
+too, since a revoke is a security response, not a scheduled rollover.
+
+```bash
+intutic gateway revoke <gateway_id> [--reason <text>] [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--reason <text>` | Recorded in the audit log |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+---
+
+## `intutic gateway config set <gateway_id>`
+
+Update a gateway's remote config. Only the fields the gateway actually reads are accepted.
+
+```bash
+intutic gateway config set <gateway_id> [--require-vk <true|false>] [--require-provisioned-key <true|false>] [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--require-vk <true\|false>` | Refuse non-`vk_` bearer tokens at this gateway |
+| `--require-provisioned-key <true\|false>` | Refuse workspaces with no provisioned upstream key |
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+A bare-metal daemon-supervised gateway applies a config change on its next poll. Docker and
+Kubernetes deployments need a manual redeploy to pick it up.
+
+<!-- ENTERPRISE_ONLY_END -->
+
+---
+
 ## `intutic skill list`
 
 Discover and list local workspace rule/skill files.
@@ -637,6 +761,81 @@ intutic budget [options]
 
 **What it does:**
 Fetches cloud budget status (daily and monthly spend, percentages used, remaining budget, alert flag), prints the local spending cap configured in `~/.intutic/config.json` (default `$10.00`), and lists all `ACTIVE` loop runs with their token spend and budget limit. Without stored credentials it runs in standalone (offline) mode and reports only the local cap.
+
+---
+
+## `intutic credentials list`
+
+Provisioning status for every provider in the credential registry — see
+[Provider Keys](/guide/settings#provider-keys).
+
+```bash
+intutic credentials list [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON instead of a report |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+Each provider is reported with whether it is **live** (the gateway actually routes to it) or
+**not yet routable** (the key is stored, but nothing forwards to it yet), plus whether a key is
+currently provisioned and its last-4 preview.
+
+---
+
+## `intutic credentials set <provider>`
+
+Provision or rotate a workspace's own upstream provider key.
+
+```bash
+intutic credentials set <provider> --field key=value [--field key=value ...] [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--field <key=value>` | A credential field; repeat for multi-field providers |
+| `--json` | Output as JSON instead of a report |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**Examples:**
+
+```bash
+# A single-key provider
+intutic credentials set anthropic --field apiKey=sk-ant-...
+
+# A multi-field provider (Azure OpenAI)
+intutic credentials set azure_openai \
+  --field apiKey=sk-... \
+  --field endpoint=https://your-resource.openai.azure.com \
+  --field deployment=gpt-4
+```
+
+If BYO-key enforcement is on for your gateway, requests for a provider with no provisioned key
+fail with `402 byok_required` until one is set here.
+
+---
+
+## `intutic credentials unset <provider>`
+
+Remove a provisioned provider credential.
+
+```bash
+intutic credentials unset <provider> [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+If BYO-key enforcement is on, requests for this provider are refused after this until a new
+key is provisioned.
 
 ---
 
