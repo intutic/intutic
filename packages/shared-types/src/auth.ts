@@ -180,6 +180,52 @@ export interface SignupResult {
   isNewUser: boolean
 }
 
+// ─── Org Signup (Tenancy phase 4) ─────────────────────────────────────
+
+/**
+ * Org signup input schema. Distinct from `SignupInputSchema`: `orgName` is
+ * required (no "N's workspace" auto-name fallback — an org identity is the
+ * point of this path), and there is no `workspaceName` — the org's default
+ * workspace is named from the org itself.
+ */
+export const OrgSignupInputSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(8).max(128),
+  name: z.string().min(1).max(128),
+  orgName: z.string().min(1).max(128),
+  signupSource: z.string().max(32).optional(),
+  marketingAttribution: z.record(z.any()).optional(),
+})
+
+/** Org signup params type. */
+export type OrgSignupParams = z.infer<typeof OrgSignupInputSchema>
+
+/** Org signup result — same shape as SignupResult, plus the org identity. */
+export interface OrgSignupResult {
+  user: {
+    id: string
+    email: string
+    name: string
+    emailVerified: boolean
+  }
+  org: {
+    id: string
+    name: string
+    planTier: string
+    trialExpiresAt: string
+  }
+  workspace: {
+    id: string
+    name: string
+    planTier: string
+    trialExpiresAt: string
+  }
+  accessToken: string
+  refreshToken: string
+  cliInstall: string
+  isNewUser: boolean
+}
+
 /** Verify email input schema. */
 export const VerifyEmailInputSchema = z.object({
   token: z.string().length(64),
