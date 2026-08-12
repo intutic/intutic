@@ -363,6 +363,9 @@ export * from './billing.js'
 // Restored task management and alerting adapter types
 export * from './taskManagement.js'
 
+// LLD #67: multi-provider credential registry
+export * from './providers.js'
+
 
 
 
