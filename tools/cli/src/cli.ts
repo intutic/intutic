@@ -759,4 +759,70 @@ credentialsCmd
     await runCredentialsUnset(provider, opts)
   })
 
+// ── Org signup + team management (LLD #65) ───────────────────────────────
+const orgCmd = program
+  .command('org')
+  .description('Create and manage orgs')
+
+orgCmd
+  .command('signup')
+  .description('Create a real org (paid tier, 30-day trial) with a default team and workspace')
+  .option('--email <email>', 'Account email (prompted if omitted)')
+  .option('--password <password>', 'Account password, min 8 chars (prompted if omitted)')
+  .option('--name <name>', 'Your name (prompted if omitted)')
+  .option('--org-name <orgName>', 'Organization name (prompted if omitted)')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runOrgSignup } = await import('./commands/org.js')
+    await runOrgSignup(opts)
+  })
+
+const teamCmd = program
+  .command('team')
+  .description('Manage teams and workspaces under an org')
+
+teamCmd
+  .command('list')
+  .description("List an org's teams")
+  .requiredOption('--org <org_id>', 'Org ID')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runTeamList } = await import('./commands/team.js')
+    await runTeamList(opts)
+  })
+
+teamCmd
+  .command('create')
+  .description('Create a new team under an org')
+  .requiredOption('--org <org_id>', 'Org ID')
+  .requiredOption('--name <name>', 'Team name')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runTeamCreate } = await import('./commands/team.js')
+    await runTeamCreate(opts)
+  })
+
+teamCmd
+  .command('workspaces <team_id>')
+  .description('List the workspaces under a team')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (teamId, opts) => {
+    const { runTeamWorkspaces } = await import('./commands/team.js')
+    await runTeamWorkspaces(teamId, opts)
+  })
+
+teamCmd
+  .command('create-workspace <team_id>')
+  .description('Create a new workspace under a team; you become its OWNER')
+  .requiredOption('--name <name>', 'Workspace name')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (teamId, opts) => {
+    const { runTeamCreateWorkspace } = await import('./commands/team.js')
+    await runTeamCreateWorkspace(teamId, opts)
+  })
+
 program.parse()
