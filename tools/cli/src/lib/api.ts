@@ -37,6 +37,10 @@ export interface ApiClient {
   post<T>(path: string, body?: unknown): Promise<T>
   /** Generic PUT request for arbitrary API paths. */
   put<T>(path: string, body?: unknown): Promise<T>
+  /** Generic PATCH request for arbitrary API paths. */
+  patch<T>(path: string, body?: unknown): Promise<T>
+  /** Generic DELETE request for arbitrary API paths. */
+  del<T>(path: string, body?: unknown): Promise<T>
 }
 
 /**
@@ -112,6 +116,14 @@ export function createApiClient(controlPlaneUrl: string, apiKey: string): ApiCli
 
     async put<T>(path: string, body?: unknown): Promise<T> {
       return request<T>('PUT', path, body)
+    },
+
+    async patch<T>(path: string, body?: unknown): Promise<T> {
+      return request<T>('PATCH', path, body)
+    },
+
+    async del<T>(path: string, body?: unknown): Promise<T> {
+      return request<T>('DELETE', path, body)
     },
   }
 }
