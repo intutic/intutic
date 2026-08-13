@@ -23,6 +23,8 @@ describe('gateway command registration', () => {
     ['status <gateway_id>', 'runGatewayStatus'],
     ['rotate <gateway_id>', 'runGatewayRotate'],
     ['revoke <gateway_id>', 'runGatewayRevoke'],
+    ['assign', 'runGatewayAssign'],
+    ['resolve', 'runGatewayResolve'],
   ])('wires the %s subcommand to its handler', (subcommand, handler) => {
     const name = subcommand.split(' ')[0]
     expect(source, `subcommand '${name}' is not registered`).toMatch(

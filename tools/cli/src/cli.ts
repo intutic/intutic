@@ -721,6 +721,29 @@ gatewayConfigCmd
     await runGatewayConfigSet(gatewayId, opts)
   })
 
+gatewayCmd
+  .command('assign')
+  .description('Assign (or clear) the gateway this workspace or org defaults to')
+  .option('--gateway <gateway_id>', 'Gateway to assign')
+  .option('--clear', 'Clear the current assignment instead of setting one')
+  .option('--org <org_id>', 'Set the ORG default instead of this workspace\'s own override')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runGatewayAssign } = await import('./commands/gateway.js')
+    await runGatewayAssign(opts)
+  })
+
+gatewayCmd
+  .command('resolve')
+  .description('Show which gateway this workspace currently resolves to (own override, org default, or shared)')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runGatewayResolve } = await import('./commands/gateway.js')
+    await runGatewayResolve(opts)
+  })
+
 // ── Provider credentials (LLD #64 §4, LLD #67) ───────────────────────────
 //
 // Provision a workspace's own upstream provider keys — the BYO-key wizard's
