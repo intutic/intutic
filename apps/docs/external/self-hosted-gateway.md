@@ -24,8 +24,8 @@ proxy process is supervised.
 ### Docker
 
 A purpose-built Compose file bundles the proxy, a local Valkey instance, and (optionally) a
-LiteLLM container — see [§4](#4-what-does-not-run-locally-read-this-before-you-deploy) for what
-that LiteLLM container is and is not wired to. This is distinct from the full self-hosted
+LiteLLM container used by the opt-in [local judge](#4-what-does-not-run-locally-read-this-before-you-deploy)
+— see §4 for exactly what that buys you and what it still doesn't. This is distinct from the full self-hosted
 enterprise stack (`docker-compose.enterprise.yml`), which additionally runs its own
 control-plane, Postgres, and dashboard — a self-hosted *gateway* keeps the control plane on
 Intutic's Cloud and self-hosts only the data-plane proxy.
@@ -50,7 +50,7 @@ helm install my-gateway ./tools/helm/intutic-gateway \
 ```
 
 `NOTES.txt` after install shows the proxy's in-cluster address and reminds you the bundled
-LiteLLM (if enabled) is not wired to anything yet — see §4.
+LiteLLM (if enabled) is only consumed when `proxy.localJudge=true` — see §4.
 
 ### Bare-metal (Node.js supervisor daemon)
 
@@ -84,34 +84,49 @@ the TTL window (~90s) — a self-healing status, not an error state that needs t
 
 ### Pointing a workspace at your gateway
 
-Today this is a manual step, not a resolved platform feature: point the client's base URL
-(`CONTROL_PLANE_URL` / proxy target) at your gateway's own exposed address instead of
-`gateway.intutic.ai`. A `workspaces.gatewayId` assignment field exists in the schema for a
-future "the platform resolves which gateway serves this workspace" capability, but nothing
-reads or writes it yet — don't rely on assigning a gateway through the dashboard to actually
-change where traffic goes.
+Assign a gateway per-workspace (overriding the org default) or per-org (every workspace under
+it that hasn't set its own override):
+
+```bash
+intutic gateway assign <gateway_id> --workspace <workspace_id>   # this workspace only
+intutic gateway assign <gateway_id> --org <org_id>                # org-wide default
+intutic gateway resolve --workspace <workspace_id>                 # which gateway actually applies, and why
+```
+
+`gateway resolve` reports `source: workspace | org | default` so you can tell whether a
+workspace is riding its own override, its org's default, or the shared `gateway.intutic.ai`
+(no assignment at any level). This is *routing resolution* — it tells a client which gateway to
+point at — not traffic proxying: the client still connects directly to the resolved gateway's
+own exposed address, there is no proxy-in-front-of-proxies routing requests between gateways.
 
 ## 4. What does NOT run locally (read this before you deploy)
 
 A self-hosted gateway routes your organization's LLM provider traffic through your own
 infrastructure. It does **not**, today, keep every part of Intutic's evaluation pipeline local:
 
-- **The LLM-as-judge evaluation stays on Intutic's Cloud control plane.** Judge calls are made
-  by the control plane, not the proxy — the proxy only POSTs chunk/response content to
-  `{CONTROL_PLANE_URL}/api/v1/judge/...` for evaluation, and by default that URL is
-  `https://app.intutic.ai`. If your organization needs judged content to never leave your
-  infrastructure, this is not yet supported by a self-hosted gateway alone — deterministic
-  enforcement (SOPs, WASM rules, egress policy) all run locally in the proxy regardless, but
-  the LLM-judge layer specifically does not.
-- **The bundled LiteLLM container is not wired to anything.** Both the Docker Compose file and
-  the Helm chart can optionally start a LiteLLM instance at your gateway's site, provisioned
-  ahead of a proxy-side feature that would consume it — but as of today nothing in the proxy
-  calls out to it. Starting it gets you a reachable, otherwise-idle container.
-- **If your judge LLM is unreachable**, the proxy reports this honestly rather than silently
-  passing every check: a response is annotated `Intutic LLM-as-a-Judge: verdict UNAVAILABLE —
-  treat as unverified, not as clean`, instead of defaulting to a clean verdict.
-
-This page will be updated when local judge evaluation for self-hosted gateways ships.
+- **By default, LLM-as-judge evaluation stays on Intutic's Cloud control plane.** The proxy
+  POSTs chunk/response content to `{CONTROL_PLANE_URL}/api/v1/judge/...` for evaluation
+  (default `https://app.intutic.ai`) unless you opt into the local judge below.
+- **Local judge (opt-in) keeps finalize-time judging entirely on your infrastructure.** Set
+  `INTUTIC_GATEWAY_LOCAL_JUDGE=true` (Docker/bare-metal) or `proxy.localJudge: true` (Helm),
+  point `LITELLM_LOCAL_URL` / `proxy.localJudge` + `litellm.judgeModel` at a model in your own
+  bundled LiteLLM's `model_list`, and finalize-time content is judged there instead — it never
+  reaches `CONTROL_PLANE_URL`. This is a **smaller capability than the SaaS judge**, not a
+  drop-in replacement, and the gap is deliberate, not an oversight:
+  - Verdicts are `COMPLIANT | VIOLATION | AMBIGUOUS` only (no SaaS-judge chunk-log
+    reconciliation vocabulary).
+  - Judging happens once, at finalize time — **no mid-stream chunk grading** (the SaaS judge's
+    `judge_chunk_scan!` path is skipped entirely when local judge is on).
+  - **No personal-SOPs merge** — only the workspace's shared SOPs are graded against.
+  - **No incident persistence** — a `VIOLATION` verdict is annotated in the response; it is not
+    written to `governance_incidents`, since that table lives in the control plane's Postgres,
+    which a self-hosted gateway deliberately doesn't have a connection to.
+  - SOP *text* is still fetched from the control plane (`sops::all_sops_for_workspace`) — only
+    the judged *content* stays local, a disclosed trade-off, not a silent one.
+- **If your judge LLM is unreachable** — local or SaaS — the proxy reports this honestly rather
+  than silently passing every check: a response is annotated `Intutic LLM-as-a-Judge: verdict
+  UNAVAILABLE — treat as unverified, not as clean`, instead of defaulting to a clean verdict. A
+  local judge never falls back to calling the SaaS judge on its own failure.
 
 ## Related
 

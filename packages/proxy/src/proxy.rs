@@ -589,6 +589,120 @@ fn judge_unavailable_note(reason: &str) -> String {
     )
 }
 
+/// Grouped rather than eight loose arguments to `resolve_finalize_judge_note`
+/// (clippy's own `too_many_arguments` — a real signal here, not noise: the
+/// SaaS and local branches each use a different subset, and a struct makes
+/// which fields belong to "the finalize request" visible at every call site).
+struct FinalizeJudgeParams<'a> {
+    http_client: &'a reqwest::Client,
+    control_plane_url: &'a str,
+    auth_token: &'a str,
+    workspace_id: &'a str,
+    session_id: &'a str,
+    full_content: &'a str,
+    monitored_model: &'a serde_json::Value,
+    personal_sops: &'a serde_json::Value,
+}
+
+/// The finalize-time judge note, routed to either the SaaS judge (today's
+/// behaviour, byte-for-byte unchanged) or a self-hosted gateway's local
+/// judge (LLD #68 §2 phase 2), based on `gateway::uses_local_judge()`.
+///
+/// Factored out of what were two near-identical ~40-line blocks (streaming
+/// and non-streaming finalize) so the local-judge branch exists in exactly
+/// one place rather than needing to be kept in sync across both.
+async fn resolve_finalize_judge_note(p: FinalizeJudgeParams<'_>) -> Option<String> {
+    if crate::gateway::uses_local_judge() {
+        let sops = crate::sops::all_sops_for_workspace(
+            p.http_client,
+            Some(p.control_plane_url),
+            Some(p.workspace_id),
+            Some(p.auth_token),
+        )
+        .await;
+        let sop_text = sops
+            .iter()
+            .map(|s| s.body.as_str())
+            .collect::<Vec<_>>()
+            .join("\n\n---\n\n");
+
+        return match crate::judge_local::local_judge_finalize(p.http_client, p.full_content, &sop_text).await {
+            Ok(outcome) => match outcome.verdict {
+                crate::judge_local::LocalVerdict::Compliant => None,
+                crate::judge_local::LocalVerdict::Violation | crate::judge_local::LocalVerdict::Ambiguous => {
+                    Some(format!(
+                        "\n\n--- Intutic LLM-as-a-Judge (local) final Security Synthesis ---\n\n{}\n\n",
+                        outcome.reasoning
+                    ))
+                }
+            },
+            Err(reason) => Some(judge_unavailable_note(&reason)),
+        };
+    }
+
+    let finalize_url = format!("{}/api/v1/judge/finalize", p.control_plane_url);
+    tracing::info!(url = %finalize_url, "Sending finalize call to judge");
+    let finalize_res = p
+        .http_client
+        .post(&finalize_url)
+        .header("Authorization", format!("Bearer {}", p.auth_token))
+        .json(&serde_json::json!({
+            "workspaceId": p.workspace_id,
+            "sessionId": p.session_id,
+            "fullContent": p.full_content,
+            "monitoredModel": p.monitored_model,
+            "personalSops": p.personal_sops,
+        }))
+        .send()
+        .await;
+
+    // Success renders the synthesis; every failure mode renders an
+    // UNAVAILABLE note. Previously a non-2xx finalize was swallowed
+    // whole — nothing appended, nothing blocked — so a dead judge and a
+    // clean verdict produced the same stream.
+    match finalize_res {
+        Ok(resp) => {
+            let status = resp.status();
+            tracing::info!(status = %status, "Received finalize response");
+            if status.is_success() {
+                match resp.json::<serde_json::Value>().await {
+                    Ok(json_data) => {
+                        tracing::info!(json = ?json_data, "Finalize JSON content");
+                        let correction_summary = json_data
+                            .get("correctionSummary")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        if correction_summary.is_empty() {
+                            None
+                        } else {
+                            Some(format!(
+                                "\n\n--- Intutic LLM-as-a-Judge final Security Synthesis ---\n\n{}\n\n",
+                                correction_summary
+                            ))
+                        }
+                    }
+                    Err(e) => Some(judge_unavailable_note(&format!(
+                        "unparsable finalize response: {}",
+                        e
+                    ))),
+                }
+            } else {
+                Some(judge_unavailable_note(&format!(
+                    "finalize returned HTTP {}",
+                    status
+                )))
+            }
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "Finalize request failed");
+            Some(judge_unavailable_note(&format!(
+                "finalize request failed: {}",
+                e
+            )))
+        }
+    }
+}
+
 fn get_model_provider(model: &str) -> Provider {
     let m = model.to_lowercase();
     if m.contains("claude") {
@@ -3917,7 +4031,12 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // entry. Same split logic, both branches, is the fix.
             macro_rules! judge_chunk_scan {
                 () => {
-                    if judge_active_clone {
+                    // LLD #68 §2 phase 2: local judge is finalize-only, by
+                    // design -- no mid-stream chunk grading (see judge_local.rs's
+                    // module doc for why). Skipping here, not merely routing
+                    // elsewhere, means a local-judge gateway sends zero
+                    // per-chunk calls anywhere, not a redirected one.
+                    if judge_active_clone && !crate::gateway::uses_local_judge() {
                         let current_slice = &accumulated_content[last_processed_len..];
                         let mut split_index = None;
                         if let Some(pos) = current_slice.find("\n\n") {
@@ -4652,7 +4771,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
 
                 let trailing = accumulated_content[last_processed_len..].trim().to_string();
                 tracing::info!(trailing_content = %trailing, "Processing trailing content");
-                if !trailing.is_empty() {
+                // Same LLD #68 §2 phase 2 skip as judge_chunk_scan! above:
+                // local judge does finalize-only grading, so the trailing
+                // chunk this would otherwise send is never sent at all.
+                if !trailing.is_empty() && !crate::gateway::uses_local_judge() {
                     let context_paras = if paragraph_history.len() >= 2 {
                         paragraph_history[paragraph_history.len() - 2..].to_vec()
                     } else {
@@ -4715,67 +4837,17 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                         .await;
                 }
 
-                let finalize_url = format!("{}/api/v1/judge/finalize", control_plane_url_clone);
-                tracing::info!(url = %finalize_url, "Sending finalize call to judge");
-                let api_key_for_finalize = client_api_key_clone.clone();
-                let finalize_res = http_client_clone
-                    .post(&finalize_url)
-                    .header("Authorization", format!("Bearer {}", api_key_for_finalize))
-                    .json(&serde_json::json!({
-                        "workspaceId": workspace_id_clone,
-                        "sessionId": session_id_clone,
-                        "fullContent": accumulated_content,
-                        "monitoredModel": actual_model_clone.clone(),
-                        "personalSops": personal_sops_clone,
-                    }))
-                    .send()
-                    .await;
-
-                // Success renders the synthesis; every failure mode renders an
-                // UNAVAILABLE note. Previously a non-2xx finalize was swallowed
-                // whole — nothing appended, nothing blocked — so a dead judge
-                // and a clean verdict produced the same stream.
-                let judge_note: Option<String> = match finalize_res {
-                    Ok(resp) => {
-                        let status = resp.status();
-                        tracing::info!(status = %status, "Received finalize response");
-                        if status.is_success() {
-                            match resp.json::<serde_json::Value>().await {
-                                Ok(json_data) => {
-                                    tracing::info!(json = ?json_data, "Finalize JSON content");
-                                    let correction_summary = json_data
-                                        .get("correctionSummary")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("");
-                                    if correction_summary.is_empty() {
-                                        None
-                                    } else {
-                                        Some(format!(
-                                            "\n\n--- Intutic LLM-as-a-Judge final Security Synthesis ---\n\n{}\n\n",
-                                            correction_summary
-                                        ))
-                                    }
-                                }
-                                Err(e) => Some(judge_unavailable_note(&format!(
-                                    "unparsable finalize response: {}",
-                                    e
-                                ))),
-                            }
-                        } else {
-                            Some(judge_unavailable_note(&format!(
-                                "finalize returned HTTP {}",
-                                status
-                            )))
-                        }
-                    }
-                    Err(e) => {
-                        tracing::error!(error = %e, "Finalize request failed");
-                        Some(judge_unavailable_note(&format!(
-                            "finalize request failed: {}",
-                            e
-                        )))
-                    }
-                };
+                let judge_note: Option<String> = resolve_finalize_judge_note(FinalizeJudgeParams {
+                    http_client: &http_client_clone,
+                    control_plane_url: &control_plane_url_clone,
+                    auth_token: &client_api_key_clone,
+                    workspace_id: &workspace_id_clone,
+                    session_id: &session_id_clone,
+                    full_content: &accumulated_content,
+                    monitored_model: &serde_json::json!(actual_model_clone.clone()),
+                    personal_sops: &personal_sops_clone,
+                })
+                .await;
 
                 if let Some(formatted_alert) = judge_note {
                                 let alert_block = match protocol_clone {
@@ -5249,7 +5321,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         // tasks. The finalize call below still needs to say which model produced
         // the content it is asking the judge to grade.
         let judge_monitored_final = actual_model.clone();
-        for chunk_content in parts {
+        // LLD #68 §2 phase 2: local judge is finalize-only, by design -- no
+        // per-chunk calls anywhere when it's on, same skip as the streaming
+        // path's judge_chunk_scan!/trailing-chunk guards above.
+        for chunk_content in if crate::gateway::uses_local_judge() { Vec::new() } else { parts } {
             let context_paras = if paragraph_history.len() >= 2 {
                 paragraph_history[paragraph_history.len() - 2..].to_vec()
             } else {
@@ -5330,66 +5405,17 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             let _ = h.await;
         }
 
-        let finalize_url = format!("{}/api/v1/judge/finalize", control_plane_url);
-        tracing::info!(url = %finalize_url, "Sending non-streaming finalize call to judge");
-        let finalize_res = state
-            .http_client
-            .post(&finalize_url)
-            .header("Authorization", format!("Bearer {}", raw_token))
-            .json(&serde_json::json!({
-                "workspaceId": workspace_id,
-                "sessionId": session_id,
-                "fullContent": accumulated_content,
-                "monitoredModel": judge_monitored_final,
-                "personalSops": personal_sops,
-            }))
-            .send()
-            .await;
-
-        // Success renders the synthesis; every failure mode renders an
-        // UNAVAILABLE note. Previously a non-2xx finalize was swallowed whole,
-        // so a dead judge and a clean verdict produced identical bodies.
-        let judge_note: Option<String> = match finalize_res {
-            Ok(resp) => {
-                let status = resp.status();
-                tracing::info!(status = %status, "Received non-streaming finalize response");
-                if status.is_success() {
-                    match resp.json::<serde_json::Value>().await {
-                        Ok(json_data) => {
-                            tracing::info!(json = ?json_data, "Non-streaming finalize JSON content");
-                            let correction_summary = json_data
-                                .get("correctionSummary")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("");
-                            if correction_summary.is_empty() {
-                                None
-                            } else {
-                                Some(format!(
-                                    "\n\n--- Intutic LLM-as-a-Judge final Security Synthesis ---\n\n{}\n\n",
-                                    correction_summary
-                                ))
-                            }
-                        }
-                        Err(e) => Some(judge_unavailable_note(&format!(
-                            "unparsable finalize response: {}",
-                            e
-                        ))),
-                    }
-                } else {
-                    Some(judge_unavailable_note(&format!(
-                        "finalize returned HTTP {}",
-                        status
-                    )))
-                }
-            }
-            Err(e) => {
-                tracing::error!(error = %e, "Non-streaming finalize request failed");
-                Some(judge_unavailable_note(&format!(
-                    "finalize request failed: {}",
-                    e
-                )))
-            }
-        };
+        let judge_note: Option<String> = resolve_finalize_judge_note(FinalizeJudgeParams {
+            http_client: &state.http_client,
+            control_plane_url: &control_plane_url,
+            auth_token: raw_token,
+            workspace_id: &workspace_id,
+            session_id: &session_id,
+            full_content: &accumulated_content,
+            monitored_model: &serde_json::json!(judge_monitored_final),
+            personal_sops: &personal_sops,
+        })
+        .await;
 
         if let Some(formatted_alert) = judge_note {
                         accumulated_content.push_str(&formatted_alert);

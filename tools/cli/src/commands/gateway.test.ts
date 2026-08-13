@@ -20,6 +20,8 @@ import {
   runGatewayRotate,
   runGatewayRevoke,
   runGatewayConfigSet,
+  runGatewayAssign,
+  runGatewayResolve,
 } from './gateway.js'
 
 describe('intutic gateway', () => {
@@ -184,5 +186,78 @@ describe('intutic gateway', () => {
     await expect(runGatewayStatus('gw_missing', {})).rejects.toThrow('process.exit(1)')
     expect(exitSpy).toHaveBeenCalledWith(1)
     expect(errSpy).toHaveBeenCalled()
+  })
+
+  it('assign hits PATCH /api/v1/workspace/gateway with the gatewayId', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ workspaceId: 'ws_test', gatewayId: 'gw_abc' }),
+    })
+
+    await runGatewayAssign({ gateway: 'gw_abc' })
+
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('https://api.test.invalid/api/v1/workspace/gateway')
+    expect(init.method).toBe('PATCH')
+    expect(JSON.parse(init.body)).toEqual({ gatewayId: 'gw_abc' })
+  })
+
+  it('assign --org hits PATCH /api/v1/orgs/:orgId/gateway instead', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ orgId: 'org_1', gatewayId: 'gw_abc' }),
+    })
+
+    await runGatewayAssign({ gateway: 'gw_abc', org: 'org_1' })
+
+    const [url] = fetchMock.mock.calls[0]
+    expect(url).toBe('https://api.test.invalid/api/v1/orgs/org_1/gateway')
+  })
+
+  it('assign --clear sends gatewayId: null', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ workspaceId: 'ws_test', gatewayId: null }),
+    })
+
+    await runGatewayAssign({ clear: true })
+
+    const [, init] = fetchMock.mock.calls[0]
+    expect(JSON.parse(init.body)).toEqual({ gatewayId: null })
+  })
+
+  it('assign refuses with neither --gateway nor --clear', async () => {
+    await expect(runGatewayAssign({})).rejects.toThrow('process.exit(1)')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('assign refuses with both --gateway and --clear', async () => {
+    await expect(runGatewayAssign({ gateway: 'gw_abc', clear: true })).rejects.toThrow('process.exit(1)')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('resolve hits GET /api/v1/workspace/gateway-resolution', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ source: 'default', gateway: null }),
+    })
+
+    await runGatewayResolve({})
+
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('https://api.test.invalid/api/v1/workspace/gateway-resolution')
+    expect(init.method).toBe('GET')
+  })
+
+  it('resolve reports a stale assignment distinctly from no assignment', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ source: 'workspace', gateway: null, staleAssignment: 'gw_gone' }),
+    })
+
+    await runGatewayResolve({})
+
+    const printed = logSpy.mock.calls.map((c: unknown[]) => String(c[0])).join('\n')
+    expect(printed).toContain('gw_gone')
   })
 })
