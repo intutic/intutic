@@ -242,6 +242,31 @@ export interface WorkspaceSettings {
    * this from, is therefore never affected.
    */
   sandboxRequirement?: 'off' | 'warn' | 'require'
+
+  /**
+   * BYO judge model for the MANAGED LLM-as-judge path (LLD #70).
+   *
+   * When set, chunk/finalize judge calls for this workspace run on this
+   * model, routed through the platform data-plane gateway with the
+   * workspace's own vk_ — so the completion is billed to the workspace's
+   * provider key (the key wizard), not the platform. Trade-offs, stated
+   * plainly rather than implied:
+   * - This REPLACES the platform's independent trusted monitor
+   *   (`INTUTIC_TRUSTED_MONITOR_MODEL`) for this workspace. Verdicts are
+   *   stamped `[workspace-judge]`; a judge equal to the monitored model is
+   *   additionally stamped `[self-graded]` — provenance stays visible, it
+   *   is never re-labelled as independent.
+   * - Judged content still transits the control plane and the platform
+   *   gateway to the workspace's provider. The self-hosted local judge
+   *   (`INTUTIC_GATEWAY_LOCAL_JUDGE`) remains the keep-content-in-org path.
+   * - Chunk judging fires per paragraph — that cost lands on the
+   *   workspace's provider key.
+   * - A workspace policy KILL (DLP, budget) on the judge call itself fails
+   *   safe to the standard judge-unavailable note, not a bypass.
+   *
+   * `null`/absent = the platform trusted monitor, exactly as before.
+   */
+  managedJudgeModel?: string | null
 }
 
 /**
@@ -293,6 +318,9 @@ export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
   // Only load-bearing once reviewHoldBypassEnabled is true; the value here is
   // what "enabled but unset" resolves to.
   reviewHoldBypassTtlMinutes: 10,
+  // Platform trusted monitor judges by default — see the field doc for what
+  // setting a workspace's own model trades away.
+  managedJudgeModel: null,
 }
 
 /**

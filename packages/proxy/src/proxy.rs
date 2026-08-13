@@ -572,6 +572,32 @@ fn judge_session_scope(workspace_id: &str, session_id: &str) -> String {
     format!("{}:{}", workspace_id, session_id)
 }
 
+/// Header the control plane's judge routes set on their own completion
+/// calls through this gateway (LLD #70 — BYO workspace judge). Must stay in
+/// lockstep with `judge.ts`; `monitorSeparation.test.ts` pins the literal in
+/// both files.
+pub(crate) const JUDGE_LOOP_GUARD_HEADER: &str = "x-intutic-judge-loop-guard";
+
+/// LLD #70 — judge-loop guard: when the incoming request IS a judge's own
+/// completion call, every judge-activation check must be skipped, or a
+/// workspace-judge call routed back through this gateway can be judged
+/// itself — each chunk spawning another `/judge/chunk`, each of those
+/// coming back through here, unbounded. The live recursion path is the
+/// session scope: the control plane sends no `x-session-id`, so its calls
+/// land in the `{ws}:unknown` scope, which is active the moment any client
+/// in the workspace ever activated judging without a session header.
+///
+/// A plain header is sufficient — no HMAC: judge activation is already
+/// fully client-controlled (session scope keys off a client-supplied
+/// `x-session-id`, loop scope off `x-loop-run-id`, the text trigger off
+/// client-authored content), so a client that sets this header to dodge
+/// judging of its own traffic gained nothing it couldn't already do with a
+/// fresh session id. Judging is the advisory layer; all KILL sites are
+/// deterministic and entirely unaffected by this header.
+pub(crate) fn judge_checks_enabled(headers: &axum::http::HeaderMap) -> bool {
+    headers.get(JUDGE_LOOP_GUARD_HEADER).is_none()
+}
+
 /// Rendered into the response when the judge could not deliver a verdict.
 ///
 /// Deliberately NOT shaped like the synthesis block. A failed finalize used to
@@ -1247,6 +1273,11 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
 
     let mut judge_active = false;
 
+    // All three activation checks below sit behind the loop guard — see
+    // judge_checks_enabled's doc for why a judge's own completion call must
+    // never re-activate judging.
+    let judge_checks = judge_checks_enabled(&headers);
+
     // Check if auto-judging is active for this session in Valkey (fail-open)
     let session_id_hdr = headers
         .get("x-session-id")
@@ -1254,18 +1285,19 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         .unwrap_or("unknown")
         .to_string();
 
-    if state
-        .control_plane
-        .auto_judge_active(
-            JudgeScope::Session,
-            &judge_session_scope(&workspace_id, &session_id_hdr),
-        )
-        .await
+    if judge_checks
+        && state
+            .control_plane
+            .auto_judge_active(
+                JudgeScope::Session,
+                &judge_session_scope(&workspace_id, &session_id_hdr),
+            )
+            .await
     {
         judge_active = true;
     }
 
-    if !judge_active {
+    if judge_checks && !judge_active {
         let loop_run_id_header = headers
             .get("x-loop-run-id")
             .or_else(|| headers.get("http-x-loop-run-id"))
@@ -1283,7 +1315,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         }
     }
 
-    if let Some(ref text) = last_user_content {
+    if let Some(text) = last_user_content.as_ref().filter(|_| judge_checks) {
         let trimmed = text.trim();
         let judge_pos = trimmed
             .find("/intutic judge")
@@ -8026,6 +8058,34 @@ mod tests {
         // another, and auto-judging stops firing with no signal at all. Pinning the
         // shape here makes a divergence a test failure instead of a silent outage.
         assert_eq!(judge_session_scope("ws_1", "ses_9"), "ws_1:ses_9");
+    }
+
+    // LLD #70 — the judge-loop guard. Presence of the header (ANY value —
+    // the control plane sends "1", but nothing may hinge on the value)
+    // disables every judge-activation check; absence leaves them all
+    // enabled. If this inverts or the header name drifts from judge.ts's
+    // sender, a workspace-judge completion routed back through the gateway
+    // can be judged itself and fan out unboundedly — see
+    // judge_checks_enabled's doc for the recursion path.
+    #[test]
+    fn judge_loop_guard_header_disables_activation_checks() {
+        let mut h = HeaderMap::new();
+        assert!(judge_checks_enabled(&h), "no header → checks enabled");
+
+        h.insert(JUDGE_LOOP_GUARD_HEADER, "1".parse().unwrap());
+        assert!(!judge_checks_enabled(&h), "header present → checks disabled");
+
+        let mut h2 = HeaderMap::new();
+        h2.insert(JUDGE_LOOP_GUARD_HEADER, "anything".parse().unwrap());
+        assert!(!judge_checks_enabled(&h2), "value is irrelevant, presence decides");
+    }
+
+    #[test]
+    fn judge_loop_guard_header_name_is_pinned_for_the_control_plane_sender() {
+        // Rebuilt by hand in judge.ts; monitorSeparation.test.ts greps both
+        // files for this literal, and this assertion keeps the Rust side
+        // honest even when only cargo runs.
+        assert_eq!(JUDGE_LOOP_GUARD_HEADER, "x-intutic-judge-loop-guard");
     }
 
     #[test]
