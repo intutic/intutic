@@ -166,3 +166,32 @@ export function getProviderDefinition(id: string): ProviderDefinition | undefine
 export function isKnownProviderId(id: string): boolean {
   return PROVIDER_REGISTRY.some((p) => p.id === id)
 }
+
+/**
+ * Which provider the data-plane proxy would route a model name to.
+ *
+ * A hand-maintained TS mirror of `get_model_provider` in
+ * `packages/proxy/src/proxy.rs` — the proxy's routing decision is the ground
+ * truth, and this exists so the control plane / dashboard can predict it
+ * (e.g. the BYO judge model "Test" flow fast-failing on an unprovisioned
+ * provider before making a real call, LLD #70). A parity unit test pins this
+ * against the Rust source; if the heuristic changes there, change it here in
+ * the same commit.
+ *
+ * Order matters and matches the Rust exactly: claude → gemini → '/'
+ * (OpenRouter's vendor/model namespacing — checked before the mistral
+ * prefixes so "mistralai/..." routes to OpenRouter) → mistral prefixes →
+ * OpenAI as the default arm.
+ */
+export function inferProviderForModel(
+  model: string,
+): 'anthropic' | 'gemini' | 'openrouter' | 'mistral' | 'openai' {
+  const m = model.toLowerCase()
+  if (m.includes('claude')) return 'anthropic'
+  if (m.includes('gemini')) return 'gemini'
+  if (m.includes('/')) return 'openrouter'
+  if (m.startsWith('mistral') || m.startsWith('open-mixtral') || m.startsWith('codestral')) {
+    return 'mistral'
+  }
+  return 'openai'
+}
