@@ -46,6 +46,20 @@ pub struct GatewayConfig {
     /// in `proxy.rs`.
     #[serde(default)]
     pub require_provisioned_key: bool,
+    /// LLD #68 §2 phase 2 — local judge for self-hosted gateways. When true,
+    /// finalize-time judge evaluation is answered by a LOCAL LiteLLM
+    /// instance (`LITELLM_LOCAL_URL`, see `judge_local.rs`) instead of
+    /// `{CONTROL_PLANE_URL}/api/v1/judge/finalize` — so the content being
+    /// judged never leaves the org's own infrastructure. Off by default:
+    /// the SaaS judge path (richer — mid-stream chunk grading, personal
+    /// SOPs, incident persistence) stays the default for every deployment
+    /// that already has it. Deliberately NOT exposed through `PATCH
+    /// .../gateways/:id/config` (remote-config surface) — a gateway
+    /// operator turning this on is a statement about where their own
+    /// content goes, not something the SaaS control plane should be able
+    /// to flip on their behalf.
+    #[serde(default)]
+    pub local_judge: bool,
 }
 
 impl GatewayConfig {
@@ -72,7 +86,15 @@ impl GatewayConfig {
             },
             Err(_) => cfg.require_provisioned_key,
         };
-        GatewayConfig { require_vk, require_provisioned_key }
+        let local_judge = match std::env::var("INTUTIC_GATEWAY_LOCAL_JUDGE") {
+            Ok(v) => match v.trim().to_ascii_lowercase().as_str() {
+                "1" | "true" => true,
+                "0" | "false" => false,
+                _ => cfg.local_judge,
+            },
+            Err(_) => cfg.local_judge,
+        };
+        GatewayConfig { require_vk, require_provisioned_key, local_judge }
     }
 }
 
@@ -108,6 +130,12 @@ pub fn requires_vk_only() -> bool {
 /// tiny wrapper for the same reason as `requires_vk_only` above.
 pub fn requires_provisioned_key() -> bool {
     gateway_config().require_provisioned_key
+}
+
+/// True if `local_judge` is on (LLD #68 §2 phase 2). A tiny wrapper for the
+/// same reason as `requires_vk_only` above.
+pub fn uses_local_judge() -> bool {
+    gateway_config().local_judge
 }
 
 /// The pure decision: is this token acceptable under the current front-door
@@ -197,6 +225,7 @@ mod tests {
             GatewayConfig::from_config_and_env(&GatewayConfig {
                 require_vk: false,
                 require_provisioned_key: false,
+                ..Default::default()
             })
             .require_provisioned_key
         );
@@ -206,6 +235,7 @@ mod tests {
             !GatewayConfig::from_config_and_env(&GatewayConfig {
                 require_vk: false,
                 require_provisioned_key: true,
+                ..Default::default()
             })
             .require_provisioned_key
         );
@@ -217,6 +247,7 @@ mod tests {
             !GatewayConfig::from_config_and_env(&GatewayConfig {
                 require_vk: false,
                 require_provisioned_key: false,
+                ..Default::default()
             })
             .require_provisioned_key
         );
@@ -226,6 +257,7 @@ mod tests {
             !GatewayConfig::from_config_and_env(&GatewayConfig {
                 require_vk: false,
                 require_provisioned_key: false,
+                ..Default::default()
             })
             .require_provisioned_key
         );

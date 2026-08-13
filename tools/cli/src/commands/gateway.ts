@@ -1,5 +1,6 @@
 /**
- * `intutic gateway` — manage self-hosted gateway registrations (LLD #66).
+ * `intutic gateway` — manage self-hosted gateway registrations (LLD #66)
+ * and routing assignment (LLD #68 §2).
  *
  * Subcommands:
  *   - `intutic gateway register --name <name> --target <docker|kubernetes|bare_metal>`
@@ -8,12 +9,20 @@
  *   - `intutic gateway rotate <gateway_id>`
  *   - `intutic gateway revoke <gateway_id> [--reason <text>]`
  *   - `intutic gateway config set <gateway_id> [--require-vk <bool>] [--require-provisioned-key <bool>]`
+ *   - `intutic gateway assign --gateway <gateway_id>|--clear [--org <org_id>]`
+ *   - `intutic gateway resolve [--json]`
  *
  * Server side: services/control-plane/src/routes/gateways.ts,
- * routes/gatewayHeartbeat.ts. A gateway token (`gwk_...`) is a distinct
- * credential from the `vk_`/JWT this command authenticates with — it is
- * printed exactly once, on `register` and `rotate`, and never retrievable
- * again, matching the server's own one-shot design.
+ * routes/gatewayHeartbeat.ts, routes/orgs.ts (`PATCH .../gateway`). A
+ * gateway token (`gwk_...`) is a distinct credential from the `vk_`/JWT
+ * this command authenticates with — it is printed exactly once, on
+ * `register` and `rotate`, and never retrievable again, matching the
+ * server's own one-shot design.
+ *
+ * `assign`/`resolve` are client-side discovery, not traffic routing:
+ * there is no proxy-in-front-of-proxies in this architecture, so
+ * `resolve` tells you which gateway a client SHOULD point at; actually
+ * pointing one there (`CONTROL_PLANE_URL=...`) is still a manual step.
  *
  * @module
  */
@@ -297,6 +306,94 @@ export async function runGatewayConfigSet(
     )
   } catch (err) {
     log.error(`Failed to update gateway config: ${err instanceof Error ? err.message : String(err)}`)
+    process.exit(1)
+  }
+}
+
+/** `intutic gateway assign` — LLD #68 §2. */
+export async function runGatewayAssign(
+  opts: GatewayCliOpts & { gateway?: string; clear?: boolean; org?: string },
+): Promise<void> {
+  if (!opts.clear && !opts.gateway) {
+    log.error('Either --gateway <gateway_id> or --clear is required')
+    process.exit(1)
+  }
+  if (opts.clear && opts.gateway) {
+    log.error('--gateway and --clear are mutually exclusive')
+    process.exit(1)
+  }
+
+  const gatewayId = opts.clear ? null : (opts.gateway as string)
+  const client = await getClient(opts)
+  const path = opts.org
+    ? `/api/v1/orgs/${encodeURIComponent(opts.org)}/gateway`
+    : '/api/v1/workspace/gateway'
+
+  try {
+    const res = await client.patch<{ workspaceId?: string; orgId?: string; gatewayId: string | null }>(
+      path,
+      { gatewayId },
+    )
+
+    if (opts.json) {
+      console.log(JSON.stringify(res, null, 2))
+      return
+    }
+
+    if (res.gatewayId) {
+      log.success(`${opts.org ? `Org ${opts.org}` : 'This workspace'} now defaults to gateway ${res.gatewayId}.`)
+    } else {
+      log.success(`${opts.org ? `Org ${opts.org}'s` : "This workspace's"} gateway override cleared.`)
+    }
+  } catch (err) {
+    log.error(`Failed to update gateway assignment: ${err instanceof Error ? err.message : String(err)}`)
+    process.exit(1)
+  }
+}
+
+interface GatewayResolutionResponse {
+  source: 'workspace' | 'org' | 'default'
+  gateway: { gatewayId: string; name: string; deploymentTarget: string; status: string } | null
+  staleAssignment?: string
+}
+
+/** `intutic gateway resolve` — LLD #68 §2. */
+export async function runGatewayResolve(opts: GatewayCliOpts): Promise<void> {
+  const client = await getClient(opts)
+
+  try {
+    const res = await client.get<GatewayResolutionResponse>('/api/v1/workspace/gateway-resolution')
+
+    if (opts.json) {
+      console.log(JSON.stringify(res, null, 2))
+      return
+    }
+
+    log.header('Intutic — Gateway Resolution')
+    if (res.staleAssignment) {
+      log.warn(
+        `This ${res.source} points at gateway ${res.staleAssignment}, which no longer exists or was revoked.`,
+      )
+      log.dim('  Falling back to the shared gateway.intutic.ai until this is reassigned or cleared.')
+      return
+    }
+    if (!res.gateway) {
+      log.dim('  No override assigned — this workspace uses the shared gateway.intutic.ai.')
+      return
+    }
+
+    log.field('Source', res.source === 'workspace' ? 'This workspace\'s own override' : "This org's default")
+    log.field('Gateway ID', res.gateway.gatewayId)
+    log.field('Name', res.gateway.name)
+    log.field('Target', res.gateway.deploymentTarget)
+    log.field('Status', colorStatus(res.gateway.status))
+    console.log('')
+    log.dim(
+      '  Pointing a client here is still manual — set CONTROL_PLANE_URL (or the proxy target) ' +
+        "to this gateway's own reachable address.",
+    )
+  } catch (err) {
+    log.error(`Failed to resolve gateway: ${err instanceof Error ? err.message : String(err)}`)
     process.exit(1)
   }
 }
