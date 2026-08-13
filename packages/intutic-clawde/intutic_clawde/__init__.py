@@ -1,4 +1,5 @@
 from .client import ClawdeClient
+from .control_plane import ControlPlaneClient
 from .errors import ClawdeError, ClawdeConnectionError, ClawdeVerdictError
 from .gate import (
     Gate,
@@ -12,7 +13,7 @@ from .gate import (
 )
 
 __all__ = [
-    "ClawdeClient", "ClawdeError", "ClawdeConnectionError", "ClawdeVerdictError",
+    "ClawdeClient", "ControlPlaneClient", "ClawdeError", "ClawdeConnectionError", "ClawdeVerdictError",
     "Gate", "GateClient", "GateConfig", "GateResponse", "IntuticGateRefusal",
     "guard", "guard_tools", "intutic_headers",
 ]
