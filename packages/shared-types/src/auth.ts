@@ -123,6 +123,15 @@ export interface WorkspaceMemberInfo {
   isActive: boolean
   lastLoginAt: string | null
   createdAt: string
+  /**
+   * The workspace's org (tenancy phase 1, migration 130) -- optional because
+   * most `WorkspaceMemberInfo` construction sites (signup responses) return
+   * org info separately in their own `org: {...}` field already, so this
+   * would be redundant there. Only `GET /api/v1/auth/me` populates it, for
+   * the dashboard to resolve which org's teams/gateway-defaults apply
+   * without a second round-trip.
+   */
+  orgId?: string
 }
 
 // ─── Member Invite ───────────────────────────────────────────────────
