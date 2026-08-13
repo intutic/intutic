@@ -1028,6 +1028,13 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
             spend: spend_val.and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0),
             models: vec!["*".to_string()],
             expires: None,
+            // Written by the control plane's API-key middleware since LLD #71;
+            // absent on older cache entries, which org-pinned cells resolve by
+            // revalidating rather than guessing.
+            org_id: auth_json
+                .get("orgId")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
         }))
     }
 

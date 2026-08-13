@@ -27,6 +27,14 @@ export interface AuthContext {
   role: WorkspaceRole
   /** Cross-workspace user ID (LLD #11). Optional for pre-migration members. */
   userId?: string
+  /**
+   * The org the workspace belongs to (denormalized `workspaces.orgId`,
+   * LLD #71). Optional: cached auth entries written before this field
+   * existed lack it, and readers must treat absence as "unknown", never as
+   * "no org" — the proxy's cell org-pinning revalidates via the control
+   * plane in that case rather than guessing.
+   */
+  orgId?: string
 }
 
 // ─── JWT ─────────────────────────────────────────────────────────────
@@ -202,6 +210,17 @@ export const OrgSignupInputSchema = z.object({
   password: z.string().min(8).max(128),
   name: z.string().min(1).max(128),
   orgName: z.string().min(1).max(128),
+  /**
+   * The company's own domain (e.g. "acme.com") — informational, stored in
+   * `orgs.settings.domain` (LLD #71). Deliberately NOT the cell hostname:
+   * the org's slug is the subdomain under gateway.intutic.ai, so no domain
+   * verification is needed here.
+   */
+  orgDomain: z
+    .string()
+    .max(255)
+    .regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i, 'must be a bare domain like acme.com')
+    .optional(),
   signupSource: z.string().max(32).optional(),
   marketingAttribution: z.record(z.any()).optional(),
 })

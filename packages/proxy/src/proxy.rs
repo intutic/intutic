@@ -371,6 +371,13 @@ async fn parse_key_context(
         spend: 0.0,
         models: Vec::new(),
         expires: None,
+        // /auth/key-context is the AUTHORITATIVE org answer (LLD #71): the
+        // cell org-pinning path lands here precisely when a cached entry
+        // predates the field.
+        org_id: body
+            .get("orgId")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
     }))
 }
 
@@ -1955,6 +1962,82 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 );
             }
             workspace_id = authed_ws.clone();
+        }
+    }
+
+    // ── Step 2.7: cell org pinning (LLD #71) ─────────────────────────
+    //
+    // A dedicated managed cell serves exactly one org. The pin evaluates the
+    // AUTHENTICATED record's org — never a header, never the URL — and a
+    // record without one (cached before the control plane carried the field)
+    // is revalidated authoritatively rather than guessed at, failing CLOSED
+    // when the org still cannot be established. Inert everywhere the env is
+    // unset: the shared gateway and self-hosted deployments never enter this
+    // block.
+    if let Some(pinned_org) = crate::gateway::cell_org_pin() {
+        match key_record {
+            Some(ref key) => {
+                let decision = crate::gateway::org_pin_decision(pinned_org, key.org_id.as_deref());
+                let verified = match decision {
+                    crate::gateway::OrgPinDecision::Allow => true,
+                    crate::gateway::OrgPinDecision::Mismatch => false,
+                    crate::gateway::OrgPinDecision::Unverified => {
+                        // Stale cache entry — ask the control plane, which now
+                        // returns orgId from /auth/key-context.
+                        let cp_url = state
+                            .config
+                            .intutic_settings
+                            .policy
+                            .control_plane_url
+                            .as_deref();
+                        match cp_url {
+                            Some(url) => match validate_key_via_control_plane(
+                                &state.http_client,
+                                url,
+                                raw_token,
+                            )
+                            .await
+                            {
+                                Ok(Some(fresh)) => fresh.org_id.as_deref() == Some(pinned_org),
+                                Ok(None) => false,
+                                Err(()) => {
+                                    return json_error(
+                                        StatusCode::SERVICE_UNAVAILABLE,
+                                        "AUTH_UNVERIFIABLE",
+                                        "This cell could not verify your key's organization against the control plane. Retry shortly.",
+                                    );
+                                }
+                            },
+                            // A pinned cell with no control plane cannot verify
+                            // anything — misconfiguration, fail closed.
+                            None => false,
+                        }
+                    }
+                };
+                if !verified {
+                    tracing::warn!(
+                        workspace_id = %workspace_id,
+                        "Rejecting request whose key belongs to a different org than this cell"
+                    );
+                    return json_error(
+                        StatusCode::FORBIDDEN,
+                        "org_mismatch",
+                        "This API key does not belong to the organization this gateway cell serves.",
+                    );
+                }
+            }
+            // No authenticated record on a PINNED cell (an unmanaged
+            // deployment shape) — the cell cannot attribute the request to
+            // any org, so it cannot admit it. Cells always run with a
+            // control plane and vk-only enforcement; reaching this arm is a
+            // misconfiguration, and it fails closed.
+            None => {
+                return json_error(
+                    StatusCode::FORBIDDEN,
+                    "org_mismatch",
+                    "This gateway cell requires an organization-scoped API key.",
+                );
+            }
         }
     }
 

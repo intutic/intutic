@@ -138,6 +138,51 @@ pub fn uses_local_judge() -> bool {
     gateway_config().local_judge
 }
 
+/// The org this deployment is a dedicated managed cell for (LLD #71), or
+/// `None` — the shared gateway and every self-hosted deployment. Set by the
+/// cell provisioner via `INTUTIC_GATEWAY_ORG_ID` in the cell's pod env; read
+/// once (a boot-time security posture, same set-once discipline as
+/// `GATEWAY_CONFIG`). A pinned cell also sets `INTUTIC_GATEWAY_REQUIRE_VK=true`
+/// — pinning only ever evaluates vk-authenticated identities, and the vk-only
+/// front door is what guarantees every request has one.
+pub fn cell_org_pin() -> Option<&'static str> {
+    static PIN: OnceLock<Option<String>> = OnceLock::new();
+    PIN.get_or_init(|| {
+        std::env::var("INTUTIC_GATEWAY_ORG_ID")
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+    })
+    .as_deref()
+}
+
+/// A pinned cell's admission decision for one authenticated key. Pure — no
+/// I/O, no globals — so every arm is unit-testable.
+#[derive(Debug, PartialEq, Eq)]
+pub enum OrgPinDecision {
+    /// The key's workspace belongs to this cell's org.
+    Allow,
+    /// The key belongs to a DIFFERENT org → 403. Never a fall-through: a
+    /// cell serving another org's traffic is the exact cross-tenant exposure
+    /// dedicated cells exist to remove.
+    Mismatch,
+    /// The record carries no org (a cached auth entry written before the
+    /// control plane included the field). Not a verdict — the caller must
+    /// revalidate against the control plane, whose `/auth/key-context` is
+    /// authoritative, and fail CLOSED if the org still cannot be
+    /// established. Guessing "probably fine" here would quietly disable the
+    /// pin for exactly the entries least likely to be fresh.
+    Unverified,
+}
+
+pub fn org_pin_decision(pinned_org: &str, record_org: Option<&str>) -> OrgPinDecision {
+    match record_org {
+        Some(org) if org == pinned_org => OrgPinDecision::Allow,
+        Some(_) => OrgPinDecision::Mismatch,
+        None => OrgPinDecision::Unverified,
+    }
+}
+
 /// The pure decision: is this token acceptable under the current front-door
 /// policy? Exported and pure (no I/O, no global state) so it is unit-testable
 /// without installing global config.
@@ -277,4 +322,28 @@ mod tests {
     fn uninitialised_global_never_requires_provisioned_key() {
         assert!(!requires_provisioned_key());
     }
+
+    // LLD #71 — the pure cell-admission decision, every arm. The Unverified
+    // arm is the one worth staring at: it must be a distinct value, NOT a
+    // pass and NOT a mismatch, because the caller's contract is "revalidate
+    // then fail closed" — collapsing it into Allow would silently disable
+    // the pin for stale cache entries, and collapsing it into Mismatch
+    // would 403 valid keys for one cache-TTL after every deploy of this
+    // feature.
+    #[test]
+    fn org_pin_decision_covers_match_mismatch_and_unknown() {
+        assert_eq!(org_pin_decision("org_a", Some("org_a")), OrgPinDecision::Allow);
+        assert_eq!(org_pin_decision("org_a", Some("org_b")), OrgPinDecision::Mismatch);
+        assert_eq!(org_pin_decision("org_a", None), OrgPinDecision::Unverified);
+        // Exact string equality — no prefix/suffix leniency that could let
+        // "org_a2" ride "org_a"'s cell.
+        assert_eq!(org_pin_decision("org_a", Some("org_a2")), OrgPinDecision::Mismatch);
+    }
+
+    // Deliberately does NOT test cell_org_pin() itself: it reads a
+    // process-global env var through a OnceLock, so a test that sets
+    // INTUTIC_GATEWAY_ORG_ID would race every other test AND freeze the
+    // value for the rest of the process. The decision logic above is the
+    // load-bearing part; the env read is the same three-line pattern
+    // from_config_and_env already exercises.
 }
