@@ -82,6 +82,19 @@ intutic gateway config set <gateway_id> --require-provisioned-key true
 A gateway that stops heartbeating is reported `unreachable` once its heartbeat is older than
 the TTL window (~90s) — a self-healing status, not an error state that needs to be cleared.
 
+### Automatic token rotation
+
+Independent of the manual `intutic gateway rotate` above, a running proxy rotates its own
+token on a schedule (default every 30 days, `INTUTIC_GATEWAY_ROTATION_INTERVAL_DAYS`; `0`
+disables it) by calling the same rotation mechanics the CLI uses, authenticated with the
+token it already holds — not a new privilege, just automatic timing. This is a mitigation
+for a long-lived process holding one credential for too long, not a substitute for updating
+your deployment's stored `INTUTIC_GATEWAY_TOKEN`: the rotated value lives only in the proxy
+process's memory, so a restart (crash, redeploy, or — for the bare-metal daemon — its own
+config-reconciliation restart) reverts to whatever token your deployment's environment was
+last set to. See the [gateway-daemon README](https://github.com/intutic/intutic-enterprise/blob/main/packages/gateway-daemon/README.md#automatic-token-rotation-and-why-it-doesnt-survive-a-restart)
+for the restart-drift caveat in full.
+
 ### Pointing a workspace at your gateway
 
 Assign a gateway per-workspace (overriding the org default) or per-org (every workspace under
