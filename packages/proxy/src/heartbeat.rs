@@ -32,11 +32,21 @@
 //! by a single rotation, so a missed tick is never urgent), this loop calls
 //! `POST .../self-rotate` (`gatewayAuthMiddleware`-gated, same token this
 //! loop already holds) and swaps its in-memory token for the new one. This
-//! extends a long-lived process's effective credential lifetime; it does not
-//! persist the new token anywhere durable — a restart still boots from
-//! whatever `INTUTIC_GATEWAY_TOKEN` the deployment's env holds, same
-//! limitation the control-plane route's own doc comment states.
+//! extends a long-lived process's effective credential lifetime; BY DEFAULT
+//! it does not persist the new token anywhere durable — a restart boots
+//! from whatever `INTUTIC_GATEWAY_TOKEN` the deployment's env holds, same
+//! limitation the control-plane route's own doc comment states (TD-341).
+//!
+//! Opt-in exception: if `INTUTIC_GATEWAY_TOKEN_STATE_FILE` is set, every
+//! successful self-rotation also writes the new token to that path
+//! (write-then-rename, so a reader never observes a half-written file).
+//! This module never reads the file back — it exists so a supervisor that
+//! owns this process's *restart* (`packages/gateway-daemon`) can read it on
+//! its own boot and use a fresher token than its own stored env, closing
+//! the restart-drift gap for that one deployment target. Docker/Kubernetes
+//! targets leave this unset and get exactly today's behavior.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -61,6 +71,8 @@ pub struct HeartbeatConfig {
     /// skipped. The operator's manual `intutic gateway rotate` flow is
     /// unaffected either way.
     pub rotation_interval: Option<Duration>,
+    /// `INTUTIC_GATEWAY_TOKEN_STATE_FILE`, if set — see module doc.
+    pub token_state_file: Option<PathBuf>,
 }
 
 impl HeartbeatConfig {
@@ -127,12 +139,18 @@ impl HeartbeatConfig {
             None => Some(Duration::from_secs(DEFAULT_ROTATION_INTERVAL_DAYS * 86_400)),
         };
 
+        let token_state_file = std::env::var("INTUTIC_GATEWAY_TOKEN_STATE_FILE")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .map(PathBuf::from);
+
         Some(Self {
             gateway_id,
             gateway_token,
             control_plane_url,
             interval: Duration::from_secs(interval_secs),
             rotation_interval,
+            token_state_file,
         })
     }
 }
@@ -185,6 +203,21 @@ fn should_self_rotate(key_rotated_at: Option<&str>, rotation_interval: Duration)
     age.to_std().map(|age| age >= rotation_interval).unwrap_or(false)
 }
 
+/// Writes `token` to `path` via write-then-rename: the temp file is written
+/// fully, then renamed into place, so a concurrent reader (a supervisor
+/// reading this file at its own boot) never observes a partially written
+/// token. The temp path lives beside the target so the rename stays within
+/// one filesystem (a cross-filesystem rename is not atomic on every OS).
+async fn write_token_state_file(path: &std::path::Path, token: &str) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    let tmp_path = path.with_extension("tmp");
+    tokio::fs::write(&tmp_path, token).await?;
+    tokio::fs::rename(&tmp_path, path).await?;
+    Ok(())
+}
+
 /// Spawns the background heartbeat loop. Fire-and-forget: the returned
 /// `JoinHandle` is intentionally dropped by callers (`main.rs` doesn't need
 /// to await or cancel it — it runs for the lifetime of the process, same as
@@ -202,6 +235,7 @@ pub fn spawn_heartbeat_loop(http_client: Arc<reqwest::Client>, cfg: HeartbeatCon
     );
     let gateway_id = cfg.gateway_id.clone();
     let rotation_interval = cfg.rotation_interval;
+    let token_state_file = cfg.token_state_file.clone();
     let started = Instant::now();
     // The token changes over the process's lifetime once self-rotation
     // fires, so it can't stay a plain `String` captured by the loop —
@@ -229,7 +263,14 @@ pub fn spawn_heartbeat_loop(http_client: Arc<reqwest::Client>, cfg: HeartbeatCon
                         match resp.json::<HeartbeatResponse>().await {
                             Ok(parsed) => {
                                 if should_self_rotate(parsed.key_rotated_at.as_deref(), rotation_interval) {
-                                    self_rotate(&http_client, &self_rotate_url, &current_token, &gateway_id).await;
+                                    self_rotate(
+                                        &http_client,
+                                        &self_rotate_url,
+                                        &current_token,
+                                        &gateway_id,
+                                        token_state_file.as_deref(),
+                                    )
+                                    .await;
                                 }
                             }
                             Err(e) => {
@@ -271,13 +312,30 @@ async fn self_rotate(
     url: &str,
     current_token: &RwLock<String>,
     gateway_id: &str,
+    token_state_file: Option<&std::path::Path>,
 ) {
     let token = current_token.read().await.clone();
     match http_client.post(url).bearer_auth(&token).send().await {
         Ok(resp) if resp.status().is_success() => match resp.json::<SelfRotateResponse>().await {
             Ok(parsed) => {
-                *current_token.write().await = parsed.token;
+                *current_token.write().await = parsed.token.clone();
                 tracing::info!(gateway_id = %gateway_id, "gateway token self-rotated");
+                if let Some(path) = token_state_file {
+                    if let Err(e) = write_token_state_file(path, &parsed.token).await {
+                        // The rotation itself already succeeded and the
+                        // in-memory token is updated -- this process keeps
+                        // working. Only a future restart (reading this file
+                        // stale or missing) is affected, so a warn is
+                        // proportionate, not a reason to treat the
+                        // rotation as failed.
+                        tracing::warn!(
+                            gateway_id = %gateway_id,
+                            path = %path.display(),
+                            error = %e,
+                            "failed to persist self-rotated token to state file — a restart before the next successful write will use a stale token"
+                        );
+                    }
+                }
             }
             Err(e) => {
                 tracing::warn!(
@@ -367,6 +425,7 @@ mod tests {
             cfg.rotation_interval,
             Some(Duration::from_secs(DEFAULT_ROTATION_INTERVAL_DAYS * 86_400))
         );
+        assert_eq!(cfg.token_state_file, None);
 
         // 5. Custom interval respected; a non-numeric value falls back to
         //    the default rather than panicking or disabling the client.
@@ -402,6 +461,15 @@ mod tests {
             Some(Duration::from_secs(DEFAULT_ROTATION_INTERVAL_DAYS * 86_400))
         );
 
+        // 7. token_state_file: unset means None (already asserted above at
+        //    step 4); a set value is picked up verbatim.
+        std::env::set_var("INTUTIC_GATEWAY_TOKEN_STATE_FILE", "/tmp/gateway-token-state");
+        assert_eq!(
+            HeartbeatConfig::from_env().unwrap().token_state_file,
+            Some(PathBuf::from("/tmp/gateway-token-state"))
+        );
+        std::env::remove_var("INTUTIC_GATEWAY_TOKEN_STATE_FILE");
+
         // Clean up so other tests in the binary that read these same env
         // vars (there are none today, but future ones) start from a known
         // state.
@@ -410,6 +478,7 @@ mod tests {
         std::env::remove_var("CONTROL_PLANE_URL");
         std::env::remove_var("INTUTIC_GATEWAY_HEARTBEAT_INTERVAL_SECS");
         std::env::remove_var("INTUTIC_GATEWAY_ROTATION_INTERVAL_DAYS");
+        std::env::remove_var("INTUTIC_GATEWAY_TOKEN_STATE_FILE");
     }
 
     #[test]
@@ -477,6 +546,38 @@ mod tests {
         let json_null = serde_json::json!({ "ok": true, "desiredConfigVersion": 0, "keyRotatedAt": null });
         let parsed_null: HeartbeatResponse = serde_json::from_value(json_null).unwrap();
         assert_eq!(parsed_null.key_rotated_at, None);
+    }
+
+    #[tokio::test]
+    async fn write_token_state_file_creates_parent_dirs_and_writes_the_token() {
+        let dir = std::env::temp_dir().join("intutic-heartbeat-test-creates-parent-dirs");
+        let path = dir.join("nested").join("gateway-token");
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+
+        write_token_state_file(&path, "gwk_abc123").await.unwrap();
+
+        let contents = tokio::fs::read_to_string(&path).await.unwrap();
+        assert_eq!(contents, "gwk_abc123");
+        // The write-then-rename temp file must not be left behind.
+        assert!(!path.with_extension("tmp").exists());
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn write_token_state_file_overwrites_an_existing_file() {
+        let dir = std::env::temp_dir().join("intutic-heartbeat-test-overwrites");
+        let path = dir.join("gateway-token");
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        tokio::fs::write(&path, "gwk_stale").await.unwrap();
+
+        write_token_state_file(&path, "gwk_fresh").await.unwrap();
+
+        let contents = tokio::fs::read_to_string(&path).await.unwrap();
+        assert_eq!(contents, "gwk_fresh");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
     #[test]

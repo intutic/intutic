@@ -87,13 +87,18 @@ the TTL window (~90s) — a self-healing status, not an error state that needs t
 Independent of the manual `intutic gateway rotate` above, a running proxy rotates its own
 token on a schedule (default every 30 days, `INTUTIC_GATEWAY_ROTATION_INTERVAL_DAYS`; `0`
 disables it) by calling the same rotation mechanics the CLI uses, authenticated with the
-token it already holds — not a new privilege, just automatic timing. This is a mitigation
-for a long-lived process holding one credential for too long, not a substitute for updating
-your deployment's stored `INTUTIC_GATEWAY_TOKEN`: the rotated value lives only in the proxy
-process's memory, so a restart (crash, redeploy, or — for the bare-metal daemon — its own
-config-reconciliation restart) reverts to whatever token your deployment's environment was
-last set to. See the [gateway-daemon README](https://github.com/intutic/intutic-enterprise/blob/main/packages/gateway-daemon/README.md#automatic-token-rotation-and-why-it-doesnt-survive-a-restart)
-for the restart-drift caveat in full.
+token it already holds — not a new privilege, just automatic timing.
+
+By default the rotated value lives only in the proxy process's memory, so a restart (crash,
+redeploy) reverts to whatever token your deployment's environment was last set to — this is a
+mitigation for a long-lived process holding one credential for too long, not a substitute for
+updating your deployment's stored `INTUTIC_GATEWAY_TOKEN`. **The bare-metal target is the one
+exception**: `@intutic/gateway-daemon` automatically persists each self-rotated token to a
+local state file and re-reads it on every restart it performs (crash or config-reconciliation),
+so rotation survives a restart there as long as the daemon's own working directory does. Docker
+and Kubernetes deployments do not have this yet (TD-341). See the [gateway-daemon README](https://github.com/intutic/intutic-enterprise/blob/main/packages/gateway-daemon/README.md#automatic-token-rotation-and-how-it-survives-a-restart-here-td-341)
+for the full picture, including when even the bare-metal case still needs a manual
+`intutic gateway rotate`.
 
 ### Pointing a workspace at your gateway
 
