@@ -10,24 +10,32 @@ from .circuit_breaker import CircuitBreaker
 
 class ClawdeClient:
     def __init__(
-        self, 
-        api_key: str, 
-        base_url: Optional[str] = None, 
-        provider: Optional[str] = None, 
-        auto_context: bool = True, 
-        timeout: float = 30.0, 
+        self,
+        api_key: str,
+        base_url: Optional[str] = None,
+        control_plane_url: Optional[str] = None,
+        provider: Optional[str] = None,
+        auto_context: bool = True,
+        timeout: float = 30.0,
         retries: int = 2
     ):
         if not api_key:
             raise ValueError("API key is required to initialize ClawdeClient.")
         self.api_key = api_key
         self.base_url = base_url or os.environ.get("INTUTIC_BASE_URL") or "http://localhost:4000"
+        # Control plane is a different origin from the proxy base_url above --
+        # used by checkBudget() (see budget_checker.py's doc comment).
+        self.control_plane_url = (
+            control_plane_url
+            or os.environ.get("INTUTIC_CONTROL_PLANE_URL")
+            or "https://app.intutic.ai"
+        )
         self.provider = provider
         self.auto_context = auto_context
         self.timeout = timeout
         self.retries = retries
-        
-        self.budget_checker = BudgetChecker(self.base_url, self.api_key)
+
+        self.budget_checker = BudgetChecker(self.control_plane_url, self.api_key)
         self.circuit_breaker_wrapper = CircuitBreaker(self)
         self.listeners: Dict[str, List[Callable[[Dict[str, Any]], None]]] = {
             "hijack": [], "enhance": [], "kill": [], "bypass": []

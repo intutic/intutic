@@ -1,6 +1,12 @@
 export interface ClawdeClientOptions {
   apiKey: string                    // Virtual key (vk_xxx)
-  baseUrl?: string                  // Default: http://localhost:4000
+  baseUrl?: string                  // Proxy base URL. Default: http://localhost:4000
+  /**
+   * Control-plane base URL used by checkBudget() (a different origin from
+   * `baseUrl` — see control-plane.ts's doc comment). Default:
+   * INTUTIC_CONTROL_PLANE_URL env or https://app.intutic.ai.
+   */
+  controlPlaneUrl?: string
   provider?: 'openai' | 'anthropic' | 'google'  // Schema enforcement
   autoContext?: boolean             // Default: true — auto-detect Jira/git/PD
   timeout?: number                  // Default: 30000ms

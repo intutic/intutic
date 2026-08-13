@@ -38,7 +38,7 @@ The `clawde` SDK acts as a client-side wrapper around Anthropic's Message API, O
 The SDK automatically resolves git branch names, active pull requests, and CI variables. If the Intutic sync-daemon is running, the SDK reads local state at `~/.intutic/config.json` to resolve the current task, Jira ticket, or incident context.
 
 ### 2. Warm-Path Budget Gating
-Before forwarding calls to the LLM, the SDK estimates request and output tokens. It checks local memory caches (30-second TTL) or queries the local proxy at `/v1/budget/check`. The SDK piggybacks on response headers (`X-Intutic-Budget-*`) from the proxy to continuously refresh remaining budget limits.
+`checkBudget()` checks a local cache (30-second TTL) or queries the control plane's `GET /api/v1/budget` for the workspace's current spend/remaining. This reports workspace-level budget headroom, not a precise per-call afford-ability check for a specific model/token estimate — the control plane has no endpoint for that. The SDK separately piggybacks on response headers (`X-Intutic-Budget-*`) from the proxy on every `chat()` call to continuously refresh remaining budget without an extra request.
 
 ### 3. Circuit Breaker Wrapper
 Wrap arbitrary tasks or API calls in a circuit breaker. If pre-flight budget checks fail, or if policy violations are detected, the circuit breaker triggers fallback behaviors (such as returning a default safe response instead of executing the action).
