@@ -32,23 +32,41 @@ def test_resolve_context(mock_exists):
 @patch("requests.get")
 def test_budget_checker_cache(mock_get):
     client = ClawdeClient(api_key="test-key")
-    
-    # Mock budget API response
+    assert client.control_plane_url == "https://app.intutic.ai"
+
+    # Mock the REAL control-plane response shape (GET /api/v1/budget),
+    # not the historical nonexistent /v1/budget/check shape.
     mock_response = MagicMock()
     mock_response.status_code = 200
-    mock_response.json.return_value = {"allowed": True, "remaining_usd": 150.0}
+    mock_response.json.return_value = {"budget_remaining_usd": 150.0, "alert_triggered": False}
     mock_get.return_value = mock_response
-    
+
     # First call: hits API
     res1 = client.check_budget("gpt-4o", 100)
     assert res1["allowed"] is True
     assert res1["remaining_usd"] == 150.0
     assert mock_get.call_count == 1
-    
+    called_url = mock_get.call_args[0][0]
+    assert called_url == "https://app.intutic.ai/api/v1/budget"
+
     # Second call: hits cache, doesn't hit API again
     res2 = client.check_budget("gpt-4o", 100)
     assert res2["allowed"] is True
     assert mock_get.call_count == 1
+
+
+@patch("requests.get")
+def test_budget_checker_alert_triggered_is_not_allowed(mock_get):
+    client = ClawdeClient(api_key="test-key")
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"budget_remaining_usd": 0, "alert_triggered": True}
+    mock_get.return_value = mock_response
+
+    res = client.check_budget("gpt-4o", 1)
+    assert res["allowed"] is False
+    assert res["remaining_usd"] == 0
+    assert "alert threshold" in res["reason"]
 
 def test_circuit_breaker_trips():
     client = ClawdeClient(api_key="test-key")

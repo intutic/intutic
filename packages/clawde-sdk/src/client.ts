@@ -18,6 +18,7 @@ import { deriveIdentity, identityHeaders, type GraphIdentity } from './graph-ide
 export class ClawdeClient {
   private apiKey: string
   private baseUrl: string
+  private controlPlaneUrl: string
   private provider?: 'openai' | 'anthropic' | 'google'
   private autoContext: boolean
   private timeout: number
@@ -36,6 +37,8 @@ export class ClawdeClient {
     }
     this.apiKey = options.apiKey
     this.baseUrl = options.baseUrl || process.env.INTUTIC_BASE_URL || 'http://localhost:4000'
+    this.controlPlaneUrl =
+      options.controlPlaneUrl || process.env.INTUTIC_CONTROL_PLANE_URL || 'https://app.intutic.ai'
     this.provider = options.provider
     this.autoContext = options.autoContext ?? true
     this.timeout = options.timeout ?? 30000
@@ -45,7 +48,7 @@ export class ClawdeClient {
     // another agent is recorded as its parent without either of them being told.
     this.identity = deriveIdentity(options.graphIdentity)
 
-    this.budgetChecker = new BudgetChecker(this.baseUrl, this.apiKey)
+    this.budgetChecker = new BudgetChecker(this.controlPlaneUrl, this.apiKey)
     this.circuitBreakerWrapper = new CircuitBreaker(this)
     this.eventEmitter = new ClawdeEventEmitter()
   }
