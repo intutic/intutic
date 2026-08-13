@@ -1,4 +1,5 @@
 export { ClawdeClient } from './client'
+export { ControlPlaneClient } from './control-plane'
 export * from './types'
 export * from './errors'
 export { resolveContext } from './context-resolver'

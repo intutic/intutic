@@ -103,6 +103,57 @@ except ClawdeVerdictError as e:
 
 ---
 
+## Control-Plane Management (`ControlPlaneClient`)
+
+Everything above (`ClawdeClient`) is a **data-plane** client: it wraps the local proxy for chat calls. `ControlPlaneClient` is a separate, optional class for the **management** operations the [CLI](/reference/cli) already exposes interactively — org signup, team/workspace creation, gateway registration and assignment, and provider-credential provisioning — so the same actions can be driven programmatically (infra-as-code, a secrets-manager sync job, provisioning a workspace per tenant in your own SaaS built on Intutic).
+
+It talks to the **control plane** — Intutic's hosted one by default, or your own self-hosted `CONTROL_PLANE_URL` — not the proxy: a different origin from `ClawdeClient`'s `baseUrl`, so it takes its own `baseUrl`. Every method is a direct HTTP call with no hosted-vs-self-hosted branching, so it works unmodified against either. It needs a control plane to talk to, same as `intutic whoami` does: an open-core deployment with no control plane configured simply won't have anything to call.
+
+Auth: the same `apiKey` you already pass to `ClawdeClient` — a `vk_...` virtual key or a login JWT both work, as long as the underlying member has `OWNER`/`ADMIN` on the relevant workspace for admin-gated calls (gateway registration, team creation, etc.).
+
+### TypeScript
+
+```typescript
+import { ControlPlaneClient } from '@intutic/clawde';
+
+const cp = new ControlPlaneClient({
+  apiKey: process.env.INTUTIC_API_KEY!,
+  baseUrl: process.env.INTUTIC_CONTROL_PLANE_URL, // defaults to Intutic's hosted control plane
+});
+
+const gateways = await cp.listGateways();
+const { gatewayId, token } = await cp.registerGateway({ name: 'prod-gw', deploymentTarget: 'kubernetes' });
+await cp.setProviderCredential('anthropic', { apiKey: 'sk-ant-...' });
+const resolution = await cp.resolveGateway(); // which gateway this workspace should point at, and why
+```
+
+### Python
+
+```python
+from intutic_clawde import ControlPlaneClient
+
+cp = ControlPlaneClient(api_key=os.environ["INTUTIC_API_KEY"])  # base_url defaults to Intutic's hosted control plane
+
+gateways = cp.list_gateways()
+gw = cp.register_gateway("prod-gw", "kubernetes")
+cp.set_provider_credential("anthropic", {"apiKey": "sk-ant-..."})
+resolution = cp.resolve_gateway()
+```
+
+### What's covered
+
+| Area | Methods |
+|---|---|
+| Identity | `whoami()` |
+| Org signup | `signupOrg()` / `signup_org()` |
+| Teams & workspaces | `listTeams`, `createTeam`, `listTeamWorkspaces`, `createWorkspace` |
+| Gateways | `registerGateway`, `listGateways`, `getGatewayStatus`, `rotateGatewayToken`, `revokeGateway`, `setGatewayConfig`, `assignWorkspaceGateway`, `assignOrgGateway`, `resolveGateway` |
+| Provider credentials | `listProviderCredentials`, `setProviderCredential`, `unsetProviderCredential` |
+
+Not covered, on purpose: session establishment (`intutic login`/`logout` — supply `apiKey` directly instead) and local-environment/terminal-only commands (`init`, `doctor`, `install-daemon`, `integrity`, `rollback`, `connect`, `exec`, `start`, `syncContext`, `skill`) that have no meaning for a library embedded in your own process.
+
+---
+
 ## Events
 
 Register callbacks to act upon policy decisions:

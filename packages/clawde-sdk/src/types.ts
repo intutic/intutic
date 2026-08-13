@@ -83,3 +83,119 @@ export type EventCallback = (data: {
   budgetPctUsed?: number
   [key: string]: any
 }) => void | Promise<void>
+
+// ─── Control-plane management types (LLD #69) ───
+
+export interface ControlPlaneClientOptions {
+  apiKey: string                    // vk_xxx or a JWT — see control-plane.ts's doc comment
+  baseUrl?: string                  // Default: INTUTIC_CONTROL_PLANE_URL env or https://app.intutic.ai
+}
+
+export interface WhoamiResult {
+  email: string
+  memberId: string
+  workspaceId: string
+  role: string
+}
+
+export interface OrgSignupParams {
+  email: string
+  password: string
+  name: string
+  orgName: string
+}
+
+export interface OrgSignupResult {
+  user: { id: string; email: string; name: string; emailVerified: boolean }
+  org: { id: string; name: string; planTier: string; trialExpiresAt: string }
+  workspace: { id: string; name: string; planTier: string; trialExpiresAt: string }
+  accessToken: string
+  refreshToken: string
+  cliInstall: string
+  isNewUser: boolean
+}
+
+export interface Team {
+  teamId: string
+  orgId: string
+  name: string
+  slug: string
+  createdAt: string
+}
+
+export interface Workspace {
+  workspaceId: string
+  name: string
+  slug: string
+  planTier: string
+  createdAt: string
+}
+
+export interface GatewayRegisterParams {
+  name: string
+  deploymentTarget: 'docker' | 'kubernetes' | 'bare_metal'
+}
+
+export interface GatewayRegisterResult {
+  gatewayId: string
+  name: string
+  deploymentTarget: string
+  status: string
+  /** Shown once — not retrievable again after this response. */
+  token: string
+  instructions: string
+}
+
+export interface Gateway {
+  gatewayId: string
+  name: string
+  deploymentTarget: string
+  status: string
+  keyPrefix: string
+  lastHeartbeatAt: string | null
+  proxyVersion: string | null
+  createdAt: string
+  revokedAt: string | null
+}
+
+export interface GatewayRotateResult {
+  gatewayId: string
+  /** Shown once — not retrievable again after this response. */
+  token: string
+  previousTokenValidUntil: string
+  instructions: string
+}
+
+export interface GatewayStatus {
+  status: 'online' | 'degraded' | 'unreachable' | 'pending'
+  proxyVersion: string | null
+  uptimeSeconds: number | null
+  activeWorkspaces: number | null
+  litellmReachable: boolean | null
+  lastError: string | null
+  reportedAt: string | null
+}
+
+export interface GatewayConfigUpdate {
+  requireVk?: boolean
+  requireProvisionedKey?: boolean
+}
+
+export interface GatewayConfigResult {
+  config: Record<string, unknown>
+  configVersion: number
+}
+
+export interface GatewayResolution {
+  source: 'workspace' | 'org' | 'default'
+  gateway: { gatewayId: string; name: string; deploymentTarget: string; status: string } | null
+  staleAssignment?: string
+}
+
+export interface ProviderCredentialStatus {
+  provider: string
+  routingLive: boolean
+  provisioned: boolean
+  lastFour: string | null
+  updatedAt: string | null
+}
