@@ -353,7 +353,13 @@ export async function runGatewayAssign(
 
 interface GatewayResolutionResponse {
   source: 'workspace' | 'org' | 'default'
-  gateway: { gatewayId: string; name: string; deploymentTarget: string; status: string } | null
+  gateway: {
+    gatewayId: string
+    name: string
+    deploymentTarget: string
+    status: string
+    registeredEndpoint: string | null
+  } | null
   staleAssignment?: string
 }
 
@@ -388,10 +394,21 @@ export async function runGatewayResolve(opts: GatewayCliOpts): Promise<void> {
     log.field('Target', res.gateway.deploymentTarget)
     log.field('Status', colorStatus(res.gateway.status))
     console.log('')
-    log.dim(
-      '  Pointing a client here is still manual — set CONTROL_PLANE_URL (or the proxy target) ' +
-        "to this gateway's own reachable address.",
-    )
+
+    if (res.gateway.registeredEndpoint && res.gateway.status === 'online') {
+      log.field('Endpoint', res.gateway.registeredEndpoint)
+      log.dim("  intutic connect uses this automatically once no proxyUrl override is set on the workspace.")
+    } else if (res.gateway.registeredEndpoint) {
+      log.dim(
+        `  Endpoint ${res.gateway.registeredEndpoint} is registered but the gateway isn't online yet ` +
+          `(status: ${res.gateway.status}) — traffic stays on the shared gateway until it heartbeats.`,
+      )
+    } else {
+      log.dim(
+        '  Pointing a client here is still manual — set CONTROL_PLANE_URL (or the proxy target) ' +
+          "to this gateway's own reachable address.",
+      )
+    }
   } catch (err) {
     log.error(`Failed to resolve gateway: ${err instanceof Error ? err.message : String(err)}`)
     process.exit(1)

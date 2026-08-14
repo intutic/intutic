@@ -22,6 +22,12 @@ pub struct VirtualKeyRecord {
     pub spend: f64,
     pub models: Vec<String>,
     pub expires: Option<String>,
+    /// The org owning the key's workspace (LLD #71). `None` on cached auth
+    /// entries written before the control plane carried the field — a
+    /// managed cell (INTUTIC_GATEWAY_ORG_ID set) treats `None` as
+    /// "unverified", revalidates via the control plane, and fail-closes if
+    /// still unknown. Never used for anything on the shared gateway.
+    pub org_id: Option<String>,
 }
 
 /// Check if the estimated cost fits within the remaining budget (with 20% safety margin)
