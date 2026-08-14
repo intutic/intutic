@@ -164,7 +164,7 @@ export async function runOrgCreate(opts: OrgCreateOpts): Promise<void> {
   log.field('Record value', verification.txtRecordValue)
   log.dim('  DNS changes can take a few minutes to propagate.')
 
-  let checked: CheckVerificationResponse | null = null
+  let checked: CheckVerificationResponse
   while (true) {
     const answer = await prompt('\nPress Enter to check DNS now (or type "q" to abort): ')
     if (answer.trim().toLowerCase() === 'q') {
