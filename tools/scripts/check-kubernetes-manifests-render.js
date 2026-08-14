@@ -19,10 +19,12 @@
 import { execFileSync } from 'node:child_process'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { loadAll } from 'js-yaml'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const OVERLAYS_DIR = join(ROOT, 'infra', 'kubernetes', 'overlays')
+const CELLS_REMOTE_DIR = join(ROOT, 'infra', 'kubernetes', 'cells-remote')
 
 if (!existsSync(OVERLAYS_DIR)) {
   console.log('[skip] no infra/kubernetes/overlays in this tree')
@@ -136,6 +138,45 @@ for (const overlay of overlays) {
   }
 }
 
+// Remote cells regions (multi-region cells): each infra/kubernetes/
+// cells-remote/<region>/ is its own standalone kustomization applied against
+// a remote cluster (or, for *-sim, the us cluster) — render each with the
+// same tool `kubectl apply -k` would use. Their gateway-bootstrap.yaml files
+// are DELIBERATELY excluded from the kustomizations (applied once by the
+// runbook, never re-applied — see the file headers), so rendering never
+// touches them; YAML-parse them directly instead so a syntax error can't
+// hide in the one file the render gate would otherwise never read.
+let cellsRemoteRendered = 0
+if (existsSync(CELLS_REMOTE_DIR)) {
+  for (const entry of readdirSync(CELLS_REMOTE_DIR, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue
+    const dir = join(CELLS_REMOTE_DIR, entry.name)
+    if (existsSync(join(dir, 'kustomization.yaml'))) {
+      try {
+        execFileSync('kubectl', ['kustomize', dir], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 })
+        cellsRemoteRendered += 1
+      } catch (err) {
+        failures.push(`cells-remote "${entry.name}" failed to render:\n${err.stderr || err.message}`)
+      }
+    }
+    const bootstrap = join(dir, 'gateway-bootstrap.yaml')
+    if (existsSync(bootstrap)) {
+      try {
+        const docs = loadAll(readFileSync(bootstrap, 'utf8')).filter((d) => d != null)
+        // A truncated file parses "cleanly" as fewer documents — assert the
+        // bootstrap still carries a Gateway so the parse isn't vacuous.
+        if (!docs.some((d) => d.kind === 'Gateway')) {
+          failures.push(
+            `cells-remote "${entry.name}"'s gateway-bootstrap.yaml parses but contains no Gateway document.`,
+          )
+        }
+      } catch (err) {
+        failures.push(`cells-remote "${entry.name}"'s gateway-bootstrap.yaml is not valid YAML:\n${err.message}`)
+      }
+    }
+  }
+}
+
 if (!proxyChecked) {
   failures.push(
     'no overlay rendered a proxy Deployment — the TD-229 regression check never ran. ' +
@@ -155,4 +196,7 @@ if (failures.length > 0) {
   process.exit(1)
 }
 
-console.log(`[PASS] kubernetes manifests: ${overlays.length} overlay(s) render cleanly, SOPS wiring intact.`)
+console.log(
+  `[PASS] kubernetes manifests: ${overlays.length} overlay(s) and ${cellsRemoteRendered} cells-remote ` +
+    `kustomization(s) render cleanly, SOPS wiring intact.`,
+)
