@@ -1,124 +1,221 @@
 /**
- * `intutic org signup` — create a real org (tenancy phase 4, LLD #65),
- * distinct from `intutic login`/the default `intutic init` personal
- * signup: `orgName` is required, the org lands on a paid tier with a
- * 30-day trial (no free-tier fallback), and a default team + workspace
- * are created to start working in immediately.
+ * `intutic org create` — create a real org from an already-authenticated
+ * session (tenancy phase 4/7, LLD #65).
  *
- * Server side: services/control-plane/src/routes/auth.ts's
- * `POST /api/v1/auth/signup/org`.
+ * Real org creation now requires DNS domain-ownership verification (LLD #71
+ * follow-up): creating an org auto-provisions a real managed gateway cell,
+ * so an org's claimed domain must be proven before `POST /api/v1/orgs` will
+ * create it. There's no anonymous-compatible verification flow (no session
+ * exists yet to own a verification attempt against), so the old anonymous
+ * `POST /api/v1/auth/signup/org` this command used to call is now closed by
+ * default in production (`INTUTIC_PUBLIC_ORG_SIGNUP`, off unless a
+ * deployment has built its own anonymous verification story) — this command
+ * requires `intutic login` first and drives the same flow the dashboard's
+ * "Create Organization" modal does: start verification, publish the TXT
+ * record it's given, confirm it resolves, then create the org.
+ *
+ * Server side: services/control-plane/src/services/domainVerificationService.ts,
+ * services/control-plane/src/routes/orgs.ts.
  *
  * @module
  */
 
 import { log } from '../lib/logger.js'
-import { saveCredentials } from '../config/store.js'
+import { loadCredentials, saveCredentials } from '../config/store.js'
 import { resolveControlPlaneUrl } from '../config/paths.js'
 import { createApiClient } from '../lib/api.js'
 import { newIso } from '@intutic/id'
 import { createInterface } from 'node:readline'
 
-interface OrgSignupResponse {
-  user: { id: string; email: string; name: string; emailVerified: boolean }
-  org: { id: string; name: string; planTier: string; trialExpiresAt: string }
-  workspace: { id: string; name: string; planTier: string; trialExpiresAt: string }
-  accessToken: string
-  refreshToken: string
-  cliInstall: string
-  isNewUser: boolean
+const NOT_AUTHENTICATED = 'Not authenticated. Run `intutic login` first.'
+
+interface StartVerificationResponse {
+  verificationId: string
+  domain: string
+  txtRecordName: string
+  txtRecordValue: string
+  expiresAt: string
 }
 
-async function prompt(question: string, hidden = false): Promise<string> {
+interface CheckVerificationResponse {
+  verificationId: string
+  domain: string
+  status: 'pending' | 'verified' | 'consumed' | 'expired'
+  txtRecordName: string
+  txtRecordValue: string
+  verifiedAt: string | null
+}
+
+interface CreateOrgResponse {
+  orgId: string
+  teamId: string
+  workspaceId: string
+  name: string
+  planTier: string
+}
+
+interface SessionSwitchResponse {
+  memberId: string
+  workspaceId: string
+  email: string
+  role: string
+  refreshToken: string
+}
+
+interface RefreshResponse {
+  accessToken: string
+  refreshToken: string
+  expiresIn: number
+}
+
+async function prompt(question: string): Promise<string> {
   const rl = createInterface({ input: process.stdin, output: process.stdout })
   return new Promise((resolve) => {
-    if (hidden && process.stdin.isTTY) {
-      process.stdout.write(question)
-      let input = ''
-      process.stdin.setRawMode(true)
-      process.stdin.resume()
-      process.stdin.on('data', (char) => {
-        const c = char.toString()
-        if (c === '\n' || c === '\r') {
-          process.stdin.setRawMode(false)
-          process.stdin.pause()
-          console.log('')
-          rl.close()
-          resolve(input)
-        } else if (c === '') {
-          process.exit(0)
-        } else if (c === '') {
-          input = input.slice(0, -1)
-        } else {
-          input += c
-          process.stdout.write('*')
-        }
-      })
-    } else {
-      rl.question(question, (answer) => {
-        rl.close()
-        resolve(answer)
-      })
-    }
+    rl.question(question, (answer) => {
+      rl.close()
+      resolve(answer)
+    })
   })
 }
 
-interface OrgSignupOpts {
+interface OrgCreateOpts {
   dev?: boolean
-  email?: string
-  password?: string
-  name?: string
+  domain?: string
   orgName?: string
 }
 
-/** `intutic org signup` */
-export async function runOrgSignup(opts: OrgSignupOpts): Promise<void> {
-  log.header('Intutic — Org Signup')
+/**
+ * Switches the CLI's stored session to a newly created org's default
+ * workspace. `GET /api/v1/auth/session?X-Workspace-Id` mints a new
+ * refresh token scoped to the target workspace but returns its paired
+ * access token only via an httpOnly cookie (browser-only) — this exchanges
+ * that refresh token for a JSON-returned access token via the normal
+ * refresh endpoint, the same two-step dance a browser reload does
+ * implicitly through its cookie jar.
+ */
+async function switchStoredSessionToWorkspace(
+  controlPlaneUrl: string,
+  apiKey: string,
+  targetWorkspaceId: string,
+): Promise<SessionSwitchResponse & { accessToken: string }> {
+  const sessionRes = await fetch(`${controlPlaneUrl}/api/v1/auth/session`, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+      'X-Workspace-Id': targetWorkspaceId,
+    },
+  })
+  if (!sessionRes.ok) {
+    const body = await sessionRes.json().catch(() => ({}))
+    throw new Error(body.error || `Failed to switch to the new workspace (HTTP ${sessionRes.status})`)
+  }
+  const session = (await sessionRes.json()) as SessionSwitchResponse
+
+  const refreshRes = await fetch(`${controlPlaneUrl}/api/v1/auth/refresh`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refreshToken: session.refreshToken }),
+  })
+  if (!refreshRes.ok) {
+    const body = await refreshRes.json().catch(() => ({}))
+    throw new Error(body.error || `Failed to mint a token for the new workspace (HTTP ${refreshRes.status})`)
+  }
+  const refreshed = (await refreshRes.json()) as RefreshResponse
+
+  return { ...session, accessToken: refreshed.accessToken }
+}
+
+/** `intutic org create` */
+export async function runOrgCreate(opts: OrgCreateOpts): Promise<void> {
+  log.header('Intutic — Create Organization')
+
+  const creds = await loadCredentials()
+  if (!creds) {
+    log.error(NOT_AUTHENTICATED)
+    process.exit(1)
+  }
 
   const controlPlaneUrl = resolveControlPlaneUrl(opts.dev)
   log.dim(`Control plane: ${controlPlaneUrl}`)
 
-  const email = opts.email ?? (await prompt('Email: '))
-  const password = opts.password ?? (await prompt('Password (min 8 chars): ', true))
-  const name = opts.name ?? (await prompt('Your name: '))
   const orgName = opts.orgName ?? (await prompt('Organization name: '))
+  const domain = opts.domain ?? (await prompt('Domain (e.g. acme.com): '))
 
-  if (!email || !password || !name || !orgName) {
-    log.error('Email, password, name, and organization name are all required.')
-    process.exit(1)
-  }
-  if (password.length < 8) {
-    log.error('Password must be at least 8 characters.')
+  if (!orgName.trim() || !domain.trim()) {
+    log.error('Organization name and domain are both required.')
     process.exit(1)
   }
 
-  const client = createApiClient(controlPlaneUrl, '')
+  const client = createApiClient(controlPlaneUrl, creds.apiKey)
+
+  let verification: StartVerificationResponse
+  try {
+    verification = await client.post<StartVerificationResponse>('/api/v1/domain-verification/start', {
+      domain: domain.trim(),
+    })
+  } catch (err) {
+    log.error(`Failed to start domain verification: ${err instanceof Error ? err.message : String(err)}`)
+    process.exit(1)
+  }
+
+  log.success('Verification started. Add this DNS TXT record to prove you own the domain:')
+  log.field('Record name', verification.txtRecordName)
+  log.field('Record value', verification.txtRecordValue)
+  log.dim('  DNS changes can take a few minutes to propagate.')
+
+  let checked: CheckVerificationResponse
+  while (true) {
+    const answer = await prompt('\nPress Enter to check DNS now (or type "q" to abort): ')
+    if (answer.trim().toLowerCase() === 'q') {
+      log.warn('Aborted. Nothing was created.')
+      process.exit(1)
+    }
+
+    try {
+      checked = await client.get<CheckVerificationResponse>(`/api/v1/domain-verification/${verification.verificationId}`)
+    } catch (err) {
+      log.error(`Failed to check verification status: ${err instanceof Error ? err.message : String(err)}`)
+      continue
+    }
+
+    if (checked.status === 'verified') {
+      log.success('Domain verified.')
+      break
+    }
+    if (checked.status === 'expired') {
+      log.error('This verification has expired. Run this command again to start a new one.')
+      process.exit(1)
+    }
+    log.warn('TXT record not seen yet — still pending.')
+  }
 
   try {
-    const res = await client.post<OrgSignupResponse>('/api/v1/auth/signup/org', {
-      email,
-      password,
-      name,
-      orgName,
+    const org = await client.post<CreateOrgResponse>('/api/v1/orgs', {
+      orgName: orgName.trim(),
+      domain: checked.domain,
+      verificationId: verification.verificationId,
     })
 
+    log.success(`Org "${org.name}" created.`)
+    log.field('Org ID', org.orgId)
+    log.field('Org plan', org.planTier)
+    log.field('Default workspace', org.workspaceId)
+
+    const switched = await switchStoredSessionToWorkspace(controlPlaneUrl, creds.apiKey, org.workspaceId)
     await saveCredentials({
-      apiKey: res.accessToken,
-      workspaceId: res.workspace.id,
+      apiKey: switched.accessToken,
+      workspaceId: switched.workspaceId,
       controlPlaneUrl,
-      email: res.user.email,
+      email: switched.email,
       storedAt: newIso(),
     })
-
-    log.success(`Org "${res.org.name}" created. Authenticated as ${res.user.email}.`)
-    log.field('Org ID', res.org.id)
-    log.field('Org plan', `${res.org.planTier} (trial until ${res.org.trialExpiresAt})`)
-    log.field('Default workspace', res.workspace.id)
     log.dim(
-      `  A default team and workspace were created for you. Run \`intutic team list --org ${res.org.id}\` ` +
-        'to see them, or `intutic team create --org <org_id> --name <name>` to add another.',
+      `  Switched your CLI session into the new org's default workspace. Run \`intutic team list --org ${org.orgId}\` ` +
+        'to see it, or `intutic team create --org <org_id> --name <name>` to add another team.',
     )
   } catch (err) {
-    log.error(`Org signup failed: ${err instanceof Error ? err.message : String(err)}`)
+    log.error(`Org creation failed: ${err instanceof Error ? err.message : String(err)}`)
     process.exit(1)
   }
 }

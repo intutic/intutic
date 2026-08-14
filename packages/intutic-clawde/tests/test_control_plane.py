@@ -72,6 +72,66 @@ def test_signup_org_calls_post_without_bearer_token(mock_request):
 
 
 @patch("requests.request")
+def test_start_domain_verification_posts_domain_with_bearer_token(mock_request):
+    mock_request.return_value = _mock_response(
+        json_body={
+            "verificationId": "dv_1",
+            "domain": "acme.com",
+            "txtRecordName": "_intutic-verify.acme.com",
+            "txtRecordValue": "abc123",
+            "expiresAt": "2026-09-01",
+        }
+    )
+    client = ControlPlaneClient(api_key="vk_test", base_url="https://cp.example.com")
+    res = client.start_domain_verification("acme.com")
+
+    args, kwargs = mock_request.call_args
+    assert args[0] == "POST"
+    assert args[1] == "https://cp.example.com/api/v1/domain-verification/start"
+    assert kwargs["headers"]["Authorization"] == "Bearer vk_test"
+    assert kwargs["json"] == {"domain": "acme.com"}
+    assert res["verificationId"] == "dv_1"
+    assert res["txtRecordValue"] == "abc123"
+
+
+@patch("requests.request")
+def test_check_domain_verification_calls_get_by_id(mock_request):
+    mock_request.return_value = _mock_response(
+        json_body={
+            "verificationId": "dv_1",
+            "domain": "acme.com",
+            "status": "verified",
+            "txtRecordName": "_intutic-verify.acme.com",
+            "txtRecordValue": "abc123",
+            "verifiedAt": "2026-08-14",
+        }
+    )
+    client = ControlPlaneClient(api_key="vk_test", base_url="https://cp.example.com")
+    res = client.check_domain_verification("dv_1")
+
+    args, _ = mock_request.call_args
+    assert args[0] == "GET"
+    assert args[1] == "https://cp.example.com/api/v1/domain-verification/dv_1"
+    assert res["status"] == "verified"
+
+
+@patch("requests.request")
+def test_create_org_posts_org_name_domain_verification_id_with_bearer_token(mock_request):
+    mock_request.return_value = _mock_response(
+        json_body={"orgId": "org_1", "teamId": "team_1", "workspaceId": "ws_1", "name": "Acme", "planTier": "pro"}
+    )
+    client = ControlPlaneClient(api_key="vk_test", base_url="https://cp.example.com")
+    res = client.create_org("Acme", "acme.com", "dv_1")
+
+    args, kwargs = mock_request.call_args
+    assert args[0] == "POST"
+    assert args[1] == "https://cp.example.com/api/v1/orgs"
+    assert kwargs["headers"]["Authorization"] == "Bearer vk_test"
+    assert kwargs["json"] == {"orgName": "Acme", "domain": "acme.com", "verificationId": "dv_1"}
+    assert res["orgId"] == "org_1"
+
+
+@patch("requests.request")
 def test_list_teams_unwraps_data_envelope(mock_request):
     mock_request.return_value = _mock_response(
         json_body={"data": [{"teamId": "t1", "orgId": "org_1", "name": "Eng", "slug": "eng", "createdAt": "x"}]}

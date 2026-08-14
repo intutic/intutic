@@ -63,12 +63,12 @@ graph TD
 ```
 
 ### 🏛️ Org
-* **Purpose**: The billing and trial boundary. `kind: 'personal'` is the implicit org every individual signup gets — capped at exactly one team, which is the entire mechanism behind "a single user can never create more than their one default workspace." `kind: 'org'` is a real organization (`POST /api/v1/auth/signup/org`), on a paid tier with a 30-day trial from creation, capable of creating additional teams up to its plan's `maxTeamsPerOrg` limit.
+* **Purpose**: The billing and trial boundary. `kind: 'personal'` is the implicit org every individual signup gets — capped at exactly one team, which is the entire mechanism behind "a single user can never create more than their one default workspace." `kind: 'org'` is a real organization (`POST /api/v1/orgs`, from an already-authenticated caller, gated behind DNS domain-ownership verification since it auto-provisions a real managed gateway cell — see [Organizations, Teams & Billing](/guide/organizations)), on a paid tier with a 30-day trial from creation, capable of creating additional teams up to its plan's `maxTeamsPerOrg` limit.
 * **Table**: `orgs` — `orgId`, `kind`, `planTier`, `trialExpiresAt`, `dailySpendCapUsd`, `monthlyBudgetUsd`, `stripeCustomerId`, `stripeSubscriptionId`, `ownerUserId`, `gatewayId` (nullable — see [Self-Hosted Gateway](/external/self-hosted-gateway)).
 * **Authority**: `orgs.ownerUserId` is the one single-owner fact (billing/deletion authority). "Can manage this org's teams and workspaces" is derived, not a separate role: any user holding `OWNER`/`ADMIN` on *any* active workspace under the org counts (`hasOrgAdminAccess`) — there is no parallel Org-Owner/Org-Admin role split, since `WorkspaceRole`'s `OWNER`/`ADMIN` already converge everywhere a split would add.
 
 ### 🗂️ Team
-* **Purpose**: Groups workspaces under an org. A personal org's one team is created automatically at signup and cannot be added to; a real org's default team is created at org signup, and admins can create more (`POST /api/v1/orgs/:orgId/teams`) up to the plan's team limit.
+* **Purpose**: Groups workspaces under an org. A personal org's one team is created automatically at signup and cannot be added to; a real org's default team is created at org creation, and admins can create more (`POST /api/v1/orgs/:orgId/teams`) up to the plan's team limit.
 * **Table**: `teams` — `teamId`, `orgId` (FK, cascade), `name`, `slug`.
 
 ### 🏢 Workspace

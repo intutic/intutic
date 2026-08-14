@@ -788,16 +788,17 @@ const orgCmd = program
   .description('Create and manage orgs')
 
 orgCmd
-  .command('signup')
-  .description('Create a real org (paid tier, 30-day trial) with a default team and workspace')
-  .option('--email <email>', 'Account email (prompted if omitted)')
-  .option('--password <password>', 'Account password, min 8 chars (prompted if omitted)')
-  .option('--name <name>', 'Your name (prompted if omitted)')
+  .command('create')
+  .description(
+    'Create a real org (paid tier, 30-day trial) with a default team and workspace. ' +
+      'Requires `intutic login` first and DNS domain-ownership verification.',
+  )
   .option('--org-name <orgName>', 'Organization name (prompted if omitted)')
+  .option('--domain <domain>', 'Domain to verify ownership of (prompted if omitted)')
   .option('--dev', 'Use local control plane (http://localhost:3001)')
   .action(async (opts) => {
-    const { runOrgSignup } = await import('./commands/org.js')
-    await runOrgSignup(opts)
+    const { runOrgCreate } = await import('./commands/org.js')
+    await runOrgCreate(opts)
   })
 
 const teamCmd = program

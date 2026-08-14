@@ -16,9 +16,9 @@ describe('org command registration', () => {
     expect(source).toMatch(/\.command\(\s*['"]org['"]\s*\)/)
   })
 
-  it('wires signup to its handler', () => {
-    expect(source).toMatch(/\.command\(\s*['"]signup['"]\s*\)/)
-    expect(source).toContain('runOrgSignup')
+  it('wires create to its handler', () => {
+    expect(source).toMatch(/\.command\(\s*['"]create['"]\s*\)/)
+    expect(source).toContain('runOrgCreate')
   })
 })
 
