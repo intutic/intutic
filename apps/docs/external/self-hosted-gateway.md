@@ -89,16 +89,30 @@ token on a schedule (default every 30 days, `INTUTIC_GATEWAY_ROTATION_INTERVAL_D
 disables it) by calling the same rotation mechanics the CLI uses, authenticated with the
 token it already holds — not a new privilege, just automatic timing.
 
-By default the rotated value lives only in the proxy process's memory, so a restart (crash,
-redeploy) reverts to whatever token your deployment's environment was last set to — this is a
-mitigation for a long-lived process holding one credential for too long, not a substitute for
-updating your deployment's stored `INTUTIC_GATEWAY_TOKEN`. **The bare-metal target is the one
-exception**: `@intutic/gateway-daemon` automatically persists each self-rotated token to a
-local state file and re-reads it on every restart it performs (crash or config-reconciliation),
-so rotation survives a restart there as long as the daemon's own working directory does. Docker
-and Kubernetes deployments do not have this yet (TD-341). See the [gateway-daemon README](https://github.com/intutic/intutic-enterprise/blob/main/packages/gateway-daemon/README.md#automatic-token-rotation-and-how-it-survives-a-restart-here-td-341)
-for the full picture, including when even the bare-metal case still needs a manual
-`intutic gateway rotate`.
+The rotated value is kept in the proxy process's memory, and the proxy also persists it so a
+restart doesn't revert to a stale token — the exact mechanism depends on your deployment target
+(TD-341):
+
+- **Bare-metal** (`@intutic/gateway-daemon`): the proxy writes every self-rotated token to a
+  local state file (`INTUTIC_GATEWAY_TOKEN_STATE_FILE`); the daemon reads it back on every
+  restart it performs (crash or config-reconciliation). Survives as long as the daemon's own
+  working directory does.
+- **Docker** (`docker-compose.gateway.yml`): the proxy itself reads that same state file back at
+  its own startup — no supervisor required. The compose file bind-mounts a named volume at that
+  path by default, so it survives `docker compose up` recreating the container.
+- **Kubernetes** (`tools/helm/intutic-gateway`): a state file only survives an in-place container
+  restart within the same pod, not a reschedule or rolling redeploy (a new pod is a fresh
+  filesystem) — so the proxy additionally PATCHes its own gateway Secret via the in-cluster
+  Kubernetes API on every successful rotation. Opt-in via the chart's
+  `proxy.selfRotationPatchesOwnSecret` value (default `false` — it's a real RBAC grant, `get`+
+  `patch` scoped to just this release's `gatewaySecretName`, beyond what the proxy needs to run).
+  With it enabled, the next pod created from the Deployment — reschedule or redeploy — reads the
+  current token fresh via its existing `secretKeyRef`.
+
+None of this replaces `intutic gateway rotate` as your recovery path — if the persisted storage
+itself is lost (the Docker volume deleted, the Kubernetes flag left off, the bare-metal state
+file's disk wiped), a restart still reverts to whatever `INTUTIC_GATEWAY_TOKEN` your deployment's
+environment holds, and you're back to running that command and updating the stored token by hand.
 
 ### Pointing a workspace at your gateway
 

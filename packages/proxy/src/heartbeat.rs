@@ -40,11 +40,31 @@
 //! Opt-in exception: if `INTUTIC_GATEWAY_TOKEN_STATE_FILE` is set, every
 //! successful self-rotation also writes the new token to that path
 //! (write-then-rename, so a reader never observes a half-written file).
-//! This module never reads the file back — it exists so a supervisor that
-//! owns this process's *restart* (`packages/gateway-daemon`) can read it on
-//! its own boot and use a fresher token than its own stored env, closing
-//! the restart-drift gap for that one deployment target. Docker/Kubernetes
-//! targets leave this unset and get exactly today's behavior.
+//!
+//! TD-341 (Docker/Kubernetes durability): `from_env()` also READS the state
+//! file back, at proxy startup, if it's set — preferring its contents over
+//! `INTUTIC_GATEWAY_TOKEN` when the two differ, non-empty persisted value
+//! only. This mirrors `packages/gateway-daemon/src/supervisor.ts`'s
+//! `withPersistedToken()` exactly (ENOENT is silent — first boot, nothing
+//! rotated yet; any other read error warns and falls back to the configured
+//! token) but lives in the proxy binary itself rather than an external
+//! supervisor, so it works for ANY deployment target that can give the
+//! process a durable path at the same location across restarts — a Docker
+//! bind mount (`infra/compose/docker-compose.gateway.yml`) or a Kubernetes
+//! `emptyDir` surviving an in-place container restart, not just bare-metal.
+//! `packages/gateway-daemon` keeps its own copy of this preference (it reads
+//! the file before every spawn, then also sets the env var this function
+//! reads) — redundant once this lands, deliberately left in place rather
+//! than simplified, so a tested path doesn't get touched to remove
+//! redundancy alone.
+//!
+//! Kubernetes additionally gets [`crate::k8s_token_writer::K8sSecretWriter`]
+//! — a `emptyDir`/state-file still only survives a restart WITHIN the same
+//! pod, not a reschedule or a rolling redeploy (a new pod is a fresh
+//! filesystem). When `INTUTIC_GATEWAY_K8S_SECRET_NAME` is set, every
+//! successful self-rotation additionally PATCHes that Secret via the
+//! in-cluster K8s API — independent of, not a replacement for, the
+//! state-file write; a Kubernetes deployment sets both.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -73,6 +93,9 @@ pub struct HeartbeatConfig {
     pub rotation_interval: Option<Duration>,
     /// `INTUTIC_GATEWAY_TOKEN_STATE_FILE`, if set — see module doc.
     pub token_state_file: Option<PathBuf>,
+    /// Set when `INTUTIC_GATEWAY_K8S_SECRET_NAME` is configured AND the pod's
+    /// ServiceAccount is actually mounted — see `k8s_token_writer` module doc.
+    pub k8s_secret_writer: Option<crate::k8s_token_writer::K8sSecretWriter>,
 }
 
 impl HeartbeatConfig {
@@ -84,7 +107,7 @@ impl HeartbeatConfig {
     /// silently ignored so a typo doesn't read as "heartbeat just isn't
     /// running for no reason."
     pub fn from_env() -> Option<Self> {
-        let gateway_token = std::env::var("INTUTIC_GATEWAY_TOKEN")
+        let mut gateway_token = std::env::var("INTUTIC_GATEWAY_TOKEN")
             .ok()
             .filter(|v| !v.trim().is_empty())?;
 
@@ -144,6 +167,33 @@ impl HeartbeatConfig {
             .filter(|v| !v.trim().is_empty())
             .map(PathBuf::from);
 
+        if let Some(path) = &token_state_file {
+            match std::fs::read_to_string(path) {
+                Ok(raw) => {
+                    let persisted = raw.trim();
+                    if !persisted.is_empty() && persisted != gateway_token {
+                        tracing::info!(
+                            path = %path.display(),
+                            "Booting with a self-rotated gateway token from state file, newer than the configured INTUTIC_GATEWAY_TOKEN"
+                        );
+                        gateway_token = persisted.to_string();
+                    }
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    // First boot, or nothing has self-rotated yet — expected, silent.
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        path = %path.display(),
+                        error = %e,
+                        "Failed to read gateway token state file -- falling back to the configured INTUTIC_GATEWAY_TOKEN"
+                    );
+                }
+            }
+        }
+
+        let k8s_secret_writer = crate::k8s_token_writer::K8sSecretWriter::from_env();
+
         Some(Self {
             gateway_id,
             gateway_token,
@@ -151,6 +201,7 @@ impl HeartbeatConfig {
             interval: Duration::from_secs(interval_secs),
             rotation_interval,
             token_state_file,
+            k8s_secret_writer,
         })
     }
 }
@@ -236,6 +287,7 @@ pub fn spawn_heartbeat_loop(http_client: Arc<reqwest::Client>, cfg: HeartbeatCon
     let gateway_id = cfg.gateway_id.clone();
     let rotation_interval = cfg.rotation_interval;
     let token_state_file = cfg.token_state_file.clone();
+    let k8s_secret_writer = cfg.k8s_secret_writer.clone();
     let started = Instant::now();
     // The token changes over the process's lifetime once self-rotation
     // fires, so it can't stay a plain `String` captured by the loop —
@@ -269,6 +321,7 @@ pub fn spawn_heartbeat_loop(http_client: Arc<reqwest::Client>, cfg: HeartbeatCon
                                         &current_token,
                                         &gateway_id,
                                         token_state_file.as_deref(),
+                                        k8s_secret_writer.as_ref(),
                                     )
                                     .await;
                                 }
@@ -313,6 +366,7 @@ async fn self_rotate(
     current_token: &RwLock<String>,
     gateway_id: &str,
     token_state_file: Option<&std::path::Path>,
+    k8s_secret_writer: Option<&crate::k8s_token_writer::K8sSecretWriter>,
 ) {
     let token = current_token.read().await.clone();
     match http_client.post(url).bearer_auth(&token).send().await {
@@ -333,6 +387,20 @@ async fn self_rotate(
                             path = %path.display(),
                             error = %e,
                             "failed to persist self-rotated token to state file — a restart before the next successful write will use a stale token"
+                        );
+                    }
+                }
+                // Independent of the state-file write above (TD-341): a
+                // Kubernetes pod reschedule or rolling redeploy gets a fresh
+                // filesystem, so only a Secret patch survives that case. Same
+                // proportionate-warn posture -- the rotation already
+                // succeeded and this process keeps serving either way.
+                if let Some(writer) = k8s_secret_writer {
+                    if let Err(e) = writer.patch_token(&parsed.token).await {
+                        tracing::warn!(
+                            gateway_id = %gateway_id,
+                            error = %e,
+                            "failed to patch the Kubernetes Secret with the self-rotated token — a pod reschedule before the next successful patch will boot with a stale token"
                         );
                     }
                 }
@@ -462,12 +530,51 @@ mod tests {
         );
 
         // 7. token_state_file: unset means None (already asserted above at
-        //    step 4); a set value is picked up verbatim.
+        //    step 4); a set value is picked up verbatim when the file does
+        //    not exist (ENOENT falls back silently, gateway_token unchanged
+        //    — see step 9 below for the explicit assertion of that).
         std::env::set_var("INTUTIC_GATEWAY_TOKEN_STATE_FILE", "/tmp/gateway-token-state");
         assert_eq!(
             HeartbeatConfig::from_env().unwrap().token_state_file,
             Some(PathBuf::from("/tmp/gateway-token-state"))
         );
+        std::env::remove_var("INTUTIC_GATEWAY_TOKEN_STATE_FILE");
+
+        // 8. TD-341: a state file holding a token that differs from
+        //    INTUTIC_GATEWAY_TOKEN is preferred — mirrors
+        //    packages/gateway-daemon/src/supervisor.ts's withPersistedToken.
+        //    Same directory-mutation discipline as write_token_state_file's
+        //    own tests: a dedicated temp subdir, cleaned before and after.
+        let state_dir = std::env::temp_dir().join("intutic-heartbeat-test-from-env-state-file");
+        let _ = std::fs::remove_dir_all(&state_dir);
+        std::fs::create_dir_all(&state_dir).unwrap();
+        let state_path = state_dir.join("gateway-token");
+
+        std::fs::write(&state_path, "gwk_self_rotated\n").unwrap(); // trailing newline must be trimmed
+        std::env::set_var("INTUTIC_GATEWAY_TOKEN_STATE_FILE", &state_path);
+        assert_eq!(
+            HeartbeatConfig::from_env().unwrap().gateway_token,
+            "gwk_self_rotated"
+        );
+
+        // 9. Missing file → falls back silently to the configured token
+        //    (first boot / nothing has rotated yet).
+        std::fs::remove_file(&state_path).unwrap();
+        assert_eq!(
+            HeartbeatConfig::from_env().unwrap().gateway_token,
+            "gwk_test_token"
+        );
+
+        // 10. Unreadable path (a directory, not a file — IsADirectory is a
+        //     non-ENOENT read error) → warns and falls back, same outcome
+        //     as step 9 but exercising the other error branch.
+        std::fs::create_dir_all(&state_path).unwrap();
+        assert_eq!(
+            HeartbeatConfig::from_env().unwrap().gateway_token,
+            "gwk_test_token"
+        );
+
+        let _ = std::fs::remove_dir_all(&state_dir);
         std::env::remove_var("INTUTIC_GATEWAY_TOKEN_STATE_FILE");
 
         // Clean up so other tests in the binary that read these same env
