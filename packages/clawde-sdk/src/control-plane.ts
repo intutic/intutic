@@ -4,6 +4,10 @@ import type {
   WhoamiResult,
   OrgSignupParams,
   OrgSignupResult,
+  StartDomainVerificationResult,
+  CheckDomainVerificationResult,
+  CreateOrgParams,
+  CreateOrgResult,
   Team,
   Workspace,
   GatewayRegisterParams,
@@ -92,9 +96,49 @@ export class ControlPlaneClient {
     return this.request('GET', '/api/v1/auth/me')
   }
 
-  /** POST /api/v1/auth/signup/org — unauthenticated, creates the calling user. */
+  /**
+   * POST /api/v1/auth/signup/org — unauthenticated, creates the calling user.
+   *
+   * Closed by default in production (`INTUTIC_PUBLIC_ORG_SIGNUP`, off unless
+   * a deployment has built its own anonymous domain-verification story):
+   * creating a real org auto-provisions a real managed gateway cell (LLD
+   * #71), so org creation now requires DNS domain-ownership proof, and an
+   * anonymous caller has no session to own a verification attempt against.
+   * Prefer `startDomainVerification` + `checkDomainVerification` +
+   * `createOrg` with an already-authenticated `apiKey` — the same flow the
+   * CLI's `intutic org create` and the dashboard's "Create Organization"
+   * modal use.
+   */
   public async signupOrg(params: OrgSignupParams): Promise<OrgSignupResult> {
     return this.request('POST', '/api/v1/auth/signup/org', params, false)
+  }
+
+  /**
+   * POST /api/v1/domain-verification/start — mints a DNS TXT-record
+   * verification token for `domain`. Publish a TXT record at
+   * `txtRecordName` with value `txtRecordValue`, then poll
+   * `checkDomainVerification` until `status` is `'verified'`.
+   */
+  public async startDomainVerification(domain: string): Promise<StartDomainVerificationResult> {
+    return this.request('POST', '/api/v1/domain-verification/start', { domain })
+  }
+
+  /**
+   * GET /api/v1/domain-verification/:id — re-checks DNS for the TXT record.
+   * Safe to call repeatedly; performs a fresh lookup every call.
+   */
+  public async checkDomainVerification(verificationId: string): Promise<CheckDomainVerificationResult> {
+    return this.request('GET', `/api/v1/domain-verification/${encodeURIComponent(verificationId)}`)
+  }
+
+  /**
+   * POST /api/v1/orgs — creates a real org from an already-authenticated
+   * caller. Requires a `verified`, unconsumed domain verification (see
+   * `startDomainVerification`); the verification is consumed atomically
+   * inside the org-insert transaction, so it backs exactly this one org.
+   */
+  public async createOrg(params: CreateOrgParams): Promise<CreateOrgResult> {
+    return this.request('POST', '/api/v1/orgs', params)
   }
 
   /** GET /api/v1/orgs/:orgId/teams */

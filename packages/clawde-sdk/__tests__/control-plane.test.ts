@@ -79,6 +79,44 @@ describe('ControlPlaneClient', () => {
     expect(res.org.id).toBe('org_1')
   })
 
+  it('startDomainVerification() posts the domain with a bearer token', async () => {
+    respondWithBody = {
+      verificationId: 'dv_1', domain: 'acme.com',
+      txtRecordName: '_intutic-verify.acme.com', txtRecordValue: 'abc123', expiresAt: '2026-09-01',
+    }
+    const client = new ControlPlaneClient({ apiKey: 'vk_test', baseUrl })
+    const res = await client.startDomainVerification('acme.com')
+    expect(receivedMethod).toBe('POST')
+    expect(receivedPath).toBe('/api/v1/domain-verification/start')
+    expect(receivedHeaders['authorization']).toBe('Bearer vk_test')
+    expect(receivedBody).toEqual({ domain: 'acme.com' })
+    expect(res.verificationId).toBe('dv_1')
+    expect(res.txtRecordValue).toBe('abc123')
+  })
+
+  it('checkDomainVerification() calls GET /api/v1/domain-verification/:id', async () => {
+    respondWithBody = {
+      verificationId: 'dv_1', domain: 'acme.com', status: 'verified',
+      txtRecordName: '_intutic-verify.acme.com', txtRecordValue: 'abc123', verifiedAt: '2026-08-14',
+    }
+    const client = new ControlPlaneClient({ apiKey: 'vk_test', baseUrl })
+    const res = await client.checkDomainVerification('dv_1')
+    expect(receivedMethod).toBe('GET')
+    expect(receivedPath).toBe('/api/v1/domain-verification/dv_1')
+    expect(res.status).toBe('verified')
+  })
+
+  it('createOrg() posts orgName/domain/verificationId to /api/v1/orgs with a bearer token', async () => {
+    respondWithBody = { orgId: 'org_1', teamId: 'team_1', workspaceId: 'ws_1', name: 'Acme', planTier: 'pro' }
+    const client = new ControlPlaneClient({ apiKey: 'vk_test', baseUrl })
+    const res = await client.createOrg({ orgName: 'Acme', domain: 'acme.com', verificationId: 'dv_1' })
+    expect(receivedMethod).toBe('POST')
+    expect(receivedPath).toBe('/api/v1/orgs')
+    expect(receivedHeaders['authorization']).toBe('Bearer vk_test')
+    expect(receivedBody).toEqual({ orgName: 'Acme', domain: 'acme.com', verificationId: 'dv_1' })
+    expect(res.orgId).toBe('org_1')
+  })
+
   it('listTeams() unwraps the {data} envelope', async () => {
     respondWithBody = { data: [{ teamId: 't1', orgId: 'org_1', name: 'Eng', slug: 'eng', createdAt: '2026-01-01' }] }
     const client = new ControlPlaneClient({ apiKey: 'vk_test', baseUrl })
