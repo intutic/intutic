@@ -795,6 +795,7 @@ orgCmd
   )
   .option('--org-name <orgName>', 'Organization name (prompted if omitted)')
   .option('--domain <domain>', 'Domain to verify ownership of (prompted if omitted)')
+  .option('--region <region>', "Gateway cell region (e.g. 'us', 'eu'); server-validated, defaults to the deployment's home region")
   .option('--dev', 'Use local control plane (http://localhost:3001)')
   .action(async (opts) => {
     const { runOrgCreate } = await import('./commands/org.js')

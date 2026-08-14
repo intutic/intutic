@@ -200,6 +200,54 @@ describe('intutic org create', () => {
     expect(saveCredentialsMock).not.toHaveBeenCalled()
   })
 
+  it('passes --region through to POST /api/v1/orgs (normalized lowercase)', async () => {
+    let orgPayload: any = null
+    fetchMock.mockImplementation((url: string, init?: any) => {
+      if (url.includes('/api/v1/domain-verification/start')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            verificationId: 'dv_1', domain: 'acme.com',
+            txtRecordName: '_intutic-verify.acme.com', txtRecordValue: 'abc123', expiresAt: '2026-09-01',
+          }),
+        })
+      }
+      if (url.includes('/api/v1/domain-verification/dv_1')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            verificationId: 'dv_1', domain: 'acme.com', status: 'verified',
+            txtRecordName: '_intutic-verify.acme.com', txtRecordValue: 'abc123', verifiedAt: '2026-08-15T00:00:00Z',
+          }),
+        })
+      }
+      if (url.endsWith('/api/v1/orgs')) {
+        orgPayload = JSON.parse(init.body)
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ orgId: 'org_1', teamId: 'team_1', workspaceId: 'wk_new', name: 'Acme', planTier: 'pro', region: 'eu' }),
+        })
+      }
+      if (url.endsWith('/api/v1/auth/session')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ memberId: 'mbr_1', workspaceId: 'wk_new', email: 'jane@acme.test', role: 'OWNER', refreshToken: 'refresh_new' }),
+        })
+      }
+      if (url.endsWith('/api/v1/auth/refresh')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ accessToken: 'jwt_new', refreshToken: 'r2', expiresIn: 900 }),
+        })
+      }
+      throw new Error(`Unexpected fetch to ${url}`)
+    })
+    promptAnswers = ['']
+
+    await runOrgCreate({ orgName: 'Acme', domain: 'acme.com', region: 'EU' })
+    expect(orgPayload.region).toBe('eu')
+  })
+
   it('exits non-zero and reports the failure when org creation itself fails', async () => {
     fetchMock.mockImplementation((url: string) => {
       if (url.includes('/api/v1/domain-verification/start')) {

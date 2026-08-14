@@ -117,6 +117,14 @@ describe('ControlPlaneClient', () => {
     expect(res.orgId).toBe('org_1')
   })
 
+  it('createOrg() passes the optional region through; omits it when not given', async () => {
+    respondWithBody = { orgId: 'org_1', teamId: 'team_1', workspaceId: 'ws_1', name: 'Acme', planTier: 'pro', region: 'eu' }
+    const client = new ControlPlaneClient({ apiKey: 'vk_test', baseUrl })
+    const res = await client.createOrg({ orgName: 'Acme', domain: 'acme.com', verificationId: 'dv_1', region: 'eu' })
+    expect(receivedBody).toEqual({ orgName: 'Acme', domain: 'acme.com', verificationId: 'dv_1', region: 'eu' })
+    expect(res.region).toBe('eu')
+  })
+
   it('listTeams() unwraps the {data} envelope', async () => {
     respondWithBody = { data: [{ teamId: 't1', orgId: 'org_1', name: 'Eng', slug: 'eng', createdAt: '2026-01-01' }] }
     const client = new ControlPlaneClient({ apiKey: 'vk_test', baseUrl })
