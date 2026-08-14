@@ -52,6 +52,7 @@ interface CreateOrgResponse {
   workspaceId: string
   name: string
   planTier: string
+  region?: string
 }
 
 interface SessionSwitchResponse {
@@ -82,6 +83,7 @@ interface OrgCreateOpts {
   dev?: boolean
   domain?: string
   orgName?: string
+  region?: string
 }
 
 /**
@@ -195,11 +197,15 @@ export async function runOrgCreate(opts: OrgCreateOpts): Promise<void> {
       orgName: orgName.trim(),
       domain: checked.domain,
       verificationId: verification.verificationId,
+      // Omitted entirely when not passed -- the server defaults to its home
+      // region and validates against its configured cell regions.
+      ...(opts.region ? { region: opts.region.trim().toLowerCase() } : {}),
     })
 
     log.success(`Org "${org.name}" created.`)
     log.field('Org ID', org.orgId)
     log.field('Org plan', org.planTier)
+    if (org.region) log.field('Gateway region', org.region)
     log.field('Default workspace', org.workspaceId)
 
     const switched = await switchStoredSessionToWorkspace(controlPlaneUrl, creds.apiKey, org.workspaceId)
