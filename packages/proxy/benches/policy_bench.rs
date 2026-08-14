@@ -134,6 +134,7 @@ fn make_virtual_key(budget_remaining: f64) -> VirtualKeyRecord {
         spend: 100.0 - budget_remaining,
         models: vec!["gpt-4o".to_string(), "claude-sonnet-4-20250514".to_string()],
         expires: None,
+        org_id: None,
     }
 }
 
