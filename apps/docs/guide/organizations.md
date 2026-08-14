@@ -11,19 +11,25 @@ other in the data model.
 
 ## Creating an org
 
-Org signup is separate from the individual signup flow — it needs an org name, and it lands on
-a paid tier with a 30-day trial rather than the free tier's own trial. No dashboard signup form
-exists for this yet; today it's API/CLI only:
+Org creation is separate from the individual signup flow — it needs an org name, and it lands
+on a paid tier with a 30-day trial rather than the free tier's own trial. Creating a real org
+also auto-provisions a dedicated managed gateway cell for it, so it requires proving you own the
+org's domain first, via a DNS TXT record — the same mechanism Slack and Google Workspace use.
+There's no anonymous signup path for this: sign up personally first (`intutic init` / the
+dashboard's own signup page), then create the org from that authenticated session, either in the
+dashboard (the workspace switcher's "Create Organization") or via the CLI:
 
 ```bash
-intutic org signup
+intutic org create
 # or non-interactively:
-intutic org signup --email you@company.com --password '...' --name "Your Name" --org-name "Acme Corp"
+intutic org create --org-name "Acme Corp" --domain acme.com
 ```
 
-This creates the org, one default team, one default workspace, and logs you in as the org's
-`OWNER` — the same credential-persisting behavior as `intutic login`. Equivalent API call:
-`POST /api/v1/auth/signup/org`.
+This starts domain verification, prints the TXT record to publish (`_intutic-verify.<domain>`),
+polls DNS on your confirmation, then creates the org — one default team, one default workspace —
+and switches your CLI session into it once verified. Equivalent API calls:
+`POST /api/v1/domain-verification/start`, `GET /api/v1/domain-verification/:id`, and
+`POST /api/v1/orgs`.
 
 An individual who already has a personal workspace can also create a real org later without
 losing their personal one — the two are entirely separate; a new membership row under the new

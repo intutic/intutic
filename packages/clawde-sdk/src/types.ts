@@ -121,6 +121,37 @@ export interface OrgSignupResult {
   isNewUser: boolean
 }
 
+export interface StartDomainVerificationResult {
+  verificationId: string
+  domain: string
+  txtRecordName: string
+  txtRecordValue: string
+  expiresAt: string
+}
+
+export interface CheckDomainVerificationResult {
+  verificationId: string
+  domain: string
+  status: 'pending' | 'verified' | 'consumed' | 'expired'
+  txtRecordName: string
+  txtRecordValue: string
+  verifiedAt: string | null
+}
+
+export interface CreateOrgParams {
+  orgName: string
+  domain: string
+  verificationId: string
+}
+
+export interface CreateOrgResult {
+  orgId: string
+  teamId: string
+  workspaceId: string
+  name: string
+  planTier: string
+}
+
 export interface Team {
   teamId: string
   orgId: string

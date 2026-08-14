@@ -85,12 +85,49 @@ class ControlPlaneClient:
         return self._request("GET", "/api/v1/auth/me")
 
     def signup_org(self, email: str, password: str, name: str, org_name: str) -> Dict[str, Any]:
-        """POST /api/v1/auth/signup/org -- unauthenticated, creates the calling user."""
+        """POST /api/v1/auth/signup/org -- unauthenticated, creates the calling user.
+
+        Closed by default in production (INTUTIC_PUBLIC_ORG_SIGNUP, off
+        unless a deployment has built its own anonymous domain-verification
+        story): creating a real org auto-provisions a real managed gateway
+        cell (LLD #71), so org creation now requires DNS domain-ownership
+        proof, and an anonymous caller has no session to own a verification
+        attempt against. Prefer start_domain_verification +
+        check_domain_verification + create_org with an already-authenticated
+        api_key -- the same flow the CLI's `intutic org create` and the
+        dashboard's "Create Organization" modal use.
+        """
         return self._request(
             "POST",
             "/api/v1/auth/signup/org",
             {"email": email, "password": password, "name": name, "orgName": org_name},
             auth=False,
+        )
+
+    def start_domain_verification(self, domain: str) -> Dict[str, Any]:
+        """POST /api/v1/domain-verification/start -- mints a DNS TXT-record
+        verification token for `domain`. Publish a TXT record at
+        `txtRecordName` with value `txtRecordValue`, then poll
+        check_domain_verification until `status` is 'verified'.
+        """
+        return self._request("POST", "/api/v1/domain-verification/start", {"domain": domain})
+
+    def check_domain_verification(self, verification_id: str) -> Dict[str, Any]:
+        """GET /api/v1/domain-verification/:id -- re-checks DNS for the TXT
+        record. Safe to call repeatedly; performs a fresh lookup every call.
+        """
+        return self._request("GET", f"/api/v1/domain-verification/{_quote(verification_id)}")
+
+    def create_org(self, org_name: str, domain: str, verification_id: str) -> Dict[str, Any]:
+        """POST /api/v1/orgs -- creates a real org from an already-authenticated
+        caller. Requires a 'verified', unconsumed domain verification (see
+        start_domain_verification); the verification is consumed atomically
+        inside the org-insert transaction, so it backs exactly this one org.
+        """
+        return self._request(
+            "POST",
+            "/api/v1/orgs",
+            {"orgName": org_name, "domain": domain, "verificationId": verification_id},
         )
 
     def list_teams(self, org_id: str) -> List[Dict[str, Any]]:
