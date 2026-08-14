@@ -116,6 +116,21 @@ def test_check_domain_verification_calls_get_by_id(mock_request):
 
 
 @patch("requests.request")
+def test_create_org_passes_optional_region_and_omits_when_none(mock_request):
+    mock_request.return_value = _mock_response(
+        json_body={"orgId": "org_1", "teamId": "team_1", "workspaceId": "ws_1", "name": "Acme", "planTier": "pro", "region": "eu"}
+    )
+    client = ControlPlaneClient(api_key="vk_test", base_url="https://cp.example.com")
+    client.create_org("Acme", "acme.com", "dv_1", region="eu")
+    _, kwargs = mock_request.call_args
+    assert kwargs["json"] == {"orgName": "Acme", "domain": "acme.com", "verificationId": "dv_1", "region": "eu"}
+
+    client.create_org("Acme", "acme.com", "dv_1")
+    _, kwargs = mock_request.call_args
+    assert "region" not in kwargs["json"]
+
+
+@patch("requests.request")
 def test_create_org_posts_org_name_domain_verification_id_with_bearer_token(mock_request):
     mock_request.return_value = _mock_response(
         json_body={"orgId": "org_1", "teamId": "team_1", "workspaceId": "ws_1", "name": "Acme", "planTier": "pro"}

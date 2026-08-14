@@ -118,17 +118,24 @@ class ControlPlaneClient:
         """
         return self._request("GET", f"/api/v1/domain-verification/{_quote(verification_id)}")
 
-    def create_org(self, org_name: str, domain: str, verification_id: str) -> Dict[str, Any]:
+    def create_org(
+        self, org_name: str, domain: str, verification_id: str, region: Optional[str] = None
+    ) -> Dict[str, Any]:
         """POST /api/v1/orgs -- creates a real org from an already-authenticated
         caller. Requires a 'verified', unconsumed domain verification (see
         start_domain_verification); the verification is consumed atomically
         inside the org-insert transaction, so it backs exactly this one org.
+        `region` picks the managed gateway cell's placement ('us', 'eu', ...);
+        omitted, the deployment's home region applies. Server-validated.
         """
-        return self._request(
-            "POST",
-            "/api/v1/orgs",
-            {"orgName": org_name, "domain": domain, "verificationId": verification_id},
-        )
+        body: Dict[str, Any] = {
+            "orgName": org_name,
+            "domain": domain,
+            "verificationId": verification_id,
+        }
+        if region is not None:
+            body["region"] = region
+        return self._request("POST", "/api/v1/orgs", body)
 
     def list_teams(self, org_id: str) -> List[Dict[str, Any]]:
         """GET /api/v1/orgs/:orgId/teams"""

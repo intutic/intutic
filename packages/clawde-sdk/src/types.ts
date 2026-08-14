@@ -142,6 +142,8 @@ export interface CreateOrgParams {
   orgName: string
   domain: string
   verificationId: string
+  /** Gateway cell region ('us' | 'eu' | ...). Omit for the deployment's home region; server-validated. */
+  region?: string
 }
 
 export interface CreateOrgResult {
@@ -150,6 +152,7 @@ export interface CreateOrgResult {
   workspaceId: string
   name: string
   planTier: string
+  region?: string
 }
 
 export interface Team {
