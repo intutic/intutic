@@ -38,6 +38,7 @@ pub mod firewall;
 pub mod gateway;
 /// Self-hosted gateway heartbeat client (LLD #66, gateway phase 4)
 pub mod heartbeat;
+pub mod k8s_token_writer;
 /// Local judge for self-hosted gateways (LLD #68 §2 phase 2)
 pub mod judge_local;
 pub mod local_spend;
