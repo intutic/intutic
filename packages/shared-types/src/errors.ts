@@ -81,6 +81,14 @@ export const E_TOKEN_EXPIRED = 'TOKEN_EXPIRED' as const
 /** Resource is already in the target state. */
 export const E_ALREADY_VERIFIED = 'ALREADY_VERIFIED' as const
 
+/**
+ * Org creation was attempted against a domain-verification that isn't in
+ * `verified` status — pending (DNS not seen yet), already consumed by a
+ * prior org, or expired. Distinct from E_TOKEN_INVALID/E_TOKEN_EXPIRED:
+ * the verification row itself may be perfectly valid, just not proven yet.
+ */
+export const E_DOMAIN_NOT_VERIFIED = 'DOMAIN_NOT_VERIFIED' as const
+
 /** Generic validation failure (legacy alias). */
 export const E_VALIDATION = 'E_VALIDATION' as const
 
@@ -161,6 +169,7 @@ export type IntuticErrorCode =
   | typeof E_VALIDATION_FAILED
   | typeof E_CHECKOUT_DISABLED
   | typeof E_SIGNUP_DISABLED
+  | typeof E_DOMAIN_NOT_VERIFIED
   | typeof E_ALREADY_ON_TIER
   | typeof E_STRIPE_ERROR
   | typeof E_SIGNATURE_INVALID
