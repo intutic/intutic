@@ -2,6 +2,8 @@
 
 Arize AX is an AI observability platform for monitoring, evaluating, and debugging LLM applications. It provides tracing, evaluation metrics, and performance dashboards. **Intutic enforces policies on agent tool calls in real time.**
 
+> Dynatrace has announced an acquisition of Arize (~$915M), expected to close within the year. Arize is likely to be pulled toward deeper APM/infrastructure-observability integration under Dynatrace rather than continuing as an independent agent-observability product — worth factoring in if you're evaluating for the long term. This does not change the comparison below: Arize has no enforcement capability today, independent of ownership.
+
 ## Different Layers, Same Stack
 
 Arize AX **observes** what your AI systems do — traces, evaluations, latency, quality scores. Intutic **controls** what your AI agents are allowed to do — blocking destructive actions, redacting secrets, enforcing budgets.
