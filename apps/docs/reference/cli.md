@@ -870,6 +870,7 @@ Execute a command wrapped with Intutic proxy environment variables.
 
 ```bash
 intutic exec -- <command> [args...]
+intutic exec --sandbox -- <command> [args...]
 ```
 
 **Arguments:**
@@ -877,6 +878,21 @@ intutic exec -- <command> [args...]
 | Argument | Description |
 |----------|-------------|
 | `command...` | Command and arguments to execute (e.g. `-- claude`) |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--sandbox [kind]` | Run the agent in an isolated sandbox instead of directly on the host. `kind` is `oci` (default) or `firecracker`. See [Sandboxed Execution](/guide/sandboxed-execution) for what each backend actually isolates and requires. |
+| `--sandbox-image <image>` | Sandbox image — must contain the agent, `nftables`, and `capsh`. Default: `intutic/sandbox:latest`. |
+| `--sandbox-memory <size>` | Sandbox memory cap, e.g. `2g`. Default: `2g`. |
+| `--sandbox-cpus <n>` | Sandbox CPU cap. Default: `2`. |
+| `--sandbox-pids <n>` | Sandbox max process count. Default: `512`. |
+| `--sandbox-allow <cidrs>` | Comma-separated extra destination CIDRs the sandbox may reach beyond the proxy and DNS. |
+
+If the workspace's sandbox requirement is set to **Require** (Settings →
+Security → Sandboxed Execution) and `--sandbox` is omitted, the command
+refuses to run rather than executing ungoverned on the host.
 
 **What it does:**
 Injects the proxy environment into the child process, then spawns it with inherited stdio and exits with the child's exit code. The injected variables cover the competing SDK conventions:
@@ -898,6 +914,69 @@ Requires `intutic login` first. In dev mode the proxy is `http://localhost:4000`
 intutic exec -- claude
 intutic exec -- aider --model openai/gpt-4o
 intutic exec -- python my_agent.py
+```
+
+---
+
+## `intutic enforce`
+
+Manage the mandatory default-deny egress firewall — makes the governing
+proxy non-optional by dropping outbound traffic to everything except the
+proxy, DNS, and operator-declared infrastructure. Where
+[Network Egress Control](/guide/policies#network-egress-control) governs
+traffic the proxy *sees*, `intutic enforce` closes the gap where an agent
+simply doesn't route through the proxy at all: with it applied, there is
+no other way out.
+
+```bash
+intutic enforce <action> [options]
+```
+
+**Actions:**
+
+| Action | Privilege | What it does |
+|--------|-----------|---------------|
+| `generate` | None | Prints the platform firewall ruleset without applying it. |
+| `apply` | Root | Applies the default-deny egress firewall. All egress except the proxy, DNS, and `--allow` infrastructure is dropped. |
+| `remove` | Root | Removes the Intutic egress firewall. |
+| `status` | None | Reports whether the egress firewall is currently applied. |
+| `report` | None | Reports the locally recorded enforcement state (firewall, CA-trust, system-hooks posture) to the control plane. For when `apply`/`remove` ran elevated and couldn't reach stored credentials. |
+
+**Options** (`apply`/`remove`/`status`/`generate`):
+
+| Option | Description |
+|--------|-------------|
+| `--port <port>` | The proxy's listener port to permit. Default: `4000`. |
+| `--uid <uid>` | uid the proxy runs as, exempted from the deny. Defaults to the current user. |
+| `--allow <cidrs>` | Comma-separated extra destination CIDRs to permit (control plane, private registries, etc.). |
+| `--no-dns` | Also deny outbound DNS — only if a local resolver serves the host. |
+| `--platform <os>` | Target ruleset platform: `linux`, `macos`, or `windows`. Defaults to the current OS. |
+
+**What it does:**
+
+Implemented in the `intutic-proxy` binary's own `enforce` subcommand
+(platform-aware: nftables or iptables on Linux, `pf` on macOS); the CLI
+command is a thin, discoverable wrapper around it. `apply`/`remove`
+change the host firewall and need root — re-run with `sudo` if it fails
+with a permission error. After a successful `apply`/`remove`, the CLI
+re-queries status while still elevated and best-effort reports the result
+to the control plane, so an admin can see whether enforcement is actually
+active on a given machine without SSHing into it.
+
+**Examples:**
+
+```bash
+# See what would be applied, without changing anything
+intutic enforce generate
+
+# Apply, permitting an internal package registry too
+sudo intutic enforce apply --allow 10.0.0.0/8,registry.internal.corp
+
+# Check whether it's currently active
+intutic enforce status
+
+# Remove it
+sudo intutic enforce remove
 ```
 
 ---

@@ -671,3 +671,4 @@ the virtual key.
 | [Custom Filters (WASM)](/guide/wasm-rules) | Writing and compiling the rules shown here |
 | [Enforcement Actions](/concepts/enforcement-actions) | BYPASS, ENHANCE, HIJACK and KILL |
 | [Integrations](/integrations/) | Harness setup, including multi-agent frameworks |
+| [Network Egress Control](/guide/policies#network-egress-control) & [Sandboxed Execution](/guide/sandboxed-execution) | Network-level guardrails that hold regardless of graph topology — not part of the anomaly taxonomy above, since they're deterministic network controls rather than detectors firing a verdict |
