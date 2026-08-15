@@ -14,6 +14,7 @@ import type {
   SopHashReport,
 } from '@intutic/shared-types'
 import { toonDecode as sharedToonDecode } from '@intutic/shared-types'
+import { injectTraceHeaders } from './otelPropagation.js'
 
 /** API client for control plane communication. */
 export interface ApiClient {
@@ -50,13 +51,17 @@ export interface ApiClient {
  * @param apiKey - API key (vk_*) or JWT access token
  */
 export function createApiClient(controlPlaneUrl: string, apiKey: string): ApiClient {
-  const headers = {
+  const baseHeaders = {
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${apiKey}`,
   }
 
   async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const url = `${controlPlaneUrl}${path}`
+    // Per-request copy: injectTraceHeaders mutates in place, and baseHeaders
+    // is shared across every call this client makes.
+    const headers: Record<string, string> = { ...baseHeaders }
+    injectTraceHeaders(headers)
     const res = await fetch(url, {
       method,
       headers,
@@ -97,6 +102,8 @@ export function createApiClient(controlPlaneUrl: string, apiKey: string): ApiCli
     },
 
     async getWithStatus<T>(path: string): Promise<{ status: number; body: T }> {
+      const headers: Record<string, string> = { ...baseHeaders }
+      injectTraceHeaders(headers)
       const res = await fetch(`${controlPlaneUrl}${path}`, { method: 'GET', headers })
       const text = await res.text()
       let body: unknown

@@ -124,6 +124,7 @@ sidebarGuide.push({
     { text: 'Sandboxed Execution (Open-Core)', link: '/guide/sandboxed-execution' },
     { text: 'Governance Controls Checklist (Open-Core)', link: '/guide/governance-controls' },
     { text: 'Prompt Commands: /fix & /draw (Open-Core)', link: '/guide/agent-commands' },
+    { text: 'OpenTelemetry (Open-Core)', link: '/guide/opentelemetry' },
     // Routing ships in open-core. Enterprise builds already list this page under
     // 'Using Intutic' as 'Intelligent Model Routing (Cloud)', so this entry is
     // OSS-only to keep the page from appearing twice in the enterprise sidebar.
@@ -146,6 +147,7 @@ if (!IS_OSS) {
       { text: 'Security & Identity (Enterprise)', link: '/guide/security' },
       { text: 'SCIM Provisioning (Enterprise)', link: '/guide/scim' },
       { text: 'Emergency Overrides (Enterprise)', link: '/guide/break-glass' },
+      { text: 'SIEM Export (Enterprise)', link: '/guide/siem-export' },
     ],
   });
 }
