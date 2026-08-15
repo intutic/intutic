@@ -69,6 +69,19 @@ export type NotificationEventType =
    * rules are workspace-scoped), not once per gateway.
    */
   | 'gateway.stale.detected'
+  // ── Enforcement device visibility (post-strip gap #2, LLD #63 hardening) ──
+  /**
+   * A device's reported enforcement posture (firewall/CA-trust/system-hooks)
+   * hasn't been refreshed past DEVICE_STALE_THRESHOLD_MS (72h) -- fired by
+   * deviceHealthCron.ts. Most staleness is a closed laptop, not a
+   * compromise -- MEDIUM, unlike gateway.stale.detected's HIGH.
+   */
+  | 'device.enforcement.stale'
+  /**
+   * A device's firewall went from active:true to active:false on a live
+   * report -- an active bypass just occurred, not merely unreported.
+   */
+  | 'device.enforcement.disabled'
 
 export type NotificationStatus = 'sent' | 'failed' | 'deduplicated' | 'filtered'
 

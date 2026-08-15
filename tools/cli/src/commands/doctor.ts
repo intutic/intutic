@@ -32,6 +32,7 @@ import pc from 'picocolors'
 import { log } from '../lib/logger.js'
 import { loadCredentials, loadConfig, loadIntegrity } from '../config/store.js'
 import { isSyncDaemonRunning } from '../lib/process.js'
+import { caTrustCommandFor } from '../lib/caTrust.js'
 import { getPaths } from './install-daemon.js'
 import {
   readPolicySnapshot,
@@ -440,6 +441,19 @@ async function checkValkey(): Promise<CheckResult> {
 }
 
 /**
+ * Builds the system-scope CA-trust remediation string from the SAME source
+ * `caTrust.ts`'s `installCaTrust` actually runs, instead of a hand-written
+ * duplicate — the two had already drifted once (this check looks in three
+ * Linux cert-anchor directories; the old remediation only ever named one).
+ */
+function systemTrustRemediation(os: string): string {
+  const cmds = caTrustCommandFor(os as NodeJS.Platform, 'system', CA_CERT_PATH)
+  if (!cmds) return `See docs/integrations/enterprise-install.md for manual CA-trust steps on ${os}.`
+  const quoted = (arg: string) => (arg.includes(' ') ? `"${arg}"` : arg)
+  return cmds.map((c) => `sudo ${c.cmd} ${c.args.map(quoted).join(' ')}`).join(' && ')
+}
+
+/**
  * Check 7: CA certificate trust.
  *
  * Verifies that the Intutic proxy CA certificate exists at ~/.intutic/ca.crt
@@ -498,7 +512,7 @@ function checkCertTrust(): CheckResult {
         name: 'Cert Trust',
         passed: false,
         detail: 'CA cert exists but is not in system trust store',
-        remediation: `Copy and update trust: sudo cp ${CA_CERT_PATH} /usr/local/share/ca-certificates/intutic-ca.crt && sudo update-ca-certificates`,
+        remediation: systemTrustRemediation(os),
       }
     } else {
       // Windows or unknown OS — skip trust verification, just check file
@@ -513,9 +527,7 @@ function checkCertTrust(): CheckResult {
       name: 'Cert Trust',
       passed: false,
       detail: 'CA cert exists but is NOT trusted by the OS',
-      remediation: os === 'darwin'
-        ? `Trust the cert: sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain "${CA_CERT_PATH}"`
-        : `Copy and update trust: sudo cp ${CA_CERT_PATH} /usr/local/share/ca-certificates/intutic-ca.crt && sudo update-ca-certificates`,
+      remediation: systemTrustRemediation(os),
     }
   }
 }
