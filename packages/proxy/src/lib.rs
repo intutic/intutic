@@ -7,6 +7,7 @@ pub mod posture;
 pub mod graph;
 pub mod injection;
 pub mod metering;
+pub mod otel_propagation;
 pub mod plugins;
 pub mod protocol;
 pub mod probes;

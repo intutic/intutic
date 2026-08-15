@@ -132,6 +132,14 @@ async fn main() -> anyhow::Result<()> {
     let service_name =
         std::env::var("OTEL_SERVICE_NAME").unwrap_or_else(|_| "intutic-proxy".to_string());
 
+    // Register the W3C trace-context + baggage propagators as the global
+    // default. Must run unconditionally (not just inside the
+    // `OTEL_EXPORTER_OTLP_ENDPOINT` branch below) so header extraction in
+    // `handle_proxy` and W3C `baggage`-based graph identity (see graph.rs)
+    // work even when span export itself is off. See otel_propagation.rs for
+    // why this exists.
+    intutic_proxy::otel_propagation::install_default_propagator();
+
     // Initialize OpenTelemetry tracer.
     //
     // opentelemetry 0.32 removed the `new_pipeline()` builder chain in favour of
