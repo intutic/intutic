@@ -178,6 +178,7 @@ If you discover a security vulnerability, please report it to **support@intutic.
 |---|---|
 | [Getting Started](/guide/getting-started) | Quickstart guide, local CLI setup, and harness connection |
 | [How It Works](/guide/how-it-works) | Full architecture walkthrough — proxy, policy engine, control plane |
+| [Governance Controls Checklist](/guide/governance-controls) | A control-by-control mapping against a standard enterprise evaluation checklist |
 | [Custom Filters (WASM)](/external/wasm-rules) | WASM policy rules engine for custom tool-call filtering |
 | [CLI Reference](/reference/cli) | CLI commands, doctor diagnostic tool, and local configuration |
 | [Integrations Hub](/integrations/) | Harness setup guides for 19 supported agent tools |
