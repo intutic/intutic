@@ -63,6 +63,7 @@ export const FIELDS: Record<string, FieldKind> = {
   tool_sequence: 'stringList',
   new_tool_calls: 'stringList',
   injection_findings: 'stringList',
+  injection_sources: 'stringList',
   denied_tools: 'stringList',
   allowed_harnesses: 'stringList',
   review_before: 'stringList',

@@ -210,6 +210,27 @@ export interface TraceListResult {
   offset: number
 }
 
+/**
+ * One persisted detector finding on a trace, from `detector_findings`
+ * (migration 115). Distinct from `TraceDetail.anomalyDetected` /
+ * `anomalyConfidenceScore`, which carry only the single winning finding —
+ * this is every detector that fired, which is what lets a reviewer see two
+ * independent detectors agreeing (`detector_findings.md`-shaped corroboration)
+ * instead of one winner masking the rest.
+ */
+export interface TraceFindingSummary {
+  findingId: string
+  detectorId: string
+  anomalyKind: string
+  severity: string
+  /** STEER | REASK | ASK | KILL — what this finding actually did. */
+  disposition: string
+  confidence: number
+  reason: string
+  /** True when the workspace was in shadow mode — recorded, not enforced. */
+  shadowed: boolean
+}
+
 export interface TraceStep {
   logId: string
   toolName: string
@@ -260,6 +281,13 @@ export interface TraceDetail {
    */
   changeManifest?: ChangeManifestEntry[] | null
   steps?: TraceStep[]
+  /**
+   * Every detector finding persisted for this trace, most severe first —
+   * see {@link TraceFindingSummary}. `anomalyDetected`/`anomalyConfidenceScore`
+   * above stay as the single winner for backward compatibility; this is the
+   * full set, present on allowed traces as well as blocked ones.
+   */
+  findings?: TraceFindingSummary[]
 }
 
 /**
