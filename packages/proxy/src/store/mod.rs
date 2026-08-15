@@ -731,4 +731,25 @@ pub trait ControlPlaneCache: Send + Sync + 'static {
     /// parsed values to keep the store layer independent of the postprocessor's
     /// types.
     async fn drain_notifications(&self, scope: NotifyScope, id: &str) -> Vec<String>;
+
+    // ── Sandbox attestation ────────────────────────────────────────────
+
+    /// Whether this session's sandbox has proven it resolves the proxy as its
+    /// only egress path.
+    ///
+    /// Set via `PATCH /api/v1/sessions/:sessionId/attest-sandbox`, called by
+    /// this proxy's own `POST /intutic/attest-sandbox` handler from inside an
+    /// egress-locked sandbox container. It does NOT verify agent identity —
+    /// `node_id`/`agent_role` remain exactly as unverifiable as before. It
+    /// raises the floor of trust for all traffic in an attested session; it
+    /// does not authenticate any individual node's claim within it. See
+    /// `graph-guardrails.md`'s "Sandbox attestation" section for the full
+    /// scope and limits.
+    ///
+    /// Plain `bool`, not `Option<bool>` unlike [`LocalStore::is_graph_member`] —
+    /// this is a capability gate, and "unknown" (no control plane, cache
+    /// miss, standalone) must collapse to the same fail-closed answer as
+    /// "confirmed unattested", not be left for every rule author to handle
+    /// separately.
+    async fn is_sandbox_attested(&self, session_id: &str) -> bool;
 }

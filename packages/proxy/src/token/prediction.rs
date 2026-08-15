@@ -463,5 +463,8 @@ mod tests {
         async fn drain_notifications(&self, _s: crate::store::NotifyScope, _id: &str) -> Vec<String> {
             Vec::new()
         }
+        async fn is_sandbox_attested(&self, _sid: &str) -> bool {
+            false
+        }
     }
 }

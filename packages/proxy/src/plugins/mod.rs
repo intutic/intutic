@@ -137,6 +137,7 @@ mod tests {
             tool_contract_changed: false,
             harness: String::new(),
             allowed_harnesses: vec![],
+            sandbox_attested: false,
             workflow_spend_usd: None,
             workflow_budget_usd: None,
             node: Default::default(),

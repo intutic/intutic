@@ -2451,6 +2451,12 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     .await;
     let gov = crate::sops::governance_fields_from(&resolved_sops, &node.agent_role);
 
+    // Session-scoped, not node-scoped — see RequestContext::sandbox_attested's
+    // doc comment. Resolved here, once, like the other control-plane reads
+    // above, so every detector and WASM rule reading it stays a pure function
+    // of this struct.
+    let sandbox_attested = state.control_plane.is_sandbox_attested(&session_id).await;
+
     let wasm_ctx = crate::wasm::context::RequestContext {
         session_id: session_id.clone(),
         workspace_id: workspace_id.clone(),
@@ -2511,6 +2517,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         // Resolved from the route, not asserted by the caller.
         harness: provider.harness_name().to_string(),
         allowed_harnesses: gov.allowed_harnesses,
+        sandbox_attested,
         workflow_spend_usd: workflow_spend,
         workflow_budget_usd: workflow_budget,
         node,
