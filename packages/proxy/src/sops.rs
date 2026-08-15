@@ -1168,6 +1168,121 @@ pub async fn all_sops_for_workspace(
     }
 }
 
+/// Cheap, deterministic, load-order-independent fingerprint over one SOP
+/// set. `workspace_id` is folded in so two workspaces with byte-identical
+/// SOP content still produce different fingerprints once combined by
+/// [`sop_status_snapshot`] — pass `""` for the process-global set. Hashes
+/// `title`+`body` only: every other [`Sop`] field is deterministically
+/// derived from `body` by [`parse_sop_content`], so content changes there
+/// are already covered without re-serialising each `Vec` by hand.
+///
+/// Truncated to 16 hex chars (64 bits) — this is a cheap drift-detection
+/// signal for a heartbeat payload, not a security hash; 64 bits is far more
+/// headroom than a realistic SOP-set count needs before a collision becomes
+/// plausible.
+fn fingerprint_sop_set(workspace_id: &str, sops: &[Sop]) -> String {
+    use sha2::{Digest, Sha256};
+
+    let mut entries: Vec<String> = sops
+        .iter()
+        .map(|s| {
+            let mut h = Sha256::new();
+            h.update(workspace_id.as_bytes());
+            h.update(b"\x1f");
+            h.update(s.title.as_bytes());
+            h.update(b"\x1f");
+            h.update(s.body.as_bytes());
+            format!("{:x}", h.finalize())
+        })
+        .collect();
+    entries.sort_unstable();
+
+    let mut combined = Sha256::new();
+    for e in &entries {
+        combined.update(e.as_bytes());
+        combined.update(b"\x1e");
+    }
+    format!("{:x}", combined.finalize())[..16].to_string()
+}
+
+/// Gateway-mode status piggyback for `heartbeat.rs`'s optional
+/// `sopCount`/`sopHash` fields (TD-341-adjacent status leg).
+pub(crate) struct SopStatusSnapshot {
+    pub sop_count: u32,
+    pub sop_hash: String,
+}
+
+/// Cheap, read-only fingerprint of whatever SOP set(s) are ALREADY cached in
+/// memory. NEVER triggers a fetch, a disk read, or a control-plane
+/// round-trip: only reads [`CACHE`] (process-global, on-disk) and
+/// [`workspace_cache`] (per-workspace, control-plane-fetched under gateway
+/// `require_vk` mode) exactly as they stand. A cold tick — nothing resolved
+/// yet, or every entry past [`CACHE_TTL`] — returns `None`; the request path
+/// that actually needs the SOP set will (re)populate the cache as it always
+/// does, and the FOLLOWING heartbeat tick picks that up for free, at zero
+/// extra cost to this loop.
+///
+/// Combines BOTH sources unconditionally rather than branching on
+/// `gateway::requires_vk_only()`: a shared gateway can legitimately have
+/// entries in EITHER or BOTH caches depending on request mix and mode
+/// history, and this must never under-report just because a mode flag
+/// doesn't match a caller's assumption about which cache is "the" active
+/// one.
+///
+/// This is a GATEWAY-LEVEL AGGREGATE across every workspace this process
+/// currently holds a fresh SOP set for — `sop_count` sums across all of
+/// them, `sop_hash` folds all of them into one fingerprint. It is a coarse
+/// "is this gateway holding policy, and did the aggregate change since the
+/// last heartbeat" health signal, deliberately NOT a per-workspace
+/// enforcement confirmation. A dashboard consumer must not read this as
+/// "workspace X's SOPs are in sync" — a change here can just as easily mean
+/// a DIFFERENT workspace's cache entry expired and repopulated at that tick.
+pub(crate) fn sop_status_snapshot() -> Option<SopStatusSnapshot> {
+    let mut fresh_sets: Vec<(String, Vec<Sop>)> = Vec::new();
+
+    {
+        let guard = CACHE.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(c) = guard.as_ref() {
+            if c.read_at.elapsed() < CACHE_TTL {
+                fresh_sets.push((String::new(), c.sops.clone()));
+            }
+        }
+    }
+    {
+        let cache = workspace_cache().lock().unwrap_or_else(|p| p.into_inner());
+        let mut ws_ids: Vec<&String> = cache.keys().collect();
+        ws_ids.sort_unstable(); // deterministic iteration order
+        for ws in ws_ids {
+            let c = &cache[ws];
+            if c.read_at.elapsed() < CACHE_TTL {
+                fresh_sets.push((ws.clone(), c.sops.clone()));
+            }
+        }
+    }
+
+    if fresh_sets.is_empty() {
+        return None;
+    }
+
+    let sop_count: u32 = fresh_sets.iter().map(|(_, s)| s.len() as u32).sum();
+    let mut per_set_hashes: Vec<String> = fresh_sets
+        .iter()
+        .map(|(ws, sops)| fingerprint_sop_set(ws, sops))
+        .collect();
+    per_set_hashes.sort_unstable();
+
+    use sha2::{Digest, Sha256};
+    let mut combined = Sha256::new();
+    for h in &per_set_hashes {
+        combined.update(h.as_bytes());
+        combined.update(b"\x1e");
+    }
+    Some(SopStatusSnapshot {
+        sop_count,
+        sop_hash: format!("{:x}", combined.finalize())[..16].to_string(),
+    })
+}
+
 /// Every governance-context field for `role`, resolved against an explicit
 /// SOP set — the single-resolution twin of calling every `*_for_role`
 /// function separately (each of which independently calls the
@@ -2812,5 +2927,119 @@ mod cross_language_fixture_tests {
         assert_eq!(fm.scope_paths, vec!["packages/proxy", "infra/"]);
         assert_eq!(fm.roles, vec!["deployer"]);
         assert!(fm.body.starts_with("## Deploy policy"));
+    }
+}
+
+#[cfg(test)]
+mod sop_status_snapshot_tests {
+    use super::*;
+
+    fn mk(title: &str, body: &str) -> Sop {
+        Sop {
+            risk_tier: None,
+            title: title.into(),
+            body: body.into(),
+            roles: Vec::new(),
+            deny_tools: Vec::new(),
+            allow_harnesses: Vec::new(),
+            plan_steps: Vec::new(),
+            scope_paths: Vec::new(),
+            review_before: Vec::new(),
+            requires_before: Vec::new(),
+            forbid_after: Vec::new(),
+            max_calls: Vec::new(),
+            forbid_with: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn fingerprint_sop_set_is_deterministic_and_order_independent() {
+        let a = vec![mk("A", "rule A"), mk("B", "rule B")];
+        let b = vec![mk("B", "rule B"), mk("A", "rule A")];
+        assert_eq!(fingerprint_sop_set("ws_1", &a), fingerprint_sop_set("ws_1", &b));
+    }
+
+    #[test]
+    fn fingerprint_sop_set_changes_with_body_and_with_workspace_id() {
+        let base = vec![mk("A", "rule A")];
+        let different_body = vec![mk("A", "a different rule entirely")];
+        assert_ne!(
+            fingerprint_sop_set("ws_1", &base),
+            fingerprint_sop_set("ws_1", &different_body),
+            "changing a SOP's body must change the fingerprint"
+        );
+        assert_ne!(
+            fingerprint_sop_set("ws_1", &base),
+            fingerprint_sop_set("ws_2", &base),
+            "the same SOP content under a different workspace_id must fingerprint differently"
+        );
+    }
+
+    // CACHE and workspace_cache() are process-global statics shared across
+    // every test in this binary, with no reset API -- same class of problem
+    // heartbeat.rs's own tests document (search
+    // `_scenarios_run_sequentially_to_avoid_a_cross_test_race`). Consolidated
+    // into one #[test] using distinctive test-only workspace-id keys, and
+    // asserting INCREMENTAL effects (a count/hash delta after inserting one
+    // more entry) rather than exact totals, since other tests in this same
+    // binary may hold fresh cache entries under their own keys when this
+    // runs.
+    #[test]
+    fn sop_status_snapshot_scenarios_run_sequentially_to_avoid_a_cross_test_race() {
+        const WS_A: &str = "__test_sop_status_snapshot_ws_a__";
+        const WS_STALE: &str = "__test_sop_status_snapshot_ws_stale__";
+
+        // 1. A fresh per-workspace entry is included in the aggregate.
+        let before = sop_status_snapshot();
+        let before_count = before.as_ref().map(|s| s.sop_count).unwrap_or(0);
+        {
+            let mut cache = workspace_cache().lock().unwrap_or_else(|p| p.into_inner());
+            cache.insert(
+                WS_A.to_string(),
+                WorkspaceCached { sops: vec![mk("A", "rule A"), mk("B", "rule B")], read_at: Instant::now() },
+            );
+        }
+        let after_fresh = sop_status_snapshot().expect("at least one fresh entry exists now");
+        assert_eq!(
+            after_fresh.sop_count,
+            before_count + 2,
+            "the aggregate count must increase by exactly the number of SOPs just inserted"
+        );
+
+        // 2. A STALE per-workspace entry (past CACHE_TTL) is excluded.
+        {
+            let mut cache = workspace_cache().lock().unwrap_or_else(|p| p.into_inner());
+            cache.insert(
+                WS_STALE.to_string(),
+                WorkspaceCached {
+                    sops: vec![mk("C", "rule C")],
+                    read_at: Instant::now() - CACHE_TTL - Duration::from_secs(1),
+                },
+            );
+        }
+        let after_stale = sop_status_snapshot().expect("still at least the fresh entry from step 1");
+        assert_eq!(
+            after_stale.sop_count, after_fresh.sop_count,
+            "a stale (past-TTL) entry must not be counted"
+        );
+
+        // 3. The process-global cache path is additive too.
+        {
+            let mut guard = CACHE.lock().unwrap_or_else(|p| p.into_inner());
+            *guard = Some(Cached { sops: vec![mk("D", "rule D")], read_at: Instant::now() });
+        }
+        let after_global = sop_status_snapshot().expect("global cache entry now present");
+        assert_eq!(
+            after_global.sop_count,
+            after_fresh.sop_count + 1,
+            "the process-global cache's SOPs must additively contribute to the aggregate"
+        );
+
+        // Cleanup: leave the shared statics as this test found the
+        // workspace-scoped entries (the global CACHE slot is left as-is,
+        // matching this file's existing tests that touch it).
+        let mut cache = workspace_cache().lock().unwrap_or_else(|p| p.into_inner());
+        cache.remove(WS_A);
+        cache.remove(WS_STALE);
     }
 }
