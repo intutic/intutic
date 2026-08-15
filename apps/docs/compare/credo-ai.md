@@ -1,25 +1,28 @@
 # Intutic vs Credo AI
 
-Credo AI is an AI governance, risk, and compliance (GRC) platform. It helps organizations create AI policies, track model risk, and generate compliance reports. **Intutic enforces policies in real time at the tool-call level.**
+Credo AI is an AI governance, risk, and compliance (GRC) platform. Since July 2026 it also ships **Agent Governor**, a runtime enforcement feature — so this is no longer a pure governance-vs-enforcement comparison. The honest distinction is now maturity and breadth, not capability category.
 
-## Different Layers, Different Buyers
+## Different Layers, Overlapping at the Edge
 
-Credo AI owns the **governance system of record** — policy creation, risk assessment, audit documentation, and regulatory compliance workflows. Intutic sits in the **execution path** and enforces those policies on every tool call an AI agent makes.
+Credo AI's core is still the **governance system of record** — policy creation, risk assessment, audit documentation, and regulatory compliance workflows. Agent Governor extends that into the execution path: it hooks an agent harness at session start, before/after each tool call, and session end, and resolves each action to Allow / Block / Escalate / Advise, compiled from policy-as-code.
 
-**We enforce. They govern.**
+As of this writing it is a **Research Preview**, **Claude Code only**, with publicly reported scale in the low thousands of governed sessions and double-digit blocked actions — not the general-purpose, multi-harness enforcement Intutic runs today. Intutic's proxy sits in front of 19 coding-agent harnesses, enforces synchronously in-process (no round trip to a policy service), and has been the primary product surface rather than an extension of a governance platform.
+
+**Credo AI is adding an enforcement wing to a GRC platform. Intutic is an enforcement platform first.**
 
 ## Comparison
 
-| Capability | Intutic | Credo AI |
+| Capability | Intutic | Credo AI (incl. Agent Governor) |
 |-----------|---------|----------|
-| **Primary function** | Runtime enforcement (circuit breaker) | Governance, risk & compliance (GRC) |
-| **Where it sits** | In the tool-call path between agent and infrastructure | Above the execution layer — policy and audit |
-| **Enforcement** | Synchronous — BYPASS / ENHANCE / HIJACK / KILL, in-process | Policy definition and assessment — no runtime blocking |
-| **Scope** | AI coding agents (19 harness integrations) | All AI systems (models, pipelines, applications) |
-| **DLP & threat detection** | Secrets redaction, SQL injection, prompt injection | Risk scoring and bias detection |
+| **Primary function** | Runtime enforcement (circuit breaker) | Governance, risk & compliance (GRC), with a newer runtime-enforcement feature |
+| **Where it sits** | In the tool-call path between agent and infrastructure | Above the execution layer for GRC; Agent Governor adds an in-path hook per harness |
+| **Enforcement** | Synchronous — BYPASS / ENHANCE / HIJACK / KILL, in-process, all 19 harnesses | Agent Governor: Allow / Block / Escalate / Advise, Claude Code only, Research Preview |
+| **Enforcement maturity** | Production, primary product surface | New (July 2026), reported at low-thousands-of-sessions scale |
+| **Scope** | AI coding agents (19 harness integrations) | All AI systems for GRC; Agent Governor is single-harness today |
+| **DLP & threat detection** | Secrets redaction, SQL injection, prompt injection | Risk scoring and bias detection (GRC side) |
 | **Compliance output** | Enforcement audit logs (who, what, when, blocked/allowed) | Compliance reports, model cards, risk registers |
 | **Integration model** | Local proxy + sync daemon | Cloud platform + API |
-| **Custom rules** | WASM sandbox for domain-specific enforcement | Policy templates and assessment frameworks |
+| **Custom rules** | WASM sandbox for domain-specific enforcement | Policy templates and assessment frameworks; Agent Governor compiles policy-as-code |
 
 ## Better Together — What Actually Interoperates Today
 
@@ -46,6 +49,7 @@ This gives your compliance team the governance system of record they need, and y
 - You're building compliance documentation for regulators (EU AI Act, NIST, ISO 42001)
 - You need model risk scoring and bias assessment
 - You want a GRC system of record for all AI systems, not just coding agents
+- You're already invested in Credo AI's GRC platform and want to try enforcement without adding a second vendor — Agent Governor is worth evaluating for Claude Code specifically, with the caveat that it's a Research Preview today
 
 ---
 
