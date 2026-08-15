@@ -19,6 +19,7 @@ export {
   ExecutionMode,
   IncidentStatus,
   PlanLifecycleState,
+  PlanExecutionOutcome,
   SopLifecycleState,
   SopType,
   HookPhase,
@@ -125,6 +126,7 @@ export type {
 export {
   VALID_SOP_TRANSITIONS,
   ENFORCEMENT_BY_STATE,
+  VALID_PLAN_TRANSITIONS,
 } from './sop.js'
 
 export {
