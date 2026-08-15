@@ -2226,6 +2226,36 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         Vec::new()
     };
 
+    // ── Tool-poisoning redaction (TD-274) ────────────────────────────
+    //
+    // `ToolPoisoningDetector` (plugins/anomaly/detectors.rs) has read the
+    // corpus-validated patterns in `tool_poison.rs` since 2026-08-04, but only
+    // ever reported: the description it flagged still reached the model
+    // unchanged. This closes that gap the same way DLP closes its own
+    // (`TD-DLP-001`, immediately above) — mutate before `extract_tools`, keep
+    // `body_str`/`body_json`/`body_bytes` in sync, and never refuse the
+    // request over it: unlike a leaked credential, a poisoned description can
+    // be stripped and the tool call still makes sense without it.
+    //
+    // `ToolPoisoningDetector` still runs afterward, on the now-redacted
+    // `ctx.tools`, unchanged — defense-in-depth against a redaction gap, not
+    // the only place this is visible. Runs unconditionally, matching the
+    // detector's own posture: there is no enable flag for tool-poisoning
+    // detection either, so adding one only for redaction would be a narrower
+    // control on the mitigation than exists on the detection it mitigates.
+    {
+        let redacted_patterns = crate::tool_poison::redact_body(&mut body_json);
+        if !redacted_patterns.is_empty() {
+            body_str = serde_json::to_string(&body_json).unwrap_or(body_str);
+            body_bytes = axum::body::Bytes::from(body_str.clone().into_bytes());
+            tracing::warn!(
+                workspace_id = %workspace_id,
+                patterns = ?redacted_patterns,
+                "Tool poisoning: model-directed instructions redacted from a tool description before forwarding"
+            );
+        }
+    }
+
     // Check for break-glass override token in request headers
     let mut has_break_glass = false;
     if let Some(bg_token) = headers

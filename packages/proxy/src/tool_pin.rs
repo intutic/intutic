@@ -117,6 +117,28 @@ pub fn tool_objects(tools: &[serde_json::Value]) -> Vec<&serde_json::Value> {
     out
 }
 
+/// Mutable counterpart to [`tool_objects`], for a caller that needs to rewrite
+/// a tool object in place rather than only read it (`tool_poison::redact_body`
+/// — TD-274's mitigation half). Same three-shape unwrapping, kept here rather
+/// than duplicated a third time, for the reason `tool_objects`'s own doc
+/// comment gives: this file already carries the one place that walk is
+/// correct, after Gemini's nesting was missed here and in `proxy::extract_tools`
+/// on the same day.
+pub fn tool_objects_mut(tools: &mut [serde_json::Value]) -> Vec<&mut serde_json::Value> {
+    let mut out = Vec::with_capacity(tools.len());
+    for t in tools {
+        let is_gemini_wrapper = t.get("functionDeclarations").and_then(|d| d.as_array()).is_some();
+        if is_gemini_wrapper {
+            if let Some(decls) = t.get_mut("functionDeclarations").and_then(|d| d.as_array_mut()) {
+                out.extend(decls.iter_mut());
+            }
+        } else {
+            out.push(t);
+        }
+    }
+    out
+}
+
 /// Canonical signature of the tools a request advertises.
 ///
 /// Empty string when the request declares none, which is most of them — the
