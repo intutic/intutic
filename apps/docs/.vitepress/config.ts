@@ -122,6 +122,7 @@ sidebarGuide.push({
     { text: 'Custom Filters (Open-Core)', link: '/guide/wasm-rules' },
     { text: 'Graph Guardrails (Open-Core)', link: '/guide/graph-guardrails' },
     { text: 'Sandboxed Execution (Open-Core)', link: '/guide/sandboxed-execution' },
+    { text: 'Governance Controls Checklist (Open-Core)', link: '/guide/governance-controls' },
     { text: 'Prompt Commands: /fix & /draw (Open-Core)', link: '/guide/agent-commands' },
     // Routing ships in open-core. Enterprise builds already list this page under
     // 'Using Intutic' as 'Intelligent Model Routing (Cloud)', so this entry is
