@@ -213,15 +213,30 @@ struct HeartbeatBody {
     proxy_version: &'static str,
     #[serde(rename = "uptimeSeconds")]
     uptime_seconds: u64,
+    /// TD-341-adjacent status leg (gateway-mode only): a gateway-level
+    /// aggregate SOP count across every workspace this process currently
+    /// holds a fresh cache entry for — see `sops::sop_status_snapshot`.
+    /// `skip_serializing_if` omits the key entirely rather than sending a
+    /// JSON `null` when unavailable, matching this struct's existing
+    /// discipline for optional fields (`activeWorkspaces`/`litellmReachable`
+    /// don't exist as fields here at all, for the same reason).
+    #[serde(rename = "sopCount", skip_serializing_if = "Option::is_none")]
+    sop_count: Option<u32>,
+    #[serde(rename = "sopHash", skip_serializing_if = "Option::is_none")]
+    sop_hash: Option<String>,
 }
 
 /// Pure — no I/O, no global state — so the payload shape is unit-testable
 /// without a running server, same discipline as `gateway::token_allowed`.
-fn build_heartbeat_body(uptime_seconds: u64) -> HeartbeatBody {
+/// SOP status is passed in rather than read from inside this function, so
+/// purity holds regardless of what `sops::sop_status_snapshot` does.
+fn build_heartbeat_body(uptime_seconds: u64, sop_count: Option<u32>, sop_hash: Option<String>) -> HeartbeatBody {
     HeartbeatBody {
         status: "online",
         proxy_version: env!("CARGO_PKG_VERSION"),
         uptime_seconds,
+        sop_count,
+        sop_hash,
     }
 }
 
@@ -300,7 +315,12 @@ pub fn spawn_heartbeat_loop(http_client: Arc<reqwest::Client>, cfg: HeartbeatCon
         interval.tick().await; // don't fire immediately at boot; wait one full interval first
         loop {
             interval.tick().await;
-            let body = build_heartbeat_body(started.elapsed().as_secs());
+            let sop_status = crate::sops::sop_status_snapshot();
+            let body = build_heartbeat_body(
+                started.elapsed().as_secs(),
+                sop_status.as_ref().map(|s| s.sop_count),
+                sop_status.as_ref().map(|s| s.sop_hash.clone()),
+            );
             let token = current_token.read().await.clone();
             match http_client
                 .post(&heartbeat_url)
@@ -436,7 +456,7 @@ mod tests {
 
     #[test]
     fn heartbeat_body_reports_online_and_real_version() {
-        let body = build_heartbeat_body(42);
+        let body = build_heartbeat_body(42, None, None);
         assert_eq!(body.status, "online");
         assert_eq!(body.proxy_version, env!("CARGO_PKG_VERSION"));
         assert_eq!(body.uptime_seconds, 42);
@@ -447,10 +467,24 @@ mod tests {
         // Matches heartbeatSchema in
         // services/control-plane/src/routes/gatewayHeartbeat.ts —
         // status ∈ {"online","degraded"}, proxyVersion/uptimeSeconds present.
-        let json = serde_json::to_value(build_heartbeat_body(7)).unwrap();
+        let json = serde_json::to_value(build_heartbeat_body(7, None, None)).unwrap();
         assert_eq!(json["status"], "online");
         assert!(json["proxyVersion"].is_string());
         assert_eq!(json["uptimeSeconds"], 7);
+    }
+
+    #[test]
+    fn heartbeat_body_omits_sop_fields_when_none() {
+        let json = serde_json::to_value(build_heartbeat_body(1, None, None)).unwrap();
+        assert!(json.get("sopCount").is_none(), "None must omit the key, not null it");
+        assert!(json.get("sopHash").is_none(), "None must omit the key, not null it");
+    }
+
+    #[test]
+    fn heartbeat_body_includes_sop_fields_when_present() {
+        let json = serde_json::to_value(build_heartbeat_body(7, Some(3), Some("abc123".into()))).unwrap();
+        assert_eq!(json["sopCount"], 3);
+        assert_eq!(json["sopHash"], "abc123");
     }
 
     // Every scenario below touches process-global env vars, so — same
