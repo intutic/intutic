@@ -84,6 +84,7 @@ fn clean_ctx(sequence: Vec<String>) -> RequestContext {
         changes: Vec::new(),
         new_tool_calls: Vec::new(),
         injection_findings: Vec::new(),
+        injection_sources: Vec::new(),
         tool_contract_changed: false,
         harness: "claude-code".into(),
         allowed_harnesses: Vec::new(),
