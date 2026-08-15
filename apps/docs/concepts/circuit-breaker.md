@@ -9,7 +9,7 @@ The **circuit breaker** is the decision engine that evaluates every AI agent too
 
 **Design goals:**
 - Evaluation is in-process with no model call. Cost is measured per payload size in `packages/proxy/benches` — there is no single figure, because it is dominated by request size.
-- **Fail-closed** by default — if the check can't complete, block the request
+- **Fail-closed** by default for the proxy's connectivity to the control plane — if the model-request policy check can't complete, block the request (see [Proxy-side fail mode](#proxy-side-fail-mode)). This is a different guarantee from what happens *inside* a completed check: the hook gate's own per-check evaluation (DLP, SSO group policy, image provenance, and so on) fails **open** on an internal error — each check is independently wrapped so one broken detector degrades to "allowed," not "denied." Do not conflate the two.
 - **Graceful degradation** — if a backend is unavailable, fall back to the next tier
 - **Zero single points of failure** — Valkey cache and Postgres each provide a degradation layer
 
@@ -23,8 +23,11 @@ Two different paths evaluate a request, and it is worth keeping them apart.
 plane (`routes/evaluate.ts`) — the budget and loop-governance gates below.
 
 **Tool calls** are evaluated at the [hook gate](/concepts/enforcement-actions#how-a-verdict-is-decided),
-a separate endpoint with its own order of checks. Loop *detection* is different again: it is an
-anomaly detector running in-process in the proxy, not a control-plane call.
+a separate endpoint with its own order of checks — this is also where PCAS
+SSO-group privilege resolution runs (see [§3](#_3-pcas-policy-resolution)
+below), not the model-request path. Loop *detection* is different again: it
+is an anomaly detector running in-process in the proxy, not a control-plane
+call.
 
 The proxy-side model-request sequence:
 
@@ -44,12 +47,6 @@ Model request arrives at proxy (:4000)
      └────────┬───────┘
               │ pass
               ▼
-      ┌────────────────┐
-      │ 3. PCAS Policy │ ◀── Valkey cache (single GET on hit)
-      │   Resolution   │     Postgres query (one CTE on miss)
-      └────────┬───────┘
-               │
-               ▼
           Final verdict
 ```
 
@@ -111,7 +108,7 @@ it has no cache dependency to degrade.
 
 ## 3. PCAS policy resolution
 
-The most complex gate — resolves effective permissions for the user+agent pair by walking the organization policy hierarchy.
+The most complex gate — resolves effective permissions for the user+agent pair by walking the organization policy hierarchy. **This runs at the [hook gate](/concepts/enforcement-actions#how-a-verdict-is-decided) as part of tool-call evaluation** (`hookEvents.ts`'s SSO group policy check calls `pcasService.resolveSsoGroupPrivilege`) — it is not part of the model-request `/policy/check` path described above, which never calls into PCAS.
 
 **Resolution cascade:**
 
@@ -228,6 +225,21 @@ All circuit breaker state lives in Valkey for fast access:
 ---
 
 <!-- ENTERPRISE_ONLY_END -->
+
+## Continuous self-verification
+
+The circuit breaker's own controls are checked, not just trusted:
+
+- **Guard-liveness probes** re-run every guard against a violating and a
+  benign context every 15 minutes, so a control that stopped firing is
+  caught by the platform, not discovered in a postmortem. Results are
+  queryable at `GET /intutic/probes`. → Source:
+  [probes.rs](../../../packages/proxy/src/probes.rs)
+- **Silent-gate detection** flags a gate that has gone quiet — the *absence*
+  of expected activity, not a failed check — as its own finding, run hourly
+  alongside the rest of the scheduled governance sweep. A gate that silently
+  stops gating is an enforcement outage, and this is what catches it without
+  waiting for someone to notice nothing was blocked.
 
 ## Related
 
