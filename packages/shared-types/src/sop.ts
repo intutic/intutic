@@ -15,6 +15,8 @@ import type {
   ComplexityTier,
   RiskLevel,
   SopLifecycleState,
+  PlanLifecycleState,
+  PlanExecutionOutcome,
 } from './enums.js'
 
 // ─── SOP ─────────────────────────────────────────────────────────────
@@ -458,6 +460,8 @@ export interface PlanDeviation {
   expectedTool?: string
   actualTool?: string
   details?: string
+  /** When this deviation was recorded. Set by recordDeviation, not the caller. */
+  detectedAt?: string
 }
 
 /** Adherence score for a stored plan. */
@@ -469,6 +473,27 @@ export interface PlanAdherenceScore {
   adherencePercent: number
 }
 
+/**
+ * The valid lifecycle transitions for a stored plan.
+ *
+ * REJECTED is reachable only from PENDING_APPROVAL — a plan denied before
+ * execution ever starts. COMPLETED (via a closure action) is reachable
+ * from every non-terminal state, since a plan can be closed with or
+ * without ever having been formally approved, and with or without a
+ * deviation ever having flipped it to EXECUTING.
+ *
+ * @see HLD §3.4.1 — Stored plan compliance trail
+ */
+export const VALID_PLAN_TRANSITIONS: ReadonlyArray<{ from: PlanLifecycleState; to: PlanLifecycleState; description: string }> = [
+  { from: 'PENDING_APPROVAL', to: 'APPROVED', description: 'Human approves the plan' },
+  { from: 'PENDING_APPROVAL', to: 'REJECTED', description: 'Human rejects the plan before execution' },
+  { from: 'PENDING_APPROVAL', to: 'EXECUTING', description: 'A deviation is recorded before formal approval' },
+  { from: 'PENDING_APPROVAL', to: 'COMPLETED', description: 'Plan closed directly, no approval step required' },
+  { from: 'APPROVED', to: 'EXECUTING', description: 'First deviation recorded after approval' },
+  { from: 'APPROVED', to: 'COMPLETED', description: 'Plan closed after approval, no deviation ever recorded' },
+  { from: 'EXECUTING', to: 'COMPLETED', description: 'Execution finishes and the plan is closed' },
+] as const
+
 /** A stored plan artifact. */
 export interface StoredPlan {
   planId: string
@@ -477,12 +502,18 @@ export interface StoredPlan {
   createdBy: string
   approvedBy: string | null
   approvalTimestamp: string | null
-  harnessType: string
-  lifecycleState: string
-  steps: Record<string, unknown>[]
-  executionOutcome: string | null
-  deviationLog: PlanDeviation[]
   approvalRationale: string | null
+  rejectedBy: string | null
+  rejectedAt: string | null
+  rejectionRationale: string | null
+  closedBy: string | null
+  closedAt: string | null
+  closureRationale: string | null
+  harnessType: string
+  lifecycleState: PlanLifecycleState
+  steps: Record<string, unknown>[]
+  executionOutcome: PlanExecutionOutcome | null
+  deviationLog: PlanDeviation[]
 }
 
 // ─── Decision Mining (LLD #6 §4.7 / HLD §7.4) ──────────────────────

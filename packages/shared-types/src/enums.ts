@@ -199,6 +199,22 @@ export const PlanLifecycleState = {
 /** Union of all plan lifecycle state values. */
 export type PlanLifecycleState = typeof PlanLifecycleState[keyof typeof PlanLifecycleState]
 
+// ─── Plan Execution Outcome ──────────────────────────────────────────
+// HLD §3.4.1 — result category recorded when a plan is closed
+// (lifecycleState -> COMPLETED). Meaningful only in that state; null
+// otherwise — a REJECTED plan never executed, so it has no outcome.
+
+/** Result category for a closed (COMPLETED) stored plan. */
+export const PlanExecutionOutcome = {
+  SUCCESS: 'SUCCESS',
+  FAILED: 'FAILED',
+  PARTIAL: 'PARTIAL',
+  ABORTED: 'ABORTED',
+} as const
+
+/** Union of all plan execution outcome values. */
+export type PlanExecutionOutcome = typeof PlanExecutionOutcome[keyof typeof PlanExecutionOutcome]
+
 // ─── SOP Lifecycle State ─────────────────────────────────────────────
 // HLD §3.4, LLD #6 §4.2 — 7-state FSM: DRAFT → PENDING_REVIEW → GENERATED
 //   → HYPOTHESIZED → REFINED → VALIDATED → INVALIDATED
