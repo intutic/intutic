@@ -90,6 +90,7 @@ fn clean_ctx(sequence: Vec<String>) -> RequestContext {
         workflow_spend_usd: None,
         workflow_budget_usd: None,
         node: NodeIdentity::default(),
+        sandbox_attested: false,
     }
 }
 
