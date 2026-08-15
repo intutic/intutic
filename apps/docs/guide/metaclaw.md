@@ -22,6 +22,8 @@ The optimizer continuously monitors your SOP enforcement data and identifies rul
 - **Compliance scores** — The rate at which developer agent sessions violate or bypass specific rules.
 - **Trace logs** — The underlying token prompts and tool calls.
 
+An hourly background sweep runs an evaluation cycle for every eligible workspace automatically. This scheduled path is **proposal-only** — it always generates candidate proposals for human review, regardless of your workspace's auto-apply setting. Only a manually triggered cycle (below) can auto-apply a proposal, and only when your workspace has auto-apply enabled.
+
 ---
 
 ## Accessing the Optimizer
@@ -29,8 +31,8 @@ The optimizer continuously monitors your SOP enforcement data and identifies rul
 Unlike general SOP listings, the optimizer has a dedicated home. Click the **SOP Optimizer** sidebar link (under Governance & Policies) to access the compiler.
 
 ### 1. Manual Trigger
-While the optimizer runs nightly compiles in the background, you can trigger an immediate evaluation cycle by clicking the **Trigger Optimizer Cycle** button.
-- *Rate limits:* Trigger is restricted to once per hour per workspace.
+While the optimizer runs hourly compiles in the background, you can trigger an immediate evaluation cycle by clicking the **Trigger Optimizer Cycle** button.
+- *Rate limits:* Trigger is restricted to once per hour per workspace, independently of the background sweep's own hourly cadence.
 - *Report:* On complete, displays candidates evaluated, proposals created, and runs skipped.
 
 ---
