@@ -1063,4 +1063,59 @@ intutic daemon stop
 
 No options.
 
+---
+
+## `intutic rollback`
+
+List or restore file pre-images captured when a guard flagged a call and let
+it proceed (TD-328). This is the *restore* half of the mechanism — the
+*capture* half runs automatically inside the generated harness hook when a
+`warn`-tier guard fires, if capture is enabled.
+
+```bash
+intutic rollback              # list captured pre-images
+intutic rollback --id <id>    # restore one
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--list` | List captured pre-images. The default when `--id` is omitted. |
+| `--id <id>` | Restore the named pre-image. |
+
+**Capture is opt-in and narrowly scoped** — set
+`"captureRollbackPreImages": true` in `.intutic/config.json`. It's off by
+default because it stores copies of flagged files locally. It only captures
+on the `warn` enforcement tier: a `KILL`ed call never executes (nothing to
+revert), and a `require`-tier violation is refused before it runs — capture
+exists for the one case where a call was flagged *and allowed to proceed
+anyway*, so there's a "before" worth keeping. Bounded to 2 MiB per file and
+50 retained entries.
+
+**What it does:**
+
+- With no `--id`: lists every captured pre-image (id, capture time, tool,
+  target path, byte size or "file did not exist") and prints the restore
+  command for each.
+- With `--id <id>`: restores exactly that pre-image and nothing else — there
+  is no `--all` and no implicit "latest". Before restoring, the *current*
+  contents of the target are themselves captured as a new pre-image, so the
+  restore is itself undoable. The restore is appended to the same
+  `.intutic/events/hook-events.jsonl` log the gate writes to
+  (`tool_reverted`), so the audit trail reads "flagged → allowed →
+  reverted", not a file that silently changed back. If the pre-image's
+  stored blob was evicted by the retention ceiling, the command refuses
+  rather than performing a partial restore.
+
+**Examples:**
+
+```bash
+# See what's available to restore
+intutic rollback
+
+# Restore a specific one (id comes from the list above)
+intutic rollback --id a1b2c3d4e5f60718
+```
+
 
