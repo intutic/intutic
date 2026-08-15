@@ -250,8 +250,27 @@ pub struct RequestContext {
     /// input, and copying it into telemetry, notifications and sibling agent
     /// context would propagate the payload to exactly the places the detector
     /// exists to protect.
+    ///
+    /// Deduplicated by pattern name across the whole body, same as the old
+    /// whole-body `injection::scan` this now derives from —
+    /// `PromptInjectionDetector`'s reask threshold counts this list's
+    /// length, so adding source attribution (below) must never inflate it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub injection_findings: Vec<String>,
+    /// Which parts of the request contributed at least one injection match:
+    /// `"user_prompt"`, `"system_prompt"`, `"tool_result"`, or
+    /// `"tool_description"`. Deduplicated by source, not paired 1:1 with
+    /// `injection_findings` above.
+    ///
+    /// The distinction this exists for: a match in `tool_result` arrived via
+    /// content the agent fetched, not something the user typed — the
+    /// multi-agent-graph case `injection.rs`'s own module doc describes,
+    /// where one node's output becomes the next node's input and looks like
+    /// instructions from the orchestrator. A policy wanting to treat
+    /// untrusted-content injection more seriously than a user idly typing
+    /// "ignore my previous message" reads this field, not the count above.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub injection_sources: Vec<String>,
     /// True when the advertised tool definitions no longer match the pin
     /// recorded for this workspace on first use.
     ///
@@ -338,6 +357,7 @@ mod tests {
             tool_sequence: vec!["Glob".into(), "View".into()],
             denied_tools: vec![],
             injection_findings: vec![],
+            injection_sources: vec![],
             tool_contract_changed: false,
             harness: String::new(),
             allowed_harnesses: vec![],

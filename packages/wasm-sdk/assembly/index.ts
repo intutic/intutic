@@ -78,6 +78,14 @@ export class RequestContext {
   denied_tools: string[] = [];
   /** Prompt-injection pattern names matched in this request. */
   injection_findings: string[] = [];
+  /**
+   * Which parts of the request contributed at least one injection match:
+   * "user_prompt", "system_prompt", "tool_result", or "tool_description".
+   * Deduplicated by source, not paired 1:1 with injection_findings above --
+   * a rule wanting to treat a tool_result-sourced match more seriously than
+   * a user typing "ignore my previous message" checks this, not the count.
+   */
+  injection_sources: string[] = [];
   /** Harness this request came through. Resolved from the route, not claimed. */
   harness: string = "";
   /** Harnesses the SOPs permit. Empty = unrestricted. */
@@ -344,6 +352,7 @@ function parseRequestContext(jsonBytes: Uint8Array): RequestContext {
 
   ctx.denied_tools = parseStringArray(jsonObj, "denied_tools");
   ctx.injection_findings = parseStringArray(jsonObj, "injection_findings");
+  ctx.injection_sources = parseStringArray(jsonObj, "injection_sources");
   ctx.allowed_harnesses = parseStringArray(jsonObj, "allowed_harnesses");
 
   trace("WASM: parsed primitive fields");

@@ -2021,6 +2021,7 @@ pub mod test_support {
             tool_sequence: vec![],
             denied_tools: vec![],
             injection_findings: vec![],
+            injection_sources: vec![],
             tool_contract_changed: false,
             harness: String::new(),
             allowed_harnesses: vec![],

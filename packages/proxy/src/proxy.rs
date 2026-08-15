@@ -2457,6 +2457,11 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // of this struct.
     let sandbox_attested = state.control_plane.is_sandbox_attested(&session_id).await;
 
+    // (pattern names, contributing sources) — see injection.rs::scan_body's
+    // doc comment for why these stay two separately-deduplicated lists
+    // rather than one zipped structure.
+    let injection_scan = crate::injection::scan_body(&body_json);
+
     let wasm_ctx = crate::wasm::context::RequestContext {
         session_id: session_id.clone(),
         workspace_id: workspace_id.clone(),
@@ -2508,11 +2513,16 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         forbid_with: gov.forbid_with,
         changes: change_manifest.clone(),
         new_tool_calls: new_tool_calls.clone(),
-        // Scanned over the whole request text, so injected content arriving
-        // via a tool result from an earlier node is seen too — which is the
-        // case that matters in a graph, where one node's output is the next
-        // node's input.
-        injection_findings: crate::injection::scan(&body_str),
+        // Source-attributed over the parsed body (user prompt, system
+        // prompt, tool result, tool description), so injected content
+        // arriving via a tool result from an earlier node is both seen and
+        // distinguishable from the user's own words — the case that matters
+        // in a graph, where one node's output is the next node's input.
+        // `injection_findings` stays deduplicated by pattern name exactly as
+        // the old whole-body scan produced it; `injection_sources` is the
+        // new, separately-deduplicated signal.
+        injection_findings: injection_scan.0,
+        injection_sources: injection_scan.1.iter().map(|s| s.as_str().to_string()).collect(),
         tool_contract_changed,
         // Resolved from the route, not asserted by the caller.
         harness: provider.harness_name().to_string(),
@@ -2790,6 +2800,46 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 }
             }
 
+            // Corroboration: fused, not flattened. `findings` was already
+            // scanned above for the single worst blocking finding — this asks
+            // a different question, whether >= 2 *distinct* detectors agree,
+            // which a single-winner scan cannot see. See
+            // `DetectorRegistry::corroborated_finding` for the escalation rule
+            // (Steer -> Reask, Reask -> Ask).
+            let corroborated =
+                crate::plugins::anomaly::DetectorRegistry::corroborated_finding(&findings);
+
+            // An escalation that lands on `Ask` blocks exactly like a kill for
+            // this request — `AnomalyFinding::to_verdict` maps the two
+            // identically, and so does the trace's verdict string above. It is
+            // handled here, beside the kill scan, rather than folded into the
+            // reask check below: escalating this far means the corroborating
+            // signals argue self-correction is not the right response, so it
+            // should not compete for — or consume — a reask attempt budget.
+            if let Some(c) = corroborated
+                .as_ref()
+                .filter(|c| c.disposition == crate::plugins::anomaly::Disposition::Ask)
+            {
+                if shadow_enforcement {
+                    tracing::info!(
+                        workspace_id = %workspace_id,
+                        detector = %c.detector_id,
+                        anomaly = %c.kind.as_str(),
+                        "SHADOW: would have blocked this request (corroborated)"
+                    );
+                } else {
+                    return json_error(
+                        StatusCode::FORBIDDEN,
+                        "policy_denied",
+                        &format!(
+                            "Request blocked by anomaly policy [{}]: {}",
+                            c.kind.as_str(),
+                            c.reason
+                        ),
+                    );
+                }
+            }
+
             // Reask: refuse this attempt, hand back the reason, let the agent retry.
             //
             // Checked *after* the kill scan, never before. A request that trips
@@ -2807,9 +2857,30 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // would mean a workspace leaving shadow mode arrives with its
             // agents already part-way to a hard block for corrections nobody
             // ever asked them to make.
-            if let Some(r) = crate::plugins::anomaly::DetectorRegistry::reask_finding(&findings)
-                .filter(|_| !shadow_enforcement)
-            {
+            //
+            // A corroborated Steer -> Reask escalation (two agreeing detectors,
+            // neither individually past its own bar) competes here against the
+            // plain scan rather than overriding it, so a genuinely worse plain
+            // reask is never masked by a milder corroborated one. Either way
+            // the candidate funnels through the same block below, which is how
+            // it inherits shadow-mode filtering, the per-detector reask
+            // counter, and `detector_findings` persistence for free instead of
+            // duplicating any of it.
+            let corroborated_reask = corroborated
+                .filter(|c| c.disposition == crate::plugins::anomaly::Disposition::Reask);
+            let plain_reask =
+                crate::plugins::anomaly::DetectorRegistry::reask_finding(&findings).cloned();
+            let reask_candidate = match (plain_reask, corroborated_reask) {
+                (Some(p), Some(c)) => Some(if c.kind.severity() > p.kind.severity() {
+                    c
+                } else {
+                    p
+                }),
+                (Some(p), None) => Some(p),
+                (None, Some(c)) => Some(c),
+                (None, None) => None,
+            };
+            if let Some(r) = reask_candidate.filter(|_| !shadow_enforcement) {
                 // Keyed on the DETECTOR, not the kind.
                 //
                 // It was the kind, and that was a real defect: five detectors

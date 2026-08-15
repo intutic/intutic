@@ -62,6 +62,7 @@ export type {
   TraceDetail,
   TraceFilters,
   TraceStep,
+  TraceFindingSummary,
 } from './finops.js'
 
 

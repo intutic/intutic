@@ -150,6 +150,7 @@ rule author ends up not knowing that `forbid_after`, `changes` or
 | `model` | `string` | Model the agent asked for. |
 | `harness` | `string` | The agent that sent it — `claude-code`, `cursor`, … |
 | `estimated_input_tokens` | `i32` | Prompt size for this turn. |
+| `sandbox_attested` | `bool` | Whether this session's sandbox proved the proxy is its only egress path. Session-scoped, not per-call — once true, every subsequent request in the session reads `true`. `false` (never absent) until attestation happens or if the session isn't sandboxed at all. See [Sandbox attestation](/guide/graph-guardrails#sandbox-attestation) for how it's set and what it does and doesn't prove. |
 
 ### Tools
 
@@ -167,7 +168,8 @@ rule author ends up not knowing that `forbid_after`, `changes` or
 | Field | Type | What it is |
 | :--- | :--- | :--- |
 | `dlp_findings` | `DlpFinding[]` | Secrets and sensitive data matched in this request. **Carries no position in the tool sequence** — see `forbid_with` below. |
-| `injection_findings` | `string[]` | Prompt-injection pattern matches. Pattern matches produce false positives; prefer `REASK` over `KILL`. |
+| `injection_findings` | `string[]` | Prompt-injection pattern matches, deduplicated by pattern name. Pattern matches produce false positives; prefer `REASK` over `KILL`. |
+| `injection_sources` | `string[]` | Which parts of the request contributed at least one match in `injection_findings` — `user_prompt`, `system_prompt`, `tool_result`, `tool_description`. Deduplicated by source, not paired 1:1 with `injection_findings`: a rule wanting to treat a `tool_result`-sourced match more seriously than a user typing "ignore previous instructions" checks this, not the count. Empty when nothing matched. |
 | `changes` | `ChangeEntry[]` | The change manifest — what this run has written. |
 
 ### Policy, from the SOP front matter

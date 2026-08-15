@@ -525,6 +525,68 @@ impl DetectorRegistry {
             .find(|f| matches!(f.disposition, Disposition::Ask))
     }
 
+    /// Fused, not flattened: the escalated finding when independent detectors
+    /// corroborate, if any.
+    ///
+    /// [`Self::blocking_finding`] and [`Self::reask_finding`] each surface the
+    /// single worst finding on its own axis — neither can see that two
+    /// *different* detectors independently flagged the same request, because
+    /// picking a winner is exactly what discards that fact. Two distinct
+    /// heuristics agreeing is stronger evidence than either alone, even when
+    /// neither individually cleared the bar for its next disposition.
+    ///
+    /// When at least 2 distinct `detector_id`s report a finding at
+    /// [`Severity::Medium`] or worse, this escalates the most severe
+    /// [`Disposition::Steer`] or [`Disposition::Reask`] finding among the
+    /// corroborating set by exactly one rung — `Steer` becomes `Reask`,
+    /// `Reask` becomes `Ask` — and returns a clone carrying the bump, its
+    /// reason annotated with how many other detectors agreed. `Kill` and `Ask`
+    /// findings are excluded from the pool that can *supply* the escalated
+    /// finding (blocking already fires on its own, and a hold does not need
+    /// help from a second signal), but still count toward the >= 2 threshold —
+    /// a corroborating `Kill` is still corroboration.
+    ///
+    /// Detectors return `Some`/`None`, never a graded score, so how many
+    /// independently agree is the only additional signal observable here —
+    /// not stacked confidence, which no detector reports. That is the honest
+    /// primitive: this counts agreement, it does not invent precision.
+    pub fn corroborated_finding(findings: &[AnomalyFinding]) -> Option<AnomalyFinding> {
+        let mut corroborating_ids: Vec<&'static str> = findings
+            .iter()
+            .filter(|f| f.kind.severity() >= Severity::Medium)
+            .map(|f| f.detector_id)
+            .filter(|id| !id.is_empty())
+            .collect();
+        corroborating_ids.sort_unstable();
+        corroborating_ids.dedup();
+        if corroborating_ids.len() < 2 {
+            return None;
+        }
+
+        let worst = findings
+            .iter()
+            .filter(|f| f.kind.severity() >= Severity::Medium)
+            .filter(|f| matches!(f.disposition, Disposition::Steer | Disposition::Reask))
+            .max_by_key(|f| f.kind.severity())?;
+
+        let mut escalated = worst.clone();
+        escalated.disposition = match worst.disposition {
+            Disposition::Steer => Disposition::Reask,
+            Disposition::Reask => Disposition::Ask,
+            // Unreachable given the filter above, kept exhaustive rather than
+            // `unreachable!()` so a future disposition variant fails to
+            // compile here instead of panicking in production.
+            other @ (Disposition::Ask | Disposition::Kill) => other,
+        };
+        escalated.reason = format!(
+            "{} (corroborated: {} other independent detector{} also fired on this request)",
+            worst.reason,
+            corroborating_ids.len() - 1,
+            if corroborating_ids.len() - 1 == 1 { "" } else { "s" },
+        );
+        Some(escalated)
+    }
+
     /// Run every detector and return all findings, most severe first.
     ///
     /// All detectors run rather than short-circuiting on the first hit: a
@@ -1350,5 +1412,109 @@ mod coverage_tests {
         let blocking = DetectorRegistry::blocking_finding(&findings).expect("must block");
         assert_eq!(blocking.kind, AnomalyKind::DataExfiltration);
         assert_eq!(blocking.reason, "higher severity");
+    }
+
+    /// A lone finding is not corroboration, no matter its severity or
+    /// disposition — the whole primitive is *agreement between distinct
+    /// detectors*, and one detector cannot agree with itself.
+    #[test]
+    fn a_single_finding_does_not_corroborate() {
+        let mut steer = AnomalyFinding::steer(AnomalyKind::ToolAbuse, "advisory", 0.9);
+        steer.detector_id = "tool_diversity_collapse";
+        assert!(DetectorRegistry::corroborated_finding(&[steer]).is_none());
+    }
+
+    /// Two findings from the SAME detector id are not corroboration either —
+    /// `detector_id` is deduplicated before counting, so a detector that
+    /// somehow fired twice in one evaluation must not look like two detectors
+    /// agreeing.
+    #[test]
+    fn duplicate_detector_ids_do_not_corroborate() {
+        let mut a = AnomalyFinding::steer(AnomalyKind::ToolAbuse, "first", 0.9);
+        a.detector_id = "tool_diversity_collapse";
+        let mut b = AnomalyFinding::steer(AnomalyKind::ToolAbuse, "second", 0.6);
+        b.detector_id = "tool_diversity_collapse";
+        assert!(DetectorRegistry::corroborated_finding(&[a, b]).is_none());
+    }
+
+    /// Two distinct detectors agreeing at Steer escalates the worse one to
+    /// Reask — a judgement two independent heuristics both reached is treated
+    /// as more than either alone, even though neither cleared its own bar.
+    #[test]
+    fn two_distinct_steers_escalate_to_reask() {
+        let mut a = AnomalyFinding::steer(AnomalyKind::ToolAbuse, "wasteful pattern", 0.7);
+        a.detector_id = "tool_diversity_collapse";
+        let mut b = AnomalyFinding::steer(AnomalyKind::TokenWaste, "verbose output", 0.5);
+        b.detector_id = "context_growth";
+
+        let escalated = DetectorRegistry::corroborated_finding(&[a, b])
+            .expect("two distinct steers at >= Medium severity must corroborate");
+        assert_eq!(escalated.disposition, Disposition::Reask);
+        // ToolAbuse (High) outranks TokenWaste (Medium) — the worse of the two
+        // supplies the escalated finding.
+        assert_eq!(escalated.kind, AnomalyKind::ToolAbuse);
+        assert!(
+            escalated.reason.contains("corroborated"),
+            "the escalated reason must say why it escalated: {:?}",
+            escalated.reason,
+        );
+    }
+
+    /// One rung, not straight to a hold: two agreeing Reask findings escalate
+    /// to Ask, never past it. Corroboration argues the signal is stronger, not
+    /// that it becomes a declared condition — only `review_before:` may raise
+    /// an `ask` per `AnomalyFinding::ask`'s own contract.
+    #[test]
+    fn two_distinct_reasks_escalate_to_ask_not_further() {
+        let mut a = AnomalyFinding::reask(AnomalyKind::LoopDetected, "spinning", 0.6);
+        a.detector_id = "consecutive_repeat";
+        let mut b = AnomalyFinding::reask(AnomalyKind::LoopDetected, "cycling", 0.55);
+        b.detector_id = "ping_pong_cycle";
+
+        let escalated = DetectorRegistry::corroborated_finding(&[a, b])
+            .expect("two distinct reasks must corroborate");
+        assert_eq!(escalated.disposition, Disposition::Ask);
+    }
+
+    /// Severity below Medium never counts toward the threshold, matching the
+    /// plan's own bar — a corroborating pair of low-severity advisories is not
+    /// the same signal as two detectors independently flagging something the
+    /// taxonomy already treats as serious.
+    #[test]
+    fn below_medium_severity_does_not_corroborate() {
+        // Every AnomalyKind is Medium or above by construction (see
+        // `AnomalyKind::severity`), so this pins that invariant rather than
+        // constructing an impossible finding — if a future kind introduces a
+        // Low/Informational severity, this test starts failing loudly instead
+        // of the corroboration threshold silently admitting it.
+        for kind in ALL_KINDS {
+            assert!(
+                kind.severity() >= Severity::Medium,
+                "{kind:?} is below Medium — corroborated_finding's threshold check \
+                 must be revisited for it",
+            );
+        }
+    }
+
+    /// A `Kill` finding counts toward the >= 2 threshold — corroboration is
+    /// about *agreement*, and a kill is still a detector firing — but it is
+    /// excluded from the pool that can supply the escalated finding, since a
+    /// kill already blocks on its own and does not need help from a second
+    /// signal.
+    #[test]
+    fn a_kill_counts_toward_the_threshold_but_never_supplies_the_escalation() {
+        let mut killer = AnomalyFinding::kill(AnomalyKind::DataExfiltration, "credentials");
+        killer.detector_id = "taint_cooccurrence";
+        let mut steer = AnomalyFinding::steer(AnomalyKind::ToolAbuse, "advisory", 0.8);
+        steer.detector_id = "tool_diversity_collapse";
+
+        let escalated = DetectorRegistry::corroborated_finding(&[killer, steer])
+            .expect("the kill must still count toward corroboration");
+        assert_eq!(
+            escalated.disposition,
+            Disposition::Reask,
+            "the steer, not the kill, must be the one escalated",
+        );
+        assert_eq!(escalated.kind, AnomalyKind::ToolAbuse);
     }
 }
