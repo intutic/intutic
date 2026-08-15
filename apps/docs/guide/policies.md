@@ -85,6 +85,53 @@ How the enforcement action is communicated:
 
 ---
 
+## Network Egress Control
+
+While DLP and PCAS govern *what the model sees*, egress control governs
+*where the agent's traffic can go at all* — a guardrail alongside them,
+not a special case of either.
+
+Set the posture once per workspace and it reaches every proxy — they
+hot-reload it within roughly 30 seconds, no restart needed.
+
+| Mode | Behavior |
+|---|---|
+| **Off** (default) | The proxy mediates AI traffic but denies nothing. No egress control — each proxy stays on its own local config. |
+| **Monitor** | Nothing is blocked, but every connection that would be denied under Enforce is logged and counted. Use it to measure blast radius before committing. |
+| **Enforce** | Destinations not on the allow list are denied (403, no tunnel). AI providers are always intercepted, never blocked. |
+
+The **allow list** is one entry per line — an exact host
+(`api.internal.corp`), a `.suffix` domain (`.internal.corp`), or a
+CIDR/IP (`10.0.0.0/8`) — unioned with each developer's local allow
+entries. AI providers and DNS are always permitted regardless of mode.
+
+This is the *proxy-layer* half of egress control — it governs traffic the
+proxy actually sees. It does not, on its own, stop an agent from routing
+around the proxy entirely. Pair it with `intutic enforce` on the host
+(a default-deny firewall that makes the proxy the *only* path off the
+machine) to close that gap — see
+[Egress Enforcement & Runtime Isolation](/guide/how-it-works#egress-enforcement-runtime-isolation-opt-in)
+and the [CLI reference](/reference/cli#intutic-enforce).
+
+## Sandboxed Execution
+
+A workspace-level requirement that agents run inside an isolated runtime —
+a container or Firecracker microVM whose only egress is the governing
+proxy — enforced by the CLI on `intutic exec`.
+
+| Requirement | Behavior |
+|---|---|
+| **Off** (default) | Agents run on the host as normal. Developers can still opt in with `intutic exec --sandbox`. |
+| **Recommend** | An un-sandboxed `intutic exec` still runs, but prints a warning nudging the developer to add `--sandbox`. |
+| **Require** | An un-sandboxed `intutic exec` is refused — the developer must re-run with `--sandbox`. |
+
+This is a client-side, advisory layer: a determined developer can bypass
+it by not using `intutic exec` at all. See
+[Sandboxed Execution](/guide/sandboxed-execution) for the backends
+(containers today, Firecracker microVMs where KVM is available — with
+its own maturity caveat), what they actually isolate, and what platforms
+this does and does not cover.
+
 ## SOP Synchronization
 
 When you run `intutic connect`, the sync daemon keeps your workspace aligned with the control plane:
@@ -102,5 +149,6 @@ See [How It Works](/guide/how-it-works) for the full sync daemon architecture.
 
 - [Agent Guidelines (SOPs)](/guide/sops) — Managing governance rules
 - [How It Works](/guide/how-it-works) — Architecture and enforcement flow
+- [Sandboxed Execution](/guide/sandboxed-execution) — Backends, platform coverage, and the client-side-advisory caveat
 - [Core Concepts](/guide/concepts) — PCAS actions, anomaly types, risk tiers
 - [Integrations Overview](/integrations/overview) — How policies are applied per harness

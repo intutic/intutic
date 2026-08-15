@@ -191,7 +191,12 @@ enforcement, so bypass is not possible rather than merely detected:
   container today, a Firecracker microVM where KVM is available — with a dropped
   capability set, a read-only root filesystem, resource caps, and its egress
   locked to the proxy. The agent cannot reach the network except through
-  governance, and cannot alter the firewall it runs behind.
+  governance, and cannot alter the firewall it runs behind. The container
+  backend is the one to reach for by default; the Firecracker backend boots on
+  real KVM but has not yet been validated end-to-end for an agent running to
+  completion inside it — see [Sandboxed Execution](/guide/sandboxed-execution)
+  for the full backend-by-backend breakdown, what each does and doesn't cover,
+  and the platforms this does and doesn't reach.
 
 Both are off by default (no change to an existing install) and are described in
 LLD #63.

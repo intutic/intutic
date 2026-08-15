@@ -60,7 +60,7 @@ Intutic's circuit breaker evaluates every tool call against your policy stack. H
 | 🏭 **Production writes** | Database mutations against prod connections are blocked or routed to review queue |
 | 🔀 **Unauthorized git ops** | Force pushes, branch deletions, and pushes to protected branches are killed |
 | 💸 **Budget overruns** | Token spend exceeding session ceilings triggers automatic session suspension |
-| 🌐 **Unapproved API calls** | Outbound HTTP to non-allowlisted domains is blocked at the proxy layer |
+| 🌐 **Unapproved API calls** | Outbound HTTP to non-allowlisted domains is blocked at the proxy layer, and `intutic enforce` closes the escape hatch — a host firewall that makes the proxy the *only* path off the machine |
 | 🧩 **MCP tool violations** | Calls to unapproved MCP servers or tools are intercepted before execution |
 | 💉 **SQL injection** | Destructive SQL patterns (DROP, TRUNCATE, DELETE without WHERE) are caught and blocked |
 

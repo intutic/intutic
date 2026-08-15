@@ -18,6 +18,7 @@ Intutic defends against three categories of threat:
 | **Agent misuse** | AI agent executes destructive tool calls (file deletion, credential exposure, unauthorized API calls) | Real-time SOP evaluation with BYPASS/ENHANCE/HIJACK/KILL verdicts via the [circuit breaker](/guide/how-it-works) |
 | **Credential leakage** | API keys, tokens, or secrets exfiltrated through agent output or prompt injection | DLP scanning in the proxy hot path; secrets detected and redacted before reaching the LLM |
 | **Unauthorized access** | Rogue agents or developers bypassing governance controls | Harness config drift detection with auto-revert, immutable local SOP rules, and local daily spend caps |
+| **Uncontrolled egress** | An agent (or a compromised dependency it pulls in) reaches the network by a path other than the governing proxy, so nothing above ever inspects the traffic | Proxy-level allow-list enforcement (`intutic_settings.egress.mode`), and — closing the gap where an agent simply doesn't route through the proxy at all — `intutic enforce`'s host-level default-deny firewall. See [Network Egress Control](/guide/policies#network-egress-control) |
 
 ---
 
