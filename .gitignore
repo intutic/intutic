@@ -138,3 +138,6 @@ apps/docs/public/logo-white.svg
 apps/docs/public/logo.svg
 apps/docs/public/logo-black.svg
 apps/docs/public/favicon.svg
+
+# Architect (architecture-decision copilot) CLI output
+graphify-out/
