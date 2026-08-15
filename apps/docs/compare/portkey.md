@@ -2,6 +2,8 @@
 
 Portkey is an AI gateway built for LLM observability, caching, and routing. It logs requests, tracks costs, and provides dashboards for monitoring model performance. **Intutic is a synchronous enforcement layer that blocks bad actions before they happen.**
 
+> Palo Alto Networks has announced an acquisition of Portkey, expected to fold it into the Prisma AIRS platform. As of this writing the deal has not been confirmed closed. Worth tracking if Portkey's roadmap or independence matters to your evaluation.
+
 ## The Core Difference
 
 Portkey **observes** LLM traffic after the fact. Intutic **intercepts** tool calls in real time and decides whether to allow, modify, or block them — before the request leaves the machine.

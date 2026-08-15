@@ -36,6 +36,25 @@ row above.
 :::
 <!-- ENTERPRISE_ONLY_END -->
 
+## Policy review — SOPs are files you commit, not records you edit through a UI
+
+An SOP is a plain markdown file with front matter, and it is enforced by the
+local proxy reading straight off disk (`.intutic/sops/*.md`) — not gitignored,
+so the default state is that a policy change goes through the exact same
+pull-request review your code does, before it ever takes effect. This is real
+today, not aspirational: the same directory ships to a Kubernetes cluster as a
+`proxy-sops` ConfigMap, so a policy PR merge and a production policy rollout
+can be the same event.
+
+**Where this is honestly incomplete:** the control plane's own SOP registry —
+lifecycle states, the judge/validation pipeline, anti-gaming checks — is a
+separate system from the files on disk. `intutic sops push` uploads a file's
+*content* to the control plane, but today it does not carry the file's real
+front-matter metadata (risk tier, version) faithfully, and there is no pull
+path back. If your policy review process depends on the control plane's
+lifecycle gates, treat the file-based review flow above as a complement to
+that, not a replacement for it, until the two are properly connected.
+
 ## What "Strong" and "Partial" mean here
 
 "Strong" means the control is enforced today, with a real mechanism behind

@@ -179,10 +179,12 @@ Beyond the three hot-path gates, the circuit breaker can invoke additional evalu
 | **SSL enforcement** | Scheduling, structural and logical checks against the session's SOP graph | Every gated tool call — **in shadow**: findings are recorded to `detector_findings` and the call proceeds |
 | **SSL compliance reporting** | Reports which SSL graph steps a session followed | On demand, `POST /api/v1/sessions/:id/ssl-audit` |
 | **DLP Scanner** | Regex-based secret/PII detection in prompts | Every request (proxy-side, pre-forwarding) |
+| **Tool-poisoning redaction** | Strips hidden/adversarial instructions from third-party MCP tool descriptions before the agent ever sees them (`[REDACTED_TOOL_POISON]`) — the same call still makes sense to the agent, it just loses the injected instruction | Every request, unconditionally (proxy-side, pre-forwarding) |
 | **SnipCompactor** | Token compression — collapse repetitions, truncate JSON | Every request (proxy-side, pre-forwarding) |
 
-The DLP scanner and SnipCompactor run **in the proxy** (Rust, on the developer's machine) — they
-never hit the control plane. SSL enforcement runs in the control plane, at the hook gate.
+The DLP scanner, tool-poisoning redaction, and SnipCompactor run **in the proxy** (Rust, on the developer's machine) — they never hit the control plane. SSL enforcement runs in the control plane, at the hook gate.
+
+**Measured, not assumed:** the detector behind tool-poisoning redaction was run against 10,753 real tool and parameter descriptions (14 BFCL v3 splits, 2,711 tool + 8,042 parameter descriptions) and produced **zero false positives**. It is deliberately narrow — 7 patterns tuned specifically for hidden instructions in *tool descriptions*, disjoint from the conversational jailbreak patterns the request-body scan looks for — so a legitimate tool with an unusual description doesn't get flagged for describing itself. Source: `packages/proxy/src/tool_poison.rs`, corpus at `packages/proxy/tests/corpus/tooldesc/tooldesc.jsonl`.
 
 ::: warning SSL enforcement records; it does not block
 It ships shadowed on purpose. The [promotion rule](/guide/graph-guardrails) requires advisory
