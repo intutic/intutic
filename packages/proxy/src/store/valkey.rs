@@ -1193,6 +1193,21 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
         read_baseline_hash(&mut conn, &global_key).await
     }
 
+    /// `GET session:sandbox_attested:{id}` under the same gated-timeout
+    /// pattern as `feature_flags`. Written by the control plane's
+    /// attest-sandbox handler with a 24h TTL — memory hygiene only, since
+    /// attestation is idempotent and never goes stale in the correctness
+    /// sense (a session attested once stays attested). Trade-off: a
+    /// legitimately long-running sandboxed session with no further requests
+    /// to refresh the key could see this read as `false` after 24h — fails
+    /// in the safe direction (false negative on a security gate), not
+    /// treated as a permanent design.
+    async fn is_sandbox_attested(&self, session_id: &str) -> bool {
+        self.get_gated(format!("session:sandbox_attested:{}", session_id))
+            .await
+            .is_some()
+    }
+
     async fn drain_notifications(&self, scope: NotifyScope, id: &str) -> Vec<String> {
         let mut conn = self.conn();
         // For graph scope the caller passes "{graph_id}:{node_id}", because
