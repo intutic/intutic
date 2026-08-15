@@ -12,19 +12,34 @@ import { join } from 'node:path'
 import { homedir } from 'node:os'
 
 /**
+ * Returns the Intutic config directory path for a given home directory.
+ *
+ * Split out from {@link getIntuticDir} so an elevated (`sudo`) process can
+ * resolve the REAL invoking user's config dir — via
+ * `elevation.ts`'s `invokingUserHome()` — without a second, drifting copy of
+ * this platform logic. `os.homedir()` under `sudo` resolves to root's home,
+ * not the real user's, which is exactly the bug the deleted
+ * `enterprise-install.ts` had (it read `~/.intutic/ca.crt` under `sudo` and
+ * always got ENOENT).
+ */
+export function getIntuticDirFor(home: string): string {
+  if (process.platform === 'win32') {
+    const appData = process.env.APPDATA
+    if (appData) return join(appData, 'intutic')
+    // Fallback for Windows if APPDATA is not set
+    return join(home, 'AppData', 'Roaming', 'intutic')
+  }
+  // macOS and Linux
+  return join(home, '.intutic')
+}
+
+/**
  * Returns the Intutic config directory path.
  * - macOS/Linux: ~/.intutic/
  * - Windows: %APPDATA%\intutic\
  */
 export function getIntuticDir(): string {
-  if (process.platform === 'win32') {
-    const appData = process.env.APPDATA
-    if (appData) return join(appData, 'intutic')
-    // Fallback for Windows if APPDATA is not set
-    return join(homedir(), 'AppData', 'Roaming', 'intutic')
-  }
-  // macOS and Linux
-  return join(homedir(), '.intutic')
+  return getIntuticDirFor(homedir())
 }
 
 /** Path to credentials file (~/.intutic/credentials.json). */

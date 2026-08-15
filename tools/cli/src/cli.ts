@@ -248,6 +248,40 @@ for (const [action, desc] of [
     })
 }
 
+enforceCmd
+  .command('report')
+  .description(
+    'Report locally recorded enforcement state (firewall/CA-trust/system-hooks) to the control plane. ' +
+      'No privilege needed — for when apply/remove ran elevated and could not reach stored credentials.',
+  )
+  .action(async () => {
+    const { runEnforce } = await import('./commands/enforce.js')
+    await runEnforce('report', {})
+  })
+
+// CA-trust rollout, Cursor system hooks, and Jamf/Intune MDM manifest
+// generation for a managed fleet. Deliberately named `enterprise install`,
+// not the old hyphenated `enterprise-install` — that name collides with
+// tools/scripts/intutic-enterprise-install.sh, an unrelated air-gapped
+// docker-compose installer. Does not touch the host firewall; see `enforce`.
+const enterpriseCmd = program
+  .command('enterprise')
+  .description('Enterprise fleet rollout: CA trust, Cursor system hooks, MDM manifests')
+
+enterpriseCmd
+  .command('install')
+  .description('Generate MDM manifests, and (if privileged) install system CA trust + Cursor system hooks')
+  .option('--proxy-url <url>', 'Proxy base URL embedded in generated hooks (default: $INTUTIC_PROXY_URL or http://localhost:4000)')
+  .option('--generate-mdm-only', 'Only write the MDM manifests; skip CA trust and system hooks (no privilege needed)')
+  .option('--mdm-output-dir <dir>', 'Directory to write generated MDM manifests to', './intutic-mdm')
+  .option('--skip-ca', 'Skip system-wide CA trust installation')
+  .option('--skip-hooks', 'Skip system-level Cursor hooks installation')
+  .option('--dev', 'Use local control plane (http://localhost:3001) when resolving workspace context')
+  .action(async (opts) => {
+    const { runEnterpriseInstall } = await import('./commands/enterprise.js')
+    await runEnterpriseInstall(opts)
+  })
+
 const envCmd = program
   .command('env')
   .description('Persist or clear the proxy base-URL environment variables')

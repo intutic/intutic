@@ -32,11 +32,29 @@ const HOOK_EVENTS = [
 ] as const
 
 /**
+ * Where system-level hooks.json lives for a given platform. Exported (not
+ * just inlined in `writeCursorHooks` below) so `mdmManifest.ts` can target
+ * the SAME path this file actually writes to — otherwise the MDM manifest's
+ * `target_path` and this file's real write path are two hand-typed copies
+ * of the same fact, which is exactly how they drifted before (see the
+ * `hookScriptPath` note below).
+ */
+export function systemHooksDirFor(platform: NodeJS.Platform): string {
+  return platform === 'darwin' ? '/Library/Application Support/Cursor' : '/etc/cursor'
+}
+
+/**
  * Build a Cursor hooks.json config object.
+ *
+ * Exported so `enterprise install` (`tools/cli/src/lib/mdmManifest.ts`) can
+ * populate its generated MDM hooks manifest from the SAME shape this file
+ * writes, rather than a hand-retyped literal — which is exactly how that
+ * manifest drifted before (it named `pre-tool-check.js`, this file's real
+ * script is `cursor-check.js`; see the note in `writeCursorHooks` below).
  *
  * @param hookScriptPath - Absolute path to the pre-tool-check script.
  */
-function buildHooksConfig(hookScriptPath: string) {
+export function buildHooksConfig(hookScriptPath: string) {
   return {
     _comment: 'Intutic governance hooks — auto-generated. DO NOT EDIT.',
     _lastSync: newIso(),
@@ -207,9 +225,13 @@ export async function writeCursorHooks(
   await atomicWriteJson(path.join(userCursorDir, 'hooks.json'), config)
   log.info({ action: 'cursor_hooks_written', level: 'user', path: userCursorDir }, 'Cursor user-level hooks written')
 
-  // 3. System-level: /etc/cursor/hooks.json (system administrator installation only)
+  // 3. System-level (system administrator installation only). macOS has no
+  // /etc/cursor convention Cursor itself reads — its own app-support
+  // directory is the closest machine-wide location. This branch was missing
+  // until now: the success log below always claimed "system-level hooks
+  // written" for a write that, on macOS, went to a path Cursor never reads.
   if (writeSystemLevel) {
-    const systemCursorDir = '/etc/cursor'
+    const systemCursorDir = systemHooksDirFor(process.platform)
     try {
       await fs.mkdir(systemCursorDir, { recursive: true })
       await atomicWriteJson(path.join(systemCursorDir, 'hooks.json'), config)
