@@ -626,6 +626,7 @@ snake_case on the wire:
 | `node_id`, `agent_role`, `graph_id` | string | Which node, what role, which graph |
 | `parent_session_id` | string | Who handed work to this node |
 | `depth` | int | Distance from the graph root |
+| `sandbox_attested` | bool | Did this session's sandbox prove proxy-only egress? See [Sandbox attestation](#sandbox-attestation) below |
 
 ## Node identity
 
@@ -662,6 +663,53 @@ Use them to reason about the graph. Never grant capability on the basis of
 `agent_role`: an agent that can set a header can claim any role, which would turn
 a governance rule into a privilege-escalation path. Authorisation stays bound to
 the virtual key.
+:::
+
+## Sandbox attestation
+
+`node_id` and `agent_role` are unverifiable by design — see the warning above.
+Sandbox attestation is a different, narrower signal: a session's [sandbox](/guide/sandboxed-execution)
+container can prove one specific server-observable fact — that it resolves the
+proxy as its only egress path — and a rule can gate on that proof directly via
+`ctx.sandbox_attested`.
+
+The container's own entrypoint calls the proxy's attest endpoint from inside
+its egress-locked network namespace, after capability drop and firewall
+install are already in effect. Only that call can set the flag; nothing the
+agent sends in a request can. The proxy checks a control-plane-backed cache on
+every request, so once a session attests, every subsequent request in that
+session reads `sandbox_attested: true` — no per-call attestation, and no way
+for one node to attest on another's behalf across sessions.
+
+```javascript
+// AssemblyScript — see Custom Filters for the full rule harness.
+if (ctx.agent_role == "deployer" && !ctx.sandbox_attested) {
+  return BLOCK; // this role may only deploy from an attested sandbox
+}
+```
+
+**Attestation is scoped to the whole session, not to individual nodes.** Graph
+identity (`node_id`, `graph_id`) is client-supplied and per-request, with no
+structural link to the session a sandbox attests — there is no per-node
+attest call, because a sandbox's egress lockdown is a whole-container
+property, not something one agent inside it can claim separately from its
+siblings. So every node claiming membership in an attested session's graph
+reads `sandbox_attested: true` identically, regardless of its own claimed
+`node_id` or `agent_role`.
+
+::: warning What this does not prove
+Attestation proves the sandbox resolved the proxy as its only egress
+path — it does **not** verify agent identity, and it does not prove the
+entrypoint's capability-drop and firewall-install steps ran correctly. A
+custom `--sandbox-image` built to skip those but still make the one
+attest call would still attest.
+
+It raises the floor of trust for *all* traffic in an attested session; it
+does not authenticate any individual node's claim within it. A rule that
+combines `sandbox_attested` with `agent_role` is still trusting an
+unverifiable role claim — attestation narrows what a compromised sandbox
+could have done to reach you, it does not tell you which agent inside it
+is talking.
 :::
 
 ## Related

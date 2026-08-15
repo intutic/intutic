@@ -272,6 +272,19 @@ pub struct RequestContext {
     /// unrestricted.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_harnesses: Vec<String>,
+    /// Whether this session's sandbox has proven it resolves the proxy as its
+    /// only egress path — see [`crate::store::ControlPlaneCache::is_sandbox_attested`].
+    ///
+    /// Server-derived, like `harness` above, not from anything the caller
+    /// asserts — trustworthy enough to gate on. But it is a session-scoped
+    /// fact, not a node-scoped one: every node claiming membership in an
+    /// attested session's graph reads `true` identically, regardless of its
+    /// claimed `node_id`/`agent_role`. It does NOT verify agent identity — a
+    /// compromised node inside an already-attested session can still claim
+    /// any `node_id`/`agent_role` string it wants. Combining this with
+    /// `agent_role` in a rule still trusts an unverifiable role claim.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub sandbox_attested: bool,
     /// Cost of the loop run this request belongs to, and the ceiling it was
     /// started with. `None` when there is no run, or nobody set a budget.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -328,6 +341,7 @@ mod tests {
             tool_contract_changed: false,
             harness: String::new(),
             allowed_harnesses: vec![],
+            sandbox_attested: false,
             workflow_spend_usd: None,
             workflow_budget_usd: None,
             node: NodeIdentity {
@@ -408,5 +422,27 @@ mod tests {
         let parsed: RequestContext = serde_json::from_value(legacy).unwrap();
         assert_eq!(parsed.node.depth, 0);
         assert!(parsed.node.node_id.is_empty());
+        // A payload from before sandbox attestation existed must default to
+        // unattested, not fail to parse — the same fail-closed shape
+        // `ControlPlaneCache::is_sandbox_attested` uses for a cache miss.
+        assert!(!parsed.sandbox_attested);
+    }
+
+    /// An attested session must reach the guest as `true`, and the field must
+    /// keep its exact wire name — a rename here would silently strand every
+    /// rule already deployed against it.
+    #[test]
+    fn sandbox_attested_round_trips_on_the_wire() {
+        let mut attested = ctx();
+        attested.sandbox_attested = true;
+        let v: serde_json::Value = serde_json::to_value(&attested).unwrap();
+        assert_eq!(v["sandbox_attested"], true);
+
+        let mut unattested = ctx();
+        unattested.sandbox_attested = false;
+        let v: serde_json::Value = serde_json::to_value(&unattested).unwrap();
+        // `skip_serializing_if` omits it at `false`, same as `tool_contract_changed` —
+        // a guest reading a missing key must still see the fail-closed default.
+        assert!(v.as_object().unwrap().get("sandbox_attested").is_none());
     }
 }

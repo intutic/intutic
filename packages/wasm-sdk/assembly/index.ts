@@ -82,6 +82,19 @@ export class RequestContext {
   harness: string = "";
   /** Harnesses the SOPs permit. Empty = unrestricted. */
   allowed_harnesses: string[] = [];
+  /**
+   * Did this session's sandbox prove it resolves the proxy as its only
+   * egress path? Server-derived, like `harness` above — not claimed by the
+   * caller, so it is trustworthy enough to gate on.
+   *
+   * Session-scoped, not node-scoped: every node claiming membership in an
+   * attested session's graph reads `true` identically, regardless of its
+   * claimed `node_id`/`agent_role`. This does NOT verify agent identity — a
+   * compromised node inside an already-attested session can still claim any
+   * `node_id`/`agent_role` string it wants. Combining this with `agent_role`
+   * in a rule still trusts an unverifiable role claim.
+   */
+  sandbox_attested: bool = false;
   /** Cost of the loop run this belongs to, and its ceiling. `-1` = unknown. */
   workflow_spend_usd: f64 = -1;
   workflow_budget_usd: f64 = -1;
@@ -319,6 +332,9 @@ function parseRequestContext(jsonBytes: Uint8Array): RequestContext {
 
   const harness = jsonObj.getString("harness");
   if (harness) ctx.harness = harness.toString();
+
+  const sandbox_attested = jsonObj.getBool("sandbox_attested");
+  if (sandbox_attested) ctx.sandbox_attested = sandbox_attested.valueOf();
 
   const workflow_spend_usd = numberOf(jsonObj, "workflow_spend_usd");
   if (!isNaN(workflow_spend_usd)) ctx.workflow_spend_usd = workflow_spend_usd;

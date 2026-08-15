@@ -940,6 +940,29 @@ impl ControlPlaneCache for NullControlPlaneCache {
     async fn drain_notifications(&self, _scope: NotifyScope, _id: &str) -> Vec<String> {
         Vec::new()
     }
+
+    /// Always `false`. No control plane means nothing ever attests a
+    /// sandbox — returning anything else would make every open-core session
+    /// look sandboxed regardless of reality.
+    async fn is_sandbox_attested(&self, _session_id: &str) -> bool {
+        false
+    }
+}
+
+#[cfg(test)]
+mod null_control_plane_cache_tests {
+    use super::*;
+
+    /// No control plane, no attestation — same fail-closed shape as
+    /// `auto_judge_active` and `break_glass_valid` on this struct: standalone
+    /// has nothing that could have attested a sandbox, so this must never be
+    /// mistaken for "confirmed unattested" carrying different weight than
+    /// "unknown". Both collapse to the same `false`.
+    #[tokio::test]
+    async fn standalone_never_attests_a_sandbox() {
+        let cp = NullControlPlaneCache;
+        assert!(!cp.is_sandbox_attested("ses_1").await);
+    }
 }
 
 #[cfg(test)]
