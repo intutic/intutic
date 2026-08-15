@@ -29,8 +29,6 @@ pub mod routing;
 /// Storage abstraction — Valkey-backed or in-memory (SPIKE, bandit slice only)
 pub mod store;
 pub mod tls_mitm;
-// WS-6NC: Network Controls + MDM Agent
-pub mod dns_interceptor;
 /// L1 egress enforcement — the deny decision consulted on every CONNECT (LLD #63)
 pub mod egress_policy;
 pub mod firewall;
@@ -42,7 +40,6 @@ pub mod k8s_token_writer;
 /// Local judge for self-hosted gateways (LLD #68 §2 phase 2)
 pub mod judge_local;
 pub mod local_spend;
-pub mod mdm_agent;
 
 // Phase 7: Intelligence Engine (LLDs #45, #47, #49)
 /// Response post-processor — appends governance notifications after LLM responses (LLD #45)

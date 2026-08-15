@@ -32,6 +32,8 @@ import { createApiClient } from '../lib/api.js'
 import { getActiveAgentProcesses } from '../lib/process.js'
 import { getAdapter } from '../harness/detector.js'
 import { printOnboardingGuide } from '../lib/onboarding.js'
+import { writeEnforcementState } from '../lib/enforcementState.js'
+import { reportDeviceState } from '../lib/deviceReport.js'
 import { newIso } from '@intutic/id'
 import type { SopFileHash, HarnessType, SyncConfigPayload, SyncSopEntry } from '@intutic/shared-types'
 import pc from 'picocolors'
@@ -766,6 +768,33 @@ export async function runConnect(opts: {
       })
     } catch (err) {
       log.warn(`Failed to send daemon heartbeat: ${err instanceof Error ? err.message : String(err)}`)
+    }
+
+    // g. Enforcement device visibility (post-strip gap #2, LLD #63
+    // hardening) — the "interval" half of "continuous compliance": this
+    // loop already runs unprivileged, as the real user, on a timer, and
+    // already just computed sslTrustStatus above for its own DR-healing
+    // purposes. Recording it as a user-scope CA-trust leg means every
+    // `intutic connect` session reports SOMETHING even on a machine that
+    // never ran `enforce apply` or `enterprise install` — best-effort,
+    // never fails the sync loop over it.
+    try {
+      await writeEnforcementState(
+        {
+          caTrust: {
+            installed: sslTrustStatus === 'trusted',
+            scope: 'user',
+            reportedAt: newIso(),
+          },
+        },
+        cliPkgVersion,
+      )
+      const deviceReport = await reportDeviceState({ dev: devMode })
+      if (!deviceReport.reported) {
+        log.dim(`[sync] Device report not sent: ${deviceReport.reason}`)
+      }
+    } catch (err) {
+      log.warn(`Failed to record/report device enforcement state: ${err instanceof Error ? err.message : String(err)}`)
     }
 
     const driftLabel = driftCount > 0 ? pc.yellow(` — ${driftCount} drift(s) detected`) : ''
