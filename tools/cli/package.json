@@ -41,6 +41,8 @@
     "@intutic/shared-types": "workspace:*",
     "@intutic/id": "workspace:*",
     "@intutic/logger": "workspace:*",
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/core": "^2.10.0",
     "@intutic/sync-daemon": "workspace:*",
     "chokidar": "^5.0.0",
     "commander": "^13",

@@ -12,6 +12,13 @@
  *
  * @module
  */
+// Must be first: OTel instrumentation needs to monkey-patch before other
+// modules import the libraries it instruments. No-op unless
+// OTEL_EXPORTER_OTLP_ENDPOINT is set. Deliberately not imported by
+// src/index.ts (the stdio JSON-RPC proxy) -- see instrumentation.ts's
+// own doc comment for why.
+import './instrumentation.js'
+
 import fs   from 'node:fs'
 import path from 'node:path'
 import os   from 'node:os'
