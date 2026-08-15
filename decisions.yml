@@ -1,0 +1,32 @@
+# Architect decision log for this repo.
+# Format: see ~/architect/src/shared/decisions.ts (DecisionNode).
+# AI may draft decisions as status: proposed; only a human may set status: accepted
+# (accepted requires decided_by — Architect enforces this in code, not just here).
+
+decisions:
+  - id: dec-001
+    title: "Sync-daemon must never write global Claude settings from tests"
+    decision: >
+      services/sync-daemon's updatePreToolUseHooks must not write to the developer's
+      global ~/.claude/settings.json when invoked from a test/CI context. The write is
+      guarded behind process.env.VITEST / INTUTIC_SKIP_GLOBAL_HOOKS.
+    rationale: >
+      Real incident (2026-08-15): claudeCodeHooks.test.ts called updatePreToolUseHooks
+      directly during `pnpm test`, which unconditionally merged mock SOP denies (Bash,
+      Write, rm -rf, drop database, ...) into the developer's real global
+      ~/.claude/settings.json on every test run, silently disabling shell/file tools in
+      unrelated Claude Code sessions on the same machine. The global-settings write path
+      also pointed PreToolUse hooks at a mkdtemp directory the test then deleted,
+      leaving dead fail-closed hooks behind. Fixed in commit "fix(sync-daemon): never
+      write global ~/.claude settings from test runs" by adding the VITEST /
+      INTUTIC_SKIP_GLOBAL_HOOKS guard.
+    decided_by: ishan
+    status: accepted
+    created_at: "2026-08-15"
+    prohibitions:
+      - id: proh-001
+        rule: freeze_component
+        subject: "claudeCodeHooks global settings write path"
+    scope:
+      paths:
+        - "services/sync-daemon/src/harness/claudeCodeHooks.ts"
