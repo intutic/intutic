@@ -993,7 +993,7 @@ impl Default for ScopePathDetector {
 /// naive `starts_with` would wrongly admit the second. Leading `./` is
 /// normalised because harnesses disagree about it, and comparison is
 /// case-insensitive to match every other matcher in this module.
-fn is_within_scope(target: &str, scopes: &[String]) -> bool {
+pub(crate) fn is_within_scope(target: &str, scopes: &[String]) -> bool {
     let norm = |s: &str| {
         s.trim_start_matches("./")
             .trim_start_matches('/')

@@ -99,6 +99,7 @@ sopsCmd
   .command('push <name>')
   .description('Push a local offline SOP folder to the central workspace')
   .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .option('--org', "Push as an org-wide floor (LLD #65 follow-up) instead of a workspace SOP -- applies to every workspace under the caller's org, in addition to that workspace's own SOPs")
   .action(async (name, opts) => {
     const { runSopsPush } = await import('./commands/sops.js')
     await runSopsPush(name, opts)

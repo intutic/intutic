@@ -17,7 +17,7 @@ async function getClient(dev?: boolean) {
   return createApiClient(controlPlaneUrl, creds.apiKey)
 }
 
-export async function runSopsPush(name: string, opts: { dev?: boolean }): Promise<void> {
+export async function runSopsPush(name: string, opts: { dev?: boolean; org?: boolean }): Promise<void> {
   log.header(`Intutic — Push SOP: ${name}`)
 
   const config = loadConfig()
@@ -69,6 +69,32 @@ export async function runSopsPush(name: string, opts: { dev?: boolean }): Promis
 
   // 4. Submit to control plane
   const client = await getClient(opts.dev)
+
+  // --org pushes a mandatory org-wide floor (migration 139) instead of a
+  // workspace SOP -- the server derives orgId from the caller's own
+  // workspace; this CLI never resolves or supplies one.
+  if (opts.org) {
+    try {
+      const res = await client.post<{ orgSopId?: string; orgId?: string }>(
+        '/api/v1/workspace/org-sops',
+        { title, markdown_content: cleanContent },
+      )
+
+      if (res && res.orgSopId) {
+        log.info(`Successfully promoted local SOP "${name}" to an org-wide floor!`)
+        log.field('Org SOP ID', res.orgSopId)
+        log.field('Title', title)
+      } else {
+        log.error('Failed to create org SOP on the control plane.')
+        process.exit(1)
+      }
+    } catch (err) {
+      log.error(`Failed to push org SOP to control plane: ${err instanceof Error ? err.message : String(err)}`)
+      process.exit(1)
+    }
+    return
+  }
+
   try {
     const res = await client.post<{ ok: boolean; sopId?: string }>(
       '/api/v1/sops',

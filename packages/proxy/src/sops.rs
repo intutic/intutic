@@ -54,11 +54,50 @@ const CACHE_TTL: Duration = Duration::from_secs(30);
 /// than truncating advice they can still read in full on disk.
 const MAX_INJECTED_BYTES: usize = 8 * 1024;
 
+/// Which policy floor this SOP represents (migration 139).
+///
+/// `Workspace` (the default) is every SOP this proxy has ever enforced.
+/// `Org` is a mandatory ceiling an org admin declared, applied IN ADDITION
+/// TO a workspace's own SOPs, never instead of them — see
+/// `collect_harnesses`/`collect_scope_paths`/`collect_plan_steps` for the
+/// three fields where "in addition to" means intersection rather than
+/// union (those three are enforced disjunctively: "passes if it matches
+/// ANY applicable SOP's set", so naively unioning an org allowlist with a
+/// workspace allowlist would widen permissions, the opposite of a floor).
+/// The other six declarative fields plus `risk_tier` are already
+/// restriction-monotonic under plain union, so an `Org`-scoped SOP needs
+/// no special handling there at all — it is just another entry in the
+/// slice `governance_fields_from` already unions over.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SopScope {
+    #[default]
+    Workspace,
+    Org,
+}
+
+impl SopScope {
+    /// Parse the wire value `GET /api/v1/workspace/sops-policy` sends
+    /// (`"org"` or `"workspace"`). Anything else -- including `None`, which
+    /// covers both an older control plane that predates this field and a
+    /// workspace SOP whose scope was never anything but the implicit
+    /// default -- resolves to `Workspace`, today's exact behaviour. Never
+    /// silently promotes an unrecognised value to `Org`: an unexpected
+    /// string here must not become a ceiling nobody declared.
+    fn from_wire(raw: Option<&str>) -> Self {
+        match raw {
+            Some("org") => SopScope::Org,
+            _ => SopScope::Workspace,
+        }
+    }
+}
+
 /// One policy document, the roles it applies to, and anything it forbids.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Sop {
     pub title: String,
     pub body: String,
+    /// `Workspace` (default) or `Org` -- see [`SopScope`].
+    pub scope: SopScope,
     /// Lowercased roles this applies to. Empty means every role.
     pub roles: Vec<String>,
     /// Tool names this SOP forbids for the roles it covers.
@@ -499,7 +538,7 @@ fn parse_rules(front: &str, key: &str) -> (Vec<(String, String, bool)>, Vec<Stri
 /// and no declarative field set. A declaration-only SOP (whole content is
 /// `scope_paths:`) is still real and must not be dropped — every declarative
 /// field is checked here for exactly that reason.
-fn parse_sop_content(title: String, raw: &str, source: &str) -> Option<Sop> {
+fn parse_sop_content(title: String, raw: &str, source: &str, scope: SopScope) -> Option<Sop> {
     let fm = parse_front_matter(raw);
     if fm.body.is_empty()
         && fm.deny_tools.is_empty()
@@ -528,6 +567,7 @@ fn parse_sop_content(title: String, raw: &str, source: &str) -> Option<Sop> {
     Some(Sop {
         title,
         body: fm.body,
+        scope,
         roles: fm.roles,
         deny_tools: fm.deny_tools,
         allow_harnesses: fm.allow_harnesses,
@@ -556,7 +596,7 @@ fn read_dir_sops(dir: &Path) -> Vec<Sop> {
             let raw = std::fs::read_to_string(&path).ok()?;
             let title = path.file_stem()?.to_str()?.to_string();
             let source = path.display().to_string();
-            parse_sop_content(title, &raw, &source)
+            parse_sop_content(title, &raw, &source, SopScope::Workspace)
         })
         .collect();
     // Stable order, so the injected block does not reshuffle between requests
@@ -1039,6 +1079,13 @@ struct WorkspaceSopEntry {
     title: String,
     #[serde(rename = "markdownContent")]
     markdown_content: String,
+    /// `"org"` or `"workspace"` (migration 139). `#[serde(default)]` so a
+    /// control plane older than this field -- or a response from before it
+    /// shipped -- deserializes as `None`, which `SopScope::from_wire`
+    /// resolves to `Workspace`: today's exact behaviour, no coordinated
+    /// deploy required in either direction.
+    #[serde(default)]
+    scope: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -1116,7 +1163,8 @@ async fn fetch_workspace_sops(
             .into_iter()
             .filter_map(|entry| {
                 let source = format!("workspace:{workspace_id}:{}", entry.title);
-                parse_sop_content(entry.title, &entry.markdown_content, &source)
+                let scope = SopScope::from_wire(entry.scope.as_deref());
+                parse_sop_content(entry.title, &entry.markdown_content, &source, scope)
             })
             .collect();
         sops.sort_by(|a, b| a.title.cmp(&b.title));
@@ -1376,12 +1424,34 @@ pub fn allowed_harnesses_for_role(role: &str) -> Vec<String> {
 /// Sorted and deduped, unlike `collect_plan_steps` — this is a set of
 /// boundaries, and two SOPs naming the same directory should not make it count
 /// twice. Order carries nothing.
+/// Org-scope declarations narrow the workspace-scope union by
+/// containment (a workspace scope of `infra/k8s` legitimately survives an
+/// org ceiling of `infra` -- they are not string-equal, but `infra/k8s` is
+/// inside `infra`). An org set that is empty imposes no ceiling at all:
+/// an org SOP that exists but says nothing about `scope_paths` must never
+/// read as "intersect to empty", which would silently break every
+/// existing workspace SOP the moment any org SOP exists, even an
+/// unrelated one.
 fn collect_scope_paths(sops: &[Sop], role: &str) -> Vec<String> {
-    let mut out: Vec<String> = sops
+    let workspace: Vec<String> = sops
         .iter()
-        .filter(|s| s.applies_to(role))
+        .filter(|s| s.scope == SopScope::Workspace && s.applies_to(role))
         .flat_map(|s| s.scope_paths.iter().cloned())
         .collect();
+    let org: Vec<String> = sops
+        .iter()
+        .filter(|s| s.scope == SopScope::Org && s.applies_to(role))
+        .flat_map(|s| s.scope_paths.iter().cloned())
+        .collect();
+
+    let mut out: Vec<String> = if org.is_empty() {
+        workspace
+    } else {
+        workspace
+            .into_iter()
+            .filter(|w| crate::plugins::anomaly::detectors::is_within_scope(w, &org))
+            .collect()
+    };
     out.sort();
     out.dedup();
     out
@@ -1496,18 +1566,52 @@ fn collect_plan_steps(sops: &[Sop], role: &str) -> Vec<String> {
     // and dedup would collapse a step legitimately performed twice. The current check
     // is set-membership, but the ordering is preserved so an order-aware check can be
     // added later without changing the data.
-    sops.iter()
-        .filter(|s| s.applies_to(role))
+    let workspace: Vec<String> = sops
+        .iter()
+        .filter(|s| s.scope == SopScope::Workspace && s.applies_to(role))
         .flat_map(|s| s.plan_steps.iter().cloned())
+        .collect();
+    let org: Vec<String> = sops
+        .iter()
+        .filter(|s| s.scope == SopScope::Org && s.applies_to(role))
+        .flat_map(|s| s.plan_steps.iter().cloned())
+        .collect();
+
+    if org.is_empty() {
+        return workspace;
+    }
+    // Case-insensitive membership (plan_steps keeps the author's original
+    // case, unlike allow_harnesses which is lowercased at parse time), but
+    // the surviving entries keep the workspace's own casing and order --
+    // the org set only decides membership, never supplies the text.
+    let org_set: std::collections::HashSet<String> =
+        org.iter().map(|s| s.to_ascii_lowercase()).collect();
+    workspace
+        .into_iter()
+        .filter(|w| org_set.contains(&w.to_ascii_lowercase()))
         .collect()
 }
 
 fn collect_harnesses(sops: &[Sop], role: &str) -> Vec<String> {
-    let mut out: Vec<String> = sops
+    let workspace: Vec<String> = sops
         .iter()
-        .filter(|s| s.applies_to(role))
+        .filter(|s| s.scope == SopScope::Workspace && s.applies_to(role))
         .flat_map(|s| s.allow_harnesses.iter().cloned())
         .collect();
+    let org: Vec<String> = sops
+        .iter()
+        .filter(|s| s.scope == SopScope::Org && s.applies_to(role))
+        .flat_map(|s| s.allow_harnesses.iter().cloned())
+        .collect();
+
+    // allow_harnesses is lowercased at parse time (`list("allow_harnesses:", true)`),
+    // so plain equality is already case-insensitive -- no normalisation needed here.
+    let mut out: Vec<String> = if org.is_empty() {
+        workspace
+    } else {
+        let org_set: std::collections::HashSet<&str> = org.iter().map(|s| s.as_str()).collect();
+        workspace.into_iter().filter(|w| org_set.contains(w.as_str())).collect()
+    };
     out.sort();
     out.dedup();
     out
@@ -1649,6 +1753,7 @@ mod tests {
     fn sop(title: &str, roles: &[&str]) -> Sop {
         Sop {
             risk_tier: None,
+            scope: SopScope::Workspace,
             title: title.into(),
             body: format!("- rule for {title}"),
             roles: roles.iter().map(|r| r.to_string()).collect(),
@@ -1738,7 +1843,7 @@ mod tests {
     #[test]
     fn parse_sop_content_parses_front_matter_and_body() {
         let raw = "---\nroles: deployer\ndeny_tools: rm, curl\nrisk_tier: high\n---\nDo not delete production data.";
-        let parsed = parse_sop_content("my-sop".to_string(), raw, "test-source").expect("should parse");
+        let parsed = parse_sop_content("my-sop".to_string(), raw, "test-source", SopScope::Workspace).expect("should parse");
         assert_eq!(parsed.title, "my-sop");
         assert_eq!(parsed.roles, vec!["deployer".to_string()]);
         assert_eq!(parsed.deny_tools, vec!["rm".to_string(), "curl".to_string()]);
@@ -1752,7 +1857,7 @@ mod tests {
     #[test]
     fn parse_sop_content_keeps_a_declaration_only_sop() {
         let raw = "---\nscope_paths: infra/\n---\n";
-        let parsed = parse_sop_content("scope-only".to_string(), raw, "test-source");
+        let parsed = parse_sop_content("scope-only".to_string(), raw, "test-source", SopScope::Workspace);
         assert!(parsed.is_some(), "a declaration-only SOP must not be dropped");
         assert_eq!(parsed.unwrap().scope_paths, vec!["infra/".to_string()]);
     }
@@ -1761,8 +1866,8 @@ mod tests {
     /// the counterpart to the declaration-only case above.
     #[test]
     fn parse_sop_content_drops_genuinely_empty_content() {
-        assert!(parse_sop_content("empty".to_string(), "", "test-source").is_none());
-        assert!(parse_sop_content("empty2".to_string(), "---\n---\n", "test-source").is_none());
+        assert!(parse_sop_content("empty".to_string(), "", "test-source", SopScope::Workspace).is_none());
+        assert!(parse_sop_content("empty2".to_string(), "---\n---\n", "test-source", SopScope::Workspace).is_none());
     }
 
     /// `all_sops_for_workspace` must never fall back to the process-global set
@@ -1883,6 +1988,7 @@ mod tests {
         let big: Vec<Sop> = (0..40)
             .map(|i| Sop {
                 risk_tier: None,
+                scope: SopScope::Workspace,
                 title: format!("sop-{i:02}"),
                 body: "x".repeat(500),
                 roles: vec![],
@@ -2165,6 +2271,7 @@ mod discovery_tests {
         let fm = parse_front_matter(raw);
         Sop {
             risk_tier: None,
+            scope: SopScope::Workspace,
             title: title.into(),
             body: fm.body,
             roles: fm.roles,
@@ -2557,6 +2664,7 @@ mod deny_tests {
     fn with_denies(roles: &[&str], denies: &[&str]) -> Sop {
         Sop {
             risk_tier: None,
+            scope: SopScope::Workspace,
             title: "policy".into(),
             body: "- prose".into(),
             roles: roles.iter().map(|r| r.to_string()).collect(),
@@ -2645,6 +2753,7 @@ mod harness_policy_tests {
         let sops = vec![
             Sop {
                 risk_tier: None,
+                scope: SopScope::Workspace,
                 title: "a".into(),
                 body: "x".into(),
                 roles: vec!["reviewer".into()],
@@ -2660,6 +2769,7 @@ mod harness_policy_tests {
             },
             Sop {
                 risk_tier: None,
+                scope: SopScope::Workspace,
                 title: "b".into(),
                 body: "x".into(),
                 roles: vec!["deployer".into()],
@@ -2713,6 +2823,7 @@ mod plan_step_tests {
         let sops = vec![
             Sop {
                 risk_tier: None,
+                scope: SopScope::Workspace,
                 title: "deploy".into(),
                 body: "x".into(),
                 roles: vec!["deployer".into()],
@@ -2728,6 +2839,7 @@ mod plan_step_tests {
             },
             Sop {
                 risk_tier: None,
+                scope: SopScope::Workspace,
                 title: "review".into(),
                 body: "x".into(),
                 roles: vec!["reviewer".into()],
@@ -2756,6 +2868,7 @@ mod plan_step_tests {
     fn a_plan_does_not_leak_across_roles() {
         let sops = vec![Sop {
             risk_tier: None,
+            scope: SopScope::Workspace,
             title: "deploy".into(),
             body: "x".into(),
             roles: vec!["deployer".into()],
@@ -2836,6 +2949,7 @@ mod scope_and_review_tests {
     fn scopes_do_not_leak_across_roles() {
         let sops = vec![Sop {
             risk_tier: None,
+            scope: SopScope::Workspace,
             title: "deploy".into(),
             body: "x".into(),
             roles: vec!["deployer".into()],
@@ -2858,6 +2972,7 @@ mod scope_and_review_tests {
     fn scopes_from_several_sops_are_merged_and_deduped() {
         let mk = |scope: &str| Sop {
             risk_tier: None,
+            scope: SopScope::Workspace,
             title: scope.into(),
             body: "x".into(),
             roles: vec![],
@@ -2937,6 +3052,7 @@ mod sop_status_snapshot_tests {
     fn mk(title: &str, body: &str) -> Sop {
         Sop {
             risk_tier: None,
+            scope: SopScope::Workspace,
             title: title.into(),
             body: body.into(),
             roles: Vec::new(),
@@ -3041,5 +3157,138 @@ mod sop_status_snapshot_tests {
         let mut cache = workspace_cache().lock().unwrap_or_else(|p| p.into_inner());
         cache.remove(WS_A);
         cache.remove(WS_STALE);
+    }
+}
+
+/// Migration 139 -- org-level SOP scope, ceiling-by-intersection for the
+/// three allowlist-shaped fields (`allow_harnesses`, `scope_paths`,
+/// `plan_steps`). See `SopScope`'s own doc comment for why these three, and
+/// only these three, need intersection rather than the plain union every
+/// other declarative field already gets for free.
+#[cfg(test)]
+mod org_ceiling_tests {
+    use super::*;
+
+    fn sop(scope: SopScope, roles: &[&str]) -> Sop {
+        Sop { scope, roles: roles.iter().map(|r| r.to_string()).collect(), ..Default::default() }
+    }
+
+    // ── allow_harnesses ──────────────────────────────────────────────
+
+    #[test]
+    fn org_ceiling_narrows_harnesses_by_intersection() {
+        let ws = Sop { allow_harnesses: vec!["claude-code".into(), "cursor".into()], ..sop(SopScope::Workspace, &[]) };
+        let org = Sop { allow_harnesses: vec!["claude-code".into()], ..sop(SopScope::Org, &[]) };
+        assert_eq!(collect_harnesses(&[ws, org], "anyone"), vec!["claude-code"]);
+    }
+
+    #[test]
+    fn an_org_sop_declaring_no_harnesses_imposes_no_ceiling() {
+        // An org SOP that exists but says nothing about allow_harnesses must
+        // not zero out every workspace SOP's declaration -- an empty org set
+        // means "no ceiling", not "ceiling of nothing".
+        let ws = Sop { allow_harnesses: vec!["claude-code".into()], ..sop(SopScope::Workspace, &[]) };
+        let org = sop(SopScope::Org, &[]); // declares nothing
+        assert_eq!(collect_harnesses(&[ws, org], "anyone"), vec!["claude-code"]);
+    }
+
+    #[test]
+    fn an_org_ceiling_never_widens_a_workspace_that_declared_nothing() {
+        let org = Sop { allow_harnesses: vec!["claude-code".into()], ..sop(SopScope::Org, &[]) };
+        assert!(
+            collect_harnesses(&[org], "anyone").is_empty(),
+            "the workspace never declared allow_harnesses at all -- there is nothing for the org set to narrow"
+        );
+    }
+
+    #[test]
+    fn harnesses_still_union_within_a_single_scope() {
+        let ws_a = Sop { allow_harnesses: vec!["claude-code".into()], ..sop(SopScope::Workspace, &[]) };
+        let ws_b = Sop { allow_harnesses: vec!["cursor".into()], ..sop(SopScope::Workspace, &[]) };
+        assert_eq!(collect_harnesses(&[ws_a, ws_b], "anyone"), vec!["claude-code", "cursor"]);
+    }
+
+    // ── scope_paths ──────────────────────────────────────────────────
+
+    #[test]
+    fn org_ceiling_narrows_scope_paths_by_containment_not_string_equality() {
+        // packages/proxy/... IS inside packages/proxy -- containment, not
+        // byte-equality, must be what decides survival.
+        let ws = Sop { scope_paths: vec!["infra/k8s".into(), "docs".into()], ..sop(SopScope::Workspace, &[]) };
+        let org = Sop { scope_paths: vec!["infra".into()], ..sop(SopScope::Org, &[]) };
+        assert_eq!(
+            collect_scope_paths(&[ws, org], "anyone"),
+            vec!["infra/k8s"],
+            "infra/k8s is legitimately narrower than the org's infra ceiling and must survive; docs is outside it and must not"
+        );
+    }
+
+    #[test]
+    fn an_org_sop_declaring_no_scope_paths_imposes_no_ceiling() {
+        let ws = Sop { scope_paths: vec!["packages/proxy".into()], ..sop(SopScope::Workspace, &[]) };
+        let org = sop(SopScope::Org, &[]);
+        assert_eq!(collect_scope_paths(&[ws, org], "anyone"), vec!["packages/proxy"]);
+    }
+
+    #[test]
+    fn an_org_scope_ceiling_never_widens_a_workspace_that_declared_nothing() {
+        let org = Sop { scope_paths: vec!["infra".into()], ..sop(SopScope::Org, &[]) };
+        assert!(collect_scope_paths(&[org], "anyone").is_empty());
+    }
+
+    #[test]
+    fn a_workspace_scope_outside_the_org_ceiling_does_not_survive() {
+        let ws = Sop { scope_paths: vec!["docs".into()], ..sop(SopScope::Workspace, &[]) };
+        let org = Sop { scope_paths: vec!["infra".into()], ..sop(SopScope::Org, &[]) };
+        assert!(collect_scope_paths(&[ws, org], "anyone").is_empty());
+    }
+
+    // ── plan_steps ───────────────────────────────────────────────────
+
+    #[test]
+    fn org_ceiling_narrows_plan_steps_case_insensitively_but_keeps_workspace_order_and_case() {
+        let ws = Sop {
+            plan_steps: vec!["Read".into(), "Edit".into(), "action:deploy".into()],
+            ..sop(SopScope::Workspace, &[])
+        };
+        // Org declares a different case than the workspace -- membership
+        // must still match, and the surviving text must keep the
+        // workspace's own casing and order.
+        let org = Sop { plan_steps: vec!["read".into(), "ACTION:DEPLOY".into()], ..sop(SopScope::Org, &[]) };
+        assert_eq!(collect_plan_steps(&[ws, org], "anyone"), vec!["Read", "action:deploy"]);
+    }
+
+    #[test]
+    fn an_org_sop_declaring_no_plan_steps_imposes_no_ceiling() {
+        let ws = Sop { plan_steps: vec!["Read".into(), "Edit".into()], ..sop(SopScope::Workspace, &[]) };
+        let org = sop(SopScope::Org, &[]);
+        assert_eq!(collect_plan_steps(&[ws, org], "anyone"), vec!["Read", "Edit"]);
+    }
+
+    #[test]
+    fn an_org_plan_ceiling_never_widens_a_workspace_that_declared_nothing() {
+        let org = Sop { plan_steps: vec!["Read".into()], ..sop(SopScope::Org, &[]) };
+        assert!(collect_plan_steps(&[org], "anyone").is_empty());
+    }
+
+    // ── The other 7 fields are untouched by scope: plain union already
+    //    covers both scopes at once (governance_fields_from iterates the
+    //    combined slice without filtering by scope). Pinned here so a
+    //    future change to those collectors that accidentally starts
+    //    filtering by scope gets caught immediately. ──
+
+    #[test]
+    fn deny_tools_unions_across_workspace_and_org_scope_with_no_special_handling() {
+        let ws = Sop { deny_tools: vec!["rm".into()], ..sop(SopScope::Workspace, &[]) };
+        let org = Sop { deny_tools: vec!["curl".into()], ..sop(SopScope::Org, &[]) };
+        assert_eq!(collect_denies(&[ws, org], "anyone"), vec!["curl", "rm"]);
+    }
+
+    #[test]
+    fn risk_tier_takes_the_max_across_workspace_and_org_scope() {
+        let ws = Sop { risk_tier: Some(RiskLevel::Low), ..sop(SopScope::Workspace, &[]) };
+        let org = Sop { risk_tier: Some(RiskLevel::Critical), ..sop(SopScope::Org, &[]) };
+        let gov = governance_fields_from(&[ws, org], "anyone");
+        assert_eq!(gov.risk_tier, Some(RiskLevel::Critical));
     }
 }
