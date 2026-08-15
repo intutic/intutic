@@ -244,6 +244,39 @@ export interface WorkspaceSettings {
   sandboxRequirement?: 'off' | 'warn' | 'require'
 
   /**
+   * Promotes REPEATED anomaly findings within one session into enforcement
+   * (HIJACK steers with a corrective card, KILL blocks outright) — on top
+   * of ordinary per-trace detection, which always runs regardless of this
+   * setting. See `anomalyEnforcementService.ts` for the full mechanism:
+   * off by default and a single false positive can never trigger it, only
+   * a sustained pattern within one session can.
+   *
+   * Stored under the snake_case key `anomaly_enforcement`, not
+   * `anomalyEnforcement` — deliberately inconsistent with every other
+   * field here, because that key is already the load-bearing contract
+   * `anomalyEnforcementService.ts` (and its tests) read and write
+   * directly; renaming it to match this file's camelCase convention would
+   * be a breaking migration for every already-stored workspace setting,
+   * for no behavioral benefit.
+   *
+   * This is the wire/stored shape, not the resolved one — the read side
+   * additionally floors `minRepeats` at 2 (a workspace cannot configure
+   * its way to blocking on a single finding) and falls back `action` to
+   * `HIJACK` for anything other than exactly `'KILL'`. The PUT schema
+   * mirrors that floor as a 400 at write time, so an operator who tries a
+   * lower value is told now rather than discovering later that it was
+   * silently clamped.
+   */
+  anomaly_enforcement?: {
+    enabled?: boolean
+    minRepeats?: number
+    minConfidence?: number
+    action?: 'HIJACK' | 'KILL'
+    /** Categories eligible for promotion. Empty/absent means all of them. */
+    categories?: string[]
+  }
+
+  /**
    * BYO judge model for the MANAGED LLM-as-judge path (LLD #70).
    *
    * When set, chunk/finalize judge calls for this workspace run on this
@@ -321,6 +354,16 @@ export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
   // Platform trusted monitor judges by default — see the field doc for what
   // setting a workspace's own model trades away.
   managedJudgeModel: null,
+  // Off by default — mirrors anomalyEnforcementService.ts's own DISABLED
+  // default exactly, so a workspace that never configures this sees the
+  // identical values whether resolved here or read directly from the DB.
+  anomaly_enforcement: {
+    enabled: false,
+    minRepeats: 3,
+    minConfidence: 0.8,
+    action: 'HIJACK',
+    categories: [],
+  },
 }
 
 /**
