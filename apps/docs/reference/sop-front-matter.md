@@ -48,6 +48,15 @@ nothing, which reads as an over-eager product rather than a misconfiguration.
 `risk_tier:` will be reported as enforcing nothing, because as far as the proxy's
 own detectors are concerned, it is.
 
+::: tip Looking for a network/egress key?
+There isn't one, deliberately. Network egress is a workspace-wide and
+host-level control, not a per-node policy decision — it doesn't fit the
+per-SOP, per-role shape everything above uses. See
+[Network Egress Control](/guide/policies#network-egress-control) (the
+proxy-level allow list) and `intutic enforce` in the
+[CLI reference](/reference/cli#intutic-enforce) (the host firewall).
+:::
+
 ## Ordering rules
 
 ```yaml
