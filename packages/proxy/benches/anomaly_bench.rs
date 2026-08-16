@@ -74,6 +74,7 @@ fn clean_ctx(sequence: Vec<String>) -> RequestContext {
         tool_sequence: sequence,
         tool_call_counts: Vec::new(),
         calls_last_60s: 0,
+            corroborating_detectors: 0,
         transition_baseline: None,
         denied_tools: Vec::new(),
         plan_steps: Vec::new(),

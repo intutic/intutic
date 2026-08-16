@@ -59,7 +59,7 @@ The proxy processes every request through an ordered plugin chain:
 - **DLP scanner**: Pattern-based and entropy-based secret detection
 - **Code skeleton extraction**: Uses `tree-sitter` and `syn` for AST-level code analysis
 - **Token counting**: Accurate pre-flight token estimation via `tiktoken-rs`
-- **Telemetry**: OpenTelemetry OTLP export for traces only — a `SpanExporter` ships in `src/main.rs`; there is no `MeterProvider` and no logs pipeline (see `docs/TECH_DEBT.md` TD-161)
+- **Telemetry**: OpenTelemetry OTLP export for traces and metrics — a `SpanExporter` and `SdkMeterProvider` ship in `src/main.rs`, with the exported instrument set declared in `src/metrics.rs` (snip compaction histograms, egress counters, policy refusals). Still no logs pipeline (TD-161's resolution covers the metrics half only)
 
 ## Dependencies
 

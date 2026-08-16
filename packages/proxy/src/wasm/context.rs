@@ -186,6 +186,21 @@ pub struct RequestContext {
     /// the window reads `0`, not a sentinel.
     #[serde(default)]
     pub calls_last_60s: i32,
+    /// How many distinct anomaly detectors fired at Medium+ severity on THIS
+    /// request — exactly the pool `corroborated_finding` counts
+    /// (`DetectorRegistry::corroborating_detector_ids` computes both, so the
+    /// escalation rule and this field can never disagree).
+    ///
+    /// A count, not a bool: agreement-between-distinct-detectors is the
+    /// honest primitive (detectors return Some/None, never graded scores), and
+    /// a bool would bake the built-in `>= 2` threshold into the wire, leaving
+    /// a rule that wants `>= 3` nothing to read.
+    ///
+    /// `0` under break-glass (detectors are skipped entirely) and when nothing
+    /// fired; absent on old replay-corpus snapshots, which deserializes to `0`
+    /// via `serde(default)` — both honest defaults, never "unknown".
+    #[serde(default)]
+    pub corroborating_detectors: u32,
     /// Fitted `P(to | from)` for this workspace, keyed `"from to"`.
     ///
     /// Resolved on the request path, like `denied_tools` below, so the detector stays
@@ -376,6 +391,7 @@ mod tests {
             tool_sequence: vec!["Glob".into(), "View".into()],
             tool_call_counts: vec![("Glob".into(), 1), ("View".into(), 1)],
             calls_last_60s: 2,
+            corroborating_detectors: 0,
             denied_tools: vec![],
             injection_findings: vec![],
             injection_sources: vec![],
@@ -506,6 +522,44 @@ mod tests {
         c.calls_last_60s = 0;
         let v: serde_json::Value = serde_json::to_value(&c).unwrap();
         assert_eq!(v["calls_last_60s"], 0);
+    }
+
+    /// Same always-present contract for the detector-agreement count, and the
+    /// exact wire name pinned — a rename would strand any deployed rule
+    /// reading it.
+    #[test]
+    fn corroborating_detectors_round_trips_on_the_wire() {
+        let mut c = ctx();
+        c.corroborating_detectors = 2;
+        let v: serde_json::Value = serde_json::to_value(&c).unwrap();
+        assert_eq!(v["corroborating_detectors"], 2);
+
+        let mut zero = ctx();
+        zero.corroborating_detectors = 0;
+        let v: serde_json::Value = serde_json::to_value(&zero).unwrap();
+        assert_eq!(v["corroborating_detectors"], 0, "zero is a real count, never omitted");
+    }
+
+    /// Replay-corpus snapshots captured before this field existed must read
+    /// as zero — the honest answer for a request whose detector agreement was
+    /// never recorded.
+    #[test]
+    fn deserialises_payload_without_corroboration_field() {
+        let legacy = serde_json::json!({
+            "session_id": "ses_1",
+            "workspace_id": "ws_1",
+            "virtual_key_prefix": "vk_1",
+            "model": "claude-sonnet-4",
+            "tools": [],
+            "tool_calls": [],
+            "estimated_input_tokens": 10,
+            "budget_remaining_usd": 1.0,
+            "risk_tier": "Low",
+            "dlp_findings": [],
+            "tool_sequence": []
+        });
+        let parsed: RequestContext = serde_json::from_value(legacy).unwrap();
+        assert_eq!(parsed.corroborating_detectors, 0);
     }
 
     /// A payload from before this field existed must still deserialise, with
