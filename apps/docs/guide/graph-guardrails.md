@@ -151,15 +151,17 @@ what the model says is reported on the trace (pattern names only, streaming
 included) so an operator can see propagation a turn early — it never changes
 a verdict, because a model legitimately quotes these phrasings when asked
 about them. That stays true regardless of labelling: no amount of adjudication
-turns this into a blocking signal. What has changed is that the signal is no
-longer unmeasurable — each firing is now recorded per pattern as a
-`detector_findings` row and is adjudicable true/false positive by operators,
-via `intutic findings` on the CLI or the dashboard's Findings page. A
-self-authored corpus (checked-in benign outputs, not independently sourced)
-separately gates the regex patterns themselves in CI, pinning their behavior
-on known cases. Any false-positive rate this produces is measured
-per-workspace from that workspace's own adjudications; it is not published in
-these docs, and enforcement remains off.
+turns this into a blocking signal. Each firing is recorded per pattern as a
+`detector_findings` row, and `intutic findings` on the CLI or the dashboard's
+Findings page will accept a true/false-positive ruling on one — but the
+product does not retain what the model's response said, by design, so a
+ruling reflects an operator's own memory of that turn, not evidence the
+product can show them. A self-authored corpus (checked-in benign outputs, not
+independently sourced) separately gates the regex patterns themselves in CI,
+pinning their behavior on known cases; that measurement is unaffected by the
+above. Any false-positive rate this produces is measured per-workspace from
+that workspace's own adjudications, is not published in these docs, and
+enforcement remains off.
 
 In a graph this matters more than for a single agent. One node's output becomes
 the next node's input, so a payload picked up from a fetched page arrives at
