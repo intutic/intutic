@@ -128,6 +128,25 @@ sopsCmd
     await runSopsPush(name, opts)
   })
 
+sopsCmd
+  .command('pull')
+  .description('Pull every workspace SOP from the control plane into .intutic/sops/<slug>.md')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .option('--force', 'Overwrite locally-modified files instead of refusing them')
+  .action(async (opts) => {
+    const { runSopsPull } = await import('./commands/sops.js')
+    await runSopsPull(opts)
+  })
+
+sopsCmd
+  .command('status')
+  .description('Show drift between .intutic/sops/*.md and the control plane, read-only')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runSopsStatus } = await import('./commands/sops.js')
+    await runSopsStatus(opts)
+  })
+
 const policyCmd = program
   .command('policy')
   .description('Manage compliance and safety policies')

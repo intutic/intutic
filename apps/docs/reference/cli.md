@@ -924,7 +924,8 @@ key is provisioned.
 
 ## `intutic sops push <name>`
 
-Push a local offline SOP folder to the central workspace.
+Push a local offline SOP folder to the central workspace — one control-plane
+SOP per file, each carrying its own declared front matter.
 
 ```bash
 intutic sops push <name> [options]
@@ -941,9 +942,49 @@ intutic sops push <name> [options]
 | Option | Description |
 |--------|-------------|
 | `--dev` | Use local control plane (`http://localhost:3001`) |
+| `--org` | Push as an org-wide floor instead of a workspace SOP |
 
 **What it does:**
-Concatenates every `.md` file in `.intutic/sops/<name>/`, derives a title from the folder name (`postgres-migration` → `Postgres Migration`), and creates a workspace SOP on the control plane. Fails if the folder is missing or contains no markdown.
+For every `.md` file in `.intutic/sops/<name>/`, parses `title:`/`risk_tier:`/`version:` front matter (falling back to the file's first `# ` heading, then the file name, for title; to `MEDIUM` for an unstated risk tier) and creates one workspace SOP per file, front matter stripped from the uploaded body. Fails if the folder is missing or contains no markdown. See [GitOps for SOPs](/guide/gitops-sops) for the full push/pull/status flow and what does not round-trip (declarative enforcement keys like `deny_tools:` have no control-plane column).
+
+---
+
+## `intutic sops pull`
+
+Pull every workspace SOP from the control plane into `.intutic/sops/<slug>.md`.
+
+```bash
+intutic sops pull [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+| `--force` | Overwrite locally-modified files instead of refusing them |
+
+**What it does:**
+Writes one file per SOP, with `title:`/`risk_tier:`/`version:` front matter reconstructed and a `content_hash:` marker recording the body's hash. Refuses to overwrite a file whose recorded hash no longer matches its current body (a local edit since the last pull) unless `--force` is passed; a file with no recorded hash at all is treated as unverifiable and always requires `--force`. See [GitOps for SOPs](/guide/gitops-sops).
+
+---
+
+## `intutic sops status`
+
+Show drift between `.intutic/sops/*.md` and the control plane. Read-only.
+
+```bash
+intutic sops status [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+For each local file, matched by title against the workspace's control-plane SOPs, reports `in-sync`, `local-ahead` (edited locally, not yet pushed), `remote-ahead` (control plane moved on, safe to pull), `diverged` (no recorded pull hash and no match either — can't tell "never pulled" from "edited long ago"), or `push-only` (no matching title on the control plane yet). See [GitOps for SOPs](/guide/gitops-sops).
 
 ---
 
