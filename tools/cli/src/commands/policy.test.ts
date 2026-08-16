@@ -3,12 +3,23 @@ import * as fs from 'node:fs/promises'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+vi.mock('../config/store.js', () => ({
+  loadCredentials: vi.fn(async () => ({ apiKey: 'vk_test', workspaceId: 'ws_test' })),
+  loadConfig: vi.fn(() => null),
+}))
+vi.mock('../config/paths.js', () => ({ resolveControlPlaneUrl: vi.fn(() => 'https://api.test.invalid') }))
+
+const { postWithStatusMock } = vi.hoisted(() => ({ postWithStatusMock: vi.fn() }))
+vi.mock('../lib/api.js', () => ({ createApiClient: () => ({ postWithStatus: postWithStatusMock }) }))
+
 import {
   buildCompileArgs,
   installedFileName,
   instantiateAndEvaluate,
   parseRuleFileName,
   runPolicyInstall,
+  runPolicyReplay,
   DEFAULT_ALLOW_MOCK,
   HOST_IMPORT_NAMES,
   unsupportedImports,
@@ -300,5 +311,99 @@ describe('runPolicyInstall end to end', () => {
     await install(wasmPath)
 
     expect(exitCode, 'code 2 is deprecated, not refused — already-installed rules use it').toBeNull()
+  })
+})
+
+/**
+ * `runPolicyReplay` end to end, against a mocked `postWithStatus`. The point
+ * of this suite is the status-branch wiring — 404, the 422 `not_enough_traffic`
+ * shape, and 200 — not the route's own logic, which
+ * `services/control-plane/__tests__/integration/ruleGeneration.test.ts` and
+ * `replaySummary.test.ts` already cover.
+ */
+describe('runPolicyReplay end to end', () => {
+  let exitCode: number | null
+
+  beforeEach(() => {
+    exitCode = null
+    postWithStatusMock.mockReset()
+    vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      exitCode = code ?? 0
+      throw new Error(`process.exit(${code})`)
+    }) as never)
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  async function replay(ruleId: string, opts: { limit?: string; since?: string } = {}): Promise<void> {
+    try {
+      await runPolicyReplay(ruleId, opts)
+    } catch (err) {
+      if (!(err instanceof Error) || !err.message.startsWith('process.exit(')) throw err
+    }
+  }
+
+  it('exits 1 on a 404 without touching enforcement', async () => {
+    postWithStatusMock.mockResolvedValue({ status: 404, body: { error: 'Rule not found' } })
+    await replay('wasm_missing')
+    expect(exitCode).toBe(1)
+  })
+
+  it('reports not_enough_traffic on a 422 rather than a generic failure', async () => {
+    postWithStatusMock.mockResolvedValue({
+      status: 422,
+      body: { error: 'not_enough_traffic', contextCount: 3, minRequired: 50 },
+    })
+    await replay('wasm_abc')
+    expect(exitCode).toBe(1)
+    expect(postWithStatusMock).toHaveBeenCalledWith('/api/v1/wasm-rules/wasm_abc/replay', {})
+  })
+
+  it('rejects a non-positive --limit before making a network call', async () => {
+    await replay('wasm_abc', { limit: '0' })
+    expect(exitCode).toBe(1)
+    expect(postWithStatusMock).not.toHaveBeenCalled()
+  })
+
+  it('passes --limit and --since through as the request body', async () => {
+    postWithStatusMock.mockResolvedValue({
+      status: 200,
+      body: {
+        ruleId: 'wasm_abc',
+        since: '7d',
+        contextCount: 120,
+        wouldActCount: 6,
+        wouldActRate: 0.05,
+        verdictCounts: { '0': 114, '1': 6 },
+        sampleMatches: [],
+      },
+    })
+    await replay('wasm_abc', { limit: '250', since: '7d' })
+    expect(exitCode).toBeNull()
+    expect(postWithStatusMock).toHaveBeenCalledWith('/api/v1/wasm-rules/wasm_abc/replay', {
+      limit: 250,
+      since: '7d',
+    })
+  })
+
+  it('exits cleanly on a 200 and prints sample matches when present', async () => {
+    postWithStatusMock.mockResolvedValue({
+      status: 200,
+      body: {
+        ruleId: 'wasm_abc',
+        since: null,
+        contextCount: 60,
+        wouldActCount: 1,
+        wouldActRate: 1 / 60,
+        verdictCounts: { '0': 59, '1': 1 },
+        sampleMatches: [{ session_id: 'sess_1' }],
+      },
+    })
+    await replay('wasm_abc')
+    expect(exitCode).toBeNull()
   })
 })

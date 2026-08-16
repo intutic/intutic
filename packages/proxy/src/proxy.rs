@@ -72,6 +72,65 @@ const TOOL_SEQUENCE_CAP: usize = 60;
 /// answers the question the cap cannot.
 const CALL_WINDOW_SECS: i64 = 60;
 
+/// Whether this request's `RequestContext` should be captured onto its trace
+/// as `context_snapshot`, for the replay corpus.
+///
+/// A pure function of an explicit `roll`, matching `should_mirror` in
+/// `routing/mirror.rs` — the caller supplies `rand::random::<f64>()`, so the
+/// decision itself is deterministic and testable without mocking the RNG.
+/// `rate` is clamped rather than trusted: `AppState::context_snapshot_rate`
+/// is already filtered to `[0.0, 1.0]` when it is read from the environment,
+/// but a second guard here means this function is correct on its own, not
+/// only when called with an already-validated rate.
+fn should_capture_context_snapshot(rate: f64, roll: f64) -> bool {
+    roll < rate.clamp(0.0, 1.0)
+}
+
+/// Evaluate every applicable shadow-mode SOP against `base_ctx`, one at a
+/// time, through `registry` — the pure half of the shadow-SOP block in the
+/// request handler, split out so it is testable without a live request.
+///
+/// Per-SOP rather than one batched pass over the whole shadow set: batching
+/// would still tell a caller *that* something would have fired, but not
+/// *which* SOP, the same attribution `wasm::registry::ShadowReport` gives per
+/// rule rather than per workspace. `base_ctx`'s own SOP-derived fields are
+/// irrelevant here — every shadow context below replaces them with exactly
+/// one SOP's declarations — so callers may pass either the real enforcing
+/// context or one built from an empty SOP set.
+fn evaluate_sop_shadows(
+    shadow_sops: &[crate::sops::Sop],
+    role: &str,
+    base_ctx: &crate::wasm::context::RequestContext,
+    registry: &crate::plugins::anomaly::DetectorRegistry,
+) -> Vec<crate::sops::SopShadowReport> {
+    shadow_sops
+        .iter()
+        .filter(|s| s.applies_to(role))
+        .map(|s| {
+            let one = std::slice::from_ref(s);
+            let sop_gov = crate::sops::governance_fields_from(one, role);
+            let shadow_ctx = crate::wasm::context::RequestContext {
+                denied_tools: sop_gov.denied_tools,
+                plan_steps: sop_gov.plan_steps,
+                scope_paths: sop_gov.scope_paths,
+                review_before: sop_gov.review_before,
+                requires_before: sop_gov.requires_before,
+                forbid_after: sop_gov.forbid_after,
+                max_calls: sop_gov.max_calls,
+                forbid_with: sop_gov.forbid_with,
+                allowed_harnesses: sop_gov.allowed_harnesses,
+                ..base_ctx.clone()
+            };
+            let findings = registry.evaluate_all(&shadow_ctx);
+            crate::sops::SopShadowReport {
+                title: s.title.clone(),
+                would_act: !findings.is_empty(),
+                findings: findings.iter().map(|f| f.kind.as_str().to_string()).collect(),
+            }
+        })
+        .collect()
+}
+
 /// Lifetime of a judged-chunk list on the streaming paths.
 const SESSION_CHUNK_TTL_SECS: u64 = 3_600;
 
@@ -92,6 +151,15 @@ pub struct AppState {
     pub store: Arc<dyn LocalStore>,
     /// Control-plane-written keys; all `None` when standalone.
     pub control_plane: Arc<dyn ControlPlaneCache>,
+    /// Fraction of requests whose full `RequestContext` is captured onto the
+    /// trace as `context_snapshot`, for `WASM_CONTEXT_SNAPSHOT_RATE`.
+    ///
+    /// This is the corpus a rule candidate is replayed against before it is
+    /// ever installed — the "prove before enforce on real history" story.
+    /// Read once at startup, like `mirror_sample_rate`, rather than per
+    /// request: a snapshot rate is an operational dial, not something a
+    /// caller should be able to influence request-by-request.
+    pub context_snapshot_rate: f64,
 }
 
 /// Fire-and-forget local bandit reward update — never on the latency path.
@@ -2480,7 +2548,11 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         Some(raw_token),
     )
     .await;
-    let gov = crate::sops::governance_fields_from(&resolved_sops, &node.agent_role);
+    // Shadow-mode SOPs (`mode: shadow` in front matter) never contribute to the
+    // enforcing field set below — that is what makes them non-enforcing. Their
+    // would-act evaluation happens separately, once the anomaly registry exists.
+    let (enforcing_sops, shadow_mode_sops) = crate::sops::split_by_mode(&resolved_sops);
+    let gov = crate::sops::governance_fields_from(&enforcing_sops, &node.agent_role);
 
     // Session-scoped, not node-scoped — see RequestContext::sandbox_attested's
     // doc comment. Resolved here, once, like the other control-plane reads
@@ -2570,6 +2642,16 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // success paths and cannot all borrow wasm_ctx.
     let node_for_trace = wasm_ctx.node.clone();
 
+    // Sampled once here, not per trace site, so every code path this request
+    // can take (blocked, cached, errored, streamed) reports the same
+    // decision rather than each rolling its own dice.
+    let context_snapshot_for_trace: Option<serde_json::Value> =
+        if should_capture_context_snapshot(state.context_snapshot_rate, rand::random::<f64>()) {
+            serde_json::to_value(&wasm_ctx).ok()
+        } else {
+            None
+        };
+
     // Give this node the policy for the job it says it is doing.
     //
     // Scoping only — the role is a client-supplied header, so the worst a
@@ -2625,6 +2707,16 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // happened to run first. The two original checks are preserved inside it as
     // `ConsecutiveRepeatDetector` and `TransitionProbabilityDetector`.
     let anomaly_registry = crate::plugins::anomaly::DetectorRegistry::with_defaults();
+
+    // Shadow-mode SOPs (`mode: shadow`): reported on the trace, never
+    // consulted by any disposition decision below — only `gov`, built from
+    // `enforcing_sops` above, feeds `wasm_ctx`.
+    let sop_shadow_reports = evaluate_sop_shadows(
+        &shadow_mode_sops,
+        &wasm_ctx.node.agent_role,
+        &wasm_ctx,
+        &anomaly_registry,
+    );
     // Findings that did not block, carried out of this scope so the allowed-path
     // trace can publish them.
     //
@@ -2728,6 +2820,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 quality_fault: None,
                 // Blocked before WASM evaluation ran.
                 wasm_shadow_reports: Vec::new(),
+                sop_shadow_reports: sop_shadow_reports.clone(),
                 // Blocked before any upstream call — nothing to compact.
                 tool_result_bytes_saved: 0,
                 // Blocked before any upstream call — routing never ran.
@@ -2776,6 +2869,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     .map(crate::telemetry::FindingWire::from_finding)
                     .map(|w| if shadow_enforcement { w.shadowed() } else { w })
                     .collect(),
+                context_snapshot: context_snapshot_for_trace.clone(),
                 graph: crate::telemetry::GraphTrace::from_node(
                     &wasm_ctx.node,
                     findings.iter().map(|f| f.kind.as_str().to_string()).collect(),
@@ -3306,6 +3400,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 quality_fault: None,
                 // Served from cache; no rule was evaluated.
                 wasm_shadow_reports: Vec::new(),
+                sop_shadow_reports: sop_shadow_reports.clone(),
                 // Served from cache — the compactor never saw this body.
                 tool_result_bytes_saved: 0,
                 // Never reached routing, so there is no counterfactual.
@@ -3339,6 +3434,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 token_anomaly: false,
                 loop_run_id: loop_run_id_header.clone(),
                 findings: advisory_findings.clone(),
+            context_snapshot: context_snapshot_for_trace.clone(),
         graph: crate::telemetry::GraphTrace::from_node(&node_for_trace, advisory_anomalies.clone()),
             };
 
@@ -4008,6 +4104,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             quality_fault: None,
             // Error or short-circuit before rule evaluation.
             wasm_shadow_reports: Vec::new(),
+            sop_shadow_reports: sop_shadow_reports.clone(),
             // Error or short-circuit — no response body was compacted.
             tool_result_bytes_saved: 0,
             // Never reached routing, so there is no counterfactual.
@@ -4038,6 +4135,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             token_anomaly: false,
             loop_run_id: loop_run_id_header.clone(),
             findings: advisory_findings.clone(),
+            context_snapshot: context_snapshot_for_trace.clone(),
         graph: crate::telemetry::GraphTrace::from_node(&node_for_trace, advisory_anomalies.clone()),
         };
         let cache_store_clone = Arc::clone(&state.store);
@@ -5293,6 +5391,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 // never reach it, and the promotion gate would go on answering
                 // `ready: false` for a reason nothing surfaced.
                 wasm_shadow_reports: wasm_shadow_reports.clone(),
+                sop_shadow_reports: sop_shadow_reports.clone(),
                 // Streaming: the compactor needs a complete body, so it does not run
                 // on this path. Zero here is a real absence, not an unmeasured one.
                 tool_result_bytes_saved: 0,
@@ -5329,6 +5428,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 token_anomaly,
                 loop_run_id: loop_run_id_clone,
                 findings: advisory_findings.clone(),
+            context_snapshot: context_snapshot_for_trace.clone(),
         graph: crate::telemetry::GraphTrace::from_node(&node_for_trace, advisory_anomalies.clone()),
             };
 
@@ -5948,6 +6048,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         quality_fault: integrity.fault.map(|f| f.as_str().to_string()),
         // The one path that actually evaluated rules.
         wasm_shadow_reports: wasm_shadow_reports.clone(),
+        sop_shadow_reports: sop_shadow_reports.clone(),
         trace_id: uuid::Uuid::new_v4().to_string(),
         session_id: session_id.clone(),
         proxy_instance_id: proxy_instance_id().to_string(),
@@ -5978,6 +6079,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         routing_shadow_model: shadow_selection.clone(),
         loop_run_id: loop_run_id_header,
         findings: advisory_findings.clone(),
+        context_snapshot: context_snapshot_for_trace.clone(),
         graph: crate::telemetry::GraphTrace::from_node(&node_for_trace, advisory_anomalies.clone()),
     };
 
@@ -8403,6 +8505,110 @@ mod tests {
             tool_history_scope("ws", "", None, Some("mbr_1")),
             "ws:member:mbr_1"
         );
+    }
+
+    #[test]
+    fn context_snapshot_sampling_is_a_half_open_interval() {
+        // roll < rate, not <=, so a rate of exactly 0.0 captures nothing —
+        // the documented default-off behaviour — and a roll of exactly 0.0
+        // at a positive rate still counts, matching `should_mirror`'s own
+        // `roll >= rate` exclusion boundary in routing/mirror.rs.
+        assert!(!should_capture_context_snapshot(0.0, 0.0));
+        assert!(!should_capture_context_snapshot(0.0, 0.5));
+        assert!(should_capture_context_snapshot(1.0, 0.0));
+        assert!(should_capture_context_snapshot(1.0, 0.9999));
+        assert!(!should_capture_context_snapshot(1.0, 1.0));
+        assert!(should_capture_context_snapshot(0.05, 0.03));
+        assert!(!should_capture_context_snapshot(0.05, 0.06));
+    }
+
+    #[test]
+    fn context_snapshot_rate_is_clamped_even_if_the_caller_did_not() {
+        // `AppState::context_snapshot_rate` is already filtered to [0.0, 1.0]
+        // when read from the environment, but this function does not trust
+        // that — a malformed rate slipping through some other call site must
+        // not capture every request (> 1.0) or silently invert (negative).
+        assert!(!should_capture_context_snapshot(-1.0, 0.0));
+        assert!(should_capture_context_snapshot(5.0, 0.9999));
+    }
+
+    /// A shadow-mode SOP whose `deny_tools` matches an actual tool call is
+    /// reported as `would_act: true` with the detector's finding kind — the
+    /// same UnauthorizedTool check that would have killed this request had
+    /// the SOP not been shadowed.
+    #[test]
+    fn evaluate_sop_shadows_reports_would_act_on_a_matching_deny_tools_sop() {
+        use crate::plugins::anomaly::detectors::test_support::base_ctx;
+        use crate::wasm::context::ToolCall;
+
+        let ctx = crate::wasm::context::RequestContext {
+            tool_calls: vec![ToolCall {
+                id: "call_1".into(),
+                name: "kubectl".into(),
+                arguments: serde_json::json!({}),
+            }],
+            ..base_ctx()
+        };
+        let shadow_sop = crate::sops::Sop {
+            title: "Never touch prod k8s".into(),
+            deny_tools: vec!["kubectl".into()],
+            mode: crate::sops::SopMode::Shadow,
+            ..crate::sops::Sop::default()
+        };
+        let registry = crate::plugins::anomaly::DetectorRegistry::with_defaults();
+
+        let reports = evaluate_sop_shadows(&[shadow_sop], "", &ctx, &registry);
+
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].title, "Never touch prod k8s");
+        assert!(reports[0].would_act, "kubectl was called and is denied — this must be would_act: true");
+        assert!(!reports[0].findings.is_empty());
+    }
+
+    /// A shadow-mode SOP whose declarations do not match anything on the
+    /// request reports `would_act: false` — both dispositions must be
+    /// reported, not just the acts, or the denominator for a promotion
+    /// decision is missing, the same reasoning `wasm::registry::ShadowReport`
+    /// and `recordShadowReports` document for WASM rules.
+    #[test]
+    fn evaluate_sop_shadows_reports_would_act_false_on_a_bypass() {
+        use crate::plugins::anomaly::detectors::test_support::base_ctx;
+
+        let shadow_sop = crate::sops::Sop {
+            title: "Never touch prod k8s".into(),
+            deny_tools: vec!["kubectl".into()],
+            mode: crate::sops::SopMode::Shadow,
+            ..crate::sops::Sop::default()
+        };
+        let registry = crate::plugins::anomaly::DetectorRegistry::with_defaults();
+
+        let reports = evaluate_sop_shadows(&[shadow_sop], "", &base_ctx(), &registry);
+
+        assert_eq!(reports.len(), 1);
+        assert!(!reports[0].would_act, "no tool_calls were made — nothing to deny");
+        assert!(reports[0].findings.is_empty());
+    }
+
+    /// A shadow SOP scoped to a role the request did not report is not
+    /// evaluated at all — `applies_to` still governs shadow SOPs exactly as
+    /// it governs enforcing ones, so a shadow report cannot leak scoring for
+    /// a role this request has nothing to do with.
+    #[test]
+    fn evaluate_sop_shadows_skips_a_sop_scoped_to_another_role() {
+        use crate::plugins::anomaly::detectors::test_support::base_ctx;
+
+        let shadow_sop = crate::sops::Sop {
+            title: "Deployer-only shadow policy".into(),
+            roles: vec!["deployer".into()],
+            deny_tools: vec!["kubectl".into()],
+            mode: crate::sops::SopMode::Shadow,
+            ..crate::sops::Sop::default()
+        };
+        let registry = crate::plugins::anomaly::DetectorRegistry::with_defaults();
+
+        let reports = evaluate_sop_shadows(&[shadow_sop], "reviewer", &base_ctx(), &registry);
+
+        assert!(reports.is_empty(), "a shadow SOP scoped to another role must not be evaluated");
     }
 
     /// Gemini declares its tools somewhere else, and nothing read it.

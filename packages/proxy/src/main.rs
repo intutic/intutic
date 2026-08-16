@@ -477,6 +477,15 @@ async fn main() -> anyhow::Result<()> {
             .expect("Failed to build reqwest client"),
     );
 
+    // Sampled `context_snapshot` capture rate for the replay corpus. Default
+    // 5%: enough to reach `MIN_REPLAY_CONTEXTS` (50) within a day of modest
+    // traffic without writing a full RequestContext onto every trace.
+    let context_snapshot_rate = std::env::var("WASM_CONTEXT_SNAPSHOT_RATE")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .filter(|r| (0.0..=1.0).contains(r))
+        .unwrap_or(0.05);
+
     // Build application state
     let state = proxy::AppState {
         config,
@@ -485,6 +494,7 @@ async fn main() -> anyhow::Result<()> {
         reward_engine: std::sync::Arc::new(routing::reward::RewardEngine::new()),
         store,
         control_plane,
+        context_snapshot_rate,
     };
 
     // Self-hosted gateway heartbeat (LLD #66, gateway phase 4) — opt-in via
