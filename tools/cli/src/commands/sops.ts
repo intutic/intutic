@@ -261,7 +261,8 @@ type SopDrift = 'in-sync' | 'local-ahead' | 'remote-ahead' | 'diverged' | 'push-
 
 /**
  * `intutic sops status` — drift between `.intutic/sops/*.md` and the
- * control plane, read-only.
+ * control plane, read-only against the file system (the comparison itself
+ * never writes a local file).
  *
  * Matched by title, the same heuristic `pull` uses to name files: neither
  * plane has a stable identifier the other side carries (a pushed file has
@@ -270,12 +271,15 @@ type SopDrift = 'in-sync' | 'local-ahead' | 'remote-ahead' | 'diverged' | 'push-
  * cannot tell "hand-authored, never pushed" apart from "hand-authored,
  * edited after an old pull" — both report `diverged` rather than guessing.
  *
- * Deliberately CLI-only. A server-side compliance signal for this same
- * comparison (`sop_git_drift`) would need the sync daemon to report
- * file-plane hashes over a new wire message, matched and stored
- * control-plane-side before a probe could read it back — a second project
- * on the scale of this one. Flagged as a follow-up in
- * `apps/docs/guide/gitops-sops.md` rather than half-built here.
+ * The comparison itself is computed entirely client-side, same as always.
+ * What's new: once computed, every matched (non-`push-only`) result is
+ * reported to `POST /api/v1/sops/git-drift-report`, best-effort — a live
+ * sync-daemon reconciliation loop is still not attempted here (still "a
+ * second project", per `apps/docs/guide/gitops-sops.md`), but a human or CI
+ * job running this command on a schedule now leaves the compliance probe
+ * (`sop_git_drift`) something to read instead of nothing. Report failures
+ * never fail the command — the read-only status output above is already
+ * complete and correct on its own.
  */
 export async function runSopsStatus(opts: { dev?: boolean }): Promise<void> {
   log.header('Intutic — SOP Drift Status')
@@ -309,6 +313,7 @@ export async function runSopsStatus(opts: { dev?: boolean }): Promise<void> {
   }
 
   const counts: Record<SopDrift, number> = { 'in-sync': 0, 'local-ahead': 0, 'remote-ahead': 0, diverged: 0, 'push-only': 0 }
+  const driftReport: Array<{ sop_id: string; status: 'in-sync' | 'local-ahead' | 'remote-ahead' | 'diverged' }> = []
 
   for (const file of localFiles) {
     const raw = await fs.readFile(join(sopsDir, file), 'utf-8')
@@ -343,6 +348,7 @@ export async function runSopsStatus(opts: { dev?: boolean }): Promise<void> {
     }
 
     counts[status] += 1
+    driftReport.push({ sop_id: remote.sopId, status })
     const label = {
       'in-sync': 'in sync',
       'local-ahead': 'locally modified — `sops push` to publish',
@@ -357,4 +363,15 @@ export async function runSopsStatus(opts: { dev?: boolean }): Promise<void> {
     `${counts['in-sync']} in sync, ${counts['local-ahead']} locally modified, ` +
       `${counts['remote-ahead']} behind, ${counts.diverged} diverged, ${counts['push-only']} push-only.`,
   )
+
+  if (driftReport.length > 0) {
+    try {
+      await client.post('/api/v1/sops/git-drift-report', { results: driftReport })
+    } catch {
+      // Non-fatal: the status output above is already complete on its own,
+      // and a report the control plane never sees just leaves the
+      // `sop_git_drift` probe with stale (or absent) data until the next
+      // successful run — never a reason to fail this command.
+    }
+  }
 }
