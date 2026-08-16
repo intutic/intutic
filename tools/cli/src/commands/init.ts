@@ -19,8 +19,12 @@ import pc from 'picocolors'
 
 /**
  * Walk up from cwd looking for .git/ or package.json to find workspace root.
+ *
+ * Exported for `intutic setup` (LLD #70, cohort wizard) — its codescan step
+ * reuses this exact resolution, then `detectHarnesses` below, rather than a
+ * second implementation of "where does this workspace start."
  */
-function findWorkspaceRoot(): string | null {
+export function findWorkspaceRoot(): string | null {
   let dir = process.cwd()
   const root = resolve('/')
   while (dir !== root) {

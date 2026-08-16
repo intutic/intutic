@@ -125,6 +125,7 @@ sidebarGuide.push({
     { text: 'Governance Controls Checklist (Open-Core)', link: '/guide/governance-controls' },
     { text: 'Prompt Commands: /fix & /draw (Open-Core)', link: '/guide/agent-commands' },
     { text: 'OpenTelemetry (Open-Core)', link: '/guide/opentelemetry' },
+    { text: 'Cohort Wizard (Open-Core)', link: '/guide/cohort-wizard' },
     // Routing ships in open-core. Enterprise builds already list this page under
     // 'Using Intutic' as 'Intelligent Model Routing (Cloud)', so this entry is
     // OSS-only to keep the page from appearing twice in the enterprise sidebar.
@@ -161,6 +162,7 @@ const sidebarExternal = [
       ...(!IS_OSS ? [
         { text: 'Entity Hierarchy (Enterprise)', link: '/external/hierarchy' },
         { text: 'Self-Hosted Gateway (Enterprise)', link: '/external/self-hosted-gateway' },
+        { text: 'On-Prem Judge Setup (Enterprise)', link: '/external/on-prem-judge' },
         { text: 'Diagnostics Runbook (Enterprise)', link: '/external/diagnostics' },
       ] : []),
     ],
@@ -184,6 +186,7 @@ const sidebarReference = [
         { text: 'SOP Format (Cloud)', link: '/reference/sop-format' },
       ] : []),
       { text: 'clawde SDK (Open-Core)', link: '/reference/clawde-sdk' },
+      { text: 'Model Catalog (Open-Core)', link: '/reference/model-catalog' },
       { text: 'Configuration (Open-Core)', link: '/reference/configuration' },
       { text: 'Harness Matrix (Open-Core)', link: '/reference/harness-security-matrix' },
     ],
