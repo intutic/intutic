@@ -339,17 +339,13 @@ pub struct RequestContext {
     pub node: NodeIdentity,
 }
 
-/// Context passed to WASM plugins on each response
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ResponseContext {
-    pub session_id: String,
-    pub workspace_id: String,
-    pub model: String,
-    pub output_tokens: u32,
-    pub actual_cost_usd: f64,
-    pub response_tool_calls: Vec<ToolCall>,
-    pub dlp_findings: Vec<DlpFinding>,
-}
+// A `ResponseContext` struct stood here, doc-commented as "passed to WASM
+// plugins on each response". It never was: no response-path WASM evaluation
+// exists, nothing constructed it, and its only repo-wide reference was its
+// own definition. Deleted rather than left reading as a shipped capability —
+// a dead struct named like a feature is exactly the artifact the Removed-
+// plugins note in plugins/mod.rs exists to prevent. Response-path WASM
+// evaluation, if ever built, should start from its own design, not this shell.
 
 #[cfg(test)]
 mod tests {
