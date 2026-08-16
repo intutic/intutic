@@ -151,10 +151,49 @@ function formatRate(rate: number | null): string {
   return `${(rate * 100).toFixed(1)}%`
 }
 
-/** Pad a string to a fixed width (right-pad with spaces). */
-function pad(str: string, width: number): string {
-  if (str.length >= width) return str.slice(0, width)
-  return str + ' '.repeat(width - str.length)
+/**
+ * ANSI escapes are zero-width. Measuring and slicing raw string length counts
+ * them, so a coloured cell is both mis-padded and cut mid-escape — e.g.
+ * `pc.dim('no measured rate')` is more characters than its 17 visible ones,
+ * and a naive `str.slice(0, width)` against a narrower column truncates
+ * inside the escape sequence, corrupting the visible text (see the same
+ * fix and its full writeup in `integrity.ts`'s `padCell`).
+ */
+// eslint-disable-next-line no-control-regex -- ESC () opens every SGR colour sequence; matching it is this pattern's whole purpose.
+const ANSI = /\[[0-9;]*m/g
+
+function visibleLength(str: string): number {
+  return str.replace(ANSI, '').length
+}
+
+/** Cut to `width` VISIBLE characters, keeping escapes and closing any left open. */
+function truncateVisible(str: string, width: number): string {
+  let out = ''
+  let seen = 0
+  let i = 0
+  let coloured = false
+  while (i < str.length && seen < width) {
+    ANSI.lastIndex = i
+    const m = ANSI.exec(str)
+    if (m && m.index === i) {
+      out += m[0]
+      coloured = m[0] !== '[39m' && m[0] !== '[0m'
+      i += m[0].length
+      continue
+    }
+    out += str[i]
+    seen += 1
+    i += 1
+  }
+  // Never leave a colour open — it would tint the border and every later row.
+  return coloured ? out + '[0m' : out
+}
+
+/** Pad a string to a fixed VISIBLE width (right-pad with spaces). */
+export function pad(str: string, width: number): string {
+  const visible = visibleLength(str)
+  if (visible >= width) return truncateVisible(str, width)
+  return str + ' '.repeat(width - visible)
 }
 
 /** Render a simple table with borders. */
