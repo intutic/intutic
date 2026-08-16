@@ -2565,7 +2565,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // rather than one zipped structure.
     let injection_scan = crate::injection::scan_body(&body_json);
 
-    let wasm_ctx = crate::wasm::context::RequestContext {
+    let mut wasm_ctx = crate::wasm::context::RequestContext {
         session_id: session_id.clone(),
         workspace_id: workspace_id.clone(),
         virtual_key_prefix: key_prefix.to_string(),
@@ -2592,6 +2592,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         tool_sequence,
         tool_call_counts,
         calls_last_60s,
+        // Amended below, after the detector pass runs against this same
+        // context — the one field on this struct that is detector-derived
+        // rather than request-derived.
+        corroborating_detectors: 0,
         // This workspace's fitted transition model, resolved here for the same reason
         // as denied_tools below: the detector stays a pure function of the context and
         // does no I/O of its own. Cheap — one cached GET the control-plane sweep
@@ -2637,6 +2641,36 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         workflow_budget_usd: workflow_budget,
         node,
     };
+
+    // Evaluate the anomaly detector registry.
+    //
+    // This replaces the older single-purpose sequence-anomaly plugin, which
+    // covered two of the taxonomy's twelve categories. The registry runs every
+    // detector and returns the most severe finding, so a request that trips
+    // several checks is reported by its worst one rather than whichever
+    // happened to run first. The two original checks are preserved inside it as
+    // `ConsecutiveRepeatDetector` and `TransitionProbabilityDetector`.
+    //
+    // Run HERE — before the trace snapshot and the budget gate, not beside the
+    // disposition logic further down that consumes the findings — so the
+    // context can carry `corroborating_detectors` everywhere the context goes:
+    // into the snapshot (replay corpus fidelity — a rule gating on it replayed
+    // against a snapshot missing it would silently never fire), into the SOP
+    // shadow evaluation, and into every WASM rule. Two accepted deltas from
+    // the old ordering, both benign: detectors (pure functions) now also run
+    // on requests the budget gate refuses — wasted work only on refused
+    // requests — and the shadow evaluation sees the amended context, which is
+    // more correct, not less. Under break-glass detectors are skipped
+    // entirely and the count stays 0 — the honest default.
+    let anomaly_registry = crate::plugins::anomaly::DetectorRegistry::with_defaults();
+    let findings = if has_break_glass {
+        Vec::new()
+    } else {
+        anomaly_registry.evaluate_all(&wasm_ctx)
+    };
+    wasm_ctx.corroborating_detectors =
+        crate::plugins::anomaly::DetectorRegistry::corroborating_detector_ids(&findings).len()
+            as u32;
 
     // Owned copy for the trace sites below, which are spread across the
     // success paths and cannot all borrow wasm_ctx.
@@ -2698,16 +2732,6 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         );
     }
 
-    // Evaluate the anomaly detector registry.
-    //
-    // This replaces the older single-purpose sequence-anomaly plugin, which
-    // covered two of the taxonomy's twelve categories. The registry runs every
-    // detector and returns the most severe finding, so a request that trips
-    // several checks is reported by its worst one rather than whichever
-    // happened to run first. The two original checks are preserved inside it as
-    // `ConsecutiveRepeatDetector` and `TransitionProbabilityDetector`.
-    let anomaly_registry = crate::plugins::anomaly::DetectorRegistry::with_defaults();
-
     // Shadow-mode SOPs (`mode: shadow`): reported on the trace, never
     // consulted by any disposition decision below — only `gov`, built from
     // `enforcing_sops` above, feeds `wasm_ctx`.
@@ -2746,7 +2770,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // field the control plane already reads.
     let mut advisory_findings: Vec<crate::telemetry::FindingWire> = Vec::new();
     if !has_break_glass {
-        let findings = anomaly_registry.evaluate_all(&wasm_ctx);
+        // `findings` was computed above, before the trace snapshot — do NOT
+        // re-evaluate here: the detectors are pure functions of a context
+        // that has not changed, and a second pass would only double the cost.
         if let Some(worst) = findings.first() {
             // Log every finding — the secondary ones are what make a report
             // actionable, and they are lost if only the verdict is recorded.
@@ -2869,6 +2895,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     .map(crate::telemetry::FindingWire::from_finding)
                     .map(|w| if shadow_enforcement { w.shadowed() } else { w })
                     .collect(),
+                // Blocked before the model answered — no output to echo-scan.
+                response_injection_findings: Vec::new(),
                 context_snapshot: context_snapshot_for_trace.clone(),
                 graph: crate::telemetry::GraphTrace::from_node(
                     &wasm_ctx.node,
@@ -2915,6 +2943,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                         "SHADOW: would have blocked this request"
                     );
                 } else {
+                crate::metrics::record_policy_refusal("anomaly", "kill");
                 return json_error(
                     StatusCode::FORBIDDEN,
                     "policy_denied",
@@ -2955,6 +2984,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                         "SHADOW: would have blocked this request (corroborated)"
                     );
                 } else {
+                    crate::metrics::record_policy_refusal("anomaly", "ask");
                     return json_error(
                         StatusCode::FORBIDDEN,
                         "policy_denied",
@@ -3035,6 +3065,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                         attempts,
                         "Reask allowance exhausted — escalating to block"
                     );
+                    crate::metrics::record_policy_refusal("anomaly", "reask_exhausted");
                     return json_error(
                         StatusCode::FORBIDDEN,
                         "policy_denied",
@@ -3061,6 +3092,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 // and the state is one the agent can change by itself. A harness
                 // that retries on conflict does the right thing here by default,
                 // where retrying a 403 would just replay the refusal.
+                crate::metrics::record_policy_refusal("anomaly", "reask");
                 return json_error(
                     StatusCode::CONFLICT,
                     "policy_reask",
@@ -3111,6 +3143,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         match wasm_verdict {
             crate::wasm::context::Verdict::Kill { reason, .. } => {
                 tracing::warn!(workspace_id = %workspace_id, reason = %reason, "WASM custom rule blocked this request");
+                crate::metrics::record_policy_refusal("wasm", "kill");
                 return json_error(
                     StatusCode::FORBIDDEN,
                     "policy_denied",
@@ -3146,6 +3179,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                         attempts,
                         "WASM reask allowance exhausted — escalating to block"
                     );
+                    crate::metrics::record_policy_refusal("wasm", "reask_exhausted");
                     return json_error(
                         StatusCode::FORBIDDEN,
                         "policy_denied",
@@ -3167,6 +3201,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 // 409 for the same reason as the anomaly path: 403 says "you may
                 // not do this", 409 says "not in this state" — and the state is
                 // one the agent can change itself.
+                crate::metrics::record_policy_refusal("wasm", "reask");
                 return json_error(
                     StatusCode::CONFLICT,
                     "policy_reask",
@@ -3434,6 +3469,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 token_anomaly: false,
                 loop_run_id: loop_run_id_header.clone(),
                 findings: advisory_findings.clone(),
+                // Cache hit — the cached body was echo-scanned on the turn
+                // that produced it; re-reporting here would double-count.
+                response_injection_findings: Vec::new(),
             context_snapshot: context_snapshot_for_trace.clone(),
         graph: crate::telemetry::GraphTrace::from_node(&node_for_trace, advisory_anomalies.clone()),
             };
@@ -4135,6 +4173,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             token_anomaly: false,
             loop_run_id: loop_run_id_header.clone(),
             findings: advisory_findings.clone(),
+            // Upstream error or short-circuit — no response body to echo-scan.
+            response_injection_findings: Vec::new(),
             context_snapshot: context_snapshot_for_trace.clone(),
         graph: crate::telemetry::GraphTrace::from_node(&node_for_trace, advisory_anomalies.clone()),
         };
@@ -5428,6 +5468,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 token_anomaly,
                 loop_run_id: loop_run_id_clone,
                 findings: advisory_findings.clone(),
+                // The streamed model output, fully accumulated by this point —
+                // same advisory echo scan as the non-streaming path, so
+                // streaming is not a blind spot for this signal.
+                response_injection_findings: crate::injection::scan(&accumulated_content),
             context_snapshot: context_snapshot_for_trace.clone(),
         graph: crate::telemetry::GraphTrace::from_node(&node_for_trace, advisory_anomalies.clone()),
             };
@@ -6079,6 +6123,13 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         routing_shadow_model: shadow_selection.clone(),
         loop_run_id: loop_run_id_header,
         findings: advisory_findings.clone(),
+        // Advisory echo scan of the model's own output — see the field's doc
+        // in telemetry.rs and scan_response_body's in injection.rs for why
+        // this never touches a disposition.
+        response_injection_findings: parsed_response
+            .as_ref()
+            .map(crate::injection::scan_response_body)
+            .unwrap_or_default(),
         context_snapshot: context_snapshot_for_trace.clone(),
         graph: crate::telemetry::GraphTrace::from_node(&node_for_trace, advisory_anomalies.clone()),
     };

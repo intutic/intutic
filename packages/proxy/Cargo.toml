@@ -69,11 +69,15 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 # W3C Baggage headers, which are attacker-controlled on any inbound request.
 # These four move as a set — otlp 0.32 requires sdk 0.32, and
 # tracing-opentelemetry 0.33 is the first release built against otel 0.32.
-opentelemetry = { version = "0.32", features = ["trace"] }
-opentelemetry_sdk = { version = "0.32", features = ["rt-tokio", "trace"] }
+# Metrics ride the same pinned set via feature flags ONLY — never add
+# opentelemetry-prometheus here: it lags the SDK release line and pulling it
+# in would drag this set back below the advisory floor. Export is OTLP push
+# (src/metrics.rs); there is deliberately no /metrics pull endpoint.
+opentelemetry = { version = "0.32", features = ["trace", "metrics"] }
+opentelemetry_sdk = { version = "0.32", features = ["rt-tokio", "trace", "metrics"] }
 # The tonic transport feature was renamed "tonic" -> "grpc-tonic"; the separate
 # "tokio" feature no longer exists.
-opentelemetry-otlp = { version = "0.32", features = ["grpc-tonic", "trace"] }
+opentelemetry-otlp = { version = "0.32", features = ["grpc-tonic", "trace", "metrics"] }
 tracing-opentelemetry = "0.33"
 
 # Misc
