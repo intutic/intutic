@@ -48,12 +48,18 @@ can be the same event.
 
 **Where this is honestly incomplete:** the control plane's own SOP registry —
 lifecycle states, the judge/validation pipeline, anti-gaming checks — is a
-separate system from the files on disk. `intutic sops push` uploads a file's
-*content* to the control plane, but today it does not carry the file's real
-front-matter metadata (risk tier, version) faithfully, and there is no pull
-path back. If your policy review process depends on the control plane's
+separate system from the files on disk, and the two connect over three
+commands (`push`, `pull`, `status`), not a live sync. `intutic sops push` now
+carries each file's own declared title, risk tier and version faithfully
+(one control-plane SOP per file, not a folder concatenated under one
+hardcoded tier), `intutic sops pull` brings the registry's SOPs back down as
+files, and `intutic sops status` reports drift between the two, read-only.
+See [GitOps for SOPs](/guide/gitops-sops) for the full push/pull/status flow
+and what still requires a human to notice drift rather than a dashboard
+signal. If your policy review process depends on the control plane's
 lifecycle gates, treat the file-based review flow above as a complement to
-that, not a replacement for it, until the two are properly connected.
+that, not a replacement for it, until an operator has actually run `pull` or
+`status` to confirm the two agree.
 
 ## What "Strong" and "Partial" mean here
 
