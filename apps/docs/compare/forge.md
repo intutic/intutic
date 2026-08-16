@@ -20,7 +20,7 @@ Intutic takes the opposite starting point: be the in-path surface itself, purpos
 | **MCP governance** | Dedicated MCP governance proxy package | MCP Gateway with default-deny registry ACLs, pre-tool identity + argument evaluation, per-tool enable/disable |
 | **Coding-agent support** | 19 harnesses out-of-the-box, harness-native adapters | Claude Code and Cursor named, via network interception rather than harness instrumentation |
 | **Audit trail** | Merkle-sealed trace roots with browser-side signature verification, hourly sealing sweep | SHA-256 hash-chain ledger, DB-enforced immutability, scheduled integrity verifier |
-| **SIEM/export** | Not yet packaged (in progress) | Native Splunk (HEC) and S3 export, SOAR webhooks (Tines, Google SecOps) |
+| **SIEM/export** | 6 native destinations — Splunk HEC, Syslog/CEF, Datadog, S3, GCS, generic webhook — with retry/DLQ | Native Splunk (HEC) and S3 export, SOAR webhooks (Tines, Google SecOps) |
 | **Identity model** | SSO-group privilege resolution at the hook gate; sandbox attestation as a gateable signal | Proprietary agent identity records; cloud/IAM non-human-identity inventory across AWS/Azure/GCP/GitHub |
 | **On-prem / air-gapped** | Documented deployment guides | No such terms found anywhere in Forge's public docs as of this writing — treat as unconfirmed until stated otherwise |
 | **Device/endpoint enforcement** | CA trust injection, MDM manifest generation, phone-home staleness reporting | Generic "managed device" coverage via connected EDR; no comparable native detail documented |
@@ -31,7 +31,7 @@ Intutic takes the opposite starting point: be the in-path surface itself, purpos
 
 ## What Forge Does Better Today
 
-Be direct about this: Forge's audit ledger, SIEM/SOAR export, and broad identity/inventory story are real and more complete than what Intutic ships today in those specific areas. If your immediate need is enterprise-wide AI discovery plus routing enforcement through infrastructure you already run (EDR, network, identity), Forge's connector model gets there faster.
+Be direct about this: Forge's audit ledger and broad identity/inventory story are real and more complete than what Intutic ships today in those specific areas. SIEM export itself is now comparable (both ship native Splunk destinations and object-storage export); Forge's SOAR webhook integrations (Tines, Google SecOps) are named integrations Intutic does not have a direct equivalent to — Intutic's generic webhook destination can reach the same tools, just without a purpose-built connector. If your immediate need is enterprise-wide AI discovery plus routing enforcement through infrastructure you already run (EDR, network, identity), Forge's connector model gets there faster.
 
 ## When to Choose Intutic
 

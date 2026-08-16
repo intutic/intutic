@@ -76,7 +76,7 @@ const navItems = [
   { text: 'Reference', link: '/reference/cli' },
   { text: 'Concepts', link: '/concepts/enforcement-actions' },
   { text: 'Security', link: '/security' },
-  { text: 'Compare', link: '/compare/portkey' },
+  { text: 'Compare', link: '/compare/' },
 ];
 
 if (!IS_OSS) {
@@ -364,6 +364,7 @@ export default defineConfig({
         {
           text: 'Compare',
           items: [
+            { text: 'Overview & Capability Matrix', link: '/compare/' },
             { text: 'Intutic vs Portkey', link: '/compare/portkey' },
             { text: 'Intutic vs Credo AI', link: '/compare/credo-ai' },
             { text: 'Intutic vs Arize AX', link: '/compare/arize-ax' },
