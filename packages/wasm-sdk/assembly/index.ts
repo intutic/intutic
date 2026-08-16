@@ -50,6 +50,18 @@ export class RequestContext {
    * the window reads `0`, not a sentinel like the `-1` fields below use.
    */
   calls_last_60s: i32 = 0;
+  /**
+   * How many distinct anomaly detectors fired at Medium+ severity on this
+   * request — the same pool the proxy's built-in corroboration escalation
+   * counts, so a rule gating on `ctx.corroborating_detectors >= 2` agrees
+   * with the built-in `>= 2` rung by construction (and `>= 3` is available
+   * to a rule that wants a stricter bar than the built-in).
+   *
+   * `0` when nothing fired, under break-glass (detectors are skipped), and
+   * on replay snapshots captured before this field existed — always a real
+   * count, never a sentinel.
+   */
+  corroborating_detectors: i32 = 0;
 
   // ── Graph position ──────────────────────────────────────────────────────
   //
@@ -466,6 +478,9 @@ function parseRequestContext(jsonBytes: Uint8Array): RequestContext {
 
   const calls_last_60s = jsonObj.getInteger("calls_last_60s");
   if (calls_last_60s) ctx.calls_last_60s = i32(calls_last_60s.valueOf());
+
+  const corroborating_detectors = jsonObj.getInteger("corroborating_detectors");
+  if (corroborating_detectors) ctx.corroborating_detectors = i32(corroborating_detectors.valueOf());
 
   // ── Declared SOP policy, this turn's delta, and the change manifest ──────
   //

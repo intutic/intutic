@@ -146,11 +146,20 @@ async fn main() -> anyhow::Result<()> {
     // constructing the exporter and provider explicitly. The provider is kept
     // rather than discarded so shutdown can flush pending spans — the old
     // `global::shutdown_tracer_provider()` no longer exists.
-    let (otel_layer, tracer_provider) = if std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").is_ok() {
+    let (otel_layer, tracer_provider, meter_provider) = if std::env::var(
+        "OTEL_EXPORTER_OTLP_ENDPOINT",
+    )
+    .is_ok()
+    {
         use opentelemetry::trace::TracerProvider;
-        use opentelemetry_otlp::{SpanExporter, WithExportConfig};
+        use opentelemetry_otlp::{MetricExporter, SpanExporter, WithExportConfig};
+        use opentelemetry_sdk::metrics::SdkMeterProvider;
         use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider};
         use opentelemetry_sdk::Resource;
+
+        let resource = Resource::builder()
+            .with_service_name(service_name)
+            .build();
 
         let exporter = SpanExporter::builder()
             .with_tonic()
@@ -161,15 +170,39 @@ async fn main() -> anyhow::Result<()> {
         let provider = SdkTracerProvider::builder()
             .with_batch_exporter(exporter)
             .with_sampler(Sampler::AlwaysOn)
-            .with_resource(Resource::builder().with_service_name(service_name).build())
+            .with_resource(resource.clone())
             .build();
 
         let tracer = provider.tracer("intutic-proxy");
         let layer = tracing_opentelemetry::layer().with_tracer(tracer);
-        (Some(layer), Some(provider))
+
+        // Metrics: same endpoint, same gate, mirror of the tracer pattern
+        // (TD-161). Push over OTLP — see metrics.rs for why there is no
+        // /metrics pull endpoint. Installed as the global provider BEFORE any
+        // instrument is first used: metrics.rs's LazyLock instruments bind
+        // whichever provider is global at first deref, and the first deref is
+        // either register_observables() below or a per-request record, both
+        // after this line.
+        let metric_exporter = MetricExporter::builder()
+            .with_tonic()
+            .with_endpoint(otel_endpoint.clone())
+            .build()
+            .expect("Failed to build OTLP metric exporter");
+
+        let meters = SdkMeterProvider::builder()
+            .with_periodic_exporter(metric_exporter)
+            .with_resource(resource)
+            .build();
+        opentelemetry::global::set_meter_provider(meters.clone());
+
+        (Some(layer), Some(provider), Some(meters))
     } else {
-        (None, None)
+        (None, None, None)
     };
+
+    // Bridge the egress atomics as observable counters. A no-op when no
+    // meter provider was installed above.
+    let _egress_observables = intutic_proxy::metrics::register_observables();
 
     // Initialize tracing registry
     let registry = tracing_subscriber::registry()
@@ -577,6 +610,12 @@ async fn main() -> anyhow::Result<()> {
     if let Some(provider) = tracer_provider {
         if let Err(err) = provider.shutdown() {
             tracing::warn!("OpenTelemetry shutdown failed: {err}");
+        }
+    }
+    // Same for metrics — flushes the periodic reader's last collection.
+    if let Some(provider) = meter_provider {
+        if let Err(err) = provider.shutdown() {
+            tracing::warn!("OpenTelemetry metrics shutdown failed: {err}");
         }
     }
 

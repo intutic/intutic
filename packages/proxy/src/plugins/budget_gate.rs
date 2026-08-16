@@ -132,6 +132,7 @@ mod tests {
             tool_sequence: vec![],
             tool_call_counts: vec![],
             calls_last_60s: 0,
+            corroborating_detectors: 0,
             denied_tools: vec![],
             injection_findings: vec![],
             injection_sources: vec![],
