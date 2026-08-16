@@ -81,6 +81,16 @@ export interface Sop {
 
   /** Version counter for optimistic locking. */
   versionCounter?: number
+
+  /**
+   * How many times this SOP has been evaluated in shadow — non-zero only for
+   * HYPOTHESIZED/REFINED SOPs, per `ENFORCEMENT_BY_STATE`. See
+   * `sopShadowService.ts`'s `sopPromotionReadiness()` for what to do with it.
+   */
+  shadowEvaluations?: number
+
+  /** Of `shadowEvaluations`, how many the SOP would have acted on. */
+  shadowWouldBlock?: number
 }
 
 // ─── SOP Proof Tree ──────────────────────────────────────────────────
@@ -359,36 +369,32 @@ export const VALID_SOP_TRANSITIONS: ReadonlyArray<{ from: SopLifecycleState; to:
  * in the UI at the moment someone changes a state, and it must describe the
  * system rather than the design.
  *
- * It previously said `HYPOTHESIZED: 'SHADOW'` and `REFINED: 'SHADOW'`. Neither
- * was true, and four subsystems disagreed about these two states:
+ * ## History (TD-277)
  *
- * | state | synced into agent context | runtime enforcement | dashboard "active" |
- * |---|---|---|---|
- * | `HYPOTHESIZED` | yes (`syncService.ts`) | no | no |
- * | `REFINED` | **no** | no | **yes** (`dashboardService.ts`) |
- * | `VALIDATED` | yes | yes | yes |
+ * This value has been wrong in both directions. It first said
+ * `HYPOTHESIZED: 'SHADOW'` and `REFINED: 'SHADOW'` while nothing evaluated
+ * either state at all — no gate consulted them, nothing recorded what either
+ * would have done, and `VALID_SOP_TRANSITIONS`' own "Refine based on shadow
+ * results" had no shadow results to refine from. That was corrected to
+ * `ADVISORY`: honest, since the SOP text is synced into the agent's
+ * governance file and does influence it, but no gate stops anything and
+ * nothing is measured.
  *
- * Every runtime gate filters `lifecycleState = 'VALIDATED'` — `evaluate.ts`,
- * `hookEvents.ts`, `judge.ts` (twice), `skillOptService.ts`, `sops.ts`. There is
- * no shadow evaluation anywhere, so nothing records what a HYPOTHESIZED SOP
- * *would* have done, and the transition out of it — described in
- * `VALID_SOP_TRANSITIONS` as "Refine based on shadow results" — has no shadow
- * results to refine from.
+ * `SHADOW` is reinstated here because that is no longer true. Every
+ * finalized judge call (`routes/judge.ts`'s `judgeShadowSops`, fired
+ * fire-and-forget so it can never add latency to or fail the real verdict)
+ * evaluates the workspace's HYPOTHESIZED and REFINED SOPs against the same
+ * response the VALIDATED set is judged against, and records `would_act` into
+ * `sop_registry.shadow_evaluations` / `shadow_would_block` (migration 146) —
+ * the same counted-evidence shape `rule_candidates` uses for WASM rules. A
+ * human deciding a HYPOTHESIZED/REFINED → VALIDATED transition can read that
+ * evidence via `sopPromotionReadiness()` in `sopShadowService.ts` before
+ * deciding.
  *
- * `ADVISORY` is the honest name for what HYPOTHESIZED does: the SOP text is
- * synced into the agent's governance file, so the agent reads it and is
- * influenced by it, but no gate will stop anything.
- *
- * `REFINED` was `NONE` and is now `ADVISORY`. It was in neither the sync list
- * nor any enforcement filter, so moving an SOP forward from HYPOTHESIZED —
- * the designed next step — silently removed it from every agent's context while
- * the dashboard went on counting it as active. Refining a guideline un-deployed
- * it. `syncService` now includes it alongside HYPOTHESIZED, and the dashboard
- * counts advisory SOPs separately from enforced ones.
- *
- * When real shadow evaluation exists, `SHADOW` becomes available again — and
- * should be reinstated only for states where a would-have verdict is actually
- * recorded.
+ * `sopLifecycleDeployment.test.ts` used to assert `SHADOW` must never appear
+ * in this map "while no shadow evaluation of SOPs exists" — this doc comment
+ * and the citations above are what makes that condition false; the test now
+ * asserts the reverse.
  */
 export const ENFORCEMENT_BY_STATE: Record<
   SopLifecycleState,
@@ -397,8 +403,8 @@ export const ENFORCEMENT_BY_STATE: Record<
   DRAFT: 'NONE',
   PENDING_REVIEW: 'NONE',
   GENERATED: 'NONE',
-  HYPOTHESIZED: 'ADVISORY',
-  REFINED: 'ADVISORY',
+  HYPOTHESIZED: 'SHADOW',
+  REFINED: 'SHADOW',
   VALIDATED: 'ACTIVE',
   INVALIDATED: 'NONE',
 }

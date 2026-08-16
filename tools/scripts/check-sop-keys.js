@@ -78,7 +78,13 @@ const doc = readFileSync(refPage, 'utf8')
 // `risk_tier` is parsed but no proxy detector reads it, so it is deliberately
 // absent from ENFORCING_FIELDS. It must still be documented, precisely because
 // its absence from the enforceable set is the surprising part.
-const NOT_ENFORCING = new Set(['risk_tier'])
+//
+// `mode` is the same shape of exception for a different reason: `mode: shadow`
+// does not itself declare a condition to match, it changes whether the OTHER
+// nine keys enforce or only report — so it has nothing to add to a list of
+// enforcing fields, but omitting it from documentation would hide the one key
+// that can silently turn every other one into a no-op.
+const NOT_ENFORCING = new Set(['risk_tier', 'mode'])
 
 const undocumented = [...keys].filter((k) => !doc.includes(k))
 const missingFromEnforcing = [...keys].filter(

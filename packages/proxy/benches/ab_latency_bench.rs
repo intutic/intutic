@@ -163,6 +163,7 @@ async fn main() {
         reward_engine: Arc::new(intutic_proxy::routing::reward::RewardEngine::new()),
         store: Arc::new(intutic_proxy::store::MemoryStore::new()),
         control_plane: Arc::new(intutic_proxy::store::NullControlPlaneCache),
+        context_snapshot_rate: 0.0,
     };
     let proxy_listener = match tokio::net::TcpListener::bind("127.0.0.1:0").await {
         Ok(l) => l,
