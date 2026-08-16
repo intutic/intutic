@@ -122,7 +122,7 @@ Intutic provides enterprise-grade identity and access management:
 
 Intutic helps your organization meet regulatory requirements for AI governance:
 
-- **SOC 2 Probes** — Six on-demand compliance probes (workspace policy completeness, MFA coverage, data-residency violations, audit-log integrity, API-key rotation, and SOP coverage), each scored 0–100 with structured findings
+- **SOC 2 Probes** — Eight compliance probes (workspace policy completeness, MFA enforcement, data-residency violations, audit-log integrity, API-key rotation, SOP coverage, auto-apply provenance, and SOP git drift), each scored 0–100 with structured findings, run hourly and on demand — with a queryable probe history and a signed, hash-manifested SOC 2 evidence export built on top of them (see [Compliance Evidence](/guide/compliance-evidence))
 - **HIPAA BAA** — PHI safeguard tracking and BAA status management
 - **GDPR** — Article 17 erasure, consent management, and data processing
   agreements. Erasure is fulfilled by our team on request rather than through a
