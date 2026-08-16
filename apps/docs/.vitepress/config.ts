@@ -105,6 +105,7 @@ if (!IS_OSS) {
       { text: 'Activity Logs (Cloud)', link: '/guide/traces' },
       { text: 'Agents (Cloud)', link: '/guide/agents' },
       { text: 'Agent Guidelines (Cloud)', link: '/guide/sops' },
+      { text: 'GitOps for SOPs (Cloud)', link: '/guide/gitops-sops' },
       { text: 'Review Queue (Cloud)', link: '/guide/decisions' },
       { text: 'Budgets & FinOps (Cloud)', link: '/guide/budgets' },
       { text: 'Policies & Enforcement (Cloud)', link: '/guide/policies' },
