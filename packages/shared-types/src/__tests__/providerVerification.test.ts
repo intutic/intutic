@@ -58,6 +58,24 @@ describe('buildVerificationProbe', () => {
     expect(probe!.headers['api-key']).toBe('test-key')
   })
 
+  it('strips many repeated trailing slashes without a regex-driven slowdown (CodeQL polynomial-regex regression)', () => {
+    // The original implementation used endpoint.replace(/\/+$/, ''), which
+    // CodeQL flagged as a polynomial regular expression on uncontrolled
+    // input. This is the regression guard: a pathological run of trailing
+    // slashes must resolve instantly and strip completely, not just "not
+    // crash" -- a hang here would fail the test's own timeout, not silently
+    // pass.
+    const pathological = 'https://my-resource.openai.azure.com' + '/'.repeat(50_000)
+    const started = Date.now()
+    const probe = buildVerificationProbe('azure_openai', {
+      apiKey: 'test-key',
+      endpoint: pathological,
+      deploymentName: 'gpt-4o-deployment',
+    })
+    expect(Date.now() - started).toBeLessThan(100)
+    expect(probe!.url).toBe('https://my-resource.openai.azure.com/openai/models?api-version=2024-02-01')
+  })
+
   it('builds an Ollama reachability probe with no auth header', () => {
     const probe = buildVerificationProbe('ollama', { apiBase: 'http://localhost:11434' })
     expect(probe).not.toBeNull()
