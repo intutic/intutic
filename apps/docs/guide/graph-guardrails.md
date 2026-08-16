@@ -132,6 +132,21 @@ match steers rather than blocks, because people write *"ignore the previous
 suggestion"* to agents in earnest; several distinct techniques in one payload
 is not a coincidence, and that is refused.
 
+The scan's timing deserves stating just as plainly: it runs on the **request
+path only** — the proxy scans what the client sends it. A poisoned tool result
+is therefore seen one turn late: the harness runs the tool, and the scan first
+sees the result when the harness sends the conversation (result included) back
+as the next request's history. The turn in between is the exposure window —
+the agent has already read the poisoned content before any scan sees it. Two
+things narrow that window. A match whose source is a tool result or tool
+description escalates to an immediate reask on the very request that carries
+it — fetched content is not the population that types *"ignore my previous
+message"* in earnest, so it does not wait for the multi-technique threshold.
+And the tool-**call** analogue is already response-side: the response gate
+refuses a forbidden tool call before the client ever sees it. There is no
+response-side injection scan of tool results; that asymmetry is the documented
+posture, not an oversight.
+
 In a graph this matters more than for a single agent. One node's output becomes
 the next node's input, so a payload picked up from a fetched page arrives at
 the next node looking exactly like an instruction from the orchestrator — there
