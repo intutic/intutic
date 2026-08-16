@@ -333,6 +333,7 @@ enterpriseCmd
   .option('--skip-ca', 'Skip system-wide CA trust installation')
   .option('--skip-hooks', 'Skip system-level Cursor hooks installation')
   .option('--dev', 'Use local control plane (http://localhost:3001) when resolving workspace context')
+  .option('--cli-binary-path <path>', 'Absolute path to the intutic CLI binary on TARGET machines, embedded in the firewall-deployment manifests (default: /usr/local/bin/intutic — override if your fleet installs elsewhere)')
   .action(async (opts) => {
     const { runEnterpriseInstall } = await import('./commands/enterprise.js')
     await runEnterpriseInstall(opts)
@@ -447,6 +448,59 @@ traces
   .action(async (traceId, opts) => {
     const { runTracesInspect } = await import('./commands/traces.js')
     await runTracesInspect(traceId, opts)
+  })
+
+// ── Findings (detector_findings adjudication) ───────────────────────────────
+
+const findings = program
+  .command('findings')
+  .description('Query and adjudicate detector findings — the TP/FP labeling surface')
+
+findings
+  .command('list')
+  .description('List detector findings for the workspace')
+  .option('--unadjudicated', "Only show findings nobody has ruled on yet (the route's own default is to show all)")
+  .option('--detector <id>', 'Filter by detector_id (e.g. response_injection:override-instructions)')
+  .option('--limit <n>', 'Max rows to return (default: 100, max: 500)')
+  .option('--json', 'Output as JSON instead of table')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runFindingsList } = await import('./commands/findings.js')
+    await runFindingsList(opts)
+  })
+
+findings
+  .command('adjudicate <findingId>')
+  .description('Record a human ruling (true/false positive) on one finding')
+  .option('--true-positive', 'Mark this finding a true positive')
+  .option('--false-positive', 'Mark this finding a false positive')
+  .option('--note <text>', 'Optional note recorded with the ruling')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (findingId, opts) => {
+    const { runFindingsAdjudicate } = await import('./commands/findings.js')
+    await runFindingsAdjudicate(findingId, opts)
+  })
+
+findings
+  .command('stats')
+  .description('Per-detector false-positive rate, computed over adjudicated findings only')
+  .option('--json', 'Output as JSON instead of table')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runFindingsStats } = await import('./commands/findings.js')
+    await runFindingsStats(opts)
+  })
+
+findings
+  .command('echo-report')
+  .description('Response-injection echo measurement report — per-pattern false-positive rate')
+  .option('--since <date>', 'ISO date — window start (route default: trailing 7 days)')
+  .option('--until <date>', 'ISO date — window end (route default: now)')
+  .option('--json', 'Output as JSON instead of table')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runFindingsEchoReport } = await import('./commands/findings.js')
+    await runFindingsEchoReport(opts)
   })
 
 // ── Trace integrity ────────────────────────────────────────────────────────
