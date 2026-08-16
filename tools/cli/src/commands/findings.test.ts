@@ -111,6 +111,167 @@ describe('intutic findings', () => {
     expect(printed()).toMatch(/unruled/)
   })
 
+  // ─── list: Reason column ───────────────────────────────────────────
+
+  it('list renders the `reason` field (truncated), the field the CLI previously dropped entirely', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        findings: [
+          {
+            finding_id: 'fnd_reason_1',
+            trace_id: 'tr_1',
+            session_id: 'sess_1',
+            loop_run_id: null,
+            detector_id: 'graph_depth',
+            anomaly_kind: 'runaway_recursion',
+            severity: 'HIGH',
+            disposition: 'KILL',
+            confidence: 0.9,
+            reason: 'Runaway recursion: graph depth 12 exceeds the maximum of 8',
+            harness: 'claude-code',
+            shadowed: false,
+            outcome: null,
+            outcome_by: null,
+            outcome_at: null,
+            outcome_note: null,
+            created_at: '2026-08-16T00:00:00Z',
+          },
+        ],
+      }),
+    })
+
+    await runFindingsList({})
+
+    const out = printed()
+    // Reason is truncated to 26 visible chars — the full 60-char reason
+    // above does not fit, so this asserts the truncated prefix is present,
+    // not the whole string.
+    expect(out).toContain('Runaway recursion: graph')
+  })
+
+  it('list renders a null `reason` as "—", not blank', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        findings: [
+          {
+            finding_id: 'fnd_reason_2',
+            trace_id: null,
+            session_id: null,
+            loop_run_id: null,
+            detector_id: 'response_injection:override-instructions',
+            anomaly_kind: 'response_injection',
+            severity: 'MEDIUM',
+            disposition: 'ADVISORY',
+            confidence: 0.5,
+            reason: null,
+            harness: 'claude-code',
+            shadowed: false,
+            outcome: null,
+            outcome_by: null,
+            outcome_at: null,
+            outcome_note: null,
+            created_at: '2026-08-16T00:00:00Z',
+          },
+        ],
+      }),
+    })
+
+    await runFindingsList({})
+
+    const out = printed()
+    // A bare "—" only proves something rendered; anchor it to a border so
+    // it can't be satisfied by an unrelated dash elsewhere in the table.
+    expect(out).toMatch(/│\s+—\s+│/)
+  })
+
+  it('list under FORCE_COLOR renders the wider Reason+Outcome table without corrupting or truncating mid-escape-sequence', async () => {
+    const prevForceColor = process.env.FORCE_COLOR
+    process.env.FORCE_COLOR = '1'
+    vi.resetModules()
+
+    try {
+      const { runFindingsList: runFindingsListColor } = await import('./findings.js')
+
+      fetchMock.mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          findings: [
+            {
+              finding_id: 'fnd_color_1',
+              trace_id: 'tr_2',
+              session_id: 'sess_2',
+              loop_run_id: null,
+              detector_id: 'response_injection:override-instructions',
+              anomaly_kind: 'response_injection',
+              severity: 'HIGH',
+              disposition: 'KILL',
+              confidence: 0.95,
+              reason: 'Detected an instruction-override pattern embedded in the assistant response body',
+              harness: 'claude-code',
+              shadowed: false,
+              outcome: 'TRUE_POSITIVE',
+              outcome_by: 'user_1',
+              outcome_at: '2026-08-16T01:00:00Z',
+              outcome_note: null,
+              created_at: '2026-08-16T00:00:00Z',
+            },
+            {
+              finding_id: 'fnd_color_2',
+              trace_id: null,
+              session_id: null,
+              loop_run_id: null,
+              detector_id: 'graph_depth',
+              anomaly_kind: 'runaway_recursion',
+              severity: 'LOW',
+              disposition: 'ADVISORY',
+              confidence: 0.3,
+              reason: null,
+              harness: 'claude-code',
+              shadowed: false,
+              outcome: null,
+              outcome_by: null,
+              outcome_at: null,
+              outcome_note: null,
+              created_at: '2026-08-16T00:05:00Z',
+            },
+          ],
+        }),
+      })
+
+      await runFindingsListColor({})
+
+      const out = printed()
+      // eslint-disable-next-line no-control-regex -- ESC opens every SGR colour sequence; stripping it is this assertion's whole purpose.
+      const ANSI_RE = /\x1b\[[0-9;]*m/g
+      const stripped = out.replace(ANSI_RE, '')
+      expect(stripped).toContain('unruled')
+      expect(stripped).toContain('TRUE_POSITIVE')
+      expect(stripped).toContain('Detected an instruction')
+      expect(stripped).toMatch(/│\s+—\s+│/)
+
+      // The Reason/Outcome columns widened the table to widths
+      // [14, 19, 20, 26, 12, 14] across 6 columns: every box-drawing line
+      // (borders, header, and both coloured/uncoloured data rows) must have
+      // the SAME visible width once ANSI is stripped. An ANSI-unsafe pad
+      // (measuring raw length instead of visible length, as the CLI shipped
+      // with in TD-344) would either misalign a coloured row against the
+      // borders or slice it mid-escape-sequence — either way this width
+      // check catches it, which a mere substring check would not.
+      const expectedWidth = [14, 19, 20, 26, 12, 14].reduce((a, w) => a + w, 0) + 3 * 6 + 1
+      const boxLines = out.split('\n').filter((line: string) => /[┌│├└]/.test(line))
+      expect(boxLines.length).toBeGreaterThan(0)
+      for (const line of boxLines) {
+        expect(line.replace(ANSI_RE, '').length).toBe(expectedWidth)
+      }
+    } finally {
+      if (prevForceColor === undefined) delete process.env.FORCE_COLOR
+      else process.env.FORCE_COLOR = prevForceColor
+      vi.resetModules()
+    }
+  })
+
   // ─── adjudicate ──────────────────────────────────────────────────
 
   it('adjudicate refuses when BOTH --true-positive and --false-positive are set', async () => {

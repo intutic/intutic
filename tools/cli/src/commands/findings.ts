@@ -248,13 +248,19 @@ export async function runFindingsList(
       return
     }
 
-    const headers = ['Finding ID', 'Created', 'Detector', 'Disposition', 'Outcome']
-    const widths = [14, 19, 28, 12, 14]
+    // `reason` is what makes a request-path finding triageable from the
+    // terminal at all (e.g. "Runaway recursion: graph depth 12 exceeds the
+    // maximum of 8") — Detector is trimmed from 28 to 20 (still enough for
+    // the longest `response_injection:*` id once truncated) to make room for
+    // it without the table ballooning further.
+    const headers = ['Finding ID', 'Created', 'Detector', 'Reason', 'Disposition', 'Outcome']
+    const widths = [14, 19, 20, 26, 12, 14]
 
     const rows = data.findings.map((f) => [
       truncateId(f.finding_id),
       formatTimestamp(f.created_at),
-      truncateText(f.detector_id, 28),
+      truncateText(f.detector_id, 20),
+      truncateText(f.reason ?? '—', 26),
       f.disposition ?? '—',
       colorOutcome(f.outcome),
     ])
