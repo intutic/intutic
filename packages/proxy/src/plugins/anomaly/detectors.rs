@@ -1785,6 +1785,19 @@ impl AnomalyDetector for PromptInjectionDetector {
         // the places this detector exists to protect.
         let techniques = ctx.injection_findings.join(", ");
 
+        // A match sourced from tool-result content is the multi-agent-graph
+        // attack shape `injection.rs`'s own module doc describes: one node's
+        // output becomes the next node's input and looks like instructions
+        // from the orchestrator. That is content the agent fetched, not
+        // something a user typed — it doesn't share NotInject's benign
+        // false-positive population (someone idly typing "ignore my previous
+        // message"), so it earns the count threshold's rung on its own,
+        // without waiting to accumulate more matches.
+        let from_untrusted_content = ctx
+            .injection_sources
+            .iter()
+            .any(|s| s == "tool_result" || s == "tool_description");
+
         // Reask at threshold, not kill.
         //
         // This detector killed while the module doc four screens up said
@@ -1798,12 +1811,27 @@ impl AnomalyDetector for PromptInjectionDetector {
         // interrupting for. It is not worth ending a task over, when the same
         // two matches fire on someone asking how to stop their agent ignoring
         // previous instructions.
-        if ctx.injection_findings.len() >= self.kill_threshold {
-            return Some(AnomalyFinding::reask(
-                AnomalyKind::PromptInjection,
-                format!("Prompt injection: {} techniques present ({techniques})", ctx.injection_findings.len()),
-                threshold_confidence(ctx.injection_findings.len(), self.kill_threshold),
-            ));
+        if ctx.injection_findings.len() >= self.kill_threshold || from_untrusted_content {
+            let reason = if from_untrusted_content {
+                format!(
+                    "Prompt injection from untrusted tool content: {} techniques present ({techniques})",
+                    ctx.injection_findings.len()
+                )
+            } else {
+                format!("Prompt injection: {} techniques present ({techniques})", ctx.injection_findings.len())
+            };
+            // Untrusted-content matches below the count threshold don't have
+            // repetition to derive confidence from the way `threshold_confidence`
+            // does — 0.65 is a fixed value, chosen above plain `steer`'s 0.6 (this
+            // is a stronger signal than a single user-typed trigger word) but
+            // below what `threshold_confidence` reports once matches actually
+            // reach the count threshold on their own.
+            let confidence = if ctx.injection_findings.len() >= self.kill_threshold {
+                threshold_confidence(ctx.injection_findings.len(), self.kill_threshold)
+            } else {
+                0.65
+            };
+            return Some(AnomalyFinding::reask(AnomalyKind::PromptInjection, reason, confidence));
         }
         Some(AnomalyFinding::steer(
             AnomalyKind::PromptInjection,
@@ -2981,6 +3009,42 @@ mod injection_detector_tests {
         let mut ctx = base_ctx();
         ctx.injection_findings =
             vec!["override-instructions".into(), "role-reassignment".into()];
+        assert_eq!(d.detect(&ctx).unwrap().disposition, Disposition::Reask);
+    }
+
+    #[test]
+    fn a_single_technique_from_a_tool_result_escalates_past_steer() {
+        // Same single-match count as `a_single_technique_steers`, but sourced
+        // from content the agent fetched rather than something a user typed —
+        // the multi-agent-graph attack shape, not the NotInject false-positive
+        // population. One match from an untrusted source is worth interrupting
+        // for; the same one match from the user prompt is not.
+        let d = PromptInjectionDetector::default();
+        let mut ctx = base_ctx();
+        ctx.injection_findings = vec!["override-instructions".into()];
+        ctx.injection_sources = vec!["tool_result".into()];
+        let hit = d.detect(&ctx).unwrap();
+        assert_eq!(hit.disposition, Disposition::Reask);
+        assert!(hit.reason.contains("untrusted tool content"));
+    }
+
+    #[test]
+    fn a_single_technique_from_the_user_prompt_still_only_steers() {
+        // injection_sources present but naming only trusted-origin sources —
+        // the escalation must be source-specific, not "any source recorded".
+        let d = PromptInjectionDetector::default();
+        let mut ctx = base_ctx();
+        ctx.injection_findings = vec!["override-instructions".into()];
+        ctx.injection_sources = vec!["user_prompt".into()];
+        assert_eq!(d.detect(&ctx).unwrap().disposition, Disposition::Steer);
+    }
+
+    #[test]
+    fn a_tool_description_sourced_match_also_escalates() {
+        let d = PromptInjectionDetector::default();
+        let mut ctx = base_ctx();
+        ctx.injection_findings = vec!["guardrail-bypass".into()];
+        ctx.injection_sources = vec!["tool_description".into()];
         assert_eq!(d.detect(&ctx).unwrap().disposition, Disposition::Reask);
     }
 
