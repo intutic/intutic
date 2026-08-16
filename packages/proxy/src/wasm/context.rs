@@ -288,9 +288,10 @@ pub struct RequestContext {
     /// content the agent fetched, not something the user typed — the
     /// multi-agent-graph case `injection.rs`'s own module doc describes,
     /// where one node's output becomes the next node's input and looks like
-    /// instructions from the orchestrator. A policy wanting to treat
-    /// untrusted-content injection more seriously than a user idly typing
-    /// "ignore my previous message" reads this field, not the count above.
+    /// instructions from the orchestrator. `PromptInjectionDetector` reads
+    /// this field to escalate untrusted-content matches past plain `steer`
+    /// without waiting on the pattern-count threshold; a WASM rule wanting
+    /// its own, different treatment of source can read it too.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub injection_sources: Vec<String>,
     /// True when the advertised tool definitions no longer match the pin

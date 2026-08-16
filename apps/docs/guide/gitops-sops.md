@@ -94,8 +94,8 @@ the *current* local body's hash:
 intutic sops status
 ```
 
-Read-only. For every local `.intutic/sops/*.md` file, matched by title
-against the workspace's control-plane SOPs, reports one of:
+Does not modify any local file. For every local `.intutic/sops/*.md` file,
+matched by title against the workspace's control-plane SOPs, reports one of:
 
 | Status | Meaning |
 |---|---|
@@ -105,18 +105,30 @@ against the workspace's control-plane SOPs, reports one of:
 | `diverged` | No recorded pull hash, and the local body does not match the control plane either. Could be a file never pulled, or one edited long after a very old pull — `status` cannot tell those apart from local information alone. |
 | `push-only` | No SOP with a matching title exists on the control plane yet. |
 
+Every matched (non-`push-only`) result is also reported to the control plane
+over `POST /api/v1/sops/git-drift-report`, best-effort — a report failure
+never fails the command, since the table above is already complete and
+correct on its own. This is what feeds the `sop_git_drift` compliance probe
+below.
+
 ## What this does not do
 
-**No live sync, no server-side drift alert.** `push`/`pull`/`status` are
-commands you run; nothing watches `.intutic/sops/*.md` and reconciles it
-automatically, and no compliance-dashboard signal currently reports file/DB
-divergence the way it reports, say, harness-config drift (see
-[Off-Pattern Detection](/guide/drift-detection)). Building that would mean the
-sync daemon hashing and reporting file-plane SOPs over a new wire message,
-matched and stored control-plane-side, before a probe could read the result
-back — deliberately not attempted here as a half-measure. `intutic sops
-status`, run by a human (or a CI job) on a schedule, is today's honest
-substitute.
+**No live sync.** `push`/`pull`/`status` are commands you run; nothing
+watches `.intutic/sops/*.md` and reconciles it automatically. A full
+always-on version of this would mean the sync daemon hashing and reporting
+file-plane SOPs continuously in the background — deliberately not attempted
+here as a half-measure. `intutic sops status`, run by a human (or a CI job)
+on a schedule, is today's substitute — and unlike earlier, it now leaves a
+compliance signal behind each time it runs (see `sop_git_drift` below),
+instead of only printing to a terminal no one is later asked to read.
+
+**The compliance probe reports on staleness, not just the last run's
+result.** `sop_git_drift` reads whatever `git_drift_status` was last
+recorded per SOP — it does not know how long ago that was beyond the
+`git_drift_checked_at` timestamp it carries, and it cannot detect a file
+that changed after the last `status` run and before the next one. Run
+`status` on the cadence your compliance posture actually needs; the probe
+can only be as fresh as its last report.
 
 **Matching is by title, not a stable id.** Neither plane carries an
 identifier the other side already has: a freshly pushed file has no `sopId`

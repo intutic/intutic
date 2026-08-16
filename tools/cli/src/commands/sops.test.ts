@@ -408,4 +408,44 @@ describe('runSopsStatus', () => {
     expect(output()).toContain('No local SOPs directory')
     expect(getMock).not.toHaveBeenCalled()
   })
+
+  it('reports every matched (non-push-only) file to the control plane by sopId', async () => {
+    const body = 'Run tests before deploying.'
+    const hash = createHash('sha256').update(body, 'utf8').digest('hex')
+    await fs.writeFile(
+      path.join(sopsDir, 'deploy.md'),
+      renderSopFile({ title: 'Deploy Checklist', riskTier: 'LOW', version: '1.0.0', body }),
+    )
+    await fs.writeFile(path.join(sopsDir, 'orphan.md'), '# Never Pushed\nLocal only.')
+    getMock.mockResolvedValue({ items: [{ sopId: 'sop_1', title: 'Deploy Checklist', contentHash: hash }] })
+
+    await status()
+
+    expect(postMock).toHaveBeenCalledWith('/api/v1/sops/git-drift-report', {
+      results: [{ sop_id: 'sop_1', status: 'in-sync' }],
+    })
+  })
+
+  it('does not call the report endpoint when every local file is push-only', async () => {
+    await fs.writeFile(path.join(sopsDir, 'orphan.md'), '# Never Pushed\nLocal only.')
+    getMock.mockResolvedValue({ items: [] })
+
+    await status()
+
+    expect(postMock).not.toHaveBeenCalled()
+  })
+
+  it('a failed report does not fail the command or its already-printed output', async () => {
+    const body = 'Run tests before deploying.'
+    const hash = createHash('sha256').update(body, 'utf8').digest('hex')
+    await fs.writeFile(
+      path.join(sopsDir, 'deploy.md'),
+      renderSopFile({ title: 'Deploy Checklist', riskTier: 'LOW', version: '1.0.0', body }),
+    )
+    getMock.mockResolvedValue({ items: [{ sopId: 'sop_1', title: 'Deploy Checklist', contentHash: hash }] })
+    postMock.mockRejectedValueOnce(new Error('control plane unreachable'))
+
+    await expect(status()).resolves.toBeUndefined()
+    expect(output()).toContain('in-sync')
+  })
 })
