@@ -159,6 +159,8 @@ rule author ends up not knowing that `forbid_after`, `changes` or
 | `tools` | `ToolSchema[]` | Tools declared on this request. Name and description only — **not** the input schema. |
 | `tool_calls` | `ToolCall[]` | Calls in this turn's message. |
 | `tool_sequence` | `string[]` | Session history, oldest first. Includes this turn. |
+| `tool_call_counts` | `(string, i32)[]` | How many times each distinct tool/action appears in `tool_sequence` — a fold of it, not a fetch. AssemblyScript has no map type to fold `tool_sequence` into itself, so this is pre-resolved for you. |
+| `calls_last_60s` | `i32` | Tool calls in the last 60 seconds, across the whole session. Not derivable from `tool_sequence`/`tool_call_counts`: that window is a fixed entry count with no timestamps, so a burst that fills it in ten seconds and one spread over an hour look identical there. Always a real count — `0` means none, never "unknown". See [Temporal policy](#temporal-policy) below. |
 | `new_tool_calls` | `string[]` | This turn's delta. **Use this, not `tool_sequence`, for a hold** — matching on history re-fires the hold forever. |
 | `tool_contract_changed` | `bool` | A server changed a tool's contract mid-session. |
 | `transition_baseline` | `map` | Observed transition frequencies. Absent early in a session. |
@@ -189,6 +191,35 @@ Declaring these in a SOP makes the proxy's own detectors enforce them. They are
 | `max_calls` | `(string, i32)[]` | `max_calls: Tool <= N` |
 | `forbid_with` | `(string, string)[]` | `forbid_with: secrets(), action:http_post` — **co-occurrence, not flow**, because `dlp_findings` carries no sequence position. |
 | `risk_tier` | `string` | `risk_tier:` — `Low` \| `Medium` \| `High` \| `Critical`. No proxy detector reads it; it exists for your rules. |
+
+### Temporal policy
+
+This context already carries most of what a time-aware policy needs — spread
+across three shapes, because they answer three different questions:
+
+- **Ordering** — `requires_before`/`forbid_after` above, "A must (not) happen
+  relative to B". Cross-call by construction: the proxy resolves an entire
+  session's sequence before your rule ever runs.
+- **Count ceilings** — `max_calls`, "at most N calls to this tool, ever in
+  this run". No notion of time; a workspace that made 3 deploys over a week
+  and one that made 3 in a minute are indistinguishable to it.
+- **Spend ceilings** — `budget_remaining_usd`, `workflow_spend_usd` /
+  `workflow_budget_usd` above, and `graph_spend_usd` / `graph_budget_usd` on
+  [`node`](#budget-and-graph) — the same "at most N, ever" shape as
+  `max_calls`, just in dollars instead of calls.
+
+What none of those can express is a **rate** — "at most N in the last M
+seconds". `tool_sequence` and its fold `tool_call_counts` come closest but
+still cannot: both are bounded by a fixed *entry count*, not a duration, so a
+burst that fills the window in ten seconds and one spread over an hour are
+the same shape to them.
+
+`calls_last_60s` (in the [Tools](#tools) table above) is the field that
+closes that gap — a genuinely time-windowed count, resolved from a dedicated
+store rather than derived from the sequence. The starter rule
+`rules/call-rate-guard/` in the SDK reads it: REASK, not block, since the
+ceiling a rule picks here is an unmeasured threshold, the same reasoning
+`risk-tier-ceiling` and `injection-then-egress` use for theirs.
 
 ### Budget and graph
 

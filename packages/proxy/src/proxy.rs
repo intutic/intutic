@@ -66,6 +66,12 @@ use crate::token::prediction::CostPredictionGate;
 /// history does not dilute a short burst of implausible steps.
 const TOOL_SEQUENCE_CAP: usize = 60;
 
+/// Window `calls_last_60s` counts over. A fixed-entry cap like
+/// `TOOL_SEQUENCE_CAP` above cannot tell a burst that fills it in ten
+/// seconds apart from one spread over an hour — this is the field that
+/// answers the question the cap cannot.
+const CALL_WINDOW_SECS: i64 = 60;
+
 /// Lifetime of a judged-chunk list on the streaming paths.
 const SESSION_CHUNK_TTL_SECS: u64 = 3_600;
 
@@ -2342,6 +2348,31 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         .await
         .unwrap_or_default();
 
+    // A pure fold of `tool_sequence` above — no store, no I/O. AssemblyScript
+    // has no map type to do this itself, which is the whole reason it is
+    // pre-resolved here rather than left for a rule to derive.
+    let tool_call_counts: Vec<(String, i32)> = {
+        let mut counts: std::collections::HashMap<&str, i32> = std::collections::HashMap::new();
+        for tool in &tool_sequence {
+            *counts.entry(tool.as_str()).or_insert(0) += 1;
+        }
+        counts.into_iter().map(|(tool, n)| (tool.to_string(), n)).collect()
+    };
+
+    // Genuinely new state, unlike the fold above: `tool_sequence` carries no
+    // timestamps, so this is the only source for "how many calls in how much
+    // time" rather than "how many calls in how many entries".
+    let calls_last_60s = state
+        .store
+        .record_calls_and_count_window(
+            &tool_scope_id,
+            new_tool_calls.len(),
+            chrono::Utc::now().timestamp(),
+            CALL_WINDOW_SECS,
+        )
+        .await
+        .unwrap_or(0) as i32;
+
     // This workspace's fitted transition model, if the control-plane sweep has
     // published one. Parsed here rather than in the detector so the detector remains
     // a pure function of its context; a parse failure is treated as absent, because a
@@ -2487,6 +2518,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         risk_tier: gov.risk_tier.unwrap_or(crate::wasm::context::RiskLevel::Low),
         dlp_findings,
         tool_sequence,
+        tool_call_counts,
+        calls_last_60s,
         // This workspace's fitted transition model, resolved here for the same reason
         // as denied_tools below: the detector stays a pure function of the context and
         // does no I/O of its own. Cheap — one cached GET the control-plane sweep

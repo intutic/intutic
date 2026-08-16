@@ -49,6 +49,7 @@ const EXPECTED: Record<string, Verdict> = {
   'risk-tier-ceiling': 3,
   'secret-read-to-egress': 1,
   'deploy-without-tests': 1,
+  'call-rate-guard': 3,
 }
 
 const HOST_IMPL: Record<string, (...a: number[]) => void | number> = {

@@ -178,6 +178,11 @@ pub struct MemoryStore {
     modes: Mutex<HashMap<String, Ownership>>,
     sessions: Mutex<HashMap<String, SessionRouting>>,
     tool_sequences: Mutex<HashMap<String, Vec<String>>>,
+    /// Unix-second timestamp of each recorded call, per session — the
+    /// in-memory stand-in for the Valkey ZSET `record_calls_and_count_window`
+    /// uses. Trimmed to the caller's window on every write, so this never
+    /// grows past what a live window can hold.
+    call_timestamps: Mutex<HashMap<String, Vec<i64>>>,
     /// Cumulative extracted-call count per session, for per-turn deltas.
     extracted_tool_counts: Mutex<HashMap<String, u64>>,
     /// First tool signature seen per session, for drift detection.
@@ -560,6 +565,23 @@ impl LocalStore for MemoryStore {
             }
         }
         Ok(sequence.clone())
+    }
+
+    async fn record_calls_and_count_window(
+        &self,
+        session_id: &str,
+        new_call_count: usize,
+        now_unix_secs: i64,
+        window_secs: i64,
+    ) -> anyhow::Result<u32> {
+        let mut timestamps = lock(&self.call_timestamps, "call-window")?;
+        let entry = timestamps.entry(session_id.to_string()).or_default();
+        let window_start = now_unix_secs - window_secs;
+
+        entry.retain(|&ts| ts >= window_start);
+        entry.extend(std::iter::repeat(now_unix_secs).take(new_call_count));
+
+        Ok(entry.len() as u32)
     }
 
     async fn swap_extracted_tool_count(&self, session_id: &str, new_count: u64) -> u64 {
