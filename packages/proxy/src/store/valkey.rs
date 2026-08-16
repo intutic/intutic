@@ -456,6 +456,48 @@ impl LocalStore for ValkeyStore {
         Ok(sequence)
     }
 
+    async fn record_calls_and_count_window(
+        &self,
+        session_id: &str,
+        new_call_count: usize,
+        now_unix_secs: i64,
+        window_secs: i64,
+    ) -> anyhow::Result<u32> {
+        let mut conn = self.conn();
+        let key = format!("v2:session:{}:calls", session_id);
+        let window_start = now_unix_secs - window_secs;
+
+        // Drop everything the window has already aged out of before adding —
+        // otherwise a long session's ZSET grows without bound even though
+        // only the trailing `window_secs` of it is ever read.
+        let _: Result<(), redis::RedisError> =
+            conn.zrembyscore(&key, "-inf", window_start - 1).await;
+
+        for _ in 0..new_call_count {
+            // The member must be unique per call, not just the timestamp —
+            // ZADD on a member that already exists overwrites its score
+            // rather than adding a second entry, which would silently
+            // undercount two calls landing in the same second. A UUID
+            // suffix is simpler than threading a real per-call sequence
+            // number through from the caller for a count nobody reads back
+            // by member.
+            let member = format!("{now_unix_secs}-{}", uuid::Uuid::new_v4());
+            let _: Result<(), redis::RedisError> = conn.zadd(&key, member, now_unix_secs).await;
+        }
+        if new_call_count > 0 {
+            // Same TTL discipline as `record_tool_sequence`: refreshed on
+            // every write, so an idle session's window key still expires.
+            let _: Result<(), redis::RedisError> =
+                conn.expire(&key, TOOL_SEQUENCE_TTL_SECS).await;
+        }
+
+        let count: u32 = conn
+            .zcount(&key, window_start, now_unix_secs)
+            .await
+            .unwrap_or(0);
+        Ok(count)
+    }
+
     async fn swap_extracted_tool_count(&self, session_id: &str, new_count: u64) -> u64 {
         let mut conn = self.conn();
         let key = format!("v2:session:{}:toolcount", session_id);

@@ -164,6 +164,28 @@ pub struct RequestContext {
     pub risk_tier: RiskLevel,
     pub dlp_findings: Vec<DlpFinding>,
     pub tool_sequence: Vec<String>,
+    /// `(tool, count)` — how many times each distinct tool/action appears in
+    /// `tool_sequence` above.
+    ///
+    /// A pure fold of that field, not a fetch — no new store. It exists
+    /// because AssemblyScript has no map type to fold `tool_sequence` into
+    /// itself, so a rule wanting "has Bash run more than N times in this
+    /// window" would otherwise have to walk the raw sequence by hand.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_call_counts: Vec<(String, i32)>,
+    /// Tool calls in the last 60 seconds, across the whole session.
+    ///
+    /// Not derivable from `tool_sequence`/`tool_call_counts` above: that
+    /// window is capped at a fixed entry count and carries no timestamps, so
+    /// a burst that fills it in ten seconds and one spread over an hour look
+    /// identical there. This is resolved from a dedicated Valkey sorted set
+    /// scored by call time, scoped the same way `tool_sequence` is (see
+    /// `tool_history_scope` in `proxy.rs`).
+    ///
+    /// Always a real count, never "unknown" — a session with no calls yet in
+    /// the window reads `0`, not a sentinel.
+    #[serde(default)]
+    pub calls_last_60s: i32,
     /// Fitted `P(to | from)` for this workspace, keyed `"from to"`.
     ///
     /// Resolved on the request path, like `denied_tools` below, so the detector stays
@@ -355,6 +377,8 @@ mod tests {
             risk_tier: RiskLevel::Low,
             dlp_findings: vec![],
             tool_sequence: vec!["Glob".into(), "View".into()],
+            tool_call_counts: vec![("Glob".into(), 1), ("View".into(), 1)],
+            calls_last_60s: 2,
             denied_tools: vec![],
             injection_findings: vec![],
             injection_sources: vec![],
@@ -464,5 +488,49 @@ mod tests {
         // `skip_serializing_if` omits it at `false`, same as `tool_contract_changed` —
         // a guest reading a missing key must still see the fail-closed default.
         assert!(v.as_object().unwrap().get("sandbox_attested").is_none());
+    }
+
+    /// `(tool, count)` tuples serialise as two-element JSON arrays — that is
+    /// what the AssemblyScript parser walks positionally, same convention as
+    /// `max_calls`.
+    #[test]
+    fn tool_call_counts_round_trips_as_pairs() {
+        let v: serde_json::Value = serde_json::to_value(ctx()).unwrap();
+        assert_eq!(v["tool_call_counts"], serde_json::json!([["Glob", 1], ["View", 1]]));
+    }
+
+    /// `calls_last_60s` is always present, unlike the `skip_serializing_if`
+    /// fields above — zero is a real, meaningful count here, not an absent
+    /// value, so it must never be optimised off the wire the way `false`/
+    /// empty-list defaults are elsewhere on this struct.
+    #[test]
+    fn calls_last_60s_is_never_omitted_even_at_zero() {
+        let mut c = ctx();
+        c.calls_last_60s = 0;
+        let v: serde_json::Value = serde_json::to_value(&c).unwrap();
+        assert_eq!(v["calls_last_60s"], 0);
+    }
+
+    /// A payload from before this field existed must still deserialise, with
+    /// the count read as zero — the honest answer for a session the ZSET has
+    /// no history for, same reasoning as `deserialises_payload_without_graph_fields`.
+    #[test]
+    fn deserialises_payload_without_temporal_fields() {
+        let legacy = serde_json::json!({
+            "session_id": "ses_1",
+            "workspace_id": "ws_1",
+            "virtual_key_prefix": "vk_1",
+            "model": "claude-sonnet-4",
+            "tools": [],
+            "tool_calls": [],
+            "estimated_input_tokens": 10,
+            "budget_remaining_usd": 1.0,
+            "risk_tier": "Low",
+            "dlp_findings": [],
+            "tool_sequence": []
+        });
+        let parsed: RequestContext = serde_json::from_value(legacy).unwrap();
+        assert!(parsed.tool_call_counts.is_empty());
+        assert_eq!(parsed.calls_last_60s, 0);
     }
 }
