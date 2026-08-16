@@ -70,16 +70,45 @@ describe('intutic credentials', () => {
       json: async () => ({ provider: 'azure_openai', routingLive: false, provisioned: true, lastFour: null, updatedAt: '2026-08-13T00:00:00Z' }),
     })
 
+    // deploymentName, not deployment -- azure_openai's actual registry field
+    // key (providers.ts). This test used the wrong key until the LLD #70
+    // registry pre-check caught it: the server would have silently ignored
+    // an unrecognized "deployment" field and 400'd on the missing required
+    // "deploymentName", so this test was never actually exercising a request
+    // that would succeed against the real route.
     await runCredentialsSet('azure_openai', {
-      field: ['apiKey=sk-abc12345', 'endpoint=https://foo.openai.azure.com', 'deployment=gpt4'],
+      field: ['apiKey=sk-abc12345', 'endpoint=https://foo.openai.azure.com', 'deploymentName=gpt4'],
     })
 
     const [, init] = fetchMock.mock.calls[0]
     expect(JSON.parse(init.body)).toEqual({
       apiKey: 'sk-abc12345',
       endpoint: 'https://foo.openai.azure.com',
-      deployment: 'gpt4',
+      deploymentName: 'gpt4',
     })
+  })
+
+  // ── LLD #70: registry pre-check hardening ──
+
+  it('set refuses an unknown provider before any request is sent', async () => {
+    await expect(runCredentialsSet('not-a-real-provider', { field: ['apiKey=sk-test-1234567890'] })).rejects.toThrow(
+      'process.exit(1)',
+    )
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('set refuses a field key the provider does not declare', async () => {
+    await expect(
+      runCredentialsSet('anthropic', { field: ['apiKey=sk-ant-1234567890', 'notARealField=x'] }),
+    ).rejects.toThrow('process.exit(1)')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('set refuses when a required field is missing', async () => {
+    await expect(
+      runCredentialsSet('azure_openai', { field: ['apiKey=sk-abc12345', 'endpoint=https://foo.openai.azure.com'] }),
+    ).rejects.toThrow('process.exit(1)')
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('set warns when the provider is not yet routable', async () => {

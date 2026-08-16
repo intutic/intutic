@@ -155,6 +155,12 @@ infrastructure. It does **not**, today, keep every part of Intutic's evaluation 
     which a self-hosted gateway deliberately doesn't have a connection to.
   - SOP *text* is still fetched from the control plane (`sops::all_sops_for_workspace`) — only
     the judged *content* stays local, a disclosed trade-off, not a silent one.
+  - `intutic judge configure` generates the `litellm_config.yaml`, env block, and Helm values
+    snippet a local judge needs, from the same model catalog `intutic setup` and the dashboard's
+    LLM Judge picker use — see [CLI Reference — `intutic judge
+    configure`](/reference/cli#intutic-judge-configure). It writes local files only; it never
+    calls a remote API to turn `proxy.localJudge` on for you, matching this document's own point
+    that local-judge config is not remotely settable.
 - **Workspace-chosen judge model (opt-in) runs the managed judge on YOUR model and YOUR
   provider key.** Set a judge model under Settings → LLM Judge (or `managedJudgeModel` in
   workspace settings). Judge calls for that workspace then run on the model you named, routed

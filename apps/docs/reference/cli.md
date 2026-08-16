@@ -46,6 +46,85 @@ intutic init [options]
 
 ---
 
+## `intutic setup`
+
+Guided setup wizard — detect harnesses, configure a provider credential, verify it, and
+optionally choose a judge model, in one interactive flow. Unlike `intutic init`, this command
+prompts; it is the interactive counterpart, not a replacement — `init` stays flag-driven and
+safe for CI.
+
+```bash
+intutic setup [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+1. Detects harnesses in the current workspace (same detection `intutic init` uses)
+2. Asks whether to configure a provider against a **connected** workspace or **locally** (no
+   control plane — writes a `.intutic.env` file instead)
+3. Picks a provider from the registry (`intutic credentials list` shows the same set) and
+   prompts for its credential fields
+4. Verifies the credential against the provider's own API before saving — a 401/403 asks for
+   confirmation before proceeding anyway; a rate-limited or unreachable response is reported but
+   does not block
+5. Saves the credential (`PUT /api/v1/workspace/provider-credentials/:provider`, same route
+   `intutic credentials set` hits) or writes the local env file
+6. Optionally picks a judge model from Intutic's model catalog (or a custom name) and saves it
+   (same route the dashboard's Settings → LLM Judge panel uses)
+
+**Examples:**
+
+```bash
+# Connected to Intutic (requires `intutic login` first)
+intutic setup
+
+# Against a local control plane
+intutic setup --dev
+```
+
+---
+
+## `intutic judge configure`
+
+Generate the local artifacts an on-prem LLM-as-judge needs: a `litellm_config.yaml`, an env
+block, and a Helm values snippet. Writes files only — it never calls a remote API, since
+`local_judge` is deliberately not remotely configurable (see [the self-hosted gateway's local
+judge](/external/self-hosted-gateway#4-what-does-not-run-locally-read-this-before-you-deploy)).
+
+```bash
+intutic judge configure [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--out <path>` | Where to write `litellm_config.yaml` (default: `./litellm_config.yaml`) |
+
+**What it does:**
+1. Prompts for a judge model — from the model catalog (any provider, not filtered to ones
+   Intutic's managed gateway can route to, since a local LiteLLM instance can serve anything) or
+   a custom model reference
+2. Writes a `litellm_config.yaml` `model_list` entry in the same shape
+   `infra/compose/litellm_config.yaml`'s hand-written example uses
+3. Prints the env block (`INTUTIC_GATEWAY_LOCAL_JUDGE`, `LITELLM_LOCAL_URL`,
+   `LITELLM_LOCAL_API_KEY`, `LITELLM_LOCAL_JUDGE_MODEL`) for Docker/bare-metal deployments
+4. Prints the Helm values snippet (`proxy.localJudge`, `litellm.enabled`, `litellm.judgeModel`)
+   for `tools/helm/intutic-gateway`
+
+**Example:**
+
+```bash
+intutic judge configure --out ./infra/compose/litellm_config.yaml
+```
+
+---
+
 ## `intutic login`
 
 Authenticate with the Intutic control plane.

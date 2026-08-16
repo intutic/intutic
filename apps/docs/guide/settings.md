@@ -76,6 +76,40 @@ A provider needing more than one field (e.g. Azure OpenAI: endpoint, deployment,
 repeated `--field key=value` flag, one per field — the wizard's dynamic form and the CLI submit
 the same shape.
 
+New: **Guided Setup**, next to Provider Keys, walks through provisioning a provider, verifying
+it against the provider's own API, and (optionally) picking a judge model in one flow — the same
+steps as `intutic setup` below, for anyone who'd rather click through it.
+
+### LLM Judge
+
+Choose a model to run this workspace's LLM-as-judge checks on, instead of Intutic's platform
+trusted monitor. The picker lists models from Intutic's model catalog, filtered by default to
+providers you've already provisioned a credential for under Provider Keys — a model shown
+disabled needs either a credential or "Show all providers" to reveal why. A **Custom model
+name** field is always available underneath: an on-prem LiteLLM deployment can serve a model
+under any alias, and this workspace setting only validates the name's character shape, never
+catalog membership, so a custom alias is always accepted, not just tolerated. Saving a name
+outside the catalog shows a **custom model** badge rather than an error.
+
+Trade-offs, stated plainly rather than implied:
+- Choosing your own judge **replaces** Intutic's independent trusted monitor for this workspace.
+  Every verdict is stamped `[workspace-judge]`; a judge equal to the model that produced the work
+  is additionally stamped `[self-graded]`.
+- Judged content still transits Intutic's gateway to your provider — this is a billing/model-
+  choice feature, not a data-locality one. For content to stay entirely on your infrastructure,
+  see the [self-hosted gateway's local judge](/external/self-hosted-gateway#4-what-does-not-run-locally-read-this-before-you-deploy).
+- Chunk-level judging bills per paragraph, to your provider key.
+
+Use **Test** before saving — it runs one real, tiny completion through the exact path a judge
+call would take (your provisioned credential, the platform gateway), so a typo'd model name or
+a missing key fails here rather than during a live judge call.
+
+Also available from the CLI, as part of the guided wizard:
+
+```bash
+intutic setup
+```
+
 ### On-Behalf-Of (OBO) Tokens
 
 OBO tokens are short-lived, employee-scoped credentials. OBO Scoping allows you to temporarily grant limited permission clearance to an AI agent acting on your behalf (e.g., executing commands or reading files during a debug task). This token automatically expires in 15 minutes to guarantee security.

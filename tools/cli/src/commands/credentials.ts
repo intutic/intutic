@@ -20,6 +20,7 @@ import { log } from '../lib/logger.js'
 import { loadCredentials } from '../config/store.js'
 import { resolveControlPlaneUrl } from '../config/paths.js'
 import { createApiClient } from '../lib/api.js'
+import { PROVIDER_REGISTRY, getProviderDefinition } from '@intutic/shared-types'
 import pc from 'picocolors'
 
 const NOT_AUTHENTICATED = 'Not authenticated. Run `intutic login` first.'
@@ -96,6 +97,22 @@ export async function runCredentialsSet(
     process.exit(1)
   }
 
+  // Local pre-check against the registry (@intutic/shared-types
+  // PROVIDER_REGISTRY) — this module's own doc comment has promised
+  // "registry awareness" without actually validating field keys before this
+  // change; a typo'd field key would previously reach the server, get
+  // silently ignored there (the server only reads keys it recognizes off
+  // `def.fields`), and this command would report success with a credential
+  // that has a missing field. The server (`providerCredentials.ts`) remains
+  // the authoritative validator (length bounds, etc.) — this is a faster,
+  // local UX check, not a replacement for it.
+  const def = getProviderDefinition(provider)
+  if (!def) {
+    log.error(`Unknown provider "${provider}". Must be one of: ${PROVIDER_REGISTRY.map((p) => p.id).join(', ')}`)
+    process.exit(1)
+  }
+  const knownKeys = new Set(def.fields.map((f) => f.key))
+
   const body: Record<string, string> = {}
   for (const f of fields) {
     const idx = f.indexOf('=')
@@ -103,7 +120,20 @@ export async function runCredentialsSet(
       log.error(`--field "${f}" is not in key=value form`)
       process.exit(1)
     }
-    body[f.slice(0, idx)] = f.slice(idx + 1)
+    const key = f.slice(0, idx)
+    if (!knownKeys.has(key)) {
+      log.error(
+        `"${key}" is not a field ${def.displayName} takes. Expected: ${def.fields.map((f2) => f2.key).join(', ')}`,
+      )
+      process.exit(1)
+    }
+    body[key] = f.slice(idx + 1)
+  }
+  for (const field of def.fields) {
+    if (field.required && !(field.key in body)) {
+      log.error(`${def.displayName} requires --field ${field.key}=<value>`)
+      process.exit(1)
+    }
   }
 
   const client = await getClient(opts)
