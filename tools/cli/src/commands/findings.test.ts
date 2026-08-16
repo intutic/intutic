@@ -329,3 +329,38 @@ describe('intutic findings', () => {
     expect(errSpy).toHaveBeenCalled()
   })
 })
+
+describe('table padding is ANSI-aware', () => {
+  // Shipped and broke in CI, not locally: `pad` sliced RAW string length, so
+  // `pc.dim('no measured rate')` (17 visible characters, more raw ones once
+  // wrapped in SGR codes) got cut mid-escape-sequence against an 18-wide
+  // column, corrupting the visible text. It passed on every local run because
+  // picocolors disables colour when stdout is not a TTY, and only showed up
+  // once GitHub Actions' runner reported a colour-capable stream. Forcing
+  // colour here is the whole point of this block — see the identical fix and
+  // writeup in integrity.test.ts's "table padding is ANSI-aware".
+  const DIM = '' + '[2m'
+  const RESET = '' + '[22m'
+
+  it('keeps a coloured cell whole when its visible width fits', async () => {
+    const { pad } = await import('./findings.js')
+    const cell = `${DIM}no measured rate${RESET}`
+    const out = pad(cell, 18)
+    expect(out).toContain('no measured rate')
+    // eslint-disable-next-line no-control-regex -- ESC opens every SGR colour sequence; matching it is this assertion's whole purpose.
+    expect(out.replace(/\[[0-9;]*m/g, '')).toHaveLength(18)
+  })
+
+  it('cuts by visible characters, not raw ones, and never leaves colour open', async () => {
+    const { pad } = await import('./findings.js')
+    const out = pad(`${DIM}no measured rate${RESET}`, 6)
+    // eslint-disable-next-line no-control-regex -- ESC opens every SGR colour sequence; matching it is this assertion's whole purpose.
+    expect(out.replace(/\[[0-9;]*m/g, '')).toBe('no mea')
+    expect(out.endsWith('' + '[0m') || out.endsWith(RESET)).toBe(true)
+  })
+
+  it('pads an uncoloured cell to the same visible width', async () => {
+    const { pad } = await import('./findings.js')
+    expect(pad('ok', 5)).toBe('ok   ')
+  })
+})
