@@ -223,6 +223,17 @@ jobs:
       - name: Anomaly corpus gate (external FPR + mutation liveness)
         run: cd packages/proxy && cargo test --test anomaly_corpus_test
 
+      # The response-echo corpus gate: a self-authored, pinned measurement of
+      # how often the five injection patterns fire on MODEL OUTPUT (both the
+      # streaming `scan` path and the non-streaming `scan_response_body`
+      # path). Unlike the gate above, this corpus is NOT external — see
+      # tests/corpus/PROVENANCE.md, "Response-echo corpus" — so it pins a
+      # regression set on our own regexes rather than measuring a real-world
+      # false-positive rate. Unpiped for the same reason as the gate above: a
+      # piped gate reports the pipeline's last exit status.
+      - name: Response-echo corpus gate (output-echo FP set, both scan entry points)
+        run: cd packages/proxy && cargo test --test response_echo_corpus_test
+
   python:
     name: Python SDK (intutic-clawde) - Run pytest
     runs-on: ubuntu-latest

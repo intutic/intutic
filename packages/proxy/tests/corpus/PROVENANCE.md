@@ -47,3 +47,55 @@ SOTA guards dropping to ~60% accuracy on it.
 It measures `injection::scan`, **not** `PromptInjectionDetector` — the detector
 returns `None` the moment its findings list is empty, so it is a pass-through
 over the scan's output. The baseline labels it accordingly.
+
+## Response-echo corpus — self-authored, and what that means
+
+- **Source:** written by the Intutic team, for this test, in this change.
+- **Licence:** n/a — original text, not vendored.
+- **Rows:** 150, `resp_echo_0001`–`resp_echo_0150`.
+- **SHA-256:** see `response_echo/SHA256SUMS`.
+
+Every other corpus in this file is external, public, and picked by nobody at
+Intutic — that is the property that makes a false-positive measurement against
+it mean something. This one is different, and the difference needs to be
+stated plainly rather than left for a reader to discover later: `injection.rs`
+scans the MODEL'S OWN OUTPUT for the same five phrasings `scan()` looks for in
+requests (`scan_response_body`, used on the streaming and non-streaming
+response paths). No third-party corpus of "benign model outputs discussing or
+quoting prompt injection" exists anywhere — NotInject, vendored above, covers
+only the *prompt* side, and there is no output-side equivalent to fetch. So
+this corpus was written from scratch: roughly a fifth of it is the model
+answering "how do I defend against prompt injection," another chunk is
+security documentation and code-review prose quoting attack phrasing while
+discussing it, another chunk is short near-miss sentences built from each
+pattern's own trigger vocabulary in an ordinary context, and the remainder is
+ordinary model output — weather, code explanations, math help, recipes — with
+no relation to injection at all.
+
+Writing your own test data means the data encodes the authors' own
+expectations of what these five regexes should and shouldn't match. That is
+an unavoidable property of a self-authored corpus, not a flaw specific to this
+one, and it changes what the resulting numbers can support.
+
+**What this corpus DOES prove**, once `response_echo_corpus_test.rs` is
+passing: the five patterns fire on discussion-of-injection-topic model output
+at a specific, measured, pinned rate — on *this* corpus, as written. Every
+firing is pinned by row id in `EXPECTED_ECHO_FIRINGS`, so a change to any
+pattern's regex shows up as a diff against that pinned set the next time the
+test runs: a widened pattern makes previously-clean rows start firing, a
+narrowed one makes previously-firing rows go quiet. Either direction is a
+regression signal worth reading, in exactly the same spirit as
+`EXPECTED_BENIGN_FIRINGS` above — a changed *set*, not a changed *count*, is
+what the test is built to surface.
+
+**What this corpus does NOT prove**, and must never be cited as proving: any
+false-positive rate on real production model-output traffic. This is not an
+external or independent measurement — it is 150 sentences the authors of the
+detector also wrote, which means the corpus cannot be surprised by a phrasing
+its authors didn't think to include, in the way BFCL and NotInject (written
+and published by people with no stake in this codebase) can. Nothing in this
+file, or in the test that reads it, should ever be quoted in customer-facing
+documentation, a security whitepaper, or an incident response as if it were
+an independent measurement of the response-echo scan's real-world noise
+floor — it is a regression pin on our own regexes, authored by us, and
+nothing more.

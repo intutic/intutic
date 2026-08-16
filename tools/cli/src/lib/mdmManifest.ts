@@ -164,3 +164,80 @@ export function generateIntuneManifest(params: HooksManifestParams): string {
     2,
   ) + '\n'
 }
+
+export interface FirewallDeploymentParams {
+  /** Absolute path to the intutic CLI binary on the TARGET machine, e.g. `/usr/local/bin/intutic`. */
+  cliBinaryPath: string
+  /** Optional label folded into descriptions. */
+  workspaceName?: string
+}
+
+/**
+ * Shared body for the two firewall-deployment manifests below — same
+ * `content`/`schedule`/`prerequisites`/`honesty` fields, only the
+ * `_comment` and `deployment` note differ per MDM flavor.
+ */
+function buildFirewallManifestBody(params: FirewallDeploymentParams) {
+  const suffix = params.workspaceName ? ` (${params.workspaceName})` : ''
+  return {
+    suffix,
+    content: `${params.cliBinaryPath} enforce apply`,
+    prerequisites: [
+      `intutic CLI installed at ${params.cliBinaryPath} on the target machine`,
+      'MDM agent executes the script with root (macOS/Linux) or administrator (Windows) privilege — `enforce apply` needs that to write firewall rules',
+    ],
+    honesty:
+      'This re-asserts the firewall on the configured cadence; a user with root/administrator access can still run `intutic enforce remove` and stay unenforced until the next check-in. It is not tamper-proof, it is tamper-resistant on a schedule.',
+  }
+}
+
+/**
+ * Jamf-flavored managed-script deployment manifest for the egress firewall.
+ * Wraps `intutic enforce apply` as a recurring managed script — recurrence is
+ * what survives a local `intutic enforce remove`, not a static rules file.
+ * Deliberately does NOT embed generated pf/nftables/iptables rule content:
+ * the target machine's own `enforce apply` generates platform-correct rules
+ * at run time (see firewall.rs) — a snapshot here would drift exactly like
+ * the hand-retyped hooks.json this module already fixed once (see header).
+ */
+export function generateJamfFirewallManifest(params: FirewallDeploymentParams): string {
+  const body = buildFirewallManifestBody(params)
+  return JSON.stringify(
+    {
+      _comment: `Intutic Governance — egress firewall re-assertion for Jamf deployment${body.suffix}`,
+      _generated: new Date().toISOString(),
+      content: body.content,
+      schedule:
+        "Every 15 minutes via a Jamf policy with a Recurring Check-in trigger (or a Custom Trigger fired by a launchd job at the desired interval). Frequent re-assertion is the point — it's what survives a local `intutic enforce remove` between runs.",
+      prerequisites: body.prerequisites,
+      deployment: {
+        jamf: 'Deploy via Configuration Profile > Files & Processes, or a Jamf Policy with a Script payload and a recurring trigger (recommend \'Recurring Check-in\' or a Custom Trigger fired by a launchd job at the desired interval).',
+      },
+      honesty: body.honesty,
+    },
+    null,
+    2,
+  ) + '\n'
+}
+
+/** Same content as {@link generateJamfFirewallManifest}, Intune-flavored deployment notes. */
+export function generateIntuneFirewallManifest(params: FirewallDeploymentParams): string {
+  const body = buildFirewallManifestBody(params)
+  return JSON.stringify(
+    {
+      _comment: `Intutic Governance — egress firewall re-assertion for Intune deployment${body.suffix}`,
+      _generated: new Date().toISOString(),
+      content: body.content,
+      schedule:
+        'Daily platform script schedule, or trigger-on-checkin if the Intune script policy configuration supports it. Daily is the practical floor for a scripted policy run; tighten it if the Intune tenant supports more frequent check-ins.',
+      prerequisites: body.prerequisites,
+      deployment: {
+        intune:
+          "Deploy via a macOS Shell script (Devices > Scripts) with 'Run script using signed-in credentials' as needed for root context, and a policy schedule; on Windows this would need an equivalent scheduled task — note this manifest's shell command is macOS/Linux-oriented since `enforce apply` is a Rust CLI subcommand available cross-platform but the recurring-execution mechanism differs by OS, and Windows Task Scheduler wiring is left to the operator.",
+      },
+      honesty: body.honesty,
+    },
+    null,
+    2,
+  ) + '\n'
+}

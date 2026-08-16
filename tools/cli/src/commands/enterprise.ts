@@ -25,7 +25,13 @@ import { loadConfig, loadCredentials } from '../config/store.js'
 import { getIntuticDir } from '../config/paths.js'
 import { isElevatedAsync } from '../lib/elevation.js'
 import { installCaTrust } from '../lib/caTrust.js'
-import { generateMobileconfig, generateJamfManifest, generateIntuneManifest } from '../lib/mdmManifest.js'
+import {
+  generateMobileconfig,
+  generateJamfManifest,
+  generateIntuneManifest,
+  generateJamfFirewallManifest,
+  generateIntuneFirewallManifest,
+} from '../lib/mdmManifest.js'
 import { writeEnforcementState } from '../lib/enforcementState.js'
 import { reportDeviceState } from '../lib/deviceReport.js'
 
@@ -38,11 +44,27 @@ export interface EnterpriseInstallOptions {
   skipCa?: boolean
   skipHooks?: boolean
   dev?: boolean
+  /** Absolute path to the intutic CLI binary on the TARGET (managed) machine — not this admin machine. */
+  cliBinaryPath?: string
 }
 
 function resolveProxyUrl(opts: EnterpriseInstallOptions): string {
   const raw = opts.proxyUrl ?? process.env.INTUTIC_PROXY_URL ?? 'http://localhost:4000'
   return raw.replace(/\/+$/, '')
+}
+
+// Unlike `hookScriptPath` below (resolved from THIS process's own
+// workspaceRoot, which is meaningful because `enterprise install` runs on
+// the machine it configures), the intutic CLI binary path is inherently a
+// TARGET-machine fact this admin machine cannot observe — `process.execPath`
+// here would just be node's own path on the admin's box, not intutic's path
+// on the fleet. `/usr/local/bin/intutic` is the common global-install
+// location (Homebrew, npm -g with a standard prefix); operators whose fleet
+// installs elsewhere MUST override with --cli-binary-path.
+const DEFAULT_CLI_BINARY_PATH = '/usr/local/bin/intutic'
+
+function resolveCliBinaryPath(opts: EnterpriseInstallOptions): string {
+  return opts.cliBinaryPath ?? DEFAULT_CLI_BINARY_PATH
 }
 
 export async function runEnterpriseInstall(opts: EnterpriseInstallOptions): Promise<void> {
@@ -68,15 +90,23 @@ export async function runEnterpriseInstall(opts: EnterpriseInstallOptions): Prom
   // 1. Manifests — no privilege needed, always generated first.
   await mkdir(outputDir, { recursive: true })
   const hookScriptPath = join(workspaceRoot, '.intutic', 'hooks', 'cursor-check.js')
+  const cliBinaryPath = resolveCliBinaryPath(opts)
 
   await writeFile(join(outputDir, 'intutic-governance.mobileconfig'), generateMobileconfig({ caCertPem }), 'utf-8')
   await writeFile(join(outputDir, 'cursor-hooks-jamf.json'), generateJamfManifest({ hookScriptPath }), 'utf-8')
   await writeFile(join(outputDir, 'cursor-hooks-intune.json'), generateIntuneManifest({ hookScriptPath }), 'utf-8')
+  await writeFile(join(outputDir, 'jamf-firewall-manifest.json'), generateJamfFirewallManifest({ cliBinaryPath }), 'utf-8')
+  await writeFile(join(outputDir, 'intune-firewall-manifest.json'), generateIntuneFirewallManifest({ cliBinaryPath }), 'utf-8')
 
   log.success(`MDM manifests written to ${outputDir}/`)
   log.field('CA trust profile', 'intutic-governance.mobileconfig')
   log.field('Cursor hooks (Jamf)', 'cursor-hooks-jamf.json')
   log.field('Cursor hooks (Intune)', 'cursor-hooks-intune.json')
+  log.field('Firewall re-assertion (Jamf)', 'jamf-firewall-manifest.json')
+  log.field('Firewall re-assertion (Intune)', 'intune-firewall-manifest.json')
+  if (!opts.cliBinaryPath) {
+    log.dim(`  (firewall manifests assume the intutic CLI is at ${DEFAULT_CLI_BINARY_PATH} on target machines — override with --cli-binary-path if your fleet installs elsewhere)`)
+  }
 
   if (opts.generateMdmOnly) {
     return
