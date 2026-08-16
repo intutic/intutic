@@ -150,6 +150,7 @@ if (!IS_OSS) {
       { text: 'SCIM Provisioning (Enterprise)', link: '/guide/scim' },
       { text: 'Emergency Overrides (Enterprise)', link: '/guide/break-glass' },
       { text: 'SIEM Export (Enterprise)', link: '/guide/siem-export' },
+      { text: 'Compliance Evidence (Enterprise)', link: '/guide/compliance-evidence' },
     ],
   });
 }
