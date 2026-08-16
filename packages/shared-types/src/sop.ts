@@ -91,6 +91,16 @@ export interface Sop {
 
   /** Of `shadowEvaluations`, how many the SOP would have acted on. */
   shadowWouldBlock?: number
+
+  /**
+   * Result of the most recent `intutic sops status` comparison that matched
+   * this SOP by title: 'in-sync' | 'local-ahead' | 'remote-ahead' |
+   * 'diverged'. Undefined means no drift check has ever been reported.
+   */
+  gitDriftStatus?: string
+
+  /** When `gitDriftStatus` was last reported. Undefined alongside it. */
+  gitDriftCheckedAt?: string
 }
 
 // ─── SOP Proof Tree ──────────────────────────────────────────────────
