@@ -38,6 +38,7 @@ TD-306):
 | `tool-contract-pinned` | `tool_contract_changed` | — |
 | `risk-tier-ceiling` | `risk_tier` | the tier describes the SOP, not the request — reask, not block |
 | `injection-then-egress` | `injection_findings` | a pattern match, not a fact — reask, not block |
+| `call-rate-guard` | `calls_last_60s` | a fixed-entry cap (`tool_sequence`) cannot tell a burst from a long session; this field can — reask, not block, since the ceiling is unmeasured |
 
 An earlier version of this library was framed as "six to eight rules drawn
 from attack classes already in `corpus_support`" without drawing this

@@ -31,6 +31,25 @@ export class RequestContext {
   risk_tier: string = "";
   dlp_findings: DlpFinding[] = [];
   tool_sequence: string[] = [];
+  /**
+   * `(tool, count)` — how many times each distinct tool/action appears in
+   * `tool_sequence` above. A fold of that field, not a fetch: AssemblyScript
+   * has no map type to fold it into itself, so this is pre-resolved on the
+   * host rather than left for a rule to derive by walking the sequence.
+   */
+  tool_call_counts: ToolCallCount[] = [];
+  /**
+   * Tool calls in the last 60 seconds, across the whole session.
+   *
+   * Not derivable from `tool_sequence`/`tool_call_counts` above: that window
+   * is a fixed entry count with no timestamps, so a burst that fills it in
+   * ten seconds and one spread over an hour look identical there. This is
+   * resolved from a dedicated time-windowed store on the host.
+   *
+   * Always a real count, never "unknown" — a session with no calls yet in
+   * the window reads `0`, not a sentinel like the `-1` fields below use.
+   */
+  calls_last_60s: i32 = 0;
 
   // ── Graph position ──────────────────────────────────────────────────────
   //
@@ -166,6 +185,12 @@ class OrderingRule {
   from: string = "";
   to: string = "";
   adjacent: bool = false;
+}
+
+/** `(tool, count)` — one entry per distinct tool/action in `tool_sequence`. */
+class ToolCallCount {
+  tool: string = "";
+  count: i32 = 0;
 }
 
 /** `A <= N`. */
@@ -420,6 +445,27 @@ function parseRequestContext(jsonBytes: Uint8Array): RequestContext {
       }
     }
   }
+
+  // `tool_call_counts` is an array of `(tool, count)` 2-tuples, same
+  // positional-array wire shape as `max_calls` below.
+  const toolCounts = jsonObj.getArr("tool_call_counts");
+  if (toolCounts) {
+    const rows = toolCounts.valueOf();
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      if (row === null || !row.isArr) continue;
+      const pair = (<JSON.Arr>row).valueOf();
+      if (pair.length < 2) continue;
+      const tc = new ToolCallCount();
+      tc.tool = pair[0].toString();
+      const n = pair[1];
+      tc.count = n.isInteger ? i32(parseInt(n.toString())) : 0;
+      ctx.tool_call_counts.push(tc);
+    }
+  }
+
+  const calls_last_60s = jsonObj.getInteger("calls_last_60s");
+  if (calls_last_60s) ctx.calls_last_60s = i32(calls_last_60s.valueOf());
 
   // ── Declared SOP policy, this turn's delta, and the change manifest ──────
   //

@@ -40,9 +40,10 @@ export type FieldKind = 'string' | 'int' | 'float' | 'optionalFloat' | 'optional
  *
  * Derived by hand from `packages/wasm-sdk/assembly/index.ts` and gated against
  * it. Deliberately excludes the structured lists (`tools`, `tool_calls`,
- * `changes`, the four SOP rule arrays) — comparing those needs operators this
- * vocabulary does not have, and half-supporting them would let a generator
- * produce a predicate that renders to something that always evaluates false.
+ * `changes`, `tool_call_counts`, the four SOP rule arrays) — comparing those
+ * needs operators this vocabulary does not have, and half-supporting them
+ * would let a generator produce a predicate that renders to something that
+ * always evaluates false.
  */
 export const FIELDS: Record<string, FieldKind> = {
   model: 'string',
@@ -52,6 +53,7 @@ export const FIELDS: Record<string, FieldKind> = {
   estimated_input_tokens: 'int',
   depth: 'int',
   graph_node_count: 'int',
+  calls_last_60s: 'int',
   budget_remaining_usd: 'float',
   // Optional numerics arrive as -1 when the host has nothing to send. The
   // `optional` kinds are what force an unknown check into the rendered source.

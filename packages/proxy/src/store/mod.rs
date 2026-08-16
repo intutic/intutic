@@ -358,6 +358,29 @@ pub trait LocalStore: Send + Sync + 'static {
     /// compaction), the count resets to the new length in the same call.
     async fn swap_extracted_tool_count(&self, session_id: &str, new_count: u64) -> u64;
 
+    /// Record `new_call_count` tool calls at `now_unix_secs` and return the
+    /// total still within `window_secs` of it — a time window, not the
+    /// entry-count cap [`record_tool_sequence`](Self::record_tool_sequence)
+    /// uses.
+    ///
+    /// Batched like `record_tool_sequence` above, for the same reason: one
+    /// call carries a whole turn's worth of tool calls rather than looping
+    /// the caller once per call.
+    ///
+    /// A separate store from the sequence above because they answer different
+    /// questions: `tool_sequence` bounds "how many recent actions" (a fixed
+    /// entry count, no notion of time), this bounds "how many actions in how
+    /// much time" — a burst that fills the sequence window in ten seconds and
+    /// one spread over an hour are indistinguishable to the former and are
+    /// exactly what this exists to tell apart.
+    async fn record_calls_and_count_window(
+        &self,
+        session_id: &str,
+        new_call_count: usize,
+        now_unix_secs: i64,
+        window_secs: i64,
+    ) -> anyhow::Result<u32>;
+
     // ── Provider credentials ─────────────────────────────────────────
 
     /// First non-empty value among `fields` in `workspace:credentials:{ws}`.

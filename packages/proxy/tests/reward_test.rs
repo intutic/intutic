@@ -462,6 +462,67 @@ async fn tool_sequence_trims_to_the_newest_entries() {
     }
 }
 
+/// `calls_last_60s` counts a time window, not a fixed entry count — the
+/// property `tool_sequence`'s cap cannot express. Both backends must agree
+/// on when a call ages out of the window, not just on how many arrived.
+#[tokio::test]
+async fn calls_last_60s_counts_the_window_not_the_whole_history() {
+    for (name, store, _cp) in backends().await {
+        let session = unique_ws("calls");
+        let now = 1_700_000_000i64; // fixed epoch — the test owns time, not the clock
+
+        let count = store
+            .record_calls_and_count_window(&session, 3, now, 60)
+            .await
+            .unwrap();
+        assert_eq!(count, 3, "[{name}] three calls land in the window");
+
+        let count = store
+            .record_calls_and_count_window(&session, 2, now, 60)
+            .await
+            .unwrap();
+        assert_eq!(count, 5, "[{name}] two more join the same window");
+
+        // Two hours later, a read that adds nothing new must see the earlier
+        // burst as fully aged out — the whole point of a window over a
+        // fixed-entry cap, which `tool_sequence` cannot express at all.
+        let count = store
+            .record_calls_and_count_window(&session, 0, now + 7_200, 60)
+            .await
+            .unwrap();
+        assert_eq!(count, 0, "[{name}] the earlier burst has aged out of the window");
+
+        let count = store
+            .record_calls_and_count_window(&session, 1, now + 7_200, 60)
+            .await
+            .unwrap();
+        assert_eq!(count, 1, "[{name}] only the fresh call is in the new window");
+
+        // Same TTL discipline as `tool_sequence`'s key: capped by aging out
+        // entries is not the same guarantee as the key itself expiring, and
+        // the tool-sequence regression this mirrors was exactly that gap.
+        if name == "valkey" {
+            if let Some(valkey) = valkey_conn().await {
+                let mut conn = valkey.as_ref().clone();
+                let ttl: i64 = redis::cmd("TTL")
+                    .arg(format!("v2:session:{}:calls", session))
+                    .query_async(&mut conn)
+                    .await
+                    .unwrap_or(-3);
+                assert!(
+                    ttl > 0,
+                    "[{name}] call-window key must expire; TTL was {ttl} (-1 = persistent, the bug)"
+                );
+            }
+        }
+
+        if let Some(valkey) = valkey_conn().await {
+            let mut conn = valkey.as_ref().clone();
+            let _: Result<(), _> = conn.del(format!("v2:session:{}:calls", session)).await;
+        }
+    }
+}
+
 /// The response cache round-trips through both backends with its camelCase
 /// wire format intact — the field names the control plane also reads.
 #[tokio::test]
