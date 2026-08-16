@@ -26,6 +26,21 @@
  * @module
  */
 
+/**
+ * Strip trailing `/` characters, without a regex. `endpoint`/`apiBase` are
+ * workspace-provisioned credential fields — CodeQL correctly flagged the
+ * original `.replace(/\/+$/, '')` as a polynomial-regex risk on uncontrolled
+ * input (this module is a pure function with no length bound of its own;
+ * the server-side 512-char cap in `providerCredentials.ts` is a different
+ * layer, not a guarantee this function can rely on). A plain index walk is
+ * linear by construction, with no backtracking to worry about.
+ */
+function stripTrailingSlashes(s: string): string {
+  let end = s.length
+  while (end > 0 && s[end - 1] === '/') end--
+  return s.slice(0, end)
+}
+
 export interface ProviderProbeRequest {
   url: string
   method: 'GET' | 'POST'
@@ -128,7 +143,7 @@ export function buildVerificationProbe(
 
     case 'azure_openai': {
       const apiKey = fields.apiKey
-      const endpoint = fields.endpoint?.replace(/\/+$/, '')
+      const endpoint = fields.endpoint ? stripTrailingSlashes(fields.endpoint) : undefined
       if (!apiKey || !endpoint) return null
       return {
         url: `${endpoint}/openai/models?api-version=2024-02-01`,
@@ -138,7 +153,7 @@ export function buildVerificationProbe(
     }
 
     case 'ollama': {
-      const apiBase = fields.apiBase?.replace(/\/+$/, '')
+      const apiBase = fields.apiBase ? stripTrailingSlashes(fields.apiBase) : undefined
       if (!apiBase) return null
       // Ollama has no API key by default — this checks reachability, not
       // authentication. A 200 here means "something is listening," which is
