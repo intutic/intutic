@@ -36,6 +36,15 @@ export interface ApiClient {
   getWithStatus<T>(path: string): Promise<{ status: number; body: T }>
   /** Generic POST request for arbitrary API paths. */
   post<T>(path: string, body?: unknown): Promise<T>
+  /**
+   * POST that hands back the status instead of throwing on it.
+   *
+   * Same rationale as `getWithStatus`: `POST /api/v1/wasm-rules/:id/replay`
+   * returns 422 with `{error: 'not_enough_traffic', contextCount, minRequired}`
+   * when the workspace has too little sampled history, and that body is the
+   * answer a caller needs to report, not a failure to unwrap and discard.
+   */
+  postWithStatus<T>(path: string, body?: unknown): Promise<{ status: number; body: T }>
   /** Generic PUT request for arbitrary API paths. */
   put<T>(path: string, body?: unknown): Promise<T>
   /** Generic PATCH request for arbitrary API paths. */
@@ -119,6 +128,24 @@ export function createApiClient(controlPlaneUrl: string, apiKey: string): ApiCli
 
     async post<T>(path: string, body?: unknown): Promise<T> {
       return request<T>('POST', path, body)
+    },
+
+    async postWithStatus<T>(path: string, body?: unknown): Promise<{ status: number; body: T }> {
+      const headers: Record<string, string> = { ...baseHeaders }
+      injectTraceHeaders(headers)
+      const res = await fetch(`${controlPlaneUrl}${path}`, {
+        method: 'POST',
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+      })
+      const text = await res.text()
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(text)
+      } catch {
+        parsed = { error: text }
+      }
+      return { status: res.status, body: unwrapToonEnvelope(parsed) as T }
     },
 
     async put<T>(path: string, body?: unknown): Promise<T> {

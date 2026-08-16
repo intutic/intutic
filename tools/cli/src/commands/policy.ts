@@ -770,6 +770,106 @@ export async function runPolicyInstall(opts: {
   )
 }
 
+/**
+ * Shape `POST /api/v1/wasm-rules/:id/replay` returns on success — mirrors
+ * `ReplaySummary` in `services/control-plane/src/services/ruleBundleGates.ts`
+ * plus the two fields the route adds (`ruleId`, `since`).
+ */
+interface ReplayResult {
+  ruleId: string
+  since: string | null
+  contextCount: number
+  wouldActCount: number
+  wouldActRate: number
+  verdictCounts: Record<string, number>
+  sampleMatches: Record<string, unknown>[]
+}
+
+const VERDICT_NAMES: Record<string, string> = {
+  '0': 'allow',
+  '1': 'block',
+  '2': 'block (deprecated code 2)',
+  '3': 'reask',
+}
+
+/**
+ * `intutic policy replay <ruleId>` — "prove before enforce": run an installed
+ * or not-yet-active rule against a sample of this workspace's own recent
+ * traffic and report what it would have done, without touching enforcement.
+ *
+ * Uses `postWithStatus` rather than `post`: the 422 the route returns for too
+ * little sampled traffic is an answer this command exists to report, not a
+ * request failure to throw past.
+ */
+export async function runPolicyReplay(
+  ruleId: string,
+  opts: { limit?: string; since?: string; dev?: boolean },
+): Promise<void> {
+  log.header(`Intutic — Replay Policy Rule: ${ruleId}`)
+
+  const client = await getClient(opts.dev)
+
+  const body: { limit?: number; since?: string } = {}
+  if (opts.limit !== undefined) {
+    const limit = parseInt(opts.limit, 10)
+    if (isNaN(limit) || limit <= 0) {
+      log.error(`Invalid --limit "${opts.limit}". Must be a positive integer.`)
+      process.exit(1)
+    }
+    body.limit = limit
+  }
+  if (opts.since !== undefined) {
+    body.since = opts.since
+  }
+
+  try {
+    const { status, body: result } = await client.postWithStatus<
+      ReplayResult | { error: string; message?: string; contextCount?: number; minRequired?: number }
+    >(`/api/v1/wasm-rules/${ruleId}/replay`, body)
+
+    if (status === 404) {
+      log.error(`Rule "${ruleId}" not found in this workspace.`)
+      process.exit(1)
+    }
+
+    if (status === 422) {
+      const err = result as { error: string; message?: string; contextCount?: number; minRequired?: number }
+      if (err.error === 'not_enough_traffic') {
+        log.warn('Not enough sampled traffic to estimate a would-act rate.')
+        log.field('Sampled contexts', String(err.contextCount ?? 0))
+        log.field('Required', String(err.minRequired ?? 0))
+        log.info(
+          'Contexts are sampled at WASM_CONTEXT_SNAPSHOT_RATE (default 5%) as traffic flows ' +
+            'through the proxy — this grows with time and traffic, not with --limit.',
+        )
+      } else {
+        log.error(`Replay could not evaluate the rule: ${err.message ?? err.error}`)
+      }
+      process.exit(1)
+    }
+
+    if (status !== 200) {
+      log.error(`Replay failed (${status}): ${JSON.stringify(result)}`)
+      process.exit(1)
+    }
+
+    const summary = result as ReplayResult
+    log.success(`Replayed against ${summary.contextCount} sampled context(s).`)
+    log.field('Since', summary.since ?? '(all sampled history)')
+    log.field('Would act (block/reask/other)', `${summary.wouldActCount} (${(summary.wouldActRate * 100).toFixed(1)}%)`)
+    for (const [code, count] of Object.entries(summary.verdictCounts)) {
+      log.field(`  verdict ${code} (${VERDICT_NAMES[code] ?? 'unmapped'})`, String(count))
+    }
+    if (summary.sampleMatches.length > 0) {
+      log.info(`First ${summary.sampleMatches.length} non-allow context(s):`)
+      console.log(JSON.stringify(summary.sampleMatches, null, 2))
+    }
+  } catch (err) {
+    log.error(`Failed to replay rule: ${errMessage(err)}`)
+    process.exit(1)
+  }
+}
+
 export async function runPolicyListLocal(): Promise<void> {
   log.header('Intutic — Local WASM Policy Rules')
   const dir = resolveLocalWasmDir()

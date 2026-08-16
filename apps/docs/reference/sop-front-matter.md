@@ -48,6 +48,41 @@ nothing, which reads as an over-eager product rather than a misconfiguration.
 `risk_tier:` will be reported as enforcing nothing, because as far as the proxy's
 own detectors are concerned, it is.
 
+### `mode: shadow` — prove a SOP before it enforces
+
+```yaml
+---
+deny_tools: kubectl
+mode: shadow
+---
+```
+
+Every key above enforces by default. Adding `mode: shadow` changes that for
+*this SOP only*: its declarations are still evaluated against every request,
+but a match is recorded rather than acted on — the request proceeds
+unchanged. Nothing else in the file needs to change; the same `deny_tools:`
+or `max_calls:` that would block in enforce mode is what gets evaluated in
+shadow mode, so the evidence a shadow period produces is exactly the evidence
+the SOP would have generated enforcing.
+
+What each request's shadow SOPs would have done is recorded on that request's
+trace, per SOP, as `would_act: true` (something matched) or `false` (a
+bypass — both are reported, since a would-act rate needs a denominator). This
+is the SOP-declaration analogue of [WASM rules](/guide/wasm-rules)' own
+`mode: SHADOW` bundle setting: prove a policy against real traffic before it
+can block anyone's work, without a second parallel policy language to
+maintain.
+
+`mode: enforce` is the explicit spelling of the default, for a file that wants
+to say so. Anything else — a missing key, a typo — also reads as `enforce`:
+the failure direction that matters here is a typo silently *disabling*
+enforcement, not merely going unread, so an unrecognised value never falls
+back to shadow.
+
+Scoping (`roles:`) still applies to a shadow SOP exactly as it does to an
+enforcing one — a shadow policy scoped to `deployer` is evaluated only against
+requests reporting that role, same as if it were enforcing.
+
 ::: tip Looking for a network/egress key?
 There isn't one, deliberately. Network egress is a workspace-wide and
 host-level control, not a per-node policy decision — it doesn't fit the

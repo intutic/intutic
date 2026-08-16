@@ -224,6 +224,20 @@ policyCmd
     await runPolicyListLocal()
   })
 
+policyCmd
+  .command('replay <ruleId>')
+  .description(
+    "Replay a rule (installed or not) against this workspace's own recent traffic and report " +
+    'what it would have done, without touching enforcement.'
+  )
+  .option('--limit <n>', 'Max sampled contexts to replay against (default 500, capped at 5000)')
+  .option('--since <duration>', 'Only contexts at or after this time — relative ("7d", "24h") or ISO 8601')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (ruleId, opts) => {
+    const { runPolicyReplay } = await import('./commands/policy.js')
+    await runPolicyReplay(ruleId, opts)
+  })
+
 program
   .command('whoami')
   .description('Show current authenticated identity')
