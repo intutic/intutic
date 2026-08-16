@@ -41,6 +41,8 @@ export interface TraceDagNode {
   totalCostUsd: number
   stepCount: number
   errorCount: number
+  /** 'LEGACY_BUCKET' | 'PROXY_PROCESS' | other — derived, see agent_sessions_resolved */
+  sessionKind?: string
 }
 
 export interface TraceDagResult {

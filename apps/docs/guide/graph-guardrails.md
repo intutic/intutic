@@ -150,8 +150,16 @@ posture, not an oversight. What the response path does carry is an
 what the model says is reported on the trace (pattern names only, streaming
 included) so an operator can see propagation a turn early — it never changes
 a verdict, because a model legitimately quotes these phrasings when asked
-about them, and that false-positive rate is unmeasured by design until an
-output corpus exists.
+about them. That stays true regardless of labelling: no amount of adjudication
+turns this into a blocking signal. What has changed is that the signal is no
+longer unmeasurable — each firing is now recorded per pattern as a
+`detector_findings` row and is adjudicable true/false positive by operators,
+via `intutic findings` on the CLI or the dashboard's Findings page. A
+self-authored corpus (checked-in benign outputs, not independently sourced)
+separately gates the regex patterns themselves in CI, pinning their behavior
+on known cases. Any false-positive rate this produces is measured
+per-workspace from that workspace's own adjudications; it is not published in
+these docs, and enforcement remains off.
 
 In a graph this matters more than for a single agent. One node's output becomes
 the next node's input, so a payload picked up from a fetched page arrives at
