@@ -34,6 +34,24 @@ import { resolveControlPlaneUrl } from '../config/paths.js'
 import { createApiClient } from '../lib/api.js'
 import { probeProviderCredential } from '../lib/providerProbe.js'
 
+// Uses lib/api.ts's createApiClient, the same client every other CLI command
+// (credentials.ts, org.ts, team.ts, gateway.ts, whoami.ts) uses -- NOT
+// @intutic/clawde-sdk. clawde-sdk's own module doc is explicit that it
+// mirrors the CLI's already-tested contracts for THIRD-PARTY embedders ("the
+// CLI's own already-tested contracts, not re-derived"); the CLI depending on
+// it would invert that relationship, and no other command here does.
+
+/** Result of POST /api/v1/workspace/judge-model/test (mirrors the dashboard's useJudgeModel.ts). */
+interface JudgeModelTestResult {
+  ok: boolean
+  model?: string
+  provider?: string
+  latencyMs?: number
+  stage?: 'shape' | 'provider' | 'completion'
+  error?: string
+  upstreamStatus?: number
+}
+
 // Exported (not just module-private) so a test's SetupIO implementation can
 // return the SAME unique-symbol value the SetupIO interface's method
 // signatures reference -- TS treats two `Symbol('cancelled')` literals in
@@ -233,6 +251,32 @@ export async function runSetup(opts: SetupOpts, io: SetupIO = createClackIO()): 
         io.log.success(`Judge model set to ${judgeModel}.`)
       } catch (err) {
         io.log.error(`Failed to save judge model: ${err instanceof Error ? err.message : String(err)}`)
+      }
+
+      // Same round-trip the dashboard's JudgeModelPanel Test button runs
+      // (POST /api/v1/workspace/judge-model/test, workspace.ts) — a real,
+      // tiny completion through the exact path a workspace judge would
+      // take. Reported, not gating: the setting is already saved above, the
+      // same way the dashboard's Save and Test are independent actions.
+      io.log.info('Verifying the judge model…')
+      try {
+        const testResult = await client.post<JudgeModelTestResult>('/api/v1/workspace/judge-model/test', {
+          model: judgeModel,
+        })
+        if (testResult.ok) {
+          io.log.success(
+            `Judge model verified — routes via ${testResult.provider}, ${testResult.latencyMs}ms round-trip.`,
+          )
+        } else {
+          io.log.warn(
+            `Judge model test failed at the ${testResult.stage} stage: ${testResult.error}` +
+              (testResult.stage === 'provider'
+                ? ' (this only means it cannot be tested right now — the setting above is already saved)'
+                : ''),
+          )
+        }
+      } catch (err) {
+        io.log.warn(`Could not run the judge model test: ${err instanceof Error ? err.message : String(err)}`)
       }
     } else {
       io.note(
