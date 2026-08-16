@@ -4,6 +4,8 @@ import {
   generateMobileconfig,
   generateJamfManifest,
   generateIntuneManifest,
+  generateJamfFirewallManifest,
+  generateIntuneFirewallManifest,
   pemToBase64Der,
 } from './mdmManifest.js'
 
@@ -92,4 +94,82 @@ describe('hooks manifests (Jamf / Intune)', () => {
       })
     })
   }
+})
+
+describe('firewall deployment manifests (Jamf / Intune)', () => {
+  const cliBinaryPath = '/opt/intutic/bin/intutic'
+
+  // Real rule-generator output markers, grepped from packages/proxy/src/firewall.rs
+  // (generate_pf_rules / generate_iptables_rules / generate_nftables_rules /
+  // generate_windows_rules). None of these should ever appear in the MDM
+  // manifest — it wraps the `enforce apply` COMMAND, not a rules snapshot,
+  // because a snapshot generated here would immediately drift from whatever
+  // firewall.rs generates at run time on the actual target platform.
+  const RULE_SYNTAX_MARKERS = [
+    'rdr pass', // pf
+    'pass all', // pf
+    'iptables', // iptables
+    'REDIRECT --to-port', // iptables
+    'table ip intutic', // nftables
+    'redirect to :', // nftables
+    'netsh interface portproxy', // windows
+  ]
+
+  for (const [name, generate] of [
+    ['generateJamfFirewallManifest', generateJamfFirewallManifest],
+    ['generateIntuneFirewallManifest', generateIntuneFirewallManifest],
+  ] as const) {
+    describe(name, () => {
+      it('is valid JSON', () => {
+        const json = generate({ cliBinaryPath })
+        expect(() => JSON.parse(json)).not.toThrow()
+      })
+
+      it('wraps `enforce apply` as the content, using the given cliBinaryPath', () => {
+        const json = generate({ cliBinaryPath })
+        const parsed = JSON.parse(json)
+        expect(parsed.content).toBe(`${cliBinaryPath} enforce apply`)
+      })
+
+      it('documents prerequisites, including the CLI install path and privileged execution context', () => {
+        const json = generate({ cliBinaryPath })
+        const parsed = JSON.parse(json)
+        expect(Array.isArray(parsed.prerequisites)).toBe(true)
+        expect(parsed.prerequisites.length).toBeGreaterThan(0)
+        expect(parsed.prerequisites.join(' ')).toContain(cliBinaryPath)
+      })
+
+      it('states the honesty/guarantees boundary: scheduled re-assertion, not tamper-proof', () => {
+        const json = generate({ cliBinaryPath })
+        const parsed = JSON.parse(json)
+        expect(typeof parsed.honesty).toBe('string')
+        expect(parsed.honesty.toLowerCase()).toContain('not tamper-proof')
+        expect(parsed.honesty.toLowerCase()).toContain('remove')
+      })
+
+      it('documents a recurrence/schedule', () => {
+        const json = generate({ cliBinaryPath })
+        const parsed = JSON.parse(json)
+        expect(typeof parsed.schedule).toBe('string')
+        expect(parsed.schedule.length).toBeGreaterThan(0)
+      })
+
+      it('does not embed any pf/nftables/iptables rule syntax', () => {
+        const json = generate({ cliBinaryPath })
+        for (const marker of RULE_SYNTAX_MARKERS) {
+          expect(json).not.toContain(marker)
+        }
+      })
+    })
+  }
+
+  it('Jamf and Intune manifests use distinct deployment-mechanism text', () => {
+    const jamf = JSON.parse(generateJamfFirewallManifest({ cliBinaryPath }))
+    const intune = JSON.parse(generateIntuneFirewallManifest({ cliBinaryPath }))
+    expect(jamf.deployment.jamf).toBeDefined()
+    expect(intune.deployment.intune).toBeDefined()
+    expect(jamf.deployment.jamf).not.toBe(intune.deployment.intune)
+    expect(jamf.deployment.jamf.toLowerCase()).toContain('jamf')
+    expect(intune.deployment.intune.toLowerCase()).toContain('scripts')
+  })
 })

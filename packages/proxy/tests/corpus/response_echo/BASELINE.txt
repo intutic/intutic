@@ -1,0 +1,77 @@
+Intutic response-echo corpus baseline — self-authored, regression-only
+========================================================================
+
+Produced by:
+    cd packages/proxy && INTUTIC_WRITE_BASELINE=1 cargo test --test response_echo_corpus_test
+
+Source: self-authored by the Intutic team (see tests/corpus/PROVENANCE.md,
+section "Response-echo corpus"). This is NOT an external or independent
+measurement, unlike the BFCL and NotInject corpora in BASELINE.txt one
+directory up — no third-party corpus of "benign model output discussing
+prompt injection" exists anywhere. Read PROVENANCE.md before citing any
+number in this file in documentation.
+
+Corpus: 150 self-authored rows (resp_echo_0001..resp_echo_0150).
+
+Both scan entry points agree on every row (see `both_scan_entry_points_agree_on_every_row`); the counts below come from `injection::scan` run directly on each row's `text`.
+
+  pattern_name                  | rows_fired
+  -------------------------------|-----------
+  guardrail-bypass               |         10
+  instruction-boundary-forgery   |          3
+  override-instructions          |         25
+  reveal-system-prompt           |         11
+  role-reassignment              |         14
+
+Rows with at least one firing: 49 of 150 (32.7%).
+
+Firing rows, by id:
+  resp_echo_0001  ->  override-instructions, reveal-system-prompt
+  resp_echo_0002  ->  override-instructions
+  resp_echo_0003  ->  override-instructions
+  resp_echo_0004  ->  reveal-system-prompt
+  resp_echo_0005  ->  role-reassignment
+  resp_echo_0006  ->  guardrail-bypass
+  resp_echo_0007  ->  override-instructions, role-reassignment
+  resp_echo_0008  ->  guardrail-bypass, override-instructions, reveal-system-prompt
+  resp_echo_0009  ->  guardrail-bypass, override-instructions, role-reassignment
+  resp_echo_0012  ->  override-instructions, role-reassignment
+  resp_echo_0015  ->  role-reassignment
+  resp_echo_0017  ->  override-instructions
+  resp_echo_0018  ->  override-instructions
+  resp_echo_0020  ->  override-instructions
+  resp_echo_0021  ->  override-instructions
+  resp_echo_0022  ->  guardrail-bypass, role-reassignment
+  resp_echo_0023  ->  guardrail-bypass
+  resp_echo_0024  ->  reveal-system-prompt
+  resp_echo_0026  ->  override-instructions
+  resp_echo_0027  ->  override-instructions, role-reassignment
+  resp_echo_0028  ->  reveal-system-prompt
+  resp_echo_0029  ->  override-instructions
+  resp_echo_0030  ->  override-instructions
+  resp_echo_0031  ->  override-instructions
+  resp_echo_0032  ->  override-instructions
+  resp_echo_0033  ->  override-instructions, reveal-system-prompt
+  resp_echo_0034  ->  role-reassignment
+  resp_echo_0035  ->  override-instructions
+  resp_echo_0036  ->  reveal-system-prompt
+  resp_echo_0037  ->  role-reassignment
+  resp_echo_0038  ->  guardrail-bypass
+  resp_echo_0040  ->  override-instructions
+  resp_echo_0041  ->  guardrail-bypass, role-reassignment
+  resp_echo_0043  ->  override-instructions
+  resp_echo_0044  ->  reveal-system-prompt
+  resp_echo_0046  ->  guardrail-bypass, override-instructions, reveal-system-prompt, role-reassignment
+  resp_echo_0047  ->  reveal-system-prompt
+  resp_echo_0048  ->  role-reassignment
+  resp_echo_0049  ->  override-instructions
+  resp_echo_0050  ->  override-instructions
+  resp_echo_0054  ->  override-instructions
+  resp_echo_0058  ->  reveal-system-prompt
+  resp_echo_0062  ->  role-reassignment
+  resp_echo_0065  ->  role-reassignment
+  resp_echo_0067  ->  guardrail-bypass
+  resp_echo_0070  ->  guardrail-bypass
+  resp_echo_0072  ->  instruction-boundary-forgery
+  resp_echo_0073  ->  instruction-boundary-forgery
+  resp_echo_0074  ->  instruction-boundary-forgery
