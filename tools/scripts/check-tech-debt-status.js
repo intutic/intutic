@@ -37,7 +37,11 @@ if (!existsSync(DOC)) {
 }
 
 /** Markers an entry may declare. Anything else is a typo, not a state. */
-const MARKERS = ['✅', '⚠️', '🟡', '🟢', '🔵', '⏸️', '🔴', '🟠']
+// 🔨 = "restoration in progress": a deliberately-stripped capability whose
+// restoration gate has been declared met and whose rebuild is underway
+// (TD-SIEM-01 introduced the marker; TD-SOC2-01 reuses it). A real state,
+// distinct from 🔵 Open — the work exists and is tracked, not merely known.
+const MARKERS = ['✅', '⚠️', '🟡', '🟢', '🔵', '⏸️', '🔴', '🟠', '🔨']
 
 const src = readFileSync(DOC, 'utf8')
 // `TD-\d+` is not the only id shape: TD-SEC-001, TD-GG-01, TD-COST-001,
