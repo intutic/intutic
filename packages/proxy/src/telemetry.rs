@@ -54,6 +54,12 @@ pub struct ExecutionTrace {
     /// is not a denominator.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub wasm_shadow_reports: Vec<crate::wasm::registry::ShadowReport>,
+    /// What each shadow-mode SOP (`mode: shadow` in front matter) would have
+    /// done on this request — the SOP-declaration analogue of
+    /// `wasm_shadow_reports` above, one entry per applicable shadow SOP rather
+    /// than per rule. Empty on nearly every trace, for the same reason.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sop_shadow_reports: Vec<crate::sops::SopShadowReport>,
     /// Response Integrity Score, 0–100. 100 is clean.
     ///
     /// The router's only quality signal. Before it, `upstream_ok` plus latency
@@ -160,6 +166,22 @@ pub struct ExecutionTrace {
     /// Empty is skipped, so a clean request's wire shape is unchanged.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub findings: Vec<FindingWire>,
+
+    /// A sampled copy of this request's full `RequestContext`, for the
+    /// replay corpus.
+    ///
+    /// `None` on the overwhelming majority of traces — see
+    /// `AppState::context_snapshot_rate` (`WASM_CONTEXT_SNAPSHOT_RATE`,
+    /// default 5%). A new WASM rule candidate needs `historical_replay`
+    /// evidence before it is ever installed, and that evidence has to be
+    /// *real* requests, not a synthetic block/allow pair — this is where
+    /// that corpus comes from. Sampled, not universal: capturing the full
+    /// context on every trace would write a governance-relevant payload
+    /// (tool sequences, DLP findings, SOP declarations) onto every single
+    /// row in the busiest table in the system for a corpus that only needs
+    /// to clear `MIN_REPLAY_CONTEXTS` (50).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_snapshot: Option<serde_json::Value>,
 
     /// Where in the graph this request happened. Flattened onto the wire.
     #[serde(flatten)]
@@ -284,6 +306,51 @@ mod tests {
     use super::*;
     use crate::wasm::context::NodeIdentity;
 
+    /// Every field at its zero value. Test fixtures overwrite the one or two
+    /// fields the test is actually about, matching `base_ctx()`-style
+    /// fixtures elsewhere in this crate — `ExecutionTrace` derives no
+    /// `Default` of its own, since a wire struct silently growing a
+    /// zero-value field for every new column is exactly the failure mode
+    /// the five-trace-site tests above guard against in production code.
+    fn base_trace() -> ExecutionTrace {
+        ExecutionTrace {
+            trace_id: String::new(),
+            session_id: String::new(),
+            proxy_instance_id: String::new(),
+            workspace_id: String::new(),
+            virtual_key_id: String::new(),
+            model: String::new(),
+            provider: String::new(),
+            raw_input_tokens: 0,
+            compressed_input_tokens: 0,
+            tool_result_bytes_saved: 0,
+            wasm_shadow_reports: Vec::new(),
+            sop_shadow_reports: Vec::new(),
+            routing_shadow_model: None,
+            response_integrity: None,
+            quality_fault: None,
+            output_tokens: 0,
+            raw_cost_usd: 0.0,
+            actual_cost_usd: 0.0,
+            cache_hit: false,
+            latency_ms: 0,
+            verdict: String::new(),
+            harness_type: String::new(),
+            created_at: String::new(),
+            requested_model: String::new(),
+            actual_model_routed: String::new(),
+            task_type: String::new(),
+            tools: Vec::new(),
+            change_manifest: Vec::new(),
+            reconstruction_quality: 0,
+            token_anomaly: false,
+            loop_run_id: None,
+            findings: Vec::new(),
+            context_snapshot: None,
+            graph: GraphTrace::default(),
+        }
+    }
+
     fn node(graph: &str, id: &str) -> NodeIdentity {
         NodeIdentity {
             node_id: id.into(),
@@ -391,6 +458,81 @@ mod tests {
             src.matches("proxy_instance_id: proxy_instance_id()").count(),
             5,
             "every one of the five trace sites must publish the process id"
+        );
+    }
+
+    /// Every trace site must carry the sampled context snapshot.
+    ///
+    /// Same shape of defect as `no_trace_site_omits_the_change_manifest` above
+    /// — five construction sites, one field, and a missed site is silent: the
+    /// struct still compiles because `context_snapshot` has a serde default,
+    /// so an omitted field just reads `None` forever on that one path instead
+    /// of failing to build. Caught once already while wiring this field in —
+    /// this test is what should have caught it instead of a manual re-grep.
+    #[test]
+    fn no_trace_site_omits_the_context_snapshot() {
+        let src = include_str!("proxy.rs");
+        assert!(
+            src.matches("context_snapshot: context_snapshot_for_trace.clone()").count() >= 5,
+            "a trace site has lost its context_snapshot field — the replay \
+             corpus silently stops sampling that path"
+        );
+    }
+
+    /// `context_snapshot` round-trips when present, and is omitted (not
+    /// `null`) when absent — same `skip_serializing_if` discipline as
+    /// `routing_shadow_model` and `quality_fault` on this struct, so a clean
+    /// trace's wire shape does not grow a key on the overwhelming majority of
+    /// requests that were never sampled.
+    #[test]
+    fn context_snapshot_round_trips_and_is_omitted_when_absent() {
+        let mut trace = base_trace();
+        trace.context_snapshot = Some(serde_json::json!({"session_id": "ses_1"}));
+        let v = serde_json::to_value(&trace).unwrap();
+        assert_eq!(v["context_snapshot"]["session_id"], "ses_1");
+
+        trace.context_snapshot = None;
+        let v = serde_json::to_value(&trace).unwrap();
+        assert!(
+            v.as_object().unwrap().get("context_snapshot").is_none(),
+            "an unsampled trace must omit the key, not serialise it as null"
+        );
+    }
+
+    /// Every trace site must carry the shadow-mode SOP reports. Same shape of
+    /// defect as `no_trace_site_omits_the_context_snapshot` — five construction
+    /// sites, one field, and a missed site is silent: `Vec::is_empty` means the
+    /// struct still compiles and that one path just never reports a shadow SOP,
+    /// forever, with nothing to notice.
+    #[test]
+    fn no_trace_site_omits_the_sop_shadow_reports() {
+        let src = include_str!("proxy.rs");
+        assert!(
+            src.matches("sop_shadow_reports: sop_shadow_reports.clone()").count() >= 5,
+            "a trace site has lost its sop_shadow_reports field"
+        );
+    }
+
+    /// `sop_shadow_reports` round-trips when present, and is omitted (not an
+    /// empty array) when there was nothing to report — same
+    /// `skip_serializing_if` discipline as `wasm_shadow_reports` beside it.
+    #[test]
+    fn sop_shadow_reports_round_trips_and_is_omitted_when_empty() {
+        let mut trace = base_trace();
+        trace.sop_shadow_reports = vec![crate::sops::SopShadowReport {
+            title: "Never delete prod".into(),
+            would_act: true,
+            findings: vec!["POLICY_VIOLATION".into()],
+        }];
+        let v = serde_json::to_value(&trace).unwrap();
+        assert_eq!(v["sop_shadow_reports"][0]["title"], "Never delete prod");
+        assert_eq!(v["sop_shadow_reports"][0]["would_act"], true);
+
+        trace.sop_shadow_reports = Vec::new();
+        let v = serde_json::to_value(&trace).unwrap();
+        assert!(
+            v.as_object().unwrap().get("sop_shadow_reports").is_none(),
+            "a trace with nothing shadowed must omit the key, not serialise an empty array"
         );
     }
 

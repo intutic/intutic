@@ -38,6 +38,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use crate::wasm::context::RiskLevel;
+use serde::Serialize;
 
 /// How long a resolved set is reused before the directory is re-read.
 ///
@@ -73,6 +74,24 @@ pub enum SopScope {
     #[default]
     Workspace,
     Org,
+}
+
+/// `mode: shadow` in front matter, mirroring `wasm::registry::RuleMode`.
+///
+/// A shadow SOP's declared fields (`deny_tools`, `max_calls`, `requires_before`
+/// and the rest) are excluded from `governance_fields_from`'s enforcing set —
+/// they never reach a live `RequestContext` and so cannot block, hold or steer
+/// anything — and are instead evaluated against a shadow copy of the context
+/// in `proxy.rs`, which records what the SOP would have done without doing it.
+/// The one place this record lands is `ExecutionTrace::sop_shadow_reports`;
+/// there is no `WOULD_HAVE` sentinel disposition for the same reason
+/// `FindingWire.shadowed` and `wasm::registry::ShadowReport` document theirs:
+/// a synthetic verdict is invisible to every consumer matching on the real one.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SopMode {
+    #[default]
+    Enforce,
+    Shadow,
 }
 
 impl SopScope {
@@ -188,6 +207,8 @@ pub struct Sop {
     /// Ordering rules this SOP forbids: `A -> B` means B must not run *after* A.
     /// Parsed from `forbid_after:`.
     pub forbid_after: Vec<(String, String, bool)>,
+    /// `Enforce` (default) or `Shadow` — see [`SopMode`].
+    pub mode: SopMode,
 }
 
 impl Sop {
@@ -230,6 +251,8 @@ struct FrontMatter {
     forbid_with: Vec<(String, String)>,
     /// The severity band this SOP declares, if any. `None` means unstated.
     risk_tier: Option<RiskLevel>,
+    /// `mode: shadow` in front matter, or `Enforce` (the default) otherwise.
+    mode: SopMode,
     /// Rules that failed to parse, kept so they can be reported rather than
     /// dropped. A malformed ordering rule must not read as "no rule declared".
     rule_errors: Vec<String>,
@@ -268,6 +291,24 @@ fn parse_risk_tier(front: &str) -> Option<RiskLevel> {
         "high" => Some(RiskLevel::High),
         "critical" => Some(RiskLevel::Critical),
         _ => None,
+    }
+}
+
+/// `mode: shadow` in front matter, or `SopMode::Enforce` (the default) for
+/// anything else — unstated, misspelled, or `mode: enforce` written out
+/// explicitly. Unlike `parse_risk_tier`, an unrecognised value falls back to
+/// the safe default rather than `None`: the failure direction that matters
+/// here is a typo silently *disabling* enforcement, not merely being unread,
+/// so `mode: shaddow` enforces exactly as if the line were never written.
+fn parse_mode(front: &str) -> SopMode {
+    let raw = front
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix("mode:"))
+        .next()
+        .map(|v| v.trim().trim_matches(['"', '\'']).to_ascii_lowercase());
+    match raw.as_deref() {
+        Some("shadow") => SopMode::Shadow,
+        _ => SopMode::Enforce,
     }
 }
 
@@ -328,6 +369,7 @@ fn parse_front_matter(raw: &str) -> FrontMatter {
         // and the comparison ignores it.
         review_before: list("review_before:", false),
         risk_tier: parse_risk_tier(front),
+        mode: parse_mode(front),
         requires_before: requires.0,
         forbid_after: forbids.0,
         max_calls: counts.0,
@@ -579,6 +621,7 @@ fn parse_sop_content(title: String, raw: &str, source: &str, scope: SopScope) ->
         forbid_after: fm.forbid_after,
         max_calls: fm.max_calls,
         forbid_with: fm.forbid_with,
+        mode: fm.mode,
     })
 }
 
@@ -1353,6 +1396,36 @@ pub struct GovernanceFields {
     pub governance_block: Option<String>,
 }
 
+/// Split a resolved SOP set into `(enforcing, shadow)` by [`SopMode`].
+///
+/// The only caller is the request path, right before building the enforcing
+/// `GovernanceFields` — `governance_fields_from` takes whatever slice it is
+/// given at face value, so excluding shadow-mode SOPs here is what keeps their
+/// declared fields out of the live `RequestContext` entirely, rather than
+/// relying on every detector to separately know to ignore them.
+pub fn split_by_mode(sops: &[Sop]) -> (Vec<Sop>, Vec<Sop>) {
+    sops.iter().cloned().partition(|s| s.mode != SopMode::Shadow)
+}
+
+/// One shadow-mode SOP's outcome on one request.
+///
+/// Mirrors `wasm::registry::ShadowReport` (rule_id/name/would_act/verdict):
+/// carries the real finding kinds that fired, not a `WOULD_HAVE` sentinel, for
+/// the same reason documented there and on `FindingWire.shadowed` — a
+/// synthetic value is invisible to any consumer matching on the real one.
+#[derive(Debug, Clone, Serialize)]
+pub struct SopShadowReport {
+    pub title: String,
+    /// False when this SOP's declared fields matched nothing on this request.
+    /// Both are reported, not just the acts — the acts alone have no
+    /// denominator, exactly as `wasm::registry::ShadowReport::would_act`
+    /// documents.
+    pub would_act: bool,
+    /// Which detector kinds fired against this SOP's shadow context, for a
+    /// human reading the trace without re-deriving them from raw findings.
+    pub findings: Vec<String>,
+}
+
 pub fn governance_fields_from(sops: &[Sop], role: &str) -> GovernanceFields {
     let mut max_calls: Vec<(String, usize)> = sops
         .iter()
@@ -1747,6 +1820,67 @@ pub fn inject_into_body(
 }
 
 #[cfg(test)]
+mod mode_tests {
+    use super::*;
+
+    /// `mode: shadow` parses case-insensitively and quoted; anything else,
+    /// including an unrecognised value, is `Enforce` — the safe default,
+    /// since the failure direction that matters is a typo silently
+    /// *disabling* enforcement, not merely going unread.
+    #[test]
+    fn mode_shadow_parses_case_insensitively_and_quoted() {
+        let parse = |raw: &str| parse_front_matter(raw).mode;
+        assert_eq!(parse("---\nmode: shadow\n---\nbody"), SopMode::Shadow);
+        assert_eq!(parse("---\nmode: SHADOW\n---\nbody"), SopMode::Shadow);
+        assert_eq!(parse("---\nmode: \"shadow\"\n---\nbody"), SopMode::Shadow);
+    }
+
+    #[test]
+    fn mode_defaults_to_enforce_when_unstated_or_unrecognised() {
+        let parse = |raw: &str| parse_front_matter(raw).mode;
+        assert_eq!(parse("---\nroles: deployer\n---\nbody"), SopMode::Enforce);
+        assert_eq!(parse("---\nmode: enforce\n---\nbody"), SopMode::Enforce);
+        assert_eq!(parse("---\nmode: shaddow\n---\nbody"), SopMode::Enforce);
+    }
+
+    #[test]
+    fn parse_sop_content_carries_the_declared_mode() {
+        let raw = "---\nroles: deployer\ndeny_tools: rm\nmode: shadow\n---\nbody";
+        let sop = parse_sop_content("t".into(), raw, "src", SopScope::Workspace).unwrap();
+        assert_eq!(sop.mode, SopMode::Shadow);
+    }
+
+    /// `split_by_mode` is what keeps a shadow SOP's declared fields out of the
+    /// enforcing `GovernanceFields` entirely — this is the partition the
+    /// request path in `proxy.rs` relies on before calling
+    /// `governance_fields_from` on the enforcing half.
+    #[test]
+    fn split_by_mode_separates_enforcing_from_shadow() {
+        let enforcing_sop = Sop {
+            title: "enforcing".into(),
+            mode: SopMode::Enforce,
+            ..Sop::default()
+        };
+        let shadow_sop = Sop {
+            title: "shadow".into(),
+            mode: SopMode::Shadow,
+            ..Sop::default()
+        };
+        let (enforcing, shadow) =
+            split_by_mode(&[enforcing_sop.clone(), shadow_sop.clone()]);
+        assert_eq!(enforcing.iter().map(|s| &s.title).collect::<Vec<_>>(), vec!["enforcing"]);
+        assert_eq!(shadow.iter().map(|s| &s.title).collect::<Vec<_>>(), vec!["shadow"]);
+    }
+
+    #[test]
+    fn split_by_mode_on_an_all_enforcing_set_has_an_empty_shadow_half() {
+        let (enforcing, shadow) = split_by_mode(&[Sop::default()]);
+        assert_eq!(enforcing.len(), 1);
+        assert!(shadow.is_empty());
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -1764,6 +1898,7 @@ mod tests {
             review_before: Vec::new(),
             requires_before: Vec::new(),
             forbid_after: Vec::new(),
+            mode: SopMode::default(),
             max_calls: Vec::new(),
             forbid_with: Vec::new(),
         }
@@ -1999,6 +2134,7 @@ mod tests {
                 review_before: Vec::new(),
             requires_before: Vec::new(),
             forbid_after: Vec::new(),
+            mode: SopMode::default(),
             max_calls: Vec::new(),
             forbid_with: Vec::new(),
             })
@@ -2282,6 +2418,7 @@ mod discovery_tests {
             review_before: fm.review_before,
             requires_before: fm.requires_before,
             forbid_after: fm.forbid_after,
+            mode: SopMode::default(),
             max_calls: fm.max_calls,
             forbid_with: fm.forbid_with,
         }
@@ -2675,6 +2812,7 @@ mod deny_tests {
             review_before: Vec::new(),
             requires_before: Vec::new(),
             forbid_after: Vec::new(),
+            mode: SopMode::default(),
             max_calls: Vec::new(),
             forbid_with: Vec::new(),
         }
@@ -2764,6 +2902,7 @@ mod harness_policy_tests {
                 review_before: Vec::new(),
             requires_before: Vec::new(),
             forbid_after: Vec::new(),
+            mode: SopMode::default(),
             max_calls: Vec::new(),
             forbid_with: Vec::new(),
             },
@@ -2780,6 +2919,7 @@ mod harness_policy_tests {
                 review_before: Vec::new(),
             requires_before: Vec::new(),
             forbid_after: Vec::new(),
+            mode: SopMode::default(),
             max_calls: Vec::new(),
             forbid_with: Vec::new(),
             },
@@ -2834,6 +2974,7 @@ mod plan_step_tests {
                 review_before: Vec::new(),
             requires_before: Vec::new(),
             forbid_after: Vec::new(),
+            mode: SopMode::default(),
             max_calls: Vec::new(),
             forbid_with: Vec::new(),
             },
@@ -2850,6 +2991,7 @@ mod plan_step_tests {
                 review_before: Vec::new(),
             requires_before: Vec::new(),
             forbid_after: Vec::new(),
+            mode: SopMode::default(),
             max_calls: Vec::new(),
             forbid_with: Vec::new(),
             },
@@ -2879,6 +3021,7 @@ mod plan_step_tests {
             review_before: Vec::new(),
             requires_before: Vec::new(),
             forbid_after: Vec::new(),
+            mode: SopMode::default(),
             max_calls: Vec::new(),
             forbid_with: Vec::new(),
         }];
@@ -2960,6 +3103,7 @@ mod scope_and_review_tests {
             review_before: vec!["action:deploy".into()],
             requires_before: Vec::new(),
             forbid_after: Vec::new(),
+            mode: SopMode::default(),
             max_calls: Vec::new(),
             forbid_with: Vec::new(),
         }];
@@ -2983,6 +3127,7 @@ mod scope_and_review_tests {
             review_before: vec![],
             requires_before: Vec::new(),
             forbid_after: Vec::new(),
+            mode: SopMode::default(),
             max_calls: Vec::new(),
             forbid_with: Vec::new(),
         };
@@ -3063,6 +3208,7 @@ mod sop_status_snapshot_tests {
             review_before: Vec::new(),
             requires_before: Vec::new(),
             forbid_after: Vec::new(),
+            mode: SopMode::default(),
             max_calls: Vec::new(),
             forbid_with: Vec::new(),
         }

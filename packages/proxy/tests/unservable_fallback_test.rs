@@ -104,6 +104,7 @@ intutic_settings:
         reward_engine: Arc::new(intutic_proxy::routing::reward::RewardEngine::new()),
         store: Arc::clone(&store) as Arc<dyn intutic_proxy::store::LocalStore>,
         control_plane: Arc::new(intutic_proxy::store::NullControlPlaneCache),
+        context_snapshot_rate: 0.0,
     };
     let app = intutic_proxy::router::build_router(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
