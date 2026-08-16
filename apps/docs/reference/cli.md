@@ -51,7 +51,8 @@ intutic init [options]
 Guided setup wizard — detect harnesses, configure a provider credential, verify it, and
 optionally choose a judge model, in one interactive flow. Unlike `intutic init`, this command
 prompts; it is the interactive counterpart, not a replacement — `init` stays flag-driven and
-safe for CI.
+safe for CI. See [the cohort wizard guide](/guide/cohort-wizard) for a full narrative walkthrough
+of every step.
 
 ```bash
 intutic setup [options]
@@ -74,8 +75,10 @@ intutic setup [options]
    does not block
 5. Saves the credential (`PUT /api/v1/workspace/provider-credentials/:provider`, same route
    `intutic credentials set` hits) or writes the local env file
-6. Optionally picks a judge model from Intutic's model catalog (or a custom name) and saves it
-   (same route the dashboard's Settings → LLM Judge panel uses)
+6. Optionally picks a judge model from [Intutic's model catalog](/reference/model-catalog) (or a
+   custom name), saves it (same route the dashboard's Settings → LLM Judge panel uses), and — in
+   connected mode — runs the same test round-trip the panel's own Test button does, reporting
+   which stage (shape/provider/completion) it reached
 
 **Examples:**
 
@@ -95,6 +98,7 @@ Generate the local artifacts an on-prem LLM-as-judge needs: a `litellm_config.ya
 block, and a Helm values snippet. Writes files only — it never calls a remote API, since
 `local_judge` is deliberately not remotely configurable (see [the self-hosted gateway's local
 judge](/external/self-hosted-gateway#4-what-does-not-run-locally-read-this-before-you-deploy)).
+See [On-Prem Judge Setup](/external/on-prem-judge) for the full walkthrough.
 
 ```bash
 intutic judge configure [options]

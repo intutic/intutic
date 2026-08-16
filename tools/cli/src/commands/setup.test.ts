@@ -17,8 +17,8 @@ vi.mock('../config/paths.js', () => ({ resolveControlPlaneUrl: vi.fn(() => 'http
 // vi.mock factories are hoisted above top-level const declarations, so the
 // mocks they reference must be created via vi.hoisted() rather than a plain
 // `const` above them.
-const { putMock, probeMock } = vi.hoisted(() => ({ putMock: vi.fn(), probeMock: vi.fn() }))
-vi.mock('../lib/api.js', () => ({ createApiClient: () => ({ put: putMock }) }))
+const { putMock, postMock, probeMock } = vi.hoisted(() => ({ putMock: vi.fn(), postMock: vi.fn(), probeMock: vi.fn() }))
+vi.mock('../lib/api.js', () => ({ createApiClient: () => ({ put: putMock, post: postMock }) }))
 vi.mock('../lib/providerProbe.js', () => ({ probeProviderCredential: probeMock }))
 
 import { runSetup, CANCELLED, type SetupIO } from './setup.js'
@@ -65,6 +65,7 @@ class FakeIO implements SetupIO {
 
 beforeEach(() => {
   putMock.mockReset().mockResolvedValue({})
+  postMock.mockReset().mockResolvedValue({ ok: true, provider: 'anthropic', latencyMs: 250 })
   probeMock.mockReset().mockResolvedValue({ status: 'valid', detail: 'looks valid' })
 })
 
@@ -86,7 +87,34 @@ describe('runSetup — connected mode', () => {
     expect(putMock).toHaveBeenNthCalledWith(2, '/api/v1/workspace/settings', {
       managedJudgeModel: 'anthropic/claude-haiku-4-5',
     })
+    // The same round-trip the dashboard's JudgeModelPanel Test button runs,
+    // fired automatically after the save -- not just a PUT-and-hope.
+    expect(postMock).toHaveBeenCalledWith('/api/v1/workspace/judge-model/test', {
+      model: 'anthropic/claude-haiku-4-5',
+    })
     expect(io.calls.some((c) => c.method === 'log.success' && String(c.arg).includes('credential saved'))).toBe(true)
+    expect(io.calls.some((c) => c.method === 'log.success' && String(c.arg).includes('Judge model verified'))).toBe(true)
+  })
+
+  it('a failed judge-model test reports the stage but does not undo the already-saved setting', async () => {
+    postMock.mockResolvedValue({ ok: false, stage: 'completion', error: 'upstream returned 500' })
+    const io = new FakeIO([
+      'connected',
+      'anthropic',
+      'sk-ant-test-key-1234567890',
+      true,
+      'anthropic/claude-haiku-4-5',
+    ])
+
+    await runSetup({}, io)
+
+    // The setting is saved regardless of the test outcome.
+    expect(putMock).toHaveBeenNthCalledWith(2, '/api/v1/workspace/settings', {
+      managedJudgeModel: 'anthropic/claude-haiku-4-5',
+    })
+    expect(
+      io.calls.some((c) => c.method === 'log.warn' && String(c.arg).includes('failed at the completion stage')),
+    ).toBe(true)
   })
 
   it('an invalid credential (401) prompts to save anyway, and declining cancels before any PUT', async () => {
