@@ -167,6 +167,20 @@ pub struct ExecutionTrace {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub findings: Vec<FindingWire>,
 
+    /// Injection-pattern echoes in the MODEL'S OWN OUTPUT — advisory only.
+    ///
+    /// Pattern names from `injection::scan_response_body` (never the matched
+    /// text — same discipline as the request path). This never influences a
+    /// disposition and never will without an output corpus first: model
+    /// output legitimately quotes injection phrasing, so the FP rate is
+    /// structurally unmeasured (NotInject gates prompts, not outputs — the
+    /// scan's own doc comment carries the full argument). Present on the
+    /// success paths where a response body exists (non-streaming and
+    /// streamed); empty on blocked/error paths (no response) and on cache
+    /// hits (the cached body was scanned on the turn that produced it).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub response_injection_findings: Vec<String>,
+
     /// A sampled copy of this request's full `RequestContext`, for the
     /// replay corpus.
     ///
@@ -346,6 +360,7 @@ mod tests {
             token_anomaly: false,
             loop_run_id: None,
             findings: Vec::new(),
+            response_injection_findings: Vec::new(),
             context_snapshot: None,
             graph: GraphTrace::default(),
         }
@@ -366,6 +381,23 @@ mod tests {
     /// existed. `node_id == graph_id` is what the identity extractor produces
     /// when no graph headers are present, and emitting self-referential graph
     /// keys for it would imply a topology that is not there.
+    /// The advisory echo field rides the trace wire only when it has content
+    /// — the common clean-response case must not pay for an empty key — and
+    /// carries pattern names, exactly as recorded.
+    #[test]
+    fn response_injection_findings_serialise_only_when_present() {
+        let mut t = base_trace();
+        let v = serde_json::to_value(&t).unwrap();
+        assert!(
+            v.as_object().unwrap().get("response_injection_findings").is_none(),
+            "empty must be omitted from the wire",
+        );
+
+        t.response_injection_findings = vec!["override-instructions".to_string()];
+        let v = serde_json::to_value(&t).unwrap();
+        assert_eq!(v["response_injection_findings"], serde_json::json!(["override-instructions"]));
+    }
+
     #[test]
     fn graph_of_one_adds_no_wire_keys() {
         let g = GraphTrace::from_node(&node("ses_1", "ses_1"), vec![]);

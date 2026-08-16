@@ -551,14 +551,7 @@ impl DetectorRegistry {
     /// not stacked confidence, which no detector reports. That is the honest
     /// primitive: this counts agreement, it does not invent precision.
     pub fn corroborated_finding(findings: &[AnomalyFinding]) -> Option<AnomalyFinding> {
-        let mut corroborating_ids: Vec<&'static str> = findings
-            .iter()
-            .filter(|f| f.kind.severity() >= Severity::Medium)
-            .map(|f| f.detector_id)
-            .filter(|id| !id.is_empty())
-            .collect();
-        corroborating_ids.sort_unstable();
-        corroborating_ids.dedup();
+        let corroborating_ids = Self::corroborating_detector_ids(findings);
         if corroborating_ids.len() < 2 {
             return None;
         }
@@ -585,6 +578,24 @@ impl DetectorRegistry {
             if corroborating_ids.len() - 1 == 1 { "" } else { "s" },
         );
         Some(escalated)
+    }
+
+    /// The distinct detector ids with a [`Severity::Medium`]-or-worse finding
+    /// — the pool [`Self::corroborated_finding`] counts, extracted so the WASM
+    /// context can carry the same number (`corroborating_detectors` in
+    /// `wasm/context.rs`) without the two ever computing it differently.
+    /// Sorted and deduplicated; empty-id findings (a finding no registered
+    /// detector attributed) are excluded, as they cannot corroborate anything.
+    pub fn corroborating_detector_ids(findings: &[AnomalyFinding]) -> Vec<&'static str> {
+        let mut ids: Vec<&'static str> = findings
+            .iter()
+            .filter(|f| f.kind.severity() >= Severity::Medium)
+            .map(|f| f.detector_id)
+            .filter(|id| !id.is_empty())
+            .collect();
+        ids.sort_unstable();
+        ids.dedup();
+        ids
     }
 
     /// Run every detector and return all findings, most severe first.
@@ -1494,6 +1505,53 @@ mod coverage_tests {
                  must be revisited for it",
             );
         }
+    }
+
+    /// The extracted pool function is the same computation
+    /// `corroborated_finding` counts — pinned here so the WASM context's
+    /// `corroborating_detectors` field and the escalation rule can never
+    /// disagree about what "corroborating" means.
+    #[test]
+    fn corroborating_ids_empty_for_no_findings() {
+        assert!(DetectorRegistry::corroborating_detector_ids(&[]).is_empty());
+    }
+
+    #[test]
+    fn corroborating_ids_dedupe_the_same_detector() {
+        let mut a = AnomalyFinding::steer(AnomalyKind::ToolAbuse, "first", 0.9);
+        a.detector_id = "tool_diversity_collapse";
+        let mut b = AnomalyFinding::steer(AnomalyKind::ToolAbuse, "second", 0.6);
+        b.detector_id = "tool_diversity_collapse";
+        assert_eq!(
+            DetectorRegistry::corroborating_detector_ids(&[a, b]),
+            vec!["tool_diversity_collapse"],
+        );
+    }
+
+    #[test]
+    fn corroborating_ids_exclude_unattributed_findings() {
+        // detector_id defaults to "" for a finding no registered detector
+        // attributed — it cannot corroborate anything.
+        let unattributed = AnomalyFinding::steer(AnomalyKind::ToolAbuse, "orphan", 0.9);
+        let mut real = AnomalyFinding::steer(AnomalyKind::TokenWaste, "attributed", 0.5);
+        real.detector_id = "context_growth";
+        assert_eq!(
+            DetectorRegistry::corroborating_detector_ids(&[unattributed, real]),
+            vec!["context_growth"],
+        );
+    }
+
+    #[test]
+    fn corroborating_ids_count_kills_and_asks_too() {
+        // Kill/Ask findings can't SUPPLY the escalation but they are still a
+        // detector firing — the pool counts them, same as the threshold does.
+        let mut killer = AnomalyFinding::kill(AnomalyKind::DataExfiltration, "credentials");
+        killer.detector_id = "taint_cooccurrence";
+        let mut steer = AnomalyFinding::steer(AnomalyKind::ToolAbuse, "advisory", 0.8);
+        steer.detector_id = "tool_diversity_collapse";
+        let ids = DetectorRegistry::corroborating_detector_ids(&[killer, steer]);
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains(&"taint_cooccurrence"));
     }
 
     /// A `Kill` finding counts toward the >= 2 threshold — corroboration is

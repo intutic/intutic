@@ -19,6 +19,8 @@
 
 import { NodeSDK } from '@opentelemetry/sdk-node'
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http'
+import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http'
+import { PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics'
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node'
 import { resourceFromAttributes } from '@opentelemetry/resources'
 import { ATTR_SERVICE_NAME } from '@opentelemetry/semantic-conventions'
@@ -29,8 +31,12 @@ const log = createLogger('instrumentation')
 const endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? 'http://localhost:4318/v1/traces'
 const serviceName = process.env.OTEL_SERVICE_NAME ?? 'mcp-daemon'
 
+// The env var may name either the collector base or the full traces path;
+// derive the base once so traces and metrics land on their own signal paths.
+const base = endpoint.replace(/\/v1\/traces$/, '')
+
 const traceExporter = new OTLPTraceExporter({
-  url: endpoint.endsWith('/v1/traces') ? endpoint : `${endpoint}/v1/traces`,
+  url: `${base}/v1/traces`,
 })
 
 const sdk = new NodeSDK({
@@ -38,6 +44,9 @@ const sdk = new NodeSDK({
     [ATTR_SERVICE_NAME]: serviceName,
   }),
   traceExporter,
+  metricReader: new PeriodicExportingMetricReader({
+    exporter: new OTLPMetricExporter({ url: `${base}/v1/metrics` }),
+  }),
   instrumentations: [
     getNodeAutoInstrumentations({
       '@opentelemetry/instrumentation-fs': {

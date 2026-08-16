@@ -145,7 +145,13 @@ message"* in earnest, so it does not wait for the multi-technique threshold.
 And the tool-**call** analogue is already response-side: the response gate
 refuses a forbidden tool call before the client ever sees it. There is no
 response-side injection scan of tool results; that asymmetry is the documented
-posture, not an oversight.
+posture, not an oversight. What the response path does carry is an
+**advisory-only echo scan** of the model's own output: injection phrasing in
+what the model says is reported on the trace (pattern names only, streaming
+included) so an operator can see propagation a turn early — it never changes
+a verdict, because a model legitimately quotes these phrasings when asked
+about them, and that false-positive rate is unmeasured by design until an
+output corpus exists.
 
 In a graph this matters more than for a single agent. One node's output becomes
 the next node's input, so a payload picked up from a fetched page arrives at
