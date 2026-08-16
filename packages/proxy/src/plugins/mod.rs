@@ -1,8 +1,12 @@
 //! Governance plugin system — native Rust implementations.
 //!
-//! Each plugin receives a [`RequestContext`] and returns a [`Verdict`].
-//! The [`evaluate_chain`] function runs plugins in priority order and
-//! short-circuits on the first [`Verdict::Kill`].
+//! Each plugin receives a [`RequestContext`] and returns a [`Verdict`], and is
+//! invoked directly by the proxy at its own call site — `BudgetGatePlugin` in
+//! `proxy.rs` is the live example. There is no chained dispatcher: an
+//! `evaluate_chain` function existed here with a docstring claiming the proxy
+//! called it on every request, but it never had a production caller (only its
+//! own tests) and was deleted rather than left reading as working governance —
+//! the same standard the Removed-plugins note below applies.
 //!
 //! # Removed plugins
 //!
@@ -32,9 +36,8 @@ use crate::wasm::context::{RequestContext, Verdict};
 
 /// Plugin trait — identical interface for native Rust and future WASM plugins.
 ///
-/// Every governance gate (budget, DLP, PCAS, …) implements this trait.
-/// The proxy calls [`evaluate_chain`] with a sorted `Vec<Box<dyn IntuticPlugin>>`
-/// on each inbound request.
+/// Every governance gate implements this trait and is called directly where
+/// it applies (`BudgetGatePlugin` on the request path in `proxy.rs`).
 ///
 /// # Contract
 ///
@@ -54,151 +57,4 @@ pub trait IntuticPlugin: Send + Sync {
 
     /// Evaluate the request context and return a governance verdict.
     fn evaluate(&self, ctx: &RequestContext) -> Verdict;
-}
-
-/// Runs all plugins in priority order. Short-circuits on first [`Verdict::Kill`].
-///
-/// Returns the most restrictive verdict observed:
-///
-/// | Precedence | Verdict | Behaviour |
-/// |------------|---------|-----------|
-/// | 1 (highest)| `Kill`  | Immediately returned — no further plugins run |
-/// | 2          | `Hijack`| Stored, but remaining plugins still run |
-/// | 3          | `Enhance`| Stored only if nothing worse seen yet |
-/// | 4 (lowest) | `Bypass`| Default — request proceeds unmodified |
-///
-/// **Important:** The caller is responsible for sorting `plugins` by
-/// [`IntuticPlugin::priority`] before calling this function. The chain
-/// itself iterates in the order given.
-pub fn evaluate_chain(plugins: &[Box<dyn IntuticPlugin>], ctx: &RequestContext) -> Verdict {
-    let mut worst_verdict = Verdict::Bypass;
-    for plugin in plugins {
-        let verdict = plugin.evaluate(ctx);
-        match &verdict {
-            Verdict::Kill { .. } => return verdict, // short-circuit
-            Verdict::Hijack { .. } => worst_verdict = verdict,
-            Verdict::Enhance { .. } if matches!(worst_verdict, Verdict::Bypass) => {
-                worst_verdict = verdict;
-            }
-            _ => {}
-        }
-    }
-    worst_verdict
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::wasm::context::{RequestContext, RiskLevel, Verdict};
-
-    /// Minimal plugin for testing chain behaviour.
-    struct StubPlugin {
-        verdict: Verdict,
-        priority: u8,
-    }
-
-    impl IntuticPlugin for StubPlugin {
-        fn name(&self) -> &str {
-            "stub"
-        }
-        fn priority(&self) -> u8 {
-            self.priority
-        }
-        fn evaluate(&self, _ctx: &RequestContext) -> Verdict {
-            self.verdict.clone()
-        }
-    }
-
-    fn dummy_ctx() -> RequestContext {
-        RequestContext {
-            session_id: "sess-1".into(),
-            plan_steps: Vec::new(),
-            scope_paths: Vec::new(),
-            review_before: Vec::new(),
-            requires_before: Vec::new(),
-            forbid_after: Vec::new(),
-            max_calls: Vec::new(),
-            forbid_with: Vec::new(),
-            changes: Vec::new(),
-            new_tool_calls: Vec::new(),
-            transition_baseline: None,
-            workspace_id: "ws-1".into(),
-            virtual_key_prefix: "vk-test".into(),
-            model: "gpt-4o".into(),
-            tools: vec![],
-            tool_calls: vec![],
-            estimated_input_tokens: 1000,
-            budget_remaining_usd: 10.0,
-            risk_tier: RiskLevel::Low,
-            dlp_findings: vec![],
-            tool_sequence: vec![],
-            tool_call_counts: vec![],
-            calls_last_60s: 0,
-            denied_tools: vec![],
-            injection_findings: vec![],
-            injection_sources: vec![],
-            tool_contract_changed: false,
-            harness: String::new(),
-            allowed_harnesses: vec![],
-            sandbox_attested: false,
-            workflow_spend_usd: None,
-            workflow_budget_usd: None,
-            node: Default::default(),
-        }
-    }
-
-    #[test]
-    fn chain_returns_bypass_when_all_bypass() {
-        let plugins: Vec<Box<dyn IntuticPlugin>> = vec![
-            Box::new(StubPlugin {
-                verdict: Verdict::Bypass,
-                priority: 1,
-            }),
-            Box::new(StubPlugin {
-                verdict: Verdict::Bypass,
-                priority: 2,
-            }),
-        ];
-        assert_eq!(evaluate_chain(&plugins, &dummy_ctx()), Verdict::Bypass);
-    }
-
-    #[test]
-    fn chain_short_circuits_on_kill() {
-        let plugins: Vec<Box<dyn IntuticPlugin>> = vec![
-            Box::new(StubPlugin {
-                verdict: Verdict::Kill {
-                    reason: "blocked".into(),
-                    policy_id: None,
-                },
-                priority: 1,
-            }),
-            Box::new(StubPlugin {
-                verdict: Verdict::Bypass,
-                priority: 2,
-            }),
-        ];
-        let result = evaluate_chain(&plugins, &dummy_ctx());
-        assert!(matches!(result, Verdict::Kill { .. }));
-    }
-
-    #[test]
-    fn chain_keeps_hijack_over_enhance() {
-        let plugins: Vec<Box<dyn IntuticPlugin>> = vec![
-            Box::new(StubPlugin {
-                verdict: Verdict::Hijack {
-                    reason: "needs review".into(),
-                    confidence: 0.6,
-                },
-                priority: 1,
-            }),
-            Box::new(StubPlugin {
-                verdict: Verdict::Enhance {
-                    context: "note".into(),
-                },
-                priority: 2,
-            }),
-        ];
-        let result = evaluate_chain(&plugins, &dummy_ctx());
-        assert!(matches!(result, Verdict::Hijack { .. }));
-    }
 }
