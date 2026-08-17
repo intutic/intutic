@@ -195,7 +195,7 @@ The enforcement action system is defined across these components:
 
 | Component / File | What it defines | Scope |
 |---|---|---|
-| [enums.ts](../../../packages/shared-types/src/enums.ts#L29-L41) | `EnforcementAction` enum — `BYPASS`, `ENHANCE`, `HIJACK`, `KILL` | Open-Core / Shared Types |
+| [enums.ts](../../../packages/shared-types/src/enums.ts#L29-L41) | `EnforcementAction` enum — `BYPASS`, `ENHANCE`, `HIJACK`, `REASK`, `KILL` | Open-Core / Shared Types |
 | `routes/hookEvents.ts` | The gate itself — DLP, `BLOCK:` SOP, SSO group policy, promoted findings | Enterprise Control Plane |
 | `valkeySubscriber.ts` | Proxy verdict → `EnforcementAction` mapping | Enterprise Control Plane |
 | `pcasService.ts` | SSO group privilege resolution (Valkey → Postgres cascade) | Enterprise Control Plane |
