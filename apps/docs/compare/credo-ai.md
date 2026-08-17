@@ -8,7 +8,7 @@ Credo AI's core is still the **governance system of record** — policy creation
 
 As of this writing it is a **Research Preview**, **Claude Code only**, with publicly reported scale in the low thousands of governed sessions and double-digit blocked actions — not the general-purpose, multi-harness enforcement Intutic runs today. Intutic's proxy sits in front of 19 coding-agent harnesses, enforces synchronously in-process (no round trip to a policy service), and has been the primary product surface rather than an extension of a governance platform.
 
-**Credo AI is adding an enforcement wing to a GRC platform. Intutic is an enforcement platform first.**
+Both products now say "policy-as-code," so the distinction has to be sharper than the vocabulary: where the policy lives, and what executes it. In Credo AI, policy-as-code is authored in a governance platform and compiled down into a per-harness hook. In Intutic, the policies are literally files in your repository — `.intutic/sops/*.md` and harness guideline files, reviewed in git like any other code change (see [GitOps for SOPs](/guide/gitops-sops)) — and the thing executing them is the enforcement path itself: the proxy evaluates them synchronously, in-process, on every tool call, with no round trip to a policy service. **Credo AI is adding an enforcement wing to a GRC platform. Intutic is policy-as-code where the code already runs: in the enforcement path.**
 
 ## Comparison
 
@@ -22,7 +22,7 @@ As of this writing it is a **Research Preview**, **Claude Code only**, with publ
 | **DLP & threat detection** | Secrets redaction, SQL injection, prompt injection | Risk scoring and bias detection (GRC side) |
 | **Compliance output** | Enforcement audit logs (who, what, when, blocked/allowed) | Compliance reports, model cards, risk registers |
 | **Integration model** | Local proxy + sync daemon | Cloud platform + API |
-| **Custom rules** | WASM sandbox for domain-specific enforcement | Policy templates and assessment frameworks; Agent Governor compiles policy-as-code |
+| **Custom rules** | Policies are files in git (`.intutic/sops/*.md`) plus a WASM sandbox for domain-specific enforcement logic | Policy templates and assessment frameworks; Agent Governor compiles policy-as-code |
 
 ## Better Together — What Actually Interoperates Today
 
