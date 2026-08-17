@@ -432,3 +432,107 @@ fn both_scan_entry_points_agree_on_every_row() {
         "multi-choice OpenAI response did not cover every choice",
     );
 }
+
+// ── Test 5: response_echoes / response_echoes_from_body snippet capture ────
+//
+// Phase 4A: bounded, DLP-scrubbed snippet capture layered on top of the
+// pattern-name scan this file otherwise exercises. These three tests extend
+// this corpus's coverage from "which patterns fired" to "what does the
+// adjudicable evidence for a firing look like," using the same real corpus
+// rows and the same three provider wrapper shapes already defined above.
+
+/// The literal assertion that `response_echoes` is a no-op on an empty
+/// pattern list -- snippet capture is a fallback lookup on patterns already
+/// known to have fired, never a second primary scan.
+#[test]
+fn snippet_is_never_captured_when_nothing_fires() {
+    let rows = load_rows();
+    let clean_row = rows
+        .iter()
+        .find(|r| fired_raw(&r.text).is_empty())
+        .expect("at least one corpus row must not fire (150 rows, only ~48 pinned as firing)");
+
+    let echoes = intutic_proxy::injection::response_echoes(&clean_row.text, &[], 200);
+    assert!(
+        echoes.is_empty(),
+        "response_echoes must return nothing when the pattern-name list is empty, \
+         regardless of what the text contains: {echoes:?}"
+    );
+}
+
+/// A firing row produces one echo per fired pattern, each carrying a
+/// non-empty, boundedly-sized snippet.
+#[test]
+fn snippet_is_captured_and_bounded_for_a_firing_row() {
+    let rows = load_rows();
+    let firing_row = rows
+        .iter()
+        .find(|r| !fired_raw(&r.text).is_empty())
+        .expect("a firing row exists");
+    let names = fired_raw(&firing_row.text);
+
+    let window_bytes = 200;
+    let echoes = intutic_proxy::injection::response_echoes(&firing_row.text, &names, window_bytes);
+
+    assert_eq!(echoes.len(), names.len(), "one echo per fired pattern name");
+    for echo in &echoes {
+        assert!(
+            names.contains(&echo.pattern),
+            "echo pattern {:?} is not one of the fired names {:?}",
+            echo.pattern,
+            names
+        );
+        assert!(!echo.snippet.is_empty(), "{}: snippet must be non-empty for a firing row", echo.pattern);
+        // Generous bound: window_bytes plus room for redaction-placeholder
+        // growth (a [REDACTED_CATEGORY] marker can be longer than what it
+        // replaced).
+        assert!(
+            echo.snippet.len() <= window_bytes + 128,
+            "{}: snippet of {} bytes exceeds the generous bound",
+            echo.pattern,
+            echo.snippet.len()
+        );
+    }
+}
+
+/// `response_echoes_from_body` (non-streaming, provider-JSON path) agrees
+/// with `response_echoes` (streaming, flat-text path) on a firing row,
+/// across all three provider wrapper shapes -- extending
+/// `both_scan_entry_points_agree_on_every_row`'s pattern-name-level agreement
+/// to the snippet level.
+#[test]
+fn snippet_only_populated_on_wrapped_provider_bodies_that_actually_fire() {
+    let rows = load_rows();
+    let firing_row = rows
+        .iter()
+        .find(|r| !fired_raw(&r.text).is_empty())
+        .expect("a firing row exists");
+    let names = fired_raw(&firing_row.text);
+    let window_bytes = 200;
+
+    let expected = intutic_proxy::injection::response_echoes(&firing_row.text, &names, window_bytes);
+
+    for (label, body) in [
+        ("anthropic", wrap_anthropic(&firing_row.text)),
+        ("openai", wrap_openai(&firing_row.text)),
+        ("gemini", wrap_gemini(&firing_row.text)),
+    ] {
+        let from_body =
+            intutic_proxy::injection::response_echoes_from_body(&body, &names, window_bytes);
+        assert_eq!(
+            from_body, expected,
+            "{label}: response_echoes_from_body disagrees with response_echoes on {}",
+            firing_row.id,
+        );
+    }
+
+    // And the negative side: a non-firing row wrapped the same way must
+    // still produce nothing, matching `snippet_is_never_captured_when_nothing_fires`.
+    let clean_row = rows
+        .iter()
+        .find(|r| fired_raw(&r.text).is_empty())
+        .expect("a non-firing row exists");
+    let anthropic_clean = wrap_anthropic(&clean_row.text);
+    assert!(intutic_proxy::injection::response_echoes_from_body(&anthropic_clean, &[], window_bytes)
+        .is_empty());
+}
