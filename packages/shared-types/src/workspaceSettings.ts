@@ -306,6 +306,29 @@ export interface WorkspaceSettings {
   }
 
   /**
+   * Governed decisions log: whether the sync-daemon writes a bounded,
+   * auto-maintained record of GOVERNANCE decisions (adjudications,
+   * approved/rejected decisions, SOP-related settings changes) as context
+   * files the coding agent's harness reads — `.intutic/DECISIONS.md` (the
+   * full bounded record) plus a marker-delimited section injected into the
+   * `claude-code` harness's own regenerated config file. See
+   * `services/control-plane/src/routes/workspace.ts`'s
+   * `GET /api/v1/workspace/decisions-digest` and
+   * `services/sync-daemon/src/lib/decisionsDigest.ts`.
+   *
+   * Deliberately narrow: this is governance-decision records only, never
+   * conversational memory or general context management (this repo pivoted
+   * away from that harness product — see this repo's own CLAUDE.md history).
+   *
+   * Off (undefined/false) by default — per the standing rule elsewhere in
+   * this file (see {@link imageProvenance}, {@link reviewHoldBypassEnabled}):
+   * a workspace that never configured this must not start seeing new files
+   * written into its tree, and a growing context file is token spend the
+   * product must not silently impose on every workspace.
+   */
+  decisionsLogEnabled?: boolean
+
+  /**
    * BYO judge model for the MANAGED LLM-as-judge path (LLD #70).
    *
    * When set, chunk/finalize judge calls for this workspace run on this
@@ -385,6 +408,9 @@ export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
   // Platform trusted monitor judges by default — see the field doc for what
   // setting a workspace's own model trades away.
   managedJudgeModel: null,
+  // Off by default — see the field doc for why a growing auto-written
+  // context file must be opt-in.
+  decisionsLogEnabled: false,
   // Off by default — mirrors anomalyEnforcementService.ts's own DISABLED
   // default exactly, so a workspace that never configures this sees the
   // identical values whether resolved here or read directly from the DB.
