@@ -272,6 +272,74 @@ describe('intutic findings', () => {
     }
   })
 
+  // ─── list: response-injection snippet pointer ──────────────────────
+
+  it('list prints a snippet pointer line when a response_injection:* detector row is present', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        findings: [
+          {
+            finding_id: 'fnd_snip_1',
+            trace_id: 'tr_1',
+            session_id: 'sess_1',
+            loop_run_id: null,
+            detector_id: 'response_injection:override-instructions',
+            anomaly_kind: 'response_injection',
+            severity: 'MEDIUM',
+            disposition: 'ADVISORY',
+            confidence: 0.6,
+            reason: null,
+            harness: 'claude-code',
+            shadowed: false,
+            outcome: null,
+            outcome_by: null,
+            outcome_at: null,
+            outcome_note: null,
+            created_at: '2026-08-16T00:00:00Z',
+          },
+        ],
+      }),
+    })
+
+    await runFindingsList({})
+
+    expect(printed()).toMatch(/1 finding\(s\) may have a scrubbed response snippet available/)
+  })
+
+  it('list omits the snippet pointer line when no row is a response_injection:* detector', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        findings: [
+          {
+            finding_id: 'fnd_nosnip_1',
+            trace_id: 'tr_1',
+            session_id: 'sess_1',
+            loop_run_id: null,
+            detector_id: 'graph_depth',
+            anomaly_kind: 'runaway_recursion',
+            severity: 'HIGH',
+            disposition: 'KILL',
+            confidence: 0.9,
+            reason: 'Runaway recursion',
+            harness: 'claude-code',
+            shadowed: false,
+            outcome: null,
+            outcome_by: null,
+            outcome_at: null,
+            outcome_note: null,
+            created_at: '2026-08-16T00:00:00Z',
+          },
+        ],
+      }),
+    })
+
+    await runFindingsList({})
+
+    expect(printed()).not.toMatch(/scrubbed response snippet available/)
+  })
+
   // ─── adjudicate ──────────────────────────────────────────────────
 
   it('adjudicate refuses when BOTH --true-positive and --false-positive are set', async () => {

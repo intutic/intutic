@@ -4355,6 +4355,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         // same policy from the same source.
         let response_gate_cfg = state.config.intutic_settings.response_gate.clone();
         let denied_tools_clone = wasm_ctx.denied_tools.clone();
+        // Same reason as response_gate_cfg above: the stream task outlives
+        // this scope, and the snippet-capture config has to travel with it.
+        let response_injection_snippet_cfg =
+            state.config.intutic_settings.response_injection_snippet.clone();
 
         spawn(async move {
             let mut stream = upstream_stream;
@@ -5415,6 +5419,26 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     .await;
             }
 
+            // Advisory echo scan of the model's own output, fully
+            // accumulated by this point, plus (Phase 4A) a bounded,
+            // DLP-scrubbed snippet per firing pattern — same signal as the
+            // non-streaming path, so streaming is not a blind spot for it.
+            let response_injection_pattern_names = crate::injection::scan(&accumulated_content);
+            let response_injection_findings = if response_injection_pattern_names.is_empty()
+                || !response_injection_snippet_cfg.enabled
+            {
+                response_injection_pattern_names
+                    .into_iter()
+                    .map(|pattern| crate::injection::ResponseInjectionEcho { pattern, snippet: String::new() })
+                    .collect()
+            } else {
+                crate::injection::response_echoes(
+                    &accumulated_content,
+                    &response_injection_pattern_names,
+                    response_injection_snippet_cfg.window_bytes,
+                )
+            };
+
             let trace = ExecutionTrace {
                 response_integrity: integrity.measured.then_some(integrity.score),
                 quality_fault: integrity.fault.map(|f| f.as_str().to_string()),
@@ -5468,10 +5492,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 token_anomaly,
                 loop_run_id: loop_run_id_clone,
                 findings: advisory_findings.clone(),
-                // The streamed model output, fully accumulated by this point —
-                // same advisory echo scan as the non-streaming path, so
-                // streaming is not a blind spot for this signal.
-                response_injection_findings: crate::injection::scan(&accumulated_content),
+                response_injection_findings,
             context_snapshot: context_snapshot_for_trace.clone(),
         graph: crate::telemetry::GraphTrace::from_node(&node_for_trace, advisory_anomalies.clone()),
             };
@@ -6067,6 +6088,33 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         estimate_model_cost(&actual_model, final_prompt_tokens, final_completion_tokens);
     let latency_ms = start.elapsed().as_millis() as u32;
 
+    // Advisory echo scan of the model's own output, plus (Phase 4A) a
+    // bounded, DLP-scrubbed snippet per firing pattern so the finding is
+    // adjudicable. See response_gate's docs and injection::extract_scrubbed_snippet
+    // for why this never touches a disposition and never exceeds the
+    // configured window.
+    let response_injection_pattern_names = parsed_response
+        .as_ref()
+        .map(crate::injection::scan_response_body)
+        .unwrap_or_default();
+    let response_injection_snippet_cfg = &state.config.intutic_settings.response_injection_snippet;
+    let response_injection_findings = if response_injection_pattern_names.is_empty()
+        || !response_injection_snippet_cfg.enabled
+    {
+        response_injection_pattern_names
+            .into_iter()
+            .map(|pattern| crate::injection::ResponseInjectionEcho { pattern, snippet: String::new() })
+            .collect()
+    } else if let Some(body) = parsed_response.as_ref() {
+        crate::injection::response_echoes_from_body(
+            body,
+            &response_injection_pattern_names,
+            response_injection_snippet_cfg.window_bytes,
+        )
+    } else {
+        Vec::new()
+    };
+
     if reward_eligible {
         spawn_reward_update(
             &state,
@@ -6123,13 +6171,11 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         routing_shadow_model: shadow_selection.clone(),
         loop_run_id: loop_run_id_header,
         findings: advisory_findings.clone(),
-        // Advisory echo scan of the model's own output — see the field's doc
-        // in telemetry.rs and scan_response_body's in injection.rs for why
-        // this never touches a disposition.
-        response_injection_findings: parsed_response
-            .as_ref()
-            .map(crate::injection::scan_response_body)
-            .unwrap_or_default(),
+        // Advisory echo scan of the model's own output, plus a bounded
+        // DLP-scrubbed snippet per firing pattern — see the field's doc in
+        // telemetry.rs and injection.rs's own doc comments for why this
+        // never touches a disposition.
+        response_injection_findings,
         context_snapshot: context_snapshot_for_trace.clone(),
         graph: crate::telemetry::GraphTrace::from_node(&node_for_trace, advisory_anomalies.clone()),
     };
