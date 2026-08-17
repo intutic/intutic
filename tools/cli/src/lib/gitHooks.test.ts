@@ -75,3 +75,51 @@ describe('pre-commit secret scan', () => {
     )
   })
 })
+
+describe('post-merge decisions-log-refresh hook — marker discipline', () => {
+  let repo: string
+
+  beforeEach(async () => {
+    repo = fs.mkdtempSync(path.join(os.tmpdir(), 'intutic-postmerge-'))
+    git(repo, 'init', '-q')
+    git(repo, 'config', 'user.email', 't@t.local')
+    git(repo, 'config', 'user.name', 't')
+  })
+  afterEach(() => {
+    fs.rmSync(repo, { recursive: true, force: true })
+  })
+
+  it('installs a post-merge hook that triggers decisions-log-refresh', async () => {
+    expect(await installGitHooks(repo)).toBe(true)
+    const hookPath = path.join(repo, '.git', 'hooks', 'post-merge')
+    const content = fs.readFileSync(hookPath, 'utf-8')
+    expect(content).toContain('Intutic Post-Merge Decisions Log Refresh')
+    expect(content).toContain('decisions-log-refresh')
+    // Backgrounded and output-suppressed, same shape as the other tracking hooks.
+    expect(content).toContain('>/dev/null 2>&1 &')
+  })
+
+  // Same overwrite guard as pre-commit — mirrored here, and load-bearing for
+  // this new hook in a way it is NOT for post-commit/post-checkout above
+  // (see TD-351): those two overwrite unconditionally.
+  it('never clobbers a pre-existing post-merge hook it did not write', async () => {
+    const hookPath = path.join(repo, '.git', 'hooks', 'post-merge')
+    fs.mkdirSync(path.dirname(hookPath), { recursive: true })
+    const theirs = '#!/bin/sh\n# some team script\nexit 0\n'
+    fs.writeFileSync(hookPath, theirs, { mode: 0o755 })
+    expect(await installGitHooks(repo)).toBe(true)
+    expect(fs.readFileSync(hookPath, 'utf-8'), 'a foreign post-merge hook was overwritten').toBe(
+      theirs,
+    )
+  })
+
+  it('re-running install updates its own previously-installed post-merge hook (marker present)', async () => {
+    expect(await installGitHooks(repo)).toBe(true)
+    const hookPath = path.join(repo, '.git', 'hooks', 'post-merge')
+    const first = fs.readFileSync(hookPath, 'utf-8')
+    expect(await installGitHooks(repo)).toBe(true)
+    const second = fs.readFileSync(hookPath, 'utf-8')
+    expect(second).toBe(first)
+    expect(second).toContain('Intutic Post-Merge Decisions Log Refresh')
+  })
+})

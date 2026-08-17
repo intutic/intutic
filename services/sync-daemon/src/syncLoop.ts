@@ -42,6 +42,7 @@ import { writeRuntimeEnv } from './lib/runtimeEnv.js'
 import { refreshPolicySnapshot } from './lib/policySnapshot.js'
 import { refreshApprovedBypasses } from './lib/approvedBypasses.js'
 import { refreshEgressPolicy } from './lib/egressPolicy.js'
+import { refreshDecisionsDigest } from './lib/decisionsDigest.js'
 import { runComplianceProbes } from './lib/complianceProbes.js'
 import { startWatcher } from './watcher/driftWatcher.js'
 import { shouldCaptureThisIteration, captureAndUpload } from './configReader.js'
@@ -341,6 +342,25 @@ export async function startSyncLoop(options: SyncLoopOptions): Promise<void> {
         await refreshApprovedBypasses({ controlPlaneUrl, apiKey, workspaceId })
         // Same reasoning as Step 0d.
         await refreshEgressPolicy({ controlPlaneUrl, apiKey, workspaceId })
+
+        // Governed decisions log — opt-in only (WorkspaceSettings.decisionsLogEnabled,
+        // default off: a growing context file is token spend the product must not
+        // silently impose on every workspace). No Step-0-equivalent unconditional
+        // call before the loop, unlike egress/policy/bypasses above: this gate can
+        // only be evaluated once `result.settings` is known, which is not yet true
+        // before the first iteration completes. When disabled, this is simply not
+        // called — existing files (if any, from before the workspace disabled the
+        // feature) are left as last written rather than force-deleted or overwritten
+        // with a stale/wrong "disabled" digest.
+        if (result.settings?.decisionsLogEnabled) {
+          await refreshDecisionsDigest({
+            controlPlaneUrl,
+            apiKey,
+            workspaceId,
+            workspaceRoot,
+            harnesses: latestHarnesses,
+          })
+        }
       }
 
       // Start the drift watcher on first successful sync (once harnesses are known)
