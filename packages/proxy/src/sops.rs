@@ -1744,6 +1744,20 @@ fn render(sops: &[Sop], role: &str) -> Option<String> {
 /// Prepending rather than appending is deliberate: the caller's own system
 /// prompt is the more specific instruction and should be read last, closest to
 /// the task. Governance is the frame it sits inside.
+///
+/// **Known KV-cache hazard (TD-348), not fixed here:** this writes at
+/// `system[0]` (Anthropic/Gemini) or `messages[0]` (OpenAI Chat) on *every*
+/// request. `routing::bandit::route_model`'s session lock pins the model
+/// across a session specifically to keep the provider-side cached prefix
+/// warm — but if `block`'s content changes between two requests in the same
+/// session (a SOP is edited, a tier flips, keyword overrides change), the
+/// prefix this function writes changes too, and the model pin can't save a
+/// prefix that itself moved. Reordering injection to preserve prefix
+/// stability would touch SOP priority semantics (the doc comment above is
+/// explicit that prepend-vs-append is deliberate), which is out of scope
+/// here — this comment and TD-348 exist so the gap is recorded rather than
+/// silently inherited by whoever writes the "why doesn't caching help more"
+/// investigation next.
 pub fn inject_into_body(
     body: &mut serde_json::Value,
     protocol: &crate::protocol::Protocol,

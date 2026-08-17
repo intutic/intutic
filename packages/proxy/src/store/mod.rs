@@ -67,13 +67,25 @@ pub enum ClaimOutcome {
     Lost,
 }
 
-/// The two `session:metadata:{sid}` fields routing reads. Returned together
-/// because `route_model` always needs both, and one method beats two round
+/// The `session:metadata:{sid}` fields routing reads. Returned together
+/// because `route_model` always needs them, and one method beats several round
 /// trips on the request path.
 #[derive(Debug, Clone, Default)]
 pub struct SessionRouting {
     pub locked_model: Option<String>,
     pub sop_tier: Option<String>,
+    /// The most recent model this session was locked to, kept even after
+    /// `clear_session_locked_model` releases the lock — deliberately not
+    /// cleared alongside it.
+    ///
+    /// Exists solely so a post-unlock Thompson-sample re-sample (the "next
+    /// separate request" after a lock releases — see
+    /// `routing::bandit::route_model`) has something to prefer-tie-break
+    /// toward. Without it, the re-sample would have no memory of what the
+    /// session was just running on, and every unlock would cost the KV-cache
+    /// warmth the session lock exists to protect even when an equally-good
+    /// same-family arm was available.
+    pub last_model: Option<String>,
 }
 
 /// A cached upstream response, as stored under `cache:response:{sha256}`.
@@ -314,10 +326,12 @@ pub trait LocalStore: Send + Sync + 'static {
 
     // ── Session routing ──────────────────────────────────────────────
 
-    /// Session's pinned model and SOP tier, if routing has recorded them.
+    /// Session's pinned model, SOP tier, and last-pinned model, if routing has
+    /// recorded them.
     async fn session_routing(&self, session_id: &str) -> anyhow::Result<SessionRouting>;
 
-    /// Pin a model for the session.
+    /// Pin a model for the session. Also updates `last_model`, which —
+    /// unlike `locked_model` — survives `clear_session_locked_model`.
     async fn set_session_locked_model(&self, session_id: &str, model: &str)
         -> anyhow::Result<()>;
 
@@ -329,6 +343,9 @@ pub trait LocalStore: Send + Sync + 'static {
     /// session-lock branch, re-sent the unservable model, and failed the same
     /// way. Called when an upstream error is attributed to the routed model, so
     /// the next request re-selects from arms that have since been penalised.
+    ///
+    /// Deliberately leaves `last_model` in place — see its doc comment on
+    /// `SessionRouting`.
     async fn clear_session_locked_model(&self, session_id: &str) -> anyhow::Result<()>;
 
     // ── Tool-sequence anomaly detection ──────────────────────────────
@@ -660,6 +677,20 @@ pub trait ControlPlaneCache: Send + Sync + 'static {
 
     /// Workspace-level SOP tier, used when the session carries none.
     async fn active_sop_tier(&self, workspace_id: &str) -> Option<String>;
+
+    /// Approved-models allowlist for this workspace, read from
+    /// `workspace:allowed_models:{workspace_id}`.
+    ///
+    /// `None` means unrestricted — no control plane, an unset key, or a read
+    /// failure/timeout are all indistinguishable from "this workspace never
+    /// configured an allowlist", the same fail-open posture as
+    /// [`feature_flags`](Self::feature_flags). `Some(vec![])` is normalized
+    /// away by the writer (`persistAndSyncSettings` deletes the key rather
+    /// than writing `[]`), but callers must still treat an empty `Some` as
+    /// unrestricted rather than "allow nothing" — refusing every model is
+    /// not a state any settings write can currently produce, but it must
+    /// never become the accidental behavior of a Valkey read glitch either.
+    async fn allowed_models(&self, workspace_id: &str) -> Option<Vec<String>>;
 
     /// `None` when no control plane manages this workspace. Fails open — a
     /// read error or timeout is indistinguishable from absence by design, so a

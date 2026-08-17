@@ -52,6 +52,35 @@ SkillOpt parses agent trajectory failures and config files (like `.cursorrules`,
 2. **Generation** — An LLM call generates structural changes (e.g., adding rules to block specific commands or auto-inject system contexts). This step is generation, not evaluation — nothing here judges whether the result is safe.
 3. **Safety Gate** — Two deterministic checks run before a recommendation is displayed, not an LLM judge: bounds checking (operation count, edit size, no wildcard deletes, no sectionless full-file replaces, and per-file-type syntax validation for JSON/YAML/Markdown), and a scan of the edit against active workspace SOPs for conflicting security language (e.g. a SOP's "must not"/"forbidden" clauses).
 4. **Auto-Apply** — If enabled, recommendations with confidence scores above `0.85` are automatically applied to the workspace harnesses via the sync daemon.
+5. **Measurement** — Every applied suggestion carries the dollar estimate that
+   justified it (`estimatedSavingsUsd`, snapshotted from the originating
+   recommendation) alongside an actual measured outcome, so the estimate is
+   checked rather than taken on faith.
+
+   At apply time, the workspace's current absolute waste (`wastedTokens` — see
+   [Token Waste Patterns](#token-waste-patterns) above; deliberately *not* the
+   percentage, which is self-referential against its own 3x-median threshold
+   and can hide a real improvement) is snapshotted as the "before" figure. No
+   earlier than 7 full days later, a scheduled sweep recomputes the same
+   metric over the non-overlapping 7-day window that followed the apply and
+   records it as the "after" figure — never sooner, and never by reading the
+   `waste_patterns` table directly, since that table is a periodically
+   recomputed aggregate that gets overwritten on every cycle and would no
+   longer hold the original numbers by the time 7 days had passed.
+
+   The after-window must carry at least as much oversized-prompt traffic as
+   originally justified the recommendation, or the suggestion is marked
+   **insufficient traffic to measure** rather than scored — a quiet workspace
+   is not the same thing as a fixed one, and no delta is ever fabricated to
+   fill the gap. Otherwise it is marked **measured**, with the actual
+   before/after token counts shown next to the original estimate on the
+   SkillOpt panel, side by side rather than blended into one number.
+
+   This is deliberately not split-traffic A/B testing: governance stays
+   shadow-first by design (a single workspace either has an edit applied or
+   it doesn't, evaluated before/after in time rather than concurrently across
+   a traffic split), and cost-policy A/B is deferred until a customer actually
+   asks for it. See `docs/TECH_DEBT.md`.
 
 ---
 
