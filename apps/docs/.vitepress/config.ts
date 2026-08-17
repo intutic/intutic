@@ -127,6 +127,7 @@ sidebarGuide.push({
     { text: 'Sandboxed Execution (Open-Core)', link: '/guide/sandboxed-execution' },
     { text: 'Governance Controls Checklist (Open-Core)', link: '/guide/governance-controls' },
     { text: 'Skill Scanning (Open-Core)', link: '/guide/skill-scanning' },
+    { text: 'MCP Server Governance (Open-Core)', link: '/guide/mcp-governance' },
     { text: 'Prompt Commands: /fix & /draw (Open-Core)', link: '/guide/agent-commands' },
     { text: 'OpenTelemetry (Open-Core)', link: '/guide/opentelemetry' },
     { text: 'Cohort Wizard (Open-Core)', link: '/guide/cohort-wizard' },

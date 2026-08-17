@@ -39,7 +39,9 @@ import {
   GOVERNANCE_BYPASS_PATTERNS,
   DESTRUCTIVE_COMMAND_PATTERNS,
   SECRET_CONTENT_PATTERNS,
+  SKILL_SURFACE_PATTERNS,
   NORMALISE_CONTRACT,
+  staticFloorPatterns,
   type GuardPattern,
 } from '../../src/harness/protectedPaths.js'
 import { toRulesLine } from '../../src/harness/gateBody.js'
@@ -313,11 +315,24 @@ describe('gate registry completeness', () => {
     expect(UNIVERSAL_PROTECTED_PATHS.length, 'no protected paths to check').toBeGreaterThanOrEqual(12)
     expect(GOVERNANCE_BYPASS_PATTERNS.length, 'no bypass patterns to check').toBeGreaterThanOrEqual(4)
     expect(DESTRUCTIVE_COMMAND_PATTERNS.length, 'no destructive patterns to check').toBeGreaterThanOrEqual(7)
+    expect(SKILL_SURFACE_PATTERNS.length, 'no skill-surface patterns to check').toBeGreaterThanOrEqual(2)
     // Per-pattern: a rule with no positive fixture is never checked to fire.
     // `assertGuardTableSane` enforces this at module load; asserted here too so
     // the reason is visible where the iteration happens.
-    for (const p of [...GOVERNANCE_BYPASS_PATTERNS, ...DESTRUCTIVE_COMMAND_PATTERNS]) {
+    for (const p of [...GOVERNANCE_BYPASS_PATTERNS, ...DESTRUCTIVE_COMMAND_PATTERNS, ...SKILL_SURFACE_PATTERNS]) {
       expect(p.matches.length, `${p.id} has no matches fixture`).toBeGreaterThanOrEqual(1)
+    }
+  })
+
+  it('SKILL_SURFACE_PATTERNS is compiled into the static floor, at warn', () => {
+    // TD-358: unlike DESTRUCTIVE_COMMAND_PATTERNS, this set carries no content
+    // judgement (path-only), so it ships in the floor rather than the policy
+    // snapshot — see the pattern set's own doc comment in protectedPaths.ts.
+    const floor = staticFloorPatterns()
+    for (const p of SKILL_SURFACE_PATTERNS) {
+      const inFloor = floor.find((f) => f.id === p.id)
+      expect(inFloor, `${p.id} is not in staticFloorPatterns()`).toBeDefined()
+      expect(inFloor?.severity, `${p.id} must ship at warn in this phase`).toBe('warn')
     }
   })
 
@@ -508,6 +523,33 @@ for (const g of GATES) {
       const r = await runGate(g, { command: 'CLAUDE_CODE_HOOKS=0 PI_PRE_TOOL_HOOK= agent run' })
       assertCleanExit(g, r, 'a foreign kill switch')
       expect(wasBlocked(g, r)).toBe(true)
+    })
+
+    it('flags a Write to a skill-surface path without blocking it (TD-358)', async () => {
+      // SKILL_SURFACE_PATTERNS ships in the static floor at `warn`, so this
+      // must be enforced from the compiled-in gate with no snapshot needed —
+      // unlike the destructive tier below.
+      for (const filePath of [
+        '/w/.agents/skills/my-skill/SKILL.md',
+        '/w/.claude/skills/my-skill/SKILL.md',
+      ]) {
+        const r = await runGate(g, { file_path: filePath }, { tool: 'Write' })
+        assertCleanExit(g, r, `a Write to ${filePath}`)
+        expect(
+          wasBlocked(g, r),
+          `${g.name} blocked a skill-surface write — this phase is warn-only (TD-358)`,
+        ).toBe(false)
+        expect(
+          auditLogText(g),
+          `${g.name}: no tool_flagged recorded for a skill-surface write to ${filePath}`,
+        ).toMatch(/tool_flagged/)
+      }
+    })
+
+    it('does not flag an ordinary write outside the skill surface (counter-example)', async () => {
+      const r = await runGate(g, { file_path: '/w/src/index.ts' }, { tool: 'Write' })
+      assertCleanExit(g, r, 'an ordinary Write')
+      expect(wasBlocked(g, r), `${g.name} blocked an ordinary Write`).toBe(false)
     })
 
     it('applies destructive rules only when the snapshot supplies them', async () => {
@@ -1126,7 +1168,7 @@ describe('pattern portability', () => {
    * and `\t` outright even though the local grep happens to accept them —
    * agreement here is not the same as portability, and only the ban gives that.
    */
-  const all = [...GOVERNANCE_BYPASS_PATTERNS, ...DESTRUCTIVE_COMMAND_PATTERNS]
+  const all = [...GOVERNANCE_BYPASS_PATTERNS, ...DESTRUCTIVE_COMMAND_PATTERNS, ...SKILL_SURFACE_PATTERNS]
 
   /** Evaluates a pattern with Python's `re`, the third engine in play. */
   async function pythonMatches(source: string, ignoreCase: boolean, subject: string): Promise<boolean> {

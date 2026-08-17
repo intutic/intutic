@@ -79,4 +79,27 @@ describe('loadConfig', () => {
     expect(config.failOpen).toBe(true)
     expect(config.workspaceId).toBe('ws-test-1234')
   })
+
+  // Phase D threaded --server-name onto every wrapped invocation
+  // (mcpAutoWrite.ts's wrapWithProxy); nothing consumed it until this phase's
+  // server-level allowlist (interceptor.ts) and TOFU pinning (tofu.ts) needed
+  // to know which real server this proxy process fronts.
+  it('parses --server-name from CLI arguments', async () => {
+    await node_fs.writeFile(runtimeEnvPath, 'INTUTIC_WORKSPACE_ID=ws-test\n', 'utf-8')
+
+    const config = await loadConfig([
+      '--workspace-id', 'ws-cli',
+      '--server-name', 'github',
+      '--',
+      'node', 'server.js',
+    ])
+    expect(config.serverName).toBe('github')
+  })
+
+  it('defaults serverName to "unknown" when --server-name is not passed', async () => {
+    await node_fs.writeFile(runtimeEnvPath, 'INTUTIC_WORKSPACE_ID=ws-test\n', 'utf-8')
+
+    const config = await loadConfig(['--', 'node', 'server.js'])
+    expect(config.serverName).toBe('unknown')
+  })
 })

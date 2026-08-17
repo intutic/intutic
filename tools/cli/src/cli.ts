@@ -727,9 +727,18 @@ skillCmd
 skillCmd
   .command('audit')
   .description('Audit local rules/skills for security leakage or unsafe command patterns')
-  .action(async () => {
+  .option('--sarif', 'Output findings as a SARIF 2.1.0 document (for GitHub Code Scanning / CI interop) instead of the human-readable report')
+  .action(async (opts) => {
     const { runSkillAudit } = await import('./commands/skill.js')
-    await runSkillAudit()
+    await runSkillAudit({ sarif: opts.sarif })
+  })
+
+skillCmd
+  .command('scan-staged')
+  .description('Warn-only content scan of staged skill-surface additions (.agents/skills, .claude/skills) — used by the pre-commit hook, never blocks the commit')
+  .action(async () => {
+    const { runSkillScanStaged } = await import('./commands/skill.js')
+    await runSkillScanStaged()
   })
 
 // ── Loop commands ──────────────────────────────────────────────────────────

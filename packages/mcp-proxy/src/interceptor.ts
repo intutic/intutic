@@ -26,7 +26,15 @@ export class ToolCallInterceptor {
   constructor(
     private readonly policy: PolicyClient,
     private readonly emitter: GovernanceEmitter,
-    private readonly failOpen: boolean = true
+    private readonly failOpen: boolean = true,
+    /**
+     * The real MCP server this proxy process fronts, from `--server-name`
+     * (config.ts, threaded since Phase D's `wrapWithProxy` but unconsumed
+     * until now). `'unknown'` when unset, matching config.ts's own default —
+     * see the server-scoping check below for why an allowlist naming
+     * anything else then refuses every call from this process.
+     */
+    private readonly serverName: string = 'unknown'
   ) {}
 
   /**
@@ -38,6 +46,30 @@ export class ToolCallInterceptor {
    */
   async decide(toolName: string, toolInput: unknown): Promise<Decision> {
     log.debug({ action: 'interceptor_decide', toolName }, 'Evaluating tool call')
+
+    // -1. Additive SERVER scoping. When the workspace declares a server
+    // allowlist (mcpAllowedServers), ONLY calls proxied to those servers may
+    // proceed — checked ahead of the per-tool allowlist below since a
+    // disallowed server should never even reach tool-name evaluation. Same
+    // empty-means-unrestricted convention as every allowlist in this file,
+    // and — deliberately, like the tool-scoping check right below it — NOT
+    // gated on `failOpen`: an explicit, non-empty allowlist that excludes
+    // this server is a definite policy decision the proxy already has the
+    // data to make, not a "control plane unreachable" failure mode. A
+    // control-plane outage naturally fails open here too, for the same
+    // reason it does for tool scoping: an unreachable policy fetch leaves
+    // `allowedServers` empty, which reads as unrestricted rather than as a
+    // block.
+    const allowedServers = this.policy.getAllowedServers()
+    if (allowedServers.length > 0 && !allowedServers.includes(this.serverName)) {
+      const reason =
+        `MCP server "${this.serverName}" is not in this workspace's MCP server allowlist ` +
+        `(${allowedServers.length} server(s) permitted). An operator can widen the ` +
+        `allowlist in workspace settings (mcpAllowedServers).`
+      log.warn({ action: 'server_allowlist_block', serverName: this.serverName, toolName }, reason)
+      this.emitter.emit('tool_blocked', toolName, toolInput, reason)
+      return { action: 'block', reason }
+    }
 
     // 0. Additive tool scoping. When the workspace declares an allowlist,
     // ONLY those tools may be called — the inverse of every other rule here,

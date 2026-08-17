@@ -257,6 +257,22 @@ export interface WorkspaceSettings {
   allowedModels?: string[]
 
   /**
+   * Additive MCP server allowlist: server names the MCP governance proxy
+   * (`packages/mcp-proxy`) will proxy for this workspace, matched against
+   * the `--server-name` identity threaded through by
+   * `services/sync-daemon/src/harness/mcpAutoWrite.ts`'s `wrapWithProxy`.
+   * Delivered to the proxy the same way `mcpAllowedTools` already is — via
+   * `PolicyClient.absorbCuration` (`packages/mcp-proxy/src/policy.ts`),
+   * fed from `GET /api/v1/sop/rules` (`services/control-plane/src/routes/
+   * sops.ts`).
+   *
+   * Absent or empty means UNRESTRICTED — the exact same convention as
+   * `allowedModels` above: a workspace that never configured this must not
+   * start refusing every MCP server because a default changed.
+   */
+  mcpAllowedServers?: string[]
+
+  /**
    * Whether agents in this workspace must run inside a sandbox (LLD #63 §6).
    * - `'off'` (default): `intutic exec` runs on the host as before.
    * - `'warn'`: an un-sandboxed `intutic exec` runs but prints a warning.

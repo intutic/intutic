@@ -18,15 +18,21 @@ import * as node_os from 'node:os'
 
 class StubPolicyClient extends PolicyClient {
   private _rules: SopRule[] = []
+  private _allowedServers: string[] = []
 
-  constructor(rules: SopRule[] = []) {
+  constructor(rules: SopRule[] = [], allowedServers: string[] = []) {
     // Pass dummy values — we override getRules() and matchRule()
     super('http://localhost:0', '', 'test-ws', 60_000)
     this._rules = rules
+    this._allowedServers = allowedServers
   }
 
   override getRules(): readonly SopRule[] {
     return this._rules
+  }
+
+  override getAllowedServers(): readonly string[] {
+    return this._allowedServers
   }
 
   override matchRule(toolName: string, toolInputJson: string): SopRule | null {
@@ -187,6 +193,59 @@ describe('ToolCallInterceptor', () => {
       const decision = await interceptor.decide('Write', { path: '/etc/passwd', content: 'test' })
       expect(decision.action).toBe('block')
       expect((decision as { action: 'block'; reason: string }).reason).toContain('human approval')
+    })
+  })
+
+  describe('server-level allowlist (mcpAllowedServers)', () => {
+    it('empty/absent list is unrestricted — a call through any server is allowed', async () => {
+      const policy = new StubPolicyClient([], [])
+      const interceptor = new ToolCallInterceptor(policy, emitter, true, 'any-server-name')
+
+      const decision = await interceptor.decide('Read', { path: '/tmp/hello.txt' })
+      expect(decision.action).toBe('allow')
+    })
+
+    it('a non-empty list refuses a server not on it', async () => {
+      const policy = new StubPolicyClient([], ['github', 'filesystem'])
+      const interceptor = new ToolCallInterceptor(policy, emitter, true, 'some-other-server')
+
+      const decision = await interceptor.decide('Read', { path: '/tmp/hello.txt' })
+      expect(decision.action).toBe('block')
+      expect((decision as { action: 'block'; reason: string }).reason).toContain('some-other-server')
+      expect((decision as { action: 'block'; reason: string }).reason).toContain('mcpAllowedServers')
+      expect(emitter.emitted[0]?.kind).toBe('tool_blocked')
+    })
+
+    it('a non-empty list allows a server that IS on it', async () => {
+      const policy = new StubPolicyClient([], ['github', 'filesystem'])
+      const interceptor = new ToolCallInterceptor(policy, emitter, true, 'filesystem')
+
+      const decision = await interceptor.decide('Read', { path: '/tmp/hello.txt' })
+      expect(decision.action).toBe('allow')
+    })
+
+    it('the server-allowlist refusal is unconditional — NOT relaxed by failOpen=true', async () => {
+      // Same shape as the tool-level allowlist immediately below in this
+      // file: an explicit, non-empty allowlist that excludes this server is
+      // a definite policy decision the proxy already has the data to make,
+      // not a "control plane unreachable" failure mode — so it refuses
+      // regardless of mcpProxyFailBehavior. A control-plane OUTAGE still
+      // fails open naturally, because an unreachable fetch leaves
+      // getAllowedServers() empty, which reads as unrestricted.
+      const policy = new StubPolicyClient([], ['only-this-one'])
+      const interceptor = new ToolCallInterceptor(policy, emitter, true, 'not-this-one')
+
+      const decision = await interceptor.decide('Read', { path: '/tmp/hello.txt' })
+      expect(decision.action).toBe('block')
+    })
+
+    it('defaults to serverName "unknown" when the interceptor is constructed without one', async () => {
+      const policy = new StubPolicyClient([], ['approved-server'])
+      const interceptor = new ToolCallInterceptor(policy, emitter, true)
+
+      const decision = await interceptor.decide('Read', { path: '/tmp/hello.txt' })
+      expect(decision.action).toBe('block')
+      expect((decision as { action: 'block'; reason: string }).reason).toContain('unknown')
     })
   })
 
