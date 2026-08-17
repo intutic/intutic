@@ -32,9 +32,10 @@ export type RiskLevel = typeof RiskLevel[keyof typeof RiskLevel]
 /**
  * PCAS enforcement action applied to a tool call.
  *
- * Listed in increasing severity. `REASK` sits between `HIJACK` and `KILL`:
- * the attempt is refused and the reason handed back to the agent, which may
- * retry a bounded number of times before the finding escalates to a block.
+ * BYPASS..KILL are listed in increasing severity. `REASK` sits between
+ * `HIJACK` and `KILL`: the attempt is refused and the reason handed back to
+ * the agent, which may retry a bounded number of times before the finding
+ * escalates to a block.
  *
  * It exists because the proxy's promotion rule
  * (`packages/proxy/src/plugins/anomaly/mod.rs`) forbids a heuristic from
@@ -43,6 +44,21 @@ export type RiskLevel = typeof RiskLevel[keyof typeof RiskLevel]
  * rule and lost the enforcement; `REASK` keeps both.
  *
  * Mirrors `enforcement_action_type` — see migration 114.
+ *
+ * `OBSERVED` (migration 156) is deliberately OUTSIDE that severity ladder —
+ * it does not mean "PCAS acted with this severity", it means "PCAS took no
+ * action because the request never produced a response to act on". It is
+ * `mapVerdict`'s (`services/control-plane/src/lib/valkeySubscriber.ts`)
+ * target for the proxy's `"upstream_error"` verdict — a provider 5xx or an
+ * unservable-model rejection. Before this value existed, `mapVerdict`'s
+ * fail-closed default mapped every unrecognised verdict to `KILL`, so every
+ * upstream_error trace was recorded as an enforcement block that never
+ * happened: an honest failure record read as PCAS having stopped the
+ * request. `BYPASS` was considered and rejected for the same reason in the
+ * other direction — it means the call went through and completed, which an
+ * upstream_error trace never did. Nothing existing fit, so this is the
+ * smallest addition that lets "PCAS did not enforce anything here, the
+ * provider itself failed" be recorded truthfully.
  */
 export const EnforcementAction = {
   BYPASS: 'BYPASS',
@@ -50,6 +66,7 @@ export const EnforcementAction = {
   HIJACK: 'HIJACK',
   REASK: 'REASK',
   KILL: 'KILL',
+  OBSERVED: 'OBSERVED',
 } as const
 
 /** Union of all enforcement action values. */
