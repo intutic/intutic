@@ -25,6 +25,7 @@ use super::{
 };
 use crate::metering::VirtualKeyRecord;
 use crate::routing::bandit::BanditArmState;
+use crate::routing::mirror::MirrorPairEvent;
 use crate::telemetry::ExecutionTrace;
 
 /// Every Valkey key scoped to a graph, built in one place.
@@ -611,6 +612,24 @@ impl LocalStore for ValkeyStore {
         }
 
         tracing::debug!(trace_id = %trace.trace_id, channel = %channel, "Execution trace published to Valkey");
+        Ok(())
+    }
+
+    async fn publish_mirror_pair(&self, event: &MirrorPairEvent) -> anyhow::Result<()> {
+        let mut conn = self.conn();
+        // Same per-workspace channel shape as `publish_trace`'s
+        // `intutic:traces:{ws}` — see that method and `MirrorPairEvent`'s doc
+        // comment. No durable write here or anywhere else in this function:
+        // PUBLISH does not persist, and that is the point.
+        let channel = format!("intutic:mirror_pairs:{}", event.workspace_id);
+        let payload = serde_json::to_string(event)?;
+        let _: () = conn.publish(&channel, &payload).await?;
+        tracing::debug!(
+            workspace_id = %event.workspace_id,
+            candidate = %event.candidate_model,
+            channel = %channel,
+            "Mirror comparison pair published to Valkey"
+        );
         Ok(())
     }
 

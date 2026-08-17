@@ -36,6 +36,7 @@ use std::collections::HashMap;
 
 use crate::metering::VirtualKeyRecord;
 use crate::routing::bandit::BanditArmState;
+use crate::routing::mirror::MirrorPairEvent;
 use crate::telemetry::ExecutionTrace;
 
 pub mod memory;
@@ -441,6 +442,20 @@ pub trait LocalStore: Send + Sync + 'static {
     /// session channel). Fire-and-forget; the control plane's subscriber
     /// batch-inserts these into Postgres.
     async fn publish_trace(&self, trace: &ExecutionTrace) -> anyhow::Result<()>;
+
+    /// Publish a scrubbed mirror comparison pair to
+    /// `intutic:mirror_pairs:{ws}` — same channel-per-workspace shape as
+    /// [`Self::publish_trace`]'s `intutic:traces:{ws}`. Fire-and-forget, and
+    /// deliberately the ONLY place this proxy ever puts a mirror response
+    /// pair anywhere: see [`MirrorPairEvent`]'s doc comment for why this is a
+    /// transient pub/sub publish and not a store write.
+    ///
+    /// No subscriber exists in this phase (7a). A later phase (7b,
+    /// control-plane) adds one that judges immediately and discards the raw
+    /// content, matching `publish_trace`'s "control plane batch-inserts these"
+    /// precedent — until then this channel simply has nobody listening, which
+    /// is safe: Valkey PUBLISH to a channel with no subscribers is a no-op.
+    async fn publish_mirror_pair(&self, event: &MirrorPairEvent) -> anyhow::Result<()>;
 
     /// Publish an infrastructure anomaly to `intutic:system_anomalies`.
     async fn publish_system_anomaly(&self, workspace_id: &str, description: &str);

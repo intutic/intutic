@@ -530,6 +530,49 @@ pub struct RoutingConfig {
     #[serde(default)]
     pub mirror_sample_rate: f64,
 
+    /// An explicit, operator-directed mirror candidate — independent of
+    /// `mode`/shadow routing.
+    ///
+    /// Before this field existed, `mirror_plan` (see `proxy.rs`) could only be
+    /// built from `shadow_selection`, which is itself only populated when
+    /// `mode: shadow` is active AND the bandit's selection for this request
+    /// happened to disagree with what was served. That makes mirroring
+    /// structurally unreachable for the case an operator actually wants: "test
+    /// THIS specific model release against a sample of live traffic," where the
+    /// model may not be one the bandit would ever pick — it may not even be a
+    /// bandit candidate at all.
+    ///
+    /// When set, `proxy.rs` builds `mirror_plan` from this model for a sampled
+    /// fraction of ALL eligible non-streaming traffic (still governed by
+    /// `mirror_sample_rate` and the same concurrency/rate ceilings in
+    /// `routing::mirror`), regardless of what shadow routing decided. If both
+    /// this field and a shadow disagreement would apply to the same request,
+    /// this one wins — it is operator-directed ("test THIS model now"), while
+    /// the shadow candidate is an incidental byproduct of whatever the bandit
+    /// happened to disagree on that turn.
+    ///
+    /// **Deliberately NOT run through the `candidate_models`/`model_list`
+    /// validation in `load_config` below.** That filter drops any
+    /// `candidate_models` entry the (non-empty) `model_list` doesn't already
+    /// know about, on the theory that an unlisted name is a routing typo the
+    /// bandit would otherwise select and have the upstream 404. Neither
+    /// justification applies here: this field is never selected by the bandit
+    /// (`route_model` never reads it), and the mirrored call never resolves an
+    /// upstream through `model_list` at all — `mirror_plan` reuses the primary
+    /// request's already-resolved `upstream_url`/credentials verbatim and only
+    /// swaps the JSON body's `"model"` field. The whole point of this knob is
+    /// to mirror-test a model release that has *not* been onboarded to
+    /// `model_list` yet; running it through that filter would silently drop it
+    /// at startup with no visible error the moment an operator configured
+    /// exactly the thing this field exists for. A typo'd name here still fails
+    /// safely: `run_mirror` treats a non-2xx or unreachable upstream as "not
+    /// scoreable" and drops it, same as any other mirror candidate.
+    ///
+    /// `None` (the default) leaves mirroring exactly as before: driven only by
+    /// shadow disagreement, when `mode: shadow` is active.
+    #[serde(default)]
+    pub mirror_candidate_model: Option<String>,
+
     #[serde(default)]
     pub reward: RewardConfig,
 }
@@ -546,6 +589,9 @@ impl Default for RoutingConfig {
             // No mirroring unless asked for. Every mirrored request is paid for
             // twice, so it must be opted into rather than defaulted on.
             mirror_sample_rate: 0.0,
+            // Unset: mirroring stays driven by shadow disagreement only, same
+            // as before this field existed.
+            mirror_candidate_model: None,
             reward: RewardConfig::default(),
         }
     }
@@ -725,6 +771,12 @@ pub fn load_config(path: &str) -> anyhow::Result<ProxyConfig> {
                  bandit routing is effectively disabled for this proxy"
             );
         }
+        // `mirror_candidate_model` is INTENTIONALLY not passed through this
+        // `retain` — see its doc comment on `RoutingConfig` for the full
+        // reasoning. Short version: it is not a bandit candidate and the
+        // mirrored call does not resolve its upstream via `model_list`, so
+        // filtering it here would only silently defeat the field's purpose
+        // (testing a model `model_list` does not know about yet).
     }
 
     Ok(config)
@@ -769,7 +821,39 @@ intutic_settings: {}
         assert!((routing.reward.token_anomaly_penalty - 0.2).abs() < f64::EPSILON);
         assert!((routing.reward.cost_penalty - 0.2).abs() < f64::EPSILON);
         assert!(config.intutic_settings.wasm_local_dir.is_none());
+        // Mirroring's two independent switches must BOTH default off: a typo
+        // adding a nonzero sample rate somewhere is bounded by
+        // `MAX_SAMPLE_RATE`, but nothing bounds an operator accidentally
+        // inheriting a candidate model they never configured — the field must
+        // come back `None` with no config present at all.
+        assert_eq!(
+            routing.mirror_sample_rate, 0.0,
+            "mirroring must be off until explicitly opted into"
+        );
+        assert!(
+            routing.mirror_candidate_model.is_none(),
+            "no config file must not somehow name a mirror candidate"
+        );
         let _ = std::fs::remove_file(file_path);
+    }
+
+    /// The feature's two independent knobs both default off, and — the part
+    /// that actually matters — `mirror_sample_rate: 0.0` makes the whole
+    /// feature a no-op REGARDLESS of `mirror_candidate_model`. A leftover or
+    /// mis-set candidate model with no sample rate to go with it must never
+    /// fire.
+    ///
+    /// The candidate-model half is `should_mirror`'s job to enforce (it takes
+    /// the rate, not the config struct), and
+    /// `routing::mirror::tests::does_not_mirror_when_disabled` already pins
+    /// that a `0.0` rate refuses regardless of which two distinct model names
+    /// are passed. This test pins the config-level half: that defaulting
+    /// leaves both knobs in the state that test relies on.
+    #[test]
+    fn mirroring_is_a_complete_no_op_when_unconfigured() {
+        let default_routing = RoutingConfig::default();
+        assert_eq!(default_routing.mirror_sample_rate, 0.0);
+        assert!(default_routing.mirror_candidate_model.is_none());
     }
 
     /// The response gate must be on, and fail closed, without anyone writing a
@@ -938,6 +1022,50 @@ intutic_settings:
         assert_eq!(
             cfg.intutic_settings.routing.candidate_models,
             vec!["anything-goes".to_string()]
+        );
+    }
+
+    /// The startup trap `mirror_candidate_model` must NOT fall into.
+    ///
+    /// `candidate_models` entries absent from a non-empty `model_list` are
+    /// dropped by `load_config` (see
+    /// `candidates_absent_from_a_nonempty_model_list_are_dropped` above) —
+    /// correctly, for the bandit, whose selection resolves an upstream
+    /// through `model_list`. `mirror_candidate_model` does neither of those
+    /// things: the bandit never reads it, and the mirrored call reuses the
+    /// primary request's already-resolved upstream verbatim. If this field
+    /// were run through the same `retain`, an operator configuring a
+    /// brand-new model release — the exact case the field exists for — would
+    /// have it silently eaten at startup, with no visible error and mirroring
+    /// simply never happening. This pins that it survives a `model_list` that
+    /// has never heard of it.
+    #[test]
+    fn mirror_candidate_model_survives_a_model_list_that_does_not_list_it() {
+        let dir = std::env::temp_dir().join("intutic-config-validation-test-mirror-candidate");
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let path = dir.join("config.yaml");
+        std::fs::write(
+            &path,
+            r#"
+model_list:
+  - model_name: real-model
+    litellm_params:
+      model: openai/real-model
+intutic_settings:
+  routing:
+    mirror_sample_rate: 0.05
+    mirror_candidate_model: "brand-new-unreleased-model"
+"#,
+        )
+        .expect("write config");
+
+        let cfg = load_config(path.to_str().unwrap()).expect("loads");
+        assert_eq!(
+            cfg.intutic_settings.routing.mirror_candidate_model.as_deref(),
+            Some("brand-new-unreleased-model"),
+            "model_list validation must not silently drop a mirror candidate \
+             it has never heard of — that is precisely the model this field \
+             exists to let an operator test"
         );
     }
 }
