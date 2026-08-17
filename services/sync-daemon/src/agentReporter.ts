@@ -18,7 +18,8 @@
 import { readFile, readdir, access } from 'node:fs/promises'
 import { join } from 'node:path'
 import { newIso } from '@intutic/id'
-import type { HarnessType } from '@intutic/shared-types'
+import { scanSkillContent, type HarnessType } from '@intutic/shared-types'
+import { discoverMcpServers } from './harness/mcpAutoWrite.js'
 
 /** Live egress-enforcement status read from the proxy's own diagnostic endpoint. */
 export interface EgressFacet {
@@ -38,8 +39,23 @@ interface AgentFacets {
   }
   sops: Array<{ sop_id: string; name: string; enforced: boolean }>
   budgets: { tier?: string }
-  mcp_tools: Array<{ server: string; tool: string; scopes: string[] }>
-  skills: Array<{ name: string; source: string }>
+  mcp_tools: Array<{ server: string; harness: string; transport: string; wrapped: boolean }>
+  skills: Array<{
+    name: string
+    source: string
+    /** Whether `scanSkillContent` actually ran against this skill's
+     *  `SKILL.md`. `false` on a read failure — never omitted, and never
+     *  paired with `clean: true`; see `collectSkills` below. */
+    scanned: boolean
+    /** Only meaningful when `scanned` is `true`. `false` means the content
+     *  scan found at least one pattern match (report-only — see
+     *  `packages/shared-types/src/skillScan.ts`'s doc comment; nothing here
+     *  blocks or modifies the skill). */
+    clean: boolean
+    /** Count of findings when scanned and not clean; `0` when scanned+clean
+     *  or when unscanned (there is nothing to count). */
+    findingsCount: number
+  }>
   loops: { configured: boolean }
   harness: { type: string; config_synced: boolean }
   memory: Array<{ provider: string; configured: boolean }>
@@ -118,17 +134,49 @@ async function collectSops(workspaceRoot: string): Promise<AgentFacets['sops']> 
   }
 }
 
-/** Bundled skills under `<root>/.agents/skills/<name>/SKILL.md`. */
+/**
+ * Bundled skills under `<root>/.agents/skills/<name>/SKILL.md`, content-
+ * scanned via `scanSkillContent` (`@intutic/shared-types`) on every cycle.
+ *
+ * Report-only, matching `scanSkillContent`'s own doc comment: this function
+ * never modifies, blocks, or removes anything — it reads and attaches a
+ * verdict for `agentPosture.ts`'s content-aware `skills` scoring to consume.
+ *
+ * Refusal-not-pass: a `SKILL.md` that cannot be read (permissions, vanished
+ * between `readdir` and `readFile`, not a regular file, …) is reported
+ * `scanned: false, clean: false` — never `clean: true`, and never silently
+ * dropped from the list. An unreadable skill is not a skill the daemon can
+ * vouch for, and dropping it would make a workspace's posture score look
+ * better than what is actually known.
+ */
 async function collectSkills(workspaceRoot: string): Promise<AgentFacets['skills']> {
   const dir = join(workspaceRoot, '.agents', 'skills')
+  let entries
   try {
-    const entries = await readdir(dir, { withFileTypes: true })
-    return entries
-      .filter((e) => e.isDirectory())
-      .map((e) => ({ name: e.name, source: '.agents/skills' }))
+    entries = await readdir(dir, { withFileTypes: true })
   } catch {
     return []
   }
+
+  const dirs = entries.filter((e) => e.isDirectory())
+  const out: AgentFacets['skills'] = []
+  for (const e of dirs) {
+    const skillMdPath = join(dir, e.name, 'SKILL.md')
+    try {
+      const content = await readFile(skillMdPath, 'utf8')
+      const result = scanSkillContent(content)
+      out.push({
+        name: e.name,
+        source: '.agents/skills',
+        scanned: true,
+        clean: result.clean,
+        findingsCount: result.findings.length,
+      })
+    } catch {
+      out.push({ name: e.name, source: '.agents/skills', scanned: false, clean: false, findingsCount: 0 })
+    }
+  }
+  return out
 }
 
 /** Local notes vaults (Obsidian/Logseq/Foam) at or above the workspace root. */
@@ -150,34 +198,17 @@ async function detectLocalVaults(workspaceRoot: string): Promise<string[]> {
 }
 
 /**
- * MCP servers declared in a harness's config. Claude Code / Cursor keep these
- * in JSON; we read the well-known locations and flatten server→tool with any
- * declared scopes. Missing files just yield an empty list.
+ * MCP servers declared across every harness config format this daemon knows
+ * how to parse (see `mcpAutoWrite.ts`'s `discoverMcpServers` — 9 config paths
+ * across 8 harnesses), with each server's proxy-wrapped status. Previously
+ * this only read 3 hardcoded paths (`.mcp.json`, `.cursor/mcp.json`,
+ * `~/.claude.json`) and flattened per declared tool; `discoverMcpServers` is
+ * the shared, read-only extraction of the same format knowledge
+ * `injectMcpServer` uses to wrap servers, so this reporter's coverage can
+ * never silently lag behind what actually gets wrapped.
  */
 async function collectMcpTools(workspaceRoot: string): Promise<AgentFacets['mcp_tools']> {
-  const candidates = [
-    join(workspaceRoot, '.mcp.json'),
-    join(workspaceRoot, '.cursor', 'mcp.json'),
-    join(process.env.HOME ?? '', '.claude.json'),
-  ]
-  const out: AgentFacets['mcp_tools'] = []
-  for (const path of candidates) {
-    if (!(await exists(path))) continue
-    try {
-      const parsed = JSON.parse(await readFile(path, 'utf8')) as {
-        mcpServers?: Record<string, { tools?: string[]; scopes?: string[] }>
-      }
-      for (const [server, cfg] of Object.entries(parsed.mcpServers ?? {})) {
-        const tools = cfg.tools ?? ['*']
-        for (const tool of tools) {
-          out.push({ server, tool, scopes: cfg.scopes ?? [] })
-        }
-      }
-    } catch {
-      // malformed config — skip
-    }
-  }
-  return out
+  return discoverMcpServers(workspaceRoot)
 }
 
 /**
