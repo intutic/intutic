@@ -82,6 +82,17 @@ export type NotificationEventType =
    * report -- an active bypass just occurred, not merely unreported.
    */
   | 'device.enforcement.disabled'
+  // ── Provider outage tracking (Phase 8b) ──
+  /**
+   * A NEW provider_incidents window opened for a provider (Anthropic,
+   * OpenAI, ...) -- fired once per incident open, not on every coalesced
+   * failure that extends an already-open incident. Fired scoped to the
+   * workspace whose trace triggered the open, since provider_incidents
+   * itself is not workspace-scoped (see migration 157) and no complete
+   * "every workspace routing through this provider" fan-out exists the way
+   * gateway.stale.detected's org-membership join provides for gateways.
+   */
+  | 'provider.outage.detected'
 
 export type NotificationStatus = 'sent' | 'failed' | 'deduplicated' | 'filtered'
 
