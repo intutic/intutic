@@ -3923,17 +3923,48 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         }
     }
 
+    // Which model, if any, mirroring should test against this request.
+    //
+    // Two independent sources can supply a candidate:
+    //
+    //  - `mirror_candidate_model`: an operator-configured model, mirrored
+    //    against a sampled fraction of ALL eligible traffic regardless of what
+    //    shadow routing decided. This is the path that lets an operator
+    //    mirror-test a specific new model release even though the bandit has
+    //    never selected it (and, for a model outside `candidate_models`,
+    //    never will) — see its doc comment on `RoutingConfig` in config.rs.
+    //  - `shadow_selection`: the pre-existing path. Populated only when
+    //    `mode: shadow` is active and the bandit's selection for this request
+    //    disagreed with what was actually served.
+    //
+    // When both would apply to the same request, the explicit candidate wins:
+    // it is operator-directed ("test THIS model now"), while the shadow
+    // candidate is an incidental byproduct of whatever the bandit happened to
+    // disagree on this turn. Filtered against `model` (the requested model)
+    // here rather than relying solely on `should_mirror`'s own same-model
+    // guard below, so a misconfigured `mirror_candidate_model` falls back to
+    // the shadow candidate instead of silently disabling mirroring outright
+    // for a request that did have a usable shadow disagreement.
+    let mirror_candidate: Option<String> = state
+        .config
+        .intutic_settings
+        .routing
+        .mirror_candidate_model
+        .clone()
+        .filter(|explicit| explicit != &model)
+        .or_else(|| shadow_selection.clone());
+
     // Captured before the request consumes them. The mirror re-issues the SAME
-    // call with the model swapped to the shadow candidate, so it has to be built
-    // from the same URL, headers and body — reconstructing it later would risk
-    // measuring a request the user never made.
+    // call with the model swapped to the mirror candidate, so it has to be
+    // built from the same URL, headers and body — reconstructing it later
+    // would risk measuring a request the user never made.
     let mirror_plan: Option<(String, reqwest::header::HeaderMap, Vec<u8>, String)> =
-        shadow_selection.as_ref().and_then(|candidate| {
+        mirror_candidate.and_then(|candidate| {
             let mut mirrored_body = body_json.clone();
             mirrored_body["model"] = json!(candidate);
             serde_json::to_vec(&mirrored_body)
                 .ok()
-                .map(|b| (upstream_url.clone(), fwd_headers.clone(), b, candidate.clone()))
+                .map(|b| (upstream_url.clone(), fwd_headers.clone(), b, candidate))
         });
 
     // ── Unservable-model fallback plan ──
@@ -4263,77 +4294,12 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    // Mirror the shadow candidate, if this request was sampled.
-    //
-    // Spawned detached and never awaited, so the user's response is already on
-    // its way out — a mirrored call that times out costs them nothing. The
-    // sampling roll, the 5% ceiling, the concurrency cap and the
-    // streams-are-never-mirrored rule all live in `should_mirror`.
-    if let Some((url, headers, body, candidate)) = mirror_plan {
-        let roll: f64 = rand::random::<f64>();
-        // The slot IS the decision. `should_mirror` hands back the only
-        // `MirrorSlot` that can exist, so there is no way to mirror without
-        // holding one and no way to hold one without having been permitted.
-        if let Some(slot) = crate::routing::mirror::should_mirror(
-            state.config.intutic_settings.routing.mirror_sample_rate,
-            is_streaming,
-            &model,
-            &candidate,
-            roll,
-        ) {
-            let client = state.http_client.as_ref().clone();
-            let ws = workspace_id.clone();
-            let req_json = body_json.clone();
-            let estimate: std::sync::Arc<dyn Fn(&str, u32, u32) -> f64 + Send + Sync> =
-                std::sync::Arc::new(|m: &str, p: u32, c: u32| estimate_model_cost(m, p, c));
-            let mirror_store = Arc::clone(&state.store);
-            let mirror_ws = ws.clone();
-            tokio::spawn(async move {
-                let outcome = crate::routing::mirror::run_mirror(
-                    slot,
-                    client,
-                    url,
-                    headers,
-                    body,
-                    Some(req_json),
-                    candidate,
-                    ws,
-                    estimate,
-                )
-                .await;
-
-                // Keep what the second call bought.
-                //
-                // `run_mirror` has always returned this and the spawn has always
-                // dropped it, so the only trace of a mirrored call was a log
-                // line. C6 and C7 — enforce per workspace on a mirror-measured
-                // fault-rate delta — were deferred "pending mirror-measured
-                // data", and that data was being thrown away one line after it
-                // was computed. Mirroring bills a second upstream call on up to
-                // 5% of traffic; discarding the result makes that pure cost.
-                //
-                // `None` means the call never produced a scoreable response (a
-                // non-2xx, or an unreachable upstream). That is not a fault of
-                // the candidate and is deliberately not recorded as one.
-                if let Some(o) = outcome {
-                    if let Err(e) = mirror_store
-                        .record_mirror_outcome(
-                            &mirror_ws,
-                            &o.candidate_model,
-                            o.integrity.fault.is_some(),
-                            o.integrity.measured,
-                            o.cost_usd,
-                        )
-                        .await
-                    {
-                        // The user's response went out long ago; a failure to
-                        // record evidence must cost them nothing.
-                        tracing::warn!(error = %e, "Failed to record mirror outcome");
-                    }
-                }
-            });
-        }
-    }
+    // Mirroring is triggered further down, once the primary response's own
+    // body has been read (see the comment at that site for why: publishing a
+    // useful comparison pair needs the ORIGINAL response text in hand, which
+    // does not exist yet at this point in the request). `mirror_plan` itself
+    // was already fully captured above, before anything here can consume the
+    // headers/body it holds.
 
     if is_streaming {
         resp_headers.insert(
@@ -5632,6 +5598,135 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // DLP, compaction, and cache writes below are proxy overhead and must not
     // count against the routed model's latency SLO.
     let upstream_latency_ms = start.elapsed().as_millis() as u32;
+
+    // Mirror the configured/shadow candidate, if this request was sampled.
+    //
+    // Deliberately placed HERE — after the primary response's own body
+    // (`resp_bytes`) has been read — rather than immediately after
+    // `mirror_plan` was captured far above. The scrubbed comparison pair
+    // published below needs the ORIGINAL response text, which does not exist
+    // until this point; `is_streaming` is always `false` on this path (the
+    // streaming branch always `return`s above it), which is the only shape
+    // `should_mirror` ever permits anyway, so nothing is lost by waiting.
+    //
+    // Spawned detached and never awaited, so the user's response is already on
+    // its way out — a mirrored call that times out, and the DLP scrub the
+    // spawned task does before publishing, both cost the user's own request
+    // nothing. `resp_bytes.clone()` is an `Arc` bump, not a copy, so even that
+    // capture is free on this path. The sampling roll, the 5% ceiling, the
+    // concurrency cap and the streams-are-never-mirrored rule all live in
+    // `should_mirror`.
+    if let Some((url, headers, body, candidate)) = mirror_plan {
+        let roll: f64 = rand::random::<f64>();
+        // The slot IS the decision. `should_mirror` hands back the only
+        // `MirrorSlot` that can exist, so there is no way to mirror without
+        // holding one and no way to hold one without having been permitted.
+        if let Some(slot) = crate::routing::mirror::should_mirror(
+            state.config.intutic_settings.routing.mirror_sample_rate,
+            is_streaming,
+            &model,
+            &candidate,
+            roll,
+        ) {
+            let client = state.http_client.as_ref().clone();
+            let ws = workspace_id.clone();
+            let req_json = body_json.clone();
+            let estimate: std::sync::Arc<dyn Fn(&str, u32, u32) -> f64 + Send + Sync> =
+                std::sync::Arc::new(|m: &str, p: u32, c: u32| estimate_model_cost(m, p, c));
+            let mirror_store = Arc::clone(&state.store);
+            let mirror_ws = ws.clone();
+            let requested_model_for_mirror = model.clone();
+            let original_response_bytes = resp_bytes.clone();
+            tokio::spawn(async move {
+                let outcome = crate::routing::mirror::run_mirror(
+                    slot,
+                    client,
+                    url,
+                    headers,
+                    body,
+                    Some(req_json.clone()),
+                    candidate,
+                    ws,
+                    estimate,
+                )
+                .await;
+
+                // Keep what the second call bought.
+                //
+                // `run_mirror` has always returned this and the spawn has always
+                // dropped it, so the only trace of a mirrored call was a log
+                // line. C6 and C7 — enforce per workspace on a mirror-measured
+                // fault-rate delta — were deferred "pending mirror-measured
+                // data", and that data was being thrown away one line after it
+                // was computed. Mirroring bills a second upstream call on up to
+                // 5% of traffic; discarding the result makes that pure cost.
+                //
+                // `None` means the call never produced a scoreable response (a
+                // non-2xx, or an unreachable upstream). That is not a fault of
+                // the candidate and is deliberately not recorded as one.
+                if let Some(o) = outcome {
+                    if let Err(e) = mirror_store
+                        .record_mirror_outcome(
+                            &mirror_ws,
+                            &o.candidate_model,
+                            o.integrity.fault.is_some(),
+                            o.integrity.measured,
+                            o.cost_usd,
+                        )
+                        .await
+                    {
+                        // The user's response went out long ago; a failure to
+                        // record evidence must cost them nothing.
+                        tracing::warn!(error = %e, "Failed to record mirror outcome");
+                    }
+
+                    // ── Scrubbed transient comparison pair, for 7b's judge ──
+                    //
+                    // TD-346 forbids persisting raw model response text
+                    // durably; storing an original+mirror response PAIR would
+                    // be a far larger exception to that discipline than
+                    // anything shipped under it so far. The decision made for
+                    // this phase is judge-at-ingest, verdict-only storage —
+                    // see `MirrorPairEvent`'s doc comment. Every text field is
+                    // DLP-scrubbed right here, immediately before publish,
+                    // independent of whether output DLP is enabled for the
+                    // response actually served to the caller: this sidecar
+                    // channel carries its own scrub obligation regardless of
+                    // that config.
+                    //
+                    // `o.response_text` is `None` only when the mirrored body
+                    // wasn't valid UTF-8 — skip the publish rather than send a
+                    // pair missing half its content.
+                    if let Some(mirror_response_raw) = o.response_text.as_deref() {
+                        let original_response_raw =
+                            String::from_utf8_lossy(&original_response_bytes);
+                        let event = crate::routing::mirror::MirrorPairEvent {
+                            workspace_id: mirror_ws.clone(),
+                            requested_model: requested_model_for_mirror,
+                            candidate_model: o.candidate_model.clone(),
+                            request_text: crate::routing::mirror::dlp_scrub(&req_json.to_string()),
+                            original_response_text: crate::routing::mirror::dlp_scrub(
+                                &original_response_raw,
+                            ),
+                            mirror_response_text: crate::routing::mirror::dlp_scrub(
+                                mirror_response_raw,
+                            ),
+                            mirror_faulted: o.integrity.fault.is_some(),
+                            mirror_latency_ms: o.latency_ms,
+                            mirror_cost_usd: o.cost_usd,
+                            created_at: chrono::Utc::now().to_rfc3339(),
+                        };
+                        if let Err(e) = mirror_store.publish_mirror_pair(&event).await {
+                            // Same discipline as the counter write above: the
+                            // user's response is long gone, so a failed
+                            // publish costs them nothing and is only logged.
+                            tracing::warn!(error = %e, "Failed to publish mirror comparison pair");
+                        }
+                    }
+                }
+            });
+        }
+    }
 
     let (mut final_body_bytes, prompt_tokens, completion_tokens, mut accumulated_content) =
         if is_same_provider {

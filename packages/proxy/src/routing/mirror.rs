@@ -33,6 +33,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use serde::Serialize;
 use serde_json::Value;
 
 use super::integrity::{self, Integrity, ResponseFacts};
@@ -132,6 +133,75 @@ pub struct MirrorOutcome {
     pub latency_ms: u32,
     /// Cost of the mirrored call. Real money, spent to learn this.
     pub cost_usd: f64,
+    /// The mirrored response's raw body text, carried ONLY as far as the
+    /// caller's DLP-scrub-and-publish step (see `run_mirror`'s doc comment).
+    ///
+    /// This is not a second discard site to relitigate: nothing durable ever
+    /// reads this field. It exists so `run_mirror`'s caller can build the
+    /// scrubbed transient pub/sub pair (request + both responses) documented
+    /// on `run_mirror` without re-issuing or re-parsing the mirrored call.
+    /// `None` whenever the response body wasn't valid UTF-8.
+    pub response_text: Option<String>,
+}
+
+/// Scrubs `text` with the same DLP scan-then-redact call used at every other
+/// site that carries model text past a trust boundary (e.g.
+/// `injection::extract_scrubbed_snippet`, the output-DLP block in
+/// `proxy.rs`). A clean string is returned unchanged rather than round-tripped
+/// through `redact`, matching those call sites.
+pub fn dlp_scrub(text: &str) -> String {
+    let findings = crate::dlp::scan(text);
+    if findings.is_empty() {
+        text.to_string()
+    } else {
+        crate::dlp::redact(text, &findings)
+    }
+}
+
+/// The transient, judge-at-ingest message published on mirror completion.
+///
+/// **This is the one place in the mirror path that carries two full model
+/// responses at once.** TD-346 (see `docs/TECH_DEBT.md`) forbids persisting
+/// raw model response text; storing an original/mirror response PAIR
+/// durably would be a far larger exception to that discipline than anything
+/// shipped under it so far. The decision made for this phase is
+/// judge-at-ingest, verdict-only storage: this struct is published to a
+/// Valkey pub/sub channel — transient by construction, nothing durable about
+/// a channel with no persistence — and NEVER written to a database table by
+/// this proxy.
+///
+/// Every text field here MUST already be DLP-scrubbed (via [`dlp_scrub`])
+/// before this struct is constructed; construction is not itself where
+/// scrubbing happens, so an unscrubbed field is a caller bug, not a type
+/// this struct catches.
+///
+/// **No durable consumer exists in this phase.** A later, separate phase
+/// (7b — control-plane) subscribes to this channel, judges the pair
+/// immediately, records only the verdict, and discards the raw content. Until
+/// that subscriber ships, this message has no consumer at all and is
+/// published purely so 7b has a stable wire shape to build against.
+#[derive(Debug, Clone, Serialize)]
+pub struct MirrorPairEvent {
+    pub workspace_id: String,
+    /// The model the caller actually asked for (pre-routing).
+    pub requested_model: String,
+    /// The mirror candidate this pair was measured against.
+    pub candidate_model: String,
+    /// DLP-scrubbed request body text, shared by both calls.
+    pub request_text: String,
+    /// DLP-scrubbed response text from the model that actually served the
+    /// request.
+    pub original_response_text: String,
+    /// DLP-scrubbed response text from the mirror candidate.
+    pub mirror_response_text: String,
+    /// Whether `integrity::score` found a fault in the mirrored response —
+    /// duplicated from the aggregate counter write so a 7b judge has the
+    /// deterministic-scorer's own verdict available alongside its own.
+    pub mirror_faulted: bool,
+    pub mirror_latency_ms: u32,
+    /// Cost of the mirrored call, in USD.
+    pub mirror_cost_usd: f64,
+    pub created_at: String,
 }
 
 /// Scores a mirrored response.
@@ -158,6 +228,11 @@ pub fn score_mirrored(
         integrity: integrity::score(&facts),
         latency_ms,
         cost_usd,
+        // Set by `run_mirror` after scoring, from the same bytes `facts.body`
+        // was parsed from. `score_mirrored` itself stays response-text-free so
+        // its existing direct unit tests (constructing a `Value` in memory,
+        // with no raw bytes in hand) don't have to invent any.
+        response_text: None,
     }
 }
 
@@ -167,6 +242,16 @@ pub fn score_mirrored(
 /// logged and dropped: a mirrored call is an observation, and a failed
 /// observation must never surface to the user whose request has already been
 /// answered.
+///
+/// The returned [`MirrorOutcome`] carries the mirrored response's raw text in
+/// [`MirrorOutcome::response_text`]. That is NOT a durable-storage exception —
+/// TD-346's discipline (never persist raw model response text) is unchanged.
+/// The caller's only sanctioned use of that field is: DLP-scrub it alongside
+/// the request text and the original (served) response text, and publish the
+/// three together as a TRANSIENT Valkey pub/sub message (`Store::
+/// publish_mirror_pair`, same channel-per-workspace shape as `publish_trace`)
+/// for a separate, later phase's subscriber to judge and immediately discard.
+/// This function never writes anywhere itself — see its caller in `proxy.rs`.
 pub async fn run_mirror(
     _slot: MirrorSlot,
     http_client: reqwest::Client,
@@ -228,13 +313,17 @@ pub async fn run_mirror(
         .unwrap_or((0, 0));
     let cost = estimate_cost(&candidate_model, prompt_tokens, completion_tokens);
 
-    let outcome = score_mirrored(
+    let mut outcome = score_mirrored(
         &candidate_model,
         request_json.as_ref(),
         parsed.as_ref(),
         started.elapsed().as_millis() as u32,
         cost,
     );
+    // Raw text, not `parsed.to_string()`: a body that failed to parse as JSON
+    // still deserves to reach the scrub-and-publish step verbatim rather than
+    // as `None`. Lossy only for the (rare, non-UTF-8) response body case.
+    outcome.response_text = Some(String::from_utf8_lossy(&bytes).into_owned());
 
     tracing::info!(
         workspace_id = %workspace_id,
@@ -244,11 +333,13 @@ pub async fn run_mirror(
         fault = ?outcome.integrity.fault,
         latency_ms = outcome.latency_ms,
         cost_usd = outcome.cost_usd,
-        "Mirrored candidate scored; response discarded"
+        "Mirrored candidate scored"
     );
 
-    // Deliberately no `write_cache` call. The response is discarded here and
-    // nowhere else refers to it.
+    // Deliberately no `write_cache` call, and never a durable-store write of
+    // `outcome.response_text` from this function. The response text is
+    // carried only as far as the caller's DLP-scrub-and-publish step — see
+    // this function's doc comment.
     Some(outcome)
 }
 
