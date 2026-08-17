@@ -274,6 +274,25 @@ export async function runFindingsList(
         }`,
       ),
     )
+
+    // Keyed off `detector_id` prefix — already visible in the table above,
+    // zero new API surface needed — rather than a precise "has a live
+    // snippet" boolean, which the list route deliberately doesn't carry (see
+    // routes/findings.ts's own comment on why). "May have" is honest given
+    // retention (14 days, independent of adjudication) could already have
+    // expired it by the time anyone reads this. The dashboard, not this CLI,
+    // is the only surface that ever displays the excerpt content itself —
+    // a terminal has no way to "hide again" once printed (scrollback, shell
+    // history, and terminal recordings all retain it indefinitely), so this
+    // deliberately stops at a pointer.
+    const withSnippetCandidate = data.findings.filter((f) => f.detector_id.startsWith('response_injection:')).length
+    if (withSnippetCandidate > 0) {
+      console.log(
+        pc.dim(
+          `${withSnippetCandidate} finding(s) may have a scrubbed response snippet available — view in the dashboard (Findings queue) to review it before adjudicating.`,
+        ),
+      )
+    }
   } catch (err) {
     log.error(`Failed to list findings: ${err instanceof Error ? err.message : String(err)}`)
     process.exit(1)

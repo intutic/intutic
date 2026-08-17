@@ -97,6 +97,10 @@ pub struct IntuticSettings {
     /// Response-side tool-call gate.
     #[serde(default)]
     pub response_gate: ResponseGateConfig,
+    /// Bounded, DLP-scrubbed response-snippet capture for
+    /// `response_injection:*` echo findings.
+    #[serde(default)]
+    pub response_injection_snippet: ResponseInjectionSnippetConfig,
     /// L1 egress enforcement — deny/monitor/enforce + allow policy (LLD #63).
     #[serde(default)]
     pub egress: crate::egress_policy::EgressConfig,
@@ -133,6 +137,36 @@ impl Default for ResponseGateConfig {
     fn default() -> Self {
         Self { enabled: true, fail_closed: true }
     }
+}
+
+/// Bounded, DLP-scrubbed capture of response text around a firing
+/// `response_injection:*` pattern (`injection::extract_scrubbed_snippet`).
+///
+/// Capture, not enforcement — `response_injection_findings` never influences
+/// a disposition and this config cannot change that. It only controls
+/// whether an operator gets enough context to adjudicate a finding as
+/// TRUE_POSITIVE/FALSE_POSITIVE.
+#[derive(Debug, Deserialize, Clone)]
+pub struct ResponseInjectionSnippetConfig {
+    /// Off disables snippet capture; pattern names alone still ride the
+    /// trace as before. Default on.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Total window width in bytes, split ~evenly before/after the match.
+    /// Hard-capped at `injection::MAX_SNIPPET_WINDOW_BYTES` regardless of
+    /// this value — that cap is NOT operator-configurable, deliberately.
+    #[serde(default = "default_snippet_window_bytes")]
+    pub window_bytes: usize,
+}
+
+impl Default for ResponseInjectionSnippetConfig {
+    fn default() -> Self {
+        Self { enabled: true, window_bytes: 200 }
+    }
+}
+
+fn default_snippet_window_bytes() -> usize {
+    200
 }
 
 /// Default spend ceiling for a workflow, for deployments with no control plane.
