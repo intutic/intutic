@@ -123,6 +123,26 @@ describe('processServerLine', () => {
     expect(out.curated).toBeUndefined()
   })
 
+  it('exposes toolsListTools on every tools/list response, curated or not — TOFU pinning needs it', () => {
+    const uncuratedLine = JSON.stringify({
+      jsonrpc: '2.0',
+      id: 3,
+      result: { tools: [{ name: 'a', description: 'A' }] },
+    })
+    const uncurated = processServerLine(uncuratedLine, pendingWith(3, { method: 'tools/list' }), [], {})
+    expect(uncurated.toolsListTools).toEqual([{ name: 'a', description: 'A' }])
+    expect(uncurated.toolsListMsgId).toBe(3)
+
+    const curatedLine = JSON.stringify({
+      jsonrpc: '2.0',
+      id: 4,
+      result: { tools: [{ name: 'a', description: 'A' }, { name: 'b', description: 'B' }] },
+    })
+    const curated = processServerLine(curatedLine, pendingWith(4, { method: 'tools/list' }), ['a'], {})
+    expect(curated.toolsListTools).toEqual([{ name: 'a', description: 'A' }])
+    expect(curated.toolsListMsgId).toBe(4)
+  })
+
   it('passes notifications and unknown ids through untouched', () => {
     const notification = JSON.stringify({ jsonrpc: '2.0', method: 'notifications/progress' })
     expect(processServerLine(notification, new Map(), [], {}).line).toBe(notification)

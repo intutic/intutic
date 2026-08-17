@@ -55,7 +55,7 @@ import { watch } from 'chokidar'
 // silenced exactly this, at the cost of also erasing the instance type.)
 import { Redis } from 'ioredis'
 import { TrajectoryMonitor } from './trajectoryMonitor.js'
-import { collectAgentReport, reportAgent } from './agentReporter.js'
+import { collectAgentReport, reportAgent, type AgentReport } from './agentReporter.js'
 import { startHarnessSession, endAllOpenSessions } from './sessionReporter.js'
 import type { TraceEvent } from './trajectoryMonitor.js'
 
@@ -74,6 +74,76 @@ function isTraceEvent(value: unknown): value is TraceEvent {
   if (typeof value !== 'object' || value === null) return false
   const e = value as Record<string, unknown>
   return typeof e['sessionId'] === 'string' && typeof e['workspaceId'] === 'string'
+}
+
+/**
+ * Turns a non-clean `scanSkillContent` result — already computed as part of
+ * `collectAgentReport`'s `facets.skills` — into a `skill_flagged` hook event
+ * (TD-358).
+ *
+ * Deliberately reuses the report the daemon already built for this cycle
+ * rather than re-scanning: `agentReporter.ts`'s `collectSkills` runs
+ * `scanSkillContent` on every `.agents/skills/**\/SKILL.md` as part of
+ * building `facets.skills` already, so this only turns a result the daemon
+ * already has into a visible signal — it does not add a second scan pass.
+ *
+ * Appends directly to `.intutic/events/hook-events.jsonl`, the SAME file
+ * every emitted PreToolUse gate's `log_event`/`logEvent` writes to and the
+ * SAME mechanism `onDriftDetected` below already uses for `config_tamper` —
+ * not a new event pipeline. `drainHookEvents` (`claudeCodeHooks.ts`) picks
+ * this line up on its next pass exactly like a gate-written one, because it
+ * only ever reads the file; it does not care who appended a given line.
+ *
+ * Report-only, per `scanSkillContent`'s own doc comment on the unmeasured
+ * false-positive rate against real, benign skill markdown: this NEVER
+ * blocks, mutates, or removes a skill. `hookEvents.ts`'s
+ * `HookEventSchema.event` enum (control plane) counts `skill_flagged`
+ * exactly like `tool_flagged` — advisory telemetry, not an incident.
+ *
+ * A failure to append is caught and warned, never thrown: a governance
+ * telemetry write must not be able to abort the sync cycle it rides in on.
+ */
+export function emitSkillFlaggedEvents(opts: {
+  workspaceRoot: string
+  workspaceId: string
+  harnessType: HarnessType
+  skills: AgentReport['facets']['skills']
+  /** Skills already emitted in this cycle, keyed `source:name`, mutated in
+   *  place. A skill is not harness-specific, and the caller invokes this
+   *  once per harness in the workspace — without a shared set, a workspace
+   *  with two active harnesses would double-emit every flagged skill. */
+  alreadyEmitted: Set<string>
+}): void {
+  const eventsLog = path.join(opts.workspaceRoot, '.intutic', 'events', 'hook-events.jsonl')
+  for (const skill of opts.skills) {
+    if (!skill.scanned || skill.clean) continue
+    const key = `${skill.source}:${skill.name}`
+    if (opts.alreadyEmitted.has(key)) continue
+    opts.alreadyEmitted.add(key)
+    try {
+      const ts = newIso()
+      const entry =
+        JSON.stringify({
+          event: 'skill_flagged',
+          toolName: `skill:${skill.name}`,
+          reason:
+            `scanSkillContent found ${skill.findingsCount} finding(s) in ` +
+            `${skill.source}/${skill.name}/SKILL.md — advisory only, see skillScan.ts`,
+          workspaceId: opts.workspaceId,
+          harnessType: opts.harnessType,
+          timestamp: ts,
+          incidentId: crypto
+            .createHash('sha1')
+            .update(ts + skill.name + opts.workspaceId)
+            .digest('hex')
+            .slice(0, 16),
+          filePath: `${skill.source}/${skill.name}/SKILL.md`,
+        }) + '\n'
+      fs.appendFileSync(eventsLog, entry, { flag: 'a' })
+    } catch (err) {
+      console.warn('[sync-daemon] failed to write skill_flagged event (non-fatal):', err)
+    }
+  }
 }
 
 // ─── Public interfaces ───────────────────────────────────────────────
@@ -537,6 +607,13 @@ export async function runSyncIteration(ctx: IterationContext): Promise<SyncResul
   // 5b. Register each harness as a durable agent with its facets, so the
   // dashboard agent graph + posture ring stay live. Best-effort: a failed
   // report never blocks the sync loop.
+  //
+  // Skills scanned this cycle whose finding has already been emitted, keyed
+  // `source:name`. `collectAgentReport` recomputes the same workspace-wide
+  // skill scan once per harness in this loop — a skill is not harness-
+  // specific — so without this a workspace with two active harnesses would
+  // double-emit every flagged skill every cycle.
+  const skillFlaggedThisCycle = new Set<string>()
   for (const harness of harnesses) {
     const filename = HARNESS_FILES[harness]
     const configSynced = filename
@@ -551,6 +628,17 @@ export async function runSyncIteration(ctx: IterationContext): Promise<SyncResul
       allowLocalVaults: config.settings?.allowLocalMemoryVaults,
     })
     await reportAgent(controlPlaneUrl, apiKey, workspaceId, report)
+
+    // 5b-i. Skill-content scan findings, surfaced as `skill_flagged` events
+    // (TD-358). See `emitSkillFlaggedEvents`'s own doc comment for why this
+    // rides the existing hook-events drain rather than a new pipeline.
+    emitSkillFlaggedEvents({
+      workspaceRoot,
+      workspaceId,
+      harnessType: harness,
+      skills: report.facets.skills,
+      alreadyEmitted: skillFlaggedThisCycle,
+    })
 
     // 5c. Open a real session for the harness (once per daemon run — the
     // reporter dedupes). This is what switches on branch/commit capture and
