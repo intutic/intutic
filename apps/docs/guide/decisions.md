@@ -100,4 +100,5 @@ When Slack OAuth is configured and `FF_NOTIFICATION_HUB=true` is enabled, pendin
 - [Core Concepts](/guide/concepts) — understand PCAS enforcement actions
 - [Agent Guidelines (SOPs)](/guide/sops) — create and manage governance rules
 - [How It Works](/guide/how-it-works) — architecture of the enforcement pipeline
+- [Governed Decisions Log](/guide/decisions-log) — surfaces decisions made here directly as context your coding agent reads
 <!-- ENTERPRISE_ONLY_END -->

@@ -555,8 +555,12 @@ function formatLanggraph(sops: SyncSopEntry[], proxyUrl: string): string {
  *
  * If bypassEnforcementTier === 'immutable', clears the macOS user-immutable
  * flag before writing and re-sets it after (WS-5 Q3).
+ *
+ * Exported for reuse by other full-regenerate writers in this daemon (e.g.
+ * `lib/decisionsDigest.ts`) that want the same write-tmp-then-rename
+ * atomicity without duplicating it.
  */
-async function atomicWrite(
+export async function atomicWrite(
   filePath: string,
   content: string,
   bypassEnforcementTier?: string,

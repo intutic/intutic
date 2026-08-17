@@ -398,6 +398,22 @@ program
   })
 
 program
+  .command('decisions-log-refresh')
+  .description(
+    'One-shot refresh of the governed decisions log (.intutic/DECISIONS.md + the claude-code ' +
+      'harness config section) — no-ops if decisionsLogEnabled is off. Invoked by the optional ' +
+      'post-merge hook (see gitHooks.ts); safe to run manually.',
+  )
+  .action(async () => {
+    const { refreshDecisionsLog } = await import('./lib/decisionsLogRefresh.js')
+    const result = await refreshDecisionsLog(process.cwd())
+    if (!result.refreshed && result.reason) {
+      const { log } = await import('./lib/logger.js')
+      log.dim(`Decisions log not refreshed: ${result.reason}`)
+    }
+  })
+
+program
   .command('exec')
   .description('Execute a command wrapped with Intutic proxy environment variables')
   .argument('[command...]', 'Command and arguments to execute (e.g. -- claude)')
