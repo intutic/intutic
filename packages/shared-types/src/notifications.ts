@@ -69,6 +69,54 @@ export type NotificationEventType =
    * rules are workspace-scoped), not once per gateway.
    */
   | 'gateway.stale.detected'
+  /**
+   * A managed cell (`deployment_target='managed_cell'`) has sat `pending`
+   * (registered, never heartbeated) past `CELL_STUCK_PENDING_THRESHOLD_MS`
+   * (15 min) -- the provisioner is failing to converge it (TD-342(c)).
+   * Fired by `detectStuckPendingCells` (gatewayHealthService.ts), same
+   * org→workspace fan-out and stable-reason dedup as `gateway.stale.detected`.
+   * Already wired into `notificationRouterService.ts`'s dispatch and
+   * severity map before this union entry existed -- this only adds the type
+   * contract those call sites were relying on via an `as` cast.
+   */
+  | 'gateway.cell.stuck_pending'
+  /**
+   * The control plane's CP→region Valkey sync heartbeat
+   * (`intutic:cp:last-sync`) is missing or stale in a remote region --
+   * cells there keep serving, but on progressively stale control metadata.
+   * Fired by `detectStaleRegionSync` (gatewayHealthService.ts) per member
+   * workspace of every org with a live cell in the affected region. Same
+   * pre-existing-dispatch note as `gateway.cell.stuck_pending` above.
+   */
+  | 'region.sync.stale'
+  // ── Managed gateway cell deprovisioning (LLD #71 Phase C2) ──
+  /**
+   * A managed cell was marked for removal because its org's plan tier no
+   * longer covers it (`maxCellsPerOrg` in planSkuMap.ts) -- either a
+   * voluntary downgrade or an involuntary loss of paid status (cancellation,
+   * dunning). Fired by `scheduleCellReconciliation`
+   * (cellDeprovisionService.ts) at most once per scheduled removal
+   * (`deprovision_notified_at` is the idempotence gate). Carries
+   * `deprovision_at` -- the grace-period deadline -- and `reason`.
+   */
+  | 'org.cells.deprovision_scheduled'
+  /**
+   * A previously-scheduled cell removal was cancelled because the org's
+   * cell count is no longer over its plan-tier capacity -- typically a
+   * re-upgrade landing before the grace period expired. Fired by the same
+   * reconciler as `org.cells.deprovision_scheduled` above, the bidirectional
+   * half of the same bidirectional-reconcile-marks design. MEDIUM, not
+   * HIGH: this is good news for the org, not an incident.
+   */
+  | 'org.cells.deprovision_canceled'
+  /**
+   * A managed cell's deprovision grace period actually expired and the cell
+   * was revoked -- fired by `sweepCellCapacity`'s deadline pass
+   * (cellDeprovisionService.ts), the same revoke shape as a manual
+   * `DELETE /api/v1/gateways/:id`. HIGH: an org's traffic capacity for that
+   * region just changed, same tier as `gateway.stale.detected`.
+   */
+  | 'org.cells.deprovisioned'
   // ── Enforcement device visibility (post-strip gap #2, LLD #63 hardening) ──
   /**
    * A device's reported enforcement posture (firewall/CA-trust/system-hooks)
@@ -93,6 +141,15 @@ export type NotificationEventType =
    * gateway.stale.detected's org-membership join provides for gateways.
    */
   | 'provider.outage.detected'
+  // ── Billing (LLD #71 Phase C2's fix to customer.subscription.updated) ──
+  /**
+   * A Stripe subscription reported `status: 'past_due'` or `'unpaid'` via
+   * `customer.subscription.updated` -- visibility only, not a tier change
+   * (repeated payment failure is the dunning flow's job, via
+   * `invoice.payment_failed`'s own 3rd-attempt downgrade). MEDIUM: worth a
+   * support/ops look, not yet the incident a full cancellation is.
+   */
+  | 'billing.subscription.past_due'
 
 export type NotificationStatus = 'sent' | 'failed' | 'deduplicated' | 'filtered'
 

@@ -51,6 +51,31 @@ export interface ProxyConfig {
    * Defaults to `'unknown'`, matching `workspaceId`'s own unset default.
    */
   serverName: string
+  /**
+   * Remote MCP server URL, from `--remote-url <url>`. When set, the proxy's
+   * upstream is an HTTP/SSE MCP server (remoteBridge.ts) instead of a spawned
+   * stdio child process — `realServerCommand` is empty in that case, and
+   * `loadConfig` rejects a config that sets both (see the mutual-exclusion
+   * check below). `undefined` in every other mode.
+   */
+  remoteUrl?: string
+  /**
+   * Remote transport selection, from `--remote-transport <sse|http>`. Only
+   * meaningful when `remoteUrl` is set. Defaults to `'http'`
+   * (`StreamableHTTPClientTransport` — the SDK's current, non-deprecated
+   * transport) when `--remote-url` is passed without an explicit
+   * `--remote-transport`.
+   */
+  remoteTransport?: 'sse' | 'http'
+  /**
+   * Auth headers for the remote MCP connection (e.g. `Authorization: Bearer
+   * <token>`), parsed from the `INTUTIC_REMOTE_HEADERS` env var — a JSON
+   * object string. Deliberately NOT a CLI flag: argv is visible to any local
+   * process via `ps`, and these headers carry bearer tokens/API keys that
+   * must never leak that way. Empty object when unset, malformed, or not a
+   * plain JSON object.
+   */
+  remoteHeaders: Record<string, string>
 }
 
 const DEFAULT_EVENTS_PATH = node_path.join(node_os.homedir(), '.intutic', 'events', 'hook-events.jsonl')
@@ -84,12 +109,20 @@ async function parseEnvFile(filePath: string): Promise<Record<string, string>> {
 }
 
 /**
- * Parse CLI arguments for --workspace-id, --server-name, and the real server
- * command (after --).
+ * Parse CLI arguments for --workspace-id, --server-name, --remote-url,
+ * --remote-transport, and the real server command (after --).
  */
-function parseCliArgs(argv: string[]): { workspaceId?: string; serverName?: string; realServerCommand: string[] } {
+function parseCliArgs(argv: string[]): {
+  workspaceId?: string
+  serverName?: string
+  remoteUrl?: string
+  remoteTransport?: string
+  realServerCommand: string[]
+} {
   let workspaceId: string | undefined
   let serverName: string | undefined
+  let remoteUrl: string | undefined
+  let remoteTransport: string | undefined
   let separatorIndex = -1
 
   for (let i = 0; i < argv.length; i++) {
@@ -99,6 +132,12 @@ function parseCliArgs(argv: string[]): { workspaceId?: string; serverName?: stri
     } else if (argv[i] === '--server-name' && i + 1 < argv.length) {
       serverName = argv[i + 1]
       i++ // skip value
+    } else if (argv[i] === '--remote-url' && i + 1 < argv.length) {
+      remoteUrl = argv[i + 1]
+      i++ // skip value
+    } else if (argv[i] === '--remote-transport' && i + 1 < argv.length) {
+      remoteTransport = argv[i + 1]
+      i++ // skip value
     } else if (argv[i] === '--') {
       separatorIndex = i
       break
@@ -106,7 +145,30 @@ function parseCliArgs(argv: string[]): { workspaceId?: string; serverName?: stri
   }
 
   const realServerCommand = separatorIndex !== -1 ? argv.slice(separatorIndex + 1) : []
-  return { workspaceId, serverName, realServerCommand }
+  return { workspaceId, serverName, remoteUrl, remoteTransport, realServerCommand }
+}
+
+/**
+ * Parse `INTUTIC_REMOTE_HEADERS` — a JSON object string of header name/value
+ * pairs carried via environment variable rather than argv (see
+ * `ProxyConfig.remoteHeaders`'s doc comment for why). Never throws: a
+ * missing, malformed, or non-object value degrades to "no extra headers"
+ * rather than crashing config load over a bad env var.
+ */
+function parseRemoteHeaders(raw: string | undefined): Record<string, string> {
+  if (!raw) return {}
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return {}
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {}
+  const headers: Record<string, string> = {}
+  for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (typeof value === 'string') headers[key] = value
+  }
+  return headers
 }
 
 /**
@@ -145,9 +207,41 @@ export async function loadConfig(argv: string[] = process.argv.slice(2)): Promis
   // what it says.
   const mcpProxyMode = runtimeEnv['INTUTIC_MCP_PROXY_MODE'] ?? 'per-session'
 
-  const standalone = cli.realServerCommand.length === 0
-
   const serverName = cli.serverName ?? 'unknown'
+
+  // Remote (HTTP/SSE) bridge mode and stdio proxy mode are mutually
+  // exclusive upstream modes — `--remote-url` together with a positional
+  // stdio command (`--` followed by a command) is a config error, not a
+  // "remote wins" or "stdio wins" fallback. Caught here rather than left to
+  // whichever of remoteBridge.ts/runProxy happened to be invoked, so the
+  // failure surfaces at config-load time with a clear reason (index.ts's
+  // existing `loadConfig` catch already writes config errors to stderr and
+  // exits 1 — this reuses that path, not a new one).
+  if (cli.remoteUrl !== undefined && cli.realServerCommand.length > 0) {
+    throw new Error(
+      'Configuration error: --remote-url and a stdio server command (after --) are ' +
+        'mutually exclusive upstream modes. Wrap either a remote (HTTP/SSE) MCP server ' +
+        '(--remote-url) or a local stdio command (-- <command> [args...]), not both.',
+    )
+  }
+
+  let remoteTransport: 'sse' | 'http' | undefined
+  if (cli.remoteUrl !== undefined) {
+    if (cli.remoteTransport === undefined) {
+      // StreamableHTTPClientTransport is the SDK's current, non-deprecated
+      // transport — SSEClientTransport exists only for servers that have not
+      // migrated off the older SSE transport, so it defaults on rather than off.
+      remoteTransport = 'http'
+    } else if (cli.remoteTransport === 'sse' || cli.remoteTransport === 'http') {
+      remoteTransport = cli.remoteTransport
+    } else {
+      throw new Error(
+        `Configuration error: --remote-transport must be "sse" or "http" (got "${cli.remoteTransport}").`,
+      )
+    }
+  }
+
+  const standalone = cli.realServerCommand.length === 0 && cli.remoteUrl === undefined
 
   return {
     workspaceId,
@@ -160,5 +254,8 @@ export async function loadConfig(argv: string[] = process.argv.slice(2)): Promis
     mcpProxyMode,
     standalone,
     serverName,
+    remoteUrl: cli.remoteUrl,
+    remoteTransport,
+    remoteHeaders: parseRemoteHeaders(process.env['INTUTIC_REMOTE_HEADERS']),
   }
 }

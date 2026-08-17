@@ -22,8 +22,16 @@
  *   proxy binary is the command, and the original server command is passed
  *   after `--`, tagged with `--server-name <name>` so the proxy can attribute
  *   traffic to the server it fronts. A `__intutic_wrapped: true` flag is added
- *   to prevent double-wrapping. Remote (HTTP/SSE, `url`-keyed) entries have no
- *   command to wrap and are left untouched — see TD-354.
+ *   to prevent double-wrapping. Remote (HTTP/SSE, `url`-keyed) entries are now
+ *   ALSO wrapped — TD-354's stdio→HTTP bridge phase closed the gap this
+ *   comment used to describe as "left untouched": the entry is rewritten to
+ *   spawn the SAME proxy binary in bridge mode (`--remote-url`/
+ *   `--remote-transport`, headers riding in `INTUTIC_REMOTE_HEADERS` env, not
+ *   argv — `ps` visibility). `__intutic_original` preserves the entry's
+ *   pre-wrap `url`/`type`/`headers` so `classifyEntry` can report the TRUE
+ *   transport of what got wrapped, and so a wrapped entry could be unwrapped
+ *   later. See TECH_DEBT.md TD-354 for the historical decline this phase
+ *   supersedes.
  *
  * Continuous invariant, not one-shot: `injectMcpServer` is called once from
  * `intutic connect` (tools/cli) AND once per sync-loop iteration
@@ -45,23 +53,43 @@ import * as node_os from 'node:os'
 import { existsSync } from 'node:fs'
 import { isDeepStrictEqual } from 'node:util'
 import { createLogger } from '@intutic/logger'
+import { parseDocument, isMap } from 'yaml'
 
 const log = createLogger('sync-mcp-autowrite')
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 interface McpServerEntry {
-  /** Absent on remote (HTTP/SSE) transport entries — see `url`. */
+  /** Absent on an UNWRAPPED remote (HTTP/SSE) transport entry — see `url`.
+   *  Present (== `'node'`) on any wrapped entry, stdio or remote alike, since
+   *  wrapping always rewrites the entry to spawn the proxy binary. */
   command?: string
   args?: string[]
   env?: Record<string, string>
-  /** Remote MCP transport marker. When present (instead of `command`), this
-   *  is not a stdio entry and `wrapWithProxy` leaves it alone — see TD-354. */
+  /** Remote MCP transport marker on an UNWRAPPED entry. When present (instead
+   *  of `command`), `wrapWithProxy` rewrites it into a remote-bridge-mode
+   *  stdio entry (`--remote-url`/`--remote-transport`) rather than leaving it
+   *  alone — see TD-354, now superseded. */
   url?: string
   /** Some harnesses tag a `url` entry `"sse"` explicitly; absent/other = http. */
   type?: string
+  /** Auth headers for a remote (HTTP/SSE) entry, e.g. `{ Authorization:
+   *  "Bearer …" }`. Carried into the wrapped entry's `INTUTIC_REMOTE_HEADERS`
+   *  env var, never argv — the same `ps`-visibility reasoning `--remote-url`
+   *  keeps headers out of argv for in `packages/mcp-proxy/src/config.ts`. */
+  headers?: Record<string, string>
   /** Intutic governance marker — prevents double-wrapping */
   __intutic_wrapped?: boolean
+  /**
+   * Preserves a WRAPPED remote entry's pre-wrap `url`/`type`/`headers` — the
+   * wrap rewrites the entry's top-level shape to a stdio one (`command`/
+   * `args`, so the harness can spawn the proxy binary at all), which would
+   * otherwise make the entry indistinguishable from an originally-stdio
+   * server. `classifyEntry` reads this to report the TRUE transport rather
+   * than misreporting every wrapped remote server as stdio. Absent on stdio
+   * entries and on unwrapped entries.
+   */
+  __intutic_original?: { url?: string; type?: string; headers?: Record<string, string> }
 }
 
 interface McpServersMap {
@@ -160,8 +188,23 @@ function openHandsConfigPath(workspaceRoot: string): string {
 
 /**
  * Wrap a single MCP server entry with the governance proxy.
- * Returns the entry unmodified if it's already wrapped, or if it has no
- * `command` to wrap (a remote HTTP/SSE server — see TD-354).
+ *
+ * Returns the entry unmodified if it's already wrapped, or if its shape is
+ * neither a stdio entry (`command`) nor a remote entry (`url`) — an unknown
+ * shape has nothing safe to rewrite it into.
+ *
+ * Two wrap conventions, chosen by the entry's pre-wrap shape:
+ *   - stdio (`command`/`args`): the proxy binary becomes the command, the
+ *     original command is passed after `--`, tagged `--server-name`.
+ *   - remote (`url`, HTTP/SSE — TD-354, now superseded): the proxy binary is
+ *     invoked in bridge mode (`--remote-url`/`--remote-transport` instead of
+ *     `--`), also tagged `--server-name`. Any `headers` on the original entry
+ *     ride into the wrapped entry's env as `INTUTIC_REMOTE_HEADERS` (a JSON
+ *     object string) — never argv, for the same `ps`-visibility reasoning
+ *     `packages/mcp-proxy/src/config.ts` documents for `--remote-url` itself.
+ * Both conventions end up with the SAME top-level shape (`command: 'node'`,
+ * `args: […]`) since the harness only knows how to spawn a stdio process —
+ * `__intutic_original` is what lets `classifyEntry` tell them apart again.
  */
 function wrapWithProxy(
   entry: McpServerEntry,
@@ -171,31 +214,63 @@ function wrapWithProxy(
 ): McpServerEntry {
   if (entry.__intutic_wrapped) return entry
 
-  // Remote (HTTP/SSE) transport servers have no `command` to wrap — wrapping
-  // is a stdio-process convention (spawn our proxy binary, hand it the
-  // original command after `--`). Leave non-stdio entries untouched rather
-  // than building an args array around `undefined`.
-  if (typeof entry.command !== 'string') return entry
-
   const proxyBin = resolveProxyBin(workspaceRoot)
-  const originalArgs = entry.args ?? []
 
-  return {
-    command: 'node',
-    args: [
-      proxyBin,
-      '--workspace-id', workspaceId,
-      '--server-name', serverName,
-      '--',
-      entry.command,
-      ...originalArgs,
-    ],
-    env: {
+  if (typeof entry.command === 'string') {
+    const originalArgs = entry.args ?? []
+    return {
+      command: 'node',
+      args: [
+        proxyBin,
+        '--workspace-id', workspaceId,
+        '--server-name', serverName,
+        '--',
+        entry.command,
+        ...originalArgs,
+      ],
+      env: {
+        ...(entry.env ?? {}),
+        INTUTIC_WORKSPACE_ID: workspaceId,
+      },
+      __intutic_wrapped: true,
+    }
+  }
+
+  if (typeof entry.url === 'string') {
+    const remoteTransport = entry.type?.toLowerCase() === 'sse' ? 'sse' : 'http'
+    const hasHeaders = entry.headers !== undefined && Object.keys(entry.headers).length > 0
+
+    const original: NonNullable<McpServerEntry['__intutic_original']> = { url: entry.url }
+    if (entry.type !== undefined) original.type = entry.type
+    if (entry.headers !== undefined) original.headers = entry.headers
+
+    const env: Record<string, string> = {
       ...(entry.env ?? {}),
       INTUTIC_WORKSPACE_ID: workspaceId,
-    },
-    __intutic_wrapped: true,
+    }
+    if (hasHeaders) {
+      env['INTUTIC_REMOTE_HEADERS'] = JSON.stringify(entry.headers)
+    }
+
+    return {
+      command: 'node',
+      args: [
+        proxyBin,
+        '--workspace-id', workspaceId,
+        '--server-name', serverName,
+        '--remote-url', entry.url,
+        '--remote-transport', remoteTransport,
+      ],
+      env,
+      __intutic_wrapped: true,
+      __intutic_original: original,
+    }
   }
+
+  // Neither a stdio command nor a remote url — an unrecognised shape has
+  // nothing safe to rewrite it into. Leave it alone rather than building an
+  // args array around `undefined`.
+  return entry
 }
 
 /**
@@ -453,44 +528,142 @@ async function injectContinue(workspaceId: string, workspaceRoot: string): Promi
 
 // ─── Target: Goose ────────────────────────────────────────────────────────────
 
+/**
+ * The pre-YAML-dep fallback: append-only string injection of an `intutic:`
+ * MCP block, never touching (or even parsing) anything else in the file.
+ * This is now ONLY the fallback path (see `injectGoose`) for a config.yaml
+ * that does not parse as YAML at all — a parser that cannot safely represent
+ * the file cannot safely round-trip it either, so falling back to "never
+ * touch anything but the block we control" is the safe degrade, not a
+ * regression. Never rewraps a pre-existing remote MCP server entry (it never
+ * looks at `mcp:` beyond the literal string `intutic:`), which is why
+ * `discoverGoose` cannot claim more than it can actually verify when THIS
+ * path was the one that ran.
+ */
+async function injectGooseAppendOnly(configPath: string, existingYaml: string, workspaceId: string, proxyBin: string): Promise<void> {
+  let text = existingYaml
+  const intuticBlock = [
+    'mcp:',
+    '  intutic:',
+    `    command: node`,
+    `    args: [${JSON.stringify(proxyBin)}, "--workspace-id", ${JSON.stringify(workspaceId)}]`,
+  ].join('\n')
+
+  if (!text.includes('intutic:')) {
+    text = text.trimEnd() + '\n\n' + intuticBlock + '\n'
+  }
+
+  if (text === existingYaml) {
+    // Already present and unchanged — write-if-changed applies here too
+    // (see writeJsonFile's doc comment for why: this runs every sync cycle now).
+    return
+  }
+
+  await node_fs.mkdir(node_path.dirname(configPath), { recursive: true })
+  await node_fs.writeFile(configPath, text, 'utf-8')
+  log.info({ action: 'goose_mcp_injected', mode: 'append_only_fallback' }, 'Goose config.yaml updated (append-only fallback)')
+}
+
+/**
+ * Structurally edits `~/.config/goose/config.yaml`'s `mcp:` block via the
+ * `yaml` package's `parseDocument` — unlike every other harness here (plain
+ * `JSON.parse`/`JSON.stringify`), this is a user's hand-maintained YAML file,
+ * and `parseDocument` preserves comments and formatting for everything this
+ * function does NOT touch (`Document#setIn` replaces only the specific
+ * `['mcp', <name>]` paths whose wrapped shape actually changed).
+ *
+ * Applies the SAME `wrapWithProxy` convention every other harness uses —
+ * stdio entries wrapped with `--`, remote (`url`-keyed) entries wrapped with
+ * `--remote-url`/`--remote-transport` — so a remote MCP server declared in
+ * Goose's config gets the identical bridge coverage a remote entry in
+ * `~/.claude/mcp.json` would get, not a second, divergent convention.
+ *
+ * Falls back to `injectGooseAppendOnly` (append-only text injection, the
+ * pre-existing behaviour) when the file does not parse as YAML at all —
+ * logged as `goose_yaml_unparseable` so the fallback is diagnosable rather
+ * than silently degrading coverage. A parser that cannot safely represent a
+ * malformed file cannot safely round-trip it either; corrupting a user's
+ * hand-maintained config is a worse failure than leaving non-`intutic`
+ * entries in that file unwrapped for one more sync cycle.
+ */
 async function injectGoose(workspaceId: string, workspaceRoot: string): Promise<void> {
   const configPath = gooseConfigPath()
 
   try {
     await node_fs.access(node_path.dirname(configPath))
-    let yaml = ''
-    try {
-      yaml = await node_fs.readFile(configPath, 'utf-8')
-    } catch {
-      yaml = ''
-    }
-    const originalYaml = yaml
-
-    // Inject MCP server block if not present (simple string injection — avoids yaml dep)
-    const proxyBin = resolveProxyBin(workspaceRoot)
-    const intuticBlock = [
-      'mcp:',
-      '  intutic:',
-      `    command: node`,
-      `    args: [${JSON.stringify(proxyBin)}, "--workspace-id", ${JSON.stringify(workspaceId)}]`,
-    ].join('\n')
-
-    if (!yaml.includes('intutic:')) {
-      yaml = yaml.trimEnd() + '\n\n' + intuticBlock + '\n'
-    }
-
-    if (yaml === originalYaml) {
-      // Already present and unchanged — write-if-changed applies here too
-      // (see writeJsonFile's doc comment for why: this runs every sync cycle now).
-      return
-    }
-
-    await node_fs.mkdir(node_path.dirname(configPath), { recursive: true })
-    await node_fs.writeFile(configPath, yaml, 'utf-8')
-    log.info({ action: 'goose_mcp_injected' }, 'Goose config.yaml updated')
   } catch {
     log.debug({ action: 'goose_skip' }, 'Goose not installed — skipping')
+    return
   }
+
+  let existingYaml: string
+  try {
+    existingYaml = await node_fs.readFile(configPath, 'utf-8')
+  } catch {
+    existingYaml = ''
+  }
+
+  const proxyBin = resolveProxyBin(workspaceRoot)
+
+  let doc: ReturnType<typeof parseDocument>
+  try {
+    doc = parseDocument(existingYaml)
+    if (doc.errors.length > 0) {
+      throw doc.errors[0]
+    }
+  } catch (err) {
+    log.warn(
+      { action: 'goose_yaml_unparseable', err: (err as Error).message },
+      'Goose config.yaml did not parse as YAML — falling back to append-only text injection',
+    )
+    await injectGooseAppendOnly(configPath, existingYaml, workspaceId, proxyBin)
+    return
+  }
+
+  const intuticEntry: McpServerEntry = {
+    command: 'node',
+    args: [proxyBin, '--workspace-id', workspaceId],
+  }
+
+  let changed = false
+  const mcpNode = doc.get('mcp')
+  const mcpIsMap = isMap(mcpNode)
+  const servers: Record<string, McpServerEntry> = mcpIsMap
+    ? ((doc.toJS() as { mcp?: Record<string, McpServerEntry> }).mcp ?? {})
+    : {}
+
+  if (mcpNode !== undefined && !mcpIsMap) {
+    // `mcp:` exists but isn't a mapping (e.g. `mcp: null`, `mcp: []`,
+    // `mcp: "x"`) — nothing safe to preserve there. Replace with a fresh
+    // empty map so the `setIn` calls below have a collection to write into
+    // (`Document#setIn` throws on a non-collection intermediate path).
+    doc.set('mcp', {})
+    changed = true
+  }
+
+  if (!isDeepStrictEqual(servers['intutic'], intuticEntry)) {
+    doc.setIn(['mcp', 'intutic'], intuticEntry)
+    changed = true
+  }
+
+  for (const [name, entry] of Object.entries(servers)) {
+    if (name === 'intutic') continue
+    const wrapped = wrapWithProxy(entry, workspaceId, workspaceRoot, name)
+    if (!isDeepStrictEqual(wrapped, entry)) {
+      doc.setIn(['mcp', name], wrapped)
+      changed = true
+    }
+  }
+
+  if (!changed) {
+    // Already present and unchanged — write-if-changed applies here too
+    // (see writeJsonFile's doc comment for why: this runs every sync cycle now).
+    return
+  }
+
+  await node_fs.mkdir(node_path.dirname(configPath), { recursive: true })
+  await node_fs.writeFile(configPath, doc.toString(), 'utf-8')
+  log.info({ action: 'goose_mcp_injected', mode: 'yaml' }, 'Goose config.yaml updated (structural YAML edit)')
 }
 
 // ─── Target: OpenHands ────────────────────────────────────────────────────────
@@ -518,6 +691,22 @@ function classifyEntry(entry: unknown): { transport: DiscoveredMcpServer['transp
   if (!entry || typeof entry !== 'object') return { transport: 'unknown', wrapped: false }
   const e = entry as Record<string, unknown>
   const wrapped = e.__intutic_wrapped === true
+
+  // A wrapped remote entry's TOP-LEVEL shape is stdio (`command: 'node'`,
+  // `args: […]`) — that IS the bridge, not a lie, but it would misreport
+  // every wrapped remote server as though wrapping made it stdio if checked
+  // first. `__intutic_original` (see `wrapWithProxy`) records what was
+  // actually wrapped, so this checks it BEFORE falling through to the
+  // generic `command`/`url` shape check below — visibility must stay honest.
+  const original = e.__intutic_original
+  if (wrapped && original !== null && typeof original === 'object') {
+    const o = original as Record<string, unknown>
+    if (typeof o.url === 'string') {
+      const type = typeof o.type === 'string' ? o.type.toLowerCase() : ''
+      return { transport: type === 'sse' ? 'sse' : 'http', wrapped: true }
+    }
+  }
+
   if (typeof e.command === 'string') return { transport: 'stdio', wrapped }
   if (typeof e.url === 'string') {
     const type = typeof e.type === 'string' ? e.type.toLowerCase() : ''
@@ -554,27 +743,59 @@ async function discoverContinue(): Promise<DiscoveredMcpServer[]> {
 }
 
 /**
- * Goose's `~/.config/goose/config.yaml` is YAML, and `injectGoose` above
- * avoids a yaml dependency by string-injecting a flat block rather than
- * parsing the file. Discovery mirrors that: a line scan for 2-space-indented
- * `<name>:` keys under a top-level `mcp:` block — the exact shape `injectGoose`
- * itself writes — not a real YAML parser, so a server nested any other way
- * (anchors, flow style, deeper indentation) is invisible here just as it
- * would be to the writer. `injectGoose` also never rewrites a pre-existing,
- * non-`intutic` server entry, so nothing discovered here is ever `wrapped`.
+ * Goose's `~/.config/goose/config.yaml` is YAML. `injectGoose` now
+ * structurally parses and edits it (via the `yaml` package), and — per
+ * `wrapWithProxy` — DOES rewrap a pre-existing, non-`intutic` server entry
+ * (both stdio and remote), so a blanket "nothing discovered here is ever
+ * `wrapped`" claim is no longer true. Discovery mirrors the writer: a real
+ * YAML parse via `classifyEntry` (the SAME classifier every JSON-shaped
+ * harness below uses), reporting each entry's true transport and wrapped
+ * status honestly, exactly like every other harness in this file.
+ *
+ * Falls back to the old line-scan (2-space-indented `<name>:` keys under a
+ * top-level `mcp:` block) when the file does not parse as YAML — matching
+ * `injectGoose`'s own fallback to append-only injection for the same
+ * malformed-file case. The line-scan fallback still cannot see a server
+ * nested any other way (anchors, flow style, deeper indentation) and still
+ * never reports one `wrapped`, because it never inspects a value, only a key
+ * — an honest limit of a best-effort fallback over a file real parsing
+ * already gave up on.
  */
 async function discoverGoose(): Promise<DiscoveredMcpServer[]> {
   const filePath = gooseConfigPath()
-  let yaml: string
+  let rawYaml: string
   try {
-    yaml = await node_fs.readFile(filePath, 'utf-8')
+    rawYaml = await node_fs.readFile(filePath, 'utf-8')
   } catch {
     return []
   }
 
+  try {
+    const doc = parseDocument(rawYaml)
+    if (doc.errors.length > 0) throw doc.errors[0]
+    const mcpNode = doc.get('mcp')
+    if (!isMap(mcpNode)) return []
+    // Not filtering out 'intutic' here — `discoverMcpServers` below does that
+    // once, for every harness alike (see its own doc comment), the same
+    // convention `discoverJsonObjectHarness`/`discoverContinue` already rely on.
+    const servers = (doc.toJS() as { mcp?: Record<string, unknown> }).mcp ?? {}
+    const out: DiscoveredMcpServer[] = []
+    for (const [name, entry] of Object.entries(servers)) {
+      const { transport, wrapped } = classifyEntry(entry)
+      out.push({ server: name, harness: 'goose', transport, wrapped })
+    }
+    return out
+  } catch {
+    return discoverGooseLineScanFallback(rawYaml)
+  }
+}
+
+/** Best-effort fallback for a `config.yaml` that does not parse as YAML —
+ *  see `discoverGoose`'s doc comment for why this exists and what it cannot see. */
+function discoverGooseLineScanFallback(rawYaml: string): DiscoveredMcpServer[] {
   const out: DiscoveredMcpServer[] = []
   let inMcpBlock = false
-  for (const line of yaml.split('\n')) {
+  for (const line of rawYaml.split('\n')) {
     if (/^mcp:\s*$/.test(line)) {
       inMcpBlock = true
       continue

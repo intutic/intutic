@@ -13,7 +13,18 @@ import { log } from '../lib/logger.js'
 import { loadCredentials, loadConfig } from '../config/store.js'
 import { getIntuticDir, resolveControlPlaneUrl } from '../config/paths.js'
 import { createApiClient } from '../lib/api.js'
-import { scanSkillContent, SKILL_SCAN_PATTERNS, type SkillScanFinding } from '@intutic/shared-types'
+import {
+  scanSkillContent,
+  SKILL_SCAN_PATTERNS,
+  scanScriptContent,
+  SCRIPT_SCAN_PATTERNS,
+  detectScriptLanguage,
+  MAX_SKILL_DIR_DEPTH,
+  MAX_FILES_PER_SKILL,
+  MAX_SCRIPT_SCAN_BYTES,
+  type SkillScanFinding,
+  type ScriptLanguage,
+} from '@intutic/shared-types'
 import pc from 'picocolors'
 
 // ─── Shared response shapes ──────────────────────────────────────────
@@ -49,6 +60,21 @@ export interface SkillReportEntry {
    * `scanned === false` unambiguously means "we could not tell."
    */
   scanned?: boolean
+  /**
+   * Which surface this row describes. `'skill_md'` for a skill's
+   * `SKILL.md`, `'script'` for a bundled file discovered by
+   * `discoverSkillBundledFiles` and audited by `auditScriptFile`. Absent for
+   * the legacy rule-file rows (`.cursorrules`, `CLAUDE.md`, etc), which
+   * predate this distinction and are neither.
+   */
+  kind?: 'skill_md' | 'script'
+  /**
+   * The script language `detectScriptLanguage` (`@intutic/shared-types`)
+   * inferred for a `kind: 'script'` row — `'unknown'` when neither the
+   * extension nor a shebang resolved (still hashed, never scanned; see
+   * `auditScriptFile`). Absent for anything that isn't a script row.
+   */
+  language?: string
 }
 
 /** Where bundled skill directories live, mirroring the conventions
@@ -100,7 +126,7 @@ export async function auditSkillFile(
         `[${filePath}] Could not be read (${err instanceof Error ? err.message : String(err)}) — reported as unscanned, not clean.`,
       )
     }
-    return { filePath, linesCount: 0, issuesDetected: 0, scanned: false }
+    return { filePath, linesCount: 0, issuesDetected: 0, scanned: false, kind: 'skill_md' }
   }
 
   const contentLines = content.split('\n')
@@ -141,6 +167,7 @@ export async function auditSkillFile(
     findings: result.findings,
     sha256,
     scanned: true,
+    kind: 'skill_md',
   }
 }
 
@@ -168,6 +195,150 @@ export async function discoverSkillFiles(workspaceRoot: string): Promise<Discove
     }
   }
   return out
+}
+
+/** One bundled file discovered alongside a skill's `SKILL.md`. */
+export interface DiscoveredScriptFile {
+  /** Path relative to the workspace root. */
+  filePath: string
+  fullPath: string
+}
+
+/**
+ * Bounded, symlink-skipping recursive walk of a skill directory's sibling
+ * files — everything alongside `SKILL.md`, the surface TD-356
+ * (`docs/TECH_DEBT.md`) named as unenumerated. `SKILL.md` itself is excluded
+ * (it is already covered by `discoverSkillFiles`/`auditSkillFile` above);
+ * everything else found, at any depth up to the cap, is a candidate for
+ * `auditScriptFile`.
+ *
+ * Bounded by `MAX_SKILL_DIR_DEPTH` and `MAX_FILES_PER_SKILL`
+ * (`@intutic/shared-types`) — a skill directory is developer-authored
+ * content, not something this command should ever walk unboundedly. Depth 0
+ * is the skill directory itself; nested subdirectories increment from
+ * there, and the walk stops recursing once depth exceeds the cap.
+ *
+ * Symlinks are never followed: `Dirent.isSymbolicLink()` is checked during
+ * `readdir` and skipped outright, without ever stat-ing or resolving where
+ * the link points. A symlink inside a skill directory could point outside
+ * that directory — or outside the workspace entirely — which would turn a
+ * bounded, skill-scoped walk into an effectively unbounded one, and would
+ * let a skill directory "bundle" a script that does not actually live on
+ * disk inside it.
+ */
+export async function discoverSkillBundledFiles(
+  workspaceRoot: string,
+  /** Path to the skill directory (not `SKILL.md` itself), relative to
+   *  `workspaceRoot`, e.g. `.agents/skills/my-skill`. */
+  skillDirPath: string,
+): Promise<DiscoveredScriptFile[]> {
+  const out: DiscoveredScriptFile[] = []
+
+  async function walk(relDir: string, depth: number): Promise<void> {
+    if (depth > MAX_SKILL_DIR_DEPTH || out.length >= MAX_FILES_PER_SKILL) return
+
+    let entries
+    try {
+      entries = await fs.readdir(join(workspaceRoot, relDir), { withFileTypes: true })
+    } catch {
+      return
+    }
+
+    for (const entry of entries) {
+      if (out.length >= MAX_FILES_PER_SKILL) return
+      if (entry.isSymbolicLink()) continue // never follow — see doc comment above
+
+      const relPath = join(relDir, entry.name)
+      if (entry.isDirectory()) {
+        await walk(relPath, depth + 1)
+      } else if (entry.isFile()) {
+        if (depth === 0 && entry.name === 'SKILL.md') continue
+        out.push({ filePath: relPath, fullPath: join(workspaceRoot, relPath) })
+      }
+    }
+  }
+
+  await walk(skillDirPath, 0)
+  return out
+}
+
+/**
+ * Read, hash, and — when recognized and within the byte cap — content-scan
+ * one bundled script file discovered by `discoverSkillBundledFiles`.
+ *
+ * The sha256 hash is ALWAYS computed, even for a file this scanner cannot
+ * itself interpret (a binary, an unrecognized extension with no useful
+ * shebang) — that is deliberate, not a leftover from a simpler version of
+ * this function. A later, separate, opt-in phase (Cisco `skill-scanner` /
+ * VirusTotal-style hash lookup, Phase S3) needs the hash of every bundled
+ * file regardless of whether THIS scanner's regex patterns can say anything
+ * about its content.
+ *
+ * Refusal-not-pass, same contract as `auditSkillFile`: a read failure, a
+ * file over `MAX_SCRIPT_SCAN_BYTES`, or an unrecognized language all return
+ * `scanned: false` — never folded into `issuesDetected: 0` implying safety.
+ * A file over the byte cap is a REFUSAL to look, reported as such, not a
+ * silent skip and not a false "clean".
+ */
+export async function auditScriptFile(
+  filePath: string,
+  fullPath: string,
+  quiet = false,
+): Promise<SkillReportEntry> {
+  let buffer: Buffer
+  try {
+    buffer = await fs.readFile(fullPath)
+  } catch (err) {
+    if (!quiet) {
+      log.warn(
+        `[${filePath}] Could not be read (${err instanceof Error ? err.message : String(err)}) — reported as unscanned, not clean.`,
+      )
+    }
+    return { filePath, linesCount: 0, issuesDetected: 0, scanned: false, kind: 'script' }
+  }
+
+  const sha256 = createHash('sha256').update(buffer).digest('hex')
+  const firstLine = buffer.toString('utf8', 0, Math.min(buffer.length, 200)).split('\n')[0]
+  const language: ScriptLanguage = detectScriptLanguage(filePath, firstLine)
+
+  if (buffer.length > MAX_SCRIPT_SCAN_BYTES) {
+    if (!quiet) {
+      log.warn(
+        `[${filePath}] Exceeds the ${MAX_SCRIPT_SCAN_BYTES}-byte script scan cap — refusing to scan (hash recorded).`,
+      )
+    }
+    return { filePath, linesCount: 0, issuesDetected: 0, sha256, scanned: false, kind: 'script', language }
+  }
+
+  if (language === 'unknown') {
+    // Not a script language this scanner understands (binary, data file,
+    // unrecognized extension with no useful shebang) — hash-only, same
+    // refusal-not-pass status as an over-cap file.
+    return { filePath, linesCount: 0, issuesDetected: 0, sha256, scanned: false, kind: 'script', language }
+  }
+
+  const content = buffer.toString('utf8')
+  const contentLines = content.split('\n')
+  const result = scanScriptContent(content, language)
+
+  if (!result.clean && !quiet) {
+    for (const finding of result.findings) {
+      log.warn(
+        `[${filePath}] ${finding.category} finding (${finding.patternId})${finding.excerpt ? `: ${finding.excerpt}` : ''}`,
+      )
+    }
+  }
+
+  return {
+    filePath,
+    linesCount: contentLines.length,
+    issuesDetected: result.findings.length,
+    findings: result.findings,
+    sha256,
+    scanned: true,
+    kind: 'script',
+    language,
+  }
 }
 
 /**
@@ -317,7 +488,15 @@ export function buildSarifLog(entries: readonly SkillReportEntry[]): object {
           driver: {
             name: 'intutic-skill-scan',
             informationUri: 'https://intutic.ai',
-            rules: SKILL_SCAN_PATTERNS.map((pattern) => ({
+            // The rule catalog is the union of both pattern tables — SARIF's
+            // convention is one driver's full rule set, not just the ids
+            // that fired this run, so a code-scanning UI can show a rule as
+            // "0 findings" rather than "unknown rule". Bundled-script
+            // findings (Phase S2, `SCRIPT_SCAN_PATTERNS`) land in the same
+            // `intutic-skill-scan` driver as `SKILL.md` content findings —
+            // one driver name, not a second tool, since both are the same
+            // "scan agent-loaded content for these threat shapes" capability.
+            rules: [...SKILL_SCAN_PATTERNS, ...SCRIPT_SCAN_PATTERNS].map((pattern) => ({
               id: pattern.id,
               shortDescription: { text: pattern.description },
               defaultConfiguration: { level: 'warning' },
@@ -435,6 +614,21 @@ export async function runSkillAudit(opts: { sarif?: boolean } = {}): Promise<voi
     const entry = await auditSkillFile(filePath, fullPath, enableLocalSkillAuditDelete, sarif)
     issues += entry.issuesDetected
     skillsReport.push(entry)
+
+    // ── Bundled scripts alongside this skill's SKILL.md (TD-356, Phase S2) ─
+    //
+    // `discoverSkillFiles` only ever found `SKILL.md`; a sibling `setup.sh`
+    // or `helper.py` was invisible to every consumer before this. Enumerate
+    // (bounded, symlink-skipping — see `discoverSkillBundledFiles`) and
+    // audit each one the same way: always hashed, content-scanned only when
+    // the language is recognized and the file is within the byte cap.
+    const skillDirPath = dirname(filePath)
+    const bundledFiles = await discoverSkillBundledFiles(workspaceRoot, skillDirPath)
+    for (const script of bundledFiles) {
+      const scriptEntry = await auditScriptFile(script.filePath, script.fullPath, sarif)
+      issues += scriptEntry.issuesDetected
+      skillsReport.push(scriptEntry)
+    }
   }
 
   if (sarif) {
