@@ -52,6 +52,24 @@
       "cache": false,
       "persistent": true
     },
+    "@intutic/docs#build": {
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        ".vitepress/dist/**"
+      ],
+      // Without these, turbo strips both vars before invoking vitepress.
+      // Functionally inert in this repo today — hasControlPlane in
+      // apps/docs/.vitepress/config.ts is always false here (no
+      // services/control-plane dir), so IS_OSS is always true regardless —
+      // but kept structurally identical to the enterprise repo's turbo.json
+      // rather than letting the two configs drift.
+      "passThroughEnv": [
+        "INTUTIC_ENTERPRISE_BUILD",
+        "INTUTIC_REQUIRE_OSS"
+      ]
+    },
     "@intutic/wasm-sdk#build": {
       "dependsOn": [
         "^build"
