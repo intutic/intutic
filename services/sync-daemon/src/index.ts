@@ -83,3 +83,18 @@ export { runComplianceProbes } from './lib/complianceProbes.js'
 export { getActiveAgentProcesses } from './lib/processPoller.js'
 
 export { TrajectoryMonitor } from './trajectoryMonitor.js'
+
+// Phase 6 — governed decisions log
+export {
+  refreshDecisionsDigest,
+  fetchDecisionsDigest,
+  renderDecisionsMarkdown,
+  renderBoundedSection,
+  injectBoundedSection,
+  DECISIONS_LOG_RELATIVE_PATH,
+} from './lib/decisionsDigest.js'
+export type {
+  DecisionsDigestEntry,
+  DecisionsDigestResponse,
+  DecisionsDigestOptions,
+} from './lib/decisionsDigest.js'
