@@ -565,6 +565,23 @@ fn json_error(status: StatusCode, error_type: &str, message: &str) -> Response {
     (status, axum::Json(body)).into_response()
 }
 
+/// Refusal response for a model that failed the workspace's approved-models
+/// allowlist check. Factored out of the gate in `handle_proxy` so the exact
+/// wire shape (403, `error.type: "model_not_allowed"`) is covered by a unit
+/// test (see `model_allowlist_gate` below) without driving the whole
+/// request pipeline — the same precedent as `check_budget`/`check_model_allowed`
+/// in metering.rs being pure functions the handler merely calls.
+fn model_not_allowed_response(model: &str) -> Response {
+    json_error(
+        StatusCode::FORBIDDEN,
+        "model_not_allowed",
+        &format!(
+            "Model '{}' is not on this workspace's approved-models list.",
+            model
+        ),
+    )
+}
+
 /// This proxy process's identity, minted on first use and never again.
 static PROXY_INSTANCE_ID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
@@ -1109,7 +1126,7 @@ fn extract_wasm_tool_calls(body: &serde_json::Value) -> Vec<crate::wasm::context
 /// on, so the numbers stay true and nobody has to redeploy to get unblocked.
 /// Default is enforce: an escape hatch that defaults open is not an escape
 /// hatch, it is the inert control again.
-fn local_budget_enforced() -> bool {
+pub(crate) fn local_budget_enforced() -> bool {
     !matches!(
         std::env::var("INTUTIC_LOCAL_BUDGET_ENFORCE").as_deref(),
         Ok("0") | Ok("false") | Ok("no")
@@ -2128,6 +2145,28 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 "Remaining budget is insufficient for this request's safety margin.",
             );
         }
+    }
+
+    // ── Step 2b: Approved-models allowlist (Valkey, workspace-level) ────
+    //
+    // `complianceProbesService.ts:106` has checked
+    // `settings['allowedModels']` since that probe was written, but until
+    // the control-plane PUT schema declared the key too, nothing could ever
+    // write it — the probe was permanently failing dead code. This is the
+    // enforcement half of making that key real: `None`/empty means
+    // unrestricted (no control plane, or a workspace that never configured
+    // this), exactly like `egressAllow`'s own backward-compatible default.
+    let allowed_models = state.control_plane.allowed_models(&workspace_id).await;
+    if let Err(e) =
+        crate::metering::check_model_allowed(&model, allowed_models.as_deref())
+    {
+        tracing::warn!(
+            workspace_id = %workspace_id,
+            model = %model,
+            "Model not on workspace allowlist: {}", e
+        );
+        crate::metrics::record_policy_refusal("model_allowlist", "kill");
+        return model_not_allowed_response(&model);
     }
 
     // ── Step 3: Hard-cap block check (Valkey, <1ms P99) ─────────────
@@ -8938,6 +8977,49 @@ mod tests {
 
             assert_eq!(a, None, "ws_a never provisioned a key");
             assert_eq!(b, Some(own_key), "ws_b's own provisioned key is unaffected by ws_a's absence");
+        }
+    }
+
+    /// The approved-models allowlist gate: `state.control_plane.allowed_models`
+    /// feeds `metering::check_model_allowed`, whose invariant tests live in
+    /// metering.rs. This covers what that unit doesn't reach — the actual
+    /// HTTP shape of the refusal `handle_proxy` returns for it.
+    mod model_allowlist_gate {
+        use super::super::*;
+
+        #[tokio::test]
+        async fn refusal_is_403_model_not_allowed_naming_the_model() {
+            let resp = model_not_allowed_response("gpt-4o");
+            assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+
+            let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+                .await
+                .expect("body reads");
+            let json: serde_json::Value =
+                serde_json::from_slice(&body).expect("refusal body is valid JSON");
+            assert_eq!(json["error"]["type"], "model_not_allowed");
+            assert!(
+                json["error"]["message"].as_str().unwrap().contains("gpt-4o"),
+                "the refused model name should be in the message: {json}"
+            );
+        }
+
+        /// Same invariant `check_model_allowed`'s own tests assert, exercised
+        /// through the two inputs the gate actually receives from
+        /// `ControlPlaneCache::allowed_models`: a standalone/unconfigured
+        /// `None` and a cleared/never-set `Some(vec![])`.
+        #[test]
+        fn none_and_empty_list_from_the_control_plane_both_allow_every_model() {
+            assert!(crate::metering::check_model_allowed("anything", None).is_ok());
+            let empty: Vec<String> = vec![];
+            assert!(crate::metering::check_model_allowed("anything", Some(&empty)).is_ok());
+        }
+
+        #[test]
+        fn a_configured_list_refuses_a_model_outside_it() {
+            let allowed = vec!["claude-sonnet-4-5".to_string()];
+            assert!(crate::metering::check_model_allowed("claude-sonnet-4-5", Some(&allowed)).is_ok());
+            assert!(crate::metering::check_model_allowed("gpt-4o", Some(&allowed)).is_err());
         }
     }
 }

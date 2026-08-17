@@ -111,10 +111,10 @@ pub fn record_snip_compaction(
 }
 
 /// One policy refusal that reached the client as a 4xx.
-/// `source` ∈ {"anomaly", "wasm"}; `action` ∈ {"kill", "ask", "reask",
-/// "reask_exhausted"} — the six refusal sites in `proxy.rs` were previously
-/// log-only, which made "how often does governance actually refuse" a
-/// log-grep question instead of a graph.
+/// `source` ∈ {"anomaly", "wasm", "model_allowlist"}; `action` ∈ {"kill",
+/// "ask", "reask", "reask_exhausted"} — the six refusal sites in `proxy.rs`
+/// were previously log-only, which made "how often does governance actually
+/// refuse" a log-grep question instead of a graph.
 pub fn record_policy_refusal(source: &'static str, action: &'static str) {
     REFUSALS_COUNTER.add(
         1,

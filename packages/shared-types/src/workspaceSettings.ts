@@ -245,6 +245,18 @@ export interface WorkspaceSettings {
   egressAllow?: string[]
 
   /**
+   * Approved-models allowlist: model ids the proxy will accept for this
+   * workspace's completions. Distributed to the proxy's control-plane cache
+   * under `workspace:allowed_models:{workspaceId}` (mirrors the `egressAllow`
+   * distribution pattern above).
+   *
+   * Absent or empty means UNRESTRICTED — matches `egressAllow`'s own
+   * backward-compatible default, so a workspace that never configured this
+   * must not start refusing completions because a default changed.
+   */
+  allowedModels?: string[]
+
+  /**
    * Whether agents in this workspace must run inside a sandbox (LLD #63 §6).
    * - `'off'` (default): `intutic exec` runs on the host as before.
    * - `'warn'`: an un-sandboxed `intutic exec` runs but prints a warning.

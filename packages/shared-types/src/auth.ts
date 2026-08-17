@@ -413,5 +413,12 @@ export interface DashboardSummary {
     savedUsd: number
     savingsPercent: number
   }
+  /**
+   * Runaway spend averted by proxy KILL enforcement, extrapolated forward from
+   * each killed session's measured burn rate — NOT the same population as
+   * `costSavings.savedUsd` (measured routing savings) and must never be added
+   * into it. See `runawayCounterfactualService.ts` for how this is computed.
+   */
+  runawayAvertedUsd?: number
 }
 
