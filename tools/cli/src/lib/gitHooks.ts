@@ -83,6 +83,19 @@ if [ -n "$findings" ]; then
   echo "If this is a false positive, commit with: git commit --no-verify" >&2
   exit 1
 fi
+
+# TD-358: warn-only skill-content scan of staged skill-surface additions
+# (.agents/skills/**, .claude/skills/**). Advisory only — this NEVER
+# refuses the commit, unlike the secret scan above. See skillScan.ts's
+# module doc comment for why: the pattern table's false-positive rate
+# against real, benign skill markdown has not been measured yet, so nothing
+# here may borrow the secret scan's refusal authority until it has earned
+# it the same way. If the secret scan above already refused, this line is
+# never reached — that check's exit 1 is untouched.
+if command -v intutic >/dev/null 2>&1; then
+  intutic skill scan-staged || true
+fi
+exit 0
 `.trimStart()
 }
 

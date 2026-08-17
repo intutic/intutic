@@ -27,22 +27,51 @@ import { createLogger } from '@intutic/logger'
 import { getHealthSnapshot } from './healthMonitor.js'
 import { getCacheStats } from './policyCache.js'
 import { pendingCount } from './telemetryBatcher.js'
+import { loadPin } from '../tofu.js'
 
 const logger = createLogger('mcp-proxy.statusReporter')
 
 const CP_URL         = process.env['CONTROL_PLANE_URL'] ?? 'http://localhost:3001'
 const DAEMON_API_KEY = process.env['INTUTIC_API_KEY']   ?? ''
+// Same env var config.ts's loadConfig reads as a fallback for workspaceId
+// (INTUTIC_WORKSPACE_ID, written to ~/.intutic/env/runtime.env by the
+// sync-daemon). A daemon process is scoped to one workspace, so this module
+// reads it directly rather than threading it through every call.
+const WORKSPACE_ID   = process.env['INTUTIC_WORKSPACE_ID'] ?? ''
 const REPORT_MS      = parseInt(process.env['MCP_DAEMON_STATUS_REPORT_MS'] ?? '60000', 10)
 
 const startedAt = new Date().toISOString()
 let timer: ReturnType<typeof setInterval> | null = null
 
-function buildSnapshot(running: boolean): string {
+/**
+ * Enriches each health-probed server with its current TOFU pin fingerprint
+ * (tofu.ts), read from the same local `~/.intutic/mcp-pins/` files the proxy
+ * itself pins to — so `mcp_servers.pin_fingerprint` (Part 3's ingest upsert)
+ * can eventually be cross-referenced with fingerprint history, even though
+ * building that cross-referencing view is explicitly out of scope for this
+ * phase. `harness`/`transport` are NOT attached here: healthMonitor.ts's
+ * `discoverServers` merges servers across harness config paths without
+ * recording which one a given entry came from, so there is no honest value
+ * to report yet — omitted (optional on the wire schema) rather than guessed.
+ */
+async function buildMcpServersPayload(): Promise<Array<ReturnType<typeof getHealthSnapshot>[number] & { pinFingerprint?: string }>> {
+  const health = getHealthSnapshot()
+  if (!WORKSPACE_ID) return health
+
+  return Promise.all(
+    health.map(async (server) => {
+      const pin = await loadPin(WORKSPACE_ID, server.serverName).catch(() => null)
+      return pin ? { ...server, pinFingerprint: pin.fingerprint } : server
+    }),
+  )
+}
+
+async function buildSnapshot(running: boolean): Promise<string> {
   return JSON.stringify({
     running,
     policyCache: getCacheStats(),
     telemetryBuffer: { pending: pendingCount() },
-    mcpServers: getHealthSnapshot(),
+    mcpServers: await buildMcpServersPayload(),
     startedAt,
   })
 }
@@ -81,9 +110,11 @@ export function startStatusReporter(): void {
   }
 
   const report = () => {
-    postReport(buildSnapshot(true)).catch((err: unknown) => {
-      logger.debug({ err: err instanceof Error ? err.message : String(err) }, 'status_reporter.report_failed')
-    })
+    buildSnapshot(true)
+      .then((body) => postReport(body))
+      .catch((err: unknown) => {
+        logger.debug({ err: err instanceof Error ? err.message : String(err) }, 'status_reporter.report_failed')
+      })
   }
 
   report() // First snapshot immediately — the panel should not wait a full interval.
@@ -98,7 +129,10 @@ export function startStatusReporter(): void {
 export async function stopStatusReporter(): Promise<void> {
   if (timer) { clearInterval(timer); timer = null }
   if (DAEMON_API_KEY.length === 0) return
-  await postReport(buildSnapshot(false)).catch(() => {
+  try {
+    const body = await buildSnapshot(false)
+    await postReport(body)
+  } catch {
     // Shutdown path — the TTL covers an unreachable control plane.
-  })
+  }
 }

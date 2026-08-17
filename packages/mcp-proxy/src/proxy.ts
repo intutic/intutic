@@ -25,6 +25,7 @@ import { PolicyClient } from './policy.js'
 import { GovernanceEmitter } from './emitter.js'
 import { ToolCallInterceptor } from './interceptor.js'
 import { redactText as redactMcpText } from './dlp.js'
+import { checkTofu, decideTofuAction } from './tofu.js'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
@@ -87,6 +88,16 @@ export interface ServerLineOutcome {
   redactions?: string[]
   /** Set when a tools/list response was filtered or had descriptions overridden. */
   curated?: { hidden: number; overridden: number }
+  /**
+   * The (post-curation) tool array, set whenever this line was a `tools/list`
+   * response — regardless of whether curation changed anything — so the
+   * caller can run TOFU pinning (tofu.ts) over it. `undefined` for every
+   * other line.
+   */
+  toolsListTools?: Array<Record<string, unknown>>
+  /** The JSON-RPC id of the `tools/list` response, needed to build a block
+   *  frame in the caller if TOFU refuses it. Set alongside `toolsListTools`. */
+  toolsListMsgId?: string | number | null
 }
 
 /**
@@ -188,9 +199,20 @@ export function processServerLine(
         overridden += 1
       }
     }
-    if (hidden === 0 && overridden === 0) return { line: raw }
+    // toolsListTools/toolsListMsgId are set on EVERY tools/list response,
+    // curated or not — TOFU pinning (tofu.ts) needs the full post-curation
+    // tool set regardless of whether allowlist filtering or description
+    // overrides touched it this time.
+    if (hidden === 0 && overridden === 0) {
+      return { line: raw, toolsListTools: kept, toolsListMsgId: msg.id }
+    }
     msg.result['tools'] = kept
-    return { line: JSON.stringify(msg), curated: { hidden, overridden } }
+    return {
+      line: JSON.stringify(msg),
+      curated: { hidden, overridden },
+      toolsListTools: kept,
+      toolsListMsgId: msg.id,
+    }
   }
 
   return { line: raw }
@@ -219,7 +241,7 @@ export class McpGovernanceProxy {
       config.mcpProxyMode
     )
 
-    this.interceptor = new ToolCallInterceptor(this.policy, this.emitter, config.failOpen)
+    this.interceptor = new ToolCallInterceptor(this.policy, this.emitter, config.failOpen, config.serverName)
   }
 
   /**
@@ -375,6 +397,109 @@ export class McpGovernanceProxy {
   // ─── Proxy Mode ───────────────────────────────────────────────────────────────
 
   /**
+   * Inspects one real-server → harness line (see `processServerLine`) and
+   * writes the outcome to stdout. Async, unlike the byte pipe this replaced,
+   * because a `tools/list` response also runs server-level TOFU pinning
+   * (tofu.ts), which does file I/O — the ONLY case this awaits before
+   * writing; every other line is forwarded exactly as fast as before.
+   *
+   * On a TOFU mismatch, honors `mcpProxyFailBehavior` via `config.failOpen` —
+   * the SAME field `interceptor.ts` already reads for its own fail-open/
+   * fail-closed branches, not a new mechanism: fail-open logs and forwards
+   * the (possibly curated) tools/list response as normal; fail-closed
+   * replaces it with a JSON-RPC error naming the server and the setting,
+   * mirroring `buildBlockResponse`'s existing wording style.
+   */
+  private async handleServerLine(
+    rawLine: string,
+    pending: Map<string | number, PendingRequest>,
+  ): Promise<void> {
+    const outcome = processServerLine(
+      rawLine,
+      pending,
+      this.policy.getAllowedTools(),
+      this.policy.getToolDescriptionOverrides(),
+    )
+    if (outcome.redactedTool) {
+      log.warn(
+        {
+          action: 'result_redacted',
+          toolName: outcome.redactedTool,
+          redactions: outcome.redactions,
+        },
+        'Sensitive data redacted from a tool result before it reached the agent',
+      )
+      this.emitter.emit(
+        'tool_redacted',
+        outcome.redactedTool,
+        undefined,
+        `Result redacted: ${(outcome.redactions ?? []).join('; ')}`,
+      )
+    }
+    if (outcome.curated) {
+      log.info(
+        { action: 'tools_list_curated', ...outcome.curated },
+        'tools/list curated: allowlist filtering and/or description overrides applied',
+      )
+    }
+
+    if (outcome.toolsListTools) {
+      const serverName = this.config.serverName
+      let tofu: Awaited<ReturnType<typeof checkTofu>>
+      try {
+        tofu = await checkTofu(this.config.workspaceId, serverName, outcome.toolsListTools)
+      } catch (err) {
+        // Pin storage I/O failed (disk full, permissions, ~/.intutic
+        // unwritable). This is a governance-check failure like any other in
+        // this package — fail-open forwards, fail-closed refuses — never a
+        // silent skip either way.
+        log.error({ action: 'tofu_check_error', err: (err as Error).message }, 'TOFU check failed')
+        if (!this.config.failOpen) {
+          writeFrame(
+            buildBlockResponse(
+              outcome.toolsListMsgId ?? null,
+              `TOFU pin check for MCP server "${serverName}" failed (could not read/write ` +
+                `~/.intutic/mcp-pins/). Blocked by workspace policy (fail-closed mode). ` +
+                `Contact your administrator or update mcpProxyFailBehavior to open.`,
+            ),
+          )
+          return
+        }
+        process.stdout.write(outcome.line + '\n')
+        return
+      }
+
+      if (tofu.status === 'first_contact') {
+        log.info(
+          { action: 'tofu_first_contact', serverName, fingerprint: tofu.fingerprint },
+          'MCP server tool definitions pinned on first contact',
+        )
+      } else if (tofu.status === 'mismatch') {
+        const action = decideTofuAction(tofu, serverName, this.config.failOpen)
+        const reason = action.reason ?? 'MCP server tool definitions changed since first pinned.'
+        log.warn(
+          {
+            action: 'mcp_server_definition_changed',
+            serverName,
+            previousFingerprint: tofu.previousFingerprint,
+            fingerprint: tofu.fingerprint,
+            blocked: action.block,
+          },
+          reason,
+        )
+        this.emitter.emit('mcp_server_definition_changed', serverName, undefined, reason)
+
+        if (action.block) {
+          writeFrame(buildBlockResponse(outcome.toolsListMsgId ?? null, reason))
+          return
+        }
+      }
+    }
+
+    process.stdout.write(outcome.line + '\n')
+  }
+
+  /**
    * Start the proxy. Spawns the real MCP server and begins proxying stdin/stdout.
    * Returns a promise that resolves when the real server exits.
    */
@@ -424,35 +549,7 @@ export class McpGovernanceProxy {
       terminal: false,
     })
     serverRl.on('line', (rawLine) => {
-      const outcome = processServerLine(
-        rawLine,
-        pending,
-        this.policy.getAllowedTools(),
-        this.policy.getToolDescriptionOverrides(),
-      )
-      if (outcome.redactedTool) {
-        log.warn(
-          {
-            action: 'result_redacted',
-            toolName: outcome.redactedTool,
-            redactions: outcome.redactions,
-          },
-          'Sensitive data redacted from a tool result before it reached the agent',
-        )
-        this.emitter.emit(
-          'tool_redacted',
-          outcome.redactedTool,
-          undefined,
-          `Result redacted: ${(outcome.redactions ?? []).join('; ')}`,
-        )
-      }
-      if (outcome.curated) {
-        log.info(
-          { action: 'tools_list_curated', ...outcome.curated },
-          'tools/list curated: allowlist filtering and/or description overrides applied',
-        )
-      }
-      process.stdout.write(outcome.line + '\n')
+      void this.handleServerLine(rawLine, pending)
     })
 
     // Harness stdin → governance interceptor → real server stdin

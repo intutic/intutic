@@ -41,6 +41,16 @@ export interface ProxyConfig {
    * entry that exposes Intutic governance tools to the harness.
    */
   standalone: boolean
+  /**
+   * Server identity, from `--server-name <name>` — the flag
+   * `services/sync-daemon/src/harness/mcpAutoWrite.ts`'s `wrapWithProxy` has
+   * threaded onto every wrapped invocation since Phase D, but which nothing
+   * read until now. Used for the server-level allowlist check
+   * (`mcpAllowedServers`, interceptor.ts) and TOFU pinning (tofu.ts) — both
+   * need to know which real server this proxy process is fronting.
+   * Defaults to `'unknown'`, matching `workspaceId`'s own unset default.
+   */
+  serverName: string
 }
 
 const DEFAULT_EVENTS_PATH = node_path.join(node_os.homedir(), '.intutic', 'events', 'hook-events.jsonl')
@@ -74,15 +84,20 @@ async function parseEnvFile(filePath: string): Promise<Record<string, string>> {
 }
 
 /**
- * Parse CLI arguments for --workspace-id and the real server command (after --).
+ * Parse CLI arguments for --workspace-id, --server-name, and the real server
+ * command (after --).
  */
-function parseCliArgs(argv: string[]): { workspaceId?: string; realServerCommand: string[] } {
+function parseCliArgs(argv: string[]): { workspaceId?: string; serverName?: string; realServerCommand: string[] } {
   let workspaceId: string | undefined
+  let serverName: string | undefined
   let separatorIndex = -1
 
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--workspace-id' && i + 1 < argv.length) {
       workspaceId = argv[i + 1]
+      i++ // skip value
+    } else if (argv[i] === '--server-name' && i + 1 < argv.length) {
+      serverName = argv[i + 1]
       i++ // skip value
     } else if (argv[i] === '--') {
       separatorIndex = i
@@ -91,7 +106,7 @@ function parseCliArgs(argv: string[]): { workspaceId?: string; realServerCommand
   }
 
   const realServerCommand = separatorIndex !== -1 ? argv.slice(separatorIndex + 1) : []
-  return { workspaceId, realServerCommand }
+  return { workspaceId, serverName, realServerCommand }
 }
 
 /**
@@ -132,6 +147,8 @@ export async function loadConfig(argv: string[] = process.argv.slice(2)): Promis
 
   const standalone = cli.realServerCommand.length === 0
 
+  const serverName = cli.serverName ?? 'unknown'
+
   return {
     workspaceId,
     controlPlaneUrl,
@@ -142,5 +159,6 @@ export async function loadConfig(argv: string[] = process.argv.slice(2)): Promis
     failOpen,
     mcpProxyMode,
     standalone,
+    serverName,
   }
 }

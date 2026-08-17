@@ -83,6 +83,14 @@ export class PolicyClient {
   private allowedTools: string[] = []
   /** Operator-curated tool descriptions, applied to tools/list responses. */
   private toolDescriptionOverrides: Record<string, string> = {}
+  /**
+   * Additive SERVER scoping: when non-empty, ONLY these MCP server names may
+   * be proxied by this process. Empty means unrestricted — same convention
+   * and same source as `allowedTools` above (mirrors `mcpAllowedTools` /
+   * `mcpAllowedServers` in workspace settings, delivered via the same
+   * `GET /api/v1/sop/rules` response this class already polls).
+   */
+  private allowedServers: string[] = []
   private lastFetchAt = 0
   private refreshTimer: NodeJS.Timeout | null = null
 
@@ -131,6 +139,11 @@ export class PolicyClient {
     return this.allowedTools
   }
 
+  /** The additive MCP server allowlist; empty means unrestricted. */
+  getAllowedServers(): readonly string[] {
+    return this.allowedServers
+  }
+
   /** Operator description overrides for tools/list curation. */
   getToolDescriptionOverrides(): Readonly<Record<string, string>> {
     return this.toolDescriptionOverrides
@@ -149,6 +162,10 @@ export class PolicyClient {
         if (typeof v === 'string') this.toolDescriptionOverrides[k] = v
       }
     }
+    const allowedServers = source['allowedServers'] ?? source['mcpAllowedServers']
+    this.allowedServers = Array.isArray(allowedServers)
+      ? allowedServers.filter((s): s is string => typeof s === 'string')
+      : []
   }
 
   /** Find the first matching rule for a given tool name + serialized args. */

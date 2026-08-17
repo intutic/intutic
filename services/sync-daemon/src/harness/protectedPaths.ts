@@ -526,6 +526,96 @@ export const SECRET_CONTENT_PATTERNS: readonly GuardPattern[] = assertGuardTable
 )
 
 /**
+ * Writes and edits targeting the agent-skill surface — `.agents/skills/**`
+ * and `.claude/skills/**`.
+ *
+ * TD-358: `warn`, not `block`, and compiled into {@link staticFloorPatterns}
+ * rather than shipped through the policy snapshot. The two design choices are
+ * for different reasons and worth separating:
+ *
+ * - **Why `warn`:** `packages/shared-types/src/skillScan.ts`'s own module doc
+ *   comment states the load-bearing gap this pattern set exists downstream
+ *   of — the false-positive rate of `scanSkillContent`'s patterns against a
+ *   corpus of real, benign skill markdown is UNMEASURED. Blocking a write on
+ *   the strength of an unmeasured detector is exactly the "blocking too much
+ *   manufactures the adversary" failure this file's `DESTRUCTIVE_COMMAND_PATTERNS`
+ *   doc comment names: a wrongly-refused skill edit teaches a developer to
+ *   `chflags nouchg` the hook, which is the bypass `GOVERNANCE_BYPASS_PATTERNS`
+ *   exists to stop.
+ * - **Why the floor, unlike `DESTRUCTIVE_COMMAND_PATTERNS`:** this pattern set
+ *   is NOT content-conditional — it does not run `scanSkillContent` or judge
+ *   what a skill file says, only WHERE a write targets. That is a deterministic,
+ *   zero-ambiguity match (a write's target path either is or is not under
+ *   `.agents/skills/` or `.claude/skills/`), so there is nothing here for a
+ *   sync cycle's retraction to earn: it carries no measurement risk the way a
+ *   content pattern does, and a workspace with no control-plane connectivity
+ *   (offline, pre-`connect`) still gets the advisory signal from the moment the
+ *   gate is written, rather than only after a policy snapshot resolves.
+ *
+ * `subject: 'target'` deliberately, not `'any'`: this matches the tool's own
+ * path argument (`file_path`/`path`/…, the same extraction every Write/Edit
+ * gate already does), not a bare mention in a shell command. A `cat` or `grep`
+ * of a skill file is a read, not a write, and is not what this pattern
+ * exists to flag — narrower than `UNIVERSAL_PROTECTED_PATHS`'s "any mention"
+ * rule on purpose, since that rule blocks and this one only advises.
+ *
+ * A future promotion to `block` on skill CONTENT (not path) is a different,
+ * later decision — one that needs the corpus measurement above, and per
+ * TD-358 should ship through the policy-snapshot channel
+ * (`services/sync-daemon/src/lib/policySnapshot.ts`) the way
+ * `DESTRUCTIVE_COMMAND_PATTERNS` does, so it can be retracted in a sync cycle
+ * rather than a release if the measurement turns out to be wrong.
+ */
+export const SKILL_SURFACE_PATTERNS: readonly GuardPattern[] = assertGuardTableSane([
+  {
+    id: 'skill_surface.agents_skills_write',
+    source: '\\.agents/skills/',
+    subject: 'target',
+    severity: 'warn',
+    reason:
+      'Write or edit targets a .agents/skills/** skill file — advisory only, pending a ' +
+      'false-positive measurement of scanSkillContent against real skill markdown (TD-358)',
+    rationale:
+      'Deterministic path match, not a content judgement — see the pattern-set doc comment ' +
+      'above. Does not catch a write reached through a shell redirect (subject is `target`, ' +
+      'not `any`), a symlink, or a relative walk such as ../.agents/skills/x.',
+    matches: [
+      ' .agents/skills/my-skill/SKILL.md ',
+      ' .agents/skills/foo/resources/data.json ',
+      ' /Users/dev/project/.agents/skills/bar/SKILL.md ',
+    ],
+    notMatches: [
+      ' .agents/rules.md ',
+      ' src/agents/skills/legacy.ts ',
+      ' README.md ',
+      ' .claude/skills/other-skill/SKILL.md ',
+    ],
+  },
+  {
+    id: 'skill_surface.claude_skills_write',
+    source: '\\.claude/skills/',
+    subject: 'target',
+    severity: 'warn',
+    reason:
+      'Write or edit targets a .claude/skills/** skill file — advisory only, pending a ' +
+      'false-positive measurement of scanSkillContent against real skill markdown (TD-358)',
+    rationale:
+      'The Claude Code counterpart to skill_surface.agents_skills_write; same limits.',
+    matches: [
+      ' .claude/skills/my-skill/SKILL.md ',
+      ' .claude/skills/foo/resources/data.json ',
+      ' /Users/dev/project/.claude/skills/bar/SKILL.md ',
+    ],
+    notMatches: [
+      ' .claude/settings.json ',
+      ' .claude/commands/foo.md ',
+      ' src/claude/skills/legacy.ts ',
+      ' .agents/skills/other-skill/SKILL.md ',
+    ],
+  },
+])
+
+/**
  * Commands that destroy the machine or its data irrecoverably.
  *
  * TD-309: none of these were blocked by any harness. They are shipped through
@@ -745,11 +835,15 @@ export function protectedPathShellPatterns(): readonly GuardPattern[] {
 
 /** Every compiled-in guard: the static floor. Destructive patterns are **not**
  *  here — they ship through the policy snapshot so they can be retracted
- *  without a release. */
+ *  without a release. `SKILL_SURFACE_PATTERNS` IS here, deliberately, despite
+ *  also being new and unproven: unlike the destructive tier it is a
+ *  deterministic path match with no content judgement to get wrong, so there
+ *  is no measurement risk to hold it back from — see its own doc comment. */
 export function staticFloorPatterns(): readonly GuardPattern[] {
   return [
     ...GOVERNANCE_BYPASS_PATTERNS,
     ...SECRET_CONTENT_PATTERNS,
+    ...SKILL_SURFACE_PATTERNS,
     ...protectedPathShellPatterns(),
   ]
 }
