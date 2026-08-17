@@ -205,7 +205,7 @@ const sidebarReference = [
 
 export default defineConfig({
   title: 'Intutic Docs',
-  description: 'The circuit breaker for AI agents',
+  description: 'Policy as Code for Continuous Compliance and Continuous Enforcement of AI agents',
   base: '/',
 
   head: [
@@ -319,6 +319,7 @@ export default defineConfig({
         {
           text: 'Concepts',
           items: [
+            { text: 'Policy as Code', link: '/concepts/policy-as-code' },
             { text: 'Enforcement Actions', link: '/concepts/enforcement-actions' },
             { text: 'Harnesses', link: '/concepts/harnesses' },
             { text: 'Circuit Breaker', link: '/concepts/circuit-breaker' },

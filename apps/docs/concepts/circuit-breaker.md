@@ -5,7 +5,7 @@ description: How Intutic's circuit breaker evaluates every tool call in-process 
 
 # Circuit Breaker <Badge type="tip" text="Open-Core" />
 
-The **circuit breaker** is the decision engine that evaluates every AI agent tool call and returns an [enforcement action](/concepts/enforcement-actions) — BYPASS, ENHANCE, HIJACK, or KILL. It operates on the hot path between the proxy and the LLM provider, so every millisecond matters.
+The **circuit breaker** is the decision engine that evaluates every AI agent tool call and returns an [enforcement action](/concepts/enforcement-actions) — BYPASS, ENHANCE, HIJACK, REASK, or KILL. It operates on the hot path between the proxy and the LLM provider, so every millisecond matters.
 
 **Design goals:**
 - Evaluation is in-process with no model call. Cost is measured per payload size in `packages/proxy/benches` — there is no single figure, because it is dominated by request size.
@@ -245,7 +245,7 @@ The circuit breaker's own controls are checked, not just trusted:
 
 ## Related
 
-- [Enforcement Actions](/concepts/enforcement-actions) — BYPASS/ENHANCE/HIJACK/KILL verdicts
+- [Enforcement Actions](/concepts/enforcement-actions) — BYPASS/ENHANCE/HIJACK/REASK/KILL verdicts
 - [Harnesses](/concepts/harnesses) — How the proxy and sync daemon connect
 - [Standard Operating Procedures](/concepts/sops) — SOP definitions and policy evaluation rules
 - [Custom Filters (WASM)](/external/wasm-rules) — Custom tool-call filtering and policy hooks
