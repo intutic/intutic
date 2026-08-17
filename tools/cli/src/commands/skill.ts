@@ -8,12 +8,12 @@ import { existsSync } from 'node:fs'
 import * as fs from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { dirname, join } from 'node:path'
-import { spawn } from 'node:child_process'
+import { spawn, execFileSync } from 'node:child_process'
 import { log } from '../lib/logger.js'
 import { loadCredentials, loadConfig } from '../config/store.js'
 import { getIntuticDir, resolveControlPlaneUrl } from '../config/paths.js'
 import { createApiClient } from '../lib/api.js'
-import { scanSkillContent, type SkillScanFinding } from '@intutic/shared-types'
+import { scanSkillContent, SKILL_SCAN_PATTERNS, type SkillScanFinding } from '@intutic/shared-types'
 import pc from 'picocolors'
 
 // ─── Shared response shapes ──────────────────────────────────────────
@@ -82,14 +82,24 @@ export async function auditSkillFile(
   filePath: string,
   fullPath: string,
   prune: boolean,
+  /** Suppresses the per-finding `log.warn` narrative. Used by `--sarif`
+   *  (`runSkillAudit`), whose stdout contract is a single JSON document — a
+   *  CI tool piping that into a SARIF parser must not see decorated text
+   *  interleaved with it. Findings are still returned; only the console
+   *  narration is skipped. Defaults to `false` so every existing caller
+   *  (including the tests that assert on `log.warn` output indirectly via
+   *  behaviour) is unaffected. */
+  quiet = false,
 ): Promise<SkillReportEntry> {
   let content: string
   try {
     content = await fs.readFile(fullPath, 'utf8')
   } catch (err) {
-    log.warn(
-      `[${filePath}] Could not be read (${err instanceof Error ? err.message : String(err)}) — reported as unscanned, not clean.`,
-    )
+    if (!quiet) {
+      log.warn(
+        `[${filePath}] Could not be read (${err instanceof Error ? err.message : String(err)}) — reported as unscanned, not clean.`,
+      )
+    }
     return { filePath, linesCount: 0, issuesDetected: 0, scanned: false }
   }
 
@@ -97,7 +107,7 @@ export async function auditSkillFile(
   const result = scanSkillContent(content)
   const sha256 = createHash('sha256').update(content, 'utf8').digest('hex')
 
-  if (!result.clean) {
+  if (!result.clean && !quiet) {
     for (const finding of result.findings) {
       log.warn(
         `[${filePath}] ${finding.category} finding (${finding.patternId})${finding.excerpt ? `: ${finding.excerpt}` : ''}`,
@@ -120,7 +130,7 @@ export async function auditSkillFile(
     })
     if (fileUpdated) {
       await fs.writeFile(fullPath, filteredLines.join('\n'), 'utf8')
-      log.success(`[${filePath}] Auto-pruned lines flagged by the skill-content scan.`)
+      if (!quiet) log.success(`[${filePath}] Auto-pruned lines flagged by the skill-content scan.`)
     }
   }
 
@@ -255,8 +265,82 @@ export async function runSkillList(): Promise<void> {
   }
 }
 
-export async function runSkillAudit(): Promise<void> {
-  log.header('Intutic — Skill Security Audit')
+/**
+ * A minimal, valid SARIF 2.1.0 document for CI/code-scanning interop.
+ *
+ * Built for GitHub Code Scanning and any other consumer of the format — not
+ * for Cisco's open-source `skill-scanner` project specifically, but so that
+ * tool's findings and ours can land in the same code-scanning pane on a repo
+ * that runs both. We do not shell out to or depend on that project; this is
+ * only a compatible OUTPUT shape.
+ *
+ * `rules` lists every pattern `scanSkillContent` knows how to report —
+ * SARIF's convention is the tool's full rule catalog, not only the ids that
+ * fired in this run, so a code-scanning UI can show a rule as "0 findings"
+ * rather than "unknown rule". `results` is built only from real skill files
+ * (`SkillReportEntry.findings`, populated by `auditSkillFile`); the legacy
+ * `.cursorrules`/`CLAUDE.md` regex checks above have no pattern ids and stay
+ * out of SARIF for that reason — see the entries' own `findings` being
+ * absent, not an omission here.
+ *
+ * `locations` deliberately carries no `region`: `SkillScanFinding` bounds an
+ * excerpt (see `skillScan.ts`'s `excerptFor`) but not a line/column, and
+ * SARIF's `region` is optional — fabricating `startLine: 1` would claim a
+ * precision this scanner does not have.
+ */
+export function buildSarifLog(entries: readonly SkillReportEntry[]): object {
+  const results = entries.flatMap((entry) =>
+    (entry.findings ?? []).map((finding) => ({
+      ruleId: finding.patternId,
+      level: 'warning',
+      message: {
+        text: finding.excerpt
+          ? `${finding.category} finding: ${finding.excerpt}`
+          : `${finding.category} finding (${finding.patternId})`,
+      },
+      locations: [
+        {
+          physicalLocation: {
+            artifactLocation: { uri: entry.filePath },
+          },
+        },
+      ],
+    })),
+  )
+
+  return {
+    $schema: 'https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json',
+    version: '2.1.0',
+    runs: [
+      {
+        tool: {
+          driver: {
+            name: 'intutic-skill-scan',
+            informationUri: 'https://intutic.ai',
+            rules: SKILL_SCAN_PATTERNS.map((pattern) => ({
+              id: pattern.id,
+              shortDescription: { text: pattern.description },
+              defaultConfiguration: { level: 'warning' },
+              properties: { category: pattern.category },
+            })),
+          },
+        },
+        // Present and empty, never omitted, when nothing was flagged — a
+        // missing `results` key reads to some SARIF consumers as "the tool
+        // did not run" rather than "the tool ran and found nothing".
+        results,
+      },
+    ],
+  }
+}
+
+export async function runSkillAudit(opts: { sarif?: boolean } = {}): Promise<void> {
+  const sarif = opts.sarif === true
+  // SARIF's contract is a single JSON document on stdout — a CI tool piping
+  // this into a code-scanning upload must not see decorated progress text
+  // interleaved with it. Every narrative call below is gated on `!sarif`;
+  // findings are still collected and reported identically either way.
+  if (!sarif) log.header('Intutic — Skill Security Audit')
   const config = loadConfig()
   const workspaceRoot = config?.workspaceRoot ?? process.cwd()
 
@@ -294,21 +378,21 @@ export async function runSkillAudit(): Promise<void> {
 
       // 1. Audit for secrets (AWS, Intutic, generic keys)
       if (content.match(/vk_[a-zA-Z0-9]{30,}/)) {
-        log.error(`[${file}] Hardcoded Intutic virtual key prefix detected.`)
+        if (!sarif) log.error(`[${file}] Hardcoded Intutic virtual key prefix detected.`)
         fileIssues++
       }
       if (content.match(/sk-live-[a-zA-Z0-9]{30,}/)) {
-        log.error(`[${file}] Hardcoded API secrets detected.`)
+        if (!sarif) log.error(`[${file}] Hardcoded API secrets detected.`)
         fileIssues++
       }
 
       // 2. Audit for unsafe wildcard commands (e.g. rm -rf *, sh *)
       if (content.match(/rm\s+-rf\s+[*/]/)) {
-        log.warn(`[${file}] Unsafe recursive delete wildcard patterns (rm -rf *) found.`)
+        if (!sarif) log.warn(`[${file}] Unsafe recursive delete wildcard patterns (rm -rf *) found.`)
         fileIssues++
       }
       if (content.match(/curl\s+|wget\s+/)) {
-        log.warn(`[${file}] Network retrieval commands (curl, wget) found inside rules instructions.`)
+        if (!sarif) log.warn(`[${file}] Network retrieval commands (curl, wget) found inside rules instructions.`)
         fileIssues++
       }
 
@@ -326,7 +410,7 @@ export async function runSkillAudit(): Promise<void> {
 
         if (fileUpdated) {
           await fs.writeFile(fullPath, filteredLines.join('\n'), 'utf8')
-          log.success(`[${file}] Auto-pruned unsafe lines/rules during security audit.`)
+          if (!sarif) log.success(`[${file}] Auto-pruned unsafe lines/rules during security audit.`)
         }
       }
 
@@ -348,12 +432,15 @@ export async function runSkillAudit(): Promise<void> {
   // pruning above: the same opt-in, now covering both audit paths.
   const skillFiles = await discoverSkillFiles(workspaceRoot)
   for (const { filePath, fullPath } of skillFiles) {
-    const entry = await auditSkillFile(filePath, fullPath, enableLocalSkillAuditDelete)
+    const entry = await auditSkillFile(filePath, fullPath, enableLocalSkillAuditDelete, sarif)
     issues += entry.issuesDetected
     skillsReport.push(entry)
   }
 
-  if (issues === 0) {
+  if (sarif) {
+    // The whole point: one JSON document, nothing else, on stdout.
+    console.log(JSON.stringify(buildSarifLog(skillsReport), null, 2))
+  } else if (issues === 0) {
     log.success('Skill security audit passed. No credentials or critical safety risks detected.')
   } else {
     log.warn(`Security audit completed with ${issues} findings. Review warnings above.`)
@@ -368,6 +455,94 @@ export async function runSkillAudit(): Promise<void> {
       // Non-blocking
     }
   }
+}
+
+/**
+ * Lists staged files under the skill surface (`.agents/skills/**`,
+ * `.claude/skills/**`), ADDED/COPIED/MODIFIED only — mirroring the secret
+ * pre-commit scan's `git diff --cached` scope in `lib/gitHooks.ts`, so both
+ * checks agree on what "staged" means. A deleted skill file has nothing to
+ * scan.
+ *
+ * `execFileSync`, matching this package's existing git-invocation
+ * convention (`config/keychain.ts`, `commands/install-daemon.ts`) rather
+ * than a shelled-out string — no quoting to get wrong.
+ */
+function listStagedSkillSurfaceFiles(workspaceRoot: string): string[] {
+  try {
+    const out = execFileSync(
+      'git',
+      ['diff', '--cached', '--name-only', '--diff-filter=ACM', '--', '.agents/skills', '.claude/skills'],
+      { cwd: workspaceRoot, encoding: 'utf8' },
+    )
+    return out.split('\n').map((l) => l.trim()).filter(Boolean)
+  } catch {
+    // Not a git repo, no staged changes, or git not on PATH — nothing to scan.
+    return []
+  }
+}
+
+/**
+ * Reads the STAGED content of a path via `git show :<path>` — the blob that
+ * will actually be committed, not whatever is currently on disk. A file
+ * edited again after `git add` would otherwise be scanned in a state that
+ * does not match what `git commit` is about to record.
+ */
+function readStagedBlob(workspaceRoot: string, filePath: string): string | null {
+  try {
+    return execFileSync('git', ['show', `:${filePath}`], { cwd: workspaceRoot, encoding: 'utf8' })
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Warn-only skill-content scan over staged additions in the skill surface.
+ *
+ * TD-358. This is the CLI entry point `lib/gitHooks.ts`'s pre-commit hook
+ * shells out to (`intutic skill scan-staged`) — deliberately separate from
+ * `skill audit` above, which scans the whole workspace and is too slow and
+ * too broad for a commit-time check that must stay fast.
+ *
+ * Never refuses a commit and never throws: `scanSkillContent`'s
+ * false-positive rate against real, benign skill markdown is unmeasured (see
+ * `skillScan.ts`'s module doc comment), so this phase stages the signal as
+ * an advisory only. Contrast `lib/gitHooks.ts`'s secret scan, which DOES
+ * refuse — that check is high-precision, prefixed credential shapes with no
+ * known false positives; this one is not, and must not borrow that check's
+ * authority until it has earned it the same way.
+ */
+export async function runSkillScanStaged(): Promise<void> {
+  const config = loadConfig()
+  const workspaceRoot = config?.workspaceRoot ?? process.cwd()
+
+  const staged = listStagedSkillSurfaceFiles(workspaceRoot)
+  if (staged.length === 0) return
+
+  let flaggedFiles = 0
+  for (const filePath of staged) {
+    const content = readStagedBlob(workspaceRoot, filePath)
+    if (content === null) continue // vanished between diff and show — nothing to scan
+    const result = scanSkillContent(content)
+    if (result.clean) continue
+    flaggedFiles++
+    for (const finding of result.findings) {
+      log.warn(
+        `[${filePath}] ${finding.category} finding (${finding.patternId})` +
+          `${finding.excerpt ? `: ${finding.excerpt}` : ''} — advisory only, not blocking this commit.`,
+      )
+    }
+  }
+
+  if (flaggedFiles > 0) {
+    log.warn(
+      `Skill-content scan flagged ${flaggedFiles} staged file(s) under .agents/skills or ` +
+        '.claude/skills. This is advisory only (TD-358) — the commit proceeds. Run ' +
+        '`intutic skill audit` for the full report.',
+    )
+  }
+  // No exit code is ever set here — the caller (the pre-commit hook) always
+  // treats this check as successful, by construction.
 }
 
 // ─── Loop Commands ───────────────────────────────────────────────────

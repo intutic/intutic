@@ -19,7 +19,18 @@ import { callDaemonSocket } from './daemonClient.js'
 
 const log = createLogger('mcp-proxy-emitter')
 
-export type EventKind = 'tool_allowed' | 'tool_blocked' | 'tool_redacted'
+export type EventKind =
+  | 'tool_allowed'
+  | 'tool_blocked'
+  | 'tool_redacted'
+  /**
+   * Server-level TOFU pin mismatch (tofu.ts) — a server's `tools/list`
+   * response no longer matches the fingerprint pinned on first contact. Sent
+   * with `toolName` carrying the SERVER name (there is no single tool
+   * involved), the same "reuse toolName as the identifier of whatever this
+   * event is about" shape `tool_blocked`/`tool_allowed` already use.
+   */
+  | 'mcp_server_definition_changed'
 
 export interface GovernanceEvent {
   incidentId: string
