@@ -114,6 +114,7 @@ if (!IS_OSS) {
       { text: 'Settings & Config (Cloud)', link: '/guide/settings' },
       { text: 'Organizations, Teams & Billing (Cloud)', link: '/guide/organizations' },
       { text: 'Intelligent Model Routing (Cloud)', link: '/guide/intelligent-routing' },
+      { text: 'Pre-Adoption Gate for Model Upgrades (Cloud)', link: '/guide/mirror-adoption-report' },
     ],
   });
 }
@@ -133,6 +134,12 @@ sidebarGuide.push({
     // OSS-only to keep the page from appearing twice in the enterprise sidebar.
     ...(IS_OSS ? [
       { text: 'Intelligent Model Routing (Open-Core)', link: '/guide/intelligent-routing' },
+      // Mirror sampling (mirror_candidate_model / mirror_sample_rate) is a
+      // proxy-only, open-core config knob — see the page's own "Honest
+      // Limits" section for what an OSS install can and can't do with it
+      // absent a control plane (no judge, no report). Same dual-listing
+      // reasoning as the entry directly above.
+      { text: 'Pre-Adoption Gate for Model Upgrades (Open-Core)', link: '/guide/mirror-adoption-report' },
     ] : []),
     ...(!IS_OSS ? [
       { text: 'SOP Optimizer (Cloud)', link: '/guide/metaclaw' },
