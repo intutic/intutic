@@ -76,6 +76,7 @@ use super::{
     JudgeScope, LocalStore, NotifyScope, Ownership, SessionRouting, TokenBaseline,
 };
 use crate::routing::bandit::BanditArmState;
+use crate::routing::mirror::MirrorPairEvent;
 use crate::routing::reward::apply_update;
 use crate::telemetry::ExecutionTrace;
 
@@ -669,6 +670,17 @@ impl LocalStore for MemoryStore {
             verdict = %trace.verdict,
             latency_ms = trace.latency_ms,
             "execution trace (standalone: not published)"
+        );
+        Ok(())
+    }
+
+    /// Same standalone degrade as `publish_trace` above: no cross-process
+    /// transport, so this is logged rather than dropped silently.
+    async fn publish_mirror_pair(&self, event: &MirrorPairEvent) -> anyhow::Result<()> {
+        tracing::debug!(
+            workspace_id = %event.workspace_id,
+            candidate = %event.candidate_model,
+            "mirror comparison pair (standalone: not published)"
         );
         Ok(())
     }
