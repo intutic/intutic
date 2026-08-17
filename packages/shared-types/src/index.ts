@@ -424,3 +424,12 @@ export {
   secretPatternAlternation,
   type SecretValuePattern,
 } from './secretPatterns.js'
+
+export {
+  SKILL_SCAN_PATTERNS,
+  scanSkillContent,
+  type SkillScanCategory,
+  type SkillScanPattern,
+  type SkillScanFinding,
+  type SkillScanResult,
+} from './skillScan.js'

@@ -13,10 +13,25 @@
  * - Goose:            ~/.config/goose/config.yaml (mcp section)
  * - OpenHands:        <workspaceRoot>/.openhands/mcp.json
  *
+ * That is 9 config paths across 8 `HarnessType` values (Cursor alone owns two
+ * paths — global and project). `discoverMcpServers` below reads all nine
+ * read-only, for reporting; the injectors above are the only thing that writes.
+ *
  * Proxy-wrapping convention:
- *   Each existing MCP server entry is rewritten so that the governance proxy
- *   binary is the command, and the original server command is passed after `--`.
- *   A `__intutic_wrapped: true` flag is added to prevent double-wrapping.
+ *   Each existing stdio MCP server entry is rewritten so that the governance
+ *   proxy binary is the command, and the original server command is passed
+ *   after `--`, tagged with `--server-name <name>` so the proxy can attribute
+ *   traffic to the server it fronts. A `__intutic_wrapped: true` flag is added
+ *   to prevent double-wrapping. Remote (HTTP/SSE, `url`-keyed) entries have no
+ *   command to wrap and are left untouched — see TD-354.
+ *
+ * Continuous invariant, not one-shot: `injectMcpServer` is called once from
+ * `intutic connect` (tools/cli) AND once per sync-loop iteration
+ * (services/sync-daemon/src/syncLoop.ts), so a server a user adds to a harness
+ * config after their first `connect` still gets wrapped on the next sync
+ * cycle rather than staying invisible to governance forever. Running this
+ * every ~30s only works because `writeJsonFile` below is write-if-changed —
+ * an already-wrapped, unchanged config produces zero bytes written.
  *
  * LLD #14 — mcpAutoWrite.ts
  * HLD §3.14 — GUI Harness Interception (MCP registration + Universal MCP Governance)
@@ -28,6 +43,7 @@ import * as node_fs from 'node:fs/promises'
 import * as node_path from 'node:path'
 import * as node_os from 'node:os'
 import { existsSync } from 'node:fs'
+import { isDeepStrictEqual } from 'node:util'
 import { createLogger } from '@intutic/logger'
 
 const log = createLogger('sync-mcp-autowrite')
@@ -35,15 +51,30 @@ const log = createLogger('sync-mcp-autowrite')
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 interface McpServerEntry {
-  command: string
+  /** Absent on remote (HTTP/SSE) transport entries — see `url`. */
+  command?: string
   args?: string[]
   env?: Record<string, string>
+  /** Remote MCP transport marker. When present (instead of `command`), this
+   *  is not a stdio entry and `wrapWithProxy` leaves it alone — see TD-354. */
+  url?: string
+  /** Some harnesses tag a `url` entry `"sse"` explicitly; absent/other = http. */
+  type?: string
   /** Intutic governance marker — prevents double-wrapping */
   __intutic_wrapped?: boolean
 }
 
 interface McpServersMap {
   [serverName: string]: McpServerEntry
+}
+
+/** One MCP server as discovered across every known harness config format,
+ *  without writing anything. See {@link discoverMcpServers}. */
+export interface DiscoveredMcpServer {
+  server: string
+  harness: string
+  transport: 'stdio' | 'http' | 'sse' | 'unknown'
+  wrapped: boolean
 }
 
 // ─── Proxy Binary Resolution ─────────────────────────────────────────────────
@@ -71,18 +102,80 @@ function resolveProxyBin(workspaceRoot: string): string {
   return pkgPath
 }
 
+// ─── Config Path Resolution ───────────────────────────────────────────────────
+//
+// Shared by both the injectors (which write) and discoverMcpServers (which
+// only reads), so the two can never independently drift about where a
+// harness keeps its config.
+
+function claudeCodeConfigPath(): string {
+  return node_path.join(node_os.homedir(), '.claude', 'mcp.json')
+}
+
+function claudeDesktopConfigPath(): string {
+  const home = node_os.homedir()
+  if (process.platform === 'darwin') {
+    return node_path.join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json')
+  } else if (process.platform === 'win32') {
+    return node_path.join(process.env['APPDATA'] ?? '', 'Claude', 'claude_desktop_config.json')
+  }
+  return node_path.join(home, '.config', 'Claude', 'claude_desktop_config.json')
+}
+
+function cursorGlobalConfigPath(): string {
+  const home = node_os.homedir()
+  if (process.platform === 'darwin') {
+    return node_path.join(home, 'Library', 'Application Support', 'Cursor', 'User', 'globalSettings.json')
+  } else if (process.platform === 'win32') {
+    return node_path.join(process.env['APPDATA'] ?? '', 'Cursor', 'User', 'globalSettings.json')
+  }
+  return node_path.join(home, '.config', 'Cursor', 'User', 'globalSettings.json')
+}
+
+function cursorProjectConfigPath(workspaceRoot: string): string {
+  return node_path.join(workspaceRoot, '.cursor', 'mcp.json')
+}
+
+function clineConfigPath(workspaceRoot: string): string {
+  return node_path.join(workspaceRoot, '.cline', 'mcp.json')
+}
+
+function windsurfConfigPath(): string {
+  return node_path.join(node_os.homedir(), '.codeium', 'windsurf', 'mcp_config.json')
+}
+
+function continueConfigPath(): string {
+  return node_path.join(node_os.homedir(), '.continue', 'config.json')
+}
+
+function gooseConfigPath(): string {
+  return node_path.join(node_os.homedir(), '.config', 'goose', 'config.yaml')
+}
+
+function openHandsConfigPath(workspaceRoot: string): string {
+  return node_path.join(workspaceRoot, '.openhands', 'mcp.json')
+}
+
 // ─── Proxy Wrapping ───────────────────────────────────────────────────────────
 
 /**
  * Wrap a single MCP server entry with the governance proxy.
- * Returns the entry unmodified if it's already wrapped.
+ * Returns the entry unmodified if it's already wrapped, or if it has no
+ * `command` to wrap (a remote HTTP/SSE server — see TD-354).
  */
 function wrapWithProxy(
   entry: McpServerEntry,
   workspaceId: string,
-  workspaceRoot: string
+  workspaceRoot: string,
+  serverName: string
 ): McpServerEntry {
   if (entry.__intutic_wrapped) return entry
+
+  // Remote (HTTP/SSE) transport servers have no `command` to wrap — wrapping
+  // is a stdio-process convention (spawn our proxy binary, hand it the
+  // original command after `--`). Leave non-stdio entries untouched rather
+  // than building an args array around `undefined`.
+  if (typeof entry.command !== 'string') return entry
 
   const proxyBin = resolveProxyBin(workspaceRoot)
   const originalArgs = entry.args ?? []
@@ -92,6 +185,7 @@ function wrapWithProxy(
     args: [
       proxyBin,
       '--workspace-id', workspaceId,
+      '--server-name', serverName,
       '--',
       entry.command,
       ...originalArgs,
@@ -120,7 +214,7 @@ function wrapAllServers(
       // Never wrap the Intutic server through itself
       result[name] = entry
     } else {
-      result[name] = wrapWithProxy(entry, workspaceId, workspaceRoot)
+      result[name] = wrapWithProxy(entry, workspaceId, workspaceRoot, name)
     }
   }
   return result
@@ -155,7 +249,34 @@ async function readJsonFile<T>(filePath: string, fallback: T): Promise<T> {
   }
 }
 
+/**
+ * Write JSON to disk, but only if the content actually changed.
+ *
+ * `injectMcpServer` now runs every sync-loop iteration (~every 30s, see
+ * syncLoop.ts) instead of only once at `connect` time — re-running the same
+ * wrap against an already-wrapped, unchanged config must not touch the file,
+ * or every cycle would churn the file's mtime and fire a spurious inotify /
+ * FSEvents event for every harness config on every developer machine.
+ *
+ * Compares the parsed object structurally (`isDeepStrictEqual`), not the
+ * serialized string — a naive string compare would report a false "changed"
+ * on nothing more than JSON.stringify key-ordering differences between two
+ * semantically identical objects.
+ */
 async function writeJsonFile(filePath: string, data: unknown): Promise<void> {
+  let existing: unknown
+  let hasExisting: boolean
+  try {
+    existing = JSON.parse(await node_fs.readFile(filePath, 'utf-8'))
+    hasExisting = true
+  } catch {
+    hasExisting = false
+  }
+
+  if (hasExisting && isDeepStrictEqual(existing, data)) {
+    return
+  }
+
   await node_fs.mkdir(node_path.dirname(filePath), { recursive: true })
   await node_fs.writeFile(filePath, JSON.stringify(data, null, 2) + '\n', 'utf-8')
 }
@@ -163,8 +284,7 @@ async function writeJsonFile(filePath: string, data: unknown): Promise<void> {
 // ─── Target: Claude Code ─────────────────────────────────────────────────────
 
 async function injectClaudeCode(workspaceId: string, workspaceRoot: string): Promise<void> {
-  const home = node_os.homedir()
-  const configPath = node_path.join(home, '.claude', 'mcp.json')
+  const configPath = claudeCodeConfigPath()
   const current = await readJsonFile<{ mcpServers?: McpServersMap }>(configPath, {})
 
   current.mcpServers = wrapAllServers(
@@ -180,15 +300,7 @@ async function injectClaudeCode(workspaceId: string, workspaceRoot: string): Pro
 // ─── Target: Claude Desktop ───────────────────────────────────────────────────
 
 async function injectClaudeDesktop(workspaceId: string, workspaceRoot: string): Promise<void> {
-  const home = node_os.homedir()
-  let configPath: string
-  if (process.platform === 'darwin') {
-    configPath = node_path.join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json')
-  } else if (process.platform === 'win32') {
-    configPath = node_path.join(process.env['APPDATA'] ?? '', 'Claude', 'claude_desktop_config.json')
-  } else {
-    configPath = node_path.join(home, '.config', 'Claude', 'claude_desktop_config.json')
-  }
+  const configPath = claudeDesktopConfigPath()
 
   // Skip if Claude Desktop directory doesn't exist (not installed)
   try {
@@ -212,17 +324,8 @@ async function injectClaudeDesktop(workspaceId: string, workspaceRoot: string): 
 // ─── Target: Cursor (global + project) ───────────────────────────────────────
 
 async function injectCursor(workspaceId: string, workspaceRoot: string): Promise<void> {
-  const home = node_os.homedir()
-
   // Global settings
-  let globalPath: string
-  if (process.platform === 'darwin') {
-    globalPath = node_path.join(home, 'Library', 'Application Support', 'Cursor', 'User', 'globalSettings.json')
-  } else if (process.platform === 'win32') {
-    globalPath = node_path.join(process.env['APPDATA'] ?? '', 'Cursor', 'User', 'globalSettings.json')
-  } else {
-    globalPath = node_path.join(home, '.config', 'Cursor', 'User', 'globalSettings.json')
-  }
+  const globalPath = cursorGlobalConfigPath()
 
   try {
     await node_fs.access(node_path.dirname(globalPath))
@@ -239,7 +342,7 @@ async function injectCursor(workspaceId: string, workspaceRoot: string): Promise
   }
 
   // Project-level .cursor/mcp.json
-  const projectPath = node_path.join(workspaceRoot, '.cursor', 'mcp.json')
+  const projectPath = cursorProjectConfigPath(workspaceRoot)
   try {
     const current = await readJsonFile<{ mcpServers?: McpServersMap }>(projectPath, {})
     current.mcpServers = wrapAllServers(
@@ -257,7 +360,7 @@ async function injectCursor(workspaceId: string, workspaceRoot: string): Promise
 // ─── Target: Cline ────────────────────────────────────────────────────────────
 
 async function injectCline(workspaceId: string, workspaceRoot: string): Promise<void> {
-  const configPath = node_path.join(workspaceRoot, '.cline', 'mcp.json')
+  const configPath = clineConfigPath(workspaceRoot)
   try {
     const current = await readJsonFile<{ mcpServers?: McpServersMap }>(configPath, {})
     current.mcpServers = wrapAllServers(
@@ -275,8 +378,7 @@ async function injectCline(workspaceId: string, workspaceRoot: string): Promise<
 // ─── Target: Windsurf ─────────────────────────────────────────────────────────
 
 async function injectWindsurf(workspaceId: string, workspaceRoot: string): Promise<void> {
-  const home = node_os.homedir()
-  const configPath = node_path.join(home, '.codeium', 'windsurf', 'mcp_config.json')
+  const configPath = windsurfConfigPath()
 
   try {
     await node_fs.access(node_path.dirname(configPath))
@@ -295,20 +397,23 @@ async function injectWindsurf(workspaceId: string, workspaceRoot: string): Promi
 
 // ─── Target: Continue ─────────────────────────────────────────────────────────
 
+interface ContinueServerEntry {
+  name: string
+  command?: string
+  args?: string[]
+  env?: Record<string, string>
+  url?: string
+  type?: string
+  __intutic_wrapped?: boolean
+}
+
 interface ContinueConfig {
-  mcpServers?: Array<{
-    name: string
-    command: string
-    args?: string[]
-    env?: Record<string, string>
-    __intutic_wrapped?: boolean
-  }>
+  mcpServers?: ContinueServerEntry[]
   [key: string]: unknown
 }
 
 async function injectContinue(workspaceId: string, workspaceRoot: string): Promise<void> {
-  const home = node_os.homedir()
-  const configPath = node_path.join(home, '.continue', 'config.json')
+  const configPath = continueConfigPath()
 
   try {
     await node_fs.access(node_path.dirname(configPath))
@@ -322,22 +427,17 @@ async function injectContinue(workspaceId: string, workspaceRoot: string): Promi
     // Remove any existing intutic entry and add the wrapped one
     current.mcpServers = current.mcpServers.filter((s) => s.name !== 'intutic')
 
-    // Wrap existing non-intutic servers
+    // Wrap existing non-intutic servers — routed through the same
+    // wrapWithProxy used by every other harness, so the stdio-only guard and
+    // --server-name threading stay in one place instead of two.
     current.mcpServers = current.mcpServers.map((s) => {
-      if (s.__intutic_wrapped) return s
-      return {
-        name: s.name,
-        command: 'node',
-        args: [
-          resolveProxyBin(workspaceRoot),
-          '--workspace-id', workspaceId,
-          '--',
-          s.command,
-          ...(s.args ?? []),
-        ],
-        env: { ...(s.env ?? {}), INTUTIC_WORKSPACE_ID: workspaceId },
-        __intutic_wrapped: true,
-      }
+      const wrapped = wrapWithProxy(
+        { command: s.command, args: s.args, env: s.env, url: s.url, type: s.type, __intutic_wrapped: s.__intutic_wrapped },
+        workspaceId,
+        workspaceRoot,
+        s.name
+      )
+      return { name: s.name, ...wrapped }
     })
 
     // Add Intutic MCP server
@@ -354,8 +454,7 @@ async function injectContinue(workspaceId: string, workspaceRoot: string): Promi
 // ─── Target: Goose ────────────────────────────────────────────────────────────
 
 async function injectGoose(workspaceId: string, workspaceRoot: string): Promise<void> {
-  const home = node_os.homedir()
-  const configPath = node_path.join(home, '.config', 'goose', 'config.yaml')
+  const configPath = gooseConfigPath()
 
   try {
     await node_fs.access(node_path.dirname(configPath))
@@ -365,6 +464,7 @@ async function injectGoose(workspaceId: string, workspaceRoot: string): Promise<
     } catch {
       yaml = ''
     }
+    const originalYaml = yaml
 
     // Inject MCP server block if not present (simple string injection — avoids yaml dep)
     const proxyBin = resolveProxyBin(workspaceRoot)
@@ -379,6 +479,12 @@ async function injectGoose(workspaceId: string, workspaceRoot: string): Promise<
       yaml = yaml.trimEnd() + '\n\n' + intuticBlock + '\n'
     }
 
+    if (yaml === originalYaml) {
+      // Already present and unchanged — write-if-changed applies here too
+      // (see writeJsonFile's doc comment for why: this runs every sync cycle now).
+      return
+    }
+
     await node_fs.mkdir(node_path.dirname(configPath), { recursive: true })
     await node_fs.writeFile(configPath, yaml, 'utf-8')
     log.info({ action: 'goose_mcp_injected' }, 'Goose config.yaml updated')
@@ -390,7 +496,7 @@ async function injectGoose(workspaceId: string, workspaceRoot: string): Promise<
 // ─── Target: OpenHands ────────────────────────────────────────────────────────
 
 async function injectOpenHands(workspaceId: string, workspaceRoot: string): Promise<void> {
-  const configPath = node_path.join(workspaceRoot, '.openhands', 'mcp.json')
+  const configPath = openHandsConfigPath(workspaceRoot)
   try {
     const current = await readJsonFile<{ mcpServers?: McpServersMap }>(configPath, {})
     current.mcpServers = wrapAllServers(
@@ -405,12 +511,129 @@ async function injectOpenHands(workspaceId: string, workspaceRoot: string): Prom
   }
 }
 
+// ─── Discovery (read-only — writes nothing) ───────────────────────────────────
+
+/** Classify a raw server entry's transport + wrapped status, tolerant of any shape. */
+function classifyEntry(entry: unknown): { transport: DiscoveredMcpServer['transport']; wrapped: boolean } {
+  if (!entry || typeof entry !== 'object') return { transport: 'unknown', wrapped: false }
+  const e = entry as Record<string, unknown>
+  const wrapped = e.__intutic_wrapped === true
+  if (typeof e.command === 'string') return { transport: 'stdio', wrapped }
+  if (typeof e.url === 'string') {
+    const type = typeof e.type === 'string' ? e.type.toLowerCase() : ''
+    return { transport: type === 'sse' ? 'sse' : 'http', wrapped }
+  }
+  return { transport: 'unknown', wrapped }
+}
+
+/** Read a `{ mcpServers: { [name]: entry } }` shaped config file (the shape
+ *  shared by Claude Code, Claude Desktop, both Cursor configs, Cline,
+ *  Windsurf and OpenHands) without writing anything back. */
+async function discoverJsonObjectHarness(harness: string, filePath: string): Promise<DiscoveredMcpServer[]> {
+  if (!existsSync(filePath)) return []
+  const current = await readJsonFile<{ mcpServers?: Record<string, unknown> }>(filePath, {})
+  const out: DiscoveredMcpServer[] = []
+  for (const [name, entry] of Object.entries(current.mcpServers ?? {})) {
+    const { transport, wrapped } = classifyEntry(entry)
+    out.push({ server: name, harness, transport, wrapped })
+  }
+  return out
+}
+
+/** Continue's `~/.continue/config.json` keeps `mcpServers` as an array, not a map. */
+async function discoverContinue(): Promise<DiscoveredMcpServer[]> {
+  const filePath = continueConfigPath()
+  if (!existsSync(filePath)) return []
+  const current = await readJsonFile<ContinueConfig>(filePath, {})
+  const out: DiscoveredMcpServer[] = []
+  for (const s of current.mcpServers ?? []) {
+    const { transport, wrapped } = classifyEntry(s)
+    out.push({ server: s.name, harness: 'continue', transport, wrapped })
+  }
+  return out
+}
+
+/**
+ * Goose's `~/.config/goose/config.yaml` is YAML, and `injectGoose` above
+ * avoids a yaml dependency by string-injecting a flat block rather than
+ * parsing the file. Discovery mirrors that: a line scan for 2-space-indented
+ * `<name>:` keys under a top-level `mcp:` block — the exact shape `injectGoose`
+ * itself writes — not a real YAML parser, so a server nested any other way
+ * (anchors, flow style, deeper indentation) is invisible here just as it
+ * would be to the writer. `injectGoose` also never rewrites a pre-existing,
+ * non-`intutic` server entry, so nothing discovered here is ever `wrapped`.
+ */
+async function discoverGoose(): Promise<DiscoveredMcpServer[]> {
+  const filePath = gooseConfigPath()
+  let yaml: string
+  try {
+    yaml = await node_fs.readFile(filePath, 'utf-8')
+  } catch {
+    return []
+  }
+
+  const out: DiscoveredMcpServer[] = []
+  let inMcpBlock = false
+  for (const line of yaml.split('\n')) {
+    if (/^mcp:\s*$/.test(line)) {
+      inMcpBlock = true
+      continue
+    }
+    if (!inMcpBlock) continue
+    if (/^\S/.test(line)) {
+      // Dedented back to column 0 — the mcp: block ended.
+      inMcpBlock = false
+      continue
+    }
+    const m = line.match(/^ {2}([A-Za-z0-9_-]+):\s*$/)
+    if (m) {
+      out.push({ server: m[1], harness: 'goose', transport: 'stdio', wrapped: false })
+    }
+  }
+  return out
+}
+
+/**
+ * Discover every MCP server declared in any harness config this daemon knows
+ * how to parse — the same 9 config paths / 8 harnesses `injectMcpServer`
+ * wraps — without writing anything. Used for reporting (agentReporter's
+ * `mcp_tools` facet) so visibility does not silently lag behind whatever
+ * `injectMcpServer` was last run against.
+ *
+ * The `intutic` entry itself is excluded from the result: `wrapAllServers`
+ * deliberately never wraps it (wrapping our own governance server through
+ * itself is circular), so it would always report `wrapped: false` and drag
+ * down a wrapped-ratio reading of a workspace that is, in fact, fully covered.
+ */
+export async function discoverMcpServers(workspaceRoot: string): Promise<DiscoveredMcpServer[]> {
+  const results = await Promise.all([
+    discoverJsonObjectHarness('claude-code', claudeCodeConfigPath()),
+    discoverJsonObjectHarness('claude-desktop', claudeDesktopConfigPath()),
+    discoverJsonObjectHarness('cursor', cursorGlobalConfigPath()),
+    discoverJsonObjectHarness('cursor', cursorProjectConfigPath(workspaceRoot)),
+    discoverJsonObjectHarness('cline', clineConfigPath(workspaceRoot)),
+    discoverJsonObjectHarness('windsurf', windsurfConfigPath()),
+    discoverJsonObjectHarness('openhands', openHandsConfigPath(workspaceRoot)),
+    discoverContinue(),
+    discoverGoose(),
+  ])
+  return results.flat().filter((s) => s.server !== 'intutic')
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
  * Injects and proxy-wraps the Intutic MCP server configuration into all supported harnesses.
  *
  * Non-fatal: a failure in one harness does not prevent other harnesses from being updated.
+ *
+ * Called from two places by design: once from `intutic connect` (tools/cli)
+ * for immediate effect, and once per sync-loop iteration
+ * (services/sync-daemon/src/syncLoop.ts) so it is a continuous invariant
+ * rather than a one-shot — a server a user adds after their first `connect`
+ * still gets wrapped on the next cycle. Safe to call every cycle because
+ * `writeJsonFile` is write-if-changed: an already-wrapped, unchanged config
+ * writes zero bytes.
  *
  * @param workspaceId - The workspace ID for policy lookups and event attribution.
  * @param workspaceRoot - Absolute path to the project workspace root.

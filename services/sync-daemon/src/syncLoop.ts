@@ -31,6 +31,7 @@ import type {
   WorkspaceSettings,
 } from '@intutic/shared-types'
 import { writeConfigFiles, HARNESS_FILES, applyConfigEdits } from './configWriter.js'
+import { injectMcpServer } from './harness/mcpAutoWrite.js'
 import { computeFileHashes } from './hashReporter.js'
 import { loadIntegrity, saveIntegrity } from './integrityStore.js'
 import {
@@ -414,7 +415,7 @@ export async function startSyncLoop(options: SyncLoopOptions): Promise<void> {
 
 // ─── Single iteration ────────────────────────────────────────────────
 
-interface IterationContext {
+export interface IterationContext {
   controlPlaneUrl: string
   apiKey: string
   workspaceId: string
@@ -430,8 +431,15 @@ interface IterationContext {
  * 4. Report status back to control plane
  * 5. Update local integrity store
  * 6. Call onSync callback
+ *
+ * Exported (in addition to being used internally by `startSyncLoop`'s
+ * polling loop) as a test seam — it is the unit that exercises exactly one
+ * cycle's worth of work, including the injectMcpServer call (step 3c),
+ * without the surrounding while-loop's extra one-time/Nth-iteration network
+ * calls (policy snapshot, approved bypasses, egress policy, compliance
+ * probes, drift watcher, decisions digest, config capture).
  */
-async function runSyncIteration(ctx: IterationContext): Promise<SyncResult> {
+export async function runSyncIteration(ctx: IterationContext): Promise<SyncResult> {
   const { controlPlaneUrl, apiKey, workspaceId, workspaceRoot, onSync } = ctx
 
   // 1. Fetch config from control plane
@@ -491,6 +499,19 @@ async function runSyncIteration(ctx: IterationContext): Promise<SyncResult> {
         console.warn('[sync-daemon] Failed to apply custom SkillOpt config edits:', err)
       }
     }
+  }
+
+  // 3c. Proxy-wrap MCP servers across all supported harness configs. This is
+  // a continuous invariant, not a one-shot done only at `connect` time: a
+  // server a user adds to a harness config after their first `connect` would
+  // otherwise never get wrapped and stay invisible to governance. Safe to run
+  // every cycle because mcpAutoWrite's writeJsonFile is write-if-changed — an
+  // already-wrapped, unchanged config writes zero bytes. Non-fatal, matching
+  // step 3b above: a failure here must not abort the sync cycle.
+  try {
+    await injectMcpServer(workspaceRoot, workspaceId)
+  } catch (err) {
+    console.warn('[sync-daemon] injectMcpServer failed (non-fatal):', err)
   }
 
   // 4. Compute file hashes for drift detection
