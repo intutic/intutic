@@ -6,12 +6,14 @@
 
 import { existsSync } from 'node:fs'
 import * as fs from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { spawn } from 'node:child_process'
 import { log } from '../lib/logger.js'
 import { loadCredentials, loadConfig } from '../config/store.js'
 import { getIntuticDir, resolveControlPlaneUrl } from '../config/paths.js'
 import { createApiClient } from '../lib/api.js'
+import { scanSkillContent, type SkillScanFinding } from '@intutic/shared-types'
 import pc from 'picocolors'
 
 // ─── Shared response shapes ──────────────────────────────────────────
@@ -20,13 +22,142 @@ import pc from 'picocolors'
  * One row of the local skill/rule-file inventory reported to the control
  * plane by `POST /api/v1/workspaces/:id/skills/report`.
  */
-interface SkillReportEntry {
+export interface SkillReportEntry {
   /** Path relative to the workspace root, e.g. `CLAUDE.md`. */
   filePath: string
   /** Line count of the file as scanned. */
   linesCount: number
   /** Audit findings in this file; always 0 for `skill list`, which only counts. */
   issuesDetected: number
+  /**
+   * Bounded findings from `scanSkillContent` (`@intutic/shared-types`), for
+   * real `.agents/skills/**\/SKILL.md` / `.claude/skills/**\/SKILL.md` skill
+   * files. Absent for the legacy rule-file rows, which keep the coarse
+   * regex audit above — never full skill content, see `scanSkillContent`'s
+   * own doc comment.
+   */
+  findings?: SkillScanFinding[]
+  /** sha256 of the file content at scan time, so a consumer can tell which
+   *  content a set of findings refers to without re-uploading it. */
+  sha256?: string
+  /**
+   * `false` when the file could not be read (permissions, vanished between
+   * discovery and read, etc). Refusal-not-pass: an unscanned file MUST NOT
+   * be reported as `issuesDetected: 0` implying safety — that would read as
+   * "scanned and clean" to anything downstream. Omitted (not `false`) for
+   * the legacy rule-file rows and for successfully scanned skill files, so
+   * `scanned === false` unambiguously means "we could not tell."
+   */
+  scanned?: boolean
+}
+
+/** Where bundled skill directories live, mirroring the conventions
+ *  `services/sync-daemon/src/agentReporter.ts`'s `collectSkills` already
+ *  uses for `.agents/skills`, plus Claude Code's own `.claude/skills`. Each
+ *  entry directly under the root is a skill; `SKILL.md` is its content. */
+const SKILL_DIRECTORY_ROOTS: ReadonlyArray<{ dir: string; source: string }> = [
+  { dir: '.agents/skills', source: '.agents/skills' },
+  { dir: '.claude/skills', source: '.claude/skills' },
+]
+
+export interface DiscoveredSkillFile {
+  /** Path relative to the workspace root, e.g. `.agents/skills/foo/SKILL.md`. */
+  filePath: string
+  fullPath: string
+  source: string
+}
+
+/**
+ * Read, content-scan, and (if `prune` is set and the scan is not clean)
+ * auto-prune one real skill file. Extracted from `runSkillAudit` so the
+ * discovery/read/scan/report path is testable without the network and
+ * credentials setup the full command does.
+ *
+ * Refusal-not-pass: a read failure returns `scanned: false` with
+ * `issuesDetected: 0` — the zero is not a clean bill of health, it is "we
+ * never got to look." Callers must treat `scanned: false` as its own status,
+ * never as `clean`.
+ */
+export async function auditSkillFile(
+  filePath: string,
+  fullPath: string,
+  prune: boolean,
+): Promise<SkillReportEntry> {
+  let content: string
+  try {
+    content = await fs.readFile(fullPath, 'utf8')
+  } catch (err) {
+    log.warn(
+      `[${filePath}] Could not be read (${err instanceof Error ? err.message : String(err)}) — reported as unscanned, not clean.`,
+    )
+    return { filePath, linesCount: 0, issuesDetected: 0, scanned: false }
+  }
+
+  const contentLines = content.split('\n')
+  const result = scanSkillContent(content)
+  const sha256 = createHash('sha256').update(content, 'utf8').digest('hex')
+
+  if (!result.clean) {
+    for (const finding of result.findings) {
+      log.warn(
+        `[${filePath}] ${finding.category} finding (${finding.patternId})${finding.excerpt ? `: ${finding.excerpt}` : ''}`,
+      )
+    }
+  }
+
+  // Auto-prune worthy findings, same opt-in as the legacy rule-file audit:
+  // drop any LINE that itself trips a pattern, line-by-line — mirroring the
+  // existing per-line re-scan below rather than deleting the whole file,
+  // since a skill missing a few flagged lines still functions.
+  if (!result.clean && prune) {
+    let fileUpdated = false
+    const filteredLines = contentLines.filter((line) => {
+      if (!scanSkillContent(line).clean) {
+        fileUpdated = true
+        return false
+      }
+      return true
+    })
+    if (fileUpdated) {
+      await fs.writeFile(fullPath, filteredLines.join('\n'), 'utf8')
+      log.success(`[${filePath}] Auto-pruned lines flagged by the skill-content scan.`)
+    }
+  }
+
+  return {
+    filePath,
+    linesCount: contentLines.length,
+    issuesDetected: result.findings.length,
+    findings: result.findings,
+    sha256,
+    scanned: true,
+  }
+}
+
+/** Enumerate real `SKILL.md` files under both skill directory roots. A
+ *  missing root is not an error — most workspaces have neither. Exported so
+ *  tests can walk a fixture directory tree without going through the full
+ *  `skill audit`/`skill list` command (credentials, network, etc). */
+export async function discoverSkillFiles(workspaceRoot: string): Promise<DiscoveredSkillFile[]> {
+  const out: DiscoveredSkillFile[] = []
+  for (const root of SKILL_DIRECTORY_ROOTS) {
+    const dir = join(workspaceRoot, root.dir)
+    let entries
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      const filePath = join(root.dir, entry.name, 'SKILL.md')
+      const fullPath = join(workspaceRoot, filePath)
+      if (existsSync(fullPath)) {
+        out.push({ filePath, fullPath, source: root.source })
+      }
+    }
+  }
+  return out
 }
 
 /**
@@ -85,6 +216,23 @@ export async function runSkillList(): Promise<void> {
         issuesDetected: 0,
       })
     }
+  }
+
+  // Real skill directories (`.agents/skills`, `.claude/skills`) — discovery
+  // only here, matching the existing "list only counts" contract for this
+  // command; content scanning happens in `skill audit` below.
+  const skillFiles = await discoverSkillFiles(workspaceRoot)
+  for (const { filePath } of skillFiles) {
+    found++
+    let lines = 0
+    try {
+      lines = (await fs.readFile(join(workspaceRoot, filePath), 'utf8')).split('\n').length
+    } catch {
+      // Discovery already found the directory entry; a read failure here
+      // just means we can't report a line count.
+    }
+    console.log(`  ${pc.green('✔')} ${pc.bold(filePath)} (${lines} lines)`)
+    skillsReport.push({ filePath, linesCount: lines, issuesDetected: 0 })
   }
 
   if (found === 0) {
@@ -189,6 +337,20 @@ export async function runSkillAudit(): Promise<void> {
         issuesDetected: fileIssues,
       })
     }
+  }
+
+  // ── Real skill directories (`.agents/skills`, `.claude/skills`) ──────
+  //
+  // Content-aware scan via `scanSkillContent` (`@intutic/shared-types`),
+  // report-only per that module's doc comment — a finding here is never
+  // treated as ground truth, only surfaced. `enableLocalSkillAuditDelete`
+  // gates pruning here exactly as it already gates the legacy rule-file
+  // pruning above: the same opt-in, now covering both audit paths.
+  const skillFiles = await discoverSkillFiles(workspaceRoot)
+  for (const { filePath, fullPath } of skillFiles) {
+    const entry = await auditSkillFile(filePath, fullPath, enableLocalSkillAuditDelete)
+    issues += entry.issuesDetected
+    skillsReport.push(entry)
   }
 
   if (issues === 0) {

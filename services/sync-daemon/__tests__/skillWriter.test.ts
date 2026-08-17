@@ -11,6 +11,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import * as node_fs from 'node:fs/promises'
 import * as node_path from 'node:path'
+import { scanSkillContent } from '@intutic/shared-types'
 import {
   writeBundledSkills,
   RULE_AUTHOR_SKILL,
@@ -65,5 +66,21 @@ describe('skillWriter', () => {
       return
     }
     expect(RULE_AUTHOR_SKILL).toBe(repoContent)
+  })
+
+  // The single most load-bearing fixture for `packages/shared-types/src/skillScan.ts`'s
+  // pattern table (see that module's own doc comment). RULE_AUTHOR_SKILL is
+  // full of the exact imperative security prose ("Never embed secrets…",
+  // "kill requests once the session budget drops below…") most likely to
+  // trip an overzealous pattern, and it is a real skill this codebase
+  // already ships to every workspace. This assertion lives here rather than
+  // in shared-types' own test suite because `packages/shared-types` is a
+  // leaf package `sync-daemon` depends on — importing sync-daemon's source
+  // from shared-types would invert that dependency. This is the one point
+  // in the dependency graph where both pieces are available together.
+  it('scanSkillContent reports RULE_AUTHOR_SKILL as clean (zero findings)', () => {
+    const result = scanSkillContent(RULE_AUTHOR_SKILL)
+    expect(result.findings, `unexpected findings: ${JSON.stringify(result.findings)}`).toEqual([])
+    expect(result.clean).toBe(true)
   })
 })
