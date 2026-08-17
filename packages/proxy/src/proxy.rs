@@ -957,6 +957,14 @@ fn provider_display_name(provider: &Provider) -> &'static str {
     }
 }
 
+/// The provider's identity for outage/telemetry purposes: "anthropic",
+/// "openai", … — the actual upstream LLM provider, never the harness name
+/// `ExecutionTrace.provider` carries (see `UpstreamError`'s doc comment for
+/// why that distinction matters).
+fn provider_wire_id(provider: &Provider) -> String {
+    provider_display_name(provider).to_lowercase()
+}
+
 /// The tool schemas a request advertises, in whichever shape the harness sent.
 ///
 /// Three nestings, not two. Anthropic puts `{name, description}` at the top
@@ -2937,6 +2945,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 // Blocked before the model answered — no output to echo-scan.
                 response_injection_findings: Vec::new(),
                 context_snapshot: context_snapshot_for_trace.clone(),
+                // Blocked before any upstream call was made.
+                upstream_error: None,
                 graph: crate::telemetry::GraphTrace::from_node(
                     &wasm_ctx.node,
                     findings.iter().map(|f| f.kind.as_str().to_string()).collect(),
@@ -3512,6 +3522,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 // that produced it; re-reporting here would double-count.
                 response_injection_findings: Vec::new(),
             context_snapshot: context_snapshot_for_trace.clone(),
+            // Served from cache — no upstream call was made.
+            upstream_error: None,
         graph: crate::telemetry::GraphTrace::from_node(&node_for_trace, advisory_anomalies.clone()),
             };
 
@@ -4036,6 +4048,69 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 );
             }
 
+            // The provider was completely unreachable — connection refused,
+            // DNS failure, or the request timed out before any response
+            // arrived. Before this, that failure produced no trace at all:
+            // `RewardSignals` above already knew `upstream_ok: false`, but
+            // that knowledge died with the request instead of becoming
+            // durable. Publish honestly, the same way the 5xx site below
+            // does, rather than leaving this failure invisible.
+            let final_prompt_tokens = (body_bytes.len() as f64 / 4.0).max(1.0) as u32;
+            let latency_ms = start.elapsed().as_millis() as u32;
+            let trace = ExecutionTrace {
+                // No response was ever received — nothing to score.
+                response_integrity: None,
+                quality_fault: None,
+                // No response — connection failed before rule evaluation.
+                wasm_shadow_reports: Vec::new(),
+                sop_shadow_reports: sop_shadow_reports.clone(),
+                // No response body was ever produced to compact.
+                tool_result_bytes_saved: 0,
+                routing_shadow_model: None,
+                trace_id: uuid::Uuid::new_v4().to_string(),
+                session_id: session_id.clone(),
+                proxy_instance_id: proxy_instance_id().to_string(),
+                workspace_id: workspace_id.clone(),
+                virtual_key_id: key_prefix.to_string(),
+                model: model.clone(),
+                provider: provider.harness_name().to_string(),
+                raw_input_tokens: final_prompt_tokens,
+                compressed_input_tokens: final_prompt_tokens,
+                output_tokens: 0,
+                raw_cost_usd: 0.0,
+                actual_cost_usd: 0.0,
+                cache_hit: false,
+                latency_ms,
+                verdict: "upstream_error".to_string(),
+                harness_type: harness_type.clone(),
+                created_at: chrono::Utc::now().to_rfc3339(),
+                requested_model: model.clone(),
+                actual_model_routed: actual_model.clone(),
+                task_type: task_type.clone(),
+                tools: new_tool_calls.clone(),
+                change_manifest: change_manifest.clone(),
+                reconstruction_quality: 100,
+                token_anomaly: false,
+                loop_run_id: loop_run_id_header.clone(),
+                findings: advisory_findings.clone(),
+                // No response — nothing to echo-scan.
+                response_injection_findings: Vec::new(),
+                context_snapshot: context_snapshot_for_trace.clone(),
+                upstream_error: Some(crate::telemetry::UpstreamError {
+                    provider: provider_wire_id(&target_provider),
+                    status: None,
+                    kind: crate::telemetry::UpstreamErrorKind::TransportError,
+                }),
+                graph: crate::telemetry::GraphTrace::from_node(
+                    &node_for_trace,
+                    advisory_anomalies.clone(),
+                ),
+            };
+            let trace_store = Arc::clone(&state.store);
+            tokio::spawn(async move {
+                let _ = trace_store.publish_trace(&trace).await;
+            });
+
             return json_error(StatusCode::BAD_GATEWAY, "upstream_error", &desc);
         }
     };
@@ -4078,9 +4153,17 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         // (consumed above by `.text()`), and it cannot correlate a runtime
         // flag with initialisation state — `if let` it can.
         let mut recovered_resp: Option<reqwest::Response> = None;
+        // Set when this request entered unservable-model recovery, regardless
+        // of whether the retry below goes on to succeed. Read after the
+        // retry — if `recovered_resp` stayed `None`, the request genuinely
+        // failed because the routed model does not exist and no
+        // same-provider retry could recover it, which is a real failure
+        // (`UpstreamErrorKind::Unservable`), not a bypassed request.
+        let mut was_unservable_model_error = false;
         if routed_from_to.is_some()
             && crate::routing::bandit::is_unservable_model_error(err_status.as_u16(), &err_body)
         {
+            was_unservable_model_error = true;
             let bad_model = original_routed_model.clone();
             tracing::error!(
                 workspace_id = %workspace_id,
@@ -4206,6 +4289,34 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
 
         let final_prompt_tokens = (body_bytes.len() as f64 / 4.0).max(1.0) as u32;
         let latency_ms = start.elapsed().as_millis() as u32;
+        // Honest failure classification. A 5xx is the provider's own fault; an
+        // unservable-model error that no same-provider retry could recover is
+        // the router's fault, not the caller's — either way this request did
+        // NOT go through, and `verdict: "allowed"` (which downstream mapping
+        // turns into `enforcement_action = 'BYPASS'`) said it did. 4xx errors
+        // that are neither of those (the caller's own bad request) are left
+        // as `"allowed"`, unchanged — that classification is out of scope
+        // here.
+        let computed_upstream_error = if err_status.is_server_error() {
+            Some(crate::telemetry::UpstreamError {
+                provider: provider_wire_id(&target_provider),
+                status: Some(err_status.as_u16()),
+                kind: crate::telemetry::UpstreamErrorKind::Http5xx,
+            })
+        } else if was_unservable_model_error {
+            Some(crate::telemetry::UpstreamError {
+                provider: provider_wire_id(&target_provider),
+                status: Some(err_status.as_u16()),
+                kind: crate::telemetry::UpstreamErrorKind::Unservable,
+            })
+        } else {
+            None
+        };
+        let verdict = if computed_upstream_error.is_some() {
+            "upstream_error"
+        } else {
+            "allowed"
+        };
         let trace = ExecutionTrace {
             // Error or short-circuit — no response body exists to score.
             response_integrity: None,
@@ -4231,7 +4342,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             actual_cost_usd: 0.0,
             cache_hit: false,
             latency_ms,
-            verdict: "allowed".to_string(),
+            verdict: verdict.to_string(),
             harness_type: harness_type.clone(),
             created_at: chrono::Utc::now().to_rfc3339(),
             requested_model: model.clone(),
@@ -4246,6 +4357,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // Upstream error or short-circuit — no response body to echo-scan.
             response_injection_findings: Vec::new(),
             context_snapshot: context_snapshot_for_trace.clone(),
+            upstream_error: computed_upstream_error,
         graph: crate::telemetry::GraphTrace::from_node(&node_for_trace, advisory_anomalies.clone()),
         };
         let cache_store_clone = Arc::clone(&state.store);
@@ -5056,6 +5168,76 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                 )
                                 .await;
                         }
+
+                        // Mid-stream transport failure — the connection died
+                        // after the response had already started, so this
+                        // path (like the pre-stream connection-failure site)
+                        // used to publish no trace at all. `target_provider`
+                        // is not itself captured in this closure; deriving it
+                        // fresh from the routed model is the cheap, correct
+                        // alternative — see `UpstreamError`'s doc comment.
+                        let final_prompt_tokens = if prompt_tokens > 0 {
+                            prompt_tokens
+                        } else {
+                            (prompt_text_clone.len() as f64 / 4.0).max(1.0) as u32
+                        };
+                        let final_completion_tokens = if completion_tokens > 0 {
+                            completion_tokens
+                        } else {
+                            (accumulated_content.len() as f64 / 4.0).max(1.0) as u32
+                        };
+                        let trace = ExecutionTrace {
+                            response_integrity: None,
+                            quality_fault: None,
+                            // Mid-stream failure — rule evaluation is unaffected
+                            // by this trace, so it carries what was already
+                            // computed rather than a hardcoded empty list, same
+                            // as the streaming success trace below.
+                            wasm_shadow_reports: wasm_shadow_reports.clone(),
+                            sop_shadow_reports: sop_shadow_reports.clone(),
+                            tool_result_bytes_saved: 0,
+                            routing_shadow_model: shadow_selection_clone.clone(),
+                            trace_id: uuid::Uuid::new_v4().to_string(),
+                            session_id: session_id_clone.clone(),
+                            proxy_instance_id: proxy_instance_id().to_string(),
+                            workspace_id: workspace_id_clone.clone(),
+                            virtual_key_id: key_prefix_clone.clone(),
+                            model: requested_model_clone.clone(),
+                            provider: provider_clone.harness_name().to_string(),
+                            raw_input_tokens: final_prompt_tokens,
+                            compressed_input_tokens: final_prompt_tokens,
+                            output_tokens: final_completion_tokens,
+                            raw_cost_usd: 0.0,
+                            actual_cost_usd: 0.0,
+                            cache_hit: false,
+                            latency_ms: start.elapsed().as_millis() as u32,
+                            verdict: "upstream_error".to_string(),
+                            harness_type: harness_type_clone.clone(),
+                            created_at: chrono::Utc::now().to_rfc3339(),
+                            requested_model: requested_model_clone.clone(),
+                            actual_model_routed: actual_model_clone.clone(),
+                            task_type: task_type_clone.clone(),
+                            tools: new_tool_calls_clone.clone(),
+                            change_manifest: change_manifest_clone.clone(),
+                            reconstruction_quality: 100,
+                            token_anomaly: false,
+                            loop_run_id: loop_run_id_clone.clone(),
+                            findings: advisory_findings.clone(),
+                            // Response died mid-stream — nothing complete to echo-scan.
+                            response_injection_findings: Vec::new(),
+                            context_snapshot: context_snapshot_for_trace.clone(),
+                            upstream_error: Some(crate::telemetry::UpstreamError {
+                                provider: provider_wire_id(&get_model_provider(&actual_model_clone)),
+                                status: None,
+                                kind: crate::telemetry::UpstreamErrorKind::TransportError,
+                            }),
+                            graph: crate::telemetry::GraphTrace::from_node(
+                                &node_for_trace,
+                                advisory_anomalies.clone(),
+                            ),
+                        };
+                        let _ = cache_store_clone.publish_trace(&trace).await;
+
                         let _ = tx.send(Err(std::io::Error::other(e.to_string()))).await;
                         return;
                     }
@@ -5499,6 +5681,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 findings: advisory_findings.clone(),
                 response_injection_findings,
             context_snapshot: context_snapshot_for_trace.clone(),
+            // The stream completed (this is the success trace; a mid-stream
+            // transport failure returns earlier, from its own trace above).
+            upstream_error: None,
         graph: crate::telemetry::GraphTrace::from_node(&node_for_trace, advisory_anomalies.clone()),
             };
 
@@ -5586,6 +5771,68 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     },
                 );
             }
+
+            // The connection survived long enough for a status line and
+            // headers, but died reading the body — a transport failure, not
+            // an HTTP error response, so there is no HTTP status to blame
+            // beyond the one already received (recorded for context; the
+            // failure itself is at the transport level). Before this, this
+            // path published no trace at all, same defect as the initial
+            // connection-failure site above.
+            let final_prompt_tokens = (body_bytes.len() as f64 / 4.0).max(1.0) as u32;
+            let latency_ms = start.elapsed().as_millis() as u32;
+            let trace = ExecutionTrace {
+                response_integrity: None,
+                quality_fault: None,
+                // Error or short-circuit before rule evaluation.
+                wasm_shadow_reports: Vec::new(),
+                sop_shadow_reports: sop_shadow_reports.clone(),
+                tool_result_bytes_saved: 0,
+                routing_shadow_model: None,
+                trace_id: uuid::Uuid::new_v4().to_string(),
+                session_id: session_id.clone(),
+                proxy_instance_id: proxy_instance_id().to_string(),
+                workspace_id: workspace_id.clone(),
+                virtual_key_id: key_prefix.to_string(),
+                model: model.clone(),
+                provider: provider.harness_name().to_string(),
+                raw_input_tokens: final_prompt_tokens,
+                compressed_input_tokens: final_prompt_tokens,
+                output_tokens: 0,
+                raw_cost_usd: 0.0,
+                actual_cost_usd: 0.0,
+                cache_hit: false,
+                latency_ms,
+                verdict: "upstream_error".to_string(),
+                harness_type: harness_type.clone(),
+                created_at: chrono::Utc::now().to_rfc3339(),
+                requested_model: model.clone(),
+                actual_model_routed: actual_model.clone(),
+                task_type: task_type.clone(),
+                tools: new_tool_calls.clone(),
+                change_manifest: change_manifest.clone(),
+                reconstruction_quality: 100,
+                token_anomaly: false,
+                loop_run_id: loop_run_id_header.clone(),
+                findings: advisory_findings.clone(),
+                // No complete response body — nothing to echo-scan.
+                response_injection_findings: Vec::new(),
+                context_snapshot: context_snapshot_for_trace.clone(),
+                upstream_error: Some(crate::telemetry::UpstreamError {
+                    provider: provider_wire_id(&target_provider),
+                    status: Some(upstream_status.as_u16()),
+                    kind: crate::telemetry::UpstreamErrorKind::TransportError,
+                }),
+                graph: crate::telemetry::GraphTrace::from_node(
+                    &node_for_trace,
+                    advisory_anomalies.clone(),
+                ),
+            };
+            let trace_store = Arc::clone(&state.store);
+            tokio::spawn(async move {
+                let _ = trace_store.publish_trace(&trace).await;
+            });
+
             return json_error(
                 StatusCode::BAD_GATEWAY,
                 "upstream_error",
@@ -6311,6 +6558,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         // never touches a disposition.
         response_injection_findings,
         context_snapshot: context_snapshot_for_trace.clone(),
+        // The request succeeded (this is the success trace; the 5xx/transport
+        // failure sites above carry their own honest verdict and upstream_error).
+        upstream_error: None,
         graph: crate::telemetry::GraphTrace::from_node(&node_for_trace, advisory_anomalies.clone()),
     };
 

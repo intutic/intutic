@@ -111,6 +111,22 @@ pub struct ExecutionTrace {
     /// two have opposite remedies.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quality_fault: Option<String>,
+    /// Why the upstream provider call itself did not produce a usable
+    /// response — distinct from `quality_fault`, which grades a response
+    /// that WAS received.
+    ///
+    /// `None` on every trace where the request never failed at the transport
+    /// or provider-error level, which is the overwhelming majority. Before
+    /// this field existed, a 5xx from the provider wrote `verdict: "allowed"`
+    /// — indistinguishable from a cheap, legitimately-bypassed request in
+    /// every downstream analytic — and a transport-level failure (the
+    /// provider unreachable, or the connection dying mid-response) wrote no
+    /// trace at all, so it was invisible rather than merely mislabeled. The
+    /// in-memory `RewardSignals.upstream_ok` already knew both of these; it
+    /// fed the bandit and then the request's own knowledge of its failure
+    /// died with it. This field is that knowledge, made durable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upstream_error: Option<UpstreamError>,
     pub output_tokens: u32,
     pub raw_cost_usd: f64,
     pub actual_cost_usd: f64,
@@ -265,6 +281,46 @@ impl FindingWire {
     }
 }
 
+/// Why an upstream provider call failed, when it did.
+///
+/// Carried on `ExecutionTrace.upstream_error`. `provider` is the actual LLM
+/// provider the request was routed to (`get_model_provider`/`target_provider`
+/// — "anthropic", "openai", …), never the harness name that
+/// `ExecutionTrace.provider` carries; a downtime record attributed to
+/// "claude-code" or "cursor" would blame the wrong party for an Anthropic or
+/// OpenAI outage.
+#[derive(Debug, Clone, Serialize)]
+pub struct UpstreamError {
+    pub provider: String,
+    /// The HTTP status the provider returned, when one exists. `None` for a
+    /// pure transport failure (connection refused, DNS, timeout, a body or
+    /// stream that died mid-read) — there is no status to report because no
+    /// complete HTTP response was ever received.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<u16>,
+    pub kind: UpstreamErrorKind,
+}
+
+/// The shape of an upstream failure.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UpstreamErrorKind {
+    /// No complete response was ever received: the connection failed, the
+    /// request timed out, or the response body / SSE stream died before it
+    /// finished. `UpstreamError.status` is `None` for the "never connected"
+    /// case, and may be `Some` (the response started successfully) when the
+    /// failure was mid-read.
+    TransportError,
+    /// The provider answered with a 5xx. `status` is always `Some` here.
+    Http5xx,
+    /// The routed model itself was rejected by the provider as not servable
+    /// (unknown, decommissioned, deprecated model id) and no same-provider
+    /// retry recovered it. A router/config problem, not a provider outage —
+    /// kept distinct from `Http5xx` so the two are not conflated in outage
+    /// analytics.
+    Unservable,
+}
+
 /// The graph coordinates of one traced request.
 ///
 /// A trace already records what a request did. This records *where in the
@@ -338,7 +394,9 @@ mod tests {
     /// fixtures elsewhere in this crate — `ExecutionTrace` derives no
     /// `Default` of its own, since a wire struct silently growing a
     /// zero-value field for every new column is exactly the failure mode
-    /// the five-trace-site tests above guard against in production code.
+    /// the eight-trace-site tests above guard against in production code
+    /// (five pre-existing sites, plus the three previously-silent failure
+    /// sites Phase 8a adds a trace to).
     fn base_trace() -> ExecutionTrace {
         ExecutionTrace {
             trace_id: String::new(),
@@ -356,6 +414,7 @@ mod tests {
             routing_shadow_model: None,
             response_integrity: None,
             quality_fault: None,
+            upstream_error: None,
             output_tokens: 0,
             raw_cost_usd: 0.0,
             actual_cost_usd: 0.0,
@@ -430,16 +489,19 @@ mod tests {
     #[test]
     fn every_construction_site_computes_response_injection_findings_not_a_hardcoded_default() {
         let src = include_str!("proxy.rs");
-        // Three no-response sites (blocked/cache-hit/error) hardcode an empty
-        // Vec -- that is correct, there is no response to scan. The two
+        // Six no-response sites (blocked/cache-hit/5xx-or-unservable-error,
+        // plus the three previously-silent failure sites this phase adds a
+        // trace to: initial connection failure, non-streaming body-read
+        // failure, mid-stream chunk failure) hardcode an empty Vec -- that is
+        // correct, there is no response to scan on any of them. The two
         // success sites (non-streaming, streaming) assign via shorthand field
         // init from a locally computed `response_injection_findings` binding.
-        // Together that is 5 field mentions in struct literals, matching the
-        // five ExecutionTrace construction sites.
+        // Together that is 8 field mentions in struct literals, matching the
+        // eight ExecutionTrace construction sites.
         assert_eq!(
             src.matches("response_injection_findings: Vec::new()").count(),
-            3,
-            "expected exactly the 3 no-response trace sites to hardcode an empty Vec"
+            6,
+            "expected exactly the 6 no-response trace sites to hardcode an empty Vec"
         );
         assert_eq!(
             src.matches("response_injection_findings,").count(),
@@ -548,8 +610,11 @@ mod tests {
         let src = include_str!("proxy.rs");
         assert_eq!(
             src.matches("proxy_instance_id: proxy_instance_id()").count(),
-            5,
-            "every one of the five trace sites must publish the process id"
+            8,
+            "every one of the eight trace sites must publish the process id \
+             (the original five, plus the three failure sites this phase adds \
+             a trace to: initial connection failure, non-streaming body-read \
+             failure, mid-stream chunk failure)"
         );
     }
 
@@ -625,6 +690,74 @@ mod tests {
         assert!(
             v.as_object().unwrap().get("sop_shadow_reports").is_none(),
             "a trace with nothing shadowed must omit the key, not serialise an empty array"
+        );
+    }
+
+    /// `upstream_error` round-trips when present, and is omitted (not `null`)
+    /// when absent — same `skip_serializing_if` discipline as
+    /// `routing_shadow_model` and `quality_fault` beside it, so the success
+    /// path's wire shape is unchanged by this field's existence.
+    #[test]
+    fn upstream_error_round_trips_and_is_omitted_when_absent() {
+        let mut trace = base_trace();
+        let v = serde_json::to_value(&trace).unwrap();
+        assert!(
+            v.as_object().unwrap().get("upstream_error").is_none(),
+            "a successful trace must omit the key, not serialise it as null"
+        );
+
+        trace.upstream_error = Some(UpstreamError {
+            provider: "anthropic".to_string(),
+            status: Some(503),
+            kind: UpstreamErrorKind::Http5xx,
+        });
+        let v = serde_json::to_value(&trace).unwrap();
+        assert_eq!(v["upstream_error"]["provider"], "anthropic");
+        assert_eq!(v["upstream_error"]["status"], 503);
+        assert_eq!(v["upstream_error"]["kind"], "http5xx");
+    }
+
+    /// A pure transport failure (never connected) has no HTTP status to
+    /// report, and that absence must itself be omitted, not serialised as
+    /// `"status": null` — same discipline the field-level test above holds
+    /// for `upstream_error` as a whole.
+    #[test]
+    fn upstream_error_status_is_omitted_for_a_pure_transport_failure() {
+        let mut trace = base_trace();
+        trace.upstream_error = Some(UpstreamError {
+            provider: "openai".to_string(),
+            status: None,
+            kind: UpstreamErrorKind::TransportError,
+        });
+        let v = serde_json::to_value(&trace).unwrap();
+        assert!(
+            v["upstream_error"].as_object().unwrap().get("status").is_none(),
+            "a connection failure has no status; the key must be omitted, not null"
+        );
+        assert_eq!(v["upstream_error"]["kind"], "transport_error");
+    }
+
+    /// Every trace site must carry the upstream-error field, either honestly
+    /// populated on a failure path or `None` on a path that never failed at
+    /// the transport/provider-error level.
+    ///
+    /// Same shape of defect this file's other "assert against source" tests
+    /// guard against, and the specific documented incident (see this file's
+    /// module comment on `base_trace`): a field added to the struct but
+    /// missed at one of the streaming/non-streaming call-site pairs compiles
+    /// fine (`upstream_error` has a serde default) and fails silently in
+    /// production instead of at build time.
+    #[test]
+    fn every_trace_site_carries_upstream_error() {
+        let src = include_str!("proxy.rs");
+        assert!(
+            src.matches("upstream_error:").count() >= 8,
+            "expected upstream_error on all 5 pre-existing trace sites (blocked, \
+             cache-hit, non-streaming success, streaming success, and the non-\
+             streaming 5xx/unservable error site) plus the 3 previously-silent \
+             failure sites this phase adds a trace to (initial connection \
+             failure, non-streaming body-read failure, mid-stream chunk \
+             failure) — found fewer than 8 mentions"
         );
     }
 
