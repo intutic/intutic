@@ -15,7 +15,7 @@
  *
  * So the assertions here are mostly about what does *not* get written.
  */
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { mkdtempSync, rmSync, readFileSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -24,20 +24,91 @@ import {
   writePolicySnapshot,
   buildSnapshotRules,
   validateRule,
+  fetchResolvedPolicy,
   SNAPSHOT_JSON,
   SNAPSHOT_RULES,
   DESTRUCTIVE_TIER_SEVERITY,
+  SKILL_SURFACE_TIER_SEVERITY,
   type ResolvedPolicy,
 } from '../../src/lib/policySnapshot.js'
+import { SKILL_SURFACE_PATTERNS, staticFloorPatterns } from '../../src/harness/protectedPaths.js'
 
 function policy(over: Partial<ResolvedPolicy> = {}): ResolvedPolicy {
   return {
     workspaceId: 'ws_test',
     interventionMode: 'ENFORCE',
     sopRules: [],
+    mcpAllowedServers: [],
     ...over,
   }
 }
+
+afterEach(() => vi.restoreAllMocks())
+
+describe('fetchResolvedPolicy — absorbing allowedServers from GET /api/v1/policy/resolve', () => {
+  it('reads mcpAllowedServers off the response field named `allowedServers`', async () => {
+    // The M1-added field on this route — confirmed by reading
+    // services/control-plane/src/routes/evaluate.ts and lib/mcpCuration.ts
+    // directly: both name it `allowedServers`, not `mcpAllowedServers` or
+    // anything else. This test pins that this module reads the SAME name
+    // rather than a differently-spelled one nobody's route actually emits.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          workspaceId: 'ws_1',
+          sopRules: [],
+          interventionMode: 'ENFORCE',
+          allowedServers: ['github', 'filesystem'],
+        }),
+      })) as unknown as typeof fetch,
+    )
+    const policy = await fetchResolvedPolicy({
+      controlPlaneUrl: 'https://cp.example',
+      apiKey: 'k',
+      workspaceId: 'ws_1',
+    })
+    expect(policy?.mcpAllowedServers).toEqual(['github', 'filesystem'])
+  })
+
+  it('defaults mcpAllowedServers to [] when the field is absent or the wrong type', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ workspaceId: 'ws_1', sopRules: [], interventionMode: 'ENFORCE' }),
+      })) as unknown as typeof fetch,
+    )
+    const policy = await fetchResolvedPolicy({
+      controlPlaneUrl: 'https://cp.example',
+      apiKey: 'k',
+      workspaceId: 'ws_1',
+    })
+    expect(policy?.mcpAllowedServers).toEqual([])
+  })
+
+  it('drops non-string entries rather than letting them through to the sanitiser untyped', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          workspaceId: 'ws_1',
+          sopRules: [],
+          interventionMode: 'ENFORCE',
+          allowedServers: ['github', 42, null, 'filesystem'],
+        }),
+      })) as unknown as typeof fetch,
+    )
+    const policy = await fetchResolvedPolicy({
+      controlPlaneUrl: 'https://cp.example',
+      apiKey: 'k',
+      workspaceId: 'ws_1',
+    })
+    expect(policy?.mcpAllowedServers).toEqual(['github', 'filesystem'])
+  })
+})
 
 describe('validateRule', () => {
   it('accepts an ordinary tool pattern', () => {
@@ -52,6 +123,16 @@ describe('validateRule', () => {
     for (const catchAll of ['.*', '.+', '^.*$', '[A-Za-z]*', '.?.*']) {
       expect(validateRule(catchAll, 'sop_x'), `${catchAll} was accepted`).toMatch(/catch-all/)
     }
+  })
+
+  it('M3: accepts a properly-scoped mcp__<server>__.* pattern, rejects a raw catch-all against the widened canary set', () => {
+    // CANARY_TOOLS grew two mcp__<server>__<tool>-shaped entries in M3
+    // (mcp__github__create_issue, mcp__filesystem__read_file) specifically so
+    // this threshold check is exercised against MCP-shaped tool names too,
+    // not just native ones. A rule scoped to one server must still pass; a
+    // raw catch-all must still fail even with the wider canary set.
+    expect(validateRule('mcp__github__.*', 'sop_mcp')).toBeNull()
+    expect(validateRule('.*', 'sop_mcp_catchall')).toMatch(/catch-all/)
   })
 
   it('rejects an empty or anchor-only pattern', () => {
@@ -172,6 +253,54 @@ describe('buildSnapshotRules', () => {
     expect(rules.every((r) => r.severity === 'shadow')).toBe(true)
     expect(rules.some((r) => r.severity === 'warn'), 'a shadow snapshot still emits warn rules').toBe(false)
   })
+
+  describe('skill-surface tier (TD-358 block-tier promotion)', () => {
+    it('ships one rule per SKILL_SURFACE_PATTERNS entry at SKILL_SURFACE_TIER_SEVERITY', () => {
+      const rules = buildSnapshotRules(policy())
+      const skillRules = rules.filter((r) => r.id.startsWith('skill_surface.'))
+      expect(skillRules.length).toBe(SKILL_SURFACE_PATTERNS.length)
+      for (const r of skillRules) {
+        expect(r.severity).toBe(SKILL_SURFACE_TIER_SEVERITY)
+      }
+      // Sanity: this test is only meaningful while the constant is 'block'.
+      // If it is ever flipped back to 'warn' as the retraction this comment
+      // predicts, this assertion still holds — it reads the constant, not a
+      // hardcoded 'block'.
+      expect(SKILL_SURFACE_TIER_SEVERITY).toBe('block')
+    })
+
+    it('suffixes snapshot-delivered ids so they never collide with the static-floor copies', () => {
+      const rules = buildSnapshotRules(policy())
+      const skillRules = rules.filter((r) => r.id.startsWith('skill_surface.'))
+      const floorIds = new Set(staticFloorPatterns().map((r) => r.id))
+      for (const r of skillRules) {
+        expect(r.id.endsWith('.tier'), `${r.id} is not suffixed .tier`).toBe(true)
+        expect(floorIds.has(r.id), `${r.id} collides with a static-floor rule id`).toBe(false)
+        // The un-suffixed id IS a floor id — proving the suffix is what
+        // prevents the collision, not that the ids were unrelated to begin
+        // with.
+        const base = r.id.slice(0, -'.tier'.length)
+        expect(floorIds.has(base), `${base} was expected to be the floor's own id for ${r.id}`).toBe(true)
+      }
+    })
+
+    it('matches the same source pattern as the corresponding floor rule', () => {
+      const rules = buildSnapshotRules(policy())
+      for (const floorPattern of SKILL_SURFACE_PATTERNS) {
+        const snapshotRule = rules.find((r) => r.id === `${floorPattern.id}.tier`)
+        expect(snapshotRule, `no snapshot rule for ${floorPattern.id}`).toBeDefined()
+        expect(snapshotRule!.source).toBe(floorPattern.source)
+        expect(snapshotRule!.subject).toBe(floorPattern.subject)
+      }
+    })
+
+    it('marks skill-surface rules shadow, not block, in SHADOW mode', () => {
+      const rules = buildSnapshotRules(policy({ interventionMode: 'SHADOW' }))
+      const skillRules = rules.filter((r) => r.id.startsWith('skill_surface.'))
+      expect(skillRules.length).toBeGreaterThan(0)
+      expect(skillRules.every((r) => r.severity === 'shadow')).toBe(true)
+    })
+  })
 })
 
 describe('writePolicySnapshot', () => {
@@ -254,5 +383,104 @@ describe('writePolicySnapshot', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+
+  describe('mcpAllowedServers — the #mcpservers header (M3)', () => {
+    it('omits the #mcpservers header entirely when the list is empty', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'intutic-snap-mcp1-'))
+      try {
+        await writePolicySnapshot(policy({ mcpAllowedServers: [] }), dir)
+        const rulesText = readFileSync(join(dir, SNAPSHOT_RULES), 'utf8')
+        expect(rulesText).not.toContain('#mcpservers')
+        const doc = JSON.parse(readFileSync(join(dir, SNAPSHOT_JSON), 'utf8'))
+        expect(doc.mcpAllowedServers).toEqual([])
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    })
+
+    it('emits #mcpservers block <csv> when servers are configured, ENFORCE mode', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'intutic-snap-mcp2-'))
+      try {
+        await writePolicySnapshot(
+          policy({ interventionMode: 'ENFORCE', mcpAllowedServers: ['github', 'filesystem'] }),
+          dir,
+        )
+        const rulesText = readFileSync(join(dir, SNAPSHOT_RULES), 'utf8')
+        expect(rulesText).toContain('#mcpservers block github,filesystem')
+        const doc = JSON.parse(readFileSync(join(dir, SNAPSHOT_JSON), 'utf8'))
+        expect(doc.mcpAllowedServers).toEqual(['github', 'filesystem'])
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    })
+
+    it('emits #mcpservers shadow <csv> in SHADOW mode', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'intutic-snap-mcp3-'))
+      try {
+        await writePolicySnapshot(
+          policy({ interventionMode: 'SHADOW', mcpAllowedServers: ['github'] }),
+          dir,
+        )
+        const rulesText = readFileSync(join(dir, SNAPSHOT_RULES), 'utf8')
+        expect(rulesText).toContain('#mcpservers shadow github')
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    })
+
+    it('drops a server name containing whitespace or a comma, rather than corrupting the header', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'intutic-snap-mcp4-'))
+      try {
+        await writePolicySnapshot(
+          policy({
+            mcpAllowedServers: ['github', 'bad name', 'bad,name', 'bad\tname', 'filesystem'],
+          }),
+          dir,
+        )
+        const rulesText = readFileSync(join(dir, SNAPSHOT_RULES), 'utf8')
+        // Only the two clean names survive, and the header line still has
+        // exactly one occurrence of each — a dropped name must not leave a
+        // dangling comma or a corrupted line behind.
+        expect(rulesText).toContain('#mcpservers block github,filesystem')
+        expect(rulesText).not.toContain('bad name')
+        expect(rulesText).not.toContain('bad,name')
+        expect(rulesText).not.toContain('bad\tname')
+        const doc = JSON.parse(readFileSync(join(dir, SNAPSHOT_JSON), 'utf8'))
+        expect(doc.mcpAllowedServers).toEqual(['github', 'filesystem'])
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    })
+
+    it('drops every server name and omits the header when all names are unsafe', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'intutic-snap-mcp5-'))
+      try {
+        await writePolicySnapshot(policy({ mcpAllowedServers: ['bad name', '  ', 'a,b'] }), dir)
+        const rulesText = readFileSync(join(dir, SNAPSHOT_RULES), 'utf8')
+        expect(rulesText).not.toContain('#mcpservers')
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    })
+
+    it('digest is unchanged by the #mcpservers header — it covers rule lines only', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'intutic-snap-mcp6-'))
+      try {
+        const sopRules = [{ id: 's1', toolPattern: 'Bash', action: 'block', reason: 'no shell' }]
+        const without = await writePolicySnapshot(policy({ sopRules, mcpAllowedServers: [] }), dir)
+        const withServers = await writePolicySnapshot(
+          policy({ sopRules, mcpAllowedServers: ['github', 'filesystem'] }),
+          dir,
+        )
+        expect(withServers.digest).toBe(without.digest)
+
+        const rulesText = readFileSync(join(dir, SNAPSHOT_RULES), 'utf8')
+        expect(rulesText).toContain('#mcpservers block github,filesystem')
+        expect(rulesText).toContain(`#digest ${without.digest}`)
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    })
   })
 })

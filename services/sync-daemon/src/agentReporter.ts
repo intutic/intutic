@@ -17,8 +17,17 @@
 
 import { readFile, readdir, access } from 'node:fs/promises'
 import { join } from 'node:path'
+import { createHash } from 'node:crypto'
 import { newIso } from '@intutic/id'
-import { scanSkillContent, type HarnessType } from '@intutic/shared-types'
+import {
+  scanSkillContent,
+  scanScriptContent,
+  detectScriptLanguage,
+  MAX_SKILL_DIR_DEPTH,
+  MAX_FILES_PER_SKILL,
+  MAX_SCRIPT_SCAN_BYTES,
+  type HarnessType,
+} from '@intutic/shared-types'
 import { discoverMcpServers } from './harness/mcpAutoWrite.js'
 
 /** Live egress-enforcement status read from the proxy's own diagnostic endpoint. */
@@ -55,6 +64,39 @@ interface AgentFacets {
     /** Count of findings when scanned and not clean; `0` when scanned+clean
      *  or when unscanned (there is nothing to count). */
     findingsCount: number
+    /**
+     * Bundled-script enumeration for this skill (TD-356, Phase S2) — files
+     * alongside `SKILL.md` inside the same skill directory, discovered by
+     * the same bounded, symlink-skipping walk `discoverSkillBundledFiles`
+     * (`tools/cli/src/commands/skill.ts`) uses, and content-scanned via
+     * `scanScriptContent` when a recognized language and within
+     * `MAX_SCRIPT_SCAN_BYTES`. Omitted (not `{total: 0, ...}`) when the
+     * skill has no bundled files at all — `agentPosture.ts`'s `skills`
+     * scorer treats an absent facet as "nothing to say," not as a finding.
+     */
+    scripts?: {
+      /** Every bundled file the walk found, scanned or not. */
+      total: number
+      /** How many of `total` were actually content-scanned — excludes
+       *  unreadable files, files over the byte cap (refused, not skipped),
+       *  and files whose language `detectScriptLanguage` could not
+       *  determine. */
+      scanned: number
+      /** How many of `scanned` came back with at least one finding. */
+      flagged: number
+    }
+    /**
+     * sha256 of the `SKILL.md` content this row describes (Phase S5,
+     * TD-357) — lets `services/control-plane/src/routes/agents.ts` look up
+     * a previously-judged semantic verdict
+     * (`services/semanticSkillAnalysisService.ts`'s `skills:semantic:*`
+     * Valkey entry) keyed by the exact content this cycle read, without this
+     * daemon ever transmitting the content itself over `/api/v1/agents/report`
+     * — only the CLI's `/skills/report` path (opt-in,
+     * `semanticSkillAnalysisEnabled`) does that. Absent when `SKILL.md`
+     * could not be read.
+     */
+    sha256?: string
   }>
   loops: { configured: boolean }
   harness: { type: string; config_synced: boolean }
@@ -135,8 +177,82 @@ async function collectSops(workspaceRoot: string): Promise<AgentFacets['sops']> 
 }
 
 /**
+ * Bounded, symlink-skipping walk of one skill directory's bundled files
+ * (siblings of `SKILL.md`), content-scanning each one via `scanScriptContent`
+ * when its language is recognized and it is within `MAX_SCRIPT_SCAN_BYTES`.
+ *
+ * TD-356, Phase S2: mirrors `discoverSkillBundledFiles`
+ * (`tools/cli/src/commands/skill.ts`) closely — the exact same caps
+ * (`MAX_SKILL_DIR_DEPTH`, `MAX_FILES_PER_SKILL`) and symlink-skip discipline
+ * (`Dirent.isSymbolicLink()` checked and skipped outright during `readdir`,
+ * never stat-ed or resolved — a symlink inside a skill directory could point
+ * outside it, or outside the workspace entirely, turning a bounded walk
+ * unbounded) — but is its own implementation, not a shared import. This
+ * module has no dependency on `tools/cli`; `collectSkills` already
+ * re-implements skill-directory discovery independently of the CLI's
+ * `discoverSkillFiles` for the same reason, and this walk follows that same
+ * precedent rather than introducing a new cross-package dependency for it.
+ *
+ * Returns `undefined` (not `{total: 0, scanned: 0, flagged: 0}`) when the
+ * skill has no bundled files at all, so `collectSkills` can omit `scripts`
+ * entirely for the common case of a skill that is only a `SKILL.md` — see
+ * that field's own doc comment on the `AgentFacets['skills']` item type.
+ */
+async function collectSkillScripts(
+  skillDir: string,
+): Promise<{ total: number; scanned: number; flagged: number } | undefined> {
+  const files: string[] = []
+
+  async function walk(dir: string, depth: number): Promise<void> {
+    if (depth > MAX_SKILL_DIR_DEPTH || files.length >= MAX_FILES_PER_SKILL) return
+    let entries
+    try {
+      entries = await readdir(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      if (files.length >= MAX_FILES_PER_SKILL) return
+      if (entry.isSymbolicLink()) continue // never follow — see this function's doc comment
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) {
+        await walk(full, depth + 1)
+      } else if (entry.isFile()) {
+        if (depth === 0 && entry.name === 'SKILL.md') continue
+        files.push(full)
+      }
+    }
+  }
+
+  await walk(skillDir, 0)
+  if (files.length === 0) return undefined
+
+  let scanned = 0
+  let flagged = 0
+  for (const filePath of files) {
+    let buffer: Buffer
+    try {
+      buffer = await readFile(filePath)
+    } catch {
+      continue // unreadable — counted in `total`, not `scanned`
+    }
+    if (buffer.length > MAX_SCRIPT_SCAN_BYTES) continue // refused, not silently skipped or scanned
+    const firstLine = buffer.toString('utf8', 0, Math.min(buffer.length, 200)).split('\n')[0]
+    const language = detectScriptLanguage(filePath, firstLine)
+    if (language === 'unknown') continue // not a script language this scanner understands
+    const result = scanScriptContent(buffer.toString('utf8'), language)
+    scanned++
+    if (!result.clean) flagged++
+  }
+
+  return { total: files.length, scanned, flagged }
+}
+
+/**
  * Bundled skills under `<root>/.agents/skills/<name>/SKILL.md`, content-
- * scanned via `scanSkillContent` (`@intutic/shared-types`) on every cycle.
+ * scanned via `scanSkillContent` (`@intutic/shared-types`) on every cycle,
+ * plus (TD-356, Phase S2) a bounded enumeration of each skill's bundled
+ * scripts via `collectSkillScripts`, attached as the `scripts` facet.
  *
  * Report-only, matching `scanSkillContent`'s own doc comment: this function
  * never modifies, blocks, or removes anything — it reads and attaches a
@@ -147,7 +263,10 @@ async function collectSops(workspaceRoot: string): Promise<AgentFacets['sops']> 
  * `scanned: false, clean: false` — never `clean: true`, and never silently
  * dropped from the list. An unreadable skill is not a skill the daemon can
  * vouch for, and dropping it would make a workspace's posture score look
- * better than what is actually known.
+ * better than what is actually known. The `scripts` enumeration runs
+ * regardless of whether `SKILL.md` itself was readable — a script bundled
+ * next to an unreadable `SKILL.md` is still on disk and still a surface to
+ * report on.
  */
 async function collectSkills(workspaceRoot: string): Promise<AgentFacets['skills']> {
   const dir = join(workspaceRoot, '.agents', 'skills')
@@ -161,19 +280,32 @@ async function collectSkills(workspaceRoot: string): Promise<AgentFacets['skills
   const dirs = entries.filter((e) => e.isDirectory())
   const out: AgentFacets['skills'] = []
   for (const e of dirs) {
-    const skillMdPath = join(dir, e.name, 'SKILL.md')
+    const skillDir = join(dir, e.name)
+    const skillMdPath = join(skillDir, 'SKILL.md')
+    const scripts = await collectSkillScripts(skillDir)
+
     try {
       const content = await readFile(skillMdPath, 'utf8')
       const result = scanSkillContent(content)
+      const sha256 = createHash('sha256').update(content, 'utf8').digest('hex')
       out.push({
         name: e.name,
         source: '.agents/skills',
         scanned: true,
         clean: result.clean,
         findingsCount: result.findings.length,
+        sha256,
+        ...(scripts ? { scripts } : {}),
       })
     } catch {
-      out.push({ name: e.name, source: '.agents/skills', scanned: false, clean: false, findingsCount: 0 })
+      out.push({
+        name: e.name,
+        source: '.agents/skills',
+        scanned: false,
+        clean: false,
+        findingsCount: 0,
+        ...(scripts ? { scripts } : {}),
+      })
     }
   }
   return out

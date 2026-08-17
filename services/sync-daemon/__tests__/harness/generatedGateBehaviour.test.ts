@@ -45,6 +45,7 @@ import {
   type GuardPattern,
 } from '../../src/harness/protectedPaths.js'
 import { toRulesLine } from '../../src/harness/gateBody.js'
+import { buildSnapshotRules } from '../../src/lib/policySnapshot.js'
 import { createHash } from 'node:crypto'
 
 /**
@@ -77,8 +78,19 @@ const roots = new Map<string, string>()
  *  exercised at full strength regardless of what ships by default. */
 const snapshotRules = join(home, 'policy-snapshot.rules')
 
+/** A snapshot built the way the daemon actually builds one — via
+ *  `buildSnapshotRules`, not hand-assembled — so this fixture cannot drift
+ *  from what `SKILL_SURFACE_TIER_SEVERITY` actually ships. Carries the
+ *  `skill_surface.*.tier` block-tier promotion (TD-358) alongside the
+ *  destructive tier at its default (currently `warn`) severity. */
+const skillSurfaceSnapshotRules = join(home, 'skill-surface-policy-snapshot.rules')
+
 beforeAll(async () => {
   writeRulesFixture(snapshotRules, DESTRUCTIVE_COMMAND_PATTERNS)
+  writeRulesFixture(
+    skillSurfaceSnapshotRules,
+    buildSnapshotRules({ workspaceId: 'ws_test', interventionMode: 'ENFORCE', sopRules: [], mcpAllowedServers: [] }),
+  )
   for (const g of GATES) {
     // A root per writer, HOME moved before the dynamic import: `gooseHooks`
     // reads `homedir()` at module scope and `piHooks` at call time, so HOME must
@@ -382,6 +394,20 @@ describe('gate registry completeness', () => {
     ).toEqual([])
   })
 
+  it('declares an mcpCalls fact for every gate (M3)', () => {
+    // TypeScript already forces every GATES literal to specify `mcpCalls` and
+    // `mcpNote` (required fields on GateEntry, not optional) — this is the
+    // completeness check's runtime half: a value outside the declared enum,
+    // or an empty note, would compile but say nothing. `gateRegistry.ts`'s own
+    // module doc names the failure mode this whole file exists to prevent:
+    // "not declaring one was indistinguishable from not being a harness".
+    const allowed = new Set(['yes', 'reachable', 'no'])
+    for (const g of GATES) {
+      expect(allowed.has(g.mcpCalls), `${g.name}.mcpCalls is not one of yes/reachable/no`).toBe(true)
+      expect(g.mcpNote.trim().length, `${g.name}.mcpNote is empty`).toBeGreaterThan(0)
+    }
+  })
+
   it('every gate produced its declared artifact', () => {
     for (const g of GATES) {
       const err = roots.get(g.name + ':error')
@@ -564,6 +590,39 @@ for (const g of GATES) {
       const withSnap = await runGate(g, { command: 'rm -rf /' }, { snapshot: true })
       assertCleanExit(g, withSnap, 'rm -rf / with a snapshot')
       expect(wasBlocked(g, withSnap)).toBe(true)
+    })
+
+    it('promotes a skill-surface write to block once the snapshot supplies the tier (TD-358)', async () => {
+      // Mirrors the destructive-tier test immediately above, but for the
+      // opposite starting point: SKILL_SURFACE_PATTERNS is already in the
+      // compiled floor at `warn` (asserted earlier in this file), so the
+      // no-snapshot case must still be exactly that — flagged, not blocked —
+      // and only a valid snapshot carrying the `skill_surface.*.tier` rules
+      // should turn that into a block.
+      for (const filePath of [
+        '/w/.agents/skills/my-skill/SKILL.md',
+        '/w/.claude/skills/my-skill/SKILL.md',
+      ]) {
+        const withoutSnap = await runGate(g, { file_path: filePath }, { tool: 'Write' })
+        assertCleanExit(g, withoutSnap, `a skill-surface write to ${filePath} with no snapshot`)
+        expect(
+          wasBlocked(g, withoutSnap),
+          `${g.name} blocked a skill-surface write from the floor alone — the ` +
+            `floor stays warn-tier as the degraded-mode baseline (TD-358)`,
+        ).toBe(false)
+
+        const withSnap = await runGate(
+          g,
+          { file_path: filePath },
+          { tool: 'Write', snapshot: skillSurfaceSnapshotRules },
+        )
+        assertCleanExit(g, withSnap, `a skill-surface write to ${filePath} with a promoting snapshot`)
+        expect(
+          wasBlocked(g, withSnap),
+          `${g.name} did not block a skill-surface write to ${filePath} once the ` +
+            `snapshot supplied the skill_surface.*.tier block rule`,
+        ).toBe(true)
+      }
     })
 
     /**
@@ -1127,6 +1186,7 @@ describe('n8n workflow gate', () => {
           action: 'block',
           reason: 'deploys must be digest-pinned',
         }],
+        mcpAllowedServers: [],
       },
       dir,
     )

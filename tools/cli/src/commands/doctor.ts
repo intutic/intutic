@@ -39,6 +39,7 @@ import {
   SNAPSHOT_STALE_AFTER_DAYS,
   type PolicySnapshotHealth,
 } from '../lib/policySnapshot.js'
+import { ciscoScannerOnPath, ciscoScannerVersion } from '../lib/ciscoScanner.js'
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -615,6 +616,38 @@ async function checkPolicySnapshot(): Promise<CheckResult> {
   return describePolicySnapshot(readPolicySnapshot({ expectedWorkspaceId: creds?.workspaceId }))
 }
 
+/**
+ * Check 9: Cisco `skill-scanner` integration (Phase S3) — an OPTIONAL
+ * external tool `intutic skill audit --engine cisco` (or the
+ * `ciscoSkillScannerEnabled` workspace setting's auto-run) shells out to.
+ *
+ * Unlike every other check above, absence here is NOT a failure —
+ * `passed: true` either way. This is the operator's own separate
+ * installation (`pipx install skill-scanner`), and `intutic skill audit`
+ * degrades gracefully without it (see `lib/ciscoScanner.ts`'s module doc
+ * comment). The remediation string is still populated when absent, purely
+ * informational — `runDoctor`'s print loop shows it as a dimmed hint on a
+ * passing row, not an error.
+ */
+export async function checkCiscoScanner(): Promise<CheckResult> {
+  const present = await ciscoScannerOnPath()
+  if (!present) {
+    return {
+      name: 'Cisco Skill Scanner',
+      passed: true,
+      detail: 'not installed (optional integration)',
+      remediation: 'pipx install skill-scanner',
+    }
+  }
+
+  const version = await ciscoScannerVersion()
+  return {
+    name: 'Cisco Skill Scanner',
+    passed: true,
+    detail: version ? `Installed — ${version}` : 'Installed on PATH (version unavailable)',
+  }
+}
+
 // ─── Runner ──────────────────────────────────────────────────────────
 
 export async function runDoctor(): Promise<void> {
@@ -632,6 +665,7 @@ export async function runDoctor(): Promise<void> {
   results.push(await checkValkey())
   results.push(checkCertTrust())
   results.push(await checkPolicySnapshot())
+  results.push(await checkCiscoScanner())
 
   // Print results
   const passed = results.filter(r => r.passed).length
@@ -640,6 +674,12 @@ export async function runDoctor(): Promise<void> {
   for (const result of results) {
     if (result.passed) {
       console.log(`  ${pc.green('✓')} ${pc.bold(result.name)} — ${result.detail}`)
+      // Informational only: every OTHER passing check has no remediation —
+      // this is the one exception (checkCiscoScanner, absent-but-optional),
+      // where the hint is still worth surfacing even though nothing failed.
+      if (result.remediation) {
+        console.log(`    ${pc.dim('→')} ${pc.dim(result.remediation)}`)
+      }
     } else {
       console.log(`  ${pc.red('✗')} ${pc.bold(result.name)} — ${result.detail}`)
       if (result.remediation) {

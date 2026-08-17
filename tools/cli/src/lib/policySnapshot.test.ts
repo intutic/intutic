@@ -186,6 +186,7 @@ describe('agreement with the sync daemon', () => {
         sopRules: [
           { id: 'r1', toolPattern: 'Bash', action: 'block', reason: 'No shell in this workspace' },
         ],
+        mcpAllowedServers: [],
       },
       dir,
     )

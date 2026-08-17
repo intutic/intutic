@@ -94,6 +94,24 @@ describe('Claude Code PreToolUse Hooks Compiler', () => {
 
     await node_fs.rm(tempRoot, { recursive: true, force: true })
   })
+
+  it('registers a mcp__.* PreToolUse matcher (M3)', async () => {
+    // Without this matcher, an mcp__<server>__<tool> call never reaches the
+    // gate script at all — the v6 gate body's #mcpservers allowlist check and
+    // any workspace SOP rule shaped like BLOCK:mcp__github__.* are both dead
+    // code on Claude Code without it.
+    const tempRoot = await node_fs.mkdtemp(node_path.join(node_os.tmpdir(), 'intutic-hooks-mcp-test-'))
+    try {
+      await updatePreToolUseHooks(tempRoot, mockSops)
+      const settings = JSON.parse(
+        await node_fs.readFile(node_path.join(tempRoot, '.claude', 'settings.json'), 'utf-8'),
+      )
+      const matchers = settings.hooks.PreToolUse.map((h: { matcher: string }) => h.matcher)
+      expect(matchers).toContain('mcp__.*')
+    } finally {
+      await node_fs.rm(tempRoot, { recursive: true, force: true })
+    }
+  })
 })
 
 // The pre-execution half of `review_before:`.

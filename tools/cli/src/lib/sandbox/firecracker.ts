@@ -28,6 +28,7 @@ import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import * as path from 'node:path'
 import { log } from '../logger.js'
+import { binaryOnPath } from '../binaryOnPath.js'
 import type { SandboxBackend, SandboxHealth, SandboxSpec } from './types.js'
 
 /** Firecracker-specific inputs, beyond the generic SandboxSpec. */
@@ -171,12 +172,4 @@ export class FirecrackerBackend implements SandboxBackend {
       child.on('exit', (code, signal) => resolve(signal ? 128 : (code ?? 0)))
     })
   }
-}
-
-function binaryOnPath(bin: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    const child = spawn('sh', ['-c', `command -v ${bin}`], { stdio: 'ignore' })
-    child.on('error', () => resolve(false))
-    child.on('exit', (code) => resolve(code === 0))
-  })
 }
