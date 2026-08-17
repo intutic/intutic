@@ -578,6 +578,27 @@ integrity
     await runIntegrityConfigChain(opts)
   })
 
+// ── Routing reports ─────────────────────────────────────────────────────────
+
+const routing = program
+  .command('routing')
+  .description('Read-only reports for the routing subsystem')
+
+routing
+  .command('adoption-report')
+  .description(
+    'Mirror-test adoption report for one candidate model — win/loss/tie, fault-rate delta, ' +
+    'cost delta, latency delta (Phase 7b: GET /api/v1/routing/mirror-adoption-report). ' +
+    'A reported signal for human review, not an automatic gate.'
+  )
+  .requiredOption('--candidate-model <model>', 'The mirror-tested candidate model to report on')
+  .option('--json', 'Output as JSON instead of a report')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runRoutingAdoptionReport } = await import('./commands/routing.js')
+    await runRoutingAdoptionReport(opts)
+  })
+
 // ── Daemon persistence (WS-5 — Q3 Layer 4) ─────────────────────────────────
 
 const daemon = program
