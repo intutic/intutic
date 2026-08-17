@@ -63,6 +63,7 @@ import { createLogger } from '@intutic/logger'
 import { toRulesLine, GATE_VERSION, RULES_COLUMNS } from '../harness/gateBody.js'
 import {
   DESTRUCTIVE_COMMAND_PATTERNS,
+  SKILL_SURFACE_PATTERNS,
   assertPortableEre,
   type GuardPattern,
 } from '../harness/protectedPaths.js'
@@ -98,6 +99,51 @@ export const SNAPSHOT_RULES = 'policy-snapshot.rules'
  */
 export const DESTRUCTIVE_TIER_SEVERITY: 'block' | 'warn' = 'warn'
 
+/**
+ * Whether the skill-directory-write tier ships as `block` or as `warn`.
+ *
+ * `block` — deliberately not following `DESTRUCTIVE_TIER_SEVERITY`'s warn-first
+ * ramp, because the thing that ramp is buying time for does not exist on this
+ * surface. `DESTRUCTIVE_COMMAND_PATTERNS` rides at `warn` because those seven
+ * families are unmeasured against real developer traffic and a false positive
+ * has a real cost (see that constant's own comment). `SKILL_SURFACE_PATTERNS`
+ * is not that kind of rule: it does not run `scanSkillContent` or judge
+ * anything about what a skill file says, only WHERE a write's target path
+ * points — `.agents/skills/**` or `.claude/skills/**`, a deterministic,
+ * zero-ambiguity match. TD-358 (`docs/TECH_DEBT.md`) says this about exactly
+ * that distinction: "Path-matching is the one exception, and it is not
+ * actually an exception to the measurement requirement — it never needed
+ * one." There is no false-positive rate to earn a promotion by measuring,
+ * because there is nothing probabilistic here to measure in the first place.
+ *
+ * The second half of the argument is what `warn` actually buys on this
+ * surface, and the answer is nothing. `SECRET_CONTENT_PATTERNS`
+ * (`harness/protectedPaths.ts`) skips the warn-first ramp for the same reason
+ * and states the principle this constant now follows: "A warn that lets the
+ * write proceed IS the incident." A poisoned skill file written under
+ * warn-only is not a near-miss sitting in telemetry waiting for a human to
+ * notice — it is a file on disk that the very next agent session loads and
+ * trusts as instructions, the same way it trusts its own system prompt. Warn
+ * logs the write and lets it land anyway, so there is no window in which the
+ * advisory tier protected anything. That is what makes this different from
+ * `DESTRUCTIVE_COMMAND_PATTERNS`: a destructive *command*'s warn tier buys a
+ * chance for a human to notice before the damage is done; a skill file, once
+ * written, already is the damage.
+ *
+ * Shipped *through the snapshot* rather than promoted in place in
+ * `staticFloorPatterns()`, for the same operational reason
+ * `DESTRUCTIVE_TIER_SEVERITY` is: the rollout, not the mechanism, is the thing
+ * still short on field time, and the snapshot channel is what makes it
+ * retractable in one sync cycle instead of one release if that turns out
+ * wrong. `staticFloorPatterns()` keeps its two `SKILL_SURFACE_PATTERNS`
+ * entries at `warn` — unchanged by this constant — as the degraded-mode
+ * baseline for a workspace with no snapshot, or an invalid one; this constant
+ * is what promotes the steady state to `block` everywhere a valid snapshot has
+ * landed. Flipping it back to `'warn'` is the retraction, exactly as it is for
+ * `DESTRUCTIVE_TIER_SEVERITY`.
+ */
+export const SKILL_SURFACE_TIER_SEVERITY: 'block' | 'warn' = 'block'
+
 /** Rules the control plane resolved for this workspace. Mirrors the
  *  `GET /api/v1/policy/resolve` response — including `argPattern`, the
  *  ` WHERE ` clause of a SOP title. This type is where that field used to
@@ -107,6 +153,18 @@ export interface ResolvedPolicy {
   workspaceId: string
   sopRules: Array<{ id: string; toolPattern: string; argPattern?: string; action: string; reason: string }>
   interventionMode: string
+  /**
+   * Per-server MCP allowlist, absorbed verbatim from `allowedServers` on
+   * `GET /api/v1/policy/resolve` (confirmed against `evaluate.ts` and
+   * `lib/mcpCuration.ts` — both the daemon-mode and stdio-mode routes read
+   * this same field name off `workspaces.settings`, so this is not a new
+   * name invented for the snapshot). Absent/empty means unrestricted — the
+   * MCP proxy already reads it that way (`packages/mcp-proxy/src/policy.ts`),
+   * and the gate-side `#mcpservers` header this field feeds
+   * (`writePolicySnapshot` below) preserves the same convention: an empty
+   * list omits the header entirely rather than shipping a deny-everything one.
+   */
+  mcpAllowedServers: string[]
 }
 
 export interface PolicySnapshotOptions {
@@ -127,6 +185,12 @@ export interface PolicySnapshotOptions {
 const CANARY_TOOLS = [
   'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'Task', 'WebFetch',
   'NotebookEdit', 'TodoWrite', 'run_command', 'str_replace_editor',
+  // M3: two `mcp__<server>__<tool>`-shaped canaries, so a rule that is
+  // scoped to one MCP server (e.g. `mcp__github__.*`) is exercised against
+  // this same threshold check as every other tool-name pattern, and a rule
+  // that reaches all the way into MCP-tool-shaped names (not just the
+  // native tool names above) is still caught as a catch-all.
+  'mcp__github__create_issue', 'mcp__filesystem__read_file',
 ]
 
 /**
@@ -188,11 +252,26 @@ export function validateRule(toolPattern: string, ruleId: string): string | null
   }
 
   // A threshold rather than "matches all of them". `[A-Za-z]*` matches ten of
-  // these twelve — it misses only the two with an underscore — and shipping it
-  // to a blocking path would stop essentially every tool call. Requiring a clean
-  // sweep would have let it through on a technicality.
+  // these fourteen — it misses only the four with an underscore — and shipping
+  // it to a blocking path would stop essentially every tool call. Requiring a
+  // clean sweep would have let it through on a technicality.
+  //
+  // The ratio is 0.7, not 0.8, and that is a deliberate M3 adjustment, not a
+  // drive-by tweak. Before M3, CANARY_TOOLS held 12 entries, 2 of them
+  // underscored (`run_command`, `str_replace_editor`), so `[A-Za-z]*` hit 10 of
+  // 12 (83%) — above an 0.8 threshold, correctly rejected. M3 added two more
+  // *underscored* canaries (`mcp__github__create_issue`,
+  // `mcp__filesystem__read_file`, both required by name — see CANARY_TOOLS)
+  // without adding any non-underscored ones, so the same `[A-Za-z]*` pattern
+  // now hits 10 of 14 (71%): still every alphabetic-only tool name there is,
+  // but under an unchanged 0.8 threshold that stops being "a catch-all" and
+  // starts being "accepted" — silently weakening a case
+  // `harnessProtectedPaths`... `policySnapshot.test.ts` pins by name. Lowering
+  // the ratio to 0.7 keeps the absolute hit-count threshold at 10 (`Math.ceil`
+  // of both 12*0.8 and 14*0.7), so `[A-Za-z]*` is rejected exactly as before —
+  // the ratio moved so the THRESHOLD would not.
   const hits = CANARY_TOOLS.filter((t) => re.test(` ${t} `)).length
-  const limit = Math.ceil(CANARY_TOOLS.length * 0.8)
+  const limit = Math.ceil(CANARY_TOOLS.length * 0.7)
   if (hits >= limit) {
     return (
       `matches ${hits} of ${CANARY_TOOLS.length} common tool names — this is a ` +
@@ -300,6 +379,12 @@ export async function fetchResolvedPolicy(
           (x.argPattern === undefined || typeof x.argPattern === 'string')
         )
       }),
+      // `allowedServers` — the exact field name `evaluate.ts` and
+      // `lib/mcpCuration.ts` both use. Absent or wrongly-typed degrades to
+      // `[]`, same as `sopRules` above: unrestricted, not a fetch failure.
+      mcpAllowedServers: Array.isArray(rec.allowedServers)
+        ? rec.allowedServers.filter((s): s is string => typeof s === 'string')
+        : [],
     }
   } catch (err) {
     log.warn({ action: 'policy_fetch_failed', err }, 'Policy resolve unreachable')
@@ -307,14 +392,59 @@ export async function fetchResolvedPolicy(
   }
 }
 
+/**
+ * SHADOW means observe, do not intervene. It demotes the dynamic tier to the
+ * advisory severity — it does NOT reach the static floor, which stays
+ * enforced. If one settings string could disarm the floor, the floor would
+ * not be a floor.
+ *
+ * Extracted so `buildSnapshotRules` and `writePolicySnapshot`'s `#mcpservers`
+ * header compute "is this workspace in SHADOW mode" the same way once, rather
+ * than as two copies of `.toUpperCase() === 'SHADOW'` that could drift.
+ */
+function isShadowMode(policy: ResolvedPolicy): boolean {
+  return policy.interventionMode.toUpperCase() === 'SHADOW'
+}
+
+/**
+ * Drops MCP server names that would corrupt the comma-joined `#mcpservers`
+ * `.rules` header line — a name carrying a comma would be misread as two
+ * server names, and a tab or other whitespace would collide with the
+ * `.rules` file's own column separator the moment anyone looked at the line
+ * next to a rule row. Logged, not silently dropped: a server an operator
+ * configured and then watched vanish from enforcement needs to know why,
+ * the same discipline `validateRule` follows for a rejected SOP pattern.
+ */
+function sanitizeMcpServerNames(names: readonly string[]): string[] {
+  const out: string[] = []
+  // Defensive against a caller that built a ResolvedPolicy by hand without
+  // TypeScript actually checking it — this repo's test files are outside
+  // `tsconfig.json`'s `include`, so `tsc --noEmit` does not catch a test
+  // constructing one with `mcpAllowedServers` omitted, and a JS consumer of
+  // this exported function is not checked at all. `Array.isArray` costs
+  // nothing on the real path, where `fetchResolvedPolicy` already guarantees
+  // an array.
+  if (!Array.isArray(names)) return out
+  for (const raw of names) {
+    if (typeof raw !== 'string') continue
+    const name = raw.trim()
+    if (!name) continue
+    if (/[\s,]/.test(name)) {
+      log.warn(
+        { action: 'mcp_server_name_rejected', name: raw },
+        'MCP server name contains whitespace or a comma — dropped rather than corrupting the .rules #mcpservers header',
+      )
+      continue
+    }
+    out.push(name)
+  }
+  return out
+}
+
 /** Builds the rule set a snapshot would carry, without writing it. Exported so
  *  a test can assert the contents rather than re-deriving them. */
 export function buildSnapshotRules(policy: ResolvedPolicy): GuardPattern[] {
-  // SHADOW means observe, do not intervene. It demotes the dynamic tier to the
-  // advisory severity — it does NOT reach the static floor, which stays
-  // enforced. If one settings string could disarm the floor, the floor would
-  // not be a floor.
-  const shadow = policy.interventionMode.toUpperCase() === 'SHADOW'
+  const shadow = isShadowMode(policy)
 
   const sopRules = policy.sopRules
     .map((r) => toGuardPattern(r, shadow))
@@ -332,7 +462,24 @@ export function buildSnapshotRules(policy: ResolvedPolicy): GuardPattern[] {
           : ('warn' as const),
   }))
 
-  return [...sopRules, ...destructive]
+  // The snapshot-delivered promotion of the skill-directory-write floor rules
+  // to `block` — see SKILL_SURFACE_TIER_SEVERITY. `.tier` suffixed onto the
+  // floor's own id (`skill_surface.agents_skills_write` ->
+  // `skill_surface.agents_skills_write.tier`) so this entry can never collide
+  // with `staticFloorPatterns()`'s compiled-in copy of the same pattern: both
+  // are meant to be present and matching the same path at once, one warn (the
+  // degraded-mode baseline) and one block (the steady state), and
+  // `assertGuardTableSane`'s uniqueness check would reject an accidental
+  // duplicate id the moment either table tried to load. Mirrors the
+  // destructive tier's own shadow handling: SHADOW means observe, don't act,
+  // on the dynamic tier only — the floor's warn rule is unaffected either way.
+  const skillSurface = SKILL_SURFACE_PATTERNS.map((p) => ({
+    ...p,
+    id: `${p.id}.tier`,
+    severity: shadow ? ('shadow' as GuardPattern['severity']) : SKILL_SURFACE_TIER_SEVERITY,
+  }))
+
+  return [...sopRules, ...destructive, ...skillSurface]
 }
 
 /**
@@ -355,6 +502,19 @@ export async function writePolicySnapshot(
   // would see drift that is not there.
   const generatedAt = new Date().toISOString()
 
+  // M3: the per-server MCP allowlist, sanitised once and reused for both
+  // artifacts so the JSON and the `.rules` header can never disagree about
+  // which names survived. Severity follows SHADOW the same way the dynamic
+  // tier's rules do: certain, just not acted on.
+  //
+  // Deliberately OUTSIDE `lines`/`digest` above — the digest covers RULE lines
+  // only, matching the trust model the `#workspace` header already has (parsed
+  // and integrity-checked by workspace-id comparison, not by the digest). A
+  // `#mcpservers` header is the same kind of metadata line, not a rule, so it
+  // must not change what `lines.join('\n')` hashes to.
+  const mcpServers = sanitizeMcpServerNames(policy.mcpAllowedServers)
+  const mcpSeverity: 'shadow' | 'block' = isShadowMode(policy) ? 'shadow' : 'block'
+
   await fs.mkdir(snapshotDir, { recursive: true })
 
   const json = JSON.stringify(
@@ -376,6 +536,12 @@ export async function writePolicySnapshot(
       generatedAt,
       interventionMode: policy.interventionMode,
       digest,
+      // M3: sanitised, not `policy.mcpAllowedServers` verbatim — a name this
+      // module rejected for the `.rules` header must not silently survive in
+      // the JSON, or the two artifacts would disagree about what is enforced.
+      // Empty means unrestricted, same convention as `allowedServers` at the
+      // control plane (`readMcpCurationSettings`).
+      mcpAllowedServers: mcpServers,
       /**
        * The resolve response verbatim, alongside the gate projection below.
        *
@@ -414,12 +580,23 @@ export async function writePolicySnapshot(
   // read — only the JSON carries a timestamp, and they never open the JSON. A
   // snapshot from last year enforced identically to one written a second ago,
   // and nothing anywhere could say so.
+  // `#mcpservers <severity> <comma-joined-server-names>` — OMITTED entirely
+  // when the (sanitised) list is empty. This is the mandatory-mechanism/
+  // opt-in-effect split M3 is built on: the header-parsing and per-call
+  // allowlist check ship to every gate unconditionally, but they are a no-op
+  // until a workspace actually configures `mcpAllowedServers` — and "no
+  // header line" is how a v6 gate (and, for forward-compat, a hypothetical
+  // v5-reading-a-v6-file) tells "unrestricted" apart from "restricted to
+  // zero servers", which would otherwise block every MCP call by omission.
+  const mcpHeader = mcpServers.length > 0 ? `#mcpservers ${mcpSeverity} ${mcpServers.join(',')}\n` : ''
+
   const rulesText =
     `# Intutic policy snapshot (projection of ${SNAPSHOT_JSON}) — DO NOT EDIT.\n` +
     `# Columns: ${RULES_COLUMNS.join('\t')}\n` +
     `#digest ${digest}\n` +
     `#workspace ${policy.workspaceId}\n` +
     `#generated ${generatedAt}\n` +
+    mcpHeader +
     lines.join('\n') +
     '\n'
 

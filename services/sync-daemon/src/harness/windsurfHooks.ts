@@ -118,9 +118,15 @@ process.stdin.on('end', () => {
     // the extractor's field set. Narrower would refuse real traffic; an
     // envelope with none of these extracts to empty strings, matches no rule,
     // and used to be allowed.
-    intuticGuardEnvelope(ctx, ['tool_name', 'toolName', 'tool_input', 'toolInput', 'input', 'event',
+    intuticGuardEnvelope(ctx, ['tool_name', 'toolName', 'tool_input', 'toolInput', 'input', 'event', 'hook_event_name',
       'command', 'cmd', 'script', 'path', 'file_path', 'filePath', 'file', 'target', 'notebook_path'], logEvent);
-    const event = (ctx.event || '').toLowerCase();
+    // Windsurf's hooks.json registers the same event names Cursor's does
+    // (\`beforeShellExecution\`/\`beforeMCPExecution\`/\`beforeFileEdit\`), and this
+    // writer's extraction mirrors Cursor's — including reading \`hook_event_name\`
+    // as well as \`event\`, since that is the field Cursor's own hooks
+    // documentation names for its own payload and this writer was never
+    // independently verified against a live Windsurf payload to say otherwise.
+    const event = (ctx.hook_event_name || ctx.event || '').toLowerCase();
     // tool_input is included deliberately: Windsurf sends "input", but every
     // other harness sends "tool_input", and reading only the former meant a
     // payload in the common shape produced an empty command and target — so the
@@ -130,7 +136,20 @@ process.stdin.on('end', () => {
     const targetPath = input.path || input.file_path || input.filePath || input.file ||
       input.target || input.notebook_path || '';
     const command = input.command || input.cmd || input.script || '';
-    const toolName = ctx.tool_name || ctx.toolName || event || 'tool';
+    let toolName = ctx.tool_name || ctx.toolName || event || 'tool';
+
+    // M3: compose \`mcp__<server>__<tool>\` for a beforeMCPExecution call, the
+    // same fix cursorHooks.ts carries (see its comment for the confirmed live
+    // payload shape) — applied here on the unconfirmed assumption that
+    // Windsurf's beforeMCPExecution payload matches Cursor's, since this
+    // writer's extraction has always mirrored Cursor's field-for-field and no
+    // independent Windsurf-specific payload capture exists in this codebase.
+    // Inert (no-op) if that assumption is wrong for a given Windsurf build —
+    // it only fires when \`event\` and \`tool_name\` are both already present.
+    if (event === 'beforemcpexecution' && ctx.tool_name) {
+      const mcpServer = ctx.command || ctx.url || ctx.server_name || ctx.serverName;
+      if (mcpServer) toolName = 'mcp__' + mcpServer + '__' + ctx.tool_name;
+    }
 
     // The block reason now comes from the shared gate and always contains
     // "governance rule". hookEvents.resolveSeverity keys CRITICAL off the
