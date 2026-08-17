@@ -1,8 +1,8 @@
 <div align="center">
 
-# Intutic — The Circuit Breaker for AI Agents
+# Intutic — Policy as Code for Continuous Compliance & Continuous Enforcement of AI Agents
 
-**Real-time security, secret DLP, and loop burn prevention for autonomous AI coding agents.**
+**The circuit breaker for AI agents: your policies are files in git, enforced synchronously and in-process on every tool call across 19 agent harnesses.**
 
 [![GitHub Stars](https://img.shields.io/github/stars/intutic/intutic?style=social)](https://github.com/intutic/intutic)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
@@ -42,7 +42,7 @@ flowchart TD
     subgraph HotPathProxy[" ⚡ Intutic Hot-Path Proxy (:4000) "]
         Engine["🔒 WASM Policy Engine<br><i>(In-Process Evaluation)</i>"]
         DLP["🔐 Secret DLP & Masking"]
-        PCAS["🛡️ PCAS Action Primitives<br><code>BYPASS</code> | <code>ENHANCE</code> | <code>HIJACK</code> | <code>KILL</code>"]
+        PCAS["🛡️ PCAS Action Primitives<br><code>BYPASS</code> | <code>ENHANCE</code> | <code>HIJACK</code> | <code>REASK</code> | <code>KILL</code>"]
     end
 
     subgraph SyncDaemon[" 🔄 Sync Daemon "]
@@ -103,24 +103,25 @@ That's it! Your agent is now governed by real-time safety guardrails.
 
 ---
 
-## 🛡️ The 4 PCAS Primitives
+## 🛡️ The 5 PCAS Primitives
 
-Every tool call and prompt evaluated by Intutic produces one of four **PCAS Action Primitives**:
+Every tool call and prompt evaluated by Intutic produces one of five **PCAS Action Primitives**:
 
 ```
- ┌──────────┐  ┌───────────┐  ┌────────────┐  ┌──────────┐
- │  BYPASS  │  │  ENHANCE  │  │   HIJACK   │  │   KILL   │
- └────┬─────┘  └─────┬─────┘  └─────┬──────┘  └────┬─────┘
-      │              │              │              │
-      ▼              ▼              ▼              ▼
- Direct Pass    Inject Safety  Redact Secrets   Hard-Abort
- (In-Process)    Context SOP    or Swap Args     Runaway Loop
+ ┌──────────┐  ┌───────────┐  ┌────────────┐  ┌──────────┐  ┌──────────┐
+ │  BYPASS  │  │  ENHANCE  │  │   HIJACK   │  │  REASK   │  │   KILL   │
+ └────┬─────┘  └─────┬─────┘  └─────┬──────┘  └────┬─────┘  └────┬─────┘
+      │              │              │              │              │
+      ▼              ▼              ▼              ▼              ▼
+ Direct Pass    Inject Safety  Redact Secrets    Refuse &      Hard-Abort
+ (In-Process)    Context SOP    or Swap Args    Bounded Retry  Runaway Loop
 ```
 
 1. **`BYPASS`**: Standard safe execution passes through natively (in-process, no added network hop).
 2. **`ENHANCE`**: Inject contextual SOP prompt rules or architectural guidelines.
 3. **`HIJACK`**: Substitute dangerous tool parameters or redact secrets on the fly.
-4. **`KILL`**: Hard-abort execution thread if an agent attempts destructive file/git ops or hits loop caps.
+4. **`REASK`**: Refuse the attempt and hand the reason back to the agent, which may retry a bounded number of times before the finding escalates to a block.
+5. **`KILL`**: Hard-abort execution thread if an agent attempts destructive file/git ops or hits loop caps.
 
 ---
 
