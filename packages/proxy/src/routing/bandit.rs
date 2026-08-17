@@ -5,11 +5,22 @@
 //!
 //! LLD #26 §4.1 — Thompson Sampling Selector
 
+use crate::pricing;
 use crate::store::{ControlPlaneCache, LocalStore};
 use rand::prelude::*;
 use rand_distr::Beta;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+
+/// Deterministic tie-break window for [`select_arm`]'s same-family preference.
+///
+/// Thompson samples land in `[0, 1]`; two arms with real, meaningfully
+/// different reward histories almost never land this close together, but
+/// float noise and near-identical priors (e.g. two freshly-seeded arms) do.
+/// `0.02` was chosen to catch that "practically indistinguishable" band
+/// without swallowing a genuine quality gap — an arm that's actually 2+
+/// percentage points better in expectation still wins outright.
+const FAMILY_PREFERENCE_EPSILON: f64 = 0.02;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BanditArmState {
@@ -158,6 +169,69 @@ pub fn sample_beta(alpha: f64, beta: f64) -> f64 {
     }
 }
 
+/// Thompson-samples one draw per candidate arm and returns the model with the
+/// highest sample — falling back to `requested_model` if `arms` is empty.
+///
+/// `prefer_family`, when given, is a **deterministic tie-break only**: it is
+/// consulted only among arms whose sample lands within
+/// [`FAMILY_PREFERENCE_EPSILON`] of the best sample seen. A same-family
+/// candidate inside that window wins over a marginally-higher cross-family
+/// one; a cross-family arm that is *clearly* better (outside the epsilon)
+/// always wins regardless of family. This never overrides real signal — it
+/// only picks a direction among arms Thompson sampling itself couldn't tell
+/// apart, in favor of the choice that also keeps the session's KV-cache
+/// prefix warm (see the session-lock doc comment in `route_model`).
+fn select_arm(
+    arms: Vec<(String, BanditArmState)>,
+    requested_model: &str,
+    prefer_family: Option<&str>,
+) -> String {
+    let sampled: Vec<(String, f64)> = arms
+        .into_iter()
+        .map(|(model, state)| (model, sample_beta(state.alpha, state.beta)))
+        .collect();
+
+    pick_with_family_preference(sampled, prefer_family)
+        .unwrap_or_else(|| requested_model.to_string())
+}
+
+/// The deterministic half of [`select_arm`]: given already-sampled
+/// `(model, value)` pairs, pick the winner. Split out from the sampling step
+/// so the tie-break logic can be unit-tested without depending on
+/// [`sample_beta`]'s randomness — every input here is a fixed float.
+///
+/// Returns `None` only when `sampled` is empty.
+fn pick_with_family_preference(
+    sampled: Vec<(String, f64)>,
+    prefer_family: Option<&str>,
+) -> Option<String> {
+    let max_sample = sampled
+        .iter()
+        .map(|(_, s)| *s)
+        .fold(None, |acc: Option<f64>, s| Some(acc.map_or(s, |m| m.max(s))))?;
+
+    if let Some(family) = prefer_family {
+        // Among same-family arms inside the window, still prefer the
+        // higher-sampled one — the tie-break picks a direction among noise,
+        // it does not pick arbitrarily within that direction.
+        let same_family_in_window = sampled
+            .iter()
+            .filter(|(model, sample)| {
+                max_sample - sample <= FAMILY_PREFERENCE_EPSILON
+                    && pricing::model_family(model).as_deref() == Some(family)
+            })
+            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        if let Some((model, _)) = same_family_in_window {
+            return Some(model.clone());
+        }
+    }
+
+    sampled
+        .into_iter()
+        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(model, _)| model)
+}
+
 /// Resolves model routing via Contextual Bandit or Session Lock.
 ///
 /// `candidate_models` comes from `intutic_settings.routing.candidate_models`;
@@ -198,10 +272,39 @@ pub async fn route_model(
     }
 
     // 1. Session-Locked Model Routing
+    //
+    // KV-cache preservation, not just anti-flapping.
+    //
+    // This lock was built to stop the bandit re-sampling on every turn of a
+    // session — the original complaint was arms flip-flopping mid-conversation,
+    // and pinning the pick for the session's life fixes exactly that. It has a
+    // second effect that was never the design goal but is just as real: the
+    // same pin is also what keeps the provider-side KV-cache prefix warm.
+    // Every model switch forces the provider to recompute the prompt prefix
+    // from scratch, discarding whatever cache discount prior turns in the
+    // session had built up. A bandit that resampled per request would defeat
+    // prompt caching almost entirely on multi-turn sessions — this lock is why
+    // it mostly doesn't.
+    //
+    // "Mostly", not "entirely": the lock only protects the *model* choice.
+    // SOP content is still prepended at `system[0]` on every request
+    // (`sops::inject_into_body`), which can shift the cached prefix even with
+    // the model held constant — see the hazard note there and TD-348.
     if let Some(locked_model) = session.locked_model {
         tracing::debug!(session_id = %session_id, locked_model = %locked_model, "Session lock hit");
         return Ok((locked_model, resolved_sop_tier, task_type.to_string()));
     }
+
+    // No lock is active — either this session has never been routed, or a
+    // lock was just released (e.g. the unservable-model path in `proxy.rs`
+    // clears it after a failed request). Either way we're about to
+    // Thompson-sample fresh; `last_model` (set alongside every lock and left
+    // in place when the lock clears) is the only memory of what the session
+    // was just running on, so it feeds the same-family tie-break below.
+    let prefer_family: Option<String> = session
+        .last_model
+        .as_deref()
+        .and_then(pricing::model_family);
 
     // 2. Load arms
     let raw_arms = store.load_arms(workspace_id).await.unwrap_or_default();
@@ -243,17 +346,8 @@ pub async fn route_model(
         return Ok((selected_model, resolved_sop_tier, task_type.to_string()));
     }
 
-    // 4. Sample arms using Thompson Sampling
-    let mut best_model = requested_model.to_string();
-    let mut max_sample = -1.0;
-
-    for (model, state) in arms {
-        let sample = sample_beta(state.alpha, state.beta);
-        if sample > max_sample {
-            max_sample = sample;
-            best_model = model;
-        }
-    }
+    // 4. Sample arms using Thompson Sampling, tie-broken toward `prefer_family`
+    let best_model = select_arm(arms, requested_model, prefer_family.as_deref());
 
     // Lock selected model for the session
     let _ = store
@@ -439,4 +533,116 @@ mod tests {
         assert!(!is_unservable_model_error(429, "rate limit for model gpt-4o"));
     }
 
+    // ── Same-family tie-break (`pick_with_family_preference`) ─────────────
+    //
+    // Deterministic: these drive the tie-break directly with fixed sample
+    // values rather than going through `sample_beta`, so there is no
+    // randomness to flake on.
+
+    #[test]
+    fn family_preference_wins_within_epsilon() {
+        // gpt-4o-mini samples marginally higher, but the gap (0.005) is well
+        // inside FAMILY_PREFERENCE_EPSILON (0.02) — the same-family arm wins.
+        let sampled = vec![
+            ("claude-opus-4-5".to_string(), 0.900),
+            ("gpt-4o-mini".to_string(), 0.905),
+        ];
+        let winner = pick_with_family_preference(sampled, Some("claude-opus"));
+        assert_eq!(winner.as_deref(), Some("claude-opus-4-5"));
+    }
+
+    #[test]
+    fn cross_family_wins_when_clearly_better() {
+        // gpt-4o-mini is 0.4 ahead — far outside epsilon. The family
+        // preference is a tie-break, not a filter, so it must not override
+        // an arm that is genuinely better.
+        let sampled = vec![
+            ("claude-opus-4-5".to_string(), 0.500),
+            ("gpt-4o-mini".to_string(), 0.900),
+        ];
+        let winner = pick_with_family_preference(sampled, Some("claude-opus"));
+        assert_eq!(winner.as_deref(), Some("gpt-4o-mini"));
+    }
+
+    #[test]
+    fn no_preference_highest_sample_wins() {
+        // `prefer_family: None` must reproduce the pre-existing (additive)
+        // behavior: pure argmax, no family involved.
+        let sampled = vec![
+            ("claude-opus-4-5".to_string(), 0.500),
+            ("gpt-4o-mini".to_string(), 0.900),
+            ("claude-sonnet-4-5".to_string(), 0.700),
+        ];
+        let winner = pick_with_family_preference(sampled, None);
+        assert_eq!(winner.as_deref(), Some("gpt-4o-mini"));
+    }
+
+    #[test]
+    fn preference_ignored_when_no_arm_matches_the_family() {
+        // prefer_family names a family with no candidate arm at all — falls
+        // straight through to argmax rather than erroring or picking nothing.
+        let sampled = vec![
+            ("gpt-4o-mini".to_string(), 0.900),
+            ("gemini-1.5-flash".to_string(), 0.895),
+        ];
+        let winner = pick_with_family_preference(sampled, Some("claude-opus"));
+        assert_eq!(winner.as_deref(), Some("gpt-4o-mini"));
+    }
+
+    #[test]
+    fn preference_wins_just_inside_epsilon() {
+        // Gap (0.019) just under FAMILY_PREFERENCE_EPSILON (0.02) — same-family
+        // arm wins. (Exact float equality at the boundary isn't asserted here:
+        // f64 subtraction of decimal literals like 0.900 - 0.880 doesn't land
+        // on exactly 0.02, so a "gap == epsilon" test would be testing binary
+        // floating-point rounding, not this function's logic.)
+        let sampled = vec![
+            ("claude-opus-4-5".to_string(), 0.881),
+            ("gpt-4o-mini".to_string(), 0.900), // gap = 0.019 < epsilon
+        ];
+        let winner = pick_with_family_preference(sampled, Some("claude-opus"));
+        assert_eq!(winner.as_deref(), Some("claude-opus-4-5"));
+    }
+
+    #[test]
+    fn preference_loses_just_outside_epsilon() {
+        // Gap (0.021) just over FAMILY_PREFERENCE_EPSILON (0.02) — cross-family
+        // arm wins despite the preference.
+        let sampled = vec![
+            ("claude-opus-4-5".to_string(), 0.879),
+            ("gpt-4o-mini".to_string(), 0.900), // gap = 0.021 > epsilon
+        ];
+        let winner = pick_with_family_preference(sampled, Some("claude-opus"));
+        assert_eq!(winner.as_deref(), Some("gpt-4o-mini"));
+    }
+
+    #[test]
+    fn preference_among_multiple_same_family_candidates_picks_the_higher_one() {
+        // Two same-family arms both within epsilon of the best: the
+        // tie-break must not just grab the first family match, it should
+        // still prefer the higher-sampled one within that family.
+        let sampled = vec![
+            ("claude-opus-4-5".to_string(), 0.885),
+            ("claude-opus-4-1".to_string(), 0.895),
+            ("gpt-4o-mini".to_string(), 0.900),
+        ];
+        let winner = pick_with_family_preference(sampled, Some("claude-opus"));
+        assert_eq!(winner.as_deref(), Some("claude-opus-4-1"));
+    }
+
+    #[test]
+    fn pick_with_family_preference_empty_arms_returns_none() {
+        assert_eq!(pick_with_family_preference(vec![], Some("claude-opus")), None);
+        assert_eq!(pick_with_family_preference(vec![], None), None);
+    }
+
+    #[test]
+    fn select_arm_falls_back_to_requested_model_when_no_arms() {
+        // End-to-end smoke test of `select_arm` itself (not just the
+        // deterministic helper): an empty arm list is a should-not-happen
+        // case, and it must degrade to the historical requested-model
+        // fallback rather than panicking.
+        let winner = select_arm(vec![], "claude-sonnet-4-5", Some("claude-opus"));
+        assert_eq!(winner, "claude-sonnet-4-5");
+    }
 }

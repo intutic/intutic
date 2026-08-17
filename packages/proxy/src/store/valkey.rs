@@ -405,9 +405,11 @@ impl LocalStore for ValkeyStore {
         // pre-trait code reached both through `unwrap_or_else(|_| "")`.
         let locked_model: Option<String> = conn.hget(&key, "lockedModel").await.ok().flatten();
         let sop_tier: Option<String> = conn.hget(&key, "sopTier").await.ok().flatten();
+        let last_model: Option<String> = conn.hget(&key, "lastModel").await.ok().flatten();
         Ok(SessionRouting {
             locked_model: locked_model.filter(|s| !s.is_empty()),
             sop_tier: sop_tier.filter(|s| !s.is_empty()),
+            last_model: last_model.filter(|s| !s.is_empty()),
         })
     }
 
@@ -417,8 +419,12 @@ impl LocalStore for ValkeyStore {
         model: &str,
     ) -> anyhow::Result<()> {
         let mut conn = self.conn();
+        let key = session_key(session_id);
+        // "lastModel" survives `clear_session_locked_model` (which only
+        // `hdel`s "lockedModel") — see `SessionRouting::last_model`. One
+        // round trip for both fields.
         let _: () = conn
-            .hset(session_key(session_id), "lockedModel", model)
+            .hset_multiple(&key, &[("lockedModel", model), ("lastModel", model)])
             .await?;
         Ok(())
     }
@@ -939,6 +945,15 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
             .filter(|s| !s.is_empty())
     }
 
+    async fn allowed_models(&self, workspace_id: &str) -> Option<Vec<String>> {
+        let mut conn = self.conn();
+        let key = format!("workspace:allowed_models:{}", workspace_id);
+        match tokio::time::timeout(KEYWORDS_TIMEOUT, conn.get::<_, Option<String>>(&key)).await {
+            Ok(Ok(Some(s))) => serde_json::from_str::<Vec<String>>(&s).ok(),
+            _ => None,
+        }
+    }
+
     async fn feature_flags(&self, workspace_id: &str) -> Option<FeatureFlags> {
         // Absent, unreadable, or too slow — all fail open to "no control
         // plane", which is what the pre-trait code did via its
@@ -1068,6 +1083,9 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
                 .and_then(|s| s.parse::<f64>().ok())
                 .or(Some(100.0)),
             spend: spend_val.and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0),
+            // Always "*" — see the doc comment on `VirtualKeyRecord::models`
+            // in metering.rs. Model enforcement is workspace-level
+            // (`ControlPlaneCache::allowed_models`), not per-key.
             models: vec!["*".to_string()],
             expires: None,
             // Written by the control plane's API-key middleware since LLD #71;

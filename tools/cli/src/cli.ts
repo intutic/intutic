@@ -109,7 +109,14 @@ program
   .command('budget')
   .description('Check remaining daily/monthly budget and list active loops')
   .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .option('--watch', 'Continuously print machine-local and workspace spend, one line per tick')
+  .option('--interval <seconds>', 'Tick interval in seconds for --watch', String(5))
   .action(async (opts) => {
+    if (opts.watch) {
+      const { runBudgetWatch } = await import('./commands/budget.js')
+      await runBudgetWatch(opts)
+      return
+    }
     const { runBudget } = await import('./commands/budget.js')
     await runBudget(opts)
   })

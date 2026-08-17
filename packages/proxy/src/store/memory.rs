@@ -535,10 +535,11 @@ impl LocalStore for MemoryStore {
         session_id: &str,
         model: &str,
     ) -> anyhow::Result<()> {
-        lock(&self.sessions, "session")?
-            .entry(session_id.to_string())
-            .or_default()
-            .locked_model = Some(model.to_string());
+        let mut sessions = lock(&self.sessions, "session")?;
+        let sess = sessions.entry(session_id.to_string()).or_default();
+        sess.locked_model = Some(model.to_string());
+        // Survives `clear_session_locked_model` — see `SessionRouting::last_model`.
+        sess.last_model = Some(model.to_string());
         Ok(())
     }
 
@@ -875,6 +876,14 @@ impl ControlPlaneCache for NullControlPlaneCache {
         None
     }
 
+    /// `None`, not `Some(vec![])` — a standalone proxy has no control plane to
+    /// have configured an allowlist, so it stays unrestricted, exactly like
+    /// `feature_flags` below falls back to local config rather than "deny
+    /// everything".
+    async fn allowed_models(&self, _workspace_id: &str) -> Option<Vec<String>> {
+        None
+    }
+
     /// `None`, not `Some(default)` — standalone there is no control plane to be
     /// authoritative, so `config.yaml` decides.
     async fn feature_flags(&self, _workspace_id: &str) -> Option<FeatureFlags> {
@@ -984,6 +993,18 @@ mod null_control_plane_cache_tests {
     async fn standalone_never_attests_a_sandbox() {
         let cp = NullControlPlaneCache;
         assert!(!cp.is_sandbox_attested("ses_1").await);
+    }
+
+    /// Standalone proxies have no control plane to have configured an
+    /// approved-models allowlist, so they must stay unrestricted — `None`,
+    /// never `Some(vec![])`. `check_model_allowed` treats both the same way,
+    /// but the type-level distinction matters: a standalone deployment must
+    /// never be mistaken for "workspace configured an allowlist that happens
+    /// to be empty."
+    #[tokio::test]
+    async fn standalone_has_no_allowed_models_restriction() {
+        let cp = NullControlPlaneCache;
+        assert_eq!(cp.allowed_models("ws_1").await, None);
     }
 }
 
