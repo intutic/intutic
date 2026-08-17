@@ -604,7 +604,16 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("Listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+    // `into_make_service_with_connect_info` rather than the plain
+    // `into_make_service()`/bare-`app` form: `/intutic/spend` needs the real
+    // peer address (via `ConnectInfo<SocketAddr>`) to enforce its
+    // loopback-only guard, since this listener binds `0.0.0.0` and would
+    // otherwise leak daily spend to anyone on the local network.
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
 
     // Shutdown OpenTelemetry, flushing any spans still in the batch queue.
     if let Some(provider) = tracer_provider {

@@ -17,6 +17,26 @@ function httpGetJson<T>(url: string): Promise<T | null> {
   })
 }
 
+/** Body of `GET /intutic/spend` — see proxy `router.rs`. Loopback-only, which
+ * is fine here: this extension always talks to 127.0.0.1:4000. */
+interface LocalSpendResponse {
+  local_spend_usd_today?: number
+  local_cap_usd?: number
+  enforced?: boolean
+}
+
+/**
+ * `$1.23 / $10.00` for the status bar text, or empty when the figure isn't
+ * available — offline proxy, or a response missing either number — so the
+ * caller can append it without a stray `undefined` or `$NaN`.
+ */
+function formatSpendSuffix(spend: LocalSpendResponse | null): string {
+  if (!spend || typeof spend.local_spend_usd_today !== 'number' || typeof spend.local_cap_usd !== 'number') {
+    return ''
+  }
+  return ` · $${spend.local_spend_usd_today.toFixed(2)}/$${spend.local_cap_usd.toFixed(2)}`
+}
+
 // ── Status bar registration ───────────────────────────────────────────────────
 
 /**
@@ -86,8 +106,17 @@ export function registerStatusBar(context: vscode.ExtensionContext) {
   context.subscriptions.push(statusBarItem)
 
   /**
-   * Poll /healthz to determine proxy liveness, then also fetch
+   * Poll /health to determine proxy liveness, then also fetch
    * recent open incidents to show a count badge in the status bar.
+   *
+   * This used to poll /healthz, a path the proxy's router (router.rs) never
+   * defines — only /health does. That fell through the catch-all into
+   * handle_proxy, which returns a 401 JSON body for an unauthenticated
+   * request, so this "liveness" check only ever worked by accident: the
+   * helper below only checks that the response parses as JSON, never the
+   * HTTP status, so a 401 read the same as a 200. Pointed at the real
+   * /health endpoint, which actually reports liveness rather than "some JSON
+   * came back."
    *
    * States:
    *  - Checking  (spin icon, neutral)
@@ -97,7 +126,7 @@ export function registerStatusBar(context: vscode.ExtensionContext) {
    */
   const checkDaemonHealth = async () => {
     const health = await httpGetJson<{ status?: string }>(
-      'http://127.0.0.1:4000/healthz'
+      'http://127.0.0.1:4000/health'
     )
 
     if (!health) {
@@ -112,9 +141,21 @@ export function registerStatusBar(context: vscode.ExtensionContext) {
     // This used to request /api/v1/incidents from the proxy's port (4000),
     // which does not serve control-plane routes, and without auth — so the
     // count was always 0 and the badge never appeared.
-    const incidentsResp = await fetchControlPlane<
-      { items?: unknown[]; total?: number; meta?: { total?: number } } | unknown[]
-    >('/api/v1/incidents?status=OPEN&limit=1')
+    //
+    // The spend fetch runs alongside it, same tick, same 30s cadence: today's
+    // machine-local spend from the proxy's own budget accounting
+    // (local_spend.rs via /intutic/spend), not the workspace-wide figure —
+    // this status bar only ever speaks for this one machine.
+    const [incidentsResp, spend] = await Promise.all([
+      fetchControlPlane<
+        { items?: unknown[]; total?: number; meta?: { total?: number } } | unknown[]
+      >('/api/v1/incidents?status=OPEN&limit=1'),
+      httpGetJson<LocalSpendResponse>('http://127.0.0.1:4000/intutic/spend'),
+    ])
+    const spendSuffix = formatSpendSuffix(spend)
+    const spendTooltipLine = spendSuffix
+      ? `Local spend today: $${spend!.local_spend_usd_today!.toFixed(2)} of $${spend!.local_cap_usd!.toFixed(2)} cap${spend!.enforced === false ? ' (enforcement off)' : ''}.`
+      : null
 
     let openCount = 0
     if (incidentsResp) {
@@ -135,17 +176,22 @@ export function registerStatusBar(context: vscode.ExtensionContext) {
     }
 
     if (openCount > 0) {
-      statusBarItem.text = `$(warning) Intutic: Governed · ${openCount} incident${openCount === 1 ? '' : 's'}`
+      statusBarItem.text = `$(warning) Intutic: Governed · ${openCount} incident${openCount === 1 ? '' : 's'}${spendSuffix}`
       statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground')
       statusBarItem.tooltip = [
         `Intutic governance proxy is active.`,
         `⚠ ${openCount} open governance incident${openCount === 1 ? '' : 's'} detected.`,
+        ...(spendTooltipLine ? [spendTooltipLine] : []),
         `Click to view daemon status. Use "Intutic: View governance incidents" to inspect.`,
       ].join('\n')
     } else {
-      statusBarItem.text = '$(shield) Intutic: Governed'
+      statusBarItem.text = `$(shield) Intutic: Governed${spendSuffix}`
       statusBarItem.backgroundColor = undefined
-      statusBarItem.tooltip = 'Intutic local governance proxy is active.\nNo open incidents.'
+      statusBarItem.tooltip = [
+        'Intutic local governance proxy is active.',
+        'No open incidents.',
+        ...(spendTooltipLine ? [spendTooltipLine] : []),
+      ].join('\n')
     }
   }
 

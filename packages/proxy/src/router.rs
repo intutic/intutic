@@ -7,8 +7,10 @@
 //! - POST /v1beta/models/:model  (Gemini v1beta — Antigravity)
 //! - GET  /health                (Health check)
 
+use std::net::SocketAddr;
+
 use axum::{
-    extract::State,
+    extract::{ConnectInfo, State},
     http::{HeaderMap, Method, StatusCode},
     response::Json,
     routing::{any, get, post},
@@ -44,6 +46,12 @@ pub fn build_router(state: AppState) -> Router {
         // Egress enforcement posture + live deny counts (LLD #63 §4). Makes an
         // Enforce/Monitor decision observable rather than silent.
         .route("/intutic/egress", get(egress_status))
+        // Today's local-machine spend, sourced from the same numbers the
+        // budget gate already enforces (LLD #8 follow-up: "Live terminal
+        // cost"). Loopback-only — see `spend_status` — because unlike
+        // `/health` and `/intutic/egress` above, this number grows with the
+        // developer's actual usage, and the listener binds `0.0.0.0`.
+        .route("/intutic/spend", get(spend_status))
         // Sandbox attestation callback (LLD #63 §6, TD-333). A `--sandbox`
         // container's firewall permits egress ONLY to this proxy — it cannot
         // reach the control plane directly — so this is the one path a
@@ -113,6 +121,49 @@ async fn egress_status() -> impl axum::response::IntoResponse {
         "denied": denied_count(),
         "would_deny": would_deny_count(),
     }))
+}
+
+/// Whether a peer may read `/intutic/spend`. Pure so the refusal is
+/// unit-testable without standing up a listener or constructing a live TCP
+/// connection.
+///
+/// This route is the one place the on-disk daily spend total — a number that
+/// grows with what the developer is actually being charged — is exposed over
+/// HTTP, and the proxy's listener binds `0.0.0.0` (`main.rs`) with no
+/// authentication on this path (matching `/health` and `/intutic/egress`).
+/// Without this check, anyone on the same LAN or Wi-Fi could read a
+/// teammate's daily spend by hitting `<their-ip>:4000/intutic/spend`.
+fn spend_peer_allowed(addr: &SocketAddr) -> bool {
+    addr.ip().is_loopback()
+}
+
+/// `GET /intutic/spend` — today's local-machine spend, loopback-only.
+///
+/// Sources every field from the existing local-budget accounting in
+/// `local_spend.rs` / `proxy::local_budget_enforced` — nothing here computes
+/// a new number, it only exposes what the budget gate already reads on every
+/// request. Kept deliberately distinct from `GET /api/v1/budget` on the
+/// control plane: that aggregates every member/machine in the workspace, this
+/// is just what this one machine has spent today (see `local_spend.rs`'s
+/// module docs for why the two numbers are not interchangeable).
+async fn spend_status(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+) -> impl axum::response::IntoResponse {
+    if !spend_peer_allowed(&addr) {
+        return (
+            StatusCode::FORBIDDEN,
+            axum::Json(json!({"error": "loopback only"})),
+        );
+    }
+
+    (
+        StatusCode::OK,
+        axum::Json(json!({
+            "local_spend_usd_today": crate::local_spend::get_local_spend(),
+            "local_cap_usd": crate::local_spend::get_max_daily_budget(),
+            "enforced": crate::proxy::local_budget_enforced(),
+        })),
+    )
 }
 
 /// `GET /intutic/probes` — run the guard-liveness suite and return verdicts.
@@ -310,5 +361,75 @@ mod attest_sandbox_tests {
             url,
             "http://control-plane:3001/api/v1/sessions/ses_1/attest-sandbox"
         );
+    }
+}
+
+#[cfg(test)]
+mod spend_status_tests {
+    use super::*;
+    use axum::response::IntoResponse;
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    fn v4(ip: [u8; 4], port: u16) -> SocketAddr {
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::from(ip)), port)
+    }
+
+    #[test]
+    fn allows_ipv4_loopback() {
+        assert!(spend_peer_allowed(&v4([127, 0, 0, 1], 54321)));
+    }
+
+    #[test]
+    fn allows_ipv6_loopback() {
+        let addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 54321);
+        assert!(spend_peer_allowed(&addr));
+    }
+
+    #[test]
+    fn refuses_a_lan_peer() {
+        // The exact scenario this guard exists for: the listener binds
+        // `0.0.0.0`, so a laptop on the same Wi-Fi reaches this route unless
+        // something besides "bound address" gates it.
+        assert!(!spend_peer_allowed(&v4([192, 168, 1, 42], 54321)));
+    }
+
+    #[test]
+    fn refuses_any_other_non_loopback_address() {
+        assert!(!spend_peer_allowed(&v4([10, 0, 0, 5], 1)));
+        assert!(!spend_peer_allowed(&v4([8, 8, 8, 8], 443)));
+    }
+
+    /// The handler itself, not just the pure predicate: a non-loopback peer
+    /// must actually get refused end to end, including the status code a
+    /// real client would see, not merely a predicate returning false in
+    /// isolation.
+    #[tokio::test]
+    async fn handler_refuses_a_non_loopback_peer_with_403() {
+        let addr = v4([192, 168, 1, 42], 54321);
+        let response = spend_status(ConnectInfo(addr)).await.into_response();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+        let bytes = axum::body::to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["error"], "loopback only");
+    }
+
+    /// A loopback peer gets the three documented fields back, not a subset
+    /// or a differently-named shape a client would need to guess at.
+    #[tokio::test]
+    async fn handler_serves_loopback_peers_the_documented_shape() {
+        let addr = v4([127, 0, 0, 1], 54321);
+        let response = spend_status(ConnectInfo(addr)).await.into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let bytes = axum::body::to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(body.get("local_spend_usd_today").is_some_and(|v| v.is_number()));
+        assert!(body.get("local_cap_usd").is_some_and(|v| v.is_number()));
+        assert!(body.get("enforced").is_some_and(|v| v.is_boolean()));
     }
 }

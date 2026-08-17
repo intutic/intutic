@@ -427,6 +427,9 @@ mod tests {
         async fn active_sop_tier(&self, _w: &str) -> Option<String> {
             None
         }
+        async fn allowed_models(&self, _w: &str) -> Option<Vec<String>> {
+            None
+        }
         async fn feature_flags(&self, _w: &str) -> Option<crate::store::FeatureFlags> {
             None
         }
