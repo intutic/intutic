@@ -248,3 +248,109 @@ async fn carries_the_candidate_model_to_the_upstream() {
     // The mock's `expect(1)` verifies on drop that a body naming the candidate
     // actually arrived.
 }
+
+// ── Phase 7a: the scrubbed transient publish ──────────────────────────────
+//
+// `run_mirror` itself never publishes anything — `proxy.rs`'s spawn does,
+// after DLP-scrubbing every text field via `mirror::dlp_scrub`. These tests
+// exercise that exact function against the exact response text `run_mirror`
+// hands back, which is the only boundary in this phase where a full mirrored
+// response ever leaves `run_mirror`'s caller. See `MirrorPairEvent`'s doc
+// comment for why a scrubbed PAIR is published transiently rather than any
+// of it ever reaching a durable store.
+
+/// A fake AWS access-key ID, assembled at use so no contiguous
+/// credential-shaped literal sits in source. Same halves and same "EXAMPLE"
+/// suffix `dlp.rs::holdback_tests` already uses for this — this is AWS's own
+/// canonical documentation example key, never a live credential.
+const FAKE_AWS_KEY_HEAD: &str = "AKIAIOSFODNN7";
+const FAKE_AWS_KEY_TAIL: &str = "EXAMPLE";
+
+fn fake_aws_key() -> String {
+    format!("{FAKE_AWS_KEY_HEAD}{FAKE_AWS_KEY_TAIL}")
+}
+
+/// The literal boundary the task set out to test: a secret in the mirrored
+/// response must not reach the publish payload in raw form.
+///
+/// Drives `run_mirror` for real against a stub upstream (same as every other
+/// test in this file), takes the raw `response_text` it returns, scrubs it
+/// with the exact function `proxy.rs`'s spawn calls before building a
+/// `MirrorPairEvent`, and asserts the secret is gone from BOTH the scrubbed
+/// field and the event's full serialized wire form — the wire form is what
+/// actually crosses the pub/sub boundary, so that is the assertion that
+/// matters; the field-level one just pins where the scrubbing has to happen.
+#[tokio::test]
+async fn a_secret_in_the_mirror_response_never_crosses_the_publish_boundary_unscrubbed() {
+    let _serial = serial();
+    let server = MockServer::start().await;
+    let leaky_body = json!({
+        "content": [{
+            "type": "text",
+            "text": format!("Here is a key you can use: {}", fake_aws_key())
+        }],
+        "usage": { "input_tokens": 10, "output_tokens": 20 }
+    });
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(&leaky_body))
+        .mount(&server)
+        .await;
+
+    let outcome = mirror::run_mirror(
+        slot(),
+        reqwest::Client::new(),
+        server.uri(),
+        reqwest::header::HeaderMap::new(),
+        b"{}".to_vec(),
+        Some(json!({ "messages": [] })),
+        "cheap-model".to_string(),
+        "ws_test".to_string(),
+        flat_estimate(),
+    )
+    .await
+    .expect("a 200 with a well-formed body must produce an outcome");
+
+    let raw_response_text = outcome
+        .response_text
+        .as_deref()
+        .expect("run_mirror must carry the raw response text this far");
+    assert!(
+        raw_response_text.contains(&fake_aws_key()),
+        "the fixture is wrong if the raw text doesn't even contain the key: {raw_response_text}"
+    );
+
+    // What `proxy.rs`'s spawn does, verbatim: scrub every text field, then
+    // build the event that gets published.
+    let event = mirror::MirrorPairEvent {
+        workspace_id: "ws_test".to_string(),
+        requested_model: "expensive-model".to_string(),
+        candidate_model: outcome.candidate_model.clone(),
+        request_text: mirror::dlp_scrub("{\"messages\":[]}"),
+        original_response_text: mirror::dlp_scrub("{\"content\":[{\"type\":\"text\",\"text\":\"clean\"}]}"),
+        mirror_response_text: mirror::dlp_scrub(raw_response_text),
+        mirror_faulted: outcome.integrity.fault.is_some(),
+        mirror_latency_ms: outcome.latency_ms,
+        mirror_cost_usd: outcome.cost_usd,
+        created_at: "2026-01-01T00:00:00Z".to_string(),
+    };
+
+    assert!(
+        !event.mirror_response_text.contains(&fake_aws_key()),
+        "the scrubbed field still carries the raw key"
+    );
+
+    // The wire form: this is what actually gets PUBLISHed, so it is the
+    // boundary the task describes ("never crosses the publish boundary
+    // unscrubbed"), not just the in-memory field above.
+    let wire = serde_json::to_string(&event).expect("event serializes");
+    assert!(
+        !wire.contains(&fake_aws_key()),
+        "the published payload contains the raw secret: {wire}"
+    );
+    // And a redaction marker is what took its place, so the key's absence
+    // isn't merely a truncation or an empty-field coincidence.
+    assert!(
+        wire.contains("[REDACTED_"),
+        "expected `dlp::redact`'s marker in place of the key, got: {wire}"
+    );
+}

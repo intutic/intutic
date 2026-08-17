@@ -74,6 +74,17 @@ intutic_settings:
   #   # mirrored.
   #   mirror_sample_rate: 0.01
   #
+  #   # An explicit, operator-directed mirror candidate — independent of
+  #   # `mode`/shadow above. When set, THIS model is mirrored against a
+  #   # sampled fraction of ALL eligible traffic (still governed by
+  #   # `mirror_sample_rate` and the ceilings above), regardless of what
+  #   # shadow routing decided. This is how you mirror-test a brand-new model
+  #   # release the bandit would never pick on its own — it does not even
+  #   # need to be listed in `candidate_models` or `model_list` above.
+  #   # Unset (the default) leaves mirroring driven by shadow disagreement
+  #   # only, as above.
+  #   mirror_candidate_model: null
+  #
   #   reward:
   #     enabled: true
   #     latency_slo_ms: 30000
