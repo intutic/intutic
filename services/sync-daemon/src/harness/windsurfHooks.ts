@@ -12,6 +12,59 @@
  * LLD #14 — Phase 3 cross-harness defence
  * HLD §3.14 — Three-Tier Defense Cascade
  *
+ * # Correction (2026-08-18): this file's hook event names and payload
+ * # extraction were WRONG from the day this file was written, not a case of
+ * # Windsurf changing later
+ *
+ * The original implementation (2026-06-18) registered
+ * `beforeShellExecution`/`beforeMCPExecution`/`beforeFileEdit` — Cursor's
+ * event names — under the stated assumption that Windsurf's hook system
+ * "registers the same event names Cursor's does." That assumption was never
+ * independently verified, and it was wrong: Windsurf/Cascade's REAL hook
+ * system (confirmed against docs.devin.ai/desktop/cascade/hooks — the
+ * current authoritative source; docs.windsurf.com/windsurf/cascade/hooks
+ * redirects there post-Cognition/Devin acquisition — 2026-08-18) uses
+ * entirely different event names and a differently-shaped payload, and this
+ * naming was ALREADY the live one when this file was first written — a
+ * March-2026 third-party integration guide already documents
+ * `pre_run_command`/`tool_info.command_line`, predating this file's own
+ * 2026-06-18 commit date. This was a copy-without-verifying mistake at
+ * authoring time, not a later drift.
+ *
+ * Confirmed real facts, all from docs.devin.ai/desktop/cascade/hooks:
+ * - Event names (the `hooks.json` top-level keys) are `pre_run_command`,
+ *   `pre_write_code`, `pre_mcp_tool_use` (plus `post_*` variants this file
+ *   has no use for — only pre-hooks can block, via exit code 2; any other
+ *   non-zero exit is treated as a hook ERROR and the action proceeds, i.e.
+ *   Cascade fails OPEN if this script itself cannot run — same as every
+ *   other harness in this codebase, not a Windsurf-specific gap).
+ * - Each event's value in `hooks.json` is an ARRAY of `{command, ...}`
+ *   objects, not a single object — `[{command: "..."}]`, not
+ *   `{command: "..."}`. There is no `failClosed` field in Windsurf's schema
+ *   (that was Cursor's field, also copied without verification); dropped
+ *   from the config this file writes.
+ * - The payload delivered on stdin has `agent_action_name` as its event-name
+ *   field (not `hook_event_name`/`event`, which are Cursor's field names),
+ *   and nests event-specific data under `tool_info`:
+ *   `tool_info.command_line`/`tool_info.cwd` for `pre_run_command`,
+ *   `tool_info.file_path`/`tool_info.edits[]` for `pre_write_code`,
+ *   `tool_info.mcp_server_name`/`tool_info.mcp_tool_name`/
+ *   `tool_info.mcp_tool_arguments` for `pre_mcp_tool_use`. `trajectory_id`
+ *   is Cascade's real conversation-identifier field.
+ *
+ * What was NOT independently re-verified: whether every Windsurf channel/
+ * build (Desktop vs JetBrains plugin, which docs.devin.ai documents a
+ * different user-level path for — `~/.codeium/hooks.json`, no `windsurf`
+ * subdirectory — but this file only targets Desktop's path) dispatches
+ * hooks identically, and whether `post_mcp_tool_use`'s `mcp_result` field
+ * would be useful for anything (it isn't used here — post-hooks can't
+ * block, so there is nothing this file's threat model gains from it).
+ * The Cursor-shaped field names this file previously relied on exclusively
+ * are kept as a SECOND, lower-priority fallback in the extraction below —
+ * not because they are believed to be real for Windsurf, but because they
+ * cost nothing to keep checking and this file has already been wrong about
+ * a Windsurf-specific assumption once.
+ *
  * @module
  */
 
@@ -27,24 +80,19 @@ const log = createLogger('sync-windsurf-hooks')
 const WINDSURF_USER_DIR = path.join(os.homedir(), '.codeium', 'windsurf')
 
 
+/** Cascade's real pre-hook event names (see module doc comment). Each maps
+ *  to an ARRAY of hook entries in `hooks.json` — Windsurf's schema, unlike
+ *  Cursor's, has no `failClosed` field; exit code 2 is the only block
+ *  signal Cascade recognizes. */
+const CASCADE_HOOK_EVENTS = ['pre_run_command', 'pre_write_code', 'pre_mcp_tool_use'] as const
+
 function buildHooksConfig(hookScriptPath: string) {
   return {
     _comment: 'Intutic governance hooks — auto-generated. DO NOT EDIT.',
     _lastSync: newIso(),
-    hooks: {
-      beforeShellExecution: {
-        command: `node "${hookScriptPath}"`,
-        failClosed: true,
-      },
-      beforeMCPExecution: {
-        command: `node "${hookScriptPath}"`,
-        failClosed: true,
-      },
-      beforeFileEdit: {
-        command: `node "${hookScriptPath}"`,
-        failClosed: true,
-      },
-    },
+    hooks: Object.fromEntries(
+      CASCADE_HOOK_EVENTS.map((event) => [event, [{ command: `node "${hookScriptPath}"` }]]),
+    ),
   }
 }
 
@@ -112,41 +160,47 @@ process.stdin.on('data', (c) => { raw += c; });
 process.stdin.on('end', () => {
   try {
     const ctx = JSON.parse(raw);
-    _intuticSessionId = ctx.session_id || ctx.sessionId || ctx.conversation_id || ctx.conversationId || ctx.task_id || ctx.taskId || '';
-    // Windsurf accepts FLAT payloads (fields at the top level — the \`|| ctx\`
-    // fallback below reads them), so the recognisable-envelope set is exactly
-    // the extractor's field set. Narrower would refuse real traffic; an
-    // envelope with none of these extracts to empty strings, matches no rule,
-    // and used to be allowed.
-    intuticGuardEnvelope(ctx, ['tool_name', 'toolName', 'tool_input', 'toolInput', 'input', 'event', 'hook_event_name',
-      'command', 'cmd', 'script', 'path', 'file_path', 'filePath', 'file', 'target', 'notebook_path'], logEvent);
-    // Windsurf's hooks.json registers the same event names Cursor's does
-    // (\`beforeShellExecution\`/\`beforeMCPExecution\`/\`beforeFileEdit\`), and this
-    // writer's extraction mirrors Cursor's — including reading \`hook_event_name\`
-    // as well as \`event\`, since that is the field Cursor's own hooks
-    // documentation names for its own payload and this writer was never
-    // independently verified against a live Windsurf payload to say otherwise.
-    const event = (ctx.hook_event_name || ctx.event || '').toLowerCase();
-    // tool_input is included deliberately: Windsurf sends "input", but every
-    // other harness sends "tool_input", and reading only the former meant a
-    // payload in the common shape produced an empty command and target — so the
-    // gate ran, found nothing to look at, and allowed everything.
-    const input = ctx.input || ctx.tool_input || ctx.toolInput || ctx;
+    _intuticSessionId = ctx.trajectory_id || ctx.trajectoryId || ctx.session_id || ctx.sessionId ||
+      ctx.conversation_id || ctx.conversationId || ctx.task_id || ctx.taskId || '';
+    // 'agent_action_name' and 'tool_info' are Cascade's REAL top-level
+    // fields (docs.devin.ai/desktop/cascade/hooks; see this file's module
+    // doc comment for the correction record). The rest of this list is the
+    // Claude-Code-shaped envelope this repo's own generic gate-behaviour
+    // test suite drives every harness writer with uniformly, plus the
+    // Cursor-shaped fields this file incorrectly targeted before — kept so
+    // neither that test coverage nor an unconfirmed Windsurf variant loses
+    // recognition.
+    intuticGuardEnvelope(ctx, ['agent_action_name', 'tool_info', 'tool_name', 'toolName', 'tool_input', 'toolInput',
+      'input', 'event', 'hook_event_name', 'command', 'cmd', 'script', 'path', 'file_path', 'filePath', 'file',
+      'target', 'notebook_path'], logEvent);
+    // Cascade's real event field is 'agent_action_name' (values like
+    // 'pre_run_command'/'pre_write_code'/'pre_mcp_tool_use'), checked
+    // first. 'hook_event_name'/'event' are Cursor's field names, kept as a
+    // fallback this file no longer trusts as primary.
+    const event = (ctx.agent_action_name || ctx.hook_event_name || ctx.event || '').toLowerCase();
+    // Cascade nests event-specific data under 'tool_info' — NOT 'input' or
+    // 'tool_input', which are the Claude-Code/Cursor-shaped fields this file
+    // previously read exclusively. Prefer 'tool_info' when present; fall
+    // back to the others for the generic test envelope / an unconfirmed
+    // variant.
+    const toolInfo = ctx.tool_info || {};
+    const input = ctx.input || ctx.tool_input || ctx.toolInput || toolInfo || ctx;
 
-    const targetPath = input.path || input.file_path || input.filePath || input.file ||
+    const targetPath = toolInfo.file_path || input.path || input.file_path || input.filePath || input.file ||
       input.target || input.notebook_path || '';
-    const command = input.command || input.cmd || input.script || '';
+    const command = toolInfo.command_line || input.command || input.cmd || input.script || '';
     let toolName = ctx.tool_name || ctx.toolName || event || 'tool';
 
-    // M3: compose \`mcp__<server>__<tool>\` for a beforeMCPExecution call, the
-    // same fix cursorHooks.ts carries (see its comment for the confirmed live
-    // payload shape) — applied here on the unconfirmed assumption that
-    // Windsurf's beforeMCPExecution payload matches Cursor's, since this
-    // writer's extraction has always mirrored Cursor's field-for-field and no
-    // independent Windsurf-specific payload capture exists in this codebase.
-    // Inert (no-op) if that assumption is wrong for a given Windsurf build —
-    // it only fires when \`event\` and \`tool_name\` are both already present.
-    if (event === 'beforemcpexecution' && ctx.tool_name) {
+    // M3: compose \`mcp__<server>__<tool>\` for an MCP tool call. Cascade's
+    // CONFIRMED real shape is event 'pre_mcp_tool_use' with
+    // tool_info.mcp_server_name/tool_info.mcp_tool_name (see module doc
+    // comment). The 'beforemcpexecution'/ctx.command-or-url branch below is
+    // Cursor's shape, which this file previously assumed without
+    // verification and which never matched anything Cascade actually
+    // sends — kept only as a fallback, now second priority.
+    if (event === 'pre_mcp_tool_use' && toolInfo.mcp_tool_name) {
+      toolName = 'mcp__' + toolInfo.mcp_server_name + '__' + toolInfo.mcp_tool_name;
+    } else if (event === 'beforemcpexecution' && ctx.tool_name) {
       const mcpServer = ctx.command || ctx.url || ctx.server_name || ctx.serverName;
       if (mcpServer) toolName = 'mcp__' + mcpServer + '__' + ctx.tool_name;
     }
