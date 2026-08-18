@@ -15,6 +15,28 @@ urllib3 = ">=2.7.0"
 # The gate's image-integrity tier parses the Kubernetes manifests a deploy
 # command references; see intutic_clawde/gate/imagecheck.py.
 pyyaml = "^6.0"
+# Wave 1 framework adapters (intutic_clawde/gate/adapters/) — each import is
+# guarded (`try: import ... except ImportError`), so intutic-clawde installs
+# and runs with NONE of these present; a framework is only required to
+# INSTANTIATE its adapter. LangGraph/CrewAI/AutoGen/AG2/Pydantic AI/
+# smolagents need no entry here: their tools are plain callables/duck-typed
+# objects the framework-agnostic @guard/guard_tools already governs, so they
+# have no optional import to declare (crewai's below is for its OWN adapter
+# module, adapters/crewai.py, which uses crewai's newer hook API directly).
+langchain = {version = ">=1.0", optional = true}
+# crewai caps its own Python support at <3.14; without an explicit upper
+# bound here, Poetry's solver rejects it outright because this project
+# declares support up to <4.0 and refuses an optional dep that can't cover
+# the full declared range — independent of which Python actually runs CI.
+crewai = {version = ">=1.15.3", optional = true, python = ">=3.10,<3.14"}
+google-adk = {version = ">=2.7.1", optional = true}
+openai-agents = {version = "*", optional = true}
+
+[tool.poetry.extras]
+langchain = ["langchain"]
+crewai = ["crewai"]
+google-adk = ["google-adk"]
+openai-agents = ["openai-agents"]
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^9.0.3"

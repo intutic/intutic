@@ -1,6 +1,6 @@
 # Integrations Overview
 
-Intutic supports 19 AI agent harnesses out of the box. The CLI auto-detects which harnesses are present in your workspace and syncs governance rules to each one.
+Intutic supports 25 AI agent harnesses out of the box, plus 4 more Python-SDK-gated frameworks whose adapters ship in a following wave. The CLI auto-detects which harnesses are present in your workspace and syncs governance rules to each one.
 
 ## Supported Harnesses
 
@@ -25,10 +25,17 @@ Intutic supports 19 AI agent harnesses out of the box. The CLI auto-detects whic
 | [Pi](/integrations/pi) | `.pi/hooks.json` | File presence | ✅ Stable |
 | [GitHub Copilot](/integrations/github-copilot) | `.github/copilot-instructions.md` | File presence | ✅ Stable |
 | [LangGraph](/integrations/langgraph) | `.env.intutic` | `langgraph`/`langchain` in `pyproject.toml`, `requirements.txt`, or `uv.lock` | ✅ Stable |
+| [Grok Build](/integrations/grok) | `AGENTS.md` | `.grok/` or `AGENTS.md` in project, `~/.grok/`, or `grok` in `PATH` | ✅ Stable |
+| Muse Code | `AGENTS.md` | `.muse/` or `AGENTS.md` in project, `~/.config/muse/`, or `muse` in `PATH` | ✅ Stable |
+| [LangChain](/integrations/langchain) | `.env.intutic` | `langchain`/`langchain-core` in `pyproject.toml`, `requirements.txt`, or `uv.lock` | ✅ Stable |
+| [CrewAI](/integrations/crewai) | `.env.intutic` | `crewai` in `pyproject.toml`, `requirements.txt`, or `uv.lock` | ✅ Stable |
+| [Google ADK](/integrations/google-adk) | `.env.intutic` | `google-adk` in `pyproject.toml`, `requirements.txt`, or `uv.lock` | ✅ Stable |
+| [OpenAI Agents SDK](/integrations/openai-agents) | `.env.intutic` | `openai-agents` in `pyproject.toml`, `requirements.txt`, or `uv.lock` | ✅ Stable |
+| AutoGen / AG2 / Pydantic AI / smolagents | `.env.intutic` | Dependency-manifest detection (see each `HarnessType`) | 🟡 Env-adapter shipped; dedicated SDK gate module is a following wave — governed today via `@guard`/`guard_tools` |
 
 ## How integration works
 
-1. **`intutic init`** scans your workspace for all 19 harness config files
+1. **`intutic init`** scans your workspace for all supported harness config files
 2. For each detected harness, governance rules (SOPs) are written into the harness-native config format
 3. **`intutic connect`** keeps these files in sync as SOPs change on the control plane
    (`intutic connect` needs an account. Without one, `intutic start` runs the proxy and every harness config written in step 2 still applies.)
@@ -38,9 +45,11 @@ Intutic supports 19 AI agent harnesses out of the box. The CLI auto-detects whic
 
 Harnesses fall into three categories:
 
-### Markdown-based (Cursor, Claude Code, Windsurf)
+### Markdown-based (Cursor, Claude Code, Windsurf, GitHub Copilot, Grok Build)
 
-SOP content is written as markdown with a header:
+SOP content is written as markdown with a header. Grok Build's file is
+`AGENTS.md` rather than a harness-specific filename, but the content and
+formatter are identical to every other row in this category:
 
 ```markdown
 # Intutic Governance Rules (auto-generated)

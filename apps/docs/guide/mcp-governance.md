@@ -18,11 +18,29 @@ tool definitions changing after a user has already trusted it.
 
 `intutic connect` and the sync daemon's continuous sync loop rewrite each
 stdio MCP server entry in a harness config (`~/.claude/mcp.json`, Claude
-Desktop, Cursor, Cline, Windsurf, Continue, Goose, OpenHands — nine config
-paths across eight harnesses) so that the `@intutic/mcp-governance-proxy`
-binary fronts it: the harness spawns the proxy, the proxy spawns the real
-server, and every `tools/call` and `tools/list` passes through governance in
-between.
+Desktop, Cursor, Cline, Windsurf, Continue, Goose, OpenHands, Muse Code, Grok
+Build — twelve config paths across ten harnesses) so that the
+`@intutic/mcp-governance-proxy` binary fronts it: the harness spawns the
+proxy, the proxy spawns the real server, and every `tools/call` and
+`tools/list` passes through governance in between.
+
+Muse Code's `mcp_servers` map (in `~/.config/muse/settings.json`) carries
+both `stdio` and `streamable_http` entries; the latter is assumed (not yet
+confirmed against a real install — see TD-362) to match the same
+`command`-or-`url` shape every other JSON-map harness here uses, so it rides
+the same remote-bridge path without new code.
+
+Grok Build's `[mcp_servers.*]` tables live in `config.toml` (TOML, not
+JSON/YAML like every other harness here) at both project and user level, and
+are structurally parsed/edited via `smol-toml` rather than the regex text
+surgery an earlier TOML integration (OpenHands' `config.toml`) used — the
+same "parse structurally, write-if-changed, fall back to append-only on an
+unparseable file" shape the Goose YAML integration established, applied to a
+third format. Grok Build also natively reads `.cursor/mcp.json` (already
+wrapped above, under `harness: 'cursor'`) as a compatibility feature — a
+server declared in both places produces two distinct rows in this page's
+registry and reporting, not a merged one; see `mcpAutoWrite.ts`'s module doc
+comment for why that is correct rather than a double-count to fix.
 
 **This is not instant.** A server a developer adds to their harness config is
 unwrapped and unmediated by this proxy until the *next* sync cycle picks it
@@ -215,8 +233,10 @@ apply to that gate's unit of evaluation at all.
 | Cline | ❌ no (unconfirmed dispatch) | `use_mcp_tool` envelope normalization added to the shared gate evaluator (fires if the payload arrives), but no `use_mcp_tool`/`access_mcp_resource` `PreToolUse` matcher was added — whether Cline's hook mechanism actually dispatches for these tool names could not be confirmed during M3. |
 | Roo Code | ⚠️ reachable | Already a `.*` catch-all matcher; a Cline fork, so likely inherits `use_mcp_tool`, but that inheritance is unconfirmed. |
 | Codex CLI, Continue, GitHub Copilot | ⚠️ reachable | Already `.*` catch-all matchers; each harness's own MCP tool-naming convention was not independently verified during M3. |
+| Muse Code | ⚠️ reachable | Already a `.*` catch-all matcher across both `PreToolUse` and `PermissionRequest`. The `muse` binary could not be installed to confirm its own MCP tool-naming convention, or that its `mcp_servers` `streamable_http` entry shape matches the `url`/`headers` convention this repo's wrapper assumes — see TD-362. |
 | Goose, OpenHands, Hermes, Antigravity, Pi | ⚠️ reachable | Bash-family: the gate script runs unconditionally for every tool call, matcher or not; each harness's own MCP tool-naming convention was not independently verified during M3. |
 | Openclaw | ⚠️ reachable | No matcher on its `PreToolUse` registration — runs for every tool call; tool-naming convention unconfirmed. |
+| Grok Build | ⚠️ reachable | No matcher on its `PreToolUse` registration — runs for every tool call; tool-naming convention not independently verified (not installable in the environment this integration was built in). |
 | n8n | ❌ n/a | This gate's unit of evaluation is a workflow NODE TYPE (n8n's own dot-namespaced convention), never a `mcp__<server>__<tool>` tool-call name — confirmed by reading `emitN8nWorkflowGate`. |
 | Open WebUI | ❌ n/a | This gate evaluates PROMPT TEXT, not a tool call — no tool name of any shape reaches it. |
 | LangGraph | ❌ n/a | No generated gate file — the SDK-side `intutic_clawde.gate` is out of scope for this phase's per-harness matcher work. |

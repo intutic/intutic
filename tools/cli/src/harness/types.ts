@@ -49,4 +49,23 @@ export const HARNESS_CONFIG_FILES: Record<HarnessType, string> = {
   'goose': '',
   'open-webui': '',
   'langgraph': '.env.intutic',
+  // Muse Code reads AGENTS.md (falling back to CLAUDE.md) — see muse.ts.
+  'muse-code': 'AGENTS.md',
+  // AGENTS.md is Grok Build's native rules file — the same cross-tool
+  // convention Codex/Amp read. Delivered via the generic markdown formatter
+  // (`buildMarkdownContent`/`formatMarkdown`) every `---`-separated rules
+  // file in this codebase already shares (Cursor, Claude Code, Windsurf,
+  // GitHub Copilot) — not a bespoke format.
+  'grok': 'AGENTS.md',
+  // Wave 1 SDK-gated frameworks — same rationale as langgraph above: no
+  // on-disk hook/config file exists to gate tool calls, so each of these
+  // writes .env.intutic (proxy base-URL vars + an SDK-gate pointer comment).
+  'langchain': '.env.intutic',
+  'crewai': '.env.intutic',
+  'autogen': '.env.intutic',
+  'ag2': '.env.intutic',
+  'google-adk': '.env.intutic',
+  'openai-agents': '.env.intutic',
+  'pydantic-ai': '.env.intutic',
+  'smolagents': '.env.intutic',
 }

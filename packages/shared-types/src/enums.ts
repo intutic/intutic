@@ -145,7 +145,9 @@ export type {
 
 // ─── Harness Type ────────────────────────────────────────────────────
 // HLD §3.14, §4.5 — Supported AI agent harness integrations
-// Full matrix: HLD §3.14 Harness Onboarding Matrix (19 harnesses)
+// Full matrix: HLD §3.14 Harness Onboarding Matrix (29 harnesses — 21
+// hook/config-gated (19 base + Muse Code + Grok Build) + LangGraph +
+// Wave 1's 8 SDK-gated Python frameworks)
 
 /** Supported AI agent harness/IDE integrations. */
 export const HarnessType = {
@@ -168,6 +170,31 @@ export const HarnessType = {
   OPEN_WEBUI: 'open-webui',
   GITHUB_COPILOT: 'github-copilot',
   LANGGRAPH: 'langgraph',
+  /** Meta "Muse Code" — binary `muse`, model Muse Spark. Beta since 2026-08-05. */
+  MUSE_CODE: 'muse-code',
+  /** xAI Grok Build (binary `grok`, GA 2026-05, open-sourced 2026-07-15). */
+  GROK: 'grok',
+  // ─── Wave 1: Python-SDK-gated frameworks (no on-disk hook/config file) ───
+  // Same family as LANGGRAPH: the blocking gate ships in intutic-clawde
+  // (intutic_clawde.gate, python-raise contract), evaluated in-process before
+  // the tool body runs. This adapter writes .env.intutic (proxy base-URL vars
+  // only) — see gateRegistry.ts NO_GATE rows and harness/gateKind.ts.
+  /** LangChain — covers BOTH the Python (`langchain`/`langchain-core`) and
+   *  JS/TS (`langchain` npm package) ecosystems for detection purposes, since
+   *  the framework itself ships in both. This env-adapter (`langchain.ts`) is
+   *  Python-only, matching intutic-clawde's `langchain.py` gate adapter; a
+   *  JS/TS tool-call gate for LangChain.js is a `@intutic/gate` TypeScript
+   *  package concern for a different phase, not this one. */
+  LANGCHAIN: 'langchain',
+  CREWAI: 'crewai',
+  /** Detected via any of autogen-agentchat / autogen-core / autogen-ext. */
+  AUTOGEN: 'autogen',
+  AG2: 'ag2',
+  GOOGLE_ADK: 'google-adk',
+  OPENAI_AGENTS: 'openai-agents',
+  /** Detected via pydantic-ai / pydantic-ai-slim. */
+  PYDANTIC_AI: 'pydantic-ai',
+  SMOLAGENTS: 'smolagents',
 } as const
 
 /** Union of all harness type values. */
@@ -319,8 +346,8 @@ export type WorkspaceRole = typeof WorkspaceRole[keyof typeof WorkspaceRole]
  * - `open`   (default): pass through the tool call + emit a warning event
  * - `closed`: block the tool call with a user-visible error message
  *
- * Note: `closed` only affects harnesses with MCP proxy injection (8/19 —
- * 9 config paths across 8 harnesses, see sync-daemon mcpAutoWrite.ts).
+ * Note: `closed` only affects harnesses with MCP proxy injection (9/20 —
+ * 10 config paths across 9 harnesses, see sync-daemon mcpAutoWrite.ts).
  * For harnesses without MCP proxy injection (e.g. n8n, pi, codex,
  * open-webui), see TD-151.
  */

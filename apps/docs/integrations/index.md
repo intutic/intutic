@@ -1,11 +1,11 @@
 ---
 title: Integrations
-description: Connect Intutic to 19 AI coding agents — IDE extensions, CLI tools, agent frameworks, and platforms. Auto-detected, zero config.
+description: Connect Intutic to 25 AI coding agents — IDE extensions, CLI tools, agent frameworks, and platforms. Auto-detected, zero config.
 ---
 
 # Integrations <Badge type="tip" text="Open-Core" />
 
-Intutic supports **19 AI agent harnesses** out of the box. Run `intutic init` in your project and the CLI auto-detects which agents are present, then syncs governance rules to each one.
+Intutic supports **25 AI agent harnesses** out of the box (plus 4 more Python-SDK-gated frameworks whose dedicated adapter ships in a following wave). Run `intutic init` in your project and the CLI auto-detects which agents are present, then syncs governance rules to each one.
 
 ```bash
 intutic init
@@ -41,6 +41,8 @@ Terminal-based agents that accept proxy environment variables or config files.
 | [**Aider**](/integrations/aider) | AI pair programming CLI | `.aider.conf.yml` |
 | [**Codex**](/integrations/codex) | OpenAI's autonomous coding agent | `.env.intutic` |
 | [**Antigravity**](/integrations/antigravity) | Google's Gemini AI coding agent | `.gemini/settings.json` |
+| [**Grok Build**](/integrations/grok) | xAI's terminal coding agent | `AGENTS.md` |
+| **Muse Code** | Meta's beta terminal coding agent (model Muse Spark) | `AGENTS.md` |
 
 ## Agent Frameworks
 
@@ -49,6 +51,10 @@ Autonomous coding agents that run multi-step tasks with tool use.
 | Harness | Description | Config File |
 |---|---|---|
 | [**LangGraph**](/integrations/langgraph) | LangChain's graph-based agent framework | `.env.intutic` + SDK gate |
+| [**LangChain**](/integrations/langchain) | LangChain v1.x agents (`AgentMiddleware`) | `.env.intutic` + SDK gate |
+| [**CrewAI**](/integrations/crewai) | Multi-agent orchestration framework | `.env.intutic` + SDK gate |
+| [**Google ADK**](/integrations/google-adk) | Google's Agent Development Kit | `.env.intutic` + SDK gate |
+| [**OpenAI Agents SDK**](/integrations/openai-agents) | OpenAI's Python agents SDK | `.env.intutic` + SDK gate |
 | [**OpenHands**](/integrations/openhands) | Open-source AI software developer platform | `config.toml` |
 | [**Goose**](/integrations/goose) | Block's terminal agent and desktop framework | `.agents/plugins/` |
 | [**Hermes**](/integrations/hermes) | NousResearch's skill-based developer agent | `.hermes/config.yaml` |
@@ -104,7 +110,7 @@ Because every response byte passes through the proxy before the client sees it, 
 
 ## How it works
 
-All 19 harnesses share the same integration flow:
+All harnesses share the same integration flow:
 
 ```
 ┌──────────────┐     ┌─────────────┐     ┌──────────────┐

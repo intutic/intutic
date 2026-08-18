@@ -1,7 +1,7 @@
 {
   "name": "@intutic/sync-daemon",
   "version": "1.10.0",
-  "description": "Intutic Sync Daemon \u2014 bidirectional state sync between control plane and developer workspaces",
+  "description": "Intutic Sync Daemon — bidirectional state sync between control plane and developer workspaces",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -43,6 +43,14 @@
     "./harness/aiderConfigMerger": {
       "import": "./dist/harness/aiderConfigMerger.js",
       "types": "./dist/harness/aiderConfigMerger.d.ts"
+    },
+    "./harness/museHooks": {
+      "import": "./dist/harness/museHooks.js",
+      "types": "./dist/harness/museHooks.d.ts"
+    },
+    "./harness/grokHooks": {
+      "import": "./dist/harness/grokHooks.js",
+      "types": "./dist/harness/grokHooks.d.ts"
     }
   },
   "typesVersions": {
@@ -64,6 +72,12 @@
       ],
       "harness/aiderConfigMerger": [
         "src/harness/aiderConfigMerger.ts"
+      ],
+      "harness/museHooks": [
+        "src/harness/museHooks.ts"
+      ],
+      "harness/grokHooks": [
+        "src/harness/grokHooks.ts"
       ]
     }
   },
@@ -81,6 +95,7 @@
     "@intutic/shared-types": "workspace:*",
     "chokidar": "^5.0.0",
     "ioredis": "^5.11.1",
+    "smol-toml": "^1.8.0",
     "ws": "^8.21.0",
     "yaml": "^2.9.0",
     "zod": "^3"
