@@ -28,6 +28,8 @@ import { writeCursorHooks } from '../harness/cursorHooks.js'
 import { writeOpenHandsHooks } from '../harness/openhandsHooks.js'
 import { writeGooseHooks } from '../harness/gooseHooks.js'
 import { writeWindsurfHooks } from '../harness/windsurfHooks.js'
+import { writeMuseHooks } from '../harness/museHooks.js'
+import { writeGrokHooks } from '../harness/grokHooks.js'
 import { isImmutable } from '../harness/gooseHardener.js'
 
 const log = createLogger('sync-settings-guard')
@@ -73,6 +75,17 @@ export function buildProtectedPaths(workspaceRoot: string): string[] {
     path.join(home, '.config', 'Claude', 'claude_desktop_config.json'),
     // ── Antigravity ───────────────────────────────────────────────────
     path.join(workspaceRoot, '.gemini', 'settings.json'),
+    // ── Muse Code ────────────────────────────────────────────────────
+    path.join(home, '.config', 'muse', 'settings.json'),
+    path.join(home, '.config', 'muse', 'intutic-managed-hooks.json'),
+    path.join(workspaceRoot, '.muse', 'hooks.json'),
+    // ── Grok Build ───────────────────────────────────────────────────
+    path.join(home, '.grok', 'hooks', 'intutic-governance.json'),
+    path.join(workspaceRoot, '.grok', 'hooks', 'intutic-governance.json'),
+    path.join(home, '.grok', 'config.toml'),
+    path.join(workspaceRoot, '.grok', 'config.toml'),
+    path.join(home, '.grok', 'trusted_folders.toml'),
+    path.join(workspaceRoot, '.grok', 'trusted_folders.toml'),
   ]
 }
 
@@ -194,6 +207,31 @@ export async function guardSettingsFile(
   if (changedPath.includes('.openhands') && changedPath.endsWith('hooks.json')) {
     return guardJsonHookFile(changedPath, 'openhands', async () => {
       await writeOpenHandsHooks(workspaceRoot, proxyUrl)
+    })
+  }
+
+  // ── Muse Code: project hooks.json, the managed-hooks file, and the
+  //    settings.json carrying managed_hooks_path — all three restored by
+  //    re-running the same writer, which merge-writes all three tiers.
+  if (
+    (changedPath.includes(path.join('.muse', 'hooks.json'))) ||
+    (changedPath.includes(path.join('.config', 'muse')) &&
+      (changedPath.endsWith('settings.json') || changedPath.endsWith('intutic-managed-hooks.json')))
+  ) {
+    return guardJsonHookFile(changedPath, 'muse-code', async () => {
+      await writeMuseHooks(workspaceRoot, proxyUrl, await resolveWorkspaceId(workspaceRoot))
+    })
+  }
+
+  // ── Grok Build hook registration ──────────────────────────────────
+  // config.toml / trusted_folders.toml are watched (UNIVERSAL_PROTECTED_PATHS
+  // + buildProtectedPaths above) but not actively restored here — same tier
+  // of coverage OpenHands' config.toml and Goose's config.yaml already get:
+  // a tamper there falls through to the generic drift-log path below rather
+  // than a targeted restore.
+  if (changedPath.includes('.grok') && changedPath.endsWith('intutic-governance.json')) {
+    return guardJsonHookFile(changedPath, 'grok', async () => {
+      await writeGrokHooks(workspaceRoot, proxyUrl)
     })
   }
 

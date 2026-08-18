@@ -225,6 +225,12 @@ INTUTIC_FLOOR=(
   'path.openhands_hooks_json	block	-	any	Shell command references the governance-protected path .openhands/hooks.json	\\.openhands/hooks\\.json'
   'path.gemini_settings_json	block	-	any	Shell command references the governance-protected path .gemini/settings.json	\\.gemini/settings\\.json'
   'path.agents_plugins_intutic_governance	block	-	any	Shell command references the governance-protected path .agents/plugins/intutic-governance	\\.agents/plugins/intutic-governance'
+  'path.muse_hooks_json	block	-	any	Shell command references the governance-protected path .muse/hooks.json	\\.muse/hooks\\.json'
+  'path.config_muse_settings_json	block	-	any	Shell command references the governance-protected path .config/muse/settings.json	\\.config/muse/settings\\.json'
+  'path.config_muse_intutic_managed_hooks_json	block	-	any	Shell command references the governance-protected path .config/muse/intutic-managed-hooks.json	\\.config/muse/intutic-managed-hooks\\.json'
+  'path.grok_hooks	block	-	any	Shell command references the governance-protected path .grok/hooks	\\.grok/hooks'
+  'path.grok_config_toml	block	-	any	Shell command references the governance-protected path .grok/config.toml	\\.grok/config\\.toml'
+  'path.grok_trusted_folders_toml	block	-	any	Shell command references the governance-protected path .grok/trusted_folders.toml	\\.grok/trusted_folders\\.toml'
 )
 
 # The dynamic tier, read from the policy snapshot. Additive only: it can turn an
@@ -722,6 +728,12 @@ INTUTIC_FLOOR=(
   'path.openhands_hooks_json	block	-	any	Shell command references the governance-protected path .openhands/hooks.json	\\.openhands/hooks\\.json'
   'path.gemini_settings_json	block	-	any	Shell command references the governance-protected path .gemini/settings.json	\\.gemini/settings\\.json'
   'path.agents_plugins_intutic_governance	block	-	any	Shell command references the governance-protected path .agents/plugins/intutic-governance	\\.agents/plugins/intutic-governance'
+  'path.muse_hooks_json	block	-	any	Shell command references the governance-protected path .muse/hooks.json	\\.muse/hooks\\.json'
+  'path.config_muse_settings_json	block	-	any	Shell command references the governance-protected path .config/muse/settings.json	\\.config/muse/settings\\.json'
+  'path.config_muse_intutic_managed_hooks_json	block	-	any	Shell command references the governance-protected path .config/muse/intutic-managed-hooks.json	\\.config/muse/intutic-managed-hooks\\.json'
+  'path.grok_hooks	block	-	any	Shell command references the governance-protected path .grok/hooks	\\.grok/hooks'
+  'path.grok_config_toml	block	-	any	Shell command references the governance-protected path .grok/config.toml	\\.grok/config\\.toml'
+  'path.grok_trusted_folders_toml	block	-	any	Shell command references the governance-protected path .grok/trusted_folders.toml	\\.grok/trusted_folders\\.toml'
 )
 
 # The dynamic tier, read from the policy snapshot. Additive only: it can turn an
@@ -1220,6 +1232,12 @@ INTUTIC_FLOOR=(
   'path.openhands_hooks_json	block	-	any	Shell command references the governance-protected path .openhands/hooks.json	\\.openhands/hooks\\.json'
   'path.gemini_settings_json	block	-	any	Shell command references the governance-protected path .gemini/settings.json	\\.gemini/settings\\.json'
   'path.agents_plugins_intutic_governance	block	-	any	Shell command references the governance-protected path .agents/plugins/intutic-governance	\\.agents/plugins/intutic-governance'
+  'path.muse_hooks_json	block	-	any	Shell command references the governance-protected path .muse/hooks.json	\\.muse/hooks\\.json'
+  'path.config_muse_settings_json	block	-	any	Shell command references the governance-protected path .config/muse/settings.json	\\.config/muse/settings\\.json'
+  'path.config_muse_intutic_managed_hooks_json	block	-	any	Shell command references the governance-protected path .config/muse/intutic-managed-hooks.json	\\.config/muse/intutic-managed-hooks\\.json'
+  'path.grok_hooks	block	-	any	Shell command references the governance-protected path .grok/hooks	\\.grok/hooks'
+  'path.grok_config_toml	block	-	any	Shell command references the governance-protected path .grok/config.toml	\\.grok/config\\.toml'
+  'path.grok_trusted_folders_toml	block	-	any	Shell command references the governance-protected path .grok/trusted_folders.toml	\\.grok/trusted_folders\\.toml'
 )
 
 # The dynamic tier, read from the policy snapshot. Additive only: it can turn an
@@ -1716,6 +1734,12 @@ INTUTIC_FLOOR=(
   'path.openhands_hooks_json	block	-	any	Shell command references the governance-protected path .openhands/hooks.json	\\.openhands/hooks\\.json'
   'path.gemini_settings_json	block	-	any	Shell command references the governance-protected path .gemini/settings.json	\\.gemini/settings\\.json'
   'path.agents_plugins_intutic_governance	block	-	any	Shell command references the governance-protected path .agents/plugins/intutic-governance	\\.agents/plugins/intutic-governance'
+  'path.muse_hooks_json	block	-	any	Shell command references the governance-protected path .muse/hooks.json	\\.muse/hooks\\.json'
+  'path.config_muse_settings_json	block	-	any	Shell command references the governance-protected path .config/muse/settings.json	\\.config/muse/settings\\.json'
+  'path.config_muse_intutic_managed_hooks_json	block	-	any	Shell command references the governance-protected path .config/muse/intutic-managed-hooks.json	\\.config/muse/intutic-managed-hooks\\.json'
+  'path.grok_hooks	block	-	any	Shell command references the governance-protected path .grok/hooks	\\.grok/hooks'
+  'path.grok_config_toml	block	-	any	Shell command references the governance-protected path .grok/config.toml	\\.grok/config\\.toml'
+  'path.grok_trusted_folders_toml	block	-	any	Shell command references the governance-protected path .grok/trusted_folders.toml	\\.grok/trusted_folders\\.toml'
 )
 
 # The dynamic tier, read from the policy snapshot. Additive only: it can turn an
@@ -2217,6 +2241,12 @@ INTUTIC_FLOOR=(
   'path.openhands_hooks_json	block	-	any	Shell command references the governance-protected path .openhands/hooks.json	\\.openhands/hooks\\.json'
   'path.gemini_settings_json	block	-	any	Shell command references the governance-protected path .gemini/settings.json	\\.gemini/settings\\.json'
   'path.agents_plugins_intutic_governance	block	-	any	Shell command references the governance-protected path .agents/plugins/intutic-governance	\\.agents/plugins/intutic-governance'
+  'path.muse_hooks_json	block	-	any	Shell command references the governance-protected path .muse/hooks.json	\\.muse/hooks\\.json'
+  'path.config_muse_settings_json	block	-	any	Shell command references the governance-protected path .config/muse/settings.json	\\.config/muse/settings\\.json'
+  'path.config_muse_intutic_managed_hooks_json	block	-	any	Shell command references the governance-protected path .config/muse/intutic-managed-hooks.json	\\.config/muse/intutic-managed-hooks\\.json'
+  'path.grok_hooks	block	-	any	Shell command references the governance-protected path .grok/hooks	\\.grok/hooks'
+  'path.grok_config_toml	block	-	any	Shell command references the governance-protected path .grok/config.toml	\\.grok/config\\.toml'
+  'path.grok_trusted_folders_toml	block	-	any	Shell command references the governance-protected path .grok/trusted_folders.toml	\\.grok/trusted_folders\\.toml'
 )
 
 # The dynamic tier, read from the policy snapshot. Additive only: it can turn an

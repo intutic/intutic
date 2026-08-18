@@ -19,7 +19,7 @@ If your AI agent tries to `rm -rf /`, Portkey will log it. Intutic will kill it.
 | **Circuit breaker actions** | BYPASS / ENHANCE / HIJACK / KILL | Not available |
 | **Custom policy rules** | WASM sandbox — run your own rules | JSON config guardrails |
 | **Model routing** | Thompson Sampling bandit (cost + quality) | Round-robin, fallback chains |
-| **Harness coverage** | 19 AI coding agents (Claude Code, Cursor, Antigravity, etc.) | SDK-based integration |
+| **Harness coverage** | 20 AI coding agents (Claude Code, Cursor, Antigravity, etc.) | SDK-based integration |
 | **Config sync** | Bidirectional daemon — SOPs sync to agents, configs sync to cloud | One-way SDK push |
 | **Data residency** | Local-first — proxy runs on your machine | Cloud-hosted gateway |
 | **DLP / threat detection** | Secrets redaction, SQL injection, prompt injection | Basic content filtering |

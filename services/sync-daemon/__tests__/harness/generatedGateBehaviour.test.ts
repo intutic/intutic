@@ -278,11 +278,15 @@ function auditLogText(g: GateEntry): string {
 
 /** Reads a verdict out of a run according to the gate's declared contract. */
 function wasBlocked(g: GateEntry, r: RunResult): boolean {
-  if (g.contract === 'stdout-cancel') {
+  if (g.contract === 'stdout-cancel' || g.contract === 'stdout-decision-deny') {
     for (const line of r.stdout.split('\n')) {
       if (!line.trim()) continue
       try {
-        if (JSON.parse(line)?.cancel === true) return true
+        const obj = JSON.parse(line)
+        if (obj?.cancel === true) return true
+        // Grok Build's confirmed shape — a DIFFERENT field name from
+        // Cline/Roo Code's `cancel`, see gateBody.ts's BlockContract doc.
+        if (obj?.decision === 'deny') return true
       } catch {
         // Not every stdout line is the verdict object.
       }
@@ -303,7 +307,7 @@ function assertCleanExit(
   r: RunResult & { signal?: NodeJS.Signals | null },
   what: string,
 ) {
-  const allowed = g.contract === 'stdout-cancel' ? [0] : [0, 2]
+  const allowed = g.contract === 'stdout-cancel' || g.contract === 'stdout-decision-deny' ? [0] : [0, 2]
   // Named explicitly, because "exited -1" is the least useful thing a failing
   // gate test could tell someone. A child killed by a signal means it hung, not
   // that it decided anything.

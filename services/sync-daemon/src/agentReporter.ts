@@ -29,6 +29,7 @@ import {
   type HarnessType,
 } from '@intutic/shared-types'
 import { discoverMcpServers } from './harness/mcpAutoWrite.js'
+import { gateKindForHarness } from './harness/gateKind.js'
 
 /** Live egress-enforcement status read from the proxy's own diagnostic endpoint. */
 export interface EgressFacet {
@@ -41,7 +42,17 @@ interface AgentFacets {
   guardrails: {
     dlp: boolean
     wasm_rules: number
+    /**
+     * True only when this harness's gate mechanism is `'hook'` (an on-disk
+     * file the daemon writes and verified existence of) — kept for older
+     * control-plane deployments that read this boolean directly. `false` for
+     * `gateKind: 'sdk'` is NOT "this harness is unprotected"; see
+     * `gate_kind` below and `harness/gateKind.ts`'s module doc. Previously
+     * hardcoded `true` for every harness regardless of mechanism.
+     */
     hook_gate: boolean
+    /** How this harness's tool calls get gated — see `harness/gateKind.ts`. */
+    gate_kind: import('./harness/gateKind.js').GateKind
     pcas: boolean
     /** Present when the local proxy answered GET /intutic/egress (LLD #63 §4). */
     egress?: EgressFacet
@@ -331,8 +342,8 @@ async function detectLocalVaults(workspaceRoot: string): Promise<string[]> {
 
 /**
  * MCP servers declared across every harness config format this daemon knows
- * how to parse (see `mcpAutoWrite.ts`'s `discoverMcpServers` — 9 config paths
- * across 8 harnesses), with each server's proxy-wrapped status. Previously
+ * how to parse (see `mcpAutoWrite.ts`'s `discoverMcpServers` — 11 config paths
+ * across 9 harnesses), with each server's proxy-wrapped status. Previously
  * this only read 3 hardcoded paths (`.mcp.json`, `.cursor/mcp.json`,
  * `~/.claude.json`) and flattened per declared tool; `discoverMcpServers` is
  * the shared, read-only extraction of the same format knowledge
@@ -380,7 +391,11 @@ export async function collectAgentReport(opts: {
       guardrails: {
         dlp: opts.dlpEnabled,
         wasm_rules: wasmRules,
-        hook_gate: true, // the daemon writes the hook gate for every harness it supports
+        // Computed per-harness rather than hardcoded true — see gateKind.ts's
+        // module doc for why "the daemon writes the hook gate for every
+        // harness it supports" was never actually true (langgraph, aider).
+        hook_gate: gateKindForHarness(opts.harnessType) === 'hook',
+        gate_kind: gateKindForHarness(opts.harnessType),
         pcas: opts.policyEnforced,
         // Present only when the local proxy answered; an egress denial thus
         // becomes visible in the dashboard, not just the proxy's own log.

@@ -52,7 +52,12 @@ const roots = new Map<string, string>()
 
 const bashGates = GATES.filter((g) => g.runner === 'bash')
 const jsExit2Gates = GATES.filter((g) => g.runner === 'node' && g.contract === 'exit2')
-const jsCancelGates = GATES.filter((g) => g.contract === 'stdout-cancel')
+// Both stdout-verdict contracts share this file's coverage: the exit code
+// means nothing to either family, so the same crash/malformed-input/envelope
+// assertions apply — only the JSON shape `sawCancel` looks for differs, and
+// that generalisation lives in `sawCancel` itself (see its doc comment)
+// rather than as a second parallel describe-block loop here.
+const jsCancelGates = GATES.filter((g) => g.contract === 'stdout-cancel' || g.contract === 'stdout-decision-deny')
 const n8nGate = GATES.find((g) => g.contract === 'js-throw')!
 
 /** The gates this file drives — everything with a per-call subprocess, plus n8n. */
@@ -170,13 +175,18 @@ function auditLogText(g: GateEntry): string {
   return out.join('\n')
 }
 
-/** True iff stdout carries a {"cancel": true} object on some line. */
+/** True iff stdout carries a `{"cancel": true}` (Cline/Roo Code) OR a
+ *  `{"decision": "deny"}` (Grok Build — a different, confirmed field name;
+ *  see gateBody.ts's BlockContract doc) object on some line. Both are
+ *  "the exit code is not the verdict" contracts, so one checker generalises
+ *  across the whole `jsCancelGates` family rather than the loop below
+ *  branching on which shape a given gate uses. */
 function sawCancel(r: RunResult): { cancelled: boolean; reason: string } {
   for (const line of r.stdout.split('\n')) {
     if (!line.trim()) continue
     try {
       const obj = JSON.parse(line)
-      if (obj?.cancel === true) {
+      if (obj?.cancel === true || obj?.decision === 'deny') {
         return { cancelled: true, reason: String(obj.reason ?? obj.errorMessage ?? '') }
       }
     } catch {
@@ -341,28 +351,28 @@ for (const g of jsExit2Gates) {
   })
 }
 
-// ─── JS stdout-cancel family ──────────────────────────────────────────────────
+// ─── JS stdout-verdict family (stdout-cancel + stdout-decision-deny) ──────────
 
 for (const g of jsCancelGates) {
   describe(`${g.name} gate fails closed`, () => {
-    it('prints a cancel object on garbage stdin (this harness ignores exit codes)', async () => {
+    it('prints a verdict object on garbage stdin (this harness ignores exit codes)', async () => {
       const r = await runRaw(g, 'garbage not json <<<')
       const v = sawCancel(r)
       expect(
         v.cancelled,
-        `${g.name}: unparseable stdin printed no cancel object — exit codes mean ` +
-          `nothing to this harness, so no cancel IS an allow.\nstdout: ${r.stdout}`,
+        `${g.name}: unparseable stdin printed no verdict object — exit codes mean ` +
+          `nothing to this harness, so no verdict object IS an allow.\nstdout: ${r.stdout}`,
       ).toBe(true)
     })
 
-    it('prints a cancel object for a payload carrying neither a tool name nor a tool_input', async () => {
+    it('prints a verdict object for a payload carrying neither a tool name nor a tool_input', async () => {
       const r = await runRaw(g, JSON.stringify({ totally: 'alien' }))
       const v = sawCancel(r)
-      expect(v.cancelled, `${g.name}: an unreadable envelope must CANCEL.\nstdout: ${r.stdout}`).toBe(true)
+      expect(v.cancelled, `${g.name}: an unreadable envelope must be refused.\nstdout: ${r.stdout}`).toBe(true)
       expect(v.reason).toMatch(/unrecognised PreToolUse payload/)
     })
 
-    it('an unhandled rejection injected after the prelude prints the cancel JSON (runs the real emitted handler)', async () => {
+    it('an unhandled rejection injected after the prelude prints the verdict JSON (runs the real emitted handler)', async () => {
       const original = readFileSync(join(roots.get(g.name)!, g.artifact), 'utf8')
       const marker = "process.on('unhandledRejection', _intuticCrash);"
       expect(original, `${g.name}: fail-closed prelude missing from emitted gate`).toContain(marker)
@@ -374,13 +384,13 @@ for (const g of jsCancelGates) {
       const v = sawCancel(r)
       expect(
         v.cancelled,
-        `${g.name}: a crash printed no cancel object. This harness never reads the ` +
-          `exit code, so a crash without the cancel JSON is an allow.\nstdout: ${r.stdout}\nstderr: ${r.stderr}`,
+        `${g.name}: a crash printed no verdict object. This harness never reads the ` +
+          `exit code, so a crash without the verdict JSON is an allow.\nstdout: ${r.stdout}\nstderr: ${r.stderr}`,
       ).toBe(true)
       expect(v.reason).toMatch(/gate crashed — failing closed/)
     })
 
-    it('still allows ordinary and partial envelopes, printing no cancel (false-positive pins)', async () => {
+    it('still allows ordinary and partial envelopes, printing no verdict object (false-positive pins)', async () => {
       for (const payload of [
         BENIGN,
         JSON.stringify({ tool_name: 'Read' }),
@@ -389,7 +399,7 @@ for (const g of jsCancelGates) {
         const r = await runRaw(g, payload)
         expect(
           sawCancel(r).cancelled,
-          `${g.name} cancelled ${payload} — the envelope guard is over-triggering.\nstdout: ${r.stdout}`,
+          `${g.name} refused ${payload} — the envelope guard is over-triggering.\nstdout: ${r.stdout}`,
         ).toBe(false)
       }
     })

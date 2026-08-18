@@ -92,6 +92,23 @@ export const UNIVERSAL_PROTECTED_PATHS: readonly string[] = [
   '.openhands/hooks.json',
   '.gemini/settings.json',
   '.agents/plugins/intutic-governance',
+
+  // Muse Code — project-level hooks, user settings (managed_hooks_path lives
+  // here), and the Intutic-owned managed-hooks file it points at.
+  '.muse/hooks.json',
+  '.config/muse/settings.json',
+  '.config/muse/intutic-managed-hooks.json',
+
+  // Grok Build. `.grok/hooks` covers the whole hook directory (not just the
+  // one file this writer owns) — the same "the surface, not the one file"
+  // discipline every other harness's hooks dir gets. `trusted_folders.toml`
+  // is watched even though nothing here writes to it: it governs which
+  // projects Grok Build trusts enough to run hooks in at all, so an agent
+  // rewriting it could disable this harness's whole governance surface
+  // without touching a single hook file.
+  '.grok/hooks',
+  '.grok/config.toml',
+  '.grok/trusted_folders.toml',
 ]
 
 // ───────────────────────────────────────────────────────────────────────────

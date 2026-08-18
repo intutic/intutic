@@ -1,7 +1,7 @@
 # Harness Security Matrix — Intutic Compliance Scope <Badge type="tip" text="Open-Core" />
 
-> **Last updated:** Phase 3 implementation complete  
-> **Coverage:** 19 active harnesses
+> **Last updated:** Muse Code (20th) and Grok Build (21st harness) onboarding complete  
+> **Coverage:** 21 active harnesses
 
 This document is the canonical reference for what Intutic enforces, how, and the gaps that remain per harness.
 
@@ -11,9 +11,9 @@ This document is the canonical reference for what Intutic enforces, how, and the
 
 | Vector | Mechanism | How it blocks | Scope |
 |---|---|---|---|
-| **A — Client Hook** | Pre-tool-use gate script; blocking contract varies by harness (exit code 2, `{"cancel":true}` on stdout, a JS throw, or Python raise) | Blocks before tool executes | 17 generated gates: Claude Code, Claude Desktop, Cursor, Windsurf, Cline, Roo Code, OpenClaw, OpenHands, Goose, Antigravity, Hermes, Pi, Codex CLI, GitHub Copilot (agent hooks, Preview), Continue CLI, n8n (workflow-level, manual install), and Open-WebUI (prompt-level filter) — plus LangGraph's SDK-side gate (`intutic_clawde.gate`, not a generated file). All generated gates enforce ` WHERE ` (argPattern) rules against the serialized tool input |
-| **B — Proxy Gate** | LLM request inspection at the API boundary | Blocks / audits before LLM sees the prompt | 16 of the 19 active harnesses (+ Windsurf via TLS MITM); see matrix |
-| **C — Drift Guard** | File watcher + 30s poll cycle | Detects and restores tampered governance configs | 19 paths across all harnesses |
+| **A — Client Hook** | Pre-tool-use gate script; blocking contract varies by harness (exit code 2, `{"cancel":true}` on stdout, `{"decision":"deny"}` on stdout, a JS throw, or Python raise) | Blocks before tool executes | 19 generated gates: Claude Code, Claude Desktop, Cursor, Windsurf, Cline, Roo Code, OpenClaw, OpenHands, Goose, Antigravity, Hermes, Pi, Codex CLI, Muse Code, Grok Build, GitHub Copilot (agent hooks, Preview), Continue CLI, n8n (workflow-level, manual install), and Open-WebUI (prompt-level filter) — plus LangGraph's SDK-side gate (`intutic_clawde.gate`, not a generated file). All generated gates enforce ` WHERE ` (argPattern) rules against the serialized tool input |
+| **B — Proxy Gate** | LLM request inspection at the API boundary | Blocks / audits before LLM sees the prompt | 17 of the 21 active harnesses (+ Windsurf via TLS MITM); see matrix. Muse Code is env-var/launcher-only (no persistent base-URL setting confirmed) and is not counted in this 17 |
+| **C — Drift Guard** | File watcher + 30s poll cycle | Detects and restores tampered governance configs | 23 paths across all harnesses |
 | **D — Response Gate** | Proxy-side inspection of the LLM *response* before it is forwarded to the client | Withholds a model-emitted `tool_calls[]` naming a denied tool before the client's tool runner sees it | Every harness whose LLM traffic traverses the proxy (Vector B scope); harness-agnostic, no client hook required |
 
 ### Vector D — Response Gate
@@ -53,6 +53,8 @@ Known limits, stated precisely:
 | 17 | **Pi** | ✅ pre-tool hooks | ❌ | ✅ hooks.json | Medium | Intercepts at workspace root |
 | 18 | **GitHub Copilot** | ⚠️ Preview hooks | ❌ | ✅ copilot-instructions.md | Low | `github-copilot-check.js` (exit 2) via VS Code agent hooks (`.github/hooks/*.json` + `~/.copilot/hooks`) — a **Preview** feature whose format may change; the gate refuses payloads it does not recognise, so a shift fails closed. Instructions file still merged. argPattern rules enforced. **Contract re-verified 2026-08-10** against the live VS Code docs (envelope, exit-2, both file locations, `chat.hookFilesLocations`); an end-to-end block inside a Copilot-subscribed agent session remains unverified — it needs an interactive editor with an entitlement |
 | 19 | **LangGraph** | ✅ SDK-side (Python raise) | ✅ base_url / `intutic exec` | ✅ .env.intutic | Medium | Gate lives in the developer's code via `intutic_clawde.gate` (`guard_tools` / `@guard`), not a generated hook file — it sees the tool call's full arguments, so argPattern rules apply; traces attributed via `x-intutic-harness` |
+| 20 | **Muse Code** | ⚠️ muse-check.js | ⚠️ env-var only | ✅ 3 paths | Medium | Blocking hook (exit 2, **ASSUMED contract — TD-362**) registered in `<repo>/.muse/hooks.json` AND via the pre-approved `managed_hooks_path` tier (`~/.config/muse/intutic-managed-hooks.json`, referenced from `~/.config/muse/settings.json`); covers both `PreToolUse` and `PermissionRequest`. No persistent proxy base-URL setting was confirmed — routing is `META_API_KEY`/launcher-flag only. The `muse` binary could not be installed to live-verify any of this (beta product, no public release channel found); see TD-362 |
+| 21 | **Grok Build** | ✅ grok-check.js | ✅ config.toml `[model.*]` | ✅ .grok/hooks, config.toml, trusted_folders.toml | Medium | Blocking hook, `PreToolUse` with no matcher, registered in `.grok/hooks/intutic-governance.json` (project) and `~/.grok/hooks/intutic-governance.json` (user). **Confirmed** blocking contract: `{"decision":"deny","reason":"..."}` on stdout, exit 0 — a different stdout shape from Cline/Roo Code's `{"cancel":true}`, so this harness carries its own `stdout-decision-deny` contract rather than reusing theirs. **Double-gating note:** Grok Build also natively reads `.claude/settings.json` and `.cursor/hooks.json` if present, so a workspace already running either of those gates fires BOTH on a Grok Build tool call — expected, additive, not a bug (see [The gate backstop](/guide/mcp-governance#the-gate-backstop) for the same "both layers firing is expected" posture applied to the proxy+gate combination). **Not live-verified**: Grok Build was not installable in the environment this harness was implemented in, so the per-file hook-registration schema (`event`/`command`/`timeout` fields) is this integration's own reasonable design against the confirmed facts, not a byte-for-byte match against a real install |
 
 ---
 
@@ -105,6 +107,20 @@ intutic connect --harness goose
 ```
 Writes `~/.agents/plugins/intutic-governance/hooks/hooks.json` + `scripts/intutic-check.sh`. Applies `chmod 444` + `chflags uchg` (macOS) or `chattr +i` (Linux) to make plugin files immutable. Also merges `provider.host` into `~/.config/goose/config.yaml`.
 
+### Muse Code
+```bash
+intutic connect --harness muse-code
+```
+Writes `AGENTS.md` (governance text — Muse falls back to `CLAUDE.md` if this is absent) and installs the `PreToolUse`/`PermissionRequest` gate at two tiers: `<repo>/.muse/hooks.json` (project) and the pre-approved `managed_hooks_path` tier — an Intutic-owned `~/.config/muse/intutic-managed-hooks.json`, referenced by a narrow merge into `~/.config/muse/settings.json` (`schema_version` and any other key you have set are preserved). MCP servers declared under `mcp_servers` in `settings.json` (both `stdio` and `streamable_http`) are proxy-wrapped the same way every other JSON-map harness's servers are. Skills under `~/.agents/skills` are already covered by the product's existing skill-scanning feature — nothing harness-specific was needed there. **The `muse` binary could not be installed to live-verify the block/deny wire contract, the `hooks.json` schema, or the `managed_hooks_path` semantics — see TD-362.**
+
+### Grok Build
+```bash
+intutic connect --harness grok
+```
+Writes `AGENTS.md` (governance text) + `.grok/hooks/intutic-governance.json` (project) + `~/.grok/hooks/intutic-governance.json` (user) — a blocking `PreToolUse` hook with no matcher. Also merges `base_url` into every existing `[model.*]` table in `config.toml` at both project and user level (`XAI_API_KEY` remains the auth mechanism; only the endpoint is redirected). MCP servers declared under `[mcp_servers.*]` in either `config.toml` are proxy-wrapped the same way every other harness's `mcpServers` map is.
+
+> **Double-gating:** Grok Build also natively executes `.claude/settings.json` and `.cursor/hooks.json` hooks if either is present in the workspace — so a project already connected to Claude Code or Cursor may already be partially governed under Grok Build before running `intutic connect --harness grok` at all. Connecting Grok Build natively adds its own gate on top; both firing on the same blocked call is expected (see the coverage matrix row above).
+
 ---
 
 ## Known Architectural Gaps (Permanent)
@@ -116,3 +132,4 @@ Writes `~/.agents/plugins/intutic-governance/hooks/hooks.json` + `scripts/intuti
 | **Windsurf Cascade AI** | Cannot intercept without TLS MITM | No base URL field | TLS MITM via local CA (see windsurf-tls-mitm.md) |
 | **n8n granularity & install** | Workflow-level, manual install | `EXTERNAL_HOOK_FILES` is read by the n8n server process at startup — the daemon cannot set another process's environment, and `workflow.preExecute` gates whole executions, not individual tool calls | `n8n-governance-hook.js` + INSTALL.md generated every sync; one offending node aborts the execution with an error naming the node and rule |
 | **GitHub Copilot hook stability** | Agent hooks are Preview | The `.github/hooks/*.json` format may change between VS Code releases | The gate refuses stdin payloads it does not recognise (fail closed); instructions file remains as a fallback layer |
+| **Muse Code proxy routing** | No persistent proxy base-URL setting confirmed in `settings.json` | Muse exposes a `--base-url` CLI flag and a `META_API_KEY` env var, but no equivalent persistent config key could be confirmed from available docs/source (beta product) | Document-only for now: route via the launcher flag or env var; the client hook (PreToolUse/PermissionRequest, both tiers) remains the primary enforcement surface regardless of egress routing |

@@ -1,0 +1,44 @@
+{
+  "name": "@intutic/gate",
+  "version": "0.1.0",
+  "description": "Intutic pre-execution tool gate for JS/TS agent frameworks without a shipped Intutic harness (Mastra, the Vercel AI SDK, LangChain.js, dsh, and hand-rolled agent loops)",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/intutic/intutic",
+    "directory": "packages/gate-js"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "scripts": {
+    "lint": "eslint src",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^5.5",
+    "vitest": "^3"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
