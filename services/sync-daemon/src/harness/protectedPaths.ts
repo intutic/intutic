@@ -82,6 +82,12 @@ export const UNIVERSAL_PROTECTED_PATHS: readonly string[] = [
   '.cursor/hooks.json',
   '.cline/hooks',
   '.codeium/windsurf/hooks.json',
+  // The Windsurf JetBrains plugin's SEPARATE user-level hooks.json path (no
+  // `windsurf` subdirectory — confirmed against docs.devin.ai/desktop/
+  // cascade/hooks; see windsurfHooks.ts's module doc comment). Listed
+  // independently of the entry above: an agent disabling the JetBrains
+  // plugin's copy would not touch Desktop's.
+  '.codeium/hooks.json',
   '.windsurf/hooks.json',
   '.openhands/hooks.json',
   '.gemini/settings.json',

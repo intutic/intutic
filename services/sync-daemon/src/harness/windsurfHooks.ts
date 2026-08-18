@@ -52,13 +52,22 @@
  *   `tool_info.mcp_tool_arguments` for `pre_mcp_tool_use`. `trajectory_id`
  *   is Cascade's real conversation-identifier field.
  *
- * What was NOT independently re-verified: whether every Windsurf channel/
- * build (Desktop vs JetBrains plugin, which docs.devin.ai documents a
- * different user-level path for — `~/.codeium/hooks.json`, no `windsurf`
- * subdirectory — but this file only targets Desktop's path) dispatches
- * hooks identically, and whether `post_mcp_tool_use`'s `mcp_result` field
- * would be useful for anything (it isn't used here — post-hooks can't
- * block, so there is nothing this file's threat model gains from it).
+ * # Follow-up (2026-08-18): JetBrains plugin coverage
+ *
+ * The JetBrains plugin reads user-level hooks.json from a DIFFERENT path —
+ * `~/.codeium/hooks.json`, no `windsurf` subdirectory — which this file now
+ * also writes (same config content). Its own changelog (v2.12.4) naming
+ * `post_setup_worktree`, one of Cascade's documented event names, as a hook
+ * it added is corroborating evidence the JetBrains plugin dispatches the
+ * SAME event/payload system as Desktop, not a guess. Workspace-level
+ * `.windsurf/hooks.json` needed no change — that path is workspace-root-
+ * relative, not app-specific, so the existing write already covers both
+ * clients. Still not independently verified: whether `post_mcp_tool_use`'s
+ * `mcp_result` field would be useful for anything (it isn't used here —
+ * post-hooks can't block, so there is nothing this file's threat model
+ * gains from it), and whether the JetBrains plugin's proxy-config surface
+ * has an equivalent this writer could target the way `settings.json`
+ * targets Desktop's (not researched — out of scope, a hook-dispatch fix).
  * The Cursor-shaped field names this file previously relied on exclusively
  * are kept as a SECOND, lower-priority fallback in the extraction below —
  * not because they are believed to be real for Windsurf, but because they
@@ -78,6 +87,15 @@ import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
 const log = createLogger('sync-windsurf-hooks')
 
 const WINDSURF_USER_DIR = path.join(os.homedir(), '.codeium', 'windsurf')
+
+/** The JetBrains plugin's user-level hooks.json lives directly under
+ *  `~/.codeium` — no `windsurf` subdirectory — confirmed against
+ *  docs.devin.ai/desktop/cascade/hooks (see module doc comment). Only
+ *  hooks.json goes here: this writer's `settings.json` proxy-config write
+ *  targets Desktop's known path specifically, and whether/how the
+ *  JetBrains plugin has an equivalent proxy-config surface was not
+ *  researched — out of scope for this fix, which is about hook dispatch. */
+const WINDSURF_JETBRAINS_USER_DIR = path.join(os.homedir(), '.codeium')
 
 
 /** Cascade's real pre-hook event names (see module doc comment). Each maps
@@ -253,21 +271,45 @@ export async function writeWindsurfHooks(
 
   const config = buildHooksConfig(hookScriptPath)
 
-  // 1. User-level hooks
+  // 1. User-level hooks — Desktop's path.
   await fs.mkdir(WINDSURF_USER_DIR, { recursive: true })
   await atomicWriteJson(path.join(WINDSURF_USER_DIR, 'hooks.json'), config)
   log.info({ action: 'windsurf_hooks_written', level: 'user' }, 'Windsurf user-level hooks written')
 
-  // 2. Workspace-level hooks (.windsurf/hooks.json)
+  // 1b. User-level hooks — the JetBrains plugin's SEPARATE path. Same config
+  // content: the JetBrains plugin's own changelog (v2.12.4) names
+  // `post_setup_worktree` — one of Cascade's documented event names — as a
+  // hook it added, which is corroborating evidence (not a guess) that it
+  // dispatches the same Cascade hook event/payload system as Desktop, just
+  // reads its user-level config from this different file.
+  await fs.mkdir(WINDSURF_JETBRAINS_USER_DIR, { recursive: true })
+  await atomicWriteJson(path.join(WINDSURF_JETBRAINS_USER_DIR, 'hooks.json'), config)
+  log.info(
+    { action: 'windsurf_hooks_written', level: 'user-jetbrains' },
+    'Windsurf JetBrains plugin user-level hooks written',
+  )
+
+  // 2. Workspace-level hooks (.windsurf/hooks.json) — the SAME relative path
+  // for both Desktop and the JetBrains plugin (workspace-root-relative, not
+  // app-specific), so this one write already covers both. Hooks configured
+  // at multiple levels are NOT one-wins: Cascade runs every level's hooks
+  // for a matching event, in order system → user → workspace (confirmed
+  // against docs.devin.ai/desktop/cascade/hooks) — an earlier version of
+  // this comment claimed user-level "takes precedence," which was another
+  // unverified assumption.
   const wsWindsurfDir = path.join(workspaceRoot, '.windsurf')
   await fs.mkdir(wsWindsurfDir, { recursive: true })
   await atomicWriteJson(path.join(wsWindsurfDir, 'hooks.json'), {
     ...config,
-    _note: 'Workspace-level hooks — agent may be able to modify this file. User-level hooks take precedence.',
+    _note: 'Workspace-level hooks — agent may be able to modify this file. Runs IN ADDITION to ' +
+      'user-level hooks (Cascade runs every configured level for a matching event; last-wins/' +
+      'precedence is not how this works), so this file being tampered with does not disable ' +
+      'user-level enforcement.',
   })
   log.info({ action: 'windsurf_hooks_written', level: 'workspace' }, 'Windsurf workspace-level hooks written')
 
   // 3. HTTP proxy settings → routes Windsurf's Cascade AI traffic through Intutic TLS MITM
+  // (Desktop only — see WINDSURF_JETBRAINS_USER_DIR's doc comment).
   const wsSettings = {
     _comment: 'Intutic proxy settings — auto-generated. DO NOT EDIT.',
     _lastSync: newIso(),
