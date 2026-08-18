@@ -29,6 +29,7 @@
     "@intutic/mcp-governance-proxy": "workspace:*",
     "@types/node": "^22",
     "eslint": "^9",
+    "js-yaml": "^4.3.0",
     "prettier": "^3",
     "turbo": "^2",
     "typescript": "^5.5",
