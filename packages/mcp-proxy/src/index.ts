@@ -23,6 +23,7 @@
 
 import { loadConfig } from './config.js'
 import { McpGovernanceProxy } from './proxy.js'
+import { runRemoteProxy } from './remoteBridge.js'
 import { createStderrLogger as createLogger } from './stderrLog.js'
 
 const log = createLogger('mcp-proxy-main')
@@ -37,10 +38,18 @@ async function main(): Promise<void> {
     process.exit(1)
   }
 
-  const proxy = new McpGovernanceProxy(config)
-
+  // Remote (HTTP/SSE) bridge mode, from `--remote-url` — see remoteBridge.ts.
+  // Shares the SAME proxy_fatal/exit(1) catch below as stdio proxy mode
+  // rather than a second error surface, so a remote connect failure and a
+  // "spawned stdio command doesn't exist" failure look identical to whatever
+  // is watching this process's stderr/exit code.
   try {
-    await proxy.run()
+    if (config.remoteUrl !== undefined) {
+      await runRemoteProxy(config)
+    } else {
+      const proxy = new McpGovernanceProxy(config)
+      await proxy.run()
+    }
   } catch (err) {
     log.error({ action: 'proxy_fatal', err: (err as Error).message }, 'Proxy exited with error')
     process.exit(1)
