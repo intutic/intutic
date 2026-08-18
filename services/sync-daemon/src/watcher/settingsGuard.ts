@@ -52,6 +52,9 @@ export function buildProtectedPaths(workspaceRoot: string): string[] {
     // ── Windsurf ─────────────────────────────────────────────────────
     path.join(home, '.codeium', 'windsurf', 'hooks.json'),
     path.join(home, '.codeium', 'windsurf', 'settings.json'),
+    // JetBrains plugin's separate user-level path (no `windsurf`
+    // subdirectory) — see windsurfHooks.ts's module doc comment.
+    path.join(home, '.codeium', 'hooks.json'),
     path.join(workspaceRoot, '.windsurf', 'hooks.json'),
     // ── Cline ────────────────────────────────────────────────────────
     path.join(workspaceRoot, '.clinerules', 'hooks', 'hooks.json'),

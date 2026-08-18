@@ -108,6 +108,18 @@ describe('Windsurf hooks writer — Cascade real payload shape', () => {
     expect(config.hooks).not.toHaveProperty('beforeFileEdit')
   })
 
+  it('also writes the JetBrains plugin\'s separate user-level hooks.json (~/.codeium/hooks.json)', async () => {
+    const desktopConfig = JSON.parse(
+      await node_fs.readFile(node_path.join(home, '.codeium', 'windsurf', 'hooks.json'), 'utf-8'),
+    )
+    const jetbrainsConfig = JSON.parse(
+      await node_fs.readFile(node_path.join(home, '.codeium', 'hooks.json'), 'utf-8'),
+    )
+    expect(Object.keys(jetbrainsConfig.hooks).sort()).toEqual(['pre_mcp_tool_use', 'pre_run_command', 'pre_write_code'])
+    // Same script, same config content — only the file location differs.
+    expect(jetbrainsConfig.hooks).toEqual(desktopConfig.hooks)
+  })
+
   it('blocks pre_run_command reading tool_info.command_line (real Cascade shape, dynamic tier)', async () => {
     const payload = JSON.stringify({
       agent_action_name: 'pre_run_command',
