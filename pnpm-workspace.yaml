@@ -21,7 +21,7 @@ allowBuilds:
 overrides:
   brace-expansion: '^5.0.9' # CVE-2026-13149, CVE-2026-14257, + the 2026-08 bypass of the 14257 mitigation
   fast-uri: '^3.1.5' # CVE-2026-16221, CVE-2026-13676, + host confusion via backslash authority introducer
-  js-yaml: '^4.3.0' # CVE-2026-59869
+  js-yaml: '^4.3.1' # CVE-2026-59869, CVE-2026-59870 (quadratic !!omap resolution, unfixed in 4.3.0)
   # @modelcontextprotocol/sdk pins hono ^4.11.4 and resolves it to a version
   # below the fix. 4.12.31 satisfies that range, so this needs no SDK bump.
   hono: '^4.12.34' # CVE-2026-59895/6/7, + ReDoS in CORS middleware via Access-Control-Request-Headers
