@@ -7,6 +7,7 @@ import * as http from 'node:http'
 import { callDaemonSocket } from '../../daemonClient.js'
 import { PolicyClient } from '../../policy.js'
 import { GovernanceEmitter } from '../../emitter.js'
+import { ToolCallInterceptor } from '../../interceptor.js'
 import type { ResolvedPolicy } from '../../daemon/policyCache.js'
 import type { HookEvent } from '../../daemon/telemetryBatcher.js'
 
@@ -68,6 +69,11 @@ describe('Daemon-Shim Integration Tests', () => {
   // GovernanceEmitter's dual-path fallback appends here. Nothing should ever
   // write it in this file; the telemetry test asserts it stays absent.
   const fallbackEventsPath = path.join(os.tmpdir(), `mcp-daemon-shim-fallback-${Date.now()}.jsonl`)
+  // A separate fallback path for the curation tests below: their non-daemon
+  // mode emitter writes through `runDualPath` (see emitter.ts) as designed,
+  // and sharing `fallbackEventsPath` would spuriously fail the assertion
+  // above that that specific file never gets written.
+  const curationFallbackEventsPath = path.join(os.tmpdir(), `mcp-daemon-shim-curation-fallback-${Date.now()}.jsonl`)
   let server: net.Server
   let mockCp: http.Server
   let cpPort: number
@@ -81,6 +87,7 @@ describe('Daemon-Shim Integration Tests', () => {
     process.env['MCP_DAEMON_SOCKET'] = socketPath
     await fs.rm(socketPath, { force: true })
     await fs.rm(fallbackEventsPath, { force: true })
+    await fs.rm(curationFallbackEventsPath, { force: true })
     // startBatcher() drains ~/.intutic/telemetry-buffer.ndjson into the ring on
     // start; clearing it first keeps a previous run's events out of the batches
     // asserted on below.
@@ -92,6 +99,16 @@ describe('Daemon-Shim Integration Tests', () => {
       if (url.pathname === '/api/v1/policy/resolve') {
         lastWorkspaceId = url.searchParams.get('workspaceId')
         res.writeHead(200, { 'Content-Type': 'application/json' })
+        // `ws_curation` additionally gets the MCP curation fields — the M1
+        // regression case. Before the fix, this endpoint (the one daemon-mode
+        // proxies poll, via packages/mcp-proxy/src/daemon/policyCache.ts) never
+        // sent allowedServers/allowedTools/toolDescriptionOverrides at all, so
+        // a daemon-mode `PolicyClient` silently absorbed nothing and enforced
+        // no server/tool scoping regardless of workspace settings.
+        const curation =
+          lastWorkspaceId === 'ws_curation'
+            ? { allowedServers: ['filesystem'], allowedTools: [], toolDescriptionOverrides: {} }
+            : {}
         res.end(
           JSON.stringify({
             workspaceId: lastWorkspaceId,
@@ -99,17 +116,23 @@ describe('Daemon-Shim Integration Tests', () => {
               { id: 'rule_xyz', toolPattern: 'Bash', action: 'block', reason: 'Blocked in test' }
             ],
             dlpPatterns: [],
-            interventionMode: 'BLOCK'
+            interventionMode: 'BLOCK',
+            ...curation,
           })
         )
       } else if (url.pathname === '/api/v1/sop/rules') {
         lastWorkspaceId = url.searchParams.get('workspaceId')
         res.writeHead(200, { 'Content-Type': 'application/json' })
+        const curation =
+          lastWorkspaceId === 'ws_curation'
+            ? { allowedServers: ['filesystem'], allowedTools: [], toolDescriptionOverrides: {} }
+            : {}
         res.end(
           JSON.stringify({
             rules: [
               { id: 'rule_xyz', toolPattern: 'Bash', action: 'block', reason: 'Blocked in test' }
-            ]
+            ],
+            ...curation,
           })
         )
       } else if (url.pathname === '/api/v1/hook-events') {
@@ -177,6 +200,7 @@ describe('Daemon-Shim Integration Tests', () => {
     await new Promise<void>((resolve) => mockCp.close(() => resolve()))
     await fs.rm(socketPath, { force: true })
     await fs.rm(fallbackEventsPath, { force: true })
+    await fs.rm(curationFallbackEventsPath, { force: true })
   })
 
   it('client callDaemonSocket requests policy.get and gets cached policy', async () => {
@@ -196,6 +220,74 @@ describe('Daemon-Shim Integration Tests', () => {
     const rules = client.getRules()
     expect(rules).toHaveLength(1)
     expect(rules[0]?.id).toBe('rule_xyz')
+  })
+
+  // M1: the user-visible symptom this whole change fixes. Before the fix,
+  // `GET /api/v1/policy/resolve` — the endpoint a daemon-mode PolicyClient
+  // polls via the daemon's socket ('policy.get' -> policyCache.resolvePolicy)
+  // — never sent allowedServers/allowedTools/toolDescriptionOverrides. A
+  // daemon-mode workspace with `mcpAllowedServers: ['filesystem']` configured
+  // would absorb an empty (== unrestricted) allowlist and let a tool call
+  // proxied through ANY server sail through silently. `ws_curation`'s mock
+  // response above carries `allowedServers: ['filesystem']` on both routes,
+  // so this exercises the real fix end-to-end: real PolicyClient, real daemon
+  // socket, real ToolCallInterceptor.decide().
+  it('decide() blocks a tool call proxied through a non-allowlisted MCP server in daemon mode', async () => {
+    const client = new PolicyClient(`http://127.0.0.1:${cpPort}`, 'shim-api-key', 'ws_curation', 60000, 'daemon')
+    await client.refresh()
+    // Proves the fix landed on the wire, not just in the interceptor: the
+    // daemon-mode client actually absorbed a non-empty allowlist.
+    expect(client.getAllowedServers()).toEqual(['filesystem'])
+
+    const emitter = new GovernanceEmitter(
+      `http://127.0.0.1:${cpPort}`,
+      'shim-api-key',
+      fallbackEventsPath,
+      'ws_curation',
+      'daemon',
+    )
+
+    // Proxied through a server NOT on the allowlist: before the fix this
+    // would have been allowed (empty allowlist absorbed == unrestricted).
+    const blockedInterceptor = new ToolCallInterceptor(client, emitter, true, 'not-filesystem')
+    const blocked = await blockedInterceptor.decide('read_file', { path: '/tmp/x' })
+    expect(blocked.action).toBe('block')
+    if (blocked.action === 'block') {
+      expect(blocked.reason).toContain('not-filesystem')
+      expect(blocked.reason).toContain('MCP server allowlist')
+    }
+
+    // Same client, same policy, proxied through the server that IS on the
+    // allowlist — proves this is scoping, not a blanket block.
+    const allowedInterceptor = new ToolCallInterceptor(client, emitter, true, 'filesystem')
+    const allowed = await allowedInterceptor.decide('read_file', { path: '/tmp/x' })
+    expect(allowed.action).toBe('allow')
+  })
+
+  // Same workspace settings, the other proxy mode. This is the parity the
+  // control-plane's shared helper (`services/control-plane/src/lib/
+  // mcpCuration.ts`) exists to guarantee: a workspace must not see different
+  // MCP curation depending only on which proxy mode it happens to run.
+  it('decide() enforces the identical server allowlist in non-daemon (stdio) mode', async () => {
+    const client = new PolicyClient(`http://127.0.0.1:${cpPort}`, 'shim-api-key', 'ws_curation', 60000, 'per-session')
+    await client.refresh()
+    expect(client.getAllowedServers()).toEqual(['filesystem'])
+
+    const emitter = new GovernanceEmitter(
+      `http://127.0.0.1:${cpPort}`,
+      'shim-api-key',
+      curationFallbackEventsPath,
+      'ws_curation',
+      'per-session',
+    )
+
+    const blockedInterceptor = new ToolCallInterceptor(client, emitter, true, 'not-filesystem')
+    const blocked = await blockedInterceptor.decide('read_file', { path: '/tmp/x' })
+    expect(blocked.action).toBe('block')
+
+    const allowedInterceptor = new ToolCallInterceptor(client, emitter, true, 'filesystem')
+    const allowed = await allowedInterceptor.decide('read_file', { path: '/tmp/x' })
+    expect(allowed.action).toBe('allow')
   })
 
   it('GovernanceEmitter enqueues telemetry to the daemon, which batches it to the control plane', async () => {

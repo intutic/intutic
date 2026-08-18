@@ -63,6 +63,7 @@ import { createLogger } from '@intutic/logger'
 import { toRulesLine, GATE_VERSION, RULES_COLUMNS } from '../harness/gateBody.js'
 import {
   DESTRUCTIVE_COMMAND_PATTERNS,
+  SKILL_SURFACE_PATTERNS,
   assertPortableEre,
   type GuardPattern,
 } from '../harness/protectedPaths.js'
@@ -97,6 +98,51 @@ export const SNAPSHOT_RULES = 'policy-snapshot.rules'
  * in one sync cycle instead of one release.
  */
 export const DESTRUCTIVE_TIER_SEVERITY: 'block' | 'warn' = 'warn'
+
+/**
+ * Whether the skill-directory-write tier ships as `block` or as `warn`.
+ *
+ * `block` — deliberately not following `DESTRUCTIVE_TIER_SEVERITY`'s warn-first
+ * ramp, because the thing that ramp is buying time for does not exist on this
+ * surface. `DESTRUCTIVE_COMMAND_PATTERNS` rides at `warn` because those seven
+ * families are unmeasured against real developer traffic and a false positive
+ * has a real cost (see that constant's own comment). `SKILL_SURFACE_PATTERNS`
+ * is not that kind of rule: it does not run `scanSkillContent` or judge
+ * anything about what a skill file says, only WHERE a write's target path
+ * points — `.agents/skills/**` or `.claude/skills/**`, a deterministic,
+ * zero-ambiguity match. TD-358 (`docs/TECH_DEBT.md`) says this about exactly
+ * that distinction: "Path-matching is the one exception, and it is not
+ * actually an exception to the measurement requirement — it never needed
+ * one." There is no false-positive rate to earn a promotion by measuring,
+ * because there is nothing probabilistic here to measure in the first place.
+ *
+ * The second half of the argument is what `warn` actually buys on this
+ * surface, and the answer is nothing. `SECRET_CONTENT_PATTERNS`
+ * (`harness/protectedPaths.ts`) skips the warn-first ramp for the same reason
+ * and states the principle this constant now follows: "A warn that lets the
+ * write proceed IS the incident." A poisoned skill file written under
+ * warn-only is not a near-miss sitting in telemetry waiting for a human to
+ * notice — it is a file on disk that the very next agent session loads and
+ * trusts as instructions, the same way it trusts its own system prompt. Warn
+ * logs the write and lets it land anyway, so there is no window in which the
+ * advisory tier protected anything. That is what makes this different from
+ * `DESTRUCTIVE_COMMAND_PATTERNS`: a destructive *command*'s warn tier buys a
+ * chance for a human to notice before the damage is done; a skill file, once
+ * written, already is the damage.
+ *
+ * Shipped *through the snapshot* rather than promoted in place in
+ * `staticFloorPatterns()`, for the same operational reason
+ * `DESTRUCTIVE_TIER_SEVERITY` is: the rollout, not the mechanism, is the thing
+ * still short on field time, and the snapshot channel is what makes it
+ * retractable in one sync cycle instead of one release if that turns out
+ * wrong. `staticFloorPatterns()` keeps its two `SKILL_SURFACE_PATTERNS`
+ * entries at `warn` — unchanged by this constant — as the degraded-mode
+ * baseline for a workspace with no snapshot, or an invalid one; this constant
+ * is what promotes the steady state to `block` everywhere a valid snapshot has
+ * landed. Flipping it back to `'warn'` is the retraction, exactly as it is for
+ * `DESTRUCTIVE_TIER_SEVERITY`.
+ */
+export const SKILL_SURFACE_TIER_SEVERITY: 'block' | 'warn' = 'block'
 
 /** Rules the control plane resolved for this workspace. Mirrors the
  *  `GET /api/v1/policy/resolve` response — including `argPattern`, the
@@ -332,7 +378,24 @@ export function buildSnapshotRules(policy: ResolvedPolicy): GuardPattern[] {
           : ('warn' as const),
   }))
 
-  return [...sopRules, ...destructive]
+  // The snapshot-delivered promotion of the skill-directory-write floor rules
+  // to `block` — see SKILL_SURFACE_TIER_SEVERITY. `.tier` suffixed onto the
+  // floor's own id (`skill_surface.agents_skills_write` ->
+  // `skill_surface.agents_skills_write.tier`) so this entry can never collide
+  // with `staticFloorPatterns()`'s compiled-in copy of the same pattern: both
+  // are meant to be present and matching the same path at once, one warn (the
+  // degraded-mode baseline) and one block (the steady state), and
+  // `assertGuardTableSane`'s uniqueness check would reject an accidental
+  // duplicate id the moment either table tried to load. Mirrors the
+  // destructive tier's own shadow handling: SHADOW means observe, don't act,
+  // on the dynamic tier only — the floor's warn rule is unaffected either way.
+  const skillSurface = SKILL_SURFACE_PATTERNS.map((p) => ({
+    ...p,
+    id: `${p.id}.tier`,
+    severity: shadow ? ('shadow' as GuardPattern['severity']) : SKILL_SURFACE_TIER_SEVERITY,
+  }))
+
+  return [...sopRules, ...destructive, ...skillSurface]
 }
 
 /**

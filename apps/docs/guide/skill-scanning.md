@@ -66,13 +66,83 @@ exactly the failure mode this distinction exists to avoid.
 ## Report-only, deliberately, this phase
 
 Nothing in this codebase blocks, refuses, or auto-deletes a skill on the
-strength of a finding from this scanner. Findings are surfaced — in the CLI
-output, in the control-plane report, in the posture score — and nothing
-more, unless an operator has explicitly opted into the existing
-`enableLocalSkillAuditDelete` pruning gate. Enforcement on top of these
-patterns is deliberately future, unbuilt work; see
+strength of a finding from **this scanner** — that stays true after the
+block-tier promotion below, which does not run `scanSkillContent` at all.
+Findings from the CONTENT scan are surfaced — in the CLI output, in the
+control-plane report, in the posture score — and nothing more, unless an
+operator has explicitly opted into the existing `enableLocalSkillAuditDelete`
+pruning gate. Enforcement of skill-file CONTENT is deliberately future,
+unbuilt work; see
 [TECH_DEBT.md](https://github.com/intutic/intutic/blob/main/docs/TECH_DEBT.md)
 for the tracked follow-ups.
+
+## Block-tier skill-directory protection
+
+A second, separate control — not this scanner — now **refuses** a write or
+edit whose target path lands under `.agents/skills/**` or `.claude/skills/**`.
+It is worth being precise about the boundary: this mechanism looks only at
+*where* a call is writing, never at what the content says, so it is
+enforceable with none of the caveats above. It lives in
+`services/sync-daemon/src/harness/protectedPaths.ts`
+(`SKILL_SURFACE_PATTERNS`) and
+`services/sync-daemon/src/lib/policySnapshot.ts`
+(`SKILL_SURFACE_TIER_SEVERITY`), and follows the same "policy snapshot
+dynamic-tier promotion" pattern this product already uses for
+`DESTRUCTIVE_COMMAND_PATTERNS`.
+
+**Two tiers, one path family:**
+
+- **Floor (compiled in, always present): `warn`.** Two patterns — one per
+  skill root — ship in every gate's static floor and fire on any Write/Edit
+  whose target path matches, regardless of whether the machine has ever
+  synced. This is the degraded-mode baseline: it is what a workspace gets
+  with no policy snapshot, or an invalid one, and it can only be changed by a
+  release. It stays `warn` for exactly that reason — a compiled-in rule has
+  no one-sync-cycle undo, so it has to be the version that is safe to run
+  unconditionally, forever.
+- **Snapshot (delivered every sync cycle): `block`, the steady state.** The
+  same two path patterns are re-shipped as `skill_surface.*.tier` entries
+  through the policy-snapshot channel, at whatever severity
+  `SKILL_SURFACE_TIER_SEVERITY` currently declares — `block` today. Because a
+  gate evaluates every matching rule and a `block` verdict wins outright, a
+  workspace with a valid, current snapshot sees the write refused even though
+  the floor's own copy only warned; a workspace whose snapshot is absent,
+  stale, or fails its digest/workspace check degrades cleanly back to the
+  floor's `warn`, because the dynamic tier is dropped and only the compiled-in
+  rules remain.
+
+**Why `block`, unlike the destructive-command tier it borrows the mechanism
+from.** `DESTRUCTIVE_COMMAND_PATTERNS` ships its `block`-eligible patterns at
+`warn` first specifically to earn promotion from measured field data — those
+patterns are unproven against real developer traffic, and a false positive
+there has a real cost. Skill-directory path matching was never in that
+position: it does not judge content, so there is no false-positive rate to
+measure in the first place — TD-358's own text calls this out directly,
+"path-matching... is not actually an exception to the measurement
+requirement — it never needed one." And the cost of staying at `warn` here is
+not neutral: a poisoned skill file written under warn-only is not a near-miss
+waiting to be triaged, it is a file on disk that the very next agent session
+loads and treats as instructions. A warn that lets that write proceed *is*
+the incident, the same reasoning `SECRET_CONTENT_PATTERNS` already applies to
+credential values written into files.
+
+**One-sync-cycle retractability.** The whole reason this ships through the
+snapshot rather than being promoted in place in the static floor is that it
+can be undone without a release: flipping `SKILL_SURFACE_TIER_SEVERITY` back
+to `'warn'` and letting the next sync cycle land it returns every workspace to
+the floor-only behavior described above, exactly the retraction lever
+`DESTRUCTIVE_TIER_SEVERITY` already provides for the destructive-command
+tier.
+
+**What this does not do.** It does not scan or judge skill CONTENT — that
+remains the unchanged, unblocking scanner described above, gated on the
+corpus measurement TD-358 tracks. It does not catch a skill file reached
+through a shell redirect, a symlink, or a relative path walk (`subject:
+'target'`, matching the tool's own path argument, not a bare mention in a
+command string). And SHADOW-mode workspaces see the promotion downgraded to
+`shadow` (observe, don't act) on the snapshot side, same as every other
+snapshot-delivered rule — the floor's own `warn` copy is unaffected by
+`interventionMode` either way.
 
 ## What this cannot catch
 

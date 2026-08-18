@@ -27,8 +27,10 @@ import {
   SNAPSHOT_JSON,
   SNAPSHOT_RULES,
   DESTRUCTIVE_TIER_SEVERITY,
+  SKILL_SURFACE_TIER_SEVERITY,
   type ResolvedPolicy,
 } from '../../src/lib/policySnapshot.js'
+import { SKILL_SURFACE_PATTERNS, staticFloorPatterns } from '../../src/harness/protectedPaths.js'
 
 function policy(over: Partial<ResolvedPolicy> = {}): ResolvedPolicy {
   return {
@@ -171,6 +173,54 @@ describe('buildSnapshotRules', () => {
     // made it unmeasurable.
     expect(rules.every((r) => r.severity === 'shadow')).toBe(true)
     expect(rules.some((r) => r.severity === 'warn'), 'a shadow snapshot still emits warn rules').toBe(false)
+  })
+
+  describe('skill-surface tier (TD-358 block-tier promotion)', () => {
+    it('ships one rule per SKILL_SURFACE_PATTERNS entry at SKILL_SURFACE_TIER_SEVERITY', () => {
+      const rules = buildSnapshotRules(policy())
+      const skillRules = rules.filter((r) => r.id.startsWith('skill_surface.'))
+      expect(skillRules.length).toBe(SKILL_SURFACE_PATTERNS.length)
+      for (const r of skillRules) {
+        expect(r.severity).toBe(SKILL_SURFACE_TIER_SEVERITY)
+      }
+      // Sanity: this test is only meaningful while the constant is 'block'.
+      // If it is ever flipped back to 'warn' as the retraction this comment
+      // predicts, this assertion still holds — it reads the constant, not a
+      // hardcoded 'block'.
+      expect(SKILL_SURFACE_TIER_SEVERITY).toBe('block')
+    })
+
+    it('suffixes snapshot-delivered ids so they never collide with the static-floor copies', () => {
+      const rules = buildSnapshotRules(policy())
+      const skillRules = rules.filter((r) => r.id.startsWith('skill_surface.'))
+      const floorIds = new Set(staticFloorPatterns().map((r) => r.id))
+      for (const r of skillRules) {
+        expect(r.id.endsWith('.tier'), `${r.id} is not suffixed .tier`).toBe(true)
+        expect(floorIds.has(r.id), `${r.id} collides with a static-floor rule id`).toBe(false)
+        // The un-suffixed id IS a floor id — proving the suffix is what
+        // prevents the collision, not that the ids were unrelated to begin
+        // with.
+        const base = r.id.slice(0, -'.tier'.length)
+        expect(floorIds.has(base), `${base} was expected to be the floor's own id for ${r.id}`).toBe(true)
+      }
+    })
+
+    it('matches the same source pattern as the corresponding floor rule', () => {
+      const rules = buildSnapshotRules(policy())
+      for (const floorPattern of SKILL_SURFACE_PATTERNS) {
+        const snapshotRule = rules.find((r) => r.id === `${floorPattern.id}.tier`)
+        expect(snapshotRule, `no snapshot rule for ${floorPattern.id}`).toBeDefined()
+        expect(snapshotRule!.source).toBe(floorPattern.source)
+        expect(snapshotRule!.subject).toBe(floorPattern.subject)
+      }
+    })
+
+    it('marks skill-surface rules shadow, not block, in SHADOW mode', () => {
+      const rules = buildSnapshotRules(policy({ interventionMode: 'SHADOW' }))
+      const skillRules = rules.filter((r) => r.id.startsWith('skill_surface.'))
+      expect(skillRules.length).toBeGreaterThan(0)
+      expect(skillRules.every((r) => r.severity === 'shadow')).toBe(true)
+    })
   })
 })
 
