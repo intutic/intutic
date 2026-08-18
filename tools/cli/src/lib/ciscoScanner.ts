@@ -1,10 +1,12 @@
 /**
- * Cisco `skill-scanner` integration — OPTIONAL, opt-in shell-out to an
- * external Python-packaged CLI that does full AST/dataflow analysis of
- * skill-bundled scripts, genuinely deeper than this codebase's own
- * regex-genre scanning (`packages/shared-types/src/scriptScan.ts`, Phase
- * S2). TD-356 (`docs/TECH_DEBT.md`) named this integration as the follow-up
- * to that phase's deliberately-scoped pattern matching.
+ * Cisco `skill-scanner` integration — OPTIONAL, opt-in shell-out to
+ * `cisco-ai-defense/skill-scanner`, a Cisco AI Defense open-source CLI that
+ * does static YARA/pattern detection, Python bytecode integrity checks,
+ * command-pipeline taint analysis, and (with `--use-behavioral`) full
+ * AST/dataflow analysis of skill content — genuinely deeper than this
+ * codebase's own regex-genre scanning (`packages/shared-types/src/scriptScan.ts`,
+ * Phase S2). TD-356 (`docs/TECH_DEBT.md`) named this integration as the
+ * follow-up to that phase's deliberately-scoped pattern matching.
  *
  * # Why a shell-out, not a dependency
  *
@@ -12,59 +14,74 @@
  * runtime dependency for this codebase — that decision stands. This module
  * does not embed, vendor, or depend on `skill-scanner`; it shells out to it
  * via `execFile` when the operator has separately installed it (`pipx
- * install skill-scanner`), and degrades gracefully — never throws, never
- * silently passes — when it is absent. OUR runtime stays Python-free; the
- * binary is entirely the operator's own installation.
+ * install cisco-ai-skill-scanner`), and degrades gracefully — never throws,
+ * never silently passes — when it is absent. OUR runtime stays Python-free;
+ * the binary is entirely the operator's own installation.
  *
  * # CLI invocation shape — VERIFIED against the real published tool
  *
- * Unlike most shell-outs in this codebase, this integration was written
- * against the actual `skill-scanner` CLI (PyPI package `skill-scanner`,
- * installed via `pipx install skill-scanner` and inspected with `--help` and
- * by reading its installed source, not guessed from a "typical SARIF
- * scanner" shape):
+ * This integration was written against the actual Cisco tool: PyPI package
+ * `cisco-ai-skill-scanner` (installs a binary named `skill-scanner` on
+ * PATH — same binary name as a DIFFERENT, unrelated PyPI package also
+ * called `skill-scanner`; see the correction note below), installed via
+ * `pipx install cisco-ai-skill-scanner` and inspected with `--help` and by
+ * reading its installed source, not guessed from a "typical SARIF scanner"
+ * shape:
  *
- *   skill-scanner scan --path <dir> --format sarif --output <file>
+ *   skill-scanner scan <dir> --use-behavioral --format sarif --output-sarif <file>
  *
- * Load-bearing details confirmed from the installed 0.3.3 source
- * (`skill_scanner/output/sarif_export.py`, `skill_scanner/models/findings.py`):
- * - `--path` is SINGLE-VALUED (not `--target`, which the tool's own `--help`
- *   marks "repeat for multiple" — `--path` carries no such note, and passing
- *   it twice silently keeps only the last value, confirmed empirically).
- *   {@link runCiscoScan} therefore invokes the binary ONCE PER skill
- *   directory, exactly the shape this phase's caller (`commands/skill.ts`)
- *   already iterates in.
- * - `ruleId` in the tool's own SARIF output is `skill-scanner/<category>`
- *   (e.g. `skill-scanner/exfiltration`), and `category` is one of:
- *   `external_download | prompt_injection | ssrf_cloud | command_execution |
- *   supply_chain | exfiltration | credential_leak | indirect_injection |
- *   toxic_flow | third_party_content | configuration_risk` (plus compat
- *   aliases the tool itself resolves before emitting SARIF) — this is the
- *   real taxonomy {@link mapCiscoCategory} in `commands/skill.ts` maps
- *   from, not a guess.
+ * Load-bearing details confirmed from the installed 2.0.13 source
+ * (`skill_scanner/core/models.py`, `skill_scanner/cli/cli.py`) and by
+ * actually running the binary against test fixtures:
+ * - `skill_directory` is a POSITIONAL argument, not a `--path` flag, and
+ *   takes exactly one directory — {@link runCiscoScan} therefore invokes
+ *   the binary ONCE PER skill directory, exactly the shape this phase's
+ *   caller (`commands/skill.ts`) already iterates in.
+ * - `static_analyzer`, `bytecode_analyzer`, and `pipeline_analyzer` run BY
+ *   DEFAULT, no flag or API key required. `--use-behavioral` additionally
+ *   enables `behavioral_analyzer` (AST + taint tracking) — still fully
+ *   offline, no key — which is the analyzer this integration wants for the
+ *   "genuinely deeper than regex" claim, so it is always passed.
+ *   `--use-llm`, `--use-virustotal`, and `--use-aidefense` each require a
+ *   separately-configured API key and are NEVER passed by this module —
+ *   this integration only exercises skill-scanner's offline analyzers.
+ * - Each SARIF `result` carries `properties.category` (one of an 18-value
+ *   enum — `prompt_injection`, `command_injection`, `data_exfiltration`,
+ *   `unauthorized_tool_use`, `obfuscation`, `hardcoded_secrets`,
+ *   `social_engineering`, `resource_abuse`, `policy_violation`, `malware`,
+ *   `harmful_content`, `skill_discovery_abuse`, `transitive_trust_abuse`,
+ *   `autonomy_abuse`, `tool_chaining_abuse`, `unicode_steganography`,
+ *   `supply_chain_attack` — `skill_scanner/core/models.py`'s
+ *   `ThreatCategory` enum) and `properties.severity` DIRECTLY, not encoded
+ *   into `ruleId` — `ruleId` is a plain identifier like
+ *   `PIPELINE_TAINT_FLOW`, not `skill-scanner/<category>`. `mapCiscoCategory`
+ *   in `commands/skill.ts` maps from this real taxonomy, not a guess.
+ * - `artifactLocation.uri` is RELATIVE to the scanned directory (e.g.
+ *   `"SKILL.md"`, with `uriBaseId: "%SRCROOT%"` signalling exactly that) —
+ *   NOT absolute, confirmed by actually running the binary. {@link
+ *   scanOneDir} joins it against `dir` before returning it, honoring this
+ *   module's own `CiscoScanFinding.filePath` contract ("ABSOLUTE").
+ * - A `--fail-on-severity`/`--fail-on-findings` threshold crossing still
+ *   exits non-zero WHILE writing a valid SARIF file — confirmed
+ *   empirically — so {@link scanOneDir} always attempts to read the output
+ *   file first and only reports `ok: false` when that file is absent or
+ *   unparseable.
  *
- * # What was NOT possible to verify, and matters for how this ships
+ * # Correction: an earlier version of this integration shelled out to the
+ * # WRONG package
  *
- * The installed tool's actual analysis mechanism is **LLM analysis +
- * VirusTotal**, gated on `SKILLSCAN_API_KEY`/`SKILLSCAN_BASE_URL` (LLM) or
- * `VT_API_KEY` (VirusTotal) being configured in the operator's environment —
- * NOT static AST/dataflow analysis that runs standalone offline the way this
- * module's doc comment (and `docs/TECH_DEBT.md`'s TD-356/`scriptScan.ts`)
- * describe "Cisco's skill-scanner" as doing. With neither configured, the
- * installed binary exits non-zero with "No analyzers enabled for scan" and
- * writes NO output file at all — confirmed by actually invoking it in this
- * sandbox. {@link runCiscoScan} treats that as a scan failure (surfaced via
- * `error`, never silently "clean"), not a hard binary-absent error, since
- * the binary genuinely is present and ran.
- *
- * Separately, nothing in the installed package's PyPI metadata (author,
- * project URLs, license) names Cisco as the publisher — it ships from
- * `thedevappsecguy/skill-scanner` on GitHub. This module integrates with
- * whatever binary is literally named `skill-scanner` on PATH, per the
- * existing doctor-check remediation text (`pipx install skill-scanner`)
- * this phase's brief specified; it does not itself assert Cisco authorship.
- * See the final report for this phase for why this is flagged rather than
- * silently resolved either way.
+ * `skill-scanner` is claimed on PyPI's generic namespace by an unrelated,
+ * unaffiliated project (`thedevappsecguy/skill-scanner`, MIT-licensed, no
+ * Cisco affiliation) that requires an LLM or VirusTotal API key to do
+ * anything at all — it has no offline analysis path. `pipx install
+ * skill-scanner` installs THAT package, not Cisco's. The real Cisco tool
+ * publishes under `cisco-ai-skill-scanner` on PyPI
+ * (github.com/cisco-ai-defense/skill-scanner, Apache 2.0, Cisco Systems
+ * Inc.) — install it with `pipx install cisco-ai-skill-scanner`. Once
+ * installed, its binary is ALSO named `skill-scanner` on PATH, so no other
+ * part of this integration (binary-name detection, doctor check) needed to
+ * change — only the install instructions and this module's invocation
+ * shape/category taxonomy, which were verified against the wrong package.
  *
  * @module
  */
@@ -73,22 +90,23 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import * as fs from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { binaryOnPath } from './binaryOnPath.js'
 
 const execFileAsync = promisify(execFile)
 
 /** The binary name this integration shells out to. Matches the doctor-check
- *  remediation (`pipx install skill-scanner`) and the PyPI package name. */
+ *  remediation (`pipx install cisco-ai-skill-scanner`) — the PyPI package
+ *  name differs from the binary name it installs; see this module's doc
+ *  comment. */
 export const CISCO_SCANNER_BINARY = 'skill-scanner'
 
 /**
  * Bounded timeout per scanned directory. Generous relative to every other
  * shell-out in this codebase (`elevation.ts`'s `net session` probe: 3s;
- * `process.ts`'s `ps`/`tasklist`: 5s) because this invocation can involve a
- * live LLM call and/or a polled VirusTotal analysis (the installed tool's
- * own `--vt-timeout` defaults to 300s for VT alone) — 60s is a floor meant
+ * `process.ts`'s `ps`/`tasklist`: 5s) because `--use-behavioral` runs a
+ * full AST/dataflow pass, not a fast pattern match — 60s is a floor meant
  * to catch a genuinely hung process, not a tight budget for a fast local
  * check.
  */
@@ -119,10 +137,16 @@ export async function ciscoScannerVersion(): Promise<string | null> {
  *  only — never the tool's full result object — matching this codebase's
  *  own findings' "never carry more than a caller needs" discipline. */
 export interface CiscoScanFinding {
-  /** The tool's own `ruleId`, e.g. `skill-scanner/exfiltration`. */
+  /** The tool's own `ruleId`, e.g. `PIPELINE_TAINT_FLOW`. Not itself a
+   *  category — see {@link category}. */
   ruleId: string
   level: string
   message: string
+  /** The tool's own `properties.category` on this result, e.g.
+   *  `command_injection` — one of the `ThreatCategory` enum values
+   *  documented in this module's doc comment. Absent only for a
+   *  malformed/unexpected result shape. */
+  category?: string
   /** SARIF `artifactLocation.uri` — the tool's own path, ABSOLUTE (whatever
    *  form `runCiscoScan`'s caller passed as the scanned directory), not yet
    *  relativized to a workspace root. */
@@ -135,10 +159,8 @@ export interface CiscoDirScanResult {
   /** The directory that was scanned — echoes the caller's input. */
   dir: string
   /** `false` means this directory produced no usable result — binary
-   *  absent, timed out, or exited without a parseable SARIF file (which,
-   *  per this module's doc comment, includes the tool's own "no analyzer
-   *  configured" failure mode). Refusal-not-pass: never treat `!ok` as
-   *  "clean". */
+   *  absent, timed out, or exited without a parseable SARIF file. Refusal-
+   *  not-pass: never treat `!ok` as "clean". */
   ok: boolean
   /** Populated only when `!ok`. Human-readable — safe to log or surface to
    *  the user directly. */
@@ -155,8 +177,9 @@ export interface CiscoDirScanResult {
 function friendlyMissingBinaryError(): string {
   return (
     `'${CISCO_SCANNER_BINARY}' not found on PATH. Install it with ` +
-    '`pipx install skill-scanner`, or drop `--engine cisco` / disable the ' +
-    "'ciscoSkillScannerEnabled' workspace setting to use native scanning only."
+    '`pipx install cisco-ai-skill-scanner`, or drop `--engine cisco` / ' +
+    "disable the 'ciscoSkillScannerEnabled' workspace setting to use native " +
+    'scanning only.'
   )
 }
 
@@ -171,14 +194,14 @@ interface ExecFileError extends Error {
 
 /**
  * Scan ONE directory with `skill-scanner`, writing SARIF to a scratch file
- * (`--output`) rather than parsing stdout — stdout can carry progress/log
- * text the tool itself does not suppress, and the SARIF exporter writes
- * plain JSON to the file regardless (verified from source; `--no-color` is
- * still passed for defense in depth).
+ * (`--output-sarif`) rather than parsing stdout — stdout carries a
+ * human-readable summary this integration never needs to parse, and the
+ * SARIF exporter writes plain JSON to the file regardless of `--format`
+ * also being requested for stdout.
  *
- * A non-zero exit is NOT immediately treated as failure: the tool's
- * `--fail-on` flag deliberately exits non-zero when a finding crosses a
- * severity threshold while still writing a valid SARIF file, so this
+ * A non-zero exit is NOT immediately treated as failure: `--fail-on-*`
+ * deliberately exits non-zero when a finding crosses a severity threshold
+ * while still writing a valid SARIF file (verified empirically), so this
  * function always attempts to read the output file first and only reports
  * `ok: false` when that file is absent or unparseable.
  */
@@ -189,7 +212,7 @@ async function scanOneDir(dir: string): Promise<CiscoDirScanResult> {
   try {
     await execFileAsync(
       CISCO_SCANNER_BINARY,
-      ['scan', '--path', dir, '--format', 'sarif', '--output', outFile, '--no-color'],
+      ['scan', dir, '--use-behavioral', '--format', 'sarif', '--output-sarif', outFile],
       { timeout: CISCO_SCAN_TIMEOUT_MS },
     )
   } catch (err) {
@@ -207,7 +230,7 @@ async function scanOneDir(dir: string): Promise<CiscoDirScanResult> {
       }
     }
     // Any other non-zero exit — fall through and try the output file before
-    // giving up (see doc comment: --fail-on exits non-zero on real findings).
+    // giving up (see doc comment: --fail-on-* exits non-zero on real findings).
     execError = nodeErr
   }
 
@@ -223,10 +246,7 @@ async function scanOneDir(dir: string): Promise<CiscoDirScanResult> {
       findings: [],
       error:
         `cisco skill-scanner produced no output scanning ${dir}` +
-        (stderrHint
-          ? `: ${stderrHint}`
-          : ' — it requires SKILLSCAN_API_KEY/SKILLSCAN_BASE_URL or VT_API_KEY to be ' +
-            "configured (run `skill-scanner doctor` to check)."),
+        (stderrHint ? `: ${stderrHint}` : ' — the scan did not complete.'),
     }
   } finally {
     await fs.rm(outFile, { force: true })
@@ -255,14 +275,25 @@ async function scanOneDir(dir: string): Promise<CiscoDirScanResult> {
         ruleId?: unknown
         level?: unknown
         message?: { text?: unknown }
+        properties?: { category?: unknown }
         locations?: Array<{ physicalLocation?: { artifactLocation?: { uri?: unknown }; region?: { startLine?: unknown } } }>
       }
       const location = r.locations?.[0]?.physicalLocation
+      const uri = typeof location?.artifactLocation?.uri === 'string' ? location.artifactLocation.uri : undefined
+      // The tool's own URIs are RELATIVE to the scanned directory (verified
+      // empirically: `artifactLocation.uri` is `"SKILL.md"`, not an
+      // absolute path, with `uriBaseId: "%SRCROOT%"` signalling exactly
+      // that) — join against `dir` so this module's own contract
+      // ("filePath is ABSOLUTE") holds regardless of what the tool emits.
+      // Already-absolute URIs (a future tool version, or a result with no
+      // location at all) pass through unchanged.
+      const filePath = uri === undefined ? undefined : isAbsolute(uri) ? uri : join(dir, uri)
       findings.push({
         ruleId: typeof r.ruleId === 'string' ? r.ruleId : 'unknown',
         level: typeof r.level === 'string' ? r.level : 'warning',
         message: typeof r.message?.text === 'string' ? r.message.text : '',
-        filePath: typeof location?.artifactLocation?.uri === 'string' ? location.artifactLocation.uri : undefined,
+        category: typeof r.properties?.category === 'string' ? r.properties.category : undefined,
+        filePath,
         line: typeof location?.region?.startLine === 'number' ? location.region.startLine : undefined,
       })
     }
@@ -273,16 +304,14 @@ async function scanOneDir(dir: string): Promise<CiscoDirScanResult> {
 
 /**
  * Scan each of `skillDirs` with `skill-scanner`, one invocation per
- * directory (see this module's doc comment for why `--path` cannot take
- * more than one directory per invocation). Directories are ABSOLUTE paths —
- * callers resolve against the workspace root before calling, the same
- * convention `oci.ts`/`firecracker.ts` use for the paths they hand external
- * tools.
+ * directory (see this module's doc comment for why the tool takes exactly
+ * one directory per invocation). Directories are ABSOLUTE paths — callers
+ * resolve against the workspace root before calling, the same convention
+ * `oci.ts`/`firecracker.ts` use for the paths they hand external tools.
  *
- * Never throws: every failure mode (binary absent, timeout, no analyzer
- * configured, unparseable output) is reported per-directory via
- * `CiscoDirScanResult.ok`/`.error`, so one skill's scan failing does not
- * abort the rest.
+ * Never throws: every failure mode (binary absent, timeout, unparseable
+ * output) is reported per-directory via `CiscoDirScanResult.ok`/`.error`,
+ * so one skill's scan failing does not abort the rest.
  */
 export async function runCiscoScan(skillDirs: readonly string[]): Promise<CiscoDirScanResult[]> {
   const results: CiscoDirScanResult[] = []

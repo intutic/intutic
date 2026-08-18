@@ -623,7 +623,7 @@ async function checkPolicySnapshot(): Promise<CheckResult> {
  *
  * Unlike every other check above, absence here is NOT a failure —
  * `passed: true` either way. This is the operator's own separate
- * installation (`pipx install skill-scanner`), and `intutic skill audit`
+ * installation (`pipx install cisco-ai-skill-scanner`), and `intutic skill audit`
  * degrades gracefully without it (see `lib/ciscoScanner.ts`'s module doc
  * comment). The remediation string is still populated when absent, purely
  * informational — `runDoctor`'s print loop shows it as a dimmed hint on a
@@ -636,7 +636,7 @@ export async function checkCiscoScanner(): Promise<CheckResult> {
       name: 'Cisco Skill Scanner',
       passed: true,
       detail: 'not installed (optional integration)',
-      remediation: 'pipx install skill-scanner',
+      remediation: 'pipx install cisco-ai-skill-scanner',
     }
   }
 
