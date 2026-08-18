@@ -65,9 +65,19 @@
  * clients. Still not independently verified: whether `post_mcp_tool_use`'s
  * `mcp_result` field would be useful for anything (it isn't used here —
  * post-hooks can't block, so there is nothing this file's threat model
- * gains from it), and whether the JetBrains plugin's proxy-config surface
- * has an equivalent this writer could target the way `settings.json`
- * targets Desktop's (not researched — out of scope, a hook-dispatch fix).
+ * gains from it).
+ *
+ * # Follow-up 2 (2026-08-18): JetBrains proxy configuration
+ *
+ * The JetBrains plugin's proxy-config surface — the thing that decides
+ * whether its OWN AI traffic (not just hook dispatch) routes through
+ * Intutic's TLS MITM proxy — is now also configured, via
+ * `windsurfJetBrainsProxy.ts`. See that module's doc comment for the full
+ * research record: the plugin has no manual-proxy field of its own (only
+ * a `detectProxy` boolean that opts into the IDE PLATFORM's proxy
+ * setting), confirmed by decompiling the actual published plugin JAR, not
+ * guessed.
+ *
  * The Cursor-shaped field names this file previously relied on exclusively
  * are kept as a SECOND, lower-priority fallback in the extraction below —
  * not because they are believed to be real for Windsurf, but because they
@@ -83,6 +93,7 @@ import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { newIso } from '@intutic/id'
 import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
+import { configureJetBrainsWindsurfProxy } from './windsurfJetBrainsProxy.js'
 
 const log = createLogger('sync-windsurf-hooks')
 
@@ -308,8 +319,7 @@ export async function writeWindsurfHooks(
   })
   log.info({ action: 'windsurf_hooks_written', level: 'workspace' }, 'Windsurf workspace-level hooks written')
 
-  // 3. HTTP proxy settings → routes Windsurf's Cascade AI traffic through Intutic TLS MITM
-  // (Desktop only — see WINDSURF_JETBRAINS_USER_DIR's doc comment).
+  // 3. HTTP proxy settings — Desktop's own settings.json.
   const wsSettings = {
     _comment: 'Intutic proxy settings — auto-generated. DO NOT EDIT.',
     _lastSync: newIso(),
@@ -322,6 +332,12 @@ export async function writeWindsurfHooks(
     { action: 'windsurf_proxy_configured', port: proxyPort },
     'Windsurf HTTP proxy configured for TLS MITM interception',
   )
+
+  // 4. HTTP proxy settings — every installed JetBrains product. See
+  // windsurfJetBrainsProxy.ts's module doc comment for what this
+  // configures and why it needs two merge-writes per product rather than
+  // one owned file the way Desktop's settings.json is.
+  await configureJetBrainsWindsurfProxy(proxyPort)
 }
 
 async function atomicWriteJson(filePath: string, data: unknown): Promise<void> {
