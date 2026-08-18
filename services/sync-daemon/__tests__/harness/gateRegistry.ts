@@ -222,16 +222,20 @@ export const GATES: readonly GateEntry[] = [
     migrated: true,
     mcpCalls: 'reachable',
     mcpNote:
-      'M3 applied the SAME composition fix as cursorHooks.ts, by analogy — this writer\'s ' +
-      'extraction has always mirrored Cursor\'s field-for-field, and this repo registers the ' +
-      'identical `beforeShellExecution`/`beforeMCPExecution`/`beforeFileEdit` event names for ' +
-      'both. UNCONFIRMED, not yes: Windsurf/Cascade\'s current public docs (post-Cognition' +
-      '/Devin consolidation) describe a DIFFERENT hook name and payload shape entirely — ' +
-      '`pre_mcp_tool_use` with `tool_info.mcp_server_name`/`tool_info.mcp_tool_name` — for ' +
-      'which this writer registers no hook and the extraction code has no matching branch. ' +
-      'Whether the `beforeMCPExecution`-shaped mechanism this writer targets still fires on a ' +
-      'live Windsurf build was not independently verified during M3; flagged for follow-up ' +
-      'rather than guessed at further.',
+      'CONFIRMED, not a guess (2026-08-18 follow-up to M3\'s UNCONFIRMED flag): M3\'s composition ' +
+      'fix targeted Cursor\'s event names/payload shape by analogy, and that assumption was wrong — ' +
+      'Windsurf/Cascade\'s real hook system (docs.devin.ai/desktop/cascade/hooks, the current ' +
+      'authoritative source post-Cognition/Devin acquisition) uses `pre_run_command`/' +
+      '`pre_write_code`/`pre_mcp_tool_use` event names and nests payload data under `tool_info` ' +
+      '(`tool_info.mcp_server_name`/`tool_info.mcp_tool_name` for MCP calls), never ' +
+      '`beforeShellExecution`/`beforeMCPExecution`/`beforeFileEdit`. That naming was ALREADY live ' +
+      'when this writer was first authored (2026-06-18) — a March-2026 third-party integration ' +
+      'guide already documents it — so the Cursor-shaped registration never worked on any real ' +
+      'Windsurf build, not a case of Windsurf changing later. windsurfHooks.ts now registers the ' +
+      'real event names (array-wrapped, matching Cascade\'s hooks.json schema) and its extraction ' +
+      'reads `agent_action_name`/`tool_info.*` first, with the old Cursor-shaped fields kept only ' +
+      'as a lower-priority fallback. See windsurfHooks.ts\'s module doc comment for the full ' +
+      'correction record and windsurfHooks.test.ts for coverage against the confirmed real shape.',
   },
   {
     name: 'openclaw',
