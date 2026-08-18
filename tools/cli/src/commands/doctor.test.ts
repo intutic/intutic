@@ -112,7 +112,7 @@ process.exit(1)
     const result = await checkCiscoScanner()
     expect(result.passed).toBe(true)
     expect(result.detail).toContain('not installed')
-    expect(result.remediation).toBe('pipx install skill-scanner')
+    expect(result.remediation).toBe('pipx install cisco-ai-skill-scanner')
   })
 
   it('passes and reports the version when the binary is present', async () => {

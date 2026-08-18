@@ -731,7 +731,7 @@ skillCmd
   .option(
     '--engine <engine>',
     "Scanning engine: 'native' (default, always runs) or 'cisco' to also run the opt-in Cisco " +
-      "skill-scanner integration (requires the 'skill-scanner' binary on PATH — pipx install skill-scanner)",
+      "skill-scanner integration (requires the 'skill-scanner' binary on PATH — pipx install cisco-ai-skill-scanner)",
     'native',
   )
   .action(async (opts) => {
