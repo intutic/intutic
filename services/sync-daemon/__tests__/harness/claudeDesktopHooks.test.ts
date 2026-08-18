@@ -25,8 +25,15 @@ describe('Claude Desktop hooks writer', () => {
     const tempRoot = await node_fs.mkdtemp(node_path.join(node_os.tmpdir(), 'intutic-desktop-mcp-test-'))
     const home = await node_fs.mkdtemp(node_path.join(node_os.tmpdir(), 'intutic-desktop-home-'))
     const prevHome = process.env.HOME
+    const prevPlatform = process.platform
     try {
       process.env.HOME = home
+      // The writer resolves this file's location per-OS (macOS vs Linux vs
+      // Windows-fallback — see claudeDesktopHooks.ts's
+      // resolveClaudeDesktopConfigPath). Pin to darwin so this test's
+      // expected path is deterministic across CI runners, regardless of
+      // which OS actually runs it.
+      Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true })
       await writeClaudeDesktopHooks(tempRoot, 'http://127.0.0.1:4000', 'ws_test')
       const configPath = node_path.join(
         home,
@@ -40,6 +47,7 @@ describe('Claude Desktop hooks writer', () => {
       expect(matchers).toEqual(expect.arrayContaining(['Bash', 'Edit', 'Write', 'MultiEdit', 'mcp__.*']))
     } finally {
       process.env.HOME = prevHome
+      Object.defineProperty(process, 'platform', { value: prevPlatform, configurable: true })
       await node_fs.rm(tempRoot, { recursive: true, force: true })
       await node_fs.rm(home, { recursive: true, force: true })
     }
