@@ -196,3 +196,31 @@ describe('Windsurf hooks writer — Cascade real payload shape', () => {
     expect(result.stderr).toContain('unrecognised PreToolUse payload')
   })
 })
+
+describe('Windsurf hooks writer — JetBrains proxy config wiring', () => {
+  it('writeWindsurfHooks itself reaches configureJetBrainsWindsurfProxy when a JetBrains product is installed', async () => {
+    const workspaceRoot = await node_fs.mkdtemp(node_path.join(node_os.tmpdir(), 'intutic-windsurf-jb-ws-'))
+    const home = await node_fs.mkdtemp(node_path.join(node_os.tmpdir(), 'intutic-windsurf-jb-home-'))
+    const prevHome = process.env.HOME
+    const prevPlatform = process.platform
+    try {
+      process.env.HOME = home
+      Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true })
+      const optionsDir = node_path.join(home, 'Library', 'Application Support', 'JetBrains', 'GoLand2026.1', 'options')
+      await node_fs.mkdir(optionsDir, { recursive: true })
+
+      const { writeWindsurfHooks } = await import('../../src/harness/windsurfHooks.js')
+      await writeWindsurfHooks(workspaceRoot, 'http://127.0.0.1:4000', 8877, 'ws_test')
+
+      const codeiumXml = await node_fs.readFile(node_path.join(optionsDir, 'CodeiumSettings.xml'), 'utf-8')
+      expect(codeiumXml).toContain('<option name="detectProxy" value="true" />')
+      const proxyXml = await node_fs.readFile(node_path.join(optionsDir, 'proxy.settings.xml'), 'utf-8')
+      expect(proxyXml).toContain('<option name="PROXY_PORT" value="8877" />')
+    } finally {
+      process.env.HOME = prevHome
+      Object.defineProperty(process, 'platform', { value: prevPlatform, configurable: true })
+      await node_fs.rm(workspaceRoot, { recursive: true, force: true })
+      await node_fs.rm(home, { recursive: true, force: true })
+    }
+  })
+})

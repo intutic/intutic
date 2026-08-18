@@ -414,6 +414,22 @@ export const NO_GATE: ReadonlyArray<{
   { file: 'gooseHardener.ts', harness: 'goose', why: 'applies immutable flags to gooseHooks’ output; emits no gate' },
   { file: 'mcpAutoWrite.ts', harness: null, why: 'registers MCP servers; not a tool-call gate' },
   {
+    file: 'jetbrainsXmlConfig.ts',
+    harness: null,
+    why:
+      'narrow XML merge utility windsurfJetBrainsProxy.ts uses to write into JetBrains ' +
+      'IDE settings files without corrupting unrelated content; writes no harness config ' +
+      'or gate of its own',
+  },
+  {
+    file: 'windsurfJetBrainsProxy.ts',
+    harness: 'windsurf',
+    why:
+      'configures the JetBrains Windsurf plugin\'s HTTP-proxy routing (detectProxy + the ' +
+      'IDE platform\'s own proxy.settings.xml) — not a hook/gate surface; windsurfHooks.ts ' +
+      'covers this harness\'s actual gate',
+  },
+  {
     file: 'holdRedaction.ts',
     harness: null,
     why: 'redaction serialised into claude-code’s gate; writes no harness config of its own',
