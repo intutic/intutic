@@ -9,6 +9,16 @@
  *   Harness ↔ [McpGovernanceProxy as MCP Server] ↔ Control Plane REST API
  *   Exposes governance tools: intutic_governance_status, intutic_list_sops, intutic_list_incidents.
  *
+ * Architecture (remote bridge mode — `--remote-url`, see remoteBridge.ts):
+ *   Harness stdin → [McpGovernanceProxy] → remote MCP server (HTTP/SSE)
+ *   Remote MCP server → [McpGovernanceProxy] → Harness stdout
+ *   The harness still spawns this proxy as an ordinary stdio child process —
+ *   only the UPSTREAM side changes, from a spawned child's stdin/stdout to an
+ *   MCP SDK client transport talking HTTP/SSE. `handleHarnessLine` (request
+ *   direction) and `handleServerLine` (response direction) are the exact same
+ *   functions proxy mode uses; remoteBridge.ts only supplies a different
+ *   upstream and a different `forward`.
+ *
  * CRITICAL: Never write to process.stdout except for valid JSON-RPC frames.
  *           All logging MUST go to process.stderr via @intutic/logger.
  *
@@ -218,6 +228,83 @@ export function processServerLine(
   return { line: raw }
 }
 
+/**
+ * Handle one harness→upstream line — shared, byte-for-byte, between stdio
+ * proxy mode (`McpGovernanceProxy.runProxy`, below) and the remote HTTP/SSE
+ * bridge (`remoteBridge.ts`'s `runRemoteProxy`): parse JSON-RPC, register any
+ * `tools/list`/`resources/read` request so its response gets inspected on the
+ * way back (see `processServerLine`), and run every `tools/call` through the
+ * SAME `interceptor.decide()` call this proxy has always used. `forward` is
+ * the ONLY thing that differs by upstream transport — stdio mode writes to
+ * the spawned child process's stdin, remote bridge mode calls the MCP SDK
+ * transport's `send()` — so pulling it out as a parameter, rather than
+ * forking this whole function, is what keeps governance identical across
+ * both upstream transports instead of two copies that could quietly drift.
+ *
+ * A free function (like `processServerLine`), not a class method, precisely
+ * so `remoteBridge.ts` can call it without needing a `McpGovernanceProxy`
+ * instance shaped for the stdio child-process lifecycle it doesn't have.
+ */
+export function handleHarnessLine(
+  line: string,
+  pending: Map<string | number, PendingRequest>,
+  interceptor: ToolCallInterceptor,
+  forward: (line: string) => void,
+): void {
+  const trimmed = line.trim()
+  if (!trimmed) return
+
+  let msg: JsonRpcRequest
+  try {
+    msg = JSON.parse(trimmed) as JsonRpcRequest
+  } catch {
+    log.warn({ action: 'parse_error', line: trimmed.slice(0, 100) }, 'Failed to parse JSON-RPC line')
+    return
+  }
+
+  // Register responses that need inspecting on the way back.
+  if (msg.id !== null && msg.id !== undefined) {
+    if (msg.method === 'tools/list') {
+      pending.set(msg.id, { method: 'tools/list' })
+    } else if (msg.method === 'resources/read') {
+      pending.set(msg.id, { method: 'resources/read' })
+    }
+  }
+
+  // Intercept tools/call
+  if (msg.method === 'tools/call') {
+    const params = msg.params as McpToolsCallParams | undefined
+    const toolName = params?.name ?? '<unknown>'
+    const toolInput = params?.arguments ?? {}
+
+    // Run governance check asynchronously
+    interceptor.decide(toolName, toolInput).then((decision) => {
+      if (decision.action === 'block') {
+        log.warn(
+          { action: 'tool_blocked', toolName, reason: decision.reason },
+          'Tool call blocked by governance proxy'
+        )
+        writeFrame(buildBlockResponse(msg.id, decision.reason))
+      } else {
+        // Allow: the response now needs inspecting on the way back —
+        // registered BEFORE forwarding, or a fast server could answer
+        // into the gap.
+        if (msg.id !== null && msg.id !== undefined) {
+          pending.set(msg.id, { method: 'tools/call', toolName })
+        }
+        forward(line)
+      }
+    }).catch((err) => {
+      // Governance check failed — fail-open: forward to real server
+      log.error({ action: 'interceptor_error', err: (err as Error).message }, 'Interceptor error — failing open')
+      forward(line)
+    })
+  } else {
+    // Non-tools/call messages pass through immediately
+    forward(line)
+  }
+}
+
 export class McpGovernanceProxy {
   private readonly policy: PolicyClient
   private readonly emitter: GovernanceEmitter
@@ -242,6 +329,31 @@ export class McpGovernanceProxy {
     )
 
     this.interceptor = new ToolCallInterceptor(this.policy, this.emitter, config.failOpen, config.serverName)
+  }
+
+  /**
+   * The tools/call decision engine — exposed so `remoteBridge.ts` can drive
+   * `handleHarnessLine` (the exported free function above) against the SAME
+   * interceptor instance this class builds from `config` in its constructor,
+   * rather than constructing a second one that could drift.
+   */
+  getInterceptor(): ToolCallInterceptor {
+    return this.interceptor
+  }
+
+  /**
+   * Start the policy client's background refresh timer. Exposed alongside
+   * `stopPolicy` so `remoteBridge.ts` can drive the same policy lifecycle
+   * `runProxy` below drives for stdio mode, without reaching into `policy`
+   * (private) directly.
+   */
+  startPolicy(): void {
+    this.policy.start()
+  }
+
+  /** Stop the policy client's background refresh timer. See `startPolicy`. */
+  stopPolicy(): void {
+    this.policy.stop()
   }
 
   /**
@@ -409,8 +521,14 @@ export class McpGovernanceProxy {
    * the (possibly curated) tools/list response as normal; fail-closed
    * replaces it with a JSON-RPC error naming the server and the setting,
    * mirroring `buildBlockResponse`'s existing wording style.
+   *
+   * Public (not `private`) so `remoteBridge.ts` can hand it every message
+   * `transport.onmessage` receives from a remote upstream, VERBATIM — DLP
+   * redaction, TOFU pinning, and event emission on the response direction
+   * must apply identically regardless of which upstream transport produced
+   * the line, and this is the one place that logic lives.
    */
-  private async handleServerLine(
+  async handleServerLine(
     rawLine: string,
     pending: Map<string | number, PendingRequest>,
   ): Promise<void> {
@@ -552,62 +670,16 @@ export class McpGovernanceProxy {
       void this.handleServerLine(rawLine, pending)
     })
 
-    // Harness stdin → governance interceptor → real server stdin
+    // Harness stdin → governance interceptor → real server stdin. Delegates
+    // to the module-level `handleHarnessLine`, shared verbatim with
+    // remoteBridge.ts's remote bridge mode — only `forward` differs: here it
+    // writes to the spawned child process's stdin.
     const rl = node_readline.createInterface({ input: process.stdin, terminal: false })
 
     rl.on('line', (line) => {
-      const trimmed = line.trim()
-      if (!trimmed) return
-
-      let msg: JsonRpcRequest
-      try {
-        msg = JSON.parse(trimmed) as JsonRpcRequest
-      } catch {
-        log.warn({ action: 'parse_error', line: trimmed.slice(0, 100) }, 'Failed to parse JSON-RPC line')
-        return
-      }
-
-      // Register responses that need inspecting on the way back.
-      if (msg.id !== null && msg.id !== undefined) {
-        if (msg.method === 'tools/list') {
-          pending.set(msg.id, { method: 'tools/list' })
-        } else if (msg.method === 'resources/read') {
-          pending.set(msg.id, { method: 'resources/read' })
-        }
-      }
-
-      // Intercept tools/call
-      if (msg.method === 'tools/call') {
-        const params = msg.params as McpToolsCallParams | undefined
-        const toolName = params?.name ?? '<unknown>'
-        const toolInput = params?.arguments ?? {}
-
-        // Run governance check asynchronously
-        this.interceptor.decide(toolName, toolInput).then((decision) => {
-          if (decision.action === 'block') {
-            log.warn(
-              { action: 'tool_blocked', toolName, reason: decision.reason },
-              'Tool call blocked by governance proxy'
-            )
-            writeFrame(buildBlockResponse(msg.id, decision.reason))
-          } else {
-            // Allow: the response now needs inspecting on the way back —
-            // registered BEFORE forwarding, or a fast server could answer
-            // into the gap.
-            if (msg.id !== null && msg.id !== undefined) {
-              pending.set(msg.id, { method: 'tools/call', toolName })
-            }
-            realServer.stdin!.write(line + '\n')
-          }
-        }).catch((err) => {
-          // Governance check failed — fail-open: forward to real server
-          log.error({ action: 'interceptor_error', err: (err as Error).message }, 'Interceptor error — failing open')
-          realServer.stdin!.write(line + '\n')
-        })
-      } else {
-        // Non-tools/call messages pass through immediately
-        realServer.stdin!.write(line + '\n')
-      }
+      handleHarnessLine(line, pending, this.interceptor, (l) => {
+        realServer.stdin!.write(l + '\n')
+      })
     })
 
     rl.on('close', () => {
