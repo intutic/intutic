@@ -323,8 +323,20 @@ function isAbsolutePath(p: string): boolean {
   return p.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(p)
 }
 
+function trimTrailingSlashes(s: string): string {
+  let end = s.length
+  while (end > 0 && s[end - 1] === '/') end--
+  return s.slice(0, end)
+}
+
+function trimLeadingSlashes(s: string): string {
+  let start = 0
+  while (start < s.length && s[start] === '/') start++
+  return s.slice(start)
+}
+
 function joinPath(a: string, b: string): string {
-  return `${a.replace(/\/+$/, '')}/${b.replace(/^\/+/, '')}`
+  return `${trimTrailingSlashes(a)}/${trimLeadingSlashes(b)}`
 }
 
 // Module-level active gate, so wrapped tools do not need the instance
