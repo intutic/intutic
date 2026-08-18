@@ -529,28 +529,39 @@ export const SECRET_CONTENT_PATTERNS: readonly GuardPattern[] = assertGuardTable
  * Writes and edits targeting the agent-skill surface — `.agents/skills/**`
  * and `.claude/skills/**`.
  *
- * TD-358: `warn`, not `block`, and compiled into {@link staticFloorPatterns}
- * rather than shipped through the policy snapshot. The two design choices are
- * for different reasons and worth separating:
+ * TD-358 (updated 2026-08-18): these two entries stay `warn` and stay
+ * compiled into {@link staticFloorPatterns} — that part of the original
+ * decision is unchanged. What changed is what that tier assignment now
+ * *means*: it is the DEGRADED-MODE baseline, not the intended steady state.
+ * The steady state, everywhere a valid policy snapshot has landed, is `block`
+ * — shipped as `skill_surface.*.tier` entries through
+ * `services/sync-daemon/src/lib/policySnapshot.ts`'s `buildSnapshotRules`,
+ * gated behind `SKILL_SURFACE_TIER_SEVERITY`. See that constant's doc comment
+ * for why skill-directory *path* writes no longer sit behind the same
+ * false-positive-rate justification skill-CONTENT scanning still does — this
+ * entry only covers the half that stayed at `warn`.
  *
- * - **Why `warn`:** `packages/shared-types/src/skillScan.ts`'s own module doc
- *   comment states the load-bearing gap this pattern set exists downstream
- *   of — the false-positive rate of `scanSkillContent`'s patterns against a
- *   corpus of real, benign skill markdown is UNMEASURED. Blocking a write on
- *   the strength of an unmeasured detector is exactly the "blocking too much
- *   manufactures the adversary" failure this file's `DESTRUCTIVE_COMMAND_PATTERNS`
- *   doc comment names: a wrongly-refused skill edit teaches a developer to
- *   `chflags nouchg` the hook, which is the bypass `GOVERNANCE_BYPASS_PATTERNS`
- *   exists to stop.
- * - **Why the floor, unlike `DESTRUCTIVE_COMMAND_PATTERNS`:** this pattern set
- *   is NOT content-conditional — it does not run `scanSkillContent` or judge
- *   what a skill file says, only WHERE a write targets. That is a deterministic,
- *   zero-ambiguity match (a write's target path either is or is not under
- *   `.agents/skills/` or `.claude/skills/`), so there is nothing here for a
- *   sync cycle's retraction to earn: it carries no measurement risk the way a
- *   content pattern does, and a workspace with no control-plane connectivity
- *   (offline, pre-`connect`) still gets the advisory signal from the moment the
- *   gate is written, rather than only after a policy snapshot resolves.
+ * The two design choices below are for different reasons and worth
+ * separating:
+ *
+ * - **Why the FLOOR copy stays `warn`:** a compiled-in rule ships on every
+ *   machine at once and can only be changed by a release — no one-sync-cycle
+ *   undo if it turns out wrong. That is exactly the property a degraded-mode
+ *   baseline needs (safe to run forever, unconditionally, on a machine that
+ *   has never talked to the control plane) and exactly the property the
+ *   steady-state decision does not need to have, since it lives in the
+ *   snapshot and can be retracted in a cycle. Blocking here as well would
+ *   collapse that distinction and reintroduce the un-retractable blast radius
+ *   the snapshot channel exists to avoid.
+ * - **Why a floor copy exists at all, unlike `DESTRUCTIVE_COMMAND_PATTERNS`:**
+ *   this pattern set is NOT content-conditional — it does not run
+ *   `scanSkillContent` or judge what a skill file says, only WHERE a write
+ *   targets. That is a deterministic, zero-ambiguity match (a write's target
+ *   path either is or is not under `.agents/skills/` or `.claude/skills/`),
+ *   so a workspace with no control-plane connectivity (offline, pre-`connect`,
+ *   or a snapshot that failed its digest/workspace check) still gets an
+ *   advisory signal from the moment the gate is written, rather than falling
+ *   back to nothing.
  *
  * `subject: 'target'` deliberately, not `'any'`: this matches the tool's own
  * path argument (`file_path`/`path`/…, the same extraction every Write/Edit
@@ -560,11 +571,11 @@ export const SECRET_CONTENT_PATTERNS: readonly GuardPattern[] = assertGuardTable
  * rule on purpose, since that rule blocks and this one only advises.
  *
  * A future promotion to `block` on skill CONTENT (not path) is a different,
- * later decision — one that needs the corpus measurement above, and per
- * TD-358 should ship through the policy-snapshot channel
- * (`services/sync-daemon/src/lib/policySnapshot.ts`) the way
- * `DESTRUCTIVE_COMMAND_PATTERNS` does, so it can be retracted in a sync cycle
- * rather than a release if the measurement turns out to be wrong.
+ * later, and still-open decision — it needs the corpus measurement TD-358
+ * describes, which this change does not supply. It should ship through the
+ * same policy-snapshot channel the way this path-tier promotion and
+ * `DESTRUCTIVE_COMMAND_PATTERNS` both do, so it too is retractable in a sync
+ * cycle rather than a release if the measurement turns out wrong.
  */
 export const SKILL_SURFACE_PATTERNS: readonly GuardPattern[] = assertGuardTableSane([
   {
@@ -836,9 +847,14 @@ export function protectedPathShellPatterns(): readonly GuardPattern[] {
 /** Every compiled-in guard: the static floor. Destructive patterns are **not**
  *  here — they ship through the policy snapshot so they can be retracted
  *  without a release. `SKILL_SURFACE_PATTERNS` IS here, deliberately, despite
- *  also being new and unproven: unlike the destructive tier it is a
- *  deterministic path match with no content judgement to get wrong, so there
- *  is no measurement risk to hold it back from — see its own doc comment. */
+ *  also being new: unlike the destructive tier it is a deterministic path
+ *  match with no content judgement to get wrong, so there is no measurement
+ *  risk to hold it back from — see its own doc comment. As of TD-358's
+ *  block-tier promotion these two entries are the DEGRADED-MODE baseline
+ *  only: the steady state is `block`, delivered through the policy snapshot
+ *  (`SKILL_SURFACE_TIER_SEVERITY` in `lib/policySnapshot.ts`) and additive on
+ *  top of these, exactly the way the destructive tier layers on top of this
+ *  same floor. */
 export function staticFloorPatterns(): readonly GuardPattern[] {
   return [
     ...GOVERNANCE_BYPASS_PATTERNS,

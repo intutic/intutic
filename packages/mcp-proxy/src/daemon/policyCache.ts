@@ -49,6 +49,21 @@ export interface ResolvedPolicy {
   sopRules:      Record<string, unknown>[]
   dlpPatterns:   string[]
   interventionMode: string
+  /**
+   * Additive MCP tool allowlist; empty means unrestricted. Was silently
+   * absent from `GET /api/v1/policy/resolve` (the daemon-mode source of this
+   * type) until `lib/mcpCuration.ts` on the control plane started serving it
+   * from the same place `GET /api/v1/sop/rules` (non-daemon mode) always
+   * has. Always normalized to `[]` rather than left `undefined` here — a
+   * stale Valkey/LRU entry or snapshot written before this field existed
+   * must not read as "curation absent" one layer up.
+   */
+  allowedTools: string[]
+  /** Operator-curated tool descriptions, applied to tools/list responses. */
+  toolDescriptionOverrides: Record<string, string>
+  /** Additive MCP server allowlist; empty means unrestricted. Same source
+   *  and same backward-compat treatment as `allowedTools` above. */
+  allowedServers: string[]
   cachedAt:      number
 }
 
@@ -71,13 +86,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /** The policy fields the control plane sends, once they have been checked. */
-type PolicyResponseBody = Pick<ResolvedPolicy, 'sopRules' | 'dlpPatterns' | 'interventionMode'>
+type PolicyResponseBody = Pick<
+  ResolvedPolicy,
+  'sopRules' | 'dlpPatterns' | 'interventionMode' | 'allowedTools' | 'toolDescriptionOverrides' | 'allowedServers'
+>
 
 /**
  * Validates a `GET /api/v1/policy/resolve` body. The response is `unknown` at
  * this boundary — it crosses the network — so every field is checked rather
  * than asserted. Returns null when the body is not JSON or not an object;
  * individual fields fall back to their empty value.
+ *
+ * `allowedTools`/`toolDescriptionOverrides`/`allowedServers` default to
+ * `[]`/`{}`/`[]` when absent — both because an older control plane may not
+ * send them yet, and because absent is this policy's existing convention for
+ * "unrestricted" (see `packages/mcp-proxy/src/policy.ts`'s `absorbCuration`).
  */
 function parsePolicyResponse(raw: string): PolicyResponseBody | null {
   let parsed: unknown
@@ -88,9 +111,12 @@ function parsePolicyResponse(raw: string): PolicyResponseBody | null {
   }
   if (!isRecord(parsed)) return null
 
-  const sopRules         = parsed['sopRules']
-  const dlpPatterns      = parsed['dlpPatterns']
-  const interventionMode = parsed['interventionMode']
+  const sopRules                  = parsed['sopRules']
+  const dlpPatterns               = parsed['dlpPatterns']
+  const interventionMode          = parsed['interventionMode']
+  const allowedTools              = parsed['allowedTools']
+  const toolDescriptionOverrides  = parsed['toolDescriptionOverrides']
+  const allowedServers            = parsed['allowedServers']
 
   return {
     sopRules:    Array.isArray(sopRules) ? sopRules.filter(isRecord) : [],
@@ -98,6 +124,19 @@ function parsePolicyResponse(raw: string): PolicyResponseBody | null {
       ? dlpPatterns.filter((p): p is string => typeof p === 'string')
       : [],
     interventionMode: typeof interventionMode === 'string' ? interventionMode : 'BYPASS',
+    allowedTools: Array.isArray(allowedTools)
+      ? allowedTools.filter((t): t is string => typeof t === 'string')
+      : [],
+    toolDescriptionOverrides: isRecord(toolDescriptionOverrides)
+      ? Object.fromEntries(
+          Object.entries(toolDescriptionOverrides).filter(
+            (entry): entry is [string, string] => typeof entry[1] === 'string',
+          ),
+        )
+      : {},
+    allowedServers: Array.isArray(allowedServers)
+      ? allowedServers.filter((s): s is string => typeof s === 'string')
+      : [],
   }
 }
 
@@ -142,6 +181,9 @@ async function fetchFromControlPlane(workspaceId: string): Promise<ResolvedPolic
             sopRules:         parsed.sopRules,
             dlpPatterns:      parsed.dlpPatterns,
             interventionMode: parsed.interventionMode,
+            allowedTools:     parsed.allowedTools,
+            toolDescriptionOverrides: parsed.toolDescriptionOverrides,
+            allowedServers:   parsed.allowedServers,
             cachedAt:         Date.now(),
           })
         })
@@ -226,6 +268,15 @@ export async function seedFromSnapshot(snapshotPath?: string): Promise<string | 
       dlpPatterns: [],
       interventionMode:
         typeof parsed['interventionMode'] === 'string' ? parsed['interventionMode'] : 'TRANSPARENT',
+      // The sync daemon's snapshot (services/sync-daemon/src/lib/policySnapshot.ts)
+      // does not carry MCP curation today — it predates this field and is a
+      // separate `.rules`-gate mechanism, not this module's HTTP/Valkey path.
+      // Default to unrestricted rather than invent a value; the background
+      // HTTP refresh this seed exists to avoid delaying will fill these in on
+      // the next cycle.
+      allowedTools: [],
+      toolDescriptionOverrides: {},
+      allowedServers: [],
       cachedAt,
     }
 
@@ -283,7 +334,18 @@ export async function resolvePolicy(workspaceId: string): Promise<ResolvedPolicy
   try {
     const valkeyCached = await valkey.get(`mcp_daemon:policy:${workspaceId}`)
     if (valkeyCached) {
-      const parsed = JSON.parse(valkeyCached) as ResolvedPolicy
+      // Cast, not validated — this is our own prior write, not a network
+      // boundary. But an entry written before this field existed is still a
+      // valid prior write of an older shape, so the three curation fields
+      // are normalized rather than trusted blindly off the cast.
+      const raw = JSON.parse(valkeyCached) as Partial<ResolvedPolicy> &
+        Pick<ResolvedPolicy, 'workspaceId' | 'sopRules' | 'dlpPatterns' | 'interventionMode' | 'cachedAt'>
+      const parsed: ResolvedPolicy = {
+        ...raw,
+        allowedTools: Array.isArray(raw.allowedTools) ? raw.allowedTools : [],
+        toolDescriptionOverrides: isRecord(raw.toolDescriptionOverrides) ? raw.toolDescriptionOverrides : {},
+        allowedServers: Array.isArray(raw.allowedServers) ? raw.allowedServers : [],
+      }
       evictIfFull()
       lru.set(workspaceId, parsed)
       return parsed
