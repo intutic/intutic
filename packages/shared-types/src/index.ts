@@ -431,6 +431,7 @@ export {
   excerptFor,
   EXCERPT_RADIUS,
   type SkillScanCategory,
+  type SkillScanEngine,
   type SkillScanPattern,
   type SkillScanFinding,
   type SkillScanResult,

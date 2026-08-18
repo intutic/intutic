@@ -728,9 +728,15 @@ skillCmd
   .command('audit')
   .description('Audit local rules/skills for security leakage or unsafe command patterns')
   .option('--sarif', 'Output findings as a SARIF 2.1.0 document (for GitHub Code Scanning / CI interop) instead of the human-readable report')
+  .option(
+    '--engine <engine>',
+    "Scanning engine: 'native' (default, always runs) or 'cisco' to also run the opt-in Cisco " +
+      "skill-scanner integration (requires the 'skill-scanner' binary on PATH — pipx install skill-scanner)",
+    'native',
+  )
   .action(async (opts) => {
     const { runSkillAudit } = await import('./commands/skill.js')
-    await runSkillAudit({ sarif: opts.sarif })
+    await runSkillAudit({ sarif: opts.sarif, engine: opts.engine })
   })
 
 skillCmd

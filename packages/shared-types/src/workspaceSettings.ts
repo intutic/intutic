@@ -169,6 +169,27 @@ export interface WorkspaceSettings {
   enableLocalSkillAuditDelete?: boolean
 
   /**
+   * Phase S3. Whether `intutic skill audit` should AUTOMATICALLY run the
+   * opt-in Cisco `skill-scanner` integration (`tools/cli/src/lib/ciscoScanner.ts`)
+   * alongside native scanning, when the `skill-scanner` binary happens to be
+   * on PATH. Off by default — a workspace that never configured this must
+   * not start shelling out to an external tool it never asked for.
+   *
+   * This is distinct from `--engine cisco` (an explicit, per-invocation
+   * request that fails loudly if the binary is absent): this setting gates
+   * a graceful, best-effort AUTO-run — when true but the binary is absent,
+   * the CLI logs an info-level skip and continues with native scanning
+   * only, exactly the "opt-in but gracefully degrading" contract this
+   * integration promises throughout.
+   *
+   * No Valkey projection, following the exact precedent
+   * `enableLocalSkillAuditDelete` sets immediately above: the CLI reads
+   * this straight off the synced `settings` object via `fetchConfig`, and
+   * nothing else needs a hot-path read of it.
+   */
+  ciscoSkillScannerEnabled?: boolean
+
+  /**
    * Configurable trigger keywords for classifying bandit task types.
    */
   banditKeywords?: {
@@ -345,6 +366,29 @@ export interface WorkspaceSettings {
   decisionsLogEnabled?: boolean
 
   /**
+   * Opt-in LLM-based semantic analysis of skill files (Phase S5, TD-357),
+   * on top of the always-on deterministic `scanSkillContent` pattern scan.
+   * When true:
+   * - The CLI (`intutic skill audit`) attaches the FULL content of a
+   *   `SKILL.md` file (capped at 64 KiB) to its `/skills/report` entries —
+   *   never bundled scripts, which stay S2/S3/S4's domain.
+   * - The control plane judges that content once per distinct sha256 (a
+   *   30-day Valkey marker skips re-judging unchanged content), subject to
+   *   a per-workspace daily judge-call cap
+   *   (`SEMANTIC_SKILL_JUDGE_DAILY_CAP`), and strips `content` from what it
+   *   persists — only the verdict (`'clean' | 'suspicious' | 'malicious' |
+   *   'unjudged'`) is stored, never the judged text.
+   *
+   * Off (undefined/false) by default, per the standing rule elsewhere in
+   * this file: full skill content transiting the control plane is a real
+   * privacy/cost tradeoff a workspace must opt into, not one a default
+   * change should impose. See `apps/docs/guide/skill-scanning.md`'s
+   * "Semantic analysis (optional)" section for the full transit/retention
+   * statement.
+   */
+  semanticSkillAnalysisEnabled?: boolean
+
+  /**
    * BYO judge model for the MANAGED LLM-as-judge path (LLD #70).
    *
    * When set, chunk/finalize judge calls for this workspace run on this
@@ -368,6 +412,24 @@ export interface WorkspaceSettings {
    * `null`/absent = the platform trusted monitor, exactly as before.
    */
   managedJudgeModel?: string | null
+
+  /**
+   * Opt-in VirusTotal hash lookup for skill-bundled SCRIPTS (Phase S4,
+   * TD-361). When true, and only when a `connector_credentials` row for
+   * provider `'virustotal'` is also stored, `POST .../skills/report`
+   * fire-and-forget enqueues any reported script sha256 hashes for a
+   * `GET /api/v3/files/{sha256}` lookup — never an upload, never SKILL.md
+   * prose, see `virusTotalService.ts`'s own doc comment for the full
+   * hash-only doctrine. Off by default, per the standing rule elsewhere in
+   * this file: a workspace that never configured this must not start
+   * sending script hashes to a third party because a default changed.
+   *
+   * Distinct from, and narrower than, this product's standing decline of a
+   * global MCP-server-reputation/VirusTotal integration — see
+   * `apps/docs/guide/mcp-governance.md` and `docs/TECH_DEBT.md` TD-359 for
+   * that separate decision, which this setting does not reverse.
+   */
+  virusTotalSkillLookupEnabled?: boolean
 }
 
 /**
@@ -400,6 +462,12 @@ export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
     ff_skillopt_auto_apply: false,
   },
   enableLocalSkillAuditDelete: false,
+  // Off by default — see the field doc above. A workspace must explicitly
+  // opt in before the CLI shells out to any externally-installed tool.
+  ciscoSkillScannerEnabled: false,
+  // Off by default — full skill content transiting the control plane for
+  // semantic judging is opt-in. See the field doc for the full statement.
+  semanticSkillAnalysisEnabled: false,
   banditKeywords: {
     testing: ['test', 'spec', 'assert', 'vitest', 'jest', 'unittest'],
     deployment: ['deploy', 'release', 'kubernetes', 'docker', 'gke', 'pipeline', 'ci/cd'],
@@ -437,6 +505,9 @@ export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
     action: 'HIJACK',
     categories: [],
   },
+  // Off by default — see the field doc for the hash-only doctrine and why
+  // this must never turn on for a workspace that never configured it.
+  virusTotalSkillLookupEnabled: false,
 }
 
 /**

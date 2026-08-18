@@ -14,6 +14,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import * as fs from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { createHash } from 'node:crypto'
 import { collectAgentReport } from '../src/agentReporter.js'
 
 describe('collectAgentReport — skills facet content scanning', () => {
@@ -56,6 +57,29 @@ describe('collectAgentReport — skills facet content scanning', () => {
       clean: true,
       findingsCount: 0,
     })
+  })
+
+  // Phase S5 (TD-357): sha256 lets the control plane join this facet against
+  // a previously-judged semantic verdict, without the daemon ever
+  // transmitting SKILL.md content itself over /api/v1/agents/report.
+  it('reports the sha256 of a successfully-read SKILL.md, matching the file content exactly', async () => {
+    const dir = join(workspaceRoot, '.agents', 'skills', 'hashed')
+    await fs.mkdir(dir, { recursive: true })
+    const content = '# Hashed\n\nSome content to hash.\n'
+    await fs.writeFile(join(dir, 'SKILL.md'), content, 'utf8')
+
+    const r = await report()
+    const entry = r.facets.skills.find((s: any) => s.name === 'hashed')
+    expect(entry.sha256).toBe(createHash('sha256').update(content, 'utf8').digest('hex'))
+  })
+
+  it('omits sha256 for a SKILL.md that could not be read', async () => {
+    const dir = join(workspaceRoot, '.agents', 'skills', 'unreadable-hash')
+    await fs.mkdir(join(dir, 'SKILL.md'), { recursive: true })
+
+    const r = await report()
+    const entry = r.facets.skills.find((s: any) => s.name === 'unreadable-hash')
+    expect(entry.sha256).toBeUndefined()
   })
 
   it('reports a poisoned skill as scanned:true, clean:false, with a findings count', async () => {

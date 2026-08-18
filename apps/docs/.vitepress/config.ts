@@ -161,6 +161,7 @@ if (!IS_OSS) {
       { text: 'Emergency Overrides (Enterprise)', link: '/guide/break-glass' },
       { text: 'SIEM Export (Enterprise)', link: '/guide/siem-export' },
       { text: 'Compliance Evidence (Enterprise)', link: '/guide/compliance-evidence' },
+      { text: 'VirusTotal Integration (Enterprise)', link: '/guide/virustotal-scanning' },
     ],
   });
 }

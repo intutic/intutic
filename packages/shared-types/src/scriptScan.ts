@@ -50,9 +50,9 @@
  * @module
  */
 
-import { type SkillScanCategory, type SkillScanPattern, excerptFor } from './skillScan.js'
+import { type SkillScanCategory, type SkillScanEngine, type SkillScanPattern, excerptFor } from './skillScan.js'
 
-export type { SkillScanCategory }
+export type { SkillScanCategory, SkillScanEngine }
 
 /**
  * Languages this module knows how to recognize and scan. `'unknown'` is a
@@ -102,6 +102,9 @@ export interface ScriptScanFinding {
   /** Bounded context around the match. Omitted only if excerpting somehow
    *  fails; never the full file. */
   excerpt?: string
+  /** Which engine produced this finding. See `skillScan.ts`'s
+   *  {@link SkillScanEngine}. */
+  engine?: SkillScanEngine
 }
 
 export interface ScriptScanResult {
@@ -433,6 +436,7 @@ export function scanScriptContent(content: string, language: ScriptLanguage): Sc
         patternId: pattern.id,
         category: pattern.category,
         excerpt: excerptFor(content, m.index, m[0].length),
+        engine: 'native',
       })
     }
   }

@@ -17,6 +17,7 @@
 
 import { readFile, readdir, access } from 'node:fs/promises'
 import { join } from 'node:path'
+import { createHash } from 'node:crypto'
 import { newIso } from '@intutic/id'
 import {
   scanSkillContent,
@@ -84,6 +85,18 @@ interface AgentFacets {
       /** How many of `scanned` came back with at least one finding. */
       flagged: number
     }
+    /**
+     * sha256 of the `SKILL.md` content this row describes (Phase S5,
+     * TD-357) — lets `services/control-plane/src/routes/agents.ts` look up
+     * a previously-judged semantic verdict
+     * (`services/semanticSkillAnalysisService.ts`'s `skills:semantic:*`
+     * Valkey entry) keyed by the exact content this cycle read, without this
+     * daemon ever transmitting the content itself over `/api/v1/agents/report`
+     * — only the CLI's `/skills/report` path (opt-in,
+     * `semanticSkillAnalysisEnabled`) does that. Absent when `SKILL.md`
+     * could not be read.
+     */
+    sha256?: string
   }>
   loops: { configured: boolean }
   harness: { type: string; config_synced: boolean }
@@ -274,12 +287,14 @@ async function collectSkills(workspaceRoot: string): Promise<AgentFacets['skills
     try {
       const content = await readFile(skillMdPath, 'utf8')
       const result = scanSkillContent(content)
+      const sha256 = createHash('sha256').update(content, 'utf8').digest('hex')
       out.push({
         name: e.name,
         source: '.agents/skills',
         scanned: true,
         clean: result.clean,
         findingsCount: result.findings.length,
+        sha256,
         ...(scripts ? { scripts } : {}),
       })
     } catch {

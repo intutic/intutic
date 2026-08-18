@@ -89,7 +89,7 @@ beforeAll(async () => {
   writeRulesFixture(snapshotRules, DESTRUCTIVE_COMMAND_PATTERNS)
   writeRulesFixture(
     skillSurfaceSnapshotRules,
-    buildSnapshotRules({ workspaceId: 'ws_test', interventionMode: 'ENFORCE', sopRules: [] }),
+    buildSnapshotRules({ workspaceId: 'ws_test', interventionMode: 'ENFORCE', sopRules: [], mcpAllowedServers: [] }),
   )
   for (const g of GATES) {
     // A root per writer, HOME moved before the dynamic import: `gooseHooks`
@@ -392,6 +392,20 @@ describe('gate registry completeness', () => {
         `in neither is one nobody decided about — add a gate row, or a NO_GATE ` +
         `entry (file: null if no writer exists) with a reason.`,
     ).toEqual([])
+  })
+
+  it('declares an mcpCalls fact for every gate (M3)', () => {
+    // TypeScript already forces every GATES literal to specify `mcpCalls` and
+    // `mcpNote` (required fields on GateEntry, not optional) — this is the
+    // completeness check's runtime half: a value outside the declared enum,
+    // or an empty note, would compile but say nothing. `gateRegistry.ts`'s own
+    // module doc names the failure mode this whole file exists to prevent:
+    // "not declaring one was indistinguishable from not being a harness".
+    const allowed = new Set(['yes', 'reachable', 'no'])
+    for (const g of GATES) {
+      expect(allowed.has(g.mcpCalls), `${g.name}.mcpCalls is not one of yes/reachable/no`).toBe(true)
+      expect(g.mcpNote.trim().length, `${g.name}.mcpNote is empty`).toBeGreaterThan(0)
+    }
   })
 
   it('every gate produced its declared artifact', () => {
@@ -1172,6 +1186,7 @@ describe('n8n workflow gate', () => {
           action: 'block',
           reason: 'deploys must be digest-pinned',
         }],
+        mcpAllowedServers: [],
       },
       dir,
     )

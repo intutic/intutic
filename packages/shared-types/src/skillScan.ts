@@ -87,6 +87,18 @@
  *  module doc comment for why this is a native TypeScript port instead). */
 export type SkillScanCategory = 'prompt_injection' | 'data_exfiltration' | 'malicious_code'
 
+/**
+ * Which engine produced a finding. `'native'` is this module's own regex
+ * scanner (and `scriptScan.ts`'s, which reuses this union);
+ * `'cisco-skill-scanner'` is the separate, opt-in Cisco `skill-scanner`
+ * integration (Phase S3, `tools/cli/src/lib/ciscoScanner.ts`) — the
+ * genuinely deeper AST/dataflow analysis TD-356 named as the eventual
+ * follow-up to this phase's pattern matching. Optional, not required: a
+ * finding from before this field existed has no engine tag, which is fine —
+ * absence has always meant "this codebase's own scanner," now made explicit.
+ */
+export type SkillScanEngine = 'native' | 'cisco-skill-scanner'
+
 /** One scan pattern, self-tested at import time. */
 export interface SkillScanPattern {
   /** Stable id. Appears in findings and audit lines — never renumber one. */
@@ -114,6 +126,8 @@ export interface SkillScanFinding {
   /** Bounded context around the match. Omitted only if excerpting somehow
    *  fails; never the full file. */
   excerpt?: string
+  /** Which engine produced this finding. See {@link SkillScanEngine}. */
+  engine?: SkillScanEngine
 }
 
 export interface SkillScanResult {
@@ -458,6 +472,7 @@ export function scanSkillContent(content: string): SkillScanResult {
         patternId: pattern.id,
         category: pattern.category,
         excerpt: excerptFor(content, m.index, m[0].length),
+        engine: 'native',
       })
     }
   }

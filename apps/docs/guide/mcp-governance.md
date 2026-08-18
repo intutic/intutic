@@ -154,6 +154,74 @@ protocol frames, only TCP/TLS connections. Governance over a remote server's
 traffic requires BOTH layers doing their own job, not one substituting for
 the other.
 
+## The gate backstop
+
+Everything above is enforced by the **mcp-proxy** — the process that fronts
+each stdio (and, since the M2 bridge, remote HTTP/SSE) MCP server, with
+tool-level granularity: it can refuse one `tools/call` while allowing the
+rest of that same server's tools. That is the PRIMARY enforcement point for
+MCP governance, and it stays that way.
+
+Phase M3 adds a second, deliberately smaller layer: the per-harness
+`PreToolUse` gate scripts every harness writer already generates (the same
+scripts that block a write to `.claude/settings.json` or an `rm -rf /`) now
+also recognise a `mcp__<server>__<tool>`-shaped tool name and can refuse one
+whose **server** is not on the workspace's `mcpAllowedServers` list — the
+same setting the proxy already reads (see [The allowlist](#the-allowlist-mcpallowedservers)
+above), delivered to the gate via the sync daemon's policy snapshot
+(`#mcpservers <severity> <comma-joined-server-names>` in `policy-snapshot.rules`).
+
+**This is a backstop, not a second primary control.** It is:
+
+- **Server-level only**, never tool-level — the gate cannot express "allow
+  `github`'s `read_issue` but not its `delete_repo`"; that granularity is the
+  proxy's job and only the proxy's.
+- **A defense-in-depth layer that fires even if a harness bypasses or
+  misconfigures the proxy** — a stdio server a developer added directly to a
+  harness config during the window before the next sync cycle proxy-wraps it
+  (see [How a server gets here at all](#how-a-server-gets-here-at-all) above),
+  or a harness that talks to an MCP server through some path this product
+  does not mediate, still has its tool CALLS visible to the harness's own
+  `PreToolUse` hook — and that hook now knows to check the server name.
+
+**Both layers firing on the same blocked call is expected, not a bug.** If a
+call reaches both the proxy and a harness's gate — the ordinary case, since
+proxy-wrapping puts the proxy in the path a gate script cannot see around —
+an operator may see a `tool_blocked`-shaped governance event emitted **twice**
+for what was, from the developer's point of view, one refused action: once
+from the mcp-proxy's own audit path, and once from the gate script's
+`log_event`/`record` call. Neither layer knows about the other's decision;
+each enforces independently against the same underlying policy. This is the
+same "additive, not exclusive" posture the rest of the dynamic policy tier
+follows (see `services/sync-daemon/src/lib/policySnapshot.ts`'s module doc) —
+a second block is redundancy, not a discrepancy to reconcile.
+
+### Per-harness MCP coverage
+
+`services/sync-daemon/__tests__/harness/gateRegistry.ts`'s `mcpCalls` column
+is the source of truth this table mirrors — `yes` means both "the call
+reaches the gate script" and "this harness's own MCP tool-naming convention
+was independently confirmed to take the `mcp__<server>__<tool>` shape" were
+verified; `reachable` means only the first was; `no` means neither the gate
+script sees the call, nor (for two harnesses) does the allowlist concept
+apply to that gate's unit of evaluation at all.
+
+| Harness | MCP calls | Detail |
+|---|---|---|
+| Claude Code | ✅ yes | Dedicated `mcp__.*` `PreToolUse` matcher (M3). Claude Code's own MCP tool-naming convention IS `mcp__<server>__<tool>`. |
+| Claude Desktop | ✅ yes | Dedicated `mcp__.*` matcher (M3); shares Claude Code's hook format and tool-naming convention verbatim. |
+| Cursor | ✅ yes | M3 fix: `beforeMCPExecution`'s `tool_name` (bare tool name) and top-level `command`/`url` (server identifier) are now composed into `mcp__<server>__<tool>` — confirmed against Cursor's own hooks documentation and a live payload example. |
+| Windsurf | ⚠️ reachable, unconfirmed | Same composition fix applied by analogy to Cursor (this writer's extraction has always mirrored Cursor's field-for-field) — but Windsurf/Cascade's current public documentation describes a different mechanism (`pre_mcp_tool_use`, not `beforeMCPExecution`) that this writer does not target. Not independently verified live during M3. |
+| Cline | ❌ no (unconfirmed dispatch) | `use_mcp_tool` envelope normalization added to the shared gate evaluator (fires if the payload arrives), but no `use_mcp_tool`/`access_mcp_resource` `PreToolUse` matcher was added — whether Cline's hook mechanism actually dispatches for these tool names could not be confirmed during M3. |
+| Roo Code | ⚠️ reachable | Already a `.*` catch-all matcher; a Cline fork, so likely inherits `use_mcp_tool`, but that inheritance is unconfirmed. |
+| Codex CLI, Continue, GitHub Copilot | ⚠️ reachable | Already `.*` catch-all matchers; each harness's own MCP tool-naming convention was not independently verified during M3. |
+| Goose, OpenHands, Hermes, Antigravity, Pi | ⚠️ reachable | Bash-family: the gate script runs unconditionally for every tool call, matcher or not; each harness's own MCP tool-naming convention was not independently verified during M3. |
+| Openclaw | ⚠️ reachable | No matcher on its `PreToolUse` registration — runs for every tool call; tool-naming convention unconfirmed. |
+| n8n | ❌ n/a | This gate's unit of evaluation is a workflow NODE TYPE (n8n's own dot-namespaced convention), never a `mcp__<server>__<tool>` tool-call name — confirmed by reading `emitN8nWorkflowGate`. |
+| Open WebUI | ❌ n/a | This gate evaluates PROMPT TEXT, not a tool call — no tool name of any shape reaches it. |
+| LangGraph | ❌ n/a | No generated gate file — the SDK-side `intutic_clawde.gate` is out of scope for this phase's per-harness matcher work. |
+| Aider | ❌ n/a | No `PreToolUse` hook mechanism exists for this harness at all (see `NO_GATE` in `gateRegistry.ts`). |
+
 ## What this phase deliberately does not cover
 
 - **No cross-workspace or cross-tenant correlation.** A TOFU mismatch, or a
@@ -170,7 +238,11 @@ the other.
   workspace's own observed history with a server — first contact, then
   change-detection from there. A reputation service is a different kind of
   claim (this server *is* dangerous, independent of your own history with
-  it) that nothing here makes or relies on.
+  it) that nothing here makes or relies on. This decline is about MCP
+  *servers* specifically — a separate, narrower, opt-in integration
+  (Phase S4, TD-361) does check the sha256 hash of skill-bundled *scripts*
+  against VirusTotal; see [Skill Scanning](/guide/skill-scanning#virustotal-hash-lookup-opt-in-hash-only)
+  for that feature and why it does not reverse this decline.
 - **No automated promotion out of `candidate` status.** The registry table
   supports `approved`/`blocked`, and the ingest route never sets either — but
   nothing in this phase builds the dashboard or API route an operator would

@@ -20,9 +20,17 @@ regex patterns against a skill's raw markdown — front matter included, since
 front matter is just text at the top of the file, not stripped before the
 scan. Three threat categories, borrowed from Cisco's open-source
 `skill-scanner` taxonomy (the categorisation, not the implementation — this
-is a native TypeScript port, not a wrapped external tool, since this
-codebase has zero Python runtime dependencies and already owns a detector
-for this exact threat genre):
+is a native TypeScript port, not a wrapped external tool: **this codebase's
+own runtime** stays Python-free, and already owned a detector for this exact
+threat genre before this phase shipped. That is a claim about OUR runtime,
+not a ban on ever talking to a Python tool — see
+[Cisco `skill-scanner` integration](#cisco-skill-scanner-integration-opt-in)
+below for the separate, opt-in, OPERATOR-INSTALLED integration this phase's
+own text used to describe only as future work. Nothing in this codebase
+embeds, vendors, or depends on that tool; it is shelled out to only when the
+operator has separately installed it, and every consumer degrades
+gracefully — never silently, never by pretending a skipped scan is a clean
+one — when it is absent):
 
 - **Prompt injection** — hidden instruction blocks (`<system>`, `<important>`
   tags), instructions to conceal an action from the user, redirects away
@@ -127,6 +135,82 @@ union of both pattern tables), and the sync daemon's per-skill `scripts:
 {total, scanned, flagged}` facet, which the posture scorer folds into the
 same `skills` dimension described above.
 
+## Cisco `skill-scanner` integration (opt-in)
+
+Phase S3 adds an OPTIONAL integration with Cisco's open-source
+`skill-scanner` project — the one whose category taxonomy this page's native
+scanner already borrows (see above). It is a separate binary the operator
+installs themselves; nothing in this codebase's own runtime depends on it,
+before or after this phase.
+
+**What it adds beyond native scanning.** Everything above this section —
+`scanSkillContent`, `scanScriptContent` — is regex-genre pattern matching:
+fast, dependency-free, and honest about not doing AST parsing, dataflow
+analysis, or semantic understanding (see
+[What this cannot catch](#what-this-cannot-catch)). The Cisco integration is
+a genuinely different, deeper analysis path for the same bundled-script
+surface `scriptScan.ts` covers, run as a second engine alongside — never
+instead of — native scanning.
+
+**How to enable it.**
+
+- `pipx install skill-scanner` — installs the binary on PATH. `intutic
+  doctor` reports whether it is present (optional, never a failing check)
+  and, when present, its version.
+- `intutic skill audit --engine cisco` — explicitly runs the Cisco engine
+  for this invocation, IN ADDITION to native scanning. If the binary is not
+  on PATH, this fails loudly (non-zero exit) rather than silently falling
+  back — an explicit request for a specific engine that cannot be honored is
+  an error, not a degraded pass.
+- The `ciscoSkillScannerEnabled` workspace setting (default `false`) makes
+  `intutic skill audit` AUTO-run the Cisco engine on every invocation,
+  whenever the binary happens to be on PATH. Unlike `--engine cisco`, this
+  path degrades gracefully: if the setting is on but the binary is absent,
+  the CLI logs an info-level skip and continues with native scanning only —
+  this is a best-effort auto-run, not an explicit per-invocation request.
+
+**Findings and provenance.** Every finding — native or Cisco — now carries
+an `engine: 'native' | 'cisco-skill-scanner'` field, so a consumer can tell
+which engine produced it. In `--sarif` output, Cisco's own SARIF run is
+appended VERBATIM as a second entry in the document's `runs[]` array — SARIF
+is explicitly designed to carry multiple tools' output in one document, so
+Cisco's results are never translated or re-shaped for that output mode. For
+every OTHER consumer (the human-readable CLI report, the control-plane
+`skills/report` payload, posture scoring), Cisco's findings ARE translated
+into this codebase's own `SkillScanFinding` shape — `patternId` prefixed
+`cisco.` followed by their ruleId, category mapped onto this page's
+`prompt_injection | data_exfiltration | malicious_code` taxonomy, excerpt bounded — the same
+`SkillScanFinding` shape native findings already use, just with `engine:
+'cisco-skill-scanner'` instead of `'native'`.
+
+**Trust boundary — advisory, not enforcement.** Exactly like every native
+finding on this page, a Cisco finding is surfaced, never acted on
+automatically: nothing in this codebase blocks, refuses, or auto-deletes a
+skill on the strength of a Cisco `skill-scanner` verdict alone. See
+`docs/TECH_DEBT.md` for the entry tracking this boundary explicitly.
+
+## VirusTotal hash lookup (opt-in, hash-only)
+
+**Hash-only, stated up front: this lookup never uploads file content.** A
+separate, later phase (S4, TD-361) added an **opt-in** integration that
+checks the sha256 hash `auditScriptFile` already computes for every bundled
+script (see [Bundled scripts](#bundled-scripts) above) against VirusTotal's
+public `GET /api/v3/files/{sha256}` endpoint — never `POST /api/v3/files`
+(upload), and the module that calls VirusTotal (`virusTotalService.ts`)
+carries no code path capable of uploading content at all. See the dedicated
+[VirusTotal Integration](/guide/virustotal-scanning) page for setup, the
+budget/pacing model, and what a flagged hash does to the posture score.
+
+This is a narrower, different thing from this product's standing decline of
+a **global MCP-server reputation** database / VirusTotal integration — see
+[MCP Governance](/guide/mcp-governance#what-this-phase-deliberately-does-not-cover)
+for that separate decision, which this hash lookup does not reverse: that
+decline is about judging whether an MCP *server* is known-bad across
+tenants; this is a workspace-scoped, opt-in hash check on a skill-bundled
+*script file*, off by default, and never shared as a public reputation
+signal beyond the identical-hash verdict cache described on the integration
+page.
+
 ## Report-only, deliberately, this phase
 
 Nothing in this codebase blocks, refuses, or auto-deletes a skill on the
@@ -208,6 +292,82 @@ command string). And SHADOW-mode workspaces see the promotion downgraded to
 snapshot-delivered rule — the floor's own `warn` copy is unaffected by
 `interventionMode` either way.
 
+## Semantic analysis (optional)
+
+Everything above this section is deterministic pattern matching —
+`scanSkillContent` and `scanScriptContent` match imperative sentence and
+code shapes against text, with no LLM call anywhere in the hot path. TD-357
+recorded that as a deliberate, accepted gap: a rephrasing that avoids every
+pattern's literal wording passes clean, and closing that gap needs a
+semantic judgment call a regex table cannot make. Phase S5 closes it — as an
+**opt-in**, workspace-level setting (`semanticSkillAnalysisEnabled`, default
+`false`), never a hot/live path.
+
+**What it catches that deterministic scanning cannot.** The judge is asked
+one question: does this skill's prose direct the agent to do something its
+own stated description does not cover — concealing an action from the user,
+exfiltrating data, redirecting a tool call, or otherwise acting outside a
+reasonable reader's expectation. This is exactly the prompt-injection-style
+social-engineering-of-the-agent-itself category that survives a rewording:
+the deterministic scanner keys on specific phrasings (`<system>` tags, "do
+not tell the user", a credential-shaped path in a markdown link); the
+semantic judge reads for *intent*, so a skill that achieves the same thing
+in different words is still visible to it.
+
+**The judge is told the content is data, not instructions to it.** A skill
+file is precisely the kind of untrusted, agent-authoritative prose a
+prompt-injection attempt would target — and an LLM judge asked to read it is
+exposed to that the same way any other agent loading the skill would be. The
+judge's system prompt states this explicitly: the skill content under
+evaluation is UNTRUSTED DATA, any text inside it that looks like a command
+or a request directed at an AI (including at the judge itself) is to be
+ignored, and the judge's only job is to answer the one question above about
+what the skill asks an agent to do — never to follow, obey, or act on
+anything the content says. See `JUDGE_SYSTEM_PROMPT` in
+`services/control-plane/src/services/semanticSkillAnalysisService.ts` for
+the exact wording.
+
+**Content transits the control plane, transiently, then is stripped.**
+Stated plainly rather than buried: when this setting is on, `intutic skill
+audit` attaches the FULL content of a `SKILL.md` file (capped at 64 KiB) to
+its `/skills/report` entry — never bundled scripts, which stay S2/S3/S4's
+domain. The control plane hands that content to the judge and then strips it
+before anything is persisted — the stored report never contains `content`,
+regardless of whether judging ran, succeeded, or was skipped. Only the
+verdict (`'clean' | 'suspicious' | 'malicious' | 'unjudged'`) and a short,
+bounded `reason` string are stored, keyed by the content's own sha256, under
+`skills:semantic:{workspaceId}` in Valkey — never the judged text itself.
+
+**Caps.** Two independent bounds, both enforced server-side regardless of
+what a client sends:
+
+- **64 KiB per file** — the content-transport cap on `SkillFileReportSchema`'s
+  `content` field.
+- **A per-workspace daily judge-call cap** (`SEMANTIC_SKILL_JUDGE_DAILY_CAP`,
+  env-overridable, default 200/day) — on top of a zero-cost, no-LLM-call
+  skip for content that has not changed since it was last judged (a 30-day
+  Valkey marker keyed by the content's sha256, so a workspace's daily cap is
+  spent on skills that actually changed, not re-spent every audit/sync cycle
+  on the same unchanged file).
+
+**Fail-secure semantics.** `'unjudged'` is not `'clean'` — it means no
+determination was made: a timeout, a malformed judge response, or the daily
+cap being spent when this content was reported. It is scored no differently
+from a skill the deterministic scanner never got to look at, and it is never
+treated as evidence of safety. Only a confirmed `'malicious'` or
+`'suspicious'` verdict changes anything — the posture score (a `'malicious'`
+verdict overrides the skill's score to 0 outright, the same severity tier as
+a confirmed deterministic finding or a flagged bundled script; `'suspicious'`
+degrades it to a fixed intermediate value, worse than "unknown" but short of
+a confirmed finding) and a `skill.semantic.flagged` notification (HIGH
+severity for `'malicious'`, MEDIUM for `'suspicious'`).
+
+**Verdicts are advisory, not enforcement.** Nothing in this codebase blocks,
+refuses, or auto-prunes a skill on the strength of a semantic-judge finding
+— consistent with the "report-only, deliberately, this phase" stance the
+deterministic scanner takes above. See docs/TECH_DEBT.md's TD-357 entry for
+the corpus-measurement caveat this carries forward.
+
 ## What this cannot catch
 
 **A scan that returns no findings does not guarantee a skill is secure.**
@@ -255,15 +415,28 @@ Specifically:
   shapes, and building it into this phase would have meant either rushing an
   unrelated detector in alongside these two, or quietly pretending regex
   patterns generalize to real static analysis, which they do not. Full
-  AST-level scanning of bundled scripts is available only through a later,
+  AST-level scanning of bundled scripts is available only through the
   **separate, opt-in** integration with Cisco's open-source `skill-scanner`
-  project — unbuilt as of this phase, and tracked in TECH_DEBT.md — which
-  consumes the sha256 hash `auditScriptFile` computes for every bundled file.
-  LLM-based semantic analysis of skill content is a further, still-separate
-  gap: it is deliberately kept out of any hot/live path (see TECH_DEBT.md),
-  and if it is ever built, it has to go through this codebase's
-  `resolveMonitor` judge-call convention like every other LLM judge
-  invocation, not bypass it because the input happens to be a skill file.
+  project described in
+  [Cisco `skill-scanner` integration](#cisco-skill-scanner-integration-opt-in)
+  above — off by default, requires a separate `pipx install skill-scanner`,
+  and consumes the sha256 hash `auditScriptFile` computes for every bundled
+  file.
+  A narrower, ALREADY-built piece sits between "no coverage" and full
+  static analysis: the opt-in [VirusTotal hash lookup](#virustotal-hash-lookup-opt-in-hash-only)
+  catches a script whose exact bytes match a hash already known-malicious
+  to VirusTotal's aggregated engines — a useful, cheap signal, but not code
+  understanding of any kind. A script that is malicious but not yet
+  hash-known to VirusTotal (a modified copy, a novel payload) is invisible
+  to it, exactly as it would be to any hash-based detector.
+  LLM-based semantic analysis of `SKILL.md` PROSE (as opposed to bundled
+  scripts) is no longer a gap — see [Semantic analysis
+  (optional)](#semantic-analysis-optional) above, built through this
+  codebase's `resolveMonitor` judge-call convention like every other LLM
+  judge invocation. Its own real-world false-positive/negative rate is
+  unmeasured for the identical reason the deterministic patterns' rate is —
+  no benign-skill corpus exists yet — which is why it stays report-only,
+  opt-in, and never a gate; see TD-357 in TECH_DEBT.md.
 - **Bundled-script coverage, specifically, is a first pass, not a general
   scanner.** `SCRIPT_SCAN_PATTERNS` seeds a handful of well-known shapes
   (remote-download-piped-to-shell, decode-then-execute, credential-path
@@ -284,3 +457,4 @@ Specifically:
 | [Governance Controls Checklist](/guide/governance-controls) | The house style for stating partial coverage honestly, applied across every control this product ships |
 | [Graph Guardrails](/guide/graph-guardrails) | The deterministic detector taxonomy this scanner's discipline follows |
 | [Policies & Enforcement](/guide/policies) | Where enforcement (as opposed to reporting) actually lives in this product |
+| [VirusTotal Integration](/guide/virustotal-scanning) | Opt-in, hash-only known-malware lookup for skill-bundled scripts — setup, budget/pacing, and posture-score effect |
