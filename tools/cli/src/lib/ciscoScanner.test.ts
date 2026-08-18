@@ -5,11 +5,11 @@
  * small Node script placed on PATH for the duration of each test (removed
  * from PATH afterward) — never the real Python-packaged tool. This keeps the
  * suite deterministic and dependency-free in CI, which does not (and should
- * not need to) have `pipx install skill-scanner` run anywhere.
+ * not need to) have `pipx install cisco-ai-skill-scanner` run anywhere.
  *
  * The fake binary's `scan` behaviour is driven by an env var
- * (`FIXTURE_MODE`) so each test can select clean / findings / no-analyzer /
- * slow-timeout output without juggling multiple fixture scripts.
+ * (`FIXTURE_MODE`) so each test can select clean / findings / unparseable
+ * output without juggling multiple fixture scripts.
  *
  * @module
  */
@@ -28,45 +28,49 @@ import {
 } from './ciscoScanner.js'
 
 /** A minimal fake `skill-scanner`. Understands just enough of the real CLI
- *  shape (`scan --path <dir> --format sarif --output <file>`, `--version`)
- *  to exercise `runCiscoScan`/`ciscoScannerVersion` without the real tool. */
+ *  shape (`scan <dir> --use-behavioral --format sarif --output-sarif
+ *  <file>`, `--version`) to exercise `runCiscoScan`/`ciscoScannerVersion`
+ *  without the real tool. */
 const FAKE_SKILL_SCANNER = `#!/usr/bin/env node
 const args = process.argv.slice(2)
 const mode = process.env.FIXTURE_MODE || 'clean'
 
 if (args.includes('--version')) {
-  process.stdout.write('skill-scanner-fixture, version 0.3.3-test\\n')
+  process.stdout.write('skill-scanner 2.0.13-test\\n')
   process.exit(0)
 }
 
-const outIdx = args.indexOf('--output')
+const outIdx = args.indexOf('--output-sarif')
 const outFile = outIdx >= 0 ? args[outIdx + 1] : null
-const pathIdx = args.indexOf('--path')
-const scannedDir = pathIdx >= 0 ? args[pathIdx + 1] : ''
 
-if (mode === 'no-analyzer') {
-  process.stderr.write('No analyzers enabled for scan.\\n')
-  process.exit(2)
+if (mode === 'unparseable') {
+  if (outFile) require('fs').writeFileSync(outFile, 'not json', 'utf8')
+  process.exit(1)
 }
 
 {
   const sarif = {
-    $schema: 'https://json.schemastore.org/sarif-2.1.0.json',
+    $schema: 'https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json',
     version: '2.1.0',
     runs: [
       {
-        tool: { driver: { name: 'skill-scanner', rules: mode === 'findings' ? [
-          { id: 'skill-scanner/exfiltration', name: 'Exfiltration', shortDescription: { text: 'Exfiltration' } },
+        tool: { driver: { name: 'skill-scanner', informationUri: 'https://github.com/cisco-ai-defense/skill-scanner', rules: mode === 'findings' ? [
+          { id: 'HARDCODED_SSH_KEY_READ', name: 'Hardcoded Ssh Key Read', shortDescription: { text: 'Reads an SSH private key' } },
         ] : [] } },
         results: mode === 'findings' ? [
           {
-            ruleId: 'skill-scanner/exfiltration',
+            ruleId: 'HARDCODED_SSH_KEY_READ',
             level: 'error',
             message: { text: 'Skill reads ~/.ssh/id_rsa and sends it to an external URL.' },
+            properties: { category: 'data_exfiltration', severity: 'HIGH' },
             locations: [
               {
                 physicalLocation: {
-                  artifactLocation: { uri: scannedDir + '/SKILL.md' },
+                  // RELATIVE to the scanned directory — matches the real
+                  // tool's actual output (verified empirically), not an
+                  // absolute path. runCiscoScan is responsible for joining
+                  // this against \`dir\` before returning it.
+                  artifactLocation: { uri: 'SKILL.md' },
                   region: { startLine: 4 },
                 },
               },
@@ -124,7 +128,7 @@ describe('ciscoScanner (mock-first, against a fake skill-scanner binary)', () =>
   describe('ciscoScannerVersion', () => {
     it('returns the trimmed --version output when present', async () => {
       withFixtureOnPath()
-      expect(await ciscoScannerVersion()).toBe('skill-scanner-fixture, version 0.3.3-test')
+      expect(await ciscoScannerVersion()).toBe('skill-scanner 2.0.13-test')
     })
 
     it('returns null when the binary is absent', async () => {
@@ -139,7 +143,7 @@ describe('ciscoScanner (mock-first, against a fake skill-scanner binary)', () =>
       const [result] = await runCiscoScan(['/some/skill/dir'])
       expect(result.ok).toBe(false)
       expect(result.error).toContain('not found on PATH')
-      expect(result.error).toContain('pipx install skill-scanner')
+      expect(result.error).toContain('pipx install cisco-ai-skill-scanner')
       expect(result.findings).toEqual([])
     })
 
@@ -152,7 +156,7 @@ describe('ciscoScanner (mock-first, against a fake skill-scanner binary)', () =>
       expect(result.sarifRuns).toHaveLength(1)
     })
 
-    it('parses a real finding out of the SARIF output', async () => {
+    it('parses a real finding out of the SARIF output, including its category', async () => {
       withFixtureOnPath()
       process.env.FIXTURE_MODE = 'findings'
       const dir = '/workspace/.claude/skills/demo'
@@ -160,8 +164,9 @@ describe('ciscoScanner (mock-first, against a fake skill-scanner binary)', () =>
       expect(result.ok).toBe(true)
       expect(result.findings).toHaveLength(1)
       expect(result.findings[0]).toMatchObject({
-        ruleId: 'skill-scanner/exfiltration',
+        ruleId: 'HARDCODED_SSH_KEY_READ',
         level: 'error',
+        category: 'data_exfiltration',
         filePath: `${dir}/SKILL.md`,
         line: 4,
       })
@@ -179,9 +184,9 @@ describe('ciscoScanner (mock-first, against a fake skill-scanner binary)', () =>
       expect(results[1].findings[0].filePath).toBe('/ws/b/SKILL.md')
     })
 
-    it('reports ok:false, not clean, when the tool exits with no analyzer configured', async () => {
+    it('reports ok:false, not clean, when the output file is not valid JSON', async () => {
       withFixtureOnPath()
-      process.env.FIXTURE_MODE = 'no-analyzer'
+      process.env.FIXTURE_MODE = 'unparseable'
       const [result] = await runCiscoScan(['/workspace/.claude/skills/demo'])
       expect(result.ok).toBe(false)
       expect(result.error).toBeTruthy()
@@ -206,30 +211,30 @@ describe('ciscoScanner (mock-first, against a fake skill-scanner binary)', () =>
 
     it('merges rule catalogs by id and concatenates results across runs', () => {
       const runA = {
-        tool: { driver: { name: 'skill-scanner', rules: [{ id: 'skill-scanner/exfiltration' }] } },
-        results: [{ ruleId: 'skill-scanner/exfiltration' }],
+        tool: { driver: { name: 'skill-scanner', rules: [{ id: 'HARDCODED_SSH_KEY_READ' }] } },
+        results: [{ ruleId: 'HARDCODED_SSH_KEY_READ' }],
       }
       const runB = {
-        tool: { driver: { name: 'skill-scanner', rules: [{ id: 'skill-scanner/command_execution' }] } },
-        results: [{ ruleId: 'skill-scanner/command_execution' }],
+        tool: { driver: { name: 'skill-scanner', rules: [{ id: 'PIPELINE_TAINT_FLOW' }] } },
+        results: [{ ruleId: 'PIPELINE_TAINT_FLOW' }],
       }
       const combined = combineCiscoSarifRuns([runA, runB]) as any
       expect(combined.tool.driver.name).toBe('skill-scanner')
       expect(combined.tool.driver.rules.map((r: any) => r.id).sort()).toEqual([
-        'skill-scanner/command_execution',
-        'skill-scanner/exfiltration',
+        'HARDCODED_SSH_KEY_READ',
+        'PIPELINE_TAINT_FLOW',
       ])
       expect(combined.results).toHaveLength(2)
     })
 
     it('de-duplicates a rule id that appears in more than one run', () => {
       const runA = {
-        tool: { driver: { name: 'skill-scanner', rules: [{ id: 'skill-scanner/exfiltration' }] } },
-        results: [{ ruleId: 'skill-scanner/exfiltration' }],
+        tool: { driver: { name: 'skill-scanner', rules: [{ id: 'HARDCODED_SSH_KEY_READ' }] } },
+        results: [{ ruleId: 'HARDCODED_SSH_KEY_READ' }],
       }
       const runB = {
-        tool: { driver: { name: 'skill-scanner', rules: [{ id: 'skill-scanner/exfiltration' }] } },
-        results: [{ ruleId: 'skill-scanner/exfiltration' }],
+        tool: { driver: { name: 'skill-scanner', rules: [{ id: 'HARDCODED_SSH_KEY_READ' }] } },
+        results: [{ ruleId: 'HARDCODED_SSH_KEY_READ' }],
       }
       const combined = combineCiscoSarifRuns([runA, runB]) as any
       expect(combined.tool.driver.rules).toHaveLength(1)

@@ -584,32 +584,40 @@ export function buildSarifLog(entries: readonly SkillReportEntry[], additionalRu
 const CISCO_EXCERPT_CAP = 2000
 
 /**
- * Maps the real `skill-scanner` category taxonomy (confirmed from the
- * installed 0.3.3 package's source, `skill_scanner/models/findings.py` —
- * see `lib/ciscoScanner.ts`'s module doc comment) onto this codebase's own
- * three-category taxonomy. Ported from a SARIF `ruleId` of the shape
- * `skill-scanner/<category>`; unrecognized or missing categories fall back
- * to `'malicious_code'` — the broadest of the three buckets, and the
- * correct default for "something a general-purpose security scanner flagged
- * that doesn't cleanly map to injection or exfiltration."
+ * Maps the real `skill-scanner` category taxonomy — the `ThreatCategory`
+ * enum in the installed 2.0.13 package's `skill_scanner/core/models.py`,
+ * carried on each SARIF result's `properties.category` (see
+ * `lib/ciscoScanner.ts`'s module doc comment for how it's extracted) — onto
+ * this codebase's own three-category taxonomy. `prompt_injection` covers
+ * deception/manipulation vectors (including ones aimed at a human or the
+ * discovery/trust mechanism itself, not just the model); `data_exfiltration`
+ * covers anything about data or credentials leaving; everything else
+ * (execution, abuse, supply-chain, or genuinely uncategorizable) falls back
+ * to `'malicious_code'`, the broadest of the three buckets.
  */
 const CISCO_CATEGORY_MAP: Readonly<Record<string, SkillScanCategory>> = {
   prompt_injection: 'prompt_injection',
-  indirect_injection: 'prompt_injection',
-  exfiltration: 'data_exfiltration',
-  credential_leak: 'data_exfiltration',
-  command_execution: 'malicious_code',
-  external_download: 'malicious_code',
-  supply_chain: 'malicious_code',
-  toxic_flow: 'malicious_code',
-  ssrf_cloud: 'malicious_code',
-  configuration_risk: 'malicious_code',
-  third_party_content: 'malicious_code',
+  social_engineering: 'prompt_injection',
+  harmful_content: 'prompt_injection',
+  skill_discovery_abuse: 'prompt_injection',
+  transitive_trust_abuse: 'prompt_injection',
+  unicode_steganography: 'prompt_injection',
+  data_exfiltration: 'data_exfiltration',
+  hardcoded_secrets: 'data_exfiltration',
+  command_injection: 'malicious_code',
+  unauthorized_tool_use: 'malicious_code',
+  obfuscation: 'malicious_code',
+  resource_abuse: 'malicious_code',
+  policy_violation: 'malicious_code',
+  malware: 'malicious_code',
+  autonomy_abuse: 'malicious_code',
+  tool_chaining_abuse: 'malicious_code',
+  supply_chain_attack: 'malicious_code',
 }
 
 /** See {@link CISCO_CATEGORY_MAP}. Exported for tests. */
-export function mapCiscoCategory(ruleId: string): SkillScanCategory {
-  const category = ruleId.includes('/') ? ruleId.slice(ruleId.lastIndexOf('/') + 1) : ruleId
+export function mapCiscoCategory(category: string | undefined): SkillScanCategory {
+  if (!category) return 'malicious_code'
   return CISCO_CATEGORY_MAP[category] ?? 'malicious_code'
 }
 
@@ -618,13 +626,14 @@ export function mapCiscoCategory(ruleId: string): SkillScanCategory {
  * report entries — the `SKILL.md` row, or a bundled-script row when a
  * finding's own location matches one of `candidateEntries` exactly. Falls
  * back to `fallbackEntry` (always the skill's `SKILL.md` row) when no
- * location match is found: `skill-scanner`'s own discovery targets
- * `SKILL.md` (confirmed via its `--list-targets` output), not each bundled
- * file independently, so a finding's location is not guaranteed to name a
- * file this codebase separately audited.
+ * location match is found — this codebase does not assume `skill-scanner`
+ * always attributes a finding to a specific bundled file, so an
+ * unmatched/absent location is treated as "belongs to the skill as a
+ * whole," not an error.
  *
  * Each Cisco finding becomes a `SkillScanFinding` with `patternId: 'cisco.'
- * + ruleId`, a category from {@link mapCiscoCategory}, an excerpt capped at
+ * + ruleId`, a category from {@link mapCiscoCategory} (mapped from the
+ * finding's own `category`, not its `ruleId`), an excerpt capped at
  * {@link CISCO_EXCERPT_CAP}, and `engine: 'cisco-skill-scanner'` — this
  * codebase's own findings stamp `engine: 'native'` at construction
  * (`skillScan.ts`/`scriptScan.ts`), so every finding in a report entry now
@@ -644,7 +653,7 @@ export function mergeCiscoFindings(
   for (const finding of ciscoResult.findings) {
     const mapped: SkillScanFinding = {
       patternId: `cisco.${finding.ruleId}`,
-      category: mapCiscoCategory(finding.ruleId),
+      category: mapCiscoCategory(finding.category),
       excerpt: finding.message.slice(0, CISCO_EXCERPT_CAP) || undefined,
       engine: 'cisco-skill-scanner',
     }
@@ -721,7 +730,7 @@ export async function runSkillAudit(opts: { sarif?: boolean; engine?: 'native' |
     } else if (requestedCisco) {
       log.error(
         "Cisco skill-scanner engine requested (--engine cisco) but the 'skill-scanner' binary " +
-          'is not on PATH. Install it with `pipx install skill-scanner`.',
+          'is not on PATH. Install it with `pipx install cisco-ai-skill-scanner`.',
       )
       process.exit(1)
     } else if (!sarif) {

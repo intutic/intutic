@@ -521,8 +521,8 @@ describe('buildSarifLog', () => {
 
   it('appends additionalRuns (Cisco skill-scanner) verbatim as a second runs[] entry (Phase S3)', () => {
     const ciscoRun = {
-      tool: { driver: { name: 'skill-scanner', rules: [{ id: 'skill-scanner/exfiltration' }] } },
-      results: [{ ruleId: 'skill-scanner/exfiltration', message: { text: 'exfil' } }],
+      tool: { driver: { name: 'skill-scanner', rules: [{ id: 'HARDCODED_SSH_KEY_READ' }] } },
+      results: [{ ruleId: 'HARDCODED_SSH_KEY_READ', message: { text: 'exfil' } }],
     }
     const sarif = buildSarifLog([entry()], [ciscoRun]) as any
     expect(sarif.runs).toHaveLength(2)
@@ -538,27 +538,28 @@ describe('buildSarifLog', () => {
 })
 
 describe('mapCiscoCategory (Phase S3)', () => {
-  it('maps prompt-injection-shaped categories to prompt_injection', () => {
-    expect(mapCiscoCategory('skill-scanner/prompt_injection')).toBe('prompt_injection')
-    expect(mapCiscoCategory('skill-scanner/indirect_injection')).toBe('prompt_injection')
+  it('maps injection/deception-shaped categories to prompt_injection', () => {
+    expect(mapCiscoCategory('prompt_injection')).toBe('prompt_injection')
+    expect(mapCiscoCategory('social_engineering')).toBe('prompt_injection')
+    expect(mapCiscoCategory('skill_discovery_abuse')).toBe('prompt_injection')
+    expect(mapCiscoCategory('unicode_steganography')).toBe('prompt_injection')
   })
 
-  it('maps exfiltration/credential categories to data_exfiltration', () => {
-    expect(mapCiscoCategory('skill-scanner/exfiltration')).toBe('data_exfiltration')
-    expect(mapCiscoCategory('skill-scanner/credential_leak')).toBe('data_exfiltration')
+  it('maps data/credential categories to data_exfiltration', () => {
+    expect(mapCiscoCategory('data_exfiltration')).toBe('data_exfiltration')
+    expect(mapCiscoCategory('hardcoded_secrets')).toBe('data_exfiltration')
   })
 
-  it('maps execution/supply-chain/network categories to malicious_code', () => {
-    expect(mapCiscoCategory('skill-scanner/command_execution')).toBe('malicious_code')
-    expect(mapCiscoCategory('skill-scanner/external_download')).toBe('malicious_code')
-    expect(mapCiscoCategory('skill-scanner/supply_chain')).toBe('malicious_code')
-    expect(mapCiscoCategory('skill-scanner/ssrf_cloud')).toBe('malicious_code')
-    expect(mapCiscoCategory('skill-scanner/toxic_flow')).toBe('malicious_code')
+  it('maps execution/supply-chain/abuse categories to malicious_code', () => {
+    expect(mapCiscoCategory('command_injection')).toBe('malicious_code')
+    expect(mapCiscoCategory('malware')).toBe('malicious_code')
+    expect(mapCiscoCategory('supply_chain_attack')).toBe('malicious_code')
+    expect(mapCiscoCategory('tool_chaining_abuse')).toBe('malicious_code')
   })
 
-  it('falls back to malicious_code for an unrecognized category', () => {
-    expect(mapCiscoCategory('skill-scanner/some_future_category')).toBe('malicious_code')
-    expect(mapCiscoCategory('not-even-slash-shaped')).toBe('malicious_code')
+  it('falls back to malicious_code for an unrecognized or absent category', () => {
+    expect(mapCiscoCategory('some_future_category')).toBe('malicious_code')
+    expect(mapCiscoCategory(undefined)).toBe('malicious_code')
   })
 })
 
@@ -581,9 +582,10 @@ describe('mergeCiscoFindings (Phase S3)', () => {
       sarifRuns: [],
       findings: [
         {
-          ruleId: 'skill-scanner/exfiltration',
+          ruleId: 'HARDCODED_SSH_KEY_READ',
           level: 'error',
           message: 'Reads ~/.ssh/id_rsa and sends it out.',
+          category: 'data_exfiltration',
           filePath: '/workspace/.agents/skills/demo/SKILL.md',
           line: 4,
         },
@@ -606,7 +608,7 @@ describe('mergeCiscoFindings (Phase S3)', () => {
     expect(entry.issuesDetected).toBe(1)
     expect(entry.findings).toHaveLength(1)
     expect(entry.findings?.[0]).toMatchObject({
-      patternId: 'cisco.skill-scanner/exfiltration',
+      patternId: 'cisco.HARDCODED_SSH_KEY_READ',
       category: 'data_exfiltration',
       engine: 'cisco-skill-scanner',
     })
@@ -627,9 +629,10 @@ describe('mergeCiscoFindings (Phase S3)', () => {
     const result = ciscoResult({
       findings: [
         {
-          ruleId: 'skill-scanner/command_execution',
+          ruleId: 'PIPELINE_TAINT_FLOW',
           level: 'error',
           message: 'curl | sh pipeline',
+          category: 'command_injection',
           filePath: '/workspace/.agents/skills/demo/setup.sh',
           line: 2,
         },
@@ -646,9 +649,10 @@ describe('mergeCiscoFindings (Phase S3)', () => {
     const result = ciscoResult({
       findings: [
         {
-          ruleId: 'skill-scanner/configuration_risk',
+          ruleId: 'MANIFEST_MISSING_LICENSE',
           level: 'warning',
           message: 'no location match',
+          category: 'policy_violation',
           filePath: undefined,
         },
       ],
@@ -661,7 +665,7 @@ describe('mergeCiscoFindings (Phase S3)', () => {
   it('caps the excerpt length', () => {
     const skillMd = skillMdEntry()
     const longMessage = 'x'.repeat(5000)
-    const result = ciscoResult({ findings: [{ ruleId: 'skill-scanner/exfiltration', level: 'error', message: longMessage, filePath: undefined }] })
+    const result = ciscoResult({ findings: [{ ruleId: 'HARDCODED_SSH_KEY_READ', level: 'error', message: longMessage, category: 'data_exfiltration', filePath: undefined }] })
     mergeCiscoFindings([skillMd], skillMd, result, '/workspace')
     expect(skillMd.findings?.[0].excerpt?.length).toBeLessThanOrEqual(2000)
   })
