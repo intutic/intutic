@@ -177,9 +177,9 @@ is explicitly designed to carry multiple tools' output in one document, so
 Cisco's results are never translated or re-shaped for that output mode. For
 every OTHER consumer (the human-readable CLI report, the control-plane
 `skills/report` payload, posture scoring), Cisco's findings ARE translated
-into this codebase's own `SkillScanFinding` shape — `patternId: 'cisco.' +
-<their ruleId>`, category mapped onto this page's `prompt_injection |
-data_exfiltration | malicious_code` taxonomy, excerpt bounded — the same
+into this codebase's own `SkillScanFinding` shape — `patternId` prefixed
+`cisco.` followed by their ruleId, category mapped onto this page's
+`prompt_injection | data_exfiltration | malicious_code` taxonomy, excerpt bounded — the same
 `SkillScanFinding` shape native findings already use, just with `engine:
 'cisco-skill-scanner'` instead of `'native'`.
 
