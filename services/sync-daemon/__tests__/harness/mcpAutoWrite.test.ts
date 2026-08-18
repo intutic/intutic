@@ -15,7 +15,17 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { parseDocument } from 'yaml'
 import { injectMcpServer, discoverMcpServers } from '../../src/harness/mcpAutoWrite.js'
+
+/** Loosely-typed shape for reading back a wrapped Goose `mcp:` entry in
+ *  assertions — this file doesn't need `McpServerEntry`'s full precision. */
+interface McpTestEntry {
+  command?: string
+  args?: string[]
+  env?: Record<string, string>
+  __intutic_wrapped?: boolean
+}
 
 interface Ctx {
   home: string
@@ -118,7 +128,11 @@ describe('injectMcpServer — write-if-changed', () => {
     expect(after.mcpServers.figma.args).toContain('--server-name')
   })
 
-  it('does not corrupt a remote (url-based) MCP server entry — no command to wrap', async () => {
+  // M2: TD-354's stdio→HTTP bridge phase supersedes the old "remote entries
+  // are left alone" behaviour — a remote (url-based) entry now gets wrapped
+  // into the proxy's bridge mode (`--remote-url`/`--remote-transport`),
+  // exactly like a stdio entry gets wrapped with `--`.
+  it('wraps a remote (url-based) MCP server entry into the proxy\'s bridge mode', async () => {
     ctx = setup()
     mkdirSync(join(ctx.home, '.claude'), { recursive: true })
     writeFileSync(
@@ -126,6 +140,7 @@ describe('injectMcpServer — write-if-changed', () => {
       JSON.stringify({
         mcpServers: {
           'remote-sse': { url: 'https://example.com/mcp', type: 'sse' },
+          'remote-http': { url: 'https://example.com/other', headers: { Authorization: 'Bearer secret-token' } },
         },
       }, null, 2),
     )
@@ -133,10 +148,50 @@ describe('injectMcpServer — write-if-changed', () => {
     await injectMcpServer(ctx.root, 'ws_test')
 
     const written = JSON.parse(readFileSync(claudeCodePath(ctx.home), 'utf-8'))
-    // Left alone: still url-based, no command, not marked wrapped.
-    expect(written.mcpServers['remote-sse'].url).toBe('https://example.com/mcp')
-    expect(written.mcpServers['remote-sse'].command).toBeUndefined()
-    expect(written.mcpServers['remote-sse'].__intutic_wrapped).toBeUndefined()
+
+    const sse = written.mcpServers['remote-sse']
+    expect(sse.__intutic_wrapped).toBe(true)
+    expect(sse.command).toBe('node')
+    expect(sse.args).toContain('--remote-url')
+    expect(sse.args[sse.args.indexOf('--remote-url') + 1]).toBe('https://example.com/mcp')
+    expect(sse.args).toContain('--remote-transport')
+    expect(sse.args[sse.args.indexOf('--remote-transport') + 1]).toBe('sse')
+    expect(sse.args).toContain('--server-name')
+    expect(sse.args[sse.args.indexOf('--server-name') + 1]).toBe('remote-sse')
+    // No stdio `--` separator — there is no downstream command to pass after it.
+    expect(sse.args).not.toContain('--')
+    // Original url/type preserved for unwrap + honest discovery reporting.
+    expect(sse.__intutic_original).toEqual({ url: 'https://example.com/mcp', type: 'sse' })
+    // No headers on the original entry — no INTUTIC_REMOTE_HEADERS env var.
+    expect(sse.env.INTUTIC_REMOTE_HEADERS).toBeUndefined()
+
+    const http = written.mcpServers['remote-http']
+    expect(http.__intutic_wrapped).toBe(true)
+    expect(http.args[http.args.indexOf('--remote-transport') + 1]).toBe('http') // default when `type` absent
+    // Headers ride via env, never argv — `ps` visibility.
+    expect(http.args.join(' ')).not.toContain('secret-token')
+    expect(JSON.parse(http.env.INTUTIC_REMOTE_HEADERS)).toEqual({ Authorization: 'Bearer secret-token' })
+    expect(http.__intutic_original).toEqual({ url: 'https://example.com/other', headers: { Authorization: 'Bearer secret-token' } })
+  })
+
+  it('re-injecting an already-wrapped remote entry writes ZERO bytes (idempotence, same as the stdio-wrap case)', async () => {
+    ctx = setup()
+    mkdirSync(join(ctx.home, '.claude'), { recursive: true })
+    writeFileSync(
+      claudeCodePath(ctx.home),
+      JSON.stringify({ mcpServers: { 'remote-sse': { url: 'https://example.com/mcp', type: 'sse' } } }, null, 2),
+    )
+
+    await injectMcpServer(ctx.root, 'ws_test')
+    const afterFirst = statSync(claudeCodePath(ctx.home))
+    const contentAfterFirst = readFileSync(claudeCodePath(ctx.home), 'utf-8')
+
+    await injectMcpServer(ctx.root, 'ws_test')
+    const afterSecond = statSync(claudeCodePath(ctx.home))
+    const contentAfterSecond = readFileSync(claudeCodePath(ctx.home), 'utf-8')
+
+    expect(afterSecond.mtimeMs).toBe(afterFirst.mtimeMs)
+    expect(contentAfterSecond).toBe(contentAfterFirst)
   })
 })
 
@@ -209,6 +264,31 @@ describe('discoverMcpServers', () => {
     expect(found).toContainEqual({ server: 'remote-http', harness: 'claude-code', transport: 'http', wrapped: false })
   })
 
+  // M2: `classifyEntry` must read `__intutic_original` FIRST — a wrapped
+  // remote entry's top-level shape is `command: 'node'` (the bridge), which
+  // would misreport as stdio if that were checked first. Visibility must
+  // stay honest per the task's own framing.
+  it('reports a WRAPPED remote entry\'s true transport (http/sse), never stdio, once bridge-wrapped', async () => {
+    ctx = setup()
+    mkdirSync(join(ctx.home, '.claude'), { recursive: true })
+    writeFileSync(
+      claudeCodePath(ctx.home),
+      JSON.stringify({
+        mcpServers: {
+          'remote-sse': { url: 'https://example.com/mcp', type: 'sse' },
+          'remote-http': { url: 'https://example.com/other' },
+        },
+      }, null, 2),
+    )
+
+    await injectMcpServer(ctx.root, 'ws_test')
+    const found = await discoverMcpServers(ctx.root)
+
+    expect(found).toContainEqual({ server: 'remote-sse', harness: 'claude-code', transport: 'sse', wrapped: true })
+    expect(found).toContainEqual({ server: 'remote-http', harness: 'claude-code', transport: 'http', wrapped: true })
+    expect(found.find((s) => s.server === 'remote-sse')?.transport).not.toBe('stdio')
+  })
+
   it('excludes the intutic server itself and reflects wrapped:true after injection', async () => {
     ctx = setup()
     mkdirSync(join(ctx.home, '.claude'), { recursive: true })
@@ -228,5 +308,112 @@ describe('discoverMcpServers', () => {
     ctx = setup()
     const found = await discoverMcpServers(ctx.root)
     expect(found).toEqual([])
+  })
+})
+
+// M2: Goose's config.yaml is now structurally parsed and edited (the `yaml`
+// package's `parseDocument`) instead of append-only string injection, so a
+// remote MCP server declared there gets the SAME bridge-wrap coverage a
+// remote entry in any JSON-shaped harness config gets. These tests pin the
+// two properties that make that safe on a user's hand-maintained file:
+// comments/formatting survive an edit that doesn't touch them, and a file
+// that does not parse as YAML at all falls back to the pre-existing
+// append-only injection rather than being corrupted.
+describe('Goose YAML structural editing', () => {
+  let ctx: Ctx
+  const gooseConfigPath = (home: string) => join(home, '.config', 'goose', 'config.yaml')
+
+  afterEach(() => {
+    if (ctx) teardown(ctx)
+  })
+
+  it('wraps a stdio and a remote Goose MCP entry while preserving unrelated comments and keys', async () => {
+    ctx = setup()
+    mkdirSync(join(ctx.home, '.config', 'goose'), { recursive: true })
+    const original = [
+      '# hand-maintained goose config — do not reorder',
+      'provider:',
+      '  host: https://api.example.com  # my provider host',
+      'mcp:',
+      '  github:',
+      '    command: npx',
+      '    args: ["-y", "server-github"]',
+      '  remote-thing:',
+      '    url: https://example.com/mcp',
+      '    type: sse',
+      '',
+    ].join('\n')
+    writeFileSync(gooseConfigPath(ctx.home), original)
+
+    await injectMcpServer(ctx.root, 'ws_test')
+
+    const written = readFileSync(gooseConfigPath(ctx.home), 'utf-8')
+    // Unrelated content survives byte-for-byte in spirit: comment text and
+    // the untouched `provider:` block are still present.
+    expect(written).toContain('# hand-maintained goose config — do not reorder')
+    expect(written).toContain('host: https://api.example.com')
+    expect(written).toContain('my provider host')
+
+    const doc = parseDocument(written)
+    const parsed = doc.toJS() as { mcp: Record<string, McpTestEntry> }
+    expect(parsed.mcp.intutic).toBeDefined()
+    expect(parsed.mcp.github.__intutic_wrapped).toBe(true)
+    expect(parsed.mcp.github.command).toBe('node')
+    expect(parsed.mcp.github.args).toContain('npx')
+    expect(parsed.mcp['remote-thing'].__intutic_wrapped).toBe(true)
+    expect(parsed.mcp['remote-thing'].args).toContain('--remote-url')
+    expect(parsed.mcp['remote-thing'].args).toContain('--remote-transport')
+  })
+
+  it('re-injecting an already-wrapped Goose config writes ZERO bytes (idempotence)', async () => {
+    ctx = setup()
+    mkdirSync(join(ctx.home, '.config', 'goose'), { recursive: true })
+    writeFileSync(
+      gooseConfigPath(ctx.home),
+      ['mcp:', '  github:', '    command: npx', '    args: ["-y", "server-github"]', ''].join('\n'),
+    )
+
+    await injectMcpServer(ctx.root, 'ws_test')
+    const afterFirst = statSync(gooseConfigPath(ctx.home))
+    const contentAfterFirst = readFileSync(gooseConfigPath(ctx.home), 'utf-8')
+
+    await injectMcpServer(ctx.root, 'ws_test')
+    const afterSecond = statSync(gooseConfigPath(ctx.home))
+    const contentAfterSecond = readFileSync(gooseConfigPath(ctx.home), 'utf-8')
+
+    expect(afterSecond.mtimeMs).toBe(afterFirst.mtimeMs)
+    expect(contentAfterSecond).toBe(contentAfterFirst)
+  })
+
+  it('falls back to append-only text injection when config.yaml does not parse as YAML, without corrupting it', async () => {
+    ctx = setup()
+    mkdirSync(join(ctx.home, '.config', 'goose'), { recursive: true })
+    // Tabs as indentation are invalid YAML — parseDocument reports an error.
+    const malformed = 'mcp:\n  github:\n  command: npx\n\tbad_tab: true\n'
+    writeFileSync(gooseConfigPath(ctx.home), malformed)
+
+    await injectMcpServer(ctx.root, 'ws_test')
+
+    const written = readFileSync(gooseConfigPath(ctx.home), 'utf-8')
+    // The malformed original content is still present, untouched...
+    expect(written).toContain(malformed.trimEnd())
+    // ...with the append-only `intutic:` block appended after it, the same
+    // shape the pre-YAML-dep fallback always produced.
+    expect(written).toContain('intutic:')
+    expect(written.indexOf(malformed.trimEnd())).toBeLessThan(written.indexOf('intutic:'))
+  })
+
+  it('creates a fresh mcp: block via structural YAML when config.yaml has no mcp: section yet', async () => {
+    ctx = setup()
+    mkdirSync(join(ctx.home, '.config', 'goose'), { recursive: true })
+    writeFileSync(gooseConfigPath(ctx.home), 'provider:\n  host: https://api.example.com\n')
+
+    await injectMcpServer(ctx.root, 'ws_test')
+
+    const written = readFileSync(gooseConfigPath(ctx.home), 'utf-8')
+    const doc = parseDocument(written)
+    const parsed = doc.toJS() as { provider: { host: string }; mcp: Record<string, McpTestEntry> }
+    expect(parsed.provider.host).toBe('https://api.example.com')
+    expect(parsed.mcp.intutic).toBeDefined()
   })
 })

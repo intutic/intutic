@@ -1,6 +1,6 @@
 ---
 title: Skill Scanning
-description: Content-scanning agent skill files (SKILL.md) for prompt-injection, data-exfiltration, and malicious-code shapes — what it catches, how it's scored, and what it deliberately does not cover yet.
+description: Content-scanning agent skill files (SKILL.md) and their bundled scripts for prompt-injection, data-exfiltration, and malicious-code shapes — what it catches, how it's scored, and what it deliberately does not cover yet.
 ---
 
 # Skill Scanning <Badge type="tip" text="Open-Core" />
@@ -53,15 +53,79 @@ for every consumer, immediately.
 
 | Surface | What it does |
 |---|---|
-| `intutic skill audit` | Walks `.agents/skills/**/SKILL.md` and `.claude/skills/**/SKILL.md`, scans each, prints findings, and reports them to the control plane. Auto-pruning a flagged line is opt-in via the `enableLocalSkillAuditDelete` workspace setting — the same gate that already covers the legacy rule-file audit (`CLAUDE.md`, `.cursorrules`, etc). |
-| Sync daemon | Scans `.agents/skills/**/SKILL.md` on every sync cycle and attaches the verdict to the agent's reported `skills` facet — no separate command needed. |
-| Agent posture score | The `skills` scoring dimension is content-aware: a skill scanned clean scores full marks, a skill with a confirmed finding scores zero, and a skill this report cannot vouch for either way (never scanned, or reported by an older daemon build) scores in between — see [What this cannot catch](#what-this-cannot-catch) for why "in between" and not "clean." |
+| `intutic skill audit` | Walks `.agents/skills/**/SKILL.md` and `.claude/skills/**/SKILL.md`, scans each, prints findings, and reports them to the control plane. Auto-pruning a flagged line is opt-in via the `enableLocalSkillAuditDelete` workspace setting — the same gate that already covers the legacy rule-file audit (`CLAUDE.md`, `.cursorrules`, etc). Also enumerates and scans each skill's **bundled scripts** — see below. |
+| Sync daemon | Scans `.agents/skills/**/SKILL.md` on every sync cycle and attaches the verdict to the agent's reported `skills` facet — no separate command needed. Also computes a `scripts: {total, scanned, flagged}` facet per skill from the same bounded bundled-file enumeration. |
+| Agent posture score | The `skills` scoring dimension is content-aware: a skill scanned clean scores full marks, a skill with a confirmed finding scores zero, and a skill this report cannot vouch for either way (never scanned, or reported by an older daemon build) scores in between — see [What this cannot catch](#what-this-cannot-catch) for why "in between" and not "clean." A flagged bundled script pulls the whole skill to zero regardless of how `SKILL.md` itself scored; an unscanned (refused, over-cap, or unrecognized-language) bundled script pulls the skill down to the same "in between" band an unscanned `SKILL.md` gets. |
 
 A file that cannot be read — permissions, vanished between discovery and the
 read, not a regular file — is reported `scanned: false`, never folded into
 `issuesDetected: 0` or `clean: true`. A scan that never ran says nothing
 about the file's safety, and treating silence as a clean bill of health is
 exactly the failure mode this distinction exists to avoid.
+
+## Bundled scripts
+
+A skill directory can ship executable files alongside its `SKILL.md` — a
+`setup.sh` the instructions tell the agent to run, a `helper.py` it imports,
+a downloaded binary. Until this phase (TD-356 in
+[TECH_DEBT.md](https://github.com/intutic/intutic/blob/main/docs/TECH_DEBT.md)),
+nothing in this codebase even enumerated those files: `intutic skill audit`
+and the sync daemon's `collectSkills` both walked skill directories but only
+ever opened the one `SKILL.md` inside each, so a sibling script was invisible
+to every consumer.
+
+That gap is closed by `packages/shared-types/src/scriptScan.ts` (bundled-file
+counterpart to `skillScan.ts`, reusing its pattern shape, 3-category
+taxonomy, and fixture discipline) plus two new functions in
+`tools/cli/src/commands/skill.ts`:
+
+- **`discoverSkillBundledFiles`** — a bounded, symlink-skipping walk of a
+  skill directory's sibling files. Bounded by three caps
+  (`@intutic/shared-types`): `MAX_SKILL_DIR_DEPTH` (3 — how deep the walk
+  descends into subdirectories), `MAX_FILES_PER_SKILL` (40 — how many files
+  it will ever return for one skill), and `MAX_SCRIPT_SCAN_BYTES` (256 KiB —
+  the largest file it will read content from). Symlinks are never followed —
+  a symlink inside a skill directory could point outside it, or outside the
+  workspace entirely, which would turn a bounded, skill-scoped walk into an
+  effectively unbounded one. The sync daemon's `collectSkills` applies the
+  same three caps and the same symlink-skip discipline through its own,
+  independent implementation (`collectSkillScripts`), the same way it already
+  re-implements `SKILL.md` discovery independently of the CLI rather than
+  importing from `tools/cli`.
+- **`auditScriptFile`** — reads one discovered file, infers its language via
+  `detectScriptLanguage` (extension first, shebang as a fallback), and
+  **always** computes its sha256 hash — even for a file this scanner cannot
+  itself interpret, such as a compiled binary. That hash is deliberate, not
+  incidental: a later, separate, **opt-in** integration with Cisco's
+  `skill-scanner` project (and a VirusTotal-style hash lookup) depends on
+  every bundled file being hashed regardless of whether this phase's own
+  regex patterns can say anything about its content. Content scanning itself
+  (`scanScriptContent`) only runs when the language is recognized and the
+  file is within the byte cap.
+
+Refusal-not-pass applies here exactly as it does for `SKILL.md`: a file over
+`MAX_SCRIPT_SCAN_BYTES` is reported `scanned: false` — a refusal, never a
+silent skip and never a false "clean" — and the same is true of a file whose
+language could not be determined. Both are still hashed.
+
+`SCRIPT_SCAN_PATTERNS` seeds cover the shapes this kind of script most often
+carries: a remote download piped straight into a shell (`curl … | sh`), a
+base64-decoded payload piped into a shell, reading a credential-shaped path
+(`.ssh`, `.aws/credentials`, `.env`) from a script, an outbound POST (or
+piped stdin into `curl`) to an external URL, `chmod +x` of a just-downloaded
+file, and two Python-specific idioms for the same decode-then-execute shape —
+`subprocess`/`os.system` fed a base64-decoded payload, and
+`eval(compile(...))`/`exec(base64.b64decode(...))`. Every pattern carries the
+same fixture discipline as `skillScan.ts`'s table: at least one string that
+must trigger it, at least three that must not, both checked at import time.
+
+Findings from bundled scripts land in the same places as `SKILL.md`
+findings — the CLI's console output, the `skills/report` payload (each row
+now optionally carries `kind: 'skill_md' | 'script'` and, for scripts,
+`language`), the `--sarif` output (one `intutic-skill-scan` rule catalog,
+union of both pattern tables), and the sync daemon's per-skill `scripts:
+{total, scanned, flagged}` facet, which the posture scorer folds into the
+same `skills` dimension described above.
 
 ## Report-only, deliberately, this phase
 
@@ -171,22 +235,47 @@ Specifically:
   reason `tool_poison.rs` does not claim one: the positive fixtures are
   hand-built from a published attack taxonomy, so they show the documented
   shapes are covered, not what fraction of real attacks would be caught.
-- **Deterministic pattern matching only — no semantic understanding.** A
-  rephrasing that avoids every pattern's literal wording passes clean. This
-  is by design for this phase: LLM-based semantic analysis of skill content
-  is deliberately kept out of any hot/live path (see TECH_DEBT.md); if it is
-  ever built, it has to go through this codebase's `resolveMonitor`
-  judge-call convention like every other LLM judge invocation, not bypass it
-  because the input happens to be a skill file.
-- **Bundled scripts are out of scope.** A skill can ship executable files
-  alongside its `SKILL.md` — a Python or shell script the instructions tell
-  the agent to run. This scanner reads markdown only; scanning bundled
-  executables is a different problem (static analysis of arbitrary code,
-  not pattern-matching prose) and is explicitly deferred — see TECH_DEBT.md.
+- **Regex-genre pattern matching only — for `SKILL.md` prose AND for bundled
+  scripts — never AST or dataflow analysis, and no semantic understanding.**
+  This is the single most important limitation to be honest about, and it
+  applies identically on both sides of this page: `scanSkillContent` matches
+  imperative sentence shapes against markdown text; `scanScriptContent`
+  matches source-code shapes (a `curl | sh` pipeline, a `subprocess.run(
+  base64.b64decode(...))` call) against script text. Neither one parses a
+  syntax tree, resolves what a variable holds, follows a function call to its
+  definition, or tracks where a value came from before it reaches a
+  dangerous sink. A rephrasing that avoids a pattern's literal wording passes
+  clean; so does a script that reaches the exact same dangerous operation
+  through a shape these patterns don't anticipate — an extra layer of
+  indirection, a helper function hiding the call, string concatenation
+  splitting a keyword across two variables. This is a deliberate scope
+  choice for this phase, not an oversight: full AST/dataflow analysis of
+  arbitrary source code is a meaningfully different (and much heavier)
+  engineering problem than pattern-matching prose or matching known code
+  shapes, and building it into this phase would have meant either rushing an
+  unrelated detector in alongside these two, or quietly pretending regex
+  patterns generalize to real static analysis, which they do not. Full
+  AST-level scanning of bundled scripts is available only through a later,
+  **separate, opt-in** integration with Cisco's open-source `skill-scanner`
+  project — unbuilt as of this phase, and tracked in TECH_DEBT.md — which
+  consumes the sha256 hash `auditScriptFile` computes for every bundled file.
+  LLM-based semantic analysis of skill content is a further, still-separate
+  gap: it is deliberately kept out of any hot/live path (see TECH_DEBT.md),
+  and if it is ever built, it has to go through this codebase's
+  `resolveMonitor` judge-call convention like every other LLM judge
+  invocation, not bypass it because the input happens to be a skill file.
+- **Bundled-script coverage, specifically, is a first pass, not a general
+  scanner.** `SCRIPT_SCAN_PATTERNS` seeds a handful of well-known shapes
+  (remote-download-piped-to-shell, decode-then-execute, credential-path
+  reads, outbound exfiltration POSTs, chmod+exec of a downloaded file, and
+  two Python-specific decode-then-execute idioms) — not a general-purpose
+  malicious-code detector. A script that does something harmful through any
+  other shape is not caught by this phase at all.
 - **Encoded, split, or otherwise obfuscated payloads generally.** Beyond the
-  one narrow base64-decode-then-execute shape this scanner does catch, a
-  payload assembled from pieces, or hidden behind an encoding this scanner's
-  patterns don't anticipate, is not caught.
+  narrow base64-decode-then-execute shapes these scanners do catch (one for
+  markdown, three for scripts — a shell pipeline and two Python idioms), a
+  payload assembled from pieces, or hidden behind an encoding these patterns
+  don't anticipate, is not caught.
 
 ## Related
 

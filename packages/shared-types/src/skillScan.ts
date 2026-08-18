@@ -125,10 +125,15 @@ export interface SkillScanResult {
 }
 
 /** Longest excerpt this module will ever surface, in characters, centered on
- *  a match. Bounded, not full-content — see the module doc comment. */
-const EXCERPT_RADIUS = 40
+ *  a match. Bounded, not full-content — see the module doc comment.
+ *  Exported so `scriptScan.ts` (the bundled-script scanner, Phase S2) can
+ *  reuse the exact same bounding rather than growing a second, easily
+ *  drifting copy of "how big is too big for an excerpt". */
+export const EXCERPT_RADIUS = 40
 
-function excerptFor(content: string, index: number, length: number): string {
+/** Bounds a match to a short window of surrounding context. Exported for
+ *  `scriptScan.ts` to reuse verbatim — see {@link EXCERPT_RADIUS}. */
+export function excerptFor(content: string, index: number, length: number): string {
   const start = Math.max(0, index - EXCERPT_RADIUS)
   const end = Math.min(content.length, index + length + EXCERPT_RADIUS)
   const prefix = start > 0 ? '…' : ''

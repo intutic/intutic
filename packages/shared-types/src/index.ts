@@ -428,8 +428,23 @@ export {
 export {
   SKILL_SCAN_PATTERNS,
   scanSkillContent,
+  excerptFor,
+  EXCERPT_RADIUS,
   type SkillScanCategory,
   type SkillScanPattern,
   type SkillScanFinding,
   type SkillScanResult,
 } from './skillScan.js'
+
+export {
+  SCRIPT_SCAN_PATTERNS,
+  scanScriptContent,
+  detectScriptLanguage,
+  MAX_SKILL_DIR_DEPTH,
+  MAX_FILES_PER_SKILL,
+  MAX_SCRIPT_SCAN_BYTES,
+  type ScriptLanguage,
+  type ScriptScanPattern,
+  type ScriptScanFinding,
+  type ScriptScanResult,
+} from './scriptScan.js'

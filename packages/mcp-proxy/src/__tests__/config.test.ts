@@ -102,4 +102,98 @@ describe('loadConfig', () => {
     const config = await loadConfig(['--', 'node', 'server.js'])
     expect(config.serverName).toBe('unknown')
   })
+
+  // M2: remote (HTTP/SSE) bridge mode — --remote-url and --remote-transport,
+  // and the standalone-detection update that must not treat a remote-bridge
+  // invocation as standalone (no downstream server) mode.
+  describe('remote bridge mode', () => {
+    it('parses --remote-url and defaults --remote-transport to "http"', async () => {
+      await node_fs.writeFile(runtimeEnvPath, 'INTUTIC_WORKSPACE_ID=ws-test\n', 'utf-8')
+
+      const config = await loadConfig([
+        '--workspace-id', 'ws-cli',
+        '--server-name', 'linear',
+        '--remote-url', 'https://mcp.example.com/sse',
+      ])
+      expect(config.remoteUrl).toBe('https://mcp.example.com/sse')
+      expect(config.remoteTransport).toBe('http')
+      expect(config.realServerCommand).toEqual([])
+      // Remote bridge mode is a real upstream, not "no downstream server" —
+      // must not be misdetected as standalone (the `intutic` harness entry).
+      expect(config.standalone).toBe(false)
+    })
+
+    it('parses an explicit --remote-transport sse', async () => {
+      await node_fs.writeFile(runtimeEnvPath, 'INTUTIC_WORKSPACE_ID=ws-test\n', 'utf-8')
+
+      const config = await loadConfig([
+        '--remote-url', 'https://mcp.example.com/sse',
+        '--remote-transport', 'sse',
+      ])
+      expect(config.remoteTransport).toBe('sse')
+    })
+
+    it('rejects an unrecognised --remote-transport value', async () => {
+      await node_fs.writeFile(runtimeEnvPath, 'INTUTIC_WORKSPACE_ID=ws-test\n', 'utf-8')
+
+      await expect(
+        loadConfig(['--remote-url', 'https://mcp.example.com', '--remote-transport', 'websocket']),
+      ).rejects.toThrow(/--remote-transport must be "sse" or "http"/)
+    })
+
+    it('rejects --remote-url combined with a positional stdio command as a config error', async () => {
+      await node_fs.writeFile(runtimeEnvPath, 'INTUTIC_WORKSPACE_ID=ws-test\n', 'utf-8')
+
+      await expect(
+        loadConfig(['--remote-url', 'https://mcp.example.com', '--', 'node', 'server.js']),
+      ).rejects.toThrow(/mutually exclusive/)
+    })
+
+    it('leaves remoteUrl undefined and standalone true when neither --remote-url nor a stdio command is given', async () => {
+      await node_fs.writeFile(runtimeEnvPath, 'INTUTIC_WORKSPACE_ID=ws-test\n', 'utf-8')
+
+      const config = await loadConfig([])
+      expect(config.remoteUrl).toBeUndefined()
+      expect(config.remoteTransport).toBeUndefined()
+      expect(config.standalone).toBe(true)
+    })
+
+    it('parses INTUTIC_REMOTE_HEADERS from the environment, never from argv', async () => {
+      await node_fs.writeFile(runtimeEnvPath, 'INTUTIC_WORKSPACE_ID=ws-test\n', 'utf-8')
+      const prev = process.env['INTUTIC_REMOTE_HEADERS']
+      process.env['INTUTIC_REMOTE_HEADERS'] = JSON.stringify({ Authorization: 'Bearer sekrit-token' })
+      try {
+        const config = await loadConfig(['--remote-url', 'https://mcp.example.com'])
+        expect(config.remoteHeaders).toEqual({ Authorization: 'Bearer sekrit-token' })
+      } finally {
+        if (prev === undefined) delete process.env['INTUTIC_REMOTE_HEADERS']
+        else process.env['INTUTIC_REMOTE_HEADERS'] = prev
+      }
+    })
+
+    it('defaults remoteHeaders to {} when INTUTIC_REMOTE_HEADERS is unset', async () => {
+      await node_fs.writeFile(runtimeEnvPath, 'INTUTIC_WORKSPACE_ID=ws-test\n', 'utf-8')
+      const prev = process.env['INTUTIC_REMOTE_HEADERS']
+      delete process.env['INTUTIC_REMOTE_HEADERS']
+      try {
+        const config = await loadConfig(['--remote-url', 'https://mcp.example.com'])
+        expect(config.remoteHeaders).toEqual({})
+      } finally {
+        if (prev !== undefined) process.env['INTUTIC_REMOTE_HEADERS'] = prev
+      }
+    })
+
+    it('falls back to {} when INTUTIC_REMOTE_HEADERS is malformed JSON', async () => {
+      await node_fs.writeFile(runtimeEnvPath, 'INTUTIC_WORKSPACE_ID=ws-test\n', 'utf-8')
+      const prev = process.env['INTUTIC_REMOTE_HEADERS']
+      process.env['INTUTIC_REMOTE_HEADERS'] = '{not json'
+      try {
+        const config = await loadConfig(['--remote-url', 'https://mcp.example.com'])
+        expect(config.remoteHeaders).toEqual({})
+      } finally {
+        if (prev === undefined) delete process.env['INTUTIC_REMOTE_HEADERS']
+        else process.env['INTUTIC_REMOTE_HEADERS'] = prev
+      }
+    })
+  })
 })
