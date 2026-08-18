@@ -12,10 +12,48 @@
  * - Continue:         ~/.continue/config.json (mcpServers section)
  * - Goose:            ~/.config/goose/config.yaml (mcp section)
  * - OpenHands:        <workspaceRoot>/.openhands/mcp.json
+ * - Muse Code:        ~/.config/muse/settings.json (`mcp_servers` section)
+ * - Grok Build:       ~/.grok/config.toml + <workspaceRoot>/.grok/config.toml
+ *                      ([mcp_servers.*] tables)
  *
- * That is 9 config paths across 8 `HarnessType` values (Cursor alone owns two
- * paths — global and project). `discoverMcpServers` below reads all nine
- * read-only, for reporting; the injectors above are the only thing that writes.
+ * That is 12 config paths across 10 `HarnessType` values (Cursor and Grok
+ * Build each own two paths — global/project for Cursor, user/project for
+ * Grok Build). `discoverMcpServers` below reads all twelve read-only, for
+ * reporting; the injectors above are the only thing that writes.
+ *
+ * # Grok Build's compat-path overlap — dedup, not a bug
+ *
+ * Grok Build ALSO natively reads `.cursor/mcp.json` (a compatibility
+ * feature) — which `injectCursor`/`discoverJsonObjectHarness` below ALREADY
+ * wrap/discover under `harness: 'cursor'`, independently of anything this
+ * file does for Grok Build specifically. A server declared in BOTH
+ * `.cursor/mcp.json` and Grok Build's own `[mcp_servers.*]` table therefore
+ * produces TWO rows in `discoverMcpServers`' output — one tagged `cursor`,
+ * one tagged `grok` — not one row silently merged or dropped. That is
+ * consistent with how every other harness pair already behaves here (this
+ * file reports per CONFIG FILE, never cross-harness-deduplicated), and it is
+ * the correct behaviour, not a defect to fix: the two configs are genuinely
+ * separate on disk, a user (or a future sync) could point them at different
+ * servers, and a naive same-name merge would hide that a `.cursor/mcp.json`
+ * entry is unwrapped while the `[mcp_servers.*]` entry with the same name is
+ * wrapped (or vice versa). See `grokHooks.test.ts`'s dedup test for the pin:
+ * the same server name in both files must total exactly two DISTINCT rows,
+ * never one collapsed row and never three.
+ *
+ * (Grok Build is also documented to read a bare project-root `.mcp.json` —
+ * a convention this file does not wrap or discover for ANY harness today,
+ * Grok Build included; that is a pre-existing gap in this file predating
+ * this harness, out of scope for this phase, not something newly introduced
+ * here.)
+ *
+ * Muse's `mcp_servers` map carries both `stdio` and `streamable_http` server
+ * entries, but its ON-DISK shape (`command`/`args`/`env` for stdio,
+ * `url`/`headers` for a remote transport) was ASSUMED to match the same
+ * `command`-or-`url` shape every other JSON-map harness here uses — `wrapAllServers`
+ * / `wrapWithProxy` branch on exactly that, so a `streamable_http` entry is
+ * wrapped through the SAME remote-bridge path a `url`-keyed Claude Desktop/
+ * Windsurf entry gets, without new code. See TD-362 for why this is recorded
+ * as an assumption rather than a confirmation.
  *
  * Proxy-wrapping convention:
  *   Each existing stdio MCP server entry is rewritten so that the governance
@@ -54,6 +92,7 @@ import { existsSync } from 'node:fs'
 import { isDeepStrictEqual } from 'node:util'
 import { createLogger } from '@intutic/logger'
 import { parseDocument, isMap } from 'yaml'
+import { parse as parseToml, stringify as stringifyToml } from 'smol-toml'
 
 const log = createLogger('sync-mcp-autowrite')
 
@@ -182,6 +221,18 @@ function gooseConfigPath(): string {
 
 function openHandsConfigPath(workspaceRoot: string): string {
   return node_path.join(workspaceRoot, '.openhands', 'mcp.json')
+}
+
+function museConfigPath(): string {
+  return node_path.join(node_os.homedir(), '.config', 'muse', 'settings.json')
+}
+
+function grokUserConfigPath(): string {
+  return node_path.join(node_os.homedir(), '.grok', 'config.toml')
+}
+
+function grokProjectConfigPath(workspaceRoot: string): string {
+  return node_path.join(workspaceRoot, '.grok', 'config.toml')
 }
 
 // ─── Proxy Wrapping ───────────────────────────────────────────────────────────
@@ -684,6 +735,167 @@ async function injectOpenHands(workspaceId: string, workspaceRoot: string): Prom
   }
 }
 
+// ─── Target: Muse Code ────────────────────────────────────────────────────────
+
+/**
+ * `~/.config/muse/settings.json` carries `schema_version` (documented as a
+ * mandatory field — defaulted to `1` if this is genuinely the first thing to
+ * ever write the file), `mcp_servers` (this function's target), and
+ * `managed_hooks_path` (written by `museHooks.ts`). Read-modify-write, same as
+ * every other JSON-object harness here — `mergeMuseSettingsJson` in
+ * `museHooks.ts` performs the identical pattern for the hooks half of this
+ * same file, sequentially, the same way `gooseHooks.ts`'s `mergeGooseConfig`
+ * and `injectGoose` both write `config.yaml` without coordinating.
+ */
+async function injectMuse(workspaceId: string, workspaceRoot: string): Promise<void> {
+  const configPath = museConfigPath()
+
+  try {
+    await node_fs.access(node_path.dirname(configPath))
+  } catch {
+    log.debug({ action: 'muse_skip' }, 'Muse Code not installed — skipping')
+    return
+  }
+
+  const current = await readJsonFile<{ schema_version?: number; mcp_servers?: McpServersMap; [key: string]: unknown }>(
+    configPath,
+    {},
+  )
+  current.mcp_servers = wrapAllServers(
+    { intutic: buildIntuticMcpEntry(workspaceRoot), ...(current.mcp_servers ?? {}) },
+    workspaceId,
+    workspaceRoot
+  )
+  if (current.schema_version === undefined) current.schema_version = 1
+
+  await writeJsonFile(configPath, current)
+  log.info({ action: 'muse_mcp_injected' }, 'Muse Code ~/.config/muse/settings.json mcp_servers updated')
+}
+
+// ─── Target: Grok Build ───────────────────────────────────────────────────────
+
+/** Structural TOML shape this file cares about; anything else — `[model.*]`,
+ *  whatever grokHooks.ts's own merge wrote, unrelated tables a user added —
+ *  round-trips through smol-toml untouched. */
+interface GrokTomlMcpDoc {
+  mcp_servers?: McpServersMap
+  [key: string]: unknown
+}
+
+/**
+ * The pre-parser fallback for a `config.toml` that does not parse as TOML at
+ * all — append an `[mcp_servers.intutic]` block only, mirroring
+ * `injectGooseAppendOnly`'s exact reasoning: a parser that cannot safely
+ * represent a malformed file cannot safely round-trip it either, so this
+ * never touches (or even parses) anything else already in the file. Never
+ * rewraps a pre-existing `[mcp_servers.*]` entry when this path runs — same
+ * honest limit `injectGooseAppendOnly`/`discoverGooseLineScanFallback`
+ * document for their own fallback.
+ */
+async function injectGrokConfigAppendOnly(
+  configPath: string,
+  existingToml: string,
+  workspaceId: string,
+  proxyBin: string,
+): Promise<void> {
+  let text = existingToml
+  if (!text.includes('[mcp_servers.intutic]') && !text.includes('[mcp_servers."intutic"]')) {
+    const block = [
+      '[mcp_servers.intutic]',
+      'command = "node"',
+      `args = [${JSON.stringify(proxyBin)}, "--workspace-id", ${JSON.stringify(workspaceId)}]`,
+    ].join('\n')
+    text = text.trimEnd() + '\n\n' + block + '\n'
+  }
+  if (text === existingToml) return
+
+  await node_fs.mkdir(node_path.dirname(configPath), { recursive: true })
+  await node_fs.writeFile(configPath, text, 'utf-8')
+  log.info({ action: 'grok_mcp_injected', mode: 'append_only_fallback' }, 'Grok config.toml updated (append-only fallback)')
+}
+
+/**
+ * Structurally edits `config.toml`'s `[mcp_servers.*]` tables via `smol-toml`
+ * — the TOML counterpart of `injectGoose`'s YAML edit above, applying the
+ * SAME `wrapWithProxy` convention every other harness uses (stdio entries
+ * wrapped with `--`, remote/`url`-keyed entries wrapped with
+ * `--remote-url`/`--remote-transport`) so a remote MCP server declared for
+ * Grok Build gets identical bridge coverage to one in `~/.claude/mcp.json`,
+ * not a second, divergent convention.
+ *
+ * Unlike `injectGoose`'s `Document#setIn` (which preserves comments/
+ * formatting for untouched YAML), `smol-toml` round-trips through a plain
+ * object — no TOML-parsing dependency preserving comments existed anywhere
+ * in this monorepo to reuse (checked; see grokHooks.ts's module doc for the
+ * same finding), so a table this function DOES touch loses any inline
+ * comments it carried. Tables it does not touch (`[model.*]`, anything
+ * else) are written back byte-for-byte equal in content, just
+ * re-serialized. Falls back to `injectGrokConfigAppendOnly` when the file
+ * does not parse as TOML at all.
+ *
+ * @param configPath - Absolute path to the `config.toml` to edit (project or
+ *   user level — this function is level-agnostic; the caller supplies both).
+ */
+async function injectGrokConfig(configPath: string, workspaceId: string, workspaceRoot: string): Promise<void> {
+  let existingToml = ''
+  try {
+    existingToml = await node_fs.readFile(configPath, 'utf-8')
+  } catch {
+    // Deliberate fail-open: no config.toml yet, or unreadable — falls
+    // through with '' so a fresh file is written below.
+  }
+
+  const proxyBin = resolveProxyBin(workspaceRoot)
+
+  let doc: GrokTomlMcpDoc
+  try {
+    doc = existingToml.trim() ? (parseToml(existingToml) as GrokTomlMcpDoc) : {}
+  } catch (err) {
+    log.warn(
+      { action: 'grok_toml_unparseable', path: configPath, err: (err as Error).message },
+      'Grok config.toml did not parse as TOML — falling back to append-only text injection',
+    )
+    await injectGrokConfigAppendOnly(configPath, existingToml, workspaceId, proxyBin)
+    return
+  }
+
+  const servers: McpServersMap = doc.mcp_servers && typeof doc.mcp_servers === 'object' ? doc.mcp_servers : {}
+  const intuticEntry = buildIntuticMcpEntry(workspaceRoot)
+  let changed = false
+
+  if (!isDeepStrictEqual(servers['intutic'], intuticEntry)) {
+    servers['intutic'] = intuticEntry
+    changed = true
+  }
+
+  for (const [name, entry] of Object.entries(servers)) {
+    if (name === 'intutic') continue
+    const wrapped = wrapWithProxy(entry, workspaceId, workspaceRoot, name)
+    if (!isDeepStrictEqual(wrapped, entry)) {
+      servers[name] = wrapped
+      changed = true
+    }
+  }
+
+  if (!changed) {
+    // write-if-changed, same reasoning as writeJsonFile/injectGoose: this
+    // runs every sync cycle, so a no-op merge must not churn the file's mtime.
+    return
+  }
+
+  doc.mcp_servers = servers
+  await node_fs.mkdir(node_path.dirname(configPath), { recursive: true })
+  const tmp = configPath + '.intutic-tmp'
+  await node_fs.writeFile(tmp, stringifyToml(doc), 'utf-8')
+  await node_fs.rename(tmp, configPath)
+  log.info({ action: 'grok_mcp_injected', path: configPath, mode: 'toml' }, 'Grok config.toml updated (structural TOML edit)')
+}
+
+async function injectGrok(workspaceId: string, workspaceRoot: string): Promise<void> {
+  await injectGrokConfig(grokProjectConfigPath(workspaceRoot), workspaceId, workspaceRoot)
+  await injectGrokConfig(grokUserConfigPath(), workspaceId, workspaceRoot)
+}
+
 // ─── Discovery (read-only — writes nothing) ───────────────────────────────────
 
 /** Classify a raw server entry's transport + wrapped status, tolerant of any shape. */
@@ -725,6 +937,21 @@ async function discoverJsonObjectHarness(harness: string, filePath: string): Pro
   for (const [name, entry] of Object.entries(current.mcpServers ?? {})) {
     const { transport, wrapped } = classifyEntry(entry)
     out.push({ server: name, harness, transport, wrapped })
+  }
+  return out
+}
+
+/** Muse Code's `~/.config/muse/settings.json` keeps servers under `mcp_servers`,
+ *  not `mcpServers` — otherwise the same JSON-map shape `discoverJsonObjectHarness`
+ *  reads, so this is that function with one key renamed rather than a new format. */
+async function discoverMuse(): Promise<DiscoveredMcpServer[]> {
+  const filePath = museConfigPath()
+  if (!existsSync(filePath)) return []
+  const current = await readJsonFile<{ mcp_servers?: Record<string, unknown> }>(filePath, {})
+  const out: DiscoveredMcpServer[] = []
+  for (const [name, entry] of Object.entries(current.mcp_servers ?? {})) {
+    const { transport, wrapped } = classifyEntry(entry)
+    out.push({ server: name, harness: 'muse-code', transport, wrapped })
   }
   return out
 }
@@ -815,8 +1042,61 @@ function discoverGooseLineScanFallback(rawYaml: string): DiscoveredMcpServer[] {
 }
 
 /**
+ * Grok Build's `config.toml`, discovered read-only. Mirrors `injectGrokConfig`:
+ * a real structural TOML parse via `classifyEntry` (the SAME classifier every
+ * other harness below uses), so a wrapped `[mcp_servers.*]` entry reports its
+ * true pre-wrap transport honestly. Falls back to a best-effort line-scan
+ * (top-level keys under `[mcp_servers.` — never reports one `wrapped`, the
+ * same honest limit `discoverGooseLineScanFallback` documents for its own
+ * fallback) when the file does not parse as TOML at all.
+ */
+async function discoverGrokConfig(configPath: string): Promise<DiscoveredMcpServer[]> {
+  let rawToml: string
+  try {
+    rawToml = await node_fs.readFile(configPath, 'utf-8')
+  } catch {
+    return []
+  }
+
+  try {
+    const doc = parseToml(rawToml) as GrokTomlMcpDoc
+    const servers = doc.mcp_servers && typeof doc.mcp_servers === 'object' ? doc.mcp_servers : {}
+    const out: DiscoveredMcpServer[] = []
+    for (const [name, entry] of Object.entries(servers)) {
+      const { transport, wrapped } = classifyEntry(entry)
+      out.push({ server: name, harness: 'grok', transport, wrapped })
+    }
+    return out
+  } catch {
+    return discoverGrokLineScanFallback(rawToml)
+  }
+}
+
+/** Best-effort fallback for a `config.toml` that does not parse as TOML —
+ *  see `discoverGrokConfig`'s doc comment for why this exists and what it
+ *  cannot see. */
+function discoverGrokLineScanFallback(rawToml: string): DiscoveredMcpServer[] {
+  const out: DiscoveredMcpServer[] = []
+  for (const line of rawToml.split('\n')) {
+    const m = line.match(/^\s*\[mcp_servers\.(?:"([^"]+)"|'([^']+)'|([A-Za-z0-9_-]+))\]\s*$/)
+    if (m) {
+      out.push({ server: (m[1] ?? m[2] ?? m[3])!, harness: 'grok', transport: 'stdio', wrapped: false })
+    }
+  }
+  return out
+}
+
+async function discoverGrok(workspaceRoot: string): Promise<DiscoveredMcpServer[]> {
+  const [project, user] = await Promise.all([
+    discoverGrokConfig(grokProjectConfigPath(workspaceRoot)),
+    discoverGrokConfig(grokUserConfigPath()),
+  ])
+  return [...project, ...user]
+}
+
+/**
  * Discover every MCP server declared in any harness config this daemon knows
- * how to parse — the same 9 config paths / 8 harnesses `injectMcpServer`
+ * how to parse — the same 12 config paths / 10 harnesses `injectMcpServer`
  * wraps — without writing anything. Used for reporting (agentReporter's
  * `mcp_tools` facet) so visibility does not silently lag behind whatever
  * `injectMcpServer` was last run against.
@@ -825,6 +1105,13 @@ function discoverGooseLineScanFallback(rawYaml: string): DiscoveredMcpServer[] {
  * deliberately never wraps it (wrapping our own governance server through
  * itself is circular), so it would always report `wrapped: false` and drag
  * down a wrapped-ratio reading of a workspace that is, in fact, fully covered.
+ *
+ * A server declared in BOTH `.cursor/mcp.json` (Grok Build's compat read
+ * path, already discovered under `harness: 'cursor'` below) AND Grok
+ * Build's own `[mcp_servers.*]` table legitimately produces two rows here —
+ * one per harness config file — not one merged row. See this module's
+ * top-of-file doc comment ("Grok Build's compat-path overlap — dedup, not a
+ * bug") for why that is correct, not a double-count to fix.
  */
 export async function discoverMcpServers(workspaceRoot: string): Promise<DiscoveredMcpServer[]> {
   const results = await Promise.all([
@@ -837,6 +1124,8 @@ export async function discoverMcpServers(workspaceRoot: string): Promise<Discove
     discoverJsonObjectHarness('openhands', openHandsConfigPath(workspaceRoot)),
     discoverContinue(),
     discoverGoose(),
+    discoverMuse(),
+    discoverGrok(workspaceRoot),
   ])
   return results.flat().filter((s) => s.server !== 'intutic')
 }
@@ -879,6 +1168,10 @@ export async function injectMcpServer(workspaceRoot: string, workspaceId = 'unkn
       log.error({ err: (err as Error).message, target: 'goose' }, 'MCP injection failed')),
     injectOpenHands(workspaceId, workspaceRoot).catch((err) =>
       log.error({ err: (err as Error).message, target: 'openhands' }, 'MCP injection failed')),
+    injectMuse(workspaceId, workspaceRoot).catch((err) =>
+      log.error({ err: (err as Error).message, target: 'muse-code' }, 'MCP injection failed')),
+    injectGrok(workspaceId, workspaceRoot).catch((err) =>
+      log.error({ err: (err as Error).message, target: 'grok' }, 'MCP injection failed')),
   ])
 
   log.info({ action: 'mcp_inject_complete', workspaceRoot }, 'MCP server injection complete')

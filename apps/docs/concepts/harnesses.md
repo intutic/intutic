@@ -1,11 +1,11 @@
 ---
 title: Harnesses
-description: How Intutic's proxy and sync daemon work together to govern 19 AI coding agents without changing their source code.
+description: How Intutic's proxy and sync daemon work together to govern 20 AI coding agents without changing their source code.
 ---
 
 # Harnesses <Badge type="tip" text="Open-Core" />
 
-A **harness** is any AI coding agent that Intutic governs. Intutic currently supports [19 harnesses](/integrations/) — from IDE extensions like Cursor and Windsurf to CLI tools like Claude Code and Aider to autonomous agent frameworks like OpenHands and Goose.
+A **harness** is any AI coding agent that Intutic governs. Intutic currently supports [20 harnesses](/integrations/) — from IDE extensions like Cursor and Windsurf to CLI tools like Claude Code and Aider to autonomous agent frameworks like OpenHands and Goose.
 
 Governance works through two components that run on the developer's machine:
 
@@ -190,7 +190,7 @@ The `createMarkdownAdapter()` factory in [base.ts](../../../tools/cli/src/harnes
 
 ## Related
 
-- [Integrations Hub](/integrations/) — All 19 harnesses with setup guides
+- [Integrations Hub](/integrations/) — All 20 harnesses with setup guides
 - [Enforcement Actions](/concepts/enforcement-actions) — BYPASS/ENHANCE/HIJACK/KILL verdicts
 - [Getting Started](/guide/getting-started) — Install and connect your first harness
 - [Core Concepts](/guide/concepts) — Workspaces, SOPs, scoring

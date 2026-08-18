@@ -28,6 +28,11 @@
  *   block into an error exit.
  * - `stdout-cancel` — the exit code is ignored; a `{"cancel":true}` object on
  *   stdout is what refuses the call.
+ * - `stdout-decision-deny` — also exit-code-ignored, but a DIFFERENT stdout
+ *   object: `{"decision":"deny","reason":"..."}`. Grok Build's confirmed
+ *   contract — kept distinct from `stdout-cancel` rather than folded into it
+ *   because the field names do not overlap: Grok Build does not recognise
+ *   `cancel`, and Cline/Roo Code do not recognise `decision`.
  * - `none` — the gate cannot refuse at all. Recorded rather than omitted, so
  *   "we know it cannot block" is distinguishable from "nobody checked".
  *
@@ -50,7 +55,7 @@ export type HarnessModule = Record<string, (...args: unknown[]) => Promise<void>
  *  whose preExecute function THROWS to abort — no exit code, no stdout. Its
  *  unit is a whole workflow, so like `python-raise` it is exercised by its own
  *  describe block rather than the per-tool matrix. */
-export type GateContract = 'exit2' | 'stdout-cancel' | 'python-raise' | 'js-throw'
+export type GateContract = 'exit2' | 'stdout-cancel' | 'stdout-decision-deny' | 'python-raise' | 'js-throw'
 
 /** What runs the emitted artifact. */
 export type GateRunner = 'bash' | 'node' | 'python3'
@@ -264,6 +269,27 @@ export const GATES: readonly GateEntry[] = [
     mcpNote: "Already a `.*` catch-all matcher — reaches the gate script for any tool name. Its stdin envelope is stated Claude-Code-compatible, which is suggestive but not a confirmation of Codex's own MCP tool-naming convention; not independently verified during M3.",
   },
   {
+    name: 'museCode',
+    module: '../../src/harness/museHooks.js',
+    invoke: (m, root) => m.writeMuseHooks(root, PROXY_URL, 'ws_test'),
+    artifact: '.intutic/hooks/muse-check.js',
+    runner: 'node',
+    contract: 'exit2',
+    migrated: true,
+    note:
+      'registered in <repo>/.muse/hooks.json AND via managed_hooks_path (the pre-approved ' +
+      'tier) in ~/.config/muse/settings.json, pointing at an Intutic-owned ' +
+      '~/.config/muse/intutic-managed-hooks.json. The exit-2 block/deny contract, and the ' +
+      'hooks.json schema itself, are ASSUMED from the Codex-CLI-compatible shape (TD-362) — ' +
+      'the `muse` binary was not installable in the environment this writer was authored in, ' +
+      'so neither could be confirmed against the real product',
+    mcpCalls: 'reachable',
+    mcpNote:
+      "Already a `.*` catch-all matcher across both PreToolUse and PermissionRequest. Muse " +
+      "Code's own MCP tool-naming convention was not independently verified — the binary " +
+      "could not be installed to confirm it (see TD-362).",
+  },
+  {
     name: 'githubCopilot',
     module: '../../src/harness/githubCopilotHooks.js',
     invoke: (m, root) => m.writeGithubCopilotHooks(root, PROXY_URL, 'ws_test'),
@@ -335,6 +361,39 @@ export const GATES: readonly GateEntry[] = [
       "Cline's `use_mcp_tool` tool-call vocabulary, would also benefit from the shared " +
       "intuticGate normalization above — but that inheritance was not independently verified " +
       "during M3, so this is 'reachable', not 'yes'.",
+  },
+
+  // ── JavaScript, stdout contract (Grok Build's OWN shape) ────────────────
+  {
+    name: 'grok',
+    module: '../../src/harness/grokHooks.js',
+    invoke: (m, root) => m.writeGrokHooks(root, PROXY_URL, 'ws_test'),
+    artifact: '.intutic/hooks/grok-check.js',
+    runner: 'node',
+    contract: 'stdout-decision-deny',
+    migrated: true,
+    note:
+      'registered in .grok/hooks/intutic-governance.json (project) and ' +
+      '~/.grok/hooks/intutic-governance.json (user), PreToolUse with no matcher ' +
+      '(applies to every tool call). Blocking contract CONFIRMED (not assumed): ' +
+      'writes {"decision":"deny","reason":"..."} on stdout and exits 0 — a ' +
+      'DIFFERENT stdout shape from Cline/Roo Code\'s {"cancel":true}, hence its ' +
+      'own contract value rather than reuse of stdout-cancel. Grok Build ALSO ' +
+      'natively reads .claude/settings.json and .cursor/hooks.json if present ' +
+      '(a compatibility feature), so a workspace with either of those gates ' +
+      'installed double-fires on the same Grok Build tool call — expected, not ' +
+      'a bug, same posture as the mcp-proxy + gate double-emission documented ' +
+      'in apps/docs/guide/mcp-governance.md; see grokHooks.test.ts for the ' +
+      'harmlessness pin. The exact hooks.json-equivalent per-file schema ' +
+      '(event/command/timeout fields) is this writer\'s own reasonable design, ' +
+      'not independently verified against a live Grok Build install — ' +
+      'unavailable in this environment.',
+    mcpCalls: 'reachable',
+    mcpNote:
+      'No matcher on its PreToolUse registration — runs for every tool call, so an ' +
+      'mcp__<server>__<tool>-shaped call WOULD be caught if Grok Build sends one. ' +
+      'Grok Build\'s own MCP tool-naming convention was not independently verified ' +
+      '(not installable in this environment) — hence reachable, not yes.',
   },
 
   // ── refuses by throwing, at workflow granularity ────────────────────────
@@ -414,6 +473,14 @@ export const NO_GATE: ReadonlyArray<{
   { file: 'gooseHardener.ts', harness: 'goose', why: 'applies immutable flags to gooseHooks’ output; emits no gate' },
   { file: 'mcpAutoWrite.ts', harness: null, why: 'registers MCP servers; not a tool-call gate' },
   {
+    file: 'gateKind.ts',
+    harness: null,
+    why:
+      'classifies each harness by gate MECHANISM (hook/sdk/none) for agentReporter.ts’s ' +
+      'guardrails facet — a lookup table, not itself a harness writer, and it writes no ' +
+      'config or gate of its own',
+  },
+  {
     file: 'jetbrainsXmlConfig.ts',
     harness: null,
     why:
@@ -442,5 +509,102 @@ export const NO_GATE: ReadonlyArray<{
       'Python callables in the agent’s own process. The blocking gate ships ' +
       'SDK-side in intutic-clawde (intutic_clawde.gate, python-raise), evaluating ' +
       'the policy snapshot + A3 argPattern rules in-process before the tool body runs',
+  },
+
+  // ── Wave 1: Python-SDK-gated frameworks (same family as langgraph above) ──
+  // Each writes .env.intutic (proxy base-URL vars only — see configWriter.ts's
+  // SDK_GATED_FRAMEWORKS/formatSdkGatedEnv) via a harness/*.ts adapter under
+  // tools/cli, not services/sync-daemon/src/harness — so none of these appear
+  // in `writers` above either; `file: null` here is what keeps the second
+  // completeness check (every HarnessType enum member) from going red.
+  {
+    file: null,
+    harness: 'langchain',
+    why:
+      'no on-disk config/hook file exists — tools are plain Python callables/objects ' +
+      'in the agent’s own process, same as langgraph. The blocking gate ships SDK-side ' +
+      'in intutic-clawde (intutic_clawde.gate.adapters.langchain.IntuticMiddleware, a ' +
+      'LangChain v1.x AgentMiddleware.wrap_tool_call, verified live against ' +
+      'langchain==1.3.15/langchain-core==1.5.6 — plus guard_tools for pre-1.0 LangChain). ' +
+      'Detection (HarnessType.LANGCHAIN) deliberately covers BOTH the Python and JS/TS ' +
+      'LangChain ecosystems, but this adapter and its env-writer are Python-only — a ' +
+      'JS/TS gate for LangChain.js is a @intutic/gate TypeScript package concern for a ' +
+      'different phase, not a NO_GATE decision made here.',
+  },
+  {
+    file: null,
+    harness: 'crewai',
+    why:
+      'no on-disk config/hook file exists — CrewAI tools are plain callables/' +
+      'CrewStructuredTool instances in the agent’s own process. The blocking gate ships ' +
+      'SDK-side (intutic_clawde.gate.adapters.crewai.install(), registering a ' +
+      'before_tool_call hook). CONFIRMED, not assumed: verified live by installing ' +
+      'crewai==1.15.16 and reading crewai/hooks/tool_hooks.py + dispatch.py — a hook ' +
+      'returning False raises HookAborted internally and blocks the call; True/None ' +
+      'allows it. The plan that authored this wave flagged this mechanism as ' +
+      'unconfirmed pending a real install; a real install was available in this sandbox ' +
+      '(PyPI reachable, Python 3.11 toolchain present) and resolved the question, so no ' +
+      'ASSUMED-mechanism TD entry was needed for it.',
+  },
+  {
+    file: null,
+    harness: 'autogen',
+    why:
+      'no on-disk config/hook file exists — AutoGen tools are plain callables. No ' +
+      'dedicated intutic_clawde.gate.adapters.autogen module exists yet (P2, a sibling ' +
+      'wave); until it lands, the framework-agnostic @guard/guard_tools helpers already ' +
+      'govern AutoGen tools directly (see framework.py’s module doc). Detected via any ' +
+      'of autogen-agentchat/autogen-core/autogen-ext.',
+  },
+  {
+    file: null,
+    harness: 'ag2',
+    why:
+      'no on-disk config/hook file exists — AG2 (the AutoGen fork) tools are plain ' +
+      'callables. No dedicated intutic_clawde.gate.adapters.ag2 module exists yet (P2, ' +
+      'a sibling wave); @guard/guard_tools already govern AG2 tools directly in the ' +
+      'meantime.',
+  },
+  {
+    file: null,
+    harness: 'google-adk',
+    why:
+      'no on-disk config/hook file exists — ADK tools are plain Python callables. The ' +
+      'blocking gate ships SDK-side (intutic_clawde.gate.adapters.google_adk.' +
+      'IntuticPlugin.before_tool_callback, plus a per-agent before_tool_callback ' +
+      'fallback for callers not using App(plugins=[...])). Verified live against ' +
+      'google-adk==2.7.1: returning a non-None dict from before_tool_callback skips the ' +
+      'real tool call and that dict becomes the (synthetic) tool result — ADK’s own ' +
+      'documented veto point, not inferred from docs alone.',
+  },
+  {
+    file: null,
+    harness: 'openai-agents',
+    why:
+      'no on-disk config/hook file exists — tools are plain Python callables. The ' +
+      'blocking gate ships SDK-side (intutic_clawde.gate.adapters.openai_agents.' +
+      'intutic_tool_guardrail, a @tool_input_guardrail attached via function_tool(' +
+      'tool_input_guardrails=[...])). Verified live against openai-agents==0.20.0: ' +
+      'ToolGuardrailFunctionOutput.reject_content(message) rejects the call and returns ' +
+      'the message to the model in place of the tool result — the SDK’s own documented ' +
+      'veto point.',
+  },
+  {
+    file: null,
+    harness: 'pydantic-ai',
+    why:
+      'no on-disk config/hook file exists — Pydantic AI tools are plain callables. No ' +
+      'dedicated intutic_clawde.gate.adapters.pydantic_ai module exists yet (P2, a ' +
+      'sibling wave); @guard/guard_tools already govern Pydantic AI tools directly in ' +
+      'the meantime. Detected via pydantic-ai/pydantic-ai-slim.',
+  },
+  {
+    file: null,
+    harness: 'smolagents',
+    why:
+      'no on-disk config/hook file exists — smolagents tools are plain callables. No ' +
+      'dedicated intutic_clawde.gate.adapters.smolagents module exists yet (P2, a ' +
+      'sibling wave); @guard/guard_tools already govern smolagents tools directly in ' +
+      'the meantime.',
   },
 ]

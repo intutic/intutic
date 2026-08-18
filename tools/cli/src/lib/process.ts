@@ -86,6 +86,16 @@ const PROCESS_SIGNATURES: Array<{
     name: 'Antigravity',
     patterns: [/\bantigravity\b/i],
   },
+  {
+    name: 'Grok Build',
+    // See services/sync-daemon/src/lib/processPoller.ts's copy of this table
+    // for the full false-positive reasoning — `grok` is a short, common
+    // word, so this is anchored on it appearing as an invoked COMMAND NAME
+    // (whole line, leading word, or right after a path separator) rather
+    // than a bare `\bgrok\b`, which would trip on the word appearing
+    // anywhere in an unrelated argument.
+    patterns: [/(^|[/\\\s])grok(\s|$)/],
+  },
 ]
 
 /**

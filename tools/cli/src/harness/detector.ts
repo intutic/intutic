@@ -1,7 +1,7 @@
 /**
  * Harness detector — auto-detect which AI harnesses are present.
  *
- * Instantiates all 19 adapters and checks each for presence in
+ * Instantiates all 29 adapters and checks each for presence in
  * the workspace. Returns a DetectedHarness array for reporting.
  *
  * HLD §3.14 — Harness Onboarding Matrix
@@ -30,6 +30,16 @@ import { piAdapter } from './pi.js'
 import { hermesAdapter } from './hermes.js'
 import { githubCopilotAdapter } from './githubCopilot.js'
 import { langgraphAdapter } from './langgraph.js'
+import { museAdapter } from './muse.js'
+import { grokAdapter } from './grok.js'
+import { langchainAdapter } from './langchain.js'
+import { crewaiAdapter } from './crewai.js'
+import { autogenAdapter } from './autogen.js'
+import { ag2Adapter } from './ag2.js'
+import { googleAdkAdapter } from './googleAdk.js'
+import { openaiAgentsAdapter } from './openaiAgents.js'
+import { pydanticAiAdapter } from './pydanticAi.js'
+import { smolagentsAdapter } from './smolagents.js'
 import { join } from 'node:path'
 
 /** All registered harness adapters. */
@@ -53,6 +63,16 @@ export const ALL_ADAPTERS: IHarnessAdapter[] = [
   hermesAdapter,
   githubCopilotAdapter,
   langgraphAdapter,
+  museAdapter,
+  grokAdapter,
+  langchainAdapter,
+  crewaiAdapter,
+  autogenAdapter,
+  ag2Adapter,
+  googleAdkAdapter,
+  openaiAgentsAdapter,
+  pydanticAiAdapter,
+  smolagentsAdapter,
 ]
 
 /**

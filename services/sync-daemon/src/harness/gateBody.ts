@@ -119,12 +119,19 @@ export const SNAPSHOT_STALE_AFTER_DAYS = 7
 /**
  * How a gate refuses a call.
  *
- * The two values are not stylistic. Claude Code, Cursor and the bash harnesses
- * read the **exit code** (2 = deny; 1 is an error and lets the call through).
- * Cline and Roo Code ignore the exit code and read a **JSON object on stdout**.
- * A gate that uses the wrong one looks identical in review and enforces nothing.
+ * The three values are not stylistic. Claude Code, Cursor and the bash
+ * harnesses read the **exit code** (2 = deny; 1 is an error and lets the call
+ * through). Cline and Roo Code ignore the exit code and read a `{"cancel":
+ * true}` object on stdout. Grok Build ALSO ignores the exit code, but its
+ * confirmed verdict shape is a *different* stdout object —
+ * `{"decision":"deny","reason":"..."}` — not `{"cancel":true}`. The two
+ * stdout contracts are kept as distinct union members rather than folded into
+ * one "stdout-cancel" bucket precisely because a gate that emits the wrong
+ * field name looks identical in a code review and enforces nothing: Grok
+ * Build does not recognise `cancel`, and Cline/Roo Code do not recognise
+ * `decision`. A gate that uses the wrong one is silently inert.
  */
-export type BlockContract = 'exit2' | 'stdout-cancel'
+export type BlockContract = 'exit2' | 'stdout-cancel' | 'stdout-decision-deny'
 
 /** Single-quotes a string for shell, safely. */
 function shq(s: string): string {
@@ -705,7 +712,10 @@ export function emitJsGate(opts: JsGateOptions): string {
     opts.contract === 'stdout-cancel'
       ? `      process.stdout.write(JSON.stringify({ cancel: true, reason: reason }) + '\\n');\n` +
         `      process.exit(0);`
-      : `      process.exit(2);`
+      : opts.contract === 'stdout-decision-deny'
+        ? `      process.stdout.write(JSON.stringify({ decision: 'deny', reason: reason }) + '\\n');\n` +
+          `      process.exit(0);`
+        : `      process.exit(2);`
 
   return `
 // ── Intutic gate body v${GATE_VERSION} — harness: ${opts.harness} ────────────
@@ -1115,11 +1125,17 @@ export function emitJsFailClosedPrelude(opts: JsGateOptions): string {
         `      '[Intutic Governance] gate crashed — failing closed: ' + String((err && err.stack) || err) }) + '\\n');\n` +
         `  } catch (e) { /* stdout gone too — nothing left to refuse through */ }\n` +
         `  process.exit(0);`
-      : `  try {\n` +
-        `    process.stderr.write('[Intutic Governance] BLOCKED: gate crashed — failing closed: ' +\n` +
-        `      String((err && err.stack) || err) + '\\n');\n` +
-        `  } catch (e) { /* stderr gone too — the exit code still blocks */ }\n` +
-        `  process.exit(2);`
+      : opts.contract === 'stdout-decision-deny'
+        ? `  try {\n` +
+          `    process.stdout.write(JSON.stringify({ decision: 'deny', reason:\n` +
+          `      '[Intutic Governance] gate crashed — failing closed: ' + String((err && err.stack) || err) }) + '\\n');\n` +
+          `  } catch (e) { /* stdout gone too — nothing left to refuse through */ }\n` +
+          `  process.exit(0);`
+        : `  try {\n` +
+          `    process.stderr.write('[Intutic Governance] BLOCKED: gate crashed — failing closed: ' +\n` +
+          `      String((err && err.stack) || err) + '\\n');\n` +
+          `  } catch (e) { /* stderr gone too — the exit code still blocks */ }\n` +
+          `  process.exit(2);`
   return `// ── Intutic fail-closed prelude v${GATE_VERSION} — harness: ${opts.harness} ──
 // FIRST statements on purpose, before any require: the stdin handler's catch
 // fails closed, but a crash outside it — a module-load failure, an unhandled

@@ -53,6 +53,8 @@ import { writeOpenclawHooks } from './harness/openclawHooks.js'
 import { writePiHooks } from './harness/piHooks.js'
 import { writeCodexHooks } from './harness/codexHooks.js'
 import { writeGithubCopilotHooks } from './harness/githubCopilotHooks.js'
+import { writeMuseHooks } from './harness/museHooks.js'
+import { writeGrokHooks } from './harness/grokHooks.js'
 
 // ─── Harness config file mapping ─────────────────────────────────────
 
@@ -81,6 +83,25 @@ export const HARNESS_FILES: Record<HarnessType, string> = {
   goose: '.agents/plugins/intutic-governance/hooks/hooks.json',
   'open-webui': '.open-webui/intutic-governance-filter.py',
   langgraph: '.env.intutic',
+  // Muse Code reads AGENTS.md (falling back to CLAUDE.md) — see muse.ts (CLI)
+  // and museHooks.ts (the hook writer invoked below, same split codex uses).
+  'muse-code': 'AGENTS.md',
+  // Grok Build's native rules file — same cross-tool convention Codex/Amp
+  // read. Formatted by `formatMarkdown`, the same `---`-separated formatter
+  // Cursor/Claude Code/Windsurf/GitHub Copilot already share below.
+  grok: 'AGENTS.md',
+  // Wave 1 SDK-gated frameworks — same rationale as langgraph: no on-disk
+  // hook/config file exists to gate tool calls, so each writes .env.intutic
+  // (proxy base-URL vars + an SDK-gate pointer comment). See formatContent's
+  // switch below and SDK_GATED_FRAMEWORKS.
+  langchain: '.env.intutic',
+  crewai: '.env.intutic',
+  autogen: '.env.intutic',
+  ag2: '.env.intutic',
+  'google-adk': '.env.intutic',
+  'openai-agents': '.env.intutic',
+  'pydantic-ai': '.env.intutic',
+  smolagents: '.env.intutic',
 }
 
 // ─── Public interface ────────────────────────────────────────────────
@@ -280,6 +301,20 @@ export async function writeConfigFiles(
         try { await writeGithubCopilotHooks(workspaceRoot, proxyUrl, workspaceId) } catch (e) {
           console.warn('[sync-daemon] writeGithubCopilotHooks failed (non-fatal):', e) }
       }
+      // Same split as codex/claude-desktop: AGENTS.md above carries the rules
+      // text, this installs the PreToolUse/PermissionRequest gate (project +
+      // managed tiers) and the managed_hooks_path merge into settings.json.
+      if (harness === 'muse-code') {
+        try { await writeMuseHooks(workspaceRoot, proxyUrl, workspaceId) } catch (e) {
+          console.warn('[sync-daemon] writeMuseHooks failed (non-fatal):', e) }
+      }
+      // AGENTS.md above governs prompt-level rules only; the gate is what
+      // refuses tool calls, and the config.toml model base_url merge is what
+      // routes LLM egress. Written alongside, same as codex/claude-desktop.
+      if (harness === 'grok') {
+        try { await writeGrokHooks(workspaceRoot, proxyUrl, workspaceId) } catch (e) {
+          console.warn('[sync-daemon] writeGrokHooks failed (non-fatal):', e) }
+      }
     } catch (err) {
       console.warn(`[sync-daemon] writeConfigFiles failed for ${filename}:`, err)
       // Don't crash the loop — report as skipped
@@ -428,6 +463,7 @@ function formatContent(
     case 'claude-code':
     case 'windsurf':
     case 'github-copilot':
+    case 'grok':
       return formatMarkdown(sops)
 
     case 'antigravity':
@@ -444,6 +480,20 @@ function formatContent(
 
     case 'langgraph':
       return formatLanggraph(sops, proxyUrl)
+
+    case 'muse-code':
+      // AGENTS.md — same markdown shape as CLAUDE.md/.cursorrules/.windsurfrules.
+      return formatMarkdown(sops)
+
+    case 'langchain':
+    case 'crewai':
+    case 'autogen':
+    case 'ag2':
+    case 'google-adk':
+    case 'openai-agents':
+    case 'pydantic-ai':
+    case 'smolagents':
+      return formatSdkGatedEnv(sops, proxyUrl, SDK_GATED_FRAMEWORKS[harness])
 
     default:
       return formatMarkdown(sops)
@@ -542,6 +592,91 @@ function formatLanggraph(sops: SyncSopEntry[], proxyUrl: string): string {
     '# blocking tool gate ships SDK-side:\n' +
     '#   pip install intutic-clawde\n' +
     '#   from intutic_clawde.gate import guard_tools\n'
+  )
+}
+
+/**
+ * Wave 1: seven more frameworks in LangGraph's family — tools are plain
+ * Python callables/objects in the agent's own process, so the daemon has no
+ * on-disk hook/config file to gate a call with, and every one of these
+ * writes the same `.env.intutic` shape `formatLanggraph` does (proxy URL
+ * vars + a comment pointing at the SDK-side gate). Declared as data here,
+ * rather than as seven more hand-copied `formatXxx` functions, so the shape
+ * cannot drift per-framework the way `gateBody.ts`'s module doc warns
+ * hand-copied gate logic does.
+ *
+ * `pipExtra` is omitted for the three frameworks with no dedicated
+ * `intutic_clawde.gate.adapters.*` module yet (autogen, ag2, pydantic-ai,
+ * smolagents ship in a later wave — see `gateRegistry.ts`'s NO_GATE rows) —
+ * their tools are governed today through the framework-agnostic
+ * `@guard`/`guard_tools` helpers, which need no optional import.
+ */
+const SDK_GATED_FRAMEWORKS: Record<
+  'langchain' | 'crewai' | 'autogen' | 'ag2' | 'google-adk' | 'openai-agents' | 'pydantic-ai' | 'smolagents',
+  { label: string; pipExtra?: string; importLine: string; docsSlug: string }
+> = {
+  langchain: {
+    label: 'LangChain',
+    pipExtra: 'langchain',
+    importLine: 'from intutic_clawde.gate.adapters.langchain import IntuticMiddleware',
+    docsSlug: 'langchain',
+  },
+  crewai: {
+    label: 'CrewAI',
+    pipExtra: 'crewai',
+    importLine: 'from intutic_clawde.gate.adapters.crewai import install',
+    docsSlug: 'crewai',
+  },
+  autogen: {
+    label: 'AutoGen',
+    importLine: 'from intutic_clawde.gate import guard, guard_tools',
+    docsSlug: 'autogen',
+  },
+  ag2: {
+    label: 'AG2',
+    importLine: 'from intutic_clawde.gate import guard, guard_tools',
+    docsSlug: 'ag2',
+  },
+  'google-adk': {
+    label: 'Google ADK',
+    pipExtra: 'google-adk',
+    importLine: 'from intutic_clawde.gate.adapters.google_adk import IntuticPlugin',
+    docsSlug: 'google-adk',
+  },
+  'openai-agents': {
+    label: 'OpenAI Agents SDK',
+    pipExtra: 'openai-agents',
+    importLine: 'from intutic_clawde.gate.adapters.openai_agents import intutic_tool_guardrail',
+    docsSlug: 'openai-agents',
+  },
+  'pydantic-ai': {
+    label: 'Pydantic AI',
+    importLine: 'from intutic_clawde.gate import guard, guard_tools',
+    docsSlug: 'pydantic-ai',
+  },
+  smolagents: {
+    label: 'smolagents',
+    importLine: 'from intutic_clawde.gate import guard, guard_tools',
+    docsSlug: 'smolagents',
+  },
+}
+
+/** Shared formatter for every Wave 1 SDK-gated framework — see SDK_GATED_FRAMEWORKS. */
+function formatSdkGatedEnv(
+  sops: SyncSopEntry[],
+  proxyUrl: string,
+  info: { label: string; pipExtra?: string; importLine: string; docsSlug: string },
+): string {
+  const pipInstall = info.pipExtra ? `intutic-clawde[${info.pipExtra}]` : 'intutic-clawde'
+  return (
+    formatCodex(sops, proxyUrl) +
+    '\n' +
+    `# These env vars govern LLM egress only. ${info.label} tools run in your own\n` +
+    '# Python process, where no config or hook file can gate them — the\n' +
+    '# blocking tool gate ships SDK-side:\n' +
+    `#   pip install ${pipInstall}\n` +
+    `#   ${info.importLine}\n` +
+    `# See https://docs.intutic.ai/integrations/${info.docsSlug}\n`
   )
 }
 
