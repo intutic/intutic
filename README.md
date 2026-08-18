@@ -1,6 +1,6 @@
 <div align="center">
 
-# Intutic — Policy as Code for Continuous Compliance & Continuous Enforcement of AI Agents
+# Intutic — Policy as Code for Continuous Compliance & Continuous Enforcement for AI Agents
 
 **The circuit breaker for AI agents: your policies are files in git, enforced synchronously and in-process on every tool call across 19 agent harnesses.**
 
