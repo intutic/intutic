@@ -208,7 +208,7 @@ const sidebarReference = [
 
 export default defineConfig({
   title: 'Intutic Docs',
-  description: 'Policy as Code for Continuous Compliance and Continuous Enforcement of AI agents',
+  description: 'Policy as Code for Continuous Compliance and Continuous Enforcement for AI agents',
   base: '/',
 
   head: [

@@ -5,7 +5,7 @@ description: How Intutic treats governance as code — policies are files review
 
 # Policy as Code <Badge type="tip" text="Open-Core" />
 
-Intutic's category line is **Policy as Code for Continuous Compliance and Continuous Enforcement of AI agents**. This page defines what that means concretely, and links to the pages that back each claim. The mechanism underneath it is the same one described in [Circuit Breaker](/concepts/circuit-breaker): policies are files, evaluated synchronously and in-process on the hot path, before an action reaches your infrastructure.
+Intutic's category line is **Policy as Code for Continuous Compliance and Continuous Enforcement for AI agents**. This page defines what that means concretely, and links to the pages that back each claim. The mechanism underneath it is the same one described in [Circuit Breaker](/concepts/circuit-breaker): policies are files, evaluated synchronously and in-process on the hot path, before an action reaches your infrastructure.
 
 ## What policy as code means here
 
