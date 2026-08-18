@@ -147,16 +147,22 @@ before or after this phase.
 `scanSkillContent`, `scanScriptContent` — is regex-genre pattern matching:
 fast, dependency-free, and honest about not doing AST parsing, dataflow
 analysis, or semantic understanding (see
-[What this cannot catch](#what-this-cannot-catch)). The Cisco integration is
-a genuinely different, deeper analysis path for the same bundled-script
-surface `scriptScan.ts` covers, run as a second engine alongside — never
-instead of — native scanning.
+[What this cannot catch](#what-this-cannot-catch)). The Cisco integration
+runs static YARA/pattern detection, Python bytecode integrity checks, and
+command-pipeline taint analysis by default, plus — since this integration
+always passes `--use-behavioral` — full AST/dataflow analysis, all fully
+offline and requiring no API key. That is a genuinely different, deeper
+analysis path for the same bundled-script surface `scriptScan.ts` covers,
+run as a second engine alongside — never instead of — native scanning.
+(An earlier version of this page pointed at the wrong PyPI package — see
+the correction note in `docs/TECH_DEBT.md`'s TD-361.)
 
 **How to enable it.**
 
-- `pipx install skill-scanner` — installs the binary on PATH. `intutic
-  doctor` reports whether it is present (optional, never a failing check)
-  and, when present, its version.
+- `pipx install cisco-ai-skill-scanner` — installs a binary named
+  `skill-scanner` on PATH (the package name and the binary name differ).
+  `intutic doctor` reports whether it is present (optional, never a
+  failing check) and, when present, its version.
 - `intutic skill audit --engine cisco` — explicitly runs the Cisco engine
   for this invocation, IN ADDITION to native scanning. If the binary is not
   on PATH, this fails loudly (non-zero exit) rather than silently falling
@@ -419,7 +425,7 @@ Specifically:
   **separate, opt-in** integration with Cisco's open-source `skill-scanner`
   project described in
   [Cisco `skill-scanner` integration](#cisco-skill-scanner-integration-opt-in)
-  above — off by default, requires a separate `pipx install skill-scanner`,
+  above — off by default, requires a separate `pipx install cisco-ai-skill-scanner`,
   and consumes the sha256 hash `auditScriptFile` computes for every bundled
   file.
   A narrower, ALREADY-built piece sits between "no coverage" and full
