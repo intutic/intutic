@@ -247,7 +247,10 @@ export async function writeClaudeDesktopHooks(
   const existingPreToolUse = (existingHooks.PreToolUse as unknown[]) ?? []
 
   // De-duplicate: remove any existing Intutic entry for Bash then re-add
-  const HOOK_MATCHERS = ['Bash', 'Edit', 'Write', 'MultiEdit']
+  // M3: 'mcp__.*' routes Claude Desktop's mcp__<server>__<tool> calls into
+  // this same gate script — see the identical note in claudeCodeHooks.ts,
+  // which shares this harness's PreToolUse contract exactly.
+  const HOOK_MATCHERS = ['Bash', 'Edit', 'Write', 'MultiEdit', 'mcp__.*']
   const intuticCmd = `node ${hookScriptPath}`
   const filteredPTU = existingPreToolUse.filter((entry: unknown) => {
     if (typeof entry !== 'object' || entry === null) return true

@@ -20,8 +20,12 @@ import {
   discoverSkillBundledFiles,
   auditScriptFile,
   buildSarifLog,
+  mapCiscoCategory,
+  mergeCiscoFindings,
+  capContentForTransport,
   type SkillReportEntry,
 } from './skill.js'
+import type { CiscoDirScanResult } from '../lib/ciscoScanner.js'
 
 describe('discoverSkillFiles', () => {
   let workspaceRoot: string
@@ -180,6 +184,62 @@ describe('auditSkillFile', () => {
 
     const entry = await auditSkillFile('.agents/skills/clean-skill-kind/SKILL.md', fullPath, false)
     expect(entry.kind).toBe('skill_md')
+  })
+
+  // ── Phase S5 (TD-357): opt-in content attachment ─────────────────────
+
+  it('does NOT attach content by default (attachContent omitted)', async () => {
+    const dir = join(workspaceRoot, '.agents', 'skills', 'no-content-default')
+    await fs.mkdir(dir, { recursive: true })
+    const fullPath = join(dir, 'SKILL.md')
+    await fs.writeFile(fullPath, '# Skill\nBody text.\n', 'utf8')
+
+    const entry = await auditSkillFile('.agents/skills/no-content-default/SKILL.md', fullPath, false)
+    expect(entry.content).toBeUndefined()
+  })
+
+  it('does NOT attach content when attachContent is explicitly false', async () => {
+    const dir = join(workspaceRoot, '.agents', 'skills', 'no-content-explicit')
+    await fs.mkdir(dir, { recursive: true })
+    const fullPath = join(dir, 'SKILL.md')
+    await fs.writeFile(fullPath, '# Skill\nBody text.\n', 'utf8')
+
+    const entry = await auditSkillFile('.agents/skills/no-content-explicit/SKILL.md', fullPath, false, false, false)
+    expect(entry.content).toBeUndefined()
+  })
+
+  it('attaches full content when attachContent is true', async () => {
+    const dir = join(workspaceRoot, '.agents', 'skills', 'with-content')
+    await fs.mkdir(dir, { recursive: true })
+    const fullPath = join(dir, 'SKILL.md')
+    const body = '# Skill\nBody text with a marker: SEMANTIC_TEST_MARKER_XYZ\n'
+    await fs.writeFile(fullPath, body, 'utf8')
+
+    const entry = await auditSkillFile('.agents/skills/with-content/SKILL.md', fullPath, false, false, true)
+    expect(entry.content).toBe(body)
+  })
+
+  it('never attaches content on a read-failure row, even when attachContent is true', async () => {
+    const dir = join(workspaceRoot, '.agents', 'skills', 'unreadable-with-content')
+    const fullPath = join(dir, 'SKILL.md')
+    await fs.mkdir(fullPath, { recursive: true }) // EISDIR forces the read-failure path
+
+    const entry = await auditSkillFile('.agents/skills/unreadable-with-content/SKILL.md', fullPath, false, false, true)
+    expect(entry.scanned).toBe(false)
+    expect(entry.content).toBeUndefined()
+  })
+})
+
+describe('capContentForTransport', () => {
+  it('returns content unchanged when within the 65536-char cap', () => {
+    const content = 'a'.repeat(100)
+    expect(capContentForTransport(content)).toBe(content)
+  })
+
+  it('truncates content over the 65536-char cap', () => {
+    const content = 'a'.repeat(70_000)
+    const capped = capContentForTransport(content)
+    expect(capped.length).toBe(65536)
   })
 })
 
@@ -457,5 +517,152 @@ describe('buildSarifLog', () => {
   it('is valid JSON when serialized — the exact contract `skill audit --sarif` prints to stdout', () => {
     const sarif = buildSarifLog([entry()])
     expect(() => JSON.parse(JSON.stringify(sarif))).not.toThrow()
+  })
+
+  it('appends additionalRuns (Cisco skill-scanner) verbatim as a second runs[] entry (Phase S3)', () => {
+    const ciscoRun = {
+      tool: { driver: { name: 'skill-scanner', rules: [{ id: 'skill-scanner/exfiltration' }] } },
+      results: [{ ruleId: 'skill-scanner/exfiltration', message: { text: 'exfil' } }],
+    }
+    const sarif = buildSarifLog([entry()], [ciscoRun]) as any
+    expect(sarif.runs).toHaveLength(2)
+    expect(sarif.runs[0].tool.driver.name).toBe('intutic-skill-scan')
+    // Verbatim: the exact object reference/shape, not translated.
+    expect(sarif.runs[1]).toEqual(ciscoRun)
+  })
+
+  it('omits additional runs when none are given, unchanged from before Phase S3', () => {
+    const sarif = buildSarifLog([entry()]) as any
+    expect(sarif.runs).toHaveLength(1)
+  })
+})
+
+describe('mapCiscoCategory (Phase S3)', () => {
+  it('maps prompt-injection-shaped categories to prompt_injection', () => {
+    expect(mapCiscoCategory('skill-scanner/prompt_injection')).toBe('prompt_injection')
+    expect(mapCiscoCategory('skill-scanner/indirect_injection')).toBe('prompt_injection')
+  })
+
+  it('maps exfiltration/credential categories to data_exfiltration', () => {
+    expect(mapCiscoCategory('skill-scanner/exfiltration')).toBe('data_exfiltration')
+    expect(mapCiscoCategory('skill-scanner/credential_leak')).toBe('data_exfiltration')
+  })
+
+  it('maps execution/supply-chain/network categories to malicious_code', () => {
+    expect(mapCiscoCategory('skill-scanner/command_execution')).toBe('malicious_code')
+    expect(mapCiscoCategory('skill-scanner/external_download')).toBe('malicious_code')
+    expect(mapCiscoCategory('skill-scanner/supply_chain')).toBe('malicious_code')
+    expect(mapCiscoCategory('skill-scanner/ssrf_cloud')).toBe('malicious_code')
+    expect(mapCiscoCategory('skill-scanner/toxic_flow')).toBe('malicious_code')
+  })
+
+  it('falls back to malicious_code for an unrecognized category', () => {
+    expect(mapCiscoCategory('skill-scanner/some_future_category')).toBe('malicious_code')
+    expect(mapCiscoCategory('not-even-slash-shaped')).toBe('malicious_code')
+  })
+})
+
+describe('mergeCiscoFindings (Phase S3)', () => {
+  function skillMdEntry(): SkillReportEntry {
+    return {
+      filePath: '.agents/skills/demo/SKILL.md',
+      linesCount: 10,
+      issuesDetected: 0,
+      findings: [],
+      scanned: true,
+      kind: 'skill_md',
+    }
+  }
+
+  function ciscoResult(over: Partial<CiscoDirScanResult> = {}): CiscoDirScanResult {
+    return {
+      dir: '/workspace/.agents/skills/demo',
+      ok: true,
+      sarifRuns: [],
+      findings: [
+        {
+          ruleId: 'skill-scanner/exfiltration',
+          level: 'error',
+          message: 'Reads ~/.ssh/id_rsa and sends it out.',
+          filePath: '/workspace/.agents/skills/demo/SKILL.md',
+          line: 4,
+        },
+      ],
+      ...over,
+    }
+  }
+
+  it('does nothing and returns 0 when the scan itself failed', () => {
+    const entry = skillMdEntry()
+    const added = mergeCiscoFindings([entry], entry, ciscoResult({ ok: false, findings: [] }), '/workspace')
+    expect(added).toBe(0)
+    expect(entry.findings).toEqual([])
+  })
+
+  it('stamps patternId as cisco.<ruleId>, maps the category, and tags engine: cisco-skill-scanner', () => {
+    const entry = skillMdEntry()
+    const added = mergeCiscoFindings([entry], entry, ciscoResult(), '/workspace')
+    expect(added).toBe(1)
+    expect(entry.issuesDetected).toBe(1)
+    expect(entry.findings).toHaveLength(1)
+    expect(entry.findings?.[0]).toMatchObject({
+      patternId: 'cisco.skill-scanner/exfiltration',
+      category: 'data_exfiltration',
+      engine: 'cisco-skill-scanner',
+    })
+    expect(entry.findings?.[0].excerpt).toContain('id_rsa')
+  })
+
+  it('relativizes an absolute finding path and attaches to the matching bundled-script entry', () => {
+    const skillMd = skillMdEntry()
+    const scriptEntry: SkillReportEntry = {
+      filePath: '.agents/skills/demo/setup.sh',
+      linesCount: 3,
+      issuesDetected: 0,
+      findings: [],
+      scanned: true,
+      kind: 'script',
+      language: 'shell',
+    }
+    const result = ciscoResult({
+      findings: [
+        {
+          ruleId: 'skill-scanner/command_execution',
+          level: 'error',
+          message: 'curl | sh pipeline',
+          filePath: '/workspace/.agents/skills/demo/setup.sh',
+          line: 2,
+        },
+      ],
+    })
+    mergeCiscoFindings([skillMd, scriptEntry], skillMd, result, '/workspace')
+    expect(skillMd.findings).toEqual([])
+    expect(scriptEntry.findings).toHaveLength(1)
+    expect(scriptEntry.issuesDetected).toBe(1)
+  })
+
+  it('falls back to the SKILL.md entry when no candidate matches the finding location', () => {
+    const skillMd = skillMdEntry()
+    const result = ciscoResult({
+      findings: [
+        {
+          ruleId: 'skill-scanner/configuration_risk',
+          level: 'warning',
+          message: 'no location match',
+          filePath: undefined,
+        },
+      ],
+    })
+    mergeCiscoFindings([skillMd], skillMd, result, '/workspace')
+    expect(skillMd.findings).toHaveLength(1)
+    expect(skillMd.findings?.[0].category).toBe('malicious_code')
+  })
+
+  it('caps the excerpt length', () => {
+    const skillMd = skillMdEntry()
+    const longMessage = 'x'.repeat(5000)
+    const result = ciscoResult({ findings: [{ ruleId: 'skill-scanner/exfiltration', level: 'error', message: longMessage, filePath: undefined }] })
+    mergeCiscoFindings([skillMd], skillMd, result, '/workspace')
+    expect(skillMd.findings?.[0].excerpt?.length).toBeLessThanOrEqual(2000)
   })
 })

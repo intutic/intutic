@@ -150,6 +150,32 @@ export type NotificationEventType =
    * support/ops look, not yet the incident a full cancellation is.
    */
   | 'billing.subscription.past_due'
+  // ── Skill-bundled-script malware detection (Phase S4, opt-in VirusTotal hash lookup) ──
+  /**
+   * An opt-in `GET /api/v3/files/{sha256}` VirusTotal lookup on a
+   * skill-bundled SCRIPT (never `SKILL.md` prose, never uploaded content —
+   * see `virusTotalService.ts`'s doc comment) returned at least one AV
+   * engine detection. HIGH: a confirmed-malicious file already sitting in a
+   * developer's skill directory is a live incident, the same tier as
+   * `provider.outage.detected` and `device.enforcement.disabled` above, not
+   * a usage-pattern signal to review later.
+   */
+  | 'skill.malware.detected'
+  // ── Semantic skill analysis (Phase S5, TD-357) ──
+  /**
+   * The opt-in LLM judge (`semanticSkillAnalysisEnabled`) called a skill's
+   * `SKILL.md` prose `'suspicious'` or `'malicious'` — content that
+   * `scanSkillContent`'s deterministic patterns may have missed entirely,
+   * since the whole point of this judge is catching a rephrasing that
+   * avoids every pattern's literal wording. Fired by
+   * `analyzeSkillSemantics` (`services/semanticSkillAnalysisService.ts`)
+   * only for a judge call that actually ran and returned one of those two
+   * verdicts — never for `'clean'`, and never for `'unjudged'` (a failed or
+   * capped-out call is an absence of signal, not a finding). Severity is
+   * dynamic: HIGH for `'malicious'`, MEDIUM for `'suspicious'` — see
+   * `mapSeverity` in `notificationRouterService.ts`.
+   */
+  | 'skill.semantic.flagged'
 
 export type NotificationStatus = 'sent' | 'failed' | 'deduplicated' | 'filtered'
 

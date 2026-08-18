@@ -306,6 +306,13 @@ export async function updatePreToolUseHooks(
         hookEntry('Edit'),
         hookEntry('Write'),
         hookEntry('MultiEdit'),
+        // M3: Claude Code names an MCP tool call `mcp__<server>__<tool>` —
+        // this matcher is what routes those calls into the same gate script
+        // at all. The gate body itself (gateBody.ts, v6) is what actually
+        // understands the shape once it arrives — the `#mcpservers`
+        // allowlist check and any `mcp__github__.*`-shaped SOP rule both need
+        // this matcher present to ever see the call.
+        hookEntry('mcp__.*'),
       ],
     },
   }

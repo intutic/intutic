@@ -147,9 +147,15 @@ process.stdin.on('end', () => {
     // recognisable-envelope set is exactly the extractor's field set. Narrower
     // would refuse real traffic; an envelope with none of these extracts to
     // empty strings, matches no rule, and used to be allowed.
-    intuticGuardEnvelope(ctx, ['tool_name', 'toolName', 'tool_input', 'toolInput', 'input', 'event',
+    intuticGuardEnvelope(ctx, ['tool_name', 'toolName', 'tool_input', 'toolInput', 'input', 'event', 'hook_event_name',
       'command', 'cmd', 'script', 'path', 'file_path', 'filePath', 'file', 'target', 'notebook_path'], logEvent);
-    const event = (ctx.event || '').toLowerCase();
+    // Cursor's real field is \`hook_event_name\` (confirmed against Cursor's
+    // hooks documentation and a live \`beforeMCPExecution\` payload example
+    // from Cursor's own bug tracker, 2026-08 — \`ctx.event\` is not a field
+    // Cursor actually sends). Both are read: the correct name, and the one
+    // this file read alone before, so a future payload shape carrying \`event\`
+    // instead is not silently dropped.
+    const event = (ctx.hook_event_name || ctx.event || '').toLowerCase();
     const input = ctx.input || ctx.tool_input || ctx;
 
     // Every spelling any harness uses, matching the bash extractor. A field name
@@ -158,7 +164,22 @@ process.stdin.on('end', () => {
     const targetPath = input.path || input.file_path || input.filePath || input.file ||
       input.target || input.notebook_path || '';
     const command = input.command || input.cmd || input.script || '';
-    const toolName = ctx.tool_name || ctx.toolName || event || 'tool';
+    let toolName = ctx.tool_name || ctx.toolName || event || 'tool';
+
+    // M3: a \`beforeMCPExecution\` payload's \`tool_name\` is the BARE MCP tool
+    // name (e.g. "create_issue"), never "beforeMCPExecution" itself — but it
+    // was never composed into the \`mcp__<server>__<tool>\` shape every other
+    // harness's MCP tool name already takes, so an allowlist rule or a
+    // workspace's own \`mcp__github__.*\`-shaped SOP rule silently never fired
+    // on a Cursor MCP call. The server is a TOP-LEVEL sibling field —
+    // \`command\` for a stdio server, \`url\` for a remote one (per Cursor's
+    // hooks documentation; verified live payload: \`{tool_name, command,
+    // hook_event_name: "beforeMCPExecution", ...}\`) — composed in here, once,
+    // before anything reads \`toolName\`.
+    if (event === 'beforemcpexecution' && ctx.tool_name) {
+      const mcpServer = ctx.command || ctx.url || ctx.server_name || ctx.serverName;
+      if (mcpServer) toolName = 'mcp__' + mcpServer + '__' + ctx.tool_name;
+    }
 
     // The protected-path check used to be gated on \`event === 'beforefileedit'
     // || input.path\`, so a shell command naming a protected path was only

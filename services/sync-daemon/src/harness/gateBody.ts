@@ -85,8 +85,26 @@ import {
  * malformed-envelope refusal is shared across the JS writers via
  * `intuticGuardEnvelope`. The `.rules` format is unchanged — v4 and v5 gates
  * read each other's snapshots byte-identically.
+ *
+ * v6 (M3): `#mcpservers` header parsing + `mcp__<server>__*` allowlist
+ * refusal + Cline `use_mcp_tool` envelope normalization; rule-line format
+ * itself is unchanged. This IS a `.rules` shape change, unlike v5 (which only
+ * closed fail-open edges) — a new header line means:
+ *
+ * - a v5 gate reading a v6 snapshot ignores the unknown `#mcpservers` header
+ *   (every existing header-parsing loop already falls through unrecognised
+ *   `#`-prefixed lines to the comment case) and degrades to v5 behaviour: no
+ *   allowlist enforcement, but no crash and no false-block either;
+ * - a v6 gate reading a v5 snapshot (no `#mcpservers` header present) also
+ *   behaves as unrestricted — the empty-list default — because "header
+ *   absent" and "header present with an empty list" are deliberately the same
+ *   observable state (`writePolicySnapshot` omits the line rather than
+ *   emitting it empty, precisely so a v6 gate cannot tell "no snapshot
+ *   configured a list yet" from "this workspace wants zero servers", and
+ *   picks the fail-open reading of that ambiguity rather than blocking every
+ *   MCP call the first time a v6 gate meets an old snapshot).
  */
-export const GATE_VERSION = 5
+export const GATE_VERSION = 6
 
 /**
  * How old a snapshot may be before a gate reports it as stale.
@@ -329,13 +347,26 @@ fi
 
 INTUTIC_SNAPSHOT_WORKSPACE=""
 INTUTIC_SNAPSHOT_GENERATED=""
+# M3: the per-server MCP allowlist header. Empty means "not configured" —
+# indistinguishable from "header absent", deliberately: writePolicySnapshot
+# omits the line entirely rather than shipping it with an empty list, so
+# empty-list-means-unrestricted holds all the way to the gate.
+INTUTIC_MCP_SEVERITY=""
+INTUTIC_MCP_SERVERS=""
 if [ -f "$INTUTIC_SNAPSHOT_RULES" ]; then
   INTUTIC_SNAPSHOT_STATE="ok"
   while IFS= read -r _line || [ -n "$_line" ]; do
     case "$_line" in
-      '#digest '*)    INTUTIC_SNAPSHOT_DIGEST="\${_line#\\#digest }" ;;
-      '#workspace '*) INTUTIC_SNAPSHOT_WORKSPACE="\${_line#\\#workspace }" ;;
-      '#generated '*) INTUTIC_SNAPSHOT_GENERATED="\${_line#\\#generated }" ;;
+      '#digest '*)      INTUTIC_SNAPSHOT_DIGEST="\${_line#\\#digest }" ;;
+      '#workspace '*)   INTUTIC_SNAPSHOT_WORKSPACE="\${_line#\\#workspace }" ;;
+      '#generated '*)   INTUTIC_SNAPSHOT_GENERATED="\${_line#\\#generated }" ;;
+      '#mcpservers '*)
+        # \`#mcpservers <severity> <comma-joined-server-names>\` — parameter
+        # expansion only, no subshell, matching the other header lines here.
+        _intutic_mcp_rest="\${_line#\\#mcpservers }"
+        INTUTIC_MCP_SEVERITY="\${_intutic_mcp_rest%% *}"
+        INTUTIC_MCP_SERVERS="\${_intutic_mcp_rest#* }"
+        ;;
       '#'*|'') : ;;
       *) INTUTIC_DYNAMIC+=("$_line") ;;
     esac
@@ -368,9 +399,13 @@ if [ -f "$INTUTIC_SNAPSHOT_RULES" ]; then
   fi
 
   # Degrade to the compiled floor. The dynamic tier is additive, so dropping it
-  # returns to yesterday's behaviour rather than opening a hole.
+  # returns to yesterday's behaviour rather than opening a hole. The MCP
+  # allowlist ships through the same file and degrades the same way — an
+  # invalid snapshot must not leave a stale allowlist enforcing.
   if [ "$INTUTIC_SNAPSHOT_STATE" = "invalid" ]; then
     INTUTIC_DYNAMIC=()
+    INTUTIC_MCP_SEVERITY=""
+    INTUTIC_MCP_SERVERS=""
   fi
 fi
 
@@ -512,6 +547,44 @@ if [ \${#INTUTIC_DYNAMIC[@]} -gt 0 ]; then
     intutic_apply "$_rec"
   done
 fi
+
+# ── M3: MCP per-server allowlist backstop ────────────────────────────────────
+# A DEDICATED header field, not a synthetic GuardPattern rule — see
+# policySnapshot.ts's module doc and protectedPaths.ts's assertPortableEre:
+# expressing "allow only these servers" as a single regex needs negative
+# lookahead, which neither \`grep -E\` (POSIX ERE) nor this file's own
+# portable-ERE discipline support. So this is a plain string-membership test
+# over the parsed \${#mcpservers} header, independent of intutic_apply/the
+# GuardPattern tables entirely.
+#
+# Only fires when a \`mcp__<server>__<tool>\`-shaped tool name was actually
+# called AND the header was present (INTUTIC_MCP_SERVERS non-empty — absent
+# header means unrestricted, see the header-parsing block above). Refuses
+# through the SAME exit-2 + \${log} idiom every other block in this file uses,
+# not a parallel mechanism.
+case "\${TOOL:-}" in
+  mcp__*__*)
+    if [ -n "$INTUTIC_MCP_SERVERS" ]; then
+      _intutic_mcp_server="\${TOOL#mcp__}"
+      _intutic_mcp_server="\${_intutic_mcp_server%%__*}"
+      case ",$INTUTIC_MCP_SERVERS," in
+        *",$_intutic_mcp_server,"*)
+          : # allowed — the server is in the workspace's list
+          ;;
+        *)
+          _intutic_mcp_reason="MCP server \\"$_intutic_mcp_server\\" is not on the MCP server allowlist for this workspace [mcp_allowlist]"
+          if [ "$INTUTIC_MCP_SEVERITY" = "shadow" ]; then
+            ${log} "tool_would_block" "\${TOOL:-}" "$_intutic_mcp_reason" || true
+          else
+            echo "[Intutic Governance] BLOCKED: $_intutic_mcp_reason" >&2
+            ${log} "tool_blocked" "\${TOOL:-}" "$_intutic_mcp_reason"
+            exit 2
+          fi
+          ;;
+      esac
+    fi
+    ;;
+esac
 # ── end Intutic gate body ────────────────────────────────────────────────────
 `
 }
@@ -535,7 +608,11 @@ const JS_SNAPSHOT_LOADER = `function intuticLoadSnapshot(INTUTIC_WORKSPACE_ID) {
   const fs = require('fs'), os = require('os'), path = require('path');
   const p = process.env.INTUTIC_SNAPSHOT_RULES ||
     path.join(os.homedir(), '.intutic', 'hooks', 'policy-snapshot.rules');
-  const out = { rules: [], digest: 'none', state: 'absent', workspaceId: '', generatedAt: '', ageDays: 0 };
+  // M3: mcpServers/mcpSeverity default to unrestricted (empty list) — the
+  // same "header absent means unrestricted" reading writePolicySnapshot's
+  // \`#mcpservers\` header is built on.
+  const out = { rules: [], digest: 'none', state: 'absent', workspaceId: '', generatedAt: '', ageDays: 0,
+    mcpServers: [], mcpSeverity: 'block' };
   let text;
   try { text = fs.readFileSync(p, 'utf8'); } catch (e) { return out; }
   out.state = 'ok';
@@ -543,6 +620,20 @@ const JS_SNAPSHOT_LOADER = `function intuticLoadSnapshot(INTUTIC_WORKSPACE_ID) {
     if (line.startsWith('#digest ')) { out.digest = line.slice(8).trim(); continue; }
     if (line.startsWith('#workspace ')) { out.workspaceId = line.slice(11).trim(); continue; }
     if (line.startsWith('#generated ')) { out.generatedAt = line.slice(11).trim(); continue; }
+    if (line.startsWith('#mcpservers ')) {
+      // \`#mcpservers <severity> <comma-joined-server-names>\` — same header a
+      // v5 gate would silently ignore via the generic '#'-prefix skip below,
+      // which is exactly the graceful-degradation contract this format change
+      // relies on.
+      const rest = line.slice('#mcpservers '.length);
+      const sp = rest.indexOf(' ');
+      if (sp === -1) { out.mcpSeverity = rest.trim(); out.mcpServers = []; }
+      else {
+        out.mcpSeverity = rest.slice(0, sp).trim();
+        out.mcpServers = rest.slice(sp + 1).trim().split(',').filter(Boolean);
+      }
+      continue;
+    }
     if (!line || line.startsWith('#')) continue;
     const f = line.split('\\t');
     if (f.length < 6 || !f[5]) continue;
@@ -583,8 +674,10 @@ const JS_SNAPSHOT_LOADER = `function intuticLoadSnapshot(INTUTIC_WORKSPACE_ID) {
   // exactly like a healthy quiet workspace.
   if (out.state === 'ok' && out.rules.length === 0) out.state = 'empty';
 
-  // Additive tier, so dropping it returns to yesterday's behaviour.
-  if (out.state === 'invalid') out.rules = [];
+  // Additive tier, so dropping it returns to yesterday's behaviour. The MCP
+  // allowlist ships through the same file and degrades the same way — an
+  // invalid snapshot must not leave a stale allowlist enforcing.
+  if (out.state === 'invalid') { out.rules = []; out.mcpServers = []; }
 
   if (out.state === 'ok' && out.generatedAt) {
     const t = Date.parse(out.generatedAt);
@@ -679,6 +772,23 @@ ${refuse}
  * it itself so no writer can hand it a differently-shaped string.
  */
 function intuticGate(toolName, target, command, record, workspaceId, toolInput) {
+  // M3: Cline's \`use_mcp_tool\` envelope, normalized into the
+  // \`mcp__<server>__<tool>\` shape every other harness's MCP tool name already
+  // takes — BEFORE any rule fires. Cline's own tool-call schema names the
+  // server and the tool as separate arguments (\`server_name\`, \`tool_name\`,
+  // alongside \`arguments\`) rather than composing them into one tool name, so
+  // without this a workspace's own \`mcp__github__.*\`-shaped SOP rule — and
+  // the allowlist check below — would silently never fire on a Cline-shaped
+  // call. Done once, here, rather than per-harness: any JS writer whose
+  // envelope happens to produce \`toolName === 'use_mcp_tool'\` with these
+  // fields benefits, not just Cline's.
+  if (toolName === 'use_mcp_tool' && toolInput && typeof toolInput === 'object') {
+    var _clineServer = toolInput.server_name || toolInput.serverName;
+    var _clineTool = toolInput.tool_name || toolInput.toolName;
+    if (_clineServer && _clineTool) {
+      toolName = 'mcp__' + _clineServer + '__' + _clineTool;
+    }
+  }
   // See the shell emitter for why this exists: the alternative escape a blocked
   // developer reaches for is chflags nouchg on the hook itself. Dynamic tier
   // only — the compiled floor below is never disabled by it — and every
@@ -774,6 +884,30 @@ function intuticGate(toolName, target, command, record, workspaceId, toolInput) 
       try { console.error('[Intutic Governance] BLOCKED: ' + reason); } catch (e) {}
       try { record('tool_blocked', toolName, reason); } catch (e) {}
 ${refuse}
+    }
+  }
+
+  // M3: MCP per-server allowlist backstop — see the shell emitter for why
+  // this is a plain membership test over the parsed \`#mcpservers\` header
+  // rather than a synthetic GuardPattern rule (no portable regex can express
+  // "allow only these servers" without negative lookahead). Only fires when
+  // \`toolName\` is actually \`mcp__<server>__<tool>\`-shaped AND the header was
+  // present (\`snap.mcpServers.length > 0\` — an absent header means
+  // unrestricted). Refuses through the SAME \`record\`/\`\${refuse}\` path as
+  // every other block above, not a parallel mechanism.
+  if (snap.mcpServers.length > 0 && toolName.indexOf('mcp__') === 0) {
+    var _mcpRest = toolName.slice('mcp__'.length);
+    var _mcpSep = _mcpRest.indexOf('__');
+    var _mcpServer = _mcpSep >= 0 ? _mcpRest.slice(0, _mcpSep) : '';
+    if (_mcpServer && snap.mcpServers.indexOf(_mcpServer) === -1) {
+      var _mcpReason = 'MCP server "' + _mcpServer + '" is not on the MCP server allowlist for this workspace [mcp_allowlist]';
+      if (snap.mcpSeverity === 'shadow') {
+        try { record('tool_would_block', toolName, _mcpReason); } catch (e) {}
+      } else {
+        try { console.error('[Intutic Governance] BLOCKED: ' + _mcpReason); } catch (e) {}
+        try { record('tool_blocked', toolName, _mcpReason); } catch (e) {}
+${refuse}
+      }
     }
   }
 }

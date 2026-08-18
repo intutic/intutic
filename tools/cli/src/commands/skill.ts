@@ -23,8 +23,15 @@ import {
   MAX_FILES_PER_SKILL,
   MAX_SCRIPT_SCAN_BYTES,
   type SkillScanFinding,
+  type SkillScanCategory,
   type ScriptLanguage,
 } from '@intutic/shared-types'
+import {
+  ciscoScannerOnPath,
+  runCiscoScan,
+  combineCiscoSarifRuns,
+  type CiscoDirScanResult,
+} from '../lib/ciscoScanner.js'
 import pc from 'picocolors'
 
 // ─── Shared response shapes ──────────────────────────────────────────
@@ -75,6 +82,37 @@ export interface SkillReportEntry {
    * `auditScriptFile`). Absent for anything that isn't a script row.
    */
   language?: string
+  /**
+   * Phase S5 (TD-357). FULL content of a `kind: 'skill_md'` file, attached
+   * ONLY when the workspace has `semanticSkillAnalysisEnabled` on (read from
+   * `client.fetchConfig`'s resolved `settings`, the same way
+   * `enableLocalSkillAuditDelete` already is below) — never for `kind:
+   * 'script'` rows, which stay S2/S3/S4's domain. Capped client-side to the
+   * same 65536-char bound `SkillFileReportSchema` enforces server-side
+   * (`services/control-plane/src/routes/harnessConfig.ts`), so an oversized
+   * file 400s never a request; it is silently capped, the same
+   * refusal-vs-cap posture `capContentForTransport`'s own doc comment
+   * explains.
+   */
+  content?: string
+}
+
+/**
+ * Cap a skill's content to the same bound the control plane's
+ * `SkillFileReportSchema` enforces (`z.string().max(65536)`) before it ever
+ * leaves this machine — truncating client-side rather than letting an
+ * oversized file 400 the whole report. `content` is judged, then stripped
+ * before persistence server-side either way (see that schema's own doc
+ * comment); a truncated judge input is a weaker signal, never a stored
+ * artifact, so silent truncation here is the same tradeoff
+ * `mirrorAdoptionService.ts`'s own `capBytes` makes for judge prompt fields.
+ */
+const MAX_SKILL_CONTENT_TRANSPORT_CHARS = 65536
+
+export function capContentForTransport(content: string): string {
+  return content.length > MAX_SKILL_CONTENT_TRANSPORT_CHARS
+    ? content.slice(0, MAX_SKILL_CONTENT_TRANSPORT_CHARS)
+    : content
 }
 
 /** Where bundled skill directories live, mirroring the conventions
@@ -116,6 +154,14 @@ export async function auditSkillFile(
    *  (including the tests that assert on `log.warn` output indirectly via
    *  behaviour) is unaffected. */
   quiet = false,
+  /**
+   * Phase S5 (TD-357). Attach the file's full content to the returned entry
+   * — only ever set by a caller that already confirmed
+   * `semanticSkillAnalysisEnabled` for this workspace (`runSkillAudit`
+   * below reads it off `client.fetchConfig`'s resolved settings, the same
+   * way it already reads `enableLocalSkillAuditDelete`). Defaults to
+   * `false` so every existing caller/test is unaffected. */
+  attachContent = false,
 ): Promise<SkillReportEntry> {
   let content: string
   try {
@@ -168,6 +214,7 @@ export async function auditSkillFile(
     sha256,
     scanned: true,
     kind: 'skill_md',
+    ...(attachContent ? { content: capContentForTransport(content) } : {}),
   }
 }
 
@@ -458,8 +505,17 @@ export async function runSkillList(): Promise<void> {
  * excerpt (see `skillScan.ts`'s `excerptFor`) but not a line/column, and
  * SARIF's `region` is optional — fabricating `startLine: 1` would claim a
  * precision this scanner does not have.
+ *
+ * `additionalRuns` (Phase S3): zero or more extra SARIF `runs[]`-shaped
+ * objects appended AFTER this codebase's own run — the Cisco skill-scanner
+ * integration's combined run, when that engine ran. SARIF is explicitly
+ * designed to carry multiple runs from different tools in one document, so
+ * these are appended AS-IS, never translated or merged into this function's
+ * own `results`/`rules` — that translation only happens for the internal
+ * `SkillScanFinding` representation (`mergeCiscoFindings`), never for this
+ * output mode.
  */
-export function buildSarifLog(entries: readonly SkillReportEntry[]): object {
+export function buildSarifLog(entries: readonly SkillReportEntry[], additionalRuns: readonly unknown[] = []): object {
   const results = entries.flatMap((entry) =>
     (entry.findings ?? []).map((finding) => ({
       ruleId: finding.patternId,
@@ -509,11 +565,107 @@ export function buildSarifLog(entries: readonly SkillReportEntry[]): object {
         // did not run" rather than "the tool ran and found nothing".
         results,
       },
+      ...additionalRuns,
     ],
   }
 }
 
-export async function runSkillAudit(opts: { sarif?: boolean } = {}): Promise<void> {
+/**
+ * Longest excerpt a Cisco finding's `message` is trimmed to before becoming
+ * a `SkillScanFinding.excerpt`. Matches the control plane's
+ * `SkillScanFindingSchema.excerpt` cap (`harnessConfig.ts`) — this codebase's
+ * own findings bound their excerpt to ~40 chars of surrounding context
+ * (`EXCERPT_RADIUS`, `skillScan.ts`), but a Cisco `message.text` is a full
+ * LLM-authored sentence, not a regex match window, so this cap is generous
+ * rather than matching that radius — it exists to reject an attempt to
+ * smuggle something much larger through this field, not to enforce a tight
+ * budget on a legitimate finding description.
+ */
+const CISCO_EXCERPT_CAP = 2000
+
+/**
+ * Maps the real `skill-scanner` category taxonomy (confirmed from the
+ * installed 0.3.3 package's source, `skill_scanner/models/findings.py` —
+ * see `lib/ciscoScanner.ts`'s module doc comment) onto this codebase's own
+ * three-category taxonomy. Ported from a SARIF `ruleId` of the shape
+ * `skill-scanner/<category>`; unrecognized or missing categories fall back
+ * to `'malicious_code'` — the broadest of the three buckets, and the
+ * correct default for "something a general-purpose security scanner flagged
+ * that doesn't cleanly map to injection or exfiltration."
+ */
+const CISCO_CATEGORY_MAP: Readonly<Record<string, SkillScanCategory>> = {
+  prompt_injection: 'prompt_injection',
+  indirect_injection: 'prompt_injection',
+  exfiltration: 'data_exfiltration',
+  credential_leak: 'data_exfiltration',
+  command_execution: 'malicious_code',
+  external_download: 'malicious_code',
+  supply_chain: 'malicious_code',
+  toxic_flow: 'malicious_code',
+  ssrf_cloud: 'malicious_code',
+  configuration_risk: 'malicious_code',
+  third_party_content: 'malicious_code',
+}
+
+/** See {@link CISCO_CATEGORY_MAP}. Exported for tests. */
+export function mapCiscoCategory(ruleId: string): SkillScanCategory {
+  const category = ruleId.includes('/') ? ruleId.slice(ruleId.lastIndexOf('/') + 1) : ruleId
+  return CISCO_CATEGORY_MAP[category] ?? 'malicious_code'
+}
+
+/**
+ * Merges one skill directory's Cisco findings into that skill's existing
+ * report entries — the `SKILL.md` row, or a bundled-script row when a
+ * finding's own location matches one of `candidateEntries` exactly. Falls
+ * back to `fallbackEntry` (always the skill's `SKILL.md` row) when no
+ * location match is found: `skill-scanner`'s own discovery targets
+ * `SKILL.md` (confirmed via its `--list-targets` output), not each bundled
+ * file independently, so a finding's location is not guaranteed to name a
+ * file this codebase separately audited.
+ *
+ * Each Cisco finding becomes a `SkillScanFinding` with `patternId: 'cisco.'
+ * + ruleId`, a category from {@link mapCiscoCategory}, an excerpt capped at
+ * {@link CISCO_EXCERPT_CAP}, and `engine: 'cisco-skill-scanner'` — this
+ * codebase's own findings stamp `engine: 'native'` at construction
+ * (`skillScan.ts`/`scriptScan.ts`), so every finding in a report entry now
+ * carries its provenance.
+ *
+ * Returns the number of findings merged, for the caller's running `issues`
+ * count.
+ */
+export function mergeCiscoFindings(
+  candidateEntries: readonly SkillReportEntry[],
+  fallbackEntry: SkillReportEntry,
+  ciscoResult: CiscoDirScanResult,
+  workspaceRoot: string,
+): number {
+  if (!ciscoResult.ok) return 0
+
+  for (const finding of ciscoResult.findings) {
+    const mapped: SkillScanFinding = {
+      patternId: `cisco.${finding.ruleId}`,
+      category: mapCiscoCategory(finding.ruleId),
+      excerpt: finding.message.slice(0, CISCO_EXCERPT_CAP) || undefined,
+      engine: 'cisco-skill-scanner',
+    }
+
+    let target: SkillReportEntry | undefined
+    if (finding.filePath) {
+      const relPath = finding.filePath.startsWith(workspaceRoot)
+        ? finding.filePath.slice(workspaceRoot.length).replace(/^[/\\]/, '')
+        : finding.filePath
+      target = candidateEntries.find((e) => e.filePath === relPath)
+    }
+    target ??= fallbackEntry
+
+    target.findings = [...(target.findings ?? []), mapped]
+    target.issuesDetected += 1
+  }
+
+  return ciscoResult.findings.length
+}
+
+export async function runSkillAudit(opts: { sarif?: boolean; engine?: 'native' | 'cisco' } = {}): Promise<void> {
   const sarif = opts.sarif === true
   // SARIF's contract is a single JSON document on stdout — a CI tool piping
   // this into a code-scanning upload must not see decorated progress text
@@ -525,17 +677,61 @@ export async function runSkillAudit(opts: { sarif?: boolean } = {}): Promise<voi
 
   const creds = await loadCredentials().catch(() => null)
   let enableLocalSkillAuditDelete = false
+  let ciscoSkillScannerEnabled = false
+  // Phase S5 (TD-357): gates whether `auditSkillFile` below attaches full
+  // `SKILL.md` content to its report entry. Off unless the workspace opted
+  // in — see `WorkspaceSettings.semanticSkillAnalysisEnabled`'s own doc
+  // comment for what turning it on transmits.
+  let semanticSkillAnalysisEnabled = false
 
-  // Fetch workspace settings to see if auto-delete is enabled
+  // Fetch workspace settings to see if auto-delete / the Cisco auto-run /
+  // semantic analysis are enabled
   if (creds) {
     try {
       const client = await getClient(config?.devMode)
       const syncConfig = await client.fetchConfig(creds.workspaceId)
       enableLocalSkillAuditDelete = syncConfig.settings?.enableLocalSkillAuditDelete ?? false
+      ciscoSkillScannerEnabled = syncConfig.settings?.ciscoSkillScannerEnabled ?? false
+      semanticSkillAnalysisEnabled = syncConfig.settings?.semanticSkillAnalysisEnabled ?? false
     } catch {
       // fallback to false
     }
   }
+
+  // ── Cisco skill-scanner engine resolution (Phase S3) ──────────────────
+  //
+  // Native scanning always runs — it is this command's baseline and always
+  // available. The Cisco engine additionally runs when EITHER:
+  //   - `--engine cisco` was explicitly passed: a LOUD failure (non-zero
+  //     exit) if the binary is absent, since the user explicitly asked for
+  //     this engine and a silent skip would look like a clean scan.
+  //   - the `ciscoSkillScannerEnabled` workspace setting is on: a graceful,
+  //     info-level skip if the binary is absent, since this is an opt-in
+  //     AUTO-run path, not an explicit request.
+  if (opts.engine !== undefined && opts.engine !== 'native' && opts.engine !== 'cisco') {
+    log.error(`Unknown --engine value '${opts.engine}'. Expected 'native' or 'cisco'.`)
+    process.exit(1)
+  }
+  const requestedCisco = opts.engine === 'cisco'
+  let runCisco = false
+  if (requestedCisco || ciscoSkillScannerEnabled) {
+    const available = await ciscoScannerOnPath()
+    if (available) {
+      runCisco = true
+    } else if (requestedCisco) {
+      log.error(
+        "Cisco skill-scanner engine requested (--engine cisco) but the 'skill-scanner' binary " +
+          'is not on PATH. Install it with `pipx install skill-scanner`.',
+      )
+      process.exit(1)
+    } else if (!sarif) {
+      log.info(
+        "ciscoSkillScannerEnabled is on, but the 'skill-scanner' binary is not on PATH — " +
+          'skipping the Cisco engine for this run (native scanning still ran).',
+      )
+    }
+  }
+  const ciscoRawSarifRuns: unknown[] = []
 
   const filesToScan = [
     '.cursorrules',
@@ -611,7 +807,7 @@ export async function runSkillAudit(opts: { sarif?: boolean } = {}): Promise<voi
   // pruning above: the same opt-in, now covering both audit paths.
   const skillFiles = await discoverSkillFiles(workspaceRoot)
   for (const { filePath, fullPath } of skillFiles) {
-    const entry = await auditSkillFile(filePath, fullPath, enableLocalSkillAuditDelete, sarif)
+    const entry = await auditSkillFile(filePath, fullPath, enableLocalSkillAuditDelete, sarif, semanticSkillAnalysisEnabled)
     issues += entry.issuesDetected
     skillsReport.push(entry)
 
@@ -624,16 +820,38 @@ export async function runSkillAudit(opts: { sarif?: boolean } = {}): Promise<voi
     // the language is recognized and the file is within the byte cap.
     const skillDirPath = dirname(filePath)
     const bundledFiles = await discoverSkillBundledFiles(workspaceRoot, skillDirPath)
+    const bundledEntries: SkillReportEntry[] = []
     for (const script of bundledFiles) {
       const scriptEntry = await auditScriptFile(script.filePath, script.fullPath, sarif)
       issues += scriptEntry.issuesDetected
       skillsReport.push(scriptEntry)
+      bundledEntries.push(scriptEntry)
+    }
+
+    // ── Cisco skill-scanner engine (Phase S3, opt-in) ───────────────────
+    //
+    // One invocation per skill directory — see `lib/ciscoScanner.ts`'s
+    // module doc comment for why the real CLI cannot take more than one
+    // `--path` per invocation. Findings merge into this skill's existing
+    // entries (SKILL.md or a matching bundled-script row); the raw SARIF
+    // run is kept separately for verbatim passthrough below.
+    if (runCisco) {
+      const [ciscoResult] = await runCiscoScan([join(workspaceRoot, skillDirPath)])
+      if (ciscoResult.ok) {
+        issues += mergeCiscoFindings([entry, ...bundledEntries], entry, ciscoResult, workspaceRoot)
+        ciscoRawSarifRuns.push(...ciscoResult.sarifRuns)
+      } else if (!sarif) {
+        log.warn(`[cisco] ${skillDirPath}: ${ciscoResult.error}`)
+      }
     }
   }
 
   if (sarif) {
-    // The whole point: one JSON document, nothing else, on stdout.
-    console.log(JSON.stringify(buildSarifLog(skillsReport), null, 2))
+    // The whole point: one JSON document, nothing else, on stdout. Cisco's
+    // combined run (if the engine ran) appends as a second `runs[]` entry,
+    // verbatim — see `buildSarifLog`'s doc comment.
+    const combinedCiscoRun = combineCiscoSarifRuns(ciscoRawSarifRuns)
+    console.log(JSON.stringify(buildSarifLog(skillsReport, combinedCiscoRun ? [combinedCiscoRun] : []), null, 2))
   } else if (issues === 0) {
     log.success('Skill security audit passed. No credentials or critical safety risks detected.')
   } else {
