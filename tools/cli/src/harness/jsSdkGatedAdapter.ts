@@ -64,8 +64,30 @@ export interface JsSdkGatedFrameworkSpec {
    * cannot actually call a model yet.
    */
   requiresPrefix?: string
+  /**
+   * OR-semantics variant of `requiresPrefix`, for frameworks whose presence
+   * is signalled by any one of SEVERAL package families rather than one
+   * required package plus one prefix: at least one dependency must start
+   * with at least one of these prefixes (an exact package name works too —
+   * a name is a prefix of itself). Used by `@ai-sdk/harness` detection,
+   * where `@ai-sdk/harness`, any `@ai-sdk/harness-*` adapter, or any
+   * `@ai-sdk/sandbox-*` provider each independently indicate the framework.
+   * Evaluated IN ADDITION to `requires`/`requiresPrefix` when both are set.
+   */
+  requiresAnyPrefix?: readonly string[]
   /** `npm install <npmInstall>` shown in the generated comment. */
   npmInstall: string
+  /**
+   * Replaces the default preamble lines of the generated comment block
+   * (`These env vars govern LLM egress only. <label> tools run in your own
+   * Node.js process, ...`) — each entry is one line, rendered with a leading
+   * `# `. For frameworks whose execution model makes the default prose
+   * FALSE rather than merely generic: `@ai-sdk/harness` tools execute
+   * server-side in Vercel Sandbox microVMs, so neither "tools run in your
+   * own Node.js process" nor an unqualified "these vars govern LLM egress"
+   * holds there. Omit for the standard in-process frameworks.
+   */
+  envPreamble?: readonly string[]
   /** The `@intutic/gate/<subpath>` import line shown in the comment. */
   importLine: string
   /** One line (no leading "# ") summarising how the imported symbol vetoes a call. */
@@ -138,11 +160,23 @@ export function makeJsSdkGatedAdapter(spec: JsSdkGatedFrameworkSpec): IHarnessAd
         if (!hasPrefixed) return false
       }
 
+      if (spec.requiresAnyPrefix !== undefined) {
+        const hasAny = Object.keys(deps).some((name) =>
+          spec.requiresAnyPrefix!.some((prefix) => name.startsWith(prefix)),
+        )
+        if (!hasAny) return false
+      }
+
       return true
     },
 
     async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
       const filePath = join(workspaceRoot, CONFIG_FILE)
+      const preamble = spec.envPreamble ?? [
+        `These env vars govern LLM egress only. ${spec.label} tools run in your own`,
+        'Node.js process, where no config or hook file can gate them — the',
+        'blocking tool gate ships SDK-side:',
+      ]
       const envContent = [
         '# Intutic Governance Rules (auto-generated)',
         '# DO NOT EDIT — managed by intutic sync daemon',
@@ -154,9 +188,7 @@ export function makeJsSdkGatedAdapter(spec: JsSdkGatedFrameworkSpec): IHarnessAd
         `export INTUTIC_PROXY_URL="${proxyUrl}"`,
         `export INTUTIC_SOP_COUNT=${sops.length}`,
         '',
-        `# These env vars govern LLM egress only. ${spec.label} tools run in your own`,
-        '# Node.js process, where no config or hook file can gate them — the',
-        '# blocking tool gate ships SDK-side:',
+        ...preamble.map((line) => `# ${line}`),
         `#   npm install ${spec.npmInstall}`,
         `#   ${spec.importLine}`,
         `# ${spec.usageSummary}`,

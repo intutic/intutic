@@ -14,7 +14,7 @@ That's true of the LLM-observability tools (LangSmith, W&B Weave, Arize AX) by d
 |---|---|---|---|---|
 | **When it acts** | Synchronous, in the tool-call path | After the fact (trace/log) | Runtime enforcement (Credo AI, since Jul 2026) | Synchronous, at the network/inference layer |
 | **What it sees** | The actual tool call — filesystem writes, shell commands, MCP invocations | Model input/output, spans | Policy state, some runtime hooks | Prompt/response payloads |
-| **Coding-agent harnesses** | 19 out-of-the-box, harness-native adapters | Generic SDK tracing | Not the focus | Network interception, 1-2 named harnesses |
+| **Coding-agent harnesses** | 39 out-of-the-box, harness-native adapters | Generic SDK tracing | Not the focus | Network interception, 1-2 named harnesses |
 | **SIEM/export** | 6 native destinations (Splunk, Syslog/CEF, Datadog, S3, GCS, webhook) with retry/DLQ | Varies | Not found in public docs | Forge: Splunk + S3 + SOAR webhooks |
 | **Audit trail** | Merkle-sealed trace roots, browser-verifiable | Trace logs | Policy version history | Forge: SHA-256 hash-chain ledger |
 | **Prove-before-enforce** | Replay any rule against real traffic before it's live; SOP shadow mode with a measured would-act rate | Not applicable | Not found in public docs | Not found in public docs |

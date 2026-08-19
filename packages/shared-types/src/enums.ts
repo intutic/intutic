@@ -231,10 +231,28 @@ export const HarnessType = {
   AUTOGEN: 'autogen',
   AG2: 'ag2',
   GOOGLE_ADK: 'google-adk',
+  /** OpenAI Agents SDK — covers BOTH the Python (`openai-agents` on PyPI)
+   *  and JS/TS (`@openai/agents` on npm) ecosystems, same dual-ecosystem
+   *  pattern as LANGCHAIN above — but unlike LangChain, BOTH sides have a
+   *  shipped gate: Python via `intutic_clawde.gate.adapters.openai_agents`
+   *  (`intutic_tool_guardrail`), TypeScript via `@intutic/gate/openai`
+   *  (packages/gate-js — tool input guardrails, `wrapAgent()` for
+   *  mcpServers-derived tools, and the tracing-exporter DLP kill-switch).
+   *  Detection (`tools/cli/src/harness/openaiAgents.ts`) matches Python
+   *  manifests AND package.json `@openai/agents*` deps. */
   OPENAI_AGENTS: 'openai-agents',
   /** Detected via pydantic-ai / pydantic-ai-slim. */
   PYDANTIC_AI: 'pydantic-ai',
   SMOLAGENTS: 'smolagents',
+  /** AWS Strands Agents (`strands-agents` on PyPI — the default framework in
+   *  Bedrock AgentCore's own quickstarts). Detected via `strands-agents` in
+   *  Python dependency manifests. Gate: `intutic_clawde.gate.adapters.strands`'s
+   *  `IntuticHookProvider`, built on Strands' documented
+   *  `BeforeToolCallEvent.cancel_tool` veto (verified against a real
+   *  strands-agents==1.52.0 install). NOTE: the framework's DEFAULT model
+   *  provider (Bedrock, SigV4-signed via boto3) is NOT routable through the
+   *  Intutic proxy — see apps/docs/integrations/strands.md. */
+  STRANDS: 'strands',
   // ─── T2: JS/TS SDK-gated frameworks (no on-disk hook/config file) ───────
   // Same family as LANGCHAIN/LANGGRAPH above, but JS/TS-native: the blocking
   // gate ships in @intutic/gate (packages/gate-js), a subpath adapter per
@@ -250,6 +268,87 @@ export const HarnessType = {
    *  harnesses here, this framework has NO env-var LLM-egress routing — see
    *  `@intutic/gate/vercel`'s `withIntuticProxy()` and its module doc. */
   VERCEL_AI_SDK: 'vercel-ai-sdk',
+  /** Vercel's "eve" (npm `eve`, github.com/vercel/eve) — filesystem-first
+   *  durable backend AI agents; an agent is an `agent/` directory eve builds
+   *  by walking the tree. Pre-1.0 PREVIEW (0.39.x). Detected via `eve` in
+   *  `package.json` PLUS the characteristic `agent/` directory (a compound
+   *  check — either alone is too generic; see tools/cli/src/harness/eve.ts).
+   *  Gate: `@intutic/gate/eve`'s `intuticApproval()` on eve's per-tool /
+   *  per-connection `approval` policy surface — see gateRegistry.ts's `eve`
+   *  row and TD-410 for the preview-churn shield. */
+  EVE: 'eve',
+  // ─── A3: Vercel platform-agent runtimes (JS/TS SDK-gated, gate-js) ──────
+  // Same family as MASTRA/VERCEL_AI_SDK, but the tool-execution model
+  // differs enough to matter: harness tools run SERVER-SIDE in Vercel
+  // Sandbox microVMs (the laptop proxy never sees sandbox egress), and
+  // workflow tools run inside a DURABLE runtime that retries thrown errors
+  // (refusals must be FatalError-compatible). See each adapter's module doc.
+  /** Vercel `@ai-sdk/harness` (HarnessAgent — sandboxed coding-agent
+   *  harnesses, e.g. `@ai-sdk/harness-claude-code`/`-grok-build`). Detected
+   *  via `@ai-sdk/harness`, any `@ai-sdk/harness-*` adapter, or any
+   *  `@ai-sdk/sandbox-*` provider in `package.json`. Gate:
+   *  `@intutic/gate/harness`'s approval responder — the framework's
+   *  `toolApproval` setting is a STATIC record without callback support, so
+   *  per-call gating routes through the tool-approval flow; built-in sandbox
+   *  tools are governed only by `permissionMode`, which DEFAULTS to
+   *  'allow-all'. See gateRegistry.ts's NO_GATE row and TD-415..417. */
+  AI_SDK_HARNESS: 'ai-sdk-harness',
+  /** Vercel `@ai-sdk/workflow` (WorkflowAgent — durable workflow agents on
+   *  the Workflow DevKit). Detected via `@ai-sdk/workflow` in `package.json`
+   *  (the unscoped `workflow` package alone is deliberately NOT a trigger —
+   *  it is the durable runtime with no agent surface, and the bare name is
+   *  too generic). Gate: `@intutic/gate/workflow`'s `intuticNeedsApproval()`
+   *  on each tool — WorkflowAgent itself has zero approval fields; refusals
+   *  are FatalError-compatible so the durable runtime aborts rather than
+   *  retry-looping a governance denial. See gateRegistry.ts's NO_GATE row
+   *  and TD-418..419. */
+  AI_SDK_WORKFLOW: 'ai-sdk-workflow',
+  // ─── B2: AWS Bedrock AgentCore ───────────────────────────────────────────
+  /**
+   * AWS Bedrock AgentCore **Runtime** (GA 2025-10) — a managed hosting
+   * environment for a customer's OWN agent code (any framework), NOT itself
+   * an agent framework. Detected via the `bedrock-agentcore` SDK (PyPI
+   * `bedrock-agentcore`, CONFIRMED at 1.22.0; npm `bedrock-agentcore`,
+   * CONFIRMED at 0.4.3 — both live-checked via `pip index versions`/`npm
+   * view` and by downloading and inspecting the real packages, not assumed)
+   * OR the local dev-loop config files the `agentcore` CLI (npm
+   * `@aws/agentcore`, CONFIRMED at 0.27.0) and the Python
+   * `bedrock-agentcore-starter-toolkit` (CONFIRMED at 0.3.11) write:
+   * `.bedrock_agentcore.yaml`, `agentcore/agentcore.json`, `aws-targets.json`
+   * — all three confirmed by extracting the real published tarballs/wheels
+   * and grepping their compiled/source output for the literal filenames.
+   *
+   * Classified `'delegated'` (see `gateKind.ts`), the SAME kind as XIRP and
+   * AGENTIC_ORCHESTRATOR, for an analogous but distinct reason: Runtime
+   * hosts the customer's chosen framework's code UNCHANGED, so a tool call
+   * made inside it is governed by whichever already-supported framework
+   * adapter that code uses (Strands, LangGraph, CrewAI, ...) — this
+   * adapter's own `writeConfig` is a no-op, same as Xirp/Agentic
+   * Orchestrator's. Unlike those two, Runtime does not SPAWN another
+   * already-installed CLI harness as a subprocess; it hosts a customer's
+   * framework-SDK code as the deployment target, so if that code uses no
+   * framework this registry supports (raw boto3, a hand-rolled tool loop),
+   * coverage is genuinely zero — the same honest gap AGENTIC_ORCHESTRATOR's
+   * OpenCode backend has (TD-397). Deployment-target constraints that are
+   * NOT a gate concern (environment-variable caps, VPC/NAT egress topology,
+   * SigV4 traffic not being proxyable) are documented in
+   * apps/docs/integrations/agentcore.md rather than encoded here.
+   *
+   * AgentCore **Gateway** (the MCP-tool-call interceptor path) deliberately
+   * has NO enum entry here — same precedent QM set (see TD-400): it is a
+   * deployed AWS resource (a Lambda attached to a Gateway), never something
+   * `intutic init`/`intutic connect` finds on a developer's laptop. Its
+   * coverage is the `tools/agentcore-interceptor` Lambda calling
+   * `POST /api/v1/integrations/agentcore/gateway-check` — see TD-430.
+   *
+   * AgentCore **Policy** (Cedar/"Dogwood") has NO third-party HTTP policy
+   * backend at all (confirmed against `GatewayPolicyEngineConfiguration`'s
+   * real API reference: `arn` only ever names an AWS-native
+   * `policy-engine/...` resource) — not integrable by design, not a gap.
+   *
+   * See apps/docs/integrations/agentcore.md and TD-430..432.
+   */
+  AGENTCORE_RUNTIME: 'agentcore-runtime',
 } as const
 
 /** Union of all harness type values. */

@@ -6,7 +6,7 @@ Credo AI is an AI governance, risk, and compliance (GRC) platform. Since July 20
 
 Credo AI's core is still the **governance system of record** — policy creation, risk assessment, audit documentation, and regulatory compliance workflows. Agent Governor extends that into the execution path: it hooks an agent harness at session start, before/after each tool call, and session end, and resolves each action to Allow / Block / Escalate / Advise, compiled from policy-as-code.
 
-As of this writing it is a **Research Preview**, **Claude Code only**, with publicly reported scale in the low thousands of governed sessions and double-digit blocked actions — not the general-purpose, multi-harness enforcement Intutic runs today. Intutic's proxy sits in front of 19 coding-agent harnesses, enforces synchronously in-process (no round trip to a policy service), and has been the primary product surface rather than an extension of a governance platform.
+As of this writing it is a **Research Preview**, **Claude Code only**, with publicly reported scale in the low thousands of governed sessions and double-digit blocked actions — not the general-purpose, multi-harness enforcement Intutic runs today. Intutic's proxy sits in front of 39 coding-agent harnesses, enforces synchronously in-process (no round trip to a policy service), and has been the primary product surface rather than an extension of a governance platform.
 
 Both products now say "policy-as-code," so the distinction has to be sharper than the vocabulary: where the policy lives, and what executes it. In Credo AI, policy-as-code is authored in a governance platform and compiled down into a per-harness hook. In Intutic, the policies are literally files in your repository — `.intutic/sops/*.md` and harness guideline files, reviewed in git like any other code change (see [GitOps for SOPs](/guide/gitops-sops)) — and the thing executing them is the enforcement path itself: the proxy evaluates them synchronously, in-process, on every tool call, with no round trip to a policy service. **Credo AI is adding an enforcement wing to a GRC platform. Intutic is policy-as-code where the code already runs: in the enforcement path.**
 
@@ -16,9 +16,9 @@ Both products now say "policy-as-code," so the distinction has to be sharper tha
 |-----------|---------|----------|
 | **Primary function** | Runtime enforcement (circuit breaker) | Governance, risk & compliance (GRC), with a newer runtime-enforcement feature |
 | **Where it sits** | In the tool-call path between agent and infrastructure | Above the execution layer for GRC; Agent Governor adds an in-path hook per harness |
-| **Enforcement** | Synchronous — BYPASS / ENHANCE / HIJACK / KILL, in-process, all 34 harnesses | Agent Governor: Allow / Block / Escalate / Advise, Claude Code only, Research Preview |
+| **Enforcement** | Synchronous — BYPASS / ENHANCE / HIJACK / KILL, in-process, all 39 harnesses | Agent Governor: Allow / Block / Escalate / Advise, Claude Code only, Research Preview |
 | **Enforcement maturity** | Production, primary product surface | New (July 2026), reported at low-thousands-of-sessions scale |
-| **Scope** | AI coding agents (34 harness integrations) | All AI systems for GRC; Agent Governor is single-harness today |
+| **Scope** | AI coding agents (39 harness integrations) | All AI systems for GRC; Agent Governor is single-harness today |
 | **DLP & threat detection** | Secrets redaction, SQL injection, prompt injection | Risk scoring and bias detection (GRC side) |
 | **Compliance output** | Enforcement audit logs (who, what, when, blocked/allowed) | Compliance reports, model cards, risk registers |
 | **Integration model** | Local proxy + sync daemon | Cloud platform + API |
@@ -41,7 +41,7 @@ This gives your compliance team the governance system of record they need, and y
 - Your AI agents write files, run commands, and mutate databases
 - You need **runtime enforcement** — blocking bad actions before they execute
 - You want tool-call-level audit trails with enforcement decisions
-- You need to cover **19 AI coding harnesses** with a single policy stack
+- You need to cover **39 AI coding harnesses** with a single policy stack
 
 ## When You Need Credo AI
 
