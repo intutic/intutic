@@ -370,5 +370,5 @@ intutic status
 | [**How It Works**](/guide/how-it-works) | Understand the proxy → policy engine → verdict pipeline |
 | [**Enforcement Actions**](/concepts/enforcement-actions) | Deep dive into BYPASS, ENHANCE, HIJACK, and KILL |
 | [**Custom Filters (WASM)**](/external/wasm-rules) | Create WASM policy rules for custom tool-call filtering |
-| [**Integrations**](/integrations/) | Detailed setup guides for all 20 harnesses |
+| [**Integrations**](/integrations/) | Detailed setup guides for all 24 harnesses |
 | [**CLI Reference**](/reference/cli) | Complete command reference for `@intutic/cli` |

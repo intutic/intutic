@@ -1,11 +1,11 @@
 ---
 title: Integrations
-description: Connect Intutic to 27 AI coding agents — IDE extensions, CLI tools, agent frameworks, and platforms. Auto-detected, zero config.
+description: Connect Intutic to 34 AI coding agents — IDE extensions, CLI tools, agent frameworks, orchestrators, and platforms. Auto-detected, zero config.
 ---
 
 # Integrations <Badge type="tip" text="Open-Core" />
 
-Intutic supports **27 AI agent harnesses** out of the box (plus 4 more Python-SDK-gated frameworks whose dedicated adapter ships in a following wave). Run `intutic init` in your project and the CLI auto-detects which agents are present, then syncs governance rules to each one.
+Intutic supports **34 AI agent harnesses** out of the box. Run `intutic init` in your project and the CLI auto-detects which agents are present, then syncs governance rules to each one.
 
 ```bash
 intutic init
@@ -56,6 +56,10 @@ Autonomous coding agents that run multi-step tasks with tool use.
 | [**CrewAI**](/integrations/crewai) | Multi-agent orchestration framework | `.env.intutic` + SDK gate |
 | [**Google ADK**](/integrations/google-adk) | Google's Agent Development Kit | `.env.intutic` + SDK gate |
 | [**OpenAI Agents SDK**](/integrations/openai-agents) | OpenAI's Python agents SDK | `.env.intutic` + SDK gate |
+| **AutoGen** | Microsoft's multi-agent conversation framework | `.env.intutic` + SDK gate |
+| **AG2** | CrewAI-style fork/continuation of pre-Microsoft AutoGen | `.env.intutic` + SDK gate |
+| **Pydantic AI** | Pydantic's typed agent framework | `.env.intutic` + SDK gate |
+| **smolagents** | Hugging Face's code-executing agent framework | `.env.intutic` + SDK gate |
 | [**Mastra**](/integrations/mastra) | TypeScript agent framework | `.env.intutic` + SDK gate |
 | [**Vercel AI SDK**](/integrations/vercel-ai-sdk) | Vercel's `ai` package (v6+) | `.env.intutic` + SDK gate |
 | [**OpenHands**](/integrations/openhands) | Open-source AI software developer platform | `config.toml` |

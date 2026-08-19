@@ -22,14 +22,16 @@ Most teams map one workspace to one code repository. This keeps governance rules
 
 ## Harnesses
 
-A **harness** is any AI coding agent that Intutic governs. Intutic currently supports **20 harnesses**:
+A **harness** is any AI coding agent that Intutic governs. Intutic currently supports **24 harnesses**, plus dedicated SDK-side gates for 10 more agent frameworks that have no installable CLI/IDE surface of their own:
 
 | Category | Harnesses |
 |----------|-----------|
 | IDE agents | Cursor, Windsurf, Continue, Cline, Roo Code, GitHub Copilot |
-| CLI agents | Claude Code, Aider, Codex, Goose, Pi, Grok Build |
+| CLI agents | Claude Code, Aider, Codex, Goose, Pi, Grok Build, Muse Code, dsh (preview) |
 | Platform agents | Antigravity, OpenHands, n8n, Claude Desktop, Open WebUI |
 | Specialized | OpenClaw, Hermes, LangGraph |
+| Orchestrators (delegate to already-gated harnesses) | Spotify Xirp, DoorDash Agentic Orchestrator |
+| SDK-gated frameworks (`@intutic/gate` / `intutic-clawde`, not `intutic connect` targets) | LangChain, CrewAI, AutoGen, AG2, Google ADK, OpenAI Agents SDK, Pydantic AI, smolagents, Mastra, Vercel AI SDK |
 
 The `intutic init` command auto-detects which harnesses are present in your repo and writes governance config into each one's native config file. See [How It Works](/guide/how-it-works) for details on per-harness routing.
 
