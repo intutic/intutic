@@ -12,16 +12,19 @@ vi.mock('../config/paths.js', () => ({ resolveControlPlaneUrl: vi.fn(() => 'http
 // vi.mock factories are hoisted above top-level const declarations, so
 // anything they close over has to come from vi.hoisted() — including the
 // mutable workspaceRoot each test points at its own temp dir.
-const { postMock, getMock, workspaceRootRef } = vi.hoisted(() => ({
+const { postMock, getMock, delMock, workspaceRootRef } = vi.hoisted(() => ({
   postMock: vi.fn(),
   getMock: vi.fn(),
+  delMock: vi.fn(),
   workspaceRootRef: { value: '' },
 }))
-vi.mock('../lib/api.js', () => ({ createApiClient: () => ({ post: postMock, get: getMock }) }))
+vi.mock('../lib/api.js', () => ({
+  createApiClient: () => ({ post: postMock, get: getMock, del: delMock }),
+}))
 
 import { createHash } from 'node:crypto'
 import { renderSopFile } from '../lib/sopFrontMatter.js'
-import { runSopsPush, runSopsPull, runSopsStatus } from './sops.js'
+import { runSopsPush, runSopsPull, runSopsStatus, runSopsOrgList, runSopsOrgRm } from './sops.js'
 
 describe('runSopsPush', () => {
   let sopsDir: string
@@ -447,5 +450,106 @@ describe('runSopsStatus', () => {
 
     await expect(status()).resolves.toBeUndefined()
     expect(output()).toContain('in-sync')
+  })
+})
+
+describe('runSopsOrgList', () => {
+  let exitCode: number | null
+  let logLines: string[]
+
+  beforeEach(() => {
+    workspaceRootRef.value = '/unused'
+    getMock.mockReset()
+    exitCode = null
+    logLines = []
+    vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      exitCode = code ?? 0
+      throw new Error(`process.exit(${code})`)
+    }) as never)
+    vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      logLines.push(args.join(' '))
+    })
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  async function orgList(): Promise<void> {
+    try {
+      await runSopsOrgList({})
+    } catch (err) {
+      if (!(err instanceof Error) || !err.message.startsWith('process.exit(')) throw err
+    }
+  }
+
+  it('lists org SOPs from the bare { data: [...] } shape, not an items envelope', async () => {
+    getMock.mockResolvedValue({
+      data: [
+        { orgSopId: 'osp_1', title: 'Mandatory Floor', riskTier: 'HIGH', createdAt: '2026-01-01T00:00:00Z' },
+      ],
+    })
+
+    await orgList()
+
+    expect(getMock).toHaveBeenCalledWith('/api/v1/workspace/org-sops')
+    expect(logLines.join('\n')).toContain('Mandatory Floor')
+    expect(logLines.join('\n')).toContain('osp_1')
+    expect(exitCode).toBeNull()
+  })
+
+  it('reports none found without treating an empty org as an error', async () => {
+    getMock.mockResolvedValue({ data: [] })
+    await orgList()
+    expect(logLines.join('\n')).toContain('No org-wide SOPs found')
+    expect(exitCode).toBeNull()
+  })
+
+  it('exits 1 when the request fails (e.g. non-membership 404)', async () => {
+    getMock.mockRejectedValue(new Error('API GET /api/v1/workspace/org-sops failed (404): Org not found'))
+    await orgList()
+    expect(exitCode).toBe(1)
+  })
+})
+
+describe('runSopsOrgRm', () => {
+  let exitCode: number | null
+
+  beforeEach(() => {
+    workspaceRootRef.value = '/unused'
+    delMock.mockReset()
+    exitCode = null
+    vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      exitCode = code ?? 0
+      throw new Error(`process.exit(${code})`)
+    }) as never)
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  async function orgRm(orgSopId: string): Promise<void> {
+    try {
+      await runSopsOrgRm(orgSopId, {})
+    } catch (err) {
+      if (!(err instanceof Error) || !err.message.startsWith('process.exit(')) throw err
+    }
+  }
+
+  it('deletes by orgSopId against the singular org-sops path', async () => {
+    delMock.mockResolvedValue({ deleted: true })
+    await orgRm('osp_1')
+    expect(delMock).toHaveBeenCalledWith('/api/v1/workspace/org-sops/osp_1')
+    expect(exitCode).toBeNull()
+  })
+
+  it('exits 1 when the delete fails (not found or lacking admin access)', async () => {
+    delMock.mockRejectedValue(new Error('API DELETE /api/v1/workspace/org-sops/osp_x failed (404): Org SOP not found'))
+    await orgRm('osp_x')
+    expect(exitCode).toBe(1)
   })
 })
