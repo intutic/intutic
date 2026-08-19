@@ -306,7 +306,7 @@ export async function mergeProfilePatch(profileDir: string, workspaceRoot: strin
  */
 export async function mergeProfileDependency(profileDir: string): Promise<void> {
   const manifestPath = path.join(profileDir, 'package.json')
-  let manifest: Record<string, unknown> = {}
+  let manifest: Record<string, unknown>
   try {
     manifest = JSON.parse(await fs.readFile(manifestPath, 'utf-8')) as Record<string, unknown>
   } catch {
