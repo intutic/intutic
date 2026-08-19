@@ -92,4 +92,16 @@ describe('collectAgentReport — guardrails.hook_gate / guardrails.gate_kind', (
     expect(r.facets.guardrails.hook_gate).toBe(false)
     expect(r.facets.guardrails.gate_kind).toBe('delegated')
   })
+
+  it('reports hook_gate:false, gate_kind:"delegated" for agentic-orchestrator — wraps Claude Code/Codex/OpenCode (two of three gated, see TD-397)', async () => {
+    const r = await collectAgentReport({
+      workspaceRoot,
+      harnessType: 'agentic-orchestrator',
+      configSynced: true,
+      dlpEnabled: false,
+      policyEnforced: false,
+    })
+    expect(r.facets.guardrails.hook_gate).toBe(false)
+    expect(r.facets.guardrails.gate_kind).toBe('delegated')
+  })
 })

@@ -109,6 +109,16 @@ const PROCESS_SIGNATURES: Array<{
     // process-list scan has no parent-PID data to produce on its own.
     patterns: [/\/Xirp\.app\//i],
   },
+  {
+    name: 'Agentic Orchestrator',
+    // Unlike Xirp, `agentico` IS a CLI binary invoked by name — confirmed by
+    // downloading and running the real released binary during this
+    // integration's research (see agenticOrchestrator.ts's module doc). Same
+    // anchoring discipline as `grok` above: only when it appears as an
+    // invoked COMMAND NAME (whole line, leading word, or right after a path
+    // separator), never merely present inside a longer token.
+    patterns: [/(^|[/\\\s])agentico(\s|$)/],
+  },
 ]
 
 /**

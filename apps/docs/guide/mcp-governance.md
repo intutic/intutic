@@ -253,6 +253,7 @@ apply to that gate's unit of evaluation at all.
 | LangGraph | ❌ n/a | No generated gate file — the SDK-side `intutic_clawde.gate` is out of scope for this phase's per-harness matcher work. |
 | Aider | ❌ n/a | No `PreToolUse` hook mechanism exists for this harness at all (see `NO_GATE` in `gateRegistry.ts`). |
 | Xirp | ❌ n/a (delegated) | Not itself an AI agent — no tool calls of its own to match. An `mcp__<server>__<tool>`-shaped call made inside a Xirp-managed session is whatever the WRAPPED harness (Claude Code, Codex, …) sends, and is covered by that harness's own row above — provided the wrapped harness's gate files reach the `git worktree` the call runs in, which is what [Worktree Coverage](/reference/harness-security-matrix#worktree-coverage) (TD-390) now ensures. |
+| Agentic Orchestrator | ❌ n/a (delegated) | Not itself an AI agent — no tool calls of its own to match. An `mcp__<server>__<tool>`-shaped call made inside a session is whatever the WRAPPED backend (Claude Code, Codex, or OpenCode) sends. Claude Code/Codex calls are covered by that backend's own row above under the same worktree-coverage guarantee as Xirp; **OpenCode calls are not covered by anything** — no row for OpenCode exists in this table at all, because no MCP (or any other) gate exists for it yet. See TD-397. |
 
 ## What this phase deliberately does not cover
 

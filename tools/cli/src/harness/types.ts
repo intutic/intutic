@@ -67,6 +67,11 @@ export const HARNESS_CONFIG_FILES: Record<HarnessType, string> = {
   // orchestrates other already-gated harnesses (Claude Code, Codex,
   // Antigravity/Gemini CLI), whose own adapters do the real writing.
   'xirp': '',
+  // Agentic Orchestrator writes no config of its own — see
+  // agenticOrchestrator.ts's module doc. It orchestrates other CLI backends
+  // (Claude Code, Codex, OpenCode), whose own adapters do the real writing
+  // (OpenCode has none today — see TD-397).
+  'agentic-orchestrator': '',
   // Wave 1 SDK-gated frameworks — same rationale as langgraph above: no
   // on-disk hook/config file exists to gate tool calls, so each of these
   // writes .env.intutic (proxy base-URL vars + an SDK-gate pointer comment).

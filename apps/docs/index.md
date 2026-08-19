@@ -24,8 +24,8 @@ features:
     title: FinOps Ledger
     details: Track every token, every model, every dollar. Per-model cost breakdowns, local session token metering, and customizable spending caps.
   - icon: 🔌
-    title: 19 Harness Integrations
-    details: Works with Claude Code, Cursor, Windsurf, Aider, Antigravity, Codex, OpenHands, n8n, Cline, Roo Code, Continue, Claude Desktop, Goose, Open WebUI, OpenClaw, Hermes, Pi, and GitHub Copilot. Auto-detects your tooling and syncs governance rules to every agent.
+    title: 24 Harness Integrations
+    details: Works with Claude Code, Cursor, Windsurf, Aider, Antigravity, Codex, OpenHands, n8n, Cline, Roo Code, Continue, Claude Desktop, Goose, Open WebUI, OpenClaw, Hermes, Pi, GitHub Copilot, LangGraph, Muse Code, Grok Build, dsh, Xirp, and DoorDash Agentic Orchestrator — plus dedicated SDK-side gates for LangChain, CrewAI, AutoGen, AG2, Google ADK, OpenAI Agents SDK, Pydantic AI, smolagents, Mastra, and the Vercel AI SDK. Auto-detects your tooling and syncs governance rules to every agent.
 ---
 
 <style>

@@ -39,7 +39,7 @@ intutic init [options]
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-1. Scans the workspace for all 19 harness config files
+1. Scans the workspace for all harness config files
 2. Creates a workspace on the control plane
 3. Generates a virtual API key (`vk_*`)
 4. Writes governance config into each detected harness file

@@ -1,6 +1,6 @@
 # Integrations Overview
 
-Intutic supports 25 AI agent harnesses out of the box, plus 4 more Python-SDK-gated frameworks whose adapters ship in a following wave. The CLI auto-detects which harnesses are present in your workspace and syncs governance rules to each one.
+Intutic supports 34 AI agent harnesses out of the box. The CLI auto-detects which harnesses are present in your workspace and syncs governance rules to each one.
 
 ## Supported Harnesses
 
@@ -31,9 +31,15 @@ Intutic supports 25 AI agent harnesses out of the box, plus 4 more Python-SDK-ga
 | [CrewAI](/integrations/crewai) | `.env.intutic` | `crewai` in `pyproject.toml`, `requirements.txt`, or `uv.lock` | ✅ Stable |
 | [Google ADK](/integrations/google-adk) | `.env.intutic` | `google-adk` in `pyproject.toml`, `requirements.txt`, or `uv.lock` | ✅ Stable |
 | [OpenAI Agents SDK](/integrations/openai-agents) | `.env.intutic` | `openai-agents` in `pyproject.toml`, `requirements.txt`, or `uv.lock` | ✅ Stable |
-| AutoGen / AG2 / Pydantic AI / smolagents | `.env.intutic` | Dependency-manifest detection (see each `HarnessType`) | 🟡 Env-adapter shipped; dedicated SDK gate module is a following wave — governed today via `@guard`/`guard_tools` |
-| [Mastra](/integrations/mastra) | `.env.intutic` | `@mastra/core` in `package.json` | ✅ Stable |
+| AutoGen | `.env.intutic` | `autogen-agentchat`/`autogen-core`/`autogen-ext` in `pyproject.toml`, `requirements.txt`, or `uv.lock` | ✅ Stable — `InterventionHandler.on_send` is invisible to `AssistantAgent`'s own tool calls, only runtime-routed messages (see docs) |
+| AG2 | `.env.intutic` | `ag2` in `pyproject.toml`, `requirements.txt`, or `uv.lock` | ✅ Stable |
+| Pydantic AI | `.env.intutic` | `pydantic-ai`/`pydantic-ai-slim` in `pyproject.toml`, `requirements.txt`, or `uv.lock` | ✅ Stable |
+| smolagents | `.env.intutic` | `smolagents` in `pyproject.toml`, `requirements.txt`, or `uv.lock` | ✅ Stable — gates the generated code string pre-execution (`CodeAgent`'s "tool call" IS code execution) |
+| [Mastra](/integrations/mastra) | `.env.intutic` | `@mastra/core` in `package.json` | ✅ Stable — per-call `hooks` passed to `.generate()`/`.stream()` override agent-level hooks (see docs) |
 | [Vercel AI SDK](/integrations/vercel-ai-sdk) | `.env.intutic` | `ai` (major ≥ 6) plus any `@ai-sdk/*` package in `package.json` | ✅ Stable — LLM-egress routing is in-code only, see the integration page |
+| [dsh](/integrations/dsh) | `cordis.patch.yml` (Cordis plugin) | `$DSH_HOME`/`~/.dsh/`, `@deepseek-ai/dsh` in PATH/package.json | 🟡 Preview — developer preview, breaking changes possible |
+| [Xirp](/integrations/xirp) | none (delegates) | `~/.xirp`/`$XIRP_HOME`, `Xirp.app`, tmux-parented Claude Code/Codex/Gemini CLI processes | ✅ Stable — macOS only, no gate of its own |
+| [Agentic Orchestrator](/integrations/agentic-orchestrator) | none (delegates) | `agentico` in PATH, `~/.agentic-orchestrator/config.yaml` | ✅ Stable — OpenCode backend has no gate to delegate to (see docs) |
 
 ## How integration works
 

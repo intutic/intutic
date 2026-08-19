@@ -98,8 +98,8 @@ That's it! Your agent is now governed by real-time safety guardrails.
 | 🛡️ **Zero-Trust Tool Interception** | Intercepts dangerous commands (`rm -rf`, `git push --force`, `DROP TABLE`) before they touch your system. |
 | 🔐 **Secret DLP & Masking** | Automatically redacts API keys (`[REDACTED_SECRET]`), AWS credentials, and tokens in prompts & tool payloads. |
 | 💰 **Session Spend Ceilings** | Prevents "loop burn" by enforcing token spending ceilings per session (e.g. $5.00 limit). |
-| 🔄 **19 Harness Adapters** | Pre-configured support for Claude Code CLI, Cursor, Windsurf, Aider, Antigravity, and more. |
-| 🤖 **Single & Multi-Agent Swarms** | Governs single developer tools as well as multi-agent graph workflows — LangGraph via its own adapter; CrewAI and AutoGen route through the proxy with no adapter needed. |
+| 🔄 **24 Harness Adapters** | Pre-configured support for Claude Code CLI, Cursor, Windsurf, Aider, Antigravity, DeepSeek dsh, Spotify Xirp, DoorDash Agentic Orchestrator, and more. |
+| 🤖 **Single & Multi-Agent Swarms** | Governs single developer tools as well as multi-agent graph/swarm workflows — LangGraph, LangChain, CrewAI, AutoGen, AG2, Google ADK, OpenAI Agents SDK, Pydantic AI, and smolagents each have a dedicated SDK-side gate (Python); Mastra and the Vercel AI SDK have the same on the TypeScript side (`@intutic/gate`). |
 
 ---
 
@@ -127,13 +127,15 @@ Every tool call and prompt evaluated by Intutic produces one of five **PCAS Acti
 
 ## 🔌 Supported Harnesses & Frameworks
 
-Intutic ships **19 harness adapters** that are auto-detected and config-synced without modifying your agent's source code. Anything else that speaks an OpenAI- or Anthropic-compatible API is governed the same way by pointing its base URL at the proxy:
+Intutic ships **24 harness adapters** that are auto-detected and config-synced without modifying your agent's source code. Anything else that speaks an OpenAI- or Anthropic-compatible API is governed the same way by pointing its base URL at the proxy:
 
 | Category | Supported Tools & Frameworks |
 | :--- | :--- |
-| **Single-Agent Assistants** (adapters) | **Claude Code CLI**, **Cursor**, **Windsurf**, **Aider**, **Antigravity**, **Cline**, **Roo Code**, **Codex**, **Continue**, **Claude Desktop**, **Goose**, **Pi**, **GitHub Copilot**, **OpenWebUI** |
-| **Multi-Agent Swarms** (adapters) | **LangGraph**, **OpenHands**, **OpenClaw**, **Hermes**, **n8n** |
-| **Any OpenAI-compatible framework** (no adapter needed) | **CrewAI**, **AutoGen**, and anything else honoring `OPENAI_BASE_URL` / `ANTHROPIC_BASE_URL` — launch it with `intutic exec` or export the base-URL env vars |
+| **Single-Agent Assistants** (native adapters) | **Claude Code CLI**, **Cursor**, **Windsurf**, **Aider**, **Antigravity**, **Cline**, **Roo Code**, **Codex**, **Continue**, **Claude Desktop**, **Goose**, **Pi**, **GitHub Copilot**, **OpenWebUI**, **Muse Code**, **Grok Build**, **dsh** (preview) |
+| **Multi-Agent Swarms** (native adapters) | **LangGraph**, **OpenHands**, **OpenClaw**, **Hermes**, **n8n** |
+| **Orchestrators** (delegate to already-gated harnesses, no gate of their own) | **Spotify Xirp**, **DoorDash Agentic Orchestrator** |
+| **SDK-gated frameworks** (dedicated in-process gate, `@intutic/gate`/`intutic-clawde`) | **LangChain**, **CrewAI**, **AutoGen**, **AG2**, **Google ADK**, **OpenAI Agents SDK**, **Pydantic AI**, **smolagents**, **Mastra**, **Vercel AI SDK** |
+| **Any OpenAI-compatible framework** (no adapter needed) | Anything else honoring `OPENAI_BASE_URL` / `ANTHROPIC_BASE_URL` — launch it with `intutic exec` or export the base-URL env vars |
 
 ---
 
