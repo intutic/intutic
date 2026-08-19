@@ -559,3 +559,20 @@ export const DriftDetectionMode = {
 } as const
 export type DriftDetectionMode = typeof DriftDetectionMode[keyof typeof DriftDetectionMode]
 
+/**
+ * Migration 163: which of `sop_amendments`' three producers wrote a row.
+ * INCIDENT_MINING (`dreamCycleService.runDreamCycle`, `runId` prefixed
+ * `dcr_`) and METACLAW (`promptEvolutionService.runEvolutionCycle`, `runId`
+ * prefixed `mcr_`, has a matching `metaclaw_runs` row — the only source a
+ * clause diff is meaningful for) are both manually/dashboard-triggered.
+ * HEALTH_CRON (`sopHealthCron.ts`, `runId` NULL) is the only one currently
+ * on a schedule — its output was invisible to every UI before this column
+ * existed, since the sole proposals feed filtered `runId IS NOT NULL`.
+ */
+export const AmendmentSource = {
+  INCIDENT_MINING: 'INCIDENT_MINING',
+  METACLAW: 'METACLAW',
+  HEALTH_CRON: 'HEALTH_CRON',
+} as const
+export type AmendmentSource = typeof AmendmentSource[keyof typeof AmendmentSource]
+

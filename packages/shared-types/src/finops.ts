@@ -276,6 +276,26 @@ export interface TraceDetail {
   reasoningTokens?: number | null
   toolCallMetrics?: unknown | null
   /**
+   * 0–100 integrity score backing a WASTED `tokenUtility` verdict; null when
+   * the trace was never scored (e.g. it wasn't a candidate for waste
+   * classification). Written at ingest; previously selected nowhere, so a
+   * WASTED badge had no way to explain itself — see `qualityFault` below.
+   */
+  responseIntegrity?: number | null
+  /**
+   * The specific check that failed when `responseIntegrity` is low — e.g.
+   * the first-failing-check name. Pairs with `responseIntegrity`; both are
+   * null together.
+   */
+  qualityFault?: string | null
+  /**
+   * The model a shadow-routing evaluation would have picked for this trace,
+   * if the workspace has shadow routing configured; null otherwise. Written
+   * at ingest on both the streaming and non-streaming ingest paths; reading
+   * it back is what the shadow-routing savings report aggregates.
+   */
+  routingShadowModel?: string | null
+  /**
    * What this request touched (migration 105). `toolCallMetrics` is token
    * accounting per tool; this is the files, URLs and commands they named.
    */
