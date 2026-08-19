@@ -79,8 +79,58 @@ intutic_settings:
 
 `candidate_models` must name entries from your `model_list` so provider resolution and cost estimation stay accurate. Requests for models outside the pool bypass the bandit untouched.
 
+In a cloud-managed workspace, the routing candidate pool is further narrowed to the intersection
+of `candidate_models` and the workspace's approved-models allowlist (see
+[Settings → Approved Models](/guide/settings#approved-models)) — a candidate the allowlist excludes
+is never selected, no matter how strong its arm.
+
 > [!IMPORTANT]
 > **Precedence**: if a control plane publishes a feature-flag payload for the workspace, `ff_bandit_routing` is authoritative and `routing.enabled` is ignored — even if that payload is malformed, in which case every flag resolves to `false`. Presence is what confers authority. The config toggle applies only when no control plane manages the workspace.
+
+---
+
+## Session Lock and KV-Cache Affinity
+
+Every session's model choice is pinned for the session's lifetime — the bandit samples once per
+session, not once per request. This section explains why, and what that pin does and doesn't
+protect.
+
+### Why mid-session switches are expensive
+
+Provider inference backends cache the key/value (KV) state of a prompt prefix so a follow-up
+request that repeats that prefix — exactly what a multi-turn conversation does — can skip
+recomputing it, cutting both latency and cost on later turns. That cache is scoped to a specific
+model: switching models mid-session forces the new model to recompute the entire prompt prefix
+from scratch, discarding whatever cache discount the prior turns had built up. A bandit that
+re-sampled fresh on every request would defeat prompt caching almost entirely on any multi-turn
+session, trading a small chance of a marginally-better arm for a guaranteed cache miss on every
+subsequent turn.
+
+The session lock exists primarily to stop the bandit from flip-flopping arms mid-conversation —
+that was the original complaint it fixes. Keeping the provider-side KV-cache prefix warm across
+turns is a second effect of the same mechanism, not a separate feature, but it's just as real and
+just as load-bearing for session cost and latency.
+
+### What engages and releases the lock
+
+- **Engaged**: the first time a session is routed — either because Thompson sampling picked an
+  arm, or because the fallback path (fewer than 20 cumulative pulls on the relevant arms) used the
+  requested model outright — the chosen model is written as that session's locked model. Every
+  subsequent request in the session reads the lock and skips sampling entirely.
+- **Released**: a lock clears when the proxy detects the locked model has become unservable (for
+  example, the provider has decommissioned it and starts returning errors specifically attributable
+  to the model choice, not the request). The next request in that session re-samples fresh, and the
+  model the session was just running on feeds a same-family tie-break preference for the new pick —
+  so a released lock still prefers landing back in the same model family where reasonably possible,
+  rather than jumping to an unrelated one.
+
+### The limit of what the lock protects
+
+The lock only protects the *model* choice — it says nothing about the rest of the request body.
+SOP content is still prepended to the system prompt on every request, which can itself shift the
+cached prefix even with the model held constant. The session lock keeps you from paying the
+worst-case cost (a full model switch) on every turn; it does not guarantee a byte-identical prefix
+across the whole session.
 
 ---
 
