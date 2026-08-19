@@ -87,6 +87,15 @@ const PROCESS_SIGNATURES: Array<{
     patterns: [/\bantigravity\b/i],
   },
   {
+    name: 'Muse Code',
+    // See services/sync-daemon/src/lib/processPoller.ts's copy of this table
+    // for the full reasoning — this codebase's two independent process-list
+    // scanners (this one and the sync daemon's) intentionally carry the same
+    // signature set; this entry was missing here until it was flagged as a
+    // real drift between the two copies.
+    patterns: [/\bmuse\b/],
+  },
+  {
     name: 'Grok Build',
     // See services/sync-daemon/src/lib/processPoller.ts's copy of this table
     // for the full false-positive reasoning — `grok` is a short, common
@@ -95,6 +104,17 @@ const PROCESS_SIGNATURES: Array<{
     // than a bare `\bgrok\b`, which would trip on the word appearing
     // anywhere in an unrelated argument.
     patterns: [/(^|[/\\\s])grok(\s|$)/],
+  },
+  {
+    name: 'dsh',
+    // See services/sync-daemon/src/lib/processPoller.ts's copy of this table
+    // for the full false-positive reasoning — `dsh` is even shorter and more
+    // collision-prone than `grok`, so it's anchored the same way: only when
+    // it appears as an invoked COMMAND NAME, never merely present inside a
+    // longer token. Also matches the npm package name directly
+    // (`@deepseek-ai/dsh`), which `npx`/a locally-run bin often surfaces
+    // verbatim in a process list before the resolved binary name does.
+    patterns: [/(^|[/\\\s])dsh(\s|$)/, /@deepseek-ai\/dsh\b/],
   },
   {
     name: 'Xirp',
