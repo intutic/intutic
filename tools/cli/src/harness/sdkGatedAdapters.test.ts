@@ -23,6 +23,7 @@ import { googleAdkAdapter } from './googleAdk.js'
 import { openaiAgentsAdapter } from './openaiAgents.js'
 import { pydanticAiAdapter } from './pydanticAi.js'
 import { smolagentsAdapter } from './smolagents.js'
+import { strandsAdapter } from './strands.js'
 import { ALL_ADAPTERS } from './detector.js'
 import { HARNESS_CONFIG_FILES } from './types.js'
 
@@ -97,6 +98,15 @@ const CASES: Case[] = [
     positive: 'smolagents==1.0\n',
     negative: 'fastapi\nuvicorn\n',
     importSnippet: 'intutic_clawde.gate.adapters.smolagents',
+  },
+  {
+    name: 'strands',
+    adapter: strandsAdapter,
+    positive: 'strands-agents>=1.52.0\n',
+    // A bare "strands" (e.g. an unrelated project name) must NOT trigger —
+    // the keyword is the full package name `strands-agents`.
+    negative: 'strands==0.1\nfastapi\n',
+    importSnippet: 'intutic_clawde.gate.adapters.strands',
   },
 ]
 

@@ -1,7 +1,7 @@
 /**
  * Harness detector — auto-detect which AI harnesses are present.
  *
- * Instantiates all 34 adapters and checks each for presence in
+ * Instantiates all 39 adapters and checks each for presence in
  * the workspace. Returns a DetectedHarness array for reporting.
  *
  * HLD §3.14 — Harness Onboarding Matrix
@@ -43,8 +43,13 @@ import { googleAdkAdapter } from './googleAdk.js'
 import { openaiAgentsAdapter } from './openaiAgents.js'
 import { pydanticAiAdapter } from './pydanticAi.js'
 import { smolagentsAdapter } from './smolagents.js'
+import { strandsAdapter } from './strands.js'
 import { mastraAdapter } from './mastra.js'
 import { vercelAiSdkAdapter } from './vercelAiSdk.js'
+import { eveAdapter } from './eve.js'
+import { aiSdkHarnessAdapter } from './aiSdkHarness.js'
+import { aiSdkWorkflowAdapter } from './aiSdkWorkflow.js'
+import { agentcoreAdapter } from './agentcore.js'
 import { join } from 'node:path'
 
 /** All registered harness adapters. */
@@ -81,8 +86,13 @@ export const ALL_ADAPTERS: IHarnessAdapter[] = [
   openaiAgentsAdapter,
   pydanticAiAdapter,
   smolagentsAdapter,
+  strandsAdapter,
   mastraAdapter,
   vercelAiSdkAdapter,
+  eveAdapter,
+  aiSdkHarnessAdapter,
+  aiSdkWorkflowAdapter,
+  agentcoreAdapter,
 ]
 
 /**

@@ -57,9 +57,13 @@ import { HarnessType, type HarnessType as HarnessTypeT } from '@intutic/shared-t
  *                 does not run tools itself: it wraps OTHER harnesses that
  *                 are already `'hook'`- or `'sdk'`-gated, and a tool call
  *                 made inside it is governed by whichever wrapped harness's
- *                 own gate is running (Xirp and Agentic Orchestrator today;
- *                 see gateRegistry.ts's NO_GATE rows for the reasoning this
- *                 precedent sets for future orchestrator-shaped harnesses).
+ *                 own gate is running (Xirp, Agentic Orchestrator, and — a
+ *                 different shape of the same idea — AgentCore Runtime,
+ *                 which HOSTS a customer's already-gated framework code
+ *                 rather than spawning it as a subprocess; see
+ *                 gateRegistry.ts's NO_GATE rows for the reasoning this
+ *                 precedent sets for future orchestrator/host-shaped
+ *                 harnesses).
  *                 NOTE: "governed by whichever wrapped harness's own gate is
  *                 running" assumes that wrapped harness HAS a gate — Agentic
  *                 Orchestrator's `opencode` backend does not (no OpenCode
@@ -83,11 +87,24 @@ export type GateKind = 'hook' | 'sdk' | 'none' | 'delegated'
  * process — no on-disk hook/config file exists to point a gate at. Mirrors
  * the `file: null` NO_GATE rows in `gateRegistry.ts`.
  *
- * MASTRA and VERCEL_AI_SDK (T2) are the JS/TS-native members of this family:
- * their blocking gate ships in `@intutic/gate/mastra`/`@intutic/gate/vercel`
- * (packages/gate-js) rather than `intutic-clawde`, but the shape is
- * identical — no on-disk hook/config file, tools run as plain callables in
- * the harness's own process.
+ * MASTRA, VERCEL_AI_SDK (T2) and EVE (A2) are the JS/TS-native members of
+ * this family: their blocking gate ships in `@intutic/gate/mastra`/
+ * `@intutic/gate/vercel`/`@intutic/gate/eve` (packages/gate-js) rather than
+ * `intutic-clawde`, but the shape is identical — no on-disk hook/config file,
+ * tools run as plain callables in the harness's own process (for eve, as
+ * per-tool/per-connection `approval` policies attached in the agent
+ * directory's own TypeScript).
+ *
+ * AI_SDK_HARNESS and AI_SDK_WORKFLOW (A3) are the same `@intutic/gate`
+ * family with one nuance worth naming: the VETO still runs SDK-side in the
+ * caller's own Node.js process (an approval responder / a `needsApproval`
+ * function), which is what `'sdk'` classifies — but for AI_SDK_HARNESS the
+ * tool EXECUTION it vetoes happens server-side in a Vercel Sandbox microVM,
+ * and its built-in sandbox tools have no veto surface at all beyond
+ * `permissionMode` (defaults to 'allow-all'). `'sdk'` describes where the
+ * gate mechanism lives, not a claim that every tool the harness can run
+ * passes through it — see gateRegistry.ts's NO_GATE rows for the honest
+ * scope statement per harness.
  */
 export const SDK_GATED_HARNESSES: ReadonlySet<HarnessTypeT> = new Set([
   HarnessType.LANGGRAPH,
@@ -99,8 +116,12 @@ export const SDK_GATED_HARNESSES: ReadonlySet<HarnessTypeT> = new Set([
   HarnessType.OPENAI_AGENTS,
   HarnessType.PYDANTIC_AI,
   HarnessType.SMOLAGENTS,
+  HarnessType.STRANDS,
   HarnessType.MASTRA,
   HarnessType.VERCEL_AI_SDK,
+  HarnessType.EVE,
+  HarnessType.AI_SDK_HARNESS,
+  HarnessType.AI_SDK_WORKFLOW,
 ])
 
 /**
@@ -122,6 +143,10 @@ export const NO_GATE_HARNESSES: ReadonlySet<HarnessTypeT> = new Set([HarnessType
 export const DELEGATED_GATE_HARNESSES: ReadonlySet<HarnessTypeT> = new Set([
   HarnessType.XIRP,
   HarnessType.AGENTIC_ORCHESTRATOR,
+  // B2: AWS Bedrock AgentCore Runtime — hosts a customer's own framework
+  // code unchanged; governed by whichever already-supported framework
+  // adapter that code uses. See tools/cli/src/harness/agentcore.ts.
+  HarnessType.AGENTCORE_RUNTIME,
 ])
 
 /** How this harness's tool calls get gated. Defaults to `'hook'`. */

@@ -39,4 +39,9 @@ on the narrower ones):
   pydantic_ai.py       IntuticWrapperToolset (call_tool) + guard_agent(agent)
   smolagents.py        IntuticPythonExecutor (code text, not a tool call) +
                         intutic_step_callback
+
+Modules (A4 — AWS Strands Agents; same verified-against-a-real-install
+discipline):
+  strands.py           IntuticHookProvider (BeforeToolCallEvent.cancel_tool) +
+                        install(agent)
 """

@@ -12,7 +12,10 @@ import { tmpdir } from 'node:os'
 import type { HarnessType } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
 import { mastraAdapter } from './mastra.js'
+import { openaiAgentsAdapter } from './openaiAgents.js'
 import { vercelAiSdkAdapter } from './vercelAiSdk.js'
+import { aiSdkHarnessAdapter } from './aiSdkHarness.js'
+import { aiSdkWorkflowAdapter } from './aiSdkWorkflow.js'
 import { leadingMajorVersion } from './jsSdkGatedAdapter.js'
 import { ALL_ADAPTERS } from './detector.js'
 import { HARNESS_CONFIG_FILES } from './types.js'
@@ -50,6 +53,11 @@ interface Case {
   negative: Record<string, string>
   /** Substring expected in the generated .env.intutic comment block. */
   importSnippet: string
+  /** Substrings expected in the preamble lines. Defaults to the shared
+   *  in-process prose; ai-sdk-harness overrides it (envPreamble) because
+   *  its tools execute server-side in a sandbox, not "in your own Node.js
+   *  process". */
+  preambleSnippets?: readonly string[]
 }
 
 const CASES: Case[] = [
@@ -67,9 +75,24 @@ const CASES: Case[] = [
     negative: { fastify: '^5.0.0' },
     importSnippet: "@intutic/gate/vercel'",
   },
+  {
+    name: 'ai-sdk-harness',
+    adapter: aiSdkHarnessAdapter,
+    positive: { '@ai-sdk/harness': '^1.0.75' },
+    negative: { fastify: '^5.0.0' },
+    importSnippet: "@intutic/gate/harness'",
+    preambleSnippets: ['server-side in Vercel Sandbox', 'never crosses this proxy'],
+  },
+  {
+    name: 'ai-sdk-workflow',
+    adapter: aiSdkWorkflowAdapter,
+    positive: { '@ai-sdk/workflow': '^1.0.69' },
+    negative: { fastify: '^5.0.0' },
+    importSnippet: "@intutic/gate/workflow'",
+  },
 ]
 
-describe.each(CASES)('$name adapter', ({ name, adapter, positive, negative, importSnippet }) => {
+describe.each(CASES)('$name adapter', ({ name, adapter, positive, negative, importSnippet, preambleSnippets }) => {
   let root: string
 
   beforeEach(async () => {
@@ -129,8 +152,9 @@ describe.each(CASES)('$name adapter', ({ name, adapter, positive, negative, impo
       const content = await readFile(join(root, '.env.intutic'), 'utf-8')
       expect(content).toContain('npm install @intutic/gate')
       expect(content).not.toContain('pip install')
-      expect(content).toContain('your own')
-      expect(content).toContain('Node.js process')
+      for (const snippet of preambleSnippets ?? ['your own', 'Node.js process']) {
+        expect(content).toContain(snippet)
+      }
       expect(content).toContain(importSnippet)
     })
 
@@ -160,6 +184,48 @@ describe.each(CASES)('$name adapter', ({ name, adapter, positive, negative, impo
     it('is registered in HARNESS_CONFIG_FILES with its config file', () => {
       expect(HARNESS_CONFIG_FILES[name]).toBe('.env.intutic')
     })
+  })
+})
+
+describe('openai-agents adapter: dual-ecosystem JS-side detection (Python side covered in sdkGatedAdapters.test.ts)', () => {
+  let root: string
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'intutic-openai-agents-js-'))
+  })
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true })
+  })
+
+  it.each(['@openai/agents', '@openai/agents-core', '@openai/agents-openai', '@openai/agents-realtime'])(
+    'detects %s in package.json',
+    async (dep) => {
+      await writeFile(join(root, 'package.json'), pkgJson({ [dep]: '^0.16.1' }), 'utf-8')
+      expect(await openaiAgentsAdapter.detect(root)).toBe(true)
+    },
+  )
+
+  it('ignores package.json without any @openai/agents* dependency (plain `openai` is not the Agents SDK)', async () => {
+    await writeFile(join(root, 'package.json'), pkgJson({ openai: '^7.5.0' }), 'utf-8')
+    expect(await openaiAgentsAdapter.detect(root)).toBe(false)
+  })
+
+  it('writes the @intutic/gate/openai pointer for a TypeScript-only workspace', async () => {
+    await writeFile(join(root, 'package.json'), pkgJson({ '@openai/agents': '^0.16.1' }), 'utf-8')
+    await openaiAgentsAdapter.writeConfig(root, [], PROXY_URL)
+    const content = await readFile(join(root, '.env.intutic'), 'utf-8')
+    expect(content).toContain('npm install @intutic/gate')
+    expect(content).toContain("@intutic/gate/openai'")
+    expect(content).not.toContain('pip install')
+  })
+
+  it('keeps the Python pointer when both ecosystems are present (see openaiAgents.ts module doc)', async () => {
+    await writeFile(join(root, 'package.json'), pkgJson({ '@openai/agents': '^0.16.1' }), 'utf-8')
+    await writeFile(join(root, 'requirements.txt'), 'openai-agents==0.20.0\n', 'utf-8')
+    await openaiAgentsAdapter.writeConfig(root, [], PROXY_URL)
+    const content = await readFile(join(root, '.env.intutic'), 'utf-8')
+    expect(content).toContain('pip install intutic-clawde[openai-agents]')
   })
 })
 
@@ -204,5 +270,62 @@ describe('vercel-ai-sdk adapter: version floor and @ai-sdk/* prefix rule', () =>
       'utf-8',
     )
     expect(await vercelAiSdkAdapter.detect(root)).toBe(true)
+  })
+})
+
+describe('ai-sdk-harness adapter: any-of-three-families detection rule', () => {
+  let root: string
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'intutic-aisdk-harness-'))
+  })
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true })
+  })
+
+  it.each([
+    ['the framework itself', { '@ai-sdk/harness': '^1.0.75' }],
+    ['a harness runtime adapter alone', { '@ai-sdk/harness-claude-code': '^1.0.78' }],
+    ['another harness runtime adapter alone', { '@ai-sdk/harness-grok-build': '^1.0.12' }],
+    ['a sandbox provider alone', { '@ai-sdk/sandbox-vercel': '^1.0.0' }],
+  ])('detects via %s', async (_label, deps) => {
+    await writeFile(join(root, 'package.json'), pkgJson(deps), 'utf-8')
+    expect(await aiSdkHarnessAdapter.detect(root)).toBe(true)
+  })
+
+  it('does not detect via other @ai-sdk/* packages (providers belong to vercel-ai-sdk detection)', async () => {
+    await writeFile(
+      join(root, 'package.json'),
+      pkgJson({ ai: '^7.0.68', '@ai-sdk/openai': '^4.0.43' }),
+      'utf-8',
+    )
+    expect(await aiSdkHarnessAdapter.detect(root)).toBe(false)
+  })
+})
+
+describe('ai-sdk-workflow adapter: scoped-package-required detection rule', () => {
+  let root: string
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'intutic-aisdk-workflow-'))
+  })
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true })
+  })
+
+  it('does NOT detect the unscoped `workflow` package alone — the bare name is too generic, and the durable runtime without @ai-sdk/workflow has no WorkflowAgent to gate', async () => {
+    await writeFile(join(root, 'package.json'), pkgJson({ workflow: '^4.8.3' }), 'utf-8')
+    expect(await aiSdkWorkflowAdapter.detect(root)).toBe(false)
+  })
+
+  it('detects @ai-sdk/workflow with the runtime alongside', async () => {
+    await writeFile(
+      join(root, 'package.json'),
+      pkgJson({ '@ai-sdk/workflow': '^1.0.69', workflow: '^4.8.3' }),
+      'utf-8',
+    )
+    expect(await aiSdkWorkflowAdapter.detect(root)).toBe(true)
   })
 })

@@ -43,6 +43,12 @@ autogen-ext = {version = ">=0.7.5", optional = true}
 ag2 = {version = ">=1.0.2", optional = true}
 pydantic-ai-slim = {version = ">=2.31.1", optional = true}
 smolagents = {version = ">=1.26.0", optional = true}
+# A4 (AWS Strands Agents). Same live PyPI `requires_python` check as Wave 2:
+# strands-agents reports ">=3.10" with NO upper bound at 1.52.0 (the version
+# installed while building this adapter), so — unlike crewai above — it needs
+# no explicit `python = "..."` constraint for Poetry's solver to accept the
+# full ^3.10 range this project declares.
+strands-agents = {version = ">=1.52.0", optional = true}
 
 [tool.poetry.extras]
 langchain = ["langchain"]
@@ -53,9 +59,21 @@ autogen = ["autogen-agentchat", "autogen-core", "autogen-ext"]
 ag2 = ["ag2"]
 pydantic-ai = ["pydantic-ai-slim"]
 smolagents = ["smolagents"]
+strands = ["strands-agents"]
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^9.0.3"
+# Dev-only, for tests/test_adapter_managed_agents.py: constructs real
+# anthropic.types.beta.sessions event models to check managed_agents.py's
+# duck-typed field reads against the actual shipped shapes. Not a runtime
+# dependency of the adapter itself (see managed_agents.py's module doc: it
+# duck-types `client`/event objects rather than importing `anthropic`), so —
+# unlike the optional adapters above — this carries no risk to the `^3.10`
+# extras-resolution incident: it is not `optional = true` and not part of any
+# extra. PyPI reports `anthropic==0.122.0` (the version installed while
+# building this adapter) as `Requires-Python: >=3.9`, no upper bound, so it
+# needs no explicit `python = "..."` constraint either way.
+anthropic = ">=0.122.0"
 
 [build-system]
 requires = ["poetry-core"]

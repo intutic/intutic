@@ -30,8 +30,10 @@ describe('gateKindForHarness', () => {
       HarnessType.OPENAI_AGENTS,
       HarnessType.PYDANTIC_AI,
       HarnessType.SMOLAGENTS,
+      HarnessType.STRANDS,
       HarnessType.MASTRA,
       HarnessType.VERCEL_AI_SDK,
+      HarnessType.EVE,
     ]) {
       expect(gateKindForHarness(h), h).toBe('sdk')
     }

@@ -83,9 +83,27 @@ export const HARNESS_CONFIG_FILES: Record<HarnessType, string> = {
   'openai-agents': '.env.intutic',
   'pydantic-ai': '.env.intutic',
   'smolagents': '.env.intutic',
+  // A4: AWS Strands Agents — same Python SDK-gated rationale as the Wave 1
+  // family above (gate ships in intutic_clawde.gate.adapters.strands).
+  'strands': '.env.intutic',
   // T2: JS/TS SDK-gated frameworks — same rationale as the Wave 1 Python
   // family above, but the blocking gate ships in @intutic/gate
   // (packages/gate-js) rather than intutic-clawde.
   'mastra': '.env.intutic',
   'vercel-ai-sdk': '.env.intutic',
+  // eve (Vercel, PREVIEW) — same JS/TS SDK-gated family; detection is a
+  // compound `eve` dep + `agent/` directory check — see eve.ts.
+  'eve': '.env.intutic',
+  // A3: Vercel platform-agent runtimes — same @intutic/gate family. Note the
+  // env vars are weaker still for ai-sdk-harness (tool execution is
+  // server-side in Vercel Sandbox microVMs; see aiSdkHarness.ts's module doc
+  // and the envPreamble override it carries).
+  'ai-sdk-harness': '.env.intutic',
+  'ai-sdk-workflow': '.env.intutic',
+  // B2: AWS Bedrock AgentCore Runtime — hosts the customer's own framework
+  // code unchanged; the actual tool-call gate belongs to whichever
+  // already-supported framework adapter that code uses (Strands, LangGraph,
+  // ...), same 'delegated'/no-file-of-its-own shape as xirp/
+  // agentic-orchestrator above. See agentcore.ts's module doc.
+  'agentcore-runtime': '',
 }

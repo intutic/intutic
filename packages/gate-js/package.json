@@ -30,13 +30,38 @@
     "./dsh": {
       "import": "./dist/dsh.js",
       "types": "./dist/dsh.d.ts"
+    },
+    "./openai": {
+      "import": "./dist/openai.js",
+      "types": "./dist/openai.d.ts"
+    },
+    "./eve": {
+      "import": "./dist/eve.js",
+      "types": "./dist/eve.d.ts"
+    },
+    "./harness": {
+      "import": "./dist/harness.js",
+      "types": "./dist/harness.d.ts"
+    },
+    "./workflow": {
+      "import": "./dist/workflow.js",
+      "types": "./dist/workflow.d.ts"
+    },
+    "./managed-agents": {
+      "import": "./dist/managedAgents.js",
+      "types": "./dist/managedAgents.d.ts"
     }
   },
   "typesVersions": {
     "*": {
       "mastra": ["src/mastra.ts"],
       "vercel": ["src/vercel.ts"],
-      "dsh": ["src/dsh.ts"]
+      "dsh": ["src/dsh.ts"],
+      "openai": ["src/openai.ts"],
+      "eve": ["src/eve.ts"],
+      "harness": ["src/harness.ts"],
+      "workflow": ["src/workflow.ts"],
+      "managed-agents": ["src/managedAgents.ts"]
     }
   },
   "files": [
@@ -53,13 +78,20 @@
     "yaml": "^2.9.0"
   },
   "devDependencies": {
+    "@ai-sdk/harness": "^1.0.75",
+    "@anthropic-ai/sdk": "^0.117.1",
     "@ai-sdk/openai": "^4.0.43",
+    "@ai-sdk/workflow": "^1.0.69",
     "@mastra/core": "^1.59.0",
     "@deepseek-ai/cordis": "^4.0.1",
+    "@openai/agents": "^0.16.1",
     "@types/node": "^22",
     "ai": "^7.0.68",
+    "eve": "^0.39.1",
     "typescript": "^5.5",
-    "vitest": "^3"
+    "vitest": "^3",
+    "workflow": "^4.8.3",
+    "zod": "^4.2.0"
   },
   "engines": {
     "node": ">=18"

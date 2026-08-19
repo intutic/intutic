@@ -22,7 +22,7 @@ Most teams map one workspace to one code repository. This keeps governance rules
 
 ## Harnesses
 
-A **harness** is any AI coding agent that Intutic governs. Intutic currently supports **24 harnesses**, plus dedicated SDK-side gates for 10 more agent frameworks that have no installable CLI/IDE surface of their own:
+A **harness** is any AI coding agent that Intutic governs. Intutic currently supports **39 harnesses**, all auto-detected and config-synced by `intutic init`/`intutic connect` — some write directly into a generated hook file, others write `.env.intutic` pointing at a dedicated SDK-side gate (`@intutic/gate` / `intutic-clawde`) that lives in your own code:
 
 | Category | Harnesses |
 |----------|-----------|
@@ -30,10 +30,12 @@ A **harness** is any AI coding agent that Intutic governs. Intutic currently sup
 | CLI agents | Claude Code, Aider, Codex, Goose, Pi, Grok Build, Muse Code, dsh (preview) |
 | Platform agents | Antigravity, OpenHands, n8n, Claude Desktop, Open WebUI |
 | Specialized | OpenClaw, Hermes, LangGraph |
-| Orchestrators (delegate to already-gated harnesses) | Spotify Xirp, DoorDash Agentic Orchestrator |
-| SDK-gated frameworks (`@intutic/gate` / `intutic-clawde`, not `intutic connect` targets) | LangChain, CrewAI, AutoGen, AG2, Google ADK, OpenAI Agents SDK, Pydantic AI, smolagents, Mastra, Vercel AI SDK |
+| Orchestrators (delegate to already-gated harnesses) | Spotify Xirp, DoorDash Agentic Orchestrator, AWS Bedrock AgentCore Runtime |
+| SDK-gated frameworks (`@intutic/gate` / `intutic-clawde`; `.env.intutic` points at the SDK gate instead of a generated hook file) | LangChain, CrewAI, AutoGen, AG2, Google ADK, OpenAI Agents SDK, Pydantic AI, smolagents, AWS Strands Agents, Mastra, Vercel AI SDK, eve, AI SDK Harness, AI SDK Workflow |
 
 The `intutic init` command auto-detects which harnesses are present in your repo and writes governance config into each one's native config file. See [How It Works](/guide/how-it-works) for details on per-harness routing.
+
+A separate, smaller set of **server-side platform integrations** — QM, Anthropic Managed Agents, and AWS Bedrock AgentCore Gateway — call Intutic directly over HTTP as part of their own contract. They have no `HarnessType` and are not detected by `intutic init`; see the [Integrations Hub](/integrations/#server-side-platform-integrations) for details.
 
 ## SOPs (Agent Guidelines)
 

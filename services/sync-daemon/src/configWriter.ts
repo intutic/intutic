@@ -120,12 +120,34 @@ export const HARNESS_FILES: Record<HarnessType, string> = {
   'openai-agents': '.env.intutic',
   'pydantic-ai': '.env.intutic',
   smolagents: '.env.intutic',
+  // A4: AWS Strands Agents — same Python SDK-gated rationale as the Wave 1
+  // family above (gate ships in intutic_clawde.gate.adapters.strands).
+  strands: '.env.intutic',
   // T2: JS/TS SDK-gated frameworks — same rationale as the Wave 1 Python
   // family above, but the blocking gate ships in @intutic/gate
   // (packages/gate-js) rather than intutic-clawde. See formatContent's
   // switch below and JS_SDK_GATED_FRAMEWORKS.
   mastra: '.env.intutic',
   'vercel-ai-sdk': '.env.intutic',
+  // eve (Vercel, PREVIEW) — same JS/TS SDK-gated family: the gate is
+  // @intutic/gate/eve's per-tool/per-connection approval policies, attached
+  // in the developer's own agent/ directory; this file only carries the
+  // proxy vars + pointer comment. See JS_SDK_GATED_FRAMEWORKS below.
+  eve: '.env.intutic',
+  // A3: Vercel platform-agent runtimes — same @intutic/gate family as the T2
+  // rows above. For ai-sdk-harness the env vars are weaker still: tool
+  // execution is server-side in Vercel Sandbox microVMs the local proxy
+  // never sees (the generated comment says so — see JS_SDK_GATED_FRAMEWORKS'
+  // preamble override below and @intutic/gate/harness's module doc).
+  'ai-sdk-harness': '.env.intutic',
+  'ai-sdk-workflow': '.env.intutic',
+  // B2: AWS Bedrock AgentCore Runtime — hosts the customer's own framework
+  // code unchanged, so it writes no config of its own; the real tool-call
+  // gate belongs to whichever already-supported framework adapter that code
+  // uses (Strands, LangGraph, ...). Same 'delegated'/empty-filename shape as
+  // xirp/agentic-orchestrator above — see tools/cli/src/harness/agentcore.ts
+  // and gateKind.ts's DELEGATED_GATE_HARNESSES.
+  'agentcore-runtime': '',
 }
 
 // ─── Public interface ────────────────────────────────────────────────
@@ -517,10 +539,14 @@ function formatContent(
     case 'openai-agents':
     case 'pydantic-ai':
     case 'smolagents':
+    case 'strands':
       return formatSdkGatedEnv(sops, proxyUrl, SDK_GATED_FRAMEWORKS[harness])
 
     case 'mastra':
     case 'vercel-ai-sdk':
+    case 'eve':
+    case 'ai-sdk-harness':
+    case 'ai-sdk-workflow':
       return formatJsSdkGatedEnv(sops, proxyUrl, JS_SDK_GATED_FRAMEWORKS[harness])
 
     default:
@@ -640,7 +666,7 @@ function formatLanggraph(sops: SyncSopEntry[], proxyUrl: string): string {
  * `@guard`/`guard_tools` helpers, which need no optional import.
  */
 const SDK_GATED_FRAMEWORKS: Record<
-  'langchain' | 'crewai' | 'autogen' | 'ag2' | 'google-adk' | 'openai-agents' | 'pydantic-ai' | 'smolagents',
+  'langchain' | 'crewai' | 'autogen' | 'ag2' | 'google-adk' | 'openai-agents' | 'pydantic-ai' | 'smolagents' | 'strands',
   { label: string; pipExtra?: string; importLine: string; docsSlug: string }
 > = {
   langchain: {
@@ -687,6 +713,15 @@ const SDK_GATED_FRAMEWORKS: Record<
     importLine: 'from intutic_clawde.gate import guard, guard_tools',
     docsSlug: 'smolagents',
   },
+  // A4: AWS Strands Agents — dedicated adapter module from day one
+  // (intutic_clawde.gate.adapters.strands), unlike the four `pipExtra`-less
+  // rows above that started on the framework-agnostic helpers.
+  strands: {
+    label: 'Strands Agents',
+    pipExtra: 'strands',
+    importLine: 'from intutic_clawde.gate.adapters.strands import IntuticHookProvider',
+    docsSlug: 'strands',
+  },
 }
 
 /** Shared formatter for every Wave 1 SDK-gated framework — see SDK_GATED_FRAMEWORKS. */
@@ -718,8 +753,19 @@ function formatSdkGatedEnv(
  * `formatJsSdkGatedEnv`.
  */
 const JS_SDK_GATED_FRAMEWORKS: Record<
-  'mastra' | 'vercel-ai-sdk',
-  { label: string; importLine: string; usageSummary: string; docsSlug: string }
+  'mastra' | 'vercel-ai-sdk' | 'eve' | 'ai-sdk-harness' | 'ai-sdk-workflow',
+  {
+    label: string
+    importLine: string
+    usageSummary: string
+    docsSlug: string
+    /** Replaces the default "govern LLM egress only ... your own Node.js
+     *  process" preamble lines when the default prose would be FALSE for
+     *  this framework (ai-sdk-harness: tools execute server-side in Vercel
+     *  Sandbox microVMs). Same override tools/cli's jsSdkGatedAdapter.ts
+     *  carries for the identical reason. */
+    envPreamble?: readonly string[]
+  }
 > = {
   mastra: {
     label: 'Mastra',
@@ -738,6 +784,45 @@ const JS_SDK_GATED_FRAMEWORKS: Record<
       'route it — use withIntuticProxy(createOpenAI)(...) or equivalent in code.',
     docsSlug: 'vercel-ai-sdk',
   },
+  eve: {
+    label: 'eve',
+    importLine: "import { intuticApproval, intuticAuditHooks } from '@intutic/gate/eve'",
+    usageSummary:
+      'defineTool({ ..., approval: intuticApproval() }) per tool (and intuticConnectionApproval() ' +
+      "per MCP/OpenAPI connection) — eve has no agent-level default approval field. NOTE: eve's " +
+      'default AI Gateway model routing is NOT proxy-governable; the vars above only reach a ' +
+      'direct-provider model built in code via withIntuticProxy(...). PREVIEW product.',
+    docsSlug: 'eve',
+  },
+  'ai-sdk-harness': {
+    label: 'AI SDK Harness',
+    importLine:
+      "import { intuticApprovalResponder, intuticStaticApprovals, recommendedHarnessSettings } from '@intutic/gate/harness'",
+    usageSummary:
+      'toolApproval: intuticStaticApprovals(tools) routes every custom tool through the approval ' +
+      'flow; answer pauses with intuticApprovalResponder(). NOTE: built-in sandbox tools ignore ' +
+      "toolApproval entirely — set permissionMode (defaults to 'allow-all') via " +
+      'recommendedHarnessSettings(); sandbox egress never crosses this proxy — set a sandbox ' +
+      'networkPolicy.',
+    docsSlug: 'ai-sdk-harness',
+    envPreamble: [
+      'These env vars govern LLM egress from THIS process only. AI SDK Harness',
+      'agents execute their tools server-side in Vercel Sandbox microVMs — that',
+      'traffic never crosses this proxy, and no config or hook file can gate the',
+      'sandbox from here. The blocking tool gate (custom host-executed tools',
+      'only) ships SDK-side:',
+    ],
+  },
+  'ai-sdk-workflow': {
+    label: 'AI SDK Workflow',
+    importLine: "import { intuticNeedsApproval, withIntuticApproval } from '@intutic/gate/workflow'",
+    usageSummary:
+      'new WorkflowAgent({ ..., tools: withIntuticApproval(tools) }) — attaches an async ' +
+      'needsApproval per tool (WorkflowAgent itself has no approval option). BLOCK throws a ' +
+      'FatalError-compatible refusal so the durable runtime aborts instead of retry-looping ' +
+      "the denial; ALLOW resolves false (or true with { onAllow: 'human' }).",
+    docsSlug: 'ai-sdk-workflow',
+  },
 }
 
 /** Shared formatter for every T2 JS/TS SDK-gated framework — see
@@ -747,14 +832,23 @@ const JS_SDK_GATED_FRAMEWORKS: Record<
 function formatJsSdkGatedEnv(
   sops: SyncSopEntry[],
   proxyUrl: string,
-  info: { label: string; importLine: string; usageSummary: string; docsSlug: string },
+  info: {
+    label: string
+    importLine: string
+    usageSummary: string
+    docsSlug: string
+    envPreamble?: readonly string[]
+  },
 ): string {
+  const preamble = info.envPreamble ?? [
+    `These env vars govern LLM egress only. ${info.label} tools run in your own`,
+    'Node.js process, where no config or hook file can gate them — the',
+    'blocking tool gate ships SDK-side:',
+  ]
   return (
     formatCodex(sops, proxyUrl) +
     '\n' +
-    `# These env vars govern LLM egress only. ${info.label} tools run in your own\n` +
-    '# Node.js process, where no config or hook file can gate them — the\n' +
-    '# blocking tool gate ships SDK-side:\n' +
+    preamble.map((line) => `# ${line}\n`).join('') +
     `#   npm install @intutic/gate\n` +
     `#   ${info.importLine}\n` +
     `# ${info.usageSummary}\n` +

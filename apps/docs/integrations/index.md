@@ -1,11 +1,11 @@
 ---
 title: Integrations
-description: Connect Intutic to 34 AI coding agents — IDE extensions, CLI tools, agent frameworks, orchestrators, and platforms. Auto-detected, zero config.
+description: Connect Intutic to 39 AI coding agents — IDE extensions, CLI tools, agent frameworks, orchestrators, and platforms. Auto-detected, zero config.
 ---
 
 # Integrations <Badge type="tip" text="Open-Core" />
 
-Intutic supports **34 AI agent harnesses** out of the box. Run `intutic init` in your project and the CLI auto-detects which agents are present, then syncs governance rules to each one.
+Intutic supports **39 AI agent harnesses** out of the box. Run `intutic init` in your project and the CLI auto-detects which agents are present, then syncs governance rules to each one.
 
 ```bash
 intutic init
@@ -60,8 +60,13 @@ Autonomous coding agents that run multi-step tasks with tool use.
 | **AG2** | CrewAI-style fork/continuation of pre-Microsoft AutoGen | `.env.intutic` + SDK gate |
 | **Pydantic AI** | Pydantic's typed agent framework | `.env.intutic` + SDK gate |
 | **smolagents** | Hugging Face's code-executing agent framework | `.env.intutic` + SDK gate |
+| [**Strands Agents**](/integrations/strands) | AWS's open-source agent framework (Bedrock AgentCore default) | `.env.intutic` + SDK gate |
 | [**Mastra**](/integrations/mastra) | TypeScript agent framework | `.env.intutic` + SDK gate |
 | [**Vercel AI SDK**](/integrations/vercel-ai-sdk) | Vercel's `ai` package (v6+) | `.env.intutic` + SDK gate |
+| [**eve**](/integrations/eve) <Badge type="warning" text="Preview" /> | Vercel's filesystem-first durable backend agent framework | `.env.intutic` + SDK gate (per-tool/connection `approval`) |
+| [**AI SDK Harness**](/integrations/ai-sdk-harness) | Vercel's `@ai-sdk/harness` — coding-agent harnesses in Vercel Sandbox microVMs | `.env.intutic` + SDK gate (approval flow; see sandbox caveats) |
+| [**AI SDK Workflow**](/integrations/ai-sdk-workflow) | Vercel's `@ai-sdk/workflow` — durable workflow agents on the Workflow DevKit | `.env.intutic` + SDK gate (`needsApproval`) |
+| [**AWS Bedrock AgentCore**](/integrations/agentcore) | AWS's managed hosting environment for the Runtime module — runs your own agent code (any framework) unchanged | none — delegates to whichever already-supported framework adapter your code uses |
 | [**OpenHands**](/integrations/openhands) | Open-source AI software developer platform | `config.toml` |
 | [**Goose**](/integrations/goose) | Block's terminal agent and desktop framework | `.agents/plugins/` |
 | [**Hermes**](/integrations/hermes) | NousResearch's skill-based developer agent | `.hermes/config.yaml` |
@@ -90,6 +95,8 @@ Backend platforms that call Intutic directly over HTTP as part of their own cont
 | Platform | Description | Integration point |
 |---|---|---|
 | [**QM**](/integrations/qm) | YC-backed, OSS multiplayer agent harness (wraps `pi`/`claude`/`codex`/`opencode`) | `securityScreen` HTTP contract (`qm.config.jsonc`) |
+| [**Anthropic Managed Agents**](/integrations/anthropic-managed-agents) | Anthropic-hosted "session" that executes tool calls server-side rather than in your own process | Session-confirmation responder (`IntuticSessionConfirmer`) answering `user.tool_confirmation` events |
+| [**AWS Bedrock AgentCore Gateway**](/integrations/agentcore) | Deployed AWS resource that forwards MCP `tools/call` requests to a target — distinct from the Runtime module above | `tools/agentcore-interceptor` Lambda calling `POST /api/v1/integrations/agentcore/gateway-check` |
 
 ---
 

@@ -677,7 +677,20 @@ export const NO_GATE: ReadonlyArray<{
       'tool_input_guardrails=[...])). Verified live against openai-agents==0.20.0: ' +
       'ToolGuardrailFunctionOutput.reject_content(message) rejects the call and returns ' +
       'the message to the model in place of the tool result — the SDK’s own documented ' +
-      'veto point.',
+      'veto point. ' +
+      'DUAL ECOSYSTEM (same enum pattern as langchain, but with BOTH sides gated): the ' +
+      'TypeScript SDK (@openai/agents on npm) is covered by @intutic/gate/openai ' +
+      '(packages/gate-js) — the same tool-input-guardrail veto point, verified against ' +
+      '@openai/agents@0.16.1 by driving the real Runner end to end in that package’s own ' +
+      'test suite. Its wrapAgent() also gates mcpServers-derived tools (materialized per ' +
+      'run via agent.getAllTools(), never present in agent.tools), and its ' +
+      'installOpenAiGate() disables the SDK’s tracing exporter by default — that exporter ' +
+      'posts tool inputs/outputs to a HARDCODED api.openai.com/v1/traces/ingest endpoint ' +
+      'that ignores OPENAI_BASE_URL, i.e. bypasses the Intutic proxy (a real DLP path, ' +
+      'closed by default, opt-out documented). Truly hosted tools (webSearch/fileSearch/' +
+      'codeInterpreter/imageGeneration, hosted-environment shellTool) execute server-side ' +
+      'at OpenAI with no client-side hook — not gateable by any SDK adapter, stated ' +
+      'plainly in apps/docs/integrations/openai-agents.md.',
   },
   {
     file: null,
@@ -719,6 +732,27 @@ export const NO_GATE: ReadonlyArray<{
       'step lifecycle. This governs the code text before it runs, not what an already-' +
       'running snippet does once started — see that module’s doc (TD-377) for the full ' +
       'honesty note, matched in tone to openWebuiHooks.ts’s inlet() scope note.',
+  },
+  {
+    file: null,
+    harness: 'strands',
+    why:
+      'no on-disk config/hook file exists — Strands tools are plain decorated callables ' +
+      '(or MCP-materialised MCPAgentTools) in the agent’s own Python process. The ' +
+      'blocking gate ships SDK-side (intutic_clawde.gate.adapters.strands.' +
+      'IntuticHookProvider, a strands HookProvider subscribing to the STABLE ' +
+      'strands.hooks.BeforeToolCallEvent). Verified live against strands-agents==1.52.0 ' +
+      'by reading strands/hooks/events.py + strands/tools/executors/_executor.py ' +
+      'directly AND driving a full Agent() event loop: setting event.cancel_tool (the ' +
+      'framework’s own documented veto) skips the tool body and returns an error-status ' +
+      'ToolResult carrying the refusal to the model. Strands’ dispatcher PROPAGATES a ' +
+      'raising hook and aborts the run (fail-CLOSED — the opposite of CrewAI’s ' +
+      'swallow-and-allow hazard; confirmed empirically), so unexpected gate errors abort ' +
+      'rather than run unguarded. MCP tools flow through the identical event — confirmed ' +
+      'with a real stdio FastMCP server. Egress caveat unique in this family: the ' +
+      'DEFAULT model provider (Bedrock, SigV4/boto3) is NOT proxyable — only the ' +
+      'Anthropic/OpenAI/LiteLLM providers honor .env.intutic’s base-URL vars. See ' +
+      'TD-420..423 and apps/docs/integrations/strands.md.',
   },
 
   // -- T2: JS/TS SDK-gated frameworks (same family as langchain/langgraph
@@ -766,6 +800,99 @@ export const NO_GATE: ReadonlyArray<{
       'langchain/langgraph correctly can. @intutic/gate/vercel\'s withIntuticProxy() helper ' +
       'wraps that in-code construction; see its module doc and ' +
       'apps/docs/integrations/vercel-ai-sdk.md.',
+  },
+  {
+    file: null,
+    harness: 'eve',
+    why:
+      'no on-disk config/hook file exists — Vercel\'s "eve" (npm `eve`, PREVIEW, pre-1.0) is ' +
+      'filesystem-first: the agent is an `agent/` directory of TypeScript the developer authors, ' +
+      'and tools/connections run in the compiled agent\'s own Node.js process. The blocking gate ' +
+      'ships as a TypeScript SDK adapter, @intutic/gate/eve\'s intuticApproval() (and ' +
+      'intuticConnectionApproval() for MCP/OpenAPI connections), built on eve\'s documented ' +
+      'per-tool/per-connection `approval` policy surface — CONFIRMED against a real install ' +
+      '(eve@0.39.1, devDependency of packages/gate-js): ApprovalPolicy receives ' +
+      '{ toolName, toolInput?, approvedTools, callId } + session context and returns an AI SDK 7 ' +
+      'approval status; {type:"denied", reason} vetoes the call before execute() runs, ' +
+      '"not-applicable" continues without a prompt, and booleans are back-compat ' +
+      '(true=user-approval, false=not-applicable). There is NO agent-level default approval ' +
+      'field (agent-definition d.ts carries zero approval fields — verified), so coverage is ' +
+      'per-tool/per-connection attachment, eve\'s own documented multi-tenant-approvals pattern. ' +
+      'An observe-only audit emitter (intuticAuditHooks(), on eve\'s approval.candidate/' +
+      'approval.settled hook events) maps eve\'s human-approval lifecycle onto tool_allowed/' +
+      'tool_blocked/tool_flagged — telemetry only, and request-scoped (those events carry no ' +
+      'tool name — verified against the shipped protocol types; TD-411). ' +
+      'DOCUMENTED LIMITATION (not an Intutic defect): eve routes models through the Vercel AI ' +
+      'Gateway by default, whose wire protocol the Intutic proxy does not parse — gateway-routed ' +
+      'egress is ungoverned (TD-412); only the in-code direct-provider path ' +
+      '(defineAgent({ model }) with withIntuticProxy(...)) routes through the proxy, and like ' +
+      'the Vercel AI SDK it is built on, eve has no env-var base-URL override. ' +
+      'PREVIEW churn shield per the dsh precedent: pinned verification version, Preview-labelled ' +
+      'docs — see TD-410.',
+  },
+
+  // -- A3: Vercel platform-agent runtimes (same @intutic/gate family as the
+  // T2 rows above — the gate ships in packages/gate-js, one subpath per
+  // framework; each writes .env.intutic via a tools/cli/src/harness/*.ts
+  // adapter, so neither appears in GATES above either).
+  {
+    file: null,
+    harness: 'ai-sdk-harness',
+    why:
+      'no on-disk config/hook file exists — and, uniquely in this SDK-gated family, the tools ' +
+      'do not even run on the developer\'s machine: `@ai-sdk/harness` (HarnessAgent) executes ' +
+      'them server-side in Vercel Sandbox microVMs. The blocking gate ships as ' +
+      '@intutic/gate/harness, and its veto surface is the framework\'s tool-approval FLOW, not ' +
+      'a callback: CONFIRMED against a real install (@ai-sdk/harness@1.0.75) that ' +
+      'HarnessAgentSettings.toolApproval is a STATIC Readonly<Record<string, ToolApprovalStatus>> ' +
+      'whose own doc comment says "without callback support" — so intuticStaticApprovals() marks ' +
+      'every custom tool \'user-approval\' (pausing each call) and intuticApprovalResponder() ' +
+      'answers each pause with a real per-call Gate.guard() verdict, delivered on the portable ' +
+      'continuation path (continueGenerate/continueStream\'s toolApprovalContinuations); ' +
+      'session.submitToolApproval is an OPTIONAL adapter method used as an optimization when ' +
+      'present (harness-claude-code@1.0.78 implements it; harness-grok-build@1.0.12 does not — ' +
+      'both confirmed by reading their shipped dist). ' +
+      'THREE HONEST SCOPE LIMITS, all confirmed, none hidden: (1) built-in sandbox tools ' +
+      '(read/write/edit/bash/glob/grep/...) never consult toolApproval at all — they are governed ' +
+      'solely by permissionMode, which DEFAULTS to \'allow-all\' ("preserving the existing ' +
+      'bypass-permissions behavior", the shipped doc\'s own words); recommendedHarnessSettings() ' +
+      'steers integrators to \'allow-edits\'/\'allow-reads\', but there is no per-call gate for ' +
+      'built-ins at any mode. (2) Sandbox egress never crosses the laptop Intutic proxy — the ' +
+      'only egress control is the sandbox\'s own HarnessV1NetworkPolicy (coarse host-level ' +
+      'allow/deny, no DLP), which recommendedHarnessSettings() also emits. (3) When the wrapped ' +
+      'runtime is itself a natively-gated Intutic harness (Claude Code, Grok Build), the ' +
+      'sync-daemon\'s hook files do NOT exist inside the sandbox — no worktree propagation ' +
+      'reaches a microVM — so the native gate those harnesses have on a laptop is ABSENT there; ' +
+      'the env/mcpServers passthrough (env: harness-claude-code only) is a possible config ' +
+      'channel but injecting hooks through it was NOT verified against a live sandbox. See ' +
+      'apps/docs/integrations/ai-sdk-harness.md and TD-415/TD-416/TD-417.',
+  },
+  {
+    file: null,
+    harness: 'ai-sdk-workflow',
+    why:
+      'no on-disk config/hook file exists — @ai-sdk/workflow (WorkflowAgent) tools are plain ' +
+      'objects in the agent\'s own Node.js process, durably orchestrated by the Workflow DevKit. ' +
+      'The blocking gate ships as @intutic/gate/workflow. CONFIRMED against a real install ' +
+      '(@ai-sdk/workflow@1.0.69): WorkflowAgent/WorkflowAgentOptions carry ZERO approval fields ' +
+      '(the string toolApproval appears nowhere in the package\'s shipped .d.ts) — the veto ' +
+      'surface is per-tool needsApproval (boolean | async fn), which the compiled agent loop ' +
+      'evaluates as needsApproval(input, {toolCallId, messages, context}) and which pauses the ' +
+      'run DURABLY (a human can approve hours later). intuticNeedsApproval()/withIntuticApproval() ' +
+      'implement it: BLOCK throws, ALLOW resolves false (or true with onAllow:\'human\' to keep ' +
+      'the human pause). LOAD-BEARING RETRY SEMANTICS, confirmed against workflow@4.8.3\'s real ' +
+      'machinery (not re-derived): the durable runtime\'s retry/abort decision consults ' +
+      'FatalError.is(err) (@workflow/core runtime/step-handler.js), which DUCK-TYPES on ' +
+      'err.name === \'FatalError\' because workflows execute in a separate vm realm where ' +
+      'instanceof fails — a plain IntuticGateRefusal would therefore be RETRIED toward ' +
+      'maxAttempts, replaying a governance denial on a timer. This adapter\'s refusals are ' +
+      'IntuticWorkflowRefusal (an IntuticGateRefusal subclass with name=\'FatalError\'), pinned ' +
+      'by test against the REAL FatalError.is from the workflow package. One tracked wrinkle: ' +
+      'ai@7.0.68 marks tool-level needsApproval @deprecated in favour of generateText-level ' +
+      'toolApproval, but @ai-sdk/workflow\'s own loop reads the tool-level field and exposes no ' +
+      'other surface — the correct integration point today, watched for drift in TD-419. No live ' +
+      'durable run was exercised (needs a Workflow DevKit deployment — TD-418). See ' +
+      'apps/docs/integrations/ai-sdk-workflow.md.',
   },
 
   // ── O1: orchestrator wrapping OTHER already-gated harnesses ──────────────
@@ -832,5 +959,35 @@ export const NO_GATE: ReadonlyArray<{
       'the same as any other unsupported harness. This row still classifies as NO_GATE/`delegated` ' +
       'for the harness AS A WHOLE (claude- and codex-backed features ARE fully covered), but the ' +
       'OpenCode gap is real and tracked, not merely "unconfirmed" — see TD-397.',
+  },
+
+  // ── B2: AWS Bedrock AgentCore Runtime — a "delegated" host, not a spawner ─
+  {
+    file: null,
+    harness: 'agentcore-runtime',
+    why:
+      'AWS Bedrock AgentCore Runtime (GA 2025-10) is a managed hosting environment for a ' +
+      'customer\'s OWN agent code, unchanged — NOT itself an agent framework. Because it just ' +
+      'runs the customer\'s own code, the blocking tool-call gate is whichever ALREADY-SUPPORTED ' +
+      'framework adapter that code uses (Strands, LangGraph, CrewAI, ...) — the SAME gate this ' +
+      'registry already lists under that framework\'s own row, not a second one. This adapter\'s ' +
+      '`writeConfig` is a no-op for the same reason Xirp\'s and Agentic Orchestrator\'s are. ' +
+      'UNLIKE those two, Runtime does not spawn an already-installed CLI harness as a subprocess ' +
+      '— it hosts framework-SDK code as a deployment target, which is a different shape of ' +
+      '`delegated` (see gateKind.ts) worth naming explicitly: if the hosted code uses no ' +
+      'framework this registry supports (raw boto3, a hand-rolled tool loop), coverage is ' +
+      'genuinely zero — the same honest gap Agentic Orchestrator\'s OpenCode backend has ' +
+      '(TD-397), not something this row can claim to fix. Detection (CONFIRMED against real ' +
+      'published artifacts — pip/npm package versions live-checked, config filenames confirmed ' +
+      'by extracting and grepping the real tarballs/wheels, not assumed) covers the ' +
+      '`bedrock-agentcore` PyPI/npm SDK, the `bedrock-agentcore-starter-toolkit` PyPI CLI, the ' +
+      '`@aws/agentcore` npm CLI, and the `.bedrock_agentcore.yaml`/`agentcore/agentcore.json`/ ' +
+      '`aws-targets.json` config files those CLIs write. Deployment-target caveats that are NOT ' +
+      'a gate concern — environment-variable caps (<=50 vars, <=5000 chars each, CONFIRMED ' +
+      'against the CreateAgentRuntime API reference), VPC/NAT egress topology (PUBLIC network ' +
+      'mode is the default; private egress needs an explicit NAT setup this adapter cannot do ' +
+      'for the operator), and Bedrock\'s own SigV4-signed model-invocation traffic not being ' +
+      'proxyable the way an OPENAI_BASE_URL-style override is elsewhere — are documented in ' +
+      'apps/docs/integrations/agentcore.md, not encoded here. See TD-430.',
   },
 ]

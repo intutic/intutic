@@ -4,7 +4,12 @@ packages:
   - 'tools/*'
   - 'apps/*'
 allowBuilds:
+  # workflow (gate-js devDep) CLI transitive; its native-binding postinstall is
+  # not needed to import the package's dist JS in tests — build denied.
+  '@swc/core': false
   argon2: true
+  # same chain (workflow -> @workflow/world-vercel -> cbor-x); denied likewise.
+  cbor-extract: false
   esbuild: true
   protobufjs: true
 
@@ -12,6 +17,12 @@ minimumReleaseAgeExclude:
   - '@ai-sdk/gateway@4.0.54'
   - '@ai-sdk/openai@4.0.43'
   - ai@7.0.68
+  # eve@0.39.1 (published 2026-08-19) is the exact version @intutic/gate/eve's
+  # shipped-d.ts verification was performed against — a devDependency of
+  # packages/gate-js only, never a runtime dependency. See TD-410.
+  - eve@0.39.1
+  - '@ai-sdk/harness@1.0.75'
+  - '@ai-sdk/workflow@1.0.69'
 
 # Transitive-only advisories: nothing in this workspace declares these directly,
 # so forcing resolution is the only way to take the fix. Pinned to the minimum
@@ -23,10 +34,23 @@ minimumReleaseAgeExclude:
 # and 2.x is alpha-only, so the fix is not reachable. Both advisories are
 # dev-server-only, and apps/docs is a private devDependency that builds to static
 # HTML in CI — nothing serves the dev server.
+#
+# (Resolved 2026-07-28: @modelcontextprotocol/sdk moved to ^1.30.0 once it
+# cleared the 24h release-age window, taking @hono/node-server to 2.x and
+# closing GHSA-frvp-7c67-39w9 without any guard exclusion.)
 overrides:
   brace-expansion: '^5.0.9' # CVE-2026-13149, CVE-2026-14257, + the 2026-08 bypass of the 14257 mitigation
   fast-uri: '^3.1.5' # CVE-2026-16221, CVE-2026-13676, + host confusion via backslash authority introducer
   js-yaml: '^4.3.1' # CVE-2026-59869, CVE-2026-59870 (quadratic !!omap resolution, unfixed in 4.3.0)
+  # Scoped, not a blanket `nanoid` override: @intutic/control-plane and
+  # @intutic/id depend on nanoid v3 directly (CJS, not vulnerable — the GHSA
+  # range is >=4.0.0 <5.1.16) and nanoid v4+ is ESM-only, which breaks their
+  # CJS build if forced. Only @workflow/core (a transitive of gate-js's
+  # `workflow` devDependency, dev-only, added in A3) pulls a vulnerable v5.1.6.
+  '@workflow/core>nanoid': '^5.1.16' # GHSA-28wg-ghj8-5hjv (non-secure generator can loop indefinitely on a negative size)
+  protobufjs: '^7.6.5' # CVE-2026-59877
+  undici: '^7.29.0' # 5 GHSAs newly surfaced by @anthropic-ai/sdk's devDep pulling in `workflow`'s undici transitive at scan time: cross-user cache/cookie/response-desync issues + a parse-time crash
+  uuid: '^11.1.1' # CVE-2026-41907
   # @modelcontextprotocol/sdk pins hono ^4.11.4 and resolves it to a version
   # below the fix. 4.12.31 satisfies that range, so this needs no SDK bump.
   hono: '^4.12.34' # CVE-2026-59895/6/7, + ReDoS in CORS middleware via Access-Control-Request-Headers
