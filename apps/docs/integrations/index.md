@@ -42,7 +42,7 @@ Terminal-based agents that accept proxy environment variables or config files.
 | [**Codex**](/integrations/codex) | OpenAI's autonomous coding agent | `.env.intutic` |
 | [**Antigravity**](/integrations/antigravity) | Google's Gemini AI coding agent | `.gemini/settings.json` |
 | [**Grok Build**](/integrations/grok) | xAI's terminal coding agent | `AGENTS.md` |
-| **Muse Code** | Meta's beta terminal coding agent (model Muse Spark) | `AGENTS.md` |
+| [**Muse Code**](/integrations/muse-code) | Meta's beta terminal coding agent (model Muse Spark) | `AGENTS.md` |
 | [**dsh**](/integrations/dsh) <Badge type="warning" text="Preview" /> | DeepSeek's plugin-first ("Cordis") coding agent (developer preview) | `cordis.patch.yml` (Cordis plugin, not a rules file) |
 
 ## Agent Frameworks
@@ -56,10 +56,10 @@ Autonomous coding agents that run multi-step tasks with tool use.
 | [**CrewAI**](/integrations/crewai) | Multi-agent orchestration framework | `.env.intutic` + SDK gate |
 | [**Google ADK**](/integrations/google-adk) | Google's Agent Development Kit | `.env.intutic` + SDK gate |
 | [**OpenAI Agents SDK**](/integrations/openai-agents) | OpenAI's Python agents SDK | `.env.intutic` + SDK gate |
-| **AutoGen** | Microsoft's multi-agent conversation framework | `.env.intutic` + SDK gate |
-| **AG2** | CrewAI-style fork/continuation of pre-Microsoft AutoGen | `.env.intutic` + SDK gate |
-| **Pydantic AI** | Pydantic's typed agent framework | `.env.intutic` + SDK gate |
-| **smolagents** | Hugging Face's code-executing agent framework | `.env.intutic` + SDK gate |
+| [**AutoGen**](/integrations/autogen) | Microsoft's multi-agent conversation framework | `.env.intutic` + SDK gate |
+| [**AG2**](/integrations/ag2) | CrewAI-style fork/continuation of pre-Microsoft AutoGen | `.env.intutic` + SDK gate |
+| [**Pydantic AI**](/integrations/pydantic-ai) | Pydantic's typed agent framework | `.env.intutic` + SDK gate |
+| [**smolagents**](/integrations/smolagents) | Hugging Face's code-executing agent framework | `.env.intutic` + SDK gate |
 | [**Strands Agents**](/integrations/strands) | AWS's open-source agent framework (Bedrock AgentCore default) | `.env.intutic` + SDK gate |
 | [**Mastra**](/integrations/mastra) | TypeScript agent framework | `.env.intutic` + SDK gate |
 | [**Vercel AI SDK**](/integrations/vercel-ai-sdk) | Vercel's `ai` package (v6+) | `.env.intutic` + SDK gate |
