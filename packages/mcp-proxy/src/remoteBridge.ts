@@ -98,6 +98,7 @@ export async function runRemoteProxy(config: ProxyConfig): Promise<void> {
 
   const proxy = new McpGovernanceProxy(config)
   const interceptor = proxy.getInterceptor()
+  const session = proxy.getSessionState()
 
   // Requests whose responses this proxy must inspect on the way back — same
   // role, same shape, as `runProxy`'s own `pending` map.
@@ -193,7 +194,7 @@ export async function runRemoteProxy(config: ProxyConfig): Promise<void> {
           'Failed to send message to remote MCP server',
         )
       })
-    })
+    }, session)
   })
 
   rl.on('close', () => {
