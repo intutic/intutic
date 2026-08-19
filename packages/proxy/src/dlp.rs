@@ -1074,8 +1074,13 @@ mod tests {
     #[test]
     fn aws_temporary_and_other_key_classes_detected() {
         // ASIA (STS temporary) was invisible to the old AKIA-only pattern.
-        assert!(names("key ASIAJEXAMPLEKEY234AB here").contains(&"aws_access_key".into()));
-        assert!(names("key ABIAJEXAMPLEKEY234AB here").contains(&"aws_access_key".into()));
+        // Assembled at runtime, per this module's convention — no contiguous
+        // credential-shaped literal (GitHub secret scanning flags those even
+        // with an EXAMPLE suffix).
+        let asia = format!("key {}{} here", "ASIA", "JEXAMPLEKEY234AB");
+        let abia = format!("key {}{} here", "ABIA", "JEXAMPLEKEY234AB");
+        assert!(names(&asia).contains(&"aws_access_key".into()));
+        assert!(names(&abia).contains(&"aws_access_key".into()));
     }
 
     #[test]
@@ -1178,7 +1183,7 @@ mod tests {
              auth Bearer abc123DEF456ghi789\n\
              key -----BEGIN OPENSSH PRIVATE KEY-----\n\
              and a lot of ordinary prose to make the body worth scanning. {}",
-            "ASIAJEXAMPLEKEY234AB",
+            format!("{}{}", "ASIA", "JEXAMPLEKEY234AB"),
             "ghp",
             "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8",
             "abcdefghijklmnop",
