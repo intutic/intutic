@@ -30,6 +30,7 @@ import { writeGooseHooks } from '../harness/gooseHooks.js'
 import { writeWindsurfHooks } from '../harness/windsurfHooks.js'
 import { writeMuseHooks } from '../harness/museHooks.js'
 import { writeGrokHooks } from '../harness/grokHooks.js'
+import { writeDshHooks, resolveDshHome } from '../harness/dshHooks.js'
 import { isImmutable } from '../harness/gooseHardener.js'
 
 const log = createLogger('sync-settings-guard')
@@ -86,6 +87,16 @@ export function buildProtectedPaths(workspaceRoot: string): string[] {
     path.join(workspaceRoot, '.grok', 'config.toml'),
     path.join(home, '.grok', 'trusted_folders.toml'),
     path.join(workspaceRoot, '.grok', 'trusted_folders.toml'),
+    // ── DeepSeek "dsh" ───────────────────────────────────────────────
+    // `profiles` is the whole directory (every profile's cordis.patch.yml,
+    // not one file) — same directory-level watch `.agents/plugins/
+    // intutic-governance` above uses for Goose's plugin dir. This function
+    // is synchronous (no I/O), so it cannot enumerate which profile
+    // directories actually exist the way `dshHooks.ts`'s own writer does;
+    // watching the parent directory catches every profile's file without
+    // needing to know their names in advance.
+    path.join(resolveDshHome(), 'profiles'),
+    path.join(resolveDshHome(), 'settings.yaml'),
   ]
 }
 
@@ -235,6 +246,23 @@ export async function guardSettingsFile(
     })
   }
 
+  // ── dsh: any profile's cordis.patch.yml, or settings.yaml ─────────
+  // Re-running the writer re-merges into EVERY existing profile (not just
+  // the one whose file changed) — cheap (write-if-changed per file) and
+  // avoids threading "which profile" through this generic path-triggered
+  // callback. YAML content, so `guardJsonHookFile`'s `JSON.parse` marker
+  // check does not apply; a plain substring check for the plugin row id or
+  // the llm-pi-ai route is enough to decide "does this look tampered".
+  if (
+    changedPath.startsWith(path.join(resolveDshHome(), 'profiles') + path.sep) &&
+    changedPath.endsWith('cordis.patch.yml')
+  ) {
+    return guardDshFile(changedPath, 'intutic-governance', workspaceRoot, proxyUrl)
+  }
+  if (changedPath === path.join(resolveDshHome(), 'settings.yaml')) {
+    return guardDshFile(changedPath, 'llm-pi-ai', workspaceRoot, proxyUrl)
+  }
+
   // ── All other paths: file deleted or corrupted → log drift incident
   const exists = await fileExists(changedPath)
   if (!exists) {
@@ -327,6 +355,32 @@ async function guardJsonHookFile(
   } catch {
     log.warn({ action: 'hook_file_corrupted', harness, path: filePath }, `${harness} hooks.json corrupted — restoring`)
     await safeRestore(harness, restore)
+    return true
+  }
+
+  return false
+}
+
+/**
+ * dsh's YAML files, restored by re-running `writeDshHooks` (which
+ * merge-writes into every existing profile plus settings.yaml — see
+ * dshHooks.ts). `marker` is the literal substring that must survive in the
+ * file for it to be considered intact — the plugin row id for a profile's
+ * cordis.patch.yml, the llm-pi-ai section name for settings.yaml.
+ */
+async function guardDshFile(filePath: string, marker: string, workspaceRoot: string, proxyUrl: string): Promise<boolean> {
+  let raw: string
+  try {
+    raw = await fs.readFile(filePath, 'utf-8')
+  } catch {
+    log.warn({ action: 'dsh_file_deleted', path: filePath }, 'dsh governance file deleted — restoring')
+    await safeRestore('dsh', () => writeDshHooks(workspaceRoot, proxyUrl, ''))
+    return true
+  }
+
+  if (!raw.includes(marker)) {
+    log.warn({ action: 'dsh_marker_missing', path: filePath }, 'dsh governance file tampered — restoring')
+    await safeRestore('dsh', () => writeDshHooks(workspaceRoot, proxyUrl, ''))
     return true
   }
 

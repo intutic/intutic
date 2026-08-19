@@ -5,13 +5,17 @@
  * the `autogen-agentchat` / `autogen-core` / `autogen-ext` packages — any one
  * present is treated as "AutoGen is here".
  *
- * TODO(P2, sibling wave): no `intutic_clawde.gate.adapters.autogen` module
- * exists yet — that ships in the next wave (see gateRegistry.ts's NO_GATE
- * row for `autogen`). Until it lands, AutoGen tools are plain callables, so
- * the framework-agnostic `@guard`/`guard_tools` helpers already govern them
- * (see framework.py's module doc: "CrewAI and AutoGen tools ... need nothing
- * else"); the comment this adapter writes points there rather than at a
- * dedicated adapter import that does not exist yet.
+ * The blocking gate ships SDK-side via
+ * `intutic_clawde.gate.adapters.autogen.IntuticInterventionHandler`, an
+ * `autogen_core.InterventionHandler.on_send` — verified live against
+ * autogen-core==0.7.5 by driving a real `SingleThreadedAgentRuntime` end to
+ * end. IMPORTANT, documented in that module's own doc: `on_send` only sees
+ * `FunctionCall` messages explicitly routed through
+ * `runtime.send_message`/`publish_message` — `AssistantAgent`'s own tool
+ * calls never go through the runtime at all, so for `AssistantAgent`-based
+ * code the framework-agnostic `@guard`/`guard_tools` helpers (governing the
+ * tool objects directly) remain the applicable coverage, same as before this
+ * adapter existed (see TD-374).
  *
  * HLD §3.14 — Harness Onboarding Matrix
  * @module
@@ -24,10 +28,11 @@ export const autogenAdapter = makeSdkGatedAdapter({
   type: HarnessType.AUTOGEN,
   label: 'AutoGen',
   keywords: ['autogen-agentchat', 'autogen-core', 'autogen-ext'],
-  pipInstall: 'intutic-clawde',
-  importLine: 'from intutic_clawde.gate import guard, guard_tools',
+  pipInstall: 'intutic-clawde[autogen]',
+  importLine: 'from intutic_clawde.gate.adapters.autogen import IntuticInterventionHandler',
   usageSummary:
-    'AutoGen tools are plain callables — @guard/guard_tools already govern them; a ' +
-    'dedicated adapters.autogen convenience module ships in a later wave.',
+    'IntuticInterventionHandler vetoes a runtime-routed FunctionCall via on_send (see TD-374: ' +
+    'invisible to AssistantAgent\'s own tool calls — wrap those tools with @guard/guard_tools ' +
+    'instead).',
   docsSlug: 'autogen',
 })

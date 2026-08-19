@@ -32,6 +32,7 @@ import type {
 } from '@intutic/shared-types'
 import { writeConfigFiles, HARNESS_FILES, applyConfigEdits } from './configWriter.js'
 import { injectMcpServer } from './harness/mcpAutoWrite.js'
+import { discoverWorktrees } from './lib/gitWorktrees.js'
 import { computeFileHashes } from './hashReporter.js'
 import { loadIntegrity, saveIntegrity } from './integrityStore.js'
 import {
@@ -582,6 +583,41 @@ export async function runSyncIteration(ctx: IterationContext): Promise<SyncResul
     await injectMcpServer(workspaceRoot, workspaceId)
   } catch (err) {
     console.warn('[sync-daemon] injectMcpServer failed (non-fatal):', err)
+  }
+
+  // 3d. Worktree propagation (O1). `workspaceRoot` above only ever covers the
+  // ONE checkout this daemon was pointed at — a `git worktree add`-created
+  // sibling checkout has its own independent working tree, and every
+  // project-tier governance file this product writes is untracked, so none
+  // of it exists in a worktree by default (see gitWorktrees.ts's module doc
+  // for the full mechanics and why Xirp is what surfaced this). Discovering
+  // worktrees fresh every cycle — never caching the list across
+  // iterations — is what makes worktree REMOVAL fall out for free: a
+  // worktree `git worktree remove`d since the last cycle simply stops being
+  // returned here, with no stale-entry cleanup logic required.
+  //
+  // Config-content writes reuse the SAME `config.configVersion > localVersion`
+  // gate step 3 already used — every worktree of one repo shares the one
+  // control-plane config, so re-deriving per-worktree versioning would just
+  // reproduce a decision already made above. `injectMcpServer` runs
+  // unconditionally per worktree, same as it does for the main root: it is
+  // write-if-changed internally (mcpAutoWrite's writeJsonFile), so an
+  // unchanged worktree costs a few file reads and no writes.
+  try {
+    const worktrees = await discoverWorktrees(workspaceRoot)
+    for (const worktreeRoot of worktrees) {
+      if (worktreeRoot === workspaceRoot) continue // already covered above
+      try {
+        if (config.configVersion > localVersion) {
+          await writeConfigFiles(worktreeRoot, config.sops, config.proxyUrl, extractHarnesses(config))
+        }
+        await injectMcpServer(worktreeRoot, workspaceId)
+      } catch (err) {
+        console.warn(`[sync-daemon] worktree propagation failed for ${worktreeRoot} (non-fatal):`, err)
+      }
+    }
+  } catch (err) {
+    console.warn('[sync-daemon] discoverWorktrees failed (non-fatal):', err)
   }
 
   // 4. Compute file hashes for drift detection

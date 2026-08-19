@@ -1,7 +1,7 @@
 /**
  * Harness detector — auto-detect which AI harnesses are present.
  *
- * Instantiates all 29 adapters and checks each for presence in
+ * Instantiates all 33 adapters and checks each for presence in
  * the workspace. Returns a DetectedHarness array for reporting.
  *
  * HLD §3.14 — Harness Onboarding Matrix
@@ -32,6 +32,8 @@ import { githubCopilotAdapter } from './githubCopilot.js'
 import { langgraphAdapter } from './langgraph.js'
 import { museAdapter } from './muse.js'
 import { grokAdapter } from './grok.js'
+import { dshAdapter } from './dsh.js'
+import { xirpAdapter } from './xirp.js'
 import { langchainAdapter } from './langchain.js'
 import { crewaiAdapter } from './crewai.js'
 import { autogenAdapter } from './autogen.js'
@@ -40,6 +42,8 @@ import { googleAdkAdapter } from './googleAdk.js'
 import { openaiAgentsAdapter } from './openaiAgents.js'
 import { pydanticAiAdapter } from './pydanticAi.js'
 import { smolagentsAdapter } from './smolagents.js'
+import { mastraAdapter } from './mastra.js'
+import { vercelAiSdkAdapter } from './vercelAiSdk.js'
 import { join } from 'node:path'
 
 /** All registered harness adapters. */
@@ -65,6 +69,8 @@ export const ALL_ADAPTERS: IHarnessAdapter[] = [
   langgraphAdapter,
   museAdapter,
   grokAdapter,
+  dshAdapter,
+  xirpAdapter,
   langchainAdapter,
   crewaiAdapter,
   autogenAdapter,
@@ -73,6 +79,8 @@ export const ALL_ADAPTERS: IHarnessAdapter[] = [
   openaiAgentsAdapter,
   pydanticAiAdapter,
   smolagentsAdapter,
+  mastraAdapter,
+  vercelAiSdkAdapter,
 ]
 
 /**

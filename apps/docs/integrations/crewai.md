@@ -29,6 +29,8 @@ Source `.env.intutic`, launch under `intutic exec`, or set `base_url` explicitly
 pip install intutic-clawde[crewai]
 ```
 
+> **Known transitive vulnerability (2026-08-19):** `crewai` depends on `chromadb>=1.1.0,<1.2.0`, which carries an unpatched CRITICAL pre-auth code-injection CVE (CVE-2026-45829, GitHub Dependabot alert). No patched chromadb release exists yet. The vulnerability requires an unauthenticated attacker reaching a *running ChromaDB server's* HTTP API — this integration never starts one, but if you separately run a ChromaDB server reachable from an untrusted network, treat it as vulnerable regardless of this integration. See TD-395 in `docs/TECH_DEBT.md`.
+
 CrewAI (v1.15.3+) exposes a global `before_tool_call` hook registry. `install()` registers a hook built on `Gate.guard()`:
 
 ```python

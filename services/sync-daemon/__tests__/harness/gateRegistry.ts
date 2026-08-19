@@ -35,6 +35,21 @@
  *   `cancel`, and Cline/Roo Code do not recognise `decision`.
  * - `none` — the gate cannot refuse at all. Recorded rather than omitted, so
  *   "we know it cannot block" is distinguishable from "nobody checked".
+ * - `waterfall-reject` — dsh's own contract (CONFIRMED against a real
+ *   install — see `dshHooks.ts`'s module doc), genuinely novel among the
+ *   above: the gate is an in-process Cordis Plugin (`@intutic/gate/dsh`, a
+ *   real checked-in TypeScript module with its own test suite, NOT a
+ *   per-workspace generated string this registry's shared spawn-and-pipe-JSON
+ *   matrix can exercise) subscribed to the `tools/pre-execute` WATERFALL
+ *   event. It refuses by RETURNING `{kind:'deny', reason}` without calling
+ *   the waterfall's `next()` — no exit code, no stdout, and no thrown
+ *   exception at the framework boundary (an internal `IntuticGateRefusal`
+ *   throw is caught and mapped to that return value; see
+ *   `packages/gate-js/src/dsh.ts`). Distinct from `js-throw`: that contract's
+ *   unit is a whole workflow aborted by an uncaught throw propagating out of
+ *   `preExecute`; this one's unit is one tool call, and the veto is a
+ *   returned value the waterfall's own dispatcher inspects, never a throw
+ *   that escapes the listener.
  *
  * @module
  */
@@ -55,7 +70,7 @@ export type HarnessModule = Record<string, (...args: unknown[]) => Promise<void>
  *  whose preExecute function THROWS to abort — no exit code, no stdout. Its
  *  unit is a whole workflow, so like `python-raise` it is exercised by its own
  *  describe block rather than the per-tool matrix. */
-export type GateContract = 'exit2' | 'stdout-cancel' | 'stdout-decision-deny' | 'python-raise' | 'js-throw'
+export type GateContract = 'exit2' | 'stdout-cancel' | 'stdout-decision-deny' | 'python-raise' | 'js-throw' | 'waterfall-reject'
 
 /** What runs the emitted artifact. */
 export type GateRunner = 'bash' | 'node' | 'python3'
@@ -396,6 +411,67 @@ export const GATES: readonly GateEntry[] = [
       '(not installable in this environment) — hence reachable, not yes.',
   },
 
+  // ── refuses by returning, inside a Cordis waterfall ─────────────────────
+  {
+    name: 'dsh',
+    module: '../../src/harness/dshHooks.js',
+    // dshHooks.ts's writer merge-writes into every EXISTING dsh profile — a
+    // fresh fixture root has none, so this pre-seeds one (mirroring what a
+    // real `dsh --profile test` first run creates: a directory holding a
+    // package.json and an empty cordis.patch.yml) before invoking the writer,
+    // the same way a real machine always has a profile before this writer
+    // ever runs against it. Without this, "every gate produced its declared
+    // artifact" (below) would fail for dsh alone — not because the writer is
+    // broken, but because the fixture gave it nothing to write into.
+    invoke: async (m, root) => {
+      const fs = await import('node:fs/promises')
+      const path = await import('node:path')
+      const profileDir = path.join(root, '.dsh', 'profiles', 'test')
+      await fs.mkdir(profileDir, { recursive: true })
+      await fs.writeFile(
+        path.join(profileDir, 'package.json'),
+        JSON.stringify({ name: 'test-profile', dependencies: {}, dsh: { profile: { bundles: [] } } }, null, 2),
+      )
+      await fs.writeFile(path.join(profileDir, 'cordis.patch.yml'), '[]\n')
+      await m.writeDshHooks(root, PROXY_URL, 'ws_test')
+    },
+    artifact: '.dsh/profiles/test/cordis.patch.yml',
+    // Neither spawned nor piped JSON on stdin — see the module doc's
+    // `waterfall-reject` entry. `runner` has no real meaning here (nothing
+    // in this registry ever spawns a YAML file); 'node' is the closest
+    // approximation of "the ecosystem this artifact is loaded by".
+    runner: 'node',
+    contract: 'waterfall-reject',
+    migrated: false,
+    note:
+      'the gate is a real, checked-in TypeScript module (`packages/gate-js/src/dsh.ts`, ' +
+      'exported as the `@intutic/gate/dsh` subpath) with its OWN test suite ' +
+      '(`packages/gate-js/src/__tests__/dsh.test.ts`, including a real ' +
+      '`@deepseek-ai/cordis` Context/waterfall integration test), not a per-workspace ' +
+      'generated shell/JS string this registry\'s shared spawn-and-pipe-JSON matrix can ' +
+      'exercise — hence `migrated: false` here rather than folding it into that matrix. ' +
+      'This row still asserts dshHooks.ts actually WRITES the plugin-registration row ' +
+      '(the "every gate produced its declared artifact" check below) and that it does ' +
+      'not collide with another writer\'s artifact path; the veto DECISION itself is ' +
+      'covered by dsh.test.ts. `@deepseek-ai/dsh` is a developer preview (first published ' +
+      '2026-08-13) — real npm packages (`@deepseek-ai/dsh`, `@deepseek-ai/cordis`, ' +
+      '`@deepseek-ai/dsh-tools`, `@deepseek-ai/dsh-app-boot`, `@deepseek-ai/dsh-base`, ' +
+      '`@deepseek-ai/dsh-llm-pi-ai`) were installed and read to confirm the `tools/pre-execute` ' +
+      'event, the `PreToolDecision` shape, the profile/cordis.patch.yml structure, and the ' +
+      '`llm-pi-ai.providers.<id>.baseURL` settings path — see dshHooks.ts\'s module doc and ' +
+      'the TD entry this phase filed for what is still genuinely unconfirmed (chiefly: ' +
+      'dsh-permission, dsh-settings-local, and dsh-fs-policy are npm-restricted and could not ' +
+      'be inspected directly).',
+    mcpCalls: 'reachable',
+    mcpNote:
+      '`tools/pre-execute` fires for every tool call unconditionally (confirmed from ' +
+      '`dsh-tools`\'s shipped `.d.ts` — it is the registry\'s own dispatch point, not an ' +
+      'opt-in matcher), so an `mcp__<server>__<tool>`-shaped call WOULD reach this gate if ' +
+      'dsh sends one. dsh\'s own MCP tool-naming convention was not independently verified ' +
+      '(the packages inspected for this phase govern tool dispatch generically, not MCP ' +
+      'specifically) — hence reachable, not yes.',
+  },
+
   // ── refuses by throwing, at workflow granularity ────────────────────────
   {
     name: 'n8n',
@@ -550,20 +626,34 @@ export const NO_GATE: ReadonlyArray<{
     file: null,
     harness: 'autogen',
     why:
-      'no on-disk config/hook file exists — AutoGen tools are plain callables. No ' +
-      'dedicated intutic_clawde.gate.adapters.autogen module exists yet (P2, a sibling ' +
-      'wave); until it lands, the framework-agnostic @guard/guard_tools helpers already ' +
-      'govern AutoGen tools directly (see framework.py’s module doc). Detected via any ' +
-      'of autogen-agentchat/autogen-core/autogen-ext.',
+      'no on-disk config/hook file exists — AutoGen tools are plain callables, and the ' +
+      'blocking gate ships SDK-side (intutic_clawde.gate.adapters.autogen.' +
+      'IntuticInterventionHandler, an autogen_core InterventionHandler.on_send, verified ' +
+      'live against autogen-core==0.7.5/autogen-agentchat==0.7.5/autogen-ext==0.7.5 by ' +
+      'driving a real SingleThreadedAgentRuntime end to end). Load-bearing caveat, ' +
+      'documented in that module’s doc: on_send only sees FunctionCall messages ' +
+      'explicitly routed through runtime.send_message/publish_message — reading ' +
+      'autogen_agentchat.agents._assistant_agent directly confirmed AssistantAgent’s own ' +
+      'tool calls (workbench.call_tool_stream/handoff_tool.run_json) never go through ' +
+      'the runtime at all, so this handler is blind to the common case. For that case ' +
+      'the framework-agnostic @guard/guard_tools helpers (framework.py, now duck-typing ' +
+      '.forward too) remain the applicable coverage — same as before this module existed. ' +
+      'See TD-374. Detected via any of autogen-agentchat/autogen-core/autogen-ext.',
   },
   {
     file: null,
     harness: 'ag2',
     why:
-      'no on-disk config/hook file exists — AG2 (the AutoGen fork) tools are plain ' +
-      'callables. No dedicated intutic_clawde.gate.adapters.ag2 module exists yet (P2, ' +
-      'a sibling wave); @guard/guard_tools already govern AG2 tools directly in the ' +
-      'meantime.',
+      'no on-disk config/hook file exists — AG2 tools are plain callables, and the ' +
+      'blocking gate ships SDK-side (intutic_clawde.gate.adapters.ag2.IntuticMiddleware, ' +
+      'an ag2 BaseMiddleware.on_tool_execution). Verified live against ag2==1.0.2: note ' +
+      'that package was found to be a from-scratch rewrite at this version — it no ' +
+      'longer imports as `autogen` and shares no API with the ConversableAgent/GroupChat ' +
+      'shape most AG2/pyautogen tutorials describe; this adapter targets the current ' +
+      'Event/Stream/Middleware architecture, confirmed by reading ' +
+      'ag2/middleware/base.py + ag2/tools/executor.py + ag2/tools/final/function_tool.py ' +
+      'directly, not by trusting docs written for the old shape. See TD-376 for the ' +
+      'unverified exception-propagation caveat this adapter’s doc flags.',
   },
   {
     file: null,
@@ -593,18 +683,124 @@ export const NO_GATE: ReadonlyArray<{
     file: null,
     harness: 'pydantic-ai',
     why:
-      'no on-disk config/hook file exists — Pydantic AI tools are plain callables. No ' +
-      'dedicated intutic_clawde.gate.adapters.pydantic_ai module exists yet (P2, a ' +
-      'sibling wave); @guard/guard_tools already govern Pydantic AI tools directly in ' +
-      'the meantime. Detected via pydantic-ai/pydantic-ai-slim.',
+      'no on-disk config/hook file exists — Pydantic AI tools are plain callables inside ' +
+      'toolsets, and the blocking gate ships SDK-side ' +
+      '(intutic_clawde.gate.adapters.pydantic_ai.IntuticWrapperToolset.call_tool, plus a ' +
+      'guard_agent(agent) convenience helper that wraps every toolset already on an ' +
+      'Agent). Verified live against pydantic-ai-slim==2.31.1 by driving a real ' +
+      'Agent.run_sync() through pydantic_ai.models.function.FunctionModel: a blocked ' +
+      'call raises ModelRetry (chosen over the SDK’s other veto-adjacent primitive, ' +
+      'ApprovalRequired, which defers rather than denies — see that module’s doc for ' +
+      'why an unattended run cannot use a deferral-shaped mechanism) and surfaces as a ' +
+      'real RetryPromptPart. guard_agent reaches into Agent._user_toolsets/' +
+      '_dynamic_toolsets (private attributes — Agent.toolsets is a read-only computed ' +
+      'property with no public replacement point on an already-built Agent) and ' +
+      'deliberately does not touch _function_toolset (@agent.tool-registered functions); ' +
+      'see that module’s doc for the accepted fragility and the alternative for those. ' +
+      'Detected via pydantic-ai/pydantic-ai-slim.',
   },
   {
     file: null,
     harness: 'smolagents',
     why:
-      'no on-disk config/hook file exists — smolagents tools are plain callables. No ' +
-      'dedicated intutic_clawde.gate.adapters.smolagents module exists yet (P2, a ' +
-      'sibling wave); @guard/guard_tools already govern smolagents tools directly in ' +
-      'the meantime.',
+      'no on-disk config/hook file exists. Different in kind from every other SDK-gated ' +
+      'row here: ToolCallingAgent’s tool calls are plain callables (now covered by ' +
+      '@guard/guard_tools directly — guard_tools was extended in this same phase to ' +
+      'duck-type .forward, since a smolagents Tool is otherwise callable on its own ' +
+      '__call__ and guard_tools silently replaced it with a bare function, losing the ' +
+      'schema ToolCallingAgent needs — see framework.py’s doc), but CodeAgent has no ' +
+      'discrete tool calls to wrap at all: the governed unit is the generated Python ' +
+      'CODE STRING itself. intutic_clawde.gate.adapters.smolagents.IntuticPythonExecutor ' +
+      'wraps any PythonExecutor (LocalPythonExecutor and friends) and gates the code ' +
+      'text as {"command": code_action} before delegating, raising smolagents’ own ' +
+      'InterpreterError on block so CodeAgent’s existing step-failure handling applies ' +
+      'unchanged — verified live against smolagents==1.26.0 by driving a real ' +
+      'CodeAgent.run() end to end, including intutic_step_callback observing the same ' +
+      'step lifecycle. This governs the code text before it runs, not what an already-' +
+      'running snippet does once started — see that module’s doc (TD-377) for the full ' +
+      'honesty note, matched in tone to openWebuiHooks.ts’s inlet() scope note.',
+  },
+
+  // -- T2: JS/TS SDK-gated frameworks (same family as langchain/langgraph
+  // above, but the blocking gate ships in @intutic/gate -- packages/gate-js --
+  // rather than intutic-clawde). Each writes .env.intutic via a
+  // tools/cli/src/harness/*.ts adapter, not services/sync-daemon/src/harness,
+  // so neither appears in GATES above either.
+  {
+    file: null,
+    harness: 'mastra',
+    why:
+      'no on-disk config/hook file exists — Mastra tools run as plain objects/callables in ' +
+      'the agent\'s own Node.js process. The blocking gate ships as a TypeScript SDK adapter, ' +
+      '@intutic/gate/mastra\'s intuticHooks(), built on @mastra/core\'s documented ' +
+      'Agent({ hooks: { beforeToolCall } }) veto point — CONFIRMED against a real install ' +
+      '(@mastra/core@1.59.0): returning {proceed:false, output} from beforeToolCall skips the ' +
+      'real execute() and hands output back to the model as the tool result; this applies to ' +
+      'every tool in the agent\'s assembled tool dictionary, MCP-sourced tools (@mastra/mcp) ' +
+      'included, since wrapToolsWithHooks wraps generically over the assembled record with no ' +
+      'source-specific branch. ' +
+      'KNOWN BYPASS (Mastra\'s own documented behaviour, not an Intutic defect): per-call ' +
+      '`hooks` passed to .generate()/.stream() OVERRIDE the agent-level hooks entirely rather ' +
+      'than merging with them — confirmed via @mastra/core\'s own ' +
+      'Agent.getConfiguredToolHooks() doc comment ("Run-level hooks override these via ' +
+      'resolveToolHooks"). A caller who passes ANY hooks option at call time (even {}) ' +
+      'silently disables this gate for that call, with no error. See @intutic/gate/mastra\'s ' +
+      'module doc and apps/docs/integrations/mastra.md for the same note surfaced to code and ' +
+      'operators respectively. See docs/TECH_DEBT.md TD-380.',
+  },
+  {
+    file: null,
+    harness: 'vercel-ai-sdk',
+    why:
+      'no on-disk config/hook file exists — Vercel AI SDK tools run as plain objects in the ' +
+      'agent\'s own Node.js process. The blocking gate ships as a TypeScript SDK adapter, ' +
+      '@intutic/gate/vercel\'s intuticToolApproval(), built on the `ai` package\'s documented ' +
+      '`toolApproval` veto point — CONFIRMED against a real install (ai@7.0.68): resolving to ' +
+      '{type:"denied", reason} vetoes the call before execution, and \'not-applicable\' (or ' +
+      'undefined) means this gate has no opinion and the call proceeds. ' +
+      'DOCUMENTED LIMITATION (not an Intutic defect): unlike almost every other harness here, ' +
+      'the Vercel AI SDK has no environment-variable LLM-egress routing (no OPENAI_BASE_URL- ' +
+      'equivalent) — routing through the Intutic proxy requires IN-CODE provider construction ' +
+      '(createOpenAI({baseURL}), createGateway({baseURL}), etc.), which is why this env-writer ' +
+      'documents that requirement rather than claiming zero-code proxy routing the way ' +
+      'langchain/langgraph correctly can. @intutic/gate/vercel\'s withIntuticProxy() helper ' +
+      'wraps that in-code construction; see its module doc and ' +
+      'apps/docs/integrations/vercel-ai-sdk.md.',
+  },
+
+  // ── O1: orchestrator wrapping OTHER already-gated harnesses ──────────────
+  // First entry of this specific shape — see gateKind.ts's 'delegated' kind,
+  // which this row's `file: null` feeds into the same way an `'sdk'` row
+  // does. O2 (QM) and O3 (agentic-orchestrator) are expected to add the next
+  // two, in a later wave, with the same "wraps other harnesses" reasoning.
+  {
+    file: null,
+    harness: 'xirp',
+    why:
+      'Xirp is not itself an AI agent — it is a macOS-only desktop orchestrator (beta since ' +
+      '2026-08-11) that spawns ALREADY-INSTALLED CLI harnesses (Claude Code, Codex, Gemini ' +
+      'CLI) each inside its own tmux session and git worktree, so several parallel agent ' +
+      'sessions can run against one repo without their working trees colliding. Per Xirp\'s ' +
+      'own public FAQ it preserves each wrapped harness\'s NATIVE, UNMODIFIED configuration — ' +
+      'it introduces no config format, and therefore no gate surface, of its own for this ' +
+      'registry to cover. A tool call made inside a Xirp-managed session is governed by ' +
+      'whichever wrapped harness\'s own gate is already running (claude-code-check.js, ' +
+      'codex-check.js, etc.) — the SAME gate this registry already lists under that harness\'s ' +
+      'own row, not a second one. This is NOT the same claim as "no gate exists" (that would ' +
+      'be a `harness: \'xirp\'` NO_GATE row with a `none`-shaped reason, like aider\'s); it is ' +
+      '"the gate exists, credited to the harness that actually owns it" — see gateKind.ts\'s ' +
+      '`delegated` kind for why that distinction gets its own value rather than being folded ' +
+      'into `sdk` or `none`. What IS this phase\'s own responsibility, and what makes Xirp ' +
+      'more than a detection-only add: the wrapped harness\'s gate/config files only protect a ' +
+      'tool call if they actually exist in the git worktree that call runs in, and a `git ' +
+      'worktree` checkout does NOT inherit the main checkout\'s untracked files (governance ' +
+      'config files are untracked by convention) — so before this phase, every Xirp-managed ' +
+      'worktree session ran completely ungoverned regardless of what was configured in the ' +
+      'main checkout. `services/sync-daemon/src/lib/gitWorktrees.ts` + its wiring into ' +
+      '`syncLoop.ts`\'s `runSyncIteration` is the fix: it discovers every worktree of the ' +
+      'watched repo each cycle and writes the same project-tier files into each one, which ' +
+      'restores every wrapped harness\'s own already-existing gate inside Xirp\'s sessions — ' +
+      'this row stays a NO_GATE precisely because the gate that ends up protecting a Xirp ' +
+      'session was never Xirp\'s to write. See TD-390.',
   },
 ]

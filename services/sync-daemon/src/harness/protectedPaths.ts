@@ -109,6 +109,18 @@ export const UNIVERSAL_PROTECTED_PATHS: readonly string[] = [
   '.grok/hooks',
   '.grok/config.toml',
   '.grok/trusted_folders.toml',
+
+  // DeepSeek's "dsh" — $DSH_HOME defaults to ~/.dsh, so these paths are
+  // matched wherever they appear (command text, or a Write/Edit target) the
+  // same "bare-mention block" way every entry above is, not resolved against
+  // a fixed absolute root here. `.dsh/profiles` covers the whole profiles
+  // directory (every profile's cordis.patch.yml, not just one), the same
+  // "the surface, not the one file" discipline `.grok/hooks` above uses —
+  // dsh may have zero, one, or several profiles, and a tamper anywhere under
+  // it is the same threat. `.dsh/settings.yaml` is the LLM-egress half; both
+  // are the only two files `dshHooks.ts` writes.
+  '.dsh/profiles',
+  '.dsh/settings.yaml',
 ]
 
 // ───────────────────────────────────────────────────────────────────────────

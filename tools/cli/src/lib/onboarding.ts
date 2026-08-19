@@ -203,6 +203,19 @@ export function printOnboardingGuide(harnesses: string[], userAuthToken?: string
         writeCliOutput(`  Set the custom API base URL and key in the Windsurf settings tab.`)
         break
 
+      case 'xirp':
+        // Xirp is not itself an AI agent and writes no config of its own —
+        // see gateRegistry.ts's NO_GATE row. The generic `intutic exec`
+        // wrapper below does not apply (Xirp is a GUI .app you launch
+        // normally, not a CLI you'd wrap), so this replaces the default
+        // fallback rather than falling through to it.
+        writeCliOutput(`  Xirp orchestrates other harnesses (Claude Code, Codex, ...) — connect`)
+        writeCliOutput(`  THAT harness normally, against the repo's main checkout. Intutic's sync`)
+        writeCliOutput(`  daemon automatically propagates that harness's own gate/config into every`)
+        writeCliOutput(`  git worktree Xirp creates, every sync cycle — no separate Xirp setup step.`)
+        writeCliOutput(`  See: ${pc.cyan('apps/docs/integrations/xirp.md')}`)
+        break
+
       default:
         writeCliOutput(`  Launch your agent using the Intutic exec wrapper:`)
         writeCliOutput(`     ${pc.bold(`intutic exec -- <your-agent-command>`)}`)

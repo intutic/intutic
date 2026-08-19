@@ -32,6 +32,8 @@ Intutic supports 25 AI agent harnesses out of the box, plus 4 more Python-SDK-ga
 | [Google ADK](/integrations/google-adk) | `.env.intutic` | `google-adk` in `pyproject.toml`, `requirements.txt`, or `uv.lock` | ✅ Stable |
 | [OpenAI Agents SDK](/integrations/openai-agents) | `.env.intutic` | `openai-agents` in `pyproject.toml`, `requirements.txt`, or `uv.lock` | ✅ Stable |
 | AutoGen / AG2 / Pydantic AI / smolagents | `.env.intutic` | Dependency-manifest detection (see each `HarnessType`) | 🟡 Env-adapter shipped; dedicated SDK gate module is a following wave — governed today via `@guard`/`guard_tools` |
+| [Mastra](/integrations/mastra) | `.env.intutic` | `@mastra/core` in `package.json` | ✅ Stable |
+| [Vercel AI SDK](/integrations/vercel-ai-sdk) | `.env.intutic` | `ai` (major ≥ 6) plus any `@ai-sdk/*` package in `package.json` | ✅ Stable — LLM-egress routing is in-code only, see the integration page |
 
 ## How integration works
 

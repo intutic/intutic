@@ -96,6 +96,19 @@ const PROCESS_SIGNATURES: Array<{
     // anywhere in an unrelated argument.
     patterns: [/(^|[/\\\s])grok(\s|$)/],
   },
+  {
+    name: 'Xirp',
+    // Xirp is a macOS `.app`, not a CLI binary — matched on its app bundle
+    // path the same way Cursor.app/Claude.app/Windsurf.app are above, not
+    // the bare-word CLI pattern grok/muse needed. NOT independently
+    // verified against a real Xirp install (macOS-only beta, no public
+    // download available in this environment — see xirp.ts's module doc and
+    // TD-390). See services/sync-daemon/src/lib/processPoller.ts's
+    // `detectTmuxParentedAgents` for a SEPARATE, weaker, probabilistic
+    // signal (a tmux-parented claude/codex/gemini process) this flat
+    // process-list scan has no parent-PID data to produce on its own.
+    patterns: [/\/Xirp\.app\//i],
+  },
 ]
 
 /**
