@@ -371,6 +371,7 @@ export default defineConfig({
             { text: 'Grok Build', link: '/integrations/grok' },
             { text: 'dsh', link: '/integrations/dsh' },
             { text: 'Xirp', link: '/integrations/xirp' },
+            { text: 'Agentic Orchestrator', link: '/integrations/agentic-orchestrator' },
             { text: 'LangChain', link: '/integrations/langchain' },
             { text: 'CrewAI', link: '/integrations/crewai' },
             { text: 'Google ADK', link: '/integrations/google-adk' },

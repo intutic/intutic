@@ -216,6 +216,22 @@ export function printOnboardingGuide(harnesses: string[], userAuthToken?: string
         writeCliOutput(`  See: ${pc.cyan('apps/docs/integrations/xirp.md')}`)
         break
 
+      case 'agentic-orchestrator':
+        // Same "orchestrator, not an agent, writes no config of its own"
+        // shape as xirp above — see gateRegistry.ts's NO_GATE row. Unlike
+        // Xirp, only TWO of its three wrapped backends are gated (OpenCode
+        // has no Intutic adapter at all — TD-397), so this says so plainly
+        // rather than implying full delegation the way Xirp's message can.
+        writeCliOutput(`  Agentic Orchestrator orchestrates other CLI backends (Claude Code, Codex,`)
+        writeCliOutput(`  and OpenCode) — connect Claude Code and/or Codex normally, against the`)
+        writeCliOutput(`  repo's main checkout. Intutic's sync daemon automatically propagates that`)
+        writeCliOutput(`  backend's own gate/config into every git worktree Agentic Orchestrator`)
+        writeCliOutput(`  creates, every sync cycle — no separate setup step for it.`)
+        writeCliOutput(`  ${pc.yellow('Note:')} OpenCode has no Intutic gate today — a feature run against the`)
+        writeCliOutput(`  opencode: provider is ungoverned. Restrict with --providers claude,codex.`)
+        writeCliOutput(`  See: ${pc.cyan('apps/docs/integrations/agentic-orchestrator.md')}`)
+        break
+
       default:
         writeCliOutput(`  Launch your agent using the Intutic exec wrapper:`)
         writeCliOutput(`     ${pc.bold(`intutic exec -- <your-agent-command>`)}`)

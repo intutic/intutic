@@ -18,7 +18,7 @@ Intutic takes the opposite starting point: be the in-path surface itself, purpos
 | **Policy actions** | BYPASS / ENHANCE / HIJACK / KILL | 7 typed actions: allow, nudge, flag_for_review, redact, filter, require_approval, block |
 | **Fail behavior** | Proxy connectivity to control plane fails closed by config default; individual hook-gate checks fail open internally | Malformed/timing-out/undefined policy fails closed to `block` |
 | **MCP governance** | Dedicated MCP governance proxy package | MCP Gateway with default-deny registry ACLs, pre-tool identity + argument evaluation, per-tool enable/disable |
-| **Coding-agent support** | 20 harnesses out-of-the-box, harness-native adapters | Claude Code and Cursor named, via network interception rather than harness instrumentation |
+| **Coding-agent support** | 34 harnesses out-of-the-box, harness-native adapters | Claude Code and Cursor named, via network interception rather than harness instrumentation |
 | **Audit trail** | Merkle-sealed trace roots with browser-side signature verification, hourly sealing sweep | SHA-256 hash-chain ledger, DB-enforced immutability, scheduled integrity verifier |
 | **SIEM/export** | 6 native destinations — Splunk HEC, Syslog/CEF, Datadog, S3, GCS, generic webhook — with retry/DLQ | Native Splunk (HEC) and S3 export, SOAR webhooks (Tines, Google SecOps) |
 | **Identity model** | SSO-group privilege resolution at the hook gate; sandbox attestation as a gateable signal | Proprietary agent identity records; cloud/IAM non-human-identity inventory across AWS/Azure/GCP/GitHub |
