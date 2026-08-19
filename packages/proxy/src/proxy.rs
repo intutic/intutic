@@ -1821,7 +1821,16 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 dlp_scan_input: dlp.enabled && dlp.scan_input,
                 dlp_scan_output: dlp.enabled && dlp.scan_output,
                 wasm_rule_count,
-                hook_gate: true, // the proxy is on the path; the hook gate is always present
+                // TD-365: was unconditionally `true` on the theory that "the
+                // proxy is on the path, so the gate is always present" — false
+                // for any harness whose blocking gate ships SDK-side (no
+                // on-disk hook file) or that delegates to a wrapped harness
+                // instead of running tools itself. `harness_type` is
+                // client-supplied and unverifiable (see `resolve_harness_type`'s
+                // doc comment) — same trust level every other attribution-only
+                // signal in this proxy already carries.
+                hook_gate: crate::commands::gate_kind_for_harness(&harness_type)
+                    == crate::commands::GateKind::Hook,
                 policy_enforced: state.config.intutic_settings.policy.fail_closed,
                 applicable_sops,
                 skills: crate::commands::discover_skills(),
