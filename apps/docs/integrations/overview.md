@@ -1,6 +1,6 @@
 # Integrations Overview
 
-Intutic supports 34 AI agent harnesses out of the box. The CLI auto-detects which harnesses are present in your workspace and syncs governance rules to each one.
+Intutic supports 39 AI agent harnesses out of the box. The CLI auto-detects which harnesses are present in your workspace and syncs governance rules to each one.
 
 ## Supported Harnesses
 
@@ -35,8 +35,13 @@ Intutic supports 34 AI agent harnesses out of the box. The CLI auto-detects whic
 | AG2 | `.env.intutic` | `ag2` in `pyproject.toml`, `requirements.txt`, or `uv.lock` | ✅ Stable |
 | Pydantic AI | `.env.intutic` | `pydantic-ai`/`pydantic-ai-slim` in `pyproject.toml`, `requirements.txt`, or `uv.lock` | ✅ Stable |
 | smolagents | `.env.intutic` | `smolagents` in `pyproject.toml`, `requirements.txt`, or `uv.lock` | ✅ Stable — gates the generated code string pre-execution (`CodeAgent`'s "tool call" IS code execution) |
+| [Strands Agents](/integrations/strands) | `.env.intutic` | `strands-agents` in `pyproject.toml`, `requirements.txt`, or `uv.lock` | ✅ Stable — default (Bedrock) LLM egress is NOT proxy-routable; tool gate unaffected (see docs) |
 | [Mastra](/integrations/mastra) | `.env.intutic` | `@mastra/core` in `package.json` | ✅ Stable — per-call `hooks` passed to `.generate()`/`.stream()` override agent-level hooks (see docs) |
 | [Vercel AI SDK](/integrations/vercel-ai-sdk) | `.env.intutic` | `ai` (major ≥ 6) plus any `@ai-sdk/*` package in `package.json` | ✅ Stable — LLM-egress routing is in-code only, see the integration page |
+| [eve](/integrations/eve) | `.env.intutic` | `eve` in `package.json` AND an `agent/` directory (compound) | 🟡 Preview — pre-1.0 product; default AI Gateway egress not proxy-governable, see the integration page |
+| [AI SDK Harness](/integrations/ai-sdk-harness) | `.env.intutic` | `@ai-sdk/harness`, any `@ai-sdk/harness-*`, or any `@ai-sdk/sandbox-*` in `package.json` | ✅ Stable — tools execute server-side in Vercel Sandbox microVMs; built-ins are `permissionMode`-governed only (defaults to allow-all), see the integration page |
+| [AI SDK Workflow](/integrations/ai-sdk-workflow) | `.env.intutic` | `@ai-sdk/workflow` in `package.json` (unscoped `workflow` alone is not a trigger) | ✅ Stable — denials are FatalError-compatible so the durable runtime aborts instead of retrying them, see the integration page |
+| [AWS Bedrock AgentCore](/integrations/agentcore) | none (delegates) | `bedrock-agentcore`/`bedrock-agentcore-starter-toolkit` in a Python manifest, `bedrock-agentcore`/`@aws/agentcore` in `package.json`, or `.bedrock_agentcore.yaml`/`agentcore/agentcore.json`/`aws-targets.json` at the workspace root | ✅ Stable — Runtime module only; hosts your own framework-SDK code, so the real tool gate is whichever already-supported framework adapter your code uses, see the integration page |
 | [dsh](/integrations/dsh) | `cordis.patch.yml` (Cordis plugin) | `$DSH_HOME`/`~/.dsh/`, `@deepseek-ai/dsh` in PATH/package.json | 🟡 Preview — developer preview, breaking changes possible |
 | [Xirp](/integrations/xirp) | none (delegates) | `~/.xirp`/`$XIRP_HOME`, `Xirp.app`, tmux-parented Claude Code/Codex/Gemini CLI processes | ✅ Stable — macOS only, no gate of its own |
 | [Agentic Orchestrator](/integrations/agentic-orchestrator) | none (delegates) | `agentico` in PATH, `~/.agentic-orchestrator/config.yaml` | ✅ Stable — OpenCode backend has no gate to delegate to (see docs) |

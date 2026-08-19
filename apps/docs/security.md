@@ -181,4 +181,4 @@ If you discover a security vulnerability, please report it to **support@intutic.
 | [Governance Controls Checklist](/guide/governance-controls) | A control-by-control mapping against a standard enterprise evaluation checklist |
 | [Custom Filters (WASM)](/external/wasm-rules) | WASM policy rules engine for custom tool-call filtering |
 | [CLI Reference](/reference/cli) | CLI commands, doctor diagnostic tool, and local configuration |
-| [Integrations Hub](/integrations/) | Harness setup guides for 19 supported agent tools |
+| [Integrations Hub](/integrations/) | Harness setup guides for 39 supported agent tools |
