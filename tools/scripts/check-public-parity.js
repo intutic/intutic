@@ -69,6 +69,21 @@ const SHARED = [
 ]
 
 /**
+ * Individual root-level files that must exist in BOTH repos and be
+ * byte-identical. These need stricter semantics than SHARED: a shared *tree*
+ * legitimately holds enterprise-only files (a file only here is fine), but a
+ * root file on this list is a document both repos publish as one — so its
+ * ABSENCE on either side is itself drift, not an expected enterprise-only add.
+ *
+ * README.md was the first casualty: it sits under no SHARED prefix, so three
+ * post-Wave-3 harness-count sweeps updated the enterprise copy and the public
+ * README silently kept saying "19 agent harnesses" while the real count was 39.
+ * The tree-based gate could never have caught it — a root file is invisible to
+ * the SHARED walk by construction.
+ */
+const SHARED_FILES = ['README.md']
+
+/**
  * Files that differ on purpose. Each needs a reason — an unexplained entry here
  * is how a real divergence gets parked and forgotten, which is the defect this
  * script exists to catch.
@@ -131,6 +146,18 @@ for (const tree of SHARED) {
     if (!a.equals(b) && !ALLOWED_DIVERGENCE.has(rel)) drifted.push(rel)
   }
   for (const rel of theirs) if (!ours.has(rel)) publicOnly.push(rel)
+}
+
+// Root files: unlike the SHARED trees, a missing copy on either side IS drift.
+for (const rel of SHARED_FILES) {
+  const a = join(repoRoot, rel)
+  const b = join(publicRoot, rel)
+  if (!existsSync(a) || !existsSync(b)) {
+    drifted.push(`${rel} (missing in ${existsSync(a) ? 'public' : 'enterprise'} repo)`)
+    continue
+  }
+  compared++
+  if (!readFileSync(a).equals(readFileSync(b)) && !ALLOWED_DIVERGENCE.has(rel)) drifted.push(rel)
 }
 
 if (publicOnly.length > 0) {
