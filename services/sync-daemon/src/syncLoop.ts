@@ -47,7 +47,7 @@ import { refreshEgressPolicy } from './lib/egressPolicy.js'
 import { refreshDecisionsDigest } from './lib/decisionsDigest.js'
 import { runComplianceProbes } from './lib/complianceProbes.js'
 import { startWatcher } from './watcher/driftWatcher.js'
-import { shouldCaptureThisIteration, captureAndUpload } from './configReader.js'
+import { shouldCaptureThisIteration, captureAndUpload, type GovernanceCoverageInputs } from './configReader.js'
 import { watch } from 'chokidar'
 // Named import, not default: this package is ESM ("type": "module") and under
 // Node16 resolution the default import of ioredis's CJS typings resolves to the
@@ -187,6 +187,15 @@ export interface SyncResult {
   proxyUrl?: string
   /** Active harnesses. */
   harnesses?: HarnessType[]
+  /**
+   * This cycle's per-harness governance-coverage enforcement signals, derived
+   * from the same `collectAgentReport` facets step 5b already computes for
+   * `POST /api/v1/agents/report` — see that step's inline derivation for the
+   * mapping. Consumed by the outer loop's config-capture step to fire
+   * `POST /api/v1/governance-coverage/snapshot` once per harness whose rules
+   * file content actually changed this cycle.
+   */
+  harnessGovernanceInputs?: Partial<Record<HarnessType, GovernanceCoverageInputs>>
 }
 
 // ─── Default constants ───────────────────────────────────────────────
@@ -255,6 +264,7 @@ export async function startSyncLoop(options: SyncLoopOptions): Promise<void> {
   let latestSops: SyncConfigPayload['sops'] = []
   let latestProxyUrl = ''
   let latestHarnesses: HarnessType[] = []
+  let latestGovernanceInputs: Partial<Record<HarnessType, GovernanceCoverageInputs>> = {}
 
   // Step 0: Write runtime env file (hook scripts source this for credentials)
   // Runs once at startup and then again on every iteration.
@@ -399,6 +409,7 @@ export async function startSyncLoop(options: SyncLoopOptions): Promise<void> {
         latestSops = result.sops ?? []
         latestProxyUrl = result.proxyUrl ?? ''
         latestHarnesses = result.harnesses ?? []
+        latestGovernanceInputs = result.harnessGovernanceInputs ?? {}
         await writeRuntimeEnv({
           controlPlaneUrl,
           apiKey,
@@ -462,6 +473,7 @@ export async function startSyncLoop(options: SyncLoopOptions): Promise<void> {
         try {
           await captureAndUpload(
             controlPlaneUrl, apiKey, workspaceId, workspaceRoot, latestHarnesses,
+            latestGovernanceInputs,
           )
         } catch (err) {
           console.warn('[sync-daemon] Config capture failed (non-fatal):', err)
@@ -650,6 +662,13 @@ export async function runSyncIteration(ctx: IterationContext): Promise<SyncResul
   // specific — so without this a workspace with two active harnesses would
   // double-emit every flagged skill every cycle.
   const skillFlaggedThisCycle = new Set<string>()
+  // Per-harness governance-coverage enforcement signals for this cycle,
+  // derived from the same facets `collectAgentReport` just computed — see
+  // `SyncResult.harnessGovernanceInputs`'s doc comment. Mirrors
+  // `harnessGradeSweep.ts#deriveEnforcementInputs` on the control-plane side
+  // field-for-field, re-derived here (not imported) because this module is
+  // publicly mirrored and must not depend on `services/control-plane`.
+  const harnessGovernanceInputs: Partial<Record<HarnessType, GovernanceCoverageInputs>> = {}
   for (const harness of harnesses) {
     const filename = HARNESS_FILES[harness]
     const configSynced = filename
@@ -664,6 +683,13 @@ export async function runSyncIteration(ctx: IterationContext): Promise<SyncResul
       allowLocalVaults: config.settings?.allowLocalMemoryVaults,
     })
     await reportAgent(controlPlaneUrl, apiKey, workspaceId, report)
+
+    harnessGovernanceInputs[harness] = {
+      mcpProxyActive: report.facets.mcp_tools.length > 0,
+      nativeHookActive: report.facets.guardrails.hook_gate === true,
+      llmProxyActive: report.facets.guardrails.pcas === true,
+      hasRulesFile: report.facets.harness.config_synced === true,
+    }
 
     // 5b-i. Skill-content scan findings, surfaced as `skill_flagged` events
     // (TD-358). See `emitSkillFlaggedEvents`'s own doc comment for why this
@@ -723,6 +749,7 @@ export async function runSyncIteration(ctx: IterationContext): Promise<SyncResul
     sops: config.sops,
     proxyUrl: config.proxyUrl,
     harnesses,
+    harnessGovernanceInputs,
   }
   onSync?.(result)
   return result
