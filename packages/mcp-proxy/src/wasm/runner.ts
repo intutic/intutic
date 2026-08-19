@@ -26,6 +26,8 @@
  */
 
 import { Worker } from 'node:worker_threads'
+import { existsSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { createStderrLogger as createLogger } from '../stderrLog.js'
 import { WasmLoader, resolveWasmDir, type CompileBridge, type CompileOutcome } from './loader.js'
 import { buildWasmContext, type WasmContextInput } from './context.js'
@@ -56,34 +58,37 @@ interface PendingEntry {
 }
 
 /**
- * Resolves the worker script and, when running against TypeScript source
- * directly (tests, `tsx` dev mode), the env needed to load it.
+ * Resolves the worker script to spawn.
  *
- * `import.meta.url` reflects THIS file's own real extension: `.js` once
- * built to `dist/`, `.ts` when a test runner or `tsx` executes the source
- * tree directly — vite/vitest's SSR transform preserves the real file path
- * for `import.meta.url` even though it transforms content on the fly. A
- * built `.js` sibling needs no help (plain Node module resolution); a `.ts`
- * sibling needs `tsx`'s ESM loader registered for the WORKER thread's own
- * module resolution — registering it on the current (parent) process does
- * not propagate to a `worker_threads` Worker.
+ * Always prefers the BUILT `dist/wasm/worker.js` when it exists on disk,
+ * even while this module itself is running as TypeScript source (a test
+ * runner, `tsx` dev mode) — plain compiled JS needs no loader help to
+ * resolve its own sibling `./hostImports.js` import, sidestepping
+ * `worker_threads` module-resolution entirely. `turbo.json` declares
+ * `test: { dependsOn: ['build'] }`, so `dist/` is guaranteed fresh by the
+ * time `pnpm turbo test` (CI's invocation) runs any package's suite.
  *
- * Delivered via `NODE_OPTIONS`, not `execArgv: ['--import', 'tsx/esm']`:
- * Node's `worker_threads` `execArgv` option only forwards a restricted
- * allowlist of CLI flags, and `--import`'s presence on that allowlist has
- * been version-dependent across Node 22.x — confirmed working locally on
- * Node 26 but silently dropped on Node 22 (this repo's CI pin), which left
- * the worker's own `./hostImports.js` -> `.ts` sibling import unresolved
- * (`ERR_MODULE_NOT_FOUND`) even though the worker script itself still
- * started. `NODE_OPTIONS` is honored by every worker regardless of the
- * `execArgv` allowlist, so it does not have this gap.
+ * Only falls back to spawning the `.ts` source directly (via `tsx`'s ESM
+ * loader, registered on the worker's own `execArgv`) when no build has run
+ * yet — e.g. `vitest run` invoked standalone, bypassing turbo. That
+ * fallback path is NOT reliably portable: `execArgv: ['--import',
+ * 'tsx/esm']` (and the `NODE_OPTIONS`-delivered equivalent, also tried) both
+ * failed to propagate the loader hook to the worker's own sibling import on
+ * this repo's CI runner (Node 22, Linux) despite both working locally
+ * (Node 26, macOS) — a real, observed Node-version-dependent gap in how
+ * `worker_threads` applies ESM loader hooks, not a hypothetical one. Run
+ * `pnpm --filter @intutic/mcp-governance-proxy build` first if iterating on
+ * this file with bare `vitest` outside of `turbo test`.
  */
-function workerScriptSpec(): { url: URL; env?: NodeJS.ProcessEnv } {
+function workerScriptSpec(): { url: URL; execArgv: string[] } {
+  const srcUrl = new URL('./worker.ts', import.meta.url)
+  const distPath = fileURLToPath(srcUrl).replace(/\/src\/wasm\/worker\.ts$/, '/dist/wasm/worker.js')
+  if (existsSync(distPath)) {
+    return { url: new URL(`file://${distPath}`), execArgv: [] }
+  }
   const isSource = import.meta.url.endsWith('.ts')
   const url = new URL(isSource ? './worker.ts' : './worker.js', import.meta.url)
-  if (!isSource) return { url }
-  const nodeOptions = [process.env.NODE_OPTIONS, '--import tsx/esm'].filter(Boolean).join(' ')
-  return { url, env: { ...process.env, NODE_OPTIONS: nodeOptions } }
+  return { url, execArgv: isSource ? ['--import', 'tsx/esm'] : [] }
 }
 
 export class WasmRunner implements CompileBridge {
@@ -110,8 +115,8 @@ export class WasmRunner implements CompileBridge {
 
   private ensureWorker(): Worker {
     if (this.worker) return this.worker
-    const { url, env } = workerScriptSpec()
-    const worker = new Worker(url, env ? { env } : undefined)
+    const { url, execArgv } = workerScriptSpec()
+    const worker = new Worker(url, execArgv.length > 0 ? { execArgv } : undefined)
     worker.on('message', (msg: { type: string; id?: number }) => {
       if (typeof msg.id !== 'number') return
       const entry = this.pending.get(msg.id)
