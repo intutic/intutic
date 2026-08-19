@@ -57,21 +57,33 @@ interface PendingEntry {
 
 /**
  * Resolves the worker script and, when running against TypeScript source
- * directly (tests, `tsx` dev mode), the `execArgv` needed to load it.
+ * directly (tests, `tsx` dev mode), the env needed to load it.
  *
  * `import.meta.url` reflects THIS file's own real extension: `.js` once
  * built to `dist/`, `.ts` when a test runner or `tsx` executes the source
  * tree directly — vite/vitest's SSR transform preserves the real file path
  * for `import.meta.url` even though it transforms content on the fly. A
  * built `.js` sibling needs no help (plain Node module resolution); a `.ts`
- * sibling needs `tsx`'s ESM loader registered on the WORKER thread's own
- * `execArgv` specifically — registering it on the current (parent) process
- * does not propagate to a `worker_threads` Worker's module resolution.
+ * sibling needs `tsx`'s ESM loader registered for the WORKER thread's own
+ * module resolution — registering it on the current (parent) process does
+ * not propagate to a `worker_threads` Worker.
+ *
+ * Delivered via `NODE_OPTIONS`, not `execArgv: ['--import', 'tsx/esm']`:
+ * Node's `worker_threads` `execArgv` option only forwards a restricted
+ * allowlist of CLI flags, and `--import`'s presence on that allowlist has
+ * been version-dependent across Node 22.x — confirmed working locally on
+ * Node 26 but silently dropped on Node 22 (this repo's CI pin), which left
+ * the worker's own `./hostImports.js` -> `.ts` sibling import unresolved
+ * (`ERR_MODULE_NOT_FOUND`) even though the worker script itself still
+ * started. `NODE_OPTIONS` is honored by every worker regardless of the
+ * `execArgv` allowlist, so it does not have this gap.
  */
-function workerScriptSpec(): { url: URL; execArgv: string[] } {
+function workerScriptSpec(): { url: URL; env?: NodeJS.ProcessEnv } {
   const isSource = import.meta.url.endsWith('.ts')
   const url = new URL(isSource ? './worker.ts' : './worker.js', import.meta.url)
-  return { url, execArgv: isSource ? ['--import', 'tsx/esm'] : [] }
+  if (!isSource) return { url }
+  const nodeOptions = [process.env.NODE_OPTIONS, '--import tsx/esm'].filter(Boolean).join(' ')
+  return { url, env: { ...process.env, NODE_OPTIONS: nodeOptions } }
 }
 
 export class WasmRunner implements CompileBridge {
@@ -98,8 +110,8 @@ export class WasmRunner implements CompileBridge {
 
   private ensureWorker(): Worker {
     if (this.worker) return this.worker
-    const { url, execArgv } = workerScriptSpec()
-    const worker = new Worker(url, execArgv.length > 0 ? { execArgv } : undefined)
+    const { url, env } = workerScriptSpec()
+    const worker = new Worker(url, env ? { env } : undefined)
     worker.on('message', (msg: { type: string; id?: number }) => {
       if (typeof msg.id !== 'number') return
       const entry = this.pending.get(msg.id)
