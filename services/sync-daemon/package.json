@@ -51,6 +51,10 @@
     "./harness/grokHooks": {
       "import": "./dist/harness/grokHooks.js",
       "types": "./dist/harness/grokHooks.d.ts"
+    },
+    "./harness/dshHooks": {
+      "import": "./dist/harness/dshHooks.js",
+      "types": "./dist/harness/dshHooks.d.ts"
     }
   },
   "typesVersions": {
@@ -78,6 +82,9 @@
       ],
       "harness/grokHooks": [
         "src/harness/grokHooks.ts"
+      ],
+      "harness/dshHooks": [
+        "src/harness/dshHooks.ts"
       ]
     }
   },

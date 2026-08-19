@@ -5,10 +5,12 @@
  * `pydantic-ai` or `pydantic-ai-slim` (the substring "pydantic-ai" matches
  * both).
  *
- * TODO(P2, sibling wave): no `intutic_clawde.gate.adapters.pydantic_ai`
- * module exists yet (see gateRegistry.ts's NO_GATE row for `pydantic-ai`).
- * Pydantic AI tools are plain callables, so `@guard`/`guard_tools` already
- * govern them in the meantime.
+ * The blocking gate ships SDK-side via
+ * `intutic_clawde.gate.adapters.pydantic_ai.IntuticWrapperToolset`, a
+ * Pydantic AI `WrapperToolset.call_tool` override, plus a `guard_agent(agent)`
+ * convenience helper wrapping every toolset already on an `Agent` in one
+ * call — verified live against pydantic-ai-slim==2.31.1 by driving a real
+ * `Agent.run_sync()` through `pydantic_ai.models.function.FunctionModel`.
  *
  * HLD §3.14 — Harness Onboarding Matrix
  * @module
@@ -21,10 +23,10 @@ export const pydanticAiAdapter = makeSdkGatedAdapter({
   type: HarnessType.PYDANTIC_AI,
   label: 'Pydantic AI',
   keywords: ['pydantic-ai'], // matches "pydantic-ai" and "pydantic-ai-slim"
-  pipInstall: 'intutic-clawde',
-  importLine: 'from intutic_clawde.gate import guard, guard_tools',
+  pipInstall: 'intutic-clawde[pydantic-ai]',
+  importLine: 'from intutic_clawde.gate.adapters.pydantic_ai import guard_agent',
   usageSummary:
-    'Pydantic AI tools are plain callables — @guard/guard_tools already govern them; a ' +
-    'dedicated adapters.pydantic_ai convenience module ships in a later wave.',
+    'guard_agent(agent) wraps every toolset on the Agent; a blocked call raises ModelRetry ' +
+    'before the tool body runs.',
   docsSlug: 'pydantic-ai',
 })

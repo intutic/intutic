@@ -1,7 +1,7 @@
 # Harness Security Matrix — Intutic Compliance Scope <Badge type="tip" text="Open-Core" />
 
-> **Last updated:** Muse Code (20th) and Grok Build (21st harness) onboarding complete  
-> **Coverage:** 21 active harnesses
+> **Last updated:** Muse Code (20th), Grok Build (21st), dsh (22nd, developer preview), and Xirp (23rd harness) onboarding + worktree propagation (TD-390) complete  
+> **Coverage:** 23 active harnesses
 
 This document is the canonical reference for what Intutic enforces, how, and the gaps that remain per harness.
 
@@ -11,9 +11,9 @@ This document is the canonical reference for what Intutic enforces, how, and the
 
 | Vector | Mechanism | How it blocks | Scope |
 |---|---|---|---|
-| **A — Client Hook** | Pre-tool-use gate script; blocking contract varies by harness (exit code 2, `{"cancel":true}` on stdout, `{"decision":"deny"}` on stdout, a JS throw, or Python raise) | Blocks before tool executes | 19 generated gates: Claude Code, Claude Desktop, Cursor, Windsurf, Cline, Roo Code, OpenClaw, OpenHands, Goose, Antigravity, Hermes, Pi, Codex CLI, Muse Code, Grok Build, GitHub Copilot (agent hooks, Preview), Continue CLI, n8n (workflow-level, manual install), and Open-WebUI (prompt-level filter) — plus LangGraph's SDK-side gate (`intutic_clawde.gate`, not a generated file). All generated gates enforce ` WHERE ` (argPattern) rules against the serialized tool input |
-| **B — Proxy Gate** | LLM request inspection at the API boundary | Blocks / audits before LLM sees the prompt | 17 of the 21 active harnesses (+ Windsurf via TLS MITM); see matrix. Muse Code is env-var/launcher-only (no persistent base-URL setting confirmed) and is not counted in this 17 |
-| **C — Drift Guard** | File watcher + 30s poll cycle | Detects and restores tampered governance configs | 23 paths across all harnesses |
+| **A — Client Hook** | Pre-tool-use gate script; blocking contract varies by harness (exit code 2, `{"cancel":true}` on stdout, `{"decision":"deny"}` on stdout, a JS throw, a Python raise, or a Cordis waterfall `{kind:'deny'}` return) | Blocks before tool executes | 19 generated gates: Claude Code, Claude Desktop, Cursor, Windsurf, Cline, Roo Code, OpenClaw, OpenHands, Goose, Antigravity, Hermes, Pi, Codex CLI, Muse Code, Grok Build, GitHub Copilot (agent hooks, Preview), Continue CLI, n8n (workflow-level, manual install), and Open-WebUI (prompt-level filter) — plus LangGraph's SDK-side gate (`intutic_clawde.gate`, not a generated file) and dsh's Cordis-plugin gate (`@intutic/gate/dsh`, a checked-in TypeScript module, also not a generated file). All 19 generated gates enforce ` WHERE ` (argPattern) rules against the serialized tool input; dsh's plugin enforces the same via `@intutic/gate`'s own Tier A1/A3. Xirp carries no gate of its own — it delegates entirely to whichever harness it wraps (`GateKind: 'delegated'`) |
+| **B — Proxy Gate** | LLM request inspection at the API boundary | Blocks / audits before LLM sees the prompt | 17 of the 23 active harnesses (+ Windsurf via TLS MITM); see matrix. Muse Code is env-var/launcher-only (no persistent base-URL setting confirmed), dsh's `llm-pi-ai` route is selectable-but-not-default (see TD-370), and Xirp has no LLM egress of its own — none of these three are counted in this 17 |
+| **C — Drift Guard** | File watcher + 30s poll cycle | Detects and restores tampered governance configs | 25 paths across all harnesses; every path is now also written into every discovered `git worktree` of a watched repo, not only the main checkout — see [Worktree Coverage](#worktree-coverage) |
 | **D — Response Gate** | Proxy-side inspection of the LLM *response* before it is forwarded to the client | Withholds a model-emitted `tool_calls[]` naming a denied tool before the client's tool runner sees it | Every harness whose LLM traffic traverses the proxy (Vector B scope); harness-agnostic, no client hook required |
 
 ### Vector D — Response Gate
@@ -27,6 +27,29 @@ Known limits, stated precisely:
 - **Streams are gated on tool NAME only.** OpenAI sends `function.name` on the first delta and dribbles the arguments out as JSON fragments across later chunks, so argument-level rules cannot be enforced mid-stream — argument-level matching is non-streaming-only.
 - **Locally-originated tool calls are invisible to it.** A tool call that never traverses the proxy (e.g. issued directly by a local plugin or harness-internal logic) cannot be seen or withheld; Vectors A and C cover that surface.
 - **Gemini's native `functionCall` parts are not matched** on either path; a request the proxy forwards to Gemini in its native shape is ungated by this vector.
+
+---
+
+## Worktree Coverage
+
+Every project-tier governance file this product writes (Vectors A and C — the client hook/config
+files themselves, and the drift guard that watches them) is untracked by convention: SOP content is
+synced from the control plane, not committed to the repo. A `git worktree add`-created checkout has
+its own independent working tree, so none of that untracked content existed in a worktree by
+default — `writeConfigFiles`/`injectMcpServer` running against only the ONE `workspaceRoot` a daemon
+instance was pointed at left every OTHER worktree of that same repo completely ungoverned, no matter
+what the main checkout had configured. This predates and is broader than any single harness — Xirp
+(row 22 below) is what surfaced it during this phase's research, because Xirp's whole model is
+spawning CLI agents each inside its own tmux session + `git worktree`, but the fix benefits any
+worktree-based workflow equally. See TD-390 for the full record.
+
+**The fix:** `services/sync-daemon/src/lib/gitWorktrees.ts`'s `discoverWorktrees(repoRoot)` runs
+`git worktree list --porcelain` every sync cycle (never cached across cycles) and the sync loop
+writes the same project-tier files into every discovered worktree, in addition to the main checkout.
+Locked worktrees are covered (locking only blocks git's own pruning, not ordinary file writes) and
+prunable worktrees (git has flagged the directory itself missing) are excluded, so this cannot
+resurrect a deleted worktree's folder. A worktree removed since the last cycle simply stops being
+returned by `git worktree list` — no stale-entry cleanup logic is needed for removal to work.
 
 ---
 
@@ -55,6 +78,8 @@ Known limits, stated precisely:
 | 19 | **LangGraph** | ✅ SDK-side (Python raise) | ✅ base_url / `intutic exec` | ✅ .env.intutic | Medium | Gate lives in the developer's code via `intutic_clawde.gate` (`guard_tools` / `@guard`), not a generated hook file — it sees the tool call's full arguments, so argPattern rules apply; traces attributed via `x-intutic-harness` |
 | 20 | **Muse Code** | ⚠️ muse-check.js | ⚠️ env-var only | ✅ 3 paths | Medium | Blocking hook (exit 2, **ASSUMED contract — TD-362**) registered in `<repo>/.muse/hooks.json` AND via the pre-approved `managed_hooks_path` tier (`~/.config/muse/intutic-managed-hooks.json`, referenced from `~/.config/muse/settings.json`); covers both `PreToolUse` and `PermissionRequest`. No persistent proxy base-URL setting was confirmed — routing is `META_API_KEY`/launcher-flag only. The `muse` binary could not be installed to live-verify any of this (beta product, no public release channel found); see TD-362 |
 | 21 | **Grok Build** | ✅ grok-check.js | ✅ config.toml `[model.*]` | ✅ .grok/hooks, config.toml, trusted_folders.toml | Medium | Blocking hook, `PreToolUse` with no matcher, registered in `.grok/hooks/intutic-governance.json` (project) and `~/.grok/hooks/intutic-governance.json` (user). **Confirmed** blocking contract: `{"decision":"deny","reason":"..."}` on stdout, exit 0 — a different stdout shape from Cline/Roo Code's `{"cancel":true}`, so this harness carries its own `stdout-decision-deny` contract rather than reusing theirs. **Double-gating note:** Grok Build also natively reads `.claude/settings.json` and `.cursor/hooks.json` if present, so a workspace already running either of those gates fires BOTH on a Grok Build tool call — expected, additive, not a bug (see [The gate backstop](/guide/mcp-governance#the-gate-backstop) for the same "both layers firing is expected" posture applied to the proxy+gate combination). **Not live-verified**: Grok Build was not installable in the environment this harness was implemented in, so the per-file hook-registration schema (`event`/`command`/`timeout` fields) is this integration's own reasonable design against the confirmed facts, not a byte-for-byte match against a real install |
+| 22 | **dsh** <Badge type="warning" text="Preview" /> | ⚠️ `@intutic/gate/dsh` (Cordis plugin) | ⚠️ `llm-pi-ai` route only | ✅ .dsh/profiles, .dsh/settings.yaml | Medium | DeepSeek's "dsh" (developer preview since 2026-08-13) is plugin-first (Cordis) — the gate is a real, checked-in TypeScript module (`packages/gate-js/src/dsh.ts`), not a generated shell/JS string. Registers on the **confirmed** `tools/pre-execute` Cordis waterfall event (`@deepseek-ai/dsh-tools`'s shipped types), returning `{kind:'deny', reason}` to veto or calling `next()` to allow — genuinely novel among this matrix's contracts (`waterfall-reject`), not exit-code or stdout-JSON. Merge-written into EVERY existing `$DSH_HOME/profiles/*/cordis.patch.yml` (dsh has no single default profile — `--profile <name>` is required on every invocation). **Known gaps** (see TD-370): three of dsh's own packages (`dsh-permission`, `dsh-settings-local`, `dsh-fs-policy`) are npm-restricted and could not be inspected directly; `llm-pi-ai` (the settings.yaml route this integration merges into) is NOT dsh's default LLM route (`llm-deepseek` is) and mounts dormant until configured, so proxy coverage is selectable, not automatic; the plugin registration still needs a manual `dsh plugin --profile <name> add @intutic/gate` (or `pnpm install` in the profile directory) before it actually loads — a fail-loud gap, not fail-open; and a machine where dsh has never been run has no profile to register into until the user's first `dsh --profile <name>` run |
+| 23 | **Xirp** | ⚪ N/A — delegated | ⚪ N/A — delegated | ⚪ N/A — delegated | Low | NOT itself an AI agent — a macOS orchestrator that spawns Claude Code/Codex/Gemini CLI, each in its own tmux session + `git worktree`, preserving each wrapped harness's native, unmodified config (per Xirp's own FAQ). No gate/config of its own to register: a tool call inside a Xirp session is governed by whichever wrapped harness's own row above is already running. What IS this harness's own contribution: it is what surfaced the [Worktree Coverage](#worktree-coverage) gap (TD-390) — before that fix, every wrapped harness's gate existed in the main checkout but not in the worktree the call actually ran in. **Not live-verified**: macOS-only beta with no installable artifact in this environment; detection paths (`~/.xirp`, `Xirp.app`) are this integration's own reasonable convention, not confirmed against a real install — see TD-391 |
 
 ---
 
@@ -120,6 +145,18 @@ intutic connect --harness grok
 Writes `AGENTS.md` (governance text) + `.grok/hooks/intutic-governance.json` (project) + `~/.grok/hooks/intutic-governance.json` (user) — a blocking `PreToolUse` hook with no matcher. Also merges `base_url` into every existing `[model.*]` table in `config.toml` at both project and user level (`XAI_API_KEY` remains the auth mechanism; only the endpoint is redirected). MCP servers declared under `[mcp_servers.*]` in either `config.toml` are proxy-wrapped the same way every other harness's `mcpServers` map is.
 
 > **Double-gating:** Grok Build also natively executes `.claude/settings.json` and `.cursor/hooks.json` hooks if either is present in the workspace — so a project already connected to Claude Code or Cursor may already be partially governed under Grok Build before running `intutic connect --harness grok` at all. Connecting Grok Build natively adds its own gate on top; both firing on the same blocked call is expected (see the coverage matrix row above).
+
+### dsh <Badge type="warning" text="Preview" />
+```bash
+intutic connect --harness dsh
+```
+Merge-writes an `intutic-governance` plugin row into every EXISTING `$DSH_HOME/profiles/*/cordis.patch.yml`, declares `@intutic/gate` in that profile's `package.json` dependencies, and merges an `intutic` route into `settings.yaml`'s `llm-pi-ai.providers`. See the [dsh integration guide](/integrations/dsh) for the manual `pnpm install`/`dsh plugin add` step this harness still needs before the gate actually loads, and TD-370 for what remains unconfirmed against DeepSeek's own npm-restricted packages.
+
+### Xirp
+```bash
+intutic connect   # no --harness xirp step — see below
+```
+Writes nothing for Xirp itself. Connect the wrapped harness you actually use (Claude Code, Codex, …) against the **main checkout** of the repository Xirp will manage; the sync daemon's [worktree coverage](#worktree-coverage) then propagates that harness's own gate/config into every `git worktree` Xirp spins up from there, automatically, every sync cycle. See [apps/docs/integrations/xirp.md](/integrations/xirp) for the full detection/governance model and TD-390/TD-391 for what remains unconfirmed.
 
 ---
 

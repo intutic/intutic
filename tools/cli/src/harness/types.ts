@@ -57,6 +57,16 @@ export const HARNESS_CONFIG_FILES: Record<HarnessType, string> = {
   // file in this codebase already shares (Cursor, Claude Code, Windsurf,
   // GitHub Copilot) — not a bespoke format.
   'grok': 'AGENTS.md',
+  // dsh has no workspace-relative rules file in the research this phase could
+  // verify — its config lives entirely under $DSH_HOME (profiles/*/cordis.patch.yml,
+  // settings.yaml), not the project workspace. Empty, matching goose/cline/
+  // continue/claude-desktop/open-webui's precedent for "no single canonical
+  // file" harnesses; dsh.ts's own adapter resolves its real paths directly.
+  'dsh': '',
+  // Xirp writes no config of its own — see xirp.ts's module doc. It
+  // orchestrates other already-gated harnesses (Claude Code, Codex,
+  // Antigravity/Gemini CLI), whose own adapters do the real writing.
+  'xirp': '',
   // Wave 1 SDK-gated frameworks — same rationale as langgraph above: no
   // on-disk hook/config file exists to gate tool calls, so each of these
   // writes .env.intutic (proxy base-URL vars + an SDK-gate pointer comment).
@@ -68,4 +78,9 @@ export const HARNESS_CONFIG_FILES: Record<HarnessType, string> = {
   'openai-agents': '.env.intutic',
   'pydantic-ai': '.env.intutic',
   'smolagents': '.env.intutic',
+  // T2: JS/TS SDK-gated frameworks — same rationale as the Wave 1 Python
+  // family above, but the blocking gate ships in @intutic/gate
+  // (packages/gate-js) rather than intutic-clawde.
+  'mastra': '.env.intutic',
+  'vercel-ai-sdk': '.env.intutic',
 }

@@ -5,10 +5,11 @@ harness. Port of the Python SDK's gate subpackage
 (`packages/intutic-clawde/intutic_clawde/gate/`) — see that package for the
 canonical description of the enforcement contract this one mirrors.
 
-This package is the **core** library only. Framework-specific adapters
-(Mastra, the Vercel AI SDK, a `dsh` plugin) are built on top of it in sibling
-phases; LangChain.js has no dedicated adapter planned and instead uses the
-generic `wrapTool`/`wrapTools` helper directly.
+This package is the **core** library only. Framework-specific adapters are
+built on top of it: `@intutic/gate/dsh` (a Cordis plugin for DeepSeek's "dsh"
+harness) ships in this package already; Mastra and the Vercel AI SDK adapters
+are sibling phases of the same plan. LangChain.js has no dedicated adapter
+planned and instead uses the generic `wrapTool`/`wrapTools` helper directly.
 
 ## Quick start
 
@@ -71,9 +72,13 @@ contract Tier A1 DOES reproduce, verified against the real pattern tables.
 
 ## Subpath convention for later phases
 
-`@intutic/gate/vercel`, `@intutic/gate/mastra`, and `@intutic/gate/dsh` do not
+`@intutic/gate/dsh` now exists (`src/dsh.ts` — a Cordis plugin for DeepSeek's
+"dsh" harness; see its own module doc for the veto contract, and
+`services/sync-daemon/src/harness/dshHooks.ts` for how it gets registered
+into a dsh profile). `@intutic/gate/vercel` and `@intutic/gate/mastra` do not
 exist yet — they are sibling phases of this plan. When they are built, follow
-`services/sync-daemon`'s existing subpath convention (see that package's
+the SAME convention `dsh.ts` already establishes (also
+`services/sync-daemon`'s existing subpath convention — see that package's
 `package.json`):
 
 1. One source file per adapter: `src/vercel.ts`, `src/mastra.ts`, `src/dsh.ts`.

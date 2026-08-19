@@ -59,7 +59,7 @@ const CASES: Case[] = [
     adapter: autogenAdapter,
     positive: 'autogen-agentchat==0.4.0\n',
     negative: 'fastapi\nuvicorn\n',
-    importSnippet: 'from intutic_clawde.gate import guard, guard_tools',
+    importSnippet: 'intutic_clawde.gate.adapters.autogen',
   },
   {
     name: 'ag2',
@@ -68,7 +68,7 @@ const CASES: Case[] = [
     // "flag2" contains the substring "ag2" — this exercises the boundary-aware
     // regex (AG2_TOKEN in ag2.ts), not just a plain substring test.
     negative: 'flag2-parser==1.0\n',
-    importSnippet: 'from intutic_clawde.gate import guard, guard_tools',
+    importSnippet: 'intutic_clawde.gate.adapters.ag2',
   },
   {
     name: 'google-adk',
@@ -89,14 +89,14 @@ const CASES: Case[] = [
     adapter: pydanticAiAdapter,
     positive: 'pydantic-ai-slim==1.0\n',
     negative: 'fastapi\nuvicorn\n',
-    importSnippet: 'from intutic_clawde.gate import guard, guard_tools',
+    importSnippet: 'intutic_clawde.gate.adapters.pydantic_ai',
   },
   {
     name: 'smolagents',
     adapter: smolagentsAdapter,
     positive: 'smolagents==1.0\n',
     negative: 'fastapi\nuvicorn\n',
-    importSnippet: 'from intutic_clawde.gate import guard, guard_tools',
+    importSnippet: 'intutic_clawde.gate.adapters.smolagents',
   },
 ]
 
