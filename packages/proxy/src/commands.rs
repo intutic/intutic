@@ -76,6 +76,78 @@ pub struct GraphContext {
     pub parent_session_id: String,
 }
 
+/// How a harness's tool calls get gated — the Rust-side twin of
+/// `services/sync-daemon/src/harness/gateKind.ts`'s `GateKind`. That module's
+/// own doc comment explains why this classification exists at all: `hook_gate`
+/// used to be reported unconditionally `true` everywhere on the theory that
+/// "the proxy is on the path, so the gate is always present" — false for any
+/// harness whose blocking gate ships SDK-side (`intutic-clawde`/`@intutic/gate`,
+/// no on-disk hook file for the daemon, or this proxy, to point at) or that
+/// wraps other harnesses instead of running tools itself. TD-365 tracked this
+/// as the identical bug in this proxy's own local `/fix`/`/draw` self-check,
+/// a separate code path from the TypeScript-side fix (`agentReporter.ts`) that
+/// this table mirrors rather than shares — Rust and TypeScript don't share a
+/// module boundary here, so `gateKind.ts`'s classification must be kept in
+/// sync with this one by hand if either side adds a harness.
+///
+/// See `resolve_harness_type`'s own doc comment for why the harness identity
+/// feeding this classification is client-supplied and unverifiable, same as
+/// every other attribution-only signal in this proxy — this function inherits
+/// that trust level, not a new one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GateKind {
+    /// The daemon (or this proxy, for the harnesses it front) writes an
+    /// on-disk hook/config file this harness reads before running a tool call
+    /// — the majority case, and the default this function returns for any
+    /// harness slug it doesn't otherwise recognise.
+    Hook,
+    /// The blocking gate ships in `intutic-clawde` or `@intutic/gate`,
+    /// imported into the harness's own process — no file to point at.
+    Sdk,
+    /// This harness wraps OTHER already-gated harnesses instead of running
+    /// tools itself — no gate of its own, but not ungoverned either.
+    Delegated,
+    /// No enforcement point exists today at all for this harness.
+    None,
+}
+
+/// Mirrors `gateKind.ts`'s `SDK_GATED_HARNESSES` set.
+const SDK_GATED_HARNESSES: &[&str] = &[
+    "langgraph",
+    "langchain",
+    "crewai",
+    "autogen",
+    "ag2",
+    "google-adk",
+    "openai-agents",
+    "pydantic-ai",
+    "smolagents",
+    "mastra",
+    "vercel-ai-sdk",
+];
+
+/// Mirrors `gateKind.ts`'s `NO_GATE_HARNESSES` set.
+const NO_GATE_HARNESSES: &[&str] = &["aider"];
+
+/// Mirrors `gateKind.ts`'s `DELEGATED_GATE_HARNESSES` set.
+const DELEGATED_GATE_HARNESSES: &[&str] = &["xirp", "agentic-orchestrator"];
+
+/// Classifies a harness slug (the same lowercase, kebab-case value
+/// `resolve_harness_type` produces and `HarnessType` in
+/// `packages/shared-types/src/enums.ts` enumerates) by how its tool calls get
+/// gated. Defaults to `Hook`, matching `gateKindForHarness`'s own default.
+pub fn gate_kind_for_harness(harness: &str) -> GateKind {
+    if SDK_GATED_HARNESSES.contains(&harness) {
+        GateKind::Sdk
+    } else if NO_GATE_HARNESSES.contains(&harness) {
+        GateKind::None
+    } else if DELEGATED_GATE_HARNESSES.contains(&harness) {
+        GateKind::Delegated
+    } else {
+        GateKind::Hook
+    }
+}
+
 /// Facet inventory built from what the proxy can see locally: the DLP/WASM/
 /// policy config, the SOPs on disk for the caller's role, the skills and MCP
 /// servers declared in the workspace, and — when present — the caller's graph
@@ -605,6 +677,46 @@ pub fn streaming_body(provider: WireProvider, model: &str, text: &str) -> String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gate_kind_classifies_sdk_gated_harnesses() {
+        for h in SDK_GATED_HARNESSES {
+            assert_eq!(gate_kind_for_harness(h), GateKind::Sdk, "expected {h} to be Sdk-gated");
+        }
+    }
+
+    #[test]
+    fn gate_kind_classifies_delegated_harnesses() {
+        for h in DELEGATED_GATE_HARNESSES {
+            assert_eq!(gate_kind_for_harness(h), GateKind::Delegated, "expected {h} to be Delegated");
+        }
+    }
+
+    #[test]
+    fn gate_kind_classifies_no_gate_harnesses() {
+        for h in NO_GATE_HARNESSES {
+            assert_eq!(gate_kind_for_harness(h), GateKind::None, "expected {h} to be None");
+        }
+    }
+
+    #[test]
+    fn gate_kind_defaults_to_hook() {
+        // The 24-harness native/hook-gated majority isn't individually
+        // enumerated (there's no allowlist for it, only the three
+        // exceptions above) — spot-check a representative sample instead,
+        // same as the sets above use one representative harness each.
+        for h in ["claude-code", "cursor", "grok", "muse-code", "dsh"] {
+            assert_eq!(gate_kind_for_harness(h), GateKind::Hook, "expected {h} to be Hook-gated");
+        }
+    }
+
+    #[test]
+    fn gate_kind_defaults_unknown_harness_to_hook() {
+        // Matches gateKindForHarness()'s own default — an unrecognised slug
+        // (a client-supplied x-intutic-harness header can be anything) reads
+        // as Hook rather than silently reporting no gate at all.
+        assert_eq!(gate_kind_for_harness("some-future-harness-not-yet-added"), GateKind::Hook);
+    }
 
     #[test]
     fn detects_fix_and_draw_with_aliases() {
