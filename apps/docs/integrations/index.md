@@ -1,11 +1,11 @@
 ---
 title: Integrations
-description: Connect Intutic to 25 AI coding agents — IDE extensions, CLI tools, agent frameworks, and platforms. Auto-detected, zero config.
+description: Connect Intutic to 26 AI coding agents — IDE extensions, CLI tools, agent frameworks, and platforms. Auto-detected, zero config.
 ---
 
 # Integrations <Badge type="tip" text="Open-Core" />
 
-Intutic supports **25 AI agent harnesses** out of the box (plus 4 more Python-SDK-gated frameworks whose dedicated adapter ships in a following wave). Run `intutic init` in your project and the CLI auto-detects which agents are present, then syncs governance rules to each one.
+Intutic supports **26 AI agent harnesses** out of the box (plus 4 more Python-SDK-gated frameworks whose dedicated adapter ships in a following wave). Run `intutic init` in your project and the CLI auto-detects which agents are present, then syncs governance rules to each one.
 
 ```bash
 intutic init
@@ -43,6 +43,7 @@ Terminal-based agents that accept proxy environment variables or config files.
 | [**Antigravity**](/integrations/antigravity) | Google's Gemini AI coding agent | `.gemini/settings.json` |
 | [**Grok Build**](/integrations/grok) | xAI's terminal coding agent | `AGENTS.md` |
 | **Muse Code** | Meta's beta terminal coding agent (model Muse Spark) | `AGENTS.md` |
+| [**dsh**](/integrations/dsh) <Badge type="warning" text="Preview" /> | DeepSeek's plugin-first ("Cordis") coding agent (developer preview) | `cordis.patch.yml` (Cordis plugin, not a rules file) |
 
 ## Agent Frameworks
 
@@ -55,6 +56,8 @@ Autonomous coding agents that run multi-step tasks with tool use.
 | [**CrewAI**](/integrations/crewai) | Multi-agent orchestration framework | `.env.intutic` + SDK gate |
 | [**Google ADK**](/integrations/google-adk) | Google's Agent Development Kit | `.env.intutic` + SDK gate |
 | [**OpenAI Agents SDK**](/integrations/openai-agents) | OpenAI's Python agents SDK | `.env.intutic` + SDK gate |
+| [**Mastra**](/integrations/mastra) | TypeScript agent framework | `.env.intutic` + SDK gate |
+| [**Vercel AI SDK**](/integrations/vercel-ai-sdk) | Vercel's `ai` package (v6+) | `.env.intutic` + SDK gate |
 | [**OpenHands**](/integrations/openhands) | Open-source AI software developer platform | `config.toml` |
 | [**Goose**](/integrations/goose) | Block's terminal agent and desktop framework | `.agents/plugins/` |
 | [**Hermes**](/integrations/hermes) | NousResearch's skill-based developer agent | `.hermes/config.yaml` |
@@ -71,6 +74,7 @@ Web UIs, desktop apps, and collaboration tools that host AI agents.
 | [**Open WebUI**](/integrations/open-webui) | Web interface for LLMs | `.open-webui/` filter |
 | [**Claude Desktop**](/integrations/claude-desktop) | Anthropic's desktop application | `claude_desktop_config.json` |
 | [**GitHub Copilot**](/integrations/github-copilot) | GitHub's AI pair programmer | `.github/copilot-instructions.md` |
+| [**Xirp**](/integrations/xirp) | Spotify's macOS orchestrator for parallel Claude Code/Codex/Gemini CLI sessions, each in its own tmux session + git worktree | none — delegates to the wrapped harness |
 
 ---
 

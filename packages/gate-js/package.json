@@ -18,6 +18,25 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./mastra": {
+      "import": "./dist/mastra.js",
+      "types": "./dist/mastra.d.ts"
+    },
+    "./vercel": {
+      "import": "./dist/vercel.js",
+      "types": "./dist/vercel.d.ts"
+    },
+    "./dsh": {
+      "import": "./dist/dsh.js",
+      "types": "./dist/dsh.d.ts"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "mastra": ["src/mastra.ts"],
+      "vercel": ["src/vercel.ts"],
+      "dsh": ["src/dsh.ts"]
     }
   },
   "files": [
@@ -34,7 +53,11 @@
     "yaml": "^2.9.0"
   },
   "devDependencies": {
+    "@ai-sdk/openai": "^4.0.43",
+    "@mastra/core": "^1.59.0",
+    "@deepseek-ai/cordis": "^4.0.1",
     "@types/node": "^22",
+    "ai": "^7.0.68",
     "typescript": "^5.5",
     "vitest": "^3"
   },

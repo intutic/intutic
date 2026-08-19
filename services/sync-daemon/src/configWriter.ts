@@ -90,6 +90,19 @@ export const HARNESS_FILES: Record<HarnessType, string> = {
   // read. Formatted by `formatMarkdown`, the same `---`-separated formatter
   // Cursor/Claude Code/Windsurf/GitHub Copilot already share below.
   grok: 'AGENTS.md',
+  // dsh has no workspace-relative rules file (governance lives entirely
+  // under $DSH_HOME) — empty, same as goose/openhands below: this writer's
+  // per-harness chain deliberately does not call writeDshHooks either (see
+  // the "goose and openhands are deliberately absent here" comment above);
+  // dshHooks.ts is invoked by tools/cli/src/harness/dsh.ts's own
+  // writeConfig() and re-run on tamper by settingsGuard.ts, the same
+  // two-path coverage goose/openhands rely on instead of this loop.
+  dsh: '',
+  // Xirp writes no config of its own (orchestrates other already-gated
+  // harnesses — see gateRegistry.ts's NO_GATE row and tools/cli/src/harness/
+  // xirp.ts). Empty filename => the loop below reports it `(deferred)`,
+  // same as n8n before it gained a writer.
+  xirp: '',
   // Wave 1 SDK-gated frameworks — same rationale as langgraph: no on-disk
   // hook/config file exists to gate tool calls, so each writes .env.intutic
   // (proxy base-URL vars + an SDK-gate pointer comment). See formatContent's
@@ -102,6 +115,12 @@ export const HARNESS_FILES: Record<HarnessType, string> = {
   'openai-agents': '.env.intutic',
   'pydantic-ai': '.env.intutic',
   smolagents: '.env.intutic',
+  // T2: JS/TS SDK-gated frameworks — same rationale as the Wave 1 Python
+  // family above, but the blocking gate ships in @intutic/gate
+  // (packages/gate-js) rather than intutic-clawde. See formatContent's
+  // switch below and JS_SDK_GATED_FRAMEWORKS.
+  mastra: '.env.intutic',
+  'vercel-ai-sdk': '.env.intutic',
 }
 
 // ─── Public interface ────────────────────────────────────────────────
@@ -495,6 +514,10 @@ function formatContent(
     case 'smolagents':
       return formatSdkGatedEnv(sops, proxyUrl, SDK_GATED_FRAMEWORKS[harness])
 
+    case 'mastra':
+    case 'vercel-ai-sdk':
+      return formatJsSdkGatedEnv(sops, proxyUrl, JS_SDK_GATED_FRAMEWORKS[harness])
+
     default:
       return formatMarkdown(sops)
   }
@@ -676,6 +699,60 @@ function formatSdkGatedEnv(
     '# blocking tool gate ships SDK-side:\n' +
     `#   pip install ${pipInstall}\n` +
     `#   ${info.importLine}\n` +
+    `# See https://docs.intutic.ai/integrations/${info.docsSlug}\n`
+  )
+}
+
+/**
+ * T2: two more frameworks in LangGraph's family — tools are plain
+ * objects/callables in the agent's own Node.js process, so the daemon has no
+ * on-disk hook/config file to gate a call with, and both write the same
+ * `.env.intutic` shape the Python family does. JS/TS-native, so the pointer
+ * comment reads `npm install`/`import { ... } from '@intutic/gate/<subpath>'`
+ * rather than `pip install`/`from intutic_clawde...` — see
+ * `formatJsSdkGatedEnv`.
+ */
+const JS_SDK_GATED_FRAMEWORKS: Record<
+  'mastra' | 'vercel-ai-sdk',
+  { label: string; importLine: string; usageSummary: string; docsSlug: string }
+> = {
+  mastra: {
+    label: 'Mastra',
+    importLine: "import { intuticHooks } from '@intutic/gate/mastra'",
+    usageSummary:
+      "new Agent({ ..., hooks: intuticHooks() }) — Mastra's beforeToolCall veto point. NOTE: " +
+      'per-call `hooks` on .generate()/.stream() OVERRIDE this, not merge with it.',
+    docsSlug: 'mastra',
+  },
+  'vercel-ai-sdk': {
+    label: 'Vercel AI SDK',
+    importLine: "import { intuticToolApproval, withIntuticProxy } from '@intutic/gate/vercel'",
+    usageSummary:
+      'generateText({ ..., toolApproval: intuticToolApproval() }) — the toolApproval veto ' +
+      'point. NOTE: this framework has NO env-var LLM-egress routing; the vars above do not ' +
+      'route it — use withIntuticProxy(createOpenAI)(...) or equivalent in code.',
+    docsSlug: 'vercel-ai-sdk',
+  },
+}
+
+/** Shared formatter for every T2 JS/TS SDK-gated framework — see
+ *  JS_SDK_GATED_FRAMEWORKS. Same env-var block `formatSdkGatedEnv` writes,
+ *  but "npm install"/an ESM import line/"Node.js process" in the pointer
+ *  comment, not "pip install"/"Python process". */
+function formatJsSdkGatedEnv(
+  sops: SyncSopEntry[],
+  proxyUrl: string,
+  info: { label: string; importLine: string; usageSummary: string; docsSlug: string },
+): string {
+  return (
+    formatCodex(sops, proxyUrl) +
+    '\n' +
+    `# These env vars govern LLM egress only. ${info.label} tools run in your own\n` +
+    '# Node.js process, where no config or hook file can gate them — the\n' +
+    '# blocking tool gate ships SDK-side:\n' +
+    `#   npm install @intutic/gate\n` +
+    `#   ${info.importLine}\n` +
+    `# ${info.usageSummary}\n` +
     `# See https://docs.intutic.ai/integrations/${info.docsSlug}\n`
   )
 }

@@ -15,14 +15,12 @@ urllib3 = ">=2.7.0"
 # The gate's image-integrity tier parses the Kubernetes manifests a deploy
 # command references; see intutic_clawde/gate/imagecheck.py.
 pyyaml = "^6.0"
-# Wave 1 framework adapters (intutic_clawde/gate/adapters/) — each import is
+# Wave 1/2 framework adapters (intutic_clawde/gate/adapters/) — each import is
 # guarded (`try: import ... except ImportError`), so intutic-clawde installs
 # and runs with NONE of these present; a framework is only required to
-# INSTANTIATE its adapter. LangGraph/CrewAI/AutoGen/AG2/Pydantic AI/
-# smolagents need no entry here: their tools are plain callables/duck-typed
-# objects the framework-agnostic @guard/guard_tools already governs, so they
-# have no optional import to declare (crewai's below is for its OWN adapter
-# module, adapters/crewai.py, which uses crewai's newer hook API directly).
+# INSTANTIATE its adapter. LangGraph needs no entry here: its tools are plain
+# callables/duck-typed objects the framework-agnostic @guard/guard_tools
+# already governs, so it has no optional import to declare.
 langchain = {version = ">=1.0", optional = true}
 # crewai caps its own Python support at <3.14; without an explicit upper
 # bound here, Poetry's solver rejects it outright because this project
@@ -31,12 +29,30 @@ langchain = {version = ">=1.0", optional = true}
 crewai = {version = ">=1.15.3", optional = true, python = ">=3.10,<3.14"}
 google-adk = {version = ">=2.7.1", optional = true}
 openai-agents = {version = "*", optional = true}
+# Wave 2 additions below. Checked live against PyPI's `requires_python` for
+# each (`curl -s https://pypi.org/pypi/<pkg>/json | ...['info']['requires_python']`)
+# before adding — the exact check Wave 1's crewai bug (see above) should have
+# had from the start. All four report ">=3.10" with NO upper bound at the
+# versions installed while building this adapter (autogen-agentchat/-core/-ext
+# 0.7.5, ag2 1.0.2, pydantic-ai-slim 2.31.1, smolagents 1.26.0) — unlike
+# crewai, none of them needs an explicit `python = "..."` constraint for
+# Poetry's solver to accept the full ^3.10 range this project declares.
+autogen-agentchat = {version = ">=0.7.5", optional = true}
+autogen-core = {version = ">=0.7.5", optional = true}
+autogen-ext = {version = ">=0.7.5", optional = true}
+ag2 = {version = ">=1.0.2", optional = true}
+pydantic-ai-slim = {version = ">=2.31.1", optional = true}
+smolagents = {version = ">=1.26.0", optional = true}
 
 [tool.poetry.extras]
 langchain = ["langchain"]
 crewai = ["crewai"]
 google-adk = ["google-adk"]
 openai-agents = ["openai-agents"]
+autogen = ["autogen-agentchat", "autogen-core", "autogen-ext"]
+ag2 = ["ag2"]
+pydantic-ai = ["pydantic-ai-slim"]
+smolagents = ["smolagents"]
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^9.0.3"

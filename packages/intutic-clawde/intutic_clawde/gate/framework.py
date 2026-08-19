@@ -98,16 +98,27 @@ def _tool_name(tool: Any) -> Optional[str]:
 
 
 def guard_tools(tools: Iterable[Any], *, gate: Optional[Gate] = None) -> list:
-    """Wrap a list of tools (LangChain/LangGraph BaseTool objects or plain
-    callables) so each is gated before execution.
+    """Wrap a list of tools (LangChain/LangGraph/smolagents tool objects, or
+    plain callables) so each is gated before execution.
 
-    Duck-typed on purpose — no langchain import, no hard dependency:
+    Duck-typed on purpose — no langchain/smolagents import, no hard dependency:
 
       * an object with a callable `.func` (StructuredTool, `@tool`-created
         Tool) gets its `.func` wrapped in place;
-      * otherwise an object with `._run` (BaseTool subclass) gets `._run`
-        wrapped in place (set via object.__setattr__, so pydantic models
-        that restrict attribute assignment still work);
+      * otherwise an object with `._run` (LangChain BaseTool subclass) gets
+        `._run` wrapped in place (set via object.__setattr__, so pydantic
+        models that restrict attribute assignment still work);
+      * otherwise an object with `.forward` (smolagents `Tool` subclass —
+        `Tool.__call__` dispatches to `self.forward(...)`) gets `.forward`
+        wrapped in place, the same way. Added when the smolagents adapter
+        (`adapters/smolagents.py`) was built: without this branch, a
+        smolagents `Tool` instance is still `callable` (it has `__call__`),
+        so it fell into the plain-callable branch below and got REPLACED by a
+        bare wrapper function — silently dropping the `.name`/`.inputs`/
+        schema attributes `ToolCallingAgent` needs to expose it to the model.
+        The `.forward` branch keeps the original `Tool` object (and its
+        schema) intact, only swapping its execution method, matching the
+        `._run` branch's contract exactly;
       * a plain callable is returned wrapped by `@guard` — which is also how
         CrewAI and AutoGen tools are guarded, directly with the decorator.
 
@@ -120,6 +131,7 @@ def guard_tools(tools: Iterable[Any], *, gate: Optional[Gate] = None) -> list:
 
         func = getattr(tool, "func", None)
         run = getattr(tool, "_run", None)
+        forward = getattr(tool, "forward", None)
 
         if callable(func):
             if not getattr(func, "__intutic_guarded__", False):
@@ -133,6 +145,10 @@ def guard_tools(tools: Iterable[Any], *, gate: Optional[Gate] = None) -> list:
             if not getattr(run, "__intutic_guarded__", False):
                 object.__setattr__(tool, "_run", guard(run, name=name, gate=gate))
             out.append(tool)
+        elif callable(forward):
+            if not getattr(forward, "__intutic_guarded__", False):
+                object.__setattr__(tool, "forward", guard(forward, name=name, gate=gate))
+            out.append(tool)
         elif callable(tool):
             if getattr(tool, "__intutic_guarded__", False):
                 out.append(tool)
@@ -141,7 +157,7 @@ def guard_tools(tools: Iterable[Any], *, gate: Optional[Gate] = None) -> list:
         else:
             raise TypeError(
                 f"guard_tools: {tool!r} is neither a callable nor a tool object "
-                f"with .func or ._run"
+                f"with .func, ._run, or .forward"
             )
     return out
 

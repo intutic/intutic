@@ -231,6 +231,8 @@ INTUTIC_FLOOR=(
   'path.grok_hooks	block	-	any	Shell command references the governance-protected path .grok/hooks	\\.grok/hooks'
   'path.grok_config_toml	block	-	any	Shell command references the governance-protected path .grok/config.toml	\\.grok/config\\.toml'
   'path.grok_trusted_folders_toml	block	-	any	Shell command references the governance-protected path .grok/trusted_folders.toml	\\.grok/trusted_folders\\.toml'
+  'path.dsh_profiles	block	-	any	Shell command references the governance-protected path .dsh/profiles	\\.dsh/profiles'
+  'path.dsh_settings_yaml	block	-	any	Shell command references the governance-protected path .dsh/settings.yaml	\\.dsh/settings\\.yaml'
 )
 
 # The dynamic tier, read from the policy snapshot. Additive only: it can turn an
@@ -734,6 +736,8 @@ INTUTIC_FLOOR=(
   'path.grok_hooks	block	-	any	Shell command references the governance-protected path .grok/hooks	\\.grok/hooks'
   'path.grok_config_toml	block	-	any	Shell command references the governance-protected path .grok/config.toml	\\.grok/config\\.toml'
   'path.grok_trusted_folders_toml	block	-	any	Shell command references the governance-protected path .grok/trusted_folders.toml	\\.grok/trusted_folders\\.toml'
+  'path.dsh_profiles	block	-	any	Shell command references the governance-protected path .dsh/profiles	\\.dsh/profiles'
+  'path.dsh_settings_yaml	block	-	any	Shell command references the governance-protected path .dsh/settings.yaml	\\.dsh/settings\\.yaml'
 )
 
 # The dynamic tier, read from the policy snapshot. Additive only: it can turn an
@@ -1238,6 +1242,8 @@ INTUTIC_FLOOR=(
   'path.grok_hooks	block	-	any	Shell command references the governance-protected path .grok/hooks	\\.grok/hooks'
   'path.grok_config_toml	block	-	any	Shell command references the governance-protected path .grok/config.toml	\\.grok/config\\.toml'
   'path.grok_trusted_folders_toml	block	-	any	Shell command references the governance-protected path .grok/trusted_folders.toml	\\.grok/trusted_folders\\.toml'
+  'path.dsh_profiles	block	-	any	Shell command references the governance-protected path .dsh/profiles	\\.dsh/profiles'
+  'path.dsh_settings_yaml	block	-	any	Shell command references the governance-protected path .dsh/settings.yaml	\\.dsh/settings\\.yaml'
 )
 
 # The dynamic tier, read from the policy snapshot. Additive only: it can turn an
@@ -1740,6 +1746,8 @@ INTUTIC_FLOOR=(
   'path.grok_hooks	block	-	any	Shell command references the governance-protected path .grok/hooks	\\.grok/hooks'
   'path.grok_config_toml	block	-	any	Shell command references the governance-protected path .grok/config.toml	\\.grok/config\\.toml'
   'path.grok_trusted_folders_toml	block	-	any	Shell command references the governance-protected path .grok/trusted_folders.toml	\\.grok/trusted_folders\\.toml'
+  'path.dsh_profiles	block	-	any	Shell command references the governance-protected path .dsh/profiles	\\.dsh/profiles'
+  'path.dsh_settings_yaml	block	-	any	Shell command references the governance-protected path .dsh/settings.yaml	\\.dsh/settings\\.yaml'
 )
 
 # The dynamic tier, read from the policy snapshot. Additive only: it can turn an
@@ -2247,6 +2255,8 @@ INTUTIC_FLOOR=(
   'path.grok_hooks	block	-	any	Shell command references the governance-protected path .grok/hooks	\\.grok/hooks'
   'path.grok_config_toml	block	-	any	Shell command references the governance-protected path .grok/config.toml	\\.grok/config\\.toml'
   'path.grok_trusted_folders_toml	block	-	any	Shell command references the governance-protected path .grok/trusted_folders.toml	\\.grok/trusted_folders\\.toml'
+  'path.dsh_profiles	block	-	any	Shell command references the governance-protected path .dsh/profiles	\\.dsh/profiles'
+  'path.dsh_settings_yaml	block	-	any	Shell command references the governance-protected path .dsh/settings.yaml	\\.dsh/settings\\.yaml'
 )
 
 # The dynamic tier, read from the policy snapshot. Additive only: it can turn an

@@ -8,6 +8,11 @@ allowBuilds:
   esbuild: true
   protobufjs: true
 
+minimumReleaseAgeExclude:
+  - '@ai-sdk/gateway@4.0.54'
+  - '@ai-sdk/openai@4.0.43'
+  - ai@7.0.68
+
 # Transitive-only advisories: nothing in this workspace declares these directly,
 # so forcing resolution is the only way to take the fix. Pinned to the minimum
 # patched version rather than latest, to keep the change as small as the CVE

@@ -1,5 +1,5 @@
 /**
- * ag2.ts — AG2 (the AutoGen fork) adapter (env-file config, SDK-side gate).
+ * ag2.ts — AG2 adapter (env-file config, SDK-side gate).
  *
  * Same shape as langgraph.ts (see sdkGatedAdapter.ts). "ag2" is a short
  * package name that would false-positive as a plain substring test (e.g.
@@ -7,10 +7,13 @@
  * boundary-aware regex instead of `keywords.includes('ag2')` — see
  * sdkGatedAdapter.ts's `ManifestMatcher` type.
  *
- * TODO(P2, sibling wave): no `intutic_clawde.gate.adapters.ag2` module exists
- * yet (see gateRegistry.ts's NO_GATE row for `ag2`). AG2 is an AutoGen fork
- * whose tools are, likewise, plain callables, so `@guard`/`guard_tools`
- * already govern them in the meantime.
+ * Note: AG2 was found to be a from-scratch rewrite at the version installed
+ * to build this adapter (ag2==1.0.2) — it no longer imports as `autogen` and
+ * shares no API with the ConversableAgent/GroupChat shape most AG2/pyautogen
+ * tutorials still describe. The blocking gate ships SDK-side via
+ * `intutic_clawde.gate.adapters.ag2.IntuticMiddleware`, an ag2
+ * `BaseMiddleware.on_tool_execution`, matched to that current architecture
+ * (see ag2.py's module doc; TD-376 tracks one unverified caveat).
  *
  * HLD §3.14 — Harness Onboarding Matrix
  * @module
@@ -26,10 +29,9 @@ export const ag2Adapter = makeSdkGatedAdapter({
   type: HarnessType.AG2,
   label: 'AG2',
   keywords: [AG2_TOKEN],
-  pipInstall: 'intutic-clawde',
-  importLine: 'from intutic_clawde.gate import guard, guard_tools',
+  pipInstall: 'intutic-clawde[ag2]',
+  importLine: 'from intutic_clawde.gate.adapters.ag2 import IntuticMiddleware',
   usageSummary:
-    'AG2 tools are plain callables — @guard/guard_tools already govern them; a dedicated ' +
-    'adapters.ag2 convenience module ships in a later wave.',
+    'Agent(middleware=[IntuticMiddleware]) vetoes a tool call via on_tool_execution before it runs.',
   docsSlug: 'ag2',
 })

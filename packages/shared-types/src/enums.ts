@@ -145,9 +145,12 @@ export type {
 
 // ─── Harness Type ────────────────────────────────────────────────────
 // HLD §3.14, §4.5 — Supported AI agent harness integrations
-// Full matrix: HLD §3.14 Harness Onboarding Matrix (29 harnesses — 21
+// Full matrix: HLD §3.14 Harness Onboarding Matrix (30 harnesses — 21
 // hook/config-gated (19 base + Muse Code + Grok Build) + LangGraph +
-// Wave 1's 8 SDK-gated Python frameworks)
+// Wave 1's 8 SDK-gated Python frameworks + Xirp — the first harness with
+// no gate/config format of its own because it WRAPS other already-gated
+// harnesses rather than running tools itself; see gateKind.ts's
+// 'delegated' kind and gateRegistry.ts's NO_GATE row for 'xirp')
 
 /** Supported AI agent harness/IDE integrations. */
 export const HarnessType = {
@@ -174,6 +177,20 @@ export const HarnessType = {
   MUSE_CODE: 'muse-code',
   /** xAI Grok Build (binary `grok`, GA 2026-05, open-sourced 2026-07-15). */
   GROK: 'grok',
+  /** DeepSeek's "dsh" (binary `dsh`, `@deepseek-ai/dsh`). Developer preview
+   *  since 2026-08-13; gated via a Cordis plugin (`@intutic/gate/dsh`), not a
+   *  generated hook file — see gateRegistry.ts's `dsh` row. */
+  DEEPSEEK_HARNESS: 'dsh',
+  /**
+   * Spotify "Xirp" — macOS-only desktop orchestrator, beta since 2026-08-11.
+   * NOT itself an AI agent: it spawns already-installed CLI harnesses
+   * (Claude Code, Codex, Gemini CLI) each inside its own tmux session and
+   * `git worktree`, preserving each wrapped harness's native, unmodified
+   * config (per Xirp's own FAQ). Detected for reporting/reconciliation
+   * purposes only — see `tools/cli/src/harness/xirp.ts` and
+   * `gateRegistry.ts`'s NO_GATE row for why it writes no config of its own.
+   */
+  XIRP: 'xirp',
   // ─── Wave 1: Python-SDK-gated frameworks (no on-disk hook/config file) ───
   // Same family as LANGGRAPH: the blocking gate ships in intutic-clawde
   // (intutic_clawde.gate, python-raise contract), evaluated in-process before
@@ -195,6 +212,21 @@ export const HarnessType = {
   /** Detected via pydantic-ai / pydantic-ai-slim. */
   PYDANTIC_AI: 'pydantic-ai',
   SMOLAGENTS: 'smolagents',
+  // ─── T2: JS/TS SDK-gated frameworks (no on-disk hook/config file) ───────
+  // Same family as LANGCHAIN/LANGGRAPH above, but JS/TS-native: the blocking
+  // gate ships in @intutic/gate (packages/gate-js), a subpath adapter per
+  // framework, evaluated in-process before the tool body runs. This
+  // env-adapter writes .env.intutic (proxy base-URL vars only — see
+  // gateRegistry.ts NO_GATE rows) — see also configWriter.ts's HARNESS_FILES.
+  /** Detected via `@mastra/core`/`mastra` in `package.json`. Gate:
+   *  `@intutic/gate/mastra`'s `intuticHooks()` — see that module's doc for
+   *  the per-call-hooks-override bypass this framework's own design imposes. */
+  MASTRA: 'mastra',
+  /** Detected via `ai` (v6+) plus any `@ai-sdk/*` package in `package.json`.
+   *  Gate: `@intutic/gate/vercel`'s `intuticToolApproval()`. Unlike most
+   *  harnesses here, this framework has NO env-var LLM-egress routing — see
+   *  `@intutic/gate/vercel`'s `withIntuticProxy()` and its module doc. */
+  VERCEL_AI_SDK: 'vercel-ai-sdk',
 } as const
 
 /** Union of all harness type values. */
