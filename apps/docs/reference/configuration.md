@@ -73,6 +73,7 @@ Workspaces are the top-level organizational unit. Each workspace has:
 | Name | string | Human-readable workspace name |
 | Plan | enum | `free_trial`, `pro`, `team`, `enterprise` |
 | Budget tiers | object | Per-role budget limits |
+| `allowedModels` | string[] | Approved-models allowlist. Absent or empty means unrestricted. Enforced by the proxy at request time — a request naming a model outside this list is rejected before it reaches a provider. See [Settings → Approved Models](/guide/settings#approved-models) |
 
 <!-- ENTERPRISE_ONLY_START -->
 ## Workspace Roles (RBAC)

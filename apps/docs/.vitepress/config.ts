@@ -115,6 +115,16 @@ if (!IS_OSS) {
       { text: 'Organizations, Teams & Billing (Cloud)', link: '/guide/organizations' },
       { text: 'Intelligent Model Routing (Cloud)', link: '/guide/intelligent-routing' },
       { text: 'Pre-Adoption Gate for Model Upgrades (Cloud)', link: '/guide/mirror-adoption-report' },
+      { text: 'Runaway-Spend Counterfactual (Cloud)', link: '/guide/averted-spend' },
+      { text: 'Provider Downtime & SLA Evidence (Cloud)', link: '/guide/provider-incidents' },
+      { text: 'Managed Gateway Cells (Cloud)', link: '/guide/managed-cells' },
+      // Reserved slots — sibling workstream is building the dashboard UI for
+      // these three in parallel; writing docs before the UI exists would
+      // document a page that doesn't do anything yet. Uncomment and point at
+      // a real page once each UI ships.
+      // { text: 'Audit Timeline (Cloud)', link: '/guide/audit-timeline' },
+      // { text: 'Org SOPs (Cloud)', link: '/guide/org-sops' },
+      // { text: 'Evaluator Sandbox (Cloud)', link: '/guide/evaluator-sandbox' },
     ],
   });
 }
@@ -369,11 +379,16 @@ export default defineConfig({
             { text: 'GitHub Copilot', link: '/integrations/github-copilot' },
             { text: 'LangGraph', link: '/integrations/langgraph' },
             { text: 'Grok Build', link: '/integrations/grok' },
+            { text: 'Muse Code', link: '/integrations/muse-code' },
             { text: 'dsh', link: '/integrations/dsh' },
             { text: 'Xirp', link: '/integrations/xirp' },
             { text: 'Agentic Orchestrator', link: '/integrations/agentic-orchestrator' },
             { text: 'LangChain', link: '/integrations/langchain' },
             { text: 'CrewAI', link: '/integrations/crewai' },
+            { text: 'AutoGen', link: '/integrations/autogen' },
+            { text: 'AG2', link: '/integrations/ag2' },
+            { text: 'Pydantic AI', link: '/integrations/pydantic-ai' },
+            { text: 'smolagents', link: '/integrations/smolagents' },
             { text: 'Google ADK', link: '/integrations/google-adk' },
             { text: 'OpenAI Agents SDK', link: '/integrations/openai-agents' },
             { text: 'Strands Agents', link: '/integrations/strands' },

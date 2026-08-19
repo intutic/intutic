@@ -136,6 +136,22 @@ Monitoring metrics include:
 - **Routing Decisions** — Counts total observations handled.
 - **Active Routing Configurations** — Simplified table displaying model arm IDs, task types, security levels, and performance scores.
 
+### Approved Models
+
+An optional allowlist of model names this workspace's requests are permitted to use. Leave it
+empty and every model is allowed — the allowlist only starts restricting once you add at least
+one entry.
+
+Enforcement happens at the proxy, on every request: the workspace's `allowedModels` list is
+published to the gateway, and a request naming a model outside that list is rejected before it
+reaches a provider. An absent list and an explicitly empty list are treated identically as
+"unrestricted" — there is no difference between never configuring this and configuring it with
+zero entries.
+
+See [Intelligent Model Routing](/guide/intelligent-routing) — when routing is enabled, the models
+it can actually pick from are the intersection of your `candidate_models` configuration and this
+allowlist, not either list alone.
+
 ### MCP Proxy Enforcement
 
 Controls how the Intutic governance proxy behaves when it can't reach the control plane.
