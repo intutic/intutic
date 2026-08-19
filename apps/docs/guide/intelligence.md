@@ -48,7 +48,7 @@ SkillOpt parses agent trajectory failures and config files (like `.cursorrules`,
 
 ### How It Works
 
-1. **Analysis** — SkillOpt evaluates compliance logs and config drift.
+1. **Analysis** — SkillOpt evaluates compliance logs and config drift. This runs on a nightly schedule for every workspace; a **Regenerate suggestions** button on the Intelligence page's Config tab triggers the same pipeline on demand, for when you don't want to wait for the next scheduled sweep. The scheduled run remains the authoritative, unattended path — the button is a manual, on-demand trigger only.
 2. **Generation** — An LLM call generates structural changes (e.g., adding rules to block specific commands or auto-inject system contexts). This step is generation, not evaluation — nothing here judges whether the result is safe.
 3. **Safety Gate** — Two deterministic checks run before a recommendation is displayed, not an LLM judge: bounds checking (operation count, edit size, no wildcard deletes, no sectionless full-file replaces, and per-file-type syntax validation for JSON/YAML/Markdown), and a scan of the edit against active workspace SOPs for conflicting security language (e.g. a SOP's "must not"/"forbidden" clauses).
 4. **Auto-Apply** — If enabled, recommendations with confidence scores above `0.85` are automatically applied to the workspace harnesses via the sync daemon.

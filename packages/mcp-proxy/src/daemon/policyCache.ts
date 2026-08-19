@@ -64,6 +64,29 @@ export interface ResolvedPolicy {
   /** Additive MCP server allowlist; empty means unrestricted. Same source
    *  and same backward-compat treatment as `allowedTools` above. */
   allowedServers: string[]
+  /**
+   * Prompt-injection disposition override (`packages/mcp-proxy/src/injection.ts`).
+   * `undefined` when the control plane has not sent this field yet — read the
+   * same way as every other optional curation field here: absent must mean
+   * "no override, use the package's own env-derived default"
+   * (`PolicyClient.getInjectionAction`, `../policy.ts`), never "warn" by
+   * silent default at this layer, so an old snapshot/cache entry from before
+   * this field existed reads correctly as absent rather than as an explicit
+   * value.
+   */
+  mcpInjectionAction?: 'warn' | 'block'
+  /**
+   * Anomaly-detection mode override (Phase 2, `packages/mcp-proxy/src/anomaly/`).
+   * `undefined` means absent — same convention as `mcpInjectionAction` above.
+   */
+  mcpAnomalyMode?: 'enforce' | 'warn' | 'off'
+  /**
+   * Per-detector disposition overrides. Always an object, never `undefined`
+   * — an absent field normalizes to `{}` (no overrides) the same way
+   * `toolDescriptionOverrides` above does, since "absent" and "explicitly
+   * empty" mean the same thing for an override map.
+   */
+  mcpAnomalyOverrides: Record<string, 'steer' | 'reask' | 'kill' | 'off'>
   cachedAt:      number
 }
 
@@ -88,7 +111,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /** The policy fields the control plane sends, once they have been checked. */
 type PolicyResponseBody = Pick<
   ResolvedPolicy,
-  'sopRules' | 'dlpPatterns' | 'interventionMode' | 'allowedTools' | 'toolDescriptionOverrides' | 'allowedServers'
+  | 'sopRules'
+  | 'dlpPatterns'
+  | 'interventionMode'
+  | 'allowedTools'
+  | 'toolDescriptionOverrides'
+  | 'allowedServers'
+  | 'mcpInjectionAction'
+  | 'mcpAnomalyMode'
+  | 'mcpAnomalyOverrides'
 >
 
 /**
@@ -117,6 +148,9 @@ function parsePolicyResponse(raw: string): PolicyResponseBody | null {
   const allowedTools              = parsed['allowedTools']
   const toolDescriptionOverrides  = parsed['toolDescriptionOverrides']
   const allowedServers            = parsed['allowedServers']
+  const mcpInjectionAction        = parsed['mcpInjectionAction']
+  const mcpAnomalyMode            = parsed['mcpAnomalyMode']
+  const mcpAnomalyOverridesRaw    = parsed['mcpAnomalyOverrides']
 
   return {
     sopRules:    Array.isArray(sopRules) ? sopRules.filter(isRecord) : [],
@@ -137,6 +171,20 @@ function parsePolicyResponse(raw: string): PolicyResponseBody | null {
     allowedServers: Array.isArray(allowedServers)
       ? allowedServers.filter((s): s is string => typeof s === 'string')
       : [],
+    mcpInjectionAction:
+      mcpInjectionAction === 'warn' || mcpInjectionAction === 'block' ? mcpInjectionAction : undefined,
+    mcpAnomalyMode:
+      mcpAnomalyMode === 'enforce' || mcpAnomalyMode === 'warn' || mcpAnomalyMode === 'off'
+        ? mcpAnomalyMode
+        : undefined,
+    mcpAnomalyOverrides: isRecord(mcpAnomalyOverridesRaw)
+      ? Object.fromEntries(
+          Object.entries(mcpAnomalyOverridesRaw).filter(
+            (entry): entry is [string, 'steer' | 'reask' | 'kill' | 'off'] =>
+              entry[1] === 'steer' || entry[1] === 'reask' || entry[1] === 'kill' || entry[1] === 'off',
+          ),
+        )
+      : {},
   }
 }
 
@@ -184,6 +232,9 @@ async function fetchFromControlPlane(workspaceId: string): Promise<ResolvedPolic
             allowedTools:     parsed.allowedTools,
             toolDescriptionOverrides: parsed.toolDescriptionOverrides,
             allowedServers:   parsed.allowedServers,
+            mcpInjectionAction: parsed.mcpInjectionAction,
+            mcpAnomalyMode:   parsed.mcpAnomalyMode,
+            mcpAnomalyOverrides: parsed.mcpAnomalyOverrides,
             cachedAt:         Date.now(),
           })
         })
@@ -277,6 +328,7 @@ export async function seedFromSnapshot(snapshotPath?: string): Promise<string | 
       allowedTools: [],
       toolDescriptionOverrides: {},
       allowedServers: [],
+      mcpAnomalyOverrides: {},
       cachedAt,
     }
 
@@ -345,6 +397,7 @@ export async function resolvePolicy(workspaceId: string): Promise<ResolvedPolicy
         allowedTools: Array.isArray(raw.allowedTools) ? raw.allowedTools : [],
         toolDescriptionOverrides: isRecord(raw.toolDescriptionOverrides) ? raw.toolDescriptionOverrides : {},
         allowedServers: Array.isArray(raw.allowedServers) ? raw.allowedServers : [],
+        mcpAnomalyOverrides: isRecord(raw.mcpAnomalyOverrides) ? raw.mcpAnomalyOverrides : {},
       }
       evictIfFull()
       lru.set(workspaceId, parsed)

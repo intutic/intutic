@@ -91,6 +91,30 @@ export class PolicyClient {
    * `GET /api/v1/sop/rules` response this class already polls).
    */
   private allowedServers: string[] = []
+  /**
+   * Control-plane-delivered prompt-injection disposition override. `undefined`
+   * (never `'warn'`/`'block'` by default) means "the control plane did not
+   * send this field" — distinct from the field being explicitly set to
+   * `'warn'` — so the caller (interceptor.ts) knows to fall back to
+   * `config.ts`'s `mcpInjectionAction` env-derived default rather than
+   * silently treating an unset policy as an explicit warn.
+   */
+  private injectionAction: 'warn' | 'block' | undefined
+  /**
+   * Control-plane-delivered anomaly-detection mode override (Phase 2).
+   * `undefined` when absent — same "absent means no override, fall back to
+   * config.ts's env-derived default" convention as `injectionAction` above.
+   */
+  private anomalyMode: 'enforce' | 'warn' | 'off' | undefined
+  /**
+   * Control-plane-delivered per-detector disposition overrides. Always an
+   * object (never `undefined`) — an absent policy field reads as "no
+   * overrides," which `resolveEffectiveDisposition` (anomaly/index.ts)
+   * already treats as a no-op via `overrides[detectorId] === undefined`, the
+   * same empty-object-means-unrestricted convention `toolDescriptionOverrides`
+   * above uses.
+   */
+  private anomalyOverrides: Record<string, 'steer' | 'reask' | 'kill' | 'off'> = {}
   private lastFetchAt = 0
   private refreshTimer: NodeJS.Timeout | null = null
 
@@ -102,18 +126,30 @@ export class PolicyClient {
     private readonly mcpProxyMode: string = 'per-session'
   ) {}
 
-  /** Start background refresh timer. */
-  start(): void {
+  /**
+   * Start background refresh timer.
+   *
+   * @param onTick - Optional callback invoked on the SAME interval as the
+   *   policy refresh (including the initial kick below) — Phase 3's
+   *   `~/.intutic/wasm/` rescan (`WasmRunner.rescan`, wired from proxy.ts)
+   *   hooks this rather than starting a second timer, per the task's own
+   *   "don't add a second timer" instruction. Errors are swallowed the same
+   *   way `refresh()`'s own are — a rescan failure must not take down the
+   *   policy refresh it rides alongside.
+   */
+  start(onTick?: () => void | Promise<void>): void {
     this.refreshTimer = setInterval(() => {
       void this.refresh().catch(() => {
         // Errors already logged inside refresh()
       })
+      if (onTick) void Promise.resolve(onTick()).catch(() => {})
     }, this.ttlMs)
     // Don't block Node.js exit on this timer
     this.refreshTimer.unref()
 
     // Kick off initial fetch (non-blocking — proxy starts immediately)
     void this.refresh().catch(() => {})
+    if (onTick) void Promise.resolve(onTick()).catch(() => {})
   }
 
   /** Stop the background refresh timer. */
@@ -149,6 +185,28 @@ export class PolicyClient {
     return this.toolDescriptionOverrides
   }
 
+  /**
+   * The control-plane-delivered prompt-injection disposition, or `undefined`
+   * when the policy source never sent `mcpInjectionAction` — absent means
+   * "no override", not "warn". Callers (interceptor.ts) fall back to
+   * `config.ts`'s env-derived default in that case, the same "absent means
+   * default" convention every other optional policy field in this class
+   * follows.
+   */
+  getInjectionAction(): 'warn' | 'block' | undefined {
+    return this.injectionAction
+  }
+
+  /** The control-plane-delivered anomaly mode, or `undefined` if unset (see field doc). */
+  getAnomalyMode(): 'enforce' | 'warn' | 'off' | undefined {
+    return this.anomalyMode
+  }
+
+  /** Per-detector disposition overrides; always an object, empty means none. */
+  getAnomalyOverrides(): Readonly<Record<string, 'steer' | 'reask' | 'kill' | 'off'>> {
+    return this.anomalyOverrides
+  }
+
   /** Parse the optional curation fields shared by both refresh paths. */
   private absorbCuration(source: Record<string, unknown>): void {
     const allowed = source['allowedTools'] ?? source['mcpAllowedTools']
@@ -166,6 +224,19 @@ export class PolicyClient {
     this.allowedServers = Array.isArray(allowedServers)
       ? allowedServers.filter((s): s is string => typeof s === 'string')
       : []
+    const injectionAction = source['mcpInjectionAction']
+    this.injectionAction =
+      injectionAction === 'warn' || injectionAction === 'block' ? injectionAction : undefined
+    const anomalyMode = source['mcpAnomalyMode']
+    this.anomalyMode =
+      anomalyMode === 'enforce' || anomalyMode === 'warn' || anomalyMode === 'off' ? anomalyMode : undefined
+    const anomalyOverrides = source['mcpAnomalyOverrides']
+    this.anomalyOverrides = {}
+    if (typeof anomalyOverrides === 'object' && anomalyOverrides !== null && !Array.isArray(anomalyOverrides)) {
+      for (const [k, v] of Object.entries(anomalyOverrides as Record<string, unknown>)) {
+        if (v === 'steer' || v === 'reask' || v === 'kill' || v === 'off') this.anomalyOverrides[k] = v
+      }
+    }
   }
 
   /** Find the first matching rule for a given tool name + serialized args. */

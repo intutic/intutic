@@ -76,6 +76,59 @@ export interface ProxyConfig {
    * plain JSON object.
    */
   remoteHeaders: Record<string, string>
+  /**
+   * Default prompt-injection disposition (injection.ts / interceptor.ts),
+   * from `INTUTIC_MCP_INJECTION_ACTION` — the env-var fallback for
+   * standalone/open-core use documented on `PolicyClient.getInjectionAction`
+   * (policy.ts), which the control plane's `mcpInjectionAction` policy field
+   * overrides when present. Defaults to `'warn'`, matching the Rust proxy's
+   * own steer-not-kill posture for injection: `PromptInjectionDetector`
+   * (detectors.rs) never disposes `Kill` on its own — only `Reask` (at the
+   * ≥2-technique/untrusted-source threshold) or `Steer` below it — so a
+   * default of unconditional blocking would be a stricter posture than the
+   * capability this was ported from.
+   */
+  mcpInjectionAction: 'warn' | 'block'
+  /**
+   * Default anomaly-detection mode (anomaly/index.ts, Phase 2), from
+   * `INTUTIC_MCP_ANOMALY_MODE` — the env-var fallback for standalone/
+   * open-core use, overridden by the control plane's `mcpAnomalyMode` policy
+   * field when present (`PolicyClient.getAnomalyMode`). Defaults to
+   * `'enforce'`: unlike injection scanning, 5 of the 7 ported anomaly
+   * detectors already carry a non-`kill` Rust-declared ceiling
+   * (`consecutive_repeat`/`ping_pong_cycle` reask, `landmark_cycle`/
+   * `tool_diversity_collapse`/`tool_poisoning` steer), so "enforce" here
+   * still respects every detector's own measured-or-unmeasured severity via
+   * `resolveEffectiveDisposition` — it is not a blanket "block on suspicion"
+   * setting.
+   */
+  mcpAnomalyMode: 'enforce' | 'warn' | 'off'
+  /**
+   * Per-detector disposition override map, from `INTUTIC_MCP_ANOMALY_OVERRIDES`
+   * — a JSON object string, same "env var, not a CLI flag" treatment as
+   * `remoteHeaders` (though these values are not secrets; the JSON-object
+   * convention is just kept consistent). Keys are detector ids
+   * (`anomaly/index.ts`'s `DETECTOR_BASE_DISPOSITION`); values are
+   * `'steer' | 'reask' | 'kill' | 'off'`, clamped at each detector's own
+   * Rust-declared ceiling by `resolveEffectiveDisposition` — never able to
+   * promote past it. Overridden wholesale by the control plane's
+   * `mcpAnomalyOverrides` policy field when present. Empty object when
+   * unset, malformed, or not a plain JSON object.
+   */
+  mcpAnomalyOverrides: Record<string, 'steer' | 'reask' | 'kill' | 'off'>
+  /**
+   * The "config" tier of Phase 3's WASM rule directory resolution — ported
+   * from `local_loader.rs`'s `resolve_local_dir`, whose three-tier order is
+   * `INTUTIC_WASM_DIR` env var (checked directly inside
+   * `wasm/loader.ts`'s `resolveWasmDir`, not here) → this config value →
+   * `~/.intutic/wasm` home default. Sourced from `~/.intutic/env/runtime.env`'s
+   * `INTUTIC_WASM_LOCAL_DIR` — the closest local analogue this package has
+   * to the Rust proxy's `intutic_settings.wasm_local_dir` dashboard setting
+   * (there is no control-plane-delivered equivalent on the MCP policy
+   * channel). `undefined` when unset, which `resolveWasmDir` reads as
+   * "fall through to the home default."
+   */
+  mcpWasmDir: string | undefined
 }
 
 const DEFAULT_EVENTS_PATH = node_path.join(node_os.homedir(), '.intutic', 'events', 'hook-events.jsonl')
@@ -171,6 +224,32 @@ function parseRemoteHeaders(raw: string | undefined): Record<string, string> {
   return headers
 }
 
+const VALID_ANOMALY_OVERRIDE_VALUES = new Set(['steer', 'reask', 'kill', 'off'])
+
+/**
+ * Parse `INTUTIC_MCP_ANOMALY_OVERRIDES` — a JSON object string of detector-id
+ * → disposition-override pairs. Never throws: a missing, malformed, or
+ * non-object value degrades to "no overrides," same posture as
+ * `parseRemoteHeaders`.
+ */
+function parseAnomalyOverrides(raw: string | undefined): Record<string, 'steer' | 'reask' | 'kill' | 'off'> {
+  if (!raw) return {}
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return {}
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {}
+  const overrides: Record<string, 'steer' | 'reask' | 'kill' | 'off'> = {}
+  for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (typeof value === 'string' && VALID_ANOMALY_OVERRIDE_VALUES.has(value)) {
+      overrides[key] = value as 'steer' | 'reask' | 'kill' | 'off'
+    }
+  }
+  return overrides
+}
+
 /**
  * Load the proxy configuration from runtime.env + CLI args + environment.
  */
@@ -243,6 +322,15 @@ export async function loadConfig(argv: string[] = process.argv.slice(2)): Promis
 
   const standalone = cli.realServerCommand.length === 0 && cli.remoteUrl === undefined
 
+  const mcpInjectionAction: 'warn' | 'block' =
+    (process.env['INTUTIC_MCP_INJECTION_ACTION'] ?? runtimeEnv['INTUTIC_MCP_INJECTION_ACTION']) === 'block'
+      ? 'block'
+      : 'warn'
+
+  const rawAnomalyMode = process.env['INTUTIC_MCP_ANOMALY_MODE'] ?? runtimeEnv['INTUTIC_MCP_ANOMALY_MODE']
+  const mcpAnomalyMode: 'enforce' | 'warn' | 'off' =
+    rawAnomalyMode === 'warn' || rawAnomalyMode === 'off' ? rawAnomalyMode : 'enforce'
+
   return {
     workspaceId,
     controlPlaneUrl,
@@ -257,5 +345,9 @@ export async function loadConfig(argv: string[] = process.argv.slice(2)): Promis
     remoteUrl: cli.remoteUrl,
     remoteTransport,
     remoteHeaders: parseRemoteHeaders(process.env['INTUTIC_REMOTE_HEADERS']),
+    mcpInjectionAction,
+    mcpAnomalyMode,
+    mcpAnomalyOverrides: parseAnomalyOverrides(process.env['INTUTIC_MCP_ANOMALY_OVERRIDES']),
+    mcpWasmDir: runtimeEnv['INTUTIC_WASM_LOCAL_DIR'] || undefined,
   }
 }

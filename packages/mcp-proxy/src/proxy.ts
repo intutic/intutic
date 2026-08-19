@@ -35,6 +35,10 @@ import { PolicyClient } from './policy.js'
 import { GovernanceEmitter } from './emitter.js'
 import { ToolCallInterceptor } from './interceptor.js'
 import { redactText as redactMcpText } from './dlp.js'
+import { scanText, injectionSeverity, type InjectionSource } from './injection.js'
+import { toolPoisoning, dlpEscalation } from './anomaly/index.js'
+import { SessionState } from './session.js'
+import { WasmRunner } from './wasm/runner.js'
 import { checkTofu, decideTofuAction } from './tofu.js'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
@@ -108,6 +112,43 @@ export interface ServerLineOutcome {
   /** The JSON-RPC id of the `tools/list` response, needed to build a block
    *  frame in the caller if TOFU refuses it. Set alongside `toolsListTools`. */
   toolsListMsgId?: string | number | null
+  /**
+   * Prompt-injection findings (injection.ts) from this line, one entry per
+   * scanned surface that matched — a `tools/call`/`resources/read` result
+   * (`tool_result`) yields at most one entry; a `tools/list` response can
+   * yield one per tool whose (post-curation) description matched. The
+   * caller (`handleServerLine`) emits `injection_detected` (and, on a
+   * response-direction block, `tool_blocked`) from these — `processServerLine`
+   * itself stays a pure function with no emitter access, the same reason
+   * `redactedTool`/`redactions` exist as outcome fields rather than emitting
+   * directly.
+   */
+  injectionFindings?: Array<{ source: InjectionSource; toolName: string; patterns: string[] }>
+  /**
+   * Set when a response-direction injection match, under `mcpInjectionAction:
+   * 'block'`, caused `line` to carry a withheld-result error frame instead of
+   * the real result — mirrors `redactedTool` for the injection path, so the
+   * caller can log/emit the block distinctly from a plain redaction.
+   */
+  injectionBlocked?: boolean
+  /**
+   * Phase 2's `dlp_escalation` finding (anomaly/detectors.ts), set when a
+   * `tools/call`/`resources/read` result carried ≥3 distinct DLP-redacted
+   * pattern types. Severity-escalation only — see `dlpEscalation`'s own doc
+   * comment for why this never becomes a NEW block: the content is already
+   * redacted (`redactions` above), and this proxy's DLP scan already blocks
+   * any request-direction finding unconditionally, so escalating an
+   * already-redacted RESPONSE protects nothing further.
+   */
+  dlpEscalationReason?: string
+  /**
+   * Phase 2's `tool_poisoning` finding (anomaly/detectors.ts), set on a
+   * `tools/list` response whose post-curation tool descriptions matched
+   * `toolPoison.ts`'s 7-pattern scanner. Report-only, same as
+   * `injectionFindings` on this same response type — never removes or
+   * blocks a listing.
+   */
+  toolPoisoningReason?: string
 }
 
 /**
@@ -142,6 +183,7 @@ export function processServerLine(
   pending: Map<string | number, PendingRequest>,
   allowedTools: readonly string[],
   overrides: Readonly<Record<string, string>>,
+  injectionAction: 'warn' | 'block' = 'warn',
 ): ServerLineOutcome {
   const trimmed = raw.trim()
   if (!trimmed) return { line: raw }
@@ -160,32 +202,89 @@ export function processServerLine(
   if (req.method === 'tools/call' || req.method === 'resources/read') {
     const serialized = JSON.stringify(msg.result)
     const { redacted, findings } = redactMcpText(serialized)
-    if (findings.length === 0) return { line: raw }
     const label = req.toolName ?? req.method
-    try {
-      msg.result = JSON.parse(redacted) as Record<string, unknown>
-      return {
-        line: JSON.stringify(msg),
-        redactedTool: label,
-        redactions: findings.map((f) => f.description),
+
+    // DLP redaction runs FIRST — a secret must never reach the injection
+    // scanner (or anything downstream of it) unredacted. If a match spans
+    // JSON syntax and the redacted text no longer parses, this withholds the
+    // whole result exactly as before Phase 1 existed; the injection scanner
+    // never sees a body that DLP already decided to withhold.
+    let resultText = serialized
+    let resultObj: Record<string, unknown> = msg.result
+    let redactedTool: string | undefined
+    let redactions: string[] | undefined
+    if (findings.length > 0) {
+      redactedTool = label
+      redactions = findings.map((f) => f.description)
+      try {
+        resultObj = JSON.parse(redacted) as Record<string, unknown>
+        resultText = redacted
+      } catch {
+        const withheld: JsonRpcResponse = {
+          jsonrpc: '2.0',
+          id: msg.id,
+          error: {
+            code: -32603,
+            message:
+              `[Intutic Governance] Result withheld: it contained sensitive data ` +
+              `whose redaction did not survive re-parsing. The tool ran; its output ` +
+              `was not delivered. (${findings.map((f) => f.description).join('; ')})`,
+          },
+        }
+        return { line: JSON.stringify(withheld), redactedTool, redactions }
       }
-    } catch {
-      const withheld: JsonRpcResponse = {
-        jsonrpc: '2.0',
-        id: msg.id,
-        error: {
-          code: -32603,
-          message:
-            `[Intutic Governance] Result withheld: it contained sensitive data ` +
-            `whose redaction did not survive re-parsing. The tool ran; its output ` +
-            `was not delivered. (${findings.map((f) => f.description).join('; ')})`,
-        },
+    }
+
+    // Injection scan — response direction. Runs on the (already
+    // DLP-redacted, if applicable) result text: a tool result or
+    // resources/read body is exactly the "one node's output becomes the
+    // next node's input" untrusted-content case injection.rs's module doc
+    // describes.
+    const injectionPatterns = scanText(resultText)
+    let injectionFindings: ServerLineOutcome['injectionFindings']
+    if (injectionPatterns.length > 0) {
+      injectionFindings = [{ source: 'tool_result', toolName: label, patterns: injectionPatterns }]
+      if (injectionAction === 'block') {
+        // Response-side block never claims the CALL was refused — it
+        // already ran. Only the delivered output is withheld, worded the
+        // same way the DLP reparse-withheld frame above is.
+        const withheldInjection: JsonRpcResponse = {
+          jsonrpc: '2.0',
+          id: msg.id,
+          error: {
+            code: -32603,
+            message:
+              `[Intutic Governance] Result withheld: it triggered prompt-injection ` +
+              `pattern(s) (${injectionPatterns.join(', ')}). The tool call already ran; ` +
+              `its output was not delivered.`,
+          },
+        }
+        return {
+          line: JSON.stringify(withheldInjection),
+          redactedTool,
+          redactions,
+          injectionFindings,
+          injectionBlocked: true,
+        }
       }
-      return {
-        line: JSON.stringify(withheld),
-        redactedTool: label,
-        redactions: findings.map((f) => f.description),
-      }
+      // 'warn' (default): report only, fall through and deliver the result.
+    }
+
+    // Phase 2's dlp_escalation: ≥3 distinct DLP-redacted pattern types in
+    // this one response is a credential sweep, not a single mistake — see
+    // `dlpEscalation`'s own doc comment for why this only escalates the
+    // event severity below and never gates a new block.
+    const dlpEscalationFinding = redactions ? dlpEscalation(redactions) : null
+
+    if (findings.length === 0 && injectionFindings === undefined && !dlpEscalationFinding) return { line: raw }
+
+    msg.result = resultObj
+    return {
+      line: JSON.stringify(msg),
+      redactedTool,
+      redactions,
+      injectionFindings,
+      dlpEscalationReason: dlpEscalationFinding?.reason,
     }
   }
 
@@ -209,12 +308,47 @@ export function processServerLine(
         overridden += 1
       }
     }
+
+    // Injection scan — tool descriptions, POST-curation (after allowlist
+    // filtering and operator overrides above, so a description an operator
+    // already replaced is scanned as what the agent will actually read, not
+    // as the upstream server's original text). Report-only in v1: curation
+    // and TOFU already govern what the agent sees in a tools/list response,
+    // so a description match here never removes or blocks a listing — it
+    // only produces an `injection_detected` event for the caller to emit.
+    let injectionFindings: ServerLineOutcome['injectionFindings']
+    for (const t of kept) {
+      const name = t['name']
+      const description = t['description']
+      if (typeof name !== 'string' || typeof description !== 'string') continue
+      const patterns = scanText(description)
+      if (patterns.length === 0) continue
+      injectionFindings ??= []
+      injectionFindings.push({ source: 'tool_description', toolName: name, patterns })
+    }
+
+    // Phase 2's tool_poisoning — same post-curation tool set the injection
+    // scan just ran over, a different pattern set (toolPoison.ts's 7
+    // description-poisoning patterns, tuned for documentation-shaped
+    // payloads rather than conversational jailbreak phrasing).
+    const toolPoisoningFinding = toolPoisoning(
+      kept
+        .filter((t): t is Record<string, unknown> & { name: string } => typeof t['name'] === 'string')
+        .map((t) => ({ name: t['name'], description: typeof t['description'] === 'string' ? t['description'] : undefined })),
+    )
+
     // toolsListTools/toolsListMsgId are set on EVERY tools/list response,
     // curated or not — TOFU pinning (tofu.ts) needs the full post-curation
     // tool set regardless of whether allowlist filtering or description
     // overrides touched it this time.
     if (hidden === 0 && overridden === 0) {
-      return { line: raw, toolsListTools: kept, toolsListMsgId: msg.id }
+      return {
+        line: raw,
+        toolsListTools: kept,
+        toolsListMsgId: msg.id,
+        injectionFindings,
+        toolPoisoningReason: toolPoisoningFinding?.reason,
+      }
     }
     msg.result['tools'] = kept
     return {
@@ -222,6 +356,8 @@ export function processServerLine(
       curated: { hidden, overridden },
       toolsListTools: kept,
       toolsListMsgId: msg.id,
+      injectionFindings,
+      toolPoisoningReason: toolPoisoningFinding?.reason,
     }
   }
 
@@ -250,6 +386,7 @@ export function handleHarnessLine(
   pending: Map<string | number, PendingRequest>,
   interceptor: ToolCallInterceptor,
   forward: (line: string) => void,
+  session?: SessionState,
 ): void {
   const trimmed = line.trim()
   if (!trimmed) return
@@ -292,6 +429,12 @@ export function handleHarnessLine(
         if (msg.id !== null && msg.id !== undefined) {
           pending.set(msg.id, { method: 'tools/call', toolName })
         }
+        // Phase 2: record into the session's rolling tool-call sequence only
+        // NOW that the call is actually allowed — a blocked call must not
+        // count toward consecutive_repeat/ping_pong_cycle/landmark_cycle/
+        // tool_diversity_collapse, or an agent could be penalized for calls
+        // that never ran.
+        session?.recordCall(toolName)
         forward(line)
       }
     }).catch((err) => {
@@ -309,6 +452,23 @@ export class McpGovernanceProxy {
   private readonly policy: PolicyClient
   private readonly emitter: GovernanceEmitter
   private readonly interceptor: ToolCallInterceptor
+  /**
+   * Phase 2's in-process session state — the tool-call sequence and
+   * per-detector reask counters. ONE instance per proxy process (see
+   * session.ts's doc comment on why that scope is correct, not a cut
+   * corner), shared with the interceptor (for detection + reask counting),
+   * `handleHarnessLine` (for post-decision recording), and this class's own
+   * `handleServerLine` (for caching the post-curation tools/list the
+   * tool_poisoning detector reads).
+   */
+  private readonly session: SessionState
+  /**
+   * Phase 3's WASM custom-rule runner — owns the one dedicated
+   * `worker_threads` Worker and the `~/.intutic/wasm/` directory loader.
+   * Rescanned on the SAME 60s policy-tick timer `PolicyClient.start` already
+   * runs, not a second one (see `policy.ts`'s `start(onTick)`).
+   */
+  private readonly wasmRunner: WasmRunner
   private realServer: node_child.ChildProcess | null = null
 
   constructor(private readonly config: ProxyConfig) {
@@ -328,7 +488,21 @@ export class McpGovernanceProxy {
       config.mcpProxyMode
     )
 
-    this.interceptor = new ToolCallInterceptor(this.policy, this.emitter, config.failOpen, config.serverName)
+    this.session = new SessionState()
+    this.wasmRunner = new WasmRunner(config.mcpWasmDir)
+
+    this.interceptor = new ToolCallInterceptor(
+      this.policy,
+      this.emitter,
+      config.failOpen,
+      config.serverName,
+      config.mcpInjectionAction,
+      this.session,
+      config.mcpAnomalyMode,
+      config.mcpAnomalyOverrides,
+      this.wasmRunner,
+      config.workspaceId,
+    )
   }
 
   /**
@@ -342,18 +516,33 @@ export class McpGovernanceProxy {
   }
 
   /**
+   * The shared session state — exposed for the same reason `getInterceptor`
+   * is: `remoteBridge.ts` drives `handleHarnessLine` with this exact
+   * instance so the sequence detectors read and the sequence
+   * `handleHarnessLine` records into are never two different objects.
+   */
+  getSessionState(): SessionState {
+    return this.session
+  }
+
+  /**
    * Start the policy client's background refresh timer. Exposed alongside
    * `stopPolicy` so `remoteBridge.ts` can drive the same policy lifecycle
    * `runProxy` below drives for stdio mode, without reaching into `policy`
-   * (private) directly.
+   * (private) directly. Also rides this same tick to rescan Phase 3's
+   * `~/.intutic/wasm/` directory — see `policy.ts`'s `start(onTick)` doc.
    */
   startPolicy(): void {
-    this.policy.start()
+    this.policy.start(() => this.wasmRunner.rescan())
   }
 
-  /** Stop the policy client's background refresh timer. See `startPolicy`. */
+  /**
+   * Stop the policy client's background refresh timer, and shut down the
+   * WASM worker thread. See `startPolicy`.
+   */
   stopPolicy(): void {
     this.policy.stop()
+    void this.wasmRunner.shutdown()
   }
 
   /**
@@ -532,12 +721,39 @@ export class McpGovernanceProxy {
     rawLine: string,
     pending: Map<string | number, PendingRequest>,
   ): Promise<void> {
+    const injectionAction = this.policy.getInjectionAction() ?? this.config.mcpInjectionAction
     const outcome = processServerLine(
       rawLine,
       pending,
       this.policy.getAllowedTools(),
       this.policy.getToolDescriptionOverrides(),
+      injectionAction,
     )
+    if (outcome.injectionFindings) {
+      for (const finding of outcome.injectionFindings) {
+        const severity = injectionSeverity(finding.patterns, finding.source)
+        const reason = `Prompt-injection pattern(s) detected in ${finding.source} ("${finding.toolName}"): ${finding.patterns.join(', ')}`
+        log.warn(
+          {
+            action: 'injection_detected',
+            toolName: finding.toolName,
+            source: finding.source,
+            patterns: finding.patterns,
+            severity,
+            withheld: outcome.injectionBlocked === true && finding.source === 'tool_result',
+          },
+          'Prompt-injection pattern matched in MCP response traffic',
+        )
+        this.emitter.emit('injection_detected', finding.toolName, undefined, reason, severity)
+        // tools/list description findings are report-only in v1 (never
+        // blocked by injection alone — curation + TOFU already govern the
+        // listing); only a `tool_result` finding can carry
+        // `injectionBlocked`.
+        if (outcome.injectionBlocked === true && finding.source === 'tool_result') {
+          this.emitter.emit('tool_blocked', finding.toolName, undefined, reason)
+        }
+      }
+    }
     if (outcome.redactedTool) {
       log.warn(
         {
@@ -552,7 +768,17 @@ export class McpGovernanceProxy {
         outcome.redactedTool,
         undefined,
         `Result redacted: ${(outcome.redactions ?? []).join('; ')}`,
+        outcome.dlpEscalationReason ? 'high' : undefined,
       )
+    }
+    if (outcome.dlpEscalationReason) {
+      // Phase 2's dlp_escalation: severity escalation only, never a new
+      // block — see `ServerLineOutcome.dlpEscalationReason`'s doc comment.
+      log.warn(
+        { action: 'anomaly_detected', detectorId: 'dlp_escalation', toolName: outcome.redactedTool },
+        outcome.dlpEscalationReason,
+      )
+      this.emitter.emit('anomaly_detected', outcome.redactedTool ?? 'unknown', undefined, outcome.dlpEscalationReason, 'high')
     }
     if (outcome.curated) {
       log.info(
@@ -560,8 +786,25 @@ export class McpGovernanceProxy {
         'tools/list curated: allowlist filtering and/or description overrides applied',
       )
     }
+    if (outcome.toolPoisoningReason) {
+      // Phase 2's tool_poisoning: report-only (Steer), same as Phase 1's
+      // tools/list description injection scan — never blocks the listing.
+      log.warn({ action: 'anomaly_detected', detectorId: 'tool_poisoning' }, outcome.toolPoisoningReason)
+      this.emitter.emit('anomaly_detected', this.config.serverName, undefined, outcome.toolPoisoningReason, 'low')
+    }
 
     if (outcome.toolsListTools) {
+      // Cache the post-curation tools/list for Phase 2's tool_poisoning
+      // detector (already applied above, from this same outcome) and for
+      // Phase 3's WASM rule context (`tools` field) once that lands.
+      this.session.setToolsList(
+        outcome.toolsListTools
+          .filter((t): t is Record<string, unknown> & { name: string } => typeof t['name'] === 'string')
+          .map((t) => ({
+            name: t['name'],
+            description: typeof t['description'] === 'string' ? t['description'] : undefined,
+          })),
+      )
       const serverName = this.config.serverName
       let tofu: Awaited<ReturnType<typeof checkTofu>>
       try {
@@ -585,6 +828,17 @@ export class McpGovernanceProxy {
         }
         process.stdout.write(outcome.line + '\n')
         return
+      }
+
+      // Phase 3's `tool_contract_changed` WASM context field mirrors this
+      // check's OUTCOME, not its blocking decision — a rule may want to see
+      // the mismatch even in fail-open mode, where `action.block` is false.
+      // 'skipped' (no tools declared) deliberately leaves the session's
+      // cached flag untouched; see SessionState.setToolContractChanged's doc.
+      if (tofu.status === 'first_contact' || tofu.status === 'match') {
+        this.session.setToolContractChanged(false)
+      } else if (tofu.status === 'mismatch') {
+        this.session.setToolContractChanged(true)
       }
 
       if (tofu.status === 'first_contact') {
@@ -629,8 +883,9 @@ export class McpGovernanceProxy {
       'Starting MCP governance proxy'
     )
 
-    // Start background policy refresh
-    this.policy.start()
+    // Start background policy refresh (and, on the same tick, Phase 3's
+    // WASM rescan — see startPolicy).
+    this.startPolicy()
 
     // Spawn the real MCP server
     const realServer = node_child.spawn(cmd!, args, {
@@ -642,7 +897,7 @@ export class McpGovernanceProxy {
     // Handle graceful shutdown
     const shutdown = (signal: string) => {
       log.info({ action: 'proxy_shutdown', signal }, 'Shutting down MCP governance proxy')
-      this.policy.stop()
+      this.stopPolicy()
       if (!realServer.killed) {
         realServer.kill()
       }
@@ -679,12 +934,12 @@ export class McpGovernanceProxy {
     rl.on('line', (line) => {
       handleHarnessLine(line, pending, this.interceptor, (l) => {
         realServer.stdin!.write(l + '\n')
-      })
+      }, this.session)
     })
 
     rl.on('close', () => {
       log.info({ action: 'stdin_closed' }, 'Harness stdin closed — shutting down')
-      this.policy.stop()
+      this.stopPolicy()
       if (!realServer.killed) {
         realServer.kill()
       }
@@ -694,12 +949,12 @@ export class McpGovernanceProxy {
     return new Promise((resolve, reject) => {
       realServer.on('exit', (code, signal) => {
         log.info({ action: 'real_server_exit', code, signal }, 'Real MCP server exited')
-        this.policy.stop()
+        this.stopPolicy()
         resolve()
       })
       realServer.on('error', (err) => {
         log.error({ action: 'real_server_error', err: err.message }, 'Real MCP server process error')
-        this.policy.stop()
+        this.stopPolicy()
         reject(err)
       })
     })

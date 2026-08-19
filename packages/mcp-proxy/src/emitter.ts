@@ -31,6 +31,22 @@ export type EventKind =
    * event is about" shape `tool_blocked`/`tool_allowed` already use.
    */
   | 'mcp_server_definition_changed'
+  /**
+   * A prompt-injection pattern fired (injection.ts), on any of the three
+   * scanned surfaces (`tool_result`/`tool_description`/`tool_input`). Always
+   * emitted regardless of `mcpInjectionAction` — warn mode reports and
+   * allows, block mode reports and additionally emits `tool_blocked` (see
+   * interceptor.ts / proxy.ts) so existing consumers keyed on `tool_blocked`
+   * are not blind to this new block reason.
+   */
+  | 'injection_detected'
+  /**
+   * A Phase-2 anomaly detector (anomaly/detectors.ts) fired against the
+   * session's tool-call sequence. Emitted on Steer (allow) and on Reask/Kill
+   * (block) alike — a Reask/Kill firing ALSO emits `tool_blocked`, the same
+   * "existing consumers key on it" rule `injection_detected` follows.
+   */
+  | 'anomaly_detected'
 
 export interface GovernanceEvent {
   incidentId: string
@@ -40,6 +56,13 @@ export interface GovernanceEvent {
   workspaceId: string
   harnessType: string
   reason?: string
+  /**
+   * Set only by `injection_detected`/`anomaly_detected` today — the
+   * escalation-rule mirror `injection.ts`'s `injectionSeverity` (Phase 1) and
+   * the per-detector disposition mapping (Phase 2) compute. Absent on every
+   * other event kind, matching how `reason` is already optional here.
+   */
+  severity?: string
   timestamp: string
 }
 
@@ -52,7 +75,7 @@ export class GovernanceEmitter {
     private readonly mcpProxyMode: string = 'per-session'
   ) {}
 
-  emit(kind: EventKind, toolName: string, toolInput: unknown, reason?: string): void {
+  emit(kind: EventKind, toolName: string, toolInput: unknown, reason?: string, severity?: string): void {
     const event: GovernanceEvent = {
       incidentId: node_crypto.randomUUID(),
       kind,
@@ -61,6 +84,7 @@ export class GovernanceEmitter {
       workspaceId: this.workspaceId,
       harnessType: 'mcp-governance-proxy',
       reason,
+      severity,
       timestamp: new Date().toISOString(),
     }
 
@@ -75,6 +99,7 @@ export class GovernanceEmitter {
         harnessType: 'mcp-governance-proxy',
         timestamp: event.timestamp,
         reason,
+        severity,
         toolInput,
       }
       callDaemonSocket('telemetry.enqueue', eventPayload).then(() => {
@@ -113,6 +138,7 @@ export class GovernanceEmitter {
           harnessType: event.harnessType,
           incidentId: event.incidentId,
           reason: event.reason,
+          severity: event.severity,
           timestamp: event.timestamp,
         },
       ],

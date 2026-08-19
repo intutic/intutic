@@ -9,11 +9,16 @@
  * @module
  */
 
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import * as node_fs from 'node:fs/promises'
 import * as node_path from 'node:path'
 import * as node_os from 'node:os'
-import { readHarnessConfigs, shouldCaptureThisIteration } from '../../src/configReader.js'
+import {
+  readHarnessConfigs,
+  shouldCaptureThisIteration,
+  captureAndUpload,
+  reportGovernanceCoverageSnapshot,
+} from '../../src/configReader.js'
 import type { HarnessType } from '@intutic/shared-types'
 
 describe('Config Reader', () => {
@@ -102,6 +107,166 @@ describe('Config Reader', () => {
     it('returns false on iteration 0', () => {
       // First iteration should not capture — wait for interval
       expect(shouldCaptureThisIteration(0)).toBe(false)
+    })
+  })
+
+  describe('reportGovernanceCoverageSnapshot', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals()
+    })
+
+    it('POSTs the four enforcement inputs to /governance-coverage/snapshot', async () => {
+      const fetchMock = vi.fn(async () => ({
+        ok: true,
+        status: 201,
+        json: async () => ({ ok: true }),
+        text: async () => '',
+      }))
+      vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
+
+      await reportGovernanceCoverageSnapshot(
+        'http://cp.test',
+        'vk_test',
+        'wk_test',
+        'claude-code' as HarnessType,
+        { mcpProxyActive: true, nativeHookActive: false, llmProxyActive: true, hasRulesFile: true },
+      )
+
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      const [url, init] = fetchMock.mock.calls[0] as [string, { method: string; headers: Record<string, string>; body: string }]
+      expect(url).toBe('http://cp.test/api/v1/governance-coverage/snapshot')
+      expect(init.method).toBe('POST')
+      expect(init.headers.authorization).toBe('Bearer vk_test')
+      expect(JSON.parse(init.body as string)).toEqual({
+        workspaceId: 'wk_test',
+        harnessType: 'claude-code',
+        mcpProxyActive: true,
+        nativeHookActive: false,
+        llmProxyActive: true,
+        hasRulesFile: true,
+      })
+    })
+
+    it('does not throw when the control plane rejects the snapshot', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => ({
+          ok: false,
+          status: 500,
+          text: async () => 'internal error',
+        })) as unknown as typeof fetch,
+      )
+
+      await expect(
+        reportGovernanceCoverageSnapshot('http://cp.test', 'vk_test', 'wk_test', 'cursor' as HarnessType, {
+          mcpProxyActive: false,
+          nativeHookActive: false,
+          llmProxyActive: false,
+          hasRulesFile: true,
+        }),
+      ).resolves.toBeUndefined()
+    })
+
+    it('does not throw on a network error', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('ECONNREFUSED') }) as unknown as typeof fetch)
+
+      await expect(
+        reportGovernanceCoverageSnapshot('http://cp.test', 'vk_test', 'wk_test', 'windsurf' as HarnessType, {
+          mcpProxyActive: false,
+          nativeHookActive: false,
+          llmProxyActive: false,
+          hasRulesFile: true,
+        }),
+      ).resolves.toBeUndefined()
+    })
+  })
+
+  describe('captureAndUpload — governance-coverage snapshot firing', () => {
+    let tmpDir2: string
+
+    beforeEach(async () => {
+      tmpDir2 = await node_fs.mkdtemp(node_path.join(node_os.tmpdir(), 'intutic-capture-upload-'))
+    })
+    afterEach(async () => {
+      vi.unstubAllGlobals()
+      await node_fs.rm(tmpDir2, { recursive: true, force: true })
+    })
+
+    /** Every request this test's fetch stub has seen, in order. */
+    function stubFetchCapturingCalls(): { calls: Array<{ url: string; body: unknown }> } {
+      const state = { calls: [] as Array<{ url: string; body: unknown }> }
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = String(input)
+          state.calls.push({ url, body: init?.body ? JSON.parse(init.body as string) : null })
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ ok: true }),
+            text: async () => '',
+          } as Response
+        }) as unknown as typeof fetch,
+      )
+      return state
+    }
+
+    it('fires one governance-coverage snapshot for a harness whose rules file changed, using the passed-in inputs', async () => {
+      // Distinct harness (not used by any other test in this file) so the
+      // module-level content-hash cache in configReader.ts cannot leak state
+      // in from an earlier test.
+      await node_fs.writeFile(node_path.join(tmpDir2, '.aider.conf.yml'), 'v1 rules', 'utf-8')
+      const { calls } = stubFetchCapturingCalls()
+
+      await captureAndUpload('http://cp.test', 'vk_test', 'wk_test', tmpDir2, ['aider'] as HarnessType[], {
+        aider: { mcpProxyActive: true, nativeHookActive: true, llmProxyActive: false, hasRulesFile: true },
+      })
+
+      const captureCalls = calls.filter((c) => c.url.includes('/config/capture'))
+      const snapshotCalls = calls.filter((c) => c.url.includes('/governance-coverage/snapshot'))
+      expect(captureCalls).toHaveLength(1)
+      expect(snapshotCalls).toHaveLength(1)
+      expect(snapshotCalls[0].body).toMatchObject({
+        harnessType: 'aider',
+        mcpProxyActive: true,
+        nativeHookActive: true,
+        llmProxyActive: false,
+        hasRulesFile: true,
+      })
+    })
+
+    it('does not fire a second snapshot on a later cycle when the file content is unchanged', async () => {
+      await node_fs.writeFile(node_path.join(tmpDir2, '.roorules'), 'unchanged content', 'utf-8')
+      const { calls } = stubFetchCapturingCalls()
+
+      await captureAndUpload('http://cp.test', 'vk_test', 'wk_test', tmpDir2, ['roo-code'] as HarnessType[])
+      expect(calls.filter((c) => c.url.includes('/governance-coverage/snapshot'))).toHaveLength(1)
+
+      calls.length = 0
+      // Second cycle, same content on disk — uploadConfigCapture's
+      // content-hash dedup must skip both the config-capture upload AND the
+      // governance-coverage snapshot this test exists to pin.
+      await captureAndUpload('http://cp.test', 'vk_test', 'wk_test', tmpDir2, ['roo-code'] as HarnessType[])
+      expect(calls.filter((c) => c.url.includes('/config/capture'))).toHaveLength(0)
+      expect(calls.filter((c) => c.url.includes('/governance-coverage/snapshot'))).toHaveLength(0)
+    })
+
+    it('falls back to hasRulesFile:true and everything else false when no governance inputs are passed', async () => {
+      await node_fs.mkdir(node_path.join(tmpDir2, '.hermes'), { recursive: true })
+      await node_fs.writeFile(node_path.join(tmpDir2, '.hermes', 'config.yaml'), 'rules', 'utf-8')
+      const { calls } = stubFetchCapturingCalls()
+
+      await captureAndUpload('http://cp.test', 'vk_test', 'wk_test', tmpDir2, ['hermes'] as HarnessType[])
+
+      const snapshotCalls = calls.filter((c) => c.url.includes('/governance-coverage/snapshot'))
+      expect(snapshotCalls).toHaveLength(1)
+      expect(snapshotCalls[0].body).toMatchObject({
+        harnessType: 'hermes',
+        mcpProxyActive: false,
+        nativeHookActive: false,
+        llmProxyActive: false,
+        hasRulesFile: true,
+      })
     })
   })
 })
