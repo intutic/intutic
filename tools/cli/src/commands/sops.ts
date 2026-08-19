@@ -375,3 +375,68 @@ export async function runSopsStatus(opts: { dev?: boolean }): Promise<void> {
     }
   }
 }
+
+/** The subset of an org-level SOP row `org-list` prints. */
+interface OrgSopListItem {
+  orgSopId: string
+  title: string
+  riskTier: string
+  createdAt: string
+}
+
+/**
+ * `intutic sops org-list` — every org-wide SOP floor for the caller's own
+ * org, the read side of `sops push <name> --org`.
+ *
+ * `GET /api/v1/workspace/org-sops` resolves `orgId` server-side from the
+ * caller's own workspace and answers a bare `{ data: [...] }`, not the
+ * `applyListEnvelope` shape most list endpoints use — so this reads
+ * `res.data` directly rather than `res.items`.
+ */
+export async function runSopsOrgList(opts: { dev?: boolean }): Promise<void> {
+  log.header('Intutic — Org-Wide SOPs')
+
+  const client = await getClient(opts.dev)
+
+  let items: OrgSopListItem[]
+  try {
+    const res = await client.get<{ data: OrgSopListItem[] }>('/api/v1/workspace/org-sops')
+    items = res.data ?? []
+  } catch (err) {
+    log.error(`Failed to list org SOPs: ${err instanceof Error ? err.message : String(err)}`)
+    process.exit(1)
+  }
+
+  if (items.length === 0) {
+    log.info('No org-wide SOPs found for this org.')
+    return
+  }
+
+  for (const item of items) {
+    log.field(item.title, `${item.orgSopId} — risk_tier: ${item.riskTier}`)
+  }
+  log.info(`${items.length} org-wide SOP(s).`)
+}
+
+/**
+ * `intutic sops org-rm <orgSopId>` — soft-deletes an org-wide SOP floor.
+ *
+ * `DELETE /api/v1/workspace/org-sops/:orgSopId` requires OWNER/ADMIN on some
+ * active workspace under the org, and 404s on both "not found" and
+ * "you lack admin access" — deliberately (see `routes/orgSops.ts`), so this
+ * command cannot and does not try to distinguish the two.
+ */
+export async function runSopsOrgRm(orgSopId: string, opts: { dev?: boolean }): Promise<void> {
+  log.header(`Intutic — Remove Org SOP: ${orgSopId}`)
+
+  const client = await getClient(opts.dev)
+
+  try {
+    await client.del<{ deleted: boolean }>(`/api/v1/workspace/org-sops/${orgSopId}`)
+  } catch (err) {
+    log.error(`Failed to remove org SOP: ${err instanceof Error ? err.message : String(err)}`)
+    process.exit(1)
+  }
+
+  log.info(`Removed org SOP ${orgSopId}.`)
+}

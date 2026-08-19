@@ -29,6 +29,8 @@ export {
   McpProxyFailBehavior,
   McpProxyMode,
   BypassEnforcementTier,
+  // Migration 163 — sop_amendments producer discriminator
+  AmendmentSource,
 } from './enums.js'
 
 export {

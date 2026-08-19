@@ -121,6 +121,24 @@ program
     await runBudget(opts)
   })
 
+program
+  .command('predict-cost')
+  .description(
+    'Pre-flight cost estimate for a prompt/task before it runs (POST /api/v1/predict-cost). ' +
+    'Estimates output tokens from the workspace baseline and prices with the same rate table ' +
+    'every other cost figure in the control plane uses.'
+  )
+  .requiredOption('--model <model>', 'Model to estimate against (e.g. claude-sonnet-4-5)')
+  .option('--task-type <type>', 'Task type used to pick the baseline bucket', 'coding')
+  .option('--tokens <n>', 'Input token count (mutually exclusive with --file)')
+  .option('--file <path>', 'File whose contents size the input (mutually exclusive with --tokens)')
+  .option('--json', 'Output as JSON instead of a report')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runPredictCost } = await import('./commands/predict-cost.js')
+    await runPredictCost(opts)
+  })
+
 const sopsCmd = program
   .command('sops')
   .description('Manage local and global SOP rules')
@@ -152,6 +170,24 @@ sopsCmd
   .action(async (opts) => {
     const { runSopsStatus } = await import('./commands/sops.js')
     await runSopsStatus(opts)
+  })
+
+sopsCmd
+  .command('org-list')
+  .description("List org-wide SOP floors for the caller's own org (LLD #65 follow-up)")
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runSopsOrgList } = await import('./commands/sops.js')
+    await runSopsOrgList(opts)
+  })
+
+sopsCmd
+  .command('org-rm <orgSopId>')
+  .description('Remove (soft-delete) an org-wide SOP floor')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (orgSopId, opts) => {
+    const { runSopsOrgRm } = await import('./commands/sops.js')
+    await runSopsOrgRm(orgSopId, opts)
   })
 
 const policyCmd = program
@@ -984,6 +1020,31 @@ credentialsCmd
   .action(async (provider, opts) => {
     const { runCredentialsUnset } = await import('./commands/credentials.js')
     await runCredentialsUnset(provider, opts)
+  })
+
+// ── DCT Token Attenuation (LLD #19 §2.1, HLD §5.6 Patent Family A) ───────
+//
+// "CLI mints, dashboard audits": this is the mint/inspect half. See
+// commands/attenuate.ts's module doc.
+const attenuateCmd = program
+  .command('attenuate')
+  .description('Attenuate an API key to a narrower child key (capability subset + optional TTL)')
+  .option('--parent-key <keyId>', 'Parent API key ID to attenuate')
+  .option('--caps <caps>', 'Comma-separated capability subset to grant the child key')
+  .option('--ttl <seconds>', 'Child key TTL in seconds (server default 14400, max 86400)')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runAttenuate } = await import('./commands/attenuate.js')
+    await runAttenuate(opts)
+  })
+
+attenuateCmd
+  .command('chain <chainId>')
+  .description('Resolve the full delegation lineage for an attenuation chain')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (chainId, opts) => {
+    const { runAttenuateChain } = await import('./commands/attenuate.js')
+    await runAttenuateChain(chainId, opts)
   })
 
 // ── Org signup + team management (LLD #65) ───────────────────────────────

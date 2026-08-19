@@ -214,6 +214,17 @@ export interface SopHealthMetrics {
 
   /** Whether this SOP is stale (no matches in SOP_STALENESS_DAYS). */
   isStale: boolean
+
+  /**
+   * Most recent `godel_probe_results` row for this SOP, if any has ever been
+   * recorded (manual probe or a gate-triggered score — see
+   * `godelScoreService.recordGodelScore`). `null` when none exists yet.
+   */
+  godelScore?: {
+    aggregateScore: number
+    categoryScores: Record<string, { score: number; rationale: string }> | Record<string, number>
+    evaluatedAt: string
+  } | null
 }
 
 // ─── Dream Cycle Queue (LLD #6) ─────────────────────────────────────
