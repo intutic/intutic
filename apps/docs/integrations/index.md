@@ -1,11 +1,11 @@
 ---
 title: Integrations
-description: Connect Intutic to 26 AI coding agents — IDE extensions, CLI tools, agent frameworks, and platforms. Auto-detected, zero config.
+description: Connect Intutic to 27 AI coding agents — IDE extensions, CLI tools, agent frameworks, and platforms. Auto-detected, zero config.
 ---
 
 # Integrations <Badge type="tip" text="Open-Core" />
 
-Intutic supports **26 AI agent harnesses** out of the box (plus 4 more Python-SDK-gated frameworks whose dedicated adapter ships in a following wave). Run `intutic init` in your project and the CLI auto-detects which agents are present, then syncs governance rules to each one.
+Intutic supports **27 AI agent harnesses** out of the box (plus 4 more Python-SDK-gated frameworks whose dedicated adapter ships in a following wave). Run `intutic init` in your project and the CLI auto-detects which agents are present, then syncs governance rules to each one.
 
 ```bash
 intutic init
@@ -75,8 +75,17 @@ Web UIs, desktop apps, and collaboration tools that host AI agents.
 | [**Claude Desktop**](/integrations/claude-desktop) | Anthropic's desktop application | `claude_desktop_config.json` |
 | [**GitHub Copilot**](/integrations/github-copilot) | GitHub's AI pair programmer | `.github/copilot-instructions.md` |
 | [**Xirp**](/integrations/xirp) | Spotify's macOS orchestrator for parallel Claude Code/Codex/Gemini CLI sessions, each in its own tmux session + git worktree | none — delegates to the wrapped harness |
+| [**Agentic Orchestrator**](/integrations/agentic-orchestrator) | DoorDash's open-source (Apache-2.0) desktop app + CLI (`agentico`) for multi-phase feature workflows across Claude Code/Codex/OpenCode, each in its own git worktree | none — delegates to the wrapped backend (OpenCode has no gate — see notes) |
 
 ---
+
+## Server-Side Platform Integrations
+
+Backend platforms that call Intutic directly over HTTP as part of their own contract, rather than being detected and configured by `intutic init`/`intutic connect`. No `HarnessType` enum entry, no CLI harness registration — deployment is a config step against the platform's own settings.
+
+| Platform | Description | Integration point |
+|---|---|---|
+| [**QM**](/integrations/qm) | YC-backed, OSS multiplayer agent harness (wraps `pi`/`claude`/`codex`/`opencode`) | `securityScreen` HTTP contract (`qm.config.jsonc`) |
 
 ---
 

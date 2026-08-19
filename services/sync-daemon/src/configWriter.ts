@@ -103,6 +103,11 @@ export const HARNESS_FILES: Record<HarnessType, string> = {
   // xirp.ts). Empty filename => the loop below reports it `(deferred)`,
   // same as n8n before it gained a writer.
   xirp: '',
+  // Agentic Orchestrator writes no config of its own either — same
+  // "delegated" shape as Xirp (orchestrates already-gated Claude Code/Codex,
+  // plus OpenCode which has no gate at all — see gateRegistry.ts's NO_GATE
+  // row and tools/cli/src/harness/agenticOrchestrator.ts, and TD-397).
+  'agentic-orchestrator': '',
   // Wave 1 SDK-gated frameworks — same rationale as langgraph: no on-disk
   // hook/config file exists to gate tool calls, so each writes .env.intutic
   // (proxy base-URL vars + an SDK-gate pointer comment). See formatContent's

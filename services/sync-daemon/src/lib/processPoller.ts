@@ -110,6 +110,20 @@ const PROCESS_SIGNATURES: Array<{
     // no parent-PID data).
     patterns: [/\/Xirp\.app\//i],
   },
+  {
+    name: 'Agentic Orchestrator',
+    // Unlike Xirp, `agentico` IS a CLI binary invoked by name (confirmed:
+    // the real released binary was run directly during this integration's
+    // research — `agentico`, `agentico server`, etc.) — so this follows the
+    // grok/dsh anchoring style, not Xirp's `.app`-path style. `agentico` is
+    // a coined, low-collision word (unlike `grok`/`dsh`'s common-word/
+    // short-token risk), but the same anchoring discipline applies
+    // regardless: only when it appears as an invoked COMMAND NAME — the
+    // whole line, the leading word, or right after a path separator —
+    // followed by whitespace/end-of-string/an argument dash, never merely
+    // present inside a longer token or unrelated argument.
+    patterns: [/(^|[/\\\s])agentico(\s|$)/],
+  },
 ]
 
 /**

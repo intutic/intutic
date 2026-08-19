@@ -145,12 +145,13 @@ export type {
 
 // ─── Harness Type ────────────────────────────────────────────────────
 // HLD §3.14, §4.5 — Supported AI agent harness integrations
-// Full matrix: HLD §3.14 Harness Onboarding Matrix (30 harnesses — 21
+// Full matrix: HLD §3.14 Harness Onboarding Matrix (31 harnesses — 21
 // hook/config-gated (19 base + Muse Code + Grok Build) + LangGraph +
-// Wave 1's 8 SDK-gated Python frameworks + Xirp — the first harness with
-// no gate/config format of its own because it WRAPS other already-gated
-// harnesses rather than running tools itself; see gateKind.ts's
-// 'delegated' kind and gateRegistry.ts's NO_GATE row for 'xirp')
+// Wave 1's 8 SDK-gated Python frameworks + Xirp + Agentic Orchestrator —
+// the two harnesses with no gate/config format of their own because they
+// WRAP other already-gated harnesses rather than running tools themselves;
+// see gateKind.ts's 'delegated' kind and gateRegistry.ts's NO_GATE rows for
+// 'xirp' and 'agentic-orchestrator')
 
 /** Supported AI agent harness/IDE integrations. */
 export const HarnessType = {
@@ -191,6 +192,28 @@ export const HarnessType = {
    * `gateRegistry.ts`'s NO_GATE row for why it writes no config of its own.
    */
   XIRP: 'xirp',
+  /**
+   * DoorDash's "Agentic Orchestrator" (binary `agentico`, Go, Apache-2.0,
+   * `doordash-oss/agentic-orchestrator` — CONFIRMED real/public: live-verified
+   * by running the actual released binary, not just reading its README).
+   * Desktop app + CLI, cross-platform (macOS AND Linux — unlike Xirp's
+   * macOS-only beta). NOT itself an AI agent: it wraps already-installed CLI
+   * backends — Claude Code, Codex, and OpenCode (CONFIRMED via `agentico
+   * server --help`'s `--providers` flag) — each running a feature in its own
+   * `git worktree` under `~/.agentic-orchestrator/worktrees/` (CONFIRMED via
+   * the project's own README). Detected for reporting/reconciliation
+   * purposes only — see `tools/cli/src/harness/agenticOrchestrator.ts` and
+   * `gateRegistry.ts`'s NO_GATE row for why it writes no config of its own
+   * (`GateKind: 'delegated'`, same as Xirp).
+   *
+   * UNLIKE Xirp, one of its three wrapped backends is NOT itself a supported
+   * Intutic harness: OpenCode has no adapter/gate anywhere in this registry.
+   * A feature run against the `opencode:` provider therefore has ZERO
+   * Intutic governance today, even though Claude Code- and Codex-backed
+   * features are fully covered by their own existing gates. This is a real
+   * gap, not merely unconfirmed — see TD-397.
+   */
+  AGENTIC_ORCHESTRATOR: 'agentic-orchestrator',
   // ─── Wave 1: Python-SDK-gated frameworks (no on-disk hook/config file) ───
   // Same family as LANGGRAPH: the blocking gate ships in intutic-clawde
   // (intutic_clawde.gate, python-raise contract), evaluated in-process before

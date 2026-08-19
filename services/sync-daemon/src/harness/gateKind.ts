@@ -57,9 +57,17 @@ import { HarnessType, type HarnessType as HarnessTypeT } from '@intutic/shared-t
  *                 does not run tools itself: it wraps OTHER harnesses that
  *                 are already `'hook'`- or `'sdk'`-gated, and a tool call
  *                 made inside it is governed by whichever wrapped harness's
- *                 own gate is running (Xirp today; see gateRegistry.ts's
- *                 NO_GATE row for the reasoning this precedent sets for
- *                 future orchestrator-shaped harnesses). Distinct from
+ *                 own gate is running (Xirp and Agentic Orchestrator today;
+ *                 see gateRegistry.ts's NO_GATE rows for the reasoning this
+ *                 precedent sets for future orchestrator-shaped harnesses).
+ *                 NOTE: "governed by whichever wrapped harness's own gate is
+ *                 running" assumes that wrapped harness HAS a gate — Agentic
+ *                 Orchestrator's `opencode` backend does not (no OpenCode
+ *                 adapter exists in this registry at all), so `'delegated'`
+ *                 slightly overclaims for that one backend; see TD-397. It
+ *                 remains the correct classification for the harness AS A
+ *                 WHOLE because its other two backends (claude, codex) are
+ *                 fully gated. Distinct from
  *                 `'none'`: `'none'` means no enforcement point exists
  *                 ANYWHERE for this harness's tool calls; `'delegated'`
  *                 means one exists, just not one this harness's own row
@@ -105,11 +113,16 @@ export const NO_GATE_HARNESSES: ReadonlySet<HarnessTypeT> = new Set([HarnessType
 /**
  * Harnesses that wrap OTHER already-gated harnesses instead of running tools
  * themselves — no gate of their own, but not ungoverned either. Mirrors the
- * `file: null` NO_GATE row for `xirp` in `gateRegistry.ts`. The first entry
- * here; O2 (QM) and O3 (agentic-orchestrator) are expected to add the next
- * two, same "wraps other harnesses" shape.
+ * `file: null` NO_GATE rows for `xirp` and `agentic-orchestrator` in
+ * `gateRegistry.ts`. Xirp was the first entry of this shape; Agentic
+ * Orchestrator (O3) is the second. O2 (QM) is expected to add a third, same
+ * "wraps other harnesses" shape, in a concurrent phase not yet merged as of
+ * this one.
  */
-export const DELEGATED_GATE_HARNESSES: ReadonlySet<HarnessTypeT> = new Set([HarnessType.XIRP])
+export const DELEGATED_GATE_HARNESSES: ReadonlySet<HarnessTypeT> = new Set([
+  HarnessType.XIRP,
+  HarnessType.AGENTIC_ORCHESTRATOR,
+])
 
 /** How this harness's tool calls get gated. Defaults to `'hook'`. */
 export function gateKindForHarness(type: HarnessTypeT): GateKind {

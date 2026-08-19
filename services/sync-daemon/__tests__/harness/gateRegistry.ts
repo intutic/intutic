@@ -771,8 +771,8 @@ export const NO_GATE: ReadonlyArray<{
   // ── O1: orchestrator wrapping OTHER already-gated harnesses ──────────────
   // First entry of this specific shape — see gateKind.ts's 'delegated' kind,
   // which this row's `file: null` feeds into the same way an `'sdk'` row
-  // does. O2 (QM) and O3 (agentic-orchestrator) are expected to add the next
-  // two, in a later wave, with the same "wraps other harnesses" reasoning.
+  // does. O2 (QM) and O3 (agentic-orchestrator, added below) share the same
+  // "wraps other harnesses" reasoning.
   {
     file: null,
     harness: 'xirp',
@@ -802,5 +802,35 @@ export const NO_GATE: ReadonlyArray<{
       'restores every wrapped harness\'s own already-existing gate inside Xirp\'s sessions — ' +
       'this row stays a NO_GATE precisely because the gate that ends up protecting a Xirp ' +
       'session was never Xirp\'s to write. See TD-390.',
+  },
+
+  // ── O3: second orchestrator of this shape — DoorDash Agentic Orchestrator ─
+  {
+    file: null,
+    harness: 'agentic-orchestrator',
+    why:
+      'DoorDash\'s "Agentic Orchestrator" (binary `agentico`, Go, Apache-2.0, ' +
+      'doordash-oss/agentic-orchestrator — CONFIRMED real and public: the actual released binary ' +
+      'was downloaded and run during this integration\'s research, not just its README) is not ' +
+      'itself an AI agent — it is a desktop app + CLI that turns a feature prompt into a ' +
+      'multi-phase workflow (research, planning, implementation, review, PR publish), delegating ' +
+      'the model-driving work to ALREADY-INSTALLED CLI backends: Claude Code, Codex, and OpenCode ' +
+      '(CONFIRMED via `agentico server --help`\'s `--providers` flag, live-verified against the ' +
+      'real binary: "Available: claude, codex, opencode"). Each feature runs in its own git ' +
+      'worktree under `~/.agentic-orchestrator/worktrees/` (confirmed via the project\'s README), ' +
+      'the same shape Xirp uses — `gitWorktrees.ts`\'s worktree propagation (added in O1, general ' +
+      'and not Xirp-specific) already covers these worktrees too; no new code was needed for that ' +
+      'part. A tool call made inside an Agentic-Orchestrator-managed session is governed by ' +
+      'whichever wrapped backend\'s own gate is already running (claude-code-check.js, ' +
+      'codex-check.js) — the SAME gate this registry already lists under that harness\'s own row, ' +
+      'not a second one. This is the same `delegated` reasoning as Xirp\'s row above, not a new ' +
+      'kind — see gateKind.ts. ' +
+      'IMPORTANT DIFFERENCE FROM XIRP: one of the three wrapped backends, OpenCode, has NO adapter ' +
+      'or gate anywhere in this registry at all. A feature run with `--providers opencode` (or the ' +
+      'default auto-join behavior when the `opencode` CLI is installed and authenticated) has ZERO ' +
+      'Intutic governance today — not "delegated to an existing gate" but genuinely ungoverned, ' +
+      'the same as any other unsupported harness. This row still classifies as NO_GATE/`delegated` ' +
+      'for the harness AS A WHOLE (claude- and codex-backed features ARE fully covered), but the ' +
+      'OpenCode gap is real and tracked, not merely "unconfirmed" — see TD-397.',
   },
 ]
