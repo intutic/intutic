@@ -752,6 +752,7 @@ _Generated from `services/control-plane/src/routes/*.ts` by `generate-api-catalo
 |--------|------|------|-------------|
 | POST | `/api/v1/config/capture` | Authenticated | Capture config snapshot |
 | POST | `/api/v1/skillopt/:suggestionId/apply` | Authenticated |  |
+| POST | `/api/v1/skillopt/:suggestionId/apply-result` | Authenticated | Sync daemon's ack of an apply attempt |
 | POST | `/api/v1/skillopt/:suggestionId/dismiss` | Authenticated |  |
 | GET | `/api/v1/workspaces/:workspaceId/config-snapshots` | Authenticated |  |
 | GET | `/api/v1/workspaces/:workspaceId/config-snapshots/:snapshotId/diff` | Authenticated |  |
