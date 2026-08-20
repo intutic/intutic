@@ -7,13 +7,26 @@
  * `toolApproval` option `generateText`/`streamText` accept, and that
  * `withIntuticProxy(createOpenAI)` is assignable where a provider factory is
  * expected — compile-time checks (TypeScript rejects the file if the real
- * shapes drift), not live API calls. No network call or live SDK loop is
- * exercised; the runtime behaviour under test is this adapter's own
- * functions against a `FakeGate`, matching `wrapTools.test.ts`'s style.
+ * shapes drift), not live API calls. Most of this file's runtime behaviour
+ * is this adapter's own functions against a `FakeGate`, matching
+ * `wrapTools.test.ts`'s style.
+ *
+ * TD-381 closer: the "real ai generateText() integration" block below drives
+ * the REAL `generateText()` — the `ai` package's actual dispatch loop, not a
+ * mocked-out one — with a stub `LanguageModelV4` (`MockLanguageModelV4` from
+ * `ai/test`, also a real devDependency) that emits a tool call. No API key,
+ * no network. Confirmed by reading `ai@7.0.68`'s compiled
+ * `dist/index.js`: `generateText`'s step loop calls `resolveToolApproval()`
+ * for every tool call the model emits, and on a `'denied'` status adds the
+ * call's id to `blockedToolCallIds`, which `executeTools()` is filtered
+ * against — the tool's real body genuinely never runs on a denial, the same
+ * mechanism `resolveToolApproval` also drives for `streamText`.
  */
 import { afterEach, describe, expect, it } from 'vitest'
-import type { generateText } from 'ai'
+import { generateText, tool } from 'ai'
+import { MockLanguageModelV4 } from 'ai/test'
 import { createOpenAI } from '@ai-sdk/openai'
+import { z } from 'zod'
 import { IntuticGateRefusal } from '../errors.js'
 import { Gate, install } from '../gate.js'
 import { intuticProxyUrl, intuticToolApproval, withIntuticProxy } from '../vercel.js'
@@ -134,6 +147,85 @@ describe('withIntuticProxy', () => {
   it('a real @ai-sdk/openai provider factory accepts the wrapped call (structural, not a network call)', () => {
     const openai = withIntuticProxy(createOpenAI, 'http://127.0.0.1:4000')({ apiKey: 'sk-test' })
     expect(typeof openai).toBe('function')
+  })
+})
+
+// ------------------------------------------------------------------------
+// REAL `ai` generateText() integration — no API key, no network: a stub
+// LanguageModelV4 (MockLanguageModelV4 from `ai/test`) replays a canned tool
+// call and the real `generateText()` dispatch loop does everything else
+// (tool resolution, toolApproval resolution, tool execution). Closes
+// TD-381's "what would close this" gap for the Vercel AI SDK half.
+// ------------------------------------------------------------------------
+
+const USAGE = {
+  inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
+  outputTokens: { total: 5, text: 5, reasoning: 0 },
+}
+
+function toolCallResult(toolCallId: string, toolName: string, input: unknown) {
+  return {
+    content: [
+      { type: 'tool-call' as const, toolCallId, toolName, input: JSON.stringify(input) },
+    ],
+    finishReason: { unified: 'tool-calls' as const, raw: undefined },
+    usage: USAGE,
+  }
+}
+
+function deleteTool(onExecute: () => void) {
+  return tool({
+    description: 'Deletes everything',
+    inputSchema: z.object({ path: z.string() }),
+    execute: async ({ path }: { path: string }) => {
+      onExecute()
+      return { deleted: true, path }
+    },
+  })
+}
+
+describe('real ai generateText() integration', () => {
+  it('a denied tool call never executes; the real dispatch loop records the denial reason', async () => {
+    const gate = new FakeGate(true)
+    let executed = false
+    const model = new MockLanguageModelV4({
+      doGenerate: [toolCallResult('call_1', 'delete_everything', { path: 'prod.db' })],
+    })
+
+    const result = await generateText({
+      model,
+      tools: { delete_everything: deleteTool(() => (executed = true)) },
+      toolApproval: intuticToolApproval({ gate }),
+      prompt: 'wipe it',
+    })
+
+    expect(executed).toBe(false)
+    expect(gate.calls).toEqual([{ toolName: 'delete_everything', toolInput: { path: 'prod.db' } }])
+    // No tool result was produced for the blocked call — the real dispatch
+    // loop skipped execution entirely, it did not run it and discard it.
+    expect(result.toolResults).toHaveLength(0)
+    // The denial reason from this adapter genuinely reached the real
+    // generateText() step content (a tool-approval-response part).
+    expect(JSON.stringify(result.content)).toContain('[Intutic Governance] BLOCKED: nope')
+  })
+
+  it('an allowed tool call executes untouched through the same real dispatch loop', async () => {
+    const gate = new FakeGate(false)
+    let executed = false
+    const model = new MockLanguageModelV4({
+      doGenerate: [toolCallResult('call_1', 'delete_everything', { path: 'scratch.txt' })],
+    })
+
+    const result = await generateText({
+      model,
+      tools: { delete_everything: deleteTool(() => (executed = true)) },
+      toolApproval: intuticToolApproval({ gate }),
+      prompt: 'clean it up',
+    })
+
+    expect(executed).toBe(true)
+    expect(gate.calls).toEqual([{ toolName: 'delete_everything', toolInput: { path: 'scratch.txt' } }])
+    expect(result.toolResults).toHaveLength(1)
   })
 })
 

@@ -45,20 +45,31 @@ reading `ag2/middleware/base.py`, `ag2/tools/executor.py`, and
     multi-gate processes, the same shape `openai_agents.py`'s
     `make_intutic_tool_guardrail` uses.
 
-**What was NOT verified live**: whether an exception escaping
-`on_tool_execution` itself (as opposed to the `ToolErrorEvent` this adapter
-returns deliberately) is caught by AG2's own event/stream dispatcher and
-turned into a model-visible tool error, or whether it propagates further and
-aborts the run. CrewAI's dispatcher was confirmed to swallow non-`HookAborted`
-exceptions and fail OPEN (see `crewai.py`'s module doc); AG2's brand-new
-event-stream architecture was not driven far enough (no real multi-turn run
-with a live or `FunctionModel`-style stub LLM) to confirm which way it fails.
-`IntuticMiddleware` therefore follows the same defensive posture as the
-CrewAI adapter on principle — it converts EVERY exception raised while
-evaluating the gate (not only `IntuticGateRefusal`) into a returned
-`ToolErrorEvent`, never letting one propagate out of `on_tool_execution` — but
-this has not been confirmed necessary against a real AG2 dispatcher the way
-the CrewAI fail-open finding was. See TD-376.
+**Now confirmed live (closes TD-376)**: what AG2's own event/stream
+dispatcher does with an exception escaping `on_tool_execution` itself (as
+opposed to the `ToolErrorEvent` this adapter returns deliberately) — driven
+through AG2's REAL dispatcher (`ag2.tools.executor.ToolExecutor` wired to a
+real `MemoryStream`/`ConversationContext`, the same construction
+`ag2.plugin`'s `Agent` setup uses internally), not a hand-rolled call. See
+`tests/test_adapter_ag2.py`'s `TestRealDispatcher` class, in particular
+`test_an_exception_escaping_middleware_is_caught_by_ag2s_own_dispatcher_not_swallowed_as_allowed`,
+which uses a bare middleware with NO catch-all at all. **Unlike CrewAI**
+(confirmed fail-OPEN — swallows any non-`HookAborted` exception and reports
+the call as allowed; see `crewai.py`'s module doc), **AG2 fails CLOSED**:
+`ag2/tools/executor.py`'s `_execute_call` wraps `await context.send(call)` in
+a bare `except Exception` that converts ANY exception escaping a
+middleware's `on_tool_execution` into a real `ToolErrorEvent.from_call(call,
+e)`, with the underlying tool body never invoked. `IntuticMiddleware`'s own
+defensive catch-all (converting every exception, not only
+`IntuticGateRefusal`, into a `ToolErrorEvent` itself) is therefore CONFIRMED
+NOT strictly necessary for AG2's dispatcher specifically — AG2 would already
+fail closed even without it. It is kept anyway, deliberately: without it, a
+"no gate configured" misconfiguration or a `Gate.guard()` bug would still
+surface as a `ToolErrorEvent`, but with AG2's own auto-generated traceback
+text rather than a `[Intutic Governance] BLOCKED: ...`-prefixed, model-legible
+message an operator/dashboard can recognize — the same reasoning
+`crewai.py`'s catch-all carries, just for a different (cosmetic, not
+correctness) reason on this framework.
 
 Optional import: importing this module never fails even without ag2
 installed. Only instantiating `IntuticMiddleware` (or calling

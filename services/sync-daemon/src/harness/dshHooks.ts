@@ -61,13 +61,25 @@
  *     exactly this shape overriding an EXISTING catalog route's endpoint
  *     (`providers.openai.baseURL: https://proxy.example.com:8443`), the same
  *     "override base_url on what already resolves, don't invent a model
- *     picker entry" shape `grokHooks.ts`'s `[model.*]` merge uses. See the TD
- *     entry for the one gap this surfaced that the plan brief did not
- *     anticipate: `llm-pi-ai` is NOT dsh's default LLM route (`llm-deepseek`,
- *     the native DeepSeek adapter, is — see `dsh-base`'s own
- *     `agent-default-model` row) and mounts **dormant** until a
- *     `llm-pi-ai:` settings section exists at all, so this override alone
- *     does not redirect a fresh profile's default egress.
+ *     picker entry" shape `grokHooks.ts`'s `[model.*]` merge uses. `llm-pi-ai`
+ *     is NOT dsh's default LLM route (`llm-deepseek`, the native DeepSeek
+ *     adapter, is — see `dsh-base`'s own `agent-default-model` row) and
+ *     mounts **dormant** until a `llm-pi-ai:` settings section exists at all,
+ *     so this override alone never redirected a fresh profile's DEFAULT
+ *     egress — it only added a selectable route.
+ *   - **TD-370 follow-up, closed this phase:** `@deepseek-ai/dsh-llm-deepseek`
+ *     (registry-public, `npm pack`ed and read directly — 0.1.0-rc.8, the
+ *     current prerelease at the time) IS the adapter `dsh-base`'s
+ *     `agent-default-model` routes through by default, and its own shipped
+ *     README CONFIRMS the same live-reload settings seam `llm-pi-ai` has:
+ *     "the plugin registers the `llm-deepseek` namespace with this same
+ *     `Config` schema ... so a `llm-deepseek:` section in the user settings
+ *     document overrides any field without a restart." {@link mergeSettingsYaml}
+ *     now also merges `llm-deepseek.baseURL`, touching only that one field
+ *     (same "override base_url on what already resolves" discipline as the
+ *     `llm-pi-ai` merge and `grokHooks.ts`'s `[model.*]` merge) — this is the
+ *     one that actually redirects DEFAULT egress. The `llm-pi-ai` merge is
+ *     kept alongside it (a selectable route remains useful), not replaced.
  *   - The `@intutic/gate/dsh` veto contract itself (`tools/pre-execute`,
  *     `PreToolDecision`'s real `'deny'`/`'allow'`/`'ask'` shape, Cordis's
  *     `waterfall` `next()` semantics) is confirmed from `dsh-tools`'s shipped
@@ -150,6 +162,56 @@ export async function listDshProfileDirs(dshHome: string): Promise<string[]> {
     }
   }
   return out
+}
+
+// ─── Coverage-gap detection (TD-370: the silent no-profile window) ────────
+
+/** Markers dsh leaves under `$DSH_HOME` even before any profile exists —
+ *  mirrors `tools/cli/src/harness/dsh.ts`'s own `detect()` list, minus the
+ *  `profiles` marker itself (which is what "zero profiles" already answers
+ *  for {@link detectDshCoverageGap} below). */
+const DSH_HOME_PRESENCE_MARKERS = ['settings.yaml', '.credentials.yaml']
+
+/** Is `dsh` (the binary) reachable on `$PATH`? Best-effort, synchronous —
+ *  same PATH-scan convention `dsh.ts`'s adapter `detect()` uses. */
+function isDshOnPath(): boolean {
+  const pathDirs = (process.env.PATH ?? '').split(process.platform === 'win32' ? ';' : ':')
+  for (const dir of pathDirs) {
+    if (dir && existsSync(path.join(dir, 'dsh'))) return true
+  }
+  return false
+}
+
+export interface DshCoverageGap {
+  /** dsh appears to be installed/used on this machine (a `$DSH_HOME` marker
+   *  exists, or `dsh` is on `$PATH`) — independent of whether it is governed. */
+  dshDetected: boolean
+  /** Number of EXISTING dsh profiles — see {@link listDshProfileDirs}. */
+  profileCount: number
+  /** `dshDetected && profileCount === 0`: dsh is present but nothing is
+   *  governed yet — TD-370's "silent no-profile window". */
+  gap: boolean
+}
+
+/**
+ * Detects TD-370's "silent no-profile window": the stretch between `intutic
+ * connect` and the user's first `dsh --profile <name>` run, during which dsh
+ * is entirely ungoverned — {@link writeDshHooks} is a documented no-op with
+ * nothing to register into yet — and, before this function existed, nothing
+ * made that visible.
+ *
+ * A pure detector, deliberately: no logging, no side effect, so it stays
+ * trivially unit-testable. `watcher/settingsGuard.ts`'s `warnIfDshCoverageGap`
+ * is the side-effecting caller that actually logs the gap.
+ */
+export async function detectDshCoverageGap(dshHome = resolveDshHome()): Promise<DshCoverageGap> {
+  const profileCount = (await listDshProfileDirs(dshHome)).length
+  if (profileCount > 0) return { dshDetected: true, profileCount, gap: false }
+
+  const dshDetected =
+    DSH_HOME_PRESENCE_MARKERS.some((marker) => existsSync(path.join(dshHome, marker))) || isDshOnPath()
+
+  return { dshDetected, profileCount: 0, gap: dshDetected }
 }
 
 // ─── cordis.patch.yml: plugin row registration ────────────────────────────
@@ -329,21 +391,47 @@ export async function mergeProfileDependency(profileDir: string): Promise<void> 
   log.info({ action: 'dsh_dependency_written', path: manifestPath }, 'dsh profile package.json dependency updated')
 }
 
-// ─── settings.yaml: llm-pi-ai provider baseURL ────────────────────────────
+// ─── settings.yaml: llm-deepseek (default route) + llm-pi-ai (selectable) ──
+
+/** dsh's ACTUAL DEFAULT LLM route — `@deepseek-ai/dsh-llm-deepseek`, per
+ *  `dsh-base`'s own `agent-default-model` row. See module doc for the
+ *  README confirmation that a `llm-deepseek:` settings section overrides
+ *  this adapter's config live, no restart. */
+const DEFAULT_LLM_SECTION = 'llm-deepseek'
+/** A SELECTABLE route, mounts dormant until this section exists at all —
+ *  see module doc. Kept alongside the default-route merge, not replaced. */
+const SELECTABLE_LLM_SECTION = 'llm-pi-ai'
 
 async function mergeSettingsYamlAppendOnly(settingsPath: string, existingYaml: string, proxyUrl: string): Promise<void> {
-  if (existingYaml.includes('llm-pi-ai:')) return
-  const block = [
-    '',
-    '# Intutic proxy route — auto-appended (fallback: this file did not parse as YAML).',
-    'llm-pi-ai:',
-    '  providers:',
-    '    intutic:',
-    '      displayName: Intutic Governance Proxy',
-    '      api: openai-completions',
-    `      baseURL: ${JSON.stringify(proxyUrl)}`,
-  ].join('\n')
-  const text = existingYaml.trimEnd() + '\n' + block + '\n'
+  const blocks: string[] = []
+
+  if (!existingYaml.includes(`${DEFAULT_LLM_SECTION}:`)) {
+    blocks.push(
+      '',
+      '# Intutic proxy route — auto-appended (fallback: this file did not parse as YAML).',
+      "# Redirects dsh's DEFAULT LLM route (llm-deepseek, the native DeepSeek",
+      "# adapter — see dsh-base's agent-default-model row) through the proxy.",
+      `${DEFAULT_LLM_SECTION}:`,
+      `  baseURL: ${JSON.stringify(proxyUrl)}`,
+    )
+  }
+
+  if (!existingYaml.includes(`${SELECTABLE_LLM_SECTION}:`)) {
+    blocks.push(
+      '',
+      '# Intutic proxy route — auto-appended (fallback: this file did not parse as YAML).',
+      `${SELECTABLE_LLM_SECTION}:`,
+      '  providers:',
+      '    intutic:',
+      '      displayName: Intutic Governance Proxy',
+      '      api: openai-completions',
+      `      baseURL: ${JSON.stringify(proxyUrl)}`,
+    )
+  }
+
+  if (blocks.length === 0) return
+
+  const text = existingYaml.trimEnd() + '\n' + blocks.join('\n') + '\n'
   await fs.mkdir(path.dirname(settingsPath), { recursive: true })
   const tmp = settingsPath + '.intutic-tmp'
   await fs.writeFile(tmp, text, 'utf-8')
@@ -352,19 +440,23 @@ async function mergeSettingsYamlAppendOnly(settingsPath: string, existingYaml: s
 }
 
 /**
- * Structurally merges an `intutic` route into `settings.yaml`'s
- * `llm-pi-ai.providers` map (CONFIRMED path — see module doc), overriding
- * only that one route's `baseURL`/`api`/`displayName`, preserving every other
- * provider and every other top-level section untouched.
+ * Structurally merges the Intutic proxy into TWO `settings.yaml` sections:
  *
- * KNOWN GAP, stated here and in the TD entry: `llm-pi-ai` mounts dormant
- * until a `llm-pi-ai:` section exists at all, and dsh's actual DEFAULT LLM
- * route is `llm-deepseek` (the native adapter — see `dsh-base`'s
- * `agent-default-model` row), not `llm-pi-ai`. This merge alone does not
- * redirect a fresh profile's default egress; it adds a selectable
- * `llm-pi-ai` route a user (or a future sync) can point a model at. Routing
- * `llm-deepseek`'s own settings section was not independently confirmed
- * (see the TD entry) and is not attempted here.
+ *  - `llm-deepseek.baseURL` — dsh's ACTUAL DEFAULT LLM route (CONFIRMED
+ *    against `@deepseek-ai/dsh-llm-deepseek`'s own shipped README this
+ *    phase — see module doc). Only `baseURL` is touched; `apiKeyEnv`,
+ *    `thinking`, `models`, etc. round-trip untouched, the same
+ *    "override base_url on what already resolves, never invent the rest of
+ *    the section" discipline `grokHooks.ts`'s `[model.*]` merge uses. This
+ *    is the merge that actually redirects DEFAULT egress — see the TD entry
+ *    for why the `llm-pi-ai` merge alone (below) never did.
+ *  - `llm-pi-ai.providers.intutic` — a SELECTABLE route (mounts dormant
+ *    until this section exists at all — see module doc). Kept alongside the
+ *    new default-route merge: a user, or a future sync, can still point a
+ *    model at it explicitly.
+ *
+ * Both overrides preserve every other provider and every other top-level
+ * section untouched.
  */
 export async function mergeSettingsYaml(dshHome: string, proxyUrl: string): Promise<void> {
   const settingsPath = path.join(dshHome, SETTINGS_FILENAME)
@@ -398,16 +490,30 @@ export async function mergeSettingsYaml(dshHome: string, proxyUrl: string): Prom
   // (confirmed empirically against the `yaml` package) — same failure mode
   // `injectGoose` guards for `mcp: null`. Reset only the offending level,
   // never the whole document.
-  for (const key of ['llm-pi-ai', 'providers'] as const) {
-    const pathSoFar = key === 'llm-pi-ai' ? ['llm-pi-ai'] : ['llm-pi-ai', 'providers']
-    const node = doc.getIn(pathSoFar)
+  for (const keyPath of [
+    [DEFAULT_LLM_SECTION],
+    [SELECTABLE_LLM_SECTION],
+    [SELECTABLE_LLM_SECTION, 'providers'],
+  ]) {
+    const node = doc.getIn(keyPath)
     if (node !== undefined && !isMap(node)) {
-      doc.setIn(pathSoFar, {})
+      doc.setIn(keyPath, {})
     }
   }
 
   const settingsJs = doc.toJS() as Record<string, unknown>
-  const llmPiAi = (settingsJs['llm-pi-ai'] as Record<string, unknown> | undefined) ?? {}
+  let changed = false
+
+  // ── llm-deepseek: DEFAULT route ──────────────────────────────────────
+  const deepseekSection = (settingsJs[DEFAULT_LLM_SECTION] as Record<string, unknown> | undefined) ?? {}
+  const desiredDeepseekSection = { ...deepseekSection, baseURL: proxyUrl }
+  if (!isDeepStrictEqual(deepseekSection, desiredDeepseekSection)) {
+    doc.setIn([DEFAULT_LLM_SECTION], desiredDeepseekSection)
+    changed = true
+  }
+
+  // ── llm-pi-ai: SELECTABLE route ──────────────────────────────────────
+  const llmPiAi = (settingsJs[SELECTABLE_LLM_SECTION] as Record<string, unknown> | undefined) ?? {}
   const providers = (llmPiAi.providers as Record<string, unknown> | undefined) ?? {}
   const existingRoute = (providers.intutic as Record<string, unknown> | undefined) ?? {}
   const desiredRoute = {
@@ -416,10 +522,12 @@ export async function mergeSettingsYaml(dshHome: string, proxyUrl: string): Prom
     api: 'openai-completions',
     baseURL: proxyUrl,
   }
+  if (!isDeepStrictEqual(existingRoute, desiredRoute)) {
+    doc.setIn([SELECTABLE_LLM_SECTION, 'providers', 'intutic'], desiredRoute)
+    changed = true
+  }
 
-  if (isDeepStrictEqual(existingRoute, desiredRoute)) return
-
-  doc.setIn(['llm-pi-ai', 'providers', 'intutic'], desiredRoute)
+  if (!changed) return
 
   await fs.mkdir(dshHome, { recursive: true })
   const tmp = settingsPath + '.intutic-tmp'
@@ -428,12 +536,81 @@ export async function mergeSettingsYaml(dshHome: string, proxyUrl: string): Prom
   log.info({ action: 'dsh_settings_written', path: settingsPath, mode: 'yaml' }, 'dsh settings.yaml updated (structural YAML edit)')
 }
 
+// ─── INSTALL.md: the manual pnpm-install / `dsh plugin add` step ──────────
+
+/**
+ * `$DSH_HOME/INSTALL.md` — same purpose and shape as `n8nHooks.ts`'s
+ * `buildInstallMd`: this writer declares `@intutic/gate` in each profile's
+ * `package.json` (see {@link mergeProfileDependency}) but cannot run a
+ * package manager in a directory it does not own, so the row it also writes
+ * into `cordis.patch.yml` resolves to a MISSING module until a human — or
+ * dsh's own forwarding command — installs it. See the TD entry.
+ */
+function buildDshInstallMd(profileNames: string[]): string {
+  const profileLines =
+    profileNames.length > 0
+      ? profileNames.map((name) => `- \`${name}\` — run: \`dsh plugin --profile ${name} add @intutic/gate\``).join('\n')
+      : '(no dsh profiles are registered yet)'
+
+  return `# Intutic governance for dsh — installation
+
+Auto-generated by the Intutic sync-daemon. One artifact, one manual step.
+
+## The blocking gate is registered, but not yet activated
+
+Every sync writes the \`intutic-governance\` row into each profile's
+\`cordis.patch.yml\` (naming \`@intutic/gate/dsh\`) and declares
+\`@intutic/gate\` in that profile's \`package.json\` \`dependencies\` — but this
+daemon has no general capability to run a package manager in a directory it
+does not own, so the dependency itself is never installed by this writer.
+Until it is, dsh's own Cordis loader reports that row's activation as
+FAILED (fail-loud, not silent — \`dsh-app-boot\`'s \`assertEntriesActivated\`)
+rather than silently skipping it, but it also means nothing is governed yet.
+
+Finish activation with dsh's own forwarding command, once per profile:
+
+${profileLines}
+
+That is equivalent to \`cd $DSH_HOME/profiles/<name> && pnpm install\` —
+either works; the forwarding command is dsh's own documented shortcut for
+exactly this case.
+
+## Default LLM egress needs no manual step
+
+The Intutic proxy is merged into \`settings.yaml\`'s \`llm-deepseek\` (dsh's
+default LLM route) and \`llm-pi-ai\` (a selectable route) sections on every
+sync — both take effect on dsh's next request without a restart.
+`
+}
+
+/** Write-if-changed, atomic rename — same discipline every other writer in
+ *  this file follows. Regenerated every sync so the profile list here never
+ *  goes stale. */
+async function writeDshInstallMd(dshHome: string, profileNames: string[]): Promise<void> {
+  const installPath = path.join(dshHome, 'INSTALL.md')
+  const content = buildDshInstallMd(profileNames)
+
+  let existing = ''
+  try {
+    existing = await fs.readFile(installPath, 'utf-8')
+  } catch {
+    // First write.
+  }
+  if (existing === content) return
+
+  await fs.mkdir(dshHome, { recursive: true })
+  const tmp = installPath + '.intutic-tmp'
+  await fs.writeFile(tmp, content, 'utf-8')
+  await fs.rename(tmp, installPath)
+  log.info({ action: 'dsh_install_md_written', path: installPath }, 'dsh INSTALL.md updated')
+}
+
 // ─── Public API ────────────────────────────────────────────────────────────
 
 /**
  * Register the Intutic governance plugin against every existing dsh profile
  * on this machine, and merge the Intutic proxy into `settings.yaml`'s
- * `llm-pi-ai` route.
+ * `llm-deepseek` (default) and `llm-pi-ai` (selectable) routes.
  *
  * A no-op (logged, not an error) when `$DSH_HOME/profiles` does not exist
  * yet — dsh has not been run with any `--profile <name>` on this machine, so
@@ -462,4 +639,5 @@ export async function writeDshHooks(workspaceRoot: string, proxyUrl: string, wor
   }
 
   await mergeSettingsYaml(dshHome, proxyUrl)
+  await writeDshInstallMd(dshHome, profileDirs.map((d) => path.basename(d)))
 }

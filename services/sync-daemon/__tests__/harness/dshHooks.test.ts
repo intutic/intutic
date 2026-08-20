@@ -181,6 +181,118 @@ describe('dsh hooks writer', () => {
     expect(settings['llm-pi-ai']?.providers?.intutic?.baseURL).toBe(PROXY_URL)
   })
 
+  it("merges settings.yaml's llm-deepseek.baseURL (dsh's DEFAULT LLM route), preserving other llm-deepseek fields", async () => {
+    await mkProfile(dshHome, 'myproject')
+    await node_fs.writeFile(
+      node_path.join(dshHome, 'settings.yaml'),
+      'llm-deepseek:\n  apiKeyEnv: DEEPSEEK_API_KEY\n  thinking: enabled\n',
+    )
+
+    const { writeDshHooks } = await import('../../src/harness/dshHooks.js')
+    await writeDshHooks(workspaceRoot, PROXY_URL, 'ws_test')
+
+    const raw = await node_fs.readFile(node_path.join(dshHome, 'settings.yaml'), 'utf-8')
+    const doc = parseDocument(raw)
+    const settings = doc.toJS() as {
+      'llm-deepseek'?: { baseURL?: string; apiKeyEnv?: string; thinking?: string }
+    }
+    // The DEFAULT route's baseURL is redirected through the proxy...
+    expect(settings['llm-deepseek']?.baseURL).toBe(PROXY_URL)
+    // ...without disturbing the rest of that same section.
+    expect(settings['llm-deepseek']?.apiKeyEnv).toBe('DEEPSEEK_API_KEY')
+    expect(settings['llm-deepseek']?.thinking).toBe('enabled')
+  })
+
+  it('seeds both llm-deepseek and llm-pi-ai sections on a fresh settings.yaml', async () => {
+    await mkProfile(dshHome, 'myproject')
+
+    const { writeDshHooks } = await import('../../src/harness/dshHooks.js')
+    await writeDshHooks(workspaceRoot, PROXY_URL, 'ws_test')
+
+    const raw = await node_fs.readFile(node_path.join(dshHome, 'settings.yaml'), 'utf-8')
+    const doc = parseDocument(raw)
+    const settings = doc.toJS() as {
+      'llm-deepseek'?: { baseURL?: string }
+      'llm-pi-ai'?: { providers?: Record<string, { baseURL?: string }> }
+    }
+    expect(settings['llm-deepseek']?.baseURL).toBe(PROXY_URL)
+    expect(settings['llm-pi-ai']?.providers?.intutic?.baseURL).toBe(PROXY_URL)
+  })
+
+  it('falls back to append-only text injection for BOTH llm sections when settings.yaml does not parse as YAML', async () => {
+    await mkProfile(dshHome, 'myproject')
+    const settingsPath = node_path.join(dshHome, 'settings.yaml')
+    const malformed = 'someKey: [unterminated\n'
+    await node_fs.writeFile(settingsPath, malformed)
+
+    const { writeDshHooks } = await import('../../src/harness/dshHooks.js')
+    await writeDshHooks(workspaceRoot, PROXY_URL, 'ws_test')
+
+    const after = await node_fs.readFile(settingsPath, 'utf-8')
+    expect(after).toContain(malformed.trimEnd())
+    expect(after).toContain('llm-deepseek:')
+    expect(after).toContain('llm-pi-ai:')
+
+    // A second run must not duplicate either block.
+    await writeDshHooks(workspaceRoot, PROXY_URL, 'ws_test')
+    const afterSecond = await node_fs.readFile(settingsPath, 'utf-8')
+    expect(afterSecond.match(/llm-deepseek:/g)?.length).toBe(1)
+    expect(afterSecond.match(/llm-pi-ai:/g)?.length).toBe(1)
+  })
+
+  it('writes $DSH_HOME/INSTALL.md naming every registered profile and the dsh plugin-add command', async () => {
+    await mkProfile(dshHome, 'alpha')
+    await mkProfile(dshHome, 'beta')
+
+    const { writeDshHooks } = await import('../../src/harness/dshHooks.js')
+    await writeDshHooks(workspaceRoot, PROXY_URL, 'ws_test')
+
+    const installMd = await node_fs.readFile(node_path.join(dshHome, 'INSTALL.md'), 'utf-8')
+    expect(installMd).toContain('dsh plugin --profile alpha add @intutic/gate')
+    expect(installMd).toContain('dsh plugin --profile beta add @intutic/gate')
+  })
+
+  it('INSTALL.md is write-if-changed — a second run against unchanged profiles writes identical bytes', async () => {
+    await mkProfile(dshHome, 'myproject')
+    const { writeDshHooks } = await import('../../src/harness/dshHooks.js')
+    await writeDshHooks(workspaceRoot, PROXY_URL, 'ws_test')
+
+    const installPath = node_path.join(dshHome, 'INSTALL.md')
+    const first = await node_fs.readFile(installPath, 'utf-8')
+    await writeDshHooks(workspaceRoot, PROXY_URL, 'ws_test')
+    const second = await node_fs.readFile(installPath, 'utf-8')
+    expect(second).toBe(first)
+  })
+
+  it('detectDshCoverageGap: no gap when profiles already exist', async () => {
+    await mkProfile(dshHome, 'myproject')
+    const { detectDshCoverageGap } = await import('../../src/harness/dshHooks.js')
+    const result = await detectDshCoverageGap(dshHome)
+    expect(result.gap).toBe(false)
+    expect(result.profileCount).toBe(1)
+    expect(result.dshDetected).toBe(true)
+  })
+
+  it('detectDshCoverageGap: no gap when dsh has never touched this machine at all', async () => {
+    const { detectDshCoverageGap } = await import('../../src/harness/dshHooks.js')
+    const result = await detectDshCoverageGap(dshHome)
+    expect(result.gap).toBe(false)
+    expect(result.profileCount).toBe(0)
+    expect(result.dshDetected).toBe(false)
+  })
+
+  it('detectDshCoverageGap: flags the gap when dsh left settings.yaml but zero profiles exist yet', async () => {
+    // No profiles directory at all, but $DSH_HOME/settings.yaml exists —
+    // the state right after dsh's own first-run bootstrap but before the
+    // user's first `--profile <name>` invocation.
+    await node_fs.writeFile(node_path.join(dshHome, 'settings.yaml'), '{}\n')
+    const { detectDshCoverageGap } = await import('../../src/harness/dshHooks.js')
+    const result = await detectDshCoverageGap(dshHome)
+    expect(result.gap).toBe(true)
+    expect(result.dshDetected).toBe(true)
+    expect(result.profileCount).toBe(0)
+  })
+
   it('falls back to append-only text injection when cordis.patch.yml does not parse as YAML', async () => {
     const profileDir = node_path.join(dshHome, 'profiles', 'broken')
     await node_fs.mkdir(profileDir, { recursive: true })
@@ -291,5 +403,49 @@ describe('dsh settingsGuard tamper restore', () => {
     expect(tampered).toBe(true)
     expect(existsSync(patchPath)).toBe(true)
     expect((await node_fs.readFile(patchPath, 'utf-8')).includes('intutic-governance')).toBe(true)
+  })
+
+  it('isDshProfilesRoot identifies exactly $DSH_HOME/profiles and nothing else', async () => {
+    const { isDshProfilesRoot } = await import('../../src/watcher/settingsGuard.js')
+    expect(isDshProfilesRoot(node_path.join(dshHome, 'profiles'))).toBe(true)
+    expect(isDshProfilesRoot(node_path.join(dshHome, 'profiles', 'myproject'))).toBe(false)
+    expect(isDshProfilesRoot(node_path.join(dshHome, 'settings.yaml'))).toBe(false)
+  })
+
+  it('guardSettingsFile registers governance the moment the profiles ROOT directory appears (TD-370 addDir handling)', async () => {
+    // This is the event driftWatcher.ts forwards on chokidar's `addDir` for
+    // the profiles root specifically (see isDshProfilesRoot) — the profile
+    // itself already exists on disk by the time this fires (dsh creates it
+    // atomically), so writeDshHooks has something to register into right
+    // away, without waiting for an unrelated file change or the next poll.
+    const profileDir = await mkProfile(dshHome, 'myproject')
+    const profilesRoot = node_path.join(dshHome, 'profiles')
+
+    const { guardSettingsFile } = await import('../../src/watcher/settingsGuard.js')
+    const tampered = await guardSettingsFile(profilesRoot, workspaceRoot, [], PROXY_URL)
+    expect(tampered).toBe(true)
+
+    const patchPath = node_path.join(profileDir, 'cordis.patch.yml')
+    const restored = await node_fs.readFile(patchPath, 'utf-8')
+    expect(restored).toContain('intutic-governance')
+    const settings = await node_fs.readFile(node_path.join(dshHome, 'settings.yaml'), 'utf-8')
+    expect(settings).toContain('llm-deepseek:')
+  })
+
+  it('warnIfDshCoverageGap returns false and does not throw when dsh has never touched this machine', async () => {
+    const { warnIfDshCoverageGap } = await import('../../src/watcher/settingsGuard.js')
+    await expect(warnIfDshCoverageGap()).resolves.toBe(false)
+  })
+
+  it('warnIfDshCoverageGap returns true when dsh left settings.yaml but zero profiles exist yet', async () => {
+    await node_fs.writeFile(node_path.join(dshHome, 'settings.yaml'), '{}\n')
+    const { warnIfDshCoverageGap } = await import('../../src/watcher/settingsGuard.js')
+    await expect(warnIfDshCoverageGap()).resolves.toBe(true)
+  })
+
+  it('warnIfDshCoverageGap returns false once a profile is registered', async () => {
+    await mkProfile(dshHome, 'myproject')
+    const { warnIfDshCoverageGap } = await import('../../src/watcher/settingsGuard.js')
+    await expect(warnIfDshCoverageGap()).resolves.toBe(false)
   })
 })

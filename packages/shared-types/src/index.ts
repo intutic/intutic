@@ -452,3 +452,9 @@ export {
   type ScriptScanFinding,
   type ScriptScanResult,
 } from './scriptScan.js'
+
+export {
+  deriveEnforcementInputs,
+  type EnforcementFacets,
+  type GovernanceCoverageInputs,
+} from './governanceCoverage.js'

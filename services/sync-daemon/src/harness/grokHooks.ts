@@ -44,17 +44,23 @@
  * double-fired block does not corrupt the audit log or the exit/stdout
  * contract of either gate.
  *
- * # `[model.*]` table naming — an assumption, flagged
+ * # `[model.*]` table naming — CONFIRMED against the real open-sourced parser
  *
- * The confirmed shape is `[model."<name>"]` with a per-model `base_url`.
- * Grok Build itself was not installable in this environment to confirm what
- * model id ships as the operative default, so this writer overrides
- * `base_url` on every EXISTING `[model.*]` table (never invents one if the
- * user already configured models), and falls back to seeding a literal
- * `[model.default]` table only when no `[model.*]` table exists at all. If
- * Grok Build's real default model id is not literally `"default"`, that
- * seeded table is inert until an operator (or a future sync, once the real
- * id is confirmed) corrects it — see TECH_DEBT.md.
+ * The shape is `[model."<id>"]` with a per-model `base_url` (and many other
+ * override fields — `xai_grok_shell::agent::config::ConfigModelOverride`),
+ * keyed by model id and consulted only for the model whose id equals `<id>`;
+ * it does not fall back to any other key. `xai-grok-models/default_models.json`
+ * (embedded at compile time) pins the operative default id, CONFIRMED live by
+ * cloning `github.com/xai-org/grok-build` (open-sourced 2026-07-15) and
+ * reading it directly: `"default": "grok-4.6"` — NOT the literal string
+ * `"default"`. This writer therefore overrides `base_url` on every EXISTING
+ * `[model.*]` table (never invents one if the user already configured
+ * models), and — only when no `[model.*]` table exists at all — seeds
+ * `[model."grok-4.6"]`, the confirmed compiled-in default id, not a guess.
+ * A future Grok Build release that changes its compiled default would make
+ * this seeded table inert again until re-synced against a newer clone —
+ * the same residual risk `windsurfHooks.ts`'s "confirmed, not evergreen"
+ * caveat already documents for a versioned upstream default.
  *
  * HLD §3.14 — Harness Onboarding Matrix
  * @module
@@ -80,17 +86,49 @@ const GROK_USER_DIR = path.join(os.homedir(), '.grok')
  *  user registered themselves. */
 const HOOK_FILENAME = 'intutic-governance.json'
 
+/**
+ * Builds the per-file registration this writer drops at
+ * `.grok/hooks/intutic-governance.json` (project) and `~/.grok/hooks/intutic-governance.json`
+ * (user).
+ *
+ * **Shape CONFIRMED against the real, now-open-source parser** (xAI open-sourced
+ * `grok-build` 2026-07-15 — `github.com/xai-org/grok-build`, `crates/codegen/xai-grok-hooks`):
+ * `xai_grok_hooks::config::parse_hook_file` (called identically for both a
+ * settings-file source and a `.grok/hooks/*.json` directory entry — the SAME
+ * function, see `discovery.rs`'s `load_hooks_from_settings_file`/
+ * `load_hooks_from_directory`) requires a TOP-LEVEL `"hooks"` key; a file
+ * without one returns an EMPTY spec set, silently — no error, no warning. The
+ * value under `"hooks"` is keyed by event name to an ARRAY of `MatcherGroup`s
+ * (`{matcher?: string, hooks: [{type, command, timeout?, ...}]}`), each entry
+ * of which becomes one `HookSpec` — the exact shape Claude Code's own
+ * `settings.json` `hooks` block uses, not the flat `{event, command, timeout}`
+ * record this writer emitted before this fix (which the real parser silently
+ * ignored — ZERO hooks ever registered, confirmed by having no top-level
+ * `"hooks"` key at all). No `matcher` field on the group means "fires for
+ * every tool call" (`MatcherGroup.matcher: Option<String>`, `#[serde(default)]`).
+ */
 function buildHookRegistration(hookScriptPath: string) {
   return {
     _comment: 'Intutic governance hook — auto-generated. DO NOT EDIT.',
     _lastSync: newIso(),
-    // No matcher — CONFIRMED to apply to every tool call.
-    event: 'PreToolUse',
-    command: `node "${hookScriptPath}"`,
-    // Grok Build's documented default; stated explicitly rather than left
-    // to fall back, since a local policy-snapshot evaluation is cheap but a
-    // future default change upstream should not silently starve this hook.
-    timeout: 5,
+    hooks: {
+      // No matcher — CONFIRMED to apply to every tool call.
+      PreToolUse: [
+        {
+          hooks: [
+            {
+              type: 'command',
+              command: `node "${hookScriptPath}"`,
+              // Grok Build's documented default; stated explicitly rather than
+              // left to fall back, since a local policy-snapshot evaluation is
+              // cheap but a future default change upstream should not silently
+              // starve this hook.
+              timeout: 5,
+            },
+          ],
+        },
+      ],
+    },
   }
 }
 
@@ -202,8 +240,17 @@ interface GrokTomlDoc {
 }
 
 /**
- * The pre-parser fallback: append a `[model.default]` block only, never
- * touching (or even parsing) anything else in the file — mirroring
+ * Grok Build's compiled-in default model id — CONFIRMED live (2026-08-20)
+ * against `github.com/xai-org/grok-build`'s `crates/codegen/xai-grok-models/default_models.json`
+ * `"default"` key, NOT a guess. See this module's `[model.*]` doc comment.
+ * A future upstream release may change this; re-verify against a fresh
+ * clone if this writer's seeded table stops being honoured.
+ */
+const GROK_DEFAULT_MODEL_ID = 'grok-4.6'
+
+/**
+ * The pre-parser fallback: append a `[model."<default id>"]` block only,
+ * never touching (or even parsing) anything else in the file — mirroring
  * `injectGooseAppendOnly`'s reasoning exactly: a parser that cannot safely
  * represent a malformed file cannot safely round-trip it either, so the safe
  * degrade is "never touch anything but the block we control".
@@ -214,8 +261,9 @@ async function mergeGrokConfigTomlAppendOnly(
   proxyUrl: string,
 ): Promise<void> {
   let text = existingRaw
-  if (!text.includes('[model.default]') && !text.includes('[model."default"]')) {
-    text = text.trimEnd() + `\n\n[model.default]\nbase_url = ${JSON.stringify(proxyUrl)}\n`
+  const tableHeader = `[model."${GROK_DEFAULT_MODEL_ID}"]`
+  if (!text.includes(tableHeader) && !text.includes(`[model.${GROK_DEFAULT_MODEL_ID}]`)) {
+    text = text.trimEnd() + `\n\n${tableHeader}\nbase_url = ${JSON.stringify(proxyUrl)}\n`
   }
   if (text === existingRaw) return
 
@@ -240,9 +288,9 @@ async function mergeGrokConfigTomlAppendOnly(
  *
  * Never invents a model id if the user already configured one or more —
  * only overrides `base_url` on each existing `[model.*]` table. Only when
- * NO `[model.*]` table exists at all does it seed a `[model.default]`
- * table — see this module's doc comment for why that key is an assumption,
- * not a confirmed default model id.
+ * NO `[model.*]` table exists at all does it seed a `[model."<default id>"]`
+ * table (`GROK_DEFAULT_MODEL_ID` below) — see this module's doc comment for
+ * why that id is CONFIRMED against the real open-sourced default, not a guess.
  */
 async function mergeGrokConfigToml(configPath: string, proxyUrl: string): Promise<void> {
   let existing = ''
@@ -271,9 +319,10 @@ async function mergeGrokConfigToml(configPath: string, proxyUrl: string): Promis
   let changed = false
 
   if (modelNames.length === 0) {
-    // No [model.*] table exists yet — see module doc comment for why
-    // "default" is an assumption, not a confirmed model id.
-    model.default = { ...(model.default ?? {}), base_url: proxyUrl }
+    // No [model.*] table exists yet — GROK_DEFAULT_MODEL_ID is CONFIRMED
+    // against the real open-sourced compiled default (see module doc), not
+    // a guess.
+    model[GROK_DEFAULT_MODEL_ID] = { ...(model[GROK_DEFAULT_MODEL_ID] ?? {}), base_url: proxyUrl }
     changed = true
   } else {
     for (const name of modelNames) {

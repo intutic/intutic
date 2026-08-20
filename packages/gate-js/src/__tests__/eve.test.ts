@@ -18,6 +18,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { defineTool } from 'eve/tools'
 import { defineMcpClientConnection } from 'eve/connections'
 import { defineHook } from 'eve/hooks'
+import type { HookEventMap } from 'eve/hooks'
 import { always, never, once } from 'eve/tools/approval'
 import type { Approval, ApprovalContext, ApprovalStatus } from 'eve/tools/approval'
 import { GateClient } from '../client.js'
@@ -31,6 +32,7 @@ import {
   withIntuticProxy,
   type EveApprovalContext,
   type EveApprovalStatus,
+  type EveInputRequestedEvent,
 } from '../eve.js'
 
 // Same pattern vercel.test.ts / dsh.test.ts use: a Gate whose guard() is
@@ -97,6 +99,12 @@ function _typeCheckOnly(): void {
   // eve's own helpers remain usable beside ours (the composition pattern).
   const _helpers: Approval[] = [always(), never(), once()]
   void _helpers
+
+  // TD-411: the real 'input.requested' event (from eve's own HookEventMap)
+  // is assignable to our structural EveInputRequestedEvent copy — i.e. our
+  // handler can be handed the real thing.
+  const acceptsRealInputRequested = (real: HookEventMap['input.requested']): EveInputRequestedEvent => real
+  void acceptsRealInputRequested
 }
 void _typeCheckOnly
 
@@ -245,7 +253,7 @@ describe('real eve definition machinery accepts this adapter', () => {
     const hooks = intuticAuditHooks({ client: new FakeGateClient() })
     const definition = defineHook(hooks)
     expect(definition).toBe(hooks) // defineHook is eve's identity-with-types helper
-    expect(Object.keys(hooks.events)).toEqual(['approval.candidate', 'approval.settled'])
+    expect(Object.keys(hooks.events)).toEqual(['input.requested', 'approval.candidate', 'approval.settled'])
   })
 })
 
@@ -313,6 +321,143 @@ describe('intuticAuditHooks: event mapping', () => {
       ])
     },
   )
+})
+
+// TD-411 half 2: `input.requested` carries requestId AND the real tool name
+// together (confirmed against eve's shipped `inputRequestSchema`), so
+// intuticAuditHooks() emits under the real name at request time
+// unconditionally, and best-effort enriches the LATER approval.candidate/
+// approval.settled events (which do not carry tool identity) via an
+// in-memory requestId -> toolName cache populated from this event.
+describe('intuticAuditHooks: input.requested and requestId -> toolName correlation', () => {
+  const ctx = { session: { id: 'sess-1' }, agent: { name: 'root' } }
+  const base = { requestId: 'req-1', responderPrincipalId: 'user:alice', sequence: 1, stepIndex: 0, turnId: 't-1' }
+  const inputRequestedBase = { sequence: 1, stepIndex: 0, turnId: 't-1' }
+
+  it("a 'tool-approval' request emits tool_flagged under the REAL tool name, not the synthetic one", async () => {
+    const client = new FakeGateClient()
+    await intuticAuditHooks({ client }).events['input.requested'](
+      {
+        type: 'input.requested',
+        data: {
+          ...inputRequestedBase,
+          requests: [
+            {
+              requestId: 'req-1',
+              kind: 'tool-approval',
+              action: { callId: 'call-1', toolName: 'refund_charge', input: { chargeId: 'ch_1' } },
+            },
+          ],
+        },
+      },
+      ctx,
+    )
+    expect(client.emitted).toEqual([
+      {
+        event: 'tool_flagged',
+        toolName: 'refund_charge',
+        reason: expect.stringContaining('request req-1'),
+        toolInput: { chargeId: 'ch_1' },
+      },
+    ])
+  })
+
+  it("skips 'question' and 'session-limit' requests — not Intutic's approval mechanism", async () => {
+    const client = new FakeGateClient()
+    await intuticAuditHooks({ client }).events['input.requested'](
+      {
+        type: 'input.requested',
+        data: {
+          ...inputRequestedBase,
+          requests: [
+            { requestId: 'req-q', kind: 'question', action: { callId: 'c', toolName: 'ask_question' } },
+            { requestId: 'req-s', kind: 'session-limit' },
+          ],
+        },
+      },
+      ctx,
+    )
+    expect(client.emitted).toEqual([])
+  })
+
+  it('enriches a LATER approval.settled with the real tool name when input.requested fired first', async () => {
+    const client = new FakeGateClient()
+    const hooks = intuticAuditHooks({ client })
+    await hooks.events['input.requested'](
+      {
+        type: 'input.requested',
+        data: {
+          ...inputRequestedBase,
+          requests: [{ requestId: 'req-1', kind: 'tool-approval', action: { callId: 'c', toolName: 'deploy_service' } }],
+        },
+      },
+      ctx,
+    )
+    client.emitted = [] // only care about the settled emit below
+    await hooks.events['approval.settled']({ type: 'approval.settled', data: { ...base, outcome: 'approved' } }, ctx)
+    expect(client.emitted).toEqual([
+      {
+        event: 'tool_allowed',
+        toolName: 'deploy_service',
+        reason: expect.stringContaining('approved by user:alice'),
+        toolInput: { ...base, outcome: 'approved' },
+      },
+    ])
+  })
+
+  it('enriches a LATER approval.candidate with the real tool name when input.requested fired first', async () => {
+    const client = new FakeGateClient()
+    const hooks = intuticAuditHooks({ client })
+    await hooks.events['input.requested'](
+      {
+        type: 'input.requested',
+        data: {
+          ...inputRequestedBase,
+          requests: [{ requestId: 'req-1', kind: 'tool-approval', action: { callId: 'c', toolName: 'deploy_service' } }],
+        },
+      },
+      ctx,
+    )
+    client.emitted = []
+    await hooks.events['approval.candidate'](
+      { type: 'approval.candidate', data: { ...base, candidateId: 'c-1', outcome: 'rejected' } },
+      ctx,
+    )
+    expect(client.emitted[0]!.toolName).toBe('deploy_service')
+  })
+
+  it('falls back to the synthetic tool name on settlement when no input.requested was seen for that requestId — the cross-process-restart case', async () => {
+    const client = new FakeGateClient()
+    // No 'input.requested' call at all — this hooks instance's cache is
+    // cold, simulating a process that only came up after the request was
+    // already parked (eve's own docs: a parked approval survives a restart).
+    await intuticAuditHooks({ client }).events['approval.settled'](
+      { type: 'approval.settled', data: { ...base, outcome: 'approved' } },
+      ctx,
+    )
+    expect(client.emitted[0]!.toolName).toBe(EVE_APPROVAL_TOOL_NAME)
+  })
+
+  it('evicts the cache entry on settlement — a stale requestId is never misattributed to an unrelated later tool', async () => {
+    const client = new FakeGateClient()
+    const hooks = intuticAuditHooks({ client })
+    await hooks.events['input.requested'](
+      {
+        type: 'input.requested',
+        data: {
+          ...inputRequestedBase,
+          requests: [{ requestId: 'req-1', kind: 'tool-approval', action: { callId: 'c', toolName: 'deploy_service' } }],
+        },
+      },
+      ctx,
+    )
+    await hooks.events['approval.settled']({ type: 'approval.settled', data: { ...base, outcome: 'approved' } }, ctx)
+    client.emitted = []
+    // Same requestId settles again (should not happen in practice, but the
+    // cache must not serve a stale mapping if it somehow does) — falls back.
+    await hooks.events['approval.settled']({ type: 'approval.settled', data: { ...base, outcome: 'approved' } }, ctx)
+    expect(client.emitted[0]!.toolName).toBe(EVE_APPROVAL_TOOL_NAME)
+  })
 })
 
 describe('withIntuticProxy re-export', () => {

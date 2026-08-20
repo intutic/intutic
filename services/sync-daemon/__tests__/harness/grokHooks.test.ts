@@ -113,7 +113,7 @@ describe('Grok Build hooks writer', () => {
     await node_fs.rm(home, { recursive: true, force: true })
   })
 
-  it('writes the hook registration at project and user level with no matcher', async () => {
+  it('writes the hook registration at project and user level with no matcher, in the real {hooks:{PreToolUse:[...]}} shape', async () => {
     const projectReg = JSON.parse(
       await node_fs.readFile(node_path.join(workspaceRoot, '.grok', 'hooks', 'intutic-governance.json'), 'utf-8'),
     )
@@ -121,22 +121,31 @@ describe('Grok Build hooks writer', () => {
       await node_fs.readFile(node_path.join(home, '.grok', 'hooks', 'intutic-governance.json'), 'utf-8'),
     )
     for (const reg of [projectReg, userReg]) {
-      expect(reg.event).toBe('PreToolUse')
-      expect(reg.matcher).toBeUndefined()
-      expect(reg.command).toContain('grok-check.js')
-      expect(reg.timeout).toBe(5)
+      // CONFIRMED shape (xai_grok_hooks::config::parse_hook_file requires a
+      // top-level "hooks" key — a flat {event,command,timeout} record, this
+      // writer's shape before the TD-364 fix, silently parses to ZERO hooks).
+      const groups = reg.hooks.PreToolUse
+      expect(Array.isArray(groups)).toBe(true)
+      expect(groups).toHaveLength(1)
+      expect(groups[0].matcher).toBeUndefined()
+      const handler = groups[0].hooks[0]
+      expect(handler.type).toBe('command')
+      expect(handler.command).toContain('grok-check.js')
+      expect(handler.timeout).toBe(5)
     }
   })
 
-  it('merges base_url into config.toml at project and user level', async () => {
+  it('merges base_url into config.toml at project and user level, under the confirmed default model id', async () => {
     const projectToml = parseToml(
       await node_fs.readFile(node_path.join(workspaceRoot, '.grok', 'config.toml'), 'utf-8'),
     ) as { model?: Record<string, { base_url?: string }> }
     const userToml = parseToml(
       await node_fs.readFile(node_path.join(home, '.grok', 'config.toml'), 'utf-8'),
     ) as { model?: Record<string, { base_url?: string }> }
-    expect(projectToml.model?.default?.base_url).toBe('http://127.0.0.1:4000')
-    expect(userToml.model?.default?.base_url).toBe('http://127.0.0.1:4000')
+    // "grok-4.6" — CONFIRMED against the real open-sourced
+    // xai-grok-models/default_models.json compiled default, not "default".
+    expect(projectToml.model?.['grok-4.6']?.base_url).toBe('http://127.0.0.1:4000')
+    expect(userToml.model?.['grok-4.6']?.base_url).toBe('http://127.0.0.1:4000')
   })
 
   it('never invents a model id if one is already configured — only overrides base_url', async () => {
@@ -167,7 +176,7 @@ describe('Grok Build hooks writer', () => {
     const merged = parseToml(mergedRaw) as { model?: Record<string, { base_url?: string; temperature?: number }> }
     expect(merged.model?.['grok-4']?.base_url).toBe('http://127.0.0.1:4000')
     expect(merged.model?.['grok-4']?.temperature).toBe(0.2)
-    expect(merged.model?.default).toBeUndefined()
+    expect(merged.model?.['grok-4.6']).toBeUndefined()
   })
 
   it('allows an ordinary command and prints no decision object', async () => {

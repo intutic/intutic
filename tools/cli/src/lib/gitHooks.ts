@@ -15,19 +15,30 @@ import * as node_path from 'node:path'
 import { secretPatternAlternation } from '@intutic/shared-types'
 import { log } from './logger.js'
 
-const HOOK_CONTENT = `
-#!/bin/sh
-# Intutic Git Context Sync Hook
-if command -v intutic >/dev/null 2>&1; then
-  intutic sync-context --git --branch "$(git branch --show-current)" --commit "$(git rev-parse HEAD)" >/dev/null 2>&1 &
-fi
-`.trim()
+/** Marker line identifying a post-commit/post-checkout hook as ours — the overwrite guard. */
+const GIT_CONTEXT_MARKER = '# Intutic Git Context Sync Hook'
 
 /** Marker line identifying a pre-commit hook as ours — the overwrite guard. */
 const PRE_COMMIT_MARKER = '# Intutic Pre-Commit Secret Scan'
 
 /** Marker line identifying a post-merge hook as ours — same overwrite guard as pre-commit. */
 const POST_MERGE_MARKER = '# Intutic Post-Merge Decisions Log Refresh'
+
+/**
+ * Git-context tracking hook content, shared by post-commit and post-checkout
+ * (TD-351): both fire the same best-effort branch/commit sync, backgrounded
+ * and output-suppressed so it never adds latency to the Git command that
+ * triggered it.
+ */
+function gitContextSyncContent(): string {
+  return `
+#!/bin/sh
+${GIT_CONTEXT_MARKER}
+if command -v intutic >/dev/null 2>&1; then
+  intutic sync-context --git --branch "$(git branch --show-current)" --commit "$(git rev-parse HEAD)" >/dev/null 2>&1 &
+fi
+`.trim() + '\n'
+}
 
 /**
  * Optional post-merge hook: refreshes the governed decisions log
@@ -37,8 +48,8 @@ const POST_MERGE_MARKER = '# Intutic Post-Merge Decisions Log Refresh'
  * no-ops (and never errors the shell) when `decisionsLogEnabled` is off or
  * the developer isn't authenticated — see `decisionsLogRefresh.ts`.
  *
- * Backgrounded and output-suppressed, same shape as `HOOK_CONTENT` above —
- * a governance context refresh must never add latency to `git merge`.
+ * Backgrounded and output-suppressed, same shape as `gitContextSyncContent`
+ * above — a governance context refresh must never add latency to `git merge`.
  */
 function postMergeContent(): string {
   return `
@@ -100,10 +111,55 @@ exit 0
 }
 
 /**
- * Installs post-commit and post-checkout hooks into `.git/hooks/`.
+ * Writes one hook file at `<hooksDir>/<name>` unless a foreign (non-Intutic)
+ * hook already occupies that path — the shared never-clobber-a-foreign-hook,
+ * marker-based-idempotent-rerun behavior every hook `installGitHooks` manages
+ * now follows (TD-351; previously only pre-commit and post-merge had it).
+ *
+ * Reads the existing file first: absent, or already carrying `marker` (a
+ * previous install of this same hook, safe to overwrite with the current
+ * content — this is what makes a re-run idempotent), writes `content` and
+ * marks it executable. Anything else is a hook this codebase did not write —
+ * left standing untouched, with `warnMessage` logged so the operator knows
+ * why the hook they expected is missing.
+ *
+ * @returns `true` if the hook was (re-)written, `false` if a foreign hook was
+ *   left in place. Both are legitimate outcomes, not failures — the caller
+ *   decides what "success" means for its own summary log line.
+ */
+async function writeHookIfOursOrAbsent(
+  hooksDir: string,
+  name: string,
+  content: string,
+  marker: string,
+  warnMessage: string,
+): Promise<boolean> {
+  const hookPath = node_path.join(hooksDir, name)
+  let existing: string | null
+  try {
+    existing = await node_fs.readFile(hookPath, 'utf-8')
+  } catch {
+    existing = null
+  }
+  if (existing === null || existing.includes(marker)) {
+    await node_fs.writeFile(hookPath, content, { encoding: 'utf-8', mode: 0o755 })
+    await node_fs.chmod(hookPath, 0o755)
+    return true
+  }
+  log.warn(warnMessage)
+  return false
+}
+
+/**
+ * Installs post-commit, post-checkout, pre-commit, and post-merge hooks into
+ * `.git/hooks/`.
  *
  * @param workspaceRoot - Workspace root directory.
- * @returns Promise<boolean> - True if successfully installed, false otherwise.
+ * @returns Promise<boolean> - True if installation ran without error, even
+ *   when one or more individual hooks were left untouched because a foreign
+ *   hook already occupied that path (see `writeHookIfOursOrAbsent`) — that is
+ *   correct, deliberate behavior, not a failure. `false` only when this is
+ *   not a Git repository or a filesystem error prevented writing.
  */
 export async function installGitHooks(workspaceRoot: string): Promise<boolean> {
   const gitDir = node_path.join(workspaceRoot, '.git')
@@ -122,15 +178,31 @@ export async function installGitHooks(workspaceRoot: string): Promise<boolean> {
   try {
     await node_fs.mkdir(hooksDir, { recursive: true })
 
-    const postCommitPath = node_path.join(hooksDir, 'post-commit')
-    const postCheckoutPath = node_path.join(hooksDir, 'post-checkout')
-
-    await node_fs.writeFile(postCommitPath, HOOK_CONTENT + '\n', { encoding: 'utf-8', mode: 0o755 })
-    await node_fs.writeFile(postCheckoutPath, HOOK_CONTENT + '\n', { encoding: 'utf-8', mode: 0o755 })
-
-    // Double check execute permissions
-    await node_fs.chmod(postCommitPath, 0o755)
-    await node_fs.chmod(postCheckoutPath, 0o755)
+    // Git-context tracking hooks (post-commit, post-checkout). Marker-
+    // disciplined the same way pre-commit and post-merge are below (TD-351):
+    // never clobber a hook that isn't ours. Until this fix these two
+    // overwrote whatever was already at their paths unconditionally — a
+    // team's own post-commit/post-checkout script (a notification hook, a
+    // submodule sync script) was silently replaced on install. Now a foreign
+    // hook is left standing, and the operator is told so.
+    const postCommitInstalled = await writeHookIfOursOrAbsent(
+      hooksDir,
+      'post-commit',
+      gitContextSyncContent(),
+      GIT_CONTEXT_MARKER,
+      "A post-commit hook already exists and is not Intutic's — left untouched. " +
+        'Branch/commit context will not sync automatically on commit; run ' +
+        '`intutic sync-context` manually as a workaround, or add Intutic\'s sync call to your own hook.',
+    )
+    const postCheckoutInstalled = await writeHookIfOursOrAbsent(
+      hooksDir,
+      'post-checkout',
+      gitContextSyncContent(),
+      GIT_CONTEXT_MARKER,
+      "A post-checkout hook already exists and is not Intutic's — left untouched. " +
+        'Branch/commit context will not sync automatically on checkout; run ' +
+        '`intutic sync-context` manually as a workaround, or add Intutic\'s sync call to your own hook.',
+    )
 
     // Pre-commit secret scan. Unlike the two tracking hooks above, this one
     // must NOT clobber blindly: pre-commit is where husky/lint-staged and
@@ -139,52 +211,47 @@ export async function installGitHooks(workspaceRoot: string): Promise<boolean> {
     // uninstalled. Ours is only written over an absent hook or a prior copy
     // of itself (identified by marker); anything else is left standing and
     // said so.
-    const preCommitPath = node_path.join(hooksDir, 'pre-commit')
-    let existing: string | null = null
-    try {
-      existing = await node_fs.readFile(preCommitPath, 'utf-8')
-    } catch {
-      existing = null
-    }
-    if (existing === null || existing.includes(PRE_COMMIT_MARKER)) {
-      await node_fs.writeFile(preCommitPath, preCommitContent(), { encoding: 'utf-8', mode: 0o755 })
-      await node_fs.chmod(preCommitPath, 0o755)
-      log.info('Successfully installed Git hooks (post-commit, post-checkout, pre-commit secret scan)')
-    } else {
-      log.warn(
-        'A pre-commit hook already exists and is not Intutic\'s — left untouched. ' +
-          'The staged-diff secret scan is NOT installed; add it to your existing hook ' +
-          'if you want commit-time scanning.',
-      )
-      log.info('Successfully installed Git sync hooks (post-commit, post-checkout)')
-    }
+    const preCommitInstalled = await writeHookIfOursOrAbsent(
+      hooksDir,
+      'pre-commit',
+      preCommitContent(),
+      PRE_COMMIT_MARKER,
+      "A pre-commit hook already exists and is not Intutic's — left untouched. " +
+        'The staged-diff secret scan is NOT installed; add it to your existing hook ' +
+        'if you want commit-time scanning.',
+    )
 
     // Optional post-merge hook (governed decisions log refresh). Marker-
-    // disciplined the SAME way pre-commit is above — never clobber a
-    // post-merge hook that isn't ours. Deliberately following that pattern
-    // here even though post-commit/post-checkout above do NOT (they
-    // unconditionally overwrite whatever is already at those paths): those
-    // two are a pre-existing, latent overreach — installing tracking hooks
-    // over a team's own post-commit/post-checkout scripts without checking
-    // for one first — noted as TD-351 rather than fixed as part of this
-    // change (out of scope: fixing it would change behavior for every
-    // existing install, not just this new hook). This new hook does not
-    // repeat that gap.
-    const postMergePath = node_path.join(hooksDir, 'post-merge')
-    let existingPostMerge: string | null = null
-    try {
-      existingPostMerge = await node_fs.readFile(postMergePath, 'utf-8')
-    } catch {
-      existingPostMerge = null
-    }
-    if (existingPostMerge === null || existingPostMerge.includes(POST_MERGE_MARKER)) {
-      await node_fs.writeFile(postMergePath, postMergeContent(), { encoding: 'utf-8', mode: 0o755 })
-      await node_fs.chmod(postMergePath, 0o755)
+    // disciplined the same way pre-commit is above — never clobber a
+    // post-merge hook that isn't ours. Post-commit/post-checkout above now
+    // follow this exact same pattern too (TD-351 — previously they did not:
+    // they unconditionally overwrote whatever was already at those paths,
+    // noted as a latent overreach rather than fixed alongside this hook's
+    // original addition, since changing existing-install behavior needed its
+    // own review).
+    const postMergeInstalled = await writeHookIfOursOrAbsent(
+      hooksDir,
+      'post-merge',
+      postMergeContent(),
+      POST_MERGE_MARKER,
+      "A post-merge hook already exists and is not Intutic's — left untouched. " +
+        'The governed decisions log will still refresh on the daemon\'s normal poll cycle; run ' +
+        '`intutic sync-context` manually as a workaround if you need it sooner.',
+    )
+
+    // Summary log line, kept honest: only name a hook as installed if it
+    // actually was. A hook skipped because a foreign hook already exists at
+    // that path already got its own `log.warn` above — this line must never
+    // paper over that with a blanket "success".
+    const installed: string[] = []
+    if (postCommitInstalled) installed.push('post-commit')
+    if (postCheckoutInstalled) installed.push('post-checkout')
+    if (preCommitInstalled) installed.push('pre-commit secret scan')
+    if (postMergeInstalled) installed.push('post-merge decisions log refresh')
+    if (installed.length > 0) {
+      log.info(`Successfully installed Git hooks (${installed.join(', ')})`)
     } else {
-      log.warn(
-        'A post-merge hook already exists and is not Intutic\'s — left untouched. ' +
-          'The governed decisions log will still refresh on the daemon\'s normal poll cycle.',
-      )
+      log.info('No Git hooks installed — every target hook already exists and is not Intutic\'s')
     }
 
     return true

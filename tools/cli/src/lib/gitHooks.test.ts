@@ -124,9 +124,9 @@ describe('post-merge decisions-log-refresh hook — marker discipline', () => {
     expect(content).toContain('>/dev/null 2>&1 &')
   })
 
-  // Same overwrite guard as pre-commit — mirrored here, and load-bearing for
-  // this new hook in a way it is NOT for post-commit/post-checkout above
-  // (see TD-351): those two overwrite unconditionally.
+  // Same overwrite guard as pre-commit, and (since TD-351) as post-commit
+  // and post-checkout below — all four hooks `installGitHooks` manages share
+  // this discipline via `writeHookIfOursOrAbsent` now.
   it('never clobbers a pre-existing post-merge hook it did not write', async () => {
     const hookPath = path.join(repo, '.git', 'hooks', 'post-merge')
     fs.mkdirSync(path.dirname(hookPath), { recursive: true })
@@ -146,6 +146,62 @@ describe('post-merge decisions-log-refresh hook — marker discipline', () => {
     const second = fs.readFileSync(hookPath, 'utf-8')
     expect(second).toBe(first)
     expect(second).toContain('Intutic Post-Merge Decisions Log Refresh')
+  })
+})
+
+describe('post-commit / post-checkout git-context hooks — marker discipline (TD-351)', () => {
+  let repo: string
+
+  beforeEach(async () => {
+    repo = fs.mkdtempSync(path.join(os.tmpdir(), 'intutic-gitcontext-'))
+    git(repo, 'init', '-q')
+    git(repo, 'config', 'user.email', 't@t.local')
+    git(repo, 'config', 'user.name', 't')
+  })
+  afterEach(() => {
+    fs.rmSync(repo, { recursive: true, force: true })
+  })
+
+  it('never clobbers a pre-existing post-commit hook it did not write', async () => {
+    const hookPath = path.join(repo, '.git', 'hooks', 'post-commit')
+    fs.mkdirSync(path.dirname(hookPath), { recursive: true })
+    const theirs = '#!/bin/sh\n# some team script\nexit 0\n'
+    fs.writeFileSync(hookPath, theirs, { mode: 0o755 })
+    expect(await installGitHooks(repo)).toBe(true)
+    expect(fs.readFileSync(hookPath, 'utf-8'), 'a foreign post-commit hook was overwritten').toBe(
+      theirs,
+    )
+  })
+
+  it('re-running install updates its own previously-installed post-commit hook (marker present)', async () => {
+    expect(await installGitHooks(repo)).toBe(true)
+    const hookPath = path.join(repo, '.git', 'hooks', 'post-commit')
+    const first = fs.readFileSync(hookPath, 'utf-8')
+    expect(await installGitHooks(repo)).toBe(true)
+    const second = fs.readFileSync(hookPath, 'utf-8')
+    expect(second).toBe(first)
+    expect(second).toContain('Intutic Git Context Sync Hook')
+  })
+
+  it('never clobbers a pre-existing post-checkout hook it did not write', async () => {
+    const hookPath = path.join(repo, '.git', 'hooks', 'post-checkout')
+    fs.mkdirSync(path.dirname(hookPath), { recursive: true })
+    const theirs = '#!/bin/sh\n# some team script\nexit 0\n'
+    fs.writeFileSync(hookPath, theirs, { mode: 0o755 })
+    expect(await installGitHooks(repo)).toBe(true)
+    expect(fs.readFileSync(hookPath, 'utf-8'), 'a foreign post-checkout hook was overwritten').toBe(
+      theirs,
+    )
+  })
+
+  it('re-running install updates its own previously-installed post-checkout hook (marker present)', async () => {
+    expect(await installGitHooks(repo)).toBe(true)
+    const hookPath = path.join(repo, '.git', 'hooks', 'post-checkout')
+    const first = fs.readFileSync(hookPath, 'utf-8')
+    expect(await installGitHooks(repo)).toBe(true)
+    const second = fs.readFileSync(hookPath, 'utf-8')
+    expect(second).toBe(first)
+    expect(second).toContain('Intutic Git Context Sync Hook')
   })
 })
 

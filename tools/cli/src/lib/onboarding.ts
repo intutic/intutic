@@ -203,6 +203,21 @@ export function printOnboardingGuide(harnesses: string[], userAuthToken?: string
         writeCliOutput(`  Set the custom API base URL and key in the Windsurf settings tab.`)
         break
 
+      case 'dsh':
+        writeCliOutput(`  Every sync registers the Intutic gate into each EXISTING dsh profile`)
+        writeCliOutput(`  (${pc.bold('cordis.patch.yml')} + the ${pc.bold('@intutic/gate')} package.json dependency) and`)
+        writeCliOutput(`  redirects both the llm-deepseek (default) and llm-pi-ai (selectable) LLM`)
+        writeCliOutput(`  routes in ${pc.bold('settings.yaml')} through the Intutic proxy — no manual config edit.`)
+        writeCliOutput(`  `)
+        writeCliOutput(`  One manual step remains, PER PROFILE: this daemon cannot run a package`)
+        writeCliOutput(`  manager in a directory it does not own, so finish activation with:`)
+        writeCliOutput(`     ${pc.bold('dsh plugin --profile <name> add @intutic/gate')}`)
+        writeCliOutput(`  See ${pc.cyan('$DSH_HOME/INSTALL.md')} (auto-generated, lists your current profiles).`)
+        writeCliOutput(`  `)
+        writeCliOutput(`  Nothing is governed until your FIRST \`dsh --profile <name>\` run creates a`)
+        writeCliOutput(`  profile to register into.`)
+        break
+
       case 'xirp':
         // Xirp is not itself an AI agent and writes no config of its own —
         // see gateRegistry.ts's NO_GATE row. The generic `intutic exec`

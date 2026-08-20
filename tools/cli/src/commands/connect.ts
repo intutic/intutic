@@ -43,6 +43,7 @@ import { SyncWsClient,
   updatePreToolUseHooks,
   injectMcpServer,
   guardSettingsFile,
+  warnIfDshCoverageGap,
   writeRuntimeEnv,
   refreshPolicySnapshot,
   runComplianceProbes,
@@ -1034,6 +1035,19 @@ export async function runConnect(opts: {
 
   // Run initial compliance check on startup
   await runProbes()
+
+  // dsh coverage-gap visibility (TD-370): once at startup, not every poll
+  // tick — the gap only changes state on the user's first `dsh --profile
+  // <name>` run, which the filesystem watcher below reacts to immediately
+  // via settingsGuard.ts's isDshProfilesRoot `addDir` handling. Only worth
+  // checking when dsh is actually a configured harness for this workspace.
+  if (safeConfig.harnesses.includes('dsh' as HarnessType)) {
+    try {
+      await warnIfDshCoverageGap()
+    } catch (err) {
+      log.dim(`dsh coverage-gap check failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
 
   // 5. Start Filesystem Watcher
   const watcher = startWatcher(safeConfig.workspaceRoot, safeConfig.harnesses, async (changedPath) => {

@@ -8,9 +8,12 @@
  * @module
  */
 
+import { existsSync } from 'node:fs'
+import * as node_path from 'node:path'
 import { log } from '../lib/logger.js'
 import { loadCredentials, loadConfig, loadIntegrity } from '../config/store.js'
 import { getActiveAgentProcesses, isSyncDaemonRunning } from '../lib/process.js'
+import { resolveDshHome, listDshProfileDirs, detectDshCoverageGap } from '@intutic/sync-daemon/harness/dshHooks'
 import pc from 'picocolors'
 
 const HARNESS_TO_PROCESS_NAME: Record<string, string[]> = {
@@ -58,6 +61,42 @@ export async function runStatus(): Promise<void> {
     } else {
       for (const h of config.harnesses) {
         console.log(`  ${pc.green('✔')} ${h}`)
+      }
+    }
+
+    // dsh has no canonical config file to diff (see HARNESS_FILES.dsh in
+    // configWriter.ts) and a real manual activation step after this daemon's
+    // automatic writes (TD-370) — worth its own status block rather than the
+    // plain checkmark every other harness gets above.
+    if (config.harnesses.includes('dsh')) {
+      console.log('')
+      log.info('dsh (DeepSeek harness):')
+      const dshHome = resolveDshHome()
+      const profileDirs = await listDshProfileDirs(dshHome)
+      if (profileDirs.length === 0) {
+        const gap = await detectDshCoverageGap(dshHome)
+        if (gap.dshDetected) {
+          log.warn(`  ${pc.yellow('dsh is present on this machine but has zero profiles — nothing is governed yet.')}`)
+          log.dim('  Run `dsh --profile <name> ...` once, then re-run `intutic connect` to register it.')
+        } else {
+          log.dim('  No dsh profiles detected.')
+        }
+      } else {
+        const notActivated: string[] = []
+        for (const dir of profileDirs) {
+          const name = node_path.basename(dir)
+          const installed = existsSync(node_path.join(dir, 'node_modules', '@intutic', 'gate'))
+          if (!installed) notActivated.push(name)
+        }
+        if (notActivated.length > 0) {
+          log.warn(`  ${pc.yellow(`${notActivated.length} of ${profileDirs.length} profile(s) registered but not yet activated:`)}`)
+          for (const name of notActivated) {
+            log.dim(`    ${name} — run: dsh plugin --profile ${name} add @intutic/gate`)
+          }
+          log.dim(`  See ${node_path.join(dshHome, 'INSTALL.md')}`)
+        } else {
+          console.log(`  ${pc.green('✔')} ${profileDirs.length} profile(s) registered and activated`)
+        }
       }
     }
 
