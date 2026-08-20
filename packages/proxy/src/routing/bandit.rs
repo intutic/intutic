@@ -286,10 +286,19 @@ pub async fn route_model(
     // prompt caching almost entirely on multi-turn sessions — this lock is why
     // it mostly doesn't.
     //
-    // "Mostly", not "entirely": the lock only protects the *model* choice.
-    // SOP content is still prepended at `system[0]` on every request
-    // (`sops::inject_into_body`), which can shift the cached prefix even with
-    // the model held constant — see the hazard note there and TD-348.
+    // "Mostly", not "entirely" — though the gap is narrower than it used to
+    // be. SOP content is still prepended at `system[0]` on every request
+    // (`sops::inject_into_body`), which COULD shift the cached prefix even
+    // with the model held constant. TD-348 closed the practical case: the
+    // rendered advisory text is now pinned per session
+    // (`sops::resolve_injection_block`, keyed by the same scope this session
+    // lock protects) for up to `RoutingConfig::sop_pin_max_age_secs`, so the
+    // injected bytes normally stay stable for a session's whole active span
+    // even when the underlying SOP set would render differently mid-session.
+    // What remains is bounded staleness, not unbounded churn: a SOP edited or
+    // a tier flipped can still shift the prefix once the pin's TTL elapses
+    // (or immediately, if an operator has set `sop_pin_max_age_secs: 0`) —
+    // see `resolve_injection_block`'s doc comment for the full trade-off.
     if let Some(locked_model) = session.locked_model {
         tracing::debug!(session_id = %session_id, locked_model = %locked_model, "Session lock hit");
         return Ok((locked_model, resolved_sop_tier, task_type.to_string()));

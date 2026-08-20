@@ -37,6 +37,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
+use crate::store::{LocalStore, PinScope, PinnedSopBlock};
 use crate::wasm::context::RiskLevel;
 use serde::Serialize;
 
@@ -1271,7 +1272,7 @@ pub async fn all_sops_for_workspace(
 /// signal for a heartbeat payload, not a security hash; 64 bits is far more
 /// headroom than a realistic SOP-set count needs before a collision becomes
 /// plausible.
-fn fingerprint_sop_set(workspace_id: &str, sops: &[Sop]) -> String {
+pub fn fingerprint_sop_set(workspace_id: &str, sops: &[Sop]) -> String {
     use sha2::{Digest, Sha256};
 
     let mut entries: Vec<String> = sops
@@ -1702,11 +1703,45 @@ fn collect_denies(sops: &[Sop], role: &str) -> Vec<String> {
 }
 
 /// Rendering split out so it can be tested without touching the filesystem.
+///
+/// Provably permutation-invariant of its input slice (TD-348): sorts the
+/// applicable SOPs by title itself rather than trusting `sops` to already
+/// arrive title-sorted. Two of today's callers happen to hand it a
+/// pre-sorted slice — `read_dir_sops` and `fetch_workspace_sops` sort their
+/// own caches, for their own reasons (`plan_steps` ordering, mainly) — but
+/// that was never a guarantee this function itself enforced, so a caller
+/// that *doesn't* pre-sort silently produced a differently-ordered block on
+/// no observable change in policy. Sorting here makes `render` a pure
+/// function of `(slice content, role)` regardless of input order, which is
+/// what makes it safe for `resolve_injection_block` to serve a pinned render
+/// across a session without re-deriving or comparing anything: two
+/// concurrent first-turn renders of the same (possibly differently-ordered)
+/// SOP slice converge on identical bytes.
+///
+/// **Greedy-skip truncation, deliberately not `break`.** A section that would
+/// push the block past [`MAX_INJECTED_BYTES`] is skipped (`continue`), not
+/// treated as a stopping point — a design review explicitly rejected
+/// switching this to `break`: that would let one oversized,
+/// alphabetically-first SOP blank the entire rendered block for every SOP
+/// after it, which is worse than the current coverage-maximizing behaviour of
+/// fitting as many SOPs as possible. What changed here is only that the
+/// omission note now NAMES the omitted titles (sorted, since `matching` is
+/// already sorted by the time they're skipped) instead of just counting them
+/// — making the nonlocal truncation effect visible instead of silent, without
+/// changing which SOPs get included.
+///
+/// **Never affects enforcement.** This function (and the byte budget it
+/// applies) only bounds the advisory TEXT block. `governance_fields_from`
+/// collects `deny_tools`/`plan_steps`/`scope_paths`/etc. from the full
+/// applicable slice with no byte budget of its own — an SOP omitted here for
+/// space still fully enforces. See `render_determinism_tests::
+/// truncated_sop_still_contributes_its_deny_tools_to_governance_fields_from`.
 fn render(sops: &[Sop], role: &str) -> Option<String> {
-    let matching: Vec<&Sop> = sops.iter().filter(|s| s.applies_to(role)).collect();
+    let mut matching: Vec<&Sop> = sops.iter().filter(|s| s.applies_to(role)).collect();
     if matching.is_empty() {
         return None;
     }
+    matching.sort_by(|a, b| a.title.cmp(&b.title));
 
     let mut out = String::from("[Intutic Governance] Standard operating procedures in force");
     if !role.is_empty() {
@@ -1714,25 +1749,109 @@ fn render(sops: &[Sop], role: &str) -> Option<String> {
     }
     out.push_str(":\n\n");
 
-    let mut truncated = 0usize;
+    // `matching` is already title-sorted, so titles land here in sorted
+    // order without a second sort.
+    let mut omitted_titles: Vec<String> = Vec::new();
     for sop in matching {
         let section = format!("## {}\n{}\n\n", sop.title, sop.body);
         if out.len() + section.len() > MAX_INJECTED_BYTES {
-            truncated += 1;
+            omitted_titles.push(sop.title.clone());
             continue;
         }
         out.push_str(&section);
     }
 
-    if truncated > 0 {
+    if !omitted_titles.is_empty() {
         // Say so rather than silently dropping policy — an agent told it has
-        // the full set when it does not will act with false confidence.
+        // the full set when it does not will act with false confidence. Named
+        // rather than merely counted, so a reader can tell exactly which
+        // policy is missing without cross-referencing the SOP directory.
         out.push_str(&format!(
-            "({truncated} further SOP(s) omitted to bound context size.)\n"
+            "({} further SOP(s) omitted to bound context size: {}.)\n",
+            omitted_titles.len(),
+            omitted_titles.join(", ")
         ));
     }
 
     Some(out.trim_end().to_string())
+}
+
+/// Resolve the injected SOP advisory block for a request, preferring a
+/// still-unexpired session pin over a fresh render (TD-348 mitigation).
+///
+/// `render` alone is a pure function of its input slice (see its doc
+/// comment), but the SLICE handed to it can itself change from one request
+/// to the next within the same session — a SOP edited, a tier flipped, a
+/// keyword override changed — so calling `render` fresh on every request
+/// still moves the injected prefix underneath `routing::bandit::
+/// route_model`'s session-locked model, exactly as TD-348 described. This
+/// function pins the RENDERED TEXT itself, independent of the model pin:
+/// once a session has a pin, every subsequent request in that session
+/// (until the pin's TTL elapses) serves the SAME bytes, regardless of what a
+/// fresh render would now produce.
+///
+/// `max_age_secs == 0` is the escape hatch/kill-switch: always return
+/// `freshly_rendered` unpinned — exactly today's per-request
+/// render-and-inject behaviour, restored in full. Unlike TD-347's fix, this
+/// one keeps a config off-switch on purpose: prompt content staleness for up
+/// to `max_age_secs` is a real, subjective product trade (see
+/// `RoutingConfig::sop_pin_max_age_secs`'s doc comment), not a correctness
+/// bug like the pricing defect TD-347 closed.
+///
+/// Otherwise: an existing unexpired pin for `scope` is served AS-IS — no
+/// fingerprint comparison, no "is this still fresh" check. Serving the
+/// pinned bytes unconditionally *is* the point; comparing fingerprints
+/// before serving would re-introduce the same per-request prefix churn this
+/// function exists to remove. Absent a pin (first request in this window,
+/// or a prior pin's TTL elapsed), `freshly_rendered` becomes the new pin —
+/// written via [`LocalStore::pin_sop_block`]'s NX-style "only if absent"
+/// semantics, so two concurrent first-turn requests for the same session
+/// converge on ONE winner's bytes rather than each pinning, and serving,
+/// its own. `fingerprint` (from [`fingerprint_sop_set`]) rides along on the
+/// pin purely as debugging metadata; see [`PinnedSopBlock`]'s doc comment
+/// for why it is never consulted to decide freshness.
+///
+/// A `None` `freshly_rendered` (nothing applicable to this role) is passed
+/// through unpinned — there is nothing to hold stable, and pinning "no
+/// block" would only cost a round trip for no benefit.
+///
+/// # Divergence from enforcement — intentional, not a bug
+///
+/// This function runs even on a request whose `fetch_workspace_sops` call
+/// failed toward an empty SOP set for THIS particular request (the SOP
+/// cache's own fail-closed behaviour — documented on that function). In that
+/// case the pinned advisory TEXT may still be served from before the
+/// failure: stale but non-empty, rather than reflecting this request's empty
+/// fetch. That is intentional, not a bug a future reader should "fix": the
+/// SEPARATE enforcement path — `governance_fields_from`, resolved
+/// independently against THIS request's own (possibly empty) SOP set —
+/// always sees the real thing regardless of what is pinned for display. A
+/// pinned advisory block can therefore be briefly, staleness-bounded wrong
+/// about what it *says* is enforced, while enforcement itself is never wrong
+/// about what it *does*.
+pub async fn resolve_injection_block(
+    store: &dyn LocalStore,
+    scope: &PinScope,
+    freshly_rendered: Option<String>,
+    fingerprint: &str,
+    max_age_secs: u64,
+) -> Option<String> {
+    if max_age_secs == 0 {
+        return freshly_rendered;
+    }
+
+    if let Some(pin) = store.pinned_sop_block(scope).await {
+        return Some(pin.block);
+    }
+
+    let fresh = freshly_rendered?;
+    let candidate = PinnedSopBlock {
+        block: fresh,
+        fingerprint: fingerprint.to_string(),
+        pinned_at: chrono::Utc::now().timestamp(),
+    };
+    let winner = store.pin_sop_block(scope, &candidate, max_age_secs).await;
+    Some(winner.block)
 }
 
 /// Prepend a governance block to a request body, in whatever shape the
@@ -1745,19 +1864,20 @@ fn render(sops: &[Sop], role: &str) -> Option<String> {
 /// prompt is the more specific instruction and should be read last, closest to
 /// the task. Governance is the frame it sits inside.
 ///
-/// **Known KV-cache hazard (TD-348), not fixed here:** this writes at
-/// `system[0]` (Anthropic/Gemini) or `messages[0]` (OpenAI Chat) on *every*
-/// request. `routing::bandit::route_model`'s session lock pins the model
-/// across a session specifically to keep the provider-side cached prefix
-/// warm — but if `block`'s content changes between two requests in the same
-/// session (a SOP is edited, a tier flips, keyword overrides change), the
-/// prefix this function writes changes too, and the model pin can't save a
-/// prefix that itself moved. Reordering injection to preserve prefix
-/// stability would touch SOP priority semantics (the doc comment above is
-/// explicit that prepend-vs-append is deliberate), which is out of scope
-/// here — this comment and TD-348 exist so the gap is recorded rather than
-/// silently inherited by whoever writes the "why doesn't caching help more"
-/// investigation next.
+/// **KV-cache hazard (TD-348) — mitigated, not eliminated.** This still
+/// writes at `system[0]` (Anthropic/Gemini) or `messages[0]` (OpenAI Chat) on
+/// every request; this function is unchanged. What changed is what `block`
+/// now typically IS: `resolve_injection_block` (above) pins the rendered
+/// advisory text per session for up to `RoutingConfig::sop_pin_max_age_secs`
+/// (default 10 minutes), so `block` is normally the SAME bytes across an
+/// active session's requests even if the underlying SOP set would render
+/// differently mid-session — closing the gap `routing::bandit::route_model`'s
+/// session lock could not close on its own (that lock only pins the model
+/// choice). Residual staleness — a SOP edited or a tier flipped takes up to
+/// `sop_pin_max_age_secs` to reach an active session's injected text — is a
+/// deliberate, documented trade, not a bug; see `resolve_injection_block`'s
+/// doc comment. Setting `sop_pin_max_age_secs: 0` restores exactly this
+/// function's original every-request-reflects-the-live-set behaviour.
 pub fn inject_into_body(
     body: &mut serde_json::Value,
     protocol: &crate::protocol::Protocol,
@@ -2183,6 +2303,126 @@ mod tests {
     #[test]
     fn a_missing_directory_is_not_an_error() {
         assert!(read_dir_sops(Path::new("/nonexistent/intutic/sops")).is_empty());
+    }
+}
+
+/// Pins down `render`'s permutation-invariance and truncation-naming
+/// properties (TD-348 step 1), plus the single most important correctness
+/// property of the whole pinning change: truncating the rendered advisory
+/// text must never affect enforcement.
+#[cfg(test)]
+mod render_determinism_tests {
+    use super::*;
+
+    fn sop_with_body(title: &str, body: &str) -> Sop {
+        Sop {
+            risk_tier: None,
+            scope: SopScope::Workspace,
+            title: title.into(),
+            body: body.into(),
+            roles: Vec::new(),
+            deny_tools: Vec::new(),
+            allow_harnesses: Vec::new(),
+            plan_steps: Vec::new(),
+            scope_paths: Vec::new(),
+            review_before: Vec::new(),
+            requires_before: Vec::new(),
+            forbid_after: Vec::new(),
+            mode: SopMode::default(),
+            max_calls: Vec::new(),
+            forbid_with: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn identical_input_renders_byte_identical_output_twice() {
+        let sops = vec![
+            sop_with_body("zebra", "- rule z"),
+            sop_with_body("alpha", "- rule a"),
+            sop_with_body("middle", "- rule m"),
+        ];
+        let first = render(&sops, "any").unwrap();
+        let second = render(&sops, "any").unwrap();
+        assert_eq!(first, second, "render must be a pure function of its input");
+    }
+
+    #[test]
+    fn shuffled_or_reversed_input_order_renders_the_same_bytes() {
+        let ordered = vec![
+            sop_with_body("alpha", "- rule a"),
+            sop_with_body("middle", "- rule m"),
+            sop_with_body("zebra", "- rule z"),
+        ];
+        let mut reversed = ordered.clone();
+        reversed.reverse();
+        let mut shuffled = ordered.clone();
+        shuffled.swap(0, 2);
+        shuffled.swap(1, 2);
+
+        let out_ordered = render(&ordered, "any").unwrap();
+        let out_reversed = render(&reversed, "any").unwrap();
+        let out_shuffled = render(&shuffled, "any").unwrap();
+        assert_eq!(
+            out_ordered, out_reversed,
+            "reversing the input slice must not change the rendered bytes"
+        );
+        assert_eq!(
+            out_ordered, out_shuffled,
+            "shuffling the input slice must not change the rendered bytes"
+        );
+    }
+
+    /// One section alone exceeds the byte budget; the note must NAME it, not
+    /// just count it, and a later, smaller SOP must still render — pinning the
+    /// greedy-skip (`continue`, not `break`) behaviour a design review
+    /// explicitly kept. See the doc comment on `render`.
+    #[test]
+    fn oversized_section_is_named_in_the_omission_note_and_later_sops_still_render() {
+        let sops = vec![
+            sop_with_body("aaa-huge", &"x".repeat(MAX_INJECTED_BYTES + 100)),
+            sop_with_body("zzz-small", "- a small, easily-fit rule"),
+        ];
+        let out = render(&sops, "any").unwrap();
+        assert!(
+            out.contains("aaa-huge"),
+            "the omitted SOP's title must be named in the note, not just counted: {out}"
+        );
+        assert!(
+            out.contains("## zzz-small"),
+            "a later, smaller SOP must still render despite an earlier oversized one: {out}"
+        );
+    }
+
+    /// The single most important correctness property of this whole change:
+    /// truncation of the RENDERED advisory text must never touch enforcement.
+    /// `governance_fields_from` collects `deny_tools` (and everything else it
+    /// exposes) from the full applicable slice with no byte budget of its
+    /// own — a completely separate output from `render`'s text block. This
+    /// builds a slice where the oversized SOP is guaranteed to be omitted
+    /// from the rendered block, and asserts its `deny_tools` entry is still
+    /// present in `governance_fields_from`'s output regardless.
+    #[test]
+    fn truncated_sop_still_contributes_its_deny_tools_to_governance_fields_from() {
+        let mut huge = sop_with_body("aaa-huge", &"x".repeat(MAX_INJECTED_BYTES + 100));
+        huge.deny_tools = vec!["rm".to_string()];
+        let small = sop_with_body("zzz-small", "- fits easily");
+        let sops = vec![huge, small];
+
+        // Precondition: the huge SOP really is omitted from the rendered text.
+        let rendered = render(&sops, "any").unwrap();
+        assert!(
+            !rendered.contains("## aaa-huge"),
+            "test precondition: the huge SOP's body must NOT be in the rendered block"
+        );
+
+        // The enforcement path must see it anyway.
+        let gov = governance_fields_from(&sops, "any");
+        assert_eq!(
+            gov.denied_tools,
+            vec!["rm".to_string()],
+            "deny_tools must survive rendered-block truncation — enforcement is not \
+             gated by the advisory text's byte budget"
+        );
     }
 }
 

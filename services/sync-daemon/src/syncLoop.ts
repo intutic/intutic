@@ -31,6 +31,7 @@ import type {
   WorkspaceSettings,
 } from '@intutic/shared-types'
 import { writeConfigFiles, HARNESS_FILES, applyConfigEdits } from './configWriter.js'
+import type { ConfigEditApplyOutcome } from './configWriter.js'
 import { injectMcpServer } from './harness/mcpAutoWrite.js'
 import { discoverWorktrees } from './lib/gitWorktrees.js'
 import { computeFileHashes } from './hashReporter.js'
@@ -566,12 +567,27 @@ export async function runSyncIteration(ctx: IterationContext): Promise<SyncResul
 
     if (toApply.length > 0) {
       try {
-        await applyConfigEdits(
+        const results = await applyConfigEdits(
           workspaceRoot,
           toApply,
           config.settings.bypassEnforcementTier,
         )
-        const newlyAppliedIds = Array.from(new Set([...localAppliedIds, ...toApply.map(e => e.suggestionId)]))
+
+        // Ack every result back to control-plane (TD-349). Best-effort per
+        // suggestion — one failed ack must not block the others or abort
+        // the sync cycle; see reportApplyResult's own non-fatal handling.
+        for (const result of results) {
+          await reportApplyResult(controlPlaneUrl, apiKey, result.suggestionId, result)
+        }
+
+        // Only remember ids that fully landed (every operation for that
+        // suggestion applied). Recording every ATTEMPTED id regardless of
+        // outcome (the old behavior) meant a fuzzy-match miss was silently
+        // never retried — the id was in applied-suggestions.json forever,
+        // and forceApply is the only other thing that re-attempts an id
+        // already in this file. A failed edit must remain retryable.
+        const landedIds = results.filter((r) => r.ok).map((r) => r.suggestionId)
+        const newlyAppliedIds = Array.from(new Set([...localAppliedIds, ...landedIds]))
         try {
           fs.mkdirSync(path.dirname(appliedSuggestionsPath), { recursive: true })
           fs.writeFileSync(appliedSuggestionsPath, JSON.stringify(newlyAppliedIds, null, 2), 'utf-8')
@@ -820,6 +836,45 @@ async function reportStatus(
     console.warn(
       `[sync-daemon] reportStatus failed for ${harnessType}: ${res.status} ${res.statusText}`,
     )
+  }
+}
+
+/**
+ * Ack a SkillOpt config-edit apply outcome back to the control plane
+ * (TD-349) — POST /api/v1/skillopt/:suggestionId/apply-result.
+ *
+ * Same HTTP call shape as `reportGovernanceCoverageSnapshot`
+ * (configReader.ts): `fetch` + `AbortSignal.timeout(10_000)`, fully
+ * non-fatal. This ack closing the loop is important, but it must never be
+ * allowed to abort a sync cycle that otherwise succeeded — a dropped ack
+ * just means the suggestion re-syncs and gets acked again next cycle
+ * (getSyncConfig re-pushes 'applied' and 'apply_unconfirmed' rows alike).
+ */
+async function reportApplyResult(
+  controlPlaneUrl: string,
+  apiKey: string,
+  suggestionId: string,
+  result: ConfigEditApplyOutcome,
+): Promise<void> {
+  try {
+    const res = await fetch(`${controlPlaneUrl}/api/v1/skillopt/${suggestionId}/apply-result`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        ok: result.ok,
+        perOperation: result.perOperation,
+      }),
+      signal: AbortSignal.timeout(10_000),
+    })
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      console.warn(`[sync-daemon] reportApplyResult failed for ${suggestionId} (${res.status}): ${body}`)
+    }
+  } catch (err) {
+    console.warn(`[sync-daemon] reportApplyResult request failed for ${suggestionId}:`, err)
   }
 }
 
