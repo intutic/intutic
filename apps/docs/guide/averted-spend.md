@@ -61,7 +61,7 @@ different populations of numbers:
 
 | | What it measures | Basis |
 |---|---|---|
-| **Savings %** / **You saved $X** | Actual routing/caching cost reduction on completed requests | Measured |
+| **Savings %** / **You saved $X** | Actual routing/caching cost *impact* on completed requests (caching does not always reduce cost — see [TD-347](https://github.com/intutic/intutic/blob/main/docs/TECH_DEBT.md)) | Measured |
 | **Runaway spend averted** | Projected cost of a killed session's burn rate continuing for 60 more minutes | Extrapolated |
 
 The callout only renders when the figure is a positive number — a session with no averted spend
