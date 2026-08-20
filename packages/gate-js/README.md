@@ -148,9 +148,22 @@ type-checked and exercised in `src/__tests__/harness.test.ts`):
   `toolApproval`.** They are governed only by `permissionMode`, which
   **defaults to `'allow-all'`**. `recommendedHarnessSettings()` returns the
   posture this integration recommends instead (`'allow-edits'`, plus a
-  sandbox `networkPolicy` — deny-all, or a host allow-list) — because the
-  laptop Intutic proxy never sees sandbox egress, host-level network policy
-  is the only egress control available there, and it is coarse (no DLP).
+  sandbox `networkPolicy` — deny-all, or a host allow-list — plus
+  `inactiveTools: ['bash']` by default, dropping `bash` from the tool set
+  entirely rather than merely gating it; opt out with `filterBash: false`)
+  — because the laptop Intutic proxy never sees sandbox egress, host-level
+  network policy is the only egress control available there, and it is
+  coarse (no DLP).
+- **`intuticSandboxBootstrap()`** injects a Tier A1 (policy-snapshot)
+  `PreToolUse` hook + `.claude/settings.json` directly into the sandbox
+  filesystem via `HarnessAgentSettings.sandboxConfig.onBootstrap` — the only
+  way to put anything resembling the native Intutic gate inside the
+  microVM. Claude Code only; a strict subset of a laptop gate (no SOP tier,
+  review-hold, or event draining — those need a live control-plane
+  connection a bootstrap function can't have). Spread its output into
+  `sandboxConfig` alongside `recommendedHarnessSettings()`. See TD-417 and
+  `apps/docs/integrations/ai-sdk-harness.md` for what has and hasn't been
+  live-verified.
 
 ## `@intutic/gate/workflow` — Vercel `@ai-sdk/workflow` (durable workflow agents)
 

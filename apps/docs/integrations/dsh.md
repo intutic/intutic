@@ -12,7 +12,7 @@ Unlike every other native harness Intutic supports, dsh has no `hooks.json`/shel
 
 That module is a genuine [Cordis Plugin](https://github.com/cordiverse/cordis) subscribed to dsh's `tools/pre-execute` event — a `waterfall` (Cordis's cooperative, composable event-dispatch mode) that runs before every tool call. It calls into `@intutic/gate`'s own four-tier `Gate.guard()` evaluator and returns `{kind: 'deny', reason}` to veto a call, or calls the waterfall's `next()` to let it (and any other listener, including dsh's own built-in approval flow) proceed.
 
-Intutic's sync daemon does not generate this plugin file — it already exists, published on npm. What the daemon writes is the **registration**: a row in every existing dsh profile's `cordis.patch.yml` naming the plugin, plus the `@intutic/gate` dependency declaration in that profile's `package.json`, plus an `intutic` route merged into `settings.yaml`'s `llm-pi-ai.providers` section for LLM egress.
+Intutic's sync daemon does not generate this plugin file — it already exists, published on npm. What the daemon writes is the **registration**: a row in every existing dsh profile's `cordis.patch.yml` naming the plugin, plus the `@intutic/gate` dependency declaration in that profile's `package.json`, plus proxy routes merged into `settings.yaml`'s `llm-deepseek` (dsh's default LLM route) and `llm-pi-ai` (a kept selectable route) sections for LLM egress. It also (re)generates `$DSH_HOME/INSTALL.md` on every sync — see step 5 and "What gets written" below.
 
 ## Setup
 
@@ -59,11 +59,24 @@ dsh plugin --profile myproject add @intutic/gate
 
 (or `cd $DSH_HOME/profiles/myproject && pnpm install`, if you manage the profile's `node_modules` directly). Until this runs, the `cordis.patch.yml` row Intutic wrote names a module Node cannot yet resolve, and dsh's own loader reports that row failed to activate — a **fail-loud** gap you will see in dsh's own diagnostics, not a silent one.
 
+The CLI's own onboarding text (shown after `intutic init`/`intutic connect --harness dsh`) prints this same command, per profile, so you don't have to come back to this page to find it.
+
+Every sync also (re)writes `$DSH_HOME/INSTALL.md`, listing the exact `dsh plugin --profile <name> add @intutic/gate` command for every profile currently registered — a standing, always-current reference alongside the onboarding text (the same pattern the [n8n integration](/integrations/n8n)'s own auto-generated INSTALL.md follows).
+
+## Coverage visibility
+
+Two places surface the TD-370 "silent no-profile window" and the pending activation step above, so neither goes unnoticed between syncs:
+
+- **`intutic status`** prints a dedicated `dsh (DeepSeek harness):` block: a warning when dsh is detected but has zero profiles, or — once profiles exist — a per-profile breakdown of which ones are registered but not yet activated (pointing at `INSTALL.md`), versus fully registered and activated.
+- **`intutic connect`** checks once at startup (not on every poll tick, since the gap only changes state on your first `dsh --profile <name>` run) and logs a warning if dsh is present on the machine with zero profiles yet.
+
 ## What gets written
 
 - **Plugin registration:** a `{ insert: [{ id: 'intutic-governance', name: '@intutic/gate/dsh', config: {...} }] }` row merged into every existing `$DSH_HOME/profiles/*/cordis.patch.yml` — a structural YAML edit (via the `yaml` package's `parseDocument`/`setIn`) that preserves every other row and any comments/formatting around it.
 - **Dependency:** `@intutic/gate` added to that profile's `package.json` `dependencies` (see step 5 above for why this alone is not enough).
-- **LLM egress:** an `intutic` route merged into `settings.yaml`'s `llm-pi-ai.providers` map (`baseURL` pointed at the local Intutic proxy).
+- **LLM egress — default route:** `settings.yaml`'s `llm-deepseek.baseURL` is overridden to the local Intutic proxy. `llm-deepseek` is dsh's **actual default** LLM route (the native DeepSeek adapter `dsh-base`'s own `agent-default-model` row points at) — this merge is what redirects a fresh profile's default egress, no further configuration needed. Only `baseURL` is touched; every other field in that section (`apiKeyEnv`, `thinking`, `models`, ...) round-trips untouched.
+- **LLM egress — selectable route:** an `intutic` route also merged into `settings.yaml`'s `llm-pi-ai.providers` map (`baseURL` pointed at the local Intutic proxy). `llm-pi-ai` is not dsh's default route and mounts dormant until a `llm-pi-ai:` section exists at all — this merge keeps it available as an explicit, user-selectable alternative alongside the default-route merge above, it does not replace it.
+- **`$DSH_HOME/INSTALL.md`:** regenerated every sync (write-if-changed) — lists the manual `dsh plugin --profile <name> add @intutic/gate` command for every currently-registered profile. See step 5 above.
 - **No rules file.** dsh has no workspace-relative rules/instructions file this integration writes governance text into — its config lives entirely under `$DSH_HOME`, not the project workspace.
 
 ## Pre-tool hooks (blocking)
@@ -86,7 +99,7 @@ Every decision is appended to `.intutic/events/hook-events.jsonl` and drained to
 See [TD-370](https://github.com/intutic/intutic/blob/main/docs/TECH_DEBT.md) for the complete record. In short:
 
 1. Three of dsh's own npm packages (`@deepseek-ai/dsh-permission`, `@deepseek-ai/dsh-settings-local`, `@deepseek-ai/dsh-fs-policy`) are access-restricted and could not be inspected directly — this integration's `settings.yaml` schema and dsh's own native sandbox/approval interaction are inferred from sibling packages' documentation, not read from source.
-2. The `llm-pi-ai` route this integration merges into is **not** dsh's default LLM route (`llm-deepseek`, the native DeepSeek adapter, is) and mounts dormant until configured — so the proxy merge adds a selectable route, it does not automatically redirect a fresh profile's default egress.
+2. The `llm-pi-ai` route this integration also merges into is **not** dsh's default LLM route (`llm-deepseek`, the native DeepSeek adapter, is) and mounts dormant until configured — that merge alone adds only a selectable route. Default egress redirection is handled separately, by the `llm-deepseek.baseURL` merge described above.
 3. A machine where dsh has never been run has no profile to register into until the user's first `dsh --profile <name>` run.
 4. The plugin still needs a manual dependency install (step 5 above) before it actually loads.
 

@@ -111,10 +111,10 @@ import { intuticAuditHooks } from '@intutic/gate/eve'
 export default defineHook(intuticAuditHooks())
 ```
 
-This subscribes to eve's `approval.candidate`/`approval.settled` stream events and maps them onto Intutic's event vocabulary: a settled **approved** request emits `tool_allowed`, a settled **cancelled** request emits `tool_blocked` (labelled as a human veto, not a gate refusal), and anomalous candidate outcomes (`rejected`/`failed`/`timed-out`/`stale`) emit `tool_flagged`. Two honesty notes:
+This subscribes to eve's `approval.candidate`/`approval.settled`/`input.requested` stream events and maps them onto Intutic's event vocabulary: a settled **approved** request emits `tool_allowed`, a settled **cancelled** request emits `tool_blocked` (labelled as a human veto, not a gate refusal), and anomalous candidate outcomes (`rejected`/`failed`/`timed-out`/`stale`) emit `tool_flagged`. Two honesty notes:
 
 - eve hooks are **observe-only by eve's own contract** — they fire after events are durably recorded and cannot veto anything. This is telemetry for the dashboard, not enforcement; enforcement is step 2/3.
-- eve's approval events **do not carry the tool name or input** (verified against the shipped protocol types), so these audit events attribute to the synthetic tool name `eve:approval` with the request id in the reason — request-scoped, not tool-scoped.
+- eve's `approval.candidate`/`approval.settled` events themselves **do not carry the tool name or input** (verified against the shipped protocol types) — but `intuticAuditHooks()` also subscribes to eve's third hookable event, `input.requested`, which fires once per batch of human-input requests and carries `requestId` AND `action.toolName` together for each one (confirmed against the shipped `InputRequest` zod schema). It emits a real, tool-identified `tool_flagged` at request time, and best-effort caches `requestId -> toolName` in memory so the LATER `approval.candidate`/`approval.settled` events also attribute to the real tool name — as long as that cache is still warm (same process, not yet evicted). When it is not — a genuinely long-parked, cross-restart approval, which eve's own docs confirm can survive a process restart — settlement falls back to the synthetic tool name `eve:approval` with the request id in the reason, exactly the prior behaviour, never worse.
 
 ## Known, plain limitation: LLM egress
 
@@ -160,6 +160,6 @@ Same structural gaps as every SDK-gated framework — see [LangGraph's "What the
 | Format | Shell environment variables (LLM-egress vars are inert for eve's own model calls — see the limitation above) |
 | Write strategy | Atomic (write to `.intutic-tmp`, then rename) |
 | Tool gate | SDK-side (`@intutic/gate/eve`'s `intuticApproval()` / `intuticConnectionApproval()` on eve's per-tool/per-connection `approval` policies) — no sync-daemon hook file |
-| Audit | `intuticAuditHooks()` on eve's `approval.candidate`/`approval.settled` hook events — observe-only, request-scoped attribution |
+| Audit | `intuticAuditHooks()` on eve's `approval.candidate`/`approval.settled`/`input.requested` hook events — observe-only, real tool-name attribution when the in-memory `requestId -> toolName` cache is warm, falling back to request-scoped (synthetic `eve:approval`) attribution when it is not |
 | LLM-egress routing | In-code direct-provider path only (`withIntuticProxy(...)`); AI Gateway routing (eve's default) is not proxy-governable — TD-412 |
 | Status | **Preview** — pinned verification against `eve@0.39.1`; see TD-410 |
