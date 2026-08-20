@@ -593,8 +593,12 @@ OpenAI, the Responses API and Gemini each get the shape they expect.
 
 The set is re-read at most every 30 seconds and capped at 8 KB per request,
 because injected text is paid for on every turn. If SOPs are dropped to stay
-under the cap, the block says so rather than leaving an agent believing it has
-the full set.
+under the cap, the block says so — by name, not just a count — rather than
+leaving an agent believing it has the full set. The rendered advisory text is
+additionally held stable per session for up to `sop_pin_max_age_secs` (default
+10 minutes) to preserve provider prompt-cache prefixes — enforcement (denied
+tools, scoped paths, detectors) always follows the 30-second refresh
+regardless of the pin.
 
 ::: warning Scoping, not authorisation
 The role is a client-supplied header. Showing a node the wrong policy is the

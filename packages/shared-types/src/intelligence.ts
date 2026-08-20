@@ -394,7 +394,11 @@ export interface SkillOptSuggestion {
   workspaceId: string
   harnessType: string
   filePath: string
-  status: 'pending' | 'applied' | 'dismissed'
+  // 'apply_unconfirmed' / 'apply_failed' — TD-349: the daemon's apply-result
+  // ack is what confirms an edit actually landed; 'applied' means confirmed,
+  // not merely queued. See services/control-plane/src/services/
+  // skillOptService.ts's applyConfigEdit.
+  status: 'pending' | 'applied' | 'dismissed' | 'apply_unconfirmed' | 'apply_failed'
   source: 'waste_pattern' | 'metaclaw' | 'manual_review'
   edits: ConfigEdit[]
   rationale: string

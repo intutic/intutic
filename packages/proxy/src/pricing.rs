@@ -31,6 +31,20 @@ static BUNDLE_JSON: &str = include_str!("pricing/offline_bundle.json");
 pub struct ModelPrice {
     pub input_cost_per_1k: f64,
     pub output_cost_per_1k: f64,
+    /// Per-1k rate for input tokens read from the provider's prompt cache.
+    ///
+    /// `Option` + `#[serde(default)]`, not a plain `f64`: this struct derives
+    /// `Deserialize` over the entire 1300+-line bundle file, and most bundle
+    /// entries have no cache tier at all — a non-optional field would break
+    /// every existing entry that doesn't report one. `None` means "this model
+    /// reports no cache-read rate", not "cache reads are free".
+    #[serde(default)]
+    pub cache_read_cost_per_1k: Option<f64>,
+    /// Per-1k rate for input tokens written into the provider's prompt cache
+    /// (Anthropic only today — see [`crate::usage::TokenUsage::cache_write_input`]).
+    /// Same optionality reasoning as `cache_read_cost_per_1k`.
+    #[serde(default)]
+    pub cache_write_cost_per_1k: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -82,6 +96,39 @@ pub fn estimate_cost(model: &str, input_tokens: u32, output_tokens: u32) -> f64 
 /// Returns input cost per 1K tokens for use in budget gate pre-checks.
 pub fn input_cost_per_1k(model: &str) -> f64 {
     lookup_price(model).input_cost_per_1k
+}
+
+/// Estimate cost in USD from a cache-aware [`TokenUsage`] (TD-347).
+///
+/// Billing: `uncached_input` at `input_cost_per_1k`; `cache_read_input` at
+/// `cache_read_cost_per_1k`, falling back to `input_cost_per_1k` when the
+/// model has no cache-read rate; `cache_write_input` at
+/// `cache_write_cost_per_1k`, same fallback; `output` at `output_cost_per_1k`.
+///
+/// The fallback direction is deliberate: a model with no published cache
+/// discount is billed for cache activity at the FULL input rate rather than
+/// zero — this must fail toward over-charging, the safe direction for a
+/// budget gate, not under-charging.
+///
+/// The family-prefix fallback and the unknown-model conservative estimate
+/// (both reached only via [`lookup_price`]'s own resolution order) never
+/// carry a cache tier — `family_fallbacks` and
+/// `unknown_model_conservative_estimate` entries in the bundle have no cache
+/// fields, so `price.cache_*_cost_per_1k` is `None` for them and every cache
+/// bucket falls back to the full input rate automatically. An unknown or
+/// family-matched model gets NO cache discount, full stop.
+pub fn estimate_cost_cached(model: &str, usage: &crate::usage::TokenUsage) -> f64 {
+    let price = lookup_price(model);
+    let input_rate = price.input_cost_per_1k;
+    let cache_read_rate = price.cache_read_cost_per_1k.unwrap_or(input_rate);
+    let cache_write_rate = price.cache_write_cost_per_1k.unwrap_or(input_rate);
+
+    let uncached_cost = (usage.uncached_input.unwrap_or(0) as f64 / 1000.0) * input_rate;
+    let cache_read_cost = (usage.cache_read_input.unwrap_or(0) as f64 / 1000.0) * cache_read_rate;
+    let cache_write_cost = (usage.cache_write_input.unwrap_or(0) as f64 / 1000.0) * cache_write_rate;
+    let output_cost = (usage.output.unwrap_or(0) as f64 / 1000.0) * price.output_cost_per_1k;
+
+    uncached_cost + cache_read_cost + cache_write_cost + output_cost
 }
 
 /// Derive a model's pricing family, e.g. `"claude-opus-4-5"` → `Some("claude-opus")`.
@@ -238,5 +285,95 @@ mod tests {
         // Regression guard for the tie-break's whole premise: two different
         // providers must never collapse to the same family string.
         assert_ne!(model_family("gpt-4o-mini"), model_family("claude-opus-4-5"));
+    }
+
+    /// The regression guard TD-347 exists to protect: with both cache
+    /// buckets at zero, `estimate_cost_cached` must equal the plain
+    /// cache-blind `estimate_cost` — for an exact-match model, a
+    /// family-fallback model, and the unknown-model conservative estimate. A
+    /// future refactor that breaks this equivalence has broken the "no cache
+    /// activity" case, which is supposed to be indistinguishable from
+    /// today's behavior.
+    #[test]
+    fn cached_cost_matches_blind_cost_when_cache_buckets_are_zero() {
+        use crate::usage::TokenUsage;
+
+        let cases: &[(&str, u32, u32)] = &[
+            // Exact match, has real cache rates in the bundle.
+            ("claude-3-5-sonnet-20241022", 1000, 500),
+            // Exact match, no cache rate at all.
+            ("gpt-4o-mini", 2000, 1000),
+            // Family-fallback path.
+            ("claude-opus-99", 1500, 200),
+            // Unknown-model conservative-estimate path.
+            ("unknown-vendor-model-v9", 800, 300),
+        ];
+
+        for &(model, input, output) in cases {
+            let blind = estimate_cost(model, input, output);
+            let usage = TokenUsage {
+                uncached_input: Some(input),
+                cache_read_input: Some(0),
+                cache_write_input: Some(0),
+                output: Some(output),
+            };
+            let cached = estimate_cost_cached(model, &usage);
+            assert!(
+                (blind - cached).abs() < 1e-9,
+                "model={model}: blind={blind} cached={cached} did not match with zero cache buckets"
+            );
+        }
+    }
+
+    /// A model with no published cache-read/write rate must still charge for
+    /// cache activity — at the full input rate, not for free. This is the
+    /// "fail toward over-charging" fallback direction the budget gate relies on.
+    #[test]
+    fn cache_activity_falls_back_to_full_input_rate_when_model_has_no_cache_tier() {
+        use crate::usage::TokenUsage;
+
+        // A version string with no exact-match entry, resolving through the
+        // `family_fallbacks` path — those entries are hand-curated in the
+        // bundle generator and never carry a cache tier, unlike an exact
+        // model match, whose upstream-derived cache rate can appear or
+        // disappear on a bundle regeneration. This keeps the test's premise
+        // ("this model has no cache tier") true regardless of what upstream
+        // happens to publish at regeneration time.
+        let cached = estimate_cost_cached("claude-opus-not-a-real-version", &TokenUsage {
+            uncached_input: Some(0),
+            cache_read_input: Some(1000),
+            cache_write_input: Some(0),
+            output: Some(0),
+        });
+        let full_rate_equivalent = estimate_cost("claude-opus-not-a-real-version", 1000, 0);
+        assert!(
+            (cached - full_rate_equivalent).abs() < 1e-9,
+            "cache read with no cache rate should cost the same as a full-rate input token: \
+             cached={cached} full_rate={full_rate_equivalent}"
+        );
+    }
+
+    /// Family fallback and unknown-model paths get no cache discount at all —
+    /// cache-read/write tokens on those paths must cost exactly what an
+    /// equal number of plain input tokens would.
+    #[test]
+    fn family_fallback_and_unknown_model_get_no_cache_discount() {
+        use crate::usage::TokenUsage;
+
+        for model in ["claude-opus-99", "unknown-vendor-model-v9"] {
+            let usage = TokenUsage {
+                uncached_input: Some(0),
+                cache_read_input: Some(500),
+                cache_write_input: Some(500),
+                output: Some(0),
+            };
+            let cached = estimate_cost_cached(model, &usage);
+            let blind_equivalent = estimate_cost(model, 1000, 0);
+            assert!(
+                (cached - blind_equivalent).abs() < 1e-9,
+                "model={model}: cache buckets should price identically to plain input on the \
+                 fallback paths — cached={cached} blind_equivalent={blind_equivalent}"
+            );
+        }
     }
 }

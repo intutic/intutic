@@ -130,7 +130,44 @@ pub struct ExecutionTrace {
     pub output_tokens: u32,
     pub raw_cost_usd: f64,
     pub actual_cost_usd: f64,
+    /// The proxy's OWN semantic/exact-match response cache — whether this
+    /// request's response was served from that cache instead of calling the
+    /// model. Unrelated to the two fields below: this describes whether a
+    /// model call happened at all, they describe the PROVIDER's prompt cache
+    /// on a model call that did.
     pub cache_hit: bool,
+    /// Input tokens the provider itself read from ITS OWN prompt cache
+    /// (TD-347) — Anthropic's `usage.cache_read_input_tokens`, OpenAI's
+    /// `prompt_tokens_details.cached_tokens`, or Gemini's
+    /// `cachedContentTokenCount`, whichever the routed model's provider
+    /// reported.
+    ///
+    /// Explicitly distinct from `cache_hit`/`cache_savings_usd` above: those
+    /// describe the proxy's own semantic response cache (a full response
+    /// served with no model call at all), a completely different feature.
+    /// This field is meaningful only when a model call DID happen — it is the
+    /// provider crediting part of that call's input as a cheaper cache read
+    /// rather than a full-price input token.
+    ///
+    /// `None` when the provider did not report this bucket at all (most
+    /// providers, most requests) — distinct from `Some(0)`, which means the
+    /// provider reported caching support and this call simply had no cache
+    /// hit. `skip_serializing_if` is mandatory, not stylistic, same reasoning
+    /// as `response_integrity` above: the control-plane's ingest zod schema
+    /// uses `.optional()`, which accepts an absent key but REJECTS an
+    /// explicit `null`. Emitting `null` here would silently drop the trace at
+    /// ingest — the route still answers HTTP 200 — with no error surfaced
+    /// anywhere.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_read_input_tokens: Option<u32>,
+    /// Input tokens the provider itself wrote into ITS OWN prompt cache
+    /// (TD-347) — Anthropic's `usage.cache_creation_input_tokens`. No other
+    /// provider parsed by this proxy reports a cache-write bucket today, so
+    /// this is `None` for OpenAI/Gemini traces even when `cache_read_input_tokens`
+    /// is populated. Same `cache_hit` distinction and same mandatory
+    /// `skip_serializing_if` reasoning as `cache_read_input_tokens` above.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_creation_input_tokens: Option<u32>,
     pub latency_ms: u32,
     pub verdict: String,
     pub harness_type: String,
@@ -419,6 +456,8 @@ mod tests {
             raw_cost_usd: 0.0,
             actual_cost_usd: 0.0,
             cache_hit: false,
+            cache_read_input_tokens: None,
+            cache_creation_input_tokens: None,
             latency_ms: 0,
             verdict: String::new(),
             harness_type: String::new(),

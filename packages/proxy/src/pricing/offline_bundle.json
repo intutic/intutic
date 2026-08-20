@@ -1,7 +1,7 @@
 {
   "_meta": {
     "source": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
-    "generated_at": "2026-08-15",
+    "generated_at": "2026-08-20",
     "refresh_script": "tools/scripts/build-offline-pricing-bundle.ts",
     "note": "Baked into the proxy binary via include_str!(), so editing this file does nothing until the image is rebuilt. Regenerate with tools/scripts/build-offline-pricing-bundle.ts; drift against published rates is reported monthly by .github/workflows/pricing-drift.yml. Override with OFFLINE_PRICING_PATH."
   },
@@ -9,127 +9,177 @@
     "claude-haiku-4-5-20251001": {
       "input_cost_per_1k": 0.001,
       "output_cost_per_1k": 0.005,
-      "max_tokens": 64000
+      "max_tokens": 64000,
+      "cache_read_cost_per_1k": 0.0001,
+      "cache_write_cost_per_1k": 0.00125
     },
     "claude-haiku-4-5": {
       "input_cost_per_1k": 0.001,
       "output_cost_per_1k": 0.005,
-      "max_tokens": 64000
+      "max_tokens": 64000,
+      "cache_read_cost_per_1k": 0.0001,
+      "cache_write_cost_per_1k": 0.00125
     },
     "claude-3-7-sonnet-20250219": {
       "input_cost_per_1k": 0.003,
       "output_cost_per_1k": 0.015,
-      "max_tokens": 64000
+      "max_tokens": 64000,
+      "cache_read_cost_per_1k": 0.0003,
+      "cache_write_cost_per_1k": 0.00375
     },
     "claude-3-haiku-20240307": {
       "input_cost_per_1k": 0.00025,
       "output_cost_per_1k": 0.00125,
-      "max_tokens": 4096
+      "max_tokens": 4096,
+      "cache_read_cost_per_1k": 0.00003,
+      "cache_write_cost_per_1k": 0.0003
     },
     "claude-3-opus-20240229": {
       "input_cost_per_1k": 0.015,
       "output_cost_per_1k": 0.075,
-      "max_tokens": 4096
+      "max_tokens": 4096,
+      "cache_read_cost_per_1k": 0.0015,
+      "cache_write_cost_per_1k": 0.01875
     },
     "claude-4-opus-20250514": {
       "input_cost_per_1k": 0.015,
       "output_cost_per_1k": 0.075,
-      "max_tokens": 32000
+      "max_tokens": 32000,
+      "cache_read_cost_per_1k": 0.0015,
+      "cache_write_cost_per_1k": 0.01875
     },
     "claude-4-sonnet-20250514": {
       "input_cost_per_1k": 0.003,
       "output_cost_per_1k": 0.015,
-      "max_tokens": 64000
+      "max_tokens": 64000,
+      "cache_read_cost_per_1k": 0.0003,
+      "cache_write_cost_per_1k": 0.00375
     },
     "claude-sonnet-4-5": {
       "input_cost_per_1k": 0.003,
       "output_cost_per_1k": 0.015,
-      "max_tokens": 64000
+      "max_tokens": 64000,
+      "cache_read_cost_per_1k": 0.0003,
+      "cache_write_cost_per_1k": 0.00375
     },
     "claude-sonnet-4-5-20250929": {
       "input_cost_per_1k": 0.003,
       "output_cost_per_1k": 0.015,
-      "max_tokens": 64000
+      "max_tokens": 64000,
+      "cache_read_cost_per_1k": 0.0003,
+      "cache_write_cost_per_1k": 0.00375
     },
     "claude-sonnet-5": {
       "input_cost_per_1k": 0.002,
       "output_cost_per_1k": 0.01,
-      "max_tokens": 128000
+      "max_tokens": 128000,
+      "cache_read_cost_per_1k": 0.0002,
+      "cache_write_cost_per_1k": 0.0025
     },
     "claude-sonnet-4-6": {
       "input_cost_per_1k": 0.003,
       "output_cost_per_1k": 0.015,
-      "max_tokens": 64000
+      "max_tokens": 64000,
+      "cache_read_cost_per_1k": 0.0003,
+      "cache_write_cost_per_1k": 0.00375
     },
     "claude-sonnet-4-5-20250929-v1:0": {
       "input_cost_per_1k": 0.003,
       "output_cost_per_1k": 0.015,
-      "max_tokens": 64000
+      "max_tokens": 64000,
+      "cache_read_cost_per_1k": 0.0003,
+      "cache_write_cost_per_1k": 0.00375
     },
     "claude-opus-4-1": {
       "input_cost_per_1k": 0.015,
       "output_cost_per_1k": 0.075,
-      "max_tokens": 32000
+      "max_tokens": 32000,
+      "cache_read_cost_per_1k": 0.0015,
+      "cache_write_cost_per_1k": 0.01875
     },
     "claude-opus-4-1-20250805": {
       "input_cost_per_1k": 0.015,
       "output_cost_per_1k": 0.075,
-      "max_tokens": 32000
+      "max_tokens": 32000,
+      "cache_read_cost_per_1k": 0.0015,
+      "cache_write_cost_per_1k": 0.01875
     },
     "claude-opus-4-20250514": {
       "input_cost_per_1k": 0.015,
       "output_cost_per_1k": 0.075,
-      "max_tokens": 32000
+      "max_tokens": 32000,
+      "cache_read_cost_per_1k": 0.0015,
+      "cache_write_cost_per_1k": 0.01875
     },
     "claude-opus-4-5-20251101": {
       "input_cost_per_1k": 0.005,
       "output_cost_per_1k": 0.025,
-      "max_tokens": 64000
+      "max_tokens": 64000,
+      "cache_read_cost_per_1k": 0.0005,
+      "cache_write_cost_per_1k": 0.00625
     },
     "claude-opus-4-5": {
       "input_cost_per_1k": 0.005,
       "output_cost_per_1k": 0.025,
-      "max_tokens": 64000
+      "max_tokens": 64000,
+      "cache_read_cost_per_1k": 0.0005,
+      "cache_write_cost_per_1k": 0.00625
     },
     "claude-opus-4-6": {
       "input_cost_per_1k": 0.005,
       "output_cost_per_1k": 0.025,
-      "max_tokens": 128000
+      "max_tokens": 128000,
+      "cache_read_cost_per_1k": 0.0005,
+      "cache_write_cost_per_1k": 0.00625
     },
     "claude-opus-4-6-20260205": {
       "input_cost_per_1k": 0.005,
       "output_cost_per_1k": 0.025,
-      "max_tokens": 128000
+      "max_tokens": 128000,
+      "cache_read_cost_per_1k": 0.0005,
+      "cache_write_cost_per_1k": 0.00625
     },
     "claude-opus-4-7": {
       "input_cost_per_1k": 0.005,
       "output_cost_per_1k": 0.025,
-      "max_tokens": 128000
+      "max_tokens": 128000,
+      "cache_read_cost_per_1k": 0.0005,
+      "cache_write_cost_per_1k": 0.00625
     },
     "claude-opus-4-7-20260416": {
       "input_cost_per_1k": 0.005,
       "output_cost_per_1k": 0.025,
-      "max_tokens": 128000
+      "max_tokens": 128000,
+      "cache_read_cost_per_1k": 0.0005,
+      "cache_write_cost_per_1k": 0.00625
     },
     "claude-fable-5": {
       "input_cost_per_1k": 0.01,
       "output_cost_per_1k": 0.05,
-      "max_tokens": 128000
+      "max_tokens": 128000,
+      "cache_read_cost_per_1k": 0.001,
+      "cache_write_cost_per_1k": 0.0125
     },
     "claude-opus-5": {
       "input_cost_per_1k": 0.005,
       "output_cost_per_1k": 0.025,
-      "max_tokens": 128000
+      "max_tokens": 128000,
+      "cache_read_cost_per_1k": 0.0005,
+      "cache_write_cost_per_1k": 0.00625
     },
     "claude-opus-4-8": {
       "input_cost_per_1k": 0.005,
       "output_cost_per_1k": 0.025,
-      "max_tokens": 128000
+      "max_tokens": 128000,
+      "cache_read_cost_per_1k": 0.0005,
+      "cache_write_cost_per_1k": 0.00625
     },
     "claude-sonnet-4-20250514": {
       "input_cost_per_1k": 0.003,
       "output_cost_per_1k": 0.015,
-      "max_tokens": 64000
+      "max_tokens": 64000,
+      "cache_read_cost_per_1k": 0.0003,
+      "cache_write_cost_per_1k": 0.00375
     },
     "codestral/codestral-2405": {
       "input_cost_per_1k": 0,
@@ -144,17 +194,21 @@
     "deepseek-chat": {
       "input_cost_per_1k": 0.00028,
       "output_cost_per_1k": 0.00042,
-      "max_tokens": 8192
+      "max_tokens": 8192,
+      "cache_read_cost_per_1k": 0.000028
     },
     "deepseek-reasoner": {
       "input_cost_per_1k": 0.00028,
       "output_cost_per_1k": 0.00042,
-      "max_tokens": 65536
+      "max_tokens": 65536,
+      "cache_read_cost_per_1k": 0.000028
     },
     "deepseek/deepseek-chat": {
       "input_cost_per_1k": 0.00028,
       "output_cost_per_1k": 0.00042,
-      "max_tokens": 8192
+      "max_tokens": 8192,
+      "cache_read_cost_per_1k": 0.000028,
+      "cache_write_cost_per_1k": 0
     },
     "deepseek/deepseek-coder": {
       "input_cost_per_1k": 0.00014,
@@ -169,12 +223,15 @@
     "deepseek/deepseek-reasoner": {
       "input_cost_per_1k": 0.00028,
       "output_cost_per_1k": 0.00042,
-      "max_tokens": 65536
+      "max_tokens": 65536,
+      "cache_read_cost_per_1k": 0.000028
     },
     "deepseek/deepseek-v3": {
       "input_cost_per_1k": 0.00027,
       "output_cost_per_1k": 0.0011,
-      "max_tokens": 8192
+      "max_tokens": 8192,
+      "cache_read_cost_per_1k": 0.00007,
+      "cache_write_cost_per_1k": 0
     },
     "deepseek/deepseek-v3.2": {
       "input_cost_per_1k": 0.00028,
@@ -199,100 +256,120 @@
     "gemini-2.0-flash": {
       "input_cost_per_1k": 0.0001,
       "output_cost_per_1k": 0.0004,
-      "max_tokens": 8192
+      "max_tokens": 8192,
+      "cache_read_cost_per_1k": 0.000025
     },
     "gemini-2.0-flash-001": {
       "input_cost_per_1k": 0.00015,
       "output_cost_per_1k": 0.0006,
-      "max_tokens": 8192
+      "max_tokens": 8192,
+      "cache_read_cost_per_1k": 0.0000375
     },
     "gemini-2.0-flash-lite": {
       "input_cost_per_1k": 0.000075,
-      "output_cost_per_1k": 0.0003
+      "output_cost_per_1k": 0.0003,
+      "cache_read_cost_per_1k": 0.00001875
     },
     "gemini-2.0-flash-lite-001": {
       "input_cost_per_1k": 0.000075,
-      "output_cost_per_1k": 0.0003
+      "output_cost_per_1k": 0.0003,
+      "cache_read_cost_per_1k": 0.00001875
     },
     "gemini-2.5-flash": {
       "input_cost_per_1k": 0.0003,
       "output_cost_per_1k": 0.0025,
-      "max_tokens": 65535
+      "max_tokens": 65535,
+      "cache_read_cost_per_1k": 0.00003
     },
     "gemini-3.1-flash-lite-preview": {
       "input_cost_per_1k": 0.00025,
       "output_cost_per_1k": 0.0015,
-      "max_tokens": 65536
+      "max_tokens": 65536,
+      "cache_read_cost_per_1k": 0.000025
     },
     "gemini-3.1-flash-lite": {
       "input_cost_per_1k": 0.00025,
       "output_cost_per_1k": 0.0015,
-      "max_tokens": 65536
+      "max_tokens": 65536,
+      "cache_read_cost_per_1k": 0.000025
     },
     "gemini-3.5-flash-lite": {
       "input_cost_per_1k": 0.0003,
       "output_cost_per_1k": 0.0025,
-      "max_tokens": 65536
+      "max_tokens": 65536,
+      "cache_read_cost_per_1k": 0.00003
     },
     "gemini-2.5-flash-lite": {
       "input_cost_per_1k": 0.0001,
       "output_cost_per_1k": 0.0004,
-      "max_tokens": 65535
+      "max_tokens": 65535,
+      "cache_read_cost_per_1k": 0.00001
     },
     "gemini-2.5-flash-lite-preview-09-2025": {
       "input_cost_per_1k": 0.0001,
       "output_cost_per_1k": 0.0004,
-      "max_tokens": 65535
+      "max_tokens": 65535,
+      "cache_read_cost_per_1k": 0.00001
     },
     "gemini-2.5-flash-preview-09-2025": {
       "input_cost_per_1k": 0.0003,
       "output_cost_per_1k": 0.0025,
-      "max_tokens": 65535
+      "max_tokens": 65535,
+      "cache_read_cost_per_1k": 0.000075
     },
     "gemini-2.5-flash-lite-preview-06-17": {
       "input_cost_per_1k": 0.0001,
       "output_cost_per_1k": 0.0004,
-      "max_tokens": 65535
+      "max_tokens": 65535,
+      "cache_read_cost_per_1k": 0.000025
     },
     "gemini-2.5-pro": {
       "input_cost_per_1k": 0.00125,
       "output_cost_per_1k": 0.01,
-      "max_tokens": 65535
+      "max_tokens": 65535,
+      "cache_read_cost_per_1k": 0.000125
     },
     "gemini-3-pro-preview": {
       "input_cost_per_1k": 0.002,
       "output_cost_per_1k": 0.012,
-      "max_tokens": 65535
+      "max_tokens": 65535,
+      "cache_read_cost_per_1k": 0.0002
     },
     "gemini-3.1-pro-preview": {
       "input_cost_per_1k": 0.002,
       "output_cost_per_1k": 0.012,
-      "max_tokens": 65536
+      "max_tokens": 65536,
+      "cache_read_cost_per_1k": 0.0002
     },
     "gemini-3.1-pro-preview-customtools": {
       "input_cost_per_1k": 0.002,
       "output_cost_per_1k": 0.012,
-      "max_tokens": 65536
+      "max_tokens": 65536,
+      "cache_read_cost_per_1k": 0.0002
     },
     "gemini-2.5-pro-preview-tts": {
       "input_cost_per_1k": 0.00125,
       "output_cost_per_1k": 0.01,
-      "max_tokens": 65535
+      "max_tokens": 65535,
+      "cache_read_cost_per_1k": 0.000125
     },
     "gemini-robotics-er-1.5-preview": {
       "input_cost_per_1k": 0.0003,
       "output_cost_per_1k": 0.0025,
-      "max_tokens": 65535
+      "max_tokens": 65535,
+      "cache_read_cost_per_1k": 0
     },
     "gemini/gemini-robotics-er-1.5-preview": {
       "input_cost_per_1k": 0.0003,
       "output_cost_per_1k": 0.0025,
-      "max_tokens": 65535
+      "max_tokens": 65535,
+      "cache_read_cost_per_1k": 0
     },
     "gemini/gemini-robotics-er-2-preview": {
       "input_cost_per_1k": 0.002,
       "output_cost_per_1k": 0.01,
-      "max_tokens": 65536
+      "max_tokens": 65536,
+      "cache_read_cost_per_1k": 0.0002
     },
     "gemini/gemini-robotics-er-1.6-preview": {
       "input_cost_per_1k": 0.001,
@@ -307,56 +384,67 @@
     "gemini/gemini-2.0-flash": {
       "input_cost_per_1k": 0.0001,
       "output_cost_per_1k": 0.0004,
-      "max_tokens": 8192
+      "max_tokens": 8192,
+      "cache_read_cost_per_1k": 0.000025
     },
     "gemini/gemini-2.0-flash-001": {
       "input_cost_per_1k": 0.0001,
       "output_cost_per_1k": 0.0004,
-      "max_tokens": 8192
+      "max_tokens": 8192,
+      "cache_read_cost_per_1k": 0.000025
     },
     "gemini/gemini-2.0-flash-lite": {
       "input_cost_per_1k": 0.000075,
-      "output_cost_per_1k": 0.0003
+      "output_cost_per_1k": 0.0003,
+      "cache_read_cost_per_1k": 0.00001875
     },
     "gemini/gemini-2.5-flash": {
       "input_cost_per_1k": 0.0003,
       "output_cost_per_1k": 0.0025,
-      "max_tokens": 65535
+      "max_tokens": 65535,
+      "cache_read_cost_per_1k": 0.00003
     },
     "gemini/gemini-2.5-flash-lite": {
       "input_cost_per_1k": 0.0001,
       "output_cost_per_1k": 0.0004,
-      "max_tokens": 65535
+      "max_tokens": 65535,
+      "cache_read_cost_per_1k": 0.00001
     },
     "gemini/gemini-2.5-flash-lite-preview-09-2025": {
       "input_cost_per_1k": 0.0001,
       "output_cost_per_1k": 0.0004,
-      "max_tokens": 65535
+      "max_tokens": 65535,
+      "cache_read_cost_per_1k": 0.00001
     },
     "gemini/gemini-2.5-flash-preview-09-2025": {
       "input_cost_per_1k": 0.0003,
       "output_cost_per_1k": 0.0025,
-      "max_tokens": 65535
+      "max_tokens": 65535,
+      "cache_read_cost_per_1k": 0.000075
     },
     "gemini/gemini-flash-latest": {
       "input_cost_per_1k": 0.0003,
       "output_cost_per_1k": 0.0025,
-      "max_tokens": 65535
+      "max_tokens": 65535,
+      "cache_read_cost_per_1k": 0.000075
     },
     "gemini/gemini-flash-lite-latest": {
       "input_cost_per_1k": 0.0001,
       "output_cost_per_1k": 0.0004,
-      "max_tokens": 65535
+      "max_tokens": 65535,
+      "cache_read_cost_per_1k": 0.000025
     },
     "gemini/gemini-2.5-flash-lite-preview-06-17": {
       "input_cost_per_1k": 0.0001,
       "output_cost_per_1k": 0.0004,
-      "max_tokens": 65535
+      "max_tokens": 65535,
+      "cache_read_cost_per_1k": 0.000025
     },
     "gemini/gemini-2.5-pro": {
       "input_cost_per_1k": 0.00125,
       "output_cost_per_1k": 0.01,
-      "max_tokens": 65535
+      "max_tokens": 65535,
+      "cache_read_cost_per_1k": 0.000125
     },
     "gemini/gemini-2.5-computer-use-preview-10-2025": {
       "input_cost_per_1k": 0.00125,
@@ -366,42 +454,50 @@
     "gemini/gemini-3-pro-preview": {
       "input_cost_per_1k": 0.002,
       "output_cost_per_1k": 0.012,
-      "max_tokens": 65535
+      "max_tokens": 65535,
+      "cache_read_cost_per_1k": 0.0002
     },
     "gemini/gemini-3.1-flash-lite-preview": {
       "input_cost_per_1k": 0.00025,
       "output_cost_per_1k": 0.0015,
-      "max_tokens": 65536
+      "max_tokens": 65536,
+      "cache_read_cost_per_1k": 0.000025
     },
     "gemini/gemini-3.1-flash-lite": {
       "input_cost_per_1k": 0.00025,
       "output_cost_per_1k": 0.0015,
-      "max_tokens": 65536
+      "max_tokens": 65536,
+      "cache_read_cost_per_1k": 0.000025
     },
     "gemini/gemini-3.5-flash-lite": {
       "input_cost_per_1k": 0.0003,
       "output_cost_per_1k": 0.0025,
-      "max_tokens": 65536
+      "max_tokens": 65536,
+      "cache_read_cost_per_1k": 0.00003
     },
     "gemini/gemini-3-flash-preview": {
       "input_cost_per_1k": 0.0005,
       "output_cost_per_1k": 0.003,
-      "max_tokens": 65535
+      "max_tokens": 65535,
+      "cache_read_cost_per_1k": 0.00005
     },
     "gemini/gemini-3.5-flash": {
       "input_cost_per_1k": 0.0015,
       "output_cost_per_1k": 0.009,
-      "max_tokens": 65535
+      "max_tokens": 65535,
+      "cache_read_cost_per_1k": 0.00015
     },
     "gemini/gemini-3.6-flash": {
-      "input_cost_per_1k": 0.0015,
-      "output_cost_per_1k": 0.0075,
-      "max_tokens": 65536
+      "input_cost_per_1k": 0.00075,
+      "output_cost_per_1k": 0.00375,
+      "max_tokens": 65536,
+      "cache_read_cost_per_1k": 0.000075
     },
     "gemini/gemini-3.7-flash": {
       "input_cost_per_1k": 0.00075,
       "output_cost_per_1k": 0.00375,
-      "max_tokens": 65536
+      "max_tokens": 65536,
+      "cache_read_cost_per_1k": 0.000075
     },
     "gemini/gemini-omni-flash-preview": {
       "input_cost_per_1k": 0.0015,
@@ -411,17 +507,20 @@
     "gemini/gemini-3.1-pro-preview": {
       "input_cost_per_1k": 0.002,
       "output_cost_per_1k": 0.012,
-      "max_tokens": 65536
+      "max_tokens": 65536,
+      "cache_read_cost_per_1k": 0.0002
     },
     "gemini/gemini-3.1-pro-preview-customtools": {
       "input_cost_per_1k": 0.002,
       "output_cost_per_1k": 0.012,
-      "max_tokens": 65536
+      "max_tokens": 65536,
+      "cache_read_cost_per_1k": 0.0002
     },
     "gemini-3-flash-preview": {
       "input_cost_per_1k": 0.0005,
       "output_cost_per_1k": 0.003,
-      "max_tokens": 65535
+      "max_tokens": 65535,
+      "cache_read_cost_per_1k": 0.00005
     },
     "gemini-omni-flash-preview": {
       "input_cost_per_1k": 0.0015,
@@ -431,22 +530,26 @@
     "gemini-3.5-flash": {
       "input_cost_per_1k": 0.0015,
       "output_cost_per_1k": 0.009,
-      "max_tokens": 65535
+      "max_tokens": 65535,
+      "cache_read_cost_per_1k": 0.00015
     },
     "gemini-3.6-flash": {
-      "input_cost_per_1k": 0.0015,
-      "output_cost_per_1k": 0.0075,
-      "max_tokens": 65536
+      "input_cost_per_1k": 0.00075,
+      "output_cost_per_1k": 0.00375,
+      "max_tokens": 65536,
+      "cache_read_cost_per_1k": 0.000075
     },
     "gemini-3.7-flash": {
       "input_cost_per_1k": 0.00075,
       "output_cost_per_1k": 0.00375,
-      "max_tokens": 65536
+      "max_tokens": 65536,
+      "cache_read_cost_per_1k": 0.000075
     },
     "gemini/gemini-2.5-pro-preview-tts": {
       "input_cost_per_1k": 0.00125,
       "output_cost_per_1k": 0.01,
-      "max_tokens": 65535
+      "max_tokens": 65535,
+      "cache_read_cost_per_1k": 0.000125
     },
     "gemini/gemini-exp-1114": {
       "input_cost_per_1k": 0,
@@ -561,37 +664,44 @@
     "gpt-4.1": {
       "input_cost_per_1k": 0.002,
       "output_cost_per_1k": 0.008,
-      "max_tokens": 32768
+      "max_tokens": 32768,
+      "cache_read_cost_per_1k": 0.0005
     },
     "gpt-4.1-2025-04-14": {
       "input_cost_per_1k": 0.002,
       "output_cost_per_1k": 0.008,
-      "max_tokens": 32768
+      "max_tokens": 32768,
+      "cache_read_cost_per_1k": 0.0005
     },
     "gpt-4.1-mini": {
       "input_cost_per_1k": 0.0004,
       "output_cost_per_1k": 0.0016,
-      "max_tokens": 32768
+      "max_tokens": 32768,
+      "cache_read_cost_per_1k": 0.0001
     },
     "gpt-4.1-mini-2025-04-14": {
       "input_cost_per_1k": 0.0004,
       "output_cost_per_1k": 0.0016,
-      "max_tokens": 32768
+      "max_tokens": 32768,
+      "cache_read_cost_per_1k": 0.0001
     },
     "gpt-4.1-nano": {
       "input_cost_per_1k": 0.0001,
       "output_cost_per_1k": 0.0004,
-      "max_tokens": 32768
+      "max_tokens": 32768,
+      "cache_read_cost_per_1k": 0.000025
     },
     "gpt-4.1-nano-2025-04-14": {
       "input_cost_per_1k": 0.0001,
       "output_cost_per_1k": 0.0004,
-      "max_tokens": 32768
+      "max_tokens": 32768,
+      "cache_read_cost_per_1k": 0.000025
     },
     "gpt-4o": {
       "input_cost_per_1k": 0.0025,
       "output_cost_per_1k": 0.01,
-      "max_tokens": 16384
+      "max_tokens": 16384,
+      "cache_read_cost_per_1k": 0.00125
     },
     "gpt-4o-2024-05-13": {
       "input_cost_per_1k": 0.005,
@@ -601,12 +711,14 @@
     "gpt-4o-2024-08-06": {
       "input_cost_per_1k": 0.0025,
       "output_cost_per_1k": 0.01,
-      "max_tokens": 16384
+      "max_tokens": 16384,
+      "cache_read_cost_per_1k": 0.00125
     },
     "gpt-4o-2024-11-20": {
       "input_cost_per_1k": 0.0025,
       "output_cost_per_1k": 0.01,
-      "max_tokens": 16384
+      "max_tokens": 16384,
+      "cache_read_cost_per_1k": 0.00125
     },
     "gpt-4o-audio-preview": {
       "input_cost_per_1k": 0.0025,
@@ -626,12 +738,14 @@
     "gpt-4o-mini": {
       "input_cost_per_1k": 0.00015,
       "output_cost_per_1k": 0.0006,
-      "max_tokens": 16384
+      "max_tokens": 16384,
+      "cache_read_cost_per_1k": 0.000075
     },
     "gpt-4o-mini-2024-07-18": {
       "input_cost_per_1k": 0.00015,
       "output_cost_per_1k": 0.0006,
-      "max_tokens": 16384
+      "max_tokens": 16384,
+      "cache_read_cost_per_1k": 0.000075
     },
     "gpt-4o-mini-audio-preview": {
       "input_cost_per_1k": 0.00015,
@@ -646,22 +760,26 @@
     "gpt-4o-mini-search-preview": {
       "input_cost_per_1k": 0.00015,
       "output_cost_per_1k": 0.0006,
-      "max_tokens": 16384
+      "max_tokens": 16384,
+      "cache_read_cost_per_1k": 0.000075
     },
     "gpt-4o-mini-search-preview-2025-03-11": {
       "input_cost_per_1k": 0.00015,
       "output_cost_per_1k": 0.0006,
-      "max_tokens": 16384
+      "max_tokens": 16384,
+      "cache_read_cost_per_1k": 0.000075
     },
     "gpt-4o-search-preview": {
       "input_cost_per_1k": 0.0025,
       "output_cost_per_1k": 0.01,
-      "max_tokens": 16384
+      "max_tokens": 16384,
+      "cache_read_cost_per_1k": 0.00125
     },
     "gpt-4o-search-preview-2025-03-11": {
       "input_cost_per_1k": 0.0025,
       "output_cost_per_1k": 0.01,
-      "max_tokens": 16384
+      "max_tokens": 16384,
+      "cache_read_cost_per_1k": 0.00125
     },
     "mistral.devstral-2-123b": {
       "input_cost_per_1k": 0.0004,
@@ -986,46 +1104,55 @@
     "o1": {
       "input_cost_per_1k": 0.015,
       "output_cost_per_1k": 0.06,
-      "max_tokens": 100000
+      "max_tokens": 100000,
+      "cache_read_cost_per_1k": 0.0075
     },
     "o1-2024-12-17": {
       "input_cost_per_1k": 0.015,
       "output_cost_per_1k": 0.06,
-      "max_tokens": 100000
+      "max_tokens": 100000,
+      "cache_read_cost_per_1k": 0.0075
     },
     "o3": {
       "input_cost_per_1k": 0.002,
       "output_cost_per_1k": 0.008,
-      "max_tokens": 100000
+      "max_tokens": 100000,
+      "cache_read_cost_per_1k": 0.0005
     },
     "o3-2025-04-16": {
       "input_cost_per_1k": 0.002,
       "output_cost_per_1k": 0.008,
-      "max_tokens": 100000
+      "max_tokens": 100000,
+      "cache_read_cost_per_1k": 0.0005
     },
     "o3-mini": {
       "input_cost_per_1k": 0.0011,
       "output_cost_per_1k": 0.0044,
-      "max_tokens": 100000
+      "max_tokens": 100000,
+      "cache_read_cost_per_1k": 0.00055
     },
     "o3-mini-2025-01-31": {
       "input_cost_per_1k": 0.0011,
       "output_cost_per_1k": 0.0044,
-      "max_tokens": 100000
+      "max_tokens": 100000,
+      "cache_read_cost_per_1k": 0.00055
     },
     "o4-mini": {
       "input_cost_per_1k": 0.0011,
       "output_cost_per_1k": 0.0044,
-      "max_tokens": 100000
+      "max_tokens": 100000,
+      "cache_read_cost_per_1k": 0.000275
     },
     "o4-mini-2025-04-16": {
       "input_cost_per_1k": 0.0011,
       "output_cost_per_1k": 0.0044,
-      "max_tokens": 100000
+      "max_tokens": 100000,
+      "cache_read_cost_per_1k": 0.000275
     },
     "gemini/gemini-2.0-flash-lite-001": {
       "input_cost_per_1k": 0.000075,
-      "output_cost_per_1k": 0.0003
+      "output_cost_per_1k": 0.0003,
+      "cache_read_cost_per_1k": 0.00001875
     },
     "gemini-2.5-flash-native-audio-latest": {
       "input_cost_per_1k": 0.0003,
@@ -1070,57 +1197,74 @@
     "gemini-flash-latest": {
       "input_cost_per_1k": 0.0003,
       "output_cost_per_1k": 0.0025,
-      "max_tokens": 65535
+      "max_tokens": 65535,
+      "cache_read_cost_per_1k": 0.00003
     },
     "gemini-flash-lite-latest": {
       "input_cost_per_1k": 0.0001,
       "output_cost_per_1k": 0.0004,
-      "max_tokens": 65535
+      "max_tokens": 65535,
+      "cache_read_cost_per_1k": 0.00001
     },
     "gemini-pro-latest": {
       "input_cost_per_1k": 0.00125,
       "output_cost_per_1k": 0.01,
-      "max_tokens": 65535
+      "max_tokens": 65535,
+      "cache_read_cost_per_1k": 0.000125
     },
     "gemini/gemini-pro-latest": {
       "input_cost_per_1k": 0.00125,
       "output_cost_per_1k": 0.01,
-      "max_tokens": 65535
+      "max_tokens": 65535,
+      "cache_read_cost_per_1k": 0.000125
     },
     "gemini-exp-1206": {
       "input_cost_per_1k": 0.0003,
       "output_cost_per_1k": 0.0025,
-      "max_tokens": 65535
+      "max_tokens": 65535,
+      "cache_read_cost_per_1k": 0.00003
     },
     "deepseek-v4-flash": {
       "input_cost_per_1k": 0.00014,
       "output_cost_per_1k": 0.00028,
-      "max_tokens": 8192
+      "max_tokens": 393216,
+      "cache_read_cost_per_1k": 0.0000028,
+      "cache_write_cost_per_1k": 0
     },
     "deepseek-v4-pro": {
       "input_cost_per_1k": 0.000435,
       "output_cost_per_1k": 0.00087,
-      "max_tokens": 8192
+      "max_tokens": 393216,
+      "cache_read_cost_per_1k": 0.00000363,
+      "cache_write_cost_per_1k": 0
     },
     "deepseek/deepseek-v4-flash": {
       "input_cost_per_1k": 0.00014,
       "output_cost_per_1k": 0.00028,
-      "max_tokens": 8192
+      "max_tokens": 393216,
+      "cache_read_cost_per_1k": 0.0000028,
+      "cache_write_cost_per_1k": 0
     },
     "deepseek/deepseek-v4-pro": {
       "input_cost_per_1k": 0.000435,
       "output_cost_per_1k": 0.00087,
-      "max_tokens": 8192
+      "max_tokens": 393216,
+      "cache_read_cost_per_1k": 0.00000363,
+      "cache_write_cost_per_1k": 0
     },
     "claude-mythos-5": {
       "input_cost_per_1k": 0.01,
       "output_cost_per_1k": 0.05,
-      "max_tokens": 128000
+      "max_tokens": 128000,
+      "cache_read_cost_per_1k": 0.001,
+      "cache_write_cost_per_1k": 0.0125
     },
     "claude-mythos-preview": {
       "input_cost_per_1k": 0.01,
       "output_cost_per_1k": 0.05,
-      "max_tokens": 128000
+      "max_tokens": 128000,
+      "cache_read_cost_per_1k": 0.001,
+      "cache_write_cost_per_1k": 0.0125
     },
     "gemini/gemini-robotics-er-2-streaming-preview": {
       "input_cost_per_1k": 0.002,

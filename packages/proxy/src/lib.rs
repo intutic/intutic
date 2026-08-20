@@ -28,6 +28,8 @@ pub mod hostname_filter;
 /// Offline model pricing — compile-time bundle + family prefix fallback (WS-5OP)
 pub mod pricing;
 pub mod routing;
+/// Provider token-usage parsing, normalized to disjoint billing buckets (TD-347)
+pub mod usage;
 /// Storage abstraction — Valkey-backed or in-memory (SPIKE, bandit slice only)
 pub mod store;
 pub mod tls_mitm;

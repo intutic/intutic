@@ -73,7 +73,8 @@ use std::time::{Duration, Instant};
 
 use super::{
     CachedResponse, ClaimOutcome, ControlPlaneAuth, ControlPlaneCache, FeatureFlags, HardCapStatus,
-    JudgeScope, LocalStore, NotifyScope, Ownership, SessionRouting, TokenBaseline,
+    JudgeScope, LocalStore, NotifyScope, Ownership, PinScope, PinnedSopBlock, SessionRouting,
+    TokenBaseline,
 };
 use crate::routing::bandit::BanditArmState;
 use crate::routing::mirror::MirrorPairEvent;
@@ -83,6 +84,16 @@ use crate::telemetry::ExecutionTrace;
 /// A cache entry plus the instant it stops being valid.
 struct Expiring {
     value: CachedResponse,
+    expires_at: Instant,
+}
+
+/// A pinned SOP advisory block plus the instant its TTL elapses (TD-348).
+/// Same shape as [`Expiring`], kept separate rather than made generic — two
+/// call sites do not earn an abstraction, and `CachedResponse` and
+/// `PinnedSopBlock` are otherwise unrelated types that happen to both want a
+/// TTL today.
+struct ExpiringPin {
+    value: PinnedSopBlock,
     expires_at: Instant,
 }
 
@@ -216,6 +227,11 @@ pub struct MemoryStore {
     /// No TTL here. The process lifetime is shorter than the one-hour window
     /// the Valkey path uses, so the restart is the expiry.
     reask_attempts: Mutex<HashMap<String, u32>>,
+    /// Pinned SOP advisory blocks (TD-348), keyed by [`PinScope::storage_key`].
+    /// Memory-only, same as the response cache above — a pin outlives one
+    /// request but never the process, which matches its purpose (holding a
+    /// prefix stable for a session, not across a restart).
+    sop_pins: Mutex<HashMap<String, ExpiringPin>>,
     /// `None` = ephemeral. Set only by [`MemoryStore::durable`].
     snapshot_path: Option<PathBuf>,
 }
@@ -866,6 +882,55 @@ impl LocalStore for MemoryStore {
             .or_default()
             .push(payload.to_string());
         Ok(())
+    }
+
+    async fn pinned_sop_block(&self, scope: &PinScope) -> Option<PinnedSopBlock> {
+        let mut pins = self.sop_pins.lock().ok()?;
+        let key = scope.storage_key();
+        match pins.get(&key) {
+            Some(p) if p.expires_at > Instant::now() => Some(p.value.clone()),
+            // Expired: drop it here rather than growing an unbounded map of
+            // dead entries, since nothing else sweeps this — same precedent
+            // as `cached_response` above.
+            Some(_) => {
+                pins.remove(&key);
+                None
+            }
+            None => None,
+        }
+    }
+
+    async fn pin_sop_block(
+        &self,
+        scope: &PinScope,
+        block: &PinnedSopBlock,
+        ttl_secs: u64,
+    ) -> PinnedSopBlock {
+        let Ok(mut pins) = self.sop_pins.lock() else {
+            // Poisoned lock: fail toward "my own render", not toward blocking
+            // the request. A single process racing itself is the only
+            // scenario `MemoryStore` needs to handle here at all.
+            return block.clone();
+        };
+        let key = scope.storage_key();
+        // NX semantics: only write if absent (or expired, which reads as
+        // absent). A single-process store still has real concurrent tasks —
+        // two requests in the same session's first turn can both reach this
+        // method before either has written — so this still needs to converge
+        // them on one winner, the same as the Valkey `SET NX` path.
+        if let Some(existing) = pins.get(&key) {
+            if existing.expires_at > Instant::now() {
+                return existing.value.clone();
+            }
+        }
+        pins.insert(
+            key,
+            ExpiringPin {
+                value: block.clone(),
+                expires_at: Instant::now() + Duration::from_secs(ttl_secs),
+            },
+        );
+        block.clone()
     }
 }
 
