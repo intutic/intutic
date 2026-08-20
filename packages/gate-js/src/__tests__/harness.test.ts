@@ -19,19 +19,29 @@
  * phase filed). The runtime behaviour under test is this adapter's own
  * functions against a `FakeGate`, per wrapTools.test.ts's pattern.
  */
-import { afterEach, describe, expect, it } from 'vitest'
+import { spawnSync } from 'node:child_process'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type {
+  HarnessAgentAdapter,
   HarnessAgentPermissionMode,
+  HarnessAgentSandboxConfig,
   HarnessAgentToolApprovalConfiguration,
   HarnessAgentToolApprovalContinuation,
 } from '@ai-sdk/harness/agent'
-import { collectHarnessAgentToolApprovalContinuations } from '@ai-sdk/harness/agent'
-import type { HarnessV1NetworkPolicy } from '@ai-sdk/harness'
-import type { ModelMessage } from 'ai'
+import { collectHarnessAgentToolApprovalContinuations, prepareHarnessSandboxTemplate } from '@ai-sdk/harness/agent'
+import type { HarnessV1BuiltinToolFiltering, HarnessV1NetworkPolicy, HarnessV1SandboxProvider } from '@ai-sdk/harness'
+import type { ActiveTools, ModelMessage, Tool } from 'ai'
 import { IntuticGateRefusal } from '../errors.js'
 import { Gate, install } from '../gate.js'
+import { evaluate, loadSnapshot, SEV_BLOCK, SEV_SHADOW, SEV_WARN } from '../snapshot.js'
+import { allFloorFixtures, type FixturePattern } from './fixtures/protectedPathsFixtures.js'
 import {
+  _internal,
   intuticApprovalResponder,
+  intuticSandboxBootstrap,
   intuticStaticApprovals,
   intuticSubmitApprovals,
   recommendedHarnessSettings,
@@ -84,6 +94,18 @@ function _typeCheckOnly(): void {
   void mode
   const policy: HarnessV1NetworkPolicy = settings.networkPolicy
   void policy
+
+  // TD-415: settings.inactiveTools must be assignable to the REAL
+  // HarnessAgentSettings.inactiveTools field for a tool set that declares a
+  // 'bash' builtin (true of every harness this recommendation targets —
+  // HARNESS_V1_BUILTIN_TOOL_NAMES includes 'bash'), with no cast.
+  const inactive: ActiveTools<{ bash: Tool }> = settings.inactiveTools
+  void inactive
+
+  // intuticSandboxBootstrap() must produce a real HarnessAgentSandboxConfig
+  // — bootstrapHash/onBootstrap pass straight through with no cast.
+  const sandboxConfig: HarnessAgentSandboxConfig = intuticSandboxBootstrap()
+  void sandboxConfig
 }
 
 describe('renderHarnessToolInput', () => {
@@ -281,10 +303,11 @@ describe('intuticStaticApprovals', () => {
 })
 
 describe('recommendedHarnessSettings', () => {
-  it("recommends 'allow-edits' and deny-all egress by default — never the framework's own 'allow-all'", () => {
+  it("recommends 'allow-edits', deny-all egress, and filtering bash by default — never the framework's own 'allow-all'", () => {
     expect(recommendedHarnessSettings()).toEqual({
       permissionMode: 'allow-edits',
       networkPolicy: { mode: 'deny-all' },
+      inactiveTools: ['bash'],
     })
   })
 
@@ -296,9 +319,278 @@ describe('recommendedHarnessSettings', () => {
         allowedHosts: ['registry.npmjs.org'],
         deniedCIDRs: ['169.254.169.254/32'],
       },
+      inactiveTools: ['bash'],
+    })
+  })
+
+  // TD-415: HarnessV1BuiltinToolFiltering CAN drop `bash` at config time —
+  // confirmed against real shipped dist for both harnesses TD-417 discusses
+  // (@ai-sdk/harness-claude-code@1.0.78: native filtering; @ai-sdk/harness-
+  // grok-build@1.0.12, via its pinned @ai-sdk/harness-acp@1.0.13: framework
+  // approval-auto-deny). See RecommendedHarnessSettings.inactiveTools's doc
+  // comment in harness.ts for the full finding.
+  it("recommends omitting bash entirely by default, via inactiveTools: ['bash']", () => {
+    expect(recommendedHarnessSettings().inactiveTools).toEqual(['bash'])
+  })
+
+  it('omits inactiveTools when filterBash: false — a caller that genuinely needs bash available', () => {
+    const settings = recommendedHarnessSettings({ filterBash: false })
+    expect(settings.inactiveTools).toBeUndefined()
+    expect('inactiveTools' in settings).toBe(false)
+  })
+
+  it('the recommended inactiveTools value is a real HarnessV1BuiltinToolFiltering deny list when applied', () => {
+    // What HarnessAgent itself computes from inactiveTools (dist/agent/index.js,
+    // resolveHarnessAgentToolFiltering) for a single-entry deny — confirms the
+    // recommendation composes into the real filtering shape, not just that it
+    // typechecks against it.
+    const filtering: HarnessV1BuiltinToolFiltering = { mode: 'deny', toolNames: [...(recommendedHarnessSettings().inactiveTools ?? [])] }
+    expect(filtering).toEqual({ mode: 'deny', toolNames: ['bash'] })
+  })
+})
+
+// ------------------------------------------------------------------------
+// intuticSandboxBootstrap — TD-417 Half A
+// ------------------------------------------------------------------------
+
+describe('intuticSandboxBootstrap', () => {
+  it('bootstrapHash is a deterministic sha256 hex digest, and changes with the recipe', () => {
+    const a = intuticSandboxBootstrap({ policySnapshotRules: 'x', workspaceId: 'ws_1' })
+    const b = intuticSandboxBootstrap({ policySnapshotRules: 'x', workspaceId: 'ws_1' })
+    const c = intuticSandboxBootstrap({ policySnapshotRules: 'y', workspaceId: 'ws_1' })
+    const d = intuticSandboxBootstrap({ policySnapshotRules: 'x', workspaceId: 'ws_2' })
+    expect(a.bootstrapHash).toBe(b.bootstrapHash) // same recipe, same hash
+    expect(a.bootstrapHash).toMatch(/^[0-9a-f]{64}$/) // sha256 hex, same convention as snapshot.ts
+    expect(a.bootstrapHash).not.toBe(c.bootstrapHash) // rules changed
+    expect(a.bootstrapHash).not.toBe(d.bootstrapHash) // workspace changed
+  })
+
+  it('onBootstrap writes the rules file, the hook script, and .claude/settings.json under workDir', async () => {
+    const written: Array<{ path: string; content: string }> = []
+    const session = {
+      writeTextFile: async (opts: { path: string; content: string }) => {
+        written.push(opts)
+      },
+    }
+    const bootstrap = intuticSandboxBootstrap({
+      policySnapshotRules: 'destructive.rm_rf_root\tblock\t-\tcommand\tRecursive delete\t rm( +-[a-zA-Z-]+)+ +/( |\\*)\n',
+    })
+    await bootstrap.onBootstrap({ session, workDir: '/vercel/sandbox/claude-code-abc' })
+
+    const byPath = Object.fromEntries(written.map((w) => [w.path, w.content]))
+    expect(Object.keys(byPath).sort()).toEqual(
+      [
+        '/vercel/sandbox/claude-code-abc/.claude/settings.json',
+        '/vercel/sandbox/claude-code-abc/.intutic/hooks/claude-code-check.js',
+        '/vercel/sandbox/claude-code-abc/.intutic/hooks/policy-snapshot.rules',
+      ].sort(),
+    )
+    expect(byPath['/vercel/sandbox/claude-code-abc/.intutic/hooks/policy-snapshot.rules']).toContain(
+      'destructive.rm_rf_root',
+    )
+    const settings = JSON.parse(byPath['/vercel/sandbox/claude-code-abc/.claude/settings.json']!)
+    expect(settings.hooks.PreToolUse.map((h: { matcher: string }) => h.matcher)).toEqual([
+      'Bash',
+      'Edit',
+      'Write',
+      'MultiEdit',
+      'mcp__.*',
+    ])
+    expect(settings.hooks.PreToolUse[0].hooks[0].command).toBe(
+      'node /vercel/sandbox/claude-code-abc/.intutic/hooks/claude-code-check.js',
+    )
+  })
+
+  it('respects a custom bootstrapDir', async () => {
+    const written: Array<{ path: string }> = []
+    const session = { writeTextFile: async (opts: { path: string; content: string }) => void written.push(opts) }
+    await intuticSandboxBootstrap({ bootstrapDir: '.custom-dir' }).onBootstrap({ session, workDir: '/w' })
+    expect(written.map((w) => w.path)).toContain('/w/.custom-dir/claude-code-check.js')
+  })
+
+  describe('driven through the REAL @ai-sdk/harness/agent orchestration', () => {
+    it('prepareHarnessSandboxTemplate validates and invokes our onBootstrap with the resolved workDir', async () => {
+      const written: Array<{ path: string; content: string }> = []
+      const runCalls: string[] = []
+      const fakeSandboxSession = {
+        run: async ({ command }: { command: string }) => {
+          runCalls.push(command)
+          if (command === 'pwd') return { exitCode: 0, stdout: '/vercel/sandbox', stderr: '' }
+          return { exitCode: 0, stdout: '', stderr: '' } // mkdir -p
+        },
+        writeTextFile: async (opts: { path: string; content: string }) => {
+          written.push(opts)
+        },
+      }
+
+      const fakeProvider = {
+        specificationVersion: 'harness-sandbox-v1',
+        providerId: 'fake-test-provider',
+        createSession: async (options?: {
+          onFirstCreate?: (session: unknown, opts: { abortSignal?: AbortSignal }) => Promise<void>
+        }) => {
+          await options?.onFirstCreate?.(fakeSandboxSession, {})
+          // prepareHarnessSandboxTemplate always stops the temporary session
+          // it created (finally block in the real source) once bootstrap
+          // completes — the real HarnessV1NetworkSandboxSession contract.
+          return { id: 'fake-session', stop: async () => {} }
+        },
+      } as unknown as HarnessV1SandboxProvider
+
+      const fakeHarness = {
+        specificationVersion: 'harness-v1',
+        harnessId: 'fake-claude-code',
+        builtinTools: {},
+        doStart: async () => {
+          throw new Error('not exercised by this test')
+        },
+      } as unknown as HarnessAgentAdapter
+
+      const bootstrap = intuticSandboxBootstrap({ policySnapshotRules: 'r' })
+
+      // Real framework function: validates bootstrapHash/onBootstrap pairing
+      // (throws if only one is set — HarnessAgent's own
+      // validateSandboxBootstrapSettings), computes the recipe identity, and
+      // drives our onBootstrap through its real runSandboxBootstrap
+      // (resolve pwd, mkdir -p, then call onBootstrap) — not a re-derivation
+      // of that machinery.
+      await prepareHarnessSandboxTemplate({
+        harness: fakeHarness,
+        sandboxProvider: fakeProvider,
+        sandboxConfig: bootstrap,
+      })
+
+      expect(runCalls).toContain('pwd')
+      const paths = written.map((w) => w.path).sort()
+      expect(paths).toEqual(
+        [
+          '/vercel/sandbox/.claude/settings.json',
+          '/vercel/sandbox/.intutic/hooks/claude-code-check.js',
+          '/vercel/sandbox/.intutic/hooks/policy-snapshot.rules',
+        ].sort(),
+      )
+    })
+
+    it('validateSandboxBootstrapSettings (the real one) rejects onBootstrap without bootstrapHash', async () => {
+      const fakeProvider = {
+        specificationVersion: 'harness-sandbox-v1',
+        providerId: 'fake-test-provider',
+        createSession: async () => ({ id: 'unused' }),
+      } as unknown as HarnessV1SandboxProvider
+      const fakeHarness = {
+        specificationVersion: 'harness-v1',
+        harnessId: 'fake',
+        builtinTools: {},
+        doStart: async () => {
+          throw new Error('unused')
+        },
+      } as unknown as HarnessAgentAdapter
+
+      await expect(
+        prepareHarnessSandboxTemplate({
+          harness: fakeHarness,
+          sandboxProvider: fakeProvider,
+          // onBootstrap without bootstrapHash — malformed, same as passing
+          // only half of intuticSandboxBootstrap()'s return value.
+          sandboxConfig: { onBootstrap: async () => {} } as unknown as HarnessAgentSandboxConfig,
+        }),
+      ).rejects.toThrow(/must be provided together/)
     })
   })
 })
+
+// ------------------------------------------------------------------------
+// Generated sandbox gate-script fidelity: the standalone Node script
+// intuticSandboxBootstrap() writes into the sandbox must reach the SAME
+// block/allow verdict as this package's own `snapshot.evaluate()` for the
+// same rule — proven by actually spawning the generated script, not just
+// reading it. Mirrors fidelity.test.ts's method (isolated one-rule .rules
+// files against the real protectedPaths.ts fixture table), extended to run
+// the script as a child process instead of calling evaluate() directly.
+// ------------------------------------------------------------------------
+
+describe('intuticSandboxBootstrap: generated hook script matches snapshot.evaluate()', () => {
+  let dir: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'intutic-sandbox-gate-fidelity-'))
+  })
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  function rulesLine(p: FixturePattern): string {
+    return [p.id, p.severity, p.ignoreCase ? 'i' : '-', p.subject ?? 'any', p.reason, p.source].join('\t')
+  }
+
+  /** Builds the stdin JSON envelope Claude Code's real PreToolUse hook sends,
+   *  placing `fixture` on whichever field the pattern's subject reads —
+   *  mirrors fidelity.test.ts's `evaluateAgainst`. */
+  function ctxFor(p: FixturePattern, fixture: string): unknown {
+    const subject = p.subject ?? 'any'
+    const toolName = subject === 'tool' ? fixture : 'shell'
+    const path = subject === 'target' ? fixture : ''
+    const command = subject === 'command' || subject === 'any' ? fixture : ''
+    return { tool_name: toolName, tool_input: { command, path } }
+  }
+
+  function runGeneratedScript(p: FixturePattern, fixture: string): number | null {
+    writeFileSync(join(dir, 'policy-snapshot.rules'), rulesLine(p) + '\n', 'utf-8')
+    const scriptPath = join(dir, 'claude-code-check.js')
+    writeFileSync(scriptPath, _internal.renderSandboxGateScript('policy-snapshot.rules'), 'utf-8')
+    const result = spawnSync(process.execPath, [scriptPath], {
+      input: JSON.stringify(ctxFor(p, fixture)),
+      encoding: 'utf-8',
+    })
+    return result.status
+  }
+
+  function severityConst(s: 'block' | 'warn' | 'shadow'): string {
+    return s === 'block' ? SEV_BLOCK : s === 'warn' ? SEV_WARN : SEV_SHADOW
+  }
+
+  // Every third fixture (covering every id/subject/severity family present)
+  // to keep the child-process spawn count reasonable while still exercising
+  // real fixtures from every pattern table.
+  const fixtures = allFloorFixtures().filter((_, i) => i % 3 === 0)
+
+  it('sampled a non-trivial number of pattern families', () => {
+    expect(fixtures.length).toBeGreaterThan(5)
+  })
+
+  describe.each(fixtures.map((p) => [p.id, p] as const))('%s', (_id, p) => {
+    it('exits 2 (block) or 0 (warn/shadow), agreeing with snapshot.evaluate(), on every `matches` fixture', () => {
+      const snap = loadSnapshot('', writeIsolatedRules(dir, p))
+      for (const fixture of p.matches) {
+        const subject = p.subject ?? 'any'
+        const toolName = subject === 'tool' ? fixture : 'shell'
+        const target = subject === 'target' ? fixture : ''
+        const command = subject === 'command' || subject === 'any' ? fixture : ''
+        const decision = evaluate(toolName, target, command, snap)
+        expect(decision.severity, `expected ${p.id} to match ${JSON.stringify(fixture)}`).toBe(severityConst(p.severity))
+
+        const exitCode = runGeneratedScript(p, fixture)
+        const expectedExit = decision.severity === SEV_BLOCK ? 2 : 0
+        expect(exitCode, `generated script exit code for ${p.id} / ${JSON.stringify(fixture)}`).toBe(expectedExit)
+      }
+    })
+
+    it('exits 0 on every `notMatches` fixture, agreeing with snapshot.evaluate()', () => {
+      for (const fixture of p.notMatches) {
+        const exitCode = runGeneratedScript(p, fixture)
+        expect(exitCode, `generated script exit code for ${p.id} / ${JSON.stringify(fixture)} (notMatches)`).toBe(0)
+      }
+    })
+  })
+})
+
+function writeIsolatedRules(dir: string, p: FixturePattern): string {
+  const line = [p.id, p.severity, p.ignoreCase ? 'i' : '-', p.subject ?? 'any', p.reason, p.source].join('\t')
+  const file = join(dir, `isolated-${p.id.replace(/[^a-zA-Z0-9]/g, '_')}.rules`)
+  writeFileSync(file, line + '\n', 'utf-8')
+  return file
+}
 
 // keep the type-check function reachable so it is not tree-shaken/flagged unused
 void _typeCheckOnly

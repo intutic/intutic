@@ -85,9 +85,41 @@
  * enforcement surface is {@link intuticApproval}. LOAD-BEARING caveat,
  * verified against `dist/src/protocol/message.d.ts`: these two events carry
  * `requestId`/`responderPrincipalId`/`turnId`/`stepIndex` but NOT the tool
- * name or input, so the emitted Intutic events attribute to the synthetic
- * tool name {@link EVE_APPROVAL_TOOL_NAME} with the request id in the reason
- * — request-scoped attribution, not tool-scoped. See TD-411.
+ * name or input.
+ *
+ * TD-411 half 2, revisited: `intuticApproval()` and `intuticAuditHooks()` are
+ * both plain functions exported from this one module and cannot be assumed to
+ * run in the same process at settlement time — eve's own docs state a parked
+ * approval survives a process restart verbatim ("the process can restart and
+ * the parked turn survives", `docs/tools/human-in-the-loop.md`), so a
+ * `requestId -> toolName` map populated at approval-decision time and read
+ * back later inside the hook would silently degrade for exactly the durable,
+ * long-parked approvals this mechanism exists for — the worst kind of fix,
+ * correct in local testing and quietly wrong in the deployments that matter
+ * most. That map was NOT built.
+ *
+ * What WAS found and built instead needs no cross-call memory at all: eve
+ * ships a THIRD hookable event, `input.requested` (confirmed in the same
+ * `HookEventMap`, `dist/src/public/definitions/hook.d.ts`), fired once when a
+ * batch of human-input requests is created — including every `kind:
+ * 'tool-approval'` request `intuticApproval()`'s `'user-approval'` return
+ * value produces. Each request in that ONE event already carries
+ * `requestId` AND `action.toolName` TOGETHER (`InputRequest`,
+ * `dist/src/runtime/input/types.d.ts`'s `inputRequestSchema` — confirmed by
+ * the shipped zod schema, not just prose; corroborated by
+ * `docs/tools/human-in-the-loop.md`'s explicit statement that "`toolName` and
+ * `requestId` identify the action and request"). {@link intuticAuditHooks}
+ * now subscribes to it too: it emits a real, tool-identified `tool_flagged`
+ * event at REQUEST time (closing the "no tool identity" gap unconditionally,
+ * with no process-boundary risk — the whole payload arrives in one event),
+ * and best-effort caches `requestId -> toolName` in memory so the LATER
+ * `approval.candidate`/`approval.settled` events attribute to the real tool
+ * name too WHEN this cache is still warm (same-process, or a short-lived
+ * pause). When it is not — a genuinely long-parked, cross-restart approval —
+ * settlement still falls back to the synthetic {@link EVE_APPROVAL_TOOL_NAME},
+ * exactly the pre-existing behaviour, never worse. See TD-411 for the full
+ * reasoning and what a persistent (non-memory) correlation store would take
+ * to close that residual gap.
  *
  * ## LLM egress — documented honestly, not oversold
  *
@@ -341,6 +373,40 @@ export interface EveApprovalSettledEvent {
   }
 }
 
+/**
+ * Structural copy of one element of eve's `InputRequestedStreamEvent.data.requests`
+ * (`InputRequest`, `dist/src/runtime/input/types.d.ts`'s `inputRequestSchema`,
+ * read from the shipped zod schema, not just its `.d.ts`) — narrowed to the
+ * fields this module reads. Unlike {@link EveApprovalCandidateEvent} /
+ * {@link EveApprovalSettledEvent}, this DOES carry the real tool name
+ * (`action.toolName`) alongside `requestId`, in the same object. See TD-411.
+ */
+export interface EveInputRequest {
+  readonly requestId: string
+  readonly kind: 'question' | 'session-limit' | 'tool-approval'
+  /** Required in the real shipped schema for every `kind`; kept optional
+   *  here since this module only trusts it for `kind: 'tool-approval'` and
+   *  a structural copy should not assume more than it reads. */
+  readonly action?: {
+    readonly callId: string
+    readonly toolName: string
+    readonly input?: unknown
+  }
+}
+
+/** Structural copy of eve's `InputRequestedStreamEvent` — a REAL hookable
+ *  `HookEventMap` key (`'input.requested'`, `dist/src/public/definitions/
+ *  hook.d.ts`), fired once per batch of pending human-input requests. */
+export interface EveInputRequestedEvent {
+  readonly type: 'input.requested'
+  readonly data: {
+    readonly requests: readonly EveInputRequest[]
+    readonly sequence: number
+    readonly stepIndex: number
+    readonly turnId: string
+  }
+}
+
 /** Structural slice of eve's `HookContext` this adapter reads. The real
  *  context is wider (extends `SessionContext`, `agent.name` required) — the
  *  real type is assignable to this one. */
@@ -353,6 +419,10 @@ export interface EveHookContext {
  *  a valid eve `HookDefinition`, accepted by `defineHook` as-is. */
 export interface EveAuditHookDefinition {
   readonly events: {
+    readonly 'input.requested': (
+      event: EveInputRequestedEvent,
+      ctx: EveHookContext,
+    ) => Promise<void>
     readonly 'approval.candidate': (
       event: EveApprovalCandidateEvent,
       ctx: EveHookContext,
@@ -392,6 +462,11 @@ export interface IntuticAuditHooksOptions {
  * (the same `tool_allowed`/`tool_blocked`/`tool_flagged` names `gate.ts`
  * emits, so the dashboard renders both sources on one timeline):
  *
+ * - `input.requested`, one `kind: 'tool-approval'` request → `tool_flagged`,
+ *   under the REAL tool name (`request.action.toolName`) — a genuinely new
+ *   signal this adapter did not emit before: a call is now pending human
+ *   approval. See the module doc (TD-411) for why this event, not a
+ *   process-memory map, is what closes "no tool identity" here.
  * - `approval.settled` `outcome: 'approved'` → `tool_allowed` — a human
  *   explicitly approved the parked call.
  * - `approval.settled` `outcome: 'cancelled'` → `tool_blocked` — the request
@@ -403,16 +478,32 @@ export interface IntuticAuditHooksOptions {
  *   went somewhere worth an operator's attention. `'pending'` (a candidate
  *   simply being created) is routine lifecycle and deliberately NOT emitted.
  *
+ * `approval.candidate`/`approval.settled` attribute to the REAL tool name
+ * when this instance's in-memory `requestId -> toolName` cache (populated
+ * by `input.requested`) is still warm, and fall back to the synthetic
+ * {@link EVE_APPROVAL_TOOL_NAME} otherwise — see the module doc for why that
+ * fallback exists and is not itself a bug.
+ *
  * These hooks are TELEMETRY, not enforcement: eve runs hook handlers after
  * events are durably recorded, and they cannot veto anything (eve's own
  * "observe-only" hook contract). The enforcement surface is
  * {@link intuticApproval}. Handlers never throw — a telemetry failure must
- * not break the run (`GateClient.emit`'s own never-throws contract) — and
- * the emitted events carry {@link EVE_APPROVAL_TOOL_NAME} as the tool name
- * because eve's approval events do not include the real one (see module doc).
+ * not break the run (`GateClient.emit`'s own never-throws contract).
  */
 export function intuticAuditHooks(opts: IntuticAuditHooksOptions = {}): EveAuditHookDefinition {
   const perSession = new Map<string, GateClient | null>()
+
+  // Best-effort, same-process-only. Populated by `input.requested` (which
+  // carries requestId and toolName together already — no correlation is
+  // needed to populate it) and consulted by `approval.candidate`/
+  // `approval.settled` (which do not carry toolName at all). Evicted on
+  // `approval.settled` — the terminal event for a requestId, after which it
+  // is never looked up again. A process that restarts between request and
+  // settlement (eve's own docs say this is expected and safe for eve itself
+  // — "the process can restart and the parked turn survives") simply finds
+  // this map empty and falls back to EVE_APPROVAL_TOOL_NAME, exactly this
+  // function's behaviour before this cache existed. See TD-411.
+  const requestIdToToolName = new Map<string, string>()
 
   function clientFor(sessionId: string): GateClient | null {
     if (opts.client !== undefined) return opts.client
@@ -433,14 +524,29 @@ export function intuticAuditHooks(opts: IntuticAuditHooksOptions = {}): EveAudit
 
   return {
     events: {
+      'input.requested': async (event, ctx) => {
+        const client = clientFor(ctx.session.id)
+        for (const request of event.data.requests) {
+          if (request.kind !== 'tool-approval' || request.action === undefined) continue
+          requestIdToToolName.set(request.requestId, request.action.toolName)
+          if (client === null) continue
+          await client.emit(
+            'tool_flagged',
+            request.action.toolName,
+            `eve requested human approval before running this tool (request ${request.requestId})`,
+            request.action.input,
+          )
+        }
+      },
       'approval.candidate': async (event, ctx) => {
         if (event.data.outcome === 'pending') return
         const client = clientFor(ctx.session.id)
         if (client === null) return
+        const toolName = requestIdToToolName.get(event.data.requestId) ?? EVE_APPROVAL_TOOL_NAME
         const suffix = event.data.reason ? `: ${event.data.reason}` : ''
         await client.emit(
           'tool_flagged',
-          EVE_APPROVAL_TOOL_NAME,
+          toolName,
           `eve approval candidate ${event.data.outcome} (request ${event.data.requestId}, ` +
             `responder ${event.data.responderPrincipalId})${suffix}`,
           event.data,
@@ -448,11 +554,13 @@ export function intuticAuditHooks(opts: IntuticAuditHooksOptions = {}): EveAudit
       },
       'approval.settled': async (event, ctx) => {
         const client = clientFor(ctx.session.id)
+        const toolName = requestIdToToolName.get(event.data.requestId) ?? EVE_APPROVAL_TOOL_NAME
+        requestIdToToolName.delete(event.data.requestId)
         if (client === null) return
         if (event.data.outcome === 'approved') {
           await client.emit(
             'tool_allowed',
-            EVE_APPROVAL_TOOL_NAME,
+            toolName,
             `eve approval settled: approved by ${event.data.responderPrincipalId} ` +
               `(request ${event.data.requestId})`,
             event.data,
@@ -461,7 +569,7 @@ export function intuticAuditHooks(opts: IntuticAuditHooksOptions = {}): EveAudit
         }
         await client.emit(
           'tool_blocked',
-          EVE_APPROVAL_TOOL_NAME,
+          toolName,
           `eve approval settled: cancelled — the parked tool call never ran ` +
             `(request ${event.data.requestId}, responder ${event.data.responderPrincipalId}). ` +
             `Human veto recorded by the observe-only audit hook, not an Intutic gate refusal.`,

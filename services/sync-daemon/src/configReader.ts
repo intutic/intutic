@@ -13,7 +13,12 @@
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import * as crypto from 'node:crypto'
-import type { HarnessType, CapturedConfigFile, BatchConfigCapturePayload } from '@intutic/shared-types'
+import type {
+  HarnessType,
+  CapturedConfigFile,
+  BatchConfigCapturePayload,
+  GovernanceCoverageInputs,
+} from '@intutic/shared-types'
 import { HARNESS_FILES } from './configWriter.js'
 
 // ─── Constants ───────────────────────────────────────────────────────
@@ -33,20 +38,18 @@ const lastUploadedHashes = new Map<string, string>()
 
 /**
  * The four enforcement inputs `POST /api/v1/governance-coverage/snapshot`
- * expects — mirrors `harnessGradeSweep.ts`'s `deriveEnforcementInputs` on the
- * control-plane side, which derives the same four booleans from an agent's
- * reported `facets` (already computed once per cycle by
- * `agentReporter.ts#collectAgentReport` for `POST /api/v1/agents/report`).
- * Re-derived here rather than imported: this module ships in the publicly
- * mirrored `services/sync-daemon`, which must not import from
- * `services/control-plane`.
+ * expects. Re-exported from `@intutic/shared-types` (TD-443) — previously
+ * declared locally here as a hand-kept duplicate of
+ * `harnessGradeSweep.ts`'s `deriveEnforcementInputs` return shape on the
+ * control-plane side, which drifted (this module's `syncLoop.ts` consumer
+ * was missing an `Array.isArray` guard the control-plane side had). Both
+ * sides now derive from `packages/shared-types/src/governanceCoverage.ts`'s
+ * single mapping — safe for this module to depend on since it is a leaf
+ * package, not `services/control-plane` itself, so the publicly-mirrored
+ * `services/sync-daemon` still never imports from the enterprise-only
+ * service.
  */
-export interface GovernanceCoverageInputs {
-  mcpProxyActive: boolean
-  nativeHookActive: boolean
-  llmProxyActive: boolean
-  hasRulesFile: boolean
-}
+export type { GovernanceCoverageInputs } from '@intutic/shared-types'
 
 /**
  * Determine whether config capture should run on this iteration.
