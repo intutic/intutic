@@ -21,7 +21,8 @@ use std::sync::Arc;
 
 use super::{
     CachedResponse, ClaimOutcome, ControlPlaneAuth, ControlPlaneCache, FeatureFlags, HardCapStatus,
-    JudgeScope, LocalStore, NotifyScope, Ownership, SessionRouting, TokenBaseline,
+    JudgeScope, LocalStore, NotifyScope, Ownership, PinScope, PinnedSopBlock, SessionRouting,
+    TokenBaseline,
 };
 use crate::metering::VirtualKeyRecord;
 use crate::routing::bandit::BanditArmState;
@@ -215,6 +216,21 @@ fn outage_key(workspace_id: &str) -> String {
 
 fn session_key(session_id: &str) -> String {
     format!("session:metadata:{}", session_id)
+}
+
+/// A pinned SOP advisory block's key (TD-348).
+///
+/// Deliberately its own top-level key, `v2:sopblock:{workspace_id}:{agent}:
+/// {role_hash}` — NOT a new field on `session:metadata:{sid}` above. That hash
+/// has no TTL today (an ~8KB field on a key that never expires is a leak) and
+/// no workspace-id component (its `{sid}` alone is the client-supplied
+/// `x-session-id` header, which the doc comments on `tool_history_scope` and
+/// `judge_session_scope` in `proxy.rs` record as a degenerate, frequently-
+/// shared "unknown" value across every unidentified caller in every tenant —
+/// exactly the cross-tenant text leakage a workspace-scoped, TTL'd key
+/// avoids).
+fn sop_pin_key(scope: &PinScope) -> String {
+    format!("v2:sopblock:{}", scope.storage_key())
 }
 
 fn metrics_key(workspace_id: &str) -> String {
@@ -895,6 +911,61 @@ impl LocalStore for ValkeyStore {
             let _: Result<(), redis::RedisError> = conn.expire(&key, ttl as i64).await;
         }
         Ok(())
+    }
+
+    async fn pinned_sop_block(&self, scope: &PinScope) -> Option<PinnedSopBlock> {
+        let mut conn = self.conn();
+        let raw: Option<String> = conn.get(sop_pin_key(scope)).await.unwrap_or(None);
+        // A present key is unexpired by construction — Valkey drops the key
+        // itself once its TTL elapses, so there is no separate staleness
+        // check to make here the way `MemoryStore` needs one.
+        raw.and_then(|s| serde_json::from_str(&s).ok())
+    }
+
+    async fn pin_sop_block(
+        &self,
+        scope: &PinScope,
+        block: &PinnedSopBlock,
+        ttl_secs: u64,
+    ) -> PinnedSopBlock {
+        let mut conn = self.conn();
+        let key = sop_pin_key(scope);
+        let Ok(encoded) = serde_json::to_string(block) else {
+            // Cannot even serialise our own render — nothing to pin, fail
+            // toward serving what we just built rather than blocking.
+            return block.clone();
+        };
+
+        // `SET key val NX EX ttl GET` in one round trip: NX means the write
+        // only lands if the key is absent (the concurrency guard two racing
+        // "first request in this window" callers need); GET returns
+        // whatever was already there regardless of whether NX blocked this
+        // write, or nil when the key was absent and our write won. That is
+        // exactly the "converge on one winner" signal `resolve_injection_block`
+        // needs, in one call rather than a check-then-set race of our own.
+        let previous: Option<String> = redis::cmd("SET")
+            .arg(&key)
+            .arg(&encoded)
+            .arg("NX")
+            .arg("EX")
+            .arg(ttl_secs)
+            .arg("GET")
+            .query_async(&mut conn)
+            .await
+            .unwrap_or(None);
+
+        match previous.and_then(|s| serde_json::from_str::<PinnedSopBlock>(&s).ok()) {
+            // A concurrent writer already held the key — its bytes are the
+            // pin now; use them instead of our own, so every racer converges
+            // on one block.
+            Some(winner) => winner,
+            // Either no key existed (our SET won and wrote `block`), or the
+            // existing value failed to parse (corrupt entry — proceed as if
+            // we won; our fresh write already overwrote it as far as NX is
+            // concerned only when absent, but a parse failure here is not
+            // worth a second round trip to disambiguate).
+            None => block.clone(),
+        }
     }
 }
 

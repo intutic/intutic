@@ -249,6 +249,75 @@ pub enum JudgeScope {
     Loop,
 }
 
+/// A pinned, session-stable SOP advisory block (TD-348).
+///
+/// `block` and `fingerprint` are the render `sops::render` produced when this
+/// pin was written — `fingerprint` (from `sops::fingerprint_sop_set`) is
+/// carried purely as diagnostic bookkeeping for whoever is staring at a pin
+/// wondering which SOP set produced it. It is deliberately NOT consulted to
+/// decide whether to keep serving `block`: `sops::resolve_injection_block`
+/// serves the pinned bytes for as long as the pin's TTL allows, unconditionally
+/// — comparing fingerprints to decide freshness would defeat the entire point
+/// of pinning, which is a stable prefix regardless of what the live SOP set
+/// has since become.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PinnedSopBlock {
+    pub block: String,
+    pub fingerprint: String,
+    /// Unix seconds. Bookkeeping only, same rationale as `fingerprint` above —
+    /// the pin's Valkey key TTL (set once, at write time, never refreshed) is
+    /// the actual max-age mechanism, not a comparison against this field.
+    pub pinned_at: i64,
+}
+
+/// Identity a pinned SOP advisory block is keyed on (TD-348).
+///
+/// `agent_scope` MUST be `proxy::tool_history_scope`'s output
+/// (`{workspace_id}:{agent}`) — that function's doc comment records that
+/// keying session-scoped state on the bare, client-supplied `x-session-id`
+/// header was a real cross-tenant defect, fixed twice already in that same
+/// file (`tool_history_scope` itself, and separately `judge_session_scope`).
+/// This type does not re-derive that resolution ladder; it wraps whatever the
+/// caller already resolved through it, so a pin cannot become the third
+/// instance of that mistake.
+///
+/// `role` is a client-supplied header value and is hashed rather than used as
+/// raw key material — see [`PinScope::new`].
+pub struct PinScope {
+    agent_scope: String,
+    role_hash: String,
+}
+
+impl PinScope {
+    /// `agent_scope` is `{workspace_id}:{agent}`, e.g. the value
+    /// `proxy::tool_history_scope` already returns. `role` is hashed to 8 hex
+    /// chars (32 bits) — plenty to keep distinct roles from colliding within
+    /// one agent scope, without putting an arbitrary caller-controlled string
+    /// unescaped into Valkey key material.
+    pub fn new(agent_scope: &str, role: &str) -> Self {
+        Self {
+            agent_scope: agent_scope.to_string(),
+            role_hash: Self::hash_role(role),
+        }
+    }
+
+    fn hash_role(role: &str) -> String {
+        use sha2::{Digest, Sha256};
+        let mut h = Sha256::new();
+        h.update(role.to_ascii_lowercase().as_bytes());
+        format!("{:x}", h.finalize())[..8].to_string()
+    }
+
+    /// The storage-layer-agnostic identity string both `LocalStore`
+    /// implementors key on: `ValkeyStore` wraps this in the `v2:sopblock:`
+    /// namespace, `MemoryStore` uses it verbatim as a map key. Shaped
+    /// `{workspace_id}:{agent}:{role_hash}` — the exact `v2:sopblock:{...}`
+    /// key layout this feature's design settled on.
+    pub fn storage_key(&self) -> String {
+        format!("{}:{}", self.agent_scope, self.role_hash)
+    }
+}
+
 /// State the proxy both writes and reads. Needs a real second implementation —
 /// unlike control-plane-written keys, which are simply absent when standalone.
 #[async_trait]
@@ -678,6 +747,34 @@ pub trait LocalStore: Send + Sync + 'static {
         payload: &str,
         ttl_secs: Option<u64>,
     ) -> anyhow::Result<()>;
+
+    // ── SOP advisory pinning (TD-348) ──────────────────────────────────
+
+    /// The still-unexpired pinned SOP advisory block for `scope`, if one
+    /// exists. `None` covers both "never pinned" and "pin's TTL elapsed" —
+    /// `sops::resolve_injection_block` treats both identically: render fresh
+    /// and (re)pin.
+    async fn pinned_sop_block(&self, scope: &PinScope) -> Option<PinnedSopBlock>;
+
+    /// Write a pin for `scope`, but ONLY if none already exists (`SET NX EX`
+    /// on the Valkey backend) — set once, at creation, with `ttl_secs` as the
+    /// key's expiry, and never refreshed on a later read. A sliding TTL would
+    /// mean an actively-used session's governance text could go stale
+    /// indefinitely, defeating the reason a max-age exists at all.
+    ///
+    /// Two concurrent "first request in this window" callers can race here.
+    /// Returns whichever block ends up pinned: `block` itself when this call
+    /// won the race, or the pre-existing pin when it lost — never `None`, a
+    /// lost race still has a winner to report. This is what lets
+    /// `sops::resolve_injection_block` converge two concurrent first-turn
+    /// renders on one set of bytes instead of each pinning (and serving) its
+    /// own.
+    async fn pin_sop_block(
+        &self,
+        scope: &PinScope,
+        block: &PinnedSopBlock,
+        ttl_secs: u64,
+    ) -> PinnedSopBlock;
 }
 
 /// Keys the control plane writes and the proxy only reads. Standalone, every

@@ -61,6 +61,88 @@ describe('appliedSuggestions', () => {
     })
   })
 
+  describe('Per-operation outcome reporting (TD-349)', () => {
+    it('returns ok:true and an applied:true per-operation entry for a successful ADD', async () => {
+      const edits: ConfigEdit[] = [{
+        operation: 'ADD',
+        section: 'Governance',
+        content: '- Track outcomes.',
+        reason: 'Outcome tracking',
+      }]
+
+      const results = await applyConfigEdits(tmpDir, [{
+        suggestionId: 'sko_ok',
+        harnessType: 'cursor',
+        filePath: '.cursorrules',
+        edits,
+      }])
+
+      expect(results).toHaveLength(1)
+      expect(results[0].suggestionId).toBe('sko_ok')
+      expect(results[0].ok).toBe(true)
+      expect(results[0].perOperation).toEqual([
+        { index: 0, operation: 'ADD', applied: true },
+      ])
+    })
+
+    it('records a failure in the returned per-operation array when a REPLACE target is absent, not just a console.warn', async () => {
+      const edits: ConfigEdit[] = [{
+        operation: 'REPLACE',
+        section: 'Governance',
+        target: '- This text does not exist anywhere in the file.',
+        content: '- Replacement text.',
+        reason: 'Test missing target',
+      }]
+
+      const results = await applyConfigEdits(tmpDir, [{
+        suggestionId: 'sko_missing_replace',
+        harnessType: 'cursor',
+        filePath: '.cursorrules',
+        edits,
+      }])
+
+      expect(results).toHaveLength(1)
+      expect(results[0].suggestionId).toBe('sko_missing_replace')
+      // The whole suggestion is not "ok" — its one operation never landed.
+      expect(results[0].ok).toBe(false)
+      expect(results[0].perOperation).toHaveLength(1)
+      expect(results[0].perOperation[0]).toMatchObject({
+        index: 0,
+        operation: 'REPLACE',
+        applied: false,
+      })
+      expect(results[0].perOperation[0].reason).toBeTruthy()
+
+      // Nothing was written for the missing target.
+      const content = await node_fs.readFile(targetFile, 'utf-8')
+      expect(content).not.toContain('- Replacement text.')
+    })
+
+    it('records a failure in the returned per-operation array when a DELETE target is absent, not just a console.warn', async () => {
+      const edits: ConfigEdit[] = [{
+        operation: 'DELETE',
+        section: 'Governance',
+        content: '- This text does not exist anywhere in the file.',
+        reason: 'Test missing delete target',
+      }]
+
+      const results = await applyConfigEdits(tmpDir, [{
+        suggestionId: 'sko_missing_delete',
+        harnessType: 'cursor',
+        filePath: '.cursorrules',
+        edits,
+      }])
+
+      expect(results[0].ok).toBe(false)
+      expect(results[0].perOperation[0]).toMatchObject({
+        index: 0,
+        operation: 'DELETE',
+        applied: false,
+      })
+      expect(results[0].perOperation[0].reason).toBeTruthy()
+    })
+  })
+
   describe('Fragile String Match Replacement (Gap 2)', () => {
     it('successfully replaces text with minor spacing and indentation shifts', async () => {
       // Re-seed file with specific indentation and CRLF endings

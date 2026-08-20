@@ -344,21 +344,29 @@ pub async fn run_mirror(
 }
 
 /// Token counts from a provider response, whichever shape it uses.
+///
+/// Deliberately CACHE-BLIND (TD-347): this reads [`crate::usage::TokenUsage`]'s
+/// `total_input()`, never a cache-discounted cost. A mirror candidate is, by
+/// definition, evaluating a model choice this session has never actually
+/// routed to — the whole point of mirroring is measuring what a DIFFERENT
+/// arm would have done on the same traffic the served arm actually saw. Such
+/// a candidate cannot have a warm provider-side prompt cache from a prior
+/// turn, so pricing it cache-aware would not be "fixing" a missed discount;
+/// it would be crediting a discount no real request could ever have earned
+/// from this candidate. Do not wire this through `estimate_cost_cached`.
+///
+/// Tries the Anthropic shape first, then falls back to OpenAI chat shape —
+/// whichever the candidate model's provider actually used. This mirrors the
+/// old dual-key-name heuristic's coverage (Gemini's `usageMetadata` was never
+/// read here either, since it isn't nested under a `usage` key at all).
 fn usage_of(body: &Value) -> (u32, u32) {
-    let u = body.get("usage");
-    let get = |k: &str| {
-        u.and_then(|u| u.get(k))
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as u32
-    };
-    // Anthropic: input_tokens/output_tokens. OpenAI: prompt_tokens/completion_tokens.
-    let prompt = if get("input_tokens") > 0 { get("input_tokens") } else { get("prompt_tokens") };
-    let completion = if get("output_tokens") > 0 {
-        get("output_tokens")
+    let anthropic = crate::usage::TokenUsage::from_anthropic(body);
+    let usage = if anthropic.uncached_input.is_some() || anthropic.output.is_some() {
+        anthropic
     } else {
-        get("completion_tokens")
+        crate::usage::TokenUsage::from_openai_chat(body)
     };
-    (prompt, completion)
+    (usage.total_input(), usage.output.unwrap_or(0))
 }
 
 #[cfg(test)]

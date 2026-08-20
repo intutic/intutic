@@ -250,30 +250,23 @@ impl GeminiAdapter {
             _ => "STOP",
         };
 
-        // Usage metadata
-        let mut usage_metadata = serde_json::json!({
-            "promptTokenCount": 0,
-            "candidatesTokenCount": 0,
-            "totalTokenCount": 0
+        // Usage metadata — read via the shared `TokenUsage::from_anthropic`
+        // parser (TD-347) rather than an open-coded `input_tokens`/
+        // `output_tokens` read, so this translator and every other usage call
+        // site agree on what "Anthropic usage" means. `total_input()` is used
+        // for `promptTokenCount` rather than exposing the cache split on the
+        // wire here — this function's job is producing the Gemini-shape
+        // response the client already expects, and widening that wire
+        // contract with cache fields is out of scope for this change (same
+        // reasoning as the OpenAI translator's usage mapping).
+        let usage = crate::usage::TokenUsage::from_anthropic(canonical_response);
+        let input_tokens = usage.total_input();
+        let output_tokens = usage.output.unwrap_or(0);
+        let usage_metadata = serde_json::json!({
+            "promptTokenCount": input_tokens,
+            "candidatesTokenCount": output_tokens,
+            "totalTokenCount": input_tokens + output_tokens
         });
-
-        if let Some(usage_val) = response_obj.get("usage") {
-            if let Some(usage_obj) = usage_val.as_object() {
-                let input_tokens = usage_obj
-                    .get("input_tokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                let output_tokens = usage_obj
-                    .get("output_tokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                usage_metadata = serde_json::json!({
-                    "promptTokenCount": input_tokens,
-                    "candidatesTokenCount": output_tokens,
-                    "totalTokenCount": input_tokens + output_tokens
-                });
-            }
-        }
 
         let gemini_response = serde_json::json!({
             "candidates": [

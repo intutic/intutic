@@ -573,6 +573,38 @@ pub struct RoutingConfig {
     #[serde(default)]
     pub mirror_candidate_model: Option<String>,
 
+    /// Ceiling, in seconds, on how long a session's injected SOP advisory
+    /// block stays pinned to its first-rendered bytes (TD-348).
+    ///
+    /// The bandit's session lock above already pins the MODEL choice for
+    /// KV-cache warmth; this is the same idea applied to the governance text
+    /// `sops::inject_into_body` prepends at `system[0]`/`messages[0]` on
+    /// every request, which used to re-render (and therefore potentially
+    /// change) on every turn even with the model held constant — moving the
+    /// prefix underneath a cache the model pin could not save. The pin's
+    /// Valkey key TTL IS this mechanism: set once at pin-creation time from
+    /// this value, never refreshed on a later read, so a session cannot
+    /// game staleness by staying active.
+    ///
+    /// `0` disables pinning entirely — every request falls back to exactly
+    /// today's per-request render-and-inject behaviour. This one DOES get a
+    /// config off-switch (unlike TD-347's pricing-correctness fix): prompt
+    /// content staleness for up to this many seconds is a real, if usually
+    /// small, product trade — a SOP edited or a tier flipped mid-session
+    /// will not reach an active session's injected text until the pin
+    /// expires — and that trade-off is more subjective than a pricing bug,
+    /// so an operator who wants zero staleness at the cost of the cache win
+    /// gets to say so.
+    ///
+    /// Defaults to 600 (10 minutes): long enough that a typical multi-turn
+    /// agent session sees one stable prefix for its whole working span
+    /// rather than re-paying the cache-cold cost every few turns, short
+    /// enough that an edited SOP or a flipped tier reaches every active
+    /// session within one coffee break rather than "whenever this session
+    /// happens to end."
+    #[serde(default = "default_sop_pin_max_age_secs")]
+    pub sop_pin_max_age_secs: u64,
+
     #[serde(default)]
     pub reward: RewardConfig,
 }
@@ -592,6 +624,7 @@ impl Default for RoutingConfig {
             // Unset: mirroring stays driven by shadow disagreement only, same
             // as before this field existed.
             mirror_candidate_model: None,
+            sop_pin_max_age_secs: default_sop_pin_max_age_secs(),
             reward: RewardConfig::default(),
         }
     }
@@ -669,6 +702,9 @@ fn default_candidate_models() -> Vec<String> {
         "gpt-4o".to_string(),
         "gemini-2.0-flash".to_string(),
     ]
+}
+fn default_sop_pin_max_age_secs() -> u64 {
+    600
 }
 fn default_latency_slo_ms() -> u32 {
     30_000

@@ -403,8 +403,38 @@ function findFuzzyMatch(content: string, target: string): string | null {
   return null
 }
 
+/** Outcome of a single ADD/DELETE/REPLACE operation within one suggestion's edit set. */
+export interface ConfigEditOperationOutcome {
+  /** Index into the suggestion's `edits` array. */
+  index: number
+  operation: string
+  /** Whether this operation's effect actually landed in the on-disk file. */
+  applied: boolean
+  /** Present when `applied` is false — why it didn't land. */
+  reason?: string
+}
+
+/**
+ * Per-suggestion result of `applyConfigEdits` — what the daemon reports back
+ * to control-plane via `POST /api/v1/skillopt/:suggestionId/apply-result`
+ * (TD-349).
+ */
+export interface ConfigEditApplyOutcome {
+  suggestionId: string
+  /** True only when every operation for this suggestion landed. */
+  ok: boolean
+  perOperation: ConfigEditOperationOutcome[]
+}
+
 /**
  * Apply a list of custom config edits (ADD, DELETE, REPLACE) to a workspace rule file.
+ *
+ * Returns one `ConfigEditApplyOutcome` per input suggestion (TD-349) instead
+ * of `void` — every operation's real fate (fuzzy-match miss on DELETE/
+ * REPLACE, an unresolvable target file, or the final `atomicWrite` itself
+ * failing) is recorded here rather than only `console.warn`'d, so the caller
+ * (syncLoop.ts) can ack the daemon's actual outcome back to control-plane
+ * instead of the daemon-side write being invisible to it.
  */
 export async function applyConfigEdits(
   workspaceRoot: string,
@@ -415,10 +445,31 @@ export async function applyConfigEdits(
     edits: string | ConfigEdit[]
   }>,
   bypassEnforcementTier?: string,
-): Promise<void> {
+): Promise<ConfigEditApplyOutcome[]> {
+  const outcomes: ConfigEditApplyOutcome[] = []
+
   for (const applied of appliedEdits) {
     const filename = HARNESS_FILES[applied.harnessType as HarnessType] || applied.filePath
-    if (!filename) continue
+    const editsList: ConfigEdit[] = typeof applied.edits === 'string'
+      ? JSON.parse(applied.edits)
+      : applied.edits
+
+    if (!filename) {
+      // No writable target for this harness — every operation fails to land.
+      outcomes.push({
+        suggestionId: applied.suggestionId,
+        // Vacuously ok only when there was nothing to apply in the first
+        // place — matches the `perOperation.every(...)` rule used below.
+        ok: editsList.length === 0,
+        perOperation: editsList.map((edit, index) => ({
+          index,
+          operation: edit.operation,
+          applied: false,
+          reason: `No config file resolved for harness "${applied.harnessType}"`,
+        })),
+      })
+      continue
+    }
 
     const filePath = node_path.join(workspaceRoot, filename)
 
@@ -430,15 +481,15 @@ export async function applyConfigEdits(
     }
 
     let updatedContent = currentContent
-    const editsList: ConfigEdit[] = typeof applied.edits === 'string'
-      ? JSON.parse(applied.edits)
-      : applied.edits
+    const perOperation: ConfigEditOperationOutcome[] = []
 
-    for (const edit of editsList) {
+    editsList.forEach((edit, index) => {
       if (edit.operation === 'ADD') {
-        // Idempotency: skip if edit content already exists in file
+        // Idempotency: skip if edit content already exists in file — already
+        // landed, so this counts as applied, not a no-op failure.
         if (edit.content && updatedContent.includes(edit.content)) {
-          continue
+          perOperation.push({ index, operation: edit.operation, applied: true })
+          return
         }
         const header = `## ${edit.section}`
         if (updatedContent.includes(header)) {
@@ -446,34 +497,71 @@ export async function applyConfigEdits(
         } else {
           updatedContent += `\n\n${header}\n${edit.content ?? ''}`
         }
+        perOperation.push({ index, operation: edit.operation, applied: true })
       } else if (edit.operation === 'DELETE') {
         if (edit.content) {
           const match = findFuzzyMatch(updatedContent, edit.content)
           if (match) {
             updatedContent = updatedContent.replace(match, '')
+            perOperation.push({ index, operation: edit.operation, applied: true })
           } else {
             console.warn(`[sync-daemon] [DELETE] Pattern not found in ${filename}:`, edit.content.slice(0, 100))
+            perOperation.push({
+              index,
+              operation: edit.operation,
+              applied: false,
+              reason: `DELETE target pattern not found in ${filename}`,
+            })
           }
+        } else {
+          perOperation.push({ index, operation: edit.operation, applied: false, reason: 'DELETE edit had no content to match' })
         }
       } else if (edit.operation === 'REPLACE') {
         if (edit.target) {
           const match = findFuzzyMatch(updatedContent, edit.target)
           if (match) {
             updatedContent = updatedContent.replace(match, edit.content ?? '')
+            perOperation.push({ index, operation: edit.operation, applied: true })
           } else {
             console.warn(`[sync-daemon] [REPLACE] Target pattern not found in ${filename}:`, edit.target.slice(0, 100))
+            perOperation.push({
+              index,
+              operation: edit.operation,
+              applied: false,
+              reason: `REPLACE target pattern not found in ${filename}`,
+            })
           }
+        } else {
+          perOperation.push({ index, operation: edit.operation, applied: false, reason: 'REPLACE edit had no target to match' })
         }
+      } else {
+        perOperation.push({ index, operation: edit.operation, applied: false, reason: `Unknown operation "${edit.operation}"` })
       }
-    }
+    })
 
     try {
       await atomicWrite(filePath, updatedContent, bypassEnforcementTier)
       console.log(`[sync-daemon] Applied SkillOpt config edits to ${filename} (suggestion: ${applied.suggestionId})`)
     } catch (err) {
+      // The write itself failed (e.g. protected-path/tamper guard) — nothing
+      // that "landed" in memory above actually reached disk. Every operation
+      // that had been recorded as applied must be walked back to failed.
+      const reason = `atomicWrite failed for ${filename}: ${err instanceof Error ? err.message : String(err)}`
       console.warn(`[sync-daemon] Failed to apply config edits to ${filename}:`, err)
+      for (const op of perOperation) {
+        op.applied = false
+        op.reason = op.reason ?? reason
+      }
     }
+
+    outcomes.push({
+      suggestionId: applied.suggestionId,
+      ok: perOperation.every((op) => op.applied),
+      perOperation,
+    })
   }
+
+  return outcomes
 }
 
 // ─── Formatters ──────────────────────────────────────────────────────

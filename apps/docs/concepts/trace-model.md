@@ -33,6 +33,12 @@ interface ExecutionTrace {
   savingsUsd: number;            // Total cost saved (rawCostUsd - actualCostUsd)
   cacheHit: boolean;             // Whether semantic prompt cache was hit
   cacheSavingsUsd: number;       // Savings generated via cache hits
+  cacheReadInputTokens?: number;     // Provider-reported prompt-cache read
+                                      // tokens (Anthropic `cache_read_input_tokens`
+                                      // on the wire / in the DB); see note below
+  cacheCreationInputTokens?: number; // Provider-reported prompt-cache write
+                                      // tokens (Anthropic `cache_creation_input_tokens`
+                                      // on the wire / in the DB); see note below
   
   // Token Utility & Classification
   tokenUtility: 'USEFUL' | 'WASTED' | 'AMBIGUOUS';
@@ -77,6 +83,42 @@ Cost savings are generated in two ways:
    $$\text{Savings}_{\text{routing}} = \text{Raw Cost} - \text{Actual Cost}$$
 2. **Semantic Cache Savings:** Saved when the semantic prompt cache is hit, resolving the query locally without making external calls:
    $$\text{Savings}_{\text{cache}} = \text{Cache Hit Savings}$$
+
+---
+
+## Provider Prompt-Cache Tokens vs. Semantic Cache
+
+`cacheReadInputTokens` and `cacheCreationInputTokens` are **not** related to
+`cacheHit` / `cacheSavingsUsd`, even though all four fields have "cache" in the
+name. They describe two different caches:
+
+| Field | What it measures |
+|---|---|
+| `cacheHit` / `cacheSavingsUsd` | The proxy's own **semantic response cache** — an exact/near-exact-match cache the proxy maintains so a repeated query can be answered locally without calling the provider at all. |
+| `cacheReadInputTokens` / `cacheCreationInputTokens` | The **provider's own prompt cache** (e.g. Anthropic's `cache_read_input_tokens` / `cache_creation_input_tokens`, folded from OpenAI's `prompt_tokens_details.cached_tokens` and Gemini's `cachedContentTokenCount` into cost accounting) — tokens the provider itself served from or wrote to its prompt cache on a request that still went out over the wire. `cacheHit` is `false` on these requests; the call still happened, it was just cheaper.
+
+A trace can have `cacheHit: false` and a nonzero `cacheReadInputTokens` in the
+same row — that is the normal case for a provider-side cache read.
+
+### Operator-visible behavior changes
+
+Populating these two fields also changes cost accounting, in ways operators
+watching budgets or savings dashboards should expect:
+
+- **Anthropic cache-heavy tenants: `actualCostUsd` goes up.** Cache-read
+  tokens were previously not parsed out of the provider response at all, so
+  they were dropped from cost accounting entirely and effectively billed as
+  free. They are now priced at the provider's cache-read discount tier
+  instead of $0. This is a billing-accuracy correction, not a regression —
+  the prior number was undercounting real spend. One consequence is that
+  budget and spend-cap gates may trip earlier than before on workloads that
+  fit comfortably under the cap yesterday; that's the cap doing its job
+  against a now-accurate cost figure, not a change in the cap itself.
+- **OpenAI/Gemini cache-heavy tenants: reported savings go up.** These
+  providers' cache tokens were previously billed at full input-token price
+  (no cache discount was ever applied), so `rawCostUsd - actualCostUsd` was
+  understated. With the discount now applied, `savingsUsd` for these tenants
+  will increase to reflect the discount they were already entitled to.
 
 ---
 

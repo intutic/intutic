@@ -38,8 +38,9 @@ use crate::pricing;
 use crate::protocol::Protocol;
 use crate::routing::reward::{RewardEngine, RewardMode, RewardSignals};
 use crate::snip;
-use crate::store::{ControlPlaneAuth, ControlPlaneCache, JudgeScope, LocalStore};
+use crate::store::{ControlPlaneAuth, ControlPlaneCache, JudgeScope, LocalStore, PinScope};
 use crate::telemetry::ExecutionTrace;
+use crate::usage::TokenUsage;
 use crate::wasm::registry::PluginRegistry;
 
 // Phase 7: Intelligence Engine modules
@@ -856,6 +857,58 @@ fn get_model_provider(model: &str) -> Provider {
 /// with exact model lookup, family prefix fallback, and conservative unknown-model estimate.
 fn estimate_model_cost(model: &str, input_tokens: u32, output_tokens: u32) -> f64 {
     pricing::estimate_cost(model, input_tokens, output_tokens)
+}
+
+/// The two cost figures the reward engine and telemetry need for one request
+/// (TD-347): `raw` — what the REQUESTED model would have cost — and `actual`
+/// — what the ROUTED model actually cost.
+///
+/// `raw` is deliberately CACHE-BLIND: it prices `usage.total_input()` (the
+/// plain sum of all three input buckets) at the requested model's full input
+/// rate via [`pricing::estimate_cost`], never [`pricing::estimate_cost_cached`].
+/// This is the counterfactual "what would this have cost un-optimized" side of
+/// the existing `actual/raw` reward ratio (`routing::reward::compute_reward`,
+/// and the TypeScript `banditRewardCron.ts`). If `raw` also got a cache
+/// discount, the ratio would cancel the discount out on both sides and the
+/// entire point of this change — rewarding cache-preserving routing — would
+/// become a silent no-op.
+///
+/// `actual` is priced cache-aware via [`pricing::estimate_cost_cached`].
+///
+/// `fallback_prompt`/`fallback_completion` are the byte-length heuristic
+/// callers already compute for the case a provider reports no usage at all
+/// (`(text.len() as f64 / 4.0).max(1.0)`, applied upstream of this function).
+/// They are used for BOTH figures, and only when `usage` itself is entirely
+/// empty (no input or output bucket reported) — a silent provider keeps
+/// exactly today's fallback-priced, necessarily cache-blind behavior, rather
+/// than fabricating a cache split for tokens nothing ever measured.
+fn request_costs(
+    requested_model: &str,
+    routed_model: &str,
+    usage: &TokenUsage,
+    fallback_prompt: u32,
+    fallback_completion: u32,
+) -> (f64 /* raw */, f64 /* actual */) {
+    let total_input = usage.total_input();
+    let output = usage.output.unwrap_or(0);
+    let has_real_usage = total_input > 0 || output > 0;
+
+    let raw_input = if has_real_usage { total_input } else { fallback_prompt };
+    let raw_output = if has_real_usage { output } else { fallback_completion };
+    let raw = pricing::estimate_cost(requested_model, raw_input, raw_output);
+
+    let actual_usage = if has_real_usage {
+        *usage
+    } else {
+        TokenUsage {
+            uncached_input: Some(fallback_prompt),
+            output: Some(fallback_completion),
+            ..Default::default()
+        }
+    };
+    let actual = pricing::estimate_cost_cached(routed_model, &actual_usage);
+
+    (raw, actual)
 }
 
 /// Resolves the upstream provider credential for a workspace's request.
@@ -2749,9 +2802,32 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // it must never do is gate a capability, which is why enforcement lives in
     // the detectors and WASM rules and neither consults the role.
     //
+    // Resolved through `resolve_injection_block` (TD-348) rather than
+    // injecting `gov.governance_block` straight off this request's fresh
+    // render: a session-scoped pin, held for up to
+    // `routing.sop_pin_max_age_secs`, keeps this text's bytes stable across a
+    // session's requests even when the underlying SOP set would render
+    // differently mid-session — closing the KV-cache prefix gap the bandit's
+    // model-only session lock (`routing::bandit::route_model`) could not
+    // close on its own. `tool_scope_id` is reused verbatim rather than
+    // re-deriving the agent-scope ladder here — see `tool_history_scope`'s
+    // doc comment on why keying session-scoped state on the bare
+    // `x-session-id` header is a defect this file has already fixed twice;
+    // this pin must not be the third instance of it.
+    //
     // Injected before the body is handed upstream, and only re-serialised when
     // something was actually added.
-    if let Some(block) = gov.governance_block {
+    let sop_pin_scope = PinScope::new(&tool_scope_id, &wasm_ctx.node.agent_role);
+    let sop_fingerprint = crate::sops::fingerprint_sop_set(&workspace_id, &enforcing_sops);
+    let injection_block = crate::sops::resolve_injection_block(
+        state.store.as_ref(),
+        &sop_pin_scope,
+        gov.governance_block,
+        &sop_fingerprint,
+        state.config.intutic_settings.routing.sop_pin_max_age_secs,
+    )
+    .await;
+    if let Some(block) = injection_block {
         if crate::sops::inject_into_body(&mut body_json, &protocol, &block) {
             body_bytes = serde_json::to_vec(&body_json)
                 .map(axum::body::Bytes::from)
@@ -2920,6 +2996,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 raw_cost_usd: 0.0,
                 actual_cost_usd: 0.0,
                 cache_hit: false,
+                // Blocked before any upstream call — no provider usage exists.
+                cache_read_input_tokens: None,
+                cache_creation_input_tokens: None,
                 latency_ms: start.elapsed().as_millis() as u32,
                 verdict: match worst.disposition {
                     // `Ask` reports as "killed" rather than gaining a sixth
@@ -3511,6 +3590,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 raw_cost_usd,
                 actual_cost_usd: 0.0,
                 cache_hit: true,
+                // Served from the proxy's own semantic cache — no provider
+                // call happened, so there is no provider cache to report.
+                cache_read_input_tokens: None,
+                cache_creation_input_tokens: None,
                 latency_ms,
                 verdict: "allowed".to_string(),
                 harness_type: harness_type.clone(),
@@ -4089,6 +4172,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 raw_cost_usd: 0.0,
                 actual_cost_usd: 0.0,
                 cache_hit: false,
+                // No response was ever received — no provider usage to report.
+                cache_read_input_tokens: None,
+                cache_creation_input_tokens: None,
                 latency_ms,
                 verdict: "upstream_error".to_string(),
                 harness_type: harness_type.clone(),
@@ -4350,6 +4436,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             raw_cost_usd: 0.0,
             actual_cost_usd: 0.0,
             cache_hit: false,
+            // Error or short-circuit — no complete response, no provider usage.
+            cache_read_input_tokens: None,
+            cache_creation_input_tokens: None,
             latency_ms,
             verdict: verdict.to_string(),
             harness_type: harness_type.clone(),
@@ -4491,6 +4580,14 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             let mut accumulated_content = String::new();
             let mut prompt_tokens = 0;
             let mut completion_tokens = 0;
+            // Cache-aware accumulator (TD-347) alongside the plain
+            // prompt/completion counts above — `merge_from` overlays only the
+            // fields a given event actually reports, so an Anthropic
+            // `message_delta` (output only) cannot erase the cache buckets an
+            // earlier `message_start` already established. `prompt_tokens`
+            // stays in sync with `usage_acc.total_input()` for the sites below
+            // that only need a plain total.
+            let mut usage_acc = TokenUsage::default();
             // Bytes, not String: lossy-decoding per network chunk mangles a
             // multibyte character bisected by a chunk boundary. '\n' is ASCII, so
             // per-line decoding below cannot split a character.
@@ -4976,12 +5073,12 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                             {
                                                 accumulated_content.push_str(t);
                                             }
-                                            let (pt, ct) =
-                                                stream_usage(&json_val, stream_shape);
-                                            if let Some(pt) = pt {
-                                                prompt_tokens = pt;
+                                            let usage = stream_usage(&json_val, stream_shape);
+                                            usage_acc.merge_from(usage);
+                                            if usage.uncached_input.is_some() {
+                                                prompt_tokens = usage_acc.total_input();
                                             }
-                                            if let Some(ct) = ct {
+                                            if let Some(ct) = usage.output {
                                                 completion_tokens = ct;
                                             }
                                         }
@@ -5070,28 +5167,30 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                                     }
                                                 }
                                             } else if current_event_type == "message_delta" {
+                                                // `message_delta` carries only the
+                                                // output bucket (and, on some API
+                                                // versions, a running cache/input
+                                                // update) — `merge_from` overlays
+                                                // whatever it reports without
+                                                // erasing the input+cache buckets
+                                                // `message_start` below already set.
                                                 if let Some(usage) = json_val.get("usage") {
-                                                    if let Some(it) = usage
-                                                        .get("input_tokens")
-                                                        .and_then(|v| v.as_u64())
-                                                    {
-                                                        prompt_tokens = it as u32;
+                                                    let delta_usage = TokenUsage::from_anthropic(usage);
+                                                    usage_acc.merge_from(delta_usage);
+                                                    if delta_usage.uncached_input.is_some() {
+                                                        prompt_tokens = usage_acc.total_input();
                                                     }
-                                                    if let Some(ot) = usage
-                                                        .get("output_tokens")
-                                                        .and_then(|v| v.as_u64())
-                                                    {
-                                                        completion_tokens = ot as u32;
+                                                    if let Some(ot) = delta_usage.output {
+                                                        completion_tokens = ot;
                                                     }
                                                 }
                                             } else if current_event_type == "message_start" {
                                                 if let Some(msg) = json_val.get("message") {
                                                     if let Some(usage) = msg.get("usage") {
-                                                        if let Some(it) = usage
-                                                            .get("input_tokens")
-                                                            .and_then(|v| v.as_u64())
-                                                        {
-                                                            prompt_tokens = it as u32;
+                                                        let start_usage = TokenUsage::from_anthropic(usage);
+                                                        usage_acc.merge_from(start_usage);
+                                                        if start_usage.uncached_input.is_some() {
+                                                            prompt_tokens = usage_acc.total_input();
                                                         }
                                                     }
                                                 }
@@ -5219,6 +5318,13 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                             raw_cost_usd: 0.0,
                             actual_cost_usd: 0.0,
                             cache_hit: false,
+                            // Whatever the stream reported before it died —
+                            // same partial-data posture as `raw_input_tokens`/
+                            // `output_tokens` just above, which also read
+                            // `final_prompt_tokens`/`final_completion_tokens`
+                            // off this same accumulator rather than zeroing.
+                            cache_read_input_tokens: usage_acc.cache_read_input,
+                            cache_creation_input_tokens: usage_acc.cache_write_input,
                             latency_ms: start.elapsed().as_millis() as u32,
                             verdict: "upstream_error".to_string(),
                             harness_type: harness_type_clone.clone(),
@@ -5583,13 +5689,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             );
 
             let reconstruction_quality = if is_same_provider { 100 } else { 95 };
-            let raw_cost_usd = estimate_model_cost(
+            let (raw_cost_usd, actual_cost_usd) = request_costs(
                 &requested_model_clone,
-                final_prompt_tokens,
-                final_completion_tokens,
-            );
-            let actual_cost_usd = estimate_model_cost(
                 &actual_model_clone,
+                &usage_acc,
                 final_prompt_tokens,
                 final_completion_tokens,
             );
@@ -5672,6 +5775,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 raw_cost_usd,
                 actual_cost_usd,
                 cache_hit: false,
+                cache_read_input_tokens: usage_acc.cache_read_input,
+                cache_creation_input_tokens: usage_acc.cache_write_input,
                 latency_ms: start.elapsed().as_millis() as u32,
                 // Same string the request-side kill uses, so an audit of
                 // blocked tool calls does not have to know which half of the
@@ -5811,6 +5916,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 raw_cost_usd: 0.0,
                 actual_cost_usd: 0.0,
                 cache_hit: false,
+                // Connection died reading the body — no complete provider
+                // usage block to report.
+                cache_read_input_tokens: None,
+                cache_creation_input_tokens: None,
                 latency_ms,
                 verdict: "upstream_error".to_string(),
                 harness_type: harness_type.clone(),
@@ -5984,30 +6093,29 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         }
     }
 
-    let (mut final_body_bytes, prompt_tokens, completion_tokens, mut accumulated_content) =
+    let (mut final_body_bytes, prompt_tokens, completion_tokens, mut accumulated_content, usage_final) =
         if is_same_provider {
             let resp_json: serde_json::Value =
                 serde_json::from_slice(&resp_bytes).unwrap_or_default();
-            let mut prompt_tokens = 0;
-            let mut completion_tokens = 0;
             let mut text = String::new();
 
-            if let Some(usage) = resp_json.get("usage") {
-                if let Some(pt) = usage
-                    .get("prompt_tokens")
-                    .or_else(|| usage.get("input_tokens"))
-                    .and_then(|v| v.as_u64())
-                {
-                    prompt_tokens = pt as u32;
-                }
-                if let Some(ct) = usage
-                    .get("completion_tokens")
-                    .or_else(|| usage.get("output_tokens"))
-                    .and_then(|v| v.as_u64())
-                {
-                    completion_tokens = ct as u32;
-                }
-            }
+            // Provider-dispatched (TD-347), mirroring the same provider/protocol
+            // branching the text extraction below already does — Anthropic's
+            // shape, then the Responses vs. chat-completions split within
+            // OpenAI-wire, plus Gemini (which the text extraction below has no
+            // arm for, but whose `usageMetadata` shape is unambiguous and safe
+            // to read regardless).
+            let usage = if provider == Provider::Anthropic {
+                TokenUsage::from_anthropic(&resp_json)
+            } else if provider == Provider::Gemini {
+                TokenUsage::from_gemini_metadata(&resp_json)
+            } else if protocol == Protocol::OpenAIResponses {
+                TokenUsage::from_responses(&resp_json)
+            } else {
+                TokenUsage::from_openai_chat(&resp_json)
+            };
+            let prompt_tokens = usage.total_input();
+            let completion_tokens = usage.output.unwrap_or(0);
 
             if provider == Provider::Anthropic {
                 if let Some(content) = resp_json.get("content").and_then(|c| c.as_array()) {
@@ -6053,7 +6161,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 }
             }
 
-            (resp_bytes.to_vec(), prompt_tokens, completion_tokens, text)
+            (resp_bytes.to_vec(), prompt_tokens, completion_tokens, text, usage)
         } else {
             let upstream_json: serde_json::Value =
                 serde_json::from_slice(&resp_bytes).unwrap_or_default();
@@ -6063,18 +6171,28 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 protocol == Protocol::OpenAIResponses,
             );
 
-            let mut prompt_tokens = 0;
-            let mut completion_tokens = 0;
+            // Parsed from the pre-translation UPSTREAM body, not `translated`
+            // (TD-347): `OpenAIAdapter::translate_response_to_openai` drops
+            // cache fields when it builds the OpenAI-shape body the client
+            // receives, and re-deriving from the original response avoids
+            // growing that translator's client-visible wire contract as part
+            // of this change — widening what the client sees is a separate,
+            // optional future PR. Dispatched on `target_provider` (the routed
+            // model's actual provider), matching the exhaustive match this
+            // same function uses to pick the cross-provider upstream path
+            // (`/v1/messages`, `/v1/chat/completions`, or Gemini's
+            // `generateContent`) — the upstream body's shape is always exactly
+            // one of those three, never the OpenAI-Responses shape.
+            let usage = match target_provider {
+                Provider::Anthropic => TokenUsage::from_anthropic(&upstream_json),
+                Provider::Gemini => TokenUsage::from_gemini_metadata(&upstream_json),
+                Provider::OpenAI | Provider::Mistral | Provider::OpenRouter => {
+                    TokenUsage::from_openai_chat(&upstream_json)
+                }
+            };
+            let prompt_tokens = usage.total_input();
+            let completion_tokens = usage.output.unwrap_or(0);
             let mut text = String::new();
-
-            if let Some(usage) = translated.get("usage") {
-                if let Some(pt) = usage.get("prompt_tokens").and_then(|v| v.as_u64()) {
-                    prompt_tokens = pt as u32;
-                }
-                if let Some(ct) = usage.get("completion_tokens").and_then(|v| v.as_u64()) {
-                    completion_tokens = ct as u32;
-                }
-            }
 
             if let Some(choices) = translated.get("choices").and_then(|c| c.as_array()) {
                 if let Some(first) = choices.first() {
@@ -6089,7 +6207,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             }
 
             let new_bytes = serde_json::to_vec(&translated).unwrap_or_else(|_| resp_bytes.to_vec());
-            (new_bytes, prompt_tokens, completion_tokens, text)
+            (new_bytes, prompt_tokens, completion_tokens, text, usage)
         };
 
     if judge_active {
@@ -6473,9 +6591,13 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     };
 
     let reconstruction_quality = if is_same_provider { 100 } else { 95 };
-    let raw_cost_usd = estimate_model_cost(&model, final_prompt_tokens, final_completion_tokens);
-    let actual_cost_usd =
-        estimate_model_cost(&actual_model, final_prompt_tokens, final_completion_tokens);
+    let (raw_cost_usd, actual_cost_usd) = request_costs(
+        &model,
+        &actual_model,
+        &usage_final,
+        final_prompt_tokens,
+        final_completion_tokens,
+    );
     let latency_ms = start.elapsed().as_millis() as u32;
 
     // Advisory echo scan of the model's own output, plus (Phase 4A) a
@@ -6544,6 +6666,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         raw_cost_usd,
         actual_cost_usd,
         cache_hit: false,
+        cache_read_input_tokens: usage_final.cache_read_input,
+        cache_creation_input_tokens: usage_final.cache_write_input,
         latency_ms,
         // Same string the request-side kill uses, so an audit of blocked tool
         // calls does not have to know which half of the turn caught it.
@@ -6945,41 +7069,33 @@ fn stream_delta_text(v: &serde_json::Value, shape: DeltaShape) -> Option<&str> {
     }
 }
 
-/// The (prompt, completion) token counts one SSE payload carries, if any.
+/// The token usage one SSE payload carries, if any — normalized to
+/// [`TokenUsage`]'s disjoint billing buckets (TD-347).
 ///
-/// Each provider names them differently and puts them in a different place, and
-/// getting this wrong is not a reporting detail: with both counts left at zero
-/// the caller falls back to `len()/4`, which on an empty accumulation floors at
-/// **1 token**. Cost, `accrue_spend`, the budget gate and the reward engine's
-/// cost term are then all computed from that 1.
-fn stream_usage(v: &serde_json::Value, shape: DeltaShape) -> (Option<u32>, Option<u32>) {
-    let read = |u: &serde_json::Value, a: &str, b: &str| -> Option<u32> {
-        u.get(a).or_else(|| u.get(b)).and_then(|x| x.as_u64()).map(|x| x as u32)
-    };
+/// Each provider names its usage fields differently and puts them in a
+/// different place, and getting this wrong is not a reporting detail: with
+/// the input/output counts left at zero the caller falls back to `len()/4`,
+/// which on an empty accumulation floors at **1 token**. Cost, `accrue_spend`,
+/// the budget gate and the reward engine's cost term are then all computed
+/// from that 1.
+///
+/// Dispatches on the same `DeltaShape` the text extraction (`stream_delta_text`)
+/// uses, so the shape that says "this is Anthropic-flavoured SSE" is decided in
+/// exactly one place for both.
+fn stream_usage(v: &serde_json::Value, shape: DeltaShape) -> TokenUsage {
     match shape {
-        DeltaShape::AnthropicText => match v.get("usage") {
-            Some(u) => (read(u, "input_tokens", "prompt_tokens"), read(u, "output_tokens", "completion_tokens")),
-            None => (None, None),
-        },
+        DeltaShape::AnthropicText => TokenUsage::from_anthropic(v),
         // Responses reports usage once, nested under the terminal event's
         // `response` object — never at the top level, which is the only place
         // the chat-completions arm looked.
         DeltaShape::ResponsesOutputText => {
-            match v.get("response").and_then(|r| r.get("usage")).or_else(|| v.get("usage")) {
-                Some(u) => (
-                    read(u, "input_tokens", "prompt_tokens"),
-                    read(u, "output_tokens", "completion_tokens"),
-                ),
-                None => (None, None),
+            let usage = v.get("response").and_then(|r| r.get("usage")).or_else(|| v.get("usage"));
+            match usage {
+                Some(u) => TokenUsage::from_responses(u),
+                None => TokenUsage::default(),
             }
         }
-        DeltaShape::OpenAIChatContent | DeltaShape::Unparsed => match v.get("usage") {
-            Some(u) => (
-                read(u, "prompt_tokens", "input_tokens"),
-                read(u, "completion_tokens", "output_tokens"),
-            ),
-            None => (None, None),
-        },
+        DeltaShape::OpenAIChatContent | DeltaShape::Unparsed => TokenUsage::from_openai_chat(v),
     }
 }
 
@@ -8616,29 +8732,29 @@ mod tests {
             r#"{"type":"response.completed","response":{"usage":{"input_tokens":1234,"output_tokens":567,"total_tokens":1801}}}"#,
         )
         .unwrap();
-        assert_eq!(
-            stream_usage(&ev, DeltaShape::ResponsesOutputText),
-            (Some(1234), Some(567))
-        );
+        let usage = stream_usage(&ev, DeltaShape::ResponsesOutputText);
+        assert_eq!(usage.total_input(), 1234);
+        assert_eq!(usage.output, Some(567));
         // The shape that shipped, on the same bytes, is the regression this
         // guards: nothing found, so nothing metered.
-        assert_eq!(stream_usage(&ev, DeltaShape::OpenAIChatContent), (None, None));
+        assert_eq!(stream_usage(&ev, DeltaShape::OpenAIChatContent), TokenUsage::default());
     }
 
-    /// Chat completions must keep reading the names it has always read. The
-    /// `or_else` fallbacks added for Responses must not reorder these.
+    /// Chat completions must keep reading the names it has always read.
     #[test]
     fn chat_completions_usage_is_unchanged() {
         let ev: serde_json::Value =
             serde_json::from_str(r#"{"usage":{"prompt_tokens":10,"completion_tokens":20}}"#)
                 .unwrap();
-        assert_eq!(
-            stream_usage(&ev, DeltaShape::OpenAIChatContent),
-            (Some(10), Some(20))
-        );
+        let usage = stream_usage(&ev, DeltaShape::OpenAIChatContent);
+        assert_eq!(usage.total_input(), 10);
+        assert_eq!(usage.output, Some(20));
+
         let anth: serde_json::Value =
             serde_json::from_str(r#"{"usage":{"input_tokens":7,"output_tokens":8}}"#).unwrap();
-        assert_eq!(stream_usage(&anth, DeltaShape::AnthropicText), (Some(7), Some(8)));
+        let usage = stream_usage(&anth, DeltaShape::AnthropicText);
+        assert_eq!(usage.total_input(), 7);
+        assert_eq!(usage.output, Some(8));
     }
 
     /// The route decides the wire shape, not the vendor.
