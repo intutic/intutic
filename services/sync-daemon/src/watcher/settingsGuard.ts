@@ -30,7 +30,7 @@ import { writeGooseHooks } from '../harness/gooseHooks.js'
 import { writeWindsurfHooks } from '../harness/windsurfHooks.js'
 import { writeMuseHooks } from '../harness/museHooks.js'
 import { writeGrokHooks } from '../harness/grokHooks.js'
-import { writeDshHooks, resolveDshHome } from '../harness/dshHooks.js'
+import { writeDshHooks, resolveDshHome, detectDshCoverageGap } from '../harness/dshHooks.js'
 import { isImmutable } from '../harness/gooseHardener.js'
 
 const log = createLogger('sync-settings-guard')
@@ -98,6 +98,20 @@ export function buildProtectedPaths(workspaceRoot: string): string[] {
     path.join(resolveDshHome(), 'profiles'),
     path.join(resolveDshHome(), 'settings.yaml'),
   ]
+}
+
+/**
+ * The dsh profiles ROOT directory (`$DSH_HOME/profiles`) — watched at the
+ * directory level (see {@link buildProtectedPaths} above) precisely so its
+ * own CREATION is observable, not just an edit to a file already inside it.
+ * chokidar watches a path that does not exist yet and still emits `addDir`
+ * once dsh creates it; `driftWatcher.ts` needs to know to react to `addDir`
+ * for this ONE path — every other protected path only reacts to
+ * `change`/`unlink` (see that module's own comment) — so this predicate is
+ * exported for it to check against. TD-370.
+ */
+export function isDshProfilesRoot(changedPath: string): boolean {
+  return changedPath === path.join(resolveDshHome(), 'profiles')
 }
 
 /**
@@ -246,6 +260,18 @@ export async function guardSettingsFile(
     })
   }
 
+  // ── dsh: the profiles ROOT directory was just created (first `dsh
+  // --profile <name>` run on this machine) ──────────────────────────────
+  // driftWatcher.ts forwards this here on chokidar's `addDir` event (see
+  // isDshProfilesRoot) — register governance into whichever profile(s) now
+  // exist immediately, closing TD-370's silent window at the moment it
+  // closes itself, rather than waiting for an unrelated file change or the
+  // next poll cycle to notice.
+  if (isDshProfilesRoot(changedPath)) {
+    await safeRestore('dsh', () => writeDshHooks(workspaceRoot, proxyUrl, ''))
+    return true
+  }
+
   // ── dsh: any profile's cordis.patch.yml, or settings.yaml ─────────
   // Re-running the writer re-merges into EVERY existing profile (not just
   // the one whose file changed) — cheap (write-if-changed per file) and
@@ -385,6 +411,30 @@ async function guardDshFile(filePath: string, marker: string, workspaceRoot: str
   }
 
   return false
+}
+
+/**
+ * Side-effecting wrapper around `dshHooks.ts`'s pure `detectDshCoverageGap` —
+ * logs TD-370's "silent no-profile window" as a `dsh_coverage_gap` warning
+ * when dsh is present on this machine but has zero profiles, so the window
+ * is at least documented in the logs even though there is nothing to
+ * restore into yet. Called once at `intutic connect` startup — see
+ * connect.ts — not on every poll tick: the underlying fs checks are cheap,
+ * but the gap itself only changes state on the user's first `dsh --profile
+ * <name>` run, which {@link isDshProfilesRoot}'s `addDir` handling above
+ * already reacts to immediately.
+ */
+export async function warnIfDshCoverageGap(): Promise<boolean> {
+  const result = await detectDshCoverageGap()
+  if (result.gap) {
+    log.warn(
+      { action: 'dsh_coverage_gap', dshDetected: result.dshDetected, profileCount: result.profileCount },
+      'dsh is present on this machine but has zero profiles yet — nothing is governed until the ' +
+        'first `dsh --profile <name>` run creates one (TD-370). The next sync after that run picks ' +
+        'it up automatically; this warning is visibility for the window before it, not a fix for it.',
+    )
+  }
+  return result.gap
 }
 
 async function safeRestore(harness: string, restore: () => Promise<void>): Promise<void> {

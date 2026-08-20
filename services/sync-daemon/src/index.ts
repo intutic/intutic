@@ -46,7 +46,7 @@ export type { SopHookConstraints } from './harness/claudeCodeHooks.js'
 
 export { injectMcpServer } from './harness/mcpAutoWrite.js'
 
-export { guardSettingsFile } from './watcher/settingsGuard.js'
+export { guardSettingsFile, warnIfDshCoverageGap } from './watcher/settingsGuard.js'
 
 // Gap 3 fix — Antigravity (Gemini CLI) hook coverage
 export { writeAntigravityHooks } from './harness/antigravityHooks.js'

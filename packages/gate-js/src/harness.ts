@@ -1,6 +1,7 @@
 /**
  * `@ai-sdk/harness` adapter: `intuticApprovalResponder()`, `intuticSubmitApprovals()`,
- * `intuticStaticApprovals()`, and `recommendedHarnessSettings()`.
+ * `intuticStaticApprovals()`, `recommendedHarnessSettings()`, and
+ * `intuticSandboxBootstrap()`.
  *
  * `@intutic/gate/harness` — the same idea `vercel.ts` implements for the base
  * `ai` package (wrap the framework's own veto point around this package's
@@ -66,6 +67,7 @@
  * @module
  */
 
+import { createHash } from 'node:crypto'
 import { active as activeGate, type Gate, type ToolInput } from './gate.js'
 import { IntuticGateRefusal } from './errors.js'
 
@@ -388,6 +390,13 @@ export interface RecommendedHarnessSettingsOptions {
    *  recommended policy is `{ mode: 'deny-all' }` — deny-by-default until
    *  the caller decides what the sandbox legitimately needs to reach. */
   allowedHosts?: readonly string[]
+  /**
+   * Whether to also recommend excluding the sandbox's native `bash` builtin
+   * from the tool set entirely, via `HarnessAgentSettings.inactiveTools`.
+   * Defaults to `true` — see {@link RecommendedHarnessSettings.inactiveTools}
+   * for what this does and does not guarantee (TD-415).
+   */
+  filterBash?: boolean
 }
 
 /** The exact policy shapes {@link recommendedHarnessSettings} constructs —
@@ -411,6 +420,46 @@ export interface RecommendedHarnessSettings {
    * for `undefined` and treat that as an uncovered surface, not a silent ok.
    */
   networkPolicy: RecommendedNetworkPolicy
+  /**
+   * Spread into `HarnessAgentSettings.inactiveTools` — `undefined` when
+   * `filterBash: false` was passed. TD-415, resolved with a corrected
+   * understanding: `HarnessV1BuiltinToolFiltering` (the same package's own
+   * type, `dist/index.d.ts`/`dist/agent/index.d.ts`) genuinely CAN drop
+   * `bash` at config time, confirmed against real shipped `dist/index.js`
+   * for both harnesses TD-417 discusses (not just their `.d.ts` — the
+   * behaviour lives in compiled logic no type file states):
+   *
+   *   - `@ai-sdk/harness-claude-code@1.0.78` sets BOTH
+   *     `supportsBuiltinToolApprovals: true` AND
+   *     `supportsBuiltinToolFiltering: true` on its adapter object, and its
+   *     `doStart`/`doContinueTurn` forward `builtinToolFiltering` verbatim
+   *     onto the bridge `start`/`continue` message — true native exclusion,
+   *     enforced by the wrapped Claude Agent SDK inside the sandbox itself,
+   *     not merely a framework-side veto. `bash` never becomes callable.
+   *   - `@ai-sdk/harness-grok-build@1.0.12` sets neither flag directly, but
+   *     is built on `@ai-sdk/harness-acp@1.0.13` (its exact pinned
+   *     dependency, confirmed via `npm pack`), which sets
+   *     `supportsBuiltinToolApprovals: true` (and
+   *     `supportsBuiltinToolFiltering: false`) — so Grok Build gets the
+   *     FRAMEWORK's own fallback instead: `@ai-sdk/harness/agent`'s compiled
+   *     `resolveHarnessAgentToolFiltering` (`dist/agent/index.js`) routes
+   *     every inactive-builtin call through the approval path and
+   *     auto-denies it before execution. Different mechanism, same practical
+   *     outcome — `bash` is still never executed.
+   *   - Confirmed further: if an adapter supported NEITHER flag, the
+   *     framework does not silently ignore `inactiveTools` for a builtin —
+   *     `HarnessAgent`'s constructor throws `HarnessCapabilityUnsupportedError`
+   *     (`dist/agent/index.js`) rather than accepting a setting it cannot
+   *     honour. So this recommendation is never a silent no-op for any
+   *     adapter that accepts it at all.
+   *
+   * What this does NOT close: TD-415's original per-call gap. This is a
+   * coarse, all-or-nothing exclusion decided once at session-construction
+   * time — never a `Gate.guard()`-evaluated verdict per call, and a
+   * workspace that genuinely needs `bash` available cannot use this
+   * filtering and is back to the original `permissionMode` gap for it.
+   */
+  inactiveTools?: readonly ['bash']
 }
 
 /**
@@ -447,5 +496,381 @@ export function recommendedHarnessSettings(
   return {
     permissionMode: opts.permissionMode ?? 'allow-edits',
     networkPolicy,
+    ...(opts.filterBash === false ? {} : { inactiveTools: ['bash'] as const }),
   }
 }
+
+// ============================================================================
+// Sandbox bootstrap — TD-417 Half A
+// ============================================================================
+//
+// `recommendedHarnessSettings()` and `intuticApprovalResponder()` above cover
+// the framework-level surface: `permissionMode`, `toolApproval`/the
+// continuation flow, and `networkPolicy`. None of that reaches Claude Code's
+// OWN native PreToolUse gate — the one the sync-daemon writes on a developer
+// laptop (`services/sync-daemon/src/harness/claudeCodeHooks.ts`, generating
+// `.intutic/hooks/claude-code-check.js` + `.claude/settings.json`). Inside a
+// `@ai-sdk/harness` sandbox there is no laptop for the sync-daemon to write
+// to, so that native gate is simply absent (TD-417's core finding).
+//
+// ## The channel — confirmed against a real install, not assumed
+//
+// `HarnessAgentSandboxConfig` (`@ai-sdk/harness/agent@1.0.75`'s shipped
+// `dist/agent/index.d.ts`) is a real, documented, TYPED consumer-facing
+// bootstrap hook — distinct from `HarnessV1.getBootstrap`, which is the
+// ADAPTER's own (e.g. Claude Code's) private bootstrap recipe, not something
+// a consumer of this package sets:
+//
+// ```ts
+// type HarnessAgentSandboxConfig = {
+//   readonly workDir?: string
+//   readonly bootstrapHash?: string
+//   readonly onBootstrap?: (opts: {
+//     readonly session: Experimental_SandboxSession
+//     readonly workDir: string
+//     readonly abortSignal?: AbortSignal
+//   }) => Promise<void>
+//   readonly onSession?: (opts: {
+//     readonly session: Experimental_SandboxSession
+//     readonly sessionWorkDir: string
+//     readonly abortSignal?: AbortSignal
+//   }) => Promise<void>
+// }
+// ```
+//
+// `onBootstrap` "is called during sandbox template creation after the
+// harness adapter's own bootstrap has run and before snapshot-capable
+// providers publish a snapshot" (the shipped doc comment, verbatim) — i.e.
+// it fires ONCE per `bootstrapHash` identity, its side effects get baked
+// into a reusable snapshot, and later sessions reusing that snapshot never
+// re-run it. That is exactly the right lifecycle for STATIC governance
+// files (a hook script + a settings file), which is why
+// {@link intuticSandboxBootstrap} uses `onBootstrap` alone and does not need
+// `onSession` (reserved for genuinely per-session state, which this module
+// has none of at this scope).
+//
+// ## What `intuticSandboxBootstrap()` writes, and why it is NOT a byte copy
+// of the laptop artifacts
+//
+// The laptop's `claude-code-check.js` (`emitJsGate`/`emitPreImageCapture`/
+// `emitJsFailClosedPrelude` in `services/sync-daemon/src/harness/gateBody.ts`)
+// implements FOUR tiers: the policy-snapshot floor (A1), SOP rules fetched
+// live from the control plane (A3), review-hold parking, and fire-and-forget
+// event draining to the control plane over HTTPS. `services/sync-daemon` is
+// a private service package this public package must not depend on (see
+// `snapshot.ts`'s module doc for the same constraint, already established
+// for the `.rules` reader), and three of those four tiers need something a
+// sandbox-bootstrap function fundamentally cannot have at construction time:
+// a live control-plane connection (A3, review-hold, draining), which
+// `recommendedHarnessSettings()`'s own `networkPolicy` recommends denying by
+// default anyway.
+//
+// What DOES port cleanly, with no live connection and no cross-package
+// import: Tier A1, the policy-snapshot evaluator. `snapshot.ts` in THIS
+// package already implements it (`normalise`/`evaluate`), tested for
+// fidelity against the real pattern tables in `fidelity.test.ts`. The hook
+// script below is a self-contained (zero-`require`) hand-port of that same
+// algorithm — same field order, same padding/case-sensitivity contract, same
+// severity precedence — so it can run as a standalone Node script inside the
+// sandbox with no npm install step (which the recommended `deny-all` network
+// policy would block anyway). `__tests__/harness.test.ts` proves this port
+// behaviourally, not just by inspection: it spawns the exact generated
+// script as a child process against `allFloorFixtures()` cases and asserts
+// its exit code agrees with `snapshot.evaluate()`'s verdict for the same
+// rule.
+//
+// Deliberately NOT reproduced here, and said so rather than silently
+// dropped: the SOP tier (A3), review-hold parking, and control-plane event
+// draining. A workspace relying on this bootstrap for sandbox coverage gets
+// the destructive-command floor and any SOP-authored rules already compiled
+// into the `.rules` text it supplies — a real but strict SUBSET of the
+// laptop gate, the same kind of documented gap `gate.ts`'s own module doc
+// already calls out for this package's Tier A1 relative to a shipped
+// harness gate.
+//
+// ## Scope: Claude Code only
+//
+// `.claude/settings.json`'s `hooks.PreToolUse` shape is Claude Code's own
+// contract. Grok Build's laptop equivalent
+// (`services/sync-daemon/src/harness/grokHooks.ts`) uses a completely
+// different mechanism — a `.grok/hooks/*.json` registry entry, a
+// `{"decision":"deny","reason":"..."}`-on-stdout block contract instead of
+// an exit code, and no adapter `env` passthrough at all (confirmed absent
+// from `GrokBuildHarnessSettings`, `dist/index.d.ts`, `@ai-sdk/harness-grok-
+// build@1.0.12`) — building that is real follow-up work, not attempted here.
+// Bootstrap-file injection (this channel) would still be Grok Build's ONLY
+// viable path, for the same reason it is Claude Code's: `env` does not
+// matter to this approach either way, since `onBootstrap` writes into the
+// sandbox filesystem directly, independent of adapter settings.
+//
+// ## What remains unverified (Half C, explicitly out of scope here)
+//
+// Whether the bridge inside a REAL sandbox actually runs this script as a
+// PreToolUse hook, whether the written files survive a snapshot/resume
+// cycle, and whether a `process.exit(2)` from this script genuinely stops
+// the tool call from the model's point of view — none of that is
+// verifiable without a live Vercel Sandbox deployment. See TD-417's updated
+// entry.
+
+/** Structural copy of `@ai-sdk/provider-utils`'s `SandboxSession`, narrowed
+ *  to the one method {@link intuticSandboxBootstrap}'s `onBootstrap` calls.
+ *  Confirmed field-for-field against `@ai-sdk/provider-utils@5.0.27`'s
+ *  shipped `dist/index.d.ts` (`WriteFileOptions<string>` plus its own
+ *  `encoding` addition on `writeTextFile`). */
+export interface SandboxWriteSession {
+  writeTextFile(options: { path: string; content: string; encoding?: string }): PromiseLike<void>
+}
+
+/** Structural copy of `@ai-sdk/harness/agent`'s
+ *  `HarnessAgentSandboxConfig['onBootstrap']` parameter shape
+ *  (`dist/agent/index.d.ts`), narrowed to the fields this module reads. */
+export interface SandboxBootstrapCallbackOptions {
+  readonly session: SandboxWriteSession
+  readonly workDir: string
+  readonly abortSignal?: AbortSignal
+}
+
+export interface IntuticSandboxBootstrap {
+  /** Pass through unchanged to `HarnessAgentSettings.sandboxConfig.bootstrapHash`
+   *  — required alongside `onBootstrap` by the real type. Deterministic: the
+   *  same options always produce the same hash, and a snapshot-capable
+   *  sandbox provider uses it to decide whether `onBootstrap` needs to run
+   *  again. Computed the same way `snapshot.ts` computes the policy-snapshot
+   *  digest — `createHash('sha256')` over the recipe content, this module's
+   *  own existing hashing convention, not a new one. */
+  readonly bootstrapHash: string
+  /** Pass through unchanged to `HarnessAgentSettings.sandboxConfig.onBootstrap`. */
+  readonly onBootstrap: (opts: SandboxBootstrapCallbackOptions) => Promise<void>
+}
+
+export interface IntuticSandboxBootstrapOptions {
+  /**
+   * Compiled `.rules` text — the SAME artifact format `snapshot.ts` reads
+   * (`~/.intutic/hooks/policy-snapshot.rules` on a laptop). Copy the file
+   * content in, e.g. by reading it from the host running the orchestrator
+   * code before constructing this bootstrap. Omit to ship a hook script that
+   * loads zero rules (still present as a channel, evaluating nothing) —
+   * never silently skipped, so a missing snapshot shows up as an empty file
+   * inside the sandbox rather than a missing one.
+   */
+  policySnapshotRules?: string
+  /** Embedded in the recipe hash only (so a workspace switch invalidates a
+   *  cached snapshot) — this module does not otherwise use it, matching
+   *  `snapshot.ts`'s reader, which also treats workspace id as an integrity
+   *  check rather than a lookup key. */
+  workspaceId?: string
+  /** Directory inside the sandbox (relative to `workDir`) the hook script
+   *  and its rules file are written under. Defaults to `.intutic/hooks`,
+   *  the same relative location the laptop writer uses. */
+  bootstrapDir?: string
+}
+
+function sandboxJoin(workDir: string, relative: string): string {
+  const base = workDir.endsWith('/') ? workDir.slice(0, -1) : workDir
+  return `${base}/${relative}`
+}
+
+/**
+ * Self-contained (zero-`require`) hand-port of `snapshot.ts`'s
+ * `normalise`/`evaluate` — Tier A1 only. See the module-level comment above
+ * for what this deliberately does and does not cover, and
+ * `__tests__/harness.test.ts` for the behavioural-parity check against the
+ * real `snapshot.evaluate()` this port is pinned to.
+ *
+ * Contract matches the laptop's `claude-code-check.js`
+ * (`services/sync-daemon/src/harness/claudeCodeHooks.ts`) deliberately:
+ * Claude Code's PreToolUse hook stdin carries `{tool_name, tool_input,
+ * session_id}` (this reads both the snake_case and camelCase field names,
+ * same as the laptop script); exit `2` blocks the call, exit `0` allows it;
+ * any parse/read error fails CLOSED (exit `2`), the same posture
+ * `emitJsFailClosedPrelude` documents for the laptop's version.
+ */
+function renderSandboxGateScript(rulesFileName: string): string {
+  return `#!/usr/bin/env node
+'use strict';
+/**
+ * Intutic sandbox PreToolUse gate (Tier A1 only — policy-snapshot rules).
+ * Auto-generated by @intutic/gate's intuticSandboxBootstrap(). DO NOT EDIT.
+ *
+ * Unlike the laptop's claude-code-check.js, this script has no live
+ * control-plane connection at call time (the recommended sandbox network
+ * policy is deny-all) and therefore implements NEITHER the SOP tier (A3)
+ * NOR review-hold parking NOR governance-event draining. See TD-417.
+ */
+const fs = require('fs');
+const path = require('path');
+
+const RULES_PATH = path.join(__dirname, ${JSON.stringify(rulesFileName)});
+
+function normalise(v) {
+  const s = v === null || v === undefined ? '' : String(v);
+  return ' ' + s.replace(/\\s+/g, ' ').trim() + ' ';
+}
+
+function loadRules() {
+  let text;
+  try {
+    text = fs.readFileSync(RULES_PATH, 'utf-8');
+  } catch (e) {
+    return [];
+  }
+  const rules = [];
+  for (const line of text.split('\\n')) {
+    if (!line || line.charAt(0) === '#') continue;
+    const f = line.split('\\t');
+    if (f.length < 6 || !f[5]) continue;
+    try {
+      rules.push({
+        id: f[0],
+        severity: f[1],
+        subject: f[3] || 'any',
+        reason: f[4],
+        pattern: new RegExp(f[5], f[2] === 'i' ? 'i' : ''),
+      });
+    } catch (e) {
+      // Regex would not compile — dropped, not fatal. Matches snapshot.ts.
+    }
+  }
+  return rules;
+}
+
+function evaluate(toolName, target, command, rules) {
+  const nTool = normalise(toolName);
+  const nCommand = normalise(command);
+  const nTarget = normalise(target);
+  for (const rule of rules) {
+    const subjects =
+      rule.subject === 'tool' ? [nTool] :
+      rule.subject === 'command' ? [nCommand] :
+      rule.subject === 'target' ? [nTarget] :
+      [nCommand, nTarget];
+    for (const subject of subjects) {
+      if (!rule.pattern.test(subject)) continue;
+      return { severity: rule.severity, reason: rule.reason + ' [' + rule.id + ']' };
+    }
+  }
+  return null;
+}
+
+let inputData = '';
+process.stdin.on('data', (chunk) => { inputData += chunk; });
+process.stdin.on('end', () => {
+  try {
+    const ctx = JSON.parse(inputData || '{}');
+    const toolName = ctx.tool_name || ctx.toolName || '';
+    const toolInput = ctx.tool_input || ctx.toolInput || {};
+    const target = toolInput.path || toolInput.file_path || toolInput.filePath ||
+      toolInput.new_path || toolInput.target || toolInput.notebook_path || '';
+    const command = String(toolInput.command || toolInput.cmd || toolInput.script || '');
+    const rules = loadRules();
+    const decision = evaluate(toolName, target, command, rules);
+    if (decision && decision.severity === 'block') {
+      console.error('[Intutic Guardrail] BLOCKED: ' + decision.reason);
+      process.exit(2);
+    }
+    if (decision && (decision.severity === 'warn' || decision.severity === 'shadow')) {
+      console.error('[Intutic Guardrail] FLAGGED (' + decision.severity + '): ' + decision.reason);
+    }
+    process.exit(0);
+  } catch (err) {
+    // Fail CLOSED — any hook execution error blocks the tool call, the same
+    // posture emitJsFailClosedPrelude documents for the laptop script.
+    console.error('[Intutic Guardrail] Hook error (blocking for safety):', err && err.message ? err.message : err);
+    process.exit(2);
+  }
+});
+`
+}
+
+/**
+ * Compiles the `.claude/settings.json` content that registers the generated
+ * hook script — same matcher set and hook shape as the laptop writer's
+ * `hookEntry()` (`services/sync-daemon/src/harness/claudeCodeHooks.ts`):
+ * `Bash`, `Edit`, `Write`, `MultiEdit`, and `mcp__.*`.
+ */
+function renderSandboxClaudeSettings(hookScriptSandboxPath: string): string {
+  const hookEntry = (matcher: string) => ({
+    matcher,
+    hooks: [
+      {
+        type: 'command',
+        command: `node ${hookScriptSandboxPath}`,
+        timeout: 10,
+        statusMessage: 'Verifying tool execution against Intutic SOP policy...',
+      },
+    ],
+  })
+  const settings = {
+    permissions: { deny: [] as string[] },
+    hooks: {
+      PreToolUse: [hookEntry('Bash'), hookEntry('Edit'), hookEntry('Write'), hookEntry('MultiEdit'), hookEntry('mcp__.*')],
+    },
+  }
+  return JSON.stringify(settings, null, 2) + '\n'
+}
+
+/**
+ * Builds `{ bootstrapHash, onBootstrap }` for
+ * `HarnessAgentSettings.sandboxConfig` — the channel TD-417 identified as
+ * existing but unused:
+ *
+ * ```ts
+ * import { HarnessAgent } from '@ai-sdk/harness/agent'
+ * import { intuticSandboxBootstrap, recommendedHarnessSettings } from '@intutic/gate/harness'
+ *
+ * const agent = new HarnessAgent({
+ *   harness,
+ *   sandbox,
+ *   ...recommendedHarnessSettings(),
+ *   sandboxConfig: intuticSandboxBootstrap({
+ *     policySnapshotRules: fs.readFileSync(snapshotPath(), 'utf-8'),
+ *     workspaceId: process.env.INTUTIC_WORKSPACE_ID,
+ *   }),
+ * })
+ * ```
+ *
+ * Writes two files under `<workDir>/<bootstrapDir>` (default
+ * `.intutic/hooks`) — the rules text verbatim, and a self-contained hook
+ * script implementing Tier A1 against it (see
+ * {@link renderSandboxGateScript}) — plus `.claude/settings.json` at
+ * `<workDir>/.claude/settings.json` registering that script as a
+ * `PreToolUse` hook. See the module-level comment above this section for
+ * what this does and does not cover, and why.
+ */
+export function intuticSandboxBootstrap(opts: IntuticSandboxBootstrapOptions = {}): IntuticSandboxBootstrap {
+  const bootstrapDir = opts.bootstrapDir ?? '.intutic/hooks'
+  const rulesRelPath = `${bootstrapDir}/policy-snapshot.rules`
+  const scriptRelPath = `${bootstrapDir}/claude-code-check.js`
+
+  const rulesContent = opts.policySnapshotRules ?? ''
+  const scriptContent = renderSandboxGateScript('policy-snapshot.rules')
+
+  // Same hashing convention `snapshot.ts` already uses for the policy
+  // digest (`createHash('sha256')` from node:crypto) — not a new mechanism.
+  const bootstrapHash = createHash('sha256')
+    .update(`workspace:${opts.workspaceId ?? ''} `)
+    .update(`${rulesRelPath}\x00${rulesContent}\x00${scriptRelPath}\x00${scriptContent}`)
+    .digest('hex')
+
+  return {
+    bootstrapHash,
+    onBootstrap: async ({ session, workDir }) => {
+      // Absolute paths throughout, matching the laptop writer's own
+      // convention (claudeCodeHooks.ts's hookEntry() always joins an
+      // absolute workspaceRoot) - a PreToolUse hook's invocation cwd is not
+      // guaranteed to be workDir, so a relative command would be fragile.
+      const scriptAbsPath = sandboxJoin(workDir, scriptRelPath)
+      const files: ReadonlyArray<{ path: string; content: string }> = [
+        { path: sandboxJoin(workDir, rulesRelPath), content: rulesContent },
+        { path: scriptAbsPath, content: scriptContent },
+        { path: sandboxJoin(workDir, '.claude/settings.json'), content: renderSandboxClaudeSettings(scriptAbsPath) },
+      ]
+      for (const f of files) {
+        await session.writeTextFile({ path: f.path, content: f.content })
+      }
+    },
+  }
+}
+
+// Exposed for the behavioural-parity test — not part of the public surface.
+export const _internal = { renderSandboxGateScript, renderSandboxClaudeSettings, sandboxJoin }

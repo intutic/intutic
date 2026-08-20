@@ -65,6 +65,44 @@ describe('Drift Filesystem Watcher', () => {
     await node_fs.rm(tempDir, { recursive: true, force: true })
   })
 
+  it('reacts to the dsh profiles ROOT directory being CREATED (TD-370) — addDir, not just change/unlink', async () => {
+    const dshHome = await node_fs.mkdtemp(node_path.join(node_os.tmpdir(), 'intutic-dsh-watch-'))
+    const workspaceRoot = await node_fs.mkdtemp(node_path.join(node_os.tmpdir(), 'intutic-dsh-watch-ws-'))
+    const prevDshHomeEnv = process.env.DSH_HOME
+    process.env.DSH_HOME = dshHome
+
+    try {
+      const changedPaths: string[] = []
+      const onChange = async (filePath: string) => {
+        changedPaths.push(filePath)
+      }
+
+      // No harnesses need to be passed for dsh — buildProtectedPaths (used
+      // internally by startWatcher) always includes $DSH_HOME/profiles,
+      // resolved from $DSH_HOME at call time, regardless of the `harnesses`
+      // argument.
+      const watcher = startWatcher(workspaceRoot, [], onChange)
+      await new Promise((resolve) => setTimeout(resolve, 300))
+
+      // Every other assertion in this suite mutates a file that already
+      // exists; this one creates the directory chokidar was watching before
+      // it existed at all — the exact case that used to go unnoticed,
+      // because the only events this watcher forwarded were `change` and
+      // `unlink`, and a brand-new directory fires neither.
+      await node_fs.mkdir(node_path.join(dshHome, 'profiles'), { recursive: true })
+      await new Promise((resolve) => setTimeout(resolve, 500))
+
+      expect(changedPaths.some((p) => p === node_path.join(dshHome, 'profiles'))).toBe(true)
+
+      await watcher.stop()
+    } finally {
+      if (prevDshHomeEnv === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = prevDshHomeEnv
+      await node_fs.rm(dshHome, { recursive: true, force: true })
+      await node_fs.rm(workspaceRoot, { recursive: true, force: true })
+    }
+  })
+
   it('onDriftDetected fires within 1s and appends a config_tamper event to the JSONL log', async () => {
     // 1. Setup temporary workspace and events log path
     const tempDir = await node_fs.mkdtemp(node_path.join(node_os.tmpdir(), 'intutic-tamper-test-'))

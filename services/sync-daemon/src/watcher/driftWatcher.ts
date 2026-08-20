@@ -16,7 +16,7 @@ import * as node_path from 'node:path'
 import { HARNESS_FILES } from '../configWriter.js'
 import type { HarnessType } from '@intutic/shared-types'
 import { createLogger } from '@intutic/logger'
-import { buildProtectedPaths } from './settingsGuard.js'
+import { buildProtectedPaths, isDshProfilesRoot } from './settingsGuard.js'
 
 const log = createLogger('sync-drift-watcher')
 
@@ -67,7 +67,14 @@ export function startWatcher(
   })
 
   watcher.on('all', (event, path) => {
-    if (event === 'change' || event === 'unlink') {
+    // dsh's profiles ROOT directory is watched (via buildProtectedPaths)
+    // before it exists on disk, precisely so its own CREATION — chokidar's
+    // `addDir`, never `change`/`unlink` — is observable: that is the moment
+    // TD-370's "silent no-profile window" closes, and settingsGuard.ts has
+    // nothing to register into until it does. Every other protected path
+    // stays `change`/`unlink`-only, unchanged.
+    const isDshProfilesCreation = event === 'addDir' && isDshProfilesRoot(path)
+    if (event === 'change' || event === 'unlink' || isDshProfilesCreation) {
       log.debug({ action: 'watcher_change_detected', event, path }, 'Governed file change detected')
       onChange(path).catch((err) => {
         log.error({ action: 'watcher_on_change_error', err, path }, 'Error in watcher onChange handler')

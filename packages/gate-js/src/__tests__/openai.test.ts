@@ -27,6 +27,7 @@ import {
   RunToolApprovalItem,
   ToolGuardrailFunctionOutputFactory,
   Usage,
+  computerTool,
   hostedMcpTool,
   run,
   shellTool,
@@ -34,6 +35,7 @@ import {
   webSearchTool,
 } from '@openai/agents'
 import type {
+  Computer,
   MCPServer,
   Model,
   ModelRequest,
@@ -656,6 +658,108 @@ describe('real @openai/agents runner integration', () => {
     expect(fn.inputGuardrails?.filter((g) => g.name === GUARDRAIL_NAME)).toHaveLength(1)
     await run(agent, 'go')
     expect(gate.calls).toHaveLength(1)
+  })
+})
+
+// ------------------------------------------------------------------------
+// REAL @openai/agents runner integration — computerTool (TD-407 closer).
+//
+// computerTool exposes NO inputGuardrails and NO onApproval (see openai.ts's
+// module doc + intuticComputerNeedsApproval's doc comment) — its only
+// pre-execution hook is needsApproval, so a gate refusal can only force the
+// SDK's own approval INTERRUPTION rather than auto-reject with a message.
+// This block drives that path end to end with a stub Computer through the
+// real Runner (no API key, no network): confirms a gate-refused action
+// (a) never reaches the stub Computer's real method, (b) surfaces as
+// result.interruptions, and (c) state.reject(...) round-trips — resuming
+// the run with the same RunState still never executes the action and lets
+// the run complete on the model's next canned response.
+// ------------------------------------------------------------------------
+
+function computerCallResponse(callId: string, action: protocol.ComputerUseCallItem['action']): ModelResponse {
+  const item: protocol.ComputerUseCallItem = {
+    type: 'computer_call',
+    callId,
+    status: 'completed',
+    action,
+  }
+  return { usage: usage(), output: [item] }
+}
+
+/** A minimal stub Computer — every action is a no-op except click, which
+ *  records whether it actually ran. */
+function stubComputer(onClick: () => void): Computer {
+  return {
+    environment: 'mac',
+    dimensions: [1024, 768],
+    async screenshot() {
+      return ''
+    },
+    async click(_x: number, _y: number, _button) {
+      onClick()
+    },
+    async doubleClick() {},
+    async scroll() {},
+    async type() {},
+    async wait() {},
+    async move() {},
+    async keypress() {},
+    async drag() {},
+  }
+}
+
+describe('real @openai/agents runner integration: computerTool (TD-407)', () => {
+  it('a gate-refused computer action never runs, surfaces as a pending interruption, and state.reject round-trips', async () => {
+    const gate = new FakeGate('refuse')
+    let clicked = false
+    const model = new FakeModel([
+      computerCallResponse('call_1', { type: 'click', x: 10, y: 20, button: 'left' }),
+      finalMessageResponse('done'),
+    ])
+    const rawTool = computerTool({ computer: stubComputer(() => (clicked = true)) })
+    const [wrapped] = wrapTools([rawTool], { gate })
+    const agent = new Agent({ name: 'ops', model, tools: [wrapped] })
+
+    const result = await run(agent, 'click something')
+
+    // The gate's refusal forced the SDK's own approval interruption — this
+    // adapter cannot auto-reject a computer action with a message the way
+    // the guardrail path can (module doc / TD-407).
+    expect(result.interruptions).toHaveLength(1)
+    expect(clicked).toBe(false)
+    expect(gate.calls).toEqual([
+      { toolName: 'computer_use_preview', toolInput: { type: 'click', x: 10, y: 20, button: 'left' } },
+    ])
+
+    const interruption = result.interruptions[0]!
+    result.state.reject(interruption, { message: 'blocked by operator' })
+    const resumed = await run(agent, result.state)
+
+    // Rejecting round-trips through the real runner: the action still never
+    // ran, and the run completes using the model's next canned response.
+    expect(clicked).toBe(false)
+    expect(resumed.finalOutput).toBe('done')
+  })
+
+  it('an allowed computer action executes untouched (wrapping is not a blanket interruption)', async () => {
+    const gate = new FakeGate('allow')
+    let clicked = false
+    const model = new FakeModel([
+      computerCallResponse('call_1', { type: 'click', x: 5, y: 5, button: 'left' }),
+      finalMessageResponse('done'),
+    ])
+    const rawTool = computerTool({ computer: stubComputer(() => (clicked = true)) })
+    const [wrapped] = wrapTools([rawTool], { gate })
+    const agent = new Agent({ name: 'ops', model, tools: [wrapped] })
+
+    const result = await run(agent, 'click something')
+
+    expect(result.interruptions ?? []).toHaveLength(0)
+    expect(clicked).toBe(true)
+    expect(result.finalOutput).toBe('done')
+    expect(gate.calls).toEqual([
+      { toolName: 'computer_use_preview', toolInput: { type: 'click', x: 5, y: 5, button: 'left' } },
+    ])
   })
 })
 

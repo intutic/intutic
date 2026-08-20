@@ -30,6 +30,7 @@ import type {
   SopFileHash,
   WorkspaceSettings,
 } from '@intutic/shared-types'
+import { deriveEnforcementInputs } from '@intutic/shared-types'
 import { writeConfigFiles, HARNESS_FILES, applyConfigEdits } from './configWriter.js'
 import type { ConfigEditApplyOutcome } from './configWriter.js'
 import { injectMcpServer } from './harness/mcpAutoWrite.js'
@@ -680,10 +681,13 @@ export async function runSyncIteration(ctx: IterationContext): Promise<SyncResul
   const skillFlaggedThisCycle = new Set<string>()
   // Per-harness governance-coverage enforcement signals for this cycle,
   // derived from the same facets `collectAgentReport` just computed — see
-  // `SyncResult.harnessGovernanceInputs`'s doc comment. Mirrors
-  // `harnessGradeSweep.ts#deriveEnforcementInputs` on the control-plane side
-  // field-for-field, re-derived here (not imported) because this module is
-  // publicly mirrored and must not depend on `services/control-plane`.
+  // `SyncResult.harnessGovernanceInputs`'s doc comment. Uses the shared
+  // `deriveEnforcementInputs` (`@intutic/shared-types`, TD-443) so this
+  // mapping cannot drift from `harnessGradeSweep.ts`'s control-plane-side
+  // sweep the way the two hand-kept copies previously did — safe to depend
+  // on since `@intutic/shared-types` is a leaf package, not
+  // `services/control-plane` itself, so this publicly-mirrored module still
+  // never imports from the enterprise-only service.
   const harnessGovernanceInputs: Partial<Record<HarnessType, GovernanceCoverageInputs>> = {}
   for (const harness of harnesses) {
     const filename = HARNESS_FILES[harness]
@@ -700,12 +704,7 @@ export async function runSyncIteration(ctx: IterationContext): Promise<SyncResul
     })
     await reportAgent(controlPlaneUrl, apiKey, workspaceId, report)
 
-    harnessGovernanceInputs[harness] = {
-      mcpProxyActive: report.facets.mcp_tools.length > 0,
-      nativeHookActive: report.facets.guardrails.hook_gate === true,
-      llmProxyActive: report.facets.guardrails.pcas === true,
-      hasRulesFile: report.facets.harness.config_synced === true,
-    }
+    harnessGovernanceInputs[harness] = deriveEnforcementInputs(report.facets)
 
     // 5b-i. Skill-content scan findings, surfaced as `skill_flagged` events
     // (TD-358). See `emitSkillFlaggedEvents`'s own doc comment for why this
