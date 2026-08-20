@@ -274,6 +274,15 @@ export interface TraceDetail {
   rootCauseAttribution: unknown | null
   correctivePromptCard: unknown | null
   reasoningTokens?: number | null
+  /**
+   * Provider-reported prompt-cache token counts (TD-347; migration 165) —
+   * Anthropic's `usage.cache_read_input_tokens` / `cache_creation_input_tokens`
+   * today. Null when the provider/proxy build doesn't report them; distinct
+   * from `cacheHit`/`cacheSavingsUsd` (the proxy's own semantic response
+   * cache) — see `execution_traces.cache_read_input_tokens`'s column comment.
+   */
+  cacheReadInputTokens?: number | null
+  cacheCreationInputTokens?: number | null
   toolCallMetrics?: unknown | null
   /**
    * 0–100 integrity score backing a WASTED `tokenUtility` verdict; null when
