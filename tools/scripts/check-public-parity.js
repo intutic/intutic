@@ -40,6 +40,10 @@ const SHARED = [
   // the next one hides.
   'packages/anomaly-taxonomy',
   'packages/clawde-sdk',
+  // TD-446: existed byte-identical in both repos for a long time without
+  // being tracked here at all — CI could not have caught drift in either
+  // direction. Added 2026-08-20; confirmed zero-diff at the time of adding.
+  'packages/gate-js',
   'packages/id',
   // The Python SDK, including the intutic_clawde.gate enforcement point. Its
   // tests pin behavior against the proxy's actions.rs and the control plane's

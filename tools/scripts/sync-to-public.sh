@@ -64,9 +64,9 @@ fail()  { echo -e "${RED}[ERROR]${NC} $1" >&2; }
 # Directories copied wholesale from enterprise to public.
 SYNC_PATHS=(
   packages/anomaly-taxonomy
-  packages/clawde-sdk packages/id packages/intutic-clawde packages/logger
-  packages/mcp-proxy packages/proxy packages/shared-types packages/theme
-  packages/vscode-extension packages/wasm-sdk
+  packages/clawde-sdk packages/gate-js packages/id packages/intutic-clawde
+  packages/logger packages/mcp-proxy packages/proxy packages/shared-types
+  packages/theme packages/vscode-extension packages/wasm-sdk
   services/sync-daemon
   tools/cli
   apps/docs
