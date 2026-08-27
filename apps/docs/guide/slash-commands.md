@@ -129,5 +129,5 @@ Under the hood, these calculations and checks are processed by distinct layers o
 |---------|------------------|------------------------|-----------------|
 | **Token & Cost Projections** | Proxy Gateway | **Deterministic Byte-Pair Encoder (Tiktoken)** + statistical baseline distribution values cached in Valkey (no LLM calls). | In-process |
 | **Corrective Prompt Suggestions** | Control Plane | **Corrective Prompt Service** static templates mapping directly to the detected `AnomalyType` (no LLM calls). | In-process |
-| **SOP Compliance (LLM-as-a-Judge)** | Control Plane | **LLM Probe Service** running Tier 3 async evaluations using **`claude-3-5-haiku`** (or `gpt-4o-mini` fallbacks). | Asynchronous (does not block client stream). |
+| **SOP Compliance (LLM-as-a-Judge)** | Control Plane | **LLM Probe Service** running Tier 3 async evaluations on **Intutic's cost-optimized open-weight judge** (the `intutic-openweight-judge` alias) by default; frontier models (Anthropic/OpenAI) are an explicit BYO upgrade via workspace judge settings. | Asynchronous (does not block client stream). |
 

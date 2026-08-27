@@ -25,6 +25,13 @@ pub struct NotificationClient {
 #[derive(Debug, Clone, Deserialize)]
 pub struct GovernanceNotification {
     pub notification_id: String,
+    /// Corrective-card identity (`crd_…`), present only on notifications that
+    /// carry a corrective card. Used to report actual delivery back to the
+    /// control plane's labeled dataset (`gov:delivered:{workspaceId}`);
+    /// `None` — including every payload queued before this field existed —
+    /// simply produces no delivery marker.
+    #[serde(default)]
+    pub card_id: Option<String>,
     pub session_id: String,
     pub workspace_id: String,
     pub priority: String,
@@ -111,5 +118,16 @@ impl NotificationClient {
             "Drained workspace governance notifications"
         );
         Ok(notifications)
+    }
+
+    /// Report which corrective cards were actually appended to a response.
+    ///
+    /// Pushed to `gov:delivered:{workspace_id}` for the control plane's label
+    /// sweep to fold into `governance_card_labels.delivered_at`. Fire-and-
+    /// forget — the block already went to the client by the time this runs.
+    pub async fn record_card_deliveries(&self, workspace_id: &str, payloads: &[String]) {
+        self.control_plane
+            .record_card_deliveries(workspace_id, payloads)
+            .await;
     }
 }

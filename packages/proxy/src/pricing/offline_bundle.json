@@ -6,6 +6,16 @@
     "note": "Baked into the proxy binary via include_str!(), so editing this file does nothing until the image is rebuilt. Regenerate with tools/scripts/build-offline-pricing-bundle.ts; drift against published rates is reported monthly by .github/workflows/pricing-drift.yml. Override with OFFLINE_PRICING_PATH."
   },
   "models": {
+    "intutic-openweight-judge": {
+      "input_cost_per_1k": 0.00055,
+      "output_cost_per_1k": 0.00219,
+      "max_tokens": 8192
+    },
+    "intutic-openweight-fast": {
+      "input_cost_per_1k": 0.0002,
+      "output_cost_per_1k": 0.0008,
+      "max_tokens": 163840
+    },
     "claude-haiku-4-5-20251001": {
       "input_cost_per_1k": 0.001,
       "output_cost_per_1k": 0.005,

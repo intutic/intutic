@@ -102,6 +102,18 @@ export { ANOMALY_SEVERITY_MAP } from '@intutic/anomaly-taxonomy'
  * HLD §3.5 — Corrective prompt injection
  */
 export interface CorrectivePromptCard {
+  /**
+   * Stable identity for this card — `newId('crd')`.
+   *
+   * Optional because cards persisted to `execution_traces.corrective_prompt_card`
+   * before this field existed have no id, and that JSONB is append-only — old
+   * snapshots can never be backfilled. Every newly generated card carries one;
+   * it is the join key into `governance_card_labels`, the labeled dataset that
+   * records whether the card was delivered and whether the agent (or a human
+   * reviewer) judged it adopted.
+   */
+  cardId?: string
+
   /** The corrective prompt text to inject into agent context. */
   promptText: string
 

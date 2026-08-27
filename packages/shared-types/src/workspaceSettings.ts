@@ -430,6 +430,27 @@ export interface WorkspaceSettings {
    * that separate decision, which this setting does not reverse.
    */
   virusTotalSkillLookupEnabled?: boolean
+
+  /**
+   * Whether corrective governance cards accumulate adoption labels in
+   * `governance_card_labels` — the dataset a future judge fine-tune trains on.
+   *
+   * When true (the default), every corrective card queued for this workspace
+   * writes a row (card snapshot + queued_at), the proxy's delivery marker sets
+   * delivered_at, and the label sweep infers ADOPTED/NOT_ADOPTED from the
+   * session's subsequent traces unless a human has already ruled. Human labels
+   * (`label_source='human'`) always win over auto labels and are weighted
+   * higher when the dataset is used.
+   *
+   * When false, row creation and the auto-watcher stop, and the human labeling
+   * route refuses — data retention stops. Card generation, queueing, and
+   * delivery are UNCHANGED either way: opting out stops the dataset, not
+   * governance itself. On by default because the rows contain only what the
+   * workspace's own traces already persist (the card text the agent was shown),
+   * no third party is involved, and the aggregate is what makes the judge
+   * improve for everyone.
+   */
+  governanceCardLabelingEnabled: boolean
 }
 
 /**
@@ -508,6 +529,9 @@ export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
   // Off by default — see the field doc for the hash-only doctrine and why
   // this must never turn on for a workspace that never configured it.
   virusTotalSkillLookupEnabled: false,
+  // ON by default — see the field doc. Opting out stops label retention for
+  // the judge fine-tuning dataset, never card delivery itself.
+  governanceCardLabelingEnabled: true,
 }
 
 /**
