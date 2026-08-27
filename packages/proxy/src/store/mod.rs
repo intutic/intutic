@@ -898,6 +898,21 @@ pub trait ControlPlaneCache: Send + Sync + 'static {
     /// types.
     async fn drain_notifications(&self, scope: NotifyScope, id: &str) -> Vec<String>;
 
+    /// Record which corrective cards were actually appended to a response,
+    /// by pushing the given JSON payloads to `gov:delivered:{workspace_id}`.
+    ///
+    /// The one write on this otherwise read-only surface, deliberately: the
+    /// marker is the control plane's own bookkeeping (its label sweep LPOPs
+    /// the list into `governance_card_labels`), so it belongs with the
+    /// control-plane keys rather than on `LocalStore` — standalone there is
+    /// no sweep to read it, and the default no-op below is exactly the right
+    /// behavior, mirroring how `drain_notifications` is a consumer with no
+    /// producer in open core.
+    ///
+    /// Fire-and-forget. Delivery already happened by the time this is called;
+    /// a lost marker only means one dataset row keeps a NULL `delivered_at`.
+    async fn record_card_deliveries(&self, _workspace_id: &str, _payloads: &[String]) {}
+
     // ── Sandbox attestation ────────────────────────────────────────────
 
     /// Whether this session's sandbox has proven it resolves the proxy as its
