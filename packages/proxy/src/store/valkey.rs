@@ -108,6 +108,19 @@ const NOTIFY_QUEUE_CAP: isize = 50;
 /// about a request the agent has long since moved on from.
 const NOTIFY_TTL_SECS: i64 = 3600;
 
+/// How long an unswept `gov:delivered:{ws}` marker survives — 24 hours.
+///
+/// Generous relative to the control-plane label sweep's minutes-scale
+/// cadence, so a control plane down for a day loses nothing; past that the
+/// marker describes a delivery the dataset will simply record as
+/// never-delivered, which is the honest degradation.
+const DELIVERED_MARKER_TTL_SECS: i64 = 24 * 3600;
+
+/// Most delivery markers held per workspace queue, same bounding rationale
+/// as [`NOTIFY_QUEUE_CAP`] — with a sweep reading every few minutes this is
+/// ample, and an unbounded list with a dead sweeper is a leak.
+const DELIVERED_MARKER_CAP: isize = 10_000;
+
 /// Sliding TTL on a session's tool-sequence list.
 ///
 /// The list itself is length-capped by `LTRIM`, but nothing bounded the number
@@ -1391,6 +1404,20 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
                 Vec::new()
             }
         }
+    }
+
+    async fn record_card_deliveries(&self, workspace_id: &str, payloads: &[String]) {
+        if payloads.is_empty() {
+            return;
+        }
+        let mut conn = self.conn();
+        let key = format!("gov:delivered:{}", workspace_id);
+        // Fire-and-forget, same posture as `publish_notification`: the cards
+        // were already appended to the response, and a lost marker only costs
+        // one dataset row its `delivered_at`.
+        let _: Result<(), redis::RedisError> = conn.rpush(&key, payloads).await;
+        let _: Result<(), redis::RedisError> = conn.ltrim(&key, -DELIVERED_MARKER_CAP, -1).await;
+        let _: Result<(), redis::RedisError> = conn.expire(&key, DELIVERED_MARKER_TTL_SECS).await;
     }
 }
 

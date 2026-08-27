@@ -58,6 +58,7 @@ mod tests {
     fn make_notification(priority: &str, category: &str, title: &str) -> GovernanceNotification {
         GovernanceNotification {
             notification_id: "ntf_test".to_string(),
+            card_id: None,
             session_id: "ses_test".to_string(),
             workspace_id: "wk_test".to_string(),
             priority: priority.to_string(),

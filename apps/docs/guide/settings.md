@@ -83,8 +83,11 @@ the CLI as `intutic setup`, for anyone who'd rather not click through it).
 
 ### LLM Judge
 
-Choose a model to run this workspace's LLM-as-judge checks on, instead of Intutic's platform
-trusted monitor. The picker lists models from Intutic's [model catalog](/reference/model-catalog),
+By default, this workspace's LLM-as-judge checks run on Intutic's platform trusted monitor —
+a **cost-optimized open-weight judge model**, included with the platform, so no per-token
+frontier charges land on your bill. Choosing your own judge here — including a frontier model
+(Anthropic, OpenAI) — is the explicit upgrade: it routes via your own provider key (BYO) and
+bills to you. The picker lists models from Intutic's [model catalog](/reference/model-catalog),
 filtered by default to providers you've already provisioned a credential for under Provider
 Keys — a model shown disabled needs either a credential or "Show all providers" to reveal why. A
 **Custom model name** field is always available underneath: an on-prem LiteLLM deployment can
