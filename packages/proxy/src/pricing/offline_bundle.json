@@ -7,8 +7,8 @@
   },
   "models": {
     "intutic-openweight-judge": {
-      "input_cost_per_1k": 0.00055,
-      "output_cost_per_1k": 0.00219,
+      "input_cost_per_1k": 0,
+      "output_cost_per_1k": 0,
       "max_tokens": 8192
     },
     "intutic-openweight-fast": {
