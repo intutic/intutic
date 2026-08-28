@@ -36,7 +36,7 @@ import { SKILL_SURFACE_PATTERNS, staticFloorPatterns } from '../../src/harness/p
 function policy(over: Partial<ResolvedPolicy> = {}): ResolvedPolicy {
   return {
     workspaceId: 'ws_test',
-    interventionMode: 'ENFORCE',
+    interventionMode: 'TRANSPARENT',
     sopRules: [],
     mcpAllowedServers: [],
     ...over,
@@ -59,7 +59,7 @@ describe('fetchResolvedPolicy — absorbing allowedServers from GET /api/v1/poli
         json: async () => ({
           workspaceId: 'ws_1',
           sopRules: [],
-          interventionMode: 'ENFORCE',
+          interventionMode: 'TRANSPARENT',
           allowedServers: ['github', 'filesystem'],
         }),
       })) as unknown as typeof fetch,
@@ -77,7 +77,7 @@ describe('fetchResolvedPolicy — absorbing allowedServers from GET /api/v1/poli
       'fetch',
       vi.fn(async () => ({
         ok: true,
-        json: async () => ({ workspaceId: 'ws_1', sopRules: [], interventionMode: 'ENFORCE' }),
+        json: async () => ({ workspaceId: 'ws_1', sopRules: [], interventionMode: 'TRANSPARENT' }),
       })) as unknown as typeof fetch,
     )
     const policy = await fetchResolvedPolicy({
@@ -96,7 +96,7 @@ describe('fetchResolvedPolicy — absorbing allowedServers from GET /api/v1/poli
         json: async () => ({
           workspaceId: 'ws_1',
           sopRules: [],
-          interventionMode: 'ENFORCE',
+          interventionMode: 'TRANSPARENT',
           allowedServers: ['github', 42, null, 'filesystem'],
         }),
       })) as unknown as typeof fetch,
@@ -240,10 +240,10 @@ describe('buildSnapshotRules', () => {
     expect(rm!.severity).toBe(DESTRUCTIVE_TIER_SEVERITY)
   })
 
-  it('marks rules shadow, not warn, in SHADOW mode', () => {
+  it('marks rules shadow, not warn, in SILENT_LOG mode', () => {
     const rules = buildSnapshotRules(
       policy({
-        interventionMode: 'SHADOW',
+        interventionMode: 'SILENT_LOG',
         sopRules: [{ id: 's1', toolPattern: 'Bash', action: 'block', reason: 'x' }],
       }),
     )
@@ -252,6 +252,41 @@ describe('buildSnapshotRules', () => {
     // made it unmeasurable.
     expect(rules.every((r) => r.severity === 'shadow')).toBe(true)
     expect(rules.some((r) => r.severity === 'warn'), 'a shadow snapshot still emits warn rules').toBe(false)
+  })
+
+  it('SILENT_LOG demotes the dynamic tier only — the static floor is untouched', () => {
+    // The demotion is keyed on SILENT_LOG, the one intervention_mode_type
+    // value that means observe-only (this check used to compare against
+    // 'SHADOW', which the enum can never produce — a dead branch, so a
+    // SILENT_LOG workspace shipped fully-blocking snapshots).
+    const rules = buildSnapshotRules(policy({ interventionMode: 'SILENT_LOG' }))
+    expect(rules.length).toBeGreaterThan(0)
+    // Every snapshot-delivered (dynamic-tier) rule is advisory…
+    expect(rules.every((r) => r.severity === 'shadow')).toBe(true)
+    // …and none of them IS a static-floor rule: the floor's compiled-in
+    // patterns are a separate table (staticFloorPatterns) this builder never
+    // emits, so no settings string can demote the floor itself.
+    const floorIds = new Set(staticFloorPatterns().map((r) => r.id))
+    for (const r of rules) {
+      expect(floorIds.has(r.id), `${r.id} would shadow a static-floor rule`).toBe(false)
+    }
+    // And the floor keeps its own severities regardless of workspace mode.
+    expect(staticFloorPatterns().some((r) => r.severity === ('shadow' as never))).toBe(false)
+  })
+
+  it('the other two real modes (TRANSPARENT, OPAQUE) do NOT demote — both enforce', () => {
+    for (const mode of ['TRANSPARENT', 'OPAQUE']) {
+      const rules = buildSnapshotRules(
+        policy({
+          interventionMode: mode,
+          sopRules: [{ id: 's1', toolPattern: 'Bash', action: 'block', reason: 'x' }],
+        }),
+      )
+      expect(
+        rules.some((r) => r.severity === 'shadow'),
+        `${mode} produced shadow rules — only SILENT_LOG is observe-only`,
+      ).toBe(false)
+    }
   })
 
   describe('skill-surface tier (TD-358 block-tier promotion)', () => {
@@ -294,8 +329,8 @@ describe('buildSnapshotRules', () => {
       }
     })
 
-    it('marks skill-surface rules shadow, not block, in SHADOW mode', () => {
-      const rules = buildSnapshotRules(policy({ interventionMode: 'SHADOW' }))
+    it('marks skill-surface rules shadow, not block, in SILENT_LOG mode', () => {
+      const rules = buildSnapshotRules(policy({ interventionMode: 'SILENT_LOG' }))
       const skillRules = rules.filter((r) => r.id.startsWith('skill_surface.'))
       expect(skillRules.length).toBeGreaterThan(0)
       expect(skillRules.every((r) => r.severity === 'shadow')).toBe(true)
@@ -399,11 +434,11 @@ describe('writePolicySnapshot', () => {
       }
     })
 
-    it('emits #mcpservers block <csv> when servers are configured, ENFORCE mode', async () => {
+    it('emits #mcpservers block <csv> when servers are configured, enforcing mode', async () => {
       const dir = mkdtempSync(join(tmpdir(), 'intutic-snap-mcp2-'))
       try {
         await writePolicySnapshot(
-          policy({ interventionMode: 'ENFORCE', mcpAllowedServers: ['github', 'filesystem'] }),
+          policy({ interventionMode: 'TRANSPARENT', mcpAllowedServers: ['github', 'filesystem'] }),
           dir,
         )
         const rulesText = readFileSync(join(dir, SNAPSHOT_RULES), 'utf8')
@@ -415,11 +450,11 @@ describe('writePolicySnapshot', () => {
       }
     })
 
-    it('emits #mcpservers shadow <csv> in SHADOW mode', async () => {
+    it('emits #mcpservers shadow <csv> in SILENT_LOG mode', async () => {
       const dir = mkdtempSync(join(tmpdir(), 'intutic-snap-mcp3-'))
       try {
         await writePolicySnapshot(
-          policy({ interventionMode: 'SHADOW', mcpAllowedServers: ['github'] }),
+          policy({ interventionMode: 'SILENT_LOG', mcpAllowedServers: ['github'] }),
           dir,
         )
         const rulesText = readFileSync(join(dir, SNAPSHOT_RULES), 'utf8')

@@ -913,10 +913,14 @@ _Generated from `services/control-plane/src/routes/*.ts` by `generate-api-catalo
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/api/v1/policies` | Authenticated |  |
-| POST | `/api/v1/policies/:policyId/disable` | Authenticated |  |
-| POST | `/api/v1/policies/:policyId/enable` | Authenticated |  |
-| POST | `/api/v1/policies/:policyId/rollback` | Authenticated |  |
+| GET | `/api/v1/policies` | OWNER/ADMIN/EM | List live (non-deleted) policies |
+| POST | `/api/v1/policies` | OWNER/ADMIN | Create a policy (records version 1) |
+| PUT | `/api/v1/policies/:policyId` | OWNER/ADMIN | Partial update; bumps version + snapshots |
+| DELETE | `/api/v1/policies/:policyId` | OWNER/ADMIN | Soft delete (version history kept for audit) |
+| GET | `/api/v1/policies/:policyId/versions` | OWNER/ADMIN/EM | Version history, newest first |
+| POST | `/api/v1/policies/:policyId/disable` | OWNER/ADMIN |  |
+| POST | `/api/v1/policies/:policyId/enable` | OWNER/ADMIN |  |
+| POST | `/api/v1/policies/:policyId/rollback` | OWNER/ADMIN | Body `{"version": N}` — restores as a new version |
 
 ### `providerCredentials.ts` <Badge type="tip" text="Cloud" />
 

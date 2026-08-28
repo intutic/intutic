@@ -332,8 +332,8 @@ function toGuardPattern(
     // `shadow`, not `warn`. Both allow the call, but they mean different
     // things: `warn` is "this rule has not earned the right to block yet",
     // `shadow` is "this rule is certain and the workspace asked us not to act".
-    // Collapsing them makes a SHADOW rollout unmeasurable, because you cannot
-    // tell which flags would have been blocks.
+    // Collapsing them makes a SILENT_LOG rollout unmeasurable, because you
+    // cannot tell which flags would have been blocks.
     severity: shadow ? ('shadow' as GuardPattern['severity']) : 'block',
     reason: rule.reason || `Blocked by SOP ${rule.id}`,
     rationale: 'Resolved from a BLOCK: SOP title by the control plane.',
@@ -393,17 +393,23 @@ export async function fetchResolvedPolicy(
 }
 
 /**
- * SHADOW means observe, do not intervene. It demotes the dynamic tier to the
- * advisory severity — it does NOT reach the static floor, which stays
- * enforced. If one settings string could disarm the floor, the floor would
- * not be a floor.
+ * SILENT_LOG means observe, do not intervene (docs/guides/policies.md: the
+ * call is permitted to run, the trace is tagged for audit). It demotes the
+ * dynamic tier to the advisory severity — it does NOT reach the static floor,
+ * which stays enforced. If one settings string could disarm the floor, the
+ * floor would not be a floor.
+ *
+ * This used to compare against 'SHADOW', a value intervention_mode_type
+ * (TRANSPARENT|OPAQUE|SILENT_LOG — packages/db/src/enums.ts) can never
+ * produce, so the observe-only branch was dead and a SILENT_LOG workspace
+ * shipped fully-blocking snapshots.
  *
  * Extracted so `buildSnapshotRules` and `writePolicySnapshot`'s `#mcpservers`
- * header compute "is this workspace in SHADOW mode" the same way once, rather
- * than as two copies of `.toUpperCase() === 'SHADOW'` that could drift.
+ * header compute "is this workspace observe-only" the same way once, rather
+ * than as two copies of the comparison that could drift.
  */
-function isShadowMode(policy: ResolvedPolicy): boolean {
-  return policy.interventionMode.toUpperCase() === 'SHADOW'
+function isSilentLogMode(policy: ResolvedPolicy): boolean {
+  return policy.interventionMode.toUpperCase() === 'SILENT_LOG'
 }
 
 /**
@@ -444,7 +450,9 @@ function sanitizeMcpServerNames(names: readonly string[]): string[] {
 /** Builds the rule set a snapshot would carry, without writing it. Exported so
  *  a test can assert the contents rather than re-deriving them. */
 export function buildSnapshotRules(policy: ResolvedPolicy): GuardPattern[] {
-  const shadow = isShadowMode(policy)
+  // `shadow` names the advisory GuardPattern severity these rules are demoted
+  // to; the workspace-level trigger is intervention mode SILENT_LOG.
+  const shadow = isSilentLogMode(policy)
 
   const sopRules = policy.sopRules
     .map((r) => toGuardPattern(r, shadow))
@@ -471,8 +479,9 @@ export function buildSnapshotRules(policy: ResolvedPolicy): GuardPattern[] {
   // degraded-mode baseline) and one block (the steady state), and
   // `assertGuardTableSane`'s uniqueness check would reject an accidental
   // duplicate id the moment either table tried to load. Mirrors the
-  // destructive tier's own shadow handling: SHADOW means observe, don't act,
-  // on the dynamic tier only — the floor's warn rule is unaffected either way.
+  // destructive tier's own shadow handling: SILENT_LOG means observe, don't
+  // act, on the dynamic tier only — the floor's warn rule is unaffected
+  // either way.
   const skillSurface = SKILL_SURFACE_PATTERNS.map((p) => ({
     ...p,
     id: `${p.id}.tier`,
@@ -504,8 +513,8 @@ export async function writePolicySnapshot(
 
   // M3: the per-server MCP allowlist, sanitised once and reused for both
   // artifacts so the JSON and the `.rules` header can never disagree about
-  // which names survived. Severity follows SHADOW the same way the dynamic
-  // tier's rules do: certain, just not acted on.
+  // which names survived. Severity follows SILENT_LOG the same way the
+  // dynamic tier's rules do: certain, just not acted on.
   //
   // Deliberately OUTSIDE `lines`/`digest` above — the digest covers RULE lines
   // only, matching the trust model the `#workspace` header already has (parsed
@@ -513,7 +522,7 @@ export async function writePolicySnapshot(
   // `#mcpservers` header is the same kind of metadata line, not a rule, so it
   // must not change what `lines.join('\n')` hashes to.
   const mcpServers = sanitizeMcpServerNames(policy.mcpAllowedServers)
-  const mcpSeverity: 'shadow' | 'block' = isShadowMode(policy) ? 'shadow' : 'block'
+  const mcpSeverity: 'shadow' | 'block' = isSilentLogMode(policy) ? 'shadow' : 'block'
 
   await fs.mkdir(snapshotDir, { recursive: true })
 

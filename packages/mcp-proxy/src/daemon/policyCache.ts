@@ -157,7 +157,13 @@ function parsePolicyResponse(raw: string): PolicyResponseBody | null {
     dlpPatterns: Array.isArray(dlpPatterns)
       ? dlpPatterns.filter((p): p is string => typeof p === 'string')
       : [],
-    interventionMode: typeof interventionMode === 'string' ? interventionMode : 'BYPASS',
+    // 'TRANSPARENT', matching every other default in this pipeline: the
+    // resolve route's own fallback (services/control-plane/src/routes/
+    // evaluate.ts), the schema default on pcas_policies.intervention_mode,
+    // and this module's snapshot-seed path below. The old default here was
+    // 'BYPASS', which is not an intervention_mode_type value at all — a
+    // fabricated mode no other component recognises.
+    interventionMode: typeof interventionMode === 'string' ? interventionMode : 'TRANSPARENT',
     allowedTools: Array.isArray(allowedTools)
       ? allowedTools.filter((t): t is string => typeof t === 'string')
       : [],
@@ -208,11 +214,13 @@ async function fetchFromControlPlane(workspaceId: string): Promise<ResolvedPolic
         res.on('data', (chunk: string) => { data += chunk })
         res.on('end', () => {
           // An error body parses as JSON too. `{"error":"unauthorized"}` used to
-          // become a policy with no sopRules and interventionMode BYPASS, which
-          // resolvePolicy then cached for the full TTL and socketServer read as
-          // `allowed: true` — an expired daemon key silently turned enforcement
-          // off. A non-2xx is a failure to resolve, so it returns null, the same
-          // as the transport failures below.
+          // become a policy with no sopRules and the parser's fallback
+          // interventionMode (historically the fabricated 'BYPASS', now
+          // 'TRANSPARENT'), which resolvePolicy then cached for the full TTL
+          // and socketServer read as `allowed: true` — an expired daemon key
+          // silently turned enforcement off. A non-2xx is a failure to
+          // resolve, so it returns null, the same as the transport failures
+          // below.
           if (statusCode < 200 || statusCode >= 300) {
             logger.warn({ workspaceId, statusCode }, 'policy_cache.fetch_http_error')
             resolve(null)

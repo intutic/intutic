@@ -48,6 +48,11 @@ describe('policyCache Unit Tests', () => {
         body['toolDescriptionOverrides'] = { read_file: 'Reads a file' }
         body['allowedServers'] = ['filesystem']
       }
+      // `ws_no_mode_test` gets a response WITHOUT interventionMode, to pin
+      // the parser's fallback for an older control plane that omits it.
+      if (latestWorkspaceId === 'ws_no_mode_test') {
+        delete body['interventionMode']
+      }
       res.end(JSON.stringify(body))
     })
 
@@ -126,5 +131,18 @@ describe('policyCache Unit Tests', () => {
     expect(policy?.allowedTools).toEqual(['read_file'])
     expect(policy?.toolDescriptionOverrides).toEqual({ read_file: 'Reads a file' })
     expect(policy?.allowedServers).toEqual(['filesystem'])
+  })
+
+  it("defaults a missing interventionMode to 'TRANSPARENT', a real intervention_mode_type value", async () => {
+    // The old fallback was 'BYPASS' — not an intervention_mode_type value at
+    // all (TRANSPARENT|OPAQUE|SILENT_LOG). A daemon whose Valkey entry had
+    // just been invalidated could re-read this fabricated mode from a
+    // mode-less response and enforce a state no other component defines.
+    // 'TRANSPARENT' matches the resolve route's own fallback and the
+    // snapshot-seed path in this module.
+    invalidatePolicy('ws_no_mode_test')
+    const policy = await resolvePolicy('ws_no_mode_test')
+    expect(policy).not.toBeNull()
+    expect(policy?.interventionMode).toBe('TRANSPARENT')
   })
 })
