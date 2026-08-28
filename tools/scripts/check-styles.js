@@ -58,7 +58,14 @@ console.log(`Checking ${files.length} CSS files for design system compliance...`
 
 files.forEach(filePath => {
   const relativePath = path.relative(ROOT_DIR, filePath);
-  const content = fs.readFileSync(filePath, 'utf8');
+  const rawContent = fs.readFileSync(filePath, 'utf8');
+  // Blank out /* ... */ comment bodies before scanning: the hex/rgb checks
+  // below are plain text matches with no notion of CSS syntax, so a comment
+  // like "LLD #40, migration 140, #135" reads #135 (a valid 3-hex sequence)
+  // as a hardcoded color. Replacing non-newline characters with spaces
+  // (not deleting them) keeps every line number and column exactly where
+  // it was, so error reporting below is unaffected for real matches.
+  const content = rawContent.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '));
   const lines = content.split('\n');
   const fileWhitelist = WHITELIST[path.basename(filePath)] || [];
 
