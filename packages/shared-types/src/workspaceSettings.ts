@@ -343,6 +343,58 @@ export interface WorkspaceSettings {
   }
 
   /**
+   * Server-side trajectory monitoring mode (LLD #52, parallel monitoring).
+   * Read by `services/control-plane/src/services/trajectoryAnalysisService.ts`'s
+   * `getWorkspaceMonitorMode` on every `/trajectory/analyze` call:
+   *
+   * - `'ACTIVE'`:  a CRITICAL/INTERVENE verdict can escalate into the
+   *   anomaly-enforcement occurrence counter (KILL/HIJACK promotion) in
+   *   addition to alerting.
+   * - `'PASSIVE'` (default): trajectories are analyzed and alerts are
+   *   recorded/dispatched, but nothing ever escalates to enforcement.
+   * - `'OFF'`:     trajectory analysis is skipped entirely for the workspace
+   *   (capability-miss production still runs — it is a separate feature).
+   *
+   * Stored under the snake_case key `trajectory_monitor_mode`, not
+   * `trajectoryMonitorMode` — deliberately inconsistent with this file's
+   * camelCase convention, following the exact precedent
+   * {@link WorkspaceSettings.anomaly_enforcement} documents below: that
+   * snake_case key is already the load-bearing contract the reading service
+   * consumes from raw jsonb, and renaming it would be a breaking migration
+   * for every already-stored workspace setting for no behavioral benefit.
+   *
+   * CONSTRAINT: the entry in {@link DEFAULT_WORKSPACE_SETTINGS} MUST stay
+   * `'PASSIVE'`, byte-for-byte matching `getWorkspaceMonitorMode`'s own
+   * absent-key fallback. The enforcement path reads the raw jsonb and applies
+   * its own fallback; the default here only affects GET/display resolution —
+   * if the two ever diverge, the UI would show a different mode than the one
+   * enforcement actually runs under.
+   */
+  trajectory_monitor_mode?: 'ACTIVE' | 'PASSIVE' | 'OFF'
+
+  /**
+   * Additive MCP tool allowlist, enforced by the MCP governance proxy
+   * (`packages/mcp-proxy`) and served to it by
+   * `services/control-plane/src/lib/mcpCuration.ts` (both the `/sop/rules`
+   * and `/policy/resolve` projections). Empty/absent means UNRESTRICTED —
+   * the same convention as {@link mcpAllowedServers} below, whose doc
+   * comment has referenced this field as its sibling since it was written.
+   * Was settable via the PUT schema but never declared here — the inverse
+   * of the usual both-places defect (schema-only instead of type-only),
+   * caught by the settingsKeyParity gate.
+   */
+  mcpAllowedTools?: string[]
+
+  /**
+   * Per-tool `tools/list` description overrides, curated by an operator and
+   * substituted by the MCP governance proxy before descriptions reach the
+   * model. Delivered alongside {@link mcpAllowedTools} via
+   * `lib/mcpCuration.ts`. Absent means no overrides. Declared here for the
+   * same reason as `mcpAllowedTools` immediately above.
+   */
+  mcpToolDescriptionOverrides?: Record<string, string>
+
+  /**
    * Governed decisions log: whether the sync-daemon writes a bounded,
    * auto-maintained record of GOVERNANCE decisions (adjudications,
    * approved/rejected decisions, SOP-related settings changes) as context
@@ -516,6 +568,12 @@ export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
   // Off by default — see the field doc for why a growing auto-written
   // context file must be opt-in.
   decisionsLogEnabled: false,
+  // MUST match getWorkspaceMonitorMode's absent-key fallback in
+  // trajectoryAnalysisService.ts exactly ('PASSIVE'): the enforcement path
+  // reads the raw jsonb with its own fallback, so this default is display
+  // resolution only — a different value here would make the UI show a mode
+  // enforcement does not actually run under. See the field doc.
+  trajectory_monitor_mode: 'PASSIVE',
   // Off by default — mirrors anomalyEnforcementService.ts's own DISABLED
   // default exactly, so a workspace that never configures this sees the
   // identical values whether resolved here or read directly from the DB.
