@@ -94,6 +94,9 @@ export const HARNESS_CONFIG_FILES: Record<HarnessType, string> = {
   // eve (Vercel, PREVIEW) — same JS/TS SDK-gated family; detection is a
   // compound `eve` dep + `agent/` directory check — see eve.ts.
   'eve': '.env.intutic',
+  // TrueForge (embedded-library mode only — see trueforge.ts's module doc
+  // and the HarnessType.TRUEFORGE doc comment); same JS/TS SDK-gated family.
+  'trueforge': '.env.intutic',
   // A3: Vercel platform-agent runtimes — same @intutic/gate family. Note the
   // env vars are weaker still for ai-sdk-harness (tool execution is
   // server-side in Vercel Sandbox microVMs; see aiSdkHarness.ts's module doc
@@ -106,4 +109,11 @@ export const HARNESS_CONFIG_FILES: Record<HarnessType, string> = {
   // ...), same 'delegated'/no-file-of-its-own shape as xirp/
   // agentic-orchestrator above. See agentcore.ts's module doc.
   'agentcore-runtime': '',
+  // B3: TrueForge, standalone/hosted server (see the HarnessType.TRUEFORGE_SERVER
+  // doc comment) — no CLI adapter exists for this row at all: it is an
+  // operator-configured deployment, not a package.json dependency of
+  // whatever repo `intutic init` runs against, so there is nothing for this
+  // detector to find and no config file to write. Governed entirely by
+  // services/trueforge-bridge instead (GateKind: 'bridge').
+  'trueforge-server': '',
 }

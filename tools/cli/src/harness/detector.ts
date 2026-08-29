@@ -47,6 +47,7 @@ import { strandsAdapter } from './strands.js'
 import { mastraAdapter } from './mastra.js'
 import { vercelAiSdkAdapter } from './vercelAiSdk.js'
 import { eveAdapter } from './eve.js'
+import { trueforgeAdapter } from './trueforge.js'
 import { aiSdkHarnessAdapter } from './aiSdkHarness.js'
 import { aiSdkWorkflowAdapter } from './aiSdkWorkflow.js'
 import { agentcoreAdapter } from './agentcore.js'
@@ -90,6 +91,7 @@ export const ALL_ADAPTERS: IHarnessAdapter[] = [
   mastraAdapter,
   vercelAiSdkAdapter,
   eveAdapter,
+  trueforgeAdapter,
   aiSdkHarnessAdapter,
   aiSdkWorkflowAdapter,
   agentcoreAdapter,

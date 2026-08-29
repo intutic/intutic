@@ -23,6 +23,11 @@ minimumReleaseAgeExclude:
   - eve@0.39.1
   - '@ai-sdk/harness@1.0.75'
   - '@ai-sdk/workflow@1.0.69'
+  # @truefoundry/trueforge-core@0.1.4 is the exact version @intutic/gate/trueforge's
+  # shipped-d.ts verification (embedded TrueForge, Phase 1) was performed
+  # against — a devDependency of packages/gate-js only, never a runtime
+  # dependency.
+  - '@truefoundry/trueforge-core@0.1.4'
 
 # Transitive-only advisories: nothing in this workspace declares these directly,
 # so forcing resolution is the only way to take the fix. Pinned to the minimum

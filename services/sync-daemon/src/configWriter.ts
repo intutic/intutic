@@ -134,6 +134,10 @@ export const HARNESS_FILES: Record<HarnessType, string> = {
   // in the developer's own agent/ directory; this file only carries the
   // proxy vars + pointer comment. See JS_SDK_GATED_FRAMEWORKS below.
   eve: '.env.intutic',
+  // TrueForge (embedded-library mode only — see its HarnessType doc) — same
+  // JS/TS SDK-gated family, gate ships in @intutic/gate/trueforge. See
+  // formatContent's switch below and JS_SDK_GATED_FRAMEWORKS.
+  trueforge: '.env.intutic',
   // A3: Vercel platform-agent runtimes — same @intutic/gate family as the T2
   // rows above. For ai-sdk-harness the env vars are weaker still: tool
   // execution is server-side in Vercel Sandbox microVMs the local proxy
@@ -148,6 +152,17 @@ export const HARNESS_FILES: Record<HarnessType, string> = {
   // xirp/agentic-orchestrator above — see tools/cli/src/harness/agentcore.ts
   // and gateKind.ts's DELEGATED_GATE_HARNESSES.
   'agentcore-runtime': '',
+  // B3: TrueForge, standalone/hosted server (see its HarnessType doc) —
+  // writes no config of its own: it is not detected by intutic init at all
+  // (an operator-configured deployment, not a repo dependency this daemon's
+  // scanner can find), and its gate is entirely out-of-process in
+  // services/trueforge-bridge, not a file this daemon writes. Empty filename
+  // => the loop below reports it `(deferred)`, same shape as
+  // xirp/agentic-orchestrator/agentcore-runtime above, though for a
+  // genuinely different reason — those are 'delegated' (governed by a
+  // wrapped harness's own gate); this is 'bridge' (governed by a service
+  // this repo ships and operates). See gateKind.ts's BRIDGE_GATED_HARNESSES.
+  'trueforge-server': '',
 }
 
 // ─── Public interface ────────────────────────────────────────────────
@@ -633,6 +648,7 @@ function formatContent(
     case 'mastra':
     case 'vercel-ai-sdk':
     case 'eve':
+    case 'trueforge':
     case 'ai-sdk-harness':
     case 'ai-sdk-workflow':
       return formatJsSdkGatedEnv(sops, proxyUrl, JS_SDK_GATED_FRAMEWORKS[harness])
@@ -841,7 +857,7 @@ function formatSdkGatedEnv(
  * `formatJsSdkGatedEnv`.
  */
 const JS_SDK_GATED_FRAMEWORKS: Record<
-  'mastra' | 'vercel-ai-sdk' | 'eve' | 'ai-sdk-harness' | 'ai-sdk-workflow',
+  'mastra' | 'vercel-ai-sdk' | 'eve' | 'trueforge' | 'ai-sdk-harness' | 'ai-sdk-workflow',
   {
     label: string
     importLine: string
@@ -881,6 +897,18 @@ const JS_SDK_GATED_FRAMEWORKS: Record<
       'default AI Gateway model routing is NOT proxy-governable; the vars above only reach a ' +
       'direct-provider model built in code via withIntuticProxy(...). PREVIEW product.',
     docsSlug: 'eve',
+  },
+  trueforge: {
+    label: 'TrueForge (embedded)',
+    importLine: "import { intuticApprovalResponder } from '@intutic/gate/trueforge'",
+    usageSummary:
+      'intuticApprovalResponder() answers tool.approval_required pauses with a real ' +
+      'Gate.guard() verdict, producing user.tool_approval items for your next ' +
+      'session.createTurn() call — TrueForge has no synchronous approval callback to hang a ' +
+      "function off (confirmed against a real install); see that module's doc. Covers ONLY " +
+      'the embedded-library deployment mode — TrueForge run as its own standalone/hosted ' +
+      'server is not yet supported.',
+    docsSlug: 'trueforge',
   },
   'ai-sdk-harness': {
     label: 'AI SDK Harness',

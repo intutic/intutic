@@ -28,7 +28,7 @@ If your agent's next step is a tool call an SOP forbids, W&B Weave will log the 
 - **You deploy untrusted autonomous agents** that need to execute code locally but must be walled off from sensitive networks or source code repositories.
 - **You require isolated sandbox runs** (`intutic exec --sandbox`) for per-run workspace isolation whose only egress is the governing proxy.
 - **You need active, real-time protection** against unauthorized files, commands, and network connections.
-- **You want ready-to-use integrations** for 39 agent harnesses.
+- **You want ready-to-use integrations** for 41 agent harnesses.
 
 ## When to Choose W&B Weave
 
