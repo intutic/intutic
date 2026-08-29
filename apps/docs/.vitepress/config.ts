@@ -395,6 +395,7 @@ export default defineConfig({
             { text: 'Mastra', link: '/integrations/mastra' },
             { text: 'Vercel AI SDK', link: '/integrations/vercel-ai-sdk' },
             { text: 'eve', link: '/integrations/eve' },
+            { text: 'TrueForge', link: '/integrations/trueforge' },
             { text: 'AI SDK Harness', link: '/integrations/ai-sdk-harness' },
             { text: 'AI SDK Workflow', link: '/integrations/ai-sdk-workflow' },
             { text: 'AWS Bedrock AgentCore', link: '/integrations/agentcore' },

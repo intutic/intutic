@@ -158,7 +158,7 @@ The `intutic connect` command starts a long-lived sync daemon that:
 4. **Reports** sync state back to the control plane
 5. Uses **atomic writes** (tmp file + rename) to prevent file corruption
 
-The daemon supports all 39 harness adapters and handles each one's config format natively.
+The daemon supports 40 of Intutic's 41 harness adapters and handles each one's config format natively. The 41st, TrueForge run as its own standalone/hosted server, is not something `intutic init` can detect in a repo at all (it's an operator-configured deployment, not a repo dependency) — it is governed instead by a separate, out-of-process service, `services/trueforge-bridge`. See the [TrueForge integration guide](/integrations/trueforge#server-mode-standalone-hosted).
 
 ---
 
