@@ -2,7 +2,7 @@
 
 # Intutic — Policy as Code for Continuous Compliance & Continuous Enforcement for AI Agents
 
-**The circuit breaker for AI agents: your policies are files in git, enforced synchronously and in-process on every tool call across 39 agent harnesses.**
+**The circuit breaker for AI agents: your policies are files in git, enforced synchronously and in-process on every tool call across 41 agent harnesses.**
 
 [![GitHub Stars](https://img.shields.io/github/stars/intutic/intutic?style=social)](https://github.com/intutic/intutic)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
@@ -98,8 +98,8 @@ That's it! Your agent is now governed by real-time safety guardrails.
 | 🛡️ **Zero-Trust Tool Interception** | Intercepts dangerous commands (`rm -rf`, `git push --force`, `DROP TABLE`) before they touch your system. |
 | 🔐 **Secret DLP & Masking** | Automatically redacts API keys (`[REDACTED_SECRET]`), AWS credentials, and tokens in prompts & tool payloads. |
 | 💰 **Session Spend Ceilings** | Prevents "loop burn" by enforcing token spending ceilings per session (e.g. $5.00 limit). |
-| 🔄 **39 Harness Adapters** | Pre-configured support for Claude Code CLI, Cursor, Windsurf, Aider, Antigravity, DeepSeek dsh, Spotify Xirp, DoorDash Agentic Orchestrator, AWS Bedrock AgentCore Runtime, and more. |
-| 🤖 **Single & Multi-Agent Swarms** | Governs single developer tools as well as multi-agent graph/swarm workflows — LangGraph, LangChain, CrewAI, AutoGen, AG2, Google ADK, OpenAI Agents SDK, Pydantic AI, smolagents, and AWS Strands Agents each have a dedicated SDK-side gate (Python); Mastra and the Vercel AI SDK have the same on the TypeScript side (`@intutic/gate`). |
+| 🔄 **41 Harness Adapters** | Pre-configured support for Claude Code CLI, Cursor, Windsurf, Aider, Antigravity, DeepSeek dsh, Spotify Xirp, DoorDash Agentic Orchestrator, AWS Bedrock AgentCore Runtime, and more. |
+| 🤖 **Single & Multi-Agent Swarms** | Governs single developer tools as well as multi-agent graph/swarm workflows — LangGraph, LangChain, CrewAI, AutoGen, AG2, Google ADK, OpenAI Agents SDK, Pydantic AI, smolagents, and AWS Strands Agents each have a dedicated SDK-side gate (Python); Mastra, the Vercel AI SDK, and TrueForge (embedded) have the same on the TypeScript side (`@intutic/gate`). |
 
 ---
 
@@ -127,14 +127,15 @@ Every tool call and prompt evaluated by Intutic produces one of five **PCAS Acti
 
 ## 🔌 Supported Harnesses & Frameworks
 
-Intutic ships **39 harness adapters** that are auto-detected and config-synced without modifying your agent's source code. Anything else that speaks an OpenAI- or Anthropic-compatible API is governed the same way by pointing its base URL at the proxy:
+Intutic ships **41 harness adapters** that are auto-detected and config-synced without modifying your agent's source code. Anything else that speaks an OpenAI- or Anthropic-compatible API is governed the same way by pointing its base URL at the proxy:
 
 | Category | Supported Tools & Frameworks |
 | :--- | :--- |
 | **Single-Agent Assistants** (native adapters) | **Claude Code CLI**, **Cursor**, **Windsurf**, **Aider**, **Antigravity**, **Cline**, **Roo Code**, **Codex**, **Continue**, **Claude Desktop**, **Goose**, **Pi**, **GitHub Copilot**, **OpenWebUI**, **Muse Code**, **Grok Build**, **dsh** (preview) |
 | **Multi-Agent Swarms** (native adapters) | **LangGraph**, **OpenHands**, **OpenClaw**, **Hermes**, **n8n** |
 | **Orchestrators** (delegate to already-gated harnesses, no gate of their own) | **Spotify Xirp**, **DoorDash Agentic Orchestrator**, **AWS Bedrock AgentCore Runtime** (hosts your own framework-SDK code unchanged; delegates to whichever already-supported framework adapter that code uses) |
-| **SDK-gated frameworks** (dedicated in-process gate, `@intutic/gate`/`intutic-clawde`) | **LangChain**, **CrewAI**, **AutoGen**, **AG2**, **Google ADK**, **OpenAI Agents SDK**, **Pydantic AI**, **smolagents**, **AWS Strands Agents**, **Mastra**, **Vercel AI SDK**, **eve**, **AI SDK Harness**, **AI SDK Workflow** |
+| **SDK-gated frameworks** (dedicated in-process gate, `@intutic/gate`/`intutic-clawde`) | **LangChain**, **CrewAI**, **AutoGen**, **AG2**, **Google ADK**, **OpenAI Agents SDK**, **Pydantic AI**, **smolagents**, **AWS Strands Agents**, **Mastra**, **Vercel AI SDK**, **eve**, **TrueForge** (embedded), **AI SDK Harness**, **AI SDK Workflow** |
+| **Bridge-gated** (out-of-process Intutic-operated service, no gate in the harness's own process) | **TrueForge** (standalone/hosted server — `services/trueforge-bridge`) |
 | **Any OpenAI-compatible framework** (no adapter needed) | Anything else honoring `OPENAI_BASE_URL` / `ANTHROPIC_BASE_URL` — launch it with `intutic exec` or export the base-URL env vars |
 | **Server-side platform integrations** (call Intutic directly over HTTP; no `HarnessType`, not auto-detected by `intutic init`) | **QM** (`securityScreen` HTTP contract), **Anthropic Managed Agents** (session-confirmation responder), **AWS Bedrock AgentCore Gateway** (interceptor Lambda) |
 

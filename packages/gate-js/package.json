@@ -50,6 +50,10 @@
     "./managed-agents": {
       "import": "./dist/managedAgents.js",
       "types": "./dist/managedAgents.d.ts"
+    },
+    "./trueforge": {
+      "import": "./dist/trueforge.js",
+      "types": "./dist/trueforge.d.ts"
     }
   },
   "typesVersions": {
@@ -61,7 +65,8 @@
       "eve": ["src/eve.ts"],
       "harness": ["src/harness.ts"],
       "workflow": ["src/workflow.ts"],
-      "managed-agents": ["src/managedAgents.ts"]
+      "managed-agents": ["src/managedAgents.ts"],
+      "trueforge": ["src/trueforge.ts"]
     }
   },
   "files": [
@@ -85,6 +90,7 @@
     "@mastra/core": "^1.59.0",
     "@deepseek-ai/cordis": "^4.0.1",
     "@openai/agents": "^0.16.1",
+    "@truefoundry/trueforge-core": "^0.1.4",
     "@types/node": "^22",
     "ai": "^7.0.68",
     "eve": "^0.39.1",

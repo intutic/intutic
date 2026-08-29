@@ -34,10 +34,11 @@
  * and must not be imported from daemon runtime code. `gateKind.test.ts`
  * cross-checks the two lists so this file cannot silently drift from that
  * registry's own NO_GATE rows: `file: null` harnesses split between 'sdk'
- * (LangGraph + the Python frameworks — the gate ships in intutic-clawde) and
+ * (LangGraph + the Python frameworks — the gate ships in intutic-clawde),
  * 'delegated' (xirp — the gate is whichever wrapped harness's own gate is
- * running); the one non-null row (aiderConfigMerger.ts, "no ... exists") is
- * 'none'.
+ * running), and 'bridge' (trueforge-server — the gate runs in a separate
+ * Intutic-operated service, not in any process this repo's writers touch);
+ * the one non-null row (aiderConfigMerger.ts, "no ... exists") is 'none'.
  *
  * @module
  */
@@ -79,21 +80,47 @@ import { HarnessType, type HarnessType as HarnessTypeT } from '@intutic/shared-t
  *                 as `'none'` would undercount real coverage, and reporting
  *                 it as `'hook'` would overclaim a file this daemon never
  *                 writes for the wrapping harness itself.
+ * `'bridge'`    — the gate runs OUT OF PROCESS, in an Intutic-operated
+ *                 service reacting to the harness's own async
+ *                 approval/event API, rather than a file this daemon writes
+ *                 (`'hook'`), an SDK imported into the harness's own process
+ *                 (`'sdk'`), no enforcement point at all (`'none'`), or
+ *                 governance credited to a wrapped harness's own gate
+ *                 (`'delegated'`) — a fifth, genuinely different shape.
+ *                 TRUEFORGE_SERVER is the first and so far only member: a
+ *                 TrueForge standalone/hosted server is a separate process
+ *                 nobody embeds an Intutic gate into (unlike TRUEFORGE,
+ *                 embedded mode, which IS `'sdk'`-gated — see that row's own
+ *                 doc), so `services/trueforge-bridge` watches its turn/event
+ *                 stream externally and answers pending approvals over HTTP.
+ *                 Distinct from `'delegated'`: a delegated harness's tool
+ *                 calls are governed by ANOTHER HARNESS's own gate running
+ *                 in that other harness's process; a bridge-gated harness's
+ *                 tool calls are governed by a service this repo ships and
+ *                 operates, running in neither the harness's process nor any
+ *                 other harness's. Distinct from `'sdk'`: no code from this
+ *                 repo ever runs inside the governed harness's own process
+ *                 at all — the harness's only obligation is to expose the
+ *                 async approval API the bridge polls/subscribes to.
  */
-export type GateKind = 'hook' | 'sdk' | 'none' | 'delegated'
+export type GateKind = 'hook' | 'sdk' | 'none' | 'delegated' | 'bridge'
 
 /**
  * Harnesses whose blocking gate ships SDK-side, in the harness's own
  * process — no on-disk hook/config file exists to point a gate at. Mirrors
  * the `file: null` NO_GATE rows in `gateRegistry.ts`.
  *
- * MASTRA, VERCEL_AI_SDK (T2) and EVE (A2) are the JS/TS-native members of
- * this family: their blocking gate ships in `@intutic/gate/mastra`/
- * `@intutic/gate/vercel`/`@intutic/gate/eve` (packages/gate-js) rather than
- * `intutic-clawde`, but the shape is identical — no on-disk hook/config file,
- * tools run as plain callables in the harness's own process (for eve, as
- * per-tool/per-connection `approval` policies attached in the agent
- * directory's own TypeScript).
+ * MASTRA, VERCEL_AI_SDK (T2), EVE (A2), and TRUEFORGE (embedded-library mode
+ * only — see its own HarnessType doc) are the JS/TS-native members of this
+ * family: their blocking gate ships in `@intutic/gate/mastra`/
+ * `@intutic/gate/vercel`/`@intutic/gate/eve`/`@intutic/gate/trueforge`
+ * (packages/gate-js) rather than `intutic-clawde`, but the shape is
+ * identical — no on-disk hook/config file, tools run as plain callables in
+ * the harness's own process (for eve, as per-tool/per-connection `approval`
+ * policies attached in the agent directory's own TypeScript; for TrueForge,
+ * as `intuticApprovalResponder()` answering `tool.approval_required`
+ * pauses — see `@intutic/gate/trueforge`'s module doc for why that shape
+ * differs from mastra/vercel's single-callback pattern).
  *
  * AI_SDK_HARNESS and AI_SDK_WORKFLOW (A3) are the same `@intutic/gate`
  * family with one nuance worth naming: the VETO still runs SDK-side in the
@@ -120,6 +147,7 @@ export const SDK_GATED_HARNESSES: ReadonlySet<HarnessTypeT> = new Set([
   HarnessType.MASTRA,
   HarnessType.VERCEL_AI_SDK,
   HarnessType.EVE,
+  HarnessType.TRUEFORGE,
   HarnessType.AI_SDK_HARNESS,
   HarnessType.AI_SDK_WORKFLOW,
 ])
@@ -149,10 +177,28 @@ export const DELEGATED_GATE_HARNESSES: ReadonlySet<HarnessTypeT> = new Set([
   HarnessType.AGENTCORE_RUNTIME,
 ])
 
+/**
+ * Harnesses whose blocking gate runs OUT OF PROCESS, in an Intutic-operated
+ * service reacting to the harness's own async approval/event API — not a
+ * file this daemon writes, and not an SDK imported into the harness's own
+ * process (no process of ours runs inside the harness at all). Mirrors the
+ * `file: null` NO_GATE row for `trueforge-server` in `gateRegistry.ts`.
+ *
+ * TRUEFORGE_SERVER (B3) is the first member: a TrueForge standalone/hosted
+ * server has no in-process host to hang an SDK gate off of (contrast
+ * TRUEFORGE, embedded mode, in `SDK_GATED_HARNESSES` above) — instead
+ * `services/trueforge-bridge` watches its turn/event stream externally and
+ * answers pending `tool.approval_required` pauses over HTTP. See the
+ * `'bridge'` `GateKind` doc above for the full distinction from `'sdk'` and
+ * `'delegated'`.
+ */
+export const BRIDGE_GATED_HARNESSES: ReadonlySet<HarnessTypeT> = new Set([HarnessType.TRUEFORGE_SERVER])
+
 /** How this harness's tool calls get gated. Defaults to `'hook'`. */
 export function gateKindForHarness(type: HarnessTypeT): GateKind {
   if (SDK_GATED_HARNESSES.has(type)) return 'sdk'
   if (NO_GATE_HARNESSES.has(type)) return 'none'
   if (DELEGATED_GATE_HARNESSES.has(type)) return 'delegated'
+  if (BRIDGE_GATED_HARNESSES.has(type)) return 'bridge'
   return 'hook'
 }

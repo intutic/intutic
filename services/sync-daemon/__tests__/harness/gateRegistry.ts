@@ -831,6 +831,66 @@ export const NO_GATE: ReadonlyArray<{
       'docs — see TD-410.',
   },
 
+  {
+    file: null,
+    harness: 'trueforge',
+    why:
+      'no on-disk config/hook file exists — embedded TrueForge (another team\'s Node process ' +
+      'importing @truefoundry/trueforge-core directly, github.com/truefoundry/trueforge, MIT) ' +
+      'drives its own SessionHandle/TurnHandle API in-process, same as Mastra/eve above. ' +
+      'CONFIRMED against a real published install (@truefoundry/trueforge-core@0.1.4, its ' +
+      'shipped .d.ts files read directly, not assumed): there is NO synchronous in-process ' +
+      'approval-resolver callback anywhere in the package (every .d.ts grepped for ' +
+      'approvalResolver/onApproval/approvalHandler/resolveApproval — zero matches); the ONLY ' +
+      'approval mechanism, embedded or not, is the same tool.approval_required / ' +
+      'user.tool_approval turn-and-event contract TrueForge\'s standalone server exposes over ' +
+      'HTTP. The blocking gate therefore ships as @intutic/gate/trueforge\'s ' +
+      'intuticApprovalResponder() — a BATCH function evaluating pending approval requests via ' +
+      'Gate.guard() and producing user.tool_approval TurnInputItems for the embedding host\'s ' +
+      'next session.createTurn() call, shaped like AI_SDK_HARNESS\'s approval-responder family ' +
+      'below rather than Mastra/Vercel AI SDK\'s single-callback shape. Resolving a pending ' +
+      'call\'s {id, source_event_id} back to a real tool name + arguments is the embedding ' +
+      'host\'s own responsibility (this package imports no TrueForge runtime dependency, same ' +
+      'convention as mastra.ts/vercel.ts). This row covers ONLY the embedded-library deployment ' +
+      'mode — TrueForge run as its own standalone/hosted server is HarnessType.TRUEFORGE_SERVER, ' +
+      'a separate \'bridge\'-kind row immediately below (Phase 2), since nobody embeds a gate ' +
+      'into a third-party OSS server process.',
+  },
+
+  {
+    file: null,
+    harness: 'trueforge-server',
+    why:
+      'no on-disk config/hook file exists, and no SDK gate ships in any process this repo runs ' +
+      'either — TrueForge run as its own standalone/hosted server (`npx @truefoundry/trueforge`, ' +
+      'Docker Compose, or the Helm chart) is a separate process nobody embeds an Intutic gate ' +
+      'into. Its only tool-call governance surface (confirmed against the real trueforge-core ' +
+      'and trueforge-sdk source: packages/trueforge-core/src/core/events/schema.ts, ' +
+      'packages/trueforge/src/routes/turnRoutes.ts) is the SAME async ' +
+      'tool.approval_required/user.tool_approval turn contract the embedded \'trueforge\' row ' +
+      'above documents — a turn pauses naming each pending call only as {id, source_event_id} ' +
+      '(all snake_case on the wire; the published @truefoundry/trueforge-sdk TS client types ' +
+      '(ToolCallRef.sourceEventId, etc.) are camelCase, but that is a client-side naming ' +
+      'convenience Fern generates — the actual JSON, and what this bridge speaks directly over ' +
+      'plain HTTP without depending on that SDK package, is snake_case per the zod schemas that ' +
+      'both validate the request and produce the response). There is no webhook: TrueForge never ' +
+      'pushes anything to an external system, so governance requires an Intutic-operated service ' +
+      '(services/trueforge-bridge) subscribing to each session\'s turn SSE stream (or polling ' +
+      'listTurnEventsRoute as a fallback), resolving a pending call\'s source_event_id back to a ' +
+      'real tool name + arguments via the referenced model.message event\'s tool_calls[].function ' +
+      'field, evaluating it through the identical packages/gate-js machinery the embedded row ' +
+      'above uses (soprules.ts\'s ruleMatches/firstMatch, then GateClient\'s POST /api/v1/hook-gate, ' +
+      'fail-closed by GateClient\'s own default), and resuming the turn via ' +
+      'POST /{session_id}/turns with previous_turn_id chained and a user.tool_approval input item. ' +
+      'GateKind: \'bridge\' — a new fifth kind, not \'sdk\' (no host process of ours runs inside ' +
+      'the harness) and not \'delegated\' (it does not wrap another already-gated harness). See ' +
+      'gateKind.ts\'s \'bridge\' doc and services/trueforge-bridge\'s README. Also not covered: ' +
+      'whether a tool call ever emits tool.approval_required at all is controlled by each ' +
+      'registered MCP server\'s own approval-tool-selector config (@all/@write/@destructive/a ' +
+      'specific tool name) — a narrow/default selector means some tool calls never pause and are ' +
+      'invisible to the bridge, TrueForge\'s own design, not a bridge defect.',
+  },
+
   // -- A3: Vercel platform-agent runtimes (same @intutic/gate family as the
   // T2 rows above — the gate ships in packages/gate-js, one subpath per
   // framework; each writes .env.intutic via a tools/cli/src/harness/*.ts

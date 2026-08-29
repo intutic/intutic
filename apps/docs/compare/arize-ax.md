@@ -18,7 +18,7 @@ Arize AX **observes** what your AI systems do — traces, evaluations, latency, 
 | **Where it sits** | In the tool-call path — synchronous enforcement | After execution — async tracing and analysis |
 | **Enforcement** | BYPASS / ENHANCE / HIJACK / KILL, synchronous and in-process | No enforcement — observation only |
 | **Tracing** | Tool-call-level audit logs with enforcement decisions | Full LLM trace with spans, evaluations, and annotations |
-| **Scope** | AI coding agents (39 harness integrations) | Any LLM application (RAG, agents, chatbots) |
+| **Scope** | AI coding agents (41 harness integrations) | Any LLM application (RAG, agents, chatbots) |
 | **DLP & threat detection** | Secrets redaction, SQL injection, prompt injection — blocked at proxy | Hallucination detection, toxicity scoring — flagged post-hoc |
 | **Evaluation** | Policy pass/fail per tool call | LLM-as-judge, human annotation, custom evaluators |
 | **Data export** | OTel-compatible trace export | Native OTel ingestion |

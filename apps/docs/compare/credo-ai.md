@@ -16,9 +16,9 @@ Both products now say "policy-as-code," so the distinction has to be sharper tha
 |-----------|---------|----------|
 | **Primary function** | Runtime enforcement (circuit breaker) | Governance, risk & compliance (GRC), with a newer runtime-enforcement feature |
 | **Where it sits** | In the tool-call path between agent and infrastructure | Above the execution layer for GRC; Agent Governor adds an in-path hook per harness |
-| **Enforcement** | Synchronous — BYPASS / ENHANCE / HIJACK / KILL, in-process, all 39 harnesses | Agent Governor: Allow / Block / Escalate / Advise, Claude Code only, Research Preview |
+| **Enforcement** | Synchronous — BYPASS / ENHANCE / HIJACK / KILL, in-process, all 41 harnesses | Agent Governor: Allow / Block / Escalate / Advise, Claude Code only, Research Preview |
 | **Enforcement maturity** | Production, primary product surface | New (July 2026), reported at low-thousands-of-sessions scale |
-| **Scope** | AI coding agents (39 harness integrations) | All AI systems for GRC; Agent Governor is single-harness today |
+| **Scope** | AI coding agents (41 harness integrations) | All AI systems for GRC; Agent Governor is single-harness today |
 | **DLP & threat detection** | Secrets redaction, SQL injection, prompt injection | Risk scoring and bias detection (GRC side) |
 | **Compliance output** | Enforcement audit logs (who, what, when, blocked/allowed) | Compliance reports, model cards, risk registers |
 | **Integration model** | Local proxy + sync daemon | Cloud platform + API |

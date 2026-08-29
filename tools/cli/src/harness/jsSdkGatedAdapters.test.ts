@@ -13,6 +13,7 @@ import type { HarnessType } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
 import { mastraAdapter } from './mastra.js'
 import { openaiAgentsAdapter } from './openaiAgents.js'
+import { trueforgeAdapter } from './trueforge.js'
 import { vercelAiSdkAdapter } from './vercelAiSdk.js'
 import { aiSdkHarnessAdapter } from './aiSdkHarness.js'
 import { aiSdkWorkflowAdapter } from './aiSdkWorkflow.js'
@@ -74,6 +75,13 @@ const CASES: Case[] = [
     positive: { ai: '^7.0.68', '@ai-sdk/openai': '^4.0.43' },
     negative: { fastify: '^5.0.0' },
     importSnippet: "@intutic/gate/vercel'",
+  },
+  {
+    name: 'trueforge',
+    adapter: trueforgeAdapter,
+    positive: { '@truefoundry/trueforge-core': '^0.1.4' },
+    negative: { fastify: '^5.0.0' },
+    importSnippet: "@intutic/gate/trueforge'",
   },
   {
     name: 'ai-sdk-harness',

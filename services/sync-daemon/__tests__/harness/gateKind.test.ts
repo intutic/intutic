@@ -11,6 +11,7 @@ import {
   SDK_GATED_HARNESSES,
   NO_GATE_HARNESSES,
   DELEGATED_GATE_HARNESSES,
+  BRIDGE_GATED_HARNESSES,
 } from '../../src/harness/gateKind.js'
 import { GATES, NO_GATE } from './gateRegistry.js'
 
@@ -51,9 +52,17 @@ describe('gateKindForHarness', () => {
     expect(gateKindForHarness(HarnessType.AGENTIC_ORCHESTRATOR)).toBe('delegated')
   })
 
+  it("classifies trueforge-server as 'bridge' — its gate runs out of process in services/trueforge-bridge", () => {
+    expect(gateKindForHarness(HarnessType.TRUEFORGE_SERVER)).toBe('bridge')
+  })
+
   it('defaults to hook for every other known harness', () => {
     const other = Object.values(HarnessType).filter(
-      (h) => !SDK_GATED_HARNESSES.has(h) && !NO_GATE_HARNESSES.has(h) && !DELEGATED_GATE_HARNESSES.has(h),
+      (h) =>
+        !SDK_GATED_HARNESSES.has(h) &&
+        !NO_GATE_HARNESSES.has(h) &&
+        !DELEGATED_GATE_HARNESSES.has(h) &&
+        !BRIDGE_GATED_HARNESSES.has(h),
     )
     expect(other.length).toBeGreaterThan(10)
     for (const h of other) {
@@ -61,13 +70,18 @@ describe('gateKindForHarness', () => {
     }
   })
 
-  it('SDK_GATED_HARNESSES, NO_GATE_HARNESSES, and DELEGATED_GATE_HARNESSES do not overlap', () => {
+  it('SDK_GATED_HARNESSES, NO_GATE_HARNESSES, DELEGATED_GATE_HARNESSES, and BRIDGE_GATED_HARNESSES do not overlap', () => {
     for (const h of SDK_GATED_HARNESSES) {
       expect(NO_GATE_HARNESSES.has(h), h).toBe(false)
       expect(DELEGATED_GATE_HARNESSES.has(h), h).toBe(false)
+      expect(BRIDGE_GATED_HARNESSES.has(h), h).toBe(false)
     }
     for (const h of NO_GATE_HARNESSES) {
       expect(DELEGATED_GATE_HARNESSES.has(h), h).toBe(false)
+      expect(BRIDGE_GATED_HARNESSES.has(h), h).toBe(false)
+    }
+    for (const h of DELEGATED_GATE_HARNESSES) {
+      expect(BRIDGE_GATED_HARNESSES.has(h), h).toBe(false)
     }
   })
 
@@ -90,6 +104,17 @@ describe('gateKindForHarness', () => {
     }
   })
 
+  it('is consistent with gateRegistry.ts: every bridge-kind harness has a file:null NO_GATE row', () => {
+    // Same cross-check as sdk/delegated above, now for 'bridge': the gate
+    // runs in services/trueforge-bridge, an entirely separate process this
+    // registry's spawn-and-pipe-JSON matrix cannot exercise, so it belongs
+    // in NO_GATE (no writer artifact) rather than GATES.
+    const noGateFileNull = new Set(NO_GATE.filter((n) => n.file === null).map((n) => n.harness))
+    for (const h of BRIDGE_GATED_HARNESSES) {
+      expect(noGateFileNull.has(h), `${h} should have a file:null NO_GATE row`).toBe(true)
+    }
+  })
+
   it('is consistent with gateRegistry.ts: every none-kind harness is NOT in GATES', () => {
     const gateNames = new Set(GATES.map((g) => g.name))
     for (const h of NO_GATE_HARNESSES) {
@@ -104,6 +129,16 @@ describe('gateKindForHarness', () => {
     const gateNames = new Set(GATES.map((g) => g.name))
     for (const h of DELEGATED_GATE_HARNESSES) {
       expect(gateNames.has(h), `${h} should not appear in GATES (its gate is credited to the wrapped harness)`).toBe(false)
+    }
+  })
+
+  it('is consistent with gateRegistry.ts: every bridge-kind harness is NOT in GATES', () => {
+    // A bridge-gated harness has no writer artifact of its own either — its
+    // gate is services/trueforge-bridge, not a file this registry's harness
+    // completeness check can find under any writer's name.
+    const gateNames = new Set(GATES.map((g) => g.name))
+    for (const h of BRIDGE_GATED_HARNESSES) {
+      expect(gateNames.has(h), `${h} should not appear in GATES (its gate is services/trueforge-bridge)`).toBe(false)
     }
   })
 })
