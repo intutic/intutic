@@ -714,6 +714,30 @@ fn judge_unavailable_note(reason: &str) -> String {
     )
 }
 
+/// Deadline on the post-stream judge tail (chunk-handle joins, the trailing
+/// chunk, and finalize) before the client-visible terminal event is
+/// released regardless of whether the judge has finished. 2026-08-30
+/// architecture-audit remediation, Wave 5: measured stream-close latency of
+/// 26-27s on staging came entirely from this tail running fully sequential
+/// and unbounded ahead of the terminal event — a slow or wedged judge held
+/// up every judged response by that much, every time.
+///
+/// `None` means no deadline — today's original unbounded behaviour, and the
+/// no-redeploy rollback lever if the deadline itself needs to be turned
+/// off. Unset or unparseable both default to 5000ms (mirrors judge.ts's own
+/// `judgeTimeoutMs()` unset/NaN-falls-back-to-default shape); an explicit
+/// `0` or negative value disables it.
+pub fn judge_finalize_deadline_ms() -> Option<u64> {
+    match std::env::var("JUDGE_FINALIZE_DEADLINE_MS")
+        .ok()
+        .and_then(|v| v.parse::<i64>().ok())
+    {
+        Some(n) if n <= 0 => None,
+        Some(n) => Some(n as u64),
+        None => Some(5000),
+    }
+}
+
 /// Grouped rather than eight loose arguments to `resolve_finalize_judge_note`
 /// (clippy's own `too_many_arguments` — a real signal here, not noise: the
 /// SaaS and local branches each use a different subset, and a struct makes
@@ -5473,90 +5497,149 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // block to the stream. The gate has already sent the terminal
             // event, so that block would land after it.
             if judge_active_clone && !gate_tripped {
-                tracing::info!(handles_count = %chunk_handles.len(), "Waiting for chunk evaluation handles");
-                for h in chunk_handles {
-                    let _ = h.await;
-                }
+                // The whole tail (chunk-handle joins, the trailing chunk, and
+                // finalize) runs inside its own spawned task so a deadline can
+                // race it without cancelling it: timing out the JoinHandle
+                // below only stops *waiting* on the task — it does not abort
+                // or drop the task itself, which keeps running to completion
+                // in the background. Chunk verdicts still land in Valkey via
+                // push_session_chunk below; finalize still runs and its
+                // verdict still reaches the client on its next response via
+                // the existing gov:notify/incident path. Only the currently
+                // *streaming* response's terminal event stops waiting on it.
+                // These six are still needed after this block (trace
+                // publishing, further use of the session/workspace ids,
+                // etc.), so the spawned task gets its own clones rather than
+                // moving the outer bindings — everything else referenced
+                // below (control_plane_url_clone, client_api_key_clone,
+                // personal_sops_clone, paragraph_history, chunk_index,
+                // last_processed_len, chunk_handles) is either Copy or
+                // genuinely unused past this point, so it moves in as-is.
+                let http_client_clone = http_client_clone.clone();
+                let workspace_id_clone = workspace_id_clone.clone();
+                let session_id_clone = session_id_clone.clone();
+                let actual_model_clone = actual_model_clone.clone();
+                let cache_store_clone = cache_store_clone.clone();
+                let accumulated_content = accumulated_content.clone();
+                let tail_task = spawn(async move {
+                    tracing::info!(handles_count = %chunk_handles.len(), "Waiting for chunk evaluation handles");
+                    for h in chunk_handles {
+                        let _ = h.await;
+                    }
 
-                let trailing = accumulated_content[last_processed_len..].trim().to_string();
-                tracing::info!(trailing_content = %trailing, "Processing trailing content");
-                // Same LLD #68 §2 phase 2 skip as judge_chunk_scan! above:
-                // local judge does finalize-only grading, so the trailing
-                // chunk this would otherwise send is never sent at all.
-                if !trailing.is_empty() && !crate::gateway::uses_local_judge() {
-                    let context_paras = if paragraph_history.len() >= 2 {
-                        paragraph_history[paragraph_history.len() - 2..].to_vec()
-                    } else {
-                        paragraph_history.clone()
-                    };
+                    let trailing = accumulated_content[last_processed_len..].trim().to_string();
+                    tracing::info!(trailing_content = %trailing, "Processing trailing content");
+                    // Same LLD #68 §2 phase 2 skip as judge_chunk_scan! above:
+                    // local judge does finalize-only grading, so the trailing
+                    // chunk this would otherwise send is never sent at all.
+                    if !trailing.is_empty() && !crate::gateway::uses_local_judge() {
+                        let context_paras = if paragraph_history.len() >= 2 {
+                            paragraph_history[paragraph_history.len() - 2..].to_vec()
+                        } else {
+                            paragraph_history.clone()
+                        };
 
 
-                    let check_url = format!("{}/api/v1/judge/chunk", control_plane_url_clone);
-                    tracing::info!(url = %check_url, "Sending trailing chunk to judge");
-                    let api_key_for_trailing = client_api_key_clone.clone();
-                    let response = http_client_clone
-                        .post(&check_url)
-                        .header("Authorization", format!("Bearer {}", api_key_for_trailing))
-                        .json(&serde_json::json!({
-                            "workspaceId": workspace_id_clone,
-                            "sessionId": session_id_clone,
-                            "chunkContent": trailing,
-                            "monitoredModel": actual_model_clone.clone(),
-                            "contextParagraphs": context_paras,
-                            // This was the only one of the four chunk call sites
-                            // that omitted personalSops — on a same-provider
-                            // stream (where the whole body arrives here as one
-                            // trailing chunk) personal rules reached the judge
-                            // only at finalize.
-                            "personalSops": personal_sops_clone.clone(),
-                        }))
-                        .send()
-                        .await;
+                        let check_url = format!("{}/api/v1/judge/chunk", control_plane_url_clone);
+                        tracing::info!(url = %check_url, "Sending trailing chunk to judge");
+                        let api_key_for_trailing = client_api_key_clone.clone();
+                        let response = http_client_clone
+                            .post(&check_url)
+                            .header("Authorization", format!("Bearer {}", api_key_for_trailing))
+                            .json(&serde_json::json!({
+                                "workspaceId": workspace_id_clone,
+                                "sessionId": session_id_clone,
+                                "chunkContent": trailing,
+                                "monitoredModel": actual_model_clone.clone(),
+                                "contextParagraphs": context_paras,
+                                // This was the only one of the four chunk call sites
+                                // that omitted personalSops — on a same-provider
+                                // stream (where the whole body arrives here as one
+                                // trailing chunk) personal rules reached the judge
+                                // only at finalize.
+                                "personalSops": personal_sops_clone.clone(),
+                            }))
+                            .send()
+                            .await;
 
-                    let verdict = match response {
-                        Ok(r) => {
-                            tracing::info!(status = %r.status(), "Received response from trailing chunk judge");
-                            if r.status().is_success() {
-                                r.json::<serde_json::Value>().await.unwrap_or(
-                                    serde_json::json!({"verdict": "UNAVAILABLE", "error": "judge response unparsable — segment not checked"}),
-                                )
-                            } else {
-                                serde_json::json!({"verdict": "UNAVAILABLE", "error": "judge returned an error status — segment not checked"})
+                        let verdict = match response {
+                            Ok(r) => {
+                                tracing::info!(status = %r.status(), "Received response from trailing chunk judge");
+                                if r.status().is_success() {
+                                    r.json::<serde_json::Value>().await.unwrap_or(
+                                        serde_json::json!({"verdict": "UNAVAILABLE", "error": "judge response unparsable — segment not checked"}),
+                                    )
+                                } else {
+                                    serde_json::json!({"verdict": "UNAVAILABLE", "error": "judge returned an error status — segment not checked"})
+                                }
+                            }
+                            Err(e) => {
+                                tracing::error!(error = %e, "Trailing chunk judge request failed");
+                                serde_json::json!({"verdict": "UNAVAILABLE", "error": "judge unreachable — segment not checked"})
+                            }
+                        };
+
+                        tracing::info!(verdict = ?verdict, "Trailing chunk verdict recorded");
+                        let chunk_json = serde_json::json!({
+                            "index": chunk_index,
+                            "content": trailing,
+                            "verdict": verdict,
+                        });
+                        let json_str = serde_json::to_string(&chunk_json).unwrap();
+                        let _ = cache_store_clone
+                            .push_session_chunk(
+                                &judge_session_scope(&workspace_id_clone, &session_id_clone),
+                                &json_str,
+                                Some(SESSION_CHUNK_TTL_SECS),
+                            )
+                            .await;
+                    }
+
+                    resolve_finalize_judge_note(FinalizeJudgeParams {
+                        http_client: &http_client_clone,
+                        control_plane_url: &control_plane_url_clone,
+                        auth_token: &client_api_key_clone,
+                        workspace_id: &workspace_id_clone,
+                        session_id: &session_id_clone,
+                        full_content: &accumulated_content,
+                        monitored_model: &serde_json::json!(actual_model_clone.clone()),
+                        personal_sops: &personal_sops_clone,
+                    })
+                    .await
+                });
+
+                let judge_note: Option<String> = match judge_finalize_deadline_ms() {
+                    Some(deadline_ms) => {
+                        match tokio::time::timeout(
+                            std::time::Duration::from_millis(deadline_ms),
+                            tail_task,
+                        )
+                        .await
+                        {
+                            Ok(Ok(note)) => note,
+                            Ok(Err(join_err)) => {
+                                tracing::error!(error = %join_err, "Judge finalize tail task panicked");
+                                Some(judge_unavailable_note("the judge task failed unexpectedly"))
+                            }
+                            Err(_) => {
+                                tracing::warn!(
+                                    deadline_ms,
+                                    "Judge finalize tail exceeded its deadline — releasing the stream; the tail keeps running and its verdict will be recorded asynchronously"
+                                );
+                                Some(judge_unavailable_note(
+                                    "finalize exceeded its deadline; the verdict will be recorded asynchronously",
+                                ))
                             }
                         }
-                        Err(e) => {
-                            tracing::error!(error = %e, "Trailing chunk judge request failed");
-                            serde_json::json!({"verdict": "UNAVAILABLE", "error": "judge unreachable — segment not checked"})
+                    }
+                    None => match tail_task.await {
+                        Ok(note) => note,
+                        Err(join_err) => {
+                            tracing::error!(error = %join_err, "Judge finalize tail task panicked");
+                            Some(judge_unavailable_note("the judge task failed unexpectedly"))
                         }
-                    };
-
-                    tracing::info!(verdict = ?verdict, "Trailing chunk verdict recorded");
-                    let chunk_json = serde_json::json!({
-                        "index": chunk_index,
-                        "content": trailing,
-                        "verdict": verdict,
-                    });
-                    let json_str = serde_json::to_string(&chunk_json).unwrap();
-                    let _ = cache_store_clone
-                        .push_session_chunk(
-                            &judge_session_scope(&workspace_id_clone, &session_id_clone),
-                            &json_str,
-                            Some(SESSION_CHUNK_TTL_SECS),
-                        )
-                        .await;
-                }
-
-                let judge_note: Option<String> = resolve_finalize_judge_note(FinalizeJudgeParams {
-                    http_client: &http_client_clone,
-                    control_plane_url: &control_plane_url_clone,
-                    auth_token: &client_api_key_clone,
-                    workspace_id: &workspace_id_clone,
-                    session_id: &session_id_clone,
-                    full_content: &accumulated_content,
-                    monitored_model: &serde_json::json!(actual_model_clone.clone()),
-                    personal_sops: &personal_sops_clone,
-                })
-                .await;
+                    },
+                };
 
                 if let Some(formatted_alert) = judge_note {
                                 let alert_block = match protocol_clone {
@@ -6221,139 +6304,79 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
 
     if judge_active {
         let control_plane_url = std::env::var("CONTROL_PLANE_URL").unwrap_or_default();
-        tracing::info!("Starting non-streaming paragraph evaluation");
-        let mut paragraph_history: Vec<String> = Vec::new();
-        let mut chunk_index = 0;
-        let mut chunk_handles = Vec::new();
+        tracing::info!("Starting non-streaming judge finalize");
 
-        let mut rest = accumulated_content.as_str();
-        let mut parts = Vec::new();
-        while !rest.is_empty() {
-            let mut split_index = None;
-            if let Some(pos) = rest.find("\n\n") {
-                split_index = Some(pos + 2);
-            } else if let Some(pos) = rest.find("```") {
-                if pos > 0 {
-                    split_index = Some(pos);
-                } else if let Some(pos2) = rest[3..].find("```") {
-                    split_index = Some(pos2 + 6);
-                }
-            }
-
-            if let Some(offset) = split_index {
-                let chunk_content = rest[..offset].trim().to_string();
-                if !chunk_content.is_empty() {
-                    parts.push(chunk_content);
-                }
-                rest = &rest[offset..];
-            } else {
-                let trailing = rest.trim().to_string();
-                if !trailing.is_empty() {
-                    parts.push(trailing);
-                }
-                break;
-            }
-        }
-
-        // Captured before the loop, which moves `actual_model` into its spawned
-        // tasks. The finalize call below still needs to say which model produced
-        // the content it is asking the judge to grade.
+        // Wave 5 (2026-08-30 architecture-audit remediation): this used to
+        // also paragraph-split accumulated_content and run one
+        // /judge/chunk call per segment before finalize — but finalize
+        // already grades the exact same full content in one shot.
+        // Non-streaming has no "mid-stream" to grade incrementally the way
+        // the streaming path's judge_chunk_scan! does; the per-chunk calls
+        // here were pure duplicate work (same content, same judge, twice),
+        // and every one of them ran before the client saw anything at all
+        // — unlike streaming's mid-stream grading, which overlaps with
+        // bytes the client has already received. Local judge already
+        // skipped this (finalize-only, LLD #68 §2 phase 2); removing it
+        // here just makes that the only path, for every judge.
         let judge_monitored_final = actual_model.clone();
-        // LLD #68 §2 phase 2: local judge is finalize-only, by design -- no
-        // per-chunk calls anywhere when it's on, same skip as the streaming
-        // path's judge_chunk_scan!/trailing-chunk guards above.
-        for chunk_content in if crate::gateway::uses_local_judge() { Vec::new() } else { parts } {
-            let context_paras = if paragraph_history.len() >= 2 {
-                paragraph_history[paragraph_history.len() - 2..].to_vec()
-            } else {
-                paragraph_history.clone()
-            };
-            paragraph_history.push(chunk_content.clone());
 
-            let client = state.http_client.as_ref().clone();
-            let cp_url = control_plane_url.clone();
-            let ws_id = workspace_id.clone();
-            let sess_id = session_id.clone();
-            let chunk_store = Arc::clone(&state.store);
-            let cur_index = chunk_index;
-            let personal_sops_chunk = personal_sops.clone();
-            let api_key_for_chunk = raw_token.to_string();
-            // Per-iteration clone: the spawn below takes ownership, so a later
-            // iteration — and the finalize call after the loop — cannot borrow the
-            // original.
-            let judge_monitored_chunk = actual_model.clone();
+        // Same deadline treatment as the streaming tail — see
+        // judge_finalize_deadline_ms's doc comment. Own clones for the
+        // spawned task since accumulated_content, workspace_id, etc. are
+        // still needed below (splicing the note into the response body).
+        let http_client_task = state.http_client.as_ref().clone();
+        let control_plane_url_task = control_plane_url.clone();
+        let auth_token_task = raw_token.to_string();
+        let workspace_id_task = workspace_id.clone();
+        let session_id_task = session_id.clone();
+        let accumulated_content_task = accumulated_content.clone();
+        let personal_sops_task = personal_sops.clone();
+        let tail_task = spawn(async move {
+            resolve_finalize_judge_note(FinalizeJudgeParams {
+                http_client: &http_client_task,
+                control_plane_url: &control_plane_url_task,
+                auth_token: &auth_token_task,
+                workspace_id: &workspace_id_task,
+                session_id: &session_id_task,
+                full_content: &accumulated_content_task,
+                monitored_model: &serde_json::json!(judge_monitored_final),
+                personal_sops: &personal_sops_task,
+            })
+            .await
+        });
 
-            let handle = spawn(async move {
-                let check_url = format!("{}/api/v1/judge/chunk", cp_url);
-                tracing::info!(url = %check_url, "Sending non-streaming chunk to judge");
-                let response = client
-                    .post(&check_url)
-                    .header("Authorization", format!("Bearer {}", api_key_for_chunk))
-                    .json(&serde_json::json!({
-                        "workspaceId": ws_id,
-                        "sessionId": sess_id,
-                        "chunkContent": chunk_content,
-                        "monitoredModel": judge_monitored_chunk,
-                        "contextParagraphs": context_paras,
-                        "personalSops": personal_sops_chunk,
-                    }))
-                    .send()
-                    .await;
-
-                let verdict = match response {
-                    Ok(r) => {
-                        tracing::info!(status = %r.status(), "Received response from non-streaming chunk judge");
-                        if r.status().is_success() {
-                            r.json::<serde_json::Value>().await.unwrap_or(
-                                serde_json::json!({"verdict": "UNAVAILABLE", "error": "judge response unparsable — segment not checked"}),
-                            )
-                        } else {
-                            serde_json::json!({"verdict": "UNAVAILABLE", "error": "judge returned an error status — segment not checked"})
-                        }
+        let judge_note: Option<String> = match judge_finalize_deadline_ms() {
+            Some(deadline_ms) => {
+                match tokio::time::timeout(
+                    std::time::Duration::from_millis(deadline_ms),
+                    tail_task,
+                )
+                .await
+                {
+                    Ok(Ok(note)) => note,
+                    Ok(Err(join_err)) => {
+                        tracing::error!(error = %join_err, "Judge finalize tail task panicked");
+                        Some(judge_unavailable_note("the judge task failed unexpectedly"))
                     }
-                    Err(e) => {
-                        tracing::error!(error = %e, "Non-streaming chunk judge request failed");
-                        serde_json::json!({"verdict": "UNAVAILABLE", "error": "judge unreachable — segment not checked"})
+                    Err(_) => {
+                        tracing::warn!(
+                            deadline_ms,
+                            "Judge finalize tail exceeded its deadline — releasing the response; the tail keeps running and its verdict will be recorded asynchronously"
+                        );
+                        Some(judge_unavailable_note(
+                            "finalize exceeded its deadline; the verdict will be recorded asynchronously",
+                        ))
                     }
-                };
-
-                tracing::info!(verdict = ?verdict, "Non-streaming chunk verdict recorded");
-                let chunk_json = serde_json::json!({
-                    "index": cur_index,
-                    "content": chunk_content,
-                    "verdict": verdict,
-                });
-                let json_str = serde_json::to_string(&chunk_json).unwrap();
-                // TTL matters here as much as on the streaming path: finalize
-                // DELs the list on success, but a finalize that never runs
-                // (crash, kill) would otherwise leave the key forever.
-                let _ = chunk_store
-                    .push_session_chunk(
-                        &judge_session_scope(&ws_id, &sess_id),
-                        &json_str,
-                        Some(SESSION_CHUNK_TTL_SECS),
-                    )
-                    .await;
-            });
-            chunk_handles.push(handle);
-            chunk_index += 1;
-        }
-
-        for h in chunk_handles {
-            let _ = h.await;
-        }
-
-        let judge_note: Option<String> = resolve_finalize_judge_note(FinalizeJudgeParams {
-            http_client: &state.http_client,
-            control_plane_url: &control_plane_url,
-            auth_token: raw_token,
-            workspace_id: &workspace_id,
-            session_id: &session_id,
-            full_content: &accumulated_content,
-            monitored_model: &serde_json::json!(judge_monitored_final),
-            personal_sops: &personal_sops,
-        })
-        .await;
+                }
+            }
+            None => match tail_task.await {
+                Ok(note) => note,
+                Err(join_err) => {
+                    tracing::error!(error = %join_err, "Judge finalize tail task panicked");
+                    Some(judge_unavailable_note("the judge task failed unexpectedly"))
+                }
+            },
+        };
 
         if let Some(formatted_alert) = judge_note {
                         accumulated_content.push_str(&formatted_alert);
