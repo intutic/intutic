@@ -505,6 +505,8 @@ export const SECRET_CONTENT_PATTERNS: readonly GuardPattern[] = assertGuardTable
     // gwk_ + 64 lowercase hex (routes/gateways.ts: randomBytes(32).toString('hex'))
     const gwkKey = 'gwk_' + 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6' + '9f8e7d6c5b4a39281f7e6d5c4b3a2910'
     const stripeKey = 'sk_live_' + 'A1b2C3d4E5f6G7h8I9j0K1l2'
+    const rsaPemHeader = '-----BEGIN ' + 'RSA PRIVATE KEY-----'
+    const pemHeader = '-----BEGIN ' + 'PRIVATE KEY-----'
     const fixtures: Record<string, { matches: string[]; notMatches: string[] }> = {
       'secrets.aws_access_key': {
         matches: [`{"file_path":"config.ts","content":"const key = '${awsKey}'"}`],
@@ -531,10 +533,7 @@ export const SECRET_CONTENT_PATTERNS: readonly GuardPattern[] = assertGuardTable
         ],
       },
       'secrets.private_key_pem': {
-        matches: [
-          '{"content":"-----BEGIN RSA PRIVATE KEY-----"}',
-          '{"content":"-----BEGIN PRIVATE KEY-----"}',
-        ],
+        matches: [`{"content":"${rsaPemHeader}"}`, `{"content":"${pemHeader}"}`],
         notMatches: [
           '{"content":"-----BEGIN CERTIFICATE-----"}',
           '{"content":"-----BEGIN PUBLIC KEY-----"}',

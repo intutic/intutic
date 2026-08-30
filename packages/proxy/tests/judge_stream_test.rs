@@ -147,9 +147,11 @@ async fn same_provider_stream_sends_mid_stream_chunks_to_the_judge() {
         // Suffix-format virtual key: vk_<32 hex>_<workspaceId>. The proxy
         // authorizes the x-workspace-id header against the workspace the key
         // encodes, so the two must agree.
+        // Fixture is runtime-assembled: the repo convention forbids contiguous
+        // credential-shaped literals in source, in every package.
         .header(
             "Authorization",
-            "Bearer vk_0123456789abcdef0123456789abcdef_ws_judge_stream_test",
+            concat!("Bearer vk_", "0123456789abcdef0123456789abcdef", "_ws_judge_stream_test"),
         )
         .header("x-workspace-id", "ws_judge_stream_test")
         .header("x-session-id", "ses_judge_stream_test")

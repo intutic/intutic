@@ -175,10 +175,12 @@ describe('runSetup — local mode', () => {
   })
 
   it('writes an env file with the credential and never calls the control plane', async () => {
+    // Fixture is runtime-assembled: the repo convention forbids contiguous
+    // credential-shaped literals in source, in every package.
     const io = new FakeIO([
       'local',
       'anthropic',
-      'sk-ant-local-key-1234567890',
+      'sk-ant-' + 'local-key-1234567890',
       false, // wantJudge
     ])
 
@@ -186,11 +188,11 @@ describe('runSetup — local mode', () => {
 
     expect(putMock).not.toHaveBeenCalled()
     const written = readFileSync(join(tmpDir, '.intutic.env'), 'utf-8')
-    expect(written).toContain('INTUTIC_ANTHROPIC_APIKEY=sk-ant-local-key-1234567890')
+    expect(written).toContain('INTUTIC_ANTHROPIC_APIKEY=' + 'sk-ant-' + 'local-key-1234567890')
     // The note shown to the operator must redact the value, even though the
     // file on disk necessarily has to contain it.
     const noteCall = io.calls.find((c) => c.method === 'note' && String((c.arg as { title?: string }).title).includes('.intutic.env'))
     expect(noteCall).toBeDefined()
-    expect(JSON.stringify(noteCall)).not.toContain('sk-ant-local-key-1234567890')
+    expect(JSON.stringify(noteCall)).not.toContain('sk-ant-' + 'local-key-1234567890')
   })
 })

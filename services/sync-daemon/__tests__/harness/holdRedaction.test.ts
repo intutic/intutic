@@ -55,7 +55,8 @@ describe('credential shapes are scrubbed', () => {
 
   it('scrubs a private key block whole, not just its header', () => {
     const body = 'MIIEvQIBADANBgkqhkiG9w0BAQEFAASC'.repeat(4)
-    const pem = `-----BEGIN RSA PRIVATE KEY-----\n${body}\n-----END RSA PRIVATE KEY-----`
+    // Concatenated so no credential-shaped literal exists in source.
+    const pem = '-----BEGIN ' + `RSA PRIVATE KEY-----\n${body}\n-----END RSA PRIVATE KEY-----`
     const out = JSON.stringify(redactSecrets({ file_text: pem }))
     expect(out).not.toContain(body)
   })
