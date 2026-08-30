@@ -107,20 +107,36 @@ function isGovernedConfigPath(changedPath: string, filename: string): boolean {
   return false
 }
 
+/**
+ * Asset names MUST match publish.yml's build-rust-proxy matrix
+ * artifact_name — mirrors packages/proxy/bin/proxy.js's `resolveAssetName`
+ * exactly (same five names, same live-release verification: `gh release
+ * view` on v1.6.0 through the current release confirmed every one of
+ * these). `platform`/`arch` are parameters, not read from `process`
+ * directly, so connect.test.ts can exercise every combination without
+ * stubbing global process state.
+ */
+export function resolveProxyAssetName(
+  platform: NodeJS.Platform = process.platform,
+  arch: string = process.arch,
+): string | null {
+  if (platform === 'darwin') {
+    if (arch === 'arm64') return 'intutic-proxy-darwin-arm64'
+    if (arch === 'x64') return 'intutic-proxy-darwin-x64'
+  } else if (platform === 'linux') {
+    if (arch === 'x64') return 'intutic-proxy-linux-x64'
+    if (arch === 'arm64') return 'intutic-proxy-linux-arm64'
+  } else if (platform === 'win32') {
+    if (arch === 'x64') return 'intutic-proxy-win32-x64.exe'
+  }
+  return null
+}
+
 async function downloadProxyBinary(destPath: string): Promise<string> {
   const platform = process.platform
   const arch = process.arch
-  
-  let assetName = ''
-  if (platform === 'darwin') {
-    if (arch === 'arm64') assetName = 'intutic-proxy-darwin-arm64'
-    else if (arch === 'x64') assetName = 'intutic-proxy-darwin-x64'
-  } else if (platform === 'linux') {
-    if (arch === 'x64') assetName = 'intutic-proxy-linux-x64'
-    else if (arch === 'arm64') assetName = 'intutic-proxy-linux-arm64'
-  } else if (platform === 'win32') {
-    if (arch === 'x64') assetName = 'intutic-proxy-win32-x64.exe'
-  }
+
+  const assetName = resolveProxyAssetName(platform, arch)
 
   if (!assetName) {
     throw new Error(`Unsupported platform/architecture: ${platform}-${arch}`)

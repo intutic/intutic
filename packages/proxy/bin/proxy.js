@@ -29,9 +29,15 @@ const { version } = require('../package.json');
 const isWindows = process.platform === 'win32';
 const binaryName = isWindows ? 'intutic-proxy.exe' : 'intutic-proxy';
 
-/** Asset names MUST match publish.yml's build-rust-proxy matrix artifact_name. */
-function resolveAssetName() {
-  const { platform, arch } = process;
+/**
+ * Asset names MUST match publish.yml's build-rust-proxy matrix
+ * artifact_name — every value returned here has a live release asset
+ * verified against it (`gh release view` on v1.6.0 through the current
+ * release). `platform`/`arch` are parameters, not read from `process`
+ * directly, so proxy.test.mjs can exercise every platform/arch combination
+ * without needing to stub global process state.
+ */
+export function resolveAssetName(platform = process.platform, arch = process.arch) {
   if (platform === 'darwin') {
     if (arch === 'arm64') return 'intutic-proxy-darwin-arm64';
     if (arch === 'x64') return 'intutic-proxy-darwin-x64';

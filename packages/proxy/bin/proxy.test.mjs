@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import { sha256Hex, parseChecksums, verifyChecksum } from './proxy.js';
+import { sha256Hex, parseChecksums, verifyChecksum, resolveAssetName } from './proxy.js';
 
 function realSha256Hex(buffer) {
   return 'sha256:' + crypto.createHash('sha256').update(buffer).digest('hex');
@@ -66,4 +66,44 @@ test('verifyChecksum refuses an asset absent from the manifest, not silently all
 test('verifyChecksum refuses against an empty manifest', () => {
   const buf = Buffer.from('anything');
   assert.throws(() => verifyChecksum(buf, {}, 'intutic-proxy-win32-x64.exe'));
+});
+
+// resolveAssetName: every value here MUST match a real .github/workflows/publish.yml
+// build-rust-proxy matrix artifact_name, and every one below has a live release asset
+// verified against it (`gh release view` on v1.6.0 through the current release found
+// exactly these five names). A naming mismatch here means real installed launchers
+// 404 on download — this repo shipped that exact bug (intutic-proxy-linux-x64 vs. the
+// matrix's then-artifact_name intutic-proxy-linux-amd64, and no Linux arm64 target at
+// all, despite every real release having shipped one since v1.6.0).
+const SUPPORTED_PLATFORMS = [
+  ['darwin', 'arm64', 'intutic-proxy-darwin-arm64'],
+  ['darwin', 'x64', 'intutic-proxy-darwin-x64'],
+  ['linux', 'x64', 'intutic-proxy-linux-x64'],
+  ['linux', 'arm64', 'intutic-proxy-linux-arm64'],
+  ['win32', 'x64', 'intutic-proxy-win32-x64.exe'],
+];
+
+for (const [platform, arch, expected] of SUPPORTED_PLATFORMS) {
+  test(`resolveAssetName(${platform}, ${arch}) resolves to ${expected}`, () => {
+    assert.equal(resolveAssetName(platform, arch), expected);
+  });
+}
+
+const UNSUPPORTED_PLATFORMS = [
+  ['darwin', 'ia32'],
+  ['linux', 'ia32'],
+  ['win32', 'arm64'],
+  ['win32', 'ia32'],
+  ['freebsd', 'x64'],
+  ['sunos', 'x64'],
+];
+
+for (const [platform, arch] of UNSUPPORTED_PLATFORMS) {
+  test(`resolveAssetName(${platform}, ${arch}) returns null — no asset exists for this combination`, () => {
+    assert.equal(resolveAssetName(platform, arch), null);
+  });
+}
+
+test('resolveAssetName defaults to the real process.platform/process.arch when called with no arguments', () => {
+  assert.equal(resolveAssetName(), resolveAssetName(process.platform, process.arch));
 });
