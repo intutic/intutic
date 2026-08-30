@@ -113,11 +113,13 @@ async fn local_judge_answers_finalize_without_calling_the_control_plane() {
     });
 
     // ── Scenario 1: local judge reachable, returns VIOLATION ──
+    // Fixture is runtime-assembled: the repo convention forbids contiguous
+    // credential-shaped literals in source, in every package.
     let res = reqwest::Client::new()
         .post(format!("http://{}/v1/chat/completions", addr))
         .header(
             "Authorization",
-            "Bearer vk_0123456789abcdef0123456789abcdef_ws_local_judge_test",
+            concat!("Bearer vk_", "0123456789abcdef0123456789abcdef", "_ws_local_judge_test"),
         )
         .header("x-workspace-id", "ws_local_judge_test")
         .header("x-session-id", "ses_local_judge_test_1")
@@ -167,7 +169,7 @@ async fn local_judge_answers_finalize_without_calling_the_control_plane() {
         .post(format!("http://{}/v1/chat/completions", addr))
         .header(
             "Authorization",
-            "Bearer vk_0123456789abcdef0123456789abcdef_ws_local_judge_test",
+            concat!("Bearer vk_", "0123456789abcdef0123456789abcdef", "_ws_local_judge_test"),
         )
         .header("x-workspace-id", "ws_local_judge_test")
         .header("x-session-id", "ses_local_judge_test_2")

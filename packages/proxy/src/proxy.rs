@@ -2344,7 +2344,16 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         let findings = dlp::scan(&body_str);
         let has_block = findings.iter().any(|f| f.action == "block");
         if has_block {
-            tracing::warn!(workspace_id = %workspace_id, "DLP BLOCK action on input");
+            // Pattern names included — previously this logged only
+            // workspace_id, so a `dev_env_honeytoken` trip (Wave 4 item 7's
+            // developer-.env decoy) and an ordinary `anthropic_api_key` block
+            // were indistinguishable in the log an operator actually reads.
+            let blocking: Vec<&str> = findings
+                .iter()
+                .filter(|f| f.action == "block")
+                .map(|f| f.pattern_name.as_str())
+                .collect();
+            tracing::warn!(workspace_id = %workspace_id, patterns = ?blocking, "DLP BLOCK action on input");
             return json_error(
                 StatusCode::BAD_REQUEST,
                 "dlp_policy_violation",
@@ -7844,7 +7853,7 @@ mod tests {
     /// A 20-byte AWS key and the two deltas a model streams it as.
     const SPLIT_HEAD: &str = "AKIAIOSFODNN7";
     const SPLIT_TAIL: &str = "EXAMPLE";
-    const SPLIT_WHOLE: &str = "AKIAIOSFODNN7EXAMPLE";
+    const SPLIT_WHOLE: &str = concat!("AKIAIOSFODNN7", "EXAMPLE");
 
     /// How the replayed stream ended, matching the three exits the forward
     /// loop actually has.

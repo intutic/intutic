@@ -5,6 +5,37 @@
 
 set -euo pipefail
 
+# --- Secret scan (2026-08-30 architecture-audit remediation, Wave 4) -----
+# Refuses a commit whose staged additions carry a credential-shaped value.
+# Runs unconditionally, ahead of the slice-boundary dispatch below — a
+# secret shouldn't get a pass just because the current slice is metadata-
+# only. Single source of truth: packages/shared-types/src/secretPatterns.ts
+# (secretPatternAlternation()) — loaded from the built dist rather than
+# duplicated here, so a pattern change there takes effect on the next
+# commit with no hook edit. If the package isn't built yet (fresh clone,
+# pre-`pnpm build`), this warns and lets the commit through rather than
+# blocking every commit on a build step; a real match still hard-blocks.
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+SECRET_PATTERNS_MODULE="$REPO_ROOT/packages/shared-types/dist/secretPatterns.js"
+if [ -f "$SECRET_PATTERNS_MODULE" ]; then
+  ALTERNATION="$(node -e "console.log(require('$SECRET_PATTERNS_MODULE').secretPatternAlternation())" 2>/dev/null || true)"
+  if [ -n "$ALTERNATION" ]; then
+    findings="$(git diff --cached -U0 --no-color | grep -E '^\+' | grep -vE '^\+\+\+' | grep -nE "$ALTERNATION" || true)"
+    if [ -n "$findings" ]; then
+      echo "" >&2
+      echo "[secret-scan] Commit refused: staged changes add credential-shaped content:" >&2
+      echo "$findings" | head -10 >&2
+      echo "" >&2
+      echo "Remove the secret and reference it from the environment instead." >&2
+      echo "If this is a false positive, commit with: git commit --no-verify" >&2
+      exit 1
+    fi
+  fi
+else
+  echo "[secret-scan] WARNING: packages/shared-types is not built — skipping secret scan for this commit. Run 'pnpm --filter @intutic/shared-types build' to enable it." >&2
+fi
+# --- end secret scan -------------------------------------------------------
+
 SLICE_FILE="uat/CURRENT_SLICE.md"
 if [ ! -f "$SLICE_FILE" ]; then
   exit 0

@@ -124,7 +124,9 @@ describe('ToolCallInterceptor', () => {
       const policy = new StubPolicyClient()
       const interceptor = new ToolCallInterceptor(policy, emitter, true)
 
-      const decision = await interceptor.decide('Write', { content: 'key=sk-ant-api03-verylongantkeyhere12345678901234' })
+      // Fixture is runtime-assembled: the repo convention forbids contiguous
+      // credential-shaped literals in source, in every package.
+      const decision = await interceptor.decide('Write', { content: 'key=sk-ant-' + 'api03-verylongantkeyhere12345678901234' })
       expect(decision.action).toBe('block')
     })
 

@@ -124,9 +124,11 @@ intutic_settings:
 
     let res = reqwest::Client::new()
         .post(format!("http://{}/v1/chat/completions", addr))
+        // Fixture is runtime-assembled: the repo convention forbids contiguous
+        // credential-shaped literals in source, in every package.
         .header(
             "Authorization",
-            "Bearer vk_0123456789abcdef0123456789abcdef_ws_unservable_test",
+            concat!("Bearer vk_", "0123456789abcdef0123456789abcdef", "_ws_unservable_test"),
         )
         .header("x-workspace-id", "ws_unservable_test")
         .header("x-session-id", session_id)
