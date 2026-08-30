@@ -57,7 +57,7 @@ Intutic Proxy supports two primary self-hosted deployment topologies depending o
         # Set it only when you actually have a control plane to talk to.
 
     litellm:
-      image: ghcr.io/berriai/litellm:main-latest
+      image: ghcr.io/berriai/litellm@sha256:be646214d7bc1cda0be57debbbf58e822ca4f233ddc50d0c0c7fa9b4a28063af
       ports:
         - "4001:4000"
       volumes:
