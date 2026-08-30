@@ -84,6 +84,49 @@ jobs:
       - name: Run TypeScript typecheck
         run: pnpm turbo typecheck
 
+  # 2026-08-30 architecture audit (Wave 4): the pre-commit secret scan only
+  # ever sees a commit's staged additions, so a credential-shaped literal
+  # already sitting in history (or added by a commit made with --no-verify)
+  # is invisible to it. This job runs the same pattern set repo-wide on
+  # every push/PR, as a regression gate rather than a point-in-time sweep.
+  secret-scan:
+    name: Secret Scan (Repo-Wide) - Check for credential-shaped literals
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          lfs: true
+
+      - name: Install pnpm
+        run: npm install -g pnpm@11.6.0
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build shared-types (source of the pattern set)
+        run: pnpm --filter @intutic/shared-types build
+
+      - name: Scan the tree for credential-shaped literals
+        run: |
+          ALTERNATION="$(node -e "console.log(require('./packages/shared-types/dist/secretPatterns.js').secretPatternAlternation())")"
+          if [ -z "$ALTERNATION" ]; then
+            echo "secretPatternAlternation() returned empty — treat as a build failure, not a clean scan." >&2
+            exit 1
+          fi
+          FINDINGS="$(git grep -InE "$ALTERNATION" -- . ':!**/node_modules/**' ':!**/dist/**' ':!**/target/**' ':!**/*.lock' ':!pnpm-lock.yaml' || true)"
+          if [ -n "$FINDINGS" ]; then
+            echo "Credential-shaped literal(s) found in tracked source:" >&2
+            echo "$FINDINGS" >&2
+            echo "" >&2
+            echo "Assemble the value at runtime instead of writing it as one contiguous literal (see packages/shared-types/src/secretPatterns.ts's consumers for the repo's convention)." >&2
+            exit 1
+          fi
+
   test:
     name: Test (TS Workspaces) - Run Vitest Suite (Sync Daemon, CLI, Packages)
     runs-on: ubuntu-latest
@@ -274,7 +317,7 @@ jobs:
   build:
     name: Build (TS Workspaces) - Bundle TS apps and packages
     runs-on: ubuntu-latest
-    needs: [lint, typecheck, test, rust, python]
+    needs: [lint, typecheck, test, rust, python, secret-scan]
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:

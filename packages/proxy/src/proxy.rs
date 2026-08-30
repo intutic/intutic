@@ -7844,7 +7844,7 @@ mod tests {
     /// A 20-byte AWS key and the two deltas a model streams it as.
     const SPLIT_HEAD: &str = "AKIAIOSFODNN7";
     const SPLIT_TAIL: &str = "EXAMPLE";
-    const SPLIT_WHOLE: &str = "AKIAIOSFODNN7EXAMPLE";
+    const SPLIT_WHOLE: &str = concat!("AKIAIOSFODNN7", "EXAMPLE");
 
     /// How the replayed stream ended, matching the three exits the forward
     /// loop actually has.

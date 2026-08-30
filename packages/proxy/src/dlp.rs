@@ -330,7 +330,7 @@ pub fn scan(text: &str) -> Vec<DlpFinding> {
 ///
 /// and matches nothing, because the scaffolding really is in the way. The
 /// client concatenates the two `content` values and sees
-/// `AKIAIOSFODNN7EXAMPLE`. The scrubber reads the wire form; the client reads
+/// `AKIAIOSFODNN7` + `EXAMPLE`. The scrubber reads the wire form; the client reads
 /// the decoded form; a pattern invisible in the first is plain in the second.
 /// "No linear pattern can match it" described the scanner's blindness, not the
 /// stream's safety, and it was written as if it were a safety property — which
@@ -957,7 +957,9 @@ mod tests {
 
     #[test]
     fn test_aws_key_detection() {
-        let text = "My key is AKIAIOSFODNN7EXAMPLE and it should be found";
+        // Fixture is runtime-assembled: the repo convention forbids contiguous
+        // credential-shaped literals in source, in every package.
+        let text = concat!("My key is AKIA", "IOSFODNN7EXAMPLE and it should be found");
         let findings = scan(text);
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].pattern_name, "aws_access_key");
@@ -982,7 +984,7 @@ mod tests {
 
     #[test]
     fn test_redaction() {
-        let text = "Key: AKIAIOSFODNN7EXAMPLE";
+        let text = concat!("Key: AKIA", "IOSFODNN7EXAMPLE");
         let findings = scan(text);
         let redacted = redact(text, &findings);
         assert!(redacted.contains("[REDACTED_SECRET]"));
@@ -1026,7 +1028,7 @@ mod tests {
                 "custom pattern did not fire: {findings:?}"
             );
             // And the built-ins still work with a custom set installed.
-            assert!(!scan("AKIAIOSFODNN7EXAMPLE").is_empty());
+            assert!(!scan(concat!("AKIA", "IOSFODNN7EXAMPLE")).is_empty());
         }
     }
 
@@ -1181,7 +1183,7 @@ mod tests {
              db postgres://{}:{}@db.internal:5432/app\n\
              ssn 123-45-6789\n\
              auth Bearer abc123DEF456ghi789\n\
-             key -----BEGIN OPENSSH PRIVATE KEY-----\n\
+             key {}\n\
              and a lot of ordinary prose to make the body worth scanning. {}",
             format!("{}{}", "ASIA", "JEXAMPLEKEY234AB"),
             "ghp",
@@ -1194,6 +1196,7 @@ mod tests {
             "AbCdEfGhIjKlMnOpQrStUvWxYzAbCdEfGh",
             "svc_user",
             "hunter22secret",
+            concat!("-----BEGIN ", "OPENSSH PRIVATE KEY-----"),
             "lorem ipsum dolor sit amet ".repeat(200),
         );
 
@@ -1248,12 +1251,14 @@ mod tests {
     #[test]
     fn private_key_family_blocks_including_openssh_and_pgp() {
         // Had zero coverage; the old pattern also missed both of these.
+        // Fixture is runtime-assembled: the repo convention forbids contiguous
+        // credential-shaped literals in source, in every package.
         for header in [
-            "-----BEGIN PRIVATE KEY-----",
-            "-----BEGIN RSA PRIVATE KEY-----",
-            "-----BEGIN OPENSSH PRIVATE KEY-----",
-            "-----BEGIN ENCRYPTED PRIVATE KEY-----",
-            "-----BEGIN PGP PRIVATE KEY BLOCK-----",
+            concat!("-----BEGIN ", "PRIVATE KEY-----"),
+            concat!("-----BEGIN ", "RSA PRIVATE KEY-----"),
+            concat!("-----BEGIN ", "OPENSSH PRIVATE KEY-----"),
+            concat!("-----BEGIN ", "ENCRYPTED PRIVATE KEY-----"),
+            concat!("-----BEGIN ", "PGP PRIVATE KEY BLOCK-----"),
         ] {
             let f = scan(header);
             let hit = f.iter().find(|x| x.pattern_name == "private_key");
@@ -1288,9 +1293,9 @@ mod stream_scrub_tests {
 
     #[test]
     fn secret_inside_a_delta_is_redacted_and_named() {
-        let line = r#"data: {"delta":{"text":"key: AKIAIOSFODNN7EXAMPLE done"}}"#;
+        let line = concat!(r#"data: {"delta":{"text":"key: AKIA"#, r#"IOSFODNN7EXAMPLE done"}}"#);
         let (scrubbed, names) = scrub_stream_text(line).expect("must find the key");
-        assert!(!scrubbed.contains("AKIAIOSFODNN7EXAMPLE"));
+        assert!(!scrubbed.contains(concat!("AKIA", "IOSFODNN7EXAMPLE")));
         assert!(scrubbed.contains("[REDACTED_SECRET]"));
         assert_eq!(names, ["aws_access_key"]);
         // The scrubbed line must still be a valid SSE data line with valid JSON.
@@ -1301,7 +1306,7 @@ mod stream_scrub_tests {
     #[test]
     fn block_action_material_is_contained_by_redaction() {
         // Output-side doctrine: containment, not stream-kill.
-        let line = r#"data: {"delta":{"text":"-----BEGIN OPENSSH PRIVATE KEY----- b"}}"#;
+        let line = concat!(r#"data: {"delta":{"text":"-----BEGIN "#, r#"OPENSSH PRIVATE KEY----- b"}}"#);
         let (scrubbed, names) = scrub_stream_text(line).unwrap();
         assert!(!scrubbed.contains("BEGIN OPENSSH"));
         assert!(names.contains(&"private_key".to_string()));
@@ -1334,7 +1339,8 @@ mod stream_scrub_tests {
     #[test]
     fn several_distinct_secrets_in_one_line_all_redact() {
         let line = format!(
-            r#"data: {{"text":"a AKIAIOSFODNN7EXAMPLE b ghp_{} c 123-45-6789"}}"#,
+            r#"data: {{"text":"a {} b ghp_{} c 123-45-6789"}}"#,
+            concat!("AKIA", "IOSFODNN7EXAMPLE"),
             "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"
         );
         let (scrubbed, names) = scrub_stream_text(&line).unwrap();
@@ -1354,7 +1360,9 @@ mod redaction_before_forward_tests {
     /// broke the structure would turn a leak into a confusing upstream error.
     #[test]
     fn redacting_inside_json_keeps_it_valid() {
-        let body = r#"{"messages":[{"role":"user","content":"key AKIAIOSFODNN7EXAMPLE here"}]}"#;
+        // Fixture is runtime-assembled: the repo convention forbids contiguous
+        // credential-shaped literals in source, in every package.
+        let body = concat!(r#"{"messages":[{"role":"user","content":"key AKIA"#, r#"IOSFODNN7EXAMPLE here"}]}"#);
         let findings = scan(body);
         assert!(!findings.is_empty(), "the fixture must actually match");
 
@@ -1363,7 +1371,7 @@ mod redaction_before_forward_tests {
             serde_json::from_str(&redacted).expect("redacted body must still be valid JSON");
 
         let content = parsed["messages"][0]["content"].as_str().unwrap();
-        assert!(!content.contains("AKIAIOSFODNN7EXAMPLE"), "secret must be gone");
+        assert!(!content.contains(concat!("AKIA", "IOSFODNN7EXAMPLE")), "secret must be gone");
         assert!(content.contains("REDACTED"));
     }
 
@@ -1371,8 +1379,8 @@ mod redaction_before_forward_tests {
     /// escaping inside a JSON string.
     #[test]
     fn the_replacement_needs_no_json_escaping() {
-        let findings = scan("AKIAIOSFODNN7EXAMPLE");
-        let out = redact("AKIAIOSFODNN7EXAMPLE", &findings);
+        let findings = scan(concat!("AKIA", "IOSFODNN7EXAMPLE"));
+        let out = redact(concat!("AKIA", "IOSFODNN7EXAMPLE"), &findings);
         assert!(!out.contains('"'), "a quote would break the enclosing string");
         assert!(!out.contains('\\'), "a backslash would break escaping");
     }
@@ -1381,14 +1389,18 @@ mod redaction_before_forward_tests {
     fn several_secrets_in_one_body_are_all_removed() {
         // Offsets shift as each replacement is applied; reverse ordering is
         // what keeps the later ones pointing at the right bytes.
-        let body = r#"{"a":"AKIAIOSFODNN7EXAMPLE","b":"ghp_012345678901234567890123456789012345","c":"123-45-6789"}"#;
+        let body = concat!(
+            r#"{"a":"AKIA"#,
+            r#"IOSFODNN7EXAMPLE","b":"ghp_"#,
+            r#"012345678901234567890123456789012345","c":"123-45-6789"}"#
+        );
         let findings = scan(body);
         assert!(findings.len() >= 3, "expected three matches, got {}", findings.len());
 
         let redacted = redact(body, &findings);
         serde_json::from_str::<serde_json::Value>(&redacted).expect("still valid JSON");
-        assert!(!redacted.contains("AKIAIOSFODNN7EXAMPLE"));
-        assert!(!redacted.contains("ghp_012345678901234567890123456789012345"));
+        assert!(!redacted.contains(concat!("AKIA", "IOSFODNN7EXAMPLE")));
+        assert!(!redacted.contains(concat!("ghp_", "012345678901234567890123456789012345")));
         assert!(!redacted.contains("123-45-6789"));
     }
 
@@ -1397,13 +1409,13 @@ mod redaction_before_forward_tests {
         // replace_range panics on a non-char-boundary. Regex offsets are byte
         // offsets, so a body with multibyte text before the secret is the case
         // that would expose it.
-        let body = r#"{"m":"日本語のテキスト AKIAIOSFODNN7EXAMPLE です"}"#;
+        let body = concat!(r#"{"m":"日本語のテキスト AKIA"#, r#"IOSFODNN7EXAMPLE です"}"#);
         let findings = scan(body);
         let redacted = redact(body, &findings);
         let parsed: serde_json::Value = serde_json::from_str(&redacted).unwrap();
         let m = parsed["m"].as_str().unwrap();
         assert!(m.contains("日本語のテキスト"), "surrounding text intact");
-        assert!(!m.contains("AKIAIOSFODNN7EXAMPLE"));
+        assert!(!m.contains(concat!("AKIA", "IOSFODNN7EXAMPLE")));
     }
 
     #[test]
@@ -1419,7 +1431,7 @@ mod holdback_tests {
     use super::*;
 
     /// A 20-byte AWS key, and the two halves a model would stream it as.
-    const AWS_KEY: &str = "AKIAIOSFODNN7EXAMPLE";
+    const AWS_KEY: &str = concat!("AKIA", "IOSFODNN7EXAMPLE");
     const AWS_HEAD: &str = "AKIAIOSFODNN7";
     const AWS_TAIL: &str = "EXAMPLE";
 

@@ -169,6 +169,48 @@ check_clean() {
   fi
 }
 
+# ── Guard 1b: no credential-shaped literal about to be mirrored ─────────────
+#
+# 2026-08-30 architecture audit (Wave 4): check_clean and check_versions run
+# before ANY content leaves $SRC_DIR, but neither looks at content — a secret
+# committed on the enterprise side (in violation of its own convention, or by
+# a commit made with --no-verify) would otherwise sync straight into the
+# PUBLIC repo the moment this script runs. Scan only what is actually about
+# to be copied (SYNC_PATHS, SYNC_FILES, SYNC_INTERSECT_PATHS), only on the
+# source side — the destination is the one place this must never reach.
+check_no_secrets() {
+  local shared_types_dist="$SRC_DIR/packages/shared-types/dist/secretPatterns.js"
+  if [ ! -f "$shared_types_dist" ]; then
+    fail "packages/shared-types is not built in $SRC_NAME — run 'pnpm --filter @intutic/shared-types build' first. Refusing to sync without the secret scan."
+    return 1
+  fi
+  local alternation
+  alternation="$(node -e "console.log(require('$shared_types_dist').secretPatternAlternation())")"
+  if [ -z "$alternation" ]; then
+    fail "secretPatternAlternation() returned empty — treat as a build failure, not a clean scan."
+    return 1
+  fi
+  local findings=""
+  local p
+  for p in "${SYNC_PATHS[@]}" "${SYNC_FILES[@]}" "${SYNC_INTERSECT_PATHS[@]}"; do
+    local target="$SRC_DIR/$p"
+    [ -e "$target" ] || continue
+    local hit
+    hit="$(grep -rInE "$alternation" "$target" \
+      --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=target --exclude-dir=.turbo \
+      --exclude-dir=.venv --exclude-dir=__pycache__ --exclude-dir='*.egg-info' --exclude-dir=.pytest_cache \
+      --exclude-dir=.git 2>/dev/null || true)"
+    [ -n "$hit" ] && findings="${findings}${hit}"$'\n'
+  done
+  if [ -n "$findings" ]; then
+    fail "Credential-shaped literal(s) found in content about to sync to $DEST_NAME:"
+    echo "$findings" >&2
+    echo "" >&2
+    echo "Assemble the value at runtime instead of writing it as one contiguous literal, then re-run." >&2
+    return 1
+  fi
+}
+
 # ── Guard 2: never move the destination's versions backwards ────────────────
 #
 # Whichever tree publishes a given package, overwriting it with an older
@@ -296,6 +338,10 @@ echo
 info "Checking working trees…"
 check_clean "$SRC_DIR" "$SRC_NAME"
 check_clean "$DEST_DIR" "$DEST_NAME"
+echo
+
+info "Scanning content about to sync for credential-shaped literals…"
+check_no_secrets
 echo
 
 info "Checking versions…"

