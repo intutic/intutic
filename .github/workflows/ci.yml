@@ -187,7 +187,7 @@ jobs:
           echo "Installing emscripten..."
           sudo apt-get update -qq
           sudo apt-get install -y emscripten nodejs npm
-          npm install -g tree-sitter-cli
+          npm install -g tree-sitter-cli@0.26.13
           emcc --version
           tree-sitter --version
           echo "Rebuilding .wasm grammars..."
@@ -250,6 +250,18 @@ jobs:
 
       - name: Install Poetry
         run: pipx install poetry
+
+      # poetry.lock lived in the enterprise repo only — this repo's own
+      # checkout had no lockfile at all, and `poetry install` with none
+      # resolves every dependency fresh from its open pyproject.toml range on
+      # every run: the exact malicious-release-window exposure the March
+      # 2026 LiteLLM PyPI compromise (a 40-minute bad release) depends on.
+      # `check --lock` fails loud if the lock is missing or has drifted from
+      # pyproject.toml, instead of silently falling back to an unlocked
+      # resolve.
+      - name: Verify poetry.lock is present and matches pyproject.toml
+        working-directory: packages/intutic-clawde
+        run: poetry check --lock
 
       - name: Install package + dev dependencies
         working-directory: packages/intutic-clawde

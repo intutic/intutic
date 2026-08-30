@@ -65,6 +65,37 @@ export const SECRET_VALUE_PATTERNS: readonly SecretValuePattern[] = [
     source: '-----BEGIN [A-Z ]*PRIVATE KEY-----',
     description: 'PEM private key material',
   },
+  {
+    id: 'secrets.openrouter_api_key',
+    // sk-or-v1- + a long hex tail. The default workhorse alias
+    // (infra/kubernetes/base/litellm/config.yaml) routes through this key —
+    // the one credential a default, non-BYOK Intutic deployment actually
+    // depends on, and it was absent from this table.
+    source: 'sk-or-v1-' + rep('[A-Za-z0-9]', 20) + '[A-Za-z0-9]*',
+    description: 'OpenRouter API key',
+  },
+  {
+    id: 'secrets.intutic_virtual_key',
+    // `vk_${randomBytes(16).toString('hex')}_${workspaceId}` —
+    // apiKeyService.ts's createApiKey. Exactly 32 lowercase hex chars after
+    // the prefix; the trailing `_<workspaceId>` is left unanchored since its
+    // own prefix is a plain implementation detail, not part of the secret.
+    source: 'vk_' + rep('[a-f0-9]', 32),
+    description: 'Intutic virtual key',
+  },
+  {
+    id: 'secrets.intutic_gateway_token',
+    // `gwk_${randomBytes(32).toString('hex')}` — routes/gateways.ts. Exactly
+    // 64 lowercase hex chars; this is the cell/gateway registration
+    // credential, gatewayAuth.ts's sole accepted token shape.
+    source: 'gwk_' + rep('[a-f0-9]', 64),
+    description: 'Intutic gateway token',
+  },
+  {
+    id: 'secrets.stripe_secret_key',
+    source: 'sk_live_' + rep('[A-Za-z0-9]', 24),
+    description: 'Stripe live secret key',
+  },
 ]
 
 /**
