@@ -179,14 +179,64 @@ static PATTERNS: Lazy<Vec<DlpPattern>> = Lazy::new(|| {
         ),
     ];
 
-    defs.into_iter()
+    let mut patterns: Vec<DlpPattern> = defs
+        .into_iter()
         .map(|(name, category, regex, action)| DlpPattern {
             name: name.into(),
             category: category.into(),
             regex: Regex::new(regex).unwrap(),
             action: action.into(),
         })
-        .collect()
+        .collect();
+
+    // Developer-workstation honeytoken (2026-08-30 architecture-audit
+    // remediation, Wave 4, item 7). Same idea as `llm-provider-secrets.yaml`'s
+    // `OPENAI_API_KEY` canary — a credential-shaped value with zero legitimate
+    // consumer anywhere in this repo, so any appearance is unambiguous signal
+    // — moved onto this repo's other real honeytoken surface: a decoy
+    // AWS_ACCESS_KEY_ID planted in a developer-lookalike `.env`
+    // (`infra/scripts/gen-dev-honeytoken.sh`; the value there and here must
+    // stay byte-identical or the bait stops tripping this pattern).
+    //
+    // `aws_access_key` above already matches this value's *shape* (it is a
+    // syntactically valid AKIA-format key) and would silently redact it and
+    // forward the request. That is the wrong response to a value that no
+    // legitimate caller can ever hold: `block` gives an operator a loud,
+    // attributable "DLP BLOCK action on input" with this pattern's name in
+    // the log (see proxy.rs's DLP step 4) instead of a quiet redaction lost
+    // among ordinary AWS-key false positives.
+    //
+    // The most realistic path a decoy sitting in a workstation `.env` reaches
+    // this scanner: no hook governs the Read tool (protectedPaths.ts's
+    // PreToolUse gate only covers Bash/Edit/Write/MultiEdit/mcp__.* — see its
+    // module doc), so a compromised agent can read the file freely. What it
+    // cannot do unnoticed is USE the value — a Bash command or an MCP call
+    // that echoes it locally is already caught by the generic
+    // `secrets.aws_access_key` GuardPattern in
+    // `services/sync-daemon/src/harness/protectedPaths.ts` (same shape,
+    // independent enforcement point), and pasting it into a prompt that
+    // transits this proxy is caught here.
+    //
+    // Runtime-assembled, not a contiguous literal — this repo's own
+    // convention (see protectedPaths.ts's `SECRET_CONTENT_PATTERNS` fixtures)
+    // — because the assembled value below is AKIA-shaped and a contiguous
+    // spelling of it in this source would itself trip
+    // `.githooks/pre-commit`'s secret scan
+    // (packages/shared-types/src/secretPatterns.ts's `aws_access_key`
+    // alternation matches it on purpose; that pattern and this one are
+    // deliberately the same shape). Note for future edits to this comment:
+    // do not spell the assembled value out contiguously here either.
+    let honeytoken_head = "AKIA";
+    let honeytoken_tail = "HONEYTOKENDECOY6";
+    let honeytoken_regex = format!(r"\b{honeytoken_head}{honeytoken_tail}\b");
+    patterns.push(DlpPattern {
+        name: "dev_env_honeytoken".into(),
+        category: "credential".into(),
+        regex: Regex::new(&honeytoken_regex).expect("honeytoken regex must compile"),
+        action: "block".into(),
+    });
+
+    patterns
 });
 
 struct DlpPattern {
@@ -991,6 +1041,44 @@ mod tests {
         assert!(!redacted.contains("AKIA"));
     }
 
+    // ── developer-workstation honeytoken (Wave 4 item 7) ──────────────────
+    //
+    // The decoy value planted by `infra/scripts/gen-dev-honeytoken.sh` and
+    // matched by `PATTERNS`'s `dev_env_honeytoken` entry. Runtime-assembled
+    // here too, for the same reason `test_aws_key_detection` above is.
+
+    #[test]
+    fn honeytoken_value_is_blocked_not_merely_redacted() {
+        let decoy = concat!("AKIA", "HONEYTOKENDECOY6");
+        let text = format!("AWS_ACCESS_KEY_ID={decoy}");
+        let findings = scan(&text);
+        // Also matches the generic `aws_access_key` shape (deliberately — see
+        // the `dev_env_honeytoken` doc comment above `PATTERNS`), so this
+        // asserts presence and action rather than an exact count.
+        let hit = findings
+            .iter()
+            .find(|f| f.pattern_name == "dev_env_honeytoken")
+            .expect("the honeytoken value must be recognised by its own pattern, not just aws_access_key's generic shape");
+        assert_eq!(hit.action, "block", "a honeytoken hit must block, not redact — a quiet redaction is indistinguishable from an ordinary AWS-key false positive in the logs");
+        assert_eq!(hit.category, "credential");
+    }
+
+    #[test]
+    fn honeytoken_pattern_does_not_fire_on_an_ordinary_aws_key() {
+        // The false-positive contract every fixture table in this repo
+        // carries: a real (fake-but-differently-shaped) AWS key must not be
+        // misreported as the honeytoken specifically.
+        let ordinary = concat!("AKIA", "IOSFODNN7EXAMPLE");
+        let findings = scan(ordinary);
+        assert!(
+            !findings.iter().any(|f| f.pattern_name == "dev_env_honeytoken"),
+            "an unrelated AWS key must not be misidentified as the honeytoken: {findings:?}"
+        );
+        // It must still be caught by the generic pattern — this test is about
+        // over-matching, not about losing coverage.
+        assert!(findings.iter().any(|f| f.pattern_name == "aws_access_key"));
+    }
+
     // ── operator-supplied patterns ─────────────────────────────────────────
     //
     // `install_custom_patterns` writes a process-global `OnceCell`, so exactly
@@ -1710,6 +1798,7 @@ mod holdback_tests {
             ("ssn", Some(38)),
             ("bearer_token", None), // \s+ and +
             ("private_key", Some(132)),
+            ("dev_env_honeytoken", Some(20)),
         ];
         let by_name: Vec<(String, Option<usize>)> = PATTERNS
             .iter()
