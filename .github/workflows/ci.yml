@@ -109,7 +109,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build shared-types (source of the pattern set)
-        run: pnpm --filter @intutic/shared-types build
+        run: pnpm turbo build --filter=@intutic/shared-types
 
       - name: Scan the tree for credential-shaped literals
         run: |
