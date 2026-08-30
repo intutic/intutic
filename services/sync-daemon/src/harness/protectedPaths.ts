@@ -499,6 +499,12 @@ export const SECRET_CONTENT_PATTERNS: readonly GuardPattern[] = assertGuardTable
     const awsKey = 'AKIA' + 'B2C3D4E5F6G7H2J3'
     const antKey = 'sk-ant-' + 'api03-abcdefghijklmnop'
     const ghToken = 'ghp_' + 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8'
+    const orKey = 'sk-or-v1-' + 'a1b2c3d4e5f6g7h8i9j0k1l2'
+    // vk_ + 32 lowercase hex (apiKeyService.ts: randomBytes(16).toString('hex'))
+    const vkKey = 'vk_' + 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6'
+    // gwk_ + 64 lowercase hex (routes/gateways.ts: randomBytes(32).toString('hex'))
+    const gwkKey = 'gwk_' + 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6' + '9f8e7d6c5b4a39281f7e6d5c4b3a2910'
+    const stripeKey = 'sk_live_' + 'A1b2C3d4E5f6G7h8I9j0K1l2'
     const fixtures: Record<string, { matches: string[]; notMatches: string[] }> = {
       'secrets.aws_access_key': {
         matches: [`{"file_path":"config.ts","content":"const key = '${awsKey}'"}`],
@@ -533,6 +539,40 @@ export const SECRET_CONTENT_PATTERNS: readonly GuardPattern[] = assertGuardTable
           '{"content":"-----BEGIN CERTIFICATE-----"}',
           '{"content":"-----BEGIN PUBLIC KEY-----"}',
           '{"content":"the PRIVATE KEY header is five dashes"}',
+        ],
+      },
+      'secrets.openrouter_api_key': {
+        matches: [`{"content":"OPENROUTER_API_KEY=${orKey}"}`],
+        notMatches: [
+          '{"content":"sk-or-v1- is the OpenRouter prefix"}',
+          '{"content":"' + 'sk-or-v1-' + 'short"}',
+          '{"content":"' + 'sk-or-v2-' + 'a1b2c3d4e5f6g7h8i9j0k1l2"}', // wrong version tag
+        ],
+      },
+      'secrets.intutic_virtual_key': {
+        matches: [`{"content":"INTUTIC_API_KEY=${vkKey}"}`],
+        notMatches: [
+          '{"content":"vk_ prefixes every Intutic virtual key"}',
+          '{"content":"' + 'vk_' + 'tooshort"}',
+          // 31 hex chars, one short of the fixed 32 — must not match
+          '{"content":"' + 'vk_' + 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d"}',
+        ],
+      },
+      'secrets.intutic_gateway_token': {
+        matches: [`{"content":"gateway registered with token ${gwkKey}"}`],
+        notMatches: [
+          '{"content":"gwk_ prefixes every gateway token"}',
+          '{"content":"' + 'gwk_' + 'tooshort"}',
+          // 63 hex chars, one short of the fixed 64 — must not match
+          '{"content":"' + 'gwk_' + 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6' + '9f8e7d6c5b4a39281f7e6d5c4b3a291"}',
+        ],
+      },
+      'secrets.stripe_secret_key': {
+        matches: [`{"content":"STRIPE_SECRET_KEY=${stripeKey}"}`],
+        notMatches: [
+          '{"content":"sk_live_ is the Stripe live-mode prefix"}',
+          '{"content":"' + 'sk_live_' + 'short"}',
+          '{"content":"' + 'sk_test_' + 'A1b2C3d4E5f6G7h8I9j0K1l2"}', // test mode, not live
         ],
       },
     }

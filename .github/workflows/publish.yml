@@ -265,7 +265,7 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm turbo run build
           mkdir -p dist-cli
-          npx pkg tools/cli/package.json --targets node18-macos-arm64,node18-macos-x64,node18-linux-x64,node18-win-x64 --out-path dist-cli
+          pnpm exec pkg tools/cli/package.json --targets node18-macos-arm64,node18-macos-x64,node18-linux-x64,node18-win-x64 --out-path dist-cli
           mv dist-cli/cli-macos-arm64 dist-cli/cli-macos-arm64 2>/dev/null || true
       - uses: actions/upload-artifact@v7
         with:
