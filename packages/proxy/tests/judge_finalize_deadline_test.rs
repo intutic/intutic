@@ -23,61 +23,24 @@
 //!
 //! ## Shape notes
 //!
-//! - ONE `#[tokio::test]` in this file for the deadline-race scenario,
-//!   matching `judge_stream_test.rs`'s convention — `OPENAI_UPSTREAM_URL`,
+//! - ONE `#[tokio::test]` in this file, deliberately — matching
+//!   `judge_stream_test.rs`'s convention. `OPENAI_UPSTREAM_URL`,
 //!   `CONTROL_PLANE_URL`, and `JUDGE_FINALIZE_DEADLINE_MS` are all
-//!   process-global env vars; a second test in this binary would race them.
-//! - The plain `#[test]` for `judge_finalize_deadline_ms()`'s own parsing
-//!   is free to share the file: it touches only
-//!   `JUDGE_FINALIZE_DEADLINE_MS`, which no other test in this workspace
-//!   sets, and it does not spawn a router.
+//!   process-global env vars; a second test in this binary would race them
+//!   (`cargo test` runs a binary's tests concurrently by default). This
+//!   file originally also carried a plain `#[test]` for
+//!   `judge_finalize_deadline_ms()`'s own env-var parsing, on the theory
+//!   that it only touched a var nothing else in the workspace set — true
+//!   only until this file's own integration test started setting that same
+//!   var. That race was real: it passed locally and failed in CI. See
+//!   `judge_finalize_deadline_parse_test.rs`, its own file now, for that
+//!   test and the full incident writeup in its module doc.
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
-
-#[test]
-fn judge_finalize_deadline_ms_parses_unset_disabled_and_explicit() {
-    // Isolated to this one test in the crate — see the module doc.
-    std::env::remove_var("JUDGE_FINALIZE_DEADLINE_MS");
-    assert_eq!(
-        intutic_proxy::proxy::judge_finalize_deadline_ms(),
-        Some(5000),
-        "unset must default to 5000ms"
-    );
-
-    std::env::set_var("JUDGE_FINALIZE_DEADLINE_MS", "0");
-    assert_eq!(
-        intutic_proxy::proxy::judge_finalize_deadline_ms(),
-        None,
-        "explicit 0 must disable the deadline"
-    );
-
-    std::env::set_var("JUDGE_FINALIZE_DEADLINE_MS", "-100");
-    assert_eq!(
-        intutic_proxy::proxy::judge_finalize_deadline_ms(),
-        None,
-        "a negative value must disable the deadline, same as 0"
-    );
-
-    std::env::set_var("JUDGE_FINALIZE_DEADLINE_MS", "2500");
-    assert_eq!(
-        intutic_proxy::proxy::judge_finalize_deadline_ms(),
-        Some(2500),
-        "a positive value must be used verbatim"
-    );
-
-    std::env::set_var("JUDGE_FINALIZE_DEADLINE_MS", "not-a-number");
-    assert_eq!(
-        intutic_proxy::proxy::judge_finalize_deadline_ms(),
-        Some(5000),
-        "unparseable must fall back to the default, same as unset — never to unbounded"
-    );
-
-    std::env::remove_var("JUDGE_FINALIZE_DEADLINE_MS");
-}
 
 fn upstream_sse_body() -> String {
     let deltas = [
@@ -208,12 +171,14 @@ async fn a_slow_finalize_releases_the_stream_at_the_deadline_but_keeps_running()
     assert!(status.is_success(), "proxy returned {status}: {body}");
 
     // The load-bearing timing assertion: released well before the 3s
-    // finalize delay would otherwise force it to wait. Generous margin
-    // above the 500ms deadline (network + task scheduling on a loaded CI
-    // box), still far under the 3s the old unbounded behavior would need.
+    // finalize delay would otherwise force it to wait. 2.5s is a generous
+    // margin above the 500ms deadline (network + task scheduling on a
+    // loaded CI runner — this repo's own CI took over 10 minutes on this
+    // job the run this test's threshold was tuned against), while staying
+    // comfortably under the 3s the old unbounded behavior would have taken.
     assert!(
-        elapsed < Duration::from_millis(2000),
-        "stream took {elapsed:?} to close — the deadline should have released it well under 2s, not waited out the 3s finalize delay"
+        elapsed < Duration::from_millis(2500),
+        "stream took {elapsed:?} to close — the deadline should have released it well under 2.5s, not waited out the 3s finalize delay"
     );
 
     // The client got the model's text…
