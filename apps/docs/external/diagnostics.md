@@ -88,4 +88,4 @@ kubectl port-forward svc/litellm 4000:4000 -n intutic-dev
 ### GKE Autopilot Troubleshooting
 If a new deployment pod remains in a `Pending` state:
 1. **Node Provisioning Latency**: GKE Autopilot requires 1–2 minutes to automatically spin up a new virtual node when resource requests exceed cluster headroom.
-2. **Image Pull Times**: Large docker images (like `ghcr.io/berriai/litellm:main-latest`) require several minutes to pull on fresh nodes. Run `kubectl describe pod` to monitor image pulling progress events.
+2. **Image Pull Times**: Large docker images (like `ghcr.io/berriai/litellm`) require several minutes to pull on fresh nodes. Run `kubectl describe pod` to monitor image pulling progress events.
