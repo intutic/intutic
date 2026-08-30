@@ -13,6 +13,13 @@ allowBuilds:
   esbuild: true
   protobufjs: true
 
+# 24h cooldown before a newly-published package version is installable —
+# was only pnpm 11.6.0's inherited default until now, so a pnpm major bump
+# or a differently-provisioned runner could silently alter or remove the
+# guard every exclude entry below assumes is active. Declared explicitly so
+# it survives pnpm upgrades and stays visible to reviewers.
+minimumReleaseAge: 1440
+
 minimumReleaseAgeExclude:
   - '@ai-sdk/gateway@4.0.54'
   - '@ai-sdk/openai@4.0.43'

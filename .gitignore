@@ -12,10 +12,14 @@ build/
 # Turbo
 .turbo/
 
-# Environment
-.env
-.env.local
-.env.*.local
+# Environment — .env, .env.local, and .env.*.local used to be the whole
+# list, so .env.production/.env.staging/.env.backup (or any other variant)
+# were committable, and nothing scans for the secret inside one. .env*
+# covers every variant; the two re-includes keep committing real templates
+# possible.
+.env*
+!.env.example
+!.env.*.example
 
 # IDE
 .idea/
