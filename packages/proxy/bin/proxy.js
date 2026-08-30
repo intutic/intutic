@@ -18,6 +18,7 @@ import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import crypto from 'crypto';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 
@@ -110,6 +111,57 @@ function pruneLegacyCache() {
   }
 }
 
+/** `sha256:<hex>` of `buffer` — the same shape publish.yml's checksums.json values use. */
+export function sha256Hex(buffer) {
+  return 'sha256:' + crypto.createHash('sha256').update(buffer).digest('hex');
+}
+
+/** Parses a checksums.json body into a plain name→digest map. Throws on any other shape. */
+export function parseChecksums(text) {
+  const data = JSON.parse(text);
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+    throw new Error('checksums.json did not parse to an object');
+  }
+  return data;
+}
+
+/**
+ * Throws unless `buffer`'s digest matches `checksums[assetName]`. A missing entry
+ * fails the same as a mismatch — an asset absent from the manifest is exactly as
+ * unverifiable as one that fails it, and treating it as "nothing to check" would
+ * make the whole guard optional for any release that forgot to list an asset.
+ */
+export function verifyChecksum(buffer, checksums, assetName) {
+  const expected = checksums[assetName];
+  const actual = sha256Hex(buffer);
+  if (!expected) {
+    throw new Error(
+      `checksums.json has no entry for ${assetName} — refusing to install an unverified binary.`
+    );
+  }
+  if (actual !== expected) {
+    throw new Error(
+      `Checksum mismatch for ${assetName}:\n` +
+        `  expected: ${expected}\n` +
+        `  actual:   ${actual}\n` +
+        `This could mean a corrupted download or a tampered release asset — refusing to install it. Do not retry blindly.`
+    );
+  }
+}
+
+async function fetchChecksums(assetVersion) {
+  const url = `https://github.com/intutic/intutic/releases/download/v${assetVersion}/checksums.json`;
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(
+      `Failed to download checksums.json (HTTP ${response.status} ${response.statusText}).\n` +
+        `  URL: ${url}\n` +
+        `Refusing to install an unverified binary. Build from source instead: cargo build --release --package intutic-proxy`
+    );
+  }
+  return parseChecksums(await response.text());
+}
+
 async function downloadBinary(destPath) {
   const assetName = resolveAssetName();
   if (!assetName) {
@@ -132,6 +184,11 @@ async function downloadBinary(destPath) {
   }
 
   const buffer = Buffer.from(await response.arrayBuffer());
+
+  process.stderr.write(`intutic-proxy: verifying checksum…\n`);
+  const checksums = await fetchChecksums(version);
+  verifyChecksum(buffer, checksums, assetName);
+
   fs.mkdirSync(path.dirname(destPath), { recursive: true });
 
   // Write to a temp path and rename, so a partial download from an interrupted
@@ -183,4 +240,9 @@ async function main() {
   });
 }
 
-main();
+// Guarded so a test can `import` this module for its pure functions
+// (sha256Hex, parseChecksums, verifyChecksum) without triggering a real
+// download-and-spawn as a side effect of the import.
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main();
+}

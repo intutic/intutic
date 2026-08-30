@@ -34,6 +34,7 @@ import { getAdapter } from '../harness/detector.js'
 import { printOnboardingGuide } from '../lib/onboarding.js'
 import { writeEnforcementState } from '../lib/enforcementState.js'
 import { reportDeviceState } from '../lib/deviceReport.js'
+import { parseChecksums, verifyChecksum } from '../lib/binaryChecksum.js'
 import { newIso } from '@intutic/id'
 import type { SopFileHash, HarnessType, SyncConfigPayload, SyncSopEntry } from '@intutic/shared-types'
 import pc from 'picocolors'
@@ -137,7 +138,7 @@ async function downloadProxyBinary(destPath: string): Promise<string> {
   const url = `https://github.com/intutic/intutic/releases/download/v${cliPkgVersion}/${assetName}`
 
   log.info(`Downloading precompiled Intutic proxy from ${url}...`)
-  
+
   const response = await fetch(url)
   if (!response.ok) {
     throw new Error(`Failed to download binary from release server: HTTP ${response.status} ${response.statusText}`)
@@ -145,6 +146,19 @@ async function downloadProxyBinary(destPath: string): Promise<string> {
 
   const arrayBuffer = await response.arrayBuffer()
   const buffer = Buffer.from(arrayBuffer)
+
+  log.info('Verifying checksum...')
+  const checksumsUrl = `https://github.com/intutic/intutic/releases/download/v${cliPkgVersion}/checksums.json`
+  const checksumsResponse = await fetch(checksumsUrl)
+  if (!checksumsResponse.ok) {
+    throw new Error(
+      `Failed to download checksums.json (HTTP ${checksumsResponse.status} ${checksumsResponse.statusText}).\n` +
+        `  URL: ${checksumsUrl}\n` +
+        `Refusing to install an unverified binary.`,
+    )
+  }
+  const checksums = parseChecksums(await checksumsResponse.text())
+  verifyChecksum(buffer, checksums, assetName)
 
   const destDir = node_path.dirname(destPath)
   await node_fs.mkdir(destDir, { recursive: true })

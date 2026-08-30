@@ -1,0 +1,21 @@
+# Keeps the SHA-pinned GitHub Actions in .github/workflows/*.yml current.
+#
+# Every third-party action reference in this repo is pinned to a full commit
+# SHA (not a floating tag) so a compromised or malicious action release can't
+# silently swap in — but a SHA pin that nothing ever bumps just freezes the
+# repo on whatever commit it started at, including any bug or vulnerability
+# already present there. This is the update side of that pin: Dependabot
+# opens a PR bumping the SHA (with the version-tag comment kept current)
+# whenever the pinned action publishes a new release, so the pin stays
+# deliberate and reviewed rather than either mutable or stale.
+#
+# Scoped to github-actions only. npm dependencies already have their own
+# deliberate mechanism (pnpm's minimumReleaseAge cooldown) — an additional
+# Dependabot version-bump flow for that ecosystem would duplicate or
+# conflict with it rather than close a real gap.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
