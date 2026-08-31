@@ -884,55 +884,113 @@ fn estimate_model_cost(model: &str, input_tokens: u32, output_tokens: u32) -> f6
 }
 
 /// The two cost figures the reward engine and telemetry need for one request
-/// (TD-347): `raw` — what the REQUESTED model would have cost — and `actual`
-/// — what the ROUTED model actually cost.
+/// (TD-347, honest-counterfactual pass TD-445): `raw` — what the REQUESTED
+/// model would have cost — and `actual` — what the ROUTED model actually
+/// cost.
 ///
-/// `raw` is deliberately CACHE-BLIND: it prices `usage.total_input()` (the
-/// plain sum of all three input buckets) at the requested model's full input
-/// rate via [`pricing::estimate_cost`], never [`pricing::estimate_cost_cached`].
-/// This is the counterfactual "what would this have cost un-optimized" side of
-/// the existing `actual/raw` reward ratio (`routing::reward::compute_reward`,
-/// and the TypeScript `banditRewardCron.ts`). If `raw` also got a cache
-/// discount, the ratio would cancel the discount out on both sides and the
-/// entire point of this change — rewarding cache-preserving routing — would
-/// become a silent no-op.
+/// `raw` used to be unconditionally CACHE-BLIND — priced at the requested
+/// model's full input rate no matter what — while `actual` was priced
+/// cache-aware. That was backwards for the one case that matters most: when
+/// the router did NOT move the request (`routed_model == requested_model`),
+/// pricing `raw` cache-blind and `actual` cache-aware manufactured a reward
+/// bonus for doing nothing. A warm turn where the router correctly left the
+/// request alone was billed at full input rate on the `raw` side and the
+/// cache-discounted rate on the `actual` side, so `actual < raw` on every
+/// such turn — `compute_reward`'s cost term paid out for a no-op, on every
+/// warm turn, which is the direct source of inflated `savedUsd` on the
+/// dashboard. This function's whole job now is to price both sides on THE
+/// SAME token split, differing only by which model's rates apply:
 ///
-/// `actual` is priced cache-aware via [`pricing::estimate_cost_cached`].
+/// - `routed_model == requested_model`: `raw == actual` exactly — the
+///   counterfactual IS what happened, so the cost term is precisely zero.
+///   No bonus for not routing.
+/// - The router moved to a different model AND `prior_cache_read_ratio` is
+///   `Some` (this scope's most recent observed cache-read fraction FOR
+///   `requested_model` specifically — see `routing::bandit::RouteDecision`):
+///   `raw` reprices the SAME total input/output split `actual` used, at
+///   `requested_model`'s rates, assuming that ratio held. This is the
+///   "would have kept that warmth" case — the honest middle ground between
+///   assuming stone cold (the old bug) and assuming it inherited the ROUTED
+///   model's own warmth (wrong; different models don't share a provider-side
+///   cache prefix).
+/// - The router moved AND there is no such observation: falls back to
+///   cache-blind pricing on the real total — the honest answer when there is
+///   no evidence either way, not an assumption in either direction.
+///
+/// `actual` is always priced cache-aware via [`pricing::estimate_cost_cached`]
+/// on the real reported split.
 ///
 /// `fallback_prompt`/`fallback_completion` are the byte-length heuristic
 /// callers already compute for the case a provider reports no usage at all
 /// (`(text.len() as f64 / 4.0).max(1.0)`, applied upstream of this function).
-/// They are used for BOTH figures, and only when `usage` itself is entirely
-/// empty (no input or output bucket reported) — a silent provider keeps
-/// exactly today's fallback-priced, necessarily cache-blind behavior, rather
-/// than fabricating a cache split for tokens nothing ever measured.
+/// This fallback path is UNCHANGED by the above and stays cache-blind on both
+/// sides — there is no real cache split to reason about for tokens nothing
+/// ever measured, so fabricating one here would be worse than not trying.
 fn request_costs(
     requested_model: &str,
     routed_model: &str,
     usage: &TokenUsage,
     fallback_prompt: u32,
     fallback_completion: u32,
+    prior_cache_read_ratio: Option<f64>,
 ) -> (f64 /* raw */, f64 /* actual */) {
     let total_input = usage.total_input();
     let output = usage.output.unwrap_or(0);
     let has_real_usage = total_input > 0 || output > 0;
 
-    let raw_input = if has_real_usage { total_input } else { fallback_prompt };
-    let raw_output = if has_real_usage { output } else { fallback_completion };
-    let raw = pricing::estimate_cost(requested_model, raw_input, raw_output);
-
-    let actual_usage = if has_real_usage {
-        *usage
-    } else {
-        TokenUsage {
+    if !has_real_usage {
+        let raw = pricing::estimate_cost(requested_model, fallback_prompt, fallback_completion);
+        let actual_usage = TokenUsage {
             uncached_input: Some(fallback_prompt),
             output: Some(fallback_completion),
             ..Default::default()
-        }
+        };
+        let actual = pricing::estimate_cost_cached(routed_model, &actual_usage);
+        return (raw, actual);
+    }
+
+    let actual = pricing::estimate_cost_cached(routed_model, usage);
+
+    let raw = if routed_model == requested_model {
+        // No routing happened — the counterfactual IS what happened.
+        actual
+    } else if let Some(ratio) = prior_cache_read_ratio {
+        let ratio = ratio.clamp(0.0, 1.0);
+        let cache_read = (total_input as f64 * ratio).round() as u32;
+        let counterfactual_usage = TokenUsage {
+            uncached_input: Some(total_input.saturating_sub(cache_read)),
+            cache_read_input: Some(cache_read),
+            cache_write_input: None,
+            output: Some(output),
+        };
+        pricing::estimate_cost_cached(requested_model, &counterfactual_usage)
+    } else {
+        pricing::estimate_cost(requested_model, total_input, output)
     };
-    let actual = pricing::estimate_cost_cached(routed_model, &actual_usage);
 
     (raw, actual)
+}
+
+/// This response's observed prompt-cache-read fraction, in basis points —
+/// what `record_session_cache` persists for a future request's
+/// `prior_cache_read_ratio`. `None` when the provider reported NEITHER cache
+/// bucket at all (both `uncached_input`-only usage, or genuinely empty),
+/// which must not be recorded as `Some(0)` — a bucket a provider does not
+/// report is "unmeasured", not "measured, and cold". Distinct from
+/// `has_real_usage` in `request_costs`: a provider can report real token
+/// counts while never reporting cache activity at all (no `cache_read_input`/
+/// `cache_write_input` fields), which is exactly the case this must not
+/// mistake for a cold cache.
+fn cache_read_bp(usage: &TokenUsage) -> Option<u32> {
+    if usage.cache_read_input.is_none() && usage.cache_write_input.is_none() {
+        return None;
+    }
+    let total_input = usage.total_input();
+    if total_input == 0 {
+        return None;
+    }
+    let ratio = usage.cache_read_input.unwrap_or(0) as f64 / total_input as f64;
+    Some((ratio.clamp(0.0, 1.0) * 10_000.0).round() as u32)
 }
 
 /// Resolves the upstream provider credential for a workspace's request.
@@ -3678,26 +3736,31 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
 
     // Contextual Bandit Routing
     let prompt_text = crate::plugins::semantic_cache::extract_prompt_text(&body_json);
-    let (mut actual_model, sop_tier, task_type) = if bandit_active {
+    let (mut actual_model, sop_tier, task_type, prior_cache_read_ratio) = if bandit_active {
         match crate::routing::bandit::route_model(
             &state.store,
             &state.control_plane,
             &workspace_id,
-            &session_id,
+            // tool_scope_id, NOT session_id — a bare x-session-id is "unknown"
+            // for effectively all traffic (see tool_history_scope's doc
+            // comment), so keying the routing lock on it made every
+            // unidentified caller in every tenant share one lock.
+            &tool_scope_id,
             &model,
             &prompt_text,
             &state.config.intutic_settings.routing.candidate_models,
+            &state.config.intutic_settings.routing,
         )
         .await
         {
-            Ok(res) => res,
+            Ok(res) => (res.model, res.sop_tier, res.task_type, res.prior_cache_read_ratio),
             Err(e) => {
                 tracing::warn!("Bandit routing failed: {}", e);
-                (model.clone(), "TIER_1".to_string(), "coding".to_string())
+                (model.clone(), "TIER_1".to_string(), "coding".to_string(), None)
             }
         }
     } else {
-        (model.clone(), "TIER_1".to_string(), "coding".to_string())
+        (model.clone(), "TIER_1".to_string(), "coding".to_string(), None)
     };
 
     // Shadow: the selection was made in full and is recorded, but the request is
@@ -4345,8 +4408,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 );
             }
 
-            // 2. Unlock, so the session is not condemned to repeat the pick.
-            let _ = state.store.clear_session_locked_model(&session_id).await;
+            // 2. Unlock, so the scope is not condemned to repeat the pick.
+            // Must match the scope route_model locked under — tool_scope_id,
+            // not session_id (see the route_model call site's comment).
+            let _ = state.store.clear_session_locked_model(&tool_scope_id).await;
 
             // 3. One retry, same provider only (the plan is None otherwise).
             if let Some((f_url, f_headers, f_body)) = fallback_plan.clone() {
@@ -4604,6 +4669,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         };
         let loop_run_id_clone = loop_run_id_header.clone();
         let break_glass_request_id_clone = break_glass_request_id.clone();
+        let tool_scope_id_clone = tool_scope_id.clone();
         let control_plane_url_clone = std::env::var("CONTROL_PLANE_URL").unwrap_or_default();
         let judge_active_clone = judge_active;
         let personal_sops_clone = personal_sops.clone();
@@ -5807,7 +5873,17 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 &usage_acc,
                 final_prompt_tokens,
                 final_completion_tokens,
+                prior_cache_read_ratio,
             );
+
+            // Fire-and-forget: feeds a FUTURE request's prior_cache_read_ratio,
+            // never this one's. A lost write just means the next request's
+            // counterfactual falls back to cache-blind.
+            if let Some(bp) = cache_read_bp(&usage_acc) {
+                let _ = reward_store_clone
+                    .record_session_cache(&tool_scope_id_clone, &actual_model_clone, bp)
+                    .await;
+            }
 
             if reward_eligible {
                 reward_engine_clone
@@ -6653,7 +6729,16 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         &usage_final,
         final_prompt_tokens,
         final_completion_tokens,
+        prior_cache_read_ratio,
     );
+
+    // Fire-and-forget: feeds a FUTURE request's prior_cache_read_ratio, never
+    // this one's. A lost write just means the next request's counterfactual
+    // falls back to cache-blind.
+    if let Some(bp) = cache_read_bp(&usage_final) {
+        let _ = state.store.record_session_cache(&tool_scope_id, &actual_model, bp).await;
+    }
+
     let latency_ms = start.elapsed().as_millis() as u32;
 
     // Advisory echo scan of the model's own output, plus (Phase 4A) a
@@ -7654,6 +7739,144 @@ pub fn get_terminal_stream_event(protocol: &crate::protocol::Protocol, model: &s
 mod tests {
     use super::*;
     use axum::http::HeaderMap;
+
+    /// TD-445 / the honest counterfactual (Wave 3.2 of the audit-remediation
+    /// programme): `request_costs` used to price `raw` cache-blind
+    /// unconditionally while `actual` was cache-aware, which meant a warm
+    /// turn where the router correctly left the request alone (`routed ==
+    /// requested`) was billed full rate on the `raw` side and the
+    /// cache-discounted rate on the `actual` side — `compute_reward`'s cost
+    /// term then paid out a bonus for doing nothing, on every warm turn.
+    mod honest_counterfactual {
+        use super::*;
+        use crate::config::RewardConfig;
+        use crate::routing::reward::{compute_reward, RewardSignals, NO_FAULT_BASELINE};
+
+        const WARM_MODEL: &str = "claude-sonnet-4-5"; // has a real cache_read_cost_per_1k in the bundle
+
+        fn warm_usage() -> TokenUsage {
+            TokenUsage {
+                uncached_input: Some(200),
+                cache_read_input: Some(800),
+                cache_write_input: None,
+                output: Some(100),
+            }
+        }
+
+        /// The single highest-value assertion in the whole audit-remediation
+        /// programme: `routed == requested` on a warm turn must score
+        /// EXACTLY `NO_FAULT_BASELINE` — no bonus for not routing.
+        #[test]
+        fn routed_equals_requested_on_a_warm_turn_scores_exactly_no_fault_baseline() {
+            let usage = warm_usage();
+            let (raw, actual) = request_costs(WARM_MODEL, WARM_MODEL, &usage, 0, 0, None);
+
+            assert_eq!(raw, actual, "no routing happened — the counterfactual IS what happened");
+            assert!(raw > 0.0, "sanity: a real cache-read-heavy call must not cost exactly zero");
+
+            let reward = compute_reward(
+                &RewardSignals {
+                    upstream_ok: true,
+                    latency_ms: 0,
+                    token_anomaly: false,
+                    raw_cost_usd: raw,
+                    actual_cost_usd: actual,
+                    response_integrity: 100,
+                },
+                &RewardConfig::default(),
+            );
+            assert_eq!(
+                reward, NO_FAULT_BASELINE,
+                "a clean, unrouted, warm turn must score exactly the no-fault baseline — \
+                 any deviation means the cost term is still paying (or charging) for \
+                 something that didn't happen"
+            );
+        }
+
+        /// The router moved off a model this scope had recently seen warm —
+        /// the counterfactual must keep that warmth, not assume the
+        /// requested model would have started stone cold.
+        #[test]
+        fn a_prior_cache_read_ratio_keeps_the_counterfactual_warm() {
+            let usage = warm_usage(); // as reported by the ROUTED model
+            let requested = WARM_MODEL;
+            let routed = "gpt-4o"; // a different model, no cache rate in the bundle
+
+            let (raw_cold, _actual) = request_costs(requested, routed, &usage, 0, 0, None);
+            let (raw_warm, _actual2) =
+                request_costs(requested, routed, &usage, 0, 0, Some(0.8));
+
+            assert!(
+                raw_warm < raw_cold,
+                "a requested model observed 80% warm must price cheaper than assuming it \
+                 was stone cold: warm={raw_warm} cold={raw_cold}"
+            );
+        }
+
+        /// No observation of the requested model's own warmth — cache-blind
+        /// is the honest answer, not an assumption in either direction. This
+        /// pins the exact value so a change to the fallback formula is
+        /// visible here, not just as "some number changed".
+        #[test]
+        fn no_prior_observation_falls_back_to_cache_blind_pricing() {
+            let usage = warm_usage();
+            let (raw, _actual) = request_costs("claude-sonnet-4-5", "gpt-4o", &usage, 0, 0, None);
+            let expected = pricing::estimate_cost("claude-sonnet-4-5", usage.total_input(), 100);
+            assert_eq!(raw, expected);
+        }
+
+        /// The `has_real_usage == false` fallback path is explicitly UNCHANGED
+        /// by this fix — no real usage means no real cache split to reason
+        /// about, so it must stay cache-blind on both sides regardless of
+        /// what `prior_cache_read_ratio` says.
+        #[test]
+        fn no_real_usage_stays_cache_blind_regardless_of_prior_ratio() {
+            let empty = TokenUsage::default();
+            let (raw_none, actual_none) =
+                request_costs("claude-sonnet-4-5", "gpt-4o", &empty, 400, 100, None);
+            let (raw_ratio, actual_ratio) =
+                request_costs("claude-sonnet-4-5", "gpt-4o", &empty, 400, 100, Some(0.9));
+
+            assert_eq!(raw_none, raw_ratio, "prior_cache_read_ratio must be ignored on the fallback path");
+            assert_eq!(actual_none, actual_ratio);
+            assert_eq!(raw_none, pricing::estimate_cost("claude-sonnet-4-5", 400, 100));
+        }
+
+        #[test]
+        fn cache_read_bp_is_none_when_neither_cache_bucket_is_reported() {
+            let usage = TokenUsage {
+                uncached_input: Some(500),
+                output: Some(50),
+                ..Default::default()
+            };
+            assert_eq!(
+                cache_read_bp(&usage),
+                None,
+                "a provider that never reports cache activity must read as unmeasured, not cold"
+            );
+        }
+
+        #[test]
+        fn cache_read_bp_computes_the_real_fraction() {
+            let usage = TokenUsage {
+                uncached_input: Some(200),
+                cache_read_input: Some(800),
+                output: Some(50),
+                ..Default::default()
+            };
+            assert_eq!(cache_read_bp(&usage), Some(8_000)); // 800/1000 = 80.00%
+        }
+
+        #[test]
+        fn cache_read_bp_is_none_on_zero_total_input() {
+            let usage = TokenUsage {
+                cache_read_input: Some(0),
+                output: Some(50),
+                ..Default::default()
+            };
+            assert_eq!(cache_read_bp(&usage), None);
+        }
+    }
 
     /// The split-secret case `ArgHoldback` exists to close.
     ///

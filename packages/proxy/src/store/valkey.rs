@@ -227,8 +227,15 @@ fn outage_key(workspace_id: &str) -> String {
     format!("bandit:outage_failures:{}", workspace_id)
 }
 
-fn session_key(session_id: &str) -> String {
-    format!("session:metadata:{}", session_id)
+/// `scope` MUST be `proxy::tool_history_scope`'s output
+/// (`{workspace_id}:{agent}`), matching `sop_pin_key`'s shape and for the
+/// same reason: the pre-`v2:` key was `session:metadata:{sid}`, keyed on the
+/// bare `x-session-id` header that no harness sets, so every unidentified
+/// caller in every tenant shared one lock. `v2:` abandons those old keys
+/// rather than reinterpreting them — no migration, no coordination, and
+/// nothing outside this crate reads them.
+fn session_key(scope: &str) -> String {
+    format!("v2:routing:{}", scope)
 }
 
 /// A pinned SOP advisory block's key (TD-348).
@@ -428,40 +435,69 @@ impl LocalStore for ValkeyStore {
         Ok(())
     }
 
-    async fn session_routing(&self, session_id: &str) -> anyhow::Result<SessionRouting> {
+    async fn session_routing(&self, scope: &str) -> anyhow::Result<SessionRouting> {
+        debug_assert!(scope.contains(':'), "session routing scope must be tool_history_scope's {{workspace}}:{{agent}} output, not a bare session id: {scope:?}");
         let mut conn = self.conn();
-        let key = session_key(session_id);
+        let key = session_key(scope);
         // Non-empty only: the caller treats "" and absent identically, and the
         // pre-trait code reached both through `unwrap_or_else(|_| "")`.
         let locked_model: Option<String> = conn.hget(&key, "lockedModel").await.ok().flatten();
         let sop_tier: Option<String> = conn.hget(&key, "sopTier").await.ok().flatten();
         let last_model: Option<String> = conn.hget(&key, "lastModel").await.ok().flatten();
+        let cache_warm_model: Option<String> = conn.hget(&key, "cacheWarmModel").await.ok().flatten();
+        let cache_read_bp: Option<u32> = conn.hget(&key, "cacheReadBp").await.ok().flatten();
+        let cache_observed_at: Option<i64> = conn.hget(&key, "cacheObservedAt").await.ok().flatten();
         Ok(SessionRouting {
             locked_model: locked_model.filter(|s| !s.is_empty()),
             sop_tier: sop_tier.filter(|s| !s.is_empty()),
             last_model: last_model.filter(|s| !s.is_empty()),
+            cache_warm_model: cache_warm_model.filter(|s| !s.is_empty()),
+            cache_read_bp,
+            cache_observed_at,
         })
     }
 
-    async fn set_session_locked_model(
-        &self,
-        session_id: &str,
-        model: &str,
-    ) -> anyhow::Result<()> {
+    async fn set_session_locked_model(&self, scope: &str, model: &str) -> anyhow::Result<()> {
+        debug_assert!(scope.contains(':'), "session routing scope must be tool_history_scope's {{workspace}}:{{agent}} output, not a bare session id: {scope:?}");
         let mut conn = self.conn();
-        let key = session_key(session_id);
+        let key = session_key(scope);
         // "lastModel" survives `clear_session_locked_model` (which only
         // `hdel`s "lockedModel") — see `SessionRouting::last_model`. One
         // round trip for both fields.
         let _: () = conn
             .hset_multiple(&key, &[("lockedModel", model), ("lastModel", model)])
             .await?;
+        // Sliding 24h TTL on every write, matching TOOL_SEQUENCE_TTL_SECS —
+        // this key now carries a real workspace:agent identity rather than
+        // the old degenerate shared session bucket, so it must not accumulate
+        // forever the way that bucket implicitly didn't (constant churn kept
+        // it "fresh" by accident).
+        let _: Result<(), _> = conn.expire(&key, TOOL_SEQUENCE_TTL_SECS).await;
         Ok(())
     }
 
-    async fn clear_session_locked_model(&self, session_id: &str) -> anyhow::Result<()> {
+    async fn clear_session_locked_model(&self, scope: &str) -> anyhow::Result<()> {
+        debug_assert!(scope.contains(':'), "session routing scope must be tool_history_scope's {{workspace}}:{{agent}} output, not a bare session id: {scope:?}");
         let mut conn = self.conn();
-        let _: () = conn.hdel(session_key(session_id), "lockedModel").await?;
+        let _: () = conn.hdel(session_key(scope), "lockedModel").await?;
+        Ok(())
+    }
+
+    async fn record_session_cache(&self, scope: &str, model: &str, cache_read_bp: u32) -> anyhow::Result<()> {
+        debug_assert!(scope.contains(':'), "session routing scope must be tool_history_scope's {{workspace}}:{{agent}} output, not a bare session id: {scope:?}");
+        let mut conn = self.conn();
+        let key = session_key(scope);
+        let _: () = conn
+            .hset_multiple(
+                &key,
+                &[
+                    ("cacheWarmModel", model.to_string()),
+                    ("cacheReadBp", cache_read_bp.to_string()),
+                    ("cacheObservedAt", chrono::Utc::now().timestamp().to_string()),
+                ],
+            )
+            .await?;
+        let _: Result<(), _> = conn.expire(&key, TOOL_SEQUENCE_TTL_SECS).await;
         Ok(())
     }
 

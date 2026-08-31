@@ -410,8 +410,25 @@ export interface DashboardSummary {
   costSavings?: {
     rawCostUsd: number
     actualCostUsd: number
+    /**
+     * Can be negative (Wave 3.2's honest counterfactual pass removed a bug
+     * that manufactured a reward/savings bonus for the router doing
+     * nothing — `rawCostUsd` on new traces now prices identically to
+     * `actualCostUsd` when the request wasn't routed, so a genuine
+     * overspend, where routing picked a worse model, now shows as one
+     * instead of being floored to 0). Consumers must render this signed,
+     * not `Math.max(0, …)` it a second time.
+     */
     savedUsd: number
     savingsPercent: number
+    /**
+     * Provider prompt-cache reads (TD-347) over the same window — a
+     * SEPARATE population from `savedUsd`. A request can show heavy
+     * cache-read activity while `savedUsd` is flat or negative (the router
+     * moved off a model that was warm), so this must never be folded into
+     * `savedUsd` or the two figures will misrepresent each other.
+     */
+    cacheReadInputTokens: number
   }
   /**
    * Runaway spend averted by proxy KILL enforcement, extrapolated forward from

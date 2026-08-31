@@ -605,6 +605,35 @@ pub struct RoutingConfig {
     #[serde(default = "default_sop_pin_max_age_secs")]
     pub sop_pin_max_age_secs: u64,
 
+    /// How old a `SessionRouting::cache_observed_at` observation may be and
+    /// still count as "fresh" for the cache-honesty guard (`bandit.rs`,
+    /// immediately after the session-lock check). Defaults to 300 —
+    /// Anthropic's own prompt-cache TTL, so this tracks the window the
+    /// observation is actually still true for, not an arbitrary staleness
+    /// budget. `0` is the KILL SWITCH: the guard never finds a fresh
+    /// observation and always falls through to normal sampling.
+    #[serde(default = "default_cache_guard_max_age_secs")]
+    pub cache_guard_max_age_secs: u64,
+
+    /// The minimum observed cache-read fraction (basis points, 0-10_000) for
+    /// the guard to consider a scope "warm enough" to decline sampling and
+    /// stay on the requested model. Defaults to 5000 (50%) — a coin-flip
+    /// cache-read rate is not worth pinning a whole turn's routing decision
+    /// over, but a majority-warm prefix is.
+    #[serde(default = "default_cache_guard_min_read_bp")]
+    pub cache_guard_min_read_bp: u32,
+
+    /// Prompt size, in bytes, above which the guard's cold-start heuristic
+    /// declines to sample on a scope's FIRST turn (no cache observation
+    /// exists yet to consult). A large first prompt is the shape most
+    /// likely to be worth keeping a stable prefix for. Fires at most once
+    /// per scope — the moment any real cache observation exists (even a
+    /// stale or cold one), evidence supersedes the heuristic permanently.
+    /// `0` disables just this heuristic, leaving the evidence-based guard
+    /// itself untouched.
+    #[serde(default = "default_cache_guard_cold_start_prompt_bytes")]
+    pub cache_guard_cold_start_prompt_bytes: usize,
+
     #[serde(default)]
     pub reward: RewardConfig,
 }
@@ -625,6 +654,9 @@ impl Default for RoutingConfig {
             // as before this field existed.
             mirror_candidate_model: None,
             sop_pin_max_age_secs: default_sop_pin_max_age_secs(),
+            cache_guard_max_age_secs: default_cache_guard_max_age_secs(),
+            cache_guard_min_read_bp: default_cache_guard_min_read_bp(),
+            cache_guard_cold_start_prompt_bytes: default_cache_guard_cold_start_prompt_bytes(),
             reward: RewardConfig::default(),
         }
     }
@@ -705,6 +737,15 @@ fn default_candidate_models() -> Vec<String> {
 }
 fn default_sop_pin_max_age_secs() -> u64 {
     600
+}
+fn default_cache_guard_max_age_secs() -> u64 {
+    300
+}
+fn default_cache_guard_min_read_bp() -> u32 {
+    5_000
+}
+fn default_cache_guard_cold_start_prompt_bytes() -> usize {
+    20_000
 }
 fn default_latency_slo_ms() -> u32 {
     30_000
