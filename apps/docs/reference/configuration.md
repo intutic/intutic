@@ -33,7 +33,7 @@ These variables are used exclusively in the backend control plane deployment to 
 | `TRACE_SIGNING_RETIRED_KEYS` | ❌ | — | Previously-active PEMs, any number of them, separated by newlines or commas or not at all (whole armoured blocks are matched). **Never used to sign** — they are published in the JWKS and used to verify roots sealed before a rotation, selected by the key id recorded on each root. Set this when you rotate `TRACE_SIGNING_PRIVATE_KEY`; without it, every root signed by the outgoing key becomes permanently unverifiable. A malformed entry here is logged and skipped rather than fatal, so one stale PEM cannot empty the JWKS. |
 | `PORT` | ❌ | `3001` | HTTP port for the control plane API service |
 | `LITELLM_ADMIN_BASE_URL`| ❌ | `http://litellm:4000` | LiteLLM helper admin URL |
-| `LITELLM_MASTER_KEY` | ❌ | — | LiteLLM helper API token |
+| `LITELLM_PLATFORM_KEY` | ❌ | — | Scoped LiteLLM virtual key for judge/probe/generation calls — NOT LiteLLM's own admin secret, which this service never holds. See the key-rotation runbook for how it's minted. |
 
 ---
 
