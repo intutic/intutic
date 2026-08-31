@@ -540,30 +540,39 @@ impl LocalStore for MemoryStore {
         Ok(())
     }
 
-    async fn session_routing(&self, session_id: &str) -> anyhow::Result<SessionRouting> {
+    async fn session_routing(&self, scope: &str) -> anyhow::Result<SessionRouting> {
+        debug_assert!(scope.contains(':'), "session routing scope must be tool_history_scope's {{workspace}}:{{agent}} output, not a bare session id: {scope:?}");
         Ok(lock(&self.sessions, "session")?
-            .get(session_id)
+            .get(scope)
             .cloned()
             .unwrap_or_default())
     }
 
-    async fn set_session_locked_model(
-        &self,
-        session_id: &str,
-        model: &str,
-    ) -> anyhow::Result<()> {
+    async fn set_session_locked_model(&self, scope: &str, model: &str) -> anyhow::Result<()> {
+        debug_assert!(scope.contains(':'), "session routing scope must be tool_history_scope's {{workspace}}:{{agent}} output, not a bare session id: {scope:?}");
         let mut sessions = lock(&self.sessions, "session")?;
-        let sess = sessions.entry(session_id.to_string()).or_default();
+        let sess = sessions.entry(scope.to_string()).or_default();
         sess.locked_model = Some(model.to_string());
         // Survives `clear_session_locked_model` — see `SessionRouting::last_model`.
         sess.last_model = Some(model.to_string());
         Ok(())
     }
 
-    async fn clear_session_locked_model(&self, session_id: &str) -> anyhow::Result<()> {
-        if let Some(sess) = lock(&self.sessions, "session")?.get_mut(session_id) {
+    async fn clear_session_locked_model(&self, scope: &str) -> anyhow::Result<()> {
+        debug_assert!(scope.contains(':'), "session routing scope must be tool_history_scope's {{workspace}}:{{agent}} output, not a bare session id: {scope:?}");
+        if let Some(sess) = lock(&self.sessions, "session")?.get_mut(scope) {
             sess.locked_model = None;
         }
+        Ok(())
+    }
+
+    async fn record_session_cache(&self, scope: &str, model: &str, cache_read_bp: u32) -> anyhow::Result<()> {
+        debug_assert!(scope.contains(':'), "session routing scope must be tool_history_scope's {{workspace}}:{{agent}} output, not a bare session id: {scope:?}");
+        let mut sessions = lock(&self.sessions, "session")?;
+        let sess = sessions.entry(scope.to_string()).or_default();
+        sess.cache_warm_model = Some(model.to_string());
+        sess.cache_read_bp = Some(cache_read_bp);
+        sess.cache_observed_at = Some(chrono::Utc::now().timestamp());
         Ok(())
     }
 

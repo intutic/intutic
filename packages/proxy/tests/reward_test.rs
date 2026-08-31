@@ -8,7 +8,7 @@
 //! Backend-specific tests — wire format, cloud takeover — are marked as such
 //! and skip when Valkey is absent.
 
-use intutic_proxy::config::RewardConfig;
+use intutic_proxy::config::{RewardConfig, RoutingConfig};
 use intutic_proxy::routing::bandit::route_model;
 use intutic_proxy::routing::reward::{apply_update, RewardEngine, RewardSignals};
 use intutic_proxy::store::{
@@ -95,8 +95,8 @@ async fn cleanup(ws: &str, session: Option<&str>) {
     let mut conn = valkey.as_ref().clone();
     let _: Result<(), _> = conn.del(format!("bandit:{}", ws)).await;
     let _: Result<(), _> = conn.del(format!("bandit:reward_mode:{}", ws)).await;
-    if let Some(sid) = session {
-        let _: Result<(), _> = conn.del(format!("session:metadata:{}", sid)).await;
+    if let Some(scope) = session {
+        let _: Result<(), _> = conn.del(format!("v2:routing:{}", scope)).await;
     }
 }
 
@@ -188,7 +188,11 @@ async fn cloud_marker_suppresses_local_writes() {
 async fn twenty_rewards_exit_cold_start_and_enable_sampling() {
     for (name, store, cp) in backends().await {
         let ws = unique_ws("coldstart");
-        let session = unique_ws("session");
+        // route_model's scope parameter must be tool_history_scope's shape,
+        // {workspace_id}:{agent} — never a bare session id (see the
+        // debug_assert in session_routing/set_session_locked_model/
+        // clear_session_locked_model, which now enforces exactly this).
+        let scope = format!("{ws}:agent");
         let engine = RewardEngine::new();
         let cfg = RewardConfig::default();
 
@@ -210,17 +214,19 @@ async fn twenty_rewards_exit_cold_start_and_enable_sampling() {
             "gpt-4o".to_string(),
             "gemini-2.0-flash".to_string(),
         ];
-        let (selected, sop_tier, task_type) = route_model(
+        let decision = route_model(
             &store,
             &cp,
             &ws,
-            &session,
+            &scope,
             "gpt-4o",
             "write a function to add two numbers",
             &candidates,
+            &RoutingConfig::default(),
         )
         .await
         .unwrap();
+        let (selected, sop_tier, task_type) = (decision.model, decision.sop_tier, decision.task_type);
         assert!(
             candidates.contains(&selected),
             "[{name}] sampled model {selected} must come from the candidate pool"
@@ -228,12 +234,56 @@ async fn twenty_rewards_exit_cold_start_and_enable_sampling() {
         assert_eq!(sop_tier, "TIER_1", "[{name}]");
         assert_eq!(task_type, "coding", "[{name}]");
 
-        // The sampled choice must be locked for the session.
-        let locked = store.session_routing(&session).await.unwrap().locked_model;
+        // The sampled choice must be locked for the scope.
+        let locked = store.session_routing(&scope).await.unwrap().locked_model;
         assert_eq!(locked.as_deref(), Some(selected.as_str()), "[{name}]");
 
-        cleanup(&ws, Some(&session)).await;
+        cleanup(&ws, Some(&scope)).await;
     }
+}
+
+/// The defect this closes: routing state used to key on the bare
+/// `x-session-id` header alone, which is "unknown" for effectively all
+/// traffic — so every unidentified caller in every tenant shared one lock.
+/// `agent` here is deliberately identical across both scopes; only the
+/// workspace differs.
+#[tokio::test]
+async fn two_workspaces_with_identical_agent_suffixes_must_not_share_a_lock() {
+    for (name, store, _cp) in backends().await {
+        let ws_a = unique_ws("scope-a");
+        let ws_b = unique_ws("scope-b");
+        let agent = "agent-shared-suffix";
+        let scope_a = format!("{ws_a}:{agent}");
+        let scope_b = format!("{ws_b}:{agent}");
+
+        store
+            .set_session_locked_model(&scope_a, "claude-3-5-sonnet")
+            .await
+            .unwrap();
+
+        let a = store.session_routing(&scope_a).await.unwrap();
+        let b = store.session_routing(&scope_b).await.unwrap();
+
+        assert_eq!(a.locked_model.as_deref(), Some("claude-3-5-sonnet"), "[{name}]");
+        assert!(
+            b.locked_model.is_none(),
+            "[{name}] workspace B must not see workspace A's lock despite an identical agent suffix"
+        );
+
+        cleanup(&ws_a, Some(&scope_a)).await;
+        cleanup(&ws_b, Some(&scope_b)).await;
+    }
+}
+
+/// The `debug_assert!` catching a fifth instance of the bare-session-id bug:
+/// a scope with no `:` cannot be `tool_history_scope`'s `{workspace}:{agent}`
+/// output, so `cargo test` (a debug build) must panic rather than silently
+/// accept it.
+#[tokio::test]
+#[should_panic(expected = "session routing scope must be")]
+async fn a_bare_session_id_with_no_colon_trips_the_scope_guard() {
+    let store = MemoryStore::new();
+    let _ = store.set_session_locked_model("ses_bare_no_colon", "claude-3-5-sonnet").await;
 }
 
 /// The bytes the enterprise reward cron reads must not change. Field names are
