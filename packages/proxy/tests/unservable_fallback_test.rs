@@ -116,9 +116,15 @@ intutic_settings:
     // The poisoned state: a previous selection locked the unservable model
     // into this session. Every request in the session will be rewritten to it.
     let session_id = "ses_unservable_test";
+    // The store keys on tool_history_scope's {workspace}:{agent} output, not
+    // the bare x-session-id header — see that function's doc comment. With
+    // this request's headers (a non-"unknown" x-session-id), the agent
+    // component is the session id itself, so this reconstructs exactly what
+    // the real request handler will compute.
+    let scope = format!("ws_unservable_test:{session_id}");
     use intutic_proxy::store::LocalStore as _;
     store
-        .set_session_locked_model(session_id, "stub-bad-model")
+        .set_session_locked_model(&scope, "stub-bad-model")
         .await
         .expect("pre-lock");
 
@@ -174,7 +180,7 @@ intutic_settings:
     // The lock is released: the session is no longer condemned to repeat the
     // pick. This is the half that stops the failure from being permanent.
     let session = store
-        .session_routing(session_id)
+        .session_routing(&scope)
         .await
         .expect("session readable");
     assert!(

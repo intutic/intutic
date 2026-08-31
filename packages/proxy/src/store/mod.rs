@@ -68,14 +68,16 @@ pub enum ClaimOutcome {
     Lost,
 }
 
-/// The `session:metadata:{sid}` fields routing reads. Returned together
-/// because `route_model` always needs them, and one method beats several round
-/// trips on the request path.
+/// The `v2:routing:{scope}` fields routing reads, keyed on the resolved
+/// agent scope (`{workspace_id}:{agent}`), not a bare session id — see the
+/// `Session routing` trait-method group's doc comment for why. Returned
+/// together because `route_model` always needs them, and one method beats
+/// several round trips on the request path.
 #[derive(Debug, Clone, Default)]
 pub struct SessionRouting {
     pub locked_model: Option<String>,
     pub sop_tier: Option<String>,
-    /// The most recent model this session was locked to, kept even after
+    /// The most recent model this scope was locked to, kept even after
     /// `clear_session_locked_model` releases the lock — deliberately not
     /// cleared alongside it.
     ///
@@ -83,10 +85,27 @@ pub struct SessionRouting {
     /// separate request" after a lock releases — see
     /// `routing::bandit::route_model`) has something to prefer-tie-break
     /// toward. Without it, the re-sample would have no memory of what the
-    /// session was just running on, and every unlock would cost the KV-cache
+    /// scope was just running on, and every unlock would cost the KV-cache
     /// warmth the session lock exists to protect even when an equally-good
     /// same-family arm was available.
     pub last_model: Option<String>,
+
+    /// The model whose cache-read ratio `cache_read_bp` describes, if any
+    /// has been observed for this scope. Written post-response by
+    /// `record_session_cache` — see that method's doc comment.
+    pub cache_warm_model: Option<String>,
+    /// `cache_warm_model`'s most recently observed cache-read fraction, in
+    /// basis points (0-10_000). Integer, not `f64` — this round-trips
+    /// through Valkey as a hash field, and a float would lose precision on
+    /// every read/write cycle for no benefit: nothing needs sub-basis-point
+    /// resolution on a ratio this noisy request-to-request.
+    pub cache_read_bp: Option<u32>,
+    /// Unix seconds when `cache_read_bp` was last observed. Not currently
+    /// read by anything — `record_session_cache`'s TTL already bounds
+    /// staleness — but kept for the same reason `PinnedSopBlock::fingerprint`
+    /// is: diagnostic bookkeeping for whoever is staring at a stale-looking
+    /// ratio wondering how old it is.
+    pub cache_observed_at: Option<i64>,
 }
 
 /// A cached upstream response, as stored under `cache:response:{sha256}`.
@@ -406,28 +425,56 @@ pub trait LocalStore: Send + Sync + 'static {
         -> anyhow::Result<()>;
 
     // ── Session routing ──────────────────────────────────────────────
+    //
+    // `scope`, not `session_id`: these used to be keyed on the bare,
+    // client-supplied `x-session-id` header, which no harness sets (see
+    // `proxy::tool_history_scope`'s doc comment) — so this state was
+    // effectively one global lock shared across every unidentified caller in
+    // every tenant. Callers MUST pass `tool_history_scope`'s output
+    // (`{workspace_id}:{agent}`), the same resolution `PinScope` already
+    // requires for SOP pins. The parameter is named `scope` rather than
+    // `session_id` so a caller cannot pass the raw header by accident and
+    // have it type-check.
 
-    /// Session's pinned model, SOP tier, and last-pinned model, if routing has
-    /// recorded them.
-    async fn session_routing(&self, session_id: &str) -> anyhow::Result<SessionRouting>;
+    /// The scope's pinned model, SOP tier, and last-pinned model, if routing
+    /// has recorded them.
+    async fn session_routing(&self, scope: &str) -> anyhow::Result<SessionRouting>;
 
-    /// Pin a model for the session. Also updates `last_model`, which —
+    /// Pin a model for the scope. Also updates `last_model`, which —
     /// unlike `locked_model` — survives `clear_session_locked_model`.
-    async fn set_session_locked_model(&self, session_id: &str, model: &str)
-        -> anyhow::Result<()>;
+    async fn set_session_locked_model(&self, scope: &str, model: &str) -> anyhow::Result<()>;
 
-    /// Release the session's model pin.
+    /// Release the scope's model pin.
     ///
     /// The lock is set the moment the bandit selects and, until this existed,
     /// released never. A pick the upstream cannot serve was therefore locked in
-    /// for the session's whole life: every subsequent request took the
+    /// for the scope's whole life: every subsequent request took the
     /// session-lock branch, re-sent the unservable model, and failed the same
     /// way. Called when an upstream error is attributed to the routed model, so
     /// the next request re-selects from arms that have since been penalised.
     ///
     /// Deliberately leaves `last_model` in place — see its doc comment on
     /// `SessionRouting`.
-    async fn clear_session_locked_model(&self, session_id: &str) -> anyhow::Result<()>;
+    async fn clear_session_locked_model(&self, scope: &str) -> anyhow::Result<()>;
+
+    /// Record `model`'s observed prompt-cache-read fraction for `scope`,
+    /// post-response — the write side of `SessionRouting::cache_warm_model`/
+    /// `cache_read_bp`.
+    ///
+    /// This is what makes the counterfactual in `request_costs` honest when
+    /// the router moves off the requested model: the NEXT request's
+    /// `route_model` call reads this back as `prior_cache_read_ratio` and
+    /// prices "what the requested model would have cost" assuming it was
+    /// AS warm as it last was observed to be, instead of assuming it was
+    /// stone cold. Fire-and-forget from the response path — a lost write
+    /// just means the next request's counterfactual falls back to cache-blind,
+    /// not a wrong bill for THIS request.
+    ///
+    /// Callers must skip this call entirely when the response reported
+    /// neither cache bucket at all (both `None`) — a provider that does not
+    /// report cache activity must not stamp a `Some(0)` that reads as
+    /// "measured, and cold" for a model that may simply not report caching.
+    async fn record_session_cache(&self, scope: &str, model: &str, cache_read_bp: u32) -> anyhow::Result<()>;
 
     // ── Tool-sequence anomaly detection ──────────────────────────────
 

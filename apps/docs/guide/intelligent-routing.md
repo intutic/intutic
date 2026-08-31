@@ -58,7 +58,7 @@ $$\text{scale} = \max\left(\tfrac{1}{\log_2(\text{pulls}+2)}, 0.1\right),\quad \
 **Ownership hand-off**: the first local update claims the workspace by setting `bandit:reward_mode:{workspace}` to `local`. When a control plane takes over reward learning it sets the marker to `cloud`, and the local writer stands down automatically within ~60 seconds — arms transfer to LLMProbe without distortion.
 
 > [!NOTE]
-> Routing locks the selected model per session, so one long session contributes many pulls to a single arm. This matches cloud semantics; expect learning to converge per-workspace, not per-request.
+> Routing locks the selected model per **scope** (workspace + the best available caller identity — see [Session Lock and KV-Cache Affinity](#session-lock-and-kv-cache-affinity) below for exactly what that means), so one long-running scope contributes many pulls to a single arm rather than one per request. This matches cloud semantics; expect learning to converge per-workspace, not per-request.
 
 ### Standalone Activation
 
@@ -91,36 +91,53 @@ is never selected, no matter how strong its arm.
 
 ## Session Lock and KV-Cache Affinity
 
-Every session's model choice is pinned for the session's lifetime — the bandit samples once per
-session, not once per request. This section explains why, and what that pin does and doesn't
-protect.
+Every routing scope's model choice is pinned for that scope's lifetime — the bandit samples once
+per scope, not once per request. This section explains why, what a "scope" actually is (it is
+**not** simply "the session," despite the name this feature has always gone by), and what the pin
+does and doesn't protect.
 
-### Why mid-session switches are expensive
+### What "scope" actually means
+
+The natural name for this is "session lock," but no coding-agent harness in practice sends the
+`x-session-id` header that name implies — so a lock keyed on that header alone would, in reality,
+key on the literal string `"unknown"` for effectively all traffic, collapsing every unidentified
+caller in every workspace onto one shared lock. That was a real defect, not a hypothetical one,
+fixed in the same change that made the honesty work below possible.
+
+The real key is the **scope**: `{workspace_id}:{agent}`, where `agent` resolves through a ladder —
+the `x-session-id` header if a harness ever sends one, else the active autonomous-loop run id, else
+the authenticated member id, else `anonymous`. Workspace is always the first component, so
+cross-tenant contamination is structurally impossible regardless of what (if anything) identifies
+the caller beyond that. Anonymous traffic inside one workspace still shares a bucket — correct,
+since there is genuinely nothing to tell two anonymous callers in the same workspace apart — but
+that bucket never crosses a workspace boundary.
+
+### Why mid-scope switches are expensive
 
 Provider inference backends cache the key/value (KV) state of a prompt prefix so a follow-up
 request that repeats that prefix — exactly what a multi-turn conversation does — can skip
 recomputing it, cutting both latency and cost on later turns. That cache is scoped to a specific
-model: switching models mid-session forces the new model to recompute the entire prompt prefix
-from scratch, discarding whatever cache discount the prior turns had built up. A bandit that
-re-sampled fresh on every request would defeat prompt caching almost entirely on any multi-turn
-session, trading a small chance of a marginally-better arm for a guaranteed cache miss on every
-subsequent turn.
+model: switching models mid-conversation forces the new model to recompute the entire prompt
+prefix from scratch, discarding whatever cache discount the prior turns had built up. A bandit
+that re-sampled fresh on every request would defeat prompt caching almost entirely on any
+multi-turn conversation, trading a small chance of a marginally-better arm for a guaranteed cache
+miss on every subsequent turn.
 
-The session lock exists primarily to stop the bandit from flip-flopping arms mid-conversation —
-that was the original complaint it fixes. Keeping the provider-side KV-cache prefix warm across
-turns is a second effect of the same mechanism, not a separate feature, but it's just as real and
-just as load-bearing for session cost and latency.
+The lock exists primarily to stop the bandit from flip-flopping arms mid-conversation — that was
+the original complaint it fixes. Keeping the provider-side KV-cache prefix warm across turns is a
+second effect of the same mechanism, not a separate feature, but it's just as real and just as
+load-bearing for cost and latency.
 
 ### What engages and releases the lock
 
-- **Engaged**: the first time a session is routed — either because Thompson sampling picked an
-  arm, or because the fallback path (fewer than 20 cumulative pulls on the relevant arms) used the
-  requested model outright — the chosen model is written as that session's locked model. Every
-  subsequent request in the session reads the lock and skips sampling entirely.
+- **Engaged**: the first time a scope is routed — either because Thompson sampling picked an arm,
+  or because the fallback path (fewer than 20 cumulative pulls on the relevant arms) used the
+  requested model outright — the chosen model is written as that scope's locked model. Every
+  subsequent request in the scope reads the lock and skips sampling entirely.
 - **Released**: a lock clears when the proxy detects the locked model has become unservable (for
   example, the provider has decommissioned it and starts returning errors specifically attributable
-  to the model choice, not the request). The next request in that session re-samples fresh, and the
-  model the session was just running on feeds a same-family tie-break preference for the new pick —
+  to the model choice, not the request). The next request in that scope re-samples fresh, and the
+  model the scope was just running on feeds a same-family tie-break preference for the new pick —
   so a released lock still prefers landing back in the same model family where reasonably possible,
   rather than jumping to an unrelated one.
 
@@ -128,9 +145,53 @@ just as load-bearing for session cost and latency.
 
 The lock only protects the *model* choice — it says nothing about the rest of the request body.
 SOP content is still prepended to the system prompt on every request, which can itself shift the
-cached prefix even with the model held constant. The session lock keeps you from paying the
-worst-case cost (a full model switch) on every turn; it does not guarantee a byte-identical prefix
-across the whole session.
+cached prefix even with the model held constant. The lock keeps you from paying the worst-case
+cost (a full model switch) on every turn; it does not guarantee a byte-identical prefix across the
+whole scope's life.
+
+## Cache-Honesty Guard
+
+The session lock above protects a scope's *first* routing decision for as long as it holds — but a
+lock releases (an unservable pick) or was never engaged (this is the scope's first-ever turn), and
+at that moment the bandit is about to Thompson-sample fresh with no special regard for whatever
+warmth the requested model may already have. The cache-honesty guard is the layer that closes that
+gap: immediately before sampling, it asks whether there is strong, fresh, first-party evidence
+that the *requested* model's own prefix for this scope is already warm — and if so, declines to
+sample at all, serving the request as asked instead of risking a switch that would discard that
+warmth for an unproven arm.
+
+This is entirely **deterministic, local, and open-core-safe** — no LLM call, no control-plane
+dependency, the same logic in standalone and managed deployments. It reads only
+`SessionRouting.cache_warm_model` / `cache_read_bp` / `cache_observed_at`, populated after every
+routed response's real provider usage data — never a guess, always something this specific scope
+actually observed on a prior turn.
+
+Three knobs, all on `intutic_settings.routing`, following the same shape as `sop_pin_max_age_secs`:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `cache_guard_max_age_secs` | `300` | How old an observation may be and still count as fresh — Anthropic's own prompt-cache TTL, not an arbitrary staleness budget. **`0` is the kill switch**: the guard never finds a fresh observation and always falls through to normal sampling. |
+| `cache_guard_min_read_bp` | `5000` | The minimum observed cache-read fraction, in basis points, to count as "warm enough" to protect. `5000` = 50% — a coin-flip cache-read rate isn't worth pinning a turn's routing decision over. |
+| `cache_guard_cold_start_prompt_bytes` | `20000` | On a scope's very first turn — no observation exists yet — a prompt at or above this size declines to sample once, on the theory that a large first prompt is the shape most likely worth a stable prefix. Fires **at most once per scope, ever**: the moment any real observation exists (even a stale or cold one), evidence permanently supersedes the heuristic. `0` disables just this heuristic, leaving the evidence-based guard itself untouched. |
+
+The guard deliberately does **not** re-engage the session lock when it declines to sample — a
+scope is coarse (`{workspace}:{agent}`) with its own 24-hour TTL, and locking on a single guarded
+turn would pin routing off for a full day. Leaving it unlocked means the guard re-evaluates fresh
+on every turn and resumes sampling the moment the prefix actually goes cold, rather than on a
+fixed schedule.
+
+If you need an instant, config-redeploy-free lever instead of the guard's own kill switch, `routing.mode: shadow`
+stops enforcement entirely while still recording what the router would have chosen.
+
+**Design principle**: the router is only trustworthy if it prices its own decisions honestly. As of
+this guard and the honest-counterfactual pricing fix it depends on, a request that keeps a warm
+model warm is priced identically on both sides of the savings calculation — no phantom bonus for
+declining to switch — and a request the router *would* switch away from a warm prefix is protected
+by a guard whose thresholds are config, not code, and whose kill switch is one value. Every dial
+here is visible in `config.yaml`, not buried in a reward formula. One visible consequence: reported
+savings read *lower* after this pass than before it, on workspaces that were previously crediting
+the router for turns it didn't actually improve. That is the fix working, not a regression — the
+old number was never real.
 
 ---
 

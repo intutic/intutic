@@ -6,7 +6,7 @@
 //! LLD #26 §4.1 — Thompson Sampling Selector
 
 use crate::pricing;
-use crate::store::{ControlPlaneCache, LocalStore};
+use crate::store::{ControlPlaneCache, LocalStore, SessionRouting};
 use rand::prelude::*;
 use rand_distr::Beta;
 use serde::{Deserialize, Serialize};
@@ -232,6 +232,103 @@ fn pick_with_family_preference(
         .map(|(model, _)| model)
 }
 
+/// Wave 3.4: decline to sample when there is strong, fresh evidence the
+/// requested model's own prefix is already warm for this scope — returning
+/// `Some(requested_model)` short-circuits `route_model` straight to serving
+/// the request as asked, `None` lets it proceed to Thompson sampling.
+///
+/// Deliberately does NOT set the session lock when it declines — the one
+/// place this diverges from the cold-start bypass's precedent below. A
+/// scope is coarse (`{workspace}:{agent}`) with a 24h TTL; locking on a
+/// single guarded turn would pin routing off for a whole day. Not locking
+/// lets the guard re-evaluate every turn and resume sampling the moment the
+/// prefix actually goes cold, instead of on a fixed schedule.
+///
+/// Three absences, three answers:
+///   - no observation at all (`cache_warm_model` is `None`) — the bounded
+///     cold-start heuristic: a large first-turn prompt is worth pinning
+///     even with zero evidence yet, since it's the shape most likely to be
+///     worth a stable prefix. Fires AT MOST ONCE per scope, ever — the
+///     moment any real observation exists (even stale or cold), evidence
+///     permanently supersedes the heuristic; this branch does not run once
+///     `cache_warm_model` is populated at all.
+///   - an observation exists but is STALE (older than `max_age_secs`) — sample.
+///   - an observation exists and is fresh, but COLD (`cache_read_bp` below
+///     the threshold) — sample.
+fn cache_guard_decision(
+    session: &SessionRouting,
+    requested_model: &str,
+    prompt_bytes: usize,
+    now_unix: i64,
+    cfg: &crate::config::RoutingConfig,
+) -> Option<String> {
+    let Some(warm_model) = session.cache_warm_model.as_deref() else {
+        if cfg.cache_guard_cold_start_prompt_bytes == 0 {
+            return None;
+        }
+        return (prompt_bytes >= cfg.cache_guard_cold_start_prompt_bytes)
+            .then(|| requested_model.to_string());
+    };
+
+    // `0` is the documented kill switch: no observation is ever "fresh"
+    // enough, so every scope falls through to normal sampling.
+    if cfg.cache_guard_max_age_secs == 0 {
+        return None;
+    }
+
+    // Family, not exact model — `pricing::model_family` collapses date
+    // suffixes, so "claude-sonnet-4-5" and "claude-sonnet-4-5-20250929"
+    // agree here even though `prior_cache_read_ratio`'s exact-match
+    // requirement (needed for accurate repricing) would not treat them as
+    // the same observation.
+    let same_family = match (pricing::model_family(warm_model), pricing::model_family(requested_model)) {
+        (Some(a), Some(b)) => a == b,
+        _ => false,
+    };
+    if !same_family {
+        return None;
+    }
+
+    let fresh = session
+        .cache_observed_at
+        .is_some_and(|observed| now_unix.saturating_sub(observed) <= cfg.cache_guard_max_age_secs as i64);
+    if !fresh {
+        return None;
+    }
+
+    let warm = session
+        .cache_read_bp
+        .is_some_and(|bp| bp >= cfg.cache_guard_min_read_bp);
+    if !warm {
+        return None;
+    }
+
+    Some(requested_model.to_string())
+}
+
+/// `route_model`'s result. A struct rather than a 3-tuple so `prior_cache_read_ratio`
+/// (added for the honest counterfactual — see `proxy::request_costs`) is a named
+/// field every call site must address, not a 4th positional element a
+/// destructure could silently misbind.
+#[derive(Debug, Clone)]
+pub struct RouteDecision {
+    pub model: String,
+    pub sop_tier: String,
+    pub task_type: String,
+    /// `requested_model`'s most recently observed prompt-cache-read fraction
+    /// for this scope (0.0-1.0), from `SessionRouting::cache_read_bp` —
+    /// `Some` only when that observation's `cache_warm_model` is exactly
+    /// `requested_model`, since a ratio observed for a DIFFERENT model says
+    /// nothing about this one. `None` means no usable observation: cold,
+    /// stale-evicted (the same 24h TTL as the lock), or for another model.
+    ///
+    /// Consumed by `request_costs`'s honest counterfactual: when the router
+    /// moves `model` off `requested_model`, this is the only evidence
+    /// available for what `requested_model` would have cost had it been
+    /// called instead of assuming it would have been stone cold.
+    pub prior_cache_read_ratio: Option<f64>,
+}
+
 /// Resolves model routing via Contextual Bandit or Session Lock.
 ///
 /// `candidate_models` comes from `intutic_settings.routing.candidate_models`;
@@ -240,20 +337,34 @@ pub async fn route_model(
     store: &Arc<dyn LocalStore>,
     control_plane: &Arc<dyn ControlPlaneCache>,
     workspace_id: &str,
-    session_id: &str,
+    scope: &str,
     requested_model: &str,
     prompt: &str,
     candidate_models: &[String],
-) -> anyhow::Result<(String, String, String)> {
+    routing_cfg: &crate::config::RoutingConfig,
+) -> anyhow::Result<RouteDecision> {
+    debug_assert!(scope.contains(':'), "route_model's scope must be tool_history_scope's {{workspace}}:{{agent}} output, not a bare session id: {scope:?}");
+
     // Keyword overrides are control-plane state; standalone this is `None` and
     // the classifier falls back to its built-in vocabulary.
     let keywords_json = control_plane.bandit_keywords(workspace_id).await;
     let task_type = classify_task_dynamic(prompt, keywords_json.as_ref());
 
-    let session = store.session_routing(session_id).await.unwrap_or_default();
+    let session = store.session_routing(scope).await.unwrap_or_default();
+
+    // Computed before the partial moves below consume session.sop_tier /
+    // session.locked_model — Option<u32> is Copy, and .as_deref() borrows
+    // rather than moving session.cache_warm_model, so this doesn't race them.
+    let prior_cache_read_ratio: Option<f64> =
+        if session.cache_warm_model.as_deref() == Some(requested_model) {
+            session.cache_read_bp.map(|bp| bp as f64 / 10_000.0)
+        } else {
+            None
+        };
 
     // Resolve SOP tier: session pin, else workspace default, else TIER_1.
-    let resolved_sop_tier = match session.sop_tier {
+    // .clone(), not a move — cache_guard_decision below needs `&session` whole.
+    let resolved_sop_tier = match session.sop_tier.clone() {
         Some(t) => t,
         None => control_plane
             .active_sop_tier(workspace_id)
@@ -264,11 +375,12 @@ pub async fn route_model(
     // 0. Bypass bandit routing if the requested model is not in the candidate pool
     if !candidate_models.iter().any(|m| m == requested_model) {
         tracing::debug!(requested_model = %requested_model, "Requested model not in candidate pool — bypassing bandit");
-        return Ok((
-            requested_model.to_string(),
-            resolved_sop_tier,
-            task_type.to_string(),
-        ));
+        return Ok(RouteDecision {
+            model: requested_model.to_string(),
+            sop_tier: resolved_sop_tier,
+            task_type: task_type.to_string(),
+            prior_cache_read_ratio,
+        });
     }
 
     // 1. Session-Locked Model Routing
@@ -299,9 +411,31 @@ pub async fn route_model(
     // a tier flipped can still shift the prefix once the pin's TTL elapses
     // (or immediately, if an operator has set `sop_pin_max_age_secs: 0`) —
     // see `resolve_injection_block`'s doc comment for the full trade-off.
-    if let Some(locked_model) = session.locked_model {
-        tracing::debug!(session_id = %session_id, locked_model = %locked_model, "Session lock hit");
-        return Ok((locked_model, resolved_sop_tier, task_type.to_string()));
+    // .clone(), not a move: cache_guard_decision below needs `&session`
+    // whole, immediately after this block.
+    if let Some(locked_model) = session.locked_model.clone() {
+        tracing::debug!(scope = %scope, locked_model = %locked_model, "Session lock hit");
+        return Ok(RouteDecision {
+            model: locked_model,
+            sop_tier: resolved_sop_tier,
+            task_type: task_type.to_string(),
+            prior_cache_read_ratio,
+        });
+    }
+
+    // Wave 3.4: strong, fresh evidence the requested model is already warm
+    // for this scope declines sampling outright — see cache_guard_decision's
+    // doc comment for why this does NOT set the session lock.
+    if let Some(pinned_model) =
+        cache_guard_decision(&session, requested_model, prompt.len(), chrono::Utc::now().timestamp(), routing_cfg)
+    {
+        tracing::debug!(scope = %scope, model = %pinned_model, "Cache-honesty guard declined to sample");
+        return Ok(RouteDecision {
+            model: pinned_model,
+            sop_tier: resolved_sop_tier,
+            task_type: task_type.to_string(),
+            prior_cache_read_ratio,
+        });
     }
 
     // No lock is active — either this session has never been routed, or a
@@ -350,20 +484,30 @@ pub async fn route_model(
         tracing::debug!(workspace_id = %workspace_id, total_pulls = %total_pulls, "Total pulls < 20 — using requested model");
         let selected_model = requested_model.to_string();
         let _ = store
-            .set_session_locked_model(session_id, &selected_model)
+            .set_session_locked_model(scope, &selected_model)
             .await;
-        return Ok((selected_model, resolved_sop_tier, task_type.to_string()));
+        return Ok(RouteDecision {
+            model: selected_model,
+            sop_tier: resolved_sop_tier,
+            task_type: task_type.to_string(),
+            prior_cache_read_ratio,
+        });
     }
 
     // 4. Sample arms using Thompson Sampling, tie-broken toward `prefer_family`
     let best_model = select_arm(arms, requested_model, prefer_family.as_deref());
 
-    // Lock selected model for the session
+    // Lock selected model for the scope
     let _ = store
-        .set_session_locked_model(session_id, &best_model)
+        .set_session_locked_model(scope, &best_model)
         .await;
 
-    Ok((best_model, resolved_sop_tier, task_type.to_string()))
+    Ok(RouteDecision {
+        model: best_model,
+        sop_tier: resolved_sop_tier,
+        task_type: task_type.to_string(),
+        prior_cache_read_ratio,
+    })
 }
 
 /// Whether an upstream error says the MODEL was unservable, as opposed to the
@@ -653,5 +797,132 @@ mod tests {
         // fallback rather than panicking.
         let winner = select_arm(vec![], "claude-sonnet-4-5", Some("claude-opus"));
         assert_eq!(winner, "claude-sonnet-4-5");
+    }
+
+    /// Wave 3.4: the cache-honesty guard. "Three absences, three answers" —
+    /// see `cache_guard_decision`'s own doc comment for the full rationale.
+    mod cache_guard {
+        use super::*;
+        use crate::config::RoutingConfig;
+        use crate::store::SessionRouting;
+
+        const NOW: i64 = 1_700_000_000;
+
+        fn warm_session(model: &str, age_secs: i64, read_bp: u32) -> SessionRouting {
+            SessionRouting {
+                cache_warm_model: Some(model.to_string()),
+                cache_read_bp: Some(read_bp),
+                cache_observed_at: Some(NOW - age_secs),
+                ..Default::default()
+            }
+        }
+
+        #[test]
+        fn no_observation_and_a_small_prompt_samples() {
+            let session = SessionRouting::default();
+            let decision = cache_guard_decision(&session, "claude-sonnet-4-5", 100, NOW, &RoutingConfig::default());
+            assert_eq!(decision, None);
+        }
+
+        #[test]
+        fn no_observation_but_a_large_first_turn_prompt_declines_to_sample() {
+            let session = SessionRouting::default();
+            let cfg = RoutingConfig::default();
+            let decision = cache_guard_decision(
+                &session,
+                "claude-sonnet-4-5",
+                cfg.cache_guard_cold_start_prompt_bytes,
+                NOW,
+                &cfg,
+            );
+            assert_eq!(decision.as_deref(), Some("claude-sonnet-4-5"));
+        }
+
+        #[test]
+        fn the_cold_start_heuristic_is_disabled_by_a_zero_threshold() {
+            let session = SessionRouting::default();
+            let mut cfg = RoutingConfig::default();
+            cfg.cache_guard_cold_start_prompt_bytes = 0;
+            let decision = cache_guard_decision(&session, "claude-sonnet-4-5", 1_000_000, NOW, &cfg);
+            assert_eq!(decision, None, "0 must disable just the heuristic, not crash or always-fire");
+        }
+
+        #[test]
+        fn any_real_observation_permanently_supersedes_the_cold_start_heuristic() {
+            // Fresh, warm, SAME family — but the observation exists at all,
+            // so this exercises the normal evidence path, not the heuristic.
+            // A separate, DIFFERENT-family fresh-and-warm case proves the
+            // heuristic branch specifically never re-fires once cache_warm_model
+            // is populated, even when it would have said yes on prompt size alone.
+            let session = warm_session("gpt-4o", 10, 9_000); // different family than requested below
+            let cfg = RoutingConfig::default();
+            let decision = cache_guard_decision(
+                &session,
+                "claude-sonnet-4-5",
+                cfg.cache_guard_cold_start_prompt_bytes * 10, // would trip the heuristic if it ran
+                NOW,
+                &cfg,
+            );
+            assert_eq!(
+                decision, None,
+                "an observation for a different-family model must fall through to sampling, \
+                 not re-consult the cold-start heuristic"
+            );
+        }
+
+        #[test]
+        fn fresh_warm_same_family_declines_to_sample() {
+            let session = warm_session("claude-sonnet-4-5-20250929", 10, 9_000);
+            let decision =
+                cache_guard_decision(&session, "claude-sonnet-4-5", 100, NOW, &RoutingConfig::default());
+            assert_eq!(
+                decision.as_deref(),
+                Some("claude-sonnet-4-5"),
+                "same family (date-suffix-collapsed) must count as a match"
+            );
+        }
+
+        #[test]
+        fn different_family_falls_through_to_sample() {
+            let session = warm_session("gpt-4o", 10, 9_000);
+            let decision =
+                cache_guard_decision(&session, "claude-sonnet-4-5", 100, NOW, &RoutingConfig::default());
+            assert_eq!(decision, None);
+        }
+
+        #[test]
+        fn stale_observation_samples() {
+            let cfg = RoutingConfig::default();
+            let session = warm_session("claude-sonnet-4-5", cfg.cache_guard_max_age_secs as i64 + 1, 9_000);
+            let decision = cache_guard_decision(&session, "claude-sonnet-4-5", 100, NOW, &cfg);
+            assert_eq!(decision, None, "an observation older than max_age_secs must sample, not decline");
+        }
+
+        #[test]
+        fn fresh_but_cold_observation_samples() {
+            let cfg = RoutingConfig::default();
+            let session = warm_session("claude-sonnet-4-5", 10, cfg.cache_guard_min_read_bp - 1);
+            let decision = cache_guard_decision(&session, "claude-sonnet-4-5", 100, NOW, &cfg);
+            assert_eq!(decision, None, "below min_read_bp must sample, not decline");
+        }
+
+        #[test]
+        fn fresh_and_exactly_at_the_read_bp_threshold_declines_to_sample() {
+            let cfg = RoutingConfig::default();
+            let session = warm_session("claude-sonnet-4-5", 10, cfg.cache_guard_min_read_bp);
+            let decision = cache_guard_decision(&session, "claude-sonnet-4-5", 100, NOW, &cfg);
+            assert_eq!(decision.as_deref(), Some("claude-sonnet-4-5"));
+        }
+
+        #[test]
+        fn max_age_secs_zero_is_the_kill_switch() {
+            // Fresh (age 0) and hot (10000bp) — would decline under any other
+            // config — but max_age_secs: 0 must still fall through to sampling.
+            let mut cfg = RoutingConfig::default();
+            cfg.cache_guard_max_age_secs = 0;
+            let session = warm_session("claude-sonnet-4-5", 0, 10_000);
+            let decision = cache_guard_decision(&session, "claude-sonnet-4-5", 100, NOW, &cfg);
+            assert_eq!(decision, None, "cache_guard_max_age_secs: 0 must disable the guard entirely");
+        }
     }
 }
