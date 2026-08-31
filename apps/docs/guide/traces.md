@@ -2,23 +2,27 @@
 
 Traces are the audit trail of every AI agent request that flows through the Intutic proxy. Each trace records what happened, what enforcement action was applied, and how much it cost.
 
-In open-core the proxy writes traces locally as daily-sharded JSONL under `~/.intutic/logs/`, and `intutic traces list` / `intutic traces inspect` read them straight off disk — no control plane required. The REST API shown alongside each CLI example below is the connected-mode equivalent.
+In open-core the proxy writes traces locally as daily-sharded JSONL under `~/.intutic/logs/` (`traces-YYYY-MM-DD.jsonl`, one record per line, capped at 64MB/day). Today, reading them means `cat`/`jq` on those files directly — `intutic traces list` / `intutic traces inspect` require a connected control plane and exit with an error otherwise. A local reader for these commands is in progress. The REST API shown alongside each CLI example below is the connected-mode equivalent, and connected mode is the only way to see a trace's compliance score and enforcement action today.
 
 ## What's in a trace?
 
-Each execution trace contains:
+Each execution trace contains (field names as written to the local JSONL; connected mode camelCases them over the API):
 
 | Field | Description |
 |-------|-------------|
 | `trace_id` | Unique identifier (`tr_` prefix) |
-| `timestamp` | ISO 8601 timestamp of the request |
-| `model` | The LLM model used (e.g., `claude-4-sonnet`, `gpt-4o`) |
-| `input_tokens` | Number of raw input tokens |
-| `output_tokens` | Number of output tokens |
-| `cost_usd` | Actual cost in USD |
-| `enforcement_action` | PCAS action applied: `BYPASS`, `ENHANCE`, `HIJACK`, or `KILL` |
-| `token_utility` | Classification: `USEFUL` or `WASTED` |
 | `session_id` | The agent session this trace belongs to |
+| `created_at` | ISO 8601 timestamp of the request |
+| `model` / `provider` | The LLM model and provider used |
+| `requested_model` / `actual_model_routed` | The model the caller asked for vs. the one that actually served the request |
+| `raw_input_tokens` / `output_tokens` | Token counts |
+| `raw_cost_usd` / `actual_cost_usd` | Cost had the requested model served it, vs. the actual cost of the routed model's response |
+| `cache_hit` / `cache_read_input_tokens` / `cache_creation_input_tokens` | Provider prompt-cache accounting |
+| `latency_ms` | Request latency |
+| `verdict` | The proxy's own enforcement verdict — locally, exactly one of `allowed`, `killed`, `upstream_error` |
+| `harness_type` | Which coding agent/IDE issued the request |
+
+Two fields you may see referenced elsewhere are **connected-mode only, with no local equivalent**: a compliance/quality **score**, and the four-way `BYPASS`/`ENHANCE`/`HIJACK`/`KILL` enforcement-action vocabulary used by the control plane's PCAS layer. A standalone proxy's own `verdict` field uses a different, narrower vocabulary (above).
 
 ## Listing traces
 
