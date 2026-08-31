@@ -572,12 +572,19 @@ fn json_error(status: StatusCode, error_type: &str, message: &str) -> Response {
 /// test (see `model_allowlist_gate` below) without driving the whole
 /// request pipeline — the same precedent as `check_budget`/`check_model_allowed`
 /// in metering.rs being pure functions the handler merely calls.
+/// "This workspace's" was wrong for a standalone deployment — there is no
+/// workspace, no control plane, and the refusal could equally be coming from
+/// `~/.intutic/config.json`'s local `allowedModels` (Wave 6.3,
+/// audit-remediation) as from a managed workspace's allowlist. Naming both
+/// sources without claiming which one fired keeps the message accurate in
+/// both deployment shapes rather than picking one and being wrong in the
+/// other half the time.
 fn model_not_allowed_response(model: &str) -> Response {
     json_error(
         StatusCode::FORBIDDEN,
         "model_not_allowed",
         &format!(
-            "Model '{}' is not on this workspace's approved-models list.",
+            "Model '{}' is not on the approved-models list — check the workspace's allowlist (if connected to a control plane) and/or ~/.intutic/config.json's allowedModels (if running standalone).",
             model
         ),
     )

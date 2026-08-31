@@ -356,6 +356,54 @@ pub fn run_guard_probes(
     verdicts
 }
 
+/// One completed run of the probe suite, with the timestamp of the run
+/// itself — not of whoever last asked about it.
+///
+/// Wave 6.1 (audit-remediation): `GET /intutic/probes` used to recompute the
+/// full suite on every request, so its own "an immutable record of one run,
+/// kept" doc-comment promise (above) was only true in memory, never on the
+/// wire — every HTTP response was a NEW run, with no way to tell whether the
+/// scheduled 15-minute loop (`main.rs`) was still alive or had silently
+/// stopped ticking. Stamping `ran_at` at the SOURCE (this cache, written
+/// only by the loop that owns the schedule) rather than at the fetch site is
+/// what makes that distinguishable: a proxy whose probe loop died still
+/// answers `GET /intutic/probes` (the last cached run), but `ran_at` stops
+/// advancing — exactly the inert-control shape this whole module exists to
+/// catch, now caught in itself.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ProbeRun {
+    pub verdicts: Vec<ProbeVerdict>,
+    /// Unix seconds when this run completed.
+    pub ran_at: i64,
+}
+
+static LAST_RUN: once_cell::sync::Lazy<std::sync::Mutex<Option<ProbeRun>>> =
+    once_cell::sync::Lazy::new(|| std::sync::Mutex::new(None));
+
+/// Runs the suite and records it as the new `LAST_RUN` — called by the
+/// startup run and the 15-minute loop in `main.rs`, and by nothing else:
+/// `GET /intutic/probes` reads `last_run()` below, never calls this itself,
+/// so an HTTP request can never mint a fresh "last run" timestamp that
+/// doesn't correspond to an actual scheduled tick.
+pub fn run_and_record(registry: &DetectorRegistry, sops: &[crate::sops::Sop]) -> ProbeRun {
+    let verdicts = run_guard_probes(registry, sops);
+    let run = ProbeRun {
+        verdicts,
+        ran_at: chrono::Utc::now().timestamp(),
+    };
+    if let Ok(mut guard) = LAST_RUN.lock() {
+        *guard = Some(run.clone());
+    }
+    run
+}
+
+/// The most recent recorded run, if the suite has ever run in this process.
+/// `None` only in the narrow window between process start and the startup
+/// run completing.
+pub fn last_run() -> Option<ProbeRun> {
+    LAST_RUN.lock().ok().and_then(|g| g.clone())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -407,5 +455,28 @@ mod tests {
             verdicts[0].probe_id
         );
         assert!(verdicts[0].passed, "{}", verdicts[0].detail);
+    }
+
+    /// `run_and_record` must both return and cache the same run — the two
+    /// codepaths (the immediate return `main.rs` logs from, and the later
+    /// `GET /intutic/probes` read via `last_run()`) must never disagree.
+    #[test]
+    fn run_and_record_caches_what_it_returns() {
+        let registry = DetectorRegistry::with_defaults();
+        let recorded = run_and_record(&registry, &[]);
+        let cached = last_run().expect("run_and_record must populate LAST_RUN");
+        assert_eq!(cached.ran_at, recorded.ran_at);
+        assert_eq!(cached.verdicts.len(), recorded.verdicts.len());
+    }
+
+    /// A second run must overwrite the first, not append to it — `last_run()`
+    /// is "the most recent run", not a history.
+    #[test]
+    fn a_second_run_replaces_the_first_in_the_cache() {
+        let registry = DetectorRegistry::with_defaults();
+        run_and_record(&registry, &[]);
+        let second = run_and_record(&registry, &[]);
+        let cached = last_run().expect("must still be populated");
+        assert_eq!(cached.verdicts.len(), second.verdicts.len());
     }
 }
