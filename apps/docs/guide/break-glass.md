@@ -51,7 +51,7 @@ Navigate to **Break-Glass** in the dashboard:
 1. Enter the target **Policy ID** to bypass (or leave empty for a global bypass).
 2. Choose the **Bypass Duration** (e.g. 15 minutes, 1 hour, or up to 24 hours).
 3. Click **Submit Request**.
-4. **Copy the Token** shown in the warning box. *For security, the token is encrypted at rest and will not be displayed again.*
+4. **Copy the Token** shown in the warning box. *It is shown only this once — the control plane does not display it again after this step.* Treat it as a live credential for the whole bypass duration: it is stored as submitted, not encrypted at rest, so anyone who can read it can use it until it expires.
 
 ### 2. Peer Approval (Double Authorization)
 To prevent security gaps:
@@ -82,7 +82,7 @@ For the configured duration, the proxy will:
 All break-glass activities are logged persistently:
 - **Request logs:** Track who requested the override, the target policies, and the requested duration.
 - **Approval logs:** Track who approved the bypass.
-- **Execution logs:** Every API request executed under a break-glass token records the active token in its trace metadata.
+- **Execution logs:** Request and approval logs record who requested and approved the bypass, the target policy, and the duration. Per-request execution traces do not currently record which requests ran under a break-glass token, or the token itself — the token is never written to a trace or a log.
 
 ::: warning
 Bypassing compliance rules presents significant security risks. Break-glass tokens should only be used as a last resort in active incidents and must be reviewed immediately after expiration.
