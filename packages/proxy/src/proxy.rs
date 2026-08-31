@@ -2474,15 +2474,24 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
 
     // Check for break-glass override token in request headers
     let mut has_break_glass = false;
+    let mut break_glass_request_id: Option<String> = None;
     if let Some(bg_token) = headers
         .get("x-intutic-break-glass")
         .and_then(|v| v.to_str().ok())
     {
-        if state.control_plane.break_glass_valid(bg_token).await {
-            tracing::info!(workspace_id = %workspace_id, token = %bg_token, "Active break-glass override token detected — bypassing safety policies");
-            has_break_glass = true;
-        } else {
-            tracing::warn!(workspace_id = %workspace_id, token = %bg_token, "Expired, invalid, or unreachable break-glass token header provided");
+        match state.control_plane.break_glass_grant(bg_token, &workspace_id).await {
+            Some(grant) => {
+                tracing::info!(workspace_id = %workspace_id, request_id = %grant.request_id, "Active break-glass override token detected — bypassing safety policies");
+                has_break_glass = true;
+                break_glass_request_id = Some(grant.request_id);
+            }
+            None => {
+                // Never the raw token in the log — a truncated hash prefix
+                // instead, so a leaked log line cannot be replayed as a live
+                // credential the way the raw value could.
+                let token_hash = &crate::store::valkey::sha256_hex(bg_token)[..8];
+                tracing::warn!(workspace_id = %workspace_id, token_hash = %token_hash, "Expired, invalid, unscoped, or unreachable break-glass token header provided");
+            }
         }
     }
 
@@ -3057,6 +3066,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 change_manifest: change_manifest.clone(),
                 reconstruction_quality: 0,
                 token_anomaly: false,
+                break_glass: has_break_glass,
+                break_glass_request_id: break_glass_request_id.clone(),
                 loop_run_id: loop_run_id_header.clone(),
                 findings: findings
                     .iter()
@@ -3641,6 +3652,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 change_manifest: change_manifest.clone(),
                 reconstruction_quality: 100,
                 token_anomaly: false,
+                break_glass: has_break_glass,
+                break_glass_request_id: break_glass_request_id.clone(),
                 loop_run_id: loop_run_id_header.clone(),
                 findings: advisory_findings.clone(),
                 // Cache hit — the cached body was echo-scanned on the turn
@@ -4219,6 +4232,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 change_manifest: change_manifest.clone(),
                 reconstruction_quality: 100,
                 token_anomaly: false,
+                break_glass: has_break_glass,
+                break_glass_request_id: break_glass_request_id.clone(),
                 loop_run_id: loop_run_id_header.clone(),
                 findings: advisory_findings.clone(),
                 // No response — nothing to echo-scan.
@@ -4483,6 +4498,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             change_manifest: change_manifest.clone(),
             reconstruction_quality: 100,
             token_anomaly: false,
+            break_glass: has_break_glass,
+            break_glass_request_id: break_glass_request_id.clone(),
             loop_run_id: loop_run_id_header.clone(),
             findings: advisory_findings.clone(),
             // Upstream error or short-circuit — no response body to echo-scan.
@@ -4586,6 +4603,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             0
         };
         let loop_run_id_clone = loop_run_id_header.clone();
+        let break_glass_request_id_clone = break_glass_request_id.clone();
         let control_plane_url_clone = std::env::var("CONTROL_PLANE_URL").unwrap_or_default();
         let judge_active_clone = judge_active;
         let personal_sops_clone = personal_sops.clone();
@@ -5369,6 +5387,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                             change_manifest: change_manifest_clone.clone(),
                             reconstruction_quality: 100,
                             token_anomaly: false,
+                            break_glass: has_break_glass,
+                            break_glass_request_id: break_glass_request_id_clone.clone(),
                             loop_run_id: loop_run_id_clone.clone(),
                             findings: advisory_findings.clone(),
                             // Response died mid-stream — nothing complete to echo-scan.
@@ -5883,6 +5903,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 change_manifest: change_manifest_clone.clone(),
                 reconstruction_quality,
                 token_anomaly,
+                break_glass: has_break_glass,
+                break_glass_request_id: break_glass_request_id_clone,
                 loop_run_id: loop_run_id_clone,
                 findings: advisory_findings.clone(),
                 response_injection_findings,
@@ -6023,6 +6045,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 change_manifest: change_manifest.clone(),
                 reconstruction_quality: 100,
                 token_anomaly: false,
+                break_glass: has_break_glass,
+                break_glass_request_id: break_glass_request_id.clone(),
                 loop_run_id: loop_run_id_header.clone(),
                 findings: advisory_findings.clone(),
                 // No complete response body — nothing to echo-scan.
@@ -6713,6 +6737,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         change_manifest: change_manifest.clone(),
         reconstruction_quality,
         token_anomaly,
+        break_glass: has_break_glass,
+        break_glass_request_id,
         tool_result_bytes_saved,
         routing_shadow_model: shadow_selection.clone(),
         loop_run_id: loop_run_id_header,

@@ -72,9 +72,9 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use super::{
-    CachedResponse, ClaimOutcome, ControlPlaneAuth, ControlPlaneCache, FeatureFlags, HardCapStatus,
-    JudgeScope, LocalStore, NotifyScope, Ownership, PinScope, PinnedSopBlock, SessionRouting,
-    TokenBaseline,
+    BreakGlassGrant, CachedResponse, ClaimOutcome, ControlPlaneAuth, ControlPlaneCache,
+    FeatureFlags, HardCapStatus, JudgeScope, LocalStore, NotifyScope, Ownership, PinScope,
+    PinnedSopBlock, SessionRouting, TokenBaseline,
 };
 use crate::routing::bandit::BanditArmState;
 use crate::routing::mirror::MirrorPairEvent;
@@ -691,12 +691,15 @@ impl LocalStore for MemoryStore {
     }
 
     /// Same standalone degrade as `publish_trace` above: no cross-process
-    /// transport, so this is logged rather than dropped silently.
+    /// transport, so this is logged rather than dropped silently. The mirrored
+    /// call this event describes was already made — and billed — by the time
+    /// this runs; the message says so rather than reading like routine
+    /// bookkeeping.
     async fn publish_mirror_pair(&self, event: &MirrorPairEvent) -> anyhow::Result<()> {
         tracing::debug!(
             workspace_id = %event.workspace_id,
             candidate = %event.candidate_model,
-            "mirror comparison pair (standalone: not published)"
+            "mirrored candidate call was billed, but its comparison result is discarded — standalone has no control plane to publish it to"
         );
         Ok(())
     }
@@ -1010,8 +1013,8 @@ impl ControlPlaneCache for NullControlPlaneCache {
 
     /// No control plane means no break-glass issuer, so no token can be valid.
     /// Standalone has nothing to break out of — policies come from local config.
-    async fn break_glass_valid(&self, _token: &str) -> bool {
-        false
+    async fn break_glass_grant(&self, _token: &str, _workspace_id: &str) -> Option<BreakGlassGrant> {
+        None
     }
 
     async fn transition_baseline(&self, _workspace_id: &str) -> Option<String> {
@@ -1062,7 +1065,7 @@ mod null_control_plane_cache_tests {
     use super::*;
 
     /// No control plane, no attestation — same fail-closed shape as
-    /// `auto_judge_active` and `break_glass_valid` on this struct: standalone
+    /// `auto_judge_active` and `break_glass_grant` on this struct: standalone
     /// has nothing that could have attested a sandbox, so this must never be
     /// mistaken for "confirmed unattested" carrying different weight than
     /// "unknown". Both collapse to the same `false`.

@@ -354,3 +354,20 @@ async fn a_secret_in_the_mirror_response_never_crosses_the_publish_boundary_unsc
         "expected `dlp::redact`'s marker in place of the key, got: {wire}"
     );
 }
+
+/// `mirroring_is_configured` gates main.rs's standalone double-billing
+/// warning. It must read the same knob `should_mirror` clamps and rolls
+/// against, not a separate copy that could drift from it.
+#[test]
+fn mirroring_is_configured_reads_the_same_knob_should_mirror_does() {
+    let mut cfg = intutic_proxy::config::RoutingConfig::default();
+
+    cfg.mirror_sample_rate = 0.0;
+    assert!(!mirror::mirroring_is_configured(&cfg), "0.0 means mirroring is off");
+
+    cfg.mirror_sample_rate = 0.01;
+    assert!(
+        mirror::mirroring_is_configured(&cfg),
+        "any positive rate means a standalone deployment is paying for mirrored calls"
+    );
+}

@@ -249,6 +249,17 @@ pub enum JudgeScope {
     Loop,
 }
 
+/// A break-glass override token validated for a SPECIFIC workspace.
+///
+/// Carrying `request_id` is the point of returning this instead of a bare
+/// bool: it is what lets the request path log which approved override a
+/// bypass ran under, and what lands on the trace (`ExecutionTrace`'s
+/// `break_glass_request_id`) — never the token itself.
+#[derive(Debug, Clone)]
+pub struct BreakGlassGrant {
+    pub request_id: String,
+}
+
 /// A pinned, session-stable SOP advisory block (TD-348).
 ///
 /// `block` and `fingerprint` are the render `sops::render` produced when this
@@ -851,8 +862,14 @@ pub trait ControlPlaneCache: Send + Sync + 'static {
     /// a control-plane feature, so standalone this is always `false`.
     async fn auto_judge_active(&self, scope: JudgeScope, id: &str) -> bool;
 
-    /// Whether a break-glass override token is currently valid.
-    async fn break_glass_valid(&self, token: &str) -> bool;
+    /// Validate a break-glass override token FOR a specific workspace.
+    ///
+    /// Returns `None` when the token is expired, unknown, or was issued to a
+    /// different workspace — a token approved for workspace A must never
+    /// bypass policy for workspace B. A stored payload that fails to parse is
+    /// also `None`: the pre-scoping code failed OPEN on any shape (existence
+    /// alone was enough), and that must not survive the port.
+    async fn break_glass_grant(&self, token: &str, workspace_id: &str) -> Option<BreakGlassGrant>;
 
     // ── WASM rule distribution ───────────────────────────────────────
 

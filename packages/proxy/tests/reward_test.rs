@@ -398,7 +398,7 @@ async fn standalone_gates_are_all_closed() {
     let cp = NullControlPlaneCache;
     assert_eq!(cp.hard_block("ws").await, HardCapStatus::Clear, "no cap without a control plane");
     assert!(
-        !cp.break_glass_valid("any-token").await,
+        cp.break_glass_grant("any-token", "ws").await.is_none(),
         "no issuer means no valid break-glass token"
     );
     assert!(
@@ -409,6 +409,77 @@ async fn standalone_gates_are_all_closed() {
     assert_eq!(cp.loop_status("run").await, None);
     assert_eq!(cp.wasm_plugins("ws").await.unwrap(), None);
     assert_eq!(cp.wasm_binary("deadbeef").await.unwrap(), None);
+}
+
+/// The break-glass defect this closes: a token approved for one workspace
+/// must never bypass policy for another. Pre-scoping, `break_glass_valid`
+/// checked only whether the Valkey key existed — any workspace's token
+/// worked for every workspace.
+#[tokio::test]
+async fn break_glass_grant_is_scoped_to_the_issuing_workspace() {
+    let Some(valkey) = valkey_conn().await else {
+        eprintln!("skipping: VALKEY_URL not set or Valkey unreachable");
+        return;
+    };
+    let owner_ws = unique_ws("bg-owner");
+    let other_ws = unique_ws("bg-other");
+    let token = format!("bg_{}", unique_ws("token"));
+    let request_id = format!("bgr_{}", unique_ws("req"));
+    let mut conn = valkey.as_ref().clone();
+    let _: () = conn
+        .set(
+            format!("bg:token:{}", token),
+            serde_json::json!({
+                "requestId": request_id,
+                "workspaceId": owner_ws,
+                "policyId": null,
+                "expiresAt": "2099-01-01T00:00:00.000Z",
+            })
+            .to_string(),
+        )
+        .await
+        .unwrap();
+
+    let cp = ValkeyControlPlaneCache::new(valkey.clone());
+
+    let grant = cp.break_glass_grant(&token, &owner_ws).await;
+    assert_eq!(
+        grant.map(|g| g.request_id),
+        Some(request_id),
+        "the issuing workspace must be granted, carrying the real request id"
+    );
+
+    assert!(
+        cp.break_glass_grant(&token, &other_ws).await.is_none(),
+        "a token approved for one workspace must not bypass policy for another"
+    );
+
+    let _: Result<(), _> = conn.del(format!("bg:token:{}", token)).await;
+}
+
+/// Present but unparseable must DENY here — the opposite rule from
+/// `present_but_unparseable_flags_stay_authoritative` above. Feature flags
+/// stay authoritative on garbage because "no flags on" is already the safe
+/// reading; break-glass existing at all is itself the risky state, so a
+/// payload this code cannot verify must not be trusted as a grant.
+#[tokio::test]
+async fn break_glass_grant_denies_an_unparseable_payload() {
+    let Some(valkey) = valkey_conn().await else {
+        eprintln!("skipping: VALKEY_URL not set or Valkey unreachable");
+        return;
+    };
+    let ws = unique_ws("bg-garbage");
+    let token = format!("bg_{}", unique_ws("token"));
+    let mut conn = valkey.as_ref().clone();
+    let _: () = conn.set(format!("bg:token:{}", token), "}{ not json").await.unwrap();
+
+    let cp = ValkeyControlPlaneCache::new(valkey.clone());
+    assert!(
+        cp.break_glass_grant(&token, &ws).await.is_none(),
+        "an unparseable break-glass payload must deny, not fail open"
+    );
+
+    let _: Result<(), _> = conn.del(format!("bg:token:{}", token)).await;
 }
 
 /// Tool-sequence anomaly detection keeps only the newest `cap` entries, and
