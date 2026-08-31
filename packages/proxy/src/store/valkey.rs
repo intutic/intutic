@@ -20,9 +20,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::{
-    CachedResponse, ClaimOutcome, ControlPlaneAuth, ControlPlaneCache, FeatureFlags, HardCapStatus,
-    JudgeScope, LocalStore, NotifyScope, Ownership, PinScope, PinnedSopBlock, SessionRouting,
-    TokenBaseline,
+    BreakGlassGrant, CachedResponse, ClaimOutcome, ControlPlaneAuth, ControlPlaneCache,
+    FeatureFlags, HardCapStatus, JudgeScope, LocalStore, NotifyScope, Ownership, PinScope,
+    PinnedSopBlock, SessionRouting, TokenBaseline,
 };
 use crate::metering::VirtualKeyRecord;
 use crate::routing::bandit::BanditArmState;
@@ -48,7 +48,7 @@ fn graph_key(workspace_id: &str, graph_id: &str, suffix: &str) -> String {
 
 
 /// Lowercase hex SHA-256, matching the control plane's `hashKeySha256`.
-fn sha256_hex(raw: &str) -> String {
+pub(crate) fn sha256_hex(raw: &str) -> String {
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new();
     h.update(raw.as_bytes());
@@ -1300,8 +1300,21 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
         self.get_gated(key).await.as_deref() == Some("true")
     }
 
-    async fn break_glass_valid(&self, token: &str) -> bool {
-        self.get_gated(format!("bg:token:{}", token)).await.is_some()
+    async fn break_glass_grant(&self, token: &str, workspace_id: &str) -> Option<BreakGlassGrant> {
+        let raw = self.get_gated(format!("bg:token:{}", token)).await?;
+
+        // Present but unparseable must DENY, unlike feature_flags above — the
+        // pre-scoping code treated key existence alone as valid, which is
+        // exactly the fail-open shape this fixes. `services/control-plane`'s
+        // `POST /break-glass/approve` is the only writer and always writes
+        // {requestId, workspaceId, policyId, expiresAt}.
+        let json = serde_json::from_str::<serde_json::Value>(&raw).ok()?;
+        let stored_workspace = json.get("workspaceId")?.as_str()?;
+        if stored_workspace != workspace_id {
+            return None;
+        }
+        let request_id = json.get("requestId")?.as_str()?.to_string();
+        Some(BreakGlassGrant { request_id })
     }
 
     async fn transition_baseline(&self, workspace_id: &str) -> Option<String> {

@@ -493,6 +493,23 @@ async fn main() -> anyhow::Result<()> {
         ),
     };
 
+    // Mirroring issues a SECOND, fully billed upstream call per sampled
+    // request. Standalone has no control plane to publish the comparison
+    // to — `NullControlPlaneCache::publish_mirror_pair` only `debug!`s the
+    // result — so a workspace could be paying for mirrored calls whose
+    // outcome is visible only at debug log level. `valkey.is_none()`, not a
+    // separately-tracked bool: it is exactly the condition the match above
+    // branches on.
+    if valkey.is_none() && routing::mirror::mirroring_is_configured(&config.intutic_settings.routing) {
+        tracing::warn!(
+            mirror_sample_rate = config.intutic_settings.routing.mirror_sample_rate,
+            "Running standalone with mirroring configured — mirrored requests are billed \
+             (a second live upstream call per sampled request) but their comparison result \
+             is discarded, not published anywhere. Set mirror_sample_rate to 0 to stop paying \
+             for it, or connect a control plane to see the results."
+        );
+    }
+
     // Initialize WASM plugin registry (control plane + local ~/.intutic/wasm rules)
     let wasm_registry =
         wasm::registry::PluginRegistry::new(config.intutic_settings.wasm_local_dir.as_deref())
