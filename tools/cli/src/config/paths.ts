@@ -53,6 +53,22 @@ export function getConfigPath(): string {
 }
 
 /**
+ * Directory the proxy writes daily-sharded trace JSONL to
+ * (`~/.intutic/logs/traces-YYYY-MM-DD.jsonl`) — see
+ * `packages/proxy/src/local_spend.rs`'s `log_offline_trace`.
+ *
+ * KNOWN CAVEAT: on Windows the proxy's own `intutic_dir()` resolves to
+ * `%USERPROFILE%\.intutic` while this file's `getIntuticDirFor` resolves to
+ * `%APPDATA%\intutic` — two different directories. On macOS/Linux both sides
+ * agree (`~/.intutic`), which is the only platform this function has been
+ * verified against; Windows users may need `INTUTIC_TRACES_LOG_DIR` (not
+ * yet implemented) until the two resolutions are reconciled.
+ */
+export function getTracesLogDir(): string {
+  return join(getIntuticDir(), 'logs')
+}
+
+/**
  * Path to local integrity store (per-workspace).
  * Located at <workspaceRoot>/.intutic/integrity.json
  */

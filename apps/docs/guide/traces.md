@@ -2,7 +2,7 @@
 
 Traces are the audit trail of every AI agent request that flows through the Intutic proxy. Each trace records what happened, what enforcement action was applied, and how much it cost.
 
-In open-core the proxy writes traces locally as daily-sharded JSONL under `~/.intutic/logs/` (`traces-YYYY-MM-DD.jsonl`, one record per line, capped at 64MB/day). Today, reading them means `cat`/`jq` on those files directly — `intutic traces list` / `intutic traces inspect` require a connected control plane and exit with an error otherwise. A local reader for these commands is in progress. The REST API shown alongside each CLI example below is the connected-mode equivalent, and connected mode is the only way to see a trace's compliance score and enforcement action today.
+In open-core the proxy writes traces locally as daily-sharded JSONL under `~/.intutic/logs/` (`traces-YYYY-MM-DD.jsonl`, one record per line, capped at 64MB/day — see [Local vs connected](#local-vs-connected) below for what that cap means for you). With no connected control plane, `intutic traces list` / `intutic traces inspect` now read that log directly — no `cat`/`jq` needed, though you're always free to do that too. The REST API shown alongside each CLI example below is the connected-mode equivalent, and connected mode is still the only way to see a trace's compliance score and enforcement action.
 
 ## What's in a trace?
 
@@ -19,10 +19,24 @@ Each execution trace contains (field names as written to the local JSONL; connec
 | `raw_cost_usd` / `actual_cost_usd` | Cost had the requested model served it, vs. the actual cost of the routed model's response |
 | `cache_hit` / `cache_read_input_tokens` / `cache_creation_input_tokens` | Provider prompt-cache accounting |
 | `latency_ms` | Request latency |
-| `verdict` | The proxy's own enforcement verdict — locally, exactly one of `allowed`, `killed`, `upstream_error` |
+| `verdict` | The proxy's own enforcement verdict — locally, exactly one of `allowed`, `killed`, `upstream_error`, `reasked`, `hijacked` |
 | `harness_type` | Which coding agent/IDE issued the request |
 
-Two fields you may see referenced elsewhere are **connected-mode only, with no local equivalent**: a compliance/quality **score**, and the four-way `BYPASS`/`ENHANCE`/`HIJACK`/`KILL` enforcement-action vocabulary used by the control plane's PCAS layer. A standalone proxy's own `verdict` field uses a different, narrower vocabulary (above).
+Two fields you may see referenced elsewhere are **connected-mode only, with no local equivalent**: a compliance/quality **score**, and the four-way `BYPASS`/`ENHANCE`/`HIJACK`/`KILL` enforcement-action vocabulary used by the control plane's PCAS layer. A standalone proxy's own `verdict` field uses a different, narrower vocabulary (above) — `allowed ≠ BYPASS`, and there is no local equivalent of ENHANCE or HIJACK's control-plane meaning.
+
+## Local vs connected
+
+| | Local (no control plane) | Connected |
+|---|---|---|
+| Data source | `~/.intutic/logs/traces-*.jsonl`, read directly | Control-plane API |
+| `traces list` / `inspect` | Read the local log | Query the API |
+| Compliance / quality score | Not available — never fabricated as a placeholder | Available |
+| Enforcement action | `verdict` only (`allowed`/`killed`/`upstream_error`/`reasked`/`hijacked`) | `BYPASS`/`ENHANCE`/`HIJACK`/`KILL` |
+| Filtering | `--verdict` | `--action` |
+| History depth | Whatever's on disk, capped at 64MB/day per shard — see below | Retained per your plan |
+| `--json` output shape | `{traces, total, malformedLines, cappedFiles}` — its own local shape | `TraceListResult` |
+
+**The 64MB/day cap is real, and the local reader is the only place you can learn you've hit it.** Past that size, the proxy silently drops further writes for the rest of that day rather than growing the file without bound — so a very high-traffic day's trace count from `intutic traces list` may be a floor, not a complete record. The CLI warns you explicitly when a day-file it read had already reached the cap.
 
 ## Listing traces
 
@@ -35,8 +49,11 @@ intutic traces list
 # Show 50 traces from the last 7 days
 intutic traces list --limit 50 --since 7d
 
-# Filter by enforcement action
+# Filter by enforcement action (connected mode only)
 intutic traces list --action KILL
+
+# Filter by verdict (local mode only)
+intutic traces list --verdict killed
 
 # Filter by model
 intutic traces list --model claude-4-sonnet
@@ -45,13 +62,16 @@ intutic traces list --model claude-4-sonnet
 intutic traces list --json
 ```
 
+With no connected control plane, `list` reads `~/.intutic/logs/` directly — no compliance-score column (there is no local compliance score) and `--action` refuses to run, since BYPASS/ENHANCE/HIJACK/KILL don't exist locally; use `--verdict` instead. See [Local vs connected](#local-vs-connected).
+
 **CLI options:**
 
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--limit <n>` | Number of traces (1–100) | `20` |
 | `--since <duration>` | Time window: `30m`, `24h`, `7d` | `24h` |
-| `--action <type>` | Filter: `BYPASS`, `ENHANCE`, `HIJACK`, `KILL` | _(all)_ |
+| `--action <type>` | Filter: `BYPASS`, `ENHANCE`, `HIJACK`, `KILL` — connected mode only | _(all)_ |
+| `--verdict <type>` | Filter: `allowed`, `killed`, `upstream_error`, `reasked`, `hijacked` — local mode only | _(all)_ |
 | `--model <name>` | Filter by model name | _(all)_ |
 | `--json` | JSON output instead of table | `false` |
 | `--dev` | Use local control plane | `false` |
@@ -92,8 +112,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 intutic traces inspect tr_abc123
 ```
 
-Returns the full trace detail including:
-- Token counts and costs
+With no connected control plane, `inspect` searches `~/.intutic/logs/` for a matching `trace_id` and prints the raw local record — token counts, costs, verdict, and everything else the proxy logged for that request, but no compliance score or corrective prompt card (both connected-mode-only). Connected mode's response additionally includes:
 - Compliance scores
 - Anomaly data (if any)
 - Corrective prompt card (if enforcement was applied)
