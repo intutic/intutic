@@ -44,6 +44,26 @@ pub mod k8s_token_writer;
 /// Local judge for self-hosted gateways (LLD #68 §2 phase 2)
 pub mod judge_local;
 pub mod local_spend;
+/// Local `~/.intutic/config.json` reader — cached daily-budget cap and
+/// approved-models allowlist for standalone deployments (Wave 6.3,
+/// audit-remediation).
+pub mod local_config;
+
+/// Test-only shared state that would otherwise be duplicated per-module.
+///
+/// `local_spend.rs` and `local_config.rs` both have tests that mutate the
+/// process-global `HOME` env var to point at a scratch directory. A
+/// module-private lock in each file cannot see the other module's lock, so
+/// running both test suites in the same binary (the normal `cargo test`
+/// case) races: one test's `HOME` leaks into the other's assertions. This
+/// was a real, observed flake — not a hypothetical — the first time a
+/// second module needed the same pattern `local_spend.rs`'s own tests
+/// already used. One shared lock closes it for every module that needs it,
+/// including ones added later.
+#[cfg(test)]
+pub(crate) mod test_support {
+    pub(crate) static HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+}
 
 // Phase 7: Intelligence Engine (LLDs #45, #47, #49)
 /// Response post-processor — appends governance notifications after LLM responses (LLD #45)

@@ -92,6 +92,13 @@ pub struct Facets {
     // memory (None = no provider connected)
     pub memory_total: Option<u32>,
     pub memory_governed: u32,
+    /// Failing-probe count from this process's own last scheduled
+    /// guard-liveness run (`probes::last_run()`), when one has completed.
+    /// Mirrors the TS `guardProbes` cap in `agentPosture.ts` (Wave 6.1,
+    /// audit-remediation): NOT a tenth weighted facet — `score()` below
+    /// applies it as a post-hoc ceiling on `overall`, so `FACETS` and its
+    /// coverage test stay untouched.
+    pub guard_probes_failed: Option<u32>,
 }
 
 /// One facet's contribution to the score.
@@ -214,9 +221,17 @@ pub fn score(f: &Facets) -> PostureResult {
     let applicable: Vec<&FacetScore> = facets.iter().filter(|s| s.applies).collect();
     let total_weight: u32 = applicable.iter().map(|s| s.weight).sum::<u32>().max(1);
     let weighted: f64 = applicable.iter().map(|s| s.score as f64 * s.weight as f64).sum();
-    let overall = (weighted / total_weight as f64).round() as u32;
+    let raw_overall = ((weighted / total_weight as f64).round() as u32).min(100);
 
-    PostureResult { overall: overall.min(100), band: band(overall), facets }
+    // Guard-liveness cap: a failed probe is an enforcement outage, not a
+    // fractional ding on one of nine facets. `None` (no run yet, or this
+    // build predates the probe suite) leaves the score untouched.
+    let overall = match f.guard_probes_failed {
+        Some(failed) if failed > 0 => raw_overall.min(50),
+        _ => raw_overall,
+    };
+
+    PostureResult { overall, band: band(overall), facets }
 }
 
 #[cfg(test)]
@@ -258,6 +273,39 @@ mod tests {
             ..Default::default()
         };
         assert!(score(&f).overall >= 85);
+    }
+
+    #[test]
+    fn guard_probes_failed_caps_the_score_at_50() {
+        let f = Facets {
+            dlp: true, wasm_rules: 3, hook_gate: true, pcas: true,
+            sops_total: 2, sops_enforced: 2,
+            budget_hard_cap: true, budget_session_cap: true,
+            loops_configured: true, loops_bounded: true,
+            harness_known: true, harness_config_synced: true,
+            guard_probes_failed: None,
+            ..Default::default()
+        };
+        let uncapped = score(&f).overall;
+        assert!(uncapped > 50, "fixture must score above the cap to test it: {uncapped}");
+
+        let capped = score(&Facets { guard_probes_failed: Some(1), ..f }).overall;
+        assert_eq!(capped, 50);
+    }
+
+    #[test]
+    fn a_zero_or_absent_guard_probes_failed_leaves_the_score_untouched() {
+        let base = Facets {
+            dlp: true, wasm_rules: 3, hook_gate: true, pcas: true,
+            sops_total: 2, sops_enforced: 2,
+            budget_hard_cap: true, budget_session_cap: true,
+            loops_configured: true, loops_bounded: true,
+            harness_known: true, harness_config_synced: true,
+            ..Default::default()
+        };
+        let without = score(&Facets { guard_probes_failed: None, ..base.clone() }).overall;
+        let zero = score(&Facets { guard_probes_failed: Some(0), ..base }).overall;
+        assert_eq!(without, zero);
     }
 
     #[test]

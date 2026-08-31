@@ -4,7 +4,7 @@
 
 // ── Notification Hub Types ─────────────────────────────────────
 
-export type NotificationChannel = 'slack' | 'email' | 'webhook'
+export type NotificationChannel = 'slack' | 'email' | 'webhook' | 'pagerduty'
 
 export type NotificationEventType =
   // ── Core governance events (already wired) ──
@@ -198,6 +198,11 @@ export interface ChannelConfig {
   emailRecipients?: string[]
   webhookUrl?: string
   webhookSecret?: string
+  /** PagerDuty Events API v2 integration/routing key. A credential — see
+   *  `notificationHubService.ts`'s `getChannelTarget` for why it is masked
+   *  (`pd:${key.slice(0,6)}…`) before ever reaching `notification_log`,
+   *  which is append-only and so unredactable forever once written. */
+  pagerdutyRoutingKey?: string
 }
 
 export interface NotificationFilters {

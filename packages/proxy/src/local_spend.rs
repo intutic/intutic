@@ -4,12 +4,6 @@ use std::io::Write;
 use std::path::PathBuf;
 
 #[derive(Serialize, Deserialize, Debug)]
-struct ConfigJson {
-    #[serde(rename = "maxDailyBudgetUsd", alias = "max_daily_budget_usd")]
-    max_daily_budget_usd: Option<f64>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
 struct LocalSpendDelta {
     spent_usd: f64,
 }
@@ -21,18 +15,15 @@ fn intutic_dir() -> PathBuf {
     PathBuf::from(home).join(".intutic")
 }
 
+/// Today's local daily spend cap, in USD.
+///
+/// Delegates to `local_config`'s cached parse (Wave 6.3, audit-remediation)
+/// — this used to read and parse `config.json` fresh on every call, on the
+/// request path, uncached. `get_local_spend` below already documents
+/// exactly this class of defect for the spend total; this function had the
+/// same one for the budget cap it's compared against.
 pub fn get_max_daily_budget() -> f64 {
-    let config_path = intutic_dir().join("config.json");
-    if !config_path.exists() {
-        return 10.0;
-    }
-    match fs::read_to_string(&config_path) {
-        Ok(content) => match serde_json::from_str::<ConfigJson>(&content) {
-            Ok(cfg) => cfg.max_daily_budget_usd.unwrap_or(10.0),
-            Err(_) => 10.0,
-        },
-        Err(_) => 10.0,
-    }
+    crate::local_config::get_max_daily_budget()
 }
 
 /// How long a cached daily total may be reused before re-reading the file.
@@ -201,33 +192,39 @@ pub fn log_offline_trace(trace: &serde_json::Value) {
 mod tests {
     use super::*;
 
-    /// Serialises the tests in this module.
+    /// Serialises the tests in this module against `local_config.rs`'s.
     ///
-    /// They share two pieces of process-global state: the `SPEND_CACHE` static,
-    /// and `HOME` — which each sets to its own directory so it does not touch a
-    /// developer's real `~/.intutic`. Run concurrently, one test's `HOME` and
-    /// cache entry leak into the other's assertions.
+    /// They share two pieces of process-global state: this module's own
+    /// `SPEND_CACHE` static, and `HOME` — which each sets to its own
+    /// directory so it does not touch a developer's real `~/.intutic`. Run
+    /// concurrently, one test's `HOME` (and cache entry) leaks into the
+    /// other's assertions.
     ///
     /// This was a real flake, not a hypothetical: the tests passed alone and
-    /// failed on every parallel run, and it only surfaced when an unrelated test
-    /// file changed the thread scheduling. A flaky guard is worse than no guard —
-    /// it teaches people to re-run until green, which is the habit that lets a
-    /// real failure through.
-    static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    /// failed on every parallel run, and it only surfaced when an unrelated
+    /// test file changed the thread scheduling. Hoisted to
+    /// `crate::test_support::HOME_LOCK` (rather than staying a module-private
+    /// static) once `local_config.rs` needed the exact same `HOME`-mutating
+    /// pattern — a second private lock could not see this one, so the same
+    /// flake would have resurfaced across modules instead of within one.
+    use crate::test_support::HOME_LOCK;
 
     /// Take the lock, tolerating a previous test having panicked while holding it.
     fn guard() -> std::sync::MutexGuard<'static, ()> {
-        TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+        HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     #[test]
     fn test_local_spend_functions() {
         let _lock = guard();
         // Reset the shared cache so this test starts from a known state whatever
-        // ran before it.
+        // ran before it. get_max_daily_budget delegates to local_config's own
+        // cache now, which must also be reset — otherwise this test can read
+        // a value local_config cached under a previous test's HOME.
         if let Ok(mut g) = SPEND_CACHE.lock() {
             *g = None;
         }
+        crate::local_config::reset_cache_for_test();
         std::env::set_var("HOME", "/tmp/intutic_test_home");
         let dir = intutic_dir();
         let _ = fs::remove_dir_all(&dir);
@@ -241,11 +238,16 @@ mod tests {
         let config_path = dir.join("config.json");
         fs::write(&config_path, r#"{"maxDailyBudgetUsd": 25.50}"#).unwrap();
 
+        // local_config's own 60s TTL means the default read just above is
+        // still cached — reset before each rewrite, exactly the shape a real
+        // 60-second wait would eventually produce on its own.
+        crate::local_config::reset_cache_for_test();
         assert_eq!(get_max_daily_budget(), 25.50);
 
         // 2. Set local config limit (snake_case alias)
         fs::write(&config_path, r#"{"max_daily_budget_usd": 15.75}"#).unwrap();
 
+        crate::local_config::reset_cache_for_test();
         assert_eq!(get_max_daily_budget(), 15.75);
 
         // 3. Add some spend

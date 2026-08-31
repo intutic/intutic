@@ -589,7 +589,8 @@ async fn main() -> anyhow::Result<()> {
             interval.tick().await;
             let registry = intutic_proxy::plugins::anomaly::DetectorRegistry::with_defaults();
             let sops = intutic_proxy::sops::loaded_sops();
-            let verdicts = intutic_proxy::probes::run_guard_probes(&registry, &sops);
+            let run = intutic_proxy::probes::run_and_record(&registry, &sops);
+            let verdicts = &run.verdicts;
             let failed: Vec<_> = verdicts.iter().filter(|v| !v.passed).collect();
             if failed.is_empty() {
                 tracing::info!(

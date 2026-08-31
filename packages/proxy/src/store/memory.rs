@@ -965,12 +965,15 @@ impl ControlPlaneCache for NullControlPlaneCache {
         None
     }
 
-    /// `None`, not `Some(vec![])` — a standalone proxy has no control plane to
-    /// have configured an allowlist, so it stays unrestricted, exactly like
-    /// `feature_flags` below falls back to local config rather than "deny
-    /// everything".
+    /// A standalone proxy has no control plane to have configured a
+    /// workspace-level allowlist — but Wave 6.3 (audit-remediation) gives it
+    /// a LOCAL one instead: `~/.intutic/config.json`'s `allowedModels`, read
+    /// through `local_config::get_allowed_models()` (its own cached parse,
+    /// already normalizing `Some(vec![])` to `None`). `workspace_id` is
+    /// unused deliberately — the local file has no concept of a workspace,
+    /// only of "models this machine may use."
     async fn allowed_models(&self, _workspace_id: &str) -> Option<Vec<String>> {
-        None
+        crate::local_config::get_allowed_models()
     }
 
     /// `None`, not `Some(default)` — standalone there is no control plane to be
@@ -1084,16 +1087,66 @@ mod null_control_plane_cache_tests {
         assert!(!cp.is_sandbox_attested("ses_1").await);
     }
 
-    /// Standalone proxies have no control plane to have configured an
-    /// approved-models allowlist, so they must stay unrestricted — `None`,
-    /// never `Some(vec![])`. `check_model_allowed` treats both the same way,
-    /// but the type-level distinction matters: a standalone deployment must
-    /// never be mistaken for "workspace configured an allowlist that happens
-    /// to be empty."
+    /// Standalone proxies have no control plane to have configured a
+    /// workspace-level approved-models allowlist — but they DO now read a
+    /// LOCAL one (Wave 6.3, audit-remediation): `~/.intutic/config.json`'s
+    /// `allowedModels`, via `local_config::get_allowed_models()`. With no
+    /// config file at all (this test's scratch `HOME` starts empty), that
+    /// stays unrestricted — `None`, never `Some(vec![])`.
+    /// `check_model_allowed` treats both the same way, but the type-level
+    /// distinction matters: an absent config must never be mistaken for
+    /// "configured an allowlist that happens to be empty."
+    ///
+    /// Uses `crate::test_support::HOME_LOCK` and a scratch `HOME`, same as
+    /// `local_config.rs`'s own tests — `allowed_models` now touches the real
+    /// filesystem through that module's cache, so this can no longer run
+    /// against whatever `HOME` happens to be set to in the process that
+    /// runs `cargo test` (a developer's real `~/.intutic/config.json` could
+    /// otherwise make this test's result depend on who's running it).
     #[tokio::test]
-    async fn standalone_has_no_allowed_models_restriction() {
+    async fn standalone_has_no_allowed_models_restriction_with_no_local_config() {
+        let _lock = crate::test_support::HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = std::env::temp_dir().join(format!(
+            "intutic-memory-test-home-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        let _ = std::fs::create_dir_all(&dir);
+        std::env::set_var("HOME", &dir);
+        crate::local_config::reset_cache_for_test();
+
         let cp = NullControlPlaneCache;
         assert_eq!(cp.allowed_models("ws_1").await, None);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The other half: a LOCAL allowlist (config.json, no control plane
+    /// involved at all) is what `NullControlPlaneCache::allowed_models` now
+    /// actually returns when one is configured — this is the enforcement
+    /// this whole build exists to light up.
+    #[tokio::test]
+    async fn standalone_honours_a_configured_local_allowlist() {
+        let _lock = crate::test_support::HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = std::env::temp_dir().join(format!(
+            "intutic-memory-test-home-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        let intutic_dir = dir.join(".intutic");
+        let _ = std::fs::create_dir_all(&intutic_dir);
+        std::fs::write(
+            intutic_dir.join("config.json"),
+            r#"{"allowedModels": ["claude-3-5-sonnet"]}"#,
+        )
+        .unwrap();
+        std::env::set_var("HOME", &dir);
+        crate::local_config::reset_cache_for_test();
+
+        let cp = NullControlPlaneCache;
+        assert_eq!(cp.allowed_models("ws_1").await, Some(vec!["claude-3-5-sonnet".to_string()]));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 
