@@ -23,6 +23,19 @@ import * as os from 'node:os'
 
 const log = createLogger('trajectory-monitor')
 
+/**
+ * Size at which the offline-trajectory spool stops accepting writes.
+ *
+ * Same shape as the proxy's own `MAX_TRACE_LOG_BYTES` (`local_spend.rs`) —
+ * checked before opening, so an oversized file costs one stat rather than an
+ * open and a write. Set well below that 64MB raw-trace cap: this file holds
+ * windowed summaries, one per session per submit interval, not one line per
+ * request, so it should never approach even this bound in normal use — the
+ * cap exists for the pathological case (control plane down for days) where
+ * `saveOffline` was previously called with no ceiling at all.
+ */
+const MAX_OFFLINE_TRAJECTORIES_BYTES = 16 * 1024 * 1024
+
 // ─── Types ──────────────────────────────────────────────────────────
 
 /** Individual trace event from the proxy pub/sub stream. */
@@ -366,6 +379,17 @@ export class TrajectoryMonitor {
 
   private saveOffline(summary: TrajectorySummaryPayload, filePath: string): void {
     try {
+      // Checked before opening, matching the proxy's MAX_TRACE_LOG_BYTES
+      // pattern — an oversized spool drops the write rather than growing
+      // without bound while the control plane stays unreachable.
+      const stat = fs.existsSync(filePath) ? fs.statSync(filePath) : null
+      if (stat && stat.size >= MAX_OFFLINE_TRAJECTORIES_BYTES) {
+        log.warn(
+          { path: filePath, bytes: stat.size },
+          'Offline trajectory spool at its size cap — dropping this summary rather than growing further',
+        )
+        return
+      }
       fs.mkdirSync(path.dirname(filePath), { recursive: true })
       fs.appendFileSync(filePath, JSON.stringify(summary) + '\n', 'utf-8')
     } catch (err) {
@@ -382,9 +406,19 @@ export class TrajectoryMonitor {
       const lines = raw.split('\n').map(l => l.trim()).filter(Boolean)
       if (lines.length === 0) return
 
+      // One reachability probe before committing to the whole file, not one
+      // failed POST per line. Without this, a control plane that has been
+      // down for days turned every submit interval into as many failed
+      // fetch attempts as there were buffered lines — an amplifying retry
+      // loop on top of the outage it was retrying against.
+      if (!(await this.controlPlaneIsReachable())) {
+        log.debug({ path: offlineFile }, 'Control plane unreachable — skipping offline trajectory drain this cycle')
+        return
+      }
+
       log.info({ count: lines.length }, 'Attempting to drain offline trajectories')
       const remaining: string[] = []
-      
+
       for (const line of lines) {
         try {
           const summary = JSON.parse(line)
@@ -415,6 +449,17 @@ export class TrajectoryMonitor {
       }
     } catch (err) {
       log.error({ err }, 'Failed to drain offline trajectories')
+    }
+  }
+
+  /** Bounded best-effort reachability probe, same shape as syncLoop.ts's. */
+  private async controlPlaneIsReachable(): Promise<boolean> {
+    if (!this.config.controlPlaneUrl) return false
+    try {
+      const res = await fetch(`${this.config.controlPlaneUrl}/healthz`, { signal: AbortSignal.timeout(2000) })
+      return res.ok
+    } catch {
+      return false
     }
   }
 

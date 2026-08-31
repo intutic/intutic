@@ -200,6 +200,18 @@ pub struct ExecutionTrace {
     pub change_manifest: Vec<crate::manifest::ChangeEntry>,
     pub reconstruction_quality: u8,
     pub token_anomaly: bool,
+    /// Whether this request ran under an active break-glass override (safety
+    /// policies and WASM rule checks skipped). Migration 170 on the control
+    /// plane side. Unconditional, like `token_anomaly` above — every trace
+    /// either ran under an override or it didn't, so this is never omitted.
+    pub break_glass: bool,
+    /// The approved `break_glass_requests.request_id` this trace ran under,
+    /// when `break_glass` is true. `None` otherwise. The override TOKEN is
+    /// deliberately never a field here — the request id is enough to join
+    /// back to the approval trail, and putting the token itself on a trace
+    /// would just relocate the "records the raw token" defect this exists to
+    /// close, not close it.
+    pub break_glass_request_id: Option<String>,
     pub loop_run_id: Option<String>,
 
     /// Every detector finding raised on this request, attributed.
@@ -469,6 +481,8 @@ mod tests {
             change_manifest: Vec::new(),
             reconstruction_quality: 0,
             token_anomaly: false,
+            break_glass: false,
+            break_glass_request_id: None,
             loop_run_id: None,
             findings: Vec::new(),
             response_injection_findings: Vec::new(),

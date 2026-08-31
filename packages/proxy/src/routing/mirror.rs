@@ -52,6 +52,15 @@ pub const MAX_CONCURRENT: usize = 4;
 
 static IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
 
+/// Whether mirroring is configured at all, independent of any one request.
+///
+/// Used at boot to decide whether standalone mode's double-billing warning
+/// applies — `should_mirror` below clamps and rolls per-request, which is the
+/// wrong shape for "is this feature on."
+pub fn mirroring_is_configured(routing: &crate::config::RoutingConfig) -> bool {
+    routing.mirror_sample_rate > 0.0
+}
+
 /// Whether this request should be mirrored.
 ///
 /// Returns false for anything that would make the comparison meaningless or the

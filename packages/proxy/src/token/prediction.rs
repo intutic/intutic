@@ -451,8 +451,8 @@ mod tests {
         async fn auto_judge_active(&self, _s: crate::store::JudgeScope, _id: &str) -> bool {
             false
         }
-        async fn break_glass_valid(&self, _t: &str) -> bool {
-            false
+        async fn break_glass_grant(&self, _t: &str, _w: &str) -> Option<crate::store::BreakGlassGrant> {
+            None
         }
         async fn transition_baseline(&self, _w: &str) -> Option<String> {
             None

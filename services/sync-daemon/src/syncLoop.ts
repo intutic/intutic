@@ -204,6 +204,27 @@ export interface SyncResult {
 
 const DEFAULT_POLL_INTERVAL_MS = 30_000
 
+/**
+ * Best-effort reachability probe for the control plane, modelled on
+ * `agentReporter.fetchEgressStatus()`'s bounded-fetch-and-swallow shape.
+ *
+ * The trajectory monitor used to start on `VALKEY_URL || apiKey` alone —
+ * never checking `controlPlaneUrl` at all, so an unset URL produced
+ * `undefined/api/v1/...` on every submit attempt. This is the missing check:
+ * a monitor that will publish its summaries to a URL that does not resolve
+ * (or does not answer) should not start believing it has somewhere to send
+ * them.
+ */
+async function controlPlaneIsReachable(controlPlaneUrl: string): Promise<boolean> {
+  if (!controlPlaneUrl) return false
+  try {
+    const res = await fetch(`${controlPlaneUrl}/healthz`, { signal: AbortSignal.timeout(2000) })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
 // ─── Core sync loop ──────────────────────────────────────────────────
 
 /**
@@ -227,7 +248,7 @@ export async function startSyncLoop(options: SyncLoopOptions): Promise<void> {
   let trajectoryMonitor: TrajectoryMonitor | null = null
   let trajectorySubscriber: Redis | null = null
 
-  if (process.env.VALKEY_URL || apiKey) {
+  if ((process.env.VALKEY_URL || apiKey) && (await controlPlaneIsReachable(controlPlaneUrl))) {
     const valkeyUrl = process.env.VALKEY_URL ?? 'redis://127.0.0.1:6379'
     trajectoryMonitor = new TrajectoryMonitor({
       valkeyUrl,
