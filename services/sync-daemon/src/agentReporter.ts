@@ -38,6 +38,22 @@ export interface EgressFacet {
   would_deny: number
 }
 
+/**
+ * Summary of the proxy's last scheduled guard-liveness probe run
+ * (`GET /intutic/probes`, Wave 6.1 audit-remediation). `ranAt` is the Unix
+ * timestamp the *scheduled loop* recorded, not when this fetch ran — a dead
+ * loop shows up here as a timestamp that stops advancing, not a fresh
+ * "just ran" answer every cycle.
+ */
+export interface GuardProbesFacet {
+  total: number
+  failed: number
+  ranAt: number
+  /** probe_id of every failing probe, capped at 10 — enough to act on
+   *  without turning this into an unbounded transcript. */
+  failing: string[]
+}
+
 interface AgentFacets {
   guardrails: {
     dlp: boolean
@@ -112,6 +128,18 @@ interface AgentFacets {
   loops: { configured: boolean }
   harness: { type: string; config_synced: boolean }
   memory: Array<{ provider: string; configured: boolean }>
+  /**
+   * Present only when the local proxy answered `GET /intutic/probes`. A
+   * sibling of `guardrails`, not a member of it — `guardrails` already names
+   * one boolean/count per guard mechanism (dlp, wasm_rules, hook_gate, pcas,
+   * egress); guard-liveness is a different axis (did the loaded guards prove
+   * themselves against a live probe, on a schedule) and collapsing it into
+   * `guardrails` would make `hasOwnProperty` checks there ambiguous between
+   * "this guard exists" and "this guard is alive". Absence here (vs. a
+   * present-but-empty facet) is itself meaningful to `agentPosture.ts`: no
+   * report means `not_enforced`, never a silent pass.
+   */
+  guardProbes?: GuardProbesFacet
 }
 
 export interface AgentReport {
@@ -153,6 +181,41 @@ export async function fetchEgressStatus(): Promise<EgressFacet | null> {
       denied: typeof body.denied === 'number' ? body.denied : 0,
       would_deny: typeof body.would_deny === 'number' ? body.would_deny : 0,
     }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Read the local proxy's last scheduled guard-liveness probe run
+ * (`GET /intutic/probes`, loopback-only — this must run on the same machine
+ * as the proxy, exactly like `fetchEgressStatus` above). Best-effort: an
+ * unreachable proxy, a 403 (non-loopback — should not happen here), or a 503
+ * (suite hasn't run yet, the narrow window right after proxy start) all
+ * simply omit the facet rather than reporting a false pass.
+ */
+export async function fetchGuardProbes(): Promise<GuardProbesFacet | null> {
+  let base = process.env.INTUTIC_PROXY_URL ?? 'http://localhost:4000'
+  while (base.endsWith('/')) base = base.slice(0, -1)
+  try {
+    const res = await fetch(`${base}/intutic/probes`, { signal: AbortSignal.timeout(2000) })
+    if (!res.ok) return null
+    const body = (await res.json()) as {
+      probes?: unknown
+      total?: unknown
+      failed?: unknown
+      ran_at?: unknown
+    }
+    if (typeof body.total !== 'number' || typeof body.failed !== 'number' || typeof body.ran_at !== 'number') {
+      return null
+    }
+    const probes = Array.isArray(body.probes) ? body.probes : []
+    const failing = probes
+      .filter((p): p is { probe_id: unknown; passed: unknown } => typeof p === 'object' && p !== null)
+      .filter((p) => p.passed === false && typeof p.probe_id === 'string')
+      .map((p) => p.probe_id as string)
+      .slice(0, 10)
+    return { total: body.total, failed: body.failed, ranAt: body.ran_at, failing }
   } catch {
     return null
   }
@@ -372,13 +435,14 @@ export async function collectAgentReport(opts: {
   /** Workspace policy: may local vaults feed /fix? Defaults to allowed. */
   allowLocalVaults?: boolean
 }): Promise<AgentReport> {
-  const [wasmRules, sops, skills, mcpTools, vaults, egress] = await Promise.all([
+  const [wasmRules, sops, skills, mcpTools, vaults, egress, guardProbes] = await Promise.all([
     countWasmRules(),
     collectSops(opts.workspaceRoot),
     collectSkills(opts.workspaceRoot),
     collectMcpTools(opts.workspaceRoot),
     detectLocalVaults(opts.workspaceRoot),
     fetchEgressStatus(),
+    fetchGuardProbes(),
   ])
 
   const role = opts.agentRole ?? ''
@@ -414,6 +478,7 @@ export async function collectAgentReport(opts: {
         opts.allowLocalVaults === false
           ? []
           : vaults.map((kind) => ({ provider: `local-vault:${kind}`, configured: true })),
+      ...(guardProbes ? { guardProbes } : {}),
     },
   }
 }
