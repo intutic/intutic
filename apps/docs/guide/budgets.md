@@ -143,11 +143,23 @@ Intutic keeps an append-only cost ledger — `execution_traces` forbids UPDATE a
 
 - **Workspace Summary:** Actual cost, raw cost before routing, routing savings, input and output token totals, and call count for a daily, weekly or monthly window (`/api/v1/usage/summary`).
 - **Per-Model Breakdown:** Cost and tokens grouped by requested model (`/api/v1/usage/models`).
+- **Per-Virtual-Key Breakdown:** Cost and tokens grouped by which virtual key authenticated the call (`/api/v1/usage/virtual-keys`).
 - **Event-Level Detail:** The individual billed calls behind those totals (`/api/v1/usage/events`).
 
 ::: info Chargebacks and GL mapping are not part of the product
 Cost-center GL mapping, period-end chargeback re-invoicing and the async PDF/CSV report workers were removed when the product narrowed to circuit-breaker scope, and their tables were dropped. The endpoints above are what ships.
 :::
+
+### Splitting cost by traffic class (desktop vs. app, staging vs. prod, …)
+
+There is no dedicated "traffic class" concept — the interim answer is one
+virtual key per class. Mint a separate key under **Settings → API Keys** for
+each class (e.g. `desktop`, `ci`, `prod`), point that traffic at its own key,
+and `/api/v1/usage/virtual-keys` reports each key's cost separately from that
+point on. Traces from before a key existed, and any trace with no virtual-key
+auth context (a standalone/offline trace synced back, for instance), report
+under a `null` key rather than being folded into whichever key happens to be
+first.
 
 ### Resolving Budget Alerts
 Security and FinOps administrators can review all active budget breaches on the **Incidents Page**. When resolving a breach, administrators can record:
