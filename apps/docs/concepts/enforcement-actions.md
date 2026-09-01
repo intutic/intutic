@@ -59,6 +59,39 @@ protected-path and shell-bypass guards written into the generated hook script.
 
 ---
 
+## Two rungs, not one bar
+
+Everything above answers *what* a verdict does. This section answers *how a
+check earns the right to block at all* — because Intutic runs two different
+kinds of check side by side, and they are held to different bars on purpose.
+
+**Rung 1 — deterministic, blocks today.** DLP pattern matches, `BLOCK:` SOPs,
+SSO group policy, and budget limits are all authored by an operator or
+computed from a fixed rule. There is no learning curve and no false-positive
+rate to earn: the rule either matches or it doesn't, so it enforces
+(`KILL`/`HIJACK`) from the moment it's turned on. This rung is exactly the
+open-core pitch — every check on it ships in the public proxy, runs
+deterministically, and needs no control plane to decide.
+
+**Rung 2 — learned, shadow-first.** SSL's structural and logical layers,
+anomaly-finding promotion, and loop detection are heuristic: they're right
+most of the time on most workspaces, which is a different guarantee than
+"right." Each one launches in **shadow mode** — it evaluates every call and
+records what it *would* have done, without changing what the agent
+experiences — until its false-positive rate is measured on that workspace's
+own real traffic and clears the [promotion rule](/guide/graph-guardrails).
+Only then does it graduate onto the enforcement table above (SSL as `KILL`,
+loop detection as today's `REASK`, findings as a promoted `KILL`/`HIJACK`).
+
+This is a deliberate trade, not a hedge: **we don't let an LLM block your
+engineers until it has proven a low false-positive rate on your traffic.** A
+heuristic that blocked from day one would be indistinguishable, from the
+agent's side, from a broken one — and the cost of that mistake is a blocked
+engineer, not a missed detection. Shadow mode is how rung 2 pays down that
+risk before it can ever cost anyone a turn.
+
+---
+
 ## BYPASS
 
 The request is permitted and passes through the proxy without modification. This is the default when all policy checks pass.

@@ -34,7 +34,7 @@ real time and return one of four verdicts: **BYPASS**, **ENHANCE**, **HIJACK**, 
 |---|---|
 | **Node.js** | 18 or later |
 | **npm** | 10 or later |
-| **AI coding agent** | Any of the [39 supported harnesses](/integrations/) (Cursor, Claude Code, Aider, Windsurf, Antigravity, etc.) |
+| **AI coding agent** | Any of the [41 supported harnesses](/integrations/) (Cursor, Claude Code, Aider, Windsurf, Antigravity, etc.) |
 | **Valkey** (or Redis) | *Optional.* 8.x — a shared, durable cache. `intutic start` provisions one if it can, and runs without it if it cannot |
 
 That is the whole list. **Valkey is not required**, and neither is a

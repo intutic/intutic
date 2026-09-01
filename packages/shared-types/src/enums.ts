@@ -435,6 +435,42 @@ export const HarnessType = {
 /** Union of all harness type values. */
 export type HarnessType = typeof HarnessType[keyof typeof HarnessType]
 
+/**
+ * The real count of `HarnessType` members — one number, exported so no doc
+ * or README prose ever has to state it by hand again (Wave 8,
+ * audit-remediation). `check-harness-counts.js` (`lint:claims`) asserts
+ * every harness-count claim in `apps/docs/**` and `README.md` matches
+ * either this or `HARNESS_HEADLINE_COUNT` below, so this drifting out of
+ * sync with prose is now a lint failure, not a silent staleness.
+ */
+export const HARNESS_COUNT = Object.keys(HarnessType).length
+
+/**
+ * `HARNESS_COUNT` minus the harnesses with a confirmed, currently-open
+ * support gap — the number safe to use in headline/marketing copy
+ * ("works with N coding agents") without overclaiming. Each exclusion is a
+ * harness with its own `docs/TECH_DEBT.md` entry describing a REAL,
+ * currently-unactionable gap (not a caveat, not a "documented, not a
+ * defect" note):
+ *
+ * - `agentic-orchestrator` (TD-397): its OpenCode backend has no Intutic
+ *   gate to delegate to at all — not actionable by this integration alone,
+ *   closes only when OpenCode itself gets an adapter.
+ * - `autogen` (TD-374): `InterventionHandler.on_send` is blind to
+ *   `AssistantAgent`'s own tool calls — they never reach `Gate.guard()`.
+ *
+ * Deliberately does NOT exclude `mastra` — TD-380 is explicitly marked
+ * "🟢 Documented, not a defect" in TECH_DEBT.md, a caveat about a call-site
+ * hook override, not a coverage gap, so excluding it here would be the
+ * exact overclaim-avoidance discipline applied backwards. Also does NOT
+ * exclude `continue` over its headless-mode limitation (`cn -p` skips
+ * PreToolUse hooks): that is a secondary invocation mode of a harness whose
+ * primary (interactive) path is fully covered, not a reason to undercount
+ * the harness itself.
+ */
+export const HARNESS_HEADLINE_COUNT =
+  HARNESS_COUNT - [HarnessType.AGENTIC_ORCHESTRATOR, HarnessType.AUTOGEN].length
+
 // ─── Execution Mode ──────────────────────────────────────────────────
 // HLD §3.4 — Agent execution modes
 

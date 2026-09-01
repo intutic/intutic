@@ -23,6 +23,7 @@
 
 import { createPublicKey, verify as nodeVerify, type JsonWebKey } from 'node:crypto'
 import { log } from '../lib/logger.js'
+import { NOT_AUTHENTICATED } from '../lib/authMessages.js'
 import { loadCredentials } from '../config/store.js'
 import { resolveControlPlaneUrl } from '../config/paths.js'
 import { createApiClient } from '../lib/api.js'
@@ -504,9 +505,6 @@ function sampleIds(ids: string[], limit = 10): string {
   if (ids.length <= limit) return ids.join(', ')
   return `${ids.slice(0, limit).join(', ')} … and ${ids.length - limit} more`
 }
-
-const NOT_AUTHENTICATED =
-  'Not authenticated. This command needs an Intutic control plane, which open core does not include. To run the proxy without one: `intutic start`.'
 
 interface IntegrityCliOpts {
   json?: boolean
