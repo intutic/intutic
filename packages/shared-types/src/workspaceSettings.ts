@@ -158,6 +158,27 @@ export interface WorkspaceSettings {
      * since `skillOptService.autoApplyIfEnabled` needs a hot-path read.
      */
     ff_skillopt_auto_apply?: boolean
+    /**
+     * Promote `destructive.sql_drop` from `warn` to `block` on the sync
+     * daemon's hook-gate path (Wave 7, audit-remediation). Read by
+     * `GET /api/v1/policy/resolve` (`routes/evaluate.ts`), which surfaces it
+     * as `sqlDropStrictBlock` on the response; the sync daemon's
+     * `buildSnapshotRules` (`services/sync-daemon/src/lib/policySnapshot.ts`)
+     * applies it as a per-rule override on the next sync cycle — independent
+     * of `DESTRUCTIVE_TIER_SEVERITY`, the evidence-gated promotion ramp that
+     * governs the OTHER six `DESTRUCTIVE_COMMAND_PATTERNS` entries.
+     * `destructive.sql_drop` was never part of that ramp (its own static
+     * definition is `severity: 'warn'`, not `'block'`, so the ramp's ternary
+     * never reaches it) — its rationale is a genuinely different one
+     * (the gate cannot distinguish a dev DSN from a production one; the MCP
+     * path already blocks, because the proxy CAN make that distinction).
+     * This flag exists for a workspace that wants the hook path to match the
+     * MCP path anyway, accepting the dev-DSN false-positive risk explicitly.
+     * `false` by default; `true` in the `strict` security posture preset
+     * (`posturePresets.ts`) — never auto-promoted by traffic evidence the
+     * way the six-pattern ramp is.
+     */
+    ff_sql_drop_strict_block?: boolean
   }
 
 
@@ -484,6 +505,25 @@ export interface WorkspaceSettings {
   virusTotalSkillLookupEnabled?: boolean
 
   /**
+   * Fraction of ingested traces that receive the two heavier, LLM-adjacent
+   * security probes — `traceIngestClassifier.classifyTraceAtIngest`'s
+   * baseline/history-derived anomaly checks and `llmProbeService`'s
+   * output probe (Wave 7, audit-remediation). `1.0` (every trace) is the
+   * default and matches today's unconditional behavior exactly — setting
+   * this field at all is the opt-in, not any particular value.
+   *
+   * Exists to turn an informal "spot-check 1-in-N traces" practice into a
+   * config answer instead of a second, undocumented detection lane a
+   * workspace has no visibility into or control over. `0` disables both
+   * probes entirely (still runs the always-on deterministic checks
+   * elsewhere in the ingest path — this field only gates these two).
+   * Clamped to `[0, 1]` at the read site; an out-of-range stored value
+   * (there is no PUT-time validation preventing one) is treated as `1.0`,
+   * never as `0` — a malformed setting must not silently blind detection.
+   */
+  securityProbeSampleRate?: number
+
+  /**
    * Whether corrective governance cards accumulate adoption labels in
    * `governance_card_labels` — the dataset a future judge fine-tune trains on.
    *
@@ -533,6 +573,9 @@ export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
     ff_shadow_enforcement: false,
     ff_metaclaw_auto_apply: false,
     ff_skillopt_auto_apply: false,
+    // Off by default — see the field doc. The `strict` security posture
+    // preset turns it on; nothing else does.
+    ff_sql_drop_strict_block: false,
   },
   enableLocalSkillAuditDelete: false,
   // Off by default — see the field doc above. A workspace must explicitly
@@ -590,6 +633,9 @@ export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
   // ON by default — see the field doc. Opting out stops label retention for
   // the judge fine-tuning dataset, never card delivery itself.
   governanceCardLabelingEnabled: true,
+  // 1.0 = every trace, matching the unconditional behavior this knob
+  // replaces exactly. See the field doc for what a lower value gates.
+  securityProbeSampleRate: 1.0,
 }
 
 /**
@@ -603,4 +649,19 @@ export function resolveWorkspaceSettings(
     ...DEFAULT_WORKSPACE_SETTINGS,
     ...(stored ?? {}),
   }
+}
+
+/**
+ * Read `securityProbeSampleRate` off already-resolved settings, clamped to
+ * the safe (unblinded) side of any bad value. The PUT schema in
+ * `routes/workspace.ts` bounds new writes to `[0, 1]`, but this also covers
+ * a value written before that bound existed, or one that reached the row by
+ * a path other than that route (a script, a fixture) — `NaN`, `undefined`,
+ * negative or `>1` all resolve to `1.0`. Only a genuine finite value in
+ * range is trusted to lower the sample rate.
+ */
+export function resolveSecurityProbeSampleRate(settings: WorkspaceSettings): number {
+  const rate = settings.securityProbeSampleRate
+  if (typeof rate !== 'number' || !Number.isFinite(rate) || rate < 0 || rate > 1) return 1.0
+  return rate
 }

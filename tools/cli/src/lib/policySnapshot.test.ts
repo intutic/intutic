@@ -187,6 +187,7 @@ describe('agreement with the sync daemon', () => {
           { id: 'r1', toolPattern: 'Bash', action: 'block', reason: 'No shell in this workspace' },
         ],
         mcpAllowedServers: [],
+        sqlDropStrictBlock: false,
       },
       dir,
     )
