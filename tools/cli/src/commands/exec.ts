@@ -32,6 +32,7 @@ import {
   type GraphIdentity,
 } from '../lib/graphIdentity.js'
 import { log } from '../lib/logger.js'
+import { NOT_AUTHENTICATED } from '../lib/authMessages.js'
 import { selectBackend, type SandboxKind, type SandboxSpec } from '../lib/sandbox/index.js'
 import pc from 'picocolors'
 
@@ -220,7 +221,7 @@ export async function runExec(
   // Load credentials
   const creds = await loadCredentials()
   if (!creds) {
-    log.error('Not authenticated. This command needs an Intutic control plane, which open core does not include. To run the proxy without one: `intutic start`.')
+    log.error(NOT_AUTHENTICATED)
     process.exit(1)
   }
 

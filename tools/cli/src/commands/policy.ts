@@ -4,6 +4,7 @@ import * as os from 'node:os'
 import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { log } from '../lib/logger.js'
+import { NOT_AUTHENTICATED } from '../lib/authMessages.js'
 import {
   WASM_HOST_IMPORTS,
   unsupportedWasmImports,
@@ -38,7 +39,7 @@ async function resolveTarget(
 ): Promise<{ controlPlaneUrl: string; apiKey: string; workspaceId: string }> {
   const creds = await loadCredentials()
   if (!creds) {
-    log.error('Not authenticated. This command needs an Intutic control plane, which open core does not include. To run the proxy without one: `intutic start`.')
+    log.error(NOT_AUTHENTICATED)
     process.exit(1)
   }
   const config = loadConfig()

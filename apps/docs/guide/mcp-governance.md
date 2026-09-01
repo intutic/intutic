@@ -182,6 +182,41 @@ protocol frames, only TCP/TLS connections. Governance over a remote server's
 traffic requires BOTH layers doing their own job, not one substituting for
 the other.
 
+### Recipe: chaining behind an existing MCP gateway
+
+The bridge above was described in terms of "one remote MCP server," but
+`--remote-url` has no idea whether the HTTP/SSE endpoint it talks to is a
+single server or something that itself fans out to many — including a
+gateway or router the organization already runs to aggregate several
+internal MCP servers behind one endpoint. If that gateway speaks MCP over
+HTTP or SSE, it needs no special support: point Intutic's proxy at it the
+same way you would point it at any other remote server, wired in as the
+harness's `mcp.json` entry (or written by `intutic connect`, once the sync
+daemon discovers it as a `url`-keyed entry):
+
+```bash
+npx @intutic/mcp-governance-proxy \
+  --workspace-id wk_your_workspace \
+  --remote-url https://mcp-gateway.internal.example.com \
+  --remote-transport http
+```
+
+An auth header the existing gateway requires (a bearer token, an API key)
+rides via `INTUTIC_REMOTE_HEADERS` on the wrapped entry, the same as any
+other remote server — never as a CLI argument.
+
+**What this does and does not give you.** Every tool call the harness makes
+to the gateway now passes through Intutic's governance pipeline first — the
+allowlist, TOFU pinning, DLP redaction, prompt-injection scanning, and
+per-call audit events all apply to the aggregate traffic between the harness
+and the gateway, exactly as they would to a single remote server. What they
+do **not** see is anything on the *other* side of the gateway: if the
+gateway itself fans a call out to one of several backend MCP servers it
+manages, that internal hop is invisible to this proxy — governance sees the
+one call the harness made and the one result the gateway returned, not the
+gateway's own internal routing. Chaining in front of an existing gateway
+adds a governance layer to it; it does not reach through it.
+
 ## Prompt-injection scanning
 
 Ported from the Rust LLM-traffic proxy's `injection.rs` — five regex patterns

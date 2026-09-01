@@ -10,6 +10,7 @@ import { createHash } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { spawn, execFileSync } from 'node:child_process'
 import { log } from '../lib/logger.js'
+import { NOT_AUTHENTICATED } from '../lib/authMessages.js'
 import { loadCredentials, loadConfig } from '../config/store.js'
 import { getIntuticDir, resolveControlPlaneUrl } from '../config/paths.js'
 import { createApiClient } from '../lib/api.js'
@@ -974,7 +975,7 @@ export async function runSkillScanStaged(): Promise<void> {
 export async function getClient(dev?: boolean) {
   const creds = await loadCredentials()
   if (!creds) {
-    log.error('Not authenticated. This command needs an Intutic control plane, which open core does not include. To run the proxy without one: `intutic start`.')
+    log.error(NOT_AUTHENTICATED)
     process.exit(1)
   }
   // `config?.devMode` is load-bearing and was missing here.
