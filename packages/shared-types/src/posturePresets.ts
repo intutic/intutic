@@ -10,6 +10,10 @@
  * - `bypassEnforcementTier` drives the sync-daemon's drift watcher.
  * - `mcpProxyFailBehavior` decides whether a broken MCP proxy fails open or
  *   closed.
+ * - `featureFlags.ff_sql_drop_strict_block` is read by `GET
+ *   /api/v1/policy/resolve` and applied by the sync daemon's
+ *   `buildSnapshotRules` (Wave 7, audit-remediation) to promote the hook
+ *   gate's `destructive.sql_drop` rule from warn to block.
  *
  * A preset key without a consumer would make the posture selector the exact
  * inert control this product exists to remove, so adding one requires naming
@@ -47,7 +51,17 @@ export const SECURITY_POSTURES: readonly PosturePreset[] = [
       bypassEnforcementTier: 'immutable',
       mcpProxyFailBehavior: 'closed',
     },
-    featureFlags: { ff_shadow_enforcement: false },
+    // ff_sql_drop_strict_block (Wave 7, audit-remediation): promotes the
+    // sync-daemon hook gate's `destructive.sql_drop` rule from warn to
+    // block, matching what the MCP path already does unconditionally. Read
+    // by `GET /api/v1/policy/resolve` (`sqlDropStrictBlock` on the
+    // response) and applied by the sync daemon's `buildSnapshotRules`
+    // (`services/sync-daemon/src/lib/policySnapshot.ts`) — a per-rule
+    // override, not a flip of `DESTRUCTIVE_TIER_SEVERITY`'s separate,
+    // evidence-gated promotion ramp for the other six destructive-command
+    // patterns. Accepts the dev-DSN false-positive risk explicitly, which is
+    // exactly the trade this posture's own description already commits to.
+    featureFlags: { ff_shadow_enforcement: false, ff_sql_drop_strict_block: true },
   },
   {
     name: 'balanced',
