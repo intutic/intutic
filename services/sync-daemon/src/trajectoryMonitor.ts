@@ -20,6 +20,7 @@ import { createLogger } from '@intutic/logger'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import * as os from 'node:os'
+import { runLocalTrajectoryHeuristics } from './localTrajectoryHeuristics.js'
 
 const log = createLogger('trajectory-monitor')
 
@@ -339,6 +340,25 @@ export class TrajectoryMonitor {
   private async submitSummary(buffer: TrajectoryBuffer): Promise<void> {
     const summary = buffer.toSummary([], 0) // SOPs and budget filled by CP
     const offlineFile = path.join(os.homedir(), '.intutic', 'events', 'offline-trajectories.jsonl')
+
+    // Wave 7 (audit-remediation): local heuristics run unconditionally, on
+    // every window, regardless of whether the control-plane submission
+    // below succeeds — this is the guardrail a standalone/open-core daemon
+    // gets with no control plane at all, not a fallback for when the network
+    // call fails. See localTrajectoryHeuristics.ts for why BUDGET_EXCEEDED
+    // is not among them.
+    for (const result of runLocalTrajectoryHeuristics(summary)) {
+      log.warn(
+        {
+          sessionId: buffer.sessionId,
+          workspaceId: buffer.workspaceId,
+          rule: result.rule,
+          severity: result.severity,
+          action: 'local_trajectory_heuristic_triggered',
+        },
+        result.message,
+      )
+    }
 
     try {
       const res = await fetch(

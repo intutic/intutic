@@ -89,7 +89,13 @@ beforeAll(async () => {
   writeRulesFixture(snapshotRules, DESTRUCTIVE_COMMAND_PATTERNS)
   writeRulesFixture(
     skillSurfaceSnapshotRules,
-    buildSnapshotRules({ workspaceId: 'ws_test', interventionMode: 'ENFORCE', sopRules: [], mcpAllowedServers: [] }),
+    buildSnapshotRules({
+      workspaceId: 'ws_test',
+      interventionMode: 'ENFORCE',
+      sopRules: [],
+      mcpAllowedServers: [],
+      sqlDropStrictBlock: false,
+    }),
   )
   for (const g of GATES) {
     // A root per writer, HOME moved before the dynamic import: `gooseHooks`

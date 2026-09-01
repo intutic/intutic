@@ -165,6 +165,14 @@ export interface ResolvedPolicy {
    * list omits the header entirely rather than shipping a deny-everything one.
    */
   mcpAllowedServers: string[]
+  /**
+   * Wave 7 (audit-remediation): promotes `destructive.sql_drop` from `warn`
+   * to `block` in `buildSnapshotRules` below — a per-rule override, not a
+   * flip of `DESTRUCTIVE_TIER_SEVERITY`. Absent/wrongly-typed degrades to
+   * `false` (stays `warn`), the same fail-safe direction every other field
+   * here degrades in.
+   */
+  sqlDropStrictBlock: boolean
 }
 
 export interface PolicySnapshotOptions {
@@ -385,6 +393,7 @@ export async function fetchResolvedPolicy(
       mcpAllowedServers: Array.isArray(rec.allowedServers)
         ? rec.allowedServers.filter((s): s is string => typeof s === 'string')
         : [],
+      sqlDropStrictBlock: rec.sqlDropStrictBlock === true,
     }
   } catch (err) {
     log.warn({ action: 'policy_fetch_failed', err }, 'Policy resolve unreachable')
@@ -458,17 +467,29 @@ export function buildSnapshotRules(policy: ResolvedPolicy): GuardPattern[] {
     .map((r) => toGuardPattern(r, shadow))
     .filter((r): r is GuardPattern => r !== null)
 
-  const destructive = DESTRUCTIVE_COMMAND_PATTERNS.map((p) => ({
-    ...p,
-    // A `warn` pattern stays `warn` regardless; only the `block` ones are held
-    // back by the tier gate.
-    severity:
-      shadow
-        ? ('shadow' as GuardPattern['severity'])
-        : p.severity === 'block'
-          ? DESTRUCTIVE_TIER_SEVERITY
-          : ('warn' as const),
-  }))
+  const destructive = DESTRUCTIVE_COMMAND_PATTERNS.map((p) => {
+    // Wave 7 (audit-remediation): `destructive.sql_drop` is a per-rule
+    // override, evaluated BEFORE the tier-wide ramp below — it was never
+    // part of `DESTRUCTIVE_TIER_SEVERITY`'s promotion (its own static
+    // `severity` is `'warn'`, not `'block'`, so that ternary never reaches
+    // it), and this flag is opt-in per workspace, not evidence-gated the way
+    // the six-pattern ramp is. Shadow mode still wins over both: SILENT_LOG
+    // means observe-only across the whole dynamic tier, no exceptions.
+    if (p.id === 'destructive.sql_drop' && !shadow && policy.sqlDropStrictBlock) {
+      return { ...p, severity: 'block' as const }
+    }
+    return {
+      ...p,
+      // A `warn` pattern stays `warn` regardless; only the `block` ones are held
+      // back by the tier gate.
+      severity:
+        shadow
+          ? ('shadow' as GuardPattern['severity'])
+          : p.severity === 'block'
+            ? DESTRUCTIVE_TIER_SEVERITY
+            : ('warn' as const),
+    }
+  })
 
   // The snapshot-delivered promotion of the skill-directory-write floor rules
   // to `block` — see SKILL_SURFACE_TIER_SEVERITY. `.tier` suffixed onto the

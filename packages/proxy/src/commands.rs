@@ -258,6 +258,14 @@ impl Inventory {
                 .len() as u32, // cloud chunks are judge-routed; vault chunks run under workspace policy + DLP
             guard_probes_failed: crate::probes::last_run()
                 .map(|r| r.verdicts.iter().filter(|v| !v.passed).count() as u32),
+            // `init_global_policy` runs unconditionally at boot (main.rs), so
+            // unlike `guard_probes_failed` above there is no "hasn't happened
+            // yet" window here — the policy's mode is always a real,
+            // deliberate boot-time decision, even when that decision is the
+            // default (Off). `Some(...)` accordingly, always.
+            egress_enforcing: Some(
+                crate::egress_policy::global_policy().mode() == crate::egress_policy::EgressMode::Enforce,
+            ),
             ..Default::default()
         }
     }

@@ -36,6 +36,7 @@ export {
 export {
   DEFAULT_WORKSPACE_SETTINGS,
   resolveWorkspaceSettings,
+  resolveSecurityProbeSampleRate,
 } from './workspaceSettings.js'
 
 export type {
