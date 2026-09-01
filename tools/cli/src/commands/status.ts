@@ -11,6 +11,7 @@
 import { existsSync } from 'node:fs'
 import * as node_path from 'node:path'
 import { log } from '../lib/logger.js'
+import { NOT_AUTHENTICATED } from '../lib/authMessages.js'
 import { loadCredentials, loadConfig, loadIntegrity } from '../config/store.js'
 import { getActiveAgentProcesses, isSyncDaemonRunning } from '../lib/process.js'
 import { resolveDshHome, listDshProfileDirs, detectDshCoverageGap } from '@intutic/sync-daemon/harness/dshHooks'
@@ -44,7 +45,7 @@ export async function runStatus(): Promise<void> {
     log.field('Workspace', creds.workspaceId)
     log.field('Control Plane', creds.controlPlaneUrl)
   } else {
-    log.warn('Not authenticated. This command needs an Intutic control plane, which open core does not include. To run the proxy without one: `intutic start`.')
+    log.warn(NOT_AUTHENTICATED)
   }
 
   // Config

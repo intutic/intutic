@@ -88,6 +88,7 @@ const sidebarGuide = [
     text: 'Introduction',
     items: [
       { text: 'Getting Started', link: '/guide/getting-started' },
+      { text: 'Tier Matrix', link: '/guide/tier-matrix' },
       { text: 'Core Concepts', link: '/guide/concepts' },
       { text: 'How It Works', link: '/guide/how-it-works' },
       { text: 'FAQs', link: '/guide/faqs' },

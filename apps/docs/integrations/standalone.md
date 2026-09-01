@@ -78,10 +78,19 @@ Intutic Proxy supports two primary self-hosted deployment topologies depending o
   # Run directly via npx
   npx @intutic/proxy
 
-  # Or install globally as a native daemon
+  # Or install once and skip the npx download step on every run
   npm install -g @intutic/proxy
   intutic-proxy
   ```
+
+  Both commands run the proxy in the **foreground** — there is no bundled
+  systemd/launchd unit for `intutic-proxy` itself (unlike the sync daemon and
+  MCP daemon, which [`intutic daemon install`](/reference/cli#intutic-daemon-install)
+  does manage this way). For unattended background operation on a single
+  host, supervise it the same way you would any other long-running process —
+  your own systemd unit, a process manager like pm2 or supervisord — or use
+  Option A/B's Docker container above, which Docker's own restart policy
+  already supervises.
 
 ---
 
