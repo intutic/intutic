@@ -16,6 +16,8 @@ export {
   ChangeClassification,
   AnomalyType,
   HarnessType,
+  HARNESS_COUNT,
+  HARNESS_HEADLINE_COUNT,
   ExecutionMode,
   IncidentStatus,
   PlanLifecycleState,

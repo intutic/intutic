@@ -38,7 +38,7 @@ sequenceDiagram
     Dev->>PR: Send request with header<br/>X-Intutic-Break-Glass: bg_token
     PR->>VK: Query token
     VK-->>PR: Active token found (workspace / policy metadata)
-    Note over PR: Bypass WASM rules & policy pre-checks
+    Note over PR: Bypass WASM rules, policy pre-checks,<br/>and the anomaly detector chain
     PR->>CP: Forward request / Log audit trace
 ```
 
@@ -73,7 +73,12 @@ For the configured duration, the proxy will:
 1. Validate the token in Valkey (a single GET).
 2. Skip custom WASM registry checks.
 3. Skip control plane policy pre-checks.
-4. Log the bypass event and associated developer in the audit trail.
+4. Skip the anomaly detector chain entirely — none of the twelve detector
+   categories (loop detection, sequence anomalies, and the rest of the
+   registry) run against a break-glass request, so no finding is recorded
+   for it under any category, not just the ones a specific policy would have
+   blocked.
+5. Log the bypass event and associated developer in the audit trail.
 
 ---
 

@@ -23,6 +23,7 @@
  */
 
 import { log } from '../lib/logger.js'
+import { NOT_AUTHENTICATED } from '../lib/authMessages.js'
 import { loadCredentials } from '../config/store.js'
 import { resolveControlPlaneUrl } from '../config/paths.js'
 import { createApiClient, type ApiClient } from '../lib/api.js'
@@ -105,9 +106,7 @@ interface FindingsCliOpts {
 async function getClient(opts: FindingsCliOpts): Promise<ApiClient> {
   const creds = await loadCredentials()
   if (!creds) {
-    log.error(
-      'Not authenticated. This command needs an Intutic control plane, which open core does not include. To run the proxy without one: `intutic start`.',
-    )
+    log.error(NOT_AUTHENTICATED)
     process.exit(1)
   }
   const controlPlaneUrl = resolveControlPlaneUrl(opts.dev)

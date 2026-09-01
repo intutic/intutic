@@ -8,6 +8,7 @@
  */
 
 import { log } from '../lib/logger.js'
+import { NOT_AUTHENTICATED } from '../lib/authMessages.js'
 import { loadCredentials } from '../config/store.js'
 import { resolveControlPlaneUrl } from '../config/paths.js'
 import { createApiClient } from '../lib/api.js'
@@ -15,7 +16,7 @@ import { createApiClient } from '../lib/api.js'
 export async function runWhoami(opts: { dev?: boolean }): Promise<void> {
   const creds = await loadCredentials()
   if (!creds) {
-    log.error('Not authenticated. This command needs an Intutic control plane, which open core does not include. To run the proxy without one: `intutic start`.')
+    log.error(NOT_AUTHENTICATED)
     process.exit(1)
   }
 
