@@ -31,7 +31,7 @@ import {
   SKILL_SURFACE_TIER_SEVERITY,
   type ResolvedPolicy,
 } from '../../src/lib/policySnapshot.js'
-import { SKILL_SURFACE_PATTERNS, staticFloorPatterns } from '../../src/harness/protectedPaths.js'
+import { SKILL_SURFACE_PATTERNS, staticFloorPatterns, DESTRUCTIVE_COMMAND_PATTERNS } from '../../src/harness/protectedPaths.js'
 
 function policy(over: Partial<ResolvedPolicy> = {}): ResolvedPolicy {
   return {
@@ -39,6 +39,7 @@ function policy(over: Partial<ResolvedPolicy> = {}): ResolvedPolicy {
     interventionMode: 'TRANSPARENT',
     sopRules: [],
     mcpAllowedServers: [],
+    sqlDropStrictBlock: false,
     ...over,
   }
 }
@@ -517,5 +518,42 @@ describe('writePolicySnapshot', () => {
         rmSync(dir, { recursive: true, force: true })
       }
     })
+  })
+})
+
+describe('sqlDropStrictBlock — Wave 7 (audit-remediation) per-rule override', () => {
+  function findSqlDrop(rules: ReturnType<typeof buildSnapshotRules>) {
+    return rules.find((r) => r.id === 'destructive.sql_drop')
+  }
+
+  it('stays warn when the flag is off, regardless of DESTRUCTIVE_TIER_SEVERITY', () => {
+    const rules = buildSnapshotRules(policy({ sqlDropStrictBlock: false }))
+    expect(findSqlDrop(rules)?.severity).toBe('warn')
+  })
+
+  it('promotes to block when the flag is on', () => {
+    const rules = buildSnapshotRules(policy({ sqlDropStrictBlock: true }))
+    expect(findSqlDrop(rules)?.severity).toBe('block')
+  })
+
+  it('does not affect the other six destructive-command patterns — DESTRUCTIVE_TIER_SEVERITY is untouched', () => {
+    const withoutFlag = buildSnapshotRules(policy({ sqlDropStrictBlock: false }))
+    const withFlag = buildSnapshotRules(policy({ sqlDropStrictBlock: true }))
+    for (const p of DESTRUCTIVE_COMMAND_PATTERNS) {
+      if (p.id === 'destructive.sql_drop') continue
+      const a = withoutFlag.find((r) => r.id === p.id)?.severity
+      const b = withFlag.find((r) => r.id === p.id)?.severity
+      expect(b, `${p.id} must be unaffected by sqlDropStrictBlock`).toBe(a)
+    }
+  })
+
+  it('SILENT_LOG mode still demotes sql_drop to shadow, even with the flag on', () => {
+    const rules = buildSnapshotRules(policy({ sqlDropStrictBlock: true, interventionMode: 'SILENT_LOG' }))
+    expect(findSqlDrop(rules)?.severity).toBe('shadow')
+  })
+
+  it('sql_drop is never part of the DESTRUCTIVE_TIER_SEVERITY ramp — its static definition is warn, not block', () => {
+    const staticDef = DESTRUCTIVE_COMMAND_PATTERNS.find((p) => p.id === 'destructive.sql_drop')
+    expect(staticDef?.severity).toBe('warn')
   })
 })

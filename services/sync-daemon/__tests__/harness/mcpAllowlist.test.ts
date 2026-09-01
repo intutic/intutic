@@ -410,7 +410,13 @@ describe('version skew — GATE_VERSION 5 -> 6 (M3)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'intutic-skew-real-'))
     try {
       await writePolicySnapshot(
-        { workspaceId: 'ws_test', interventionMode: 'ENFORCE', sopRules: [], mcpAllowedServers: ['github'] },
+        {
+          workspaceId: 'ws_test',
+          interventionMode: 'ENFORCE',
+          sopRules: [],
+          mcpAllowedServers: ['github'],
+          sqlDropStrictBlock: false,
+        },
         dir,
       )
       const real = readFileSync(join(dir, 'policy-snapshot.rules'), 'utf8')

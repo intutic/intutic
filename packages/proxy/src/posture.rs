@@ -99,6 +99,13 @@ pub struct Facets {
     /// applies it as a post-hoc ceiling on `overall`, so `FACETS` and its
     /// coverage test stay untouched.
     pub guard_probes_failed: Option<u32>,
+    /// Whether this process's egress policy (`egress_policy::global_policy`)
+    /// is `Enforce`. Mirrors the TS `egressLoudness` cap in `agentPosture.ts`
+    /// (Wave 7, audit-remediation) — same cap-not-facet treatment as
+    /// guard-liveness above. `None` (a caller that never reads the global
+    /// egress policy) leaves the score untouched; only an observed
+    /// `Some(false)` (Off or Monitor) triggers the cap.
+    pub egress_enforcing: Option<bool>,
 }
 
 /// One facet's contribution to the score.
@@ -226,9 +233,19 @@ pub fn score(f: &Facets) -> PostureResult {
     // Guard-liveness cap: a failed probe is an enforcement outage, not a
     // fractional ding on one of nine facets. `None` (no run yet, or this
     // build predates the probe suite) leaves the score untouched.
-    let overall = match f.guard_probes_failed {
+    let guard_probes_capped = match f.guard_probes_failed {
         Some(failed) if failed > 0 => raw_overall.min(50),
         _ => raw_overall,
+    };
+
+    // Egress loudness (Wave 7, audit-remediation): egress OFF or
+    // MONITOR-only means no real control on outbound traffic. Same
+    // cap-not-facet treatment, and the same `None`-means-untouched
+    // exemption as guard-liveness above — a caller that never reads the
+    // global egress policy must not have this trigger on a default.
+    let overall = match f.egress_enforcing {
+        Some(false) => guard_probes_capped.min(50),
+        _ => guard_probes_capped,
     };
 
     PostureResult { overall, band: band(overall), facets }
@@ -306,6 +323,42 @@ mod tests {
         let without = score(&Facets { guard_probes_failed: None, ..base.clone() }).overall;
         let zero = score(&Facets { guard_probes_failed: Some(0), ..base }).overall;
         assert_eq!(without, zero);
+    }
+
+    #[test]
+    fn egress_off_or_monitor_caps_the_score_at_50() {
+        let f = Facets {
+            dlp: true, wasm_rules: 3, hook_gate: true, pcas: true,
+            sops_total: 2, sops_enforced: 2,
+            budget_hard_cap: true, budget_session_cap: true,
+            loops_configured: true, loops_bounded: true,
+            harness_known: true, harness_config_synced: true,
+            egress_enforcing: None,
+            ..Default::default()
+        };
+        let uncapped = score(&f).overall;
+        assert!(uncapped > 50, "fixture must score above the cap to test it: {uncapped}");
+
+        let capped_off = score(&Facets { egress_enforcing: Some(false), ..f.clone() }).overall;
+        assert_eq!(capped_off, 50);
+
+        let capped_enforce = score(&Facets { egress_enforcing: Some(true), ..f }).overall;
+        assert_eq!(capped_enforce, uncapped, "Enforce must not cap");
+    }
+
+    #[test]
+    fn an_unread_egress_policy_leaves_the_score_untouched() {
+        let base = Facets {
+            dlp: true, wasm_rules: 3, hook_gate: true, pcas: true,
+            sops_total: 2, sops_enforced: 2,
+            budget_hard_cap: true, budget_session_cap: true,
+            loops_configured: true, loops_bounded: true,
+            harness_known: true, harness_config_synced: true,
+            ..Default::default()
+        };
+        let without = score(&Facets { egress_enforcing: None, ..base.clone() }).overall;
+        let enforcing = score(&Facets { egress_enforcing: Some(true), ..base }).overall;
+        assert_eq!(without, enforcing);
     }
 
     #[test]
