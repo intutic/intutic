@@ -256,6 +256,8 @@ impl Inventory {
                 .map(|(p, _)| p)
                 .collect::<std::collections::HashSet<_>>()
                 .len() as u32, // cloud chunks are judge-routed; vault chunks run under workspace policy + DLP
+            guard_probes_failed: crate::probes::last_run()
+                .map(|r| r.verdicts.iter().filter(|v| !v.passed).count() as u32),
             ..Default::default()
         }
     }

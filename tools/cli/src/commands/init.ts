@@ -11,7 +11,7 @@
 import { existsSync } from 'node:fs'
 import { join, resolve, dirname } from 'node:path'
 import { log } from '../lib/logger.js'
-import { loadCredentials, saveConfig } from '../config/store.js'
+import { loadCredentials, loadConfig, saveConfig } from '../config/store.js'
 import { detectHarnesses } from '../harness/detector.js'
 import { printOnboardingGuide } from '../lib/onboarding.js'
 import type { HarnessType } from '@intutic/shared-types'
@@ -82,8 +82,16 @@ export async function runInit(opts: { dev?: boolean }): Promise<void> {
   }
 
   // 4. Write config
+  //
+  // Spread the existing config first (matching connect.ts's own pattern) —
+  // a fresh object literal here used to silently delete any local key a
+  // prior run had set (maxDailyBudgetUsd, and now allowedModels), on every
+  // re-run of `intutic init`. `configVersion` and `devMode` below are the
+  // only fields THIS command has an opinion about; everything else survives.
+  const existing = loadConfig()
   const devMode = opts.dev || process.env.INTUTIC_DEV === '1'
   saveConfig({
+    ...existing,
     workspaceRoot,
     harnesses: detected.map((h) => h.type as HarnessType),
     configVersion: 0,

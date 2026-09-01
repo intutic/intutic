@@ -151,6 +151,18 @@ export interface IntuticConfig {
   /** Local daily spending cap limit in USD (alias). */
   max_daily_budget_usd?: number
   /**
+   * Local approved-models allowlist for a standalone proxy with no control
+   * plane (Wave 6.3, audit-remediation) — read directly from this file by
+   * `packages/proxy/src/local_config.rs`, not by any TS code today. Declared
+   * here so a hand-edited value survives `intutic init`'s config rewrite
+   * (which loads and spreads the existing config rather than overwriting it
+   * wholesale) and so its shape is documented in one place. Absent, or an
+   * empty array, both mean unrestricted — never "no model allowed."
+   */
+  allowedModels?: string[]
+  /** Local approved-models allowlist (alias). */
+  allowed_models?: string[]
+  /**
    * Workspace settings mirrored from the last successful sync, so policies
    * that apply at proxy spawn (e.g. `allowLocalMemoryVaults`) survive a
    * restart without waiting for the first fetch.

@@ -38,10 +38,13 @@ pub fn build_router(state: AppState) -> Router {
     Router::new()
         // Health check
         .route("/health", get(health))
-        // Guard-liveness verdicts, on demand. Same suite the startup/periodic
-        // runner executes; an operator asking "is my rule live?" gets the
-        // two-sided evidence, per guard, with latency. Local diagnostics only —
-        // it evaluates synthetic contexts and calls no upstream.
+        // Guard-liveness verdicts from the last scheduled run (main.rs's
+        // startup + 15-minute loop — this route no longer runs the suite
+        // itself, see `run_probes`'s doc comment). Loopback-only, same
+        // reasoning and same guard as `/intutic/spend` below: binding probe
+        // ids are shaped `binding.forbid_after.{first}->{then}` — a
+        // workspace's declared tool-succession policy, verbatim — and the
+        // listener binds `0.0.0.0` with no authentication on this path.
         .route("/intutic/probes", get(run_probes))
         // Egress enforcement posture + live deny counts (LLD #63 §4). Makes an
         // Enforce/Monitor decision observable rather than silent.
@@ -166,17 +169,44 @@ async fn spend_status(
     )
 }
 
-/// `GET /intutic/probes` — run the guard-liveness suite and return verdicts.
-async fn run_probes() -> impl axum::response::IntoResponse {
-    let registry = crate::plugins::anomaly::DetectorRegistry::with_defaults();
-    let sops = crate::sops::loaded_sops();
-    let verdicts = crate::probes::run_guard_probes(&registry, &sops);
-    let failed = verdicts.iter().filter(|v| !v.passed).count();
-    axum::Json(serde_json::json!({
-        "probes": verdicts,
-        "total": verdicts.len(),
-        "failed": failed,
-    }))
+/// `GET /intutic/probes` — the last SCHEDULED guard-liveness run, loopback-only.
+///
+/// Deliberately does not run the suite itself. Timestamping at the fetch
+/// site would make a dead 15-minute loop (`main.rs`) indistinguishable from
+/// a healthy one — every request would mint a fresh "just ran, all clear"
+/// answer regardless of whether the scheduler was still alive. Reading
+/// `probes::last_run()` instead means `ran_at` only advances when the
+/// scheduled loop actually ticks; a stalled loop shows up here as a
+/// timestamp that stops moving, exactly the inert-control shape this whole
+/// module exists to catch.
+async fn run_probes(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+) -> impl axum::response::IntoResponse {
+    if !spend_peer_allowed(&addr) {
+        return (
+            StatusCode::FORBIDDEN,
+            axum::Json(json!({"error": "loopback only"})),
+        );
+    }
+
+    let Some(run) = crate::probes::last_run() else {
+        // Only reachable in the narrow window between process start and the
+        // startup run completing — the loop's first tick fires immediately.
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            axum::Json(json!({"error": "guard-liveness probes have not run yet"})),
+        );
+    };
+    let failed = run.verdicts.iter().filter(|v| !v.passed).count();
+    (
+        StatusCode::OK,
+        axum::Json(json!({
+            "probes": run.verdicts,
+            "total": run.verdicts.len(),
+            "failed": failed,
+            "ran_at": run.ran_at,
+        })),
+    )
 }
 
 /// `POST /intutic/attest-sandbox` — forwards a sandboxed agent's attestation
@@ -431,5 +461,58 @@ mod spend_status_tests {
         assert!(body.get("local_spend_usd_today").is_some_and(|v| v.is_number()));
         assert!(body.get("local_cap_usd").is_some_and(|v| v.is_number()));
         assert!(body.get("enforced").is_some_and(|v| v.is_boolean()));
+    }
+}
+
+#[cfg(test)]
+mod run_probes_tests {
+    use super::*;
+    use axum::response::IntoResponse;
+    use std::net::{IpAddr, Ipv4Addr};
+
+    fn v4(ip: [u8; 4], port: u16) -> SocketAddr {
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::from(ip)), port)
+    }
+
+    /// `run_probes` reuses `spend_peer_allowed` — its own predicate coverage
+    /// (IPv4/IPv6 loopback, LAN, other) lives in `spend_status_tests` above
+    /// and is not duplicated here. This test is the same end-to-end shape as
+    /// `handler_refuses_a_non_loopback_peer_with_403`, for the route the SOP
+    /// content leak (`GET /intutic/probes`) was actually found on.
+    #[tokio::test]
+    async fn handler_refuses_a_non_loopback_peer_with_403() {
+        let addr = v4([192, 168, 1, 42], 54321);
+        let response = run_probes(ConnectInfo(addr)).await.into_response();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+        let bytes = axum::body::to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["error"], "loopback only");
+    }
+
+    /// A loopback peer gets the last recorded run, not a fresh one computed
+    /// on this request — `run_probes` must never call the suite itself. Seeds
+    /// `LAST_RUN` first via the real recorder, since it is process-global and
+    /// this test cannot assume ordering against every other test in the
+    /// binary that might also seed it.
+    #[tokio::test]
+    async fn handler_serves_loopback_peers_the_last_recorded_run() {
+        let registry = crate::plugins::anomaly::DetectorRegistry::with_defaults();
+        let recorded = crate::probes::run_and_record(&registry, &[]);
+
+        let addr = v4([127, 0, 0, 1], 54321);
+        let response = run_probes(ConnectInfo(addr)).await.into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let bytes = axum::body::to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(body.get("probes").is_some_and(|v| v.is_array()));
+        assert_eq!(body["total"], recorded.verdicts.len());
+        assert!(body.get("failed").is_some_and(|v| v.is_number()));
+        assert!(body.get("ran_at").is_some_and(|v| v.is_number()));
     }
 }
