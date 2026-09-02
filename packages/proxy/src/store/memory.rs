@@ -76,6 +76,7 @@ use super::{
     FeatureFlags, HardCapStatus, JudgeScope, LocalStore, NotifyScope, Ownership, PinScope,
     PinnedSopBlock, SessionRouting, TokenBaseline,
 };
+use crate::paths::intutic_dir;
 use crate::routing::bandit::BanditArmState;
 use crate::routing::mirror::MirrorPairEvent;
 use crate::routing::reward::apply_update;
@@ -315,10 +316,7 @@ fn save_tool_pins(pins: &HashMap<String, String>) {
 }
 
 pub(crate) fn default_snapshot_path() -> PathBuf {
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .unwrap_or_else(|_| "/tmp".to_string());
-    PathBuf::from(home).join(".intutic").join("bandit-state.json")
+    intutic_dir().join("bandit-state.json")
 }
 
 impl MemoryStore {

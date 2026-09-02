@@ -1,6 +1,9 @@
 pub mod commands;
 pub mod config;
 pub mod dlp;
+/// The single Intutic config/state directory resolution — see this
+/// module's own doc comment for the Windows path-mismatch bug it fixes.
+pub mod paths;
 pub mod manifest;
 pub mod memory;
 pub mod posture;

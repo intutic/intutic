@@ -50,6 +50,7 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 use crate::hostname_filter::is_ai_provider_host;
+use crate::paths::intutic_dir;
 
 /// How aggressively the proxy enforces egress. Defaults to `Off` so an existing
 /// config keeps its exact behaviour (no connection is ever denied).
@@ -355,13 +356,7 @@ pub fn default_egress_policy_path() -> std::path::PathBuf {
             return std::path::PathBuf::from(p);
         }
     }
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .unwrap_or_default();
-    std::path::Path::new(&home)
-        .join(".intutic")
-        .join("hooks")
-        .join("egress-policy.json")
+    intutic_dir().join("hooks").join("egress-policy.json")
 }
 
 /// Parse a daemon-written `egress-policy.json` (LLD #63 §4), verifying its
