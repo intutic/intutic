@@ -1,18 +1,11 @@
+use crate::paths::intutic_dir;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
-use std::path::PathBuf;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct LocalSpendDelta {
     spent_usd: f64,
-}
-
-fn intutic_dir() -> PathBuf {
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .unwrap_or_else(|_| "/tmp".to_string());
-    PathBuf::from(home).join(".intutic")
 }
 
 /// Today's local daily spend cap, in USD.

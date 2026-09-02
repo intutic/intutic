@@ -57,12 +57,14 @@ export function getConfigPath(): string {
  * (`~/.intutic/logs/traces-YYYY-MM-DD.jsonl`) — see
  * `packages/proxy/src/local_spend.rs`'s `log_offline_trace`.
  *
- * KNOWN CAVEAT: on Windows the proxy's own `intutic_dir()` resolves to
- * `%USERPROFILE%\.intutic` while this file's `getIntuticDirFor` resolves to
- * `%APPDATA%\intutic` — two different directories. On macOS/Linux both sides
- * agree (`~/.intutic`), which is the only platform this function has been
- * verified against; Windows users may need `INTUTIC_TRACES_LOG_DIR` (not
- * yet implemented) until the two resolutions are reconciled.
+ * On Windows, the proxy's `intutic_dir()` (`packages/proxy/src/paths.rs`)
+ * and this file's `getIntuticDirFor` both resolve to `%APPDATA%\intutic` —
+ * reconciled (they used to disagree: the proxy fell through to
+ * `%USERPROFILE%\.intutic`, silently splitting trace logs, the local spend
+ * ledger, the CA cert `caTrust.ts` installs, the egress policy snapshot, and
+ * bandit state across two directories nothing else on either side could see
+ * into). Keep the two definitions in sync — neither imports the other, so
+ * nothing but code review catches drift between them again.
  */
 export function getTracesLogDir(): string {
   return join(getIntuticDir(), 'logs')
