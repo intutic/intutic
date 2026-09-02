@@ -5,7 +5,8 @@
 //! certificates on-the-fly for TLS interception of AI provider traffic.
 //!
 //! The public CA cert must be installed in the OS trust store via
-//! the CLI `intutic init` command (ca-installer.ts) before MITM works.
+//! the CLI `intutic init` command (`tools/cli/src/lib/caTrust.ts`) before
+//! MITM works.
 
 use anyhow::{Context, Result};
 use rcgen::{
@@ -15,6 +16,8 @@ use rcgen::{
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use tracing::info;
+
+use crate::paths::intutic_dir;
 
 /// Paths for the generated CA keypair.
 pub fn ca_cert_path() -> PathBuf {
@@ -27,13 +30,6 @@ pub fn ca_key_path() -> PathBuf {
 
 pub fn ca_cert_der_path() -> PathBuf {
     intutic_dir().join("ca.der")
-}
-
-fn intutic_dir() -> PathBuf {
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .unwrap_or_else(|_| "/tmp".to_string());
-    PathBuf::from(home).join(".intutic")
 }
 
 /// Returns true if the CA cert and key files already exist.
