@@ -25,17 +25,10 @@
 //! edited allowlist is the exact operational shape `local_spend.rs`'s own
 //! TTL cache was built to avoid.
 
+use crate::paths::intutic_dir;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
-
-fn intutic_dir() -> PathBuf {
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .unwrap_or_else(|_| "/tmp".to_string());
-    PathBuf::from(home).join(".intutic")
-}
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 struct LocalConfigJson {
