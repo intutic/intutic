@@ -1,0 +1,427 @@
+{
+  "generatedBy": "packages/shared-types/scripts/generate-guardrail-fixtures.ts",
+  "vectors": [
+    {
+      "name": "one tool, one literal",
+      "ir": {
+        "kind": "hook_rule",
+        "title": "Reviewed plan before terraform apply",
+        "tools": [
+          "Bash"
+        ],
+        "argContains": [
+          "terraform apply"
+        ]
+      },
+      "citation": {
+        "quote": "Engineers must never run terraform apply against production without a reviewed plan.",
+        "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=101"
+      },
+      "rendered": {
+        "toolPattern": "^Bash$",
+        "argPattern": "(?=[\\s\\S]*terraform\\ apply)",
+        "reason": "Reviewed plan before terraform apply — policy: \"Engineers must never run terraform apply against production without a reviewed plan.\" (https://wiki.acme.dev/pages/viewpage.action?pageId=101)"
+      },
+      "cases": [
+        {
+          "tool": "Bash",
+          "toolInput": {
+            "command": "terraform apply -auto-approve"
+          },
+          "fires": true
+        },
+        {
+          "tool": "Bash",
+          "toolInput": {
+            "command": "cd infra && terraform apply"
+          },
+          "fires": true
+        },
+        {
+          "tool": "Bash",
+          "toolInput": {
+            "command": "terraform plan"
+          },
+          "fires": false
+        },
+        {
+          "tool": "Bash",
+          "toolInput": {
+            "command": "terraform\napply"
+          },
+          "fires": false
+        },
+        {
+          "tool": "Write",
+          "toolInput": {
+            "command": "terraform apply"
+          },
+          "fires": false
+        },
+        {
+          "tool": "Bash",
+          "toolInput": {},
+          "fires": false
+        }
+      ]
+    },
+    {
+      "name": "two tools, a path literal",
+      "ir": {
+        "kind": "hook_rule",
+        "title": "Workflow files are owned by platform",
+        "tools": [
+          "Write",
+          "Edit"
+        ],
+        "argContains": [
+          ".github/workflows/"
+        ]
+      },
+      "citation": {
+        "quote": "Changes under .github/workflows/ are made only by the platform team.",
+        "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=102"
+      },
+      "rendered": {
+        "toolPattern": "^(Edit|Write)$",
+        "argPattern": "(?=[\\s\\S]*\\.github\\/workflows\\/)",
+        "reason": "Workflow files are owned by platform — policy: \"Changes under .github/workflows/ are made only by the platform team.\" (https://wiki.acme.dev/pages/viewpage.action?pageId=102)"
+      },
+      "cases": [
+        {
+          "tool": "Write",
+          "toolInput": {
+            "file_path": ".github/workflows/ci.yml",
+            "content": "x"
+          },
+          "fires": true
+        },
+        {
+          "tool": "Edit",
+          "toolInput": {
+            "file_path": "repo/.github/workflows/release.yml"
+          },
+          "fires": true
+        },
+        {
+          "tool": "Write",
+          "toolInput": {
+            "file_path": "src/index.ts"
+          },
+          "fires": false
+        },
+        {
+          "tool": "Bash",
+          "toolInput": {
+            "command": "cat .github/workflows/ci.yml"
+          },
+          "fires": false
+        },
+        {
+          "tool": "Writer",
+          "toolInput": {
+            "file_path": ".github/workflows/ci.yml"
+          },
+          "fires": false
+        }
+      ]
+    },
+    {
+      "name": "dotted tool name, no literal",
+      "ir": {
+        "kind": "hook_rule",
+        "title": "terraform.apply is held",
+        "tools": [
+          "terraform.apply"
+        ]
+      },
+      "citation": {
+        "quote": "The terraform.apply tool is not to be used from an agent session.",
+        "sourceUrl": null
+      },
+      "rendered": {
+        "toolPattern": "^terraform\\.apply$",
+        "reason": "terraform.apply is held — policy: \"The terraform.apply tool is not to be used from an agent session.\""
+      },
+      "cases": [
+        {
+          "tool": "terraform.apply",
+          "toolInput": {},
+          "fires": true
+        },
+        {
+          "tool": "terraform.apply",
+          "toolInput": {
+            "anything": "at all"
+          },
+          "fires": true
+        },
+        {
+          "tool": "terraformXapply",
+          "toolInput": {},
+          "fires": false
+        },
+        {
+          "tool": "terraform.apply.now",
+          "toolInput": {},
+          "fires": false
+        }
+      ]
+    },
+    {
+      "name": "contains and not-contains",
+      "ir": {
+        "kind": "hook_rule",
+        "title": "kubectl apply must be a dry run",
+        "tools": [
+          "Bash"
+        ],
+        "argContains": [
+          "kubectl apply"
+        ],
+        "argNotContains": [
+          "--dry-run"
+        ]
+      },
+      "citation": {
+        "quote": "kubectl apply from an agent session must use --dry-run.",
+        "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=103"
+      },
+      "rendered": {
+        "toolPattern": "^Bash$",
+        "argPattern": "(?=[\\s\\S]*kubectl\\ apply)(?![\\s\\S]*\\-\\-dry\\-run)",
+        "reason": "kubectl apply must be a dry run — policy: \"kubectl apply from an agent session must use --dry-run.\" (https://wiki.acme.dev/pages/viewpage.action?pageId=103)"
+      },
+      "cases": [
+        {
+          "tool": "Bash",
+          "toolInput": {
+            "command": "kubectl apply -f deploy.yaml"
+          },
+          "fires": true
+        },
+        {
+          "tool": "Bash",
+          "toolInput": {
+            "command": "kubectl apply --dry-run=client -f deploy.yaml"
+          },
+          "fires": false
+        },
+        {
+          "tool": "Bash",
+          "toolInput": {
+            "command": "kubectl get pods"
+          },
+          "fires": false
+        },
+        {
+          "tool": "Bash",
+          "toolInput": {
+            "command": "kubectl apply -f a.yaml",
+            "description": "not a --dry-run"
+          },
+          "fires": false
+        }
+      ]
+    },
+    {
+      "name": "mcp tool, any input",
+      "ir": {
+        "kind": "hook_rule",
+        "title": "Issues are filed by humans",
+        "tools": [
+          "mcp__github__create_issue"
+        ]
+      },
+      "citation": {
+        "quote": "Agents do not file GitHub issues; a human files them after review.",
+        "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=104"
+      },
+      "rendered": {
+        "toolPattern": "^mcp__github__create_issue$",
+        "reason": "Issues are filed by humans — policy: \"Agents do not file GitHub issues; a human files them after review.\" (https://wiki.acme.dev/pages/viewpage.action?pageId=104)"
+      },
+      "cases": [
+        {
+          "tool": "mcp__github__create_issue",
+          "toolInput": {
+            "title": "x"
+          },
+          "fires": true
+        },
+        {
+          "tool": "mcp__github__create_issue",
+          "toolInput": {},
+          "fires": true
+        },
+        {
+          "tool": "mcp__github__create_pull_request",
+          "toolInput": {},
+          "fires": false
+        },
+        {
+          "tool": "mcp__github__create_issue_comment",
+          "toolInput": {},
+          "fires": false
+        }
+      ]
+    },
+    {
+      "name": "two literals, order-free",
+      "ir": {
+        "kind": "hook_rule",
+        "title": "No force push",
+        "tools": [
+          "Bash"
+        ],
+        "argContains": [
+          "git push",
+          "--force"
+        ]
+      },
+      "citation": {
+        "quote": "A force push (git push --force) to any shared branch is prohibited.",
+        "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=105"
+      },
+      "rendered": {
+        "toolPattern": "^Bash$",
+        "argPattern": "(?=[\\s\\S]*\\-\\-force)(?=[\\s\\S]*git\\ push)",
+        "reason": "No force push — policy: \"A force push (git push --force) to any shared branch is prohibited.\" (https://wiki.acme.dev/pages/viewpage.action?pageId=105)"
+      },
+      "cases": [
+        {
+          "tool": "Bash",
+          "toolInput": {
+            "command": "git push --force origin main"
+          },
+          "fires": true
+        },
+        {
+          "tool": "Bash",
+          "toolInput": {
+            "command": "git push origin main --force-with-lease"
+          },
+          "fires": true
+        },
+        {
+          "tool": "Bash",
+          "toolInput": {
+            "command": "git push origin main"
+          },
+          "fires": false
+        },
+        {
+          "tool": "Bash",
+          "toolInput": {
+            "command": "rm --force x && git push"
+          },
+          "fires": true
+        },
+        {
+          "tool": "Bash",
+          "toolInput": {
+            "command": "git pull --force"
+          },
+          "fires": false
+        }
+      ]
+    },
+    {
+      "name": "literal full of regex metacharacters",
+      "ir": {
+        "kind": "hook_rule",
+        "title": "No in-place edits across every config",
+        "tools": [
+          "Bash"
+        ],
+        "argContains": [
+          "sed -i.bak s/x/y/ *.conf"
+        ]
+      },
+      "citation": {
+        "quote": "Bulk in-place rewrites such as sed -i.bak s/x/y/ *.conf are made through the config repository, not on hosts.",
+        "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=106"
+      },
+      "rendered": {
+        "toolPattern": "^Bash$",
+        "argPattern": "(?=[\\s\\S]*sed\\ \\-i\\.bak\\ s\\/x\\/y\\/\\ \\*\\.conf)",
+        "reason": "No in-place edits across every config — policy: \"Bulk in-place rewrites such as sed -i.bak s/x/y/ *.conf are made through the config repository, not on hosts.\" (https://wiki.acme.dev/pages/viewpage.action?pageId=106)"
+      },
+      "cases": [
+        {
+          "tool": "Bash",
+          "toolInput": {
+            "command": "sed -i.bak s/x/y/ *.conf"
+          },
+          "fires": true
+        },
+        {
+          "tool": "Bash",
+          "toolInput": {
+            "command": "cd /etc/app && sed -i.bak s/x/y/ *.conf"
+          },
+          "fires": true
+        },
+        {
+          "tool": "Bash",
+          "toolInput": {
+            "command": "sed -i.bak s/x/y/ app.conf"
+          },
+          "fires": false
+        },
+        {
+          "tool": "Bash",
+          "toolInput": {
+            "command": "sed -iXbak s/x/y/ *.conf"
+          },
+          "fires": false
+        },
+        {
+          "tool": "Bash",
+          "toolInput": {
+            "command": "sed -i.bak s/x/y/ aaconf"
+          },
+          "fires": false
+        }
+      ]
+    },
+    {
+      "name": "literal with a single quote and a colon",
+      "ir": {
+        "kind": "hook_rule",
+        "title": "Latest tags are not deployable",
+        "tools": [
+          "Bash"
+        ],
+        "argContains": [
+          "image: 'latest'"
+        ]
+      },
+      "citation": {
+        "quote": "A manifest declaring image: 'latest' may not be applied.",
+        "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=107"
+      },
+      "rendered": {
+        "toolPattern": "^Bash$",
+        "argPattern": "(?=[\\s\\S]*image\\:\\ \\'latest\\')",
+        "reason": "Latest tags are not deployable — policy: \"A manifest declaring image: 'latest' may not be applied.\" (https://wiki.acme.dev/pages/viewpage.action?pageId=107)"
+      },
+      "cases": [
+        {
+          "tool": "Bash",
+          "toolInput": {
+            "command": "kubectl apply -f - <<< \"image: 'latest'\""
+          },
+          "fires": true
+        },
+        {
+          "tool": "Bash",
+          "toolInput": {
+            "command": "grep image: 'v1.2.3'"
+          },
+          "fires": false
+        }
+      ]
+    }
+  ]
+}

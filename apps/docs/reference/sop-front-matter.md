@@ -48,6 +48,21 @@ nothing, which reads as an over-eager product rather than a misconfiguration.
 `risk_tier:` will be reported as enforcing nothing, because as far as the proxy's
 own detectors are concerned, it is.
 
+### Informational keys
+
+The parser reads keys by line prefix and ignores every key it does not know,
+so a SOP may carry annotations the proxy never acts on. Two are used by
+tooling that generates front matter from a cited policy passage:
+
+| Key | Shape | What it is |
+| :--- | :--- | :--- |
+| `source:` | a URL | Where the rule's text came from — the upstream page. |
+| `cite:` | a hex digest | The hash of the exact passage the rule was derived from. |
+
+Neither blocks, steers or holds anything. They exist so a rule on disk still
+says which sentence it stands on; the enforcing keys above are the only ones
+the proxy reads.
+
 ### `mode: shadow` — prove a SOP before it enforces
 
 ```yaml
