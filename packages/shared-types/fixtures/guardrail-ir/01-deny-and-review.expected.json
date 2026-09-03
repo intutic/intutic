@@ -1,0 +1,18 @@
+{
+  "generatedBy": "packages/shared-types/scripts/generate-guardrail-fixtures.ts",
+  "deny_tools": [
+    "Bash",
+    "WebFetch"
+  ],
+  "review_before": [
+    "action:deploy"
+  ],
+  "requires_before": [],
+  "forbid_after": [],
+  "max_calls": [],
+  "forbid_with": [],
+  "roles": [
+    "deployer"
+  ],
+  "mode": "shadow"
+}
