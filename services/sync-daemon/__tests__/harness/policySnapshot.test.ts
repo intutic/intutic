@@ -166,6 +166,55 @@ describe('buildSnapshotRules', () => {
     expect(sopIds).toEqual(['sop.s1'])
   })
 
+  it('admits a warn rule only when the control plane marks it as a guardrail projection (LLD #71)', () => {
+    const rules = buildSnapshotRules(
+      policy({
+        sopRules: [
+          // A SHADOW guardrail: shipped at severity `warn` — the gate logs tool_flagged and allows.
+          { id: 'guardrail.pgr_shadow', toolPattern: '^Bash$', argPattern: '(?=[\\s\\S]*terraform\\ apply)', action: 'warn', reason: 'Plan first — policy: "Never run terraform apply without a reviewed plan." (https://wiki.acme.dev/1)', origin: 'guardrail' },
+          // An ENFORCING guardrail: a block like any other.
+          { id: 'guardrail.pgr_enforce', toolPattern: '^Write$', action: 'block', reason: 'No .env writes', origin: 'guardrail' },
+          // The same shapes without the origin are still dropped.
+          { id: 's_warn', toolPattern: 'Write', action: 'warn', reason: 'careful' },
+          { id: 's_forged', toolPattern: 'Edit', action: 'warn', reason: 'x', origin: 'sop' },
+          { id: 'guardrail.pgr_ask', toolPattern: '^Edit$', action: 'require_approval', reason: 'ask', origin: 'guardrail' },
+        ],
+      }),
+    )
+    const sop = rules.filter((r) => r.id.startsWith('sop.'))
+    expect(sop.map((r) => [r.id, r.severity])).toEqual([
+      ['sop.guardrail.pgr_shadow', 'warn'],
+      ['sop.guardrail.pgr_enforce', 'block'],
+    ])
+    expect(sop[0]!.source).toBe(' (Bash) ')
+    expect(sop[0]!.argPattern).toBe('(?=[\\s\\S]*terraform\\ apply)')
+    expect(sop[0]!.rationale).toContain('policy guardrail')
+  })
+
+  it('still refuses a catch-all that claims to be a guardrail — the action filter and validateRule are independent', () => {
+    for (const toolPattern of ['.*', '[A-Za-z]*', '^.*$']) {
+      const rules = buildSnapshotRules(
+        policy({ sopRules: [{ id: 'guardrail.pgr_bad', toolPattern, action: 'warn', reason: 'x', origin: 'guardrail' }] }),
+      )
+      expect(rules.filter((r) => r.id.startsWith('sop.')), toolPattern).toEqual([])
+    }
+  })
+
+  it('demotes a guardrail warn rule to shadow under SILENT_LOG with everything else', () => {
+    const rules = buildSnapshotRules(
+      policy({
+        interventionMode: 'SILENT_LOG',
+        sopRules: [
+          { id: 'guardrail.pgr_shadow', toolPattern: '^Bash$', action: 'warn', reason: 'x', origin: 'guardrail' },
+          { id: 's1', toolPattern: 'Write', action: 'block', reason: 'y' },
+        ],
+      }),
+    )
+    const sop = rules.filter((r) => r.id.startsWith('sop.'))
+    expect(sop.map((r) => r.severity)).toEqual(['shadow', 'shadow'])
+    expect(rules.some((r) => r.severity === 'warn' && r.id.startsWith('sop.'))).toBe(false)
+  })
+
   it('drops the HIGH/CRITICAL catch-all the control plane emits', () => {
     // The landmine, verbatim: evaluate.ts returns this for every HIGH or
     // CRITICAL SOP in the workspace. Two independent things stop it — the

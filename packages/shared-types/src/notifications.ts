@@ -43,6 +43,11 @@ export type NotificationEventType =
   | 'sop.cascade.invalidated'
   | 'sop.integrity.drift'
   | 'sop.lifecycle.transitioned'
+  // ── Policy guardrails (LLD #71) ──
+  /** A SHADOW guardrail crossed the promotion thresholds; a named member decides. */
+  | 'guardrail.ready'
+  /** The passage a guardrail cites changed upstream; promotion is refused until re-confirmed. */
+  | 'guardrail.stale'
   // ── FinOps & budget ──
   | 'finops.budget.exceeded'
   | 'finops.budget.threshold'
