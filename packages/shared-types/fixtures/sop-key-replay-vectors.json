@@ -1,0 +1,89 @@
+{
+  "about": "Hand-authored (LLD #71 Wave 5). One vector = one request context and the front-matter keys evaluated over it; `expected` says which keys fire. Consumed by services/control-plane/__tests__/unit/sopKeyReplay.test.ts (the TypeScript replay) and packages/proxy/tests/sop_key_replay_vectors.rs (the proxy's own detectors), so the two cannot disagree about what a key means.",
+  "vectors": [
+    {
+      "name": "deny_tools matches this request's own call, ASCII case-insensitively",
+      "rules": { "deny_tools": ["bash"] },
+      "snapshot": { "tool_calls": ["Bash"], "tool_sequence": ["Read", "Bash"], "dlp_categories": [] },
+      "expected": { "deny_tools": true }
+    },
+    {
+      "name": "deny_tools does not read the rolling sequence — only what this request called",
+      "rules": { "deny_tools": ["Bash"] },
+      "snapshot": { "tool_calls": ["Read"], "tool_sequence": ["Bash", "Read"], "dlp_categories": [] },
+      "expected": { "deny_tools": false }
+    },
+    {
+      "name": "requires_before fires when the second token appears with no first token before it",
+      "rules": { "requires_before": [["action:run_tests", "action:deploy"]] },
+      "snapshot": { "tool_calls": [], "tool_sequence": ["Read", "action:deploy"], "dlp_categories": [] },
+      "expected": { "requires_before": true }
+    },
+    {
+      "name": "requires_before is satisfied by the first token anywhere earlier",
+      "rules": { "requires_before": [["action:run_tests", "action:deploy"]] },
+      "snapshot": { "tool_calls": [], "tool_sequence": ["action:run_tests", "Bash", "Edit", "action:deploy"], "dlp_categories": [] },
+      "expected": { "requires_before": false }
+    },
+    {
+      "name": "requires_before judges the FIRST occurrence of the second token",
+      "rules": { "requires_before": [["action:run_tests", "action:deploy"]] },
+      "snapshot": { "tool_calls": [], "tool_sequence": ["action:deploy", "action:run_tests", "action:deploy"], "dlp_categories": [] },
+      "expected": { "requires_before": true }
+    },
+    {
+      "name": "requires_before is silent when the second token never occurs",
+      "rules": { "requires_before": [["action:run_tests", "action:deploy"]] },
+      "snapshot": { "tool_calls": [], "tool_sequence": ["action:run_tests", "Read"], "dlp_categories": [] },
+      "expected": { "requires_before": false }
+    },
+    {
+      "name": "forbid_after fires when the second token follows the first",
+      "rules": { "forbid_after": [["action:secret_read", "action:http_post"]] },
+      "snapshot": { "tool_calls": [], "tool_sequence": ["action:secret_read", "Bash", "action:http_post"], "dlp_categories": [] },
+      "expected": { "forbid_after": true }
+    },
+    {
+      "name": "forbid_after is order-sensitive: the second token before the first is fine",
+      "rules": { "forbid_after": [["action:secret_read", "action:http_post"]] },
+      "snapshot": { "tool_calls": [], "tool_sequence": ["action:http_post", "action:secret_read"], "dlp_categories": [] },
+      "expected": { "forbid_after": false }
+    },
+    {
+      "name": "max_calls fires above the ceiling, counting case-insensitively",
+      "rules": { "max_calls": [["Bash", 2]] },
+      "snapshot": { "tool_calls": [], "tool_sequence": ["Bash", "bash", "Read", "BASH"], "dlp_categories": [] },
+      "expected": { "max_calls": true }
+    },
+    {
+      "name": "max_calls is quiet exactly at the ceiling",
+      "rules": { "max_calls": [["Bash", 2]] },
+      "snapshot": { "tool_calls": [], "tool_sequence": ["Bash", "Bash"], "dlp_categories": [] },
+      "expected": { "max_calls": false }
+    },
+    {
+      "name": "forbid_with fires on a credential finding co-occurring with the token, in any order",
+      "rules": { "forbid_with": [["secrets()", "action:http_post"]] },
+      "snapshot": { "tool_calls": [], "tool_sequence": ["action:http_post", "Read"], "dlp_categories": ["credential"] },
+      "expected": { "forbid_with": true }
+    },
+    {
+      "name": "forbid_with secrets() is not satisfied by a pii finding",
+      "rules": { "forbid_with": [["secrets()", "action:http_post"]] },
+      "snapshot": { "tool_calls": [], "tool_sequence": ["action:http_post"], "dlp_categories": ["pii"] },
+      "expected": { "forbid_with": false }
+    },
+    {
+      "name": "forbid_with needs the token too — a taint alone is not a finding",
+      "rules": { "forbid_with": [["pii()", "action:http_post"]] },
+      "snapshot": { "tool_calls": [], "tool_sequence": ["Read"], "dlp_categories": ["phi"] },
+      "expected": { "forbid_with": false }
+    },
+    {
+      "name": "several keys over one request, each judged on its own",
+      "rules": { "deny_tools": ["WebFetch"], "requires_before": [["action:run_tests", "action:deploy"]], "max_calls": [["action:deploy", 1]], "forbid_with": [["pii()", "action:http_post"]] },
+      "snapshot": { "tool_calls": ["Bash"], "tool_sequence": ["action:run_tests", "action:deploy", "action:deploy", "action:http_post"], "dlp_categories": ["pii"] },
+      "expected": { "deny_tools": false, "requires_before": false, "max_calls": true, "forbid_with": true }
+    }
+  ]
+}
