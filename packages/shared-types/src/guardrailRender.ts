@@ -74,7 +74,7 @@ export function escapeRegexLiteral(literal: string): string {
  * read it as "exactly this tool".
  */
 export function renderToolPattern(tools: readonly string[]): string {
-  const escaped = [...new Set(tools)].sort().map((t) => t.replace(/\./g, '\\.'))
+  const escaped = [...new Set(tools)].sort().map((t) => t.replace(/[\\.]/g, (c) => `\\${c}`))
   return escaped.length === 1 ? `^${escaped[0]!}$` : `^(${escaped.join('|')})$`
 }
 
@@ -231,9 +231,25 @@ export function splitFrontMatter(raw: string): { front: string; body: string } {
   return { front: rest.slice(0, end), body: rest.slice(end + '\n---'.length).trim() }
 }
 
+const QUOTE_CHARS: ReadonlySet<string> = new Set(['"', "'"])
+const QUOTE_AND_BRACKET_CHARS: ReadonlySet<string> = new Set(['"', "'", '[', ']'])
+
+/**
+ * Strip any run of `chars` from both ends, in linear time. A regex spelled
+ * `/["']+$/` is quadratic on a long run of quotes that does not reach the end
+ * of the string (the same trap `policySnapshot.ts`'s `stripEnd` documents).
+ */
+function trimChars(s: string, chars: ReadonlySet<string>): string {
+  let start = 0
+  let end = s.length
+  while (start < end && chars.has(s[start]!)) start++
+  while (end > start && chars.has(s[end - 1]!)) end--
+  return s.slice(start, end)
+}
+
 /** `trim_matches(['"', '\'', '[', ']'])` — strips any run of those from both ends. */
 function trimQuotesAndBrackets(s: string): string {
-  return s.replace(/^["'[\]]+/, '').replace(/["'[\]]+$/, '')
+  return trimChars(s, QUOTE_AND_BRACKET_CHARS)
 }
 
 function keyValues(front: string, key: string): string[] {
@@ -352,7 +368,7 @@ function parseItems<T>(
 function parseMode(front: string): 'shadow' | 'enforce' {
   const first = keyValues(front, 'mode:')[0]
   if (first === undefined) return 'enforce'
-  return first.trim().replace(/^["']+|["']+$/g, '').toLowerCase() === 'shadow' ? 'shadow' : 'enforce'
+  return trimChars(first.trim(), QUOTE_CHARS).toLowerCase() === 'shadow' ? 'shadow' : 'enforce'
 }
 
 /**
