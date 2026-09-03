@@ -1,0 +1,28 @@
+{
+  "generatedBy": "packages/shared-types/scripts/generate-guardrail-fixtures.ts",
+  "deny_tools": [],
+  "review_before": [],
+  "requires_before": [
+    {
+      "first": "action:run_tests",
+      "then": "action:deploy",
+      "adjacent": false
+    }
+  ],
+  "forbid_after": [
+    {
+      "first": "action:pii_export",
+      "then": "action:db_write",
+      "adjacent": false
+    },
+    {
+      "first": "action:secret_read",
+      "then": "action:http_post",
+      "adjacent": false
+    }
+  ],
+  "max_calls": [],
+  "forbid_with": [],
+  "roles": [],
+  "mode": "enforce"
+}

@@ -1,0 +1,27 @@
+{
+  "generatedBy": "packages/shared-types/scripts/generate-guardrail-fixtures.ts",
+  "deny_tools": [
+    "WebFetch"
+  ],
+  "review_before": [],
+  "requires_before": [
+    {
+      "first": "action:run_tests",
+      "then": "action:release",
+      "adjacent": false
+    }
+  ],
+  "forbid_after": [],
+  "max_calls": [
+    {
+      "token": "action:release",
+      "limit": 1
+    }
+  ],
+  "forbid_with": [],
+  "roles": [
+    "deployer",
+    "sre"
+  ],
+  "mode": "enforce"
+}

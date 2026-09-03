@@ -134,6 +134,54 @@ export type {
 export { SOURCE_PROVIDERS, isSourceProvider } from './sourceProviders.js'
 export type { SourceProvider } from './sourceProviders.js'
 
+export {
+  ACTION_TOKENS,
+  isActionToken,
+  TOOL_TOKEN_RE,
+  GuardrailIrSchema,
+  IR_KINDS,
+  FRONT_MATTER_KINDS,
+  isFrontMatterIr,
+  validateGuardrailIr,
+  canonicalizeIr,
+  irTokens,
+  MAX_HOOK_TOOLS,
+  MAX_LIST_TOKENS,
+  MAX_LITERALS,
+  MAX_LITERAL_CHARS,
+  MAX_ROLES,
+  MAX_TITLE_CHARS,
+  MAX_RATIONALE_CHARS,
+  MAX_CALLS_LIMIT,
+} from './guardrailIr.js'
+export type {
+  ActionToken,
+  GuardrailIr,
+  HookRuleIr,
+  WasmPredicateIr,
+  FrontMatterIr,
+  IrKind,
+  IrValidation,
+} from './guardrailIr.js'
+
+export {
+  escapeRegexLiteral,
+  renderToolPattern,
+  renderArgPattern,
+  scrubReason,
+  renderHookReason,
+  renderHookRule,
+  renderFrontMatterLines,
+  splitFrontMatter,
+  parseFrontMatterEnforcing,
+  isEnforceableFrontMatter,
+  frontMatterToIrs,
+  frontMatterIrsOf,
+  MAX_REASON_CHARS,
+  MAX_QUOTE_IN_REASON,
+} from './guardrailRender.js'
+export type { HookRuleCitation, RenderedHookRule, ParsedFrontMatter } from './guardrailRender.js'
+
 
 export {
   VALID_SOP_TRANSITIONS,

@@ -1,0 +1,29 @@
+{
+  "generatedBy": "packages/shared-types/scripts/generate-guardrail-fixtures.ts",
+  "deny_tools": [],
+  "review_before": [],
+  "requires_before": [],
+  "forbid_after": [],
+  "max_calls": [
+    {
+      "token": "action:deploy",
+      "limit": 1
+    },
+    {
+      "token": "Bash",
+      "limit": 20
+    }
+  ],
+  "forbid_with": [
+    {
+      "taint": "pii()",
+      "token": "action:http_post"
+    },
+    {
+      "taint": "secrets()",
+      "token": "action:http_post"
+    }
+  ],
+  "roles": [],
+  "mode": "shadow"
+}
