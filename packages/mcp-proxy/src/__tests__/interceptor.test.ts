@@ -158,6 +158,29 @@ describe('ToolCallInterceptor', () => {
   })
 
   describe('SOP policy rules', () => {
+    it('a warn rule allows the call and reports tool_flagged with the rule id, then the allow (LLD #71)', async () => {
+      const rules: SopRule[] = [{
+        id: 'guardrail.pgr_shadow',
+        toolPattern: '^Bash$',
+        argPattern: '(?=[\\s\\S]*terraform\\ apply)',
+        action: 'warn',
+        reason: 'Reviewed plan before terraform apply — policy: "Never run terraform apply without a reviewed plan." (https://wiki.acme.dev/1)',
+      }]
+      const policy = new StubPolicyClient(rules)
+      const interceptor = new ToolCallInterceptor(policy, emitter, true)
+
+      const decision = await interceptor.decide('Bash', { command: 'terraform apply -auto-approve' })
+      expect(decision.action).toBe('allow')
+      expect(emitter.emitted.map((e) => e.kind)).toEqual(['tool_flagged', 'tool_allowed'])
+      expect(emitter.emitted[0]?.reason).toMatch(/\[guardrail\.pgr_shadow\]$/)
+      expect(emitter.emitted[0]?.reason).toContain('policy: "Never run terraform apply')
+
+      emitter.emitted.length = 0
+      const other = await interceptor.decide('Bash', { command: 'terraform plan' })
+      expect(other.action).toBe('allow')
+      expect(emitter.emitted.map((e) => e.kind)).toEqual(['tool_allowed'])
+    })
+
     it('blocks tool when matching block rule exists', async () => {
       const rules: SopRule[] = [{
         id: 'rule-1',

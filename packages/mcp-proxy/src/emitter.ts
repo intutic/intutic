@@ -24,6 +24,13 @@ export type EventKind =
   | 'tool_blocked'
   | 'tool_redacted'
   /**
+   * A `warn` SOP rule matched and the call was allowed (LLD #71): the same
+   * event the harness gates log for a warn-severity rule, carrying the rule
+   * id as `[<id>]` in `reason`, so a SHADOW guardrail seen through this
+   * proxy counts toward its evidence like one seen through a gate.
+   */
+  | 'tool_flagged'
+  /**
    * Server-level TOFU pin mismatch (tofu.ts) — a server's `tools/list`
    * response no longer matches the fingerprint pinned on first contact. Sent
    * with `toolName` carrying the SERVER name (there is no single tool

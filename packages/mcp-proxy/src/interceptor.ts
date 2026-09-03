@@ -224,7 +224,10 @@ export class ToolCallInterceptor {
         }
         if (rule.action === 'warn') {
           log.warn({ action: 'policy_warn', toolName, ruleId: rule.id, reason: rule.reason }, 'Policy warning (allowing)')
-          // Fall through to allow — warnings are logged only
+          // Fall through to allow. Reported as `tool_flagged` with the rule id
+          // in the reason — the same shape the harness gates use — so a
+          // SHADOW guardrail's evidence (LLD #71) counts this proxy's traffic.
+          this.emitter.emit('tool_flagged', toolName, toolInput, `${rule.reason} [${rule.id}]`)
         }
         // 'require_approval' treated as block in headless proxy (no interactive UI)
         if (rule.action === 'require_approval') {
