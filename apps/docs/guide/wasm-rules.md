@@ -362,10 +362,10 @@ The rule lands in `~/.intutic/wasm/` as `50_budget-guard.wasm` (lower priority n
 
 Filters are hot-reloaded into the proxy without requiring a service restart:
 
-1. The compiled WASM binary is stored in the database
-2. The proxy receives a notification via pub/sub
-3. A new WebAssembly module is instantiated on the fly
-4. The filter is immediately active on the request path
+1. The compiled WASM binary is stored in the database and the workspace's active rule set is published to Valkey
+2. Each connected proxy polls that rule set every 5 seconds (there is no push channel)
+3. A new WebAssembly module is instantiated on the fly when the descriptor changes
+4. The filter is active on the request path within one poll interval
 
 ---
 
