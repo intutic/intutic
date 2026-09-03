@@ -179,8 +179,9 @@ export {
   frontMatterIrsOf,
   MAX_REASON_CHARS,
   MAX_QUOTE_IN_REASON,
+  renderGuardrailSopFile,
 } from './guardrailRender.js'
-export type { HookRuleCitation, RenderedHookRule, ParsedFrontMatter } from './guardrailRender.js'
+export type { HookRuleCitation, RenderedHookRule, ParsedFrontMatter, GuardrailSopFileInput } from './guardrailRender.js'
 
 
 export {
