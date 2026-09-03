@@ -1,0 +1,13 @@
+{
+  "generatedBy": "packages/shared-types/scripts/generate-guardrail-fixtures.ts",
+  "deny_tools": [
+    "kubectl"
+  ],
+  "review_before": [],
+  "requires_before": [],
+  "forbid_after": [],
+  "max_calls": [],
+  "forbid_with": [],
+  "roles": [],
+  "mode": "shadow"
+}
