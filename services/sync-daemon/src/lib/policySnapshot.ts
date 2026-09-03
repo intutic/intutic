@@ -151,7 +151,20 @@ export const SKILL_SURFACE_TIER_SEVERITY: 'block' | 'warn' = 'block'
  *  gates enforced the rule as an unconditional tool-name block. */
 export interface ResolvedPolicy {
   workspaceId: string
-  sopRules: Array<{ id: string; toolPattern: string; argPattern?: string; action: string; reason: string }>
+  sopRules: Array<{
+    id: string
+    toolPattern: string
+    argPattern?: string
+    action: string
+    reason: string
+    /**
+     * LLD #71: `'guardrail'` on rules the control plane projects from a cited
+     * policy guardrail. The only origin for which `action: 'warn'` is shipped
+     * (at severity `warn`, report-only); every other warn rule is still
+     * dropped, the HIGH/CRITICAL catch-all included.
+     */
+    origin?: string
+  }>
   interventionMode: string
   /**
    * Per-server MCP allowlist, absorbed verbatim from `allowedServers` on
@@ -298,7 +311,16 @@ function toGuardPattern(
   // 'warn'}` for every HIGH/CRITICAL-risk SOP (evaluate.ts) — a live landmine
   // for anything that ships rules to a blocking path, and the reason this filter
   // is the first line rather than an afterthought.
-  if (rule.action !== 'block') return null
+  //
+  // One exception (LLD #71): a rule the control plane projects from a cited
+  // policy guardrail in SHADOW carries `origin: 'guardrail'` and `action:
+  // 'warn'`. It ships at severity `warn` — the gate logs `tool_flagged` and
+  // allows — so the rule can earn its evidence. That is the documented meaning
+  // of `warn` ("has not earned the right to block yet"), and it is still
+  // additive: a warn rule blocks nothing. `validateRule` below still applies,
+  // so a catch-all guardrail is refused the same way.
+  const guardrail = rule.origin === 'guardrail'
+  if (rule.action !== 'block' && !(guardrail && rule.action === 'warn')) return null
 
   const why = validateRule(rule.toolPattern, rule.id)
   if (why) {
@@ -341,10 +363,14 @@ function toGuardPattern(
     // things: `warn` is "this rule has not earned the right to block yet",
     // `shadow` is "this rule is certain and the workspace asked us not to act".
     // Collapsing them makes a SILENT_LOG rollout unmeasurable, because you
-    // cannot tell which flags would have been blocks.
-    severity: shadow ? ('shadow' as GuardPattern['severity']) : 'block',
+    // cannot tell which flags would have been blocks. A guardrail in SHADOW
+    // is the one rule that ships as `warn` on purpose (see above); under
+    // SILENT_LOG it demotes to `shadow` with everything else.
+    severity: shadow ? ('shadow' as GuardPattern['severity']) : rule.action === 'warn' ? ('warn' as GuardPattern['severity']) : 'block',
     reason: rule.reason || `Blocked by SOP ${rule.id}`,
-    rationale: 'Resolved from a BLOCK: SOP title by the control plane.',
+    rationale: guardrail
+      ? 'Projected from a cited policy guardrail by the control plane (LLD #71).'
+      : 'Resolved from a BLOCK: SOP title by the control plane.',
     matches: [],
     notMatches: [],
     ...(argPattern ? { argPattern } : {}),
