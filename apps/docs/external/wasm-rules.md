@@ -53,7 +53,7 @@ In enterprise environments with centralized governance:
                                                                     ▼
                                                              [Control Plane]
                                                                     │
-                                                           (Valkey Pub/Sub)
+                                                    (Valkey rule set, polled every 5 s)
                                                                     │
                                                                     ▼
                                                              [Rust Proxy]
@@ -61,7 +61,7 @@ In enterprise environments with centralized governance:
 ```
 
 1. **Registry Storage**: Rules are uploaded via the Custom Filters dashboard (`POST /api/v1/wasm-rules`) and persisted in the `wasm_rule_bundles` database table.
-2. **Real-time Sync**: The control plane broadcasts updates via Valkey Pub/Sub to active connected proxies, which load the updated module dynamically.
+2. **Sync**: The control plane writes the workspace's full active rule set to Valkey after every change; connected proxies poll it every 5 seconds and load a changed module dynamically. There is no pub/sub push — a new rule is live within one poll interval.
 <!-- ENTERPRISE_ONLY_END -->
 
 ---
