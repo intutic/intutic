@@ -127,7 +127,12 @@ export type {
   SopFilters,
   DecisionEntry,
   DecisionListResult,
+  SopProvenance,
+  SopProvenanceSource,
 } from './sop.js'
+
+export { SOURCE_PROVIDERS, isSourceProvider } from './sourceProviders.js'
+export type { SourceProvider } from './sourceProviders.js'
 
 
 export {

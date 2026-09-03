@@ -101,6 +101,57 @@ export interface Sop {
 
   /** When `gitDriftStatus` was last reported. Undefined alongside it. */
   gitDriftCheckedAt?: string
+
+  /**
+   * Where this SOP's text came from, when it came from somewhere. See
+   * {@link SopProvenance}. Absent for SOPs authored in the product.
+   */
+  provenance?: SopProvenance
+}
+
+/**
+ * The typed shape of `sop_registry.provenance` (jsonb).
+ *
+ * Before LLD #71 the column carried exactly one key, `stale`, written by the
+ * connector sync and the SOP service when an SSL recompile failed and the
+ * previous good graph was kept, and read by `sopLifecycleService.ts`'s
+ * REFINED → VALIDATED gate. That contract is unchanged: the gate reads only
+ * `stale`, and `sopValidatedGate.test.ts` pins that other keys are
+ * non-blocking.
+ *
+ * `source` is written by the connector sync for every synced SOP. It is the
+ * document-level half of a citation — the passage-level half lives in
+ * `policy_passages` — and the reason a synced SOP can finally render a link
+ * back to the page it came from.
+ */
+export interface SopProvenance {
+  /** The compiled SSL graph describes an earlier version of the markdown. */
+  stale?: boolean
+  /**
+   * Set on an enforced (VALIDATED) SOP when its upstream document changed and
+   * a DRAFT successor was created instead of overwriting the enforced text.
+   * Cleared when the successor is promoted (which deactivates this row).
+   */
+  upstreamChanged?: boolean
+  source?: SopProvenanceSource
+}
+
+/** Document-level provenance for a synced SOP. */
+export interface SopProvenanceSource {
+  /** One of `SOURCE_PROVIDERS` (plus `upload`). */
+  provider: string
+  /** `policy_source_documents.doc_id`. */
+  docId: string
+  /** Provider-native id: Notion page id, Confluence page id, GitHub path, Drive file id. */
+  externalId: string
+  /** Deep link to the upstream document, or null when the provider has none (upload). */
+  sourceUrl: string | null
+  /** Provider-native version marker (Notion last_edited_time, Confluence version number, GitHub blob sha), or null. */
+  upstreamVersion: string | null
+  /** SHA-256 of the ingested markdown at fetch time — the same key `sop_content_blocks` uses. */
+  contentHash: string
+  /** ISO timestamp of the fetch that produced this text. */
+  fetchedAt: string
 }
 
 // ─── SOP Proof Tree ──────────────────────────────────────────────────
