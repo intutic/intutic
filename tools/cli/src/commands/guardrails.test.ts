@@ -5,6 +5,9 @@
  * refuse before any request is made, and a 409 prints the server's own
  * readiness reasons.
  */
+import * as path from 'node:path'
+import * as os from 'node:os'
+import * as fs from 'node:fs/promises'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 vi.mock('../config/store.js', () => ({
@@ -199,6 +202,23 @@ describe('intutic guardrails sources / docs / search', () => {
     expect(new URL(url).pathname).toBe('/api/v1/connectors')
     expect(JSON.parse(String(init.body))).toEqual({ provider: 'github', name: 'policies', token: 'ghs_fake_token_value', config: { repo_url: 'acme/policies' } })
     expect(printed()).toContain('cc_9')
+  })
+
+  it('sources add reads a Google service-account key from --token-file and refuses an ambiguous credential', async () => {
+    await swallowExit(runGuardrailsSourcesAdd('gdrive', { name: 'policies' }))
+    expect(fetchMock).not.toHaveBeenCalled()
+    await swallowExit(runGuardrailsSourcesAdd('gdrive', { name: 'policies', token: 'a', tokenFile: 'b' }))
+    expect(fetchMock).not.toHaveBeenCalled()
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'intutic-gdrive-'))
+    const keyPath = path.join(dir, 'key.json')
+    // No PEM here on purpose: the credential body is whatever the file holds, and the secret scan refuses a real one in source.
+    await fs.writeFile(keyPath, '{"type":"service_account","client_email":"reader@acme.iam.gserviceaccount.com"}\n')
+    fetchMock.mockResolvedValue(ok({ connector: { connector_id: 'cc_g', provider: 'gdrive', name: 'policies' } }, 201))
+    await runGuardrailsSourcesAdd('gdrive', { name: 'policies', tokenFile: keyPath, config: '{"folder_id":"1AbC"}' })
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(String(init.body))).toEqual({ provider: 'gdrive', name: 'policies', token: '{"type":"service_account","client_email":"reader@acme.iam.gserviceaccount.com"}', config: { folder_id: '1AbC' } })
+    expect(printed()).toContain('cc_g')
+    await fs.rm(dir, { recursive: true, force: true })
   })
 
   it('docs extract reports the cap as an exit 1, and a success with its counts', async () => {

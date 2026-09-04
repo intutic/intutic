@@ -282,13 +282,17 @@ Instead of manually entering and updating SOPs on the dashboard, you can connect
 - **Notion** — Sync Notion databases or specific page block trees.
 - **Confluence** — Sync Space wikis and page hierarchies.
 - **GitHub** — Sync markdown files from code repositories.
+- **Google Docs** — Sync the Google Docs in one Drive folder, read-only. Created by workspace owners and admins only, with a service-account key file (share the folder with the service account's email) or a short-lived access token. Google Drive is cloud-only and is unavailable in offline mode.
+- **Upload** — A one-off Markdown, plain-text or HTML document (up to 1 MB) with no connector behind it, from Policy Guardrails → Sources. The same file twice is one document; an edited copy re-binds the citations that still hold.
 
 ### Configuring Connectors
 
-1. Navigate to **Settings → Connectors** in the dashboard.
-2. Select your provider (**Notion**, **Confluence**, or **GitHub**).
-3. Provide the integration token or PAT, and specify the page/path to sync.
+1. Open **Policy Guardrails → Sources** in the dashboard.
+2. Select your provider (**Notion**, **Confluence**, **GitHub** or **Google Docs**).
+3. Provide the integration token, PAT or service-account key, and specify the page, path or folder to sync.
 4. Once created, the sync runner compiles external pages to Intutic's structural format (`SSL`) and auto-versions drafts in your SOP registry.
+
+An SOP that a live guardrail cites is never written back to its source: the product does not overwrite a passage it stands on. Google Docs sources are read-only regardless.
 <!-- ENTERPRISE_ONLY_END -->
 
 ## Related
