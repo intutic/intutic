@@ -92,6 +92,35 @@ export function renderArgPattern(contains: readonly string[] = [], notContains: 
   return all.length === 0 ? undefined : all.join('')
 }
 
+/**
+ * A whole SOP file around rendered front-matter lines: the shape the control
+ * plane projects a front-matter guardrail into `GET /api/v1/workspace/
+ * sops-policy` with, and the shape the parity fixtures under
+ * `fixtures/guardrail-ir/` are generated in — one function, so the cargo
+ * fixture test covers the projection byte for byte. `source:` and `cite:`
+ * are informational lines the proxy ignores; `mode: shadow` is the one it
+ * reads.
+ */
+export interface GuardrailSopFileInput {
+  /** The enforcing lines, as `renderFrontMatterLines` produced them. */
+  lines: string
+  title: string
+  /** Markdown body under the H1; the cited passage usually goes here as a quote. */
+  body: string
+  sourceUrl?: string | null
+  /** The passage hash the rule stands on. */
+  cite?: string | null
+  shadow: boolean
+}
+
+export function renderGuardrailSopFile(input: GuardrailSopFileInput): string {
+  const extra: string[] = []
+  if (input.sourceUrl) extra.push(`source: ${scrubReason(input.sourceUrl)}`)
+  if (input.cite) extra.push(`cite: ${scrubReason(input.cite)}`)
+  if (input.shadow) extra.push('mode: shadow')
+  return `---\n${[input.lines, ...extra].join('\n')}\n---\n# ${scrubReason(input.title)}\n\n${input.body}\n`
+}
+
 /** Tabs and newlines would break the `.rules` projection; collapse them. */
 export function scrubReason(text: string): string {
   return text.replace(/[\t\r\n]+/g, ' ').replace(/ {2,}/g, ' ').trim()
