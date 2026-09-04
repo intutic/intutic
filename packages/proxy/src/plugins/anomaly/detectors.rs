@@ -4040,3 +4040,120 @@ mod code_as_action_tests {
             .is_none());
     }
 }
+
+/// The control plane replays SOP front-matter keys over captured request
+/// contexts to preview what a front-matter guardrail would have done
+/// (`services/control-plane/src/lib/sopKeyReplay.ts`, LLD #71 Wave 5). Its
+/// semantics are a mirror of the detectors above, and a mirror drifts unless
+/// something holds the two together: this module runs the same vector file
+/// (`packages/shared-types/fixtures/sop-key-replay-vectors.json`) through
+/// the real detectors, so a vector the TypeScript side reads one way and the
+/// proxy reads another goes red on both ends. Each vector names the keys it
+/// is about; a detector it does not mention is not asserted (a built-in
+/// floor may legitimately fire on the same sequence).
+#[cfg(test)]
+mod sop_key_replay_vectors {
+    use super::test_support::base_ctx;
+    use super::*;
+    use crate::wasm::context::{DlpFinding, RequestContext, ToolCall};
+    use serde::Deserialize;
+    use std::collections::BTreeMap;
+
+    const VECTORS: &str = include_str!("../../../../shared-types/fixtures/sop-key-replay-vectors.json");
+
+    #[derive(Deserialize, Default)]
+    struct Rules {
+        #[serde(default)]
+        deny_tools: Vec<String>,
+        #[serde(default)]
+        requires_before: Vec<(String, String)>,
+        #[serde(default)]
+        forbid_after: Vec<(String, String)>,
+        #[serde(default)]
+        max_calls: Vec<(String, usize)>,
+        #[serde(default)]
+        forbid_with: Vec<(String, String)>,
+    }
+
+    #[derive(Deserialize)]
+    struct Snapshot {
+        tool_calls: Vec<String>,
+        tool_sequence: Vec<String>,
+        dlp_categories: Vec<String>,
+    }
+
+    #[derive(Deserialize)]
+    struct Vector {
+        name: String,
+        rules: Rules,
+        snapshot: Snapshot,
+        expected: BTreeMap<String, bool>,
+    }
+
+    #[derive(Deserialize)]
+    struct VectorFile {
+        vectors: Vec<Vector>,
+    }
+
+    fn load() -> Vec<Vector> {
+        let file: VectorFile = serde_json::from_str(VECTORS).expect("the vector file parses");
+        file.vectors
+    }
+
+    fn ctx_for(v: &Vector) -> RequestContext {
+        RequestContext {
+            denied_tools: v.rules.deny_tools.clone(),
+            requires_before: v.rules.requires_before.iter().map(|(a, b)| (a.clone(), b.clone(), false)).collect(),
+            forbid_after: v.rules.forbid_after.iter().map(|(a, b)| (a.clone(), b.clone(), false)).collect(),
+            max_calls: v.rules.max_calls.clone(),
+            forbid_with: v.rules.forbid_with.clone(),
+            tool_calls: v
+                .snapshot
+                .tool_calls
+                .iter()
+                .enumerate()
+                .map(|(i, name)| ToolCall { id: format!("tc_{i}"), name: name.clone(), arguments: serde_json::json!({}) })
+                .collect(),
+            tool_sequence: v.snapshot.tool_sequence.clone(),
+            dlp_findings: v
+                .snapshot
+                .dlp_categories
+                .iter()
+                .map(|c| DlpFinding { category: c.clone(), pattern_name: "vector".into(), action: "redact".into(), offset: 0, length: 0 })
+                .collect(),
+            ..base_ctx()
+        }
+    }
+
+    fn fires(kind: &str, ctx: &RequestContext) -> bool {
+        match kind {
+            "deny_tools" => UnauthorizedToolDetector.detect(ctx).is_some(),
+            "requires_before" => MissingPredecessorDetector::default().detect(ctx).is_some(),
+            "forbid_after" => ForbiddenSuccessionDetector::default().detect(ctx).is_some(),
+            "max_calls" => CallCeilingDetector.detect(ctx).is_some(),
+            "forbid_with" => TaintCooccurrenceDetector.detect(ctx).is_some(),
+            other => panic!("the vector file names a key this test does not map: {other}"),
+        }
+    }
+
+    #[test]
+    fn the_vector_file_covers_every_replayable_key() {
+        let vectors = load();
+        assert!(vectors.len() >= 12, "only {} vector(s)", vectors.len());
+        let mut kinds: Vec<&str> = vectors.iter().flat_map(|v| v.expected.keys().map(String::as_str)).collect();
+        kinds.sort();
+        kinds.dedup();
+        assert_eq!(kinds, ["deny_tools", "forbid_after", "forbid_with", "max_calls", "requires_before"]);
+    }
+
+    #[test]
+    fn every_vector_is_decided_by_the_real_detectors_as_authored() {
+        for v in load() {
+            let ctx = ctx_for(&v);
+            for (kind, want) in &v.expected {
+                let got = fires(kind, &ctx);
+                assert_eq!(got, *want, "{}: {kind} — the proxy's detector disagrees with the vector", v.name);
+            }
+        }
+    }
+}
