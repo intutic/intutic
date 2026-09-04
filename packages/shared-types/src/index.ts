@@ -183,6 +183,41 @@ export {
 } from './guardrailRender.js'
 export type { HookRuleCitation, RenderedHookRule, ParsedFrontMatter, GuardrailSopFileInput } from './guardrailRender.js'
 
+export {
+  GUARDRAIL_STATUSES,
+  GUARDRAIL_TARGETS,
+  GUARDRAIL_EVENT_TYPES,
+  isCandidateCitationEvidence,
+} from './policyGuardrails.js'
+export type {
+  GuardrailStatus,
+  GuardrailTarget,
+  GuardrailEventType,
+  GuardrailThresholds,
+  GuardrailThresholdsResponse,
+  GuardrailClauseRef,
+  GuardrailDocumentRef,
+  GuardrailSummary,
+  GuardrailEvent,
+  GuardrailPassageRef,
+  GuardrailDetail,
+  GuardrailListFilters,
+  GuardrailReadiness,
+  GuardrailReplay,
+  GuardrailConflictKind,
+  GuardrailConflict,
+  PolicyExtractionRunRef,
+  PolicyDocumentSummary,
+  PolicyPassageRow,
+  PolicyClauseRow,
+  PolicyExtractionRunRow,
+  PolicyDocumentDetail,
+  ExtractDocumentResult,
+  TokenCoverage,
+  LedgerGraph,
+  CandidateCitationEvidence,
+} from './policyGuardrails.js'
+
 
 export {
   VALID_SOP_TRANSITIONS,

@@ -300,6 +300,191 @@ policyCmd
     await runPolicyReplay(ruleId, opts)
   })
 
+// Policy Clause Ledger (LLD #71). `intutic policy` is the WASM loop and
+// `intutic sops` is files on disk; this namespace is the cited guardrails
+// extracted from policy documents and their shadow -> promote lifecycle.
+const guardrailsCmd = program
+  .command('guardrails')
+  .description('Policy documents, cited clauses and the guardrails compiled from them')
+
+const guardrailsSourcesCmd = guardrailsCmd
+  .command('sources')
+  .description('Policy sources (Notion, Confluence, GitHub) feeding the ledger')
+
+guardrailsSourcesCmd
+  .command('list')
+  .description('List configured policy sources and their last sync')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runGuardrailsSourcesList } = await import('./commands/guardrails.js')
+    await runGuardrailsSourcesList(opts)
+  })
+
+guardrailsSourcesCmd
+  .command('add <provider>')
+  .description('Connect a policy source; the credential is read from --token, never echoed')
+  .requiredOption('--name <name>', 'Display name for the source')
+  .requiredOption('--token <token>', 'Provider credential (integration token or API key)')
+  .option('--config <json>', 'Provider-specific settings as a JSON object')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (provider, opts) => {
+    const { runGuardrailsSourcesAdd } = await import('./commands/guardrails.js')
+    await runGuardrailsSourcesAdd(provider, opts)
+  })
+
+guardrailsSourcesCmd
+  .command('sync <connectorId>')
+  .description('Pull the source now instead of waiting for the next cron pass')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (connectorId, opts) => {
+    const { runGuardrailsSourcesSync } = await import('./commands/guardrails.js')
+    await runGuardrailsSourcesSync(connectorId, opts)
+  })
+
+const guardrailsDocsCmd = guardrailsCmd
+  .command('docs')
+  .description('Ingested policy documents and their citable passages')
+
+guardrailsDocsCmd
+  .command('list')
+  .description('List ingested policy documents')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runGuardrailsDocsList } = await import('./commands/guardrails.js')
+    await runGuardrailsDocsList(opts)
+  })
+
+guardrailsDocsCmd
+  .command('show <docId>')
+  .description('Show a document, its passages and the clauses extracted from them')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (docId, opts) => {
+    const { runGuardrailsDocsShow } = await import('./commands/guardrails.js')
+    await runGuardrailsDocsShow(docId, opts)
+  })
+
+guardrailsDocsCmd
+  .command('extract <docId>')
+  .description('Propose cited guardrails from a document (every proposal is re-validated deterministically)')
+  .option('--no-llm', 'Only lift existing SOP front matter; do not call the extraction model')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (docId, opts) => {
+    const { runGuardrailsDocsExtract } = await import('./commands/guardrails.js')
+    await runGuardrailsDocsExtract(docId, { ...opts, noLlm: opts.llm === false })
+  })
+
+guardrailsCmd
+  .command('search <token>')
+  .description('Which passages and guardrails mention a tool or action token (e.g. Bash, terraform)')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (token, opts) => {
+    const { runGuardrailsSearch } = await import('./commands/guardrails.js')
+    await runGuardrailsSearch(token, opts)
+  })
+
+guardrailsCmd
+  .command('list')
+  .description('List guardrails with their status and shadow evidence')
+  .option('--status <status>', 'PROPOSED | SHADOW | ENFORCING | REJECTED | RETIRED')
+  .option('--target <target>', 'hook_rule | sop_front_matter | wasm_rule')
+  .option('--doc <docId>', 'Only guardrails cited from this document')
+  .option('--limit <n>', 'Max rows (default 50, capped at 200)')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runGuardrailsList } = await import('./commands/guardrails.js')
+    await runGuardrailsList(opts)
+  })
+
+guardrailsCmd
+  .command('show <guardrailId>')
+  .description('Show a guardrail: cited passage, rendered artifact, validation checks and readiness')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (guardrailId, opts) => {
+    const { runGuardrailsShow } = await import('./commands/guardrails.js')
+    await runGuardrailsShow(guardrailId, opts)
+  })
+
+guardrailsCmd
+  .command('approve-shadow <guardrailId>')
+  .description('Ship a proposed guardrail in shadow: it reports, never blocks')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (guardrailId, opts) => {
+    const { runGuardrailsApproveShadow } = await import('./commands/guardrails.js')
+    await runGuardrailsApproveShadow(guardrailId, opts)
+  })
+
+guardrailsCmd
+  .command('promote <guardrailId>')
+  .description('Promote a shadow guardrail to enforcing once the server says it is ready')
+  .option('--acknowledge-no-traffic', 'Promote a rule that no observed traffic exercised')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (guardrailId, opts) => {
+    const { runGuardrailsPromote } = await import('./commands/guardrails.js')
+    await runGuardrailsPromote(guardrailId, opts)
+  })
+
+guardrailsCmd
+  .command('reject <guardrailId>')
+  .description('Reject a guardrail; the reason is recorded on its authority chain')
+  .requiredOption('--reason <reason>', 'Why it is rejected')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (guardrailId, opts) => {
+    const { runGuardrailsReject } = await import('./commands/guardrails.js')
+    await runGuardrailsReject(guardrailId, opts)
+  })
+
+guardrailsCmd
+  .command('retire <guardrailId>')
+  .description('Retire a shadow or enforcing guardrail; it stops being projected')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (guardrailId, opts) => {
+    const { runGuardrailsRetire } = await import('./commands/guardrails.js')
+    await runGuardrailsRetire(guardrailId, opts)
+  })
+
+guardrailsCmd
+  .command('reconfirm <guardrailId>')
+  .description('Confirm a guardrail whose cited passage changed upstream still holds')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (guardrailId, opts) => {
+    const { runGuardrailsReconfirm } = await import('./commands/guardrails.js')
+    await runGuardrailsReconfirm(guardrailId, opts)
+  })
+
+guardrailsCmd
+  .command('replay <guardrailId>')
+  .description('Run a guardrail over captured calls and report how many it would have fired on')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (guardrailId, opts) => {
+    const { runGuardrailsReplay } = await import('./commands/guardrails.js')
+    await runGuardrailsReplay(guardrailId, opts)
+  })
+
+guardrailsCmd
+  .command('conflicts')
+  .description('List guardrails that contradict each other, with both quotes')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runGuardrailsConflicts } = await import('./commands/guardrails.js')
+    await runGuardrailsConflicts(opts)
+  })
+
 program
   .command('whoami')
   .description('Show current authenticated identity')
