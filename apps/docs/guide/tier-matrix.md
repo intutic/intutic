@@ -58,6 +58,7 @@ list is a trial or a degraded preview of a paid feature:
 | Team dashboard | — | web UI: spend, audits, compliance scores |
 | Ticket board integration (Jira/Linear) | — | cost attribution to a ticket key |
 | Corporate SOP distribution | local files only | centralized, tamper-proof, pushed to every developer |
+| Guardrails from policy documents | hand-written SOP files and rules | Notion, Confluence, GitHub, Google Docs and uploads become cited, shadow-first guardrails a person promotes |
 | LLM-as-judge (L2/L3 semantic checks) | — | requires server compute |
 
 Arm state carries over rather than resetting when you connect: a workspace
@@ -84,6 +85,11 @@ more than one developer to make sense of:
   role/capability table.
 - **SSO** — SAML 2.0 or OIDC, so team members authenticate through Okta,
   Entra ID, Google, or Ping Identity rather than individual passwords.
+- **Policy Guardrails** — the model step that proposes cited clauses from
+  your policy documents, and the review page that shadows and promotes them.
+  Ingestion and citations come with any connected workspace; extraction and
+  the page need a paid plan or an active trial. See
+  [Policy Guardrails](/guide/policy-guardrails).
 - **Semantic response caching** and **workspace-wide SOP Registry** —
   unlocked dynamically at the next sync-daemon handshake once an
   administrator raises the tier from the dashboard; no CLI or proxy binary

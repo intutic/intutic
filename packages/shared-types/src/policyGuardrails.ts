@@ -18,6 +18,32 @@ export const GUARDRAIL_STATUSES = ['PROPOSED', 'SHADOW', 'ENFORCING', 'REJECTED'
  * back over (LLD #71, Wave 8). A rejected proposal does not freeze a source.
  */
 export const LIVE_GUARDRAIL_STATUSES = ['PROPOSED', 'SHADOW', 'ENFORCING'] as const
+
+/**
+ * A projected front-matter guardrail is served to the proxy as a SOP titled
+ * `GUARDRAIL:<pgr> <first line>` (Wave 5). On disk, where the proxy titles a
+ * SOP by its file stem, the same guardrail is `guardrail-<pgr>.md` (Wave 9):
+ * no colon or space, so the name is legal on every platform, and the stem
+ * still names the guardrail so its shadow reports are credited.
+ */
+export const GUARDRAIL_SOP_TITLE_PREFIX = 'GUARDRAIL:'
+
+/** The file `intutic guardrails pull` writes for a guardrail, without the `.md`. */
+export function guardrailFileStem(guardrailId: string): string {
+  return `guardrail-${guardrailId}`
+}
+
+/**
+ * `GUARDRAIL:pgr_x deny_tools: WebFetch` → `pgr_x`; `guardrail-pgr_x` (a pulled
+ * file's stem, what a disk-loaded proxy reports as the title) → `pgr_x`;
+ * anything else → null.
+ */
+export function guardrailIdFromSopTitle(title: string): string | null {
+  const served = title.match(/^GUARDRAIL:([A-Za-z0-9_-]{4,64})(?:\s|$)/)
+  if (served) return served[1]!
+  const stem = title.match(/^guardrail-([A-Za-z0-9_-]{4,64})$/)
+  return stem ? stem[1]! : null
+}
 export type GuardrailStatus = (typeof GUARDRAIL_STATUSES)[number]
 
 export const GUARDRAIL_TARGETS = ['hook_rule', 'sop_front_matter', 'wasm_rule'] as const

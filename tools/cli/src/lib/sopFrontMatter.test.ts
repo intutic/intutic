@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { createHash } from 'node:crypto'
-import { parseSopFile, renderSopFile, slugifyTitle, titleFromFileName } from './sopFrontMatter.js'
+import { parseSopFile, renderSopFile, slugifyTitle, titleFromFileName, withContentHash } from './sopFrontMatter.js'
 
 describe('parseSopFile', () => {
   it('splits front matter from body and reads title/risk_tier/version', () => {
@@ -107,5 +107,48 @@ describe('titleFromFileName', () => {
   it('splits on hyphens and underscores and capitalizes each word', () => {
     expect(titleFromFileName('postgres-migration.md')).toBe('Postgres Migration')
     expect(titleFromFileName('deploy_checklist.md')).toBe('Deploy Checklist')
+  })
+})
+
+describe('withContentHash', () => {
+  const projected = [
+    '---',
+    'roles: deployer',
+    'deny_tools: Bash, WebFetch',
+    'source: https://wiki.acme.dev/change',
+    'cite: fb132d6403d776f2b604b75071c63acad528bbeebd6c6f9435b86ebd659fc8a2',
+    'mode: shadow',
+    '---',
+    '# Change policy',
+    '',
+    '> Deployers may not use Bash or WebFetch.',
+    '',
+  ].join('\n')
+
+  it('splices the marker into the existing fence, keeping the enforcing keys and the mode in that same fence', () => {
+    const out = withContentHash(projected)
+    const fenceEnd = out.indexOf('\n---', 3)
+    const front = out.slice(3, fenceEnd)
+    expect(front).toContain('deny_tools: Bash, WebFetch')
+    expect(front).toContain('mode: shadow')
+    expect(front).toMatch(/\ncontent_hash: [0-9a-f]{64}$/)
+    expect(out.match(/^---$/gm)).toHaveLength(2)
+    const parsed = parseSopFile(out)
+    expect(parsed.title).toBe('Change policy')
+    expect(parsed.contentHash).toBe(createHash('sha256').update(parsed.body, 'utf8').digest('hex'))
+    expect(parsed.body).toBe('# Change policy\n\n> Deployers may not use Bash or WebFetch.')
+  })
+
+  it('is idempotent and replaces a stale marker rather than stacking one', () => {
+    const once = withContentHash(projected)
+    expect(withContentHash(once)).toBe(once)
+    const stale = once.replace(/content_hash: [0-9a-f]{64}/, `content_hash: ${'0'.repeat(64)}`)
+    expect(withContentHash(stale)).toBe(once)
+  })
+
+  it('gives a fence-less file a fence holding only the marker', () => {
+    const out = withContentHash('# Plain\n\nNo fence here.\n')
+    expect(out.startsWith('---\ncontent_hash: ')).toBe(true)
+    expect(parseSopFile(out).body).toBe('# Plain\n\nNo fence here.')
   })
 })

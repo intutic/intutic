@@ -186,6 +186,9 @@ export type { HookRuleCitation, RenderedHookRule, ParsedFrontMatter, GuardrailSo
 export {
   GUARDRAIL_STATUSES,
   LIVE_GUARDRAIL_STATUSES,
+  GUARDRAIL_SOP_TITLE_PREFIX,
+  guardrailFileStem,
+  guardrailIdFromSopTitle,
   GUARDRAIL_TARGETS,
   GUARDRAIL_EVENT_TYPES,
   isCandidateCitationEvidence,

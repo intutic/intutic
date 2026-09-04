@@ -489,6 +489,18 @@ guardrailsCmd
     await runGuardrailsConflicts(opts)
   })
 
+guardrailsCmd
+  .command('pull')
+  .description('Write the SHADOW and ENFORCING front-matter guardrails to .intutic/sops/guardrail-<id>.md, for a proxy that reads SOPs from disk')
+  .option('--force', 'Overwrite a locally-modified guardrail file instead of refusing it')
+  .option('--prune', 'Remove guardrail files that are no longer served (unmodified ones only)')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runGuardrailsPull } = await import('./commands/guardrails.js')
+    await runGuardrailsPull(opts)
+  })
+
 program
   .command('whoami')
   .description('Show current authenticated identity')
