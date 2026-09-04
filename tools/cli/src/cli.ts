@@ -259,9 +259,12 @@ policyCmd
 policyCmd
   .command('compile')
   .description('Compile an AssemblyScript rule to WASM (wraps asc)')
-  .option('--src <path>', 'Rule source entry file', 'assembly/index.ts')
-  .option('--out <path>', 'Output .wasm path', 'build/rule.wasm')
+  .option('--src <path>', 'Rule source entry file (default: assembly/index.ts)')
+  .option('--out <path>', 'Output .wasm path (default: build/rule.wasm, or build/<candidate>.wasm with --candidate)')
   .option('--debug', 'Include debug info and source maps')
+  .option('--candidate <id>', 'Compile a rule candidate from its source of record on the control plane (fetched and hash-verified; not with --src)')
+  .option('--upload', 'With --candidate: upload the bundle to the candidate with its source hash and print the gate results')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
   .action(async (opts) => {
     const { runPolicyCompile } = await import('./commands/policy.js')
     await runPolicyCompile(opts)

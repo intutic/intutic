@@ -492,6 +492,8 @@ export {
   type FieldKind,
 } from './rulePredicateDsl.js'
 
+export { evaluatePredicate, compilePredicate, predicateStringValues } from './rulePredicateEval.js'
+
 export {
   TOON_THRESHOLD_ROWS,
   TOON_MAX_CELL_CHARS,

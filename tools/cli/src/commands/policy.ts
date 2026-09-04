@@ -12,7 +12,7 @@ import {
 } from '@intutic/shared-types'
 import { loadCredentials, loadConfig } from '../config/store.js'
 import { resolveControlPlaneUrl } from '../config/paths.js'
-import { createApiClient } from '../lib/api.js'
+import { createApiClient, type ApiClient } from '../lib/api.js'
 import { resolveSnapshotRulesPath, SNAPSHOT_RULES_FILE } from '../lib/policySnapshot.js'
 import type { EnforcementAction, InterventionMode, RiskCategory } from '@intutic/shared-types'
 
@@ -664,14 +664,159 @@ export function buildCompileArgs(opts: { src?: string; out?: string; debug?: boo
   return args
 }
 
+// ─── Rule candidates: the source of record (LLD #71, Wave 7) ─────────
+
+/** `GET /api/v1/rule-candidates/:id/source`, as the control plane serves it. */
+export interface CandidateSource {
+  candidateId: string
+  guardrailId: string | null
+  status: string
+  source: string
+  sourceSha256: string
+}
+
+/** Where a fetched candidate source is written: two directories below the project root, which is what its `../../assembly/index` import needs. */
+export function candidateSourcePath(candidateId: string): string {
+  return path.join('generated', 'candidates', `${candidateId}.ts`)
+}
+
+export function candidateOutPath(candidateId: string): string {
+  return path.join('build', `${candidateId}.wasm`)
+}
+
+export function sourceSha256Of(source: string): string {
+  return createHash('sha256').update(source, 'utf8').digest('hex')
+}
+
+/**
+ * Fetch a candidate's source of record and check it against the hash the
+ * server states. A body that does not hash to its own `sourceSha256` is not
+ * compiled: `/bundle` would refuse the result anyway, and a mismatch here
+ * means something between the control plane and this process changed bytes.
+ */
+export async function fetchCandidateSource(client: Pick<ApiClient, 'getWithStatus'>, candidateId: string): Promise<CandidateSource> {
+  const { status, body } = await client.getWithStatus<Partial<CandidateSource> & { error?: string; detail?: string }>(
+    `/api/v1/rule-candidates/${encodeURIComponent(candidateId)}/source`,
+  )
+  if (status === 404) {
+    log.error(`Rule candidate "${candidateId}" was not found in this workspace.`)
+    process.exit(1)
+  }
+  if (status === 409) {
+    log.error(`Refused: ${body.error ?? 'conflict'}${body.detail ? ` — ${body.detail}` : ''}`)
+    process.exit(1)
+  }
+  if (status !== 200 || typeof body.source !== 'string' || typeof body.sourceSha256 !== 'string') {
+    log.error(`Could not fetch the candidate's source (HTTP ${status}): ${body.error ?? 'unexpected response'}`)
+    process.exit(1)
+  }
+  const local = sourceSha256Of(body.source)
+  if (local !== body.sourceSha256.toLowerCase()) {
+    log.error(`The served source hashes to ${local}, not the ${body.sourceSha256} the server states; refusing to compile it.`)
+    process.exit(1)
+  }
+  return {
+    candidateId: body.candidateId ?? candidateId,
+    guardrailId: body.guardrailId ?? null,
+    status: body.status ?? 'unknown',
+    source: body.source,
+    sourceSha256: body.sourceSha256.toLowerCase(),
+  }
+}
+
+interface BundleResponse {
+  accepted?: boolean
+  gates?: Array<{ gate: string; passed: boolean; detail: string }>
+  ruleId?: string
+  mode?: string
+  error?: string
+  detail?: string
+}
+
+/**
+ * Upload a compiled bundle to its candidate together with the hash of the
+ * source it was compiled from, and print the gate results. The server
+ * recomputes the hash from the candidate row; a bundle built from anything
+ * else is refused before a gate runs.
+ */
+export async function uploadCandidateBundle(
+  client: Pick<ApiClient, 'postForm'>,
+  candidateId: string,
+  wasmPath: string,
+  sourceSha256: string,
+): Promise<void> {
+  let bytes: Buffer
+  try {
+    bytes = await fs.readFile(wasmPath)
+  } catch (err) {
+    log.error(`Failed to read the compiled bundle at "${wasmPath}": ${errMessage(err)}`)
+    process.exit(1)
+  }
+  const form = new FormData()
+  form.append('file', new Blob([new Uint8Array(bytes)], { type: 'application/wasm' }), path.basename(wasmPath))
+  form.append('source_sha256', sourceSha256)
+  const { status, body } = await client.postForm<BundleResponse>(`/api/v1/rule-candidates/${encodeURIComponent(candidateId)}/bundle`, form)
+  if (status === 404) {
+    log.error(`Rule candidate "${candidateId}" was not found in this workspace.`)
+    process.exit(1)
+  }
+  if (status === 400 || status === 409) {
+    log.error(`Refused: ${body.error ?? `HTTP ${status}`}${body.detail ? ` — ${body.detail}` : ''}`)
+    process.exit(1)
+  }
+  if (status !== 200 && status !== 201) {
+    log.error(`Upload failed (HTTP ${status}): ${body.error ?? 'unexpected response'}`)
+    process.exit(1)
+  }
+  for (const g of body.gates ?? []) log.info(`  ${g.passed ? '✓' : '✗'} ${g.gate}: ${g.detail}`)
+  if (body.accepted) {
+    log.success(`Accepted: rule ${body.ruleId ?? '?'} is in ${body.mode ?? 'SHADOW'} for candidate ${candidateId}.`)
+    log.info('It reports without acting until a member promotes it on counted shadow evidence.')
+    return
+  }
+  log.error('The bundle failed verification; the candidate is rejected with the gate named above.')
+  process.exit(1)
+}
+
 export async function runPolicyCompile(opts: {
   src?: string
   out?: string
   debug?: boolean
+  candidate?: string
+  upload?: boolean
+  dev?: boolean
 }): Promise<void> {
   log.header('Intutic — Compile WASM Policy Rule')
-  const args = buildCompileArgs(opts)
-  const out = opts.out ?? 'build/rule.wasm'
+
+  let src = opts.src
+  let out = opts.out ?? 'build/rule.wasm'
+  let candidate: CandidateSource | null = null
+  let client: ApiClient | null = null
+  if (opts.candidate) {
+    if (opts.src) {
+      log.error('--candidate compiles the source of record; it cannot be combined with --src.')
+      process.exit(1)
+    }
+    try {
+      await fs.access(path.join('assembly', 'index.ts'))
+    } catch {
+      log.error('Run this from a rule project with assembly/index.ts (the SDK layout): the generated source imports the SDK from two directories up.')
+      process.exit(1)
+    }
+    client = await getClient(opts.dev)
+    candidate = await fetchCandidateSource(client, opts.candidate)
+    src = candidateSourcePath(opts.candidate)
+    if (!opts.out) out = candidateOutPath(opts.candidate)
+    await fs.mkdir(path.dirname(src), { recursive: true })
+    await fs.writeFile(src, candidate.source, 'utf8')
+    log.info(`Source of record for ${candidate.candidateId} (${candidate.status}) → ${src}`)
+    log.info(`source_sha256 ${candidate.sourceSha256}`)
+  } else if (opts.upload) {
+    log.error('--upload needs --candidate: only a candidate has a source of record to upload against.')
+    process.exit(1)
+  }
+
+  const args = buildCompileArgs({ src, out, debug: opts.debug })
 
   try {
     await fs.mkdir(path.dirname(out), { recursive: true })
@@ -692,8 +837,16 @@ export async function runPolicyCompile(opts: {
     process.exit(1)
   }
 
-  log.success(`Compiled ${opts.src ?? 'assembly/index.ts'} → ${out}`)
-  log.info('Next: dry-run with `intutic policy test --wasm <out> --mock <mock.json>`')
+  log.success(`Compiled ${src ?? 'assembly/index.ts'} → ${out}`)
+  if (!candidate || !opts.candidate) {
+    log.info('Next: dry-run with `intutic policy test --wasm <out> --mock <mock.json>`')
+    return
+  }
+  if (!opts.upload) {
+    log.info(`Next: intutic policy compile --candidate ${opts.candidate} --upload (or upload ${out} with source_sha256 ${candidate.sourceSha256})`)
+    return
+  }
+  await uploadCandidateBundle(client!, opts.candidate, out, candidate.sourceSha256)
 }
 
 export async function runPolicyInstall(opts: {

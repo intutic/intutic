@@ -72,6 +72,8 @@ export interface GuardrailSummary {
   shadowWouldAct: number
   enforcingFires: number
   sourceStale: boolean
+  /** wasm_rule only: the rule candidate this guardrail was handed to on shadow approval (LLD #71, Wave 7). */
+  ruleCandidateId: string | null
   proposedAt: string
   shadowAt: string | null
   promotedAt: string | null

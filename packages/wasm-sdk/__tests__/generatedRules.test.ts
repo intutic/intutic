@@ -26,7 +26,7 @@ import { tmpdir } from 'node:os'
 import { spawn } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { WASM_HOST_IMPORTS, renderRule, type Predicate } from '@intutic/shared-types'
+import { WASM_HOST_IMPORTS, renderRule, evaluatePredicate, type Predicate } from '@intutic/shared-types'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const sdkRoot = join(here, '..')
@@ -119,14 +119,19 @@ function runProcess(
   })
 }
 
-/** Renders, compiles, and returns the path to the built module. */
-async function build(predicate: Predicate, verdict: number, name: string): Promise<string> {
+/** Renders, compiles, and returns the path to the built module. `name` is also the on-disk file name. */
+async function build(
+  predicate: Predicate,
+  verdict: number,
+  name: string,
+  provenance: { title?: string; rationale?: string; candidateId?: string } = {},
+): Promise<string> {
   const src = renderRule({
     predicate,
     verdict,
-    title: `test ${name}`,
-    rationale: 'generated in a test',
-    candidateId: `rc_${name}`,
+    title: provenance.title ?? `test ${name}`,
+    rationale: provenance.rationale ?? 'generated in a test',
+    candidateId: provenance.candidateId ?? `rc_${name}`,
   })
   const srcPath = join(genDir, `${name}.ts`)
   writeFileSync(srcPath, src)
@@ -315,4 +320,80 @@ describe('numeric fields arrive in either JSON form', () => {
     )
     expect(evaluate(wasm, {}), 'absent must stay unknown, not become 0').toBe(0)
   }, 120_000)
+})
+
+/**
+ * A rule cited from a policy document (LLD #71, Wave 7) is the same rendering
+ * with the citation in its rationale, and the control plane reads the
+ * predicate with `evaluatePredicate` before any bundle exists — to select
+ * mocks from captured traffic and to preview a replay. Both are pinned here:
+ * the citation survives the header byte for byte, and the TypeScript reading
+ * agrees with the compiled module on every context below, including the
+ * absent-field defaults and the unknown sentinel.
+ */
+describe('a rule cited from a policy document', () => {
+  const CITED: Array<{
+    name: string
+    predicate: Predicate
+    rationale: string
+    contexts: Array<[Record<string, unknown>, number]>
+  }> = [
+    {
+      name: 'cited_contractor',
+      predicate: { all: [{ field: 'agent_role', op: 'equals', value: 'contractor' }] },
+      rationale:
+        'Contractor agents re-ask before acting — policy: "Contractor accounts must not act on production without a human re-confirmation." (https://wiki.acme.dev/access)',
+      contexts: [
+        [{ agent_role: 'contractor' }, 3],
+        [{ agent_role: 'staff' }, 0],
+        [{}, 0],
+      ],
+    },
+    {
+      name: 'cited_budget',
+      predicate: { all: [{ field: 'budget_remaining_usd', op: 'atMost', value: 5 }] },
+      rationale:
+        'Low balance re-asks — policy: "An agent whose remaining budget is under $5 must pause and confirm." (https://wiki.acme.dev/spend)',
+      contexts: [
+        [{ budget_remaining_usd: 4.5 }, 3],
+        [{ budget_remaining_usd: 5 }, 3],
+        [{ budget_remaining_usd: 50 }, 0],
+      ],
+    },
+    {
+      name: 'cited_terraform',
+      predicate: {
+        all: [
+          { field: 'new_tool_calls', op: 'contains', value: 'terraform' },
+          { field: 'harness', op: 'notEquals', value: 'claude-code' },
+          { field: 'graph_spend_usd', op: 'atLeast', value: 10 },
+        ],
+      },
+      // A newline inside the quote: it must survive as the two characters \n
+      // in a single-line comment, never as a line break in the source.
+      rationale:
+        'Terraform outside Claude Code re-asks once the graph has spent — policy: "Infrastructure changes are approved only from the standard agent\nwith a reviewed plan." (https://wiki.acme.dev/change)',
+      contexts: [
+        [{ new_tool_calls: ['terraform'], harness: 'cursor', graph_spend_usd: 12 }, 3],
+        [{ new_tool_calls: ['terraform'], harness: 'claude-code', graph_spend_usd: 12 }, 0],
+        [{ new_tool_calls: ['terraform'], harness: 'cursor' }, 0],
+        [{ tool_sequence: ['terraform'], harness: 'cursor', graph_spend_usd: 12 }, 0],
+      ],
+    },
+  ]
+
+  it.each(CITED)(
+    '$name: the citation survives the header and the TypeScript reading agrees with the binary',
+    async ({ name, predicate, rationale, contexts }) => {
+      const wasm = await build(predicate, 3, name, { title: `policy ${name}`, rationale, candidateId: `rc_${name}` })
+      const src = readFileSync(join(genDir, `${name}.ts`), 'utf8')
+      expect(src).toContain(`// Rationale: ${JSON.stringify(rationale)}`)
+      expect(src.match(/export function evaluate/g)).toHaveLength(1)
+      for (const [ctx, expected] of contexts) {
+        expect(evaluate(wasm, ctx), `binary on ${JSON.stringify(ctx)}`).toBe(expected)
+        expect(evaluatePredicate(predicate, ctx), `evaluatePredicate on ${JSON.stringify(ctx)}`).toBe(expected !== 0)
+      }
+    },
+    120_000,
+  )
 })
