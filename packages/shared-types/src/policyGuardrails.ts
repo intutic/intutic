@@ -12,6 +12,12 @@
 import type { GuardrailIr } from './guardrailIr.js'
 
 export const GUARDRAIL_STATUSES = ['PROPOSED', 'SHADOW', 'ENFORCING', 'REJECTED', 'RETIRED'] as const
+/**
+ * Statuses in which a guardrail's citation is live — the ones conflicts are
+ * reported for and the ones that keep the cited document from being written
+ * back over (LLD #71, Wave 8). A rejected proposal does not freeze a source.
+ */
+export const LIVE_GUARDRAIL_STATUSES = ['PROPOSED', 'SHADOW', 'ENFORCING'] as const
 export type GuardrailStatus = (typeof GUARDRAIL_STATUSES)[number]
 
 export const GUARDRAIL_TARGETS = ['hook_rule', 'sop_front_matter', 'wasm_rule'] as const

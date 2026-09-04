@@ -11,6 +11,7 @@
  * trail — same rule as `intutic findings adjudicate`.
  */
 
+import { readFile } from 'node:fs/promises'
 import { log } from '../lib/logger.js'
 import { NOT_AUTHENTICATED } from '../lib/authMessages.js'
 import { loadCredentials, loadConfig } from '../config/store.js'
@@ -92,7 +93,7 @@ export async function runGuardrailsSourcesList(opts: CommonOpts): Promise<void> 
   }
   log.header('Intutic — Policy Sources')
   if (items.length === 0) {
-    log.info('No policy sources. Add one with `intutic guardrails sources add <notion|confluence|github> --name … --token …`.')
+    log.info(`No policy sources. Add one with \`intutic guardrails sources add <${SOURCE_PROVIDERS.join('|')}> --name … --token …\`.`)
     return
   }
   for (const c of items) {
@@ -106,15 +107,32 @@ export async function runGuardrailsSourcesList(opts: CommonOpts): Promise<void> 
 
 export async function runGuardrailsSourcesAdd(
   provider: string,
-  opts: CommonOpts & { name?: string; token?: string; config?: string },
+  opts: CommonOpts & { name?: string; token?: string; tokenFile?: string; config?: string },
 ): Promise<void> {
   if (!(SOURCE_PROVIDERS as readonly string[]).includes(provider)) {
     log.error(`Provider must be one of ${SOURCE_PROVIDERS.join(', ')}.`)
     process.exit(1)
   }
-  if (!opts.name || !opts.token) {
-    log.error('Both --name and --token are required.')
+  if (!opts.name) {
+    log.error('--name is required.')
     process.exit(1)
+  }
+  if (Boolean(opts.token) === Boolean(opts.tokenFile)) {
+    log.error('Give the credential with exactly one of --token or --token-file (a Google service-account key is a file).')
+    process.exit(1)
+  }
+  let credential = opts.token ?? ''
+  if (opts.tokenFile) {
+    try {
+      credential = (await readFile(opts.tokenFile, 'utf8')).trim()
+    } catch (err) {
+      log.error(`Could not read --token-file: ${errMessage(err)}`)
+      process.exit(1)
+    }
+    if (!credential) {
+      log.error('--token-file is empty.')
+      process.exit(1)
+    }
   }
   let config: Record<string, unknown> = {}
   if (opts.config) {
@@ -132,7 +150,7 @@ export async function runGuardrailsSourcesAdd(
     const res = await client.post<{ connector?: ConnectorRow; connectorId?: string; connector_id?: string }>('/api/v1/connectors', {
       provider,
       name: opts.name,
-      token: opts.token,
+      token: credential,
       config,
     })
     const id = res.connector?.connector_id ?? res.connector?.connectorId ?? res.connectorId ?? res.connector_id ?? '(see dashboard)'
