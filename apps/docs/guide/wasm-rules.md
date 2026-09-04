@@ -391,6 +391,25 @@ The dashboard shows filter execution metrics:
 - **Block count** — How many requests were blocked
 - **Average execution time** — Latency impact per request
 - **Fuel consumption** — CPU fuel used per execution
+
+---
+
+## Rules from policy documents
+
+A rule can also start as a sentence in a policy document. The Policy Guardrails page extracts cited clauses from Notion, Confluence, GitHub and uploaded documents; a clause whose control is a *context condition* — which harness, role or environment may act — becomes a guardrail of target `wasm_rule`: the same closed predicate vocabulary as a mined candidate, always verdict 3 (reask), never a block.
+
+Approving that guardrail for shadow hands it to this pipeline as a rule candidate that carries:
+
+- the **citation** as its evidence — the verbatim quote, the document and the passage hash — shown on the candidate card;
+- `guardrail_id`, which is what the candidate list's *From policy* badge reads;
+- `source_sha256` — the hash of the AssemblyScript the candidate renders to, recorded at hand-off.
+
+From there the candidate takes the same three human steps as a mined one, with two differences:
+
+1. **Mocks come from captured traffic, not denials.** A policy rule has no reason to correlate with anything a person denied, so *Attach mocks* looks for a captured context the predicate fires on and the nearest one it does not. If nothing in history exercises the rule yet, the candidate stays *Proposed* with that reason and can be re-run later; it is not rejected.
+2. **The bundle must be compiled from the source of record.** `intutic policy compile --candidate <id> --upload` fetches `GET /api/v1/rule-candidates/<id>/source`, verifies its hash, compiles it, and uploads the bundle together with that hash. `/bundle` recomputes the hash from the candidate row and refuses a bundle built from anything else. The dashboard's upload control is disabled for these candidates for the same reason.
+
+Promotion is unchanged — at least 200 shadow evaluations, at most 1 % would-block, by a named member — and it moves the originating guardrail to *Enforcing* with the same member on its authority chain. A gate rejection moves it to *Rejected* with the gate's reason. The guardrail row itself is never promoted directly; its Review card says so and points at the candidate.
 <!-- ENTERPRISE_ONLY_END -->
 
 ---

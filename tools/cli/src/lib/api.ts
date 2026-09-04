@@ -45,6 +45,14 @@ export interface ApiClient {
    * answer a caller needs to report, not a failure to unwrap and discard.
    */
   postWithStatus<T>(path: string, body?: unknown): Promise<{ status: number; body: T }>
+  /**
+   * Multipart POST that hands back the status.
+   *
+   * `POST /api/v1/rule-candidates/:id/bundle` reads a `file` field and a
+   * `source_sha256` field; `post()` JSON-encodes, so it cannot carry either.
+   * The content type is left to `fetch`, which writes the boundary.
+   */
+  postForm<T>(path: string, form: FormData): Promise<{ status: number; body: T }>
   /** Generic PUT request for arbitrary API paths. */
   put<T>(path: string, body?: unknown): Promise<T>
   /** Generic PATCH request for arbitrary API paths. */
@@ -138,6 +146,20 @@ export function createApiClient(controlPlaneUrl: string, apiKey: string): ApiCli
         headers,
         body: body ? JSON.stringify(body) : undefined,
       })
+      const text = await res.text()
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(text)
+      } catch {
+        parsed = { error: text }
+      }
+      return { status: res.status, body: unwrapToonEnvelope(parsed) as T }
+    },
+
+    async postForm<T>(path: string, form: FormData): Promise<{ status: number; body: T }> {
+      const headers: Record<string, string> = { Authorization: baseHeaders.Authorization }
+      injectTraceHeaders(headers)
+      const res = await fetch(`${controlPlaneUrl}${path}`, { method: 'POST', headers, body: form })
       const text = await res.text()
       let parsed: unknown
       try {

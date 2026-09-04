@@ -769,6 +769,18 @@ intutic policy compile [options]
 **What it does:**
 Shells out to `npx --no-install asc <src> -o <out> --optimize --exportRuntime`, creating the output directory if needed. With `--debug` it also passes `--debug --sourceMap`. If `asc` is not available, install it with `pnpm add -D assemblyscript assemblyscript-json`.
 
+<!-- ENTERPRISE_ONLY_START -->
+**Compiling a rule candidate:**
+
+| Option | Description |
+|--------|-------------|
+| `--candidate <id>` | Fetch the candidate's source of record from the control plane, verify its hash, write it to `generated/candidates/<id>.ts` and compile it to `build/<id>.wasm` (unless `--out` is given). Cannot be combined with `--src`. |
+| `--upload` | After compiling, upload the bundle to `POST /api/v1/rule-candidates/<id>/bundle` together with the source hash, and print the gate results. Requires `--candidate`. |
+| `--dev` | Use the local control plane (`http://localhost:3001`). |
+
+Run it from a rule project that has `assembly/index.ts` (the SDK layout): the generated source imports the SDK from two directories up. See [Rules from policy documents](/guide/wasm-rules#rules-from-policy-documents).
+<!-- ENTERPRISE_ONLY_END -->
+
 ---
 
 ## `intutic policy install`
