@@ -312,7 +312,7 @@ const guardrailsCmd = program
 
 const guardrailsSourcesCmd = guardrailsCmd
   .command('sources')
-  .description('Policy sources (Notion, Confluence, GitHub) feeding the ledger')
+  .description('Policy sources (Notion, Confluence, GitHub, Google Docs) feeding the ledger')
 
 guardrailsSourcesCmd
   .command('list')
@@ -326,10 +326,11 @@ guardrailsSourcesCmd
 
 guardrailsSourcesCmd
   .command('add <provider>')
-  .description('Connect a policy source; the credential is read from --token, never echoed')
+  .description('Connect a policy source; the credential is read from --token or --token-file, never echoed')
   .requiredOption('--name <name>', 'Display name for the source')
-  .requiredOption('--token <token>', 'Provider credential (integration token or API key)')
-  .option('--config <json>', 'Provider-specific settings as a JSON object')
+  .option('--token <token>', 'Provider credential (integration token or API key)')
+  .option('--token-file <path>', 'Read the credential from a file (a Google service-account key JSON)')
+  .option('--config <json>', 'Provider-specific settings as a JSON object (gdrive: {"folder_id": "…"})')
   .option('--json', 'Output as JSON')
   .option('--dev', 'Use local control plane (http://localhost:3001)')
   .action(async (provider, opts) => {
