@@ -3,6 +3,7 @@ import * as fs from 'node:fs/promises'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import type { ApiClient } from '../lib/api.js'
 
 vi.mock('../config/store.js', () => ({
   loadCredentials: vi.fn(async () => ({ apiKey: 'vk_test', workspaceId: 'ws_test' })),
@@ -10,11 +11,23 @@ vi.mock('../config/store.js', () => ({
 }))
 vi.mock('../config/paths.js', () => ({ resolveControlPlaneUrl: vi.fn(() => 'https://api.test.invalid') }))
 
-const { postWithStatusMock } = vi.hoisted(() => ({ postWithStatusMock: vi.fn() }))
-vi.mock('../lib/api.js', () => ({ createApiClient: () => ({ postWithStatus: postWithStatusMock }) }))
+const { postWithStatusMock, getWithStatusMock, postFormMock } = vi.hoisted(() => ({
+  postWithStatusMock: vi.fn(),
+  getWithStatusMock: vi.fn(),
+  postFormMock: vi.fn(),
+}))
+vi.mock('../lib/api.js', () => ({
+  createApiClient: () => ({ postWithStatus: postWithStatusMock, getWithStatus: getWithStatusMock, postForm: postFormMock }),
+}))
 
 import {
   buildCompileArgs,
+  fetchCandidateSource,
+  uploadCandidateBundle,
+  runPolicyCompile,
+  candidateSourcePath,
+  candidateOutPath,
+  sourceSha256Of,
   installedFileName,
   instantiateAndEvaluate,
   parseRuleFileName,
@@ -405,5 +418,134 @@ describe('runPolicyReplay end to end', () => {
     })
     await replay('wasm_abc')
     expect(exitCode).toBeNull()
+  })
+})
+
+/**
+ * `intutic policy compile --candidate` (LLD #71, Wave 7): the source of
+ * record is fetched, hash-checked and written where its SDK import resolves;
+ * the upload carries the hash the server recomputes. Nothing here reaches
+ * `asc` — every case stops before the compiler or exercises the two helpers
+ * around it.
+ */
+describe('runPolicyCompile --candidate', () => {
+  let exitCode: number | null
+  let project: string
+  let previousCwd: string
+  const SOURCE = '// Candidate: "rc_cited"\nexport function evaluate(o: i32, l: i32): i32 { return 0; }\n'
+  const HASH = sourceSha256Of(SOURCE)
+
+  beforeEach(async () => {
+    exitCode = null
+    getWithStatusMock.mockReset()
+    postFormMock.mockReset()
+    vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      exitCode = code ?? 0
+      throw new Error(`process.exit(${code})`)
+    }) as never)
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    previousCwd = process.cwd()
+    project = await fs.mkdtemp(path.join(os.tmpdir(), 'intutic-rule-project-'))
+    await fs.mkdir(path.join(project, 'assembly'), { recursive: true })
+    await fs.writeFile(path.join(project, 'assembly', 'index.ts'), '// sdk\n')
+    process.chdir(project)
+  })
+
+  afterEach(async () => {
+    process.chdir(previousCwd)
+    await fs.rm(project, { recursive: true, force: true })
+    vi.restoreAllMocks()
+  })
+
+  // vi.fn's inferred signature is narrower than the client method it stands in for.
+  const asClient = (stub: unknown) => stub as Pick<ApiClient, 'getWithStatus' | 'postForm'>
+
+  const compile = async (opts: Parameters<typeof runPolicyCompile>[0]) => {
+    try {
+      await runPolicyCompile(opts)
+    } catch (err) {
+      if (!(err instanceof Error) || !err.message.startsWith('process.exit(')) throw err
+    }
+  }
+
+  it('refuses --src together with --candidate before touching the network', async () => {
+    await compile({ candidate: 'rc_cited', src: 'rules/mine.ts' })
+    expect(exitCode).toBe(1)
+    expect(getWithStatusMock).not.toHaveBeenCalled()
+  })
+
+  it('refuses --upload without --candidate', async () => {
+    await compile({ upload: true })
+    expect(exitCode).toBe(1)
+    expect(getWithStatusMock).not.toHaveBeenCalled()
+  })
+
+  it('refuses to run outside a rule project, where the generated import cannot resolve', async () => {
+    await fs.rm(path.join(project, 'assembly'), { recursive: true, force: true })
+    await compile({ candidate: 'rc_cited' })
+    expect(exitCode).toBe(1)
+    expect(getWithStatusMock).not.toHaveBeenCalled()
+  })
+
+  it('refuses a served source that does not hash to the hash the server states, and writes nothing', async () => {
+    getWithStatusMock.mockResolvedValue({
+      status: 200,
+      body: { candidateId: 'rc_cited', guardrailId: 'pgr_1', status: 'MOCKS_SELECTED', source: SOURCE, sourceSha256: '0'.repeat(64) },
+    })
+    await compile({ candidate: 'rc_cited' })
+    expect(exitCode).toBe(1)
+    await expect(fs.access(candidateSourcePath('rc_cited'))).rejects.toBeTruthy()
+  })
+
+  it('fetchCandidateSource returns the verified source and normalises the hash', async () => {
+    const client = { getWithStatus: vi.fn(async () => ({ status: 200, body: { candidateId: 'rc_cited', guardrailId: 'pgr_1', status: 'PROPOSED', source: SOURCE, sourceSha256: HASH.toUpperCase() } })) }
+    const got = await fetchCandidateSource(asClient(client), 'rc_cited')
+    expect(got.source).toBe(SOURCE)
+    expect(got.sourceSha256).toBe(HASH)
+    expect(client.getWithStatus).toHaveBeenCalledWith('/api/v1/rule-candidates/rc_cited/source')
+    expect(candidateSourcePath('rc_cited')).toBe(path.join('generated', 'candidates', 'rc_cited.ts'))
+    expect(candidateOutPath('rc_cited')).toBe(path.join('build', 'rc_cited.wasm'))
+  })
+
+  it('fetchCandidateSource exits 1 on source_drift and on a missing candidate', async () => {
+    const drift = { getWithStatus: vi.fn(async () => ({ status: 409, body: { error: 'source_drift', detail: 'the candidate changed after it was handed off' } })) }
+    await expect(fetchCandidateSource(asClient(drift), 'rc_cited')).rejects.toThrow('process.exit(1)')
+    expect(exitCode).toBe(1)
+    const missing = { getWithStatus: vi.fn(async () => ({ status: 404, body: { error: 'Candidate not found' } })) }
+    await expect(fetchCandidateSource(asClient(missing), 'rc_gone')).rejects.toThrow('process.exit(1)')
+  })
+
+  it('uploadCandidateBundle sends the bundle and the source hash as multipart and prints the gates', async () => {
+    const wasm = path.join(project, 'build', 'rc_cited.wasm')
+    await fs.mkdir(path.dirname(wasm), { recursive: true })
+    await fs.writeFile(wasm, Buffer.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]))
+    let sent: FormData | null = null
+    const client = {
+      postForm: vi.fn(async (_path: string, form: FormData) => {
+        sent = form
+        return { status: 201, body: { accepted: true, ruleId: 'wasm_1', mode: 'SHADOW', gates: [{ gate: 'compiles_and_links', passed: true, detail: 'ok' }] } }
+      }),
+    }
+    await uploadCandidateBundle(asClient(client), 'rc_cited', wasm, HASH)
+    expect(exitCode).toBeNull()
+    expect(client.postForm).toHaveBeenCalledWith('/api/v1/rule-candidates/rc_cited/bundle', expect.any(FormData))
+    expect(sent!.get('source_sha256')).toBe(HASH)
+    const file = sent!.get('file')
+    expect(file).toBeInstanceOf(Blob)
+    expect((file as Blob).size).toBe(8)
+  })
+
+  it('uploadCandidateBundle exits 1 when the server refuses the source hash or a gate fails', async () => {
+    const wasm = path.join(project, 'build', 'rc_cited.wasm')
+    await fs.mkdir(path.dirname(wasm), { recursive: true })
+    await fs.writeFile(wasm, Buffer.from([0x00]))
+    const mismatch = { postForm: vi.fn(async () => ({ status: 400, body: { error: 'source_mismatch', detail: 'not compiled from the source of record' } })) }
+    await expect(uploadCandidateBundle(asClient(mismatch), 'rc_cited', wasm, HASH)).rejects.toThrow('process.exit(1)')
+    expect(exitCode).toBe(1)
+    exitCode = null
+    const refused = { postForm: vi.fn(async () => ({ status: 200, body: { accepted: false, gates: [{ gate: 'default_allow', passed: false, detail: 'fires on the empty context' }] } })) }
+    await expect(uploadCandidateBundle(asClient(refused), 'rc_cited', wasm, HASH)).rejects.toThrow('process.exit(1)')
+    expect(exitCode).toBe(1)
   })
 })
