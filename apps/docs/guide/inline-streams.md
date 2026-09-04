@@ -29,7 +29,7 @@ The Rust proxy gateway captures and buffers streaming responses from models in a
 
 ## 📋 Markdown Alert Structure
 
-Drained alerts are formatted into standard Markdown blocks containing GitHub-style warning callouts. An alert names the governance event and the guidance to follow; it does not yet link back to the upstream policy page the guideline came from:
+Drained alerts are formatted into standard Markdown blocks containing GitHub-style warning callouts. An alert names the governance event and the guidance to follow; when the rule was derived from a policy document, that guidance carries the cited sentence and the page it came from, the same text the gate printed at the moment of the block:
 
 ```markdown
 --- Intutic Governance ---

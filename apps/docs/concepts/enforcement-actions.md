@@ -79,9 +79,18 @@ most of the time on most workspaces, which is a different guarantee than
 "right." Each one launches in **shadow mode** — it evaluates every call and
 records what it *would* have done, without changing what the agent
 experiences — until its false-positive rate is measured on that workspace's
-own real traffic and clears the [promotion rule](/guide/graph-guardrails).
+own real traffic and clears the [promotion rule](#the-promotion-rule).
 Only then does it graduate onto the enforcement table above (SSL as `KILL`,
 loop detection as today's `REASK`, findings as a promoted `KILL`/`HIJACK`).
+
+**Generated guardrails start on rung 2 and end on rung 1.** A rule the
+[Policy Clause Ledger](/guide/policy-guardrails) derived from a policy
+document had a model in its derivation, so it launches in shadow like any
+other rung-2 check, whatever it renders to. When a named owner or admin
+promotes it, the emitted artifact — a hook-gate rule, a front-matter key, a
+compiled WASM rule — is enforced by the rung-1 machinery above and is
+indistinguishable from one an operator wrote by hand. The citation it
+carries says why it exists; the promotion is what lets it act.
 
 This is a deliberate trade, not a hedge: **we don't let an LLM block your
 engineers until it has proven a low false-positive rate on your traffic.** A
@@ -89,6 +98,25 @@ heuristic that blocked from day one would be indistinguishable, from the
 agent's side, from a broken one — and the cost of that mistake is a blocked
 engineer, not a missed detection. Shadow mode is how rung 2 pays down that
 risk before it can ever cost anyone a turn.
+
+### The promotion rule
+
+A rung-2 check earns enforcement on counted evidence from the workspace's own
+traffic, judged by a person:
+
+- **Generated guardrails** (hook rules and front-matter rules from policy
+  documents): at least 200 shadow evaluations; a would-act rate of at most
+  5 %; and, among the calls it would have acted on, at least min(10, fires)
+  adjudicated as true positives with a false-positive rate of at most 1 % —
+  over the adjudicated fires, never the total. A rule that never fired is
+  promotable only with an explicit acknowledgement, recorded on the event.
+- **Generated WASM rules and rule candidates**: at least 200 shadow
+  evaluations and a would-block rate of at most 1 %, per rule, by an
+  authenticated member.
+- **Detector findings**: adjudicated on the Findings page; the meter counts
+  adjudicated findings, not total findings.
+
+No workspace setting, plan flag or feature flag promotes anything on its own.
 
 ---
 
@@ -133,7 +161,7 @@ The request passes through, but Intutic attaches governance metadata — warning
 
 Most detectors ship on `STEER` or `REASK` rather than `KILL` for exactly this reason: a
 threshold that has never had its false-positive rate measured annotates the trace instead of
-stopping the work. See the [promotion rule](/guide/graph-guardrails).
+stopping the work. See the [promotion rule](#the-promotion-rule).
 
 ---
 
@@ -180,7 +208,7 @@ The request is blocked entirely. The agent receives an error response explaining
 
 Note what is **not** on this list. SSL enforcement runs at the gate but is shadowed — it records
 what it would have done and the call proceeds. Loop detection ships on `REASK`. Both are held
-back by the [promotion rule](/guide/graph-guardrails) until their false-positive rates are
+back by the [promotion rule](#the-promotion-rule) until their false-positive rates are
 measured on real traffic.
 
 **In the proxy verdict mapping:**
