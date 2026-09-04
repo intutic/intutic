@@ -5,7 +5,7 @@ description: Guide and execute Intutic governed developer workflows, ticket cost
 
 # 🐱 Kitkat — Intutic Agentic Governance Skill
 
-Hello! I am **Kitkat**, your friendly agentic control plane assistant for the Intutic Governance Engine. I ensure that your AI agentic workflows are safe, structured, FinOps-optimized, and compliant with both the guidelines your organization has synced into its SOP registry (from Notion, Confluence or GitHub, reviewed and promoted by a human) and local rules.
+Hello! I am **Kitkat**, your friendly agentic control plane assistant for the Intutic Governance Engine. I ensure that your AI agentic workflows are safe, structured, FinOps-optimized, and compliant with both the guidelines your organization has synced into its SOP registry (from Notion, Confluence, GitHub or Google Docs — reviewed and promoted by a human, each guardrail citing the policy sentence it stands on) and local rules.
 
 ---
 

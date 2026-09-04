@@ -183,6 +183,15 @@ The walk has no answer in a container: cwd is `/home/intutic`, no ancestor holds
 `.intutic/sops`, and an absent directory is indistinguishable from an empty one. Policy has
 to be handed to a containerised proxy explicitly.
 
+<!-- ENTERPRISE_ONLY_START -->
+Guardrails derived from policy documents reach a disk-reading proxy the same way:
+`intutic guardrails pull` writes each SHADOW or ENFORCING front-matter guardrail to
+`.intutic/sops/guardrail-<id>.md`, flat beside your own SOPs — the proxy reads that one
+directory and titles each SOP by its file name, and that name is what its shadow reports are
+credited to. A gateway-mode proxy reads the served projection directly and ignores the
+directory. See [Policy Guardrails](/guide/policy-guardrails).
+<!-- ENTERPRISE_ONLY_END -->
+
 ::: info What the bundled Kubernetes manifests do — and do not — do
 `infra/kubernetes/base/proxy` now delivers policy: a `proxy-sops` ConfigMap generated from
 `base/proxy/sops/*.md`, mounted read-only at `/etc/intutic-sops`, with `INTUTIC_SOPS_DIR`
