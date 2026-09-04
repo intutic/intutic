@@ -131,8 +131,8 @@ export type {
   SopProvenanceSource,
 } from './sop.js'
 
-export { SOURCE_PROVIDERS, isSourceProvider } from './sourceProviders.js'
-export type { SourceProvider } from './sourceProviders.js'
+export { SOURCE_PROVIDERS, DOCUMENT_PROVIDERS, PRIVILEGED_SOURCE_PROVIDERS, isSourceProvider, isDocumentProvider } from './sourceProviders.js'
+export type { SourceProvider, DocumentProvider } from './sourceProviders.js'
 
 export {
   ACTION_TOKENS,
@@ -185,6 +185,7 @@ export type { HookRuleCitation, RenderedHookRule, ParsedFrontMatter, GuardrailSo
 
 export {
   GUARDRAIL_STATUSES,
+  LIVE_GUARDRAIL_STATUSES,
   GUARDRAIL_TARGETS,
   GUARDRAIL_EVENT_TYPES,
   isCandidateCitationEvidence,
