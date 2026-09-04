@@ -820,6 +820,423 @@ No options. For each `.wasm` file in the local rules dir (`INTUTIC_WASM_DIR`, de
 
 ---
 
+<!-- ENTERPRISE_ONLY_START -->
+## `intutic guardrails`
+
+The Policy Clause Ledger from the terminal: sources, documents, the review queue, the three decisions that move a cited guardrail, and the file plane. A client of `/api/v1/policy-guardrails/*` and `/api/v1/connectors`; nothing here decides anything the server would not, and the acting identity is never a flag — the server records the authenticated member. Not `intutic policy` (the WASM rule loop) and not `intutic sops` (your own SOP files). See [Policy Guardrails](/guide/policy-guardrails).
+
+---
+
+## `intutic guardrails sources list`
+
+List configured policy sources and their last sync.
+
+```bash
+intutic guardrails sources list
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Lists the workspace's source connectors (Notion, Confluence, GitHub, Google Docs), with auto-sync state, last sync and last error. Memory providers are not policy sources and are not listed.
+
+---
+## `intutic guardrails sources add <provider>`
+
+Connect a policy source; the credential is read from `--token` or `--token-file`, never echoed.
+
+```bash
+intutic guardrails sources add <provider>
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `provider` | One of `notion`, `confluence`, `github`, `gdrive` |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--name <name>` | Display name for the source (required) |
+| `--token <token>` | Provider credential (integration token or API key) |
+| `--token-file <path>` | Read the credential from a file — a Google service-account key JSON |
+| `--config <json>` | Provider-specific settings as a JSON object, e.g. `{"folder_id":"…"}` for Google Docs |
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Creates the connector encrypted at rest. Exactly one of `--token` / `--token-file` is required. A Google Docs source may only be created, rescheduled, synced or removed by a workspace owner or admin; share the Drive folder with the service account's email first.
+
+---
+## `intutic guardrails sources sync <connectorId>`
+
+Pull the source now instead of waiting for the next cron pass.
+
+```bash
+intutic guardrails sources sync <connectorId>
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `connectorId` | The connector to sync |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Runs one sync: changed documents are re-split into passages, citations that no longer hold are marked stale, and changed documents are queued for extraction when the plan carries the budget. A cloud-only provider (Notion, Google Drive) answers 503 in offline mode.
+
+---
+## `intutic guardrails docs list`
+
+List ingested policy documents.
+
+```bash
+intutic guardrails docs list
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+One line per document: provider, title, passage, clause and guardrail counts, and the last extraction run.
+
+---
+## `intutic guardrails docs show <docId>`
+
+Show a document, its passages and the clauses extracted from them.
+
+```bash
+intutic guardrails docs show <docId>
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `docId` | The document id (`psd_…`) |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Prints the document's provenance, every live passage with its hash, and every clause with its check results.
+
+---
+## `intutic guardrails docs extract <docId>`
+
+Propose cited guardrails from a document; every proposal is re-validated deterministically.
+
+```bash
+intutic guardrails docs extract <docId>
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `docId` | The document to extract from |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--no-llm` | Only lift existing SOP front matter; do not call the extraction model |
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+One model call per chunk of passages, under the workspace's daily cap (exit 1 with the cap on 429). A proposal is a verbatim quote plus a clause in the closed grammar; anything else is rejected by name. A valid clause becomes a proposed guardrail that enforces nothing until approved for shadow.
+
+---
+## `intutic guardrails search <token>`
+
+Which passages and guardrails mention a tool or action token.
+
+```bash
+intutic guardrails search <token>
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `token` | A tool name or action token, e.g. `Bash`, `action:deploy` |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Coverage for one token: the passages whose token index carries it and the guardrails whose rule names it, so "do we have a rule about X" has an answer with citations.
+
+---
+## `intutic guardrails list`
+
+List guardrails with their status and shadow evidence.
+
+```bash
+intutic guardrails list
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--status <status>` | `PROPOSED`, `SHADOW`, `ENFORCING`, `REJECTED` or `RETIRED` |
+| `--target <target>` | `hook_rule`, `sop_front_matter` or `wasm_rule` |
+| `--doc <docId>` | Only guardrails cited from this document |
+| `--limit <n>` | Max rows (default 50, capped at 200) |
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+One line per guardrail: id, status, target, the cited quote, and the shadow counters.
+
+---
+## `intutic guardrails show <guardrailId>`
+
+Show a guardrail: cited passage, rendered artifact, validation checks, readiness and history.
+
+```bash
+intutic guardrails show <guardrailId>
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `guardrailId` | The guardrail id (`pgr_…`) |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+For a hook rule, prints the tool and input patterns and the exact stderr line a developer sees on a block; for a front-matter rule, the lines the proxy reads; for a WASM rule, the predicate source. A SHADOW guardrail also prints the server's readiness reasons verbatim.
+
+---
+## `intutic guardrails approve-shadow <guardrailId>`
+
+Ship a proposed guardrail in shadow: it reports, never blocks.
+
+```bash
+intutic guardrails approve-shadow <guardrailId>
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `guardrailId` | The guardrail to approve |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+PROPOSED → SHADOW. A hook rule is distributed at severity `warn`; a front-matter rule is served with `mode: shadow`; a WASM rule is handed to the rule-candidate pipeline and the command prints the candidate id and the compile command. Refused for a stale citation.
+
+---
+## `intutic guardrails promote <guardrailId>`
+
+Promote a shadow guardrail to enforcing once the server says it is ready.
+
+```bash
+intutic guardrails promote <guardrailId>
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `guardrailId` | The guardrail to promote |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--acknowledge-no-traffic` | Promote a rule that no observed traffic exercised |
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+SHADOW → ENFORCING under the [promotion rule](/concepts/enforcement-actions#the-promotion-rule); refused (exit 1, with the reasons) until it holds. A WASM guardrail is promoted through its rule candidate instead, and this command says so.
+
+---
+## `intutic guardrails reject <guardrailId>`
+
+Reject a guardrail; the reason is recorded on its authority chain.
+
+```bash
+intutic guardrails reject <guardrailId>
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `guardrailId` | The guardrail to reject |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--reason <reason>` | Why it is rejected (required) |
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Any live state → REJECTED, with the reason on the event.
+
+---
+## `intutic guardrails retire <guardrailId>`
+
+Retire a shadow or enforcing guardrail; it stops being projected.
+
+```bash
+intutic guardrails retire <guardrailId>
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `guardrailId` | The guardrail to retire |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+SHADOW or ENFORCING → RETIRED. The rule leaves both rule endpoints and the SOP policy on the next poll; a pulled file on disk stays until `intutic guardrails pull --prune` removes it.
+
+---
+## `intutic guardrails reconfirm <guardrailId>`
+
+Confirm a guardrail whose cited passage changed upstream still holds.
+
+```bash
+intutic guardrails reconfirm <guardrailId>
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `guardrailId` | The stale guardrail |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Clears the stale flag only when the quote is still verbatim in a live passage of its document, re-binding the citation there. Otherwise refused: retire the guardrail or re-extract.
+
+---
+## `intutic guardrails replay <guardrailId>`
+
+Run a guardrail over captured calls and report how many it would have fired on.
+
+```bash
+intutic guardrails replay <guardrailId>
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `guardrailId` | The guardrail to replay |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+A preview before anything ships: a hook rule over the enforcement log's captured calls, a front-matter rule over stored context snapshots (`review_before` holds rather than acts and is reported as not replayable), a WASM predicate over the same snapshots.
+
+---
+## `intutic guardrails conflicts`
+
+List guardrails that contradict each other, with both quotes.
+
+```bash
+intutic guardrails conflicts
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Pure arithmetic over the live rules: a denied tool with a call ceiling, an ordering rule against its inverse, two ceilings on one token, a hook rule whose literals another's exclude. Each conflict names both ids and both cited sentences.
+
+---
+## `intutic guardrails pull`
+
+Write the SHADOW and ENFORCING front-matter guardrails to `.intutic/sops/guardrail-<id>.md`, for a proxy that reads SOPs from disk.
+
+```bash
+intutic guardrails pull
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--force` | Overwrite a locally-modified guardrail file instead of refusing it |
+| `--prune` | Remove guardrail files that are no longer served (unmodified ones only) |
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Fetches the workspace SOP policy and writes one flat file per served guardrail, named by the guardrail id — flat because the proxy reads one directory level and titles each SOP by its file name, and that name is what its shadow reports are credited to. The served front matter (the enforcing keys, `mode: shadow`, `source:`, `cite:`) is kept in its single fence and a `content_hash:` marker is added inside it. Refuses to overwrite a file whose recorded hash no longer matches its body unless `--force` is passed; reports a file whose guardrail is no longer served, and removes it only with `--prune` and only when unmodified. A gateway-mode proxy reads the served projection directly and ignores this directory. See [Policy Guardrails](/guide/policy-guardrails).
+
+---
+<!-- ENTERPRISE_ONLY_END -->
+
 ## `intutic doctor`
 
 Diagnose workspace health — proxy, auth, daemon, configs, logs.

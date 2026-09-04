@@ -130,3 +130,32 @@ export function titleFromFileName(fileName: string): string {
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(' ')
 }
+
+/**
+ * Add `intutic sops pull`'s `content_hash:` marker to a file that already
+ * carries its own front matter — a projected guardrail, whose fence holds
+ * the enforcing keys the proxy reads (LLD #71, Wave 9).
+ *
+ * Not `renderSopFile`: that wraps a second fence around the text, and the
+ * proxy reads only the first, so the enforcing keys would become body prose
+ * and the rule would load, be listed, and never fire. The marker goes INSIDE
+ * the existing fence, as the last line before it closes; the hash is over
+ * what `parseSopFile` will read back as `body`, so the dirty check is the
+ * same one `sops pull` runs. A file with no fence gets one holding only the
+ * marker. Unknown keys are inert to the proxy, so enforcement is unchanged.
+ */
+export function withContentHash(raw: string): string {
+  const trimmed = raw.trimStart()
+  const body = parseSopFile(raw).body
+  const hash = createHash('sha256').update(body, 'utf8').digest('hex')
+  if (trimmed.startsWith('---')) {
+    const rest = trimmed.slice(3)
+    const end = rest.indexOf('\n---')
+    if (end !== -1) {
+      const front = rest.slice(0, end).split('\n').filter((l) => !l.trim().startsWith('content_hash:')).join('\n')
+      const after = rest.slice(end)
+      return `---${front}\ncontent_hash: ${hash}${after}`
+    }
+  }
+  return ['---', `content_hash: ${hash}`, '---', '', body, ''].join('\n')
+}

@@ -335,3 +335,21 @@ describe('hook rule rendering', () => {
     expect(renderHookRule(ir, { quote: 'q', sourceUrl: null })).toEqual(renderHookRule(ir, { quote: 'q', sourceUrl: null }))
   })
 })
+
+describe('guardrail SOP titles on the wire and on disk (Wave 9)', async () => {
+  const { guardrailIdFromSopTitle, guardrailFileStem, GUARDRAIL_SOP_TITLE_PREFIX } = await import('../policyGuardrails.js')
+  it('credits the served title form and the pulled file stem, and nothing else', () => {
+    expect(GUARDRAIL_SOP_TITLE_PREFIX).toBe('GUARDRAIL:')
+    expect(guardrailIdFromSopTitle('GUARDRAIL:pgr_abc123 deny_tools: WebFetch')).toBe('pgr_abc123')
+    expect(guardrailIdFromSopTitle('GUARDRAIL:pgr_abc123')).toBe('pgr_abc123')
+    expect(guardrailIdFromSopTitle(guardrailFileStem('pgr_abc123'))).toBe('pgr_abc123')
+    expect(guardrailFileStem('pgr_abc123')).toBe('guardrail-pgr_abc123')
+    expect(guardrailIdFromSopTitle('guardrail-pgr_abc123 extra')).toBeNull()
+    expect(guardrailIdFromSopTitle('Guardrail-pgr_abc123')).toBeNull()
+    expect(guardrailIdFromSopTitle('GUARDRAIL:x')).toBeNull()
+    expect(guardrailIdFromSopTitle('Deploy checklist')).toBeNull()
+  })
+  it('the stem is legal on every platform: no colon, no space', () => {
+    expect(guardrailFileStem('pgr_1')).not.toMatch(/[:\s\\/]/)
+  })
+})

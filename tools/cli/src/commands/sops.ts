@@ -291,7 +291,10 @@ export async function runSopsStatus(opts: { dev?: boolean }): Promise<void> {
 
   let localFiles: string[]
   try {
-    localFiles = (await fs.readdir(sopsDir)).filter((f) => f.endsWith('.md')).sort()
+    // `guardrail-*.md` are written by `intutic guardrails pull` and have no
+    // control-plane SOP to drift against; listing them here would report every
+    // one as push-only.
+    localFiles = (await fs.readdir(sopsDir)).filter((f) => f.endsWith('.md') && !f.startsWith('guardrail-')).sort()
   } catch {
     log.info(`No local SOPs directory at ${sopsDir}.`)
     return

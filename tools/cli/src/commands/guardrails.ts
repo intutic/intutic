@@ -11,8 +11,11 @@
  * trail — same rule as `intutic findings adjudicate`.
  */
 
-import { readFile } from 'node:fs/promises'
+import { readFile, writeFile, mkdir, readdir, unlink } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { join } from 'node:path'
 import { log } from '../lib/logger.js'
+import { parseSopFile, withContentHash } from '../lib/sopFrontMatter.js'
 import { NOT_AUTHENTICATED } from '../lib/authMessages.js'
 import { loadCredentials, loadConfig } from '../config/store.js'
 import { resolveControlPlaneUrl } from '../config/paths.js'
@@ -21,6 +24,8 @@ import {
   SOURCE_PROVIDERS,
   GUARDRAIL_STATUSES,
   GUARDRAIL_TARGETS,
+  guardrailIdFromSopTitle,
+  guardrailFileStem,
   type ExtractDocumentResult,
   type GuardrailConflict,
   type GuardrailDetail,
@@ -467,6 +472,11 @@ async function transition(
   }
   log.success(`${guardrailId}: ${done}`)
   if (res.readiness) printReadiness(res.readiness)
+  if (action === 'approve-shadow' && res.guardrail.target === 'wasm_rule' && res.guardrail.ruleCandidateId) {
+    // A wasm guardrail is enforced by nothing this row projects: it was handed
+    // to the rule-candidate pipeline, and the next step is a compile.
+    log.info(`Handed off to rule candidate ${res.guardrail.ruleCandidateId}. Next: intutic policy compile --candidate ${res.guardrail.ruleCandidateId} --upload`)
+  }
   const last = res.guardrail.events.at(-1)
   if (last) log.dim(`  ${last.event}${last.actorId ? ` by ${last.actorId}` : ''}`)
 }
@@ -542,4 +552,122 @@ export async function runGuardrailsConflicts(opts: CommonOpts): Promise<void> {
     log.dim(`    ${c.b.id}: "${c.b.quote}"`)
   }
   log.info(`${conflicts.length} conflict(s).`)
+}
+
+// ─── The file plane (Wave 9) ─────────────────────────────────────────
+
+interface ServedSop {
+  title: string
+  markdownContent: string
+  scope?: string
+}
+
+const sha256 = (text: string) => createHash('sha256').update(text, 'utf8').digest('hex')
+
+/**
+ * `intutic guardrails pull` — the SHADOW and ENFORCING front-matter
+ * guardrails `GET /api/v1/workspace/sops-policy` serves, written to
+ * `.intutic/sops/guardrail-<id>.md` for a proxy that reads SOPs from disk.
+ *
+ * Flat, not in a subdirectory: the proxy's loader reads one directory level
+ * and titles each SOP by its file stem, and `guardrail-<id>` is a stem the
+ * control plane credits shadow reports to. The served markdown already
+ * carries its own front-matter fence with the enforcing keys and
+ * `mode: shadow`; `withContentHash` puts the pull marker inside that fence
+ * rather than wrapping a second one the proxy would never read.
+ *
+ * Same overwrite rule as `intutic sops pull`: a file whose recorded hash no
+ * longer matches its body was edited by hand and is left alone without
+ * `--force`. A file for a guardrail that is no longer served (retired or
+ * rejected) is reported — a proxy reading the directory still enforces it —
+ * and removed only with `--prune`, and only when it is unmodified.
+ */
+export async function runGuardrailsPull(opts: CommonOpts & { force?: boolean; prune?: boolean }): Promise<void> {
+  const config = loadConfig()
+  const workspaceRoot = config?.workspaceRoot ?? process.cwd()
+  const sopsDir = join(workspaceRoot, '.intutic', 'sops')
+  const say = (level: 'info' | 'warn', message: string) => {
+    if (opts.json) return
+    if (level === 'warn') log.warn(message)
+    else log.info(message)
+  }
+  if (!opts.json) log.header('Intutic — Pull Guardrails')
+
+  const client = await getClient(opts.dev)
+  let served: ServedSop[]
+  try {
+    served = (await client.get<{ sops?: ServedSop[] }>('/api/v1/workspace/sops-policy')).sops ?? []
+  } catch (err) {
+    log.error(`Failed to fetch the workspace SOP policy: ${errMessage(err)}`)
+    process.exit(1)
+  }
+  const guardrails = served
+    .map((entry) => ({ id: guardrailIdFromSopTitle(entry.title), entry }))
+    .filter((x): x is { id: string; entry: ServedSop } => x.id !== null && typeof x.entry.markdownContent === 'string' && x.entry.markdownContent.trim().length > 0)
+
+  await mkdir(sopsDir, { recursive: true })
+  const written: string[] = []
+  const unchanged: string[] = []
+  const skipped: string[] = []
+  const servedStems = new Set<string>()
+  for (const { id, entry } of guardrails) {
+    const stem = guardrailFileStem(id)
+    servedStems.add(stem)
+    const filePath = join(sopsDir, `${stem}.md`)
+    const rendered = withContentHash(`${entry.markdownContent.trim()}\n`)
+    const existing = await readFile(filePath, 'utf-8').catch(() => null)
+    if (existing !== null) {
+      if (existing === rendered) {
+        unchanged.push(stem)
+        continue
+      }
+      if (!opts.force) {
+        const parsedExisting = parseSopFile(existing)
+        const dirty = parsedExisting.contentHash === null || parsedExisting.contentHash !== sha256(parsedExisting.body)
+        if (dirty) {
+          say('warn', `${filePath}: locally modified (or not written by pull) — refusing to overwrite. Use --force to pull anyway.`)
+          skipped.push(stem)
+          continue
+        }
+      }
+    }
+    await writeFile(filePath, rendered, 'utf-8')
+    written.push(stem)
+    say('info', `${filePath} ← ${entry.title}`)
+  }
+
+  // Files this command wrote for guardrails the server no longer serves.
+  const onDisk = (await readdir(sopsDir).catch(() => [] as string[])).filter((f) => /^guardrail-.+\.md$/.test(f))
+  const pruned: string[] = []
+  const stale: string[] = []
+  for (const file of onDisk) {
+    const stem = file.replace(/\.md$/, '')
+    if (servedStems.has(stem)) continue
+    const filePath = join(sopsDir, file)
+    if (!opts.prune) {
+      say('warn', `${filePath}: no longer served (retired or rejected) — a proxy reading this directory still enforces it. Re-run with --prune to remove it.`)
+      stale.push(stem)
+      continue
+    }
+    const existing = await readFile(filePath, 'utf-8').catch(() => null)
+    const parsed = existing !== null ? parseSopFile(existing) : null
+    const clean = parsed !== null && parsed.contentHash !== null && parsed.contentHash === sha256(parsed.body)
+    if (!clean) {
+      say('warn', `${filePath}: no longer served but locally modified — left in place; remove it by hand.`)
+      stale.push(stem)
+      continue
+    }
+    await unlink(filePath)
+    pruned.push(stem)
+    say('info', `${filePath}: removed (no longer served)`)
+  }
+
+  if (opts.json) {
+    emitJson({ sopsDir, written, unchanged, skipped, pruned, stale })
+    return
+  }
+  if (guardrails.length === 0) log.info('No SHADOW or ENFORCING front-matter guardrails are served for this workspace.')
+  log.info(`${written.length} written, ${unchanged.length} unchanged, ${skipped.length} left untouched, ${pruned.length} pruned, ${stale.length} stale — in ${sopsDir}.`)
+  if (skipped.length > 0) log.info('Re-run with --force to overwrite locally-modified guardrail files.')
+  log.dim('A proxy that reads .intutic/sops from disk (standalone, or INTUTIC_SOPS_DIR) enforces these within 30 s. A gateway-mode proxy reads the served projection directly and ignores this directory.')
 }

@@ -159,6 +159,7 @@ sidebarGuide.push({
       { text: 'Off-Pattern Detection (Cloud)', link: '/guide/drift-detection' },
       { text: 'Slash Commands (Cloud)', link: '/guide/slash-commands' },
       { text: 'Stream Alerts (Cloud)', link: '/guide/inline-streams' },
+      { text: 'Policy Guardrails (Cloud)', link: '/guide/policy-guardrails' },
     ] : []),
   ],
 });
