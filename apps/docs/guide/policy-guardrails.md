@@ -122,10 +122,15 @@ guardrail cites it.
   gates drain. A machine whose snapshot had not refreshed yet counts as an
   evaluation that did not fire, which biases the would-act rate down by at
   most one 30-second cycle per machine.
-- **Extraction fidelity is unmeasured until the golden corpus is recorded.**
-  The corpus (22 documents, two adversarial) and the fidelity test ship; the
-  test prints how many goldens exist and asserts nothing about quality until a
-  person records and reviews them.
+- **Extraction fidelity is measured against a recorded golden corpus.** The
+  corpus (22 documents, two adversarial) has goldens recorded against a real
+  model; a golden is a real extraction, never hand-written, and its review
+  status is tracked in the open-core repository's tech-debt record. The
+  fidelity test's always-on half checks the corpus and prints how many goldens
+  exist; its opt-in live half re-extracts every document and holds it to the
+  thresholds (mean F1 at least 0.80, per-document
+  recall at least 0.60, citation verbatim at least 0.95, no clause from a
+  negative). CI never calls a model.
 - **A gateway-mode proxy ignores the disk.** Pulled guardrail files are for a
   proxy that reads `.intutic/sops`; the two planes never merge.
 
