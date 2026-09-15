@@ -8,15 +8,8 @@
 import * as path from 'node:path'
 import * as os from 'node:os'
 import * as fs from 'node:fs/promises'
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-
-vi.mock('../config/store.js', () => ({
-  loadCredentials: vi.fn(async () => ({ apiKey: 'vk_test_key', workspaceId: 'ws_test' })),
-  loadConfig: vi.fn(() => null),
-}))
-vi.mock('../config/paths.js', () => ({
-  resolveControlPlaneUrl: vi.fn(() => 'https://api.test.invalid'),
-}))
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest'
 
 import {
   runGuardrailsList,
@@ -28,7 +21,29 @@ import {
   runGuardrailsSourcesAdd,
   runGuardrailsDocsExtract,
   runGuardrailsSearch,
+  runGuardrailsImpact,
+  runGuardrailsDuplicates,
 } from './guardrails.js'
+
+// Real credential files in a throwaway home, read by the real config store —
+// no module mock. `os.homedir()` reads HOME on every call, so the commands
+// resolve this directory; the only stub is `fetch`.
+const realHome = process.env.HOME
+const realDev = process.env.INTUTIC_DEV
+const home = mkdtempSync(path.join(os.tmpdir(), 'intutic-guardrails-cli-'))
+
+beforeAll(() => {
+  process.env.HOME = home
+  delete process.env.INTUTIC_DEV
+  mkdirSync(path.join(home, '.intutic'), { recursive: true })
+  writeFileSync(path.join(home, '.intutic', 'credentials.json'), JSON.stringify({ apiKey: 'vk_test_key', workspaceId: 'ws_test' }), { mode: 0o600 })
+})
+
+afterAll(() => {
+  process.env.HOME = realHome
+  if (realDev !== undefined) process.env.INTUTIC_DEV = realDev
+  rmSync(home, { recursive: true, force: true })
+})
 
 let fetchMock: ReturnType<typeof vi.fn>
 // spyOn's inferred type narrows to the mocked implementation's signature, which is
@@ -238,5 +253,47 @@ describe('intutic guardrails sources / docs / search', () => {
     expect(u.pathname).toBe('/api/v1/policy-guardrails/coverage')
     expect(u.searchParams.get('token')).toBe('action:deploy')
     expect(printed()).toContain('1 passage(s); 0 guardrail(s)')
+  })
+})
+
+describe('intutic guardrails search --text / impact / duplicates', () => {
+  it('search --text hits the full-text endpoint with the words encoded', async () => {
+    fetchMock.mockResolvedValue(ok({ search: { query: 'production deploy', passages: [{ passageId: 'p', docId: 'd', title: 'Change policy', sourceUrl: null, headingPath: ['Rules'], excerpt: 'Every production deploy…', rank: 0.2 }] } }))
+    await runGuardrailsSearch('production deploy', { text: true })
+    const u = new URL(fetchMock.mock.calls[0]![0] as string)
+    expect(u.pathname).toBe('/api/v1/policy-guardrails/search')
+    expect(u.searchParams.get('q')).toBe('production deploy')
+    expect(printed()).toContain('Every production deploy')
+  })
+
+  it('impact needs exactly one seed, then prints the guardrails it reaches and warns about an enforcing one', async () => {
+    await swallowExit(runGuardrailsImpact({}))
+    await swallowExit(runGuardrailsImpact({ doc: 'psd_1', passage: 'pps_1' }))
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(errors()).toContain('exactly one of --doc')
+
+    fetchMock.mockResolvedValue(ok({ impact: { seed: { docId: 'psd_1', passageId: null }, maxDepth: 5, passages: [{ passageId: 'pps_1', docId: 'psd_1', title: 'Change policy', depth: 0, retired: false, excerpt: 'x' }], clauses: [{ clauseId: 'pcl_1', passageId: 'pps_1', docId: 'psd_1', kind: 'hook_rule', quote: 'q', depth: 0 }], guardrails: [{ guardrailId: 'pgr_1', clauseId: 'pcl_1', status: 'ENFORCING', target: 'hook_rule', sourceStale: false, ruleCandidateId: null, depth: 0 }], truncated: false } }))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await runGuardrailsImpact({ doc: 'psd_1' })
+    const u = new URL(fetchMock.mock.calls[0]![0] as string)
+    expect(u.pathname).toBe('/api/v1/policy-guardrails/impact')
+    expect(u.searchParams.get('docId')).toBe('psd_1')
+    expect(printed()).toContain('pgr_1 [ENFORCING] hook_rule, 0 edge(s) from the change')
+    const warned = [...warn.mock.calls, ...logSpy.mock.calls, ...errSpy.mock.calls].map((c: unknown[]) => String(c[0])).join('\n')
+    expect(warned).toContain('never switches enforcement off')
+  })
+
+  it('duplicates validates --min-jaccard before any request and prints both sides of a pair', async () => {
+    await swallowExit(runGuardrailsDuplicates({ minJaccard: 'high' }))
+    await swallowExit(runGuardrailsDuplicates({ minJaccard: '1.5' }))
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    const side = (id: string, title: string) => ({ passageId: id, docId: `d_${id}`, title, excerpt: `${title} excerpt`, guardrailIds: [] })
+    fetchMock.mockResolvedValue(ok({ duplicates: { minJaccard: 0.85, passagePairs: [{ jaccard: 0.91, intersection: 30, union: 33, nearIdentical: true, a: side('pps_a', 'Handbook'), b: side('pps_b', 'Runbook') }], sameRule: [] } }))
+    await runGuardrailsDuplicates({ minJaccard: '0.85' })
+    expect(new URL(fetchMock.mock.calls[0]![0] as string).searchParams.get('minJaccard')).toBe('0.85')
+    const out = printed()
+    expect(out).toContain('Handbook and Runbook (30 of 33 shingles shared)')
+    expect(out).toContain('pps_b: Runbook excerpt')
   })
 })

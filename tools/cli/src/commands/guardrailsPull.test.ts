@@ -14,20 +14,6 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import { createHash } from 'node:crypto'
 
-vi.mock('../config/store.js', () => ({
-  loadCredentials: vi.fn(async () => ({ apiKey: 'vk_test', workspaceId: 'ws_test' })),
-  loadConfig: vi.fn(() => ({ workspaceRoot: workspaceRootRef.value })),
-}))
-vi.mock('../config/paths.js', () => ({ resolveControlPlaneUrl: vi.fn(() => 'https://api.test.invalid') }))
-
-const { getMock, workspaceRootRef } = vi.hoisted(() => ({
-  getMock: vi.fn(),
-  workspaceRootRef: { value: '' },
-}))
-vi.mock('../lib/api.js', () => ({
-  createApiClient: () => ({ get: getMock }),
-}))
-
 import { renderGuardrailSopFile, splitFrontMatter, parseFrontMatterEnforcing, isEnforceableFrontMatter } from '@intutic/shared-types'
 import { parseSopFile } from '../lib/sopFrontMatter.js'
 import { runGuardrailsPull } from './guardrails.js'
@@ -52,12 +38,24 @@ describe('runGuardrailsPull', () => {
   let sopsDir: string
   let exitCode: number | null
   let logs: string[]
+  let realHome: string | undefined
+  let realDev: string | undefined
+  let fetchMock: ReturnType<typeof vi.fn>
 
   beforeEach(async () => {
     root = await fs.mkdtemp(path.join(os.tmpdir(), 'intutic-guardrails-pull-'))
-    workspaceRootRef.value = root
     sopsDir = path.join(root, '.intutic', 'sops')
-    getMock.mockReset()
+    // The real config store reads these (no module mock): credentials and a
+    // workspace root under a throwaway HOME. The only stub is `fetch`.
+    realHome = process.env.HOME
+    realDev = process.env.INTUTIC_DEV
+    process.env.HOME = root
+    delete process.env.INTUTIC_DEV
+    await fs.mkdir(path.join(root, '.intutic'), { recursive: true })
+    await fs.writeFile(path.join(root, '.intutic', 'credentials.json'), JSON.stringify({ apiKey: 'vk_test', workspaceId: 'ws_test' }), { mode: 0o600 })
+    await fs.writeFile(path.join(root, '.intutic', 'config.json'), JSON.stringify({ workspaceRoot: root }), { mode: 0o600 })
+    fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
     exitCode = null
     logs = []
     vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
@@ -73,10 +71,14 @@ describe('runGuardrailsPull', () => {
 
   afterEach(async () => {
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+    process.env.HOME = realHome
+    if (realDev !== undefined) process.env.INTUTIC_DEV = realDev
     await fs.rm(root, { recursive: true, force: true })
   })
 
-  const serve = (sops: unknown[]) => getMock.mockResolvedValue({ workspaceId: 'ws_test', sops })
+  const serve = (sops: unknown[]) =>
+    fetchMock.mockImplementation(async () => ({ ok: true, status: 200, json: async () => ({ workspaceId: 'ws_test', sops }), text: async () => '' }))
 
   async function pull(opts: { force?: boolean; prune?: boolean; json?: boolean } = {}): Promise<Record<string, string[]> | null> {
     logs = []
@@ -97,7 +99,7 @@ describe('runGuardrailsPull', () => {
     ])
     const out = await pull({ json: true })
     expect(out!.written.sort()).toEqual(['guardrail-pgr_live001', 'guardrail-pgr_shadow1'])
-    expect(getMock).toHaveBeenCalledWith('/api/v1/workspace/sops-policy')
+    expect(new URL(fetchMock.mock.calls[0]![0] as string).pathname).toBe('/api/v1/workspace/sops-policy')
     expect(await fs.readdir(sopsDir)).toEqual(['guardrail-pgr_live001.md', 'guardrail-pgr_shadow1.md'])
 
     const file = await fs.readFile(path.join(sopsDir, 'guardrail-pgr_shadow1.md'), 'utf-8')
@@ -159,7 +161,7 @@ describe('runGuardrailsPull', () => {
   })
 
   it('exits 1 when the policy cannot be fetched, writing nothing', async () => {
-    getMock.mockRejectedValue(new Error('boom'))
+    fetchMock.mockRejectedValue(new Error('boom'))
     await pull()
     expect(exitCode).toBe(1)
     await expect(fs.readdir(sopsDir)).rejects.toBeTruthy()

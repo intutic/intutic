@@ -192,6 +192,10 @@ export {
   GUARDRAIL_TARGETS,
   GUARDRAIL_EVENT_TYPES,
   isCandidateCitationEvidence,
+  LEDGER_OVERLAP_JACCARD,
+  LEDGER_NEAR_IDENTICAL_JACCARD,
+  LEDGER_IMPACT_MAX_DEPTH,
+  LEDGER_EDGE_TYPES,
 } from './policyGuardrails.js'
 export type {
   GuardrailStatus,
@@ -219,6 +223,11 @@ export type {
   ExtractDocumentResult,
   TokenCoverage,
   LedgerGraph,
+  LedgerEdgeType,
+  LedgerImpact,
+  PassageSearchResult,
+  LedgerDuplicateSide,
+  LedgerDuplicates,
   CandidateCitationEvidence,
 } from './policyGuardrails.js'
 
