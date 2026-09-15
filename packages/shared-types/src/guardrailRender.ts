@@ -89,7 +89,16 @@ export function renderArgPattern(contains: readonly string[] = [], notContains: 
   const positive = [...new Set(contains)].sort().map((l) => `(?=[\\s\\S]*${escapeRegexLiteral(l)})`)
   const negative = [...new Set(notContains)].sort().map((l) => `(?![\\s\\S]*${escapeRegexLiteral(l)})`)
   const all = [...positive, ...negative]
-  return all.length === 0 ? undefined : all.join('')
+  if (all.length === 0) return undefined
+  // Every matcher searches (`RegExp.test`, Python `re.search`), trying each
+  // start position. A positive lookahead is position-independent enough — if
+  // the literal is anywhere ahead of position 0 the search succeeds there —
+  // but a negative one is not: at a start position past the excluded
+  // literal it holds, so an unanchored exclusion never excludes. Anchoring
+  // pins every lookahead to the start of the input. Only patterns with an
+  // exclusion carry the anchor, so a required-only pattern renders to the
+  // same bytes it always has.
+  return negative.length > 0 ? `^${all.join('')}` : all.join('')
 }
 
 /**

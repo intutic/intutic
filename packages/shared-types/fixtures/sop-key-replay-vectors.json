@@ -1,5 +1,5 @@
 {
-  "about": "Hand-authored (LLD #71 Wave 5). One vector = one request context and the front-matter keys evaluated over it; `expected` says which keys fire. Consumed by services/control-plane/__tests__/unit/sopKeyReplay.test.ts (the TypeScript replay) and packages/proxy/tests/sop_key_replay_vectors.rs (the proxy's own detectors), so the two cannot disagree about what a key means.",
+  "about": "Hand-authored (LLD #71 Wave 5). One vector = one request context and the front-matter keys evaluated over it; `expected` says which keys fire. Consumed by services/control-plane/__tests__/unit/sopKeyReplay.test.ts (the TypeScript replay) and the `sop_key_replay_vectors` test module in packages/proxy/src/plugins/anomaly/detectors.rs (the proxy's own detectors), so the two cannot disagree about what a key means.",
   "vectors": [
     {
       "name": "deny_tools matches this request's own call, ASCII case-insensitively",

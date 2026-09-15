@@ -385,7 +385,8 @@ guardrailsDocsCmd
 
 guardrailsCmd
   .command('search <token>')
-  .description('Which passages and guardrails mention a tool or action token (e.g. Bash, terraform)')
+  .description('Which passages and guardrails mention a tool or action token (e.g. Bash, terraform); with --text, which passages use these words')
+  .option('--text', 'Full-text search over the words of every live passage instead of an exact token')
   .option('--json', 'Output as JSON')
   .option('--dev', 'Use local control plane (http://localhost:3001)')
   .action(async (token, opts) => {
@@ -487,6 +488,29 @@ guardrailsCmd
   .action(async (opts) => {
     const { runGuardrailsConflicts } = await import('./commands/guardrails.js')
     await runGuardrailsConflicts(opts)
+  })
+
+guardrailsCmd
+  .command('impact')
+  .description('What a change to a document or passage reaches: passages within five computed edges, the clauses citing them, their guardrails')
+  .option('--doc <docId>', 'Start from every live passage of this document')
+  .option('--passage <passageId>', 'Start from one passage')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runGuardrailsImpact } = await import('./commands/guardrails.js')
+    await runGuardrailsImpact(opts)
+  })
+
+guardrailsCmd
+  .command('duplicates')
+  .description('Overlapping passage pairs (with their Jaccard arithmetic) and the same rule cited from more than one passage')
+  .option('--min-jaccard <n>', 'Only pairs at or above this Jaccard (never below the recorded 0.70)')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runGuardrailsDuplicates } = await import('./commands/guardrails.js')
+    await runGuardrailsDuplicates(opts)
   })
 
 guardrailsCmd

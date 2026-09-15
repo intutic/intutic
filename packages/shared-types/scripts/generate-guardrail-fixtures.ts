@@ -92,6 +92,9 @@ const HOOK_VECTORS: HookVector[] = [
       { tool: 'Bash', toolInput: { command: 'kubectl apply --dry-run=client -f deploy.yaml' }, fires: false },
       { tool: 'Bash', toolInput: { command: 'kubectl get pods' }, fires: false },
       { tool: 'Bash', toolInput: { command: 'kubectl apply -f a.yaml', description: 'not a --dry-run' }, fires: false },
+      // The excluded fragment before the required one: an unanchored exclusion
+      // fired here, because a search that starts past `--dry-run` never sees it.
+      { tool: 'Bash', toolInput: { description: 'a --dry-run first', command: 'kubectl apply -f a.yaml' }, fires: false },
     ],
   },
   {
