@@ -14,6 +14,12 @@
  * direction is not checked: the IR deliberately omits the three allowlist keys
  * (`allow_harnesses`, `plan_steps`, `scope_paths`), and says so.
  *
+ * The docs page is held to the same set: the "Three targets" table in
+ * `apps/docs/guide/policy-guardrails.md` must name every IR kind a guardrail
+ * can carry (all but `none`) and every guardrail target, and nothing else in
+ * that shape — a kind added to the IR and not to the page, or a name on the
+ * page the grammar does not have, fails here.
+ *
  * Sibling of `check-rule-dsl-fields.js` and `check-sop-keys.js`.
  */
 const { readFileSync, existsSync } = require('node:fs')
@@ -23,13 +29,15 @@ const ROOT = join(__dirname, '..', '..')
 const IR = join(ROOT, 'packages/shared-types/src/guardrailIr.ts')
 const RENDER = join(ROOT, 'packages/shared-types/src/guardrailRender.ts')
 const SOPS_RS = join(ROOT, 'packages/proxy/src/sops.rs')
+const WIRE = join(ROOT, 'packages/shared-types/src/policyGuardrails.ts')
+const DOCS = join(ROOT, 'apps/docs/guide/policy-guardrails.md')
 
 function fail(msg) {
   console.error(`[FAIL] ${msg}`)
   process.exit(1)
 }
 
-for (const f of [IR, RENDER, SOPS_RS]) {
+for (const f of [IR, RENDER, SOPS_RS, WIRE, DOCS]) {
   if (!existsSync(f)) fail(`${f} is missing — this gate asserted nothing.`)
 }
 
@@ -79,6 +87,32 @@ if (JSON.stringify(other) !== JSON.stringify(expectedOther)) {
   fail(`IR kinds outside front matter are ${JSON.stringify(other)}; this gate knows only ${JSON.stringify(expectedOther)}. A new kind needs its own enforcer and its own line here.`)
 }
 
+// The docs page names exactly the kinds a guardrail can carry and the targets they land on.
+const wireSrc = readFileSync(WIRE, 'utf8')
+const targetsBlock = wireSrc.match(/export const GUARDRAIL_TARGETS = \[([\s\S]*?)\] as const/)
+if (!targetsBlock) fail('could not find `export const GUARDRAIL_TARGETS = [...] as const` in policyGuardrails.ts')
+const targets = [...targetsBlock[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1])
+if (targets.length < 3) fail(`found only ${targets.length} guardrail target(s); expected at least 3.`)
+
+const docsSrc = readFileSync(DOCS, 'utf8')
+const section = docsSrc.match(/## Three targets, three enforcers\n([\s\S]*?)\n## /)
+if (!section) fail('could not find the "## Three targets, three enforcers" section in apps/docs/guide/policy-guardrails.md')
+const tableRows = section[1].split('\n').filter((l) => l.trim().startsWith('|') && !/^\|\s*:?-/.test(l.trim()))
+if (tableRows.length < 4) fail(`the targets table has ${tableRows.length} row(s) including its header; expected at least 4 — the extraction is broken.`)
+const documented = new Set()
+for (const row of tableRows) for (const m of row.matchAll(/`([a-z]+(?:_[a-z]+)+)`/g)) documented.add(m[1])
+const carried = kinds.filter((k) => k !== 'none')
+const expectedOnPage = new Set([...carried, ...targets])
+const undocumented = [...expectedOnPage].filter((k) => !documented.has(k))
+if (undocumented.length > 0) {
+  fail(`apps/docs/guide/policy-guardrails.md's targets table never names: ${undocumented.join(', ')}. Every IR kind a guardrail carries and every target belongs in that table.`)
+}
+const unknownOnPage = [...documented].filter((k) => !expectedOnPage.has(k))
+if (unknownOnPage.length > 0) {
+  fail(`apps/docs/guide/policy-guardrails.md's targets table names ${unknownOnPage.join(', ')}, which is neither an IR kind nor a guardrail target.`)
+}
+
 console.log(
-  `[PASS] all ${frontMatterKinds.length} front-matter IR kinds are parsed by sops.rs and rendered; ${other.length} non-front-matter kind(s) accounted for.`,
+  `[PASS] all ${frontMatterKinds.length} front-matter IR kinds are parsed by sops.rs and rendered; ${other.length} non-front-matter kind(s) accounted for; ` +
+    `the docs targets table names all ${carried.length} carried kind(s) and ${targets.length} target(s) and nothing else.`,
 )

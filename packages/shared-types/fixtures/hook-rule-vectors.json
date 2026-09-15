@@ -189,7 +189,7 @@
       },
       "rendered": {
         "toolPattern": "^Bash$",
-        "argPattern": "(?=[\\s\\S]*kubectl\\ apply)(?![\\s\\S]*\\-\\-dry\\-run)",
+        "argPattern": "^(?=[\\s\\S]*kubectl\\ apply)(?![\\s\\S]*\\-\\-dry\\-run)",
         "reason": "kubectl apply must be a dry run — policy: \"kubectl apply from an agent session must use --dry-run.\" (https://wiki.acme.dev/pages/viewpage.action?pageId=103)"
       },
       "cases": [
@@ -219,6 +219,14 @@
           "toolInput": {
             "command": "kubectl apply -f a.yaml",
             "description": "not a --dry-run"
+          },
+          "fires": false
+        },
+        {
+          "tool": "Bash",
+          "toolInput": {
+            "description": "a --dry-run first",
+            "command": "kubectl apply -f a.yaml"
           },
           "fires": false
         }
