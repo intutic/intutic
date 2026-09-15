@@ -299,6 +299,128 @@ describe('canonicalizeIr', () => {
   })
 })
 
+// ─── Seeded single-token mutations ───────────────────────────────────
+
+/**
+ * One token of a rendered line changed, the way a hand edit or a model's
+ * near miss changes it. Each mutation must be refused by the parser in the
+ * Rust parser's own wording — never read back as a different rule of the
+ * same kind. The list keys (`deny_tools`, `review_before`) have no parser
+ * refusal; a shell command in their place is refused by the IR instead.
+ */
+const MUTATIONS: Record<FrontMatterIr['kind'], Array<{ name: string; apply: (line: string) => string | null; refusal: RegExp | 'ir' }>> = {
+  requires_before: [
+    { name: 'broken arrow', apply: (l) => (l.includes(' -> ') ? l.replace(' -> ', ' - > ') : null), refusal: /expected `A -> B`/ },
+    { name: 'command for a token', apply: (l) => l.replace(/-> \S+$/, '-> git push origin'), refusal: /looks like a shell command/ },
+  ],
+  forbid_after: [
+    { name: 'broken arrow', apply: (l) => (l.includes(' -> ') ? l.replace(' -> ', ' - > ') : null), refusal: /expected `A -> B`/ },
+    { name: 'command for a token', apply: (l) => l.replace(/-> \S+$/, '-> git push origin'), refusal: /looks like a shell command/ },
+  ],
+  max_calls: [
+    { name: 'word for a number', apply: (l) => l.replace(/<= \d+$/, '<= many'), refusal: /is not a whole number/ },
+    { name: 'reversed operator', apply: (l) => l.replace('<=', '=<'), refusal: /expected `A <= N`/ },
+  ],
+  forbid_with: [
+    { name: 'unknown taint', apply: (l) => l.replace(/(secrets|pii)\(\)/, 'creds()'), refusal: /must be `secrets\(\)` or `pii\(\)`/ },
+    { name: 'two tokens', apply: (l) => l.replace(/, \S+$/, ', two tokens'), refusal: /not a single tool or action token/ },
+  ],
+  deny_tools: [{ name: 'command for a tool', apply: (l) => l.replace(/: \S+/, ': rm -rf'), refusal: 'ir' }],
+  review_before: [{ name: 'command for a token', apply: (l) => l.replace(/: \S+/, ': git push origin'), refusal: 'ir' }],
+}
+
+describe('front matter: seeded single-token mutations are refused, never re-read as another rule', () => {
+  it('holds over the same 2,000 seeded renders, one mutation each, every mutation kind exercised', () => {
+    const exercised = new Map<string, number>()
+    for (let seed = 1; seed <= 2000; seed++) {
+      const next = rng(seed * 104729)
+      const ir = genFrontMatterIr(next, new Set())
+      const lines = renderFrontMatterLines([ir])
+      const keyLine = lines.split('\n').find((l) => l.startsWith(`${ir.kind}:`))!
+      const choices = MUTATIONS[ir.kind]
+      const mutation = choices[seed % choices.length]!
+      const mutatedLine = mutation.apply(keyLine)
+      if (mutatedLine === null || mutatedLine === keyLine) continue
+      const mutated = lines.replace(keyLine, mutatedLine)
+      try {
+        const parsed = parseFrontMatterEnforcing(mutated)
+        if (mutation.refusal === 'ir') {
+          const irs = frontMatterToIrs(parsed).filter((x) => x.kind === ir.kind)
+          expect(irs.length).toBeGreaterThan(0)
+          expect(irs.every((x) => !validateGuardrailIr(x).ok)).toBe(true)
+        } else {
+          expect(parsed.errors.length).toBeGreaterThan(0)
+          expect(parsed.errors[0]).toMatch(mutation.refusal)
+          expect(frontMatterToIrs(parsed).some((x) => x.kind === ir.kind), 'the mutated rule was read back as a rule').toBe(false)
+        }
+      } catch (err) {
+        throw new Error(`seed ${seed}, ${ir.kind} / ${mutation.name}: ${err instanceof Error ? err.message : String(err)}\nline: ${mutatedLine}`, { cause: err })
+      }
+      exercised.set(`${ir.kind}/${mutation.name}`, (exercised.get(`${ir.kind}/${mutation.name}`) ?? 0) + 1)
+    }
+    const expected = Object.entries(MUTATIONS).flatMap(([kind, ms]) => ms.map((m) => `${kind}/${m.name}`))
+    expect([...exercised.keys()].sort(), 'a mutation kind the sweep never reached asserts nothing').toEqual(expected.sort())
+    for (const [name, n] of exercised) expect(n, name).toBeGreaterThan(20)
+  })
+})
+
+// ─── Seeded hook rules ────────────────────────────────────────────────
+
+/** Literals with every regex metacharacter a policy sentence plausibly holds; none is a substring of the JSON scaffolding. */
+const LITERALS = ['terraform apply', 'rm -rf /', 'a.b*c', '(x|y)', '[prod]', 'price $5', 'café', '?query=1', '^start', 'end$', '{braces}', 'kubectl apply', '@sha256:', 'image:latest', '--force', 'DROP TABLE', 'x+y', 'why?']
+
+function genHookRuleIr(next: () => number): HookRuleIr {
+  const toolCount = 1 + Math.floor(next() * MAX_HOOK_TOOLS)
+  const tools = [...new Set(Array.from({ length: toolCount }, () => pick(next, TOKENS.filter((t) => !t.startsWith('action:')))))]
+  const pool = [...LITERALS]
+  const take = (n: number) => Array.from({ length: n }, () => pool.splice(Math.floor(next() * pool.length), 1)[0]!)
+  const argContains = take(Math.floor(next() * 5))
+  const argNotContains = take(Math.floor(next() * 3))
+  return {
+    kind: 'hook_rule',
+    title: `Seeded rule ${Math.floor(next() * 1e6)}`,
+    tools,
+    ...(argContains.length > 0 ? { argContains } : {}),
+    ...(argNotContains.length > 0 ? { argNotContains } : {}),
+  }
+}
+
+describe('hook rules: 2,000 seeded renders compile in JS and fire exactly on what they name', () => {
+  it('the tool pattern matches each named tool and nothing longer; the argument pattern requires every fragment and excludes every excluded one', () => {
+    let rendered = 0
+    for (let seed = 1; seed <= 2000; seed++) {
+      const next = rng(seed * 7919)
+      const ir = genHookRuleIr(next)
+      try {
+        expect(validateGuardrailIr(ir).ok).toBe(true)
+        const r = renderHookRule(ir, { quote: 'Engineers must never run this without a reviewed plan.', sourceUrl: null })
+        expect(renderHookRule(ir, { quote: 'Engineers must never run this without a reviewed plan.', sourceUrl: null })).toEqual(r)
+        const tool = new RegExp(r.toolPattern)
+        for (const t of ir.tools) {
+          expect(tool.test(t), t).toBe(true)
+          expect(tool.test(`${t}x`), `${t}x`).toBe(false)
+        }
+        const contains = ir.argContains ?? []
+        const excluded = ir.argNotContains ?? []
+        if (contains.length === 0 && excluded.length === 0) {
+          expect(r.argPattern).toBeUndefined()
+          rendered++
+          continue
+        }
+        const arg = new RegExp(r.argPattern!)
+        const input = (parts: string[]) => JSON.stringify({ command: ['zz', ...parts].join(' ') })
+        expect(arg.test(input(contains)), 'every fragment present, none excluded').toBe(true)
+        for (const ex of excluded) expect(arg.test(input([...contains, ex])), `excluded ${ex}`).toBe(false)
+        for (const c of contains) expect(arg.test(input(contains.filter((x) => x !== c))), `missing ${c}`).toBe(false)
+        rendered++
+      } catch (err) {
+        throw new Error(`seed ${seed}: ${err instanceof Error ? err.message : String(err)}\nIR: ${JSON.stringify(ir)}`, { cause: err })
+      }
+    }
+    expect(rendered).toBe(2000)
+  })
+})
+
 // ─── Hook rules ───────────────────────────────────────────────────────
 
 describe('hook rule rendering', () => {
@@ -312,7 +434,10 @@ describe('hook rule rendering', () => {
   it('renders literals as lookaheads both engines read the same way', () => {
     expect(escapeRegexLiteral('kubectl apply --auto-approve')).toBe('kubectl\\ apply\\ \\-\\-auto\\-approve')
     expect(escapeRegexLiteral('image:latest')).toBe('image\\:latest')
-    expect(renderArgPattern(['terraform apply'], ['-plan'])).toBe('(?=[\\s\\S]*terraform\\ apply)(?![\\s\\S]*\\-plan)')
+    // An exclusion anchors the whole pattern; a required-only pattern keeps its bytes.
+    expect(renderArgPattern(['terraform apply'], ['-plan'])).toBe('^(?=[\\s\\S]*terraform\\ apply)(?![\\s\\S]*\\-plan)')
+    expect(renderArgPattern(['terraform apply'])).toBe('(?=[\\s\\S]*terraform\\ apply)')
+    expect(new RegExp(renderArgPattern(['kubectl apply'], ['--dry-run'])!).test(JSON.stringify({ description: 'a --dry-run first', command: 'kubectl apply' }))).toBe(false)
     expect(renderArgPattern([], [])).toBeUndefined()
   })
 

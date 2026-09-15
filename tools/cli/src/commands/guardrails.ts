@@ -35,6 +35,9 @@ import {
   type PolicyDocumentDetail,
   type PolicyDocumentSummary,
   type TokenCoverage,
+  type LedgerImpact,
+  type LedgerDuplicates,
+  type PassageSearchResult,
 } from '@intutic/shared-types'
 
 const BASE = '/api/v1/policy-guardrails'
@@ -297,7 +300,8 @@ export async function runGuardrailsDocsExtract(docId: string, opts: CommonOpts &
 
 // ─── search ─────────────────────────────────────────────────────────
 
-export async function runGuardrailsSearch(token: string, opts: CommonOpts): Promise<void> {
+export async function runGuardrailsSearch(token: string, opts: CommonOpts & { text?: boolean }): Promise<void> {
+  if (opts.text) return runPassageTextSearch(token, opts)
   if (!token.trim()) {
     log.error('A tool name or action token is required, e.g. `intutic guardrails search bash`.')
     process.exit(1)
@@ -324,6 +328,106 @@ export async function runGuardrailsSearch(token: string, opts: CommonOpts): Prom
   }
   log.info(`${coverage.passages.length} passage(s); ${coverage.guardrails.length} guardrail(s) stand on them.`)
   for (const g of coverage.guardrails) log.dim(`  ${g.guardrailId} [${g.status}] ${g.target} — "${g.quote}"`)
+}
+
+/** `search --text`: the words of every live passage, stemmed, best match first. */
+async function runPassageTextSearch(query: string, opts: CommonOpts): Promise<void> {
+  if (!query.trim()) {
+    log.error('Words to search for are required, e.g. `intutic guardrails search --text "production deploy"`.')
+    process.exit(1)
+  }
+  const client = await getClient(opts.dev)
+  let result: PassageSearchResult
+  try {
+    result = (await client.get<{ search: PassageSearchResult }>(`${BASE}/search?q=${enc(query.trim())}`)).search
+  } catch (err) {
+    log.error(`Search failed: ${errMessage(err)}`)
+    process.exit(1)
+  }
+  if (opts.json) {
+    emitJson(result)
+    return
+  }
+  log.header(`Intutic — Passages about "${result.query}"`)
+  if (result.passages.length === 0) {
+    log.info('No live passage matches those words.')
+    return
+  }
+  for (const p of result.passages) {
+    log.field(p.title, `${p.headingPath.join(' › ') || '(no heading)'} — ${p.excerpt}`)
+  }
+  log.info(`${result.passages.length} passage(s), best match first.`)
+}
+
+// ─── impact / duplicates ────────────────────────────────────────────
+
+export async function runGuardrailsImpact(opts: CommonOpts & { doc?: string; passage?: string }): Promise<void> {
+  if (!opts.doc === !opts.passage) {
+    log.error('Name exactly one of --doc <docId> or --passage <passageId>.')
+    process.exit(1)
+  }
+  const client = await getClient(opts.dev)
+  const seed = opts.doc ? `docId=${enc(opts.doc)}` : `passageId=${enc(opts.passage!)}`
+  let impact: LedgerImpact
+  try {
+    impact = (await client.get<{ impact: LedgerImpact }>(`${BASE}/impact?${seed}`)).impact
+  } catch (err) {
+    log.error(`Impact failed: ${errMessage(err)}`)
+    process.exit(1)
+  }
+  if (opts.json) {
+    emitJson(impact)
+    return
+  }
+  log.header(`Intutic — What a change to ${opts.doc ?? opts.passage} reaches`)
+  log.field('Passages', `${impact.passages.length} within ${impact.maxDepth} computed edge(s)${impact.truncated ? ' (capped)' : ''}`)
+  log.field('Clauses citing them', String(impact.clauses.length))
+  log.field('Guardrails', String(impact.guardrails.length))
+  for (const g of impact.guardrails) {
+    log.dim(`  ${g.guardrailId} [${g.status}${g.sourceStale ? ', stale' : ''}] ${g.target}, ${g.depth} edge(s) from the change`)
+  }
+  if (impact.guardrails.some((g) => g.status === 'ENFORCING')) {
+    log.warn('An enforcing guardrail stands on this text. An upstream edit marks it stale for review; it never switches enforcement off.')
+  }
+}
+
+export async function runGuardrailsDuplicates(opts: CommonOpts & { minJaccard?: string }): Promise<void> {
+  let query = ''
+  if (opts.minJaccard !== undefined) {
+    const n = Number(opts.minJaccard)
+    if (opts.minJaccard.trim() === '' || !Number.isFinite(n) || n < 0 || n > 1) {
+      log.error('--min-jaccard must be a number between 0 and 1.')
+      process.exit(1)
+    }
+    query = `?minJaccard=${n}`
+  }
+  const client = await getClient(opts.dev)
+  let d: LedgerDuplicates
+  try {
+    d = (await client.get<{ duplicates: LedgerDuplicates }>(`${BASE}/duplicates${query}`)).duplicates
+  } catch (err) {
+    log.error(`Failed to list duplicates: ${errMessage(err)}`)
+    process.exit(1)
+  }
+  if (opts.json) {
+    emitJson(d)
+    return
+  }
+  log.header('Intutic — Duplicate passages and repeated rules')
+  if (d.passagePairs.length === 0 && d.sameRule.length === 0) {
+    log.info(`No passages overlap at Jaccard ${d.minJaccard.toFixed(2)} or above, and no rule is cited twice.`)
+    return
+  }
+  for (const pp of d.passagePairs) {
+    log.field(`Jaccard ${pp.jaccard.toFixed(2)}${pp.nearIdentical ? ', near-identical' : ''}`, `${pp.a.title} and ${pp.b.title} (${pp.intersection} of ${pp.union} shingles shared)`)
+    log.dim(`    ${pp.a.passageId}: ${pp.a.excerpt}`)
+    log.dim(`    ${pp.b.passageId}: ${pp.b.excerpt}`)
+  }
+  for (const r of d.sameRule) {
+    log.field(`The same ${r.kind} rule`, `cited ${r.clauses.length} times`)
+    for (const c of r.clauses) log.dim(`    ${c.clauseId} in ${c.title}${c.guardrailId ? ` (${c.guardrailId}, ${c.guardrailStatus})` : ''}: "${c.quote}"`)
+  }
+  log.info(`${d.passagePairs.length} overlapping pair(s); ${d.sameRule.length} repeated rule(s).`)
 }
 
 // ─── guardrails ─────────────────────────────────────────────────────

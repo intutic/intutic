@@ -265,12 +265,82 @@ export interface TokenCoverage {
   guardrails: Array<{ guardrailId: string; clauseId: string; passageId: string | null; status: string; target: string; quote: string }>
 }
 
+/**
+ * The ledger's two Jaccard lines (LLD #71): passages at or above the overlap
+ * line are recorded as OVERLAPS edges, and a retired passage's successor must
+ * clear the near-identical line to be recorded as SUPERSEDES. One definition
+ * for the ingest that writes the edges and the duplicates query that reads
+ * them.
+ */
+export const LEDGER_OVERLAP_JACCARD = 0.7
+export const LEDGER_NEAR_IDENTICAL_JACCARD = 0.85
+
+/** How far the impact walk follows computed passage edges from its seed. */
+export const LEDGER_IMPACT_MAX_DEPTH = 5
+
+/**
+ * Every edge the ledger names. The first six are foreign keys or hash
+ * equalities; OVERLAPS and SUPERSEDES are computed rows that carry their
+ * Jaccard arithmetic as `evidence`.
+ *
+ * - CONTAINS       document → passage (document → clause when the cited passage row is gone)
+ * - SUPPORTS       passage → clause that quotes it
+ * - COMPILES_TO    clause → guardrail
+ * - EMITS          guardrail → finding its shadow fires or blocks filed
+ * - ADJUDICATED_BY finding → member who marked it true or false positive
+ * - APPROVED_BY    guardrail → member who moved it (the event is the evidence)
+ */
+export const LEDGER_EDGE_TYPES = ['CONTAINS', 'SUPPORTS', 'COMPILES_TO', 'EMITS', 'ADJUDICATED_BY', 'APPROVED_BY', 'OVERLAPS', 'SUPERSEDES'] as const
+export type LedgerEdgeType = (typeof LEDGER_EDGE_TYPES)[number]
+
 export interface LedgerGraph {
   documents: Array<{ docId: string; title: string; provider: string; sourceUrl: string | null; status: string; passageCount: number; clauseCount: number }>
+  /** The passages a clause cites or a computed edge touches — not every passage; a document's full count is on its node. */
+  passages: Array<{ passageId: string; docId: string; ordinal: number; headingPath: string[]; excerpt: string; retired: boolean }>
   clauses: Array<{ clauseId: string; docId: string; passageId: string | null; kind: string; status: string; extractor: string; quote: string }>
   guardrails: Array<{ guardrailId: string; clauseId: string; status: string; target: string }>
-  edges: Array<{ from: string; to: string; type: 'CONTAINS' | 'COMPILES_TO' | 'OVERLAPS' | 'SUPERSEDES'; evidence?: unknown }>
+  /** Findings filed as `guardrail:<pgr>`, newest first. */
+  findings: Array<{ findingId: string; guardrailId: string; outcome: string | null; shadowed: boolean; at: string }>
+  /** Members who moved a guardrail or adjudicated one of its findings. */
+  members: Array<{ memberId: string; displayName: string | null }>
+  edges: Array<{ from: string; to: string; type: LedgerEdgeType; evidence?: unknown }>
   truncated: boolean
+}
+
+/** What a change to a document or passage reaches: passages within `maxDepth` computed edges, the clauses citing them, their guardrails. */
+export interface LedgerImpact {
+  seed: { docId: string | null; passageId: string | null }
+  maxDepth: number
+  passages: Array<{ passageId: string; docId: string; title: string; depth: number; retired: boolean; excerpt: string }>
+  clauses: Array<{ clauseId: string; passageId: string; docId: string; kind: string; quote: string; depth: number }>
+  guardrails: Array<{ guardrailId: string; clauseId: string; status: string; target: string; sourceStale: boolean; ruleCandidateId: string | null; depth: number }>
+  truncated: boolean
+}
+
+/** Full-text search over live passages (Postgres `websearch_to_tsquery`, English configuration). */
+export interface PassageSearchResult {
+  query: string
+  passages: Array<{ passageId: string; docId: string; title: string; sourceUrl: string | null; headingPath: string[]; excerpt: string; rank: number }>
+}
+
+export interface LedgerDuplicateSide {
+  passageId: string
+  docId: string
+  title: string
+  excerpt: string
+  guardrailIds: string[]
+}
+
+export interface LedgerDuplicates {
+  minJaccard: number
+  /** OVERLAPS edges between live passages at or above `minJaccard`, strongest first. */
+  passagePairs: Array<{ jaccard: number; intersection: number; union: number; nearIdentical: boolean; a: LedgerDuplicateSide; b: LedgerDuplicateSide }>
+  /** The same canonical rule cited from more than one passage. */
+  sameRule: Array<{
+    irCanonical: string
+    kind: string
+    clauses: Array<{ clauseId: string; docId: string; title: string; quote: string; guardrailId: string | null; guardrailStatus: string | null }>
+  }>
 }
 
 /** A candidate's evidence entry that carries a citation (policy-derived WASM candidates, Wave 7). */

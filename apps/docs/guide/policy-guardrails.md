@@ -39,7 +39,7 @@ will see on stderr when it blocks.
 | :--- | :--- | :--- | :--- |
 | "never run *this* with *that* in the arguments" | `hook_rule` | the PreToolUse gate scripts in every connected harness, offline | the daemon's policy snapshot, refreshed every 30 s |
 | ordering, counts, denied tools, taint: `requires_before`, `forbid_after`, `max_calls`, `forbid_with`, `deny_tools`, `review_before` | `sop_front_matter` | the proxy's SOP detectors | the workspace SOP policy a gateway-mode proxy fetches; `intutic guardrails pull` for a proxy that reads SOPs from disk |
-| a context condition — which harness, role or environment may act | `wasm_rule` | a compiled WASM rule in the proxy | the rule-candidate pipeline: compiled from its source of record, gated, shadowed, promoted |
+| a context condition — which harness, role or environment may act, as a `wasm_predicate` clause | `wasm_rule` | a compiled WASM rule in the proxy | the rule-candidate pipeline: compiled from its source of record, gated, shadowed, promoted |
 
 Hook rules are rendered from literal tool names and up to four literal
 argument fragments — the tool pattern is anchored, the argument pattern is a
@@ -131,14 +131,21 @@ guardrail cites it.
   thresholds (mean F1 at least 0.80, per-document
   recall at least 0.60, citation verbatim at least 0.95, no clause from a
   negative). CI never calls a model.
+- **A promotion reaches machines on their own clocks.** The daemon re-reads
+  the rule set every 30 seconds; an MCP proxy polls every 60 seconds behind a
+  five-minute cache that a transition clears. No push exists.
 - **A gateway-mode proxy ignores the disk.** Pulled guardrail files are for a
   proxy that reads `.intutic/sops`; the two planes never merge.
 
 ## From the terminal
 
 `intutic guardrails` is the same ledger without the page: `sources list|add|sync`,
-`docs list|show|extract`, `search <token>`, `list`, `show`, `approve-shadow`,
-`promote`, `reject`, `retire`, `reconfirm`, `replay`, `conflicts`, and `pull`.
+`docs list|show|extract`, `search <token>` (exact tool or action token) and
+`search --text <words>` (full-text, stemmed, best match first), `impact --doc
+<id>` or `--passage <id>` (what a change reaches, at most five computed edges
+out), `duplicates` (overlapping passages with their Jaccard arithmetic, and the
+same rule cited twice), `list`, `show`, `approve-shadow`, `promote`, `reject`,
+`retire`, `reconfirm`, `replay`, `conflicts`, and `pull`.
 See the [CLI reference](/reference/cli).
 
 ## Related
