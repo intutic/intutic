@@ -865,7 +865,7 @@ routing
 
 const daemon = program
   .command('daemon')
-  .description('Manage the Intutic sync-daemon system service (LaunchAgent / systemd)')
+  .description('Manage the Intutic sync-daemon, MCP daemon and standalone proxy system services (LaunchAgent / systemd)')
 
 daemon
   .command('install')
@@ -875,17 +875,44 @@ daemon
     '  macOS: ~/Library/LaunchAgents/ai.intutic.sync-daemon.plist (KeepAlive: true)\n' +
     '  Linux: ~/.config/systemd/user/intutic-sync-daemon.service (Restart=always)\n' +
     '\n' +
+    '  --proxy installs the standalone intutic-proxy binary instead (no workspace or key needed):\n' +
+    '  macOS: ~/Library/LaunchAgents/ai.intutic.proxy.plist\n' +
+    '  Linux: ~/.config/systemd/user/intutic-proxy.service\n' +
+    '\n' +
     '  NOTE: To stop the daemon you MUST use \'intutic daemon uninstall\' or \'launchctl unload\'.\n' +
     '  \'intutic disconnect\' alone will NOT stop a daemon-installed service. (TD-154)'
   )
-  .requiredOption('--workspace-id <id>', 'Workspace ID (e.g. wk_xxxx)')
-  .requiredOption('--api-key <key>', 'Workspace API key (e.g. vk_xxxx)')
+  .option('--workspace-id <id>', 'Workspace ID (e.g. wk_xxxx) — required unless --proxy')
+  .option('--api-key <key>', 'Workspace API key (e.g. vk_xxxx) — required unless --proxy')
   .option('--control-plane-url <url>', 'Control plane URL', 'https://api.intutic.ai')
-  .option('--binary-path <path>', 'Path to intutic CLI binary (defaults to current process)')
+  .option('--binary-path <path>', 'Path to intutic CLI binary (defaults to current process); with --proxy, absolute path to intutic-proxy')
   .option('--dry-run', 'Print what would be done without writing files')
   .option('--system', 'Install as a system-level service (LaunchDaemon on macOS, systemd system unit on Linux)')
   .option('--mcp', 'Install the MCP proxy daemon instead of the sync-daemon')
-  .action(async (opts) => {
+  .option('--proxy', 'Install the standalone intutic-proxy binary as a service (TD-465)')
+  .option('--port <port>', 'With --proxy: proxy listen port', '4000')
+  .option('--valkey-url <url>', 'With --proxy: Valkey URL to attach to; omit to run standalone (INTUTIC_STANDALONE=1)')
+  .option('--upstream-url <url>', 'With --proxy: upstream LLM provider base URL')
+  .action(async (opts, cmd) => {
+    if (opts.proxy) {
+      // The standalone proxy has no control plane, so no workspace or key.
+      // Its unit carries the same environment `intutic start` sets, fixed at
+      // install time rather than probed at launch (TD-465).
+      const { installProxyService } = await import('./commands/install-daemon.js')
+      await installProxyService({
+        port:        opts.port,
+        valkeyUrl:   opts.valkeyUrl,
+        upstreamUrl: opts.upstreamUrl,
+        binaryPath:  opts.binaryPath,
+        dryRun:      opts.dryRun,
+        system:      opts.system,
+      })
+      return
+    }
+    // Required for the two daemons; commander's `requiredOption` cannot express
+    // "unless --proxy", so the check lives here with the same wording.
+    if (!opts.workspaceId) cmd.error("error: required option '--workspace-id <id>' not specified")
+    if (!opts.apiKey) cmd.error("error: required option '--api-key <key>' not specified")
     // `installMcpDaemon` and `buildMcpPlist` were written, tested and exported,
     // and then nothing called them: every route into install-daemon.ts landed
     // on `installDaemon`, so the MCP proxy daemon could not be installed by any
@@ -909,9 +936,10 @@ daemon
   .option('--dry-run', 'Print what would be done without writing files')
   .option('--system', 'Uninstall the system-level service')
   .option('--mcp', 'Uninstall the MCP proxy daemon instead of the sync-daemon')
+  .option('--proxy', 'Uninstall the standalone intutic-proxy service instead of the sync-daemon')
   .action(async (opts) => {
-    const { uninstallDaemon, uninstallMcpDaemon } = await import('./commands/install-daemon.js')
-    const uninstall = opts.mcp ? uninstallMcpDaemon : uninstallDaemon
+    const { uninstallDaemon, uninstallMcpDaemon, uninstallProxyService } = await import('./commands/install-daemon.js')
+    const uninstall = opts.proxy ? uninstallProxyService : opts.mcp ? uninstallMcpDaemon : uninstallDaemon
     await uninstall({ dryRun: opts.dryRun, system: opts.system })
   })
 
@@ -967,9 +995,10 @@ program
   .option('--dry-run', 'Print what would be done without writing files')
   .option('--system', 'Uninstall the system-level service')
   .option('--mcp', 'Uninstall the MCP proxy daemon instead of the sync-daemon')
+  .option('--proxy', 'Uninstall the standalone intutic-proxy service instead of the sync-daemon')
   .action(async (opts) => {
-    const { uninstallDaemon, uninstallMcpDaemon } = await import('./commands/install-daemon.js')
-    const uninstall = opts.mcp ? uninstallMcpDaemon : uninstallDaemon
+    const { uninstallDaemon, uninstallMcpDaemon, uninstallProxyService } = await import('./commands/install-daemon.js')
+    const uninstall = opts.proxy ? uninstallProxyService : opts.mcp ? uninstallMcpDaemon : uninstallDaemon
     await uninstall({ dryRun: opts.dryRun, system: opts.system })
   })
 

@@ -46,6 +46,15 @@ fn graph_key(workspace_id: &str, graph_id: &str, suffix: &str) -> String {
     format!("graph:{workspace_id}:{graph_id}:{suffix}")
 }
 
+/// A JSON array of strings, or empty for absent/null/anything else — the
+/// shape `allowedModels` takes on a cached auth entry and on
+/// `/auth/key-context`. Non-string members are dropped, not errored: an
+/// unreadable list must degrade to "inherit", never to "unrestricted".
+pub(crate) fn string_list(v: Option<&serde_json::Value>) -> Vec<String> {
+    v.and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|m| m.as_str().map(str::to_string)).collect())
+        .unwrap_or_default()
+}
 
 /// Lowercase hex SHA-256, matching the control plane's `hashKeySha256`.
 pub fn sha256_hex(raw: &str) -> String {
@@ -1222,10 +1231,11 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
                 .and_then(|s| s.parse::<f64>().ok())
                 .or(Some(100.0)),
             spend: spend_val.and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0),
-            // Always "*" — see the doc comment on `VirtualKeyRecord::models`
-            // in metering.rs. Model enforcement is workspace-level
-            // (`ControlPlaneCache::allowed_models`), not per-key.
-            models: vec!["*".to_string()],
+            // The key's own allowlist, written by the control plane's API-key
+            // middleware from `api_keys.allowed_models` (migration 181) and
+            // absent for a key that set none. Only ever intersected with the
+            // workspace list — see `VirtualKeyRecord::models` in metering.rs.
+            models: string_list(auth_json.get("allowedModels")),
             expires: None,
             // Written by the control plane's API-key middleware since LLD #71;
             // absent on older cache entries, which org-pinned cells resolve by
