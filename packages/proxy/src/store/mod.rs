@@ -274,9 +274,77 @@ pub enum JudgeScope {
 /// bool: it is what lets the request path log which approved override a
 /// bypass ran under, and what lands on the trace (`ExecutionTrace`'s
 /// `break_glass_request_id`) — never the token itself.
+///
+/// `policy_id` is the approval's scope, exactly as the control plane stored
+/// it: `None` is a global bypass; `wasm:<ruleId>` names one WASM rule and
+/// `detector:<id>` one anomaly detector. Everything else a request runs
+/// through — DLP, budgets, `deny_tools`, the control plane's pre-check, and
+/// every rule or detector the id does not name — still applies to a scoped
+/// grant. See [`BreakGlassScope`].
 #[derive(Debug, Clone)]
 pub struct BreakGlassGrant {
     pub request_id: String,
+    pub policy_id: Option<String>,
+}
+
+/// What an approved break-glass token is allowed to skip.
+///
+/// A token with no policy id skips the anomaly detectors, the WASM rules and
+/// the control-plane pre-check wholesale — the behaviour every token had
+/// before scoping existed, kept for the tokens already issued. A scoped token
+/// skips one named thing and nothing else. A legacy id without a prefix (the
+/// dashboard called the field "Rule ID" and offered a `pcas_…` example) is
+/// read as a WASM rule id: narrower than the global bypass it used to get,
+/// never wider.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BreakGlassScope {
+    Global,
+    WasmRule(String),
+    Detector(String),
+}
+
+impl BreakGlassGrant {
+    pub fn scope(&self) -> BreakGlassScope {
+        match self.policy_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            None => BreakGlassScope::Global,
+            Some(id) => {
+                if let Some(rule) = id.strip_prefix("wasm:") {
+                    BreakGlassScope::WasmRule(rule.to_string())
+                } else if let Some(det) = id.strip_prefix("detector:") {
+                    BreakGlassScope::Detector(det.to_string())
+                } else {
+                    BreakGlassScope::WasmRule(id.to_string())
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod break_glass_scope_tests {
+    use super::*;
+
+    fn grant(policy_id: Option<&str>) -> BreakGlassGrant {
+        BreakGlassGrant { request_id: "bgr_x".into(), policy_id: policy_id.map(String::from) }
+    }
+
+    #[test]
+    fn no_policy_id_is_a_global_bypass_as_every_existing_token_was() {
+        assert_eq!(grant(None).scope(), BreakGlassScope::Global);
+        assert_eq!(grant(Some("")).scope(), BreakGlassScope::Global);
+        assert_eq!(grant(Some("  ")).scope(), BreakGlassScope::Global);
+    }
+
+    #[test]
+    fn prefixed_ids_name_one_rule_or_one_detector() {
+        assert_eq!(grant(Some("wasm:pcas_exfiltration_001")).scope(), BreakGlassScope::WasmRule("pcas_exfiltration_001".into()));
+        assert_eq!(grant(Some("detector:consecutive_repeat")).scope(), BreakGlassScope::Detector("consecutive_repeat".into()));
+    }
+
+    #[test]
+    fn a_legacy_unprefixed_id_narrows_to_a_wasm_rule_never_to_global() {
+        assert_eq!(grant(Some("pcas_exfiltration_001")).scope(), BreakGlassScope::WasmRule("pcas_exfiltration_001".into()));
+    }
 }
 
 /// A pinned, session-stable SOP advisory block (TD-348).
@@ -916,6 +984,10 @@ pub trait ControlPlaneCache: Send + Sync + 'static {
     /// bypass policy for workspace B. A stored payload that fails to parse is
     /// also `None`: the pre-scoping code failed OPEN on any shape (existence
     /// alone was enough), and that must not survive the port.
+    ///
+    /// `token` is the raw header value; the store hashes it before the
+    /// lookup, because the approval is keyed on the token's SHA-256 (the raw
+    /// value is never at rest in Valkey or Postgres).
     async fn break_glass_grant(&self, token: &str, workspace_id: &str) -> Option<BreakGlassGrant>;
 
     // ── WASM rule distribution ───────────────────────────────────────
