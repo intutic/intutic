@@ -634,22 +634,61 @@ pub fn proxy_instance_id() -> &'static str {
 /// one), else the authenticated member. Anonymous traffic inside a single workspace
 /// still shares a bucket — the correct grouping when there is genuinely nothing to
 /// tell two callers apart.
+///
+/// The member rung has one sub-rung (interview-audit closeout Wave 2): the
+/// client's own end-user id, when the request body carries one —
+/// `metadata.user_id` on the Anthropic wire, `user` on OpenAI's — hashed to the
+/// same 8-hex shape `PinScope::hash_role` uses. Several agents that share a
+/// member key (one team API key, many concurrent runs) stop sharing one tool
+/// history, so one run's repeat loop no longer trips the detector for the
+/// others. It NARROWS an authenticated bucket and never sits above `member:`:
+/// the value is client-controlled, and a rung above the member would let one
+/// caller shard its own history across arbitrary fingerprints and defeat the
+/// consecutive-repeat detector by rotating them. Below the member it can only
+/// split the caller's own bucket, which is the caller's own loss of evidence.
+/// A prompt-prefix hash was considered and rejected: it re-buckets on every
+/// system-prompt edit and merges unrelated agents that share a template.
 fn tool_history_scope(
     workspace_id: &str,
     session_id: &str,
     loop_run_id: Option<&str>,
     user_id: Option<&str>,
+    client_user_fingerprint: Option<&str>,
 ) -> String {
     let agent = if session_id != "unknown" && !session_id.is_empty() {
         session_id.to_string()
     } else if let Some(lr) = loop_run_id {
         format!("loop:{}", lr)
     } else if let Some(uid) = user_id {
-        format!("member:{}", uid)
+        match client_user_fingerprint {
+            Some(fp) => format!("member:{}:fp:{}", uid, fp),
+            None => format!("member:{}", uid),
+        }
     } else {
         "anonymous".to_string()
     };
     format!("{}:{}", workspace_id, agent)
+}
+
+/// The client's end-user id from the request body, hashed: `metadata.user_id`
+/// (Anthropic) or `user` (OpenAI), whichever is a non-empty string. `None` when
+/// neither is present, so `tool_history_scope` keeps the plain member rung.
+/// Hashed rather than embedded because the raw value is an identifier the
+/// client chose and the scope is a Valkey key that shows up in logs.
+fn client_user_fingerprint(body: &serde_json::Value) -> Option<String> {
+    let raw = body
+        .get("metadata")
+        .and_then(|m| m.get("user_id"))
+        .and_then(|v| v.as_str())
+        .or_else(|| body.get("user").and_then(|v| v.as_str()))?;
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(raw.as_bytes());
+    Some(format!("{:x}", h.finalize())[..8].to_string())
 }
 
 /// Scope key for the judge's session-keyed Valkey state — the auto-judge flag and
@@ -2614,11 +2653,13 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             .await
             .is_some_and(|pinned| pinned != tool_signature);
 
+    let client_fp = client_user_fingerprint(&body_json);
     let tool_scope_id = tool_history_scope(
         &workspace_id,
         &session_id,
         loop_run_id_header.as_deref(),
         key_record.as_ref().and_then(|k| k.user_id.as_deref()),
+        client_fp.as_deref(),
     );
 
     let request_tool_calls = crate::manifest::extract_request_tool_invocations(&body_json);
@@ -6202,135 +6243,6 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // count against the routed model's latency SLO.
     let upstream_latency_ms = start.elapsed().as_millis() as u32;
 
-    // Mirror the configured/shadow candidate, if this request was sampled.
-    //
-    // Deliberately placed HERE — after the primary response's own body
-    // (`resp_bytes`) has been read — rather than immediately after
-    // `mirror_plan` was captured far above. The scrubbed comparison pair
-    // published below needs the ORIGINAL response text, which does not exist
-    // until this point; `is_streaming` is always `false` on this path (the
-    // streaming branch always `return`s above it), which is the only shape
-    // `should_mirror` ever permits anyway, so nothing is lost by waiting.
-    //
-    // Spawned detached and never awaited, so the user's response is already on
-    // its way out — a mirrored call that times out, and the DLP scrub the
-    // spawned task does before publishing, both cost the user's own request
-    // nothing. `resp_bytes.clone()` is an `Arc` bump, not a copy, so even that
-    // capture is free on this path. The sampling roll, the 5% ceiling, the
-    // concurrency cap and the streams-are-never-mirrored rule all live in
-    // `should_mirror`.
-    if let Some((url, headers, body, candidate)) = mirror_plan {
-        let roll: f64 = rand::random::<f64>();
-        // The slot IS the decision. `should_mirror` hands back the only
-        // `MirrorSlot` that can exist, so there is no way to mirror without
-        // holding one and no way to hold one without having been permitted.
-        if let Some(slot) = crate::routing::mirror::should_mirror(
-            state.config.intutic_settings.routing.mirror_sample_rate,
-            is_streaming,
-            &model,
-            &candidate,
-            roll,
-        ) {
-            let client = state.http_client.as_ref().clone();
-            let ws = workspace_id.clone();
-            let req_json = body_json.clone();
-            let estimate: std::sync::Arc<dyn Fn(&str, u32, u32) -> f64 + Send + Sync> =
-                std::sync::Arc::new(|m: &str, p: u32, c: u32| estimate_model_cost(m, p, c));
-            let mirror_store = Arc::clone(&state.store);
-            let mirror_ws = ws.clone();
-            let requested_model_for_mirror = model.clone();
-            let original_response_bytes = resp_bytes.clone();
-            tokio::spawn(async move {
-                let outcome = crate::routing::mirror::run_mirror(
-                    slot,
-                    client,
-                    url,
-                    headers,
-                    body,
-                    Some(req_json.clone()),
-                    candidate,
-                    ws,
-                    estimate,
-                )
-                .await;
-
-                // Keep what the second call bought.
-                //
-                // `run_mirror` has always returned this and the spawn has always
-                // dropped it, so the only trace of a mirrored call was a log
-                // line. C6 and C7 — enforce per workspace on a mirror-measured
-                // fault-rate delta — were deferred "pending mirror-measured
-                // data", and that data was being thrown away one line after it
-                // was computed. Mirroring bills a second upstream call on up to
-                // 5% of traffic; discarding the result makes that pure cost.
-                //
-                // `None` means the call never produced a scoreable response (a
-                // non-2xx, or an unreachable upstream). That is not a fault of
-                // the candidate and is deliberately not recorded as one.
-                if let Some(o) = outcome {
-                    if let Err(e) = mirror_store
-                        .record_mirror_outcome(
-                            &mirror_ws,
-                            &o.candidate_model,
-                            o.integrity.fault.is_some(),
-                            o.integrity.measured,
-                            o.cost_usd,
-                        )
-                        .await
-                    {
-                        // The user's response went out long ago; a failure to
-                        // record evidence must cost them nothing.
-                        tracing::warn!(error = %e, "Failed to record mirror outcome");
-                    }
-
-                    // ── Scrubbed transient comparison pair, for 7b's judge ──
-                    //
-                    // TD-346 forbids persisting raw model response text
-                    // durably; storing an original+mirror response PAIR would
-                    // be a far larger exception to that discipline than
-                    // anything shipped under it so far. The decision made for
-                    // this phase is judge-at-ingest, verdict-only storage —
-                    // see `MirrorPairEvent`'s doc comment. Every text field is
-                    // DLP-scrubbed right here, immediately before publish,
-                    // independent of whether output DLP is enabled for the
-                    // response actually served to the caller: this sidecar
-                    // channel carries its own scrub obligation regardless of
-                    // that config.
-                    //
-                    // `o.response_text` is `None` only when the mirrored body
-                    // wasn't valid UTF-8 — skip the publish rather than send a
-                    // pair missing half its content.
-                    if let Some(mirror_response_raw) = o.response_text.as_deref() {
-                        let original_response_raw =
-                            String::from_utf8_lossy(&original_response_bytes);
-                        let event = crate::routing::mirror::MirrorPairEvent {
-                            workspace_id: mirror_ws.clone(),
-                            requested_model: requested_model_for_mirror,
-                            candidate_model: o.candidate_model.clone(),
-                            request_text: crate::routing::mirror::dlp_scrub(&req_json.to_string()),
-                            original_response_text: crate::routing::mirror::dlp_scrub(
-                                &original_response_raw,
-                            ),
-                            mirror_response_text: crate::routing::mirror::dlp_scrub(
-                                mirror_response_raw,
-                            ),
-                            mirror_faulted: o.integrity.fault.is_some(),
-                            mirror_latency_ms: o.latency_ms,
-                            mirror_cost_usd: o.cost_usd,
-                            created_at: chrono::Utc::now().to_rfc3339(),
-                        };
-                        if let Err(e) = mirror_store.publish_mirror_pair(&event).await {
-                            // Same discipline as the counter write above: the
-                            // user's response is long gone, so a failed
-                            // publish costs them nothing and is only logged.
-                            tracing::warn!(error = %e, "Failed to publish mirror comparison pair");
-                        }
-                    }
-                }
-            });
-        }
-    }
-
     let (mut final_body_bytes, prompt_tokens, completion_tokens, mut accumulated_content, usage_final) =
         if is_same_provider {
             let resp_json: serde_json::Value =
@@ -6784,6 +6696,155 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     if let Some(bp) = cache_read_bp(&usage_final) {
         let _ = state.store.record_session_cache(&tool_scope_id, &actual_model, bp).await;
     }
+
+    // Mirror the configured/shadow candidate, if this request was sampled.
+    //
+    // Deliberately placed HERE — after the primary response's own body
+    // (`resp_bytes`) has been read AND after `request_costs` has priced the
+    // served call — rather than immediately after `mirror_plan` was captured
+    // far above. The scrubbed comparison pair published below needs the
+    // ORIGINAL response text and, since interview-audit closeout Wave 2, the
+    // original side's cost and latency, so the adoption report's cost and
+    // latency deltas are measured rather than structurally null. Neither
+    // exists earlier: the text once the body is read, the cost once the usage
+    // block is parsed. `is_streaming` is always `false` on this path (the
+    // streaming branch always `return`s above it), which is the only shape
+    // `should_mirror` ever permits anyway.
+    //
+    // The price of waiting: the mirrored call now starts after the judge
+    // finalize, DLP and response-gate work between the body read and this
+    // point, instead of concurrently with it. That is bounded by the judge
+    // timeout and is proxy overhead the caller already paid for; the pair is
+    // compared on content, not on when the second call was started, and the
+    // candidate's own latency is measured from its own start. No `return`
+    // sits between the old site and this one, so nothing that used to be
+    // mirrored is lost. Not measured on live traffic at the time of writing.
+    //
+    // Spawned detached and never awaited, so the user's response is already on
+    // its way out — a mirrored call that times out, and the DLP scrub the
+    // spawned task does before publishing, both cost the user's own request
+    // nothing. `resp_bytes.clone()` is an `Arc` bump, not a copy, so even that
+    // capture is free on this path. The sampling roll, the 5% ceiling, the
+    // concurrency cap and the streams-are-never-mirrored rule all live in
+    // `should_mirror`.
+    if let Some((url, headers, body, candidate)) = mirror_plan {
+        let roll: f64 = rand::random::<f64>();
+        // The slot IS the decision. `should_mirror` hands back the only
+        // `MirrorSlot` that can exist, so there is no way to mirror without
+        // holding one and no way to hold one without having been permitted.
+        if let Some(slot) = crate::routing::mirror::should_mirror(
+            state.config.intutic_settings.routing.mirror_sample_rate,
+            is_streaming,
+            &model,
+            &candidate,
+            roll,
+        ) {
+            let client = state.http_client.as_ref().clone();
+            let ws = workspace_id.clone();
+            let req_json = body_json.clone();
+            let estimate: std::sync::Arc<dyn Fn(&str, u32, u32) -> f64 + Send + Sync> =
+                std::sync::Arc::new(|m: &str, p: u32, c: u32| estimate_model_cost(m, p, c));
+            let mirror_store = Arc::clone(&state.store);
+            let mirror_ws = ws.clone();
+            let requested_model_for_mirror = model.clone();
+            let original_response_bytes = resp_bytes.clone();
+            // What the served call cost and how long its upstream took —
+            // captured by value so the detached task owns its copy.
+            let original_cost_for_mirror = actual_cost_usd;
+            let original_latency_for_mirror = upstream_latency_ms;
+            tokio::spawn(async move {
+                let outcome = crate::routing::mirror::run_mirror(
+                    slot,
+                    client,
+                    url,
+                    headers,
+                    body,
+                    Some(req_json.clone()),
+                    candidate,
+                    ws,
+                    estimate,
+                )
+                .await;
+
+                // Keep what the second call bought.
+                //
+                // `run_mirror` has always returned this and the spawn has always
+                // dropped it, so the only trace of a mirrored call was a log
+                // line. C6 and C7 — enforce per workspace on a mirror-measured
+                // fault-rate delta — were deferred "pending mirror-measured
+                // data", and that data was being thrown away one line after it
+                // was computed. Mirroring bills a second upstream call on up to
+                // 5% of traffic; discarding the result makes that pure cost.
+                //
+                // `None` means the call never produced a scoreable response (a
+                // non-2xx, or an unreachable upstream). That is not a fault of
+                // the candidate and is deliberately not recorded as one.
+                if let Some(o) = outcome {
+                    if let Err(e) = mirror_store
+                        .record_mirror_outcome(
+                            &mirror_ws,
+                            &o.candidate_model,
+                            o.integrity.fault.is_some(),
+                            o.integrity.measured,
+                            o.cost_usd,
+                        )
+                        .await
+                    {
+                        // The user's response went out long ago; a failure to
+                        // record evidence must cost them nothing.
+                        tracing::warn!(error = %e, "Failed to record mirror outcome");
+                    }
+
+                    // ── Scrubbed transient comparison pair, for 7b's judge ──
+                    //
+                    // TD-346 forbids persisting raw model response text
+                    // durably; storing an original+mirror response PAIR would
+                    // be a far larger exception to that discipline than
+                    // anything shipped under it so far. The decision made for
+                    // this phase is judge-at-ingest, verdict-only storage —
+                    // see `MirrorPairEvent`'s doc comment. Every text field is
+                    // DLP-scrubbed right here, immediately before publish,
+                    // independent of whether output DLP is enabled for the
+                    // response actually served to the caller: this sidecar
+                    // channel carries its own scrub obligation regardless of
+                    // that config.
+                    //
+                    // `o.response_text` is `None` only when the mirrored body
+                    // wasn't valid UTF-8 — skip the publish rather than send a
+                    // pair missing half its content.
+                    if let Some(mirror_response_raw) = o.response_text.as_deref() {
+                        let original_response_raw =
+                            String::from_utf8_lossy(&original_response_bytes);
+                        let event = crate::routing::mirror::MirrorPairEvent {
+                            workspace_id: mirror_ws.clone(),
+                            requested_model: requested_model_for_mirror,
+                            candidate_model: o.candidate_model.clone(),
+                            request_text: crate::routing::mirror::dlp_scrub(&req_json.to_string()),
+                            original_response_text: crate::routing::mirror::dlp_scrub(
+                                &original_response_raw,
+                            ),
+                            mirror_response_text: crate::routing::mirror::dlp_scrub(
+                                mirror_response_raw,
+                            ),
+                            mirror_faulted: o.integrity.fault.is_some(),
+                            mirror_latency_ms: o.latency_ms,
+                            mirror_cost_usd: o.cost_usd,
+                            original_latency_ms: original_latency_for_mirror,
+                            original_cost_usd: original_cost_for_mirror,
+                            created_at: chrono::Utc::now().to_rfc3339(),
+                        };
+                        if let Err(e) = mirror_store.publish_mirror_pair(&event).await {
+                            // Same discipline as the counter write above: the
+                            // user's response is long gone, so a failed
+                            // publish costs them nothing and is only logged.
+                            tracing::warn!(error = %e, "Failed to publish mirror comparison pair");
+                        }
+                    }
+                }
+            });
+        }
+    }
+
 
     let latency_ms = start.elapsed().as_millis() as u32;
 
@@ -9401,8 +9462,8 @@ mod tests {
 
     #[test]
     fn tool_history_is_never_shared_across_workspaces() {
-        let a = tool_history_scope("ws_alpha", "unknown", None, None);
-        let b = tool_history_scope("ws_beta", "unknown", None, None);
+        let a = tool_history_scope("ws_alpha", "unknown", None, None, None);
+        let b = tool_history_scope("ws_beta", "unknown", None, None, None);
         assert_ne!(a, b, "two workspaces must not share an anonymous bucket");
         assert!(a.starts_with("ws_alpha:"), "workspace must lead the key: {a}");
     }
@@ -9411,21 +9472,21 @@ mod tests {
     fn tool_history_prefers_the_most_specific_identity_available() {
         // An explicit session header wins when a harness sends one.
         assert_eq!(
-            tool_history_scope("ws", "ses_real", Some("lr_1"), Some("mbr_1")),
+            tool_history_scope("ws", "ses_real", Some("lr_1"), Some("mbr_1"), None),
             "ws:ses_real"
         );
         // The governed path always carries a loop run, so it isolates per run.
         assert_eq!(
-            tool_history_scope("ws", "unknown", Some("lr_1"), Some("mbr_1")),
+            tool_history_scope("ws", "unknown", Some("lr_1"), Some("mbr_1"), None),
             "ws:loop:lr_1"
         );
         // Otherwise the authenticated member.
         assert_eq!(
-            tool_history_scope("ws", "unknown", None, Some("mbr_1")),
+            tool_history_scope("ws", "unknown", None, Some("mbr_1"), None),
             "ws:member:mbr_1"
         );
         // Only genuinely unidentifiable callers share, and only inside one workspace.
-        assert_eq!(tool_history_scope("ws", "unknown", None, None), "ws:anonymous");
+        assert_eq!(tool_history_scope("ws", "unknown", None, None, None), "ws:anonymous");
     }
 
     #[test]
@@ -9433,8 +9494,8 @@ mod tests {
         // The case that blocked a real end-to-end run: a spin recorded under one
         // loop must not kill the next loop's very first request.
         assert_ne!(
-            tool_history_scope("ws", "unknown", Some("lr_first"), None),
-            tool_history_scope("ws", "unknown", Some("lr_second"), None),
+            tool_history_scope("ws", "unknown", Some("lr_first"), None, None),
+            tool_history_scope("ws", "unknown", Some("lr_second"), None, None),
         );
     }
 
@@ -9462,8 +9523,46 @@ mod tests {
         // A harness sending `x-session-id:` with no value must not create a
         // workspace-wide bucket keyed on the empty string.
         assert_eq!(
-            tool_history_scope("ws", "", None, Some("mbr_1")),
+            tool_history_scope("ws", "", None, Some("mbr_1"), None),
             "ws:member:mbr_1"
+        );
+    }
+
+    // Interview-audit closeout Wave 2: the client's end-user id narrows the
+    // member rung and nothing else.
+    #[test]
+    fn client_fingerprint_narrows_the_member_rung_only() {
+        let fp = client_user_fingerprint(&serde_json::json!({"metadata": {"user_id": "agent-7"}})).unwrap();
+        assert_eq!(fp.len(), 8);
+        assert_eq!(
+            tool_history_scope("ws", "unknown", None, Some("mbr_1"), Some(&fp)),
+            format!("ws:member:mbr_1:fp:{fp}")
+        );
+        // A session header or a loop run still wins outright.
+        assert_eq!(
+            tool_history_scope("ws", "ses_real", Some("lr_1"), Some("mbr_1"), Some(&fp)),
+            "ws:ses_real"
+        );
+        assert_eq!(
+            tool_history_scope("ws", "unknown", Some("lr_1"), Some("mbr_1"), Some(&fp)),
+            "ws:loop:lr_1"
+        );
+        // Without a member there is nothing to narrow: a client-chosen value
+        // must never become a bucket of its own above the member rung.
+        assert_eq!(tool_history_scope("ws", "unknown", None, None, Some(&fp)), "ws:anonymous");
+    }
+
+    #[test]
+    fn client_fingerprint_reads_both_wire_shapes_and_ignores_empties() {
+        let a = client_user_fingerprint(&serde_json::json!({"metadata": {"user_id": "u1"}}));
+        let o = client_user_fingerprint(&serde_json::json!({"user": "u1"}));
+        assert_eq!(a, o, "the same id hashes the same on either wire");
+        assert!(client_user_fingerprint(&serde_json::json!({"user": "  "})).is_none());
+        assert!(client_user_fingerprint(&serde_json::json!({"user": 42})).is_none());
+        assert!(client_user_fingerprint(&serde_json::json!({})).is_none());
+        assert_ne!(
+            client_user_fingerprint(&serde_json::json!({"user": "u1"})),
+            client_user_fingerprint(&serde_json::json!({"user": "u2"}))
         );
     }
 

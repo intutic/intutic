@@ -35,7 +35,7 @@ export interface MirrorAdoptionReport {
   unjudged: number
   /** Candidate fault rate minus original fault rate. Negative = candidate faults less. Null when no row has both RIS scores. */
   faultRateDelta: number | null
-  /** Null whenever no row has both sides populated — every row, as of Phase 7b (see TD-352). */
+  /** Null whenever no row has both sides populated — rows judged from a proxy that predates the original-side fields. */
   averageCostDeltaUsd: number | null
   averageLatencyDeltaMs: number | null
 }
@@ -86,13 +86,13 @@ function formatFaultRateDelta(delta: number | null): string {
 }
 
 function formatCostDelta(delta: number | null): string {
-  if (delta === null) return pc.dim('not measured — served-side cost is not yet on the wire event (TD-352)')
+  if (delta === null) return pc.dim('not measured — no pairs yet where both sides were priced')
   const sign = delta > 0 ? '+' : delta < 0 ? '' : '±'
   return `${sign}${delta.toFixed(4)} USD/request`
 }
 
 function formatLatencyDelta(delta: number | null): string {
-  if (delta === null) return pc.dim('not measured — served-side latency is not yet on the wire event (TD-352)')
+  if (delta === null) return pc.dim('not measured — no pairs yet where both sides were timed')
   const sign = delta > 0 ? '+' : delta < 0 ? '' : '±'
   return `${sign}${delta.toFixed(0)} ms`
 }
