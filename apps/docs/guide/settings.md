@@ -155,6 +155,12 @@ See [Intelligent Model Routing](/guide/intelligent-routing) — when routing is 
 it can actually pick from are the intersection of your `candidate_models` configuration and this
 allowlist, not either list alone.
 
+A single API key can be scoped below the workspace list: the **Allowed models (optional)** field
+under [API Keys](#api-keys) takes one model id per line, and the proxy enforces the *intersection*
+of the key's list and this one. A key can only narrow what the workspace approves — a model
+listed on the key but not here stays refused — and a key with no list of its own inherits this
+list unchanged.
+
 #### Standalone: `allowedModels` in `~/.intutic/config.json`
 
 A proxy running with no control plane configured (see

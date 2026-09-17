@@ -35,6 +35,14 @@ export interface AuthContext {
    * plane in that case rather than guessing.
    */
   orgId?: string
+  /**
+   * The API key's own model allowlist (`api_keys.allowed_models`, migration
+   * 181). Present only for a `vk_` key that set one; absent or empty means
+   * the key inherits the workspace's `allowedModels` unchanged. The proxy
+   * INTERSECTS a non-empty list with the workspace list — a key can narrow
+   * what its workspace approves, never widen it.
+   */
+  allowedModels?: string[]
 }
 
 // ─── JWT ─────────────────────────────────────────────────────────────
@@ -290,6 +298,12 @@ export const CreateApiKeyInputSchema = z.object({
   scopes: z.array(z.string()).default(['*']),
   expiresInDays: z.number().int().min(1).max(365).optional(),
   /**
+   * Optional per-key model allowlist. Omitted or empty inherits the workspace's
+   * approved-models list; a non-empty list is intersected with it at the proxy,
+   * so a key can only narrow the workspace list, never widen it.
+   */
+  allowedModels: z.array(z.string().trim().min(1).max(128)).max(64).optional(),
+  /**
    * Automation key: exempt from the `ssoKeyMaxIdleDays` recency gate, because its
    * owner may never log in interactively. Still bound to the member's active flag
    * and still revocable, so offboarding applies (TD-218).
@@ -308,6 +322,8 @@ export interface CreateApiKeyResult {
   keyPrefix: string
   label: string
   scopes: string[]
+  /** Per-key model allowlist; `null` when the key inherits the workspace list. */
+  allowedModels: string[] | null
   expiresAt: string | null
   createdAt: string
 }
@@ -318,6 +334,8 @@ export interface ApiKeyInfo {
   keyPrefix: string
   label: string
   scopes: string[]
+  /** Per-key model allowlist; `null` when the key inherits the workspace list. */
+  allowedModels: string[] | null
   expiresAt: string | null
   lastUsedAt: string | null
   revokedAt: string | null
