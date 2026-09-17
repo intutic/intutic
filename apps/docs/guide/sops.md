@@ -73,6 +73,23 @@ DRAFT → PENDING_REVIEW → GENERATED → HYPOTHESIZED → REFINED → VALIDATE
 | **VALIDATED** | Approved and actively enforced | ADMIN, OWNER |
 | **INVALIDATED** | Retired, superseded, or found to be incorrect | ADMIN, OWNER |
 
+### The compiled graph gate
+
+Enforcement reads the SOP's compiled SSL graph, not its markdown. A SOP whose
+graph is missing (the compile failed at save time) or stale (a later edit's
+compile failed, so the previous graph was kept) is skipped by enforcement
+silently. The dashboard shows this beside the lifecycle badge as **Not
+compiled** or **Graph stale**, and an hourly sweep retries the compile for
+every active SOP in that state.
+
+Promoting `REFINED → VALIDATED` refuses a SOP in either state. To promote
+anyway, tick the acknowledgement in the transition panel (the API field is
+`acknowledge_uncompiled: true`) and give a reason; the transition event
+records that the promotion was acknowledged. The process-wide
+`SOP_ALLOW_UNCOMPILED_VALIDATION` environment variable still bypasses the gate
+but is deprecated: it logs a warning on every use and will be removed in a
+later release.
+
 ::: info Auto-generated SOPs
 Intutic can auto-generate SOPs from agent behavior patterns. These start in `GENERATED` state and move to `HYPOTHESIZED` for testing before you validate them.
 :::
