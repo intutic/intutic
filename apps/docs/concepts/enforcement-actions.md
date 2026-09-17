@@ -83,6 +83,16 @@ own real traffic and clears the [promotion rule](#the-promotion-rule).
 Only then does it graduate onto the enforcement table above (SSL as `KILL`,
 loop detection as today's `REASK`, findings as a promoted `KILL`/`HIJACK`).
 
+**Two opt-in paths escalate a judged finding.** Everything above is
+deterministic by default: no LLM verdict blocks a request on its own. Two
+paths a workspace can turn on change that. The trajectory monitor's `ACTIVE`
+mode (default `PASSIVE`, see [Trajectory Monitor](/guide/trajectory-monitor))
+lets a trajectory verdict suggest a `KILL` instead of an alert, and
+repetition-based promotion lets an anomaly finding that keeps recurring
+graduate to enforcement under the promotion rule. A scoped
+[break-glass](/guide/break-glass) grant runs in the other direction: it
+narrows what is evaluated for one request and never widens it.
+
 **Generated guardrails start on rung 2 and end on rung 1.** A rule the
 [Policy Clause Ledger](/guide/policy-guardrails) derived from a policy
 document had a model in its derivation, so it launches in shadow like any

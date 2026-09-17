@@ -95,7 +95,7 @@ That's it! Your agent is now governed by real-time safety guardrails.
 | Feature | Description |
 | :--- | :--- |
 | ⚡ **In-Process WASM Engine** | Policy evaluation runs in-process — no model call and no network hop — so it adds no round-trip to the tool-call path. |
-| 🛡️ **Zero-Trust Tool Interception** | Intercepts dangerous commands (`rm -rf`, `git push --force`, `DROP TABLE`) before they touch your system. |
+| 🛡️ **Zero-Trust Tool Interception** | Intercepts dangerous commands before they touch your system: `rm -rf` and `git push --force` are blocked at the harness hook gate; a `DROP TABLE` in an MCP tool call is blocked by the MCP governance proxy, and at the hook gate it is flagged for triage rather than blocked (the LLM proxy itself has no SQL rule). |
 | 🔐 **Secret DLP & Masking** | Automatically redacts API keys (`[REDACTED_SECRET]`), AWS credentials, and tokens in prompts & tool payloads. |
 | 💰 **Session Spend Ceilings** | Prevents "loop burn" by enforcing token spending ceilings per session (e.g. $5.00 limit). |
 | 🔄 **41 Harness Adapters** | Pre-configured support for Claude Code CLI, Cursor, Windsurf, Aider, Antigravity, DeepSeek dsh, Spotify Xirp, DoorDash Agentic Orchestrator, AWS Bedrock AgentCore Runtime, and more. |
@@ -127,7 +127,7 @@ Every tool call and prompt evaluated by Intutic produces one of five **PCAS Acti
 
 ## 🔌 Supported Harnesses & Frameworks
 
-Intutic ships **41 harness adapters** that are auto-detected and config-synced without modifying your agent's source code. Anything else that speaks an OpenAI- or Anthropic-compatible API is governed the same way by pointing its base URL at the proxy:
+Intutic ships **41 harness adapters** that are auto-detected and config-synced without modifying your agent's source code. Two of them — AutoGen and the Agentic Orchestrator — carry a confirmed, open support gap (see `docs/TECH_DEBT.md`), so the headline count is **39 supported harnesses**. Anything else that speaks an OpenAI- or Anthropic-compatible API is governed the same way by pointing its base URL at the proxy:
 
 | Category | Supported Tools & Frameworks |
 | :--- | :--- |

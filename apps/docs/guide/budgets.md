@@ -156,10 +156,12 @@ There is no dedicated "traffic class" concept — the interim answer is one
 virtual key per class. Mint a separate key under **Settings → API Keys** for
 each class (e.g. `desktop`, `ci`, `prod`), point that traffic at its own key,
 and `/api/v1/usage/virtual-keys` reports each key's cost separately from that
-point on. Traces from before a key existed, and any trace with no virtual-key
-auth context (a standalone/offline trace synced back, for instance), report
-under a `null` key rather than being folded into whichever key happens to be
-first.
+point on. The same split is on the dashboard as the **Cost by Virtual Key**
+card on the Dashboard's **Cost & Token Efficiency** tab, for today or the
+current month. Traces from before a key existed, and any trace with no
+virtual-key auth context (a standalone/offline trace synced back, for
+instance), report under a `null` key — shown as **unattributed** on the card —
+rather than being folded into whichever key happens to be first.
 
 ### Resolving Budget Alerts
 Security and FinOps administrators can review all active budget breaches on the **Incidents Page**. When resolving a breach, administrators can record:

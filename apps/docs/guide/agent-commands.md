@@ -89,6 +89,24 @@ are not marked down for a surface you never use. The score bands map to a colour
 you will also see on the [Agents dashboard](/guide/agents) ring: red < 40,
 orange < 65, yellow < 85, green ≥ 85.
 
+The nine facets and their weights (they sum to 100; a facet that does not
+apply is dropped and the rest are renormalised):
+
+| Facet | Weight | What is scored | OWASP LLM Top 10 (2025) | OWASP Agentic threats |
+|---|---|---|---|---|
+| `guardrails` | 24 | DLP, WASM rules, hook/SDK gate, PCAS | LLM01, LLM02, LLM06 | T2 Tool Misuse, T6 Intent Breaking |
+| `sops` | 18 | Enforced role SOPs | LLM01, LLM06 | T6 Intent Breaking, T7 Misaligned Behaviour |
+| `mcp_tools` | 14 | Proxy-wrapped MCP servers | LLM06, LLM03 | T2 Tool Misuse, T3 Privilege Compromise |
+| `budgets` | 12 | Session and workspace spend caps | LLM10 | T4 Resource Overload |
+| `loops` | 10 | Loop / turn limits | LLM10 | T4 Resource Overload, T5 Cascading Failures |
+| `graphs` | 8 | Workspace-scoped graph identity | LLM06 | T5 Cascading Failures, T12 Communication Poisoning |
+| `harness` | 6 | Known, config-synced harness | LLM03 | T3 Privilege Compromise |
+| `skills` | 4 | Declared, content-scanned skills | LLM03 | T3 Privilege Compromise |
+| `memory` | 4 | Governed memory providers | LLM08, LLM04 | T1 Memory Poisoning |
+
+The table is a rendering of `FACET_WEIGHTS` and `FACET_RUBRIC` in the control
+plane's `agentPosture.ts`; if the two ever disagree, the code is right.
+
 ## Blocking vs. passthrough
 
 Both commands are **blocking** by default: the proxy answers and no upstream

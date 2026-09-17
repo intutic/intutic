@@ -737,8 +737,12 @@ pub(crate) const JUDGE_LOOP_GUARD_HEADER: &str = "x-intutic-judge-loop-guard";
 /// `x-session-id`, loop scope off `x-loop-run-id`, the text trigger off
 /// client-authored content), so a client that sets this header to dodge
 /// judging of its own traffic gained nothing it couldn't already do with a
-/// fresh session id. Judging is the advisory layer; all KILL sites are
-/// deterministic and entirely unaffected by this header.
+/// fresh session id. Judging is the advisory layer; the KILL sites are
+/// deterministic by default and entirely unaffected by this header. Two
+/// opt-in paths on the control plane can escalate a judged finding to a
+/// KILL — trajectory-monitor ACTIVE mode, and repetition-based promotion of
+/// an anomaly finding — and neither reads this header either. A scoped
+/// break-glass grant narrows what is evaluated; it never widens it.
 pub(crate) fn judge_checks_enabled(headers: &axum::http::HeaderMap) -> bool {
     headers.get(JUDGE_LOOP_GUARD_HEADER).is_none()
 }

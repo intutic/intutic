@@ -114,7 +114,7 @@ Changes to SOPs are classified as `STRENGTHEN`, `CLARIFY`, `NARROW`, or `WEAKEN`
 
 ## Anomaly Detection (ARE)
 
-The Autonomous Reasoning Engine detects 12 categories of runtime anomalies:
+The Autonomous Reasoning Engine detects 12 categories of runtime anomalies. It runs on the control plane over ingested traces and hook events (a heuristic classifier per trace plus a periodic baseline sweep), records findings and opens incidents; it is not on the request path, and a finding blocks only after [promotion](/concepts/enforcement-actions#the-promotion-rule). Request-time content checks are the proxy's detectors and DLP, the response judge, the MCP interceptor and the hook gates.
 
 | Anomaly Type | Description |
 |-------------|-------------|

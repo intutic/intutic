@@ -24,7 +24,7 @@ features:
     title: FinOps Ledger
     details: Track every token, every model, every dollar. Per-model cost breakdowns, local session token metering, and customizable spending caps.
   - icon: 🔌
-    title: 41 Harness Integrations
+    title: 39 Harness Integrations
     details: Works with Claude Code, Cursor, Windsurf, Aider, Antigravity, Codex, OpenHands, n8n, Cline, Roo Code, Continue, Claude Desktop, Goose, Open WebUI, OpenClaw, Hermes, Pi, GitHub Copilot, LangGraph, Muse Code, Grok Build, dsh, Xirp, DoorDash Agentic Orchestrator, and AWS Bedrock AgentCore Runtime — plus dedicated SDK-side gates for LangChain, CrewAI, AutoGen, AG2, Google ADK, OpenAI Agents SDK, Pydantic AI, smolagents, AWS Strands Agents, Mastra, the Vercel AI SDK, eve, TrueForge (embedded), and Vercel's AI SDK Harness and AI SDK Workflow platform-agent runtimes — plus an out-of-process bridge-gated integration for TrueForge run as its own standalone/hosted server. Also reaches QM, Anthropic Managed Agents, and AWS Bedrock AgentCore Gateway as server-side platform integrations that call Intutic directly over HTTP rather than being locally detected. Auto-detects your tooling and syncs governance rules to every agent.
 ---
 
@@ -62,7 +62,7 @@ Intutic's circuit breaker evaluates every tool call against your policy stack. H
 | 💸 **Budget overruns** | Token spend exceeding session ceilings triggers automatic session suspension |
 | 🌐 **Unapproved API calls** | Outbound HTTP to non-allowlisted domains is blocked at the proxy layer, and `intutic enforce` closes the escape hatch — a host firewall that makes the proxy the *only* path off the machine |
 | 🧩 **MCP tool violations** | Calls to unapproved MCP servers or tools are intercepted before execution |
-| 💉 **SQL injection** | Destructive SQL patterns (DROP, TRUNCATE, DELETE without WHERE) are caught and blocked |
+| 💉 **Destructive SQL** | `DROP TABLE` / `DROP DATABASE` / `TRUNCATE` in an MCP tool call are blocked by the MCP governance proxy; the same shapes in a harness shell command are flagged for triage at the hook gate (advisory tier, not blocked); the LLM proxy has no SQL rule |
 
 Every blocked action generates an audit log entry with full context — who, what, when, and why it was stopped.
 
