@@ -15,11 +15,15 @@ Steps 1–2 run entirely in the proxy gateway and work the same way whether or n
 
 <!-- ENTERPRISE_ONLY_START -->
 3. **Judge at ingest** — a control-plane subscriber judges the pair the instant it arrives: an LLM judge compares the candidate's response against the response that actually served the request and returns a verdict (`candidate_better`, `original_better`, or `tie`), plus a 0–100 quality score for each side.
-4. **Store the verdict, not the text** — only the verdict and its metadata (scores, candidate cost, candidate latency, which judge model was used) are written durably. The request text and both response bodies are discarded the moment judging finishes.
+4. **Store the verdict, not the text** — only the verdict and its metadata (scores, both sides' cost and latency, which judge model was used) are written durably. The request text and both response bodies are discarded the moment judging finishes.
 5. **Report** — once enough verdicts exist for a candidate model, the report aggregates them into win/loss/tie counts and the three deltas described below. You read it from the dashboard or the CLI.
 <!-- ENTERPRISE_ONLY_END -->
 
 ## Honest Limits
+
+::: warning Standalone: mirroring bills twice and reports nothing
+A standalone open-core proxy (no control plane) still makes the mirrored call — and pays for it — but has nowhere to publish the comparison pair. The proxy logs one warning the first time it discards a pair; after that the discards are silent at the default log level. If you run standalone, leave `mirror_sample_rate` at `0`, or run with a control plane.
+:::
 
 This feature is useful, but it is not a substitute for real evaluation. Read this section before you make a decision off of it.
 
@@ -27,7 +31,7 @@ This feature is useful, but it is not a substitute for real evaluation. Read thi
 - **Sampled, not exhaustive.** The mirror sample rate is hard-capped at 5% of eligible traffic, regardless of what you configure. This bounds cost — every mirrored request is billed twice — but it also means the report is built from a slice of your traffic, not all of it.
 - **The judge is an opinion, not a correctness check.** The verdict comes from an LLM comparing two responses for correctness, completeness, and instruction-following. It is a real, useful signal, and it is *not* a ground-truth check — it can be wrong the same way any LLM judgment can be wrong, and it says nothing about wrong-but-well-formed answers that merely *look* right.
 - **Verdict-only storage — no response text is ever retained.** The only durable trace of a mirrored comparison is the verdict plus numeric metadata (scores, cost, latency, which judge model ran). The request text and both full response bodies exist only transiently, in memory, for the moment it takes to judge them, and are never written to a database, a log line, or anywhere else. If you're evaluating this feature for a privacy- or security-sensitive workload, this is the property that matters most: mirroring a request never creates a durable copy of its contents.
-- **Cost and latency deltas may come back empty.** The report can only compute a cost or latency delta from pairs where *both* the original call's and the candidate's cost/latency are known. As of this writing, only the candidate side is captured — so these two deltas are `null` until a future release adds the original side. A `null` delta means "not measured yet," never "zero difference." (Win/loss/tie counts and the fault-rate delta are unaffected by this and work today.)
+- **Cost and latency deltas may come back empty.** The report can only compute a cost or latency delta from pairs where *both* the original call's and the candidate's cost/latency are known. The proxy has published the original side with every pair since interview-audit closeout Wave 2; pairs judged from an older proxy have no original side and are left out of these two deltas. A `null` delta means "no pairs yet where both sides were priced," never "zero difference." (Win/loss/tie counts and the fault-rate delta are unaffected by this.)
 - **The report is platform-wide, not scoped to your workspace's own traffic.** A candidate model's adoption signal is deliberately aggregated across every workspace mirroring that same candidate, not filtered to yours — small per-workspace sample sizes would otherwise make the report meaningless. The verdicts it aggregates never contain response text (see above), so this doesn't cross any confidentiality boundary, but it does mean the number you see reflects more than just your own traffic.
 - **A ratio is refused, not guessed, below a minimum sample size.** If a candidate model doesn't yet have enough recorded verdicts, the report says so explicitly rather than computing a win/loss ratio from too few samples. Treat that response as "come back later," not as a bad or a good result.
 
@@ -71,7 +75,7 @@ Both default off (`mirror_sample_rate: 0.0`, `mirror_candidate_model` unset) —
 
 Open **Settings → Smart Model Routing & Response Cache**, and scroll to **Mirror-Test Adoption Report**. Enter the candidate model id you configured above and click **Load Report**.
 
-- A populated report shows candidate-better / original-better / tie / unjudged counts, the fault-rate delta (negative means the candidate faults *less* than the model it mirrored — the favorable direction), and the cost/latency deltas (shown as "not measured" rather than `$0.00`/`0 ms` when the underlying data isn't captured yet — see [Honest Limits](#honest-limits) above).
+- A populated report shows candidate-better / original-better / tie / unjudged counts, the fault-rate delta (negative means the candidate faults *less* than the model it mirrored — the favorable direction), and the cost/latency deltas (shown as "not measured" rather than `$0.00`/`0 ms` when no pair yet has both sides priced — see [Honest Limits](#honest-limits) above).
 - An **insufficient data** state is rendered as its own distinct block, not as a report with zeroed-out numbers — this is deliberate, so a candidate with too few samples never looks like a candidate that has been cleared.
 <!-- ENTERPRISE_ONLY_END -->
 
@@ -92,8 +96,8 @@ Intutic — Mirror-Test Adoption Report
   Unjudged: 2
 
   Fault-rate delta: -8.0 pts (candidate faults less)
-  Avg. cost delta: not measured — served-side cost is not yet on the wire event (TD-352)
-  Avg. latency delta: not measured — served-side latency is not yet on the wire event (TD-352)
+  Avg. cost delta: -$0.0021 per call
+  Avg. latency delta: -310 ms
 
   This is a reported signal for human review, not an automatic gate — nothing here changes routing.
 ```

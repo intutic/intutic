@@ -144,8 +144,8 @@ describe('intutic routing adoption-report', () => {
 
     const out = printed()
     expect(out).toContain('not enough scored pairs')
-    expect(out).toMatch(/not measured.*served-side cost/)
-    expect(out).toMatch(/not measured.*served-side latency/)
+    expect(out).toMatch(/not measured.*both sides were priced/)
+    expect(out).toMatch(/not measured.*both sides were timed/)
     expect(out).not.toMatch(/\$0\.00/)
     expect(out).not.toMatch(/\+0\.0000 USD/)
   })
