@@ -30,7 +30,12 @@ def test_resolve_context(mock_exists):
         assert context["workingDirectory"] == os.getcwd()
 
 @patch("requests.get")
-def test_budget_checker_cache(mock_get):
+def test_budget_checker_cache(mock_get, monkeypatch):
+    # Asserts the DEFAULT control-plane origin, so the env override must be
+    # absent: test_control_plane.py sets INTUTIC_CONTROL_PLANE_URL and a shell
+    # that exports it (a local dev pointing at 127.0.0.1:3001) made this fail
+    # under a full run on 2026-09-15 while passing alone.
+    monkeypatch.delenv("INTUTIC_CONTROL_PLANE_URL", raising=False)
     client = ClawdeClient(api_key="test-key")
     assert client.control_plane_url == "https://app.intutic.ai"
 
