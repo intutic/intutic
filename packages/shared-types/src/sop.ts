@@ -107,7 +107,19 @@ export interface Sop {
    * {@link SopProvenance}. Absent for SOPs authored in the product.
    */
   provenance?: SopProvenance
+
+  /**
+   * Whether the compiled SSL graph the enforcer reads matches this markdown
+   * (interview-audit closeout Wave 3). `compiled`: a graph exists and matches.
+   * `stale`: a graph exists but the last recompile failed, so it describes an
+   * earlier version of the text (`provenance.stale`). `uncompiled`: no graph
+   * at all — the SOP would enforce nothing if promoted. Derived on read from
+   * `ssl_graph_json` and `provenance`; the raw graph never crosses the wire.
+   */
+  sslCompileState?: SslCompileState
 }
+
+export type SslCompileState = 'compiled' | 'stale' | 'uncompiled'
 
 /**
  * The typed shape of `sop_registry.provenance` (jsonb).
@@ -253,6 +265,20 @@ export interface SopHealthMetrics {
 
   /** Number of matches in the last 30 days. */
   matchCount30d: number
+
+  /**
+   * Number of SSL scheduling-layer evaluations this SOP was a candidate in
+   * over the last 30 days, matched or not (migration 171). The denominator
+   * for `activationRate30d`; without it a SOP whose triggers can never match
+   * reads the same as one nobody has evaluated.
+   */
+  evaluationCount30d: number
+
+  /**
+   * `matchCount30d / evaluationCount30d`, or `null` when nothing evaluated
+   * the SOP — never 0, which would read as "evaluated and never matched".
+   */
+  activationRate30d: number | null
 
   /** Average compliance score across recent traces (0.0–1.0). */
   avgCompliance: number
@@ -645,6 +671,8 @@ export interface SopSummary {
   lifecycleState: SopLifecycleState | string
   riskTier: RiskLevel | string
   complexityTier: ComplexityTier | string
+  /** Whether the compiled SSL graph matches the markdown; see `Sop.sslCompileState`. */
+  sslCompileState?: SslCompileState
   contentHash?: string
   isActive?: boolean
   createdAt?: string
