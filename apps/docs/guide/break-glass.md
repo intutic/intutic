@@ -87,7 +87,7 @@ For the configured duration, the proxy will:
 All break-glass activities are logged persistently:
 - **Request logs:** Track who requested the override, the target policies, and the requested duration.
 - **Approval logs:** Track who approved the bypass.
-- **Execution logs:** Request and approval logs record who requested and approved the bypass, the target policy, and the duration. Per-request execution traces do not currently record which requests ran under a break-glass token, or the token itself — the token is never written to a trace or a log.
+- **Execution logs:** every request served under a break-glass token is recorded on its execution trace as `break_glass = true` with the approval's request id (`break_glass_request_id`), so the traces a token covered can be listed after the fact. The token itself is never written to a trace or a log; the proxy logs the request id on success and a short hash of the token on a denial.
 
 ::: warning
 Bypassing compliance rules presents significant security risks. Break-glass tokens should only be used as a last resort in active incidents and must be reviewed immediately after expiration.
