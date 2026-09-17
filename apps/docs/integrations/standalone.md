@@ -72,6 +72,10 @@ Intutic Proxy supports two primary self-hosted deployment topologies depending o
   intutic start --upstream-url "https://api.anthropic.com"
   ```
 
+::: warning Standalone has no control plane: leave mirroring off
+`mirror_sample_rate` still mirrors up to 5% of eligible requests to a candidate model standalone — every mirrored request is billed twice — but there is no control plane to judge the pair or build the [adoption report](/guide/mirror-adoption-report), so the result is discarded. The proxy warns once, the first time. Keep the rate at `0` unless a control plane is attached.
+:::
+
 ### Option C: Native NPM Binary Runner (`npx @intutic/proxy`)
 * **How it works:** Execute the native high-performance Rust proxy binary directly via npm without needing Docker or Kubernetes:
   ```bash

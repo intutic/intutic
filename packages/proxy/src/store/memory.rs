@@ -79,6 +79,9 @@ use super::{
 use crate::paths::intutic_dir;
 use crate::routing::bandit::BanditArmState;
 use crate::routing::mirror::MirrorPairEvent;
+
+/// Fires once per process, the first time a mirrored pair is discarded.
+static MIRROR_DISCARD_WARNING: std::sync::Once = std::sync::Once::new();
 use crate::routing::reward::apply_update;
 use crate::telemetry::ExecutionTrace;
 
@@ -185,6 +188,17 @@ impl Drop for FileLock {
     }
 }
 
+/// How many distinct tool-history scopes a standalone proxy remembers at once.
+/// Ten thousand concurrent sessions is far past what a single standalone
+/// proxy serves; the point is a ceiling, not a tuning knob.
+pub const DEFAULT_SCOPE_CAP: usize = 10_000;
+
+#[derive(Default)]
+struct ScopeIndex {
+    order: std::collections::VecDeque<String>,
+    seen: std::collections::HashSet<String>,
+}
+
 #[derive(Default)]
 pub struct MemoryStore {
     arms: Mutex<HashMap<String, HashMap<String, BanditArmState>>>,
@@ -198,6 +212,21 @@ pub struct MemoryStore {
     call_timestamps: Mutex<HashMap<String, Vec<i64>>>,
     /// Cumulative extracted-call count per session, for per-turn deltas.
     extracted_tool_counts: Mutex<HashMap<String, u64>>,
+    /// First-seen order and membership of every scope the five per-session
+    /// maps above (`sessions`, `tool_sequences`, `call_timestamps`,
+    /// `extracted_tool_counts`, `tool_signatures`) hold, so they are bounded
+    /// together (interview-audit closeout Wave 2). Before this, a standalone
+    /// proxy kept every scope it ever saw for the life of the process — and
+    /// the client-fingerprint rung in `tool_history_scope` makes the scope
+    /// population as large as the callers choose. Past `scope_cap` the
+    /// oldest-seen scope is dropped from all five maps: first-seen order, not
+    /// least-recently-used, because a session that has been quiet for ten
+    /// thousand other sessions is over either way, and tracking recency would
+    /// cost a write on every read.
+    scope_index: Mutex<ScopeIndex>,
+    /// `None` = `DEFAULT_SCOPE_CAP`; tests set a small cap through
+    /// `with_scope_cap`.
+    scope_cap: Option<usize>,
     /// First tool signature seen per session, for drift detection.
     tool_signatures: Mutex<HashMap<String, String>>,
     credentials: Mutex<HashMap<String, HashMap<String, String>>>,
@@ -323,6 +352,59 @@ impl MemoryStore {
     /// Ephemeral. Nothing touches disk.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// An ephemeral store that forgets its oldest-seen scopes past `cap`.
+    /// Production uses `DEFAULT_SCOPE_CAP`; this exists so a test can watch
+    /// eviction happen with four scopes instead of ten thousand.
+    pub fn with_scope_cap(cap: usize) -> Self {
+        Self {
+            scope_cap: Some(cap),
+            ..Self::default()
+        }
+    }
+
+    /// Record that `scope` now has state in one of the per-session maps, and
+    /// evict the oldest-seen scopes from all of them once the cap is passed.
+    /// Called after the writer has released its own map lock, so the index
+    /// lock is never held inside a map lock and eviction takes each map lock
+    /// on its own.
+    fn touch_scope(&self, scope: &str) {
+        let cap = self.scope_cap.unwrap_or(DEFAULT_SCOPE_CAP).max(1);
+        let evicted: Vec<String> = {
+            let Ok(mut idx) = self.scope_index.lock() else { return };
+            if !idx.seen.insert(scope.to_string()) {
+                return;
+            }
+            idx.order.push_back(scope.to_string());
+            let mut out = Vec::new();
+            while idx.order.len() > cap {
+                if let Some(old) = idx.order.pop_front() {
+                    idx.seen.remove(&old);
+                    out.push(old);
+                }
+            }
+            out
+        };
+        if evicted.is_empty() {
+            return;
+        }
+        if let Ok(mut m) = self.sessions.lock() {
+            for k in &evicted { m.remove(k); }
+        }
+        if let Ok(mut m) = self.tool_sequences.lock() {
+            for k in &evicted { m.remove(k); }
+        }
+        if let Ok(mut m) = self.call_timestamps.lock() {
+            for k in &evicted { m.remove(k); }
+        }
+        if let Ok(mut m) = self.extracted_tool_counts.lock() {
+            for k in &evicted { m.remove(k); }
+        }
+        if let Ok(mut m) = self.tool_signatures.lock() {
+            for k in &evicted { m.remove(k); }
+        }
+        tracing::debug!(evicted = evicted.len(), cap, "forgot the oldest-seen tool-history scopes");
     }
 
     /// Persists learning to `~/.intutic/bandit-state.json`, loading any
@@ -548,11 +630,14 @@ impl LocalStore for MemoryStore {
 
     async fn set_session_locked_model(&self, scope: &str, model: &str) -> anyhow::Result<()> {
         debug_assert!(scope.contains(':'), "session routing scope must be tool_history_scope's {{workspace}}:{{agent}} output, not a bare session id: {scope:?}");
-        let mut sessions = lock(&self.sessions, "session")?;
-        let sess = sessions.entry(scope.to_string()).or_default();
-        sess.locked_model = Some(model.to_string());
-        // Survives `clear_session_locked_model` — see `SessionRouting::last_model`.
-        sess.last_model = Some(model.to_string());
+        {
+            let mut sessions = lock(&self.sessions, "session")?;
+            let sess = sessions.entry(scope.to_string()).or_default();
+            sess.locked_model = Some(model.to_string());
+            // Survives `clear_session_locked_model` — see `SessionRouting::last_model`.
+            sess.last_model = Some(model.to_string());
+        }
+        self.touch_scope(scope);
         Ok(())
     }
 
@@ -566,11 +651,14 @@ impl LocalStore for MemoryStore {
 
     async fn record_session_cache(&self, scope: &str, model: &str, cache_read_bp: u32) -> anyhow::Result<()> {
         debug_assert!(scope.contains(':'), "session routing scope must be tool_history_scope's {{workspace}}:{{agent}} output, not a bare session id: {scope:?}");
-        let mut sessions = lock(&self.sessions, "session")?;
-        let sess = sessions.entry(scope.to_string()).or_default();
-        sess.cache_warm_model = Some(model.to_string());
-        sess.cache_read_bp = Some(cache_read_bp);
-        sess.cache_observed_at = Some(chrono::Utc::now().timestamp());
+        {
+            let mut sessions = lock(&self.sessions, "session")?;
+            let sess = sessions.entry(scope.to_string()).or_default();
+            sess.cache_warm_model = Some(model.to_string());
+            sess.cache_read_bp = Some(cache_read_bp);
+            sess.cache_observed_at = Some(chrono::Utc::now().timestamp());
+        }
+        self.touch_scope(scope);
         Ok(())
     }
 
@@ -580,16 +668,20 @@ impl LocalStore for MemoryStore {
         new_tools: &[String],
         cap: usize,
     ) -> anyhow::Result<Vec<String>> {
-        let mut sequences = lock(&self.tool_sequences, "tool-sequence")?;
-        let sequence = sequences.entry(session_id.to_string()).or_default();
-        if !new_tools.is_empty() {
-            sequence.extend_from_slice(new_tools);
-            if sequence.len() > cap {
-                let start = sequence.len() - cap;
-                *sequence = sequence.split_off(start);
+        let out = {
+            let mut sequences = lock(&self.tool_sequences, "tool-sequence")?;
+            let sequence = sequences.entry(session_id.to_string()).or_default();
+            if !new_tools.is_empty() {
+                sequence.extend_from_slice(new_tools);
+                if sequence.len() > cap {
+                    let start = sequence.len() - cap;
+                    *sequence = sequence.split_off(start);
+                }
             }
-        }
-        Ok(sequence.clone())
+            sequence.clone()
+        };
+        self.touch_scope(session_id);
+        Ok(out)
     }
 
     async fn record_calls_and_count_window(
@@ -599,21 +691,29 @@ impl LocalStore for MemoryStore {
         now_unix_secs: i64,
         window_secs: i64,
     ) -> anyhow::Result<u32> {
-        let mut timestamps = lock(&self.call_timestamps, "call-window")?;
-        let entry = timestamps.entry(session_id.to_string()).or_default();
-        let window_start = now_unix_secs - window_secs;
+        let count = {
+            let mut timestamps = lock(&self.call_timestamps, "call-window")?;
+            let entry = timestamps.entry(session_id.to_string()).or_default();
+            let window_start = now_unix_secs - window_secs;
 
-        entry.retain(|&ts| ts >= window_start);
-        entry.extend(std::iter::repeat(now_unix_secs).take(new_call_count));
+            entry.retain(|&ts| ts >= window_start);
+            entry.extend(std::iter::repeat(now_unix_secs).take(new_call_count));
 
-        Ok(entry.len() as u32)
+            entry.len() as u32
+        };
+        self.touch_scope(session_id);
+        Ok(count)
     }
 
     async fn swap_extracted_tool_count(&self, session_id: &str, new_count: u64) -> u64 {
-        let Ok(mut counts) = lock(&self.extracted_tool_counts, "tool-count") else {
-            return 0;
+        let prev = {
+            let Ok(mut counts) = lock(&self.extracted_tool_counts, "tool-count") else {
+                return 0;
+            };
+            counts.insert(session_id.to_string(), new_count).unwrap_or(0)
         };
-        counts.insert(session_id.to_string(), new_count).unwrap_or(0)
+        self.touch_scope(session_id);
+        prev
     }
 
     async fn workspace_credential(
@@ -703,6 +803,18 @@ impl LocalStore for MemoryStore {
     /// this runs; the message says so rather than reading like routine
     /// bookkeeping.
     async fn publish_mirror_pair(&self, event: &MirrorPairEvent) -> anyhow::Result<()> {
+        // Once per process at warn (the same `Once` shape as the WASM
+        // registry's no-root warning), then debug per pair: an operator who
+        // turned mirroring on standalone is paying for a second upstream call
+        // on up to 5% of traffic and getting nothing durable back, and a
+        // debug line nobody reads is not how they should find out.
+        MIRROR_DISCARD_WARNING.call_once(|| {
+            tracing::warn!(
+                workspace_id = %event.workspace_id,
+                candidate = %event.candidate_model,
+                "mirroring is on, but this proxy is standalone: every mirrored candidate call is billed and its comparison result is discarded — there is no control plane to judge it or report on it. Set mirror_sample_rate to 0, or run with a control plane."
+            );
+        });
         tracing::debug!(
             workspace_id = %event.workspace_id,
             candidate = %event.candidate_model,
@@ -1201,5 +1313,44 @@ mod graph_tests {
         store.set_workflow_budget_if_absent("lr_1", 5.0).await;
         store.add_workflow_spend("lr_1", 4.0).await;
         assert_eq!(store.workflow_budget("lr_2").await, (None, None));
+    }
+}
+
+#[cfg(test)]
+mod scope_bound_tests {
+    use super::*;
+    use crate::store::LocalStore;
+
+    #[tokio::test]
+    async fn the_oldest_seen_scope_is_forgotten_from_every_map_past_the_cap() {
+        let store = MemoryStore::with_scope_cap(3);
+        for i in 0..3 {
+            let scope = format!("ws:member:m:fp:{i:08x}");
+            store.set_session_locked_model(&scope, "claude-haiku-4-5").await.unwrap();
+            store.record_tool_sequence(&scope, &["Bash".to_string()], 10).await.unwrap();
+            store.record_calls_and_count_window(&scope, 1, 1_000, 60).await.unwrap();
+            store.swap_extracted_tool_count(&scope, 1).await;
+        }
+        let first = "ws:member:m:fp:00000000";
+        assert!(store.session_routing(first).await.unwrap().locked_model.is_some());
+
+        // The fourth scope pushes the first one out — of all the maps at once.
+        let fourth = "ws:member:m:fp:00000003";
+        store.set_session_locked_model(fourth, "claude-haiku-4-5").await.unwrap();
+
+        assert!(store.session_routing(first).await.unwrap().locked_model.is_none(), "sessions");
+        // The scopes that survived are untouched, and re-touching a live scope
+        // evicts nothing.
+        store.set_session_locked_model(fourth, "claude-sonnet-4-5").await.unwrap();
+        assert!(store.session_routing("ws:member:m:fp:00000001").await.unwrap().locked_model.is_some());
+        assert!(store.session_routing("ws:member:m:fp:00000002").await.unwrap().locked_model.is_some());
+
+        // The evicted scope's other maps are empty too. Reading them through
+        // the writers re-creates the scope as a NEW one (first-seen order),
+        // which in turn pushes out the next-oldest — that is the FIFO rule,
+        // not a leak.
+        assert!(store.record_tool_sequence(first, &[], 10).await.unwrap().is_empty(), "tool_sequences");
+        assert_eq!(store.swap_extracted_tool_count(first, 0).await, 0, "extracted_tool_counts");
+        assert!(store.session_routing("ws:member:m:fp:00000001").await.unwrap().locked_model.is_none(), "next-oldest evicted by the re-created scope");
     }
 }

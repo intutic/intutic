@@ -123,6 +123,25 @@ that re-sampled fresh on every request would defeat prompt caching almost entire
 multi-turn conversation, trading a small chance of a marginally-better arm for a guaranteed cache
 miss on every subsequent turn.
 
+**Worked example.** A coding agent is twelve turns into a session on `claude-sonnet-4-5` with a
+20,000-token prefix (system prompt, tool definitions, the conversation so far) that the provider
+has cached. At the bundled list prices, a cache read is $0.30 per million tokens and a cache
+write is $3.75 per million on Sonnet; on `claude-haiku-4-5` the same two rates are $0.10 and
+$1.25.
+
+| Turn 13 routed to | Prefix cost this turn | Why |
+|---|---|---|
+| Sonnet (stay) | 20,000 × $0.30/M = **$0.0060** | the whole prefix is a cache read |
+| Haiku (switch) | 20,000 × $1.25/M = **$0.0250** | Haiku has never seen this prefix — a full cache write |
+
+The switch costs about four times what staying costs on the turn it happens. Haiku's cheaper reads
+then save $0.004 a turn ($0.006 − $0.002), so the switch does not pay for itself until five more
+turns have gone by on Haiku without switching back — and a bandit that re-samples every turn
+switches back. The guard rule in the proxy is exactly this arithmetic: when the last observation
+for the scope shows a cache-read fraction of at least `cache_guard_min_read_bp` (5000 = 50%) and
+is younger than `cache_guard_max_age_secs` (300 s, the provider's cache TTL), the bandit is not
+consulted and the warm model is kept. Output tokens are the same either way and are left out.
+
 The lock exists primarily to stop the bandit from flip-flopping arms mid-conversation — that was
 the original complaint it fixes. Keeping the provider-side KV-cache prefix warm across turns is a
 second effect of the same mechanism, not a separate feature, but it's just as real and just as
