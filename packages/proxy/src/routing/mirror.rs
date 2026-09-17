@@ -210,6 +210,13 @@ pub struct MirrorPairEvent {
     pub mirror_latency_ms: u32,
     /// Cost of the mirrored call, in USD.
     pub mirror_cost_usd: f64,
+    /// Upstream latency of the call that actually served the request, so the
+    /// adoption report can measure a latency delta instead of reporting null
+    /// (interview-audit closeout Wave 2).
+    pub original_latency_ms: u32,
+    /// Cost of the call that actually served the request, in USD, priced by
+    /// the same `request_costs` the trace carries.
+    pub original_cost_usd: f64,
     pub created_at: String,
 }
 

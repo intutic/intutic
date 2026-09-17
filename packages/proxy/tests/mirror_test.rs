@@ -331,6 +331,8 @@ async fn a_secret_in_the_mirror_response_never_crosses_the_publish_boundary_unsc
         mirror_faulted: outcome.integrity.fault.is_some(),
         mirror_latency_ms: outcome.latency_ms,
         mirror_cost_usd: outcome.cost_usd,
+        original_latency_ms: 850,
+        original_cost_usd: 0.004,
         created_at: "2026-01-01T00:00:00Z".to_string(),
     };
 
