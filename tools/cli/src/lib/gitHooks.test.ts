@@ -12,6 +12,12 @@ import * as path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { installGitHooks } from './gitHooks.js'
 
+// Every test here runs real `git commit`s through the real installed hook, and
+// the TD-358 cases spawn the built CLI inside that hook. Alone they take about
+// a second each; under a full CLI-suite run on 2026-09-15 they took 7-23 s and
+// hit vitest's 5 s default. The per-describe timeout below is for load, not
+// slow code.
+
 /** Runtime-assembled per the repo convention: no contiguous credential-shaped literals. */
 const fangedKey = () => `${'AKIA'}${'B2C3D4E5F6G7H2J3'}`
 
@@ -43,7 +49,7 @@ function withIntuticShim(binDir: string, env: NodeJS.ProcessEnv): NodeJS.Process
   return { ...env, PATH: `${binDir}:${env.PATH ?? ''}` }
 }
 
-describe('pre-commit secret scan', () => {
+describe('pre-commit secret scan', { timeout: 60_000 }, () => {
   let repo: string
 
   beforeEach(async () => {
@@ -101,7 +107,7 @@ describe('pre-commit secret scan', () => {
   })
 })
 
-describe('post-merge decisions-log-refresh hook — marker discipline', () => {
+describe('post-merge decisions-log-refresh hook — marker discipline', { timeout: 60_000 }, () => {
   let repo: string
 
   beforeEach(async () => {
@@ -149,7 +155,7 @@ describe('post-merge decisions-log-refresh hook — marker discipline', () => {
   })
 })
 
-describe('post-commit / post-checkout git-context hooks — marker discipline (TD-351)', () => {
+describe('post-commit / post-checkout git-context hooks — marker discipline (TD-351)', { timeout: 60_000 }, () => {
   let repo: string
 
   beforeEach(async () => {
