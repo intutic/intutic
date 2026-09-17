@@ -155,6 +155,26 @@ See [Intelligent Model Routing](/guide/intelligent-routing) — when routing is 
 it can actually pick from are the intersection of your `candidate_models` configuration and this
 allowlist, not either list alone.
 
+#### Standalone: `allowedModels` in `~/.intutic/config.json`
+
+A proxy running with no control plane configured (see
+[Standalone](/integrations/standalone#option-b-standalone-intutic-proxy-direct-provider-connection))
+has no workspace settings to publish — so it reads the same allowlist from a local file instead,
+through the same enforcement path:
+
+```json
+{
+  "allowedModels": ["claude-sonnet-4-5", "claude-opus-4-1"]
+}
+```
+
+- The key is `allowedModels`; `allowed_models` is accepted as an alias.
+- Absent, empty, or unparseable all mean **unrestricted** — identical to the workspace setting.
+- The file is re-read on a 60-second cache, so an edit takes effect within a minute with no
+  restart.
+- A rejected request names both sources in its error, so a model refused on a connected proxy
+  points you at the workspace allowlist, and on a standalone one at this file.
+
 ### MCP Proxy Enforcement
 
 Controls how the Intutic governance proxy behaves when it can't reach the control plane.

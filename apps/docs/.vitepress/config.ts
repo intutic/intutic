@@ -112,12 +112,13 @@ if (!IS_OSS) {
       { text: 'Budgets & FinOps (Cloud)', link: '/guide/budgets' },
       { text: 'Policies & Enforcement (Cloud)', link: '/guide/policies' },
       { text: 'Session Safety & Budgets (Cloud)', link: '/guide/loops' },
+      { text: 'Trajectory Monitor (Cloud)', link: '/guide/trajectory-monitor' },
       { text: 'Settings & Config (Cloud)', link: '/guide/settings' },
       { text: 'Organizations, Teams & Billing (Cloud)', link: '/guide/organizations' },
       { text: 'Intelligent Model Routing (Cloud)', link: '/guide/intelligent-routing' },
-      { text: 'Pre-Adoption Gate for Model Upgrades (Cloud)', link: '/guide/mirror-adoption-report' },
+      { text: 'Pre-Adoption Report for Model Upgrades (Cloud)', link: '/guide/mirror-adoption-report' },
       { text: 'Runaway-Spend Counterfactual (Cloud)', link: '/guide/averted-spend' },
-      { text: 'Provider Downtime & SLA Evidence (Cloud)', link: '/guide/provider-incidents' },
+      { text: 'Signed Provider-Downtime Evidence (Cloud)', link: '/guide/provider-incidents' },
       { text: 'Managed Gateway Cells (Cloud)', link: '/guide/managed-cells' },
       // Reserved slots — sibling workstream is building the dashboard UI for
       // these three in parallel; writing docs before the UI exists would
@@ -152,7 +153,7 @@ sidebarGuide.push({
       // Limits" section for what an OSS install can and can't do with it
       // absent a control plane (no judge, no report). Same dual-listing
       // reasoning as the entry directly above.
-      { text: 'Pre-Adoption Gate for Model Upgrades (Open-Core)', link: '/guide/mirror-adoption-report' },
+      { text: 'Pre-Adoption Report for Model Upgrades (Open-Core)', link: '/guide/mirror-adoption-report' },
     ] : []),
     ...(!IS_OSS ? [
       { text: 'SOP Optimizer (Cloud)', link: '/guide/metaclaw' },

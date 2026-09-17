@@ -47,7 +47,9 @@ export function startWatcher(
   // Watch .intutic/sops directory itself (and child directories/files) for real-time rules updates
   filePaths.push(node_path.join(workspaceRoot, '.intutic', 'sops'))
 
-  // Watch ALL governance config paths across all 18 supported harnesses.
+  // Watch ALL governance config paths across every supported harness
+  // (`HARNESS_COUNT` in @intutic/shared-types is the number; it is not
+  // repeated here because a hand-stated count drifts).
   // Any change (edit or delete) triggers the settingsGuard pipeline which
   // validates and restores the file within one poll cycle.
   const protectedPaths = buildProtectedPaths(workspaceRoot)

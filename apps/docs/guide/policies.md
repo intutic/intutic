@@ -113,6 +113,26 @@ machine) to close that gap — see
 [Egress Enforcement & Runtime Isolation](/guide/how-it-works#egress-enforcement-runtime-isolation-opt-in)
 and the [CLI reference](/reference/cli#intutic-enforce).
 
+### Promoting Monitor → Enforce
+
+Run **Monitor** first and read what it would have denied before you switch:
+
+1. Set the mode to Monitor with the allow list you intend to enforce, and
+   leave it there for at least one full working week so every job and
+   developer machine has run under it.
+2. Read the would-deny counts (each would-be denial is counted per
+   destination). Every destination on that list is either a missing
+   allow-list entry or a real leak; decide which for each one, and add the
+   entries you mean to keep.
+3. When a week passes with no would-deny you did not expect, switch to
+   Enforce. AI providers and DNS stay reachable in every mode, so the switch
+   cannot cut an agent off from its model.
+4. Keep `intutic enforce` on the host for the machines that matter: the
+   proxy-layer mode only governs traffic the proxy sees.
+
+Switching back to Monitor is one setting and takes effect on the next
+request; nothing is queued or lost in between.
+
 ## Sandboxed Execution
 
 A workspace-level requirement that agents run inside an isolated runtime —
