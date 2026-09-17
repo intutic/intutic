@@ -40,7 +40,7 @@ human-in-the-loop validation or in-process local interception:
 | :--- | :--- | :--- |
 | **Execution Timing** | **Pre-flight (Before execution)** | **Post-flight / Async (During/After execution)** |
 | **Latency** | **<5 milliseconds** (Instant) | **2–5 seconds** (LLM inference delay) |
-| **Purpose** | **Hard Prevention**: Instantly blocks `rm -rf`, `DROP TABLE`, force pushes, and redacts API keys before destruction occurs. | **Semantic Audit**: Evaluates whether the agent followed complex, subjective guidelines (e.g. *"Did the refactored code maintain proper architectural layering?"*). |
+| **Purpose** | **Hard Prevention**: Instantly blocks `rm -rf` and force pushes at the hook gate, blocks a `DROP TABLE` in an MCP tool call (at the hook gate it is flagged, not blocked), and redacts API keys before destruction occurs. | **Semantic Audit**: Evaluates whether the agent followed complex, subjective guidelines (e.g. *"Did the refactored code maintain proper architectural layering?"*). |
 
 *Without local harness rules, an agent would execute destructive commands before an LLM judge even finishes thinking!*
 

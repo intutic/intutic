@@ -71,6 +71,7 @@ Intutic Proxy supports two primary self-hosted deployment topologies depending o
   export ANTHROPIC_BASE_URL="http://localhost:4000/v1"
   intutic start --upstream-url "https://api.anthropic.com"
   ```
+* **Approved models:** With no control plane to publish a workspace allowlist, the standalone proxy reads `allowedModels` from `~/.intutic/config.json` and enforces it the same way. See [Settings → Standalone allowlist](/guide/settings#standalone-allowedmodels-in-intutic-config-json).
 
 ::: warning Standalone has no control plane: leave mirroring off
 `mirror_sample_rate` still mirrors up to 5% of eligible requests to a candidate model standalone — every mirrored request is billed twice — but there is no control plane to judge the pair or build the [adoption report](/guide/mirror-adoption-report), so the result is discarded. The proxy warns once, the first time. Keep the rate at `0` unless a control plane is attached.
@@ -97,6 +98,14 @@ Intutic Proxy supports two primary self-hosted deployment topologies depending o
   already supervises.
 
 ---
+
+### Option D: Intutic behind an existing gateway (Portkey, Kong, LiteLLM)
+
+* **How it works:** If your traffic already goes through an AI gateway, keep it there and put the Intutic proxy **between the gateway and the provider**. The gateway keeps doing routing, retries and virtual keys; Intutic sees every request the gateway forwards and applies DLP, tool interception and budgets on the way through. Point the gateway's provider base URL at the Intutic proxy, and point the Intutic proxy's `--upstream-url` at the real provider.
+* **Portkey:** on the provider config (or per request, with the custom-host option Portkey documents for its provider integrations), set the provider's base URL to the Intutic proxy, for example `http://intutic-proxy:4000/v1`. Leave the provider's API key on the Portkey side; the Intutic proxy forwards the `Authorization` header it receives.
+* **Kong (AI Proxy plugin):** create a Service whose `url` is the Intutic proxy and a Route for the model path, and keep the AI Proxy plugin's provider settings as they are; Kong's rate limiting and key auth run first, Intutic's governance runs on the forwarded request.
+* **LiteLLM:** that is Option A above — LiteLLM stays the gateway and Intutic is its upstream.
+* **What you keep and what you lose:** everything on the request path (DLP, tool interception, budgets, the routing guard) works unchanged. Attribution is by whatever identity the gateway forwards — configure the gateway to pass the caller's `user` / `metadata.user_id` through, or every request lands in one bucket. If the gateway rewrites tool-call bodies, tool interception sees what the gateway sends, not what the agent sent.
 
 ## 🛠️ Framework Integration
 

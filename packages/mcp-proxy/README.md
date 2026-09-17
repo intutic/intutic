@@ -1,5 +1,7 @@
 # @intutic/mcp-governance-proxy
 
+> Three names, one thing: the directory is `packages/mcp-proxy`, the published package is `@intutic/mcp-governance-proxy`, and the docs page is `/integrations/mcp-proxy`.
+
 > Transparent stdio proxy that intercepts MCP `tools/call` JSON-RPC messages and applies workspace SOP policy before forwarding to real MCP servers.
 
 ## Overview

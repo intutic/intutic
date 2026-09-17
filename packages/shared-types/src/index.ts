@@ -372,6 +372,7 @@ export type {
   UsageSummary,
   UsageEvent,
   ModelBreakdown,
+  VirtualKeyBreakdown,
 } from './usage.js'
 
 // WS2: Advanced Observability

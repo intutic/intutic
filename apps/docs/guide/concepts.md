@@ -22,7 +22,7 @@ Most teams map one workspace to one code repository. This keeps governance rules
 
 ## Harnesses
 
-A **harness** is any AI coding agent that Intutic governs. Intutic currently supports **41 harnesses** — 40 auto-detected and config-synced by `intutic init`/`intutic connect` (some write directly into a generated hook file, others write `.env.intutic` pointing at a dedicated SDK-side gate (`@intutic/gate` / `intutic-clawde`) that lives in your own code), plus 1 that is operator-deployed rather than repo-detected (see the bridge-gated row below):
+A **harness** is any AI coding agent that Intutic governs. Intutic ships **41 harness adapters**; two of them (AutoGen and the Agentic Orchestrator) carry a confirmed open support gap and are left out of the headline count of **39 supported harnesses** — 40 adapters auto-detected and config-synced by `intutic init`/`intutic connect` (some write directly into a generated hook file, others write `.env.intutic` pointing at a dedicated SDK-side gate (`@intutic/gate` / `intutic-clawde`) that lives in your own code), plus 1 that is operator-deployed rather than repo-detected (see the bridge-gated row below):
 
 | Category | Harnesses |
 |----------|-----------|
@@ -108,7 +108,7 @@ Traces flagged with high waste metrics trigger automated configuration optimizat
 
 ## Anomaly Detection (ARE)
 
-The **Autonomous Reasoning Engine** monitors agent sessions in real time and flags suspicious behavior across **12 anomaly types**:
+The **Autonomous Reasoning Engine** runs on the control plane over the traces and hook events it ingests — a heuristic classifier per trace plus a baseline sweep — and flags suspicious behavior across **12 anomaly types**. It is not on the request path: the checks that act on a request as it happens are the proxy's own detectors and DLP, the response judge, the MCP interceptor and the harness hook gates.
 
 | Anomaly | What it catches |
 |---------|----------------|
@@ -125,7 +125,7 @@ The **Autonomous Reasoning Engine** monitors agent sessions in real time and fla
 | `WORKFLOW_BUDGET_BREACH` | Multi-step workflow over budget |
 | `WORKFLOW_GOAL_DRIFT` | Workflow deviating from its stated objective |
 
-When the ARE flags an anomaly, it can trigger a `KILL` enforcement action and open a governance incident.
+When the ARE flags an anomaly it records the finding and can open a governance incident. A finding blocks nothing on its own; it reaches enforcement only through the [promotion rule](/concepts/enforcement-actions#the-promotion-rule).
 
 ## Trust Scores
 

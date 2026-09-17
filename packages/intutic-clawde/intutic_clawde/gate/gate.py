@@ -1,6 +1,7 @@
 """The enforcement point.
 
-Intutic ships PreToolUse hooks for 18 harnesses; frameworks outside that list
+Intutic ships PreToolUse hooks for the harnesses in the sync-daemon's gate
+registry (services/sync-daemon/src/harness/gateKind.ts); frameworks outside that list
 (LangGraph, CrewAI, AutoGen, hand-rolled loops) have no adapter, and the
 sync-daemon writes no PreToolUse hook for them. The proxy's response gate
 (plugins/response_gate.rs, default-on) can withhold a model-emitted

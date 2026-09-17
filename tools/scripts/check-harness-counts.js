@@ -25,7 +25,7 @@
  *
  * Exit 1 on any mismatch or on any file it cannot read.
  */
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync, readdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -112,41 +112,93 @@ if (enumBackedRows !== realCount) {
 // `\*{0,2}` around each number tolerates markdown bold (`**41**`) — the same
 // convention check-detector-coverage-claims.js's own pattern uses for the
 // identical reason.
+// Interview-audit closeout Wave 5: the five-file list this gate used to check
+// left ~19 hand-stated counts unwatched (an integrations page said 38, a
+// guide said 18, four compare pages said 41 where the headline is 39). Every
+// docs page, both READMEs and the sandbox guide are read now, and the patterns
+// cover the phrasings those sites actually used. "other N harnesses" (an
+// integration page counting the rest) is N = count − 1.
 const CLAIM_PATTERNS = [
   /\*{0,2}(\d+)\*{0,2}\s+supported\s+harness(?:es)?\b/gi,
   /\*{0,2}(\d+)\*{0,2}\s+harness\s+adapters?\b/gi,
-  /Intutic\s+(?:currently\s+)?supports\s+\*{0,2}(\d+)\*{0,2}\s+harnesses\b/gi,
+  /\*{0,2}(\d+)\*{0,2}\s+harness\s+integrations\b/gi,
+  /Intutic\s+(?:currently\s+)?supports\s+\*{0,2}(\d+)\*{0,2}\s+(?:AI\s+agent\s+)?harnesses\b/gi,
   /works?\s+with\s+\*{0,2}(\d+)\*{0,2}\s+(?:coding\s+)?agents?\b/gi,
   /(?:for\s+)?all\s+\*{0,2}(\d+)\*{0,2}\s+harnesses\b/gi,
+  /(?:across|over)\s+\*{0,2}(\d+)\*{0,2}\s+(?:supported\s+)?harnesses\b/gi,
+  /\*{0,2}(\d+)\*{0,2}\s+harnesses\s+out-of-the-box\b/gi,
+  /\b(\d+)\s+Harness(?:es)?\b(?=\s*(?:<!--|$))/gm,
 ]
+const OTHER_PATTERN = /other\s+\*{0,2}(\d+)\*{0,2}\s+harnesses\b/gi
+
+function walkMarkdown(dir, out = []) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === '.vitepress' || entry.name === 'node_modules' || entry.name === 'public') continue
+    const full = join(dir, entry.name)
+    if (entry.isDirectory()) walkMarkdown(full, out)
+    else if (entry.name.endsWith('.md')) out.push(full)
+  }
+  return out
+}
 
 const TARGET_FILES = [
-  join(ROOT, 'apps/docs/guide/getting-started.md'),
-  join(ROOT, 'apps/docs/guide/settings.md'),
-  join(ROOT, 'apps/docs/guide/how-it-works.md'),
-  join(ROOT, 'apps/docs/guide/concepts.md'),
+  ...walkMarkdown(join(ROOT, 'apps/docs')),
   join(ROOT, 'README.md'),
+  join(ROOT, 'services/sync-daemon/README.md'),
 ]
+// Enterprise-only files: this script is mirrored to the public repo, where
+// `docs/` does not exist. Checked when present, skipped (and said so) when
+// not — a missing enterprise-only file is not an assertion failure there.
+const OPTIONAL_FILES = [join(ROOT, 'docs/guides/sandbox_and_policy_gates.md')]
+for (const file of OPTIONAL_FILES) {
+  if (existsSync(file)) TARGET_FILES.push(file)
+  else console.log(`[SKIP] ${file} is not in this checkout (enterprise-only).`)
+}
 
 let offences = 0
 let checked = 0
+
+function checkClaim(file, claimed, quoted, expected) {
+  checked += 1
+  if (!expected.includes(claimed)) {
+    console.error(
+      `[FAIL] ${file}: claims ${claimed} harnesses ("${quoted.trim()}"), but ` +
+        `HARNESS_COUNT=${realCount} and HARNESS_HEADLINE_COUNT=${headlineCount} ` +
+        `(accepted here: ${expected.join(' or ')}).`,
+    )
+    offences += 1
+  }
+}
 
 for (const file of TARGET_FILES) {
   if (!existsSync(file)) fail(`${file} is missing — this gate asserted nothing for it.`)
   const text = readFileSync(file, 'utf8')
   for (const pattern of CLAIM_PATTERNS) {
     for (const m of text.matchAll(pattern)) {
-      const claimed = Number(m[1])
-      checked += 1
-      if (claimed !== realCount && claimed !== headlineCount) {
-        console.error(
-          `[FAIL] ${file}: claims ${claimed} harnesses ("${m[0]}"), but ` +
-            `HARNESS_COUNT=${realCount} and HARNESS_HEADLINE_COUNT=${headlineCount}.`,
-        )
-        offences += 1
-      }
+      checkClaim(file, Number(m[1]), m[0], [realCount, headlineCount])
     }
   }
+  for (const m of text.matchAll(OTHER_PATTERN)) {
+    checkClaim(file, Number(m[1]), m[0], [realCount - 1, headlineCount - 1])
+  }
+}
+
+// ── Website markers (opt-in: --website <checkout>) ──────────────────────
+//
+// The marketing site keeps its counts between
+// `<!-- HARNESS_COUNT:sync -->N<!-- /HARNESS_COUNT:sync -->` markers; nothing
+// ever read them until this mode. Every marker must carry the headline count.
+const websiteFlag = process.argv.indexOf('--website')
+if (websiteFlag !== -1) {
+  const site = process.argv[websiteFlag + 1]
+  if (!site) fail('--website needs a path to the intutic-website checkout.')
+  const index = join(site, 'index.html')
+  if (!existsSync(index)) fail(`${index} is missing.`)
+  const html = readFileSync(index, 'utf8')
+  const markers = [...html.matchAll(/<!-- HARNESS_COUNT:sync -->\s*(\d+)[^<]*<!-- \/HARNESS_COUNT:sync -->/g)]
+  if (markers.length === 0) fail(`${index} has no HARNESS_COUNT:sync markers — this mode asserted nothing.`)
+  for (const m of markers) checkClaim(index, Number(m[1]), m[0], [headlineCount])
+  console.log(`[PASS] website: ${markers.length} HARNESS_COUNT:sync marker(s) in ${index} carry ${headlineCount}.`)
 }
 
 if (checked === 0) fail('no harness-count claim was checked. This gate asserted nothing.')

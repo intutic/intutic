@@ -1,4 +1,4 @@
-# Pre-Adoption Gate for Model Upgrades <Badge type="info" text="FinOps & Governance" />
+# Pre-Adoption Report for Model Upgrades <Badge type="info" text="FinOps & Governance" />
 
 Before you switch a workflow to a cheaper or newer model, you usually want more than a vibe check. The mirror-adoption report mirror-tests a candidate model against a sampled fraction of your real, live traffic, has an LLM judge each comparison, and rolls the results up into one report: win/loss/tie counts, a fault-rate delta, a cost delta, and a latency delta.
 
