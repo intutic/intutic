@@ -58,6 +58,8 @@ export const GUARDRAIL_EVENT_TYPES = [
   'SOURCE_STALE',
   'SOURCE_RECONFIRMED',
   'CITATION_REBOUND',
+  /** The stored render was recomputed by the current renderer (TD-478); shadow evidence gathered under the old render was reset. */
+  'RENDER_REBOUND',
 ] as const
 export type GuardrailEventType = (typeof GUARDRAIL_EVENT_TYPES)[number]
 
