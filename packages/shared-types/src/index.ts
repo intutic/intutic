@@ -103,6 +103,7 @@ export type {
   SopProofTree,
   SopLifecycleTransition,
   SopHealthMetrics,
+  SslCompileState,
   DreamCycleQueueItem,
   DreamCycleEnqueueInput,
   GodelProbeResult,
