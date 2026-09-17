@@ -200,6 +200,10 @@ export interface TraceSummary {
   complianceScore: number
   actualCostUsd: number
   anomalyDetected: AnomalyType | string | null
+  /** True when the request was served under a valid break-glass token, global or scoped (migration 170). */
+  breakGlass?: boolean
+  /** The approval this trace ran under, joinable to `break_glass_requests`; null when `breakGlass` is false. */
+  breakGlassRequestId?: string | null
 }
 
 /** Paginated result from trace listing. */
@@ -304,6 +308,10 @@ export interface TraceDetail {
    * it back is what the shadow-routing savings report aggregates.
    */
   routingShadowModel?: string | null
+  /** True when the request was served under a valid break-glass token, global or scoped (migration 170). */
+  breakGlass?: boolean
+  /** The approval this trace ran under; what it skipped is that approval's `policyId`. */
+  breakGlassRequestId?: string | null
   /**
    * What this request touched (migration 105). `toolCallMetrics` is token
    * accounting per tool; this is the files, URLs and commands they named.

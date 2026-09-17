@@ -1348,6 +1348,19 @@ async fn accrue_spend(
 ///
 /// This single handler is mounted on all four LLM provider paths (see router.rs).
 /// It implements the full 8-step governance pipeline described at the top of this file.
+/// Under a detector-scoped break-glass, drop only the named detector's
+/// findings; every other scope (none, global, a WASM rule) leaves the list
+/// as evaluated. Global never reaches here — the caller skips evaluation.
+fn retain_findings_outside_break_glass_scope(
+    mut findings: Vec<crate::plugins::anomaly::AnomalyFinding>,
+    scope: Option<&crate::store::BreakGlassScope>,
+) -> Vec<crate::plugins::anomaly::AnomalyFinding> {
+    if let Some(crate::store::BreakGlassScope::Detector(id)) = scope {
+        findings.retain(|f| f.detector_id != id.as_str());
+    }
+    findings
+}
+
 pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>) -> Response {
     let start = Instant::now();
 
@@ -2537,18 +2550,28 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         }
     }
 
-    // Check for break-glass override token in request headers
+    // Check for break-glass override token in request headers.
+    //
+    // `has_break_glass` is the trace flag: true for any valid token, scoped
+    // or not, so a request that ran under an override is always attributable.
+    // `break_glass_scope` is what the token may skip — `Global` skips the
+    // anomaly detectors, the WASM rules and the control-plane pre-check
+    // wholesale (every token before scoping existed); `WasmRule` / `Detector`
+    // skip one named thing and leave everything else in force.
     let mut has_break_glass = false;
     let mut break_glass_request_id: Option<String> = None;
+    let mut break_glass_scope: Option<crate::store::BreakGlassScope> = None;
     if let Some(bg_token) = headers
         .get("x-intutic-break-glass")
         .and_then(|v| v.to_str().ok())
     {
         match state.control_plane.break_glass_grant(bg_token, &workspace_id).await {
             Some(grant) => {
-                tracing::info!(workspace_id = %workspace_id, request_id = %grant.request_id, "Active break-glass override token detected — bypassing safety policies");
+                let scope = grant.scope();
+                tracing::info!(workspace_id = %workspace_id, request_id = %grant.request_id, scope = ?scope, "Active break-glass override token detected");
                 has_break_glass = true;
                 break_glass_request_id = Some(grant.request_id);
+                break_glass_scope = Some(scope);
             }
             None => {
                 // Never the raw token in the log — a truncated hash prefix
@@ -2559,6 +2582,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             }
         }
     }
+
+    let bypass_everything = matches!(break_glass_scope, Some(crate::store::BreakGlassScope::Global));
 
     // ── Step 4b: WASM custom rules ───────────────────────────────────
     let session_id = headers
@@ -2876,13 +2901,16 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // the old ordering, both benign: detectors (pure functions) now also run
     // on requests the budget gate refuses — wasted work only on refused
     // requests — and the shadow evaluation sees the amended context, which is
-    // more correct, not less. Under break-glass detectors are skipped
-    // entirely and the count stays 0 — the honest default.
+    // more correct, not less. Under a global break-glass the detectors are
+    // skipped entirely and the count stays 0 — the honest default. Under a
+    // detector-scoped one they all run and only the named detector's
+    // findings are dropped, so `corroborating_detectors` counts the
+    // detectors that still apply.
     let anomaly_registry = crate::plugins::anomaly::DetectorRegistry::with_defaults();
-    let findings = if has_break_glass {
+    let findings = if bypass_everything {
         Vec::new()
     } else {
-        anomaly_registry.evaluate_all(&wasm_ctx)
+        retain_findings_outside_break_glass_scope(anomaly_registry.evaluate_all(&wasm_ctx), break_glass_scope.as_ref())
     };
     wasm_ctx.corroborating_detectors =
         crate::plugins::anomaly::DetectorRegistry::corroborating_detector_ids(&findings).len()
@@ -3008,7 +3036,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // rather than replacing the first because the kind list is an existing wire
     // field the control plane already reads.
     let mut advisory_findings: Vec<crate::telemetry::FindingWire> = Vec::new();
-    if !has_break_glass {
+    if !bypass_everything {
         // `findings` was computed above, before the trace snapshot — do NOT
         // re-evaluate here: the detectors are pure functions of a context
         // that has not changed, and a second pass would only double the cost.
@@ -3363,13 +3391,18 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     }
 
     // Declared outside the break-glass branch so the trace can carry it either
-    // way: a break-glass session evaluates no rules, and an empty list is the
-    // honest record of that rather than an absent field.
+    // way: a global break-glass session evaluates no rules, and an empty list
+    // is the honest record of that rather than an absent field. A token
+    // scoped to one rule leaves that rule unevaluated and runs the rest.
     let mut wasm_shadow_reports: Vec<crate::wasm::registry::ShadowReport> = Vec::new();
-    if !has_break_glass {
+    if !bypass_everything {
+        let exempt_rule = match &break_glass_scope {
+            Some(crate::store::BreakGlassScope::WasmRule(id)) => Some(id.as_str()),
+            _ => None,
+        };
         let (wasm_verdict, shadow_reports) = state
             .wasm_registry
-            .evaluate_with_shadow(&state.control_plane, &wasm_ctx)
+            .evaluate_with_shadow_exempting(&state.control_plane, &wasm_ctx, exempt_rule)
             .await;
         // Recorded, not merely logged. Promotion out of shadow is gated on a
         // counted false-positive rate, and a rule cannot earn that from log
@@ -3462,8 +3495,14 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     }
 
     // ── Step 5: Policy pre-check via control plane ───────────────────
+    //
+    // Skipped only by a GLOBAL break-glass. The pre-check is not a policy in
+    // the WASM/detector sense: the server checks key validity, the workspace
+    // budget cap, loop status and plan-tier limits, and emits no policy id,
+    // so there is nothing for a scoped token to name — and a budget cap must
+    // not be bypassed by a token approved to skip one rule.
 
-    if !has_break_glass {
+    if !bypass_everything {
         let policy_cfg = &state.config.intutic_settings.policy;
         if let Some(cp_url) = &policy_cfg.control_plane_url {
             match policy_check(
@@ -7744,6 +7783,33 @@ pub fn get_terminal_stream_event(protocol: &crate::protocol::Protocol, model: &s
 
 #[cfg(test)]
 mod tests {
+    mod break_glass_scope {
+        use crate::plugins::anomaly::{AnomalyFinding, AnomalyKind};
+        use crate::store::BreakGlassScope;
+
+        fn finding(detector_id: &'static str) -> AnomalyFinding {
+            let mut f = AnomalyFinding::kill(AnomalyKind::UnauthorizedTool, "x");
+            f.detector_id = detector_id;
+            f
+        }
+
+        #[test]
+        fn a_detector_scoped_token_drops_only_the_named_detector_s_findings() {
+            let findings = vec![finding("consecutive_repeat"), finding("path_traversal"), finding("consecutive_repeat")];
+            let kept = super::super::retain_findings_outside_break_glass_scope(findings, Some(&BreakGlassScope::Detector("consecutive_repeat".into())));
+            assert_eq!(kept.iter().map(|f| f.detector_id).collect::<Vec<_>>(), vec!["path_traversal"]);
+        }
+
+        #[test]
+        fn a_wasm_scoped_or_absent_token_leaves_every_finding_in_force() {
+            for scope in [None, Some(BreakGlassScope::WasmRule("pcas_1".into()))] {
+                let findings = vec![finding("consecutive_repeat"), finding("path_traversal")];
+                let kept = super::super::retain_findings_outside_break_glass_scope(findings, scope.as_ref());
+                assert_eq!(kept.len(), 2, "scope {scope:?} must not drop findings");
+            }
+        }
+    }
+
     use super::*;
     use axum::http::HeaderMap;
 

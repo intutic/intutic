@@ -181,8 +181,22 @@ impl PluginRegistry {
         control_plane: &Arc<dyn ControlPlaneCache>,
         ctx: &RequestContext,
     ) -> (Verdict, Vec<ShadowReport>) {
+        self.evaluate_with_shadow_exempting(control_plane, ctx, None).await
+    }
+
+    /// `evaluate_with_shadow`, with one rule left unevaluated: a break-glass
+    /// token scoped to `exempt_rule_id` (`BreakGlassScope::WasmRule`) skips
+    /// exactly that rule. Every other rule runs and may still Kill or Reask.
+    /// An exempted rule is neither evaluated nor shadow-reported — a report
+    /// would record a verdict nobody computed.
+    pub async fn evaluate_with_shadow_exempting(
+        &self,
+        control_plane: &Arc<dyn ControlPlaneCache>,
+        ctx: &RequestContext,
+        exempt_rule_id: Option<&str>,
+    ) -> (Verdict, Vec<ShadowReport>) {
         let mut shadow = Vec::new();
-        let verdict = self.evaluate_inner(control_plane, ctx, &mut shadow).await;
+        let verdict = self.evaluate_inner(control_plane, ctx, &mut shadow, exempt_rule_id).await;
         (verdict, shadow)
     }
 
@@ -192,7 +206,7 @@ impl PluginRegistry {
         ctx: &RequestContext,
     ) -> Verdict {
         let mut sink = Vec::new();
-        self.evaluate_inner(control_plane, ctx, &mut sink).await
+        self.evaluate_inner(control_plane, ctx, &mut sink, None).await
     }
 
     async fn evaluate_inner(
@@ -200,6 +214,7 @@ impl PluginRegistry {
         control_plane: &Arc<dyn ControlPlaneCache>,
         ctx: &RequestContext,
         shadow_out: &mut Vec<ShadowReport>,
+        exempt_rule_id: Option<&str>,
     ) -> Verdict {
         let workspace_id = &ctx.workspace_id;
 
@@ -246,6 +261,14 @@ impl PluginRegistry {
         let mut pending_reask: Option<Verdict> = None;
 
         for m in modules {
+            if exempt_rule_id == Some(m.rule_id.as_str()) {
+                tracing::info!(
+                    workspace_id = %workspace_id,
+                    rule_id = %m.rule_id,
+                    "WASM rule not evaluated: a break-glass token scoped to this rule is active"
+                );
+                continue;
+            }
             let verdict = evaluate_wasm_rule(&self.engine, &m.module, ctx, &files).await;
 
             // A shadowed rule reports and falls through. It is evaluated exactly

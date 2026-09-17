@@ -48,10 +48,10 @@ sequenceDiagram
 
 ### 1. Submitting a Request
 Navigate to **Break-Glass** in the dashboard:
-1. Enter the target **Policy ID** to bypass (or leave empty for a global bypass).
+1. Enter the **scope** to bypass, or leave it empty for a global bypass. A scope is `wasm:<ruleId>` (one custom WASM rule) or `detector:<detectorId>` (one anomaly detector); nothing else can be named. SOPs and hook rules have no bypass, and DLP, budgets, `deny_tools` and the control plane's pre-check are never skipped by any token.
 2. Choose the **Bypass Duration** (e.g. 15 minutes, 1 hour, or up to 24 hours).
 3. Click **Submit Request**.
-4. **Copy the Token** shown in the warning box. *It is shown only this once — the control plane does not display it again after this step.* Treat it as a live credential for the whole bypass duration: it is stored as submitted, not encrypted at rest, so anyone who can read it can use it until it expires.
+4. **Copy the Token** shown in the warning box. *It is shown only this once — the control plane does not display it again after this step, and it is not at rest anywhere: the request row and the cache key the approval writes hold only its SHA-256.* Treat it as a live credential for the whole bypass duration: anyone holding it can use it until it expires.
 
 ### 2. Peer Approval (Double Authorization)
 To prevent security gaps:
@@ -70,15 +70,14 @@ X-Intutic-Break-Glass: bg_xxxxxxx
 ```
 
 For the configured duration, the proxy will:
-1. Validate the token in Valkey (a single GET).
-2. Skip custom WASM registry checks.
-3. Skip control plane policy pre-checks.
-4. Skip the anomaly detector chain entirely — none of the twelve detector
-   categories (loop detection, sequence anomalies, and the rest of the
-   registry) run against a break-glass request, so no finding is recorded
-   for it under any category, not just the ones a specific policy would have
-   blocked.
-5. Log the bypass event and associated developer in the audit trail.
+1. Validate the token (a single cache GET keyed on the token's SHA-256, scoped to the workspace the approval named).
+2. Mark the request's execution trace `break_glass = true` with the approval's request id, and log the bypass and the approval in the audit trail.
+3. Skip what the approval's scope allows:
+   - **Global** (no scope): the custom WASM rules, the control plane's policy pre-check, and the whole anomaly detector chain — none of the twelve detector categories run, so no finding is recorded under any category.
+   - **`wasm:<ruleId>`**: that one WASM rule is not evaluated. Every other rule, every detector and the pre-check still run and can still block.
+   - **`detector:<detectorId>`**: that detector's findings are dropped. Every other detector, every WASM rule and the pre-check still run; the corroboration count reflects the detectors that still apply.
+
+A scoped token narrows a bypass; it never widens one. Scopes written before validation existed (an unprefixed id) are read as `wasm:<id>`.
 
 ---
 

@@ -48,7 +48,7 @@ fn graph_key(workspace_id: &str, graph_id: &str, suffix: &str) -> String {
 
 
 /// Lowercase hex SHA-256, matching the control plane's `hashKeySha256`.
-pub(crate) fn sha256_hex(raw: &str) -> String {
+pub fn sha256_hex(raw: &str) -> String {
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new();
     h.update(raw.as_bytes());
@@ -1337,7 +1337,10 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
     }
 
     async fn break_glass_grant(&self, token: &str, workspace_id: &str) -> Option<BreakGlassGrant> {
-        let raw = self.get_gated(format!("bg:token:{}", token)).await?;
+        // Keyed on the token's SHA-256, never the token: the control plane
+        // stores the hash in `break_glass_requests.token` and writes this key
+        // from it, so a dump of either store yields nothing replayable.
+        let raw = self.get_gated(format!("bg:token:{}", sha256_hex(token))).await?;
 
         // Present but unparseable must DENY, unlike feature_flags above — the
         // pre-scoping code treated key existence alone as valid, which is
@@ -1350,7 +1353,8 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
             return None;
         }
         let request_id = json.get("requestId")?.as_str()?.to_string();
-        Some(BreakGlassGrant { request_id })
+        let policy_id = json.get("policyId").and_then(|v| v.as_str()).map(String::from);
+        Some(BreakGlassGrant { request_id, policy_id })
     }
 
     async fn transition_baseline(&self, workspace_id: &str) -> Option<String> {

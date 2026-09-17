@@ -15,7 +15,9 @@ use intutic_proxy::store::{
     CachedResponse, ControlPlaneAuth, ControlPlaneCache, FeatureFlags, HardCapStatus, JudgeScope,
     LocalStore, MemoryStore, NotifyScope, NullControlPlaneCache, Ownership,
     ValkeyControlPlaneCache, ValkeyStore,
+    BreakGlassScope,
 };
+use intutic_proxy::store::valkey::sha256_hex;
 use redis::AsyncCommands;
 use std::sync::Arc;
 
@@ -476,9 +478,12 @@ async fn break_glass_grant_is_scoped_to_the_issuing_workspace() {
     let token = format!("bg_{}", unique_ws("token"));
     let request_id = format!("bgr_{}", unique_ws("req"));
     let mut conn = valkey.as_ref().clone();
+    // The approval is keyed on the token's SHA-256 — the control plane never
+    // stores the raw token, so neither store holds anything replayable.
+    let key = format!("bg:token:{}", sha256_hex(&token));
     let _: () = conn
         .set(
-            format!("bg:token:{}", token),
+            &key,
             serde_json::json!({
                 "requestId": request_id,
                 "workspaceId": owner_ws,
@@ -494,9 +499,14 @@ async fn break_glass_grant_is_scoped_to_the_issuing_workspace() {
 
     let grant = cp.break_glass_grant(&token, &owner_ws).await;
     assert_eq!(
-        grant.map(|g| g.request_id),
+        grant.as_ref().map(|g| g.request_id.clone()),
         Some(request_id),
         "the issuing workspace must be granted, carrying the real request id"
+    );
+    assert_eq!(
+        grant.map(|g| g.scope()),
+        Some(BreakGlassScope::Global),
+        "a token with no policy id is the global bypass every existing token was"
     );
 
     assert!(
@@ -504,7 +514,44 @@ async fn break_glass_grant_is_scoped_to_the_issuing_workspace() {
         "a token approved for one workspace must not bypass policy for another"
     );
 
+    // A key written under the RAW token (the pre-hashing layout) is not a grant.
+    let _: () = conn.set(format!("bg:token:{}", token), r#"{"requestId":"bgr_raw","workspaceId":"x","policyId":null,"expiresAt":"2099-01-01T00:00:00.000Z"}"#).await.unwrap();
+    assert!(cp.break_glass_grant(&token, "x").await.is_none(), "the lookup is by hash; a raw-token key must not grant");
     let _: Result<(), _> = conn.del(format!("bg:token:{}", token)).await;
+
+    let _: Result<(), _> = conn.del(&key).await;
+}
+
+/// A scoped token names one WASM rule or one detector and skips nothing
+/// else; a legacy unprefixed id narrows to a WASM rule rather than staying a
+/// global bypass.
+#[tokio::test]
+async fn break_glass_grant_carries_its_scope() {
+    let Some(valkey) = valkey_conn().await else {
+        eprintln!("skipping: VALKEY_URL not set or Valkey unreachable");
+        return;
+    };
+    let ws = unique_ws("bg-scope");
+    let mut conn = valkey.as_ref().clone();
+    let cp = ValkeyControlPlaneCache::new(valkey.clone());
+    for (policy_id, expected) in [
+        ("wasm:pcas_exfiltration_001", BreakGlassScope::WasmRule("pcas_exfiltration_001".into())),
+        ("detector:consecutive_repeat", BreakGlassScope::Detector("consecutive_repeat".into())),
+        ("pcas_exfiltration_001", BreakGlassScope::WasmRule("pcas_exfiltration_001".into())),
+    ] {
+        let token = format!("bg_{}", unique_ws("token"));
+        let key = format!("bg:token:{}", sha256_hex(&token));
+        let _: () = conn
+            .set(
+                &key,
+                serde_json::json!({ "requestId": "bgr_scoped", "workspaceId": ws, "policyId": policy_id, "expiresAt": "2099-01-01T00:00:00.000Z" }).to_string(),
+            )
+            .await
+            .unwrap();
+        let grant = cp.break_glass_grant(&token, &ws).await.expect("a scoped token is still a grant for its workspace");
+        assert_eq!(grant.scope(), expected, "policyId {policy_id}");
+        let _: Result<(), _> = conn.del(&key).await;
+    }
 }
 
 /// Present but unparseable must DENY here — the opposite rule from
@@ -520,8 +567,9 @@ async fn break_glass_grant_denies_an_unparseable_payload() {
     };
     let ws = unique_ws("bg-garbage");
     let token = format!("bg_{}", unique_ws("token"));
+    let key = format!("bg:token:{}", sha256_hex(&token));
     let mut conn = valkey.as_ref().clone();
-    let _: () = conn.set(format!("bg:token:{}", token), "}{ not json").await.unwrap();
+    let _: () = conn.set(&key, "}{ not json").await.unwrap();
 
     let cp = ValkeyControlPlaneCache::new(valkey.clone());
     assert!(
@@ -529,7 +577,7 @@ async fn break_glass_grant_denies_an_unparseable_payload() {
         "an unparseable break-glass payload must deny, not fail open"
     );
 
-    let _: Result<(), _> = conn.del(format!("bg:token:{}", token)).await;
+    let _: Result<(), _> = conn.del(&key).await;
 }
 
 /// Tool-sequence anomaly detection keeps only the newest `cap` entries, and
