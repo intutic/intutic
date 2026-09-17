@@ -37,6 +37,13 @@ export interface SslGraphJson {
     // invisible because nothing reads the field and the read path casts through
     // `as unknown as SslGraphJson`.
     activation_rules: string[]
+    /**
+     * Triggers the compiler refused because they describe a schedule or a
+     * task the agent is asked to do rather than a condition the enforcer can
+     * observe on a request ("every Monday", "when asked to deploy"). Kept so
+     * the author can see what was dropped; never evaluated.
+     */
+    dropped_triggers?: string[]
   }
   structural_layer: {
     steps: SslStep[]
