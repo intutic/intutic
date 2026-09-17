@@ -444,7 +444,9 @@ async fn parse_key_context(
             .map(|s| s.to_string()),
         max_budget: None,
         spend: 0.0,
-        models: Vec::new(),
+        // The key's own allowlist (migration 181), same field name and same
+        // shape as the cached entry; empty when the key set none.
+        models: crate::store::valkey::string_list(body.get("allowedModels")),
         expires: None,
         // /auth/key-context is the AUTHORITATIVE org answer (LLD #71): the
         // cell org-pinning path lands here precisely when a cached entry
@@ -2362,7 +2364,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         }
     }
 
-    // ── Step 2b: Approved-models allowlist (Valkey, workspace-level) ────
+    // ── Step 2b: Approved-models allowlist (Valkey, workspace ∩ key) ────
     //
     // `complianceProbesService.ts:106` has checked
     // `settings['allowedModels']` since that probe was written, but until
@@ -2371,9 +2373,14 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // enforcement half of making that key real: `None`/empty means
     // unrestricted (no control plane, or a workspace that never configured
     // this), exactly like `egressAllow`'s own backward-compatible default.
+    //
+    // The key's own list (`api_keys.allowed_models`, migration 181) is ANDed
+    // with it: a key can narrow what its workspace approves, never widen it.
+    // Unmanaged (standalone) has no key record and so no key list.
     let allowed_models = state.control_plane.allowed_models(&workspace_id).await;
+    let key_models: &[String] = key_record.as_ref().map_or(&[], |k| k.models.as_slice());
     if let Err(e) =
-        crate::metering::check_model_allowed(&model, allowed_models.as_deref())
+        crate::metering::check_model_allowed(&model, allowed_models.as_deref(), key_models)
     {
         tracing::warn!(
             workspace_id = %workspace_id,
@@ -9937,16 +9944,35 @@ mod tests {
         /// `None` and a cleared/never-set `Some(vec![])`.
         #[test]
         fn none_and_empty_list_from_the_control_plane_both_allow_every_model() {
-            assert!(crate::metering::check_model_allowed("anything", None).is_ok());
+            assert!(crate::metering::check_model_allowed("anything", None, &[]).is_ok());
             let empty: Vec<String> = vec![];
-            assert!(crate::metering::check_model_allowed("anything", Some(&empty)).is_ok());
+            assert!(crate::metering::check_model_allowed("anything", Some(&empty), &[]).is_ok());
         }
 
         #[test]
         fn a_configured_list_refuses_a_model_outside_it() {
             let allowed = vec!["claude-sonnet-4-5".to_string()];
-            assert!(crate::metering::check_model_allowed("claude-sonnet-4-5", Some(&allowed)).is_ok());
-            assert!(crate::metering::check_model_allowed("gpt-4o", Some(&allowed)).is_err());
+            assert!(crate::metering::check_model_allowed("claude-sonnet-4-5", Some(&allowed), &[]).is_ok());
+            assert!(crate::metering::check_model_allowed("gpt-4o", Some(&allowed), &[]).is_err());
+        }
+
+        /// The key list the gate reads comes off the cached auth entry's
+        /// `allowedModels`; absent, null, or non-array all mean "inherit".
+        #[test]
+        fn key_list_is_read_from_the_cached_entry_and_only_narrows() {
+            use crate::store::valkey::string_list;
+            let entry: serde_json::Value = serde_json::json!({
+                "workspaceId": "ws_x",
+                "allowedModels": ["claude-haiku-4-5", 7, null],
+            });
+            let key = string_list(entry.get("allowedModels"));
+            assert_eq!(key, vec!["claude-haiku-4-5".to_string()]);
+            assert!(string_list(None).is_empty());
+            assert!(string_list(Some(&serde_json::Value::Null)).is_empty());
+
+            let ws = vec!["claude-sonnet-4-5".to_string(), "claude-haiku-4-5".to_string()];
+            assert!(crate::metering::check_model_allowed("claude-haiku-4-5", Some(&ws), &key).is_ok());
+            assert!(crate::metering::check_model_allowed("claude-sonnet-4-5", Some(&ws), &key).is_err());
         }
     }
 }

@@ -1,8 +1,9 @@
 /**
- * install-daemon.ts — System-level sync-daemon & mcp-daemon persistence installer.
+ * install-daemon.ts — System-level sync-daemon, mcp-daemon & proxy persistence installer.
  *
- * Registers the Intutic sync-daemon or mcp-daemon as system-level services so they
- * auto-start on login/boot and restart automatically on any exit.
+ * Registers the Intutic sync-daemon, mcp-daemon, or the standalone `intutic-proxy`
+ * binary as system-level services so they auto-start on login/boot and restart
+ * automatically on any exit.
  *
  * Platform support:
  *   - macOS : LaunchAgent/LaunchDaemon (LaunchDaemon requires root/system flag)
@@ -18,6 +19,7 @@ import * as path from 'node:path'
 import * as os from 'node:os'
 import { execFileSync } from 'node:child_process'
 import { loadConfig } from '../config/store.js'
+import { localProxyBinary } from '../lib/proxyBinary.js'
 
 // ── Error definitions ──────────────────────────────────────────────────
 
@@ -50,6 +52,40 @@ export interface UninstallDaemonOptions {
   system?: boolean
 }
 
+/**
+ * `intutic daemon install --proxy` (TD-465): supervise the standalone Rust
+ * proxy the way `intutic start` runs it in the foreground. No workspace or
+ * API key — standalone has no control plane — so this is a separate option
+ * shape rather than a flag on `InstallDaemonOptions`.
+ */
+export interface ProxyServiceOptions {
+  /** Proxy listen port. Defaults to 4000, the same as `intutic start`. */
+  port?: string
+  /**
+   * Valkey to attach to. When set, the unit exports `VALKEY_URL`; when absent
+   * it exports `INTUTIC_STANDALONE=1` instead — the two states `intutic start`
+   * resolves at launch by probing, resolved here once at install time because
+   * a service file cannot probe.
+   */
+  valkeyUrl?: string
+  /** Upstream LLM provider base URL (`UPSTREAM_URL`). */
+  upstreamUrl?: string
+  /**
+   * Absolute path to the `intutic-proxy` binary. Defaults to the version-pinned
+   * binary the launcher installs under `~/.intutic/bin`, then to wherever
+   * `intutic-proxy` resolves on PATH.
+   */
+  binaryPath?: string
+  /** If true, just print what would be done without writing files */
+  dryRun?: boolean
+  /** Install as a system-level service (LaunchDaemon on macOS, systemd system unit on Linux) */
+  system?: boolean
+}
+
+/** `ProxyServiceOptions` with every default applied — what the builders take. */
+export type ResolvedProxyOptions = Required<Pick<ProxyServiceOptions, 'binaryPath' | 'port'>> &
+  Pick<ProxyServiceOptions, 'valkeyUrl' | 'upstreamUrl'>
+
 // ── Helpers ───────────────────────────────────────────────────────────
 
 export function checkRootPrivileges(system: boolean, targetPath = '/Library/LaunchDaemons/ or /etc/systemd/system/'): void {
@@ -68,9 +104,17 @@ export interface ResolvedPaths {
   errPath: string
 }
 
-export function getPaths(system: boolean, isMcp: boolean, platform: string = process.platform): ResolvedPaths {
-  const label = isMcp ? 'ai.intutic.mcp-daemon' : 'ai.intutic.sync-daemon'
-  const unitName = isMcp ? 'intutic-mcp-daemon.service' : 'intutic-sync-daemon.service'
+/** The three processes this file can supervise. */
+export type ServiceTarget = 'sync' | 'mcp' | 'proxy'
+
+const SERVICE_NAMES: Record<ServiceTarget, { label: string; unitName: string; logStem: string }> = {
+  sync:  { label: 'ai.intutic.sync-daemon', unitName: 'intutic-sync-daemon.service', logStem: 'sync-daemon' },
+  mcp:   { label: 'ai.intutic.mcp-daemon',  unitName: 'intutic-mcp-daemon.service',  logStem: 'mcp-daemon' },
+  proxy: { label: 'ai.intutic.proxy',       unitName: 'intutic-proxy.service',       logStem: 'proxy' },
+}
+
+export function getServicePaths(system: boolean, target: ServiceTarget, platform: string = process.platform): ResolvedPaths {
+  const { label, unitName, logStem } = SERVICE_NAMES[target]
 
   if (platform === 'darwin') {
     const dir = system ? '/Library/LaunchDaemons' : path.join(os.homedir(), 'Library', 'LaunchAgents')
@@ -81,8 +125,8 @@ export function getPaths(system: boolean, isMcp: boolean, platform: string = pro
       targetDir: dir,
       targetPath: plistPath,
       logsDir,
-      logPath: path.join(logsDir, isMcp ? 'mcp-daemon.log' : 'sync-daemon.log'),
-      errPath: path.join(logsDir, isMcp ? 'mcp-daemon.err' : 'sync-daemon.err'),
+      logPath: path.join(logsDir, `${logStem}.log`),
+      errPath: path.join(logsDir, `${logStem}.err`),
     }
   } else {
     const dir = system ? '/etc/systemd/system' : path.join(os.homedir(), '.config', 'systemd', 'user')
@@ -94,10 +138,15 @@ export function getPaths(system: boolean, isMcp: boolean, platform: string = pro
       targetDir: dir,
       targetPath: unitPath,
       logsDir,
-      logPath: path.join(logsDir, isMcp ? 'mcp-daemon.log' : 'sync-daemon.log'),
-      errPath: path.join(logsDir, isMcp ? 'mcp-daemon.err' : 'sync-daemon.err'),
+      logPath: path.join(logsDir, `${logStem}.log`),
+      errPath: path.join(logsDir, `${logStem}.err`),
     }
   }
+}
+
+/** The two-daemon shape every existing caller uses; `getServicePaths` is the general form. */
+export function getPaths(system: boolean, isMcp: boolean, platform: string = process.platform): ResolvedPaths {
+  return getServicePaths(system, isMcp ? 'mcp' : 'sync', platform)
 }
 
 // ── macOS LaunchAgent & LaunchDaemon ──────────────────────────────────
@@ -365,6 +414,125 @@ Environment=INTUTIC_WORKSPACE_ID=${opts.workspaceId}
 Environment=INTUTIC_API_KEY=${opts.apiKey}
 Environment=INTUTIC_CONTROL_PLANE_URL=${opts.controlPlaneUrl}
 Environment=CONTROL_PLANE_URL=${opts.controlPlaneUrl}
+
+StandardOutput=append:${paths.logPath}
+StandardError=append:${paths.errPath}
+
+[Install]
+WantedBy=${system ? 'multi-user.target' : 'default.target'}
+`
+}
+
+// ── Standalone proxy (TD-465) ─────────────────────────────────────────
+
+/**
+ * The environment `intutic start` hands the proxy, as a service file has to
+ * fix it: `PORT` always; `VALKEY_URL` when a Valkey was named, else
+ * `INTUTIC_STANDALONE=1` so the proxy skips the probe and says why;
+ * `UPSTREAM_URL` only when given. Insertion order is the order it is written.
+ */
+export function proxyServiceEnv(opts: ResolvedProxyOptions): Record<string, string> {
+  return {
+    PORT: opts.port,
+    ...(opts.valkeyUrl ? { VALKEY_URL: opts.valkeyUrl } : { INTUTIC_STANDALONE: '1' }),
+    ...(opts.upstreamUrl ? { UPSTREAM_URL: opts.upstreamUrl } : {}),
+  }
+}
+
+/**
+ * Resolve the absolute `intutic-proxy` path a service file may reference.
+ *
+ * Same rule as `resolveMcpDaemonExec`: launchd and systemd exec the program
+ * directly, do not search PATH, and refuse a relative `ExecStart`, so the PATH
+ * shim `intutic start` falls back to is not usable here. An explicit path is
+ * taken as given but must be absolute; otherwise the launcher's version-pinned
+ * binary, then `which`. Nothing found is an error rather than a unit that
+ * fails on its first start with a message only the log file sees.
+ */
+export function resolveProxyServiceBinary(explicit?: string): string {
+  if (explicit) {
+    if (!path.isAbsolute(explicit)) {
+      throw new Error(`--binary-path must be absolute (a service file cannot search PATH): ${explicit}`)
+    }
+    return explicit
+  }
+  const pinned = localProxyBinary()
+  if (pinned) return pinned
+  try {
+    const resolved = execFileSync('which', ['intutic-proxy'], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+      .split('\n')[0]
+      .trim()
+    if (path.isAbsolute(resolved)) return resolved
+  } catch {
+    // `which` exits non-zero when nothing is on PATH; handled by the throw below.
+  }
+  throw new Error(
+    'Could not find the intutic-proxy binary. Install it with `npm install -g @intutic/proxy` ' +
+    'or pass --binary-path /absolute/path/to/intutic-proxy.',
+  )
+}
+
+export function buildProxyPlist(opts: ResolvedProxyOptions, system = false): string {
+  const paths = getServicePaths(system, 'proxy', 'darwin')
+  const runAtLoad = system ? '' : '\n  <key>RunAtLoad</key>\n  <true/>'
+  const envXml = Object.entries(proxyServiceEnv(opts))
+    .map(([k, v]) => `    <key>${k}</key>\n    <string>${v}</string>`)
+    .join('\n')
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${paths.label}</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>${opts.binaryPath}</string>
+  </array>
+
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>5</integer>${runAtLoad}
+
+  <key>StandardOutPath</key>
+  <string>${paths.logPath}</string>
+  <key>StandardErrorPath</key>
+  <string>${paths.errPath}</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+${envXml}
+  </dict>
+</dict>
+</plist>
+`
+}
+
+export function buildProxyUnit(opts: ResolvedProxyOptions, system = false): string {
+  const paths = getServicePaths(system, 'proxy', 'linux')
+  const envLines = Object.entries(proxyServiceEnv(opts))
+    .map(([k, v]) => `Environment=${k}=${v}`)
+    .join('\n')
+
+  return `[Unit]
+Description=Intutic Proxy — Standalone governed LLM gateway
+Documentation=https://docs.intutic.ai/integrations/standalone
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=${opts.binaryPath}
+
+Restart=always
+RestartSec=5
+
+${envLines}
 
 StandardOutput=append:${paths.logPath}
 StandardError=append:${paths.errPath}
@@ -828,5 +996,135 @@ export async function mcpDaemonStart(): Promise<void> {
       }
       break
     }
+  }
+}
+
+// ── Public API (standalone proxy, TD-465) ────────────────────────────
+
+export async function installProxyService(opts: ProxyServiceOptions = {}): Promise<void> {
+  const resolved: ResolvedProxyOptions = {
+    binaryPath:  resolveProxyServiceBinary(opts.binaryPath),
+    port:        opts.port ?? '4000',
+    valkeyUrl:   opts.valkeyUrl,
+    upstreamUrl: opts.upstreamUrl,
+  }
+  const system = !!opts.system
+  const mode = resolved.valkeyUrl ? `Valkey ${resolved.valkeyUrl}` : 'standalone (INTUTIC_STANDALONE=1)'
+
+  switch (process.platform) {
+    case 'darwin': {
+      const paths = getServicePaths(system, 'proxy', 'darwin')
+      if (!opts.dryRun) {
+        checkRootPrivileges(system, paths.targetPath)
+      }
+      const plist = buildProxyPlist(resolved, system)
+      console.log(`\n📦 Installing proxy macOS Launch${system ? 'Daemon' : 'Agent'}: ${paths.targetPath}`)
+      console.log(`   Binary : ${resolved.binaryPath}`)
+      console.log(`   Port   : ${resolved.port} — ${mode}`)
+      if (opts.dryRun) {
+        console.log('\n[dry-run] Would write plist:')
+        console.log(plist)
+        return
+      }
+      await fs.mkdir(paths.targetDir, { recursive: true })
+      await fs.mkdir(paths.logsDir, { recursive: true })
+      try {
+        execFileSync('launchctl', ['unload', '-w', paths.targetPath], { stdio: 'ignore' })
+      } catch {
+        // Best-effort: releases a previously installed proxy agent before its
+        // plist is overwritten. Nothing is loaded on a first install, so a
+        // non-zero exit here is the normal path. The `load` below is unwrapped
+        // and will report a genuine failure.
+      }
+      await fs.writeFile(paths.targetPath, plist, 'utf-8')
+      execFileSync('launchctl', ['load', '-w', paths.targetPath])
+      console.log(`\n✅ Proxy Launch${system ? 'Daemon' : 'Agent'} installed and started.`)
+      break
+    }
+    case 'linux': {
+      const paths = getServicePaths(system, 'proxy', 'linux')
+      if (!opts.dryRun) {
+        checkRootPrivileges(system, paths.targetPath)
+      }
+      const unit = buildProxyUnit(resolved, system)
+      console.log(`\n📦 Installing proxy systemd ${system ? 'system' : 'user'} unit: ${paths.targetPath}`)
+      console.log(`   Binary : ${resolved.binaryPath}`)
+      console.log(`   Port   : ${resolved.port} — ${mode}`)
+      if (opts.dryRun) {
+        console.log('\n[dry-run] Would write unit:')
+        console.log(unit)
+        return
+      }
+      await fs.mkdir(paths.targetDir, { recursive: true })
+      await fs.mkdir(paths.logsDir, { recursive: true })
+      await fs.writeFile(paths.targetPath, unit, 'utf-8')
+      const cmdArgs = system ? [] : ['--user']
+      execFileSync('systemctl', [...cmdArgs, 'daemon-reload'])
+      execFileSync('systemctl', [...cmdArgs, 'enable', '--now', paths.unitName!])
+      console.log(`\n✅ Proxy systemd ${system ? 'system' : 'user'} unit installed and started.`)
+      break
+    }
+    default:
+      console.log(`\n⚠️  Platform '${process.platform}' not supported.`)
+  }
+}
+
+export async function uninstallProxyService(opts: UninstallDaemonOptions = {}): Promise<void> {
+  const system = !!opts.system
+  const paths = getServicePaths(system, 'proxy')
+  if (!opts.dryRun) {
+    checkRootPrivileges(system, paths.targetPath)
+  }
+
+  switch (process.platform) {
+    case 'darwin': {
+      console.log(`\n🗑  Removing proxy Launch${system ? 'Daemon' : 'Agent'}: ${paths.targetPath}`)
+      if (!opts.dryRun) {
+        try {
+          execFileSync('launchctl', ['unload', '-w', paths.targetPath], { stdio: 'ignore' })
+        } catch {
+          // Best-effort: uninstall is idempotent. An agent that is already
+          // unloaded (or never was) makes launchctl exit non-zero while leaving
+          // the desired end state in place, and the plist removal below still
+          // has to run.
+        }
+        try {
+          await fs.unlink(paths.targetPath)
+        } catch {
+          // Best-effort: ENOENT means a previous uninstall already removed the
+          // plist, which is the outcome this command wants. Permission failures
+          // on the /Library/LaunchDaemons copy are pre-empted by the
+          // checkRootPrivileges call above.
+        }
+      }
+      console.log(`✅ Proxy Launch${system ? 'Daemon' : 'Agent'} removed.`)
+      break
+    }
+    case 'linux': {
+      console.log(`\n🗑  Removing proxy systemd ${system ? 'system' : 'user'} unit: ${paths.targetPath}`)
+      if (!opts.dryRun) {
+        const cmdArgs = system ? [] : ['--user']
+        try {
+          execFileSync('systemctl', [...cmdArgs, 'disable', '--now', paths.unitName!], { stdio: 'ignore' })
+        } catch {
+          // Best-effort: a unit that is not enabled, not loaded, or absent makes
+          // `disable --now` exit non-zero, and each of those already satisfies
+          // what this call was for. Removal of the unit file below must not be
+          // skipped because of it.
+        }
+        try {
+          await fs.unlink(paths.targetPath)
+          execFileSync('systemctl', [...cmdArgs, 'daemon-reload'], { stdio: 'ignore' })
+        } catch {
+          // Best-effort: ENOENT means the unit file is already gone. The reload
+          // shares this block on purpose — with nothing removed there is no
+          // change for systemd to reload.
+        }
+      }
+      console.log(`✅ Proxy systemd ${system ? 'system' : 'user'} unit removed.`)
+      break
+    }
+    default:
+      console.log(`\n⚠️  Platform '${process.platform}' is not supported.`)
   }
 }
