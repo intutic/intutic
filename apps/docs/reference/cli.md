@@ -1540,6 +1540,7 @@ Install sync-daemon as a system service (auto-starts on login, restarts on any e
 
 ```bash
 intutic daemon install --workspace-id <id> --api-key <key> [options]
+intutic daemon install --proxy [--port <port>] [--valkey-url <url>] [--upstream-url <url>]
 ```
 
 Also available as the top-level shortcut `intutic install-daemon`.
@@ -1548,16 +1549,22 @@ Also available as the top-level shortcut `intutic install-daemon`.
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--workspace-id <id>` | Workspace ID, e.g. `wk_xxxx` (required) | — |
-| `--api-key <key>` | Workspace API key, e.g. `vk_xxxx` (required) | — |
+| `--workspace-id <id>` | Workspace ID, e.g. `wk_xxxx` (required unless `--proxy`) | — |
+| `--api-key <key>` | Workspace API key, e.g. `vk_xxxx` (required unless `--proxy`) | — |
 | `--control-plane-url <url>` | Control plane URL | `https://your-control-plane.example` |
-| `--binary-path <path>` | Path to the `intutic` CLI binary | _(current process)_ |
+| `--binary-path <path>` | Path to the `intutic` CLI binary; with `--proxy`, an absolute path to `intutic-proxy` | _(current process; with `--proxy`, the launcher's pinned binary, then `intutic-proxy` on PATH)_ |
 | `--dry-run` | Print what would be done without writing files | — |
 | `--system` | Install as a system-level service (LaunchDaemon on macOS, systemd system unit on Linux) | — |
+| `--mcp` | Install the MCP proxy daemon instead of the sync-daemon | — |
+| `--proxy` | Install the standalone `intutic-proxy` binary as a service — no workspace or key needed | — |
+| `--port <port>` | With `--proxy`: proxy listen port (`PORT`) | `4000` |
+| `--valkey-url <url>` | With `--proxy`: Valkey to attach to (`VALKEY_URL`); omitted, the unit sets `INTUTIC_STANDALONE=1` | — |
+| `--upstream-url <url>` | With `--proxy`: upstream LLM provider base URL (`UPSTREAM_URL`) | — |
 
 **Service files written:**
 - macOS: `~/Library/LaunchAgents/ai.intutic.sync-daemon.plist` (`KeepAlive: true`)
 - Linux: `~/.config/systemd/user/intutic-sync-daemon.service` (`Restart=always`)
+- With `--proxy`: `~/Library/LaunchAgents/ai.intutic.proxy.plist` / `~/.config/systemd/user/intutic-proxy.service`, running the binary with the same environment [`intutic start`](/integrations/standalone#option-c-native-npm-binary-runner-npx-intutic-proxy) sets. The binary path must be absolute — neither launchd nor systemd searches `PATH`.
 
 Because the service restarts on any exit, stopping it requires `intutic daemon stop`, `intutic daemon uninstall`, or `launchctl unload`.
 
@@ -1579,6 +1586,8 @@ Also available as the top-level shortcut `intutic uninstall-daemon`.
 |--------|-------------|
 | `--dry-run` | Print what would be done without writing files |
 | `--system` | Uninstall the system-level service |
+| `--mcp` | Uninstall the MCP proxy daemon instead of the sync-daemon |
+| `--proxy` | Uninstall the standalone `intutic-proxy` service instead of the sync-daemon |
 
 ---
 

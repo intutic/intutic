@@ -88,14 +88,18 @@ Intutic Proxy supports two primary self-hosted deployment topologies depending o
   intutic-proxy
   ```
 
-  Both commands run the proxy in the **foreground** — there is no bundled
-  systemd/launchd unit for `intutic-proxy` itself (unlike the sync daemon and
-  MCP daemon, which [`intutic daemon install`](/reference/cli#intutic-daemon-install)
-  does manage this way). For unattended background operation on a single
-  host, supervise it the same way you would any other long-running process —
-  your own systemd unit, a process manager like pm2 or supervisord — or use
-  Option A/B's Docker container above, which Docker's own restart policy
-  already supervises.
+  Both commands run the proxy in the **foreground**. For unattended background
+  operation on a single host, install it as a supervised service instead —
+  [`intutic daemon install --proxy`](/reference/cli#intutic-daemon-install)
+  writes a launchd plist (macOS) or systemd unit (Linux) for the installed
+  `intutic-proxy` binary, carrying the same `PORT`, `VALKEY_URL` /
+  `INTUTIC_STANDALONE=1` and `UPSTREAM_URL` environment `intutic start` sets:
+  ```bash
+  intutic daemon install --proxy --upstream-url "https://api.anthropic.com" --dry-run   # preview
+  intutic daemon install --proxy --upstream-url "https://api.anthropic.com"
+  ```
+  Option A/B's Docker container above remains the alternative, supervised by
+  Docker's own restart policy.
 
 ---
 
