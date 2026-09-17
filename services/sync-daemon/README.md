@@ -23,7 +23,7 @@ On each sync cycle the daemon:
 
 ### Config Writers
 
-19 harness-specific config writers that translate governance SOPs into native configuration formats (YAML, JSON, TOML, Markdown, environment variables); 13 of them emit blocking pre-tool gates (see `__tests__/harness/gateRegistry.ts`).
+Harness-specific config writers (one module per harness under `src/harness/`) that translate governance SOPs into native configuration formats (YAML, JSON, TOML, Markdown, environment variables); most of them emit blocking pre-tool gates. The authoritative list of which harness gets which gate shape is `src/harness/gateKind.ts`, and `__tests__/harness/gateRegistry.ts` exercises every generated gate — counts are not repeated here because they drifted every time a harness was added.
 
 ### Atomic Writes
 
