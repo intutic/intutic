@@ -1593,37 +1593,58 @@ Also available as the top-level shortcut `intutic uninstall-daemon`.
 
 ## `intutic daemon status`
 
-Show sync-daemon system service status.
+Show sync-daemon system service status. With `--proxy` or `--mcp`, the same for the standalone proxy service or the MCP proxy daemon.
 
 ```bash
 intutic daemon status
+intutic daemon status --proxy
+intutic daemon status --mcp
 ```
 
-No options.
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--proxy` | Show the standalone `intutic-proxy` service installed by `daemon install --proxy` instead of the sync-daemon. |
+| `--mcp` | Show the MCP proxy daemon instead of the sync-daemon. |
 
 ---
 
 ## `intutic daemon start`
 
-Start and load the sync-daemon system service.
+Start and load the sync-daemon system service. With `--proxy` or `--mcp`, the same for the standalone proxy service or the MCP proxy daemon.
 
 ```bash
 intutic daemon start
+intutic daemon start --proxy
+intutic daemon start --mcp
 ```
 
-No options.
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--proxy` | Start the standalone `intutic-proxy` service installed by `daemon install --proxy` instead of the sync-daemon. |
+| `--mcp` | Start the MCP proxy daemon instead of the sync-daemon. |
 
 ---
 
 ## `intutic daemon stop`
 
-Stop and unload the sync-daemon system service.
+Stop and unload the sync-daemon system service. With `--proxy` or `--mcp`, the same for the standalone proxy service or the MCP proxy daemon.
 
 ```bash
 intutic daemon stop
+intutic daemon stop --proxy
+intutic daemon stop --mcp
 ```
 
-No options.
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--proxy` | Stop the standalone `intutic-proxy` service installed by `daemon install --proxy` instead of the sync-daemon. |
+| `--mcp` | Stop the MCP proxy daemon instead of the sync-daemon. |
 
 ---
 

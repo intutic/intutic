@@ -141,9 +141,9 @@ guardrail cites it.
 
 `intutic guardrails` is the same ledger without the page: `sources list|add|sync`,
 `docs list|show|extract`, `search <token>` (exact tool or action token) and
-`search --text <words>` (full-text, stemmed, best match first), `impact --doc
-<id>` or `--passage <id>` (what a change reaches, at most five computed edges
-out), `duplicates` (overlapping passages with their Jaccard arithmetic, and the
+`search --text <words>` (full-text, stemmed, best match first),
+`impact --doc <id>` or `--passage <id>` (what a change reaches, at most five
+computed edges out), `duplicates` (overlapping passages with their Jaccard arithmetic, and the
 same rule cited twice), `list`, `show`, `approve-shadow`, `promote`, `reject`,
 `retire`, `reconfirm`, `replay`, `conflicts`, and `pull`.
 See the [CLI reference](/reference/cli).

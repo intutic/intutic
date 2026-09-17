@@ -945,26 +945,41 @@ daemon
 
 daemon
   .command('status')
-  .description('Show sync-daemon system service status.')
-  .action(async () => {
-    const { daemonStatus } = await import('./commands/install-daemon.js')
-    await daemonStatus()
+  .description('Show sync-daemon system service status (or the standalone proxy service with --proxy).')
+  .option('--proxy', 'Show the standalone intutic-proxy service instead of the sync-daemon')
+  .option('--mcp', 'Show the MCP proxy daemon instead of the sync-daemon')
+  .action(async (opts) => {
+    // `mcpDaemonStatus` was exported and never called by any command until the
+    // reachability test widened to the status/stop/start verbs (TD-153's
+    // shape, one more time).
+    const { daemonStatus, proxyServiceStatus, mcpDaemonStatus } = await import('./commands/install-daemon.js')
+    await (opts.proxy ? proxyServiceStatus() : opts.mcp ? mcpDaemonStatus() : daemonStatus())
   })
 
 daemon
   .command('stop')
-  .description('Stop and unload the sync-daemon system service.')
-  .action(async () => {
-    const { daemonStop } = await import('./commands/install-daemon.js')
-    await daemonStop()
+  .description('Stop and unload the sync-daemon system service (or the standalone proxy service with --proxy).')
+  .option('--proxy', 'Stop the standalone intutic-proxy service instead of the sync-daemon')
+  .option('--mcp', 'Stop the MCP proxy daemon instead of the sync-daemon')
+  .action(async (opts) => {
+    // `mcpDaemonStop` was exported and never called by any command until the
+    // reachability test widened to the status/stop/start verbs (TD-153's
+    // shape, one more time).
+    const { daemonStop, proxyServiceStop, mcpDaemonStop } = await import('./commands/install-daemon.js')
+    await (opts.proxy ? proxyServiceStop() : opts.mcp ? mcpDaemonStop() : daemonStop())
   })
 
 daemon
   .command('start')
-  .description('Start and load the sync-daemon system service.')
-  .action(async () => {
-    const { daemonStart } = await import('./commands/install-daemon.js')
-    await daemonStart()
+  .description('Start and load the sync-daemon system service (or the standalone proxy service with --proxy).')
+  .option('--proxy', 'Start the standalone intutic-proxy service instead of the sync-daemon')
+  .option('--mcp', 'Start the MCP proxy daemon instead of the sync-daemon')
+  .action(async (opts) => {
+    // `mcpDaemonStart` was exported and never called by any command until the
+    // reachability test widened to the status/stop/start verbs (TD-153's
+    // shape, one more time).
+    const { daemonStart, proxyServiceStart, mcpDaemonStart } = await import('./commands/install-daemon.js')
+    await (opts.proxy ? proxyServiceStart() : opts.mcp ? mcpDaemonStart() : daemonStart())
   })
 
 // Top-level shortcuts (for discoverability)

@@ -999,6 +999,122 @@ export async function mcpDaemonStart(): Promise<void> {
   }
 }
 
+/**
+ * `intutic daemon status|stop|start --proxy` — the same three verbs the
+ * sync daemon and the MCP daemon have, for the standalone proxy service
+ * `installProxyService` writes. Both scopes are checked, as for the others:
+ * a user-level LaunchAgent and a system-level LaunchDaemon can coexist.
+ */
+export async function proxyServiceStatus(): Promise<void> {
+  switch (process.platform) {
+    case 'darwin': {
+      for (const system of [false, true]) {
+        const paths = getServicePaths(system, 'proxy', 'darwin')
+        const plistExists = await fs.access(paths.targetPath).then(() => true).catch(() => false)
+        const scopeStr = system ? 'System-level (LaunchDaemon)' : 'User-level (LaunchAgent)'
+        if (plistExists) {
+          console.log(`✅ Proxy: ${scopeStr} installed at ${paths.targetPath}`)
+          try {
+            execFileSync('launchctl', ['list', paths.label], { stdio: 'inherit' })
+          } catch {
+            console.log(`   ⚠️  Proxy ${scopeStr} plist exists but is not loaded.`)
+          }
+        } else {
+          console.log(`⬜ Proxy: ${scopeStr} not installed`)
+        }
+      }
+      break
+    }
+    case 'linux': {
+      for (const system of [false, true]) {
+        const paths = getServicePaths(system, 'proxy', 'linux')
+        const scopeStr = system ? 'System-level' : 'User-level'
+        const cmdArgs = system ? [] : ['--user']
+        try {
+          console.log(`\n--- Proxy ${scopeStr} Status ---`)
+          execFileSync('systemctl', [...cmdArgs, 'status', paths.unitName!], { stdio: 'inherit' })
+        } catch {
+          console.log(`⬜ Proxy: ${scopeStr} not running`)
+        }
+      }
+      break
+    }
+  }
+}
+
+export async function proxyServiceStop(): Promise<void> {
+  switch (process.platform) {
+    case 'darwin': {
+      for (const system of [false, true]) {
+        const paths = getServicePaths(system, 'proxy', 'darwin')
+        const plistExists = await fs.access(paths.targetPath).then(() => true).catch(() => false)
+        if (plistExists) {
+          console.log(`\n🛑 Stopping proxy Launch${system ? 'Daemon' : 'Agent'}: ${paths.label}`)
+          try {
+            execFileSync('launchctl', ['unload', paths.targetPath], { stdio: 'ignore' })
+            console.log(`✅ Successfully stopped proxy Launch${system ? 'Daemon' : 'Agent'}.`)
+          } catch (e) {
+            console.log(`❌ Failed to stop proxy Launch${system ? 'Daemon' : 'Agent'}: ${e instanceof Error ? e.message : String(e)}`)
+          }
+        }
+      }
+      break
+    }
+    case 'linux': {
+      for (const system of [false, true]) {
+        const paths = getServicePaths(system, 'proxy', 'linux')
+        const unitExists = await fs.access(paths.targetPath).then(() => true).catch(() => false)
+        if (unitExists) {
+          try {
+            const cmdArgs = system ? [] : ['--user']
+            execFileSync('systemctl', [...cmdArgs, 'stop', paths.unitName!], { stdio: 'ignore' })
+            console.log(`✅ Successfully stopped proxy ${system ? 'system' : 'user'} unit.`)
+          } catch (e) {
+            console.log(`❌ Failed to stop proxy ${system ? 'system' : 'user'} unit: ${e instanceof Error ? e.message : String(e)}`)
+          }
+        }
+      }
+      break
+    }
+  }
+}
+
+export async function proxyServiceStart(): Promise<void> {
+  switch (process.platform) {
+    case 'darwin': {
+      for (const system of [false, true]) {
+        const paths = getServicePaths(system, 'proxy', 'darwin')
+        const plistExists = await fs.access(paths.targetPath).then(() => true).catch(() => false)
+        if (plistExists) {
+          try {
+            execFileSync('launchctl', ['load', '-w', paths.targetPath], { stdio: 'ignore' })
+            console.log(`✅ Successfully started proxy Launch${system ? 'Daemon' : 'Agent'}.`)
+          } catch (e) {
+            console.log(`❌ Failed to start proxy Launch${system ? 'Daemon' : 'Agent'}: ${e instanceof Error ? e.message : String(e)}`)
+          }
+        }
+      }
+      break
+    }
+    case 'linux': {
+      for (const system of [false, true]) {
+        const paths = getServicePaths(system, 'proxy', 'linux')
+        const unitExists = await fs.access(paths.targetPath).then(() => true).catch(() => false)
+        if (unitExists) {
+          try {
+            const cmdArgs = system ? [] : ['--user']
+            execFileSync('systemctl', [...cmdArgs, 'start', paths.unitName!], { stdio: 'ignore' })
+            console.log(`✅ Successfully started proxy ${system ? 'system' : 'user'} unit.`)
+          } catch (e) {
+            console.log(`❌ Failed to start proxy ${system ? 'system' : 'user'} unit: ${e instanceof Error ? e.message : String(e)}`)
+          }
+        }
+      }
+      break
+    }
+  }
+}
+
 // ── Public API (standalone proxy, TD-465) ────────────────────────────
 
 export async function installProxyService(opts: ProxyServiceOptions = {}): Promise<void> {

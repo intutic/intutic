@@ -224,7 +224,9 @@ describe('every daemon entry point is reachable from the CLI', () => {
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/^\s*\/\/.*$/gm, '')
 
-  const entryPoints = [...moduleSrc.matchAll(/export async function ((?:un)?install\w*)/g)].map((m) => m[1]!)
+  // Install/uninstall for every target, plus the status/stop/start verbs —
+  // `proxyServiceStatus/Stop/Start` were the Wave 6 gap this closes.
+  const entryPoints = [...moduleSrc.matchAll(/export async function ((?:un)?install\w*|\w+(?:Status|Stop|Start))\(/g)].map((m) => m[1]!)
 
   it('finds the install/uninstall entry points to check', () => {
     // Guard against the regex silently matching nothing, which would make
