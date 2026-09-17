@@ -6253,6 +6253,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // DLP, compaction, and cache writes below are proxy overhead and must not
     // count against the routed model's latency SLO.
     let upstream_latency_ms = start.elapsed().as_millis() as u32;
+    // When the body was fully read. The mirror spawn below is measured from
+    // here, so the delay the Wave 2 move introduced is a number in the log,
+    // not an estimate in a comment.
+    let body_read_at = std::time::Instant::now();
 
     let (mut final_body_bytes, prompt_tokens, completion_tokens, mut accumulated_content, usage_final) =
         if is_same_provider {
@@ -6729,7 +6733,12 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // compared on content, not on when the second call was started, and the
     // candidate's own latency is measured from its own start. No `return`
     // sits between the old site and this one, so nothing that used to be
-    // mirrored is lost. Not measured on live traffic at the time of writing.
+    // mirrored is lost. Measured standalone (no judge) against a local mock
+    // upstream on 2026-09-17: 0 ms at millisecond resolution over 19 mirrored
+    // requests, so everything but the judge-finalize await is free. With a
+    // control plane the await is the delay, bounded by the judge timeout;
+    // `mirror_spawn_delay_ms` on the spawn log line below is the production
+    // number.
     //
     // Spawned detached and never awaited, so the user's response is already on
     // its way out — a mirrored call that times out, and the DLP scrub the
@@ -6763,6 +6772,17 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // captured by value so the detached task owns its copy.
             let original_cost_for_mirror = actual_cost_usd;
             let original_latency_for_mirror = upstream_latency_ms;
+            // How long the served response's own post-processing (usage parse,
+            // judge finalize, DLP, response gate, pricing) held the mirror back.
+            // Interview-audit closeout Wave 2 moved the spawn below all of that
+            // and could only bound the cost; this is the measurement.
+            let mirror_spawn_delay_ms = body_read_at.elapsed().as_millis() as u32;
+            tracing::info!(
+                workspace_id = %ws,
+                candidate = %candidate,
+                mirror_spawn_delay_ms,
+                "mirroring the served request to the candidate"
+            );
             tokio::spawn(async move {
                 let outcome = crate::routing::mirror::run_mirror(
                     slot,
