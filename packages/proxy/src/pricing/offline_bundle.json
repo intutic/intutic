@@ -1,7 +1,7 @@
 {
   "_meta": {
-    "source": "https://raw.githubusercontent.com/BerriAI/litellm/5ef40a630b8937c63cf6c11a160e147f594d908a/model_prices_and_context_window.json",
-    "generated_at": "2026-09-17",
+    "source": "https://raw.githubusercontent.com/BerriAI/litellm/d5d12edbae018ed7d376dbf7de8858f84fdf94da/model_prices_and_context_window.json",
+    "generated_at": "2026-09-20",
     "refresh_script": "tools/scripts/build-offline-pricing-bundle.ts",
     "note": "Baked into the proxy binary via include_str!(), so editing this file does nothing until the image is rebuilt. Regenerate with tools/scripts/build-offline-pricing-bundle.ts; drift against published rates is reported monthly by .github/workflows/pricing-drift.yml. Override with OFFLINE_PRICING_PATH."
   },
@@ -885,7 +885,8 @@
     "mistral/codestral-mamba-latest": {
       "input_cost_per_1k": 0.00025,
       "output_cost_per_1k": 0.00025,
-      "max_tokens": 256000
+      "max_tokens": 256000,
+      "cache_read_cost_per_1k": 0.000025
     },
     "mistral/devstral-medium-2507": {
       "input_cost_per_1k": 0.0004,
@@ -905,7 +906,8 @@
     "mistral/devstral-small-latest": {
       "input_cost_per_1k": 0.0001,
       "output_cost_per_1k": 0.0003,
-      "max_tokens": 256000
+      "max_tokens": 256000,
+      "cache_read_cost_per_1k": 0.00001
     },
     "mistral/labs-devstral-small-2512": {
       "input_cost_per_1k": 0.0001,
@@ -915,12 +917,14 @@
     "mistral/devstral-latest": {
       "input_cost_per_1k": 0.0004,
       "output_cost_per_1k": 0.002,
-      "max_tokens": 256000
+      "max_tokens": 256000,
+      "cache_read_cost_per_1k": 0.00004
     },
     "mistral/devstral-medium-latest": {
       "input_cost_per_1k": 0.0004,
       "output_cost_per_1k": 0.002,
-      "max_tokens": 256000
+      "max_tokens": 256000,
+      "cache_read_cost_per_1k": 0.00004
     },
     "mistral/devstral-2512": {
       "input_cost_per_1k": 0.0004,
@@ -954,17 +958,20 @@
     "mistral/mistral-medium-3": {
       "input_cost_per_1k": 0.0015,
       "output_cost_per_1k": 0.0075,
-      "max_tokens": 262144
+      "max_tokens": 262144,
+      "cache_read_cost_per_1k": 0.00015
     },
     "mistral/voxtral-small-2507": {
       "input_cost_per_1k": 0.0001,
       "output_cost_per_1k": 0.0004,
-      "max_tokens": 32768
+      "max_tokens": 32768,
+      "cache_read_cost_per_1k": 0.00001
     },
     "mistral/voxtral-small-latest": {
       "input_cost_per_1k": 0.0001,
       "output_cost_per_1k": 0.0004,
-      "max_tokens": 32768
+      "max_tokens": 32768,
+      "cache_read_cost_per_1k": 0.00001
     },
     "mistral/zai-glm-5-2": {
       "input_cost_per_1k": 0.0014,
@@ -1113,7 +1120,8 @@
     "mistral/mistral-small": {
       "input_cost_per_1k": 0.0001,
       "output_cost_per_1k": 0.0003,
-      "max_tokens": 8191
+      "max_tokens": 8191,
+      "cache_read_cost_per_1k": 0.00001
     },
     "mistral/mistral-small-latest": {
       "input_cost_per_1k": 0.00015,
@@ -1159,7 +1167,8 @@
     "mistral/mistral-tiny": {
       "input_cost_per_1k": 0.00025,
       "output_cost_per_1k": 0.00025,
-      "max_tokens": 8191
+      "max_tokens": 8191,
+      "cache_read_cost_per_1k": 0.000025
     },
     "mistral/open-codestral-mamba": {
       "input_cost_per_1k": 0.00025,
@@ -1174,7 +1183,8 @@
     "mistral/open-mistral-nemo": {
       "input_cost_per_1k": 0.0003,
       "output_cost_per_1k": 0.0003,
-      "max_tokens": 128000
+      "max_tokens": 128000,
+      "cache_read_cost_per_1k": 0.00003
     },
     "mistral/open-mistral-nemo-2407": {
       "input_cost_per_1k": 0.0003,
@@ -1204,7 +1214,8 @@
     "mistral/pixtral-large-latest": {
       "input_cost_per_1k": 0.002,
       "output_cost_per_1k": 0.006,
-      "max_tokens": 128000
+      "max_tokens": 128000,
+      "cache_read_cost_per_1k": 0.0002
     },
     "o1": {
       "input_cost_per_1k": 0.015,
@@ -1425,7 +1436,8 @@
     "mistral/mistral-code-agent-latest": {
       "input_cost_per_1k": 0.0004,
       "output_cost_per_1k": 0.002,
-      "max_tokens": 256000
+      "max_tokens": 256000,
+      "cache_read_cost_per_1k": 0.00004
     },
     "mistral/labs-leanstral-1-5-1": {
       "input_cost_per_1k": 0,
