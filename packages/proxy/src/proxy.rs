@@ -104,25 +104,50 @@ fn evaluate_sop_shadows(
     base_ctx: &crate::wasm::context::RequestContext,
     registry: &crate::plugins::anomaly::DetectorRegistry,
 ) -> Vec<crate::sops::SopShadowReport> {
-    shadow_sops
-        .iter()
-        .filter(|s| s.applies_to(role))
+    let applicable: Vec<&crate::sops::Sop> =
+        shadow_sops.iter().filter(|s| s.applies_to(role)).collect();
+    if applicable.is_empty() {
+        return Vec::new();
+    }
+
+    // One SOP's declarations over everything else the request carries.
+    let with_sops = |sops: &[crate::sops::Sop]| {
+        let sop_gov = crate::sops::governance_fields_from(sops, role);
+        crate::wasm::context::RequestContext {
+            denied_tools: sop_gov.denied_tools,
+            plan_steps: sop_gov.plan_steps,
+            scope_paths: sop_gov.scope_paths,
+            review_before: sop_gov.review_before,
+            requires_before: sop_gov.requires_before,
+            forbid_after: sop_gov.forbid_after,
+            max_calls: sop_gov.max_calls,
+            forbid_with: sop_gov.forbid_with,
+            allowed_harnesses: sop_gov.allowed_harnesses,
+            ..base_ctx.clone()
+        }
+    };
+
+    // TD-485: what this request raises with NO SOP declared. The registry runs
+    // every detector over every inherited field, so without this baseline a
+    // schema-drift or injection finding — nothing to do with any SOP — marked
+    // every shadow SOP as would-act. On staging a Bash-only request was
+    // credited to a `deny_tools: WebFetch` guardrail that way, and would-act
+    // and the adjudicated false-positive rate are what promotion is gated on.
+    // A finding belongs to a SOP only if declaring that SOP is what raised it.
+    let baseline: std::collections::HashSet<(&'static str, String)> = registry
+        .evaluate_all(&with_sops(&[]))
+        .into_iter()
+        .map(|f| (f.detector_id, f.reason))
+        .collect();
+
+    applicable
+        .into_iter()
         .map(|s| {
-            let one = std::slice::from_ref(s);
-            let sop_gov = crate::sops::governance_fields_from(one, role);
-            let shadow_ctx = crate::wasm::context::RequestContext {
-                denied_tools: sop_gov.denied_tools,
-                plan_steps: sop_gov.plan_steps,
-                scope_paths: sop_gov.scope_paths,
-                review_before: sop_gov.review_before,
-                requires_before: sop_gov.requires_before,
-                forbid_after: sop_gov.forbid_after,
-                max_calls: sop_gov.max_calls,
-                forbid_with: sop_gov.forbid_with,
-                allowed_harnesses: sop_gov.allowed_harnesses,
-                ..base_ctx.clone()
-            };
-            let findings = registry.evaluate_all(&shadow_ctx);
+            let findings: Vec<_> = registry
+                .evaluate_all(&with_sops(std::slice::from_ref(s)))
+                .into_iter()
+                .filter(|f| !baseline.contains(&(f.detector_id, f.reason.clone())))
+                .collect();
             crate::sops::SopShadowReport {
                 title: s.title.clone(),
                 would_act: !findings.is_empty(),
@@ -9677,6 +9702,72 @@ mod tests {
         assert_eq!(reports.len(), 1);
         assert!(!reports[0].would_act, "no tool_calls were made — nothing to deny");
         assert!(reports[0].findings.is_empty());
+    }
+
+    /// TD-485, the staging case: the request drifted its tool contract and
+    /// called only Bash. `schema_drift` fires with or without any SOP, so it
+    /// is not the WebFetch guardrail's finding and must not be credited to it.
+    #[test]
+    fn evaluate_sop_shadows_does_not_credit_a_sop_with_an_unrelated_finding() {
+        use crate::plugins::anomaly::detectors::test_support::base_ctx;
+        use crate::wasm::context::ToolCall;
+
+        let ctx = crate::wasm::context::RequestContext {
+            tool_contract_changed: true,
+            tool_calls: vec![ToolCall {
+                id: "call_1".into(),
+                name: "Bash".into(),
+                arguments: serde_json::json!({ "command": "ls -la" }),
+            }],
+            ..base_ctx()
+        };
+        let registry = crate::plugins::anomaly::DetectorRegistry::with_defaults();
+        assert!(
+            !registry.evaluate_all(&ctx).is_empty(),
+            "fixture must raise an unrelated finding, or this test proves nothing"
+        );
+        let shadow_sop = crate::sops::Sop {
+            title: "GUARDRAIL:pgr_x deny_tools: WebFetch".into(),
+            deny_tools: vec!["WebFetch".into()],
+            mode: crate::sops::SopMode::Shadow,
+            ..crate::sops::Sop::default()
+        };
+
+        let reports = evaluate_sop_shadows(&[shadow_sop], "", &ctx, &registry);
+
+        assert_eq!(reports.len(), 1, "still evaluated: the denominator must move");
+        assert!(!reports[0].would_act, "no WebFetch call — drift is not this SOP's finding");
+        assert!(reports[0].findings.is_empty());
+    }
+
+    /// The unrelated finding must not hide the SOP's own: same drifted request,
+    /// but it does call the denied tool.
+    #[test]
+    fn evaluate_sop_shadows_still_credits_the_sops_own_finding_beside_an_unrelated_one() {
+        use crate::plugins::anomaly::detectors::test_support::base_ctx;
+        use crate::wasm::context::ToolCall;
+
+        let ctx = crate::wasm::context::RequestContext {
+            tool_contract_changed: true,
+            tool_calls: vec![ToolCall {
+                id: "call_1".into(),
+                name: "WebFetch".into(),
+                arguments: serde_json::json!({}),
+            }],
+            ..base_ctx()
+        };
+        let shadow_sop = crate::sops::Sop {
+            title: "GUARDRAIL:pgr_x deny_tools: WebFetch".into(),
+            deny_tools: vec!["WebFetch".into()],
+            mode: crate::sops::SopMode::Shadow,
+            ..crate::sops::Sop::default()
+        };
+        let registry = crate::plugins::anomaly::DetectorRegistry::with_defaults();
+
+        let reports = evaluate_sop_shadows(&[shadow_sop], "", &ctx, &registry);
+
+        assert!(reports[0].would_act);
+        assert_eq!(reports[0].findings, vec!["UNAUTHORIZED_TOOL".to_string()], "only the SOP's own finding, not the drift");
     }
 
     /// A shadow SOP scoped to a role the request did not report is not
