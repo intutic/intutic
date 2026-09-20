@@ -20,6 +20,7 @@ const { version: cliPkgVersion } = createRequire(import.meta.url)('../../package
 import * as node_fs from 'node:fs/promises'
 import { log } from '../lib/logger.js'
 import { ensureValkey, valkeyRemediation, isValkeyRunning } from '../lib/ensureValkey.js'
+import { createShutdownHandler, terminateChild } from '../lib/gracefulShutdown.js'
 import {
   loadCredentials,
   loadConfig,
@@ -315,16 +316,21 @@ export async function runConnect(opts: {
   // 2. AbortController for clean shutdown
   let proxyProc: ChildProcess | null = null
   const ac = new AbortController()
-  const shutdown = () => {
-    log.info('Shutting down sync daemon...')
-    if (proxyProc) {
-      log.info('Stopping managed proxy gateway...')
-      proxyProc.kill('SIGTERM')
-    }
-    trajectoryMonitor?.stop()
-    trajectorySubscriber?.disconnect()
-    ac.abort()
-  }
+  // TD-484: this handler used to abort the loop and hope. The process stayed
+  // alive for hours. `createShutdownHandler` adds the exit deadline and the
+  // second-signal exit; `terminateChild` escalates to SIGKILL.
+  const shutdown = createShutdownHandler({
+    onShutdown: () => {
+      log.info('Shutting down sync daemon...')
+      ac.abort()
+      if (proxyProc) {
+        log.info('Stopping managed proxy gateway...')
+        terminateChild(proxyProc)
+      }
+      trajectoryMonitor?.stop()
+      trajectorySubscriber?.disconnect()
+    },
+  })
   process.on('SIGINT', shutdown)
   process.on('SIGTERM', shutdown)
 
@@ -739,7 +745,11 @@ export async function runConnect(opts: {
       const proxyActive = await isPortInUse(proxyPort)
       if (!proxyActive) {
         proxyStatus = 'unhealthy'
-        if (proxyProc) {
+        if (ac.signal.aborted) {
+          // Shutting down: the proxy is gone because we stopped it. Re-spawning
+          // it here would leave an orphan holding the port (TD-484).
+          proxyStatus = 'stopped'
+        } else if (proxyProc) {
           log.warn('[DR] Managed proxy gateway process has terminated. Auto-healing re-spawn...')
           const logDir = node_path.join(safeConfig.workspaceRoot, '.intutic', 'logs')
           const logStream = createWriteStream(node_path.join(logDir, 'proxy-gateway.log'), { flags: 'a' })
