@@ -418,7 +418,9 @@ describe('hook rules: 2,000 seeded renders compile in JS and fire exactly on wha
       }
     }
     expect(rendered).toBe(2000)
-  })
+    // 2,000 renders, each compiled and matched: about a second locally, past
+    // vitest's 5 s default on a shared CI runner (first real CI run, 2026-09-20).
+  }, 60_000)
 })
 
 // ─── Hook rules ───────────────────────────────────────────────────────
