@@ -138,7 +138,7 @@ const ANCHOR_FREQ_SLOTS = 256
  * every entry here is already a concrete anchor; this function's only job is
  * the interning itself.
  */
-function anchorProjection(seq: readonly string[]): { anchors: number[]; symbols: string[] } {
+export function anchorProjection(seq: readonly string[]): { anchors: number[]; symbols: string[] } {
   const symbols: string[] = []
   const anchors: number[] = []
   for (const tok of seq) {

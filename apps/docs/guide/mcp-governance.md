@@ -228,7 +228,10 @@ This is pattern matching, not a classifier — it is deliberately narrow,
 because a classifier asked "is this an injection?" is itself something an
 attacker can talk out of the answer, and because the false-positive cost of a
 loose pattern is real: people legitimately tell an agent to "ignore my last
-message."
+message." A workspace that knows its own attack phrasings adds them as
+`mcpInjectionPatterns` in workspace settings; they ride the same policy
+delivery as the tool allowlist and sit on top of the five built-in patterns,
+never in place of them.
 
 The MCP proxy's version of the multi-agent-graph risk `injection.rs`'s own
 doc comment describes is a tool result: one MCP tool's output becomes context

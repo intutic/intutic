@@ -75,6 +75,8 @@ export interface ResolvedPolicy {
    * value.
    */
   mcpInjectionAction?: 'warn' | 'block'
+  /** Workspace injection-pattern sources (TD-436); normalized to `[]` like `allowedTools`. */
+  mcpInjectionPatterns: string[]
   /**
    * Anomaly-detection mode override (Phase 2, `packages/mcp-proxy/src/anomaly/`).
    * `undefined` means absent — same convention as `mcpInjectionAction` above.
@@ -118,6 +120,7 @@ type PolicyResponseBody = Pick<
   | 'toolDescriptionOverrides'
   | 'allowedServers'
   | 'mcpInjectionAction'
+  | 'mcpInjectionPatterns'
   | 'mcpAnomalyMode'
   | 'mcpAnomalyOverrides'
 >
@@ -149,6 +152,7 @@ function parsePolicyResponse(raw: string): PolicyResponseBody | null {
   const toolDescriptionOverrides  = parsed['toolDescriptionOverrides']
   const allowedServers            = parsed['allowedServers']
   const mcpInjectionAction        = parsed['mcpInjectionAction']
+  const mcpInjectionPatterns      = parsed['mcpInjectionPatterns']
   const mcpAnomalyMode            = parsed['mcpAnomalyMode']
   const mcpAnomalyOverridesRaw    = parsed['mcpAnomalyOverrides']
 
@@ -179,6 +183,9 @@ function parsePolicyResponse(raw: string): PolicyResponseBody | null {
       : [],
     mcpInjectionAction:
       mcpInjectionAction === 'warn' || mcpInjectionAction === 'block' ? mcpInjectionAction : undefined,
+    mcpInjectionPatterns: Array.isArray(mcpInjectionPatterns)
+      ? mcpInjectionPatterns.filter((p): p is string => typeof p === 'string')
+      : [],
     mcpAnomalyMode:
       mcpAnomalyMode === 'enforce' || mcpAnomalyMode === 'warn' || mcpAnomalyMode === 'off'
         ? mcpAnomalyMode
@@ -241,6 +248,7 @@ async function fetchFromControlPlane(workspaceId: string): Promise<ResolvedPolic
             toolDescriptionOverrides: parsed.toolDescriptionOverrides,
             allowedServers:   parsed.allowedServers,
             mcpInjectionAction: parsed.mcpInjectionAction,
+            mcpInjectionPatterns: parsed.mcpInjectionPatterns,
             mcpAnomalyMode:   parsed.mcpAnomalyMode,
             mcpAnomalyOverrides: parsed.mcpAnomalyOverrides,
             cachedAt:         Date.now(),
@@ -333,6 +341,7 @@ export async function seedFromSnapshot(snapshotPath?: string): Promise<string | 
       // Default to unrestricted rather than invent a value; the background
       // HTTP refresh this seed exists to avoid delaying will fill these in on
       // the next cycle.
+      mcpInjectionPatterns: [],
       allowedTools: [],
       toolDescriptionOverrides: {},
       allowedServers: [],
@@ -405,6 +414,7 @@ export async function resolvePolicy(workspaceId: string): Promise<ResolvedPolicy
         allowedTools: Array.isArray(raw.allowedTools) ? raw.allowedTools : [],
         toolDescriptionOverrides: isRecord(raw.toolDescriptionOverrides) ? raw.toolDescriptionOverrides : {},
         allowedServers: Array.isArray(raw.allowedServers) ? raw.allowedServers : [],
+        mcpInjectionPatterns: Array.isArray(raw.mcpInjectionPatterns) ? raw.mcpInjectionPatterns : [],
         mcpAnomalyOverrides: isRecord(raw.mcpAnomalyOverrides) ? raw.mcpAnomalyOverrides : {},
       }
       evictIfFull()

@@ -73,6 +73,8 @@ export class PolicyClient {
    * wired to nothing.
    */
   private dlpPatterns: string[] = []
+  /** Workspace injection-pattern sources (`mcpInjectionPatterns`, TD-436); empty = floor only. */
+  private injectionPatterns: string[] = []
   /**
    * Additive tool scoping: when non-empty, ONLY these tools may be called
    * through this proxy. Empty means unrestricted — the same convention as
@@ -166,6 +168,11 @@ export class PolicyClient {
   }
 
   /** Workspace DLP regex sources from the last successful refresh. */
+  /** Workspace-supplied prompt-injection regex sources; empty means the hardcoded floor alone. */
+  getInjectionPatterns(): readonly string[] {
+    return this.injectionPatterns
+  }
+
   getDlpPatterns(): readonly string[] {
     return this.dlpPatterns
   }
@@ -223,6 +230,10 @@ export class PolicyClient {
     const allowedServers = source['allowedServers'] ?? source['mcpAllowedServers']
     this.allowedServers = Array.isArray(allowedServers)
       ? allowedServers.filter((s): s is string => typeof s === 'string')
+      : []
+    const injectionPatterns = source['mcpInjectionPatterns']
+    this.injectionPatterns = Array.isArray(injectionPatterns)
+      ? injectionPatterns.filter((p): p is string => typeof p === 'string')
       : []
     const injectionAction = source['mcpInjectionAction']
     this.injectionAction =

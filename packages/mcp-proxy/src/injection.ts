@@ -75,6 +75,40 @@ const PATTERNS: readonly InjectionPattern[] = [
 const KILL_THRESHOLD = 2
 
 /**
+ * Workspace-supplied patterns, compiled (TD-436). Same contract as
+ * `dlp.ts`'s `setDynamicPatterns`: sources come from the control plane's
+ * `mcpInjectionPatterns`, an invalid one is dropped and counted, and the
+ * hardcoded floor above applies regardless — an unreachable control plane
+ * degrades to the floor, never to no scanning. Named `workspace:<n>` so a
+ * finding says which layer matched.
+ */
+let dynamicPatterns: readonly InjectionPattern[] = []
+let dynamicKey = ''
+
+/**
+ * Replace the dynamic pattern set. Cheap to call on every scan: a source
+ * list identical to the last one is a no-op, so callers can hand it the
+ * policy's current list without tracking changes themselves. Returns how
+ * many sources did not compile.
+ */
+export function setDynamicInjectionPatterns(sources: readonly string[]): number {
+  const key = sources.join('\u0000')
+  if (key === dynamicKey) return 0
+  const compiled: InjectionPattern[] = []
+  let dropped = 0
+  sources.forEach((src, i) => {
+    try {
+      compiled.push({ name: `workspace:${i + 1}`, regex: new RegExp(src, 'i') })
+    } catch {
+      dropped += 1
+    }
+  })
+  dynamicPatterns = compiled
+  dynamicKey = key
+  return dropped
+}
+
+/**
  * Names of the injection patterns present in `text`, deduplicated. Empty
  * when nothing matched (the overwhelmingly common case).
  */
@@ -82,6 +116,10 @@ export function scanText(text: string): string[] {
   if (!text) return []
   const found: string[] = []
   for (const { name, regex } of PATTERNS) {
+    if (regex.test(text)) found.push(name)
+  }
+  for (const { name, regex } of dynamicPatterns) {
+    regex.lastIndex = 0
     if (regex.test(text)) found.push(name)
   }
   return found

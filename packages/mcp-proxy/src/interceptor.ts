@@ -14,7 +14,7 @@ import * as node_crypto from 'node:crypto'
 import { createStderrLogger as createLogger } from './stderrLog.js'
 import { scanToolInput, formatDlpBlockReason, setDynamicPatterns } from './dlp.js'
 import type { DlpFinding } from './dlp.js'
-import { scanText, injectionSeverity } from './injection.js'
+import { scanText, injectionSeverity, setDynamicInjectionPatterns } from './injection.js'
 import { evaluateSequenceDetectors, resolveEffectiveDisposition, REASK_MAX_ATTEMPTS } from './anomaly/index.js'
 import type { AnomalyMode, Disposition } from './anomaly/index.js'
 import { SessionState } from './session.js'
@@ -259,6 +259,7 @@ export class ToolCallInterceptor {
     // 2/3 land after this).
     try {
       const toolInputText = JSON.stringify(toolInput ?? {})
+      setDynamicInjectionPatterns(this.policy.getInjectionPatterns())
       const findings = scanText(toolInputText)
       if (findings.length > 0) {
         injectionFindingsForContext = findings

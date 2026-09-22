@@ -228,12 +228,18 @@ describe('openai-agents adapter: dual-ecosystem JS-side detection (Python side c
     expect(content).not.toContain('pip install')
   })
 
-  it('keeps the Python pointer when both ecosystems are present (see openaiAgents.ts module doc)', async () => {
+  it('names both gates when both ecosystems are present (TD-408 item 5)', async () => {
     await writeFile(join(root, 'package.json'), pkgJson({ '@openai/agents': '^0.16.1' }), 'utf-8')
     await writeFile(join(root, 'requirements.txt'), 'openai-agents==0.20.0\n', 'utf-8')
     await openaiAgentsAdapter.writeConfig(root, [], PROXY_URL)
     const content = await readFile(join(root, '.env.intutic'), 'utf-8')
     expect(content).toContain('pip install intutic-clawde[openai-agents]')
+    expect(content).toContain('npm install @intutic/gate')
+    expect(content).toContain("@intutic/gate/openai'")
+    // Still one file, still sourceable: every non-comment line is an export.
+    for (const line of content.split('\n')) {
+      if (line.trim() && !line.startsWith('#')) expect(line).toMatch(/^export /)
+    }
   })
 })
 
