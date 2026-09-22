@@ -12,7 +12,11 @@
  * Protocol (see `runner.ts` for the main-thread side):
  *   compile  { type:'compile',  id, ruleId, bytes }  -> { type:'compile-result',  id, ruleId, ok, unsupportedImports?, readsReferencedFiles?, error? }
  *   remove   { type:'remove', ruleId }                  (no reply)
- *   evaluate { type:'evaluate', id, ruleId, bytes }   -> { type:'evaluate-result', id, ruleId, ok, code?, reason?, error? }
+ *   evaluate { type:'evaluate', id, ruleId, bytes, files? } -> { type:'evaluate-result', id, ruleId, ok, code?, reason?, error? }
+ *
+ * `files` is the per-evaluation referenced-files table (TD-441), posted only
+ * to a rule that imports `read_referenced_file`; it is rebuilt here into the
+ * host-import state, so the main thread never shares memory with the guest.
  *
  * A guest `abort` call is inert (hostImports.ts logs and returns); an
  * uncaught exception or trap during instantiation/evaluation is caught here
@@ -24,7 +28,20 @@
 
 import { parentPort } from 'node:worker_threads'
 import { unsupportedWasmImports, WASM_HOST_IMPORTS } from '@intutic/shared-types'
-import { createHostImports } from './hostImports.js'
+import { createHostImports, newHostImportState } from './hostImports.js'
+import { ReferencedFiles, type ReferencedFilesTable } from './referencedFiles.js'
+
+/**
+ * Guest memory ceiling, `runner.rs`'s 16MB `StoreLimits` (TD-440). V8 offers
+ * no grow hook on a memory the module itself exports and `unsupportedWasmImports`
+ * refuses an imported one, so this is enforced AFTER the call: a rule whose
+ * memory grew past the ceiling has its verdict discarded and reported as a
+ * failure (fail-open, like a trap), rather than being stopped mid-growth.
+ * What it cannot do is bound the growth itself; that remainder stays in
+ * TD-440. Checked before the call too, so a module that declares more than
+ * the ceiling as its initial size never runs.
+ */
+export const MAX_GUEST_MEMORY_BYTES = 16 * 1024 * 1024
 
 /**
  * Longest reason a guest may return — ported from `runner.rs`'s
@@ -69,6 +86,7 @@ interface EvaluateMessage {
   id: number
   ruleId: string
   bytes: ArrayBuffer
+  files?: ReferencedFilesTable
 }
 type InMessage = CompileMessage | RemoveMessage | EvaluateMessage
 
@@ -174,7 +192,8 @@ function handleEvaluate(msg: EvaluateMessage): void {
     // `memory` export does, so `createHostImports`'s closure reads through
     // one indirection that gets filled in once, right after instantiation.
     const memoryHolder: { current: WebAssembly.Memory | undefined } = { current: undefined }
-    const env: WebAssembly.ModuleImports = createHostImports(() => memoryHolder.current)
+    const hostState = newHostImportState(ReferencedFiles.fromTable(msg.files))
+    const env: WebAssembly.ModuleImports = createHostImports(() => memoryHolder.current, hostState)
     const instance = new WebAssembly.Instance(module, { env })
     const exportsObj = instance.exports as Record<string, unknown>
 
@@ -184,6 +203,9 @@ function handleEvaluate(msg: EvaluateMessage): void {
     }
     memoryHolder.current = memExport
     const memory = memExport
+    if (memory.buffer.byteLength > MAX_GUEST_MEMORY_BYTES) {
+      throw new Error(`WASM module declares ${memory.buffer.byteLength} bytes of initial memory, over the ${MAX_GUEST_MEMORY_BYTES}-byte ceiling`)
+    }
 
     const contextBytes = new Uint8Array(msg.bytes)
 
@@ -214,6 +236,10 @@ function handleEvaluate(msg: EvaluateMessage): void {
     // hostile length must not be able to buy extra time by doing so after
     // the verdict — same reasoning runner.rs states for its own placement.
     const reason = readGuestReason(exportsObj, memory)
+
+    if (memory.buffer.byteLength > MAX_GUEST_MEMORY_BYTES) {
+      throw new Error(`WASM rule grew guest memory to ${memory.buffer.byteLength} bytes, over the ${MAX_GUEST_MEMORY_BYTES}-byte ceiling; verdict discarded`)
+    }
 
     parentPort?.postMessage({ type: 'evaluate-result', id: msg.id, ruleId: msg.ruleId, ok: true, code, reason })
   } catch (err) {

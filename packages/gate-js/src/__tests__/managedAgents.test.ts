@@ -385,6 +385,151 @@ describe('IntuticSessionConfirmer', () => {
 
     expect(sent.map((c) => c.tool_use_id)).toEqual(['t1', 't2'])
   })
+
+  // ── TD-428: reconnect ──────────────────────────────────────────────
+
+  /** A stream client whose `stream()` hands out one scripted segment per call: an
+   *  array of events (ends cleanly) or an Error (the stream dies). */
+  class FlakyEvents implements ManagedAgentsSessionEventsClientLike {
+    sent: UserToolConfirmationParams[] = []
+    opened = 0
+    constructor(
+      private listed: ManagedAgentsSessionEventLike[],
+      private readonly segments: Array<ManagedAgentsSessionEventLike[] | Error>,
+    ) {}
+    async *list(): AsyncIterable<ManagedAgentsSessionEventLike> {
+      for (const event of this.listed) yield event
+    }
+    async send(_sessionId: string, params: { events: UserToolConfirmationParams[] }): Promise<unknown> {
+      this.sent.push(...params.events)
+      return { events: params.events }
+    }
+    async stream(): Promise<AsyncIterable<ManagedAgentsSessionEventLike>> {
+      const segment = this.segments[this.opened] ?? []
+      this.opened += 1
+      return {
+        async *[Symbol.asyncIterator]() {
+          if (segment instanceof Error) throw segment
+          for (const event of segment) yield event
+        },
+      }
+    }
+  }
+
+  function flakyClient(listed: ManagedAgentsSessionEventLike[], segments: Array<ManagedAgentsSessionEventLike[] | Error>) {
+    const events = new FlakyEvents(listed, segments)
+    const client: ManagedAgentsClientLike = { beta: { sessions: { events } } }
+    return { client, events }
+  }
+
+  it('watch() reopens a stream that ends without a terminal event and confirms each tool_use_id exactly once (TD-428)', async () => {
+    const gate = new FakeGate('allow')
+    const { client, events } = flakyClient(
+      [],
+      [
+        [toolUseEvent({ id: 't1' })], // ends cleanly, no terminal event
+        new Error('socket hang up'), // dies
+        [toolUseEvent({ id: 't1' }), toolUseEvent({ id: 't2' }), { id: 'end', type: 'session.status_terminated' }],
+      ],
+    )
+    const confirmer = new IntuticSessionConfirmer(client, 'sess_1', { gate })
+
+    const sent: string[] = []
+    for await (const confirmation of confirmer.watch({ backoffStartMs: 1, backoffCapMs: 2 })) {
+      sent.push(confirmation.tool_use_id)
+    }
+
+    expect(events.opened).toBe(3)
+    expect(sent).toEqual(['t1', 't2'])
+    expect(events.sent.map((c) => c.tool_use_id)).toEqual(['t1', 't2'])
+  })
+
+  it('watch() re-polls after a reconnect so a pause raised while the stream was down is still answered', async () => {
+    const gate = new FakeGate('allow')
+    const { client, events } = flakyClient(
+      [],
+      [new Error('reset'), [{ id: 'end', type: 'session.status_terminated' }]],
+    )
+    // The pause appears in list() only after the first stream has died.
+    const original = events.stream.bind(events)
+    events.stream = async () => {
+      const s = await original()
+      if (events.opened === 2) (events as unknown as { listed: ManagedAgentsSessionEventLike[] }).listed = [toolUseEvent({ id: 'missed' })]
+      return s
+    }
+    const confirmer = new IntuticSessionConfirmer(client, 'sess_1', { gate })
+
+    const sent: string[] = []
+    for await (const c of confirmer.watch({ backoffStartMs: 1 })) sent.push(c.tool_use_id)
+
+    expect(sent).toEqual(['missed'])
+  })
+
+  it('watch() rethrows a fatal 4xx instead of reconnecting forever', async () => {
+    const gate = new FakeGate('allow')
+    const gone = Object.assign(new Error('session not found'), { status: 404 })
+    const { client, events } = flakyClient([], [gone, [{ id: 'end', type: 'session.status_terminated' }]])
+    const confirmer = new IntuticSessionConfirmer(client, 'sess_1', { gate })
+
+    const drain = async () => {
+      for await (const _ of confirmer.watch({ backoffStartMs: 1 })) void _
+    }
+    await expect(drain()).rejects.toBe(gone)
+    expect(events.opened).toBe(1)
+  })
+
+  it('watch() treats 408 and 429 as transient and reconnects', async () => {
+    const gate = new FakeGate('allow')
+    const { client, events } = flakyClient(
+      [],
+      [
+        Object.assign(new Error('timeout'), { status: 408 }),
+        Object.assign(new Error('slow down'), { status: 429 }),
+        [{ id: 'end', type: 'session.status_terminated' }],
+      ],
+    )
+    const confirmer = new IntuticSessionConfirmer(client, 'sess_1', { gate })
+    for await (const _ of confirmer.watch({ backoffStartMs: 1 })) void _
+    expect(events.opened).toBe(3)
+  })
+
+  it('watch() stops when maxReconnects is exhausted', async () => {
+    const gate = new FakeGate('allow')
+    const { client, events } = flakyClient([], [[], [], [], []])
+    const confirmer = new IntuticSessionConfirmer(client, 'sess_1', { gate })
+    const drain = async () => {
+      for await (const _ of confirmer.watch({ backoffStartMs: 1, maxReconnects: 2 })) void _
+    }
+    await expect(drain()).rejects.toThrow(/maxReconnects \(2\) is exhausted/)
+    expect(events.opened).toBe(3)
+  })
+
+  it('watch() ends on signal abort while waiting to reconnect', async () => {
+    const gate = new FakeGate('allow')
+    const { client, events } = flakyClient([], [[], [], []])
+    const confirmer = new IntuticSessionConfirmer(client, 'sess_1', { gate })
+    const ac = new AbortController()
+    setTimeout(() => ac.abort(), 20)
+    for await (const _ of confirmer.watch({ backoffStartMs: 10_000, signal: ac.signal })) void _
+    expect(events.opened).toBe(1)
+  })
+
+  it('watch() drops a stream that is silent past idleTimeoutMs and reopens it', async () => {
+    const gate = new FakeGate('allow')
+    const events = new FlakyEvents([], [])
+    let opened = 0
+    events.stream = async () => {
+      opened += 1
+      if (opened === 1) {
+        return { [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }) } // never yields
+      }
+      return { async *[Symbol.asyncIterator]() { yield { id: 'end', type: 'session.status_terminated' } } }
+    }
+    const client: ManagedAgentsClientLike = { beta: { sessions: { events } } }
+    const confirmer = new IntuticSessionConfirmer(client, 'sess_1', { gate })
+    for await (const _ of confirmer.watch({ backoffStartMs: 1, idleTimeoutMs: 15 })) void _
+    expect(opened).toBe(2)
+  })
 })
 
 describe('wrapManagedAgentsCustomTool / wrapManagedAgentsCustomTools', () => {

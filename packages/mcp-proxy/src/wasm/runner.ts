@@ -15,12 +15,18 @@
  *   the in-process Wasmtime call never did) is the only backstop available
  *   here. 50ms, not 5ms, to keep that overhead from false-positiving a
  *   legitimate rule under normal load.
- * - **No explicit guest memory ceiling.** `runner.rs` sets a 16MB
- *   `StoreLimits` memory cap; V8's WebAssembly.Memory has its own built-in
- *   maximum (bounded by the module's own declared `maximum`, if any) but
- *   this runner does not impose a SEPARATE, proxy-owned ceiling the way the
- *   Rust `ResourceLimiter` does.
- * - **`read_referenced_file` always refuses.** See `hostImports.ts`.
+ * - **Guest memory ceiling is checked, not enforced mid-call.** `runner.rs`
+ *   sets a 16MB `StoreLimits` cap that stops a `memory.grow` as it happens;
+ *   V8 exposes no such hook on a module-exported memory, so `worker.ts`
+ *   refuses a module whose initial memory is over 16MB and discards the
+ *   verdict of one that grew past it during the call (reported as a
+ *   failure, fail-open like a trap). The growth itself is bounded only by
+ *   V8 (TD-440's remainder).
+ * - **`read_referenced_file` is served from a pre-read table**
+ *   (`referencedFiles.ts`, the port of `referenced_files.rs`), prefetched
+ *   once per `evaluate()` only when a loaded rule imports the function and
+ *   `INTUTIC_WASM_MANIFEST_ROOT` is set; otherwise every call refuses,
+ *   exactly as the Rust proxy answers with no root configured.
  *
  * @module
  */
@@ -31,6 +37,7 @@ import { fileURLToPath } from 'node:url'
 import { createStderrLogger as createLogger } from '../stderrLog.js'
 import { WasmLoader, resolveWasmDir, type CompileBridge, type CompileOutcome } from './loader.js'
 import { buildWasmContext, type WasmContextInput } from './context.js'
+import { prefetch, resolveRoot, ReferencedFiles, type ReferencedFilesTable } from './referencedFiles.js'
 
 const log = createLogger('mcp-proxy-wasm-runner')
 
@@ -227,8 +234,12 @@ export class WasmRunner implements CompileBridge {
     const contextBytes = Buffer.from(JSON.stringify(buildWasmContext(input)))
     let pendingReask: { code: 'reask'; reason: string; ruleId: string } | null = null
 
+    // Read once per evaluation, before any rule runs, so the per-rule
+    // deadline covers guest execution only — and only when a rule will ask.
+    const files = rules.some((r) => r.readsReferencedFiles) ? await this.prefetchReferencedFiles(input) : undefined
+
     for (const rule of rules) {
-      const result = await this.evaluateOne(rule.ruleId, contextBytes)
+      const result = await this.evaluateOne(rule.ruleId, contextBytes, rule.readsReferencedFiles ? files : undefined)
       if (result === null) continue // fail-open ALLOW for this rule (timeout, trap, or worker error)
 
       switch (result.code) {
@@ -271,14 +282,29 @@ export class WasmRunner implements CompileBridge {
     return pendingReask ?? { code: 'allow' }
   }
 
+  /**
+   * The referenced-files table for this evaluation (TD-441). With no
+   * `INTUTIC_WASM_MANIFEST_ROOT` the table is empty and every read refuses.
+   */
+  private async prefetchReferencedFiles(input: WasmContextInput): Promise<ReferencedFilesTable> {
+    const root = resolveRoot()
+    if (!root) return ReferencedFiles.empty().toTable()
+    const files = await prefetch([{ name: input.toolName, arguments: input.toolArguments ?? {} }], root)
+    if (!files.isEmpty()) {
+      log.debug({ action: 'wasm_referenced_files', readable: files.readableCount(), table: files.describe() }, 'referenced files resolved for WASM rules')
+    }
+    return files.toTable()
+  }
+
   /** One rule's evaluation, raced against `EVALUATE_TIMEOUT_MS`. `null` means fail-open (timeout, worker error, or guest trap). */
   private async evaluateOne(
     ruleId: string,
     contextBytes: Buffer,
+    files?: ReferencedFilesTable,
   ): Promise<{ code: number; reason?: string } | null> {
     const id = this.allocId()
     const reply = await this.send<{ ok: boolean; code?: number; reason?: string; error?: string }>(
-      { type: 'evaluate', id, ruleId, bytes: toArrayBuffer(contextBytes) },
+      { type: 'evaluate', id, ruleId, bytes: toArrayBuffer(contextBytes), ...(files ? { files } : {}) },
       EVALUATE_TIMEOUT_MS,
     )
 

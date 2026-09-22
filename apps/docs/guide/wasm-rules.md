@@ -105,6 +105,13 @@ write your rule so that branch is a sensible outcome, because it is what runs on
 any deployment that has not opted in.
 :::
 
+The MCP governance proxy honours the same import with the same guards, codes
+and root variable: the candidate paths come from the MCP tool call's arguments
+(the structured path keys and the shell words of a `command`), and the file is
+read once per evaluation, before the rule runs, only when a loaded rule imports
+the function. A rule written for the LLM proxy therefore reads the same file
+either way.
+
 ::: tip This is the one thing a rule sees that is not the request
 A verdict that depends on a file is no longer reproducible from the stored
 request alone: replaying it needs the tree as it was. The proxy logs a content
