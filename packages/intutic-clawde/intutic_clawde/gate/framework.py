@@ -97,6 +97,12 @@ def _tool_name(tool: Any) -> Optional[str]:
     return n if isinstance(n, str) and n else None
 
 
+def _is_anthropic_beta_tool(tool: Any) -> bool:
+    """A `BaseFunctionTool` from `anthropic.lib.tools`, detected without importing it."""
+    module = getattr(type(tool), "__module__", "") or ""
+    return module.startswith("anthropic.lib.tools") and hasattr(tool, "_func_with_validate")
+
+
 def guard_tools(tools: Iterable[Any], *, gate: Optional[Gate] = None) -> list:
     """Wrap a list of tools (LangChain/LangGraph/smolagents tool objects, or
     plain callables) so each is gated before execution.
@@ -128,6 +134,22 @@ def guard_tools(tools: Iterable[Any], *, gate: Optional[Gate] = None) -> list:
     out = []
     for tool in tools:
         name = _tool_name(tool)
+
+        # `anthropic.lib.tools.beta_tool` objects (TD-427): `BaseFunctionTool`
+        # captures `pydantic.validate_call(func)` at construction and `call()`
+        # invokes THAT, never `.func`. Swapping `.func` below would look like a
+        # gate and gate nothing. Refuse loudly, the way the TypeScript twin's
+        # `wrapTools()` throws on a `BetaRunnableTool`, and say what works:
+        # `@guard` innermost, `@beta_tool` outermost (the docs page's §3).
+        # Duck-typed on the private attribute's presence plus the module, so
+        # nothing here imports `anthropic`.
+        if _is_anthropic_beta_tool(tool):
+            raise TypeError(
+                f"guard_tools: {name or tool!r} is an anthropic `@beta_tool` object; its "
+                "`.func` is never called, so wrapping it here would gate nothing. Apply "
+                "`@guard` to the function BEFORE `@beta_tool` wraps it (guard innermost, "
+                "beta_tool outermost) — see docs/integrations/anthropic-managed-agents.md §3."
+            )
 
         func = getattr(tool, "func", None)
         run = getattr(tool, "_run", None)

@@ -21,6 +21,7 @@ import {
   REASK_MAX_ATTEMPTS,
 } from '../anomaly/index.js'
 import { SessionState, TOOL_SEQUENCE_CAP } from '../session.js'
+import { anchorProjection } from '../anomaly/detectors.js'
 
 describe('consecutiveRepeat', () => {
   it('fires at exactly 5 consecutive identical calls (REPETITION_THRESHOLD)', () => {
@@ -273,5 +274,67 @@ describe('SessionState', () => {
     expect(s.incrReaskAttempt('consecutive_repeat')).toBe(2)
     expect(s.incrReaskAttempt('ping_pong_cycle')).toBe(1) // independent counter
     expect(s.getReaskAttempts('consecutive_repeat')).toBe(2)
+  })
+})
+
+/**
+ * TD-439: the rest of `detectors.rs`'s `landmark_cycle_tests` module,
+ * transcribed verbatim where the port has the same inputs. Two Rust fixtures
+ * are not portable and are listed here so nobody hunts for them:
+ * `action_emission_does_not_change_the_verdict`, `an_interleaved_spin_is_
+ * visible_to_nothing_else` and `the_counts_disclose_that_action_steps_are_
+ * not_counted` all depend on synthesised `action:` tokens, which this proxy
+ * never records (see `anchorProjection`'s doc).
+ */
+describe('landmarkCycle — ported detectors.rs fixtures (TD-439)', () => {
+  const repeat = (pattern: string[], times: number): string[] =>
+    Array.from({ length: pattern.length * times }, (_, i) => pattern[i % pattern.length]!)
+
+  it('a_period_three_cycle_is_caught: names the period and steers', () => {
+    const hit = landmarkCycle(repeat(['Read', 'Grep', 'Bash'], 4))
+    expect(hit).not.toBeNull()
+    expect(hit!.disposition).toBe('steer')
+    expect(hit!.reason).toContain('period of 3')
+  })
+
+  it('genuine_variety_is_not_a_cycle: stopped by MIN_LANDMARK_ANCHORS, not the floor', () => {
+    expect(landmarkCycle(['A', 'B', 'C', 'A', 'B', 'D', 'A', 'B', 'E'])).toBeNull()
+  })
+
+  it('variety_is_rejected_by_the_coverage_floor_itself: the one fixture that pins CYCLE_COVERAGE_FLOOR', () => {
+    const raw = ['A', 'B', 'C', 'A', 'B', 'D', 'A', 'B', 'E', 'A', 'B', 'F']
+    expect(landmarkCycle(raw)).toBeNull()
+    // Restate the arithmetic so a fixture edit that parks it behind an
+    // earlier gate fails loudly: 12 anchors, 8 survivors (meets the 8 floor
+    // exactly), coverage 8/12 = 0.67 < 0.75.
+    const { anchors } = anchorProjection(raw)
+    expect(anchors).toHaveLength(12)
+    const survivors = anchors.filter((id) => anchors.filter((o) => o === id).length > 1)
+    expect(survivors).toHaveLength(8)
+    expect(survivors.length / anchors.length).toBeLessThan(0.75)
+  })
+
+  it('case_differences_do_not_hide_a_cycle', () => {
+    expect(landmarkCycle(['bash', 'Write', 'BASH', 'write', 'Bash', 'WRITE', 'bAsH', 'wRiTe'])).not.toBeNull()
+  })
+
+  it('a_short_sequence_is_not_judged', () => {
+    expect(landmarkCycle(['A', 'B', 'A', 'B'])).toBeNull()
+  })
+
+  it('the_smallest_period_is_reported: ABAB reports 2, not 4', () => {
+    expect(landmarkCycle(repeat(['A', 'B'], 6))!.reason).toContain('period of 2')
+  })
+
+  it('a_repeated_interloper_defeats_it_and_that_is_documented', () => {
+    expect(landmarkCycle(['A', 'B', 'A', 'B', 'X', 'A', 'B', 'X', 'A', 'B'])).toBeNull()
+  })
+
+  it('the_description_cannot_name_an_elided_tool', () => {
+    const hit = landmarkCycle(['A', 'B', 'A', 'B', 'A', 'B', 'A', 'B', 'A', 'B', 'X'])
+    expect(hit).not.toBeNull()
+    expect(hit!.reason).toContain('period of 2')
+    expect(hit!.reason).toContain('(A → B)')
+    expect(hit!.reason).not.toContain('X')
   })
 })

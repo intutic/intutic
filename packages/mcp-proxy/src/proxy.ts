@@ -35,7 +35,7 @@ import { PolicyClient } from './policy.js'
 import { GovernanceEmitter } from './emitter.js'
 import { ToolCallInterceptor } from './interceptor.js'
 import { redactText as redactMcpText } from './dlp.js'
-import { scanText, injectionSeverity, type InjectionSource } from './injection.js'
+import { scanText, injectionSeverity, setDynamicInjectionPatterns, type InjectionSource } from './injection.js'
 import { toolPoisoning, dlpEscalation } from './anomaly/index.js'
 import { SessionState } from './session.js'
 import { WasmRunner } from './wasm/runner.js'
@@ -43,6 +43,7 @@ import { checkTofu, decideTofuAction } from './tofu.js'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
+import { watchWasmDir, type WasmDirWatcher } from './wasm/watch.js'
 
 const log = createLogger('mcp-governance-proxy')
 
@@ -184,7 +185,11 @@ export function processServerLine(
   allowedTools: readonly string[],
   overrides: Readonly<Record<string, string>>,
   injectionAction: 'warn' | 'block' = 'warn',
+  injectionPatterns: readonly string[] = [],
 ): ServerLineOutcome {
+  // Workspace-supplied injection patterns (TD-436), on top of the floor.
+  // Idempotent when the list has not changed, so this is cheap per line.
+  setDynamicInjectionPatterns(injectionPatterns)
   const trimmed = raw.trim()
   if (!trimmed) return { line: raw }
   let msg: JsonRpcResponse & { result?: Record<string, unknown> }
@@ -321,7 +326,7 @@ export function processServerLine(
       const name = t['name']
       const description = t['description']
       if (typeof name !== 'string' || typeof description !== 'string') continue
-      const patterns = scanText(description)
+        const patterns = scanText(description)
       if (patterns.length === 0) continue
       injectionFindings ??= []
       injectionFindings.push({ source: 'tool_description', toolName: name, patterns })
@@ -533,7 +538,23 @@ export class McpGovernanceProxy {
    * `~/.intutic/wasm/` directory — see `policy.ts`'s `start(onTick)` doc.
    */
   startPolicy(): void {
-    this.policy.start(() => this.wasmRunner.rescan())
+    this.policy.start(() => {
+      this.ensureWasmWatch()
+      return this.wasmRunner.rescan()
+    })
+  }
+
+  private wasmWatch: WasmDirWatcher | null = null
+
+  /**
+   * Hot reload for `~/.intutic/wasm/` (TD-442): a directory watcher, not a
+   * second timer, so a dropped-in rule takes effect within a second instead
+   * of at the next 60-second tick. Re-armed on every tick because the
+   * directory may not exist when the proxy starts.
+   */
+  private ensureWasmWatch(): void {
+    if (this.wasmWatch) return
+    this.wasmWatch = watchWasmDir(this.wasmRunner.getDir(), () => this.wasmRunner.rescan())
   }
 
   /**
@@ -542,6 +563,8 @@ export class McpGovernanceProxy {
    */
   stopPolicy(): void {
     this.policy.stop()
+    this.wasmWatch?.close()
+    this.wasmWatch = null
     void this.wasmRunner.shutdown()
   }
 
@@ -728,6 +751,7 @@ export class McpGovernanceProxy {
       this.policy.getAllowedTools(),
       this.policy.getToolDescriptionOverrides(),
       injectionAction,
+      this.policy.getInjectionPatterns(),
     )
     if (outcome.injectionFindings) {
       for (const finding of outcome.injectionFindings) {

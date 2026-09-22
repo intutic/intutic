@@ -499,7 +499,15 @@ function wrapHostedMcpTool(tool: HostedToolSlice, opts: OpenAiWrapOptions): Host
 }
 
 /** Shared shell/apply_patch wrapping: force every action through the
- *  approval path, gate it there, then replay the tool's original policy. */
+ *  approval path, gate it there, then replay the tool's original policy.
+ *
+ *  Fall-through, stated because it is easy to miss (TD-406): this relies on
+ *  `needsApproval`/`onApproval` being the SDK's veto point for these two
+ *  hosted tools. A future `@openai/agents` that executes a shell or
+ *  apply_patch action without consulting `onApproval` would bypass the gate
+ *  with no error here — which is why `package.json` pins the exact version
+ *  this was verified against, and a bump must re-run the openai adapter
+ *  tests (`__tests__/openai.test.ts`) before landing. */
 function wrapApprovalGatedTool<T extends ShellToolSlice | ApplyPatchToolSlice>(
   tool: T,
   opts: OpenAiWrapOptions,
