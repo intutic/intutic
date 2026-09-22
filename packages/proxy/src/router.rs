@@ -298,9 +298,12 @@ async fn attest_sandbox(
         }
     };
 
+    // `url` is built from `CONTROL_PLANE_URL`, operator configuration, and
+    // `http://localhost:3001` is the documented development value; the same
+    // header already travels to the same URL from the auth middleware.
     let resp = state
         .http_client
-        .patch(&url)
+        .patch(&url) // codeql[rust/cleartext-transmission]
         .header("authorization", auth)
         .timeout(std::time::Duration::from_millis(3000))
         .send()

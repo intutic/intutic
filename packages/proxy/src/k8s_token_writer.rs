@@ -67,8 +67,22 @@ impl K8sSecretWriter {
         secret_name: impl Into<String>,
         secret_key: impl Into<String>,
     ) -> Self {
+        let base_url: String = base_url.into();
+        // The bearer token below is the pod's ServiceAccount token. It goes to
+        // exactly one place, the in-cluster API server over TLS; a plain-HTTP
+        // base URL is legal only for the loopback fake server the tests run.
+        // Enforced here rather than trusted: `from_env` is the only production
+        // constructor, but an invariant that lives in a comment is not one.
+        assert!(
+            base_url.starts_with("https://")
+                || base_url.starts_with("http://127.0.0.1")
+                || base_url.starts_with("http://localhost")
+                || base_url.starts_with("http://[::1]"),
+            "K8sSecretWriter: base_url must be https:// (or loopback in tests), got {}",
+            base_url.split("://").next().unwrap_or("?")
+        );
         Self {
-            base_url: base_url.into(),
+            base_url,
             token: token.into(),
             ca_pem,
             namespace: namespace.into(),
@@ -160,8 +174,10 @@ impl K8sSecretWriter {
         let mut body = serde_json::Map::new();
         body.insert("data".to_string(), serde_json::Value::Object(data));
 
+        // `url` is `https://kubernetes.default.svc/…` in every production
+        // path (`from_env`) and loopback in tests; `new()` asserts exactly that.
         let resp = client
-            .patch(&url)
+            .patch(&url) // codeql[rust/cleartext-transmission]
             .bearer_auth(&self.token)
             .header("Content-Type", "application/strategic-merge-patch+json")
             .json(&serde_json::Value::Object(body))
