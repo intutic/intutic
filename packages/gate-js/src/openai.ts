@@ -766,7 +766,7 @@ export interface OpenAiGateConfig extends GateConfig {
    * choose it ONLY once the exporter endpoint is re-pointed somewhere
    * approved, otherwise tool inputs/outputs leave via api.openai.com.
    */
-  tracingExport?: 'disable' | 'keep'
+  tracingExport?: 'disable' | 'keep' | 'intutic'
 }
 
 /**
@@ -782,6 +782,30 @@ export interface OpenAiGateConfig extends GateConfig {
  * session" readable at install time; see dsh.ts's `resolveSessionId` for the
  * full rationale this mirrors.
  */
+/**
+ * Where to point `@openai/agents`' tracing exporter so traces stay governed
+ * (TD-405): the control plane's ingest route, authenticated with the same
+ * API key the gate uses. Pass the result to the SDK's own exporter —
+ *
+ * ```ts
+ * import { setTraceProcessors, BatchTraceProcessor, OpenAITracingExporter } from '@openai/agents'
+ * setTraceProcessors([new BatchTraceProcessor(new OpenAITracingExporter(intuticTracingExporterOptions()))])
+ * ```
+ *
+ * — and pass `{ tracingExport: 'intutic' }` to {@link installOpenAiGate}. No
+ * `@openai/agents` import here, so this module stays loadable without the SDK.
+ * Generation spans become traces in the ledger; tool spans are counted, not
+ * stored (the route's own doc says why).
+ */
+export function intuticTracingExporterOptions(env: NodeJS.ProcessEnv = process.env): { endpoint: string; apiKey: string } {
+  const base = (env.INTUTIC_CONTROL_PLANE_URL ?? '').replace(/\/+$/, '')
+  const apiKey = env.INTUTIC_API_KEY ?? ''
+  if (!base || !apiKey) {
+    throw new Error('intuticTracingExporterOptions: INTUTIC_CONTROL_PLANE_URL and INTUTIC_API_KEY must be set to route traces to Intutic')
+  }
+  return { endpoint: `${base}/api/v1/integrations/openai-agents/traces/ingest`, apiKey }
+}
+
 export function installOpenAiGate(config: OpenAiGateConfig = {}): Gate {
   if ((config.tracingExport ?? 'disable') === 'disable') {
     suppressAgentsTracingExport()
