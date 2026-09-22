@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, truncateSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readLocalTraces, findLocalTraceById, LOCAL_VERDICTS } from './localTraces.js'
@@ -156,15 +156,19 @@ describe('readLocalTraces', () => {
     dir = mkdtempSync(join(tmpdir(), 'intutic-traces-'))
     mkdirSync(dir, { recursive: true })
     const path = join(dir, 'traces-2026-08-30.jsonl')
-    // Cheaper than actually writing 64MB: truncate to the cap size directly,
-    // then append one real, parseable line so the reader still finds a trace.
-    writeFileSync(path, Buffer.alloc(64 * 1024 * 1024))
+    // Cheaper than actually writing 64MB: truncate to the cap size directly
+    // (a sparse file, so no 64MB of zeros hit the disk), then append one real,
+    // parseable line so the reader still finds a trace. The reader still has
+    // to scan the whole file, which took over 5 s on a hosted CI runner once
+    // (2026-09-22), hence the explicit timeout.
+    writeFileSync(path, '')
+    truncateSync(path, 64 * 1024 * 1024)
     writeFileSync(path, traceLine({ trace_id: 'tr_capped' }) + '\n', { flag: 'a' })
 
     const result = await readLocalTraces({ logsDir: dir, since: new Date('2026-01-01'), limit: 20 })
 
     expect(result.cappedFiles).toEqual(['traces-2026-08-30.jsonl'])
-  })
+  }, 30_000)
 
   it('returns an empty result for a logs directory that does not exist', async () => {
     const result = await readLocalTraces({
