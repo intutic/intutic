@@ -315,6 +315,24 @@ export interface WorkspaceSettings {
   mcpAllowedServers?: string[]
 
   /**
+   * Workspace-supplied prompt-injection regex sources for the MCP governance
+   * proxy (TD-436), on top of its hardcoded floor. Delivered with the rest of
+   * the MCP curation; the proxy compiles them and drops one that does not.
+   * Absent or empty means the floor alone.
+   */
+  mcpInjectionPatterns?: string[]
+
+  /**
+   * Negotiated per-token rates, by model id, in USD per 1k tokens (TD-434).
+   * The `model_pricing` table is LIST price; a workspace paying below list
+   * had every savings figure skewed by the difference. Where a model is
+   * listed here it is priced at these rates in the routing shadow-savings
+   * report; anything else falls back to list. Absent or empty means list
+   * for everything.
+   */
+  contractedRates?: Record<string, { inputCostPer1k: number; outputCostPer1k: number }>
+
+  /**
    * Whether agents in this workspace must run inside a sandbox (LLD #63 §6).
    * - `'off'` (default): `intutic exec` runs on the host as before.
    * - `'warn'`: an un-sandboxed `intutic exec` runs but prints a warning.
