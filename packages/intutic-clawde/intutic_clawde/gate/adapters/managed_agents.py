@@ -131,6 +131,7 @@ wrapped in a generic "gate crashed" `deny_message`.
 
 from __future__ import annotations
 
+import time
 from typing import Any, Dict, Iterator, List, Optional, Set
 
 from ..gate import Gate, IntuticGateRefusal, active
@@ -159,6 +160,14 @@ def _field(obj: Any, name: str, default: Any = None) -> Any:
         return obj.get(name, default)
     return getattr(obj, name, default)
 
+
+
+def _is_fatal_4xx(exc: BaseException) -> bool:
+    """400–499 except 408 and 429: a retry cannot help (the session is gone or
+    the key is wrong). Duck-typed on ``status_code`` so nothing here imports
+    ``anthropic``."""
+    status = getattr(exc, "status_code", None)
+    return isinstance(status, int) and 400 <= status < 500 and status not in (408, 429)
 
 def _no_gate_result() -> str:
     return (
@@ -268,10 +277,12 @@ class IntuticSessionConfirmer:
         if event.data.type == "session.requires_action":
             IntuticSessionConfirmer(client, event.data.id).poll()
 
-    Usage — live stream, single connection (see `watch()`'s doc for why this
-    does not reconnect on its own)::
+    Usage — live stream. `watch()` reconnects with capped backoff and re-polls
+    after every reconnect, so a pause raised while the stream was down is
+    still answered (see `watch()`'s own doc for the knobs)::
 
-        for sent in confirmer.watch():
+        stop = threading.Event()
+        for sent in confirmer.watch(stop=stop, idle_timeout_s=120.0):
             print(sent["tool_use_id"], sent["result"])
     """
 
@@ -354,31 +365,65 @@ class IntuticSessionConfirmer:
             )
         return self.poll()
 
-    def watch(self) -> Iterator[Dict[str, Any]]:
+    def watch(
+        self,
+        *,
+        max_reconnects: Optional[int] = None,
+        backoff_start_s: float = 0.5,
+        backoff_cap_s: float = 10.0,
+        idle_timeout_s: Optional[float] = None,
+        stop: Optional[Any] = None,
+    ) -> Iterator[Dict[str, Any]]:
         """Catch up on anything already pending, then follow the live event
-        stream, yielding each confirmation as it is sent.
+        stream, yielding each confirmation as it is sent, reconnecting when
+        the stream drops (TD-428).
 
-        Ends when the session terminates (`session.status_terminated` /
-        `session.deleted`) or the stream itself ends. Deliberately NOT a
-        production-grade reconnect loop the way
-        `anthropic.lib.tools.SessionToolRunner` is (reconnect with capped
-        backoff, idle watchdog, partial-fulfillment bookkeeping — see that
-        module's real implementation for the scope of what a fully robust
-        version would need): a dropped connection here simply ends iteration.
-        Wrap `watch()` in your own retry loop for a long-running confirmer, or
-        prefer `poll()` from a webhook/cron trigger, which is naturally
-        idempotent and needs no reconnect logic at all. See TD-428.
+        Modelled on ``anthropic.lib.tools.SessionToolRunner``'s stream loop:
+        open the stream first, then reconcile with ``poll()``; on end or
+        error sleep (backoff doubling from ``backoff_start_s`` to
+        ``backoff_cap_s``, reset on any received event) and reopen. A fatal
+        4xx (400–499 other than 408 and 429) is re-raised. ``idle_timeout_s``
+        is passed to the SDK as the read timeout, so a silent stream raises
+        ``APITimeoutError`` and is reopened. ``stop`` is anything with an
+        ``is_set()`` (a ``threading.Event``); when set, ``watch()`` returns.
+        Ends on a terminal event, ``stop``, or ``max_reconnects`` exhausted
+        (unbounded by default).
         """
-        for confirmation in self.poll():
-            yield confirmation
-        with self._client.beta.sessions.events.stream(self.session_id) as stream:
-            for event in stream:
-                event_type = _field(event, "type")
-                if event_type in _TERMINAL_EVENT_TYPES:
-                    return
-                if event_type == "user.tool_confirmation":
-                    self._note_confirmation_event(event)
-                    continue
-                confirmation = self.handle_event(event)
-                if confirmation is not None:
-                    yield confirmation
+        backoff = backoff_start_s
+        reconnects = 0
+        while not (stop is not None and stop.is_set()):
+            terminal = False
+            try:
+                kwargs: Dict[str, Any] = {}
+                if idle_timeout_s is not None:
+                    kwargs["timeout"] = idle_timeout_s
+                with self._client.beta.sessions.events.stream(self.session_id, **kwargs) as stream:
+                    for confirmation in self.poll():
+                        yield confirmation
+                    for event in stream:
+                        backoff = backoff_start_s
+                        if stop is not None and stop.is_set():
+                            return
+                        event_type = _field(event, "type")
+                        if event_type in _TERMINAL_EVENT_TYPES:
+                            terminal = True
+                            break
+                        if event_type == "user.tool_confirmation":
+                            self._note_confirmation_event(event)
+                            continue
+                        confirmation = self.handle_event(event)
+                        if confirmation is not None:
+                            yield confirmation
+            except Exception as exc:  # noqa: BLE001 - classified below
+                if _is_fatal_4xx(exc):
+                    raise
+            if terminal or (stop is not None and stop.is_set()):
+                return
+            if max_reconnects is not None and reconnects >= max_reconnects:
+                raise RuntimeError(
+                    f"watch(): stream ended {reconnects + 1} time(s) and max_reconnects "
+                    f"({max_reconnects}) is exhausted"
+                )
+            reconnects += 1
+            time.sleep(backoff)
+            backoff = min(backoff * 2, backoff_cap_s)

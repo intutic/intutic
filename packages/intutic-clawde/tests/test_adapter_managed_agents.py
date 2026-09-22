@@ -267,6 +267,53 @@ class _FakeClient:
         self.beta = type("_Beta", (), {"sessions": type("_Sessions", (), {"events": events})()})()
 
 
+class _StatusError(Exception):
+    """Shaped like `anthropic.APIStatusError`: carries `status_code`."""
+
+    def __init__(self, status_code: int, message: str):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class _FlakyEvents(_FakeEvents):
+    """`stream()` hands out one scripted segment per call: a list of events
+    (the stream ends cleanly) or an exception (the stream dies)."""
+
+    def __init__(self, segments: List[Any]):
+        super().__init__([])
+        self._segments = segments
+        self.opened = 0
+        self.stream_kwargs: List[Dict[str, Any]] = []
+        self.listed_after_open: Dict[int, List[Any]] = {}
+
+    def stream(self, session_id: str, **kwargs):  # noqa: ARG002
+        self.opened += 1
+        self.stream_kwargs.append(dict(kwargs))
+        if self.opened in self.listed_after_open:
+            self._listed = list(self.listed_after_open[self.opened])
+        segment = self._segments[self.opened - 1] if self.opened - 1 < len(self._segments) else []
+        if isinstance(segment, BaseException):
+            return _FailingStream(segment)
+        return _FakeStream(segment)
+
+
+class _FailingStream:
+    def __init__(self, exc: BaseException):
+        self._exc = exc
+
+    def __enter__(self):
+        raise self._exc
+
+    def __exit__(self, *exc):
+        return False
+
+
+class _FlakyClient:
+    def __init__(self, segments: List[Any]):
+        self.events = _FlakyEvents(segments)
+        self.beta = type("_Beta", (), {"sessions": type("_Sessions", (), {"events": self.events})()})()
+
+
 class TestIntuticSessionConfirmer:
     def test_poll_answers_every_pending_pause_and_ignores_already_answered_ones(self, tmp_path, monkeypatch):
         g = make_gate(tmp_path, monkeypatch, rules=[BLOCK_RULE])
@@ -359,3 +406,95 @@ class TestIntuticSessionConfirmer:
 
         assert [c["tool_use_id"] for c in sent] == ["t1", "t2"]
         assert sent[1]["result"] == "deny"
+
+    # ── TD-428: reconnect ──────────────────────────────────────────────
+
+    def test_watch_reopens_a_dropped_stream_and_confirms_each_id_once(self, tmp_path, monkeypatch):
+        g = make_gate(tmp_path, monkeypatch, rules=[BLOCK_RULE])
+        t1 = {"id": "t1", "type": "agent.tool_use", "name": "shell",
+              "input": {"command": ALLOWED_COMMAND}, "evaluated_permission": "ask"}
+        t2 = dict(t1, id="t2")
+        client = _FlakyClient(segments=[
+            [t1],                                   # ends cleanly, no terminal event
+            ConnectionError("socket hang up"),      # dies
+            [t1, t2, {"id": "end", "type": "session.status_terminated"}],
+        ])
+        confirmer = IntuticSessionConfirmer(client, "sess_1", gate=g)
+        monkeypatch.setattr("intutic_clawde.gate.adapters.managed_agents.time.sleep", lambda _s: None)
+
+        sent = list(confirmer.watch())
+
+        assert client.events.opened == 3
+        assert [c["tool_use_id"] for c in sent] == ["t1", "t2"]
+        assert [c["tool_use_id"] for c in client.events.sent] == ["t1", "t2"]
+
+    def test_watch_re_polls_after_a_reconnect(self, tmp_path, monkeypatch):
+        g = make_gate(tmp_path, monkeypatch, rules=[BLOCK_RULE])
+        missed = {"id": "missed", "type": "agent.tool_use", "name": "shell",
+                  "input": {"command": ALLOWED_COMMAND}, "evaluated_permission": "ask"}
+        client = _FlakyClient(segments=[ConnectionError("reset"),
+                                        [{"id": "end", "type": "session.status_terminated"}]])
+        # The pause shows up in list() only once the first stream has died.
+        client.events.listed_after_open = {2: [missed]}
+        confirmer = IntuticSessionConfirmer(client, "sess_1", gate=g)
+        monkeypatch.setattr("intutic_clawde.gate.adapters.managed_agents.time.sleep", lambda _s: None)
+
+        sent = list(confirmer.watch())
+        assert [c["tool_use_id"] for c in sent] == ["missed"]
+
+    def test_watch_reraises_a_fatal_4xx(self, tmp_path, monkeypatch):
+        g = make_gate(tmp_path, monkeypatch, rules=[BLOCK_RULE])
+        gone = _StatusError(404, "session not found")
+        client = _FlakyClient(segments=[gone, [{"id": "end", "type": "session.status_terminated"}]])
+        confirmer = IntuticSessionConfirmer(client, "sess_1", gate=g)
+        with pytest.raises(_StatusError):
+            list(confirmer.watch())
+        assert client.events.opened == 1
+
+    def test_watch_treats_408_and_429_as_transient(self, tmp_path, monkeypatch):
+        g = make_gate(tmp_path, monkeypatch, rules=[BLOCK_RULE])
+        client = _FlakyClient(segments=[_StatusError(408, "timeout"), _StatusError(429, "slow down"),
+                                        [{"id": "end", "type": "session.status_terminated"}]])
+        confirmer = IntuticSessionConfirmer(client, "sess_1", gate=g)
+        monkeypatch.setattr("intutic_clawde.gate.adapters.managed_agents.time.sleep", lambda _s: None)
+        list(confirmer.watch())
+        assert client.events.opened == 3
+
+    def test_watch_stops_when_max_reconnects_is_exhausted(self, tmp_path, monkeypatch):
+        g = make_gate(tmp_path, monkeypatch, rules=[BLOCK_RULE])
+        client = _FlakyClient(segments=[[], [], [], []])
+        confirmer = IntuticSessionConfirmer(client, "sess_1", gate=g)
+        monkeypatch.setattr("intutic_clawde.gate.adapters.managed_agents.time.sleep", lambda _s: None)
+        with pytest.raises(RuntimeError, match=r"max_reconnects \(2\) is exhausted"):
+            list(confirmer.watch(max_reconnects=2))
+        assert client.events.opened == 3
+
+    def test_watch_backs_off_and_resets_on_an_event(self, tmp_path, monkeypatch):
+        g = make_gate(tmp_path, monkeypatch, rules=[BLOCK_RULE])
+        ev = {"id": "x", "type": "agent.tool_use", "name": "shell",
+              "input": {"command": ALLOWED_COMMAND}, "evaluated_permission": "ask"}
+        client = _FlakyClient(segments=[[], [], [ev], [],
+                                        [{"id": "end", "type": "session.status_terminated"}]])
+        confirmer = IntuticSessionConfirmer(client, "sess_1", gate=g)
+        slept: list = []
+        monkeypatch.setattr("intutic_clawde.gate.adapters.managed_agents.time.sleep", slept.append)
+        list(confirmer.watch(backoff_start_s=1.0, backoff_cap_s=3.0))
+        # 1, 2 (doubling), then the event on stream 3 resets it: 1, then 2.
+        assert slept == [1.0, 2.0, 1.0, 2.0]
+
+    def test_watch_returns_when_stop_is_set(self, tmp_path, monkeypatch):
+        import threading
+        g = make_gate(tmp_path, monkeypatch, rules=[BLOCK_RULE])
+        client = _FlakyClient(segments=[[], [], []])
+        confirmer = IntuticSessionConfirmer(client, "sess_1", gate=g)
+        stop = threading.Event()
+        monkeypatch.setattr("intutic_clawde.gate.adapters.managed_agents.time.sleep", lambda _s: stop.set())
+        list(confirmer.watch(stop=stop))
+        assert client.events.opened == 1
+
+    def test_watch_passes_idle_timeout_to_the_sdk_stream(self, tmp_path, monkeypatch):
+        g = make_gate(tmp_path, monkeypatch, rules=[BLOCK_RULE])
+        client = _FlakyClient(segments=[[{"id": "end", "type": "session.status_terminated"}]])
+        confirmer = IntuticSessionConfirmer(client, "sess_1", gate=g)
+        list(confirmer.watch(idle_timeout_s=30.0))
+        assert client.events.stream_kwargs == [{"timeout": 30.0}]

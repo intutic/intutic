@@ -26,7 +26,7 @@ WHAT `measured` MEANS
                       operator declaration and therefore has no false-positive
                       rate to measure at all.
 
-18 of 26 are not-measured. That is the honest reach of a public
+19 of 27 are not-measured. That is the honest reach of a public
 corpus, and it is written down rather than averaged away.
 
 WHAT THIS DOES NOT SUPPORT
@@ -63,6 +63,7 @@ Corpus: 1000 BFCL seeds (1000 with at least one parsed call), 339 NotInject prom
   schema_drift                 | not-measured       |            0 |            0
   scope_path                   | not-measured       |            0 |            0
   spawn_budget_breach          | not-measured       |            0 |            0
+  spend_trajectory             | not-measured       |            0 |            0
   taint_cooccurrence           | not-measured       |            0 |            0
   tool_diversity_collapse      | external-bfcl      |            0 |            1
   tool_poisoning               | external-tooldesc  |            0 |            0

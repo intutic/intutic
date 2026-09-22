@@ -19,7 +19,7 @@
  * @module
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest'
 import { spawn } from 'node:child_process'
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, copyFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -143,6 +143,98 @@ describe('WasmRunner + real wasm-sdk drop-in rules', () => {
       rmSync(wasmDir, { recursive: true, force: true })
     }
   }, 120_000)
+})
+
+describe('WasmRunner + read_referenced_file (TD-441) and the memory ceiling (TD-440)', () => {
+  // A rule that asks for the manifest the command names and blocks on a marker.
+  const MANIFEST_RULE = [
+    '@external("env", "read_referenced_file")',
+    'declare function read_referenced_file(pathPtr: usize, pathLen: usize, outPtr: usize, outCap: i32): i32;',
+    'const reasonBytes: ArrayBuffer = String.UTF8.encode("manifest pins :latest");',
+    'const ctxBuf: ArrayBuffer = new ArrayBuffer(65536);',
+    'export function allocate(size: i32): i32 { return changetype<i32>(ctxBuf); }',
+    'export function evaluate(offset: i32, len: i32): i32 {',
+    '  const path = String.UTF8.encode("k8s/deploy.yaml");',
+    '  const size = read_referenced_file(changetype<usize>(path), path.byteLength, 0, 0);',
+    '  if (size < 0) return 0;',
+    '  const out = new ArrayBuffer(size);',
+    '  const got = read_referenced_file(changetype<usize>(path), path.byteLength, changetype<usize>(out), size);',
+    '  if (got != size) return 0;',
+    '  const text = String.UTF8.decode(out);',
+    '  return text.includes(":latest") ? 1 : 0;',
+    '}',
+    'export function reason_ptr(): i32 { return changetype<i32>(reasonBytes); }',
+    'export function reason_len(): i32 { return reasonBytes.byteLength; }',
+  ].join('\n')
+
+  const ORIGINAL_ROOT = process.env['INTUTIC_WASM_MANIFEST_ROOT']
+  afterEach(() => {
+    if (ORIGINAL_ROOT === undefined) delete process.env['INTUTIC_WASM_MANIFEST_ROOT']
+    else process.env['INTUTIC_WASM_MANIFEST_ROOT'] = ORIGINAL_ROOT
+  })
+
+  it('an asc-compiled rule reads a manifest under the root and blocks on its marker; without a root it cannot', async () => {
+    const wasmDir = mkdtempSync(join(tmpdir(), 'intutic-mcp-wasm-reffile-'))
+    const root = mkdtempSync(join(tmpdir(), 'intutic-mcp-manifest-root-'))
+    try {
+      const wasmPath = await compileScratchRule('reads-manifest', MANIFEST_RULE, outDir)
+      copyFileSync(wasmPath, join(wasmDir, '10_reads-manifest.wasm'))
+      mkdirSync(join(root, 'k8s'))
+      writeFileSync(join(root, 'k8s', 'deploy.yaml'), 'image: app:latest\n')
+
+      const runner = new WasmRunner(wasmDir)
+      try {
+        await runner.rescan()
+        const input: WasmContextInput = { ...baseContext, toolArguments: { command: 'kubectl apply -f k8s/deploy.yaml' } }
+
+        delete process.env['INTUTIC_WASM_MANIFEST_ROOT']
+        expect((await runner.evaluate(input)).code).toBe('allow') // every read refuses: nothing to judge
+
+        process.env['INTUTIC_WASM_MANIFEST_ROOT'] = root
+        const verdict = await runner.evaluate(input)
+        expect(verdict.code).toBe('block')
+        if (verdict.code === 'block') expect(verdict.reason).toBe('manifest pins :latest')
+
+        // A command that never named the file: refused, so allow.
+        expect((await runner.evaluate({ ...baseContext, toolArguments: { command: 'ls' } })).code).toBe('allow')
+
+        writeFileSync(join(root, 'k8s', 'deploy.yaml'), 'image: app@sha256:abc\n')
+        expect((await runner.evaluate(input)).code).toBe('allow')
+      } finally {
+        await runner.shutdown()
+      }
+    } finally {
+      rmSync(wasmDir, { recursive: true, force: true })
+      rmSync(root, { recursive: true, force: true })
+    }
+  }, 60_000)
+
+  it('a rule that grows guest memory past 16MB has its verdict discarded (fail-open), not enforced', async () => {
+    const wasmDir = mkdtempSync(join(tmpdir(), 'intutic-mcp-wasm-memory-'))
+    try {
+      const wasmPath = await compileScratchRule(
+        'memory-hog',
+        [
+          'export function allocate(size: i32): i32 { return 1024; }',
+          'export function evaluate(offset: i32, len: i32): i32 {',
+          '  memory.grow(300);', // 300 pages = 18.75MB, over the 16MB ceiling
+          '  return 1;',
+          '}',
+        ].join('\n'),
+        outDir,
+      )
+      copyFileSync(wasmPath, join(wasmDir, '10_memory-hog.wasm'))
+      const runner = new WasmRunner(wasmDir)
+      try {
+        await runner.rescan()
+        expect((await runner.evaluate(baseContext)).code).toBe('allow')
+      } finally {
+        await runner.shutdown()
+      }
+    } finally {
+      rmSync(wasmDir, { recursive: true, force: true })
+    }
+  }, 60_000)
 })
 
 describe('WasmRunner + purpose-built fixtures', () => {

@@ -432,6 +432,7 @@ impl DetectorRegistry {
                 Box::new(SchemaDriftDetector::default()),
                 Box::new(ContextGrowthDetector::default()),
                 Box::new(BudgetExhaustionDetector::default()),
+                Box::new(SpendTrajectoryDetector::default()),
                 Box::new(SpawnBudgetBreachDetector::default()),
                 Box::new(OrphanExecutionDetector::default()),
                 Box::new(UnauthorizedToolDetector::default()),
@@ -1322,7 +1323,8 @@ mod coverage_tests {
         // 26: code_as_action joined — the in-blob analogue of forbid_with
         // secrets()+http_post, for the one-REPL-call-bundles-everything shape
         // that per-call gates cannot see into.
-        assert_eq!(ids.len(), 26, "registry size changed — update this test deliberately");
+        // 27: spend_trajectory — the local daily-cap projection (TD-481).
+        assert_eq!(ids.len(), 27, "registry size changed — update this test deliberately");
 
         for id in &ids {
             assert!(!id.is_empty(), "a registered detector has no id");

@@ -1522,6 +1522,112 @@ impl AnomalyDetector for BudgetExhaustionDetector {
     }
 }
 
+// ── Local spend trajectory (TD-481) ─────────────────────────────────────────
+
+/// Fraction of the local day before a projection means anything. At 09:00 a
+/// developer who has spent nothing yet and then runs one large request looks
+/// like a 24× overshoot for the next minute; the first tenth of the day
+/// (2h24m) is left unjudged for that reason.
+const TRAJECTORY_MIN_DAY_FRACTION: f64 = 0.10;
+
+/// Utilization below which no projection is made, whatever the rate. Half the
+/// cap: a session that has burned less than that has room to change course
+/// without being told to.
+const TRAJECTORY_MIN_UTILIZATION: f64 = 0.50;
+
+/// The local counterpart of the control plane's budget-trajectory heuristic
+/// (`trajectoryAnalysisService.ts`'s `BUDGET_EXCEEDED`, 95% utilization).
+///
+/// The control plane's rule is scored against the workspace's spend history
+/// and budget tiers, which a standalone proxy does not hold — that is why it
+/// was not ported with the other four (TD-481). What the proxy does hold is a
+/// local daily cap (`~/.intutic/config.json` `maxDailyBudgetUsd`) and the
+/// day's ledger, and against those a projection IS well defined: spend so far
+/// divided by the fraction of the day elapsed is the end-of-day spend at the
+/// current rate. When that overshoots the cap and utilization is already past
+/// half, the agent is told — steered, never killed. The hard stop stays with
+/// [`BudgetExhaustionDetector`] at zero headroom; this one exists so the
+/// agent hears about the cap while it still has room to finish cleanly.
+///
+/// Free-tier-legal: local, deterministic, no judge. The two closures are
+/// injection points for tests; production reads the local config cap and the
+/// wall clock.
+pub struct SpendTrajectoryDetector {
+    /// Today's cap in USD. `<= 0` disables the detector.
+    daily_cap_usd: fn() -> f64,
+    /// Fraction of the local day elapsed, `0.0..=1.0`.
+    day_fraction: fn() -> f64,
+}
+
+impl Default for SpendTrajectoryDetector {
+    fn default() -> Self {
+        Self {
+            daily_cap_usd: crate::local_config::get_max_daily_budget,
+            day_fraction: local_day_fraction,
+        }
+    }
+}
+
+impl SpendTrajectoryDetector {
+    /// A detector with injected cap and clock, for tests.
+    pub fn with_sources(daily_cap_usd: fn() -> f64, day_fraction: fn() -> f64) -> Self {
+        Self {
+            daily_cap_usd,
+            day_fraction,
+        }
+    }
+}
+
+fn local_day_fraction() -> f64 {
+    use chrono::Timelike;
+    let now = chrono::Local::now();
+    now.num_seconds_from_midnight() as f64 / 86_400.0
+}
+
+impl AnomalyDetector for SpendTrajectoryDetector {
+    fn id(&self) -> &'static str {
+        "spend_trajectory"
+    }
+
+    fn kind(&self) -> AnomalyKind {
+        AnomalyKind::BudgetBreach
+    }
+
+    fn detect(&self, ctx: &RequestContext) -> Option<AnomalyFinding> {
+        let cap = (self.daily_cap_usd)();
+        if !(cap > 0.0) || ctx.budget_remaining_usd < 0.0 {
+            // No cap, or the proxy did not fill the field (-1 sentinel).
+            return None;
+        }
+        // Headroom already at zero is `budget_exhaustion`'s finding, not this one.
+        if ctx.budget_remaining_usd <= 0.0 {
+            return None;
+        }
+        let spent = (cap - ctx.budget_remaining_usd).max(0.0);
+        let utilization = spent / cap;
+        let elapsed = (self.day_fraction)().clamp(0.0, 1.0);
+        if elapsed < TRAJECTORY_MIN_DAY_FRACTION || utilization < TRAJECTORY_MIN_UTILIZATION {
+            return None;
+        }
+        let projected = spent / elapsed;
+        if projected <= cap {
+            return None;
+        }
+        // Confidence grows with the overshoot: exactly on the cap is a coin
+        // flip about the afternoon; 2× is not.
+        let overshoot = projected / cap;
+        let confidence = (0.5 + 0.2 * (overshoot - 1.0)).min(0.9);
+        Some(AnomalyFinding::steer(
+            AnomalyKind::BudgetBreach,
+            format!(
+                "Local daily budget on track to overshoot: ${spent:.2} of ${cap:.2} spent with {:.0}% of the day elapsed, projecting ${projected:.2} by midnight",
+                elapsed * 100.0
+            ),
+            confidence,
+        ))
+    }
+}
+
 // ── Graph-wide cost and liveness ────────────────────────────────────────────
 
 /// Multiple of the per-node budget at which a graph's total spend is a breach.
@@ -2091,6 +2197,74 @@ pub mod test_support {
             offset: 0,
             length: 8,
         }
+    }
+}
+
+#[cfg(test)]
+mod spend_trajectory_tests {
+    use super::test_support::base_ctx;
+    use super::*;
+    use crate::plugins::anomaly::Disposition;
+
+    fn ctx_remaining(remaining: f64) -> RequestContext {
+        let mut ctx = base_ctx();
+        ctx.budget_remaining_usd = remaining;
+        ctx
+    }
+    fn cap_10() -> f64 { 10.0 }
+    fn cap_off() -> f64 { 0.0 }
+    fn noon() -> f64 { 0.5 }
+    fn dawn() -> f64 { 0.05 }
+
+    #[test]
+    fn overshooting_the_cap_at_the_current_rate_steers() {
+        // $7 spent by noon projects $14 against a $10 cap.
+        let d = SpendTrajectoryDetector::with_sources(cap_10, noon);
+        let f = d.detect(&ctx_remaining(3.0)).expect("must fire");
+        assert_eq!(f.disposition, Disposition::Steer);
+        assert!(f.reason.contains("$7.00 of $10.00"), "{}", f.reason);
+        assert!(f.reason.contains("$14.00"), "{}", f.reason);
+        assert!(f.confidence > 0.5 && f.confidence < 0.9);
+    }
+
+    #[test]
+    fn on_track_to_finish_under_the_cap_is_quiet() {
+        // $5 by noon projects exactly $10: on the cap, not over it.
+        let d = SpendTrajectoryDetector::with_sources(cap_10, noon);
+        assert!(d.detect(&ctx_remaining(5.0)).is_none());
+    }
+
+    #[test]
+    fn under_half_utilization_is_never_judged() {
+        // $4 at 10% of the day projects $40, but the agent still has $6 of room.
+        let d = SpendTrajectoryDetector::with_sources(cap_10, || 0.10);
+        assert!(d.detect(&ctx_remaining(6.0)).is_none());
+    }
+
+    #[test]
+    fn the_first_tenth_of_the_day_is_not_projected() {
+        let d = SpendTrajectoryDetector::with_sources(cap_10, dawn);
+        assert!(d.detect(&ctx_remaining(3.0)).is_none());
+    }
+
+    #[test]
+    fn zero_headroom_is_left_to_budget_exhaustion() {
+        let d = SpendTrajectoryDetector::with_sources(cap_10, noon);
+        assert!(d.detect(&ctx_remaining(0.0)).is_none());
+    }
+
+    #[test]
+    fn no_cap_or_unfilled_field_disables_it() {
+        assert!(SpendTrajectoryDetector::with_sources(cap_off, noon).detect(&ctx_remaining(3.0)).is_none());
+        assert!(SpendTrajectoryDetector::with_sources(cap_10, noon).detect(&ctx_remaining(-1.0)).is_none());
+    }
+
+    #[test]
+    fn confidence_is_capped_and_grows_with_the_overshoot() {
+        let d = SpendTrajectoryDetector::with_sources(cap_10, || 0.2);
+        // $9 at 20% of the day projects $45 — 4.5× the cap.
+        let f = d.detect(&ctx_remaining(1.0)).unwrap();
+        assert_eq!(f.confidence, 0.9);
     }
 }
 
