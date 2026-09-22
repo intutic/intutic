@@ -33,8 +33,10 @@ Modules (Wave 1 — verified against a real install, each with a non-mocked test
 Modules (Wave 2 — also verified against a real install; each has its own,
 sometimes load-bearing, honesty note in its module doc — read before relying
 on the narrower ones):
-  autogen.py           IntuticInterventionHandler (on_send) — see its doc for
-                        the AssistantAgent-invisibility gap
+  autogen.py           IntuticInterventionHandler (on_send) — runtime-routed
+                        FunctionCall messages only
+  autogen_workbench.py IntuticWorkbench (Workbench.call_tool) + guard_assistant_agent
+                        — the in-process half AssistantAgent actually exercises
   ag2.py               IntuticMiddleware (on_tool_execution) + make_intutic_middleware
   pydantic_ai.py       IntuticWrapperToolset (call_tool) + guard_agent(agent)
   smolagents.py        IntuticPythonExecutor (code text, not a tool call) +

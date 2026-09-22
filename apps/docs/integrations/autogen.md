@@ -35,16 +35,30 @@ Source `.env.intutic`, launch under `intutic exec`, or set `base_url` explicitly
 pip install intutic-clawde[autogen]
 ```
 
-**If your code is `AssistantAgent`-based (the common case):** `IntuticInterventionHandler` will not see these tool calls at all. Wrap the tool objects themselves before handing them to the agent, using the same framework-agnostic helper CrewAI/LangGraph tools were already documented as covered by:
+**If your code is `AssistantAgent`-based (the common case):** `IntuticInterventionHandler` will not see these tool calls at all — `AssistantAgent` runs them through its `Workbench` in-process. Govern the workbench:
 
 ```python
-from intutic_clawde.gate import Gate, GateConfig, install, guard_tools
+from autogen_core.tools import StaticWorkbench
+from intutic_clawde.gate import Gate, GateConfig, install
+from intutic_clawde.gate.adapters.autogen_workbench import IntuticWorkbench
 
 install(Gate(GateConfig()))
 
-tools = guard_tools([shell_tool, write_file_tool, deploy_tool])
-agent = AssistantAgent("assistant", model_client=model_client, tools=tools)
+agent = AssistantAgent(
+    "assistant", model_client=model_client,
+    workbench=IntuticWorkbench(StaticWorkbench([shell_tool, write_file_tool, deploy_tool])),
+)
 ```
+
+Or, for an agent you did not construct, wrap what it already holds — idempotent, in place:
+
+```python
+from intutic_clawde.gate.adapters.autogen_workbench import guard_assistant_agent
+
+guard_assistant_agent(agent)
+```
+
+On a deny, `IntuticWorkbench.call_tool` returns a `ToolResult(is_error=True)` carrying the `[Intutic Governance] BLOCKED: ...` text: the tool body never runs, and the model reads the block on its next turn and can change approach instead of the whole `agent.run()` aborting. Wrapping a `StaticStreamWorkbench` trades its intermediate streamed events for governance (the final `ToolResult` is unchanged); handoff tools run outside the workbench and transfer control without executing a user tool. The framework-agnostic `guard_tools([...])` still works for a plain tool list and is what earlier versions of this page recommended.
 
 **If your code is a custom multi-agent system built directly on `AgentRuntime`/`RoutedAgent`**, dispatching `FunctionCall` messages between agents explicitly (the lower-level, core-API pattern — real, and the one case this handler actually covers), register `IntuticInterventionHandler`:
 
@@ -80,7 +94,7 @@ Same shape as LangGraph's `.env.intutic` — proxy URLs plus a pointer at `intut
 
 Same structural gaps as every SDK-gated framework — see [LangGraph's "What the adapter does NOT do"](/integrations/langgraph#what-the-adapter-does-not-do) — plus AutoGen-specific limits:
 
-- **`AssistantAgent`'s own tool calls never reach `IntuticInterventionHandler`.** Confirmed by reading `autogen_agentchat.agents._assistant_agent` directly, not by inference: `_execute_tool_call` dispatches to `workbench.call_tool_stream(...)`/`handoff_tool.run_json(...)` in-process, bypassing `AgentRuntime` message-passing entirely. This is wider than "the reflection path is uncovered" — it is the entire `AssistantAgent` tool-execution path. Mitigation: wrap the tool objects with `guard_tools`/`@guard` before constructing the `Workbench`/tool list, as shown in Setup step 3. See TD-374.
+- **`AssistantAgent`'s own tool calls never reach `IntuticInterventionHandler`.** Confirmed by reading `autogen_agentchat.agents._assistant_agent` directly, not by inference: `_execute_tool_call` dispatches to `workbench.call_tool(...)`/`handoff_tool.run_json(...)` in-process, bypassing `AgentRuntime` message-passing entirely. That is why the workbench is the veto point for them: `IntuticWorkbench` (Setup step 3) governs every call that goes through a workbench. Handoff tools bypass the workbench and are not governed; they execute no user tool. TD-374 closed with the workbench wrapper.
 - **`ToolException` does not exist.** An earlier plan for this adapter proposed raising `autogen_core.ToolException(call_id=...)` as an alternative veto; that class was checked against a real `autogen-core==0.7.5` install and does not exist at this version (`autogen_core.exceptions` exports only `CantHandleException`, `MessageDroppedException`, `NotAccessibleError`, `UndeliverableException`). `DropMessage` is the only confirmed veto point.
 - **Microsoft's "Agent Framework" convergence is a watch item, not something this adapter targets.** Microsoft has publicly discussed consolidating AutoGen and Semantic Kernel into a successor framework; no concrete, installable, stable release existed at the time this adapter was built, so it has not been evaluated and is not covered by anything on this page. See TD-375.
 
@@ -93,4 +107,4 @@ Same structural gaps as every SDK-gated framework — see [LangGraph's "What the
 | Detection | `autogen-agentchat`, `autogen-core`, or `autogen-ext` in `pyproject.toml`, `requirements.txt`, or `uv.lock` |
 | Format | Shell environment variables |
 | Write strategy | Atomic (write to `.intutic-tmp`, then rename) |
-| Tool gate | SDK-side (`intutic_clawde.gate.adapters.autogen.IntuticInterventionHandler`, an `InterventionHandler.on_send` veto) — covers only runtime-routed `FunctionCall` messages, **not** `AssistantAgent`'s own tool calls (use `guard_tools`/`@guard` for those); no sync-daemon hook file |
+| Tool gate | SDK-side: `intutic_clawde.gate.adapters.autogen_workbench.IntuticWorkbench` (a `Workbench.call_tool` veto) for `AssistantAgent`'s in-process tool calls, plus `intutic_clawde.gate.adapters.autogen.IntuticInterventionHandler` (an `InterventionHandler.on_send` veto) for runtime-routed `FunctionCall` messages; no sync-daemon hook file |

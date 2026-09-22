@@ -358,15 +358,72 @@ export async function confirmationForEvent(
  * }
  * ```
  *
- * Usage — live stream, single connection (see {@link watch}'s doc for why
- * this does not reconnect on its own):
+ * Usage — live stream. `watch()` reconnects with capped backoff and re-polls
+ * after every reconnect, so a pause raised while the stream was down is
+ * still answered (see {@link watch} and {@link WatchOptions}):
  *
  * ```ts
- * for await (const sent of confirmer.watch()) {
+ * const ac = new AbortController()
+ * for await (const sent of confirmer.watch({ signal: ac.signal, idleTimeoutMs: 120_000 })) {
  *   console.log(sent.tool_use_id, sent.result)
  * }
  * ```
  */
+
+/** Options for {@link IntuticSessionConfirmer.watch} (TD-428). */
+export interface WatchOptions {
+  /** Reconnects allowed after the first connection; unbounded by default. */
+  maxReconnects?: number
+  backoffStartMs?: number
+  backoffCapMs?: number
+  /** Drop and reopen a stream that has been silent this long. */
+  idleTimeoutMs?: number
+  /** Aborting ends `watch()` at the next opportunity. */
+  signal?: AbortSignal
+}
+
+class IdleTimeout extends Error {
+  constructor() { super('watch(): stream idle') }
+}
+
+/** 400–499 except 408 (timeout) and 429 (rate limit): a retry cannot help. */
+export function isFatal4xx(err: unknown): boolean {
+  const status = (err as { status?: unknown } | null)?.status
+  return typeof status === 'number' && status >= 400 && status < 500 && status !== 408 && status !== 429
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const t = setTimeout(done, ms)
+    function done() { signal?.removeEventListener('abort', done); resolve() }
+    signal?.addEventListener('abort', done, { once: true })
+  })
+}
+
+/** Yields the stream's events; throws IdleTimeout when none arrives within `ms`. */
+async function* withIdleTimeout<T>(stream: AsyncIterable<T>, ms: number | undefined, signal?: AbortSignal): AsyncGenerator<T> {
+  const it = stream[Symbol.asyncIterator]()
+  try {
+    while (true) {
+      if (signal?.aborted) return
+      const next = it.next()
+      const result = ms === undefined
+        ? await next
+        : await Promise.race([
+            next,
+            new Promise<never>((_, reject) => { const t = setTimeout(() => reject(new IdleTimeout()), ms); void next.finally(() => clearTimeout(t)) }),
+          ])
+      if (result.done) return
+      yield result.value
+    }
+  } finally {
+    // Not awaited: after an idle timeout the generator is still suspended
+    // inside its own pending `next()`, and `return()` queues behind it — an
+    // await here would hang exactly as long as the dead stream does.
+    void Promise.resolve(it.return?.()).catch(() => undefined)
+  }
+}
+
 export class IntuticSessionConfirmer {
   readonly sessionId: string
   private readonly client: ManagedAgentsClientLike
@@ -451,32 +508,57 @@ export class IntuticSessionConfirmer {
 
   /**
    * Catch up on anything already pending, then follow the live event
-   * stream, yielding each confirmation as it is sent.
+   * stream, yielding each confirmation as it is sent, reconnecting when the
+   * stream drops (TD-428).
    *
-   * Ends when the session terminates (`session.status_terminated` /
-   * `session.deleted`) or the stream itself ends. Deliberately NOT a
-   * production-grade reconnect loop the way `SessionToolRunner` is
-   * (reconnect with capped backoff, idle watchdog, partial-fulfillment
-   * bookkeeping — see that class's real implementation for the scope of
-   * what a fully robust version would need): a dropped connection here
-   * simply ends iteration. Wrap `watch()` in your own retry loop for a
-   * long-running confirmer, or prefer `poll()` from a webhook/cron trigger,
-   * which is naturally idempotent and needs no reconnect logic at all. See
-   * TD-428.
+   * Modelled on the SDK's own `SessionToolRunner#streamLoop`: open the
+   * stream FIRST, then reconcile with `poll()` — an event emitted in the gap
+   * is buffered on the stream rather than lost, and `answered` dedups
+   * anything that shows up on both. On end or error the loop sleeps
+   * (backoff doubling from `backoffStartMs` to `backoffCapMs`, reset on any
+   * received event) and reopens. A fatal 4xx (anything 400–499 other than
+   * 408 and 429) rethrows: the session is gone or the key is wrong, and
+   * retrying would loop forever. `idleTimeoutMs` drops a stream that has
+   * gone silent and reopens it, which re-polls. Ends only on a terminal
+   * event, `signal` abort, or `maxReconnects` exhausted (unbounded by
+   * default, the SDK's own choice).
    */
-  async *watch(): AsyncGenerator<UserToolConfirmationParams> {
-    for (const confirmation of await this.poll()) {
-      yield confirmation
-    }
-    const stream = await this.client.beta.sessions.events.stream(this.sessionId)
-    for await (const event of stream) {
-      if (TERMINAL_EVENT_TYPES.has(event.type)) return
-      if (event.type === 'user.tool_confirmation') {
-        this.noteConfirmationEvent(event)
-        continue
+  async *watch(opts: WatchOptions = {}): AsyncGenerator<UserToolConfirmationParams> {
+    const backoffStart = opts.backoffStartMs ?? 500
+    const backoffCap = opts.backoffCapMs ?? 10_000
+    const maxReconnects = opts.maxReconnects ?? Number.POSITIVE_INFINITY
+    let backoff = backoffStart
+    let reconnects = 0
+    while (!opts.signal?.aborted) {
+      let terminal = false
+      try {
+        const stream = await this.client.beta.sessions.events.stream(this.sessionId)
+        for (const confirmation of await this.poll()) yield confirmation
+        for await (const event of withIdleTimeout(stream, opts.idleTimeoutMs, opts.signal)) {
+          backoff = backoffStart
+          if (TERMINAL_EVENT_TYPES.has(event.type)) { terminal = true; break }
+          if (event.type === 'user.tool_confirmation') {
+            this.noteConfirmationEvent(event)
+            continue
+          }
+          const confirmation = await this.handleEvent(event)
+          if (confirmation) yield confirmation
+        }
+      } catch (err) {
+        if (opts.signal?.aborted) return
+        if (err instanceof IdleTimeout) {
+          // fall through: reconnect and re-poll
+        } else if (isFatal4xx(err)) {
+          throw err
+        }
       }
-      const confirmation = await this.handleEvent(event)
-      if (confirmation !== null) yield confirmation
+      if (terminal || opts.signal?.aborted) return
+      if (reconnects >= maxReconnects) {
+        throw new Error(`watch(): stream ended ${reconnects + 1} time(s) and maxReconnects (${maxReconnects}) is exhausted`)
+      }
+      reconnects += 1
+      await sleep(backoff, opts.signal)
+      backoff = Math.min(backoff * 2, backoffCap)
     }
   }
 }
