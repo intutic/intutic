@@ -63,7 +63,9 @@ fn expand_home(path: &str) -> PathBuf {
 /// dropping local Kill rules would be an enforcement bypass.
 pub fn scan_signatures(dir: &Path) -> std::io::Result<HashMap<PathBuf, (SystemTime, u64)>> {
     let mut signatures = HashMap::new();
-    let entries = match std::fs::read_dir(dir) {
+    // `dir` is the operator's `INTUTIC_WASM_DIR` / config override: the same
+    // trust level as the binary's own configuration, never a request value.
+    let entries = match std::fs::read_dir(dir) { // codeql[rust/path-injection]
         Ok(entries) => entries,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(signatures),
         Err(e) => return Err(e),
