@@ -798,7 +798,11 @@ export interface OpenAiGateConfig extends GateConfig {
  * stored (the route's own doc says why).
  */
 export function intuticTracingExporterOptions(env: NodeJS.ProcessEnv = process.env): { endpoint: string; apiKey: string } {
-  const base = (env.INTUTIC_CONTROL_PLANE_URL ?? '').replace(/\/+$/, '')
+  // Trailing slashes stripped with a loop, not `/\/+$/`: CodeQL flags that
+  // regex as polynomial on a long run of slashes, and the input is operator
+  // config read once, so a loop is both safe and obviously linear.
+  let base = env.INTUTIC_CONTROL_PLANE_URL ?? ''
+  while (base.endsWith('/')) base = base.slice(0, -1)
   const apiKey = env.INTUTIC_API_KEY ?? ''
   if (!base || !apiKey) {
     throw new Error('intuticTracingExporterOptions: INTUTIC_CONTROL_PLANE_URL and INTUTIC_API_KEY must be set to route traces to Intutic')
