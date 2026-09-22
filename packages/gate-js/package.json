@@ -89,7 +89,7 @@
     "@ai-sdk/workflow": "^1.0.69",
     "@mastra/core": "^1.59.0",
     "@deepseek-ai/cordis": "^4.0.1",
-    "@openai/agents": "^0.16.1",
+    "@openai/agents": "0.16.1",
     "@truefoundry/trueforge-core": "^0.1.4",
     "@types/node": "^22",
     "ai": "^7.0.68",

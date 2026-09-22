@@ -41,6 +41,7 @@ describe('policyCache Unit Tests', () => {
           },
         ],
         dlpPatterns: [],
+        mcpInjectionPatterns: [],
         interventionMode: 'BLOCK',
       }
       if (latestWorkspaceId === 'ws_curation_test') {
