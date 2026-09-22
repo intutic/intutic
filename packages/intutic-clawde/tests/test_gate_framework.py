@@ -294,3 +294,32 @@ class TestIntuticHeaders:
         monkeypatch.delenv("INTUTIC_SESSION_ID", raising=False)
         monkeypatch.delenv("INTUTIC_WORKSPACE_ID", raising=False)
         assert framework.intutic_headers() == {"x-intutic-harness": "langgraph"}
+
+
+class TestGuardToolsRefusesBetaTool:
+    """TD-427: `anthropic.lib.tools.beta_tool` objects call a validated copy of
+    the function captured at construction, never `.func`, so the generic
+    `.func` swap would gate nothing. It must refuse, loudly, like the TS twin."""
+
+    def test_beta_tool_object_raises_type_error(self):
+        beta_tool = pytest.importorskip("anthropic.lib.tools").beta_tool
+
+        @beta_tool
+        def lookup(query: str) -> str:
+            """Look something up."""
+            return query
+
+        with pytest.raises(TypeError) as excinfo:
+            framework.guard_tools([lookup])
+        message = str(excinfo.value)
+        assert "beta_tool" in message
+        assert "guard" in message
+        # And the object was left untouched: nothing pretended to gate it.
+        assert not getattr(lookup.func, "__intutic_guarded__", False)
+
+    def test_detection_is_duck_typed_on_module_and_private_attr(self):
+        class Impostor:  # right attribute, wrong module — must NOT be refused
+            _func_with_validate = staticmethod(lambda: None)
+            func = staticmethod(lambda: "ok")
+
+        assert framework._is_anthropic_beta_tool(Impostor()) is False

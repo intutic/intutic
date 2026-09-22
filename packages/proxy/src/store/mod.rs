@@ -473,13 +473,16 @@ pub trait LocalStore: Send + Sync + 'static {
     ///
     /// Mirroring spends real money on a second upstream call for exactly one
     /// reason: it is the only evidence that a cheaper model would have answered
-    /// as well. That evidence went to a `tracing::info!` and nowhere else, so
-    /// C6/C7 — enforce per workspace on a mirror-measured fault-rate delta —
-    /// were waiting on data that existed only as unaggregated log lines.
+    /// as well. This counter is the fault-rate half of that evidence. The
+    /// cost and latency halves travel per pair on `MirrorPairEvent`
+    /// (`original_cost_usd`, `original_latency_ms`, plus the candidate's) and
+    /// land in the control plane's mirror adoption report — so the individual
+    /// samples ARE consumed downstream, just not from here. C6/C7 automatic
+    /// enforcement on a fault-rate delta stays unbuilt by decision (TD-352):
+    /// the report supersedes it; a human promotes.
     ///
-    /// A counter hash rather than a row per call: the question is a rate, the
-    /// volume is capped at 5% of traffic, and nothing downstream needs the
-    /// individual samples.
+    /// A counter hash rather than a row per call: the question this store
+    /// answers is a rate, and the volume is capped at 5% of traffic.
     async fn record_mirror_outcome(
         &self,
         workspace_id: &str,

@@ -27,15 +27,16 @@
  * `writeConfig` writes the SAME proxy env vars either way (the `openai`
  * clients of both ecosystems honour `OPENAI_BASE_URL`); only the SDK-gate
  * pointer comment differs. A workspace detected as TypeScript-only gets the
- * `@intutic/gate/openai` pointer; anything else (Python-only, or a monorepo
- * with both) gets the Python pointer — the Python text is the established
- * default this adapter has always written, and a both-ecosystems workspace
- * still finds the TS adapter through the docs page both comments link to.
+ * `@intutic/gate/openai` pointer; Python-only gets the Python pointer; a
+ * monorepo with both gets the Python file with the TypeScript pointer
+ * appended (TD-408 item 5 — until 2026-09-22 the TS half was only reachable
+ * through the docs page).
  *
  * HLD §3.14 — Harness Onboarding Matrix
  * @module
  */
 
+import { appendFile } from 'node:fs/promises'
 import { HarnessType } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
 import { makeSdkGatedAdapter } from './sdkGatedAdapter.js'
@@ -92,7 +93,26 @@ export const openaiAgentsAdapter: IHarnessAdapter = {
     if (js && !python) {
       return jsAdapter.writeConfig(workspaceRoot, sops, proxyUrl)
     }
-    return pythonAdapter.writeConfig(workspaceRoot, sops, proxyUrl)
+    const filePath = await pythonAdapter.writeConfig(workspaceRoot, sops, proxyUrl)
+    if (filePath && js) {
+      // Both ecosystems in one workspace (TD-408 item 5): the file is the
+      // Python adapter's, so its pointer named only the Python gate and the
+      // TypeScript half of the monorepo was left to find `@intutic/gate`
+      // through the docs page. Say it here too.
+      await appendFile(
+        filePath,
+        [
+          '# This workspace also carries `@openai/agents` (TypeScript). Its tools run in',
+          '# your own Node process; the blocking gate for that half ships SDK-side too:',
+          '#   npm install @intutic/gate',
+          "#   import { installOpenAiGate, wrapAgent } from '@intutic/gate/openai'",
+          '# See https://docs.intutic.ai/integrations/openai-agents',
+          '',
+        ].join('\n'),
+        'utf-8',
+      )
+    }
+    return filePath
   },
 
   // Both sides write the identical file path; either delegate reads it.

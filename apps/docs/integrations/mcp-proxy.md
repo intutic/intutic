@@ -140,6 +140,15 @@ The scanner (`src/injection.ts`) runs at three points:
 - **Request direction**: the `arguments` of an incoming `tools/call`, as a step inside `interceptor.decide`.
 
 **Configuration** — `mcpInjectionAction: 'warn' | 'block'`, default **`warn`**.
+
+**Workspace patterns** — `mcpInjectionPatterns: string[]` in workspace settings
+adds your own regex sources on top of the five built in. The control plane
+serves them with the rest of the MCP curation (`GET /api/v1/policy/resolve`
+and `GET /api/v1/sop/rules`); the proxy compiles them itself, drops one that
+does not compile and counts the drop, and reports a match as `workspace:<n>`
+so a finding says which layer caught it. The built-in floor applies whether
+or not the control plane is reachable. Patterns are matched case-insensitively
+and capped at 512 characters each.
 This mirrors the Rust proxy's own posture: its `PromptInjectionDetector` never
 disposes an injection finding as an unconditional kill on its own — only
 `reask` (once findings reach a 2-technique threshold, or the source is

@@ -116,6 +116,7 @@ describe('Daemon-Shim Integration Tests', () => {
               { id: 'rule_xyz', toolPattern: 'Bash', action: 'block', reason: 'Blocked in test' }
             ],
             dlpPatterns: [],
+            mcpInjectionPatterns: [],
             interventionMode: 'BLOCK',
             ...curation,
           })
