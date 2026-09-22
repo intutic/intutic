@@ -47,6 +47,14 @@ export interface SslGraphJson {
   }
   structural_layer: {
     steps: SslStep[]
+    /**
+     * Per step, the tools the compiler refused because the SOP text never
+     * names them (TD-477 part 1): a step "run the tests" compiled to
+     * `tools: ["Bash"]` when the SOP said nothing about Bash, and the
+     * enforcer then treated any other tool as unauthorized. Kept for the
+     * author; never evaluated.
+     */
+    dropped_tools?: Array<{ index: number; tools: string[] }>
   }
   logical_layer: {
     constraints: Record<string, string>

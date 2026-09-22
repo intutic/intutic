@@ -93,10 +93,25 @@ trace spans — **including tool inputs and outputs** — to a **hardcoded**
 `https://api.openai.com/v1/traces/ingest`. That endpoint ignores
 `OPENAI_BASE_URL`: even with LLM egress fully proxied, tool I/O leaves
 through the side door. `installOpenAiGate()` closes this by default by
-setting the SDK's own kill-switch env, `OPENAI_AGENTS_DISABLE_TRACING=1`. If
-you need traces, re-point the exporter at an approved collector —
-`setTraceProcessors([new BatchTraceProcessor(new OpenAITracingExporter({ endpoint }))])`
-— and pass `{ tracingExport: 'keep' }`.
+setting the SDK's own kill-switch env, `OPENAI_AGENTS_DISABLE_TRACING=1`.
+
+If you want the traces, keep them governed: the control plane accepts the
+exporter's own wire shape at `POST /api/v1/integrations/openai-agents/traces/ingest`,
+DLP-scans every span's input and output, and records each `generation` span
+as a trace in the same ledger proxied calls use. Tool and agent spans are
+counted, not stored — they carry no model, tokens or cost.
+
+```ts
+import { setTraceProcessors, BatchTraceProcessor, OpenAITracingExporter } from '@openai/agents'
+import { installOpenAiGate, intuticTracingExporterOptions } from '@intutic/gate/openai'
+
+installOpenAiGate({ tracingExport: 'intutic' })
+setTraceProcessors([new BatchTraceProcessor(new OpenAITracingExporter(intuticTracingExporterOptions()))])
+```
+
+`intuticTracingExporterOptions()` reads `INTUTIC_CONTROL_PLANE_URL` and
+`INTUTIC_API_KEY`. To send traces somewhere else entirely, pass
+`{ tracingExport: 'keep' }` and configure the exporter yourself.
 :::
 
 ### 2. Gate local tool execution (SDK)

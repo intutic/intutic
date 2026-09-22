@@ -56,7 +56,7 @@ import {
   toolInputFromArguments,
   wrapAgent,
   wrapTools,
-} from '../openai.js'
+ intuticTracingExporterOptions } from '../openai.js'
 import type { OpenAiToolApprovalItemLike } from '../openai.js'
 
 // Same pattern the mastra/vercel/dsh tests use: a Gate whose guard() is
@@ -777,6 +777,15 @@ describe('installOpenAiGate', () => {
     await expect(intuticToolGuardrail().run({ toolCall: { name: 'x', arguments: '{}' } })).resolves.toEqual({
       behavior: { type: 'allow' },
     })
+  })
+
+  it("leaves tracing on with tracingExport: 'intutic' and names the governed endpoint (TD-405)", () => {
+    delete process.env.OPENAI_AGENTS_DISABLE_TRACING
+    installOpenAiGate({ enforce: false, tracingExport: 'intutic', sessionId: 's' })
+    expect(process.env.OPENAI_AGENTS_DISABLE_TRACING).toBeUndefined()
+    const opts = intuticTracingExporterOptions({ INTUTIC_CONTROL_PLANE_URL: 'https://api.example.test/', INTUTIC_API_KEY: 'vk_x' })
+    expect(opts).toEqual({ endpoint: 'https://api.example.test/api/v1/integrations/openai-agents/traces/ingest', apiKey: 'vk_x' })
+    expect(() => intuticTracingExporterOptions({})).toThrow(/INTUTIC_CONTROL_PLANE_URL/)
   })
 
   it("leaves tracing untouched with tracingExport: 'keep'", () => {
