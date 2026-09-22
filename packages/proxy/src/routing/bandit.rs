@@ -343,10 +343,11 @@ pub async fn route_model(
     candidate_models: &[String],
     routing_cfg: &crate::config::RoutingConfig,
 ) -> anyhow::Result<RouteDecision> {
-    // CodeQL reads the `{scope:?}` below as logging a secret. It is a
-    // `workspace:agent` routing identifier, not a credential, and a
-    // `debug_assert!` message is compiled out of release builds anyway.
-    debug_assert!(scope.contains(':'), "route_model's scope must be tool_history_scope's {{workspace}}:{{agent}} output, not a bare session id: {scope:?}"); // codeql[rust/cleartext-logging]
+    // The message deliberately does not echo `scope`: it is a routing
+    // identifier, not a credential, but a panic message is a log line, and
+    // GitHub's scanner on the public mirror flagged the interpolation as
+    // cleartext logging. The assertion is what matters, not the value.
+    debug_assert!(scope.contains(':'), "route_model's scope must be tool_history_scope's {{workspace}}:{{agent}} output, not a bare session id");
 
     // Keyword overrides are control-plane state; standalone this is `None` and
     // the classifier falls back to its built-in vocabulary.
