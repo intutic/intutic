@@ -64,10 +64,11 @@ app.post('/webhooks/anthropic', (req, res) => {
 })
 ```
 
-Or a live stream for a short-lived session (see the module doc for why this is not a reconnecting production loop — [TD-428](https://github.com/intutic/intutic/blob/main/docs/TECH_DEBT.md)):
+Or a live stream. `watch()` follows the session's event stream and reconnects when it drops — backoff from 500 ms doubling to 10 s, reset on any event — re-polling after every reconnect so a pause raised while the stream was down is still answered, and each `tool_use_id` is confirmed exactly once. A fatal 4xx (anything but 408 and 429) is rethrown rather than retried; the loop ends on a terminal event, on `signal` abort, or when `maxReconnects` (unbounded by default) is exhausted. `idleTimeoutMs` drops a silent stream and reopens it:
 
 ```ts
-for await (const sent of confirmer.watch()) {
+const ac = new AbortController()
+for await (const sent of confirmer.watch({ signal: ac.signal, idleTimeoutMs: 120_000 })) {
   console.log(sent.tool_use_id, sent.result) // 'allow' | 'deny'
 }
 ```
@@ -119,10 +120,11 @@ def handle_webhook(request):
     return "", 200
 ```
 
-Or a live stream (same non-reconnecting caveat as the TS side):
+Or a live stream, with the same reconnect loop as the TS side (`max_reconnects`, `backoff_start_s`, `backoff_cap_s`, `idle_timeout_s` — passed to the SDK stream as its read timeout — and `stop`, a `threading.Event`):
 
 ```python
-for sent in confirmer.watch():
+stop = threading.Event()
+for sent in confirmer.watch(stop=stop, idle_timeout_s=120.0):
     print(sent["tool_use_id"], sent["result"])  # 'allow' | 'deny'
 ```
 
@@ -150,4 +152,4 @@ Routing your OWN calls to the Messages API through the Intutic proxy is unrelate
 
 ## Known gaps
 
-See `docs/TECH_DEBT.md` entries TD-425 through TD-429 for the coverage boundaries (`always_allow` tools are invisible to Intutic; built-in tools' default `permission_policy` is not encoded in the SDK — verify live), the Python custom-tool decorator-order gotcha, `watch()`'s non-reconnecting scope, and this integration's beta-product churn shield.
+See `docs/TECH_DEBT.md` entries TD-425 through TD-429 for the coverage boundaries (`always_allow` tools are invisible to Intutic; built-in tools' default `permission_policy` is not encoded in the SDK — verify live), the Python custom-tool decorator-order gotcha, and this integration's beta-product churn shield. `watch()` reconnects since TD-428 closed; what it still cannot see is a session serviced by two responders at once (each answers what it sees, and the second answer to one `tool_use_id` is rejected server-side).

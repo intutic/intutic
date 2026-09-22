@@ -9,20 +9,45 @@
  * base to build from). `log_info`/`abort`/`trace` mirror `host.rs`'s
  * tracing-log behavior, routed through this package's own `createStderrLogger`
  * (never `console.log`/stdout — the same stdio-isolation rule every other
- * module in this package follows). `read_referenced_file` ALWAYS refuses
- * (`-2`, `ERR_REFUSED` — verified against `referenced_files.rs`): there is no
- * MCP-side file resolver in v1, a stated, deliberate limitation ("refusal is
- * a value," not a bug) recorded as a TD entry.
+ * module in this package follows). `read_referenced_file` resolves against
+ * the per-evaluation table the runner pre-reads through `referencedFiles.ts`
+ * (TD-441) — the port of `host.rs`'s `read_referenced_file_impl`, code for
+ * code: the read budget is charged before argument validation, a refusal is
+ * a value the rule can act on, and nothing here traps. With no table (no
+ * `INTUTIC_WASM_MANIFEST_ROOT`, or a rule that does not import the function)
+ * every call gets `ERR_REFUSED`, which is what the Rust proxy answers with no
+ * root configured.
  *
  * @module
  */
 
 import { createStderrLogger as createLogger } from '../stderrLog.js'
+import {
+  ReferencedFiles,
+  ERR_BAD_ARGS,
+  ERR_BUDGET,
+  ERR_BUFFER_TOO_SMALL,
+  ERR_REFUSED as REFUSED,
+  MAX_GUEST_PATH_BYTES,
+  MAX_READS_PER_EVALUATION,
+} from './referencedFiles.js'
 
 const log = createLogger('mcp-proxy-wasm-host')
 
-/** `referenced_files.rs`'s `ERR_REFUSED` — confirmed: `pub const ERR_REFUSED: i32 = -2;`. */
-export const ERR_REFUSED = -2
+/** `referenced_files.rs`'s `ERR_REFUSED` (-2), kept exported here for the callers that imported it before the resolver existed. */
+export const ERR_REFUSED = REFUSED
+
+/** What one evaluation's host imports need beyond the guest memory. */
+export interface HostImportState {
+  /** The pre-read table; `ReferencedFiles.empty()` refuses everything. */
+  files: ReferencedFiles
+  /** Reads left this evaluation, decremented by every call. */
+  fileReadsRemaining: number
+}
+
+export function newHostImportState(files: ReferencedFiles = ReferencedFiles.empty()): HostImportState {
+  return { files, fileReadsRemaining: MAX_READS_PER_EVALUATION }
+}
 
 /**
  * Decode a UTF-8 string out of a WASM instance's linear memory. Returns `''`
@@ -50,7 +75,10 @@ function readUtf8(memory: WebAssembly.Memory, ptr: number, len: number): string 
  * entirely by reading `caller.get_export("memory")` inside each call; this
  * is the Node-side equivalent of that lazy lookup.
  */
-export function createHostImports(getMemory: () => WebAssembly.Memory | undefined): WebAssembly.ModuleImports {
+export function createHostImports(
+  getMemory: () => WebAssembly.Memory | undefined,
+  state: HostImportState = newHostImportState(),
+): WebAssembly.ModuleImports {
   return {
     log_info: (ptr: number, len: number): void => {
       const memory = getMemory()
@@ -106,11 +134,54 @@ export function createHostImports(getMemory: () => WebAssembly.Memory | undefine
       log.info({ action: 'wasm_trace_raw', ptr, n }, 'WASM trace (undecoded)')
     },
 
-    // ALWAYS refuses — see this module's doc comment. No MCP-side file
-    // resolver exists in v1; every call gets ERR_REFUSED regardless of its
-    // arguments, matching the reference test harness's own HOST_IMPL.
-    read_referenced_file: (_pathPtr: number, _pathLen: number, _outPtr: number, _outCap: number): number => {
-      return ERR_REFUSED
+    // Ported from host.rs's `read_referenced_file_impl`. Returns a length or
+    // one of the negative codes; never throws — a host trap would unwind the
+    // guest, fail the whole evaluation and land in the runner's fail-open
+    // arm, so one malformed call would silently switch off every OTHER
+    // check the rule performs.
+    read_referenced_file: (pathPtr: number, pathLen: number, outPtr: number, outCap: number): number => {
+      // Charged before anything else, including argument validation, so a
+      // guest cannot spin on cheap malformed calls any more than on
+      // expensive good ones.
+      if (state.fileReadsRemaining <= 0) {
+        log.warn(
+          { action: 'wasm_file_read_budget_exhausted', budget: MAX_READS_PER_EVALUATION },
+          'WASM rule exhausted its referenced-file reads in one evaluation',
+        )
+        return ERR_BUDGET
+      }
+      state.fileReadsRemaining -= 1
+
+      const memory = getMemory()
+      if (!memory) {
+        log.warn({ action: 'wasm_host_no_memory', call: 'read_referenced_file' }, 'WASM rule called read_referenced_file with no memory export')
+        return ERR_BAD_ARGS
+      }
+      if (pathPtr < 0 || pathLen <= 0 || pathLen > MAX_GUEST_PATH_BYTES || outCap < 0) return ERR_BAD_ARGS
+      const requested = readUtf8(memory, pathPtr, pathLen)
+      if (requested === null) return ERR_BAD_ARGS
+
+      const hit = state.files.lookup(requested)
+      if (!hit.ok) {
+        // The reason is operator-facing only. The guest gets the code and is
+        // told nothing it did not already supply.
+        log.debug(
+          { action: 'wasm_referenced_file_refused', path: requested, code: hit.code, reason: state.files.refusalReason(requested) },
+          "refused a WASM rule's referenced-file read",
+        )
+        return hit.code
+      }
+      const len = hit.bytes.length // capped at MAX_REFERENCED_FILE_BYTES on the way in
+      if (outCap === 0) return len
+      if (outCap < len) return ERR_BUFFER_TOO_SMALL
+      const view = new Uint8Array(memory.buffer)
+      if (outPtr < 0 || outPtr + len > view.length) {
+        // Out of bounds: a refusal, not a trap, same as host.rs.
+        log.warn({ action: 'wasm_referenced_file_out_ptr_oob', outPtr, len }, 'WASM rule passed an out-of-bounds output buffer')
+        return ERR_BAD_ARGS
+      }
+      view.set(hit.bytes, outPtr)
+      return len
     },
   }
 }
