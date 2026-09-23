@@ -410,6 +410,9 @@ mod tests {
 
     #[async_trait::async_trait]
     impl ControlPlaneCache for FixedThreshold {
+        async fn policy_version(&self, _workspace_id: &str) -> Option<u64> {
+            None
+        }
         async fn predict_gate_threshold(&self, _w: &str) -> Option<f64> {
             self.0
         }

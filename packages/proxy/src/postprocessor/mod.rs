@@ -266,6 +266,9 @@ mod tests {
 
     #[async_trait::async_trait]
     impl ControlPlaneCache for QueuedCards {
+        async fn policy_version(&self, _workspace_id: &str) -> Option<u64> {
+            None
+        }
         async fn drain_notifications(&self, scope: NotifyScope, _id: &str) -> Vec<String> {
             match scope {
                 NotifyScope::Session => self.session.clone(),
