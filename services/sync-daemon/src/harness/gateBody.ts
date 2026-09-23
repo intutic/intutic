@@ -103,8 +103,68 @@ import {
  *   configured a list yet" from "this workspace wants zero servers", and
  *   picks the fail-open reading of that ambiguity rather than blocking every
  *   MCP call the first time a v6 gate meets an old snapshot).
+ *
+ * v8 (TD-474 item 4): the `hold` severity and the `action` subject. A hold
+ * rule — a `require_approval` SOP rule the control plane resolves, or a local
+ * `review_before:` token the daemon compiles as `sop.local.review_before.*` —
+ * refuses the call through the harness's own contract, appends the v1 hold
+ * record `drainReviewRequests` already reads, prints the `intutic decision
+ * approve <holdId>` hint, and lets the call through instead when the
+ * daemon's approved-bypass cache holds an exact, unexpired match for it. One
+ * mechanism in the shared bodies; the Claude Code writer's bespoke copy is
+ * gone. The `.rules` line format is unchanged — `hold` is just a new value in
+ * the severity column — so a v7 JS or bash gate reading a v8 snapshot falls
+ * through its severity switch to BLOCK (fail closed, no hold record, no
+ * bypass). The v7 Python filter is the one exception: its mapping sent every
+ * unrecognised severity to `flags`, i.e. ALLOWED, which is why the v8 filter
+ * maps unknown to block and why the daemon regenerates every gate each cycle —
+ * the skew window is one sync interval.
  */
-export const GATE_VERSION = 7
+export const GATE_VERSION = 8
+
+/**
+ * The coarse command → action-token classification the hold tier keys on:
+ * `review_before: action:deploy` holds a shell command that contains any of
+ * the deploy needles. Deliberately minimal — a gate that tries to be clever
+ * about shell commands is a gate that blocks real work — and it mirrors the
+ * proxy's `actions.rs` in both directions: `hookActionParity.test.ts` reads
+ * THIS file as text and fails if either side knows a needle the other does
+ * not. Keep each entry on one line in this exact `['action:x', [...]]` shape;
+ * that is what the test's regex finds.
+ */
+export const ACTION_NEEDLES: ReadonlyArray<readonly [string, readonly string[]]> = [
+  ['action:deploy', ['git push', 'kubectl apply', 'kubectl rollout', 'helm upgrade', 'helm install', 'terraform apply', 'docker push', 'serverless deploy', 'fly deploy', 'vercel deploy', 'gcloud run deploy', 'aws deploy', 'aws s3 sync', 'eb deploy']],
+  ['action:publish', ['npm publish', 'pnpm publish', 'yarn publish', 'cargo publish', 'twine upload', 'poetry publish', 'gem push', 'docker manifest push']],
+  ['action:release', ['gh release create', 'git tag', 'npm version', 'cargo release', 'goreleaser release', 'semantic-release']],
+  ['action:db_write', ['insert into', 'update ', 'delete from', 'drop table', 'truncate ', 'alter table']],
+]
+
+/** The (lower-cased) tool names whose `command` the classifier reads. */
+export const ACTION_TOOL_NAMES = ['bash', 'shell', 'run_command', 'terminal', 'execute'] as const
+
+/** Where a gate appends a hold, relative to the workspace root; the daemon's
+ *  `drainReviewRequests` reads the same file. */
+export const REVIEW_REQUESTS_BASENAME = 'review-requests.jsonl'
+export const REVIEW_REQUESTS_LOG = `.intutic/events/${REVIEW_REQUESTS_BASENAME}`
+/** Bumped when a hold record's shape changes; the control plane drops any
+ *  other version at ingest. */
+export const REVIEW_REQUEST_VERSION = 1
+
+/** The bash classifier: echoes a space-padded token string for `$TOOL`/`$COMMAND`. */
+function shellActionClassifier(): string {
+  const cases = ACTION_NEEDLES.map(
+    ([action, needles]) =>
+      `  case "$_c" in ${needles.map((n) => `*"${n}"*`).join('|')}) out="\${out}${action} " ;; esac`,
+  ).join('\n')
+  return `intutic_actions() {
+  local _t _c out=" "
+  _t="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  case "$_t" in ${[...ACTION_TOOL_NAMES].join('|')}) ;; *) printf ' '; return 0 ;; esac
+  _c="$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')"
+${cases}
+  printf '%s' "$out"
+}`
+}
 
 /**
  * How old a snapshot may be before a gate reports it as stale.
@@ -288,6 +348,13 @@ export interface ShellGateOptions {
    * Called as `<fn> <verdict> <tool> <reason>`.
    */
   logFn?: string
+  /**
+   * Absolute path of the hold record file. Defaults to
+   * `<script dir>/../events/review-requests.jsonl`, which is the workspace's
+   * `.intutic/events/` for every gate that lives in `.intutic/hooks/`; a
+   * writer whose artifact lives elsewhere passes it.
+   */
+  reviewRequestFile?: string
 }
 
 /**
@@ -297,6 +364,138 @@ export interface ShellGateOptions {
  * by {@link ShellGateOptions.logFn}. Refuses with `exit 2` — every bash harness
  * uses the exit-code contract.
  */
+/** Single-quotes a path for bash. */
+function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`
+}
+
+/**
+ * The hold tier's JS helpers, emitted once into every JS-family gate.
+ *
+ * `intuticHold` is the one place a hold happens: bypass lookup, hold record,
+ * the approve hint and the audit line. It returns `{ bypassed: true }` when an
+ * exact, unexpired approved bypass lets the call through and `{ holdId }` when
+ * the caller must refuse. Everything is local — no network on the tool path.
+ */
+function jsHoldHelpers(reviewRequestFile: string | undefined): string {
+  return `const INTUTIC_ACTION_NEEDLES = ${JSON.stringify(ACTION_NEEDLES)};
+const INTUTIC_ACTION_TOOLS = ${JSON.stringify(ACTION_TOOL_NAMES)};
+const INTUTIC_REVIEW_REQUEST_FILE = ${JSON.stringify(reviewRequestFile ?? null)};
+
+/** Space-padded action tokens for a shell command (" action:deploy "), or " ". */
+function intuticActions(toolName, command) {
+  if (INTUTIC_ACTION_TOOLS.indexOf(String(toolName || '').toLowerCase()) === -1) return ' ';
+  var c = String(command || '').toLowerCase(), out = ' ';
+  for (var i = 0; i < INTUTIC_ACTION_NEEDLES.length; i++) {
+    var needles = INTUTIC_ACTION_NEEDLES[i][1];
+    for (var j = 0; j < needles.length; j++) {
+      if (c.indexOf(needles[j]) !== -1) { out += INTUTIC_ACTION_NEEDLES[i][0] + ' '; break; }
+    }
+  }
+  return out;
+}
+
+function intuticReviewRequestFile() {
+  var path = require('path');
+  if (process.env.INTUTIC_REVIEW_REQUESTS) return process.env.INTUTIC_REVIEW_REQUESTS;
+  if (INTUTIC_REVIEW_REQUEST_FILE) return INTUTIC_REVIEW_REQUEST_FILE;
+  var self = typeof __filename === 'string' ? __filename : (process.argv[1] || '.');
+  return path.resolve(path.dirname(self), '..', 'events', '${REVIEW_REQUESTS_BASENAME}');
+}
+
+/**
+ * Looks for a valid, unexpired, EXACT-match approved bypass in the cache the
+ * daemon polled from GET /api/v1/decisions/approved-bypasses. Returns null on
+ * ANY reason not to bypass — missing file, failed digest or workspace check,
+ * no matching line, an entry whose expiresAt has passed — and every null
+ * falls through to the hold: this can only make enforcement MORE permissive
+ * for the one call it matches exactly, never less for any other.
+ */
+function intuticApprovedBypass(workspaceId, sopRuleId, toolNameNormalized, targetHash) {
+  var fs = require('fs'), os = require('os'), path = require('path');
+  var file = process.env.INTUTIC_APPROVED_BYPASSES ||
+    path.join(os.homedir(), '.intutic', 'hooks', 'approved-bypasses.jsonl');
+  var raw;
+  try { raw = fs.readFileSync(file, 'utf-8'); } catch (e) { return null; }
+  var lines = raw.split('\\n');
+  var digest = '', ws = '', body = [];
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+    if (line.indexOf('#digest ') === 0) { digest = line.slice(8).trim(); continue; }
+    if (line.indexOf('#workspace ') === 0) { ws = line.slice(11).trim(); continue; }
+    if (!line || line.charAt(0) === '#') continue;
+    body.push(line);
+  }
+  try {
+    var actual = require('crypto').createHash('sha256').update(body.join('\\n')).digest('hex').slice(0, 32);
+    if (actual !== digest) return null;
+  } catch (e) { return null; }
+  if (ws && ws !== workspaceId) return null;
+  var now = Date.now();
+  for (var k = 0; k < body.length; k++) {
+    var entry;
+    try { entry = JSON.parse(body[k]); } catch (e) { continue; }
+    if (!entry || entry.workspaceId !== workspaceId || entry.sopRuleId !== sopRuleId) continue;
+    if (entry.toolNameNormalized !== toolNameNormalized || entry.targetHash !== targetHash) continue;
+    var exp = Date.parse(entry.expiresAt);
+    if (!exp || isNaN(exp) || now >= exp) continue;
+    return entry;
+  }
+  return null;
+}
+
+function intuticHold(rule, toolName, command, target, toolInput, record, workspaceId, sessionId) {
+  var crypto = require('crypto'), fs = require('fs'), path = require('path');
+  // Key material, computed the same way at both ends: the normalised tool
+  // name, and sha256 of the normalised command/target pair joined by a NUL so
+  // command="a" target="b" cannot collide with command="ab" target="".
+  var toolNameNormalized = intuticNormalise(toolName);
+  var targetHash = crypto.createHash('sha256')
+    .update(intuticNormalise(command) + '\\u0000' + intuticNormalise(target)).digest('hex');
+  var bypass = intuticApprovedBypass(workspaceId || '', rule.id, toolNameNormalized, targetHash);
+  if (bypass) {
+    // Let it through — LOUDLY. A bypass nobody can see used is no better than
+    // the observe-only gap it replaces.
+    var bypassReason = 'Approved bypass for ' + rule.id + ' — approved by ' + bypass.decidedBy + ' on hold ' + bypass.holdId;
+    try { console.error('[Intutic Guardrail] BYPASSED: ' + bypassReason); } catch (e) {}
+    try { record('hold_approved_bypass_used', toolName, bypassReason); } catch (e) {}
+    return { bypassed: true };
+  }
+  var holdId = 'hold_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+  try {
+    var file = intuticReviewRequestFile();
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    var rec = {
+      v: ${REVIEW_REQUEST_VERSION},
+      holdId: holdId,
+      reason: rule.id,
+      tool: toolName,
+      sessionId: sessionId || '',
+      workspaceId: workspaceId || '',
+      at: new Date().toISOString(),
+      toolNameNormalized: toolNameNormalized,
+      targetHash: targetHash,
+    };
+    // The redacted context snapshot, when this writer emitted the redactor
+    // (Claude Code does). Redacted here rather than in the daemon: plaintext
+    // that reaches .intutic/events/ is plaintext that ends up in a bug report.
+    if (typeof __intuticSnapshot === 'function') {
+      rec.context = __intuticSnapshot({ tool: toolName, toolInput: toolInput, cwd: process.cwd(), reason: rule.id });
+    }
+    // Appended, never overwritten: holds cluster.
+    fs.appendFileSync(file, JSON.stringify(rec) + '\\n');
+  } catch (e) {
+    // The hold still refuses even if the record cannot be written — the
+    // contract below is what stops the tool. But say so.
+    try { console.error('[Intutic Guardrail] could not record the hold: ' + (e && e.message ? e.message : e)); } catch (e2) {}
+  }
+  var reason = rule.reason + ' [' + rule.id + ']';
+  try { console.error('[Intutic Guardrail] HELD: ' + reason + ' Approve with: intutic decision approve ' + holdId + ' (or: intutic decision reject ' + holdId + ')'); } catch (e) {}
+  try { record('tool_held', toolName, reason); } catch (e) {}
+  return { holdId: holdId };
+}`
+}
+
 export function emitShellGate(opts: ShellGateOptions): string {
   const log = opts.logFn ?? 'log_event'
   const floor = staticFloorPatterns()
@@ -449,6 +648,91 @@ INTUTIC_NCOMMAND="$(intutic_normalise "\${COMMAND:-}")"
 INTUTIC_NTARGET="$(intutic_normalise "\${TARGET:-}")"
 INTUTIC_NTOOL="$(intutic_normalise "\${TOOL:-}")"
 
+# ── Hold tier (gate body v8) ─────────────────────────────────────────────────
+# A \`hold\` rule refuses the call and records it for a human; an exact,
+# unexpired approved bypass the daemon cached lets the same call through once.
+# All local — a file read, a file write and an exit code; no network on the
+# tool path.
+INTUTIC_REVIEW_REQUEST_FILE="\${INTUTIC_REVIEW_REQUESTS:-}"
+if [ -z "$INTUTIC_REVIEW_REQUEST_FILE" ]; then
+  INTUTIC_REVIEW_REQUEST_FILE=${opts.reviewRequestFile ? shellQuote(opts.reviewRequestFile) : '"$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)/events/review-requests.jsonl"'}
+fi
+INTUTIC_APPROVED_BYPASSES="\${INTUTIC_APPROVED_BYPASSES:-$HOME/.intutic/hooks/approved-bypasses.jsonl}"
+${shellActionClassifier()}
+intutic_sha256() {
+  if command -v shasum >/dev/null 2>&1; then shasum -a 256 | cut -c1-64
+  elif command -v sha256sum >/dev/null 2>&1; then sha256sum | cut -c1-64
+  else printf ''; fi
+}
+intutic_json_escape() {
+  printf '%s' "$1" | sed -e 's/\\\\/\\\\\\\\/g' -e 's/"/\\\\"/g' | tr -d '\\n\\r\\t'
+}
+# Looks for a valid, unexpired, EXACT-match approved bypass. Prints nothing
+# and returns 1 on ANY reason not to bypass: missing file, failed digest or
+# workspace check, no matching line, or an entry whose expiresAt has passed —
+# every one of which falls through to the hold. Key material is computed the
+# same way the JS gate and the control plane compute it: the normalised tool
+# name, and sha256(normalised command, NUL, normalised target).
+intutic_bypass() {
+  local rid="$1" tn="$2" th="$3" hdr_digest hdr_ws body actual now line exp
+  [ -n "$th" ] || return 1
+  [ -r "$INTUTIC_APPROVED_BYPASSES" ] || return 1
+  hdr_digest="$(grep -m1 '^#digest ' "$INTUTIC_APPROVED_BYPASSES" | cut -d' ' -f2 || true)"
+  hdr_ws="$(grep -m1 '^#workspace ' "$INTUTIC_APPROVED_BYPASSES" | cut -d' ' -f2 || true)"
+  body="$(grep -v '^#' "$INTUTIC_APPROVED_BYPASSES" | grep -v '^$' || true)"
+  [ -n "$body" ] || return 1
+  actual="$(printf '%s' "$body" | intutic_sha256 | cut -c1-32)"
+  [ -n "$actual" ] && [ "$actual" = "$hdr_digest" ] || return 1
+  if [ -n "$hdr_ws" ] && [ "$hdr_ws" != "\${INTUTIC_WORKSPACE_ID:-}" ]; then return 1; fi
+  now="$(date -u +%Y-%m-%dT%H:%M:%S)"
+  while IFS= read -r line; do
+    case "$line" in *'"workspaceId":"'"\${INTUTIC_WORKSPACE_ID:-}"'"'*) ;; *) continue ;; esac
+    case "$line" in *'"sopRuleId":"'"$rid"'"'*) ;; *) continue ;; esac
+    case "$line" in *'"toolNameNormalized":"'"$tn"'"'*) ;; *) continue ;; esac
+    case "$line" in *'"targetHash":"'"$th"'"'*) ;; *) continue ;; esac
+    exp="$(printf '%s' "$line" | sed -n 's/.*"expiresAt":"\\([^"]*\\)".*/\\1/p')"
+    [ -n "$exp" ] || continue
+    # ISO-8601 UTC timestamps compare lexically; a past expiry fails closed
+    # toward the hold, however fresh the file is.
+    if [[ "$exp" > "$now" ]]; then
+      printf '%s' "$line"; return 0
+    fi
+  done <<< "$body"
+  return 1
+}
+# Returns 0 when an approved bypass lets the call through (the caller
+# continues), 2 when the call is held (the caller refuses).
+intutic_hold() {
+  local rid="$1" rreason="$2" tn th entry decided_by hold_id at file targeth
+  tn="$(intutic_normalise "\${TOOL:-}")"
+  th="$( { printf '%s' "$INTUTIC_NCOMMAND"; printf '\\0'; printf '%s' "$INTUTIC_NTARGET"; } | intutic_sha256 )"
+  if entry="$(intutic_bypass "$rid" "$tn" "$th")"; then
+    decided_by="$(printf '%s' "$entry" | sed -n 's/.*"decidedBy":"\\([^"]*\\)".*/\\1/p')"
+    hold_id="$(printf '%s' "$entry" | sed -n 's/.*"holdId":"\\([^"]*\\)".*/\\1/p')"
+    echo "[Intutic Guardrail] BYPASSED: Approved bypass for \${rid} — approved by \${decided_by} on hold \${hold_id}" >&2
+    ${log} "hold_approved_bypass_used" "\${TOOL:-}" "Approved bypass for \${rid} — approved by \${decided_by} on hold \${hold_id}" || true
+    return 0
+  fi
+  hold_id="hold_$(printf '%x' "$(date +%s)")_$(printf '%04x%04x' "$RANDOM" "$RANDOM")"
+  at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  targeth=""
+  [ -n "$th" ] && targeth="$(printf ',"targetHash":"%s"' "$th")"
+  file="$INTUTIC_REVIEW_REQUEST_FILE"
+  # The hold still blocks even if the record cannot be written — the exit code
+  # is what stops the tool. But say so: a hold nobody can review is the worst
+  # of both outcomes.
+  if ! { mkdir -p "$(dirname "$file")" 2>/dev/null && printf '{"v":${REVIEW_REQUEST_VERSION},"holdId":"%s","reason":"%s","tool":"%s","sessionId":"%s","workspaceId":"%s","at":"%s","toolNameNormalized":"%s"%s}\\n' \\
+      "$hold_id" "$(intutic_json_escape "$rid")" "$(intutic_json_escape "\${TOOL:-}")" "$(intutic_json_escape "\${SESSION_ID:-}")" \\
+      "$(intutic_json_escape "\${INTUTIC_WORKSPACE_ID:-}")" "$at" "$(intutic_json_escape "$tn")" "$targeth" >> "$file" 2>/dev/null; }; then
+    echo "[Intutic Guardrail] could not record the hold at \${file}" >&2
+  fi
+  echo "[Intutic Guardrail] HELD: \${rreason} [\${rid}] Approve with: intutic decision approve \${hold_id} (or: intutic decision reject \${hold_id})" >&2
+  ${log} "tool_held" "\${TOOL:-}" "\${rreason} [\${rid}]" || true
+  return 2
+}
+# Computed after the classifier is defined; read by the \`action\` subject.
+INTUTIC_ACTIONS="$(intutic_actions "\${TOOL:-}" "\${COMMAND:-}")"
+
 # A rule declares which part of the call it matches. \`any\` means command and
 # target — never the tool name, because a pattern like \`\\.claude/settings\\.json\`
 # would otherwise be tested against "Write" and quietly match nothing.
@@ -479,6 +763,9 @@ intutic_apply() {
     # machinery matches. The secrets.* floor rules ride this. Guaranteed
     # non-empty by the extractor (it defaults to "{}").
     content) _subs=("$TOOL_INPUT_JSON") ;;
+    # The space-padded action tokens intutic_actions derived from the command
+    # (" action:deploy "), so a hold on \`action:deploy\` matches whole tokens.
+    action)  _subs=("$INTUTIC_ACTIONS") ;;
     # Each field is tested separately rather than concatenated. Joining them
     # lets a pattern match across the seam — a command ending in "chflags" and
     # an unrelated target starting with "nouchg" would trip the bypass rule
@@ -526,6 +813,12 @@ sys.exit(0 if rx.search(sys.argv[2]) else 1)
   if [ "$rsev" = "shadow" ]; then
     ${log} "tool_would_block" "\${TOOL:-}" "\${rreason} [\${rid}]" || true
     return 0
+  fi
+  if [ "$rsev" = "hold" ]; then
+    # Not a permanent denial: the action is legitimate, someone asked to see
+    # it first. A bypass they approved lets this exact call through once.
+    if intutic_hold "$rid" "$rreason"; then return 0; fi
+    exit 2
   fi
   if [ "$rsev" = "warn" ]; then
     # Advisory tier: allowed, and recorded with enough shape to triage.
@@ -606,6 +899,9 @@ export interface JsGateOptions {
   harness: string
   /** How this harness refuses. */
   contract: BlockContract
+  /** See {@link ShellGateOptions.reviewRequestFile}. Writers whose artifact
+   *  does not live in `.intutic/hooks/` (cline, opencode) pass it. */
+  reviewRequestFile?: string
 }
 
 /**
@@ -743,6 +1039,8 @@ ${NORMALISE_CONTRACT.jsSource}
 
 ${JS_SNAPSHOT_LOADER}
 
+${jsHoldHelpers(opts.reviewRequestFile)}
+
 /**
  * Refuses a parsed payload that carries no recognisable tool-call envelope.
  *
@@ -791,7 +1089,7 @@ ${refuse}
  * matchSopRule and the intutic-clawde gate port pin — and the gate serializes
  * it itself so no writer can hand it a differently-shaped string.
  */
-function intuticGate(toolName, target, command, record, workspaceId, toolInput) {
+function intuticGate(toolName, target, command, record, workspaceId, toolInput, sessionId) {
   // M3: Cline's \`use_mcp_tool\` envelope, normalized into the
   // \`mcp__<server>__<tool>\` shape every other harness's MCP tool name already
   // takes — BEFORE any rule fires. Cline's own tool-call schema names the
@@ -848,6 +1146,9 @@ function intuticGate(toolName, target, command, record, workspaceId, toolInput) 
   const nCommand = intuticNormalise(command);
   const nTarget = intuticNormalise(target);
   const nTool = intuticNormalise(toolName);
+  // The space-padded action tokens the command classifies to, for \`action\`
+  // subject rules (" action:deploy ").
+  const nActions = intuticActions(toolName, command);
   const rules = INTUTIC_FLOOR.concat(snap.rules);
   for (const rule of rules) {
     // Each field is tested separately rather than concatenated — joining them
@@ -861,6 +1162,7 @@ function intuticGate(toolName, target, command, record, workspaceId, toolInput) 
       // same string the WHERE argPattern machinery tests, so the two content
       // subjects cannot drift.
       : rule.subject === 'content' ? [toolInputJson]
+      : rule.subject === 'action' ? [nActions]
       : [nCommand, nTarget];
     for (const subject of subjects) {
       if (!rule.re.test(subject)) continue;
@@ -882,6 +1184,15 @@ function intuticGate(toolName, target, command, record, workspaceId, toolInput) 
         // Certain rule, deliberately not acted on. Counted apart from warn.
         try { record('tool_would_block', toolName, rule.reason + ' [' + rule.id + ']'); } catch (e) {}
         continue;
+      }
+      if (rule.severity === 'hold') {
+        // Not a permanent denial: the action is legitimate, someone asked to
+        // see it first. An approved bypass lets this exact call through once;
+        // otherwise the hold is recorded for review and the call refused.
+        const held = intuticHold(rule, toolName, command, target, toolInput, record, workspaceId, sessionId);
+        if (held.bypassed) continue;
+        const reason = '[Intutic Governance] HELD: ' + rule.reason + ' [' + rule.id + '] — approve with: intutic decision approve ' + held.holdId;
+${refuse}
       }
       if (rule.severity === 'warn') {
         // Advisory tier — allowed, recorded with the rule id and the command's
@@ -1390,12 +1701,16 @@ def _intutic_evaluate(text):
                 continue
         except Exception:
             continue
-        if severity == "block":
-            blocks.append((rid, reason))
+        if severity == "warn":
+            flags.append((rid, reason))
         elif severity == "shadow":
             shadowed.append((rid, reason))
         else:
-            flags.append((rid, reason))
+            # \`block\`, \`hold\` and anything this filter does not know. A
+            # prompt filter has no tool call to hold and no reviewer to wait
+            # for, so a hold refuses outright; and an unrecognised severity
+            # must not read as advisory — that was the v7 fail-open edge.
+            blocks.append((rid, reason))
     return blocks, flags, shadowed
 # ── end Intutic gate body ────────────────────────────────────────────────────
 `
@@ -1574,6 +1889,9 @@ function intuticGateWorkflow(workflow, record, workspaceId) {
           try { record('tool_flagged', 'n8n:' + nodeName, rule.reason + ' [' + rule.id + '] node=' + nodeType); } catch (e) {}
           continue;
         }
+        // \`hold\` falls through to the refusal below: this gate runs inside
+        // the n8n server, which has no workspace to record a hold in and no
+        // developer at a prompt to approve one, so a hold is a block here.
         // The rule's own reason, not a generic one: hookEvents.resolveSeverity
         // reads this text for "governance-protected" to file it CRITICAL.
         const reason = rule.reason + ' [' + rule.id + '] (node "' + nodeName + '", type ' + nodeType + ')';

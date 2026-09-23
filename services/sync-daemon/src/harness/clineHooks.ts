@@ -18,7 +18,7 @@ import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import { createLogger } from '@intutic/logger'
 import { newIso } from '@intutic/id'
-import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
+import { emitJsGate, emitJsFailClosedPrelude, REVIEW_REQUESTS_BASENAME } from './gateBody.js'
 
 const log = createLogger('sync-cline-hooks')
 
@@ -132,7 +132,7 @@ function logEvent(verdict, toolName, reason) {
   } catch {}
 }
 
-${emitJsGate({ harness: 'cline', contract: 'stdout-cancel' })}
+${emitJsGate({ harness: 'cline', contract: 'stdout-cancel', reviewRequestFile: path.join(workspaceRoot, '.intutic', 'events', REVIEW_REQUESTS_BASENAME) })}
 
 let raw = '';
 process.stdin.on('data', (c) => { raw += c; });

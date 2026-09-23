@@ -181,6 +181,57 @@ export interface WriteResult {
 }
 
 /**
+ * The workspace's local SOPs (`.intutic/sops/<dir>/*.md`, narrowed by
+ * `session-context.json`'s `activeLocalSops` when present). Shared by the
+ * config writer and by the gate-cache refresh, which compiles their
+ * `review_before:` tokens into hold rules (TD-474 item 4). A missing
+ * directory is an empty list.
+ */
+export async function loadLocalSopEntries(workspaceRoot: string, harnesses: HarnessType[]): Promise<SyncSopEntry[]> {
+const localSopEntries: SyncSopEntry[] = []
+try {
+  const sessionContextPath = node_path.join(workspaceRoot, '.intutic', 'session-context.json')
+  let activeLocalSops: string[] | undefined
+  try {
+    const raw = await node_fs.readFile(sessionContextPath, 'utf-8')
+    const parsed = JSON.parse(raw)
+    activeLocalSops = parsed.activeLocalSops
+  } catch {
+    // not configured yet
+  }
+
+  const sopsDir = node_path.join(workspaceRoot, '.intutic', 'sops')
+  const entries = await node_fs.readdir(sopsDir, { withFileTypes: true })
+  const dirs = entries.filter((e) => e.isDirectory()).map((e) => e.name)
+
+  const activeDirs = activeLocalSops !== undefined
+    ? dirs.filter((d) => activeLocalSops!.includes(d))
+    : dirs
+
+  for (const dirName of activeDirs) {
+    const dirPath = node_path.join(sopsDir, dirName)
+    const files = await node_fs.readdir(dirPath)
+    const mdFiles = files.filter((f) => f.endsWith('.md'))
+    
+    for (const file of mdFiles) {
+      const filePath = node_path.join(dirPath, file)
+      const content = await node_fs.readFile(filePath, 'utf-8')
+      localSopEntries.push({
+        sopId: `local:${dirName}:${file}`,
+        title: `Local SOP: ${dirName}/${file}`,
+        content,
+        contentHash: '',
+        harnessTargets: harnesses,
+      })
+    }
+  }
+} catch {
+  // ignore directory read errors (e.g. if sops folder doesn't exist)
+}
+  return localSopEntries
+}
+
+/**
  * Write SOP content to all targeted harness config files.
  *
  * For each harness type, resolves the config file path, formats the
@@ -213,47 +264,7 @@ export async function writeConfigFiles(
     console.warn('[sync-daemon] writeBundledSkills failed (non-fatal):', e)
   }
 
-  // Load and compile local SOP entries
-  const localSopEntries: SyncSopEntry[] = []
-  try {
-    const sessionContextPath = node_path.join(workspaceRoot, '.intutic', 'session-context.json')
-    let activeLocalSops: string[] | undefined
-    try {
-      const raw = await node_fs.readFile(sessionContextPath, 'utf-8')
-      const parsed = JSON.parse(raw)
-      activeLocalSops = parsed.activeLocalSops
-    } catch {
-      // not configured yet
-    }
-
-    const sopsDir = node_path.join(workspaceRoot, '.intutic', 'sops')
-    const entries = await node_fs.readdir(sopsDir, { withFileTypes: true })
-    const dirs = entries.filter((e) => e.isDirectory()).map((e) => e.name)
-
-    const activeDirs = activeLocalSops !== undefined
-      ? dirs.filter((d) => activeLocalSops!.includes(d))
-      : dirs
-
-    for (const dirName of activeDirs) {
-      const dirPath = node_path.join(sopsDir, dirName)
-      const files = await node_fs.readdir(dirPath)
-      const mdFiles = files.filter((f) => f.endsWith('.md'))
-      
-      for (const file of mdFiles) {
-        const filePath = node_path.join(dirPath, file)
-        const content = await node_fs.readFile(filePath, 'utf-8')
-        localSopEntries.push({
-          sopId: `local:${dirName}:${file}`,
-          title: `Local SOP: ${dirName}/${file}`,
-          content,
-          contentHash: '',
-          harnessTargets: harnesses,
-        })
-      }
-    }
-  } catch {
-    // ignore directory read errors (e.g. if sops folder doesn't exist)
-  }
+  const localSopEntries = await loadLocalSopEntries(workspaceRoot, harnesses)
 
   const combinedSops = [...sops, ...localSopEntries]
 

@@ -153,7 +153,10 @@ export const UNIVERSAL_PROTECTED_PATHS: readonly string[] = [
  * Making the subject an explicit column means a rule cannot be pointed at the
  * wrong string by omission.
  */
-export type GuardSubject = 'tool' | 'command' | 'target' | 'content' | 'any'
+/** `action` is the space-padded action-token string the gate classifies a
+ *  shell command to (`" action:deploy "`, from `ACTION_NEEDLES`) — the subject
+ *  a `review_before: action:deploy` hold rule matches. */
+export type GuardSubject = 'tool' | 'command' | 'target' | 'content' | 'action' | 'any'
 
 export interface GuardPattern {
   /** Stable id. Appears in the block message and the audit line, so it is the
@@ -179,9 +182,13 @@ export interface GuardPattern {
    * also allows, but emits `tool_would_block`: the rule is certain and the
    * workspace's interventionMode asked us not to act on it. The two allow-ing
    * severities are kept apart because a SHADOW rollout is decided on the second
-   * count, and collapsing them into `warn` made it unmeasurable.
+   * count, and collapsing them into `warn` made it unmeasurable. `hold`
+   * refuses the call like `block` but records it for a human (`tool_held`
+   * plus a v1 hold record) and lets the exact same call through once an
+   * approved bypass for it exists — the `review_before:` / `REQUIRE_APPROVAL:`
+   * tier, one mechanism in every gate since gate body v8.
    */
-  severity: 'block' | 'warn' | 'shadow'
+  severity: 'block' | 'warn' | 'shadow' | 'hold'
   /** Shown to the developer when it fires. Written for someone who is mid-task
    *  and now blocked, not for a security reviewer. */
   reason: string

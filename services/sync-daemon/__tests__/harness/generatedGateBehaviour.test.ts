@@ -44,7 +44,7 @@ import {
   staticFloorPatterns,
   type GuardPattern,
 } from '../../src/harness/protectedPaths.js'
-import { toRulesLine } from '../../src/harness/gateBody.js'
+import { toRulesLine, REVIEW_REQUESTS_LOG } from '../../src/harness/gateBody.js'
 import { buildSnapshotRules } from '../../src/lib/policySnapshot.js'
 import { createHash } from 'node:crypto'
 
@@ -729,6 +729,42 @@ for (const g of GATES) {
       ).toBe(false)
     })
 
+    it('holds a call under a hold rule: refused, tool_held recorded, a v1 hold record appended for the daemon; an unrelated call still runs', async () => {
+      // TD-474 item 4: the hold tier at EVERY gate, one mechanism. An
+      // `action`-subject rule is what a local `review_before: action:deploy`
+      // compiles to; the classifier turns `git push` into ` action:deploy `.
+      const snap = writeRulesFixture(join(home, `hold-${g.name}.rules`), [{
+        id: 'sop.local.review_before.action:deploy', source: ' (action:deploy) ', subject: 'action', ignoreCase: true, severity: 'hold',
+        reason: 'Held for human review: action:deploy — declared in review_before:', rationale: '', matches: [], notMatches: [],
+      }], 'ws_test')
+      const holdFile = join(roots.get(g.name)!, REVIEW_REQUESTS_LOG)
+      const before = existsSync(holdFile) ? readFileSync(holdFile, 'utf8') : ''
+
+      const held = await runGate(g, { command: 'git push origin main' }, { snapshot: snap })
+      assertCleanExit(g, held, 'a deploy under a hold rule')
+      expect(wasBlocked(g, held), `${g.name} let a held deploy run. stderr: ${held.stderr.slice(0, 300)}`).toBe(true)
+      expect(held.stderr).toMatch(/HELD/)
+      expect(held.stderr, 'the hint names the real hold id, not a placeholder').toMatch(/intutic decision approve hold_[0-9a-z_]+/)
+      expect(auditLogText(g)).toMatch(/tool_held/)
+
+      // The record the daemon drains to POST /api/v1/decisions — at the
+      // workspace path every gate must agree on, whatever its own artifact
+      // location, or the hold is refused and never reviewed.
+      const added = (existsSync(holdFile) ? readFileSync(holdFile, 'utf8') : '').slice(before.length).trim().split('\n').filter(Boolean)
+      expect(added, `${g.name} wrote no hold record at ${REVIEW_REQUESTS_LOG}`).toHaveLength(1)
+      const record = JSON.parse(added[0]!)
+      expect(record).toMatchObject({ v: 1, reason: 'sop.local.review_before.action:deploy', workspaceId: 'ws_test' })
+      expect(record.holdId).toMatch(/^hold_/)
+      expect(held.stderr).toContain(record.holdId)
+      expect(record.toolNameNormalized).toBe(NORMALISE_CONTRACT.js('Bash'))
+      expect(record.targetHash, 'the bypass key').toMatch(/^[0-9a-f]{64}$/)
+      expect(() => new Date(record.at).toISOString()).not.toThrow()
+
+      const unrelated = await runGate(g, { command: 'make test' }, { snapshot: snap })
+      assertCleanExit(g, unrelated, 'make test under a hold rule')
+      expect(wasBlocked(g, unrelated), `${g.name} held \`make test\``).toBe(false)
+    })
+
     it('still blocks unconditionally on a name-only tool rule (regression pin)', async () => {
       // A rule with no argPattern must behave exactly as before this change.
       const snap = writeRulesFixture(join(home, `nameonly-${g.name}.rules`), [{
@@ -998,6 +1034,19 @@ describe('Open WebUI prompt filter', () => {
     expect((await ask('here is a canary-string', snap)).refused).toBe(false)
   })
 
+  it('refuses when severity is hold — a prompt has no tool call to hold and no reviewer to wait for', async () => {
+    // Also the v7 fail-open edge: the old mapping sent every unrecognised
+    // severity to `flags`, so a hold rule reaching a v7 filter was ALLOWED.
+    const snap = join(home, 'owui-hold.rules')
+    writeRulesFixture(snap, [{
+      id: 'sop.ask.canary', source: 'canary-string', subject: 'command', severity: 'hold',
+      reason: 'Held for human review: canary', rationale: '', matches: [], notMatches: [],
+    }])
+    const r = await ask('here is a canary-string', snap)
+    expect(r.refused, 'a hold-severity snapshot rule did not refuse').toBe(true)
+    expect(r.stderr).toMatch(/BLOCKED/)
+  })
+
   it('does not match a tool-subject rule against prompt text', async () => {
     // The subject bug: the snapshot reader consumed columns 0,5,2,4,1 and
     // skipped f[3], so a `BLOCK:Bash` rule — subject `tool`, a pattern over
@@ -1142,6 +1191,15 @@ describe('n8n workflow gate', () => {
       snap,
     )
     expect(unrelated.refused, 'a WHERE rule on executeCommand aborted a workflow with no such node').toBe(false)
+  })
+
+  it('refuses a hold rule outright — this gate runs inside the n8n server, with no workspace to record a hold in', async () => {
+    const snap = writeRulesFixture(join(home, 'hold-n8n-wf.rules'), [{
+      id: 'sop.ask_exec', source: 'executeCommand', subject: 'tool', severity: 'hold',
+      reason: 'Held for human review: exec', rationale: '', matches: [], notMatches: [],
+    }])
+    const r = await runWorkflow(wf([commandNode('kubectl apply -f deploy.yaml')]), snap)
+    expect(r.refused, 'a hold-severity rule did not abort the workflow').toBe(true)
   })
 
   it('still blocks unconditionally on a name-only node-type rule (regression pin)', async () => {
@@ -1356,6 +1414,27 @@ describe('OpenCode plugin gate', () => {
       })
     })
   }
+
+  it('holds a deploy under a local review_before rule and records it at the workspace path — an ES module has no __filename, so the writer passes the path', async () => {
+    const file = writeRulesFixture(
+      join(home, 'opencode-hold.rules'),
+      buildSnapshotRules(
+        { workspaceId: 'ws_test', interventionMode: 'ENFORCE', sopRules: [], mcpAllowedServers: [], sqlDropStrictBlock: false },
+        ['action:deploy'],
+      ),
+      'ws_test',
+    )
+    const holdFile = join(roots.get(gate.name)!, REVIEW_REQUESTS_LOG)
+    const before = existsSync(holdFile) ? readFileSync(holdFile, 'utf8') : ''
+    const r = await runPlugin('server', 'bash', { command: 'git push origin main' }, file)
+    expect(r.refused, `the plugin let a held deploy run. stderr: ${r.stderr.slice(0, 300)}`).toBe(true)
+    expect(r.stderr).toMatch(/HELD/)
+    const added = (existsSync(holdFile) ? readFileSync(holdFile, 'utf8') : '').slice(before.length).trim().split('\n').filter(Boolean)
+    expect(added, `no hold record at ${REVIEW_REQUESTS_LOG}`).toHaveLength(1)
+    expect(JSON.parse(added[0]!)).toMatchObject({ v: 1, reason: 'sop.local.review_before.action:deploy', workspaceId: 'ws_test' })
+    const clean = await runPlugin('server', 'bash', { command: 'npm run build' }, file)
+    expect(clean.refused).toBe(false)
+  })
 
   it('applies a WHERE clause from the snapshot: kubectl apply unpinned is refused, pinned is allowed', async () => {
     const file = writeRulesFixture(
