@@ -1769,12 +1769,36 @@ impl AnomalyDetector for UnauthorizedToolDetector {
         hits.sort_unstable();
         hits.dedup();
 
+        // Name the SOP(s) that declared each ban when the context carries the
+        // provenance; a context built without titles (a WASM guest, a test
+        // fixture, an older proxy) keeps the unattributed wording.
+        let named: Vec<String> = hits
+            .iter()
+            .map(|h| {
+                let mut titles: Vec<&str> = ctx
+                    .denied_tool_sources
+                    .iter()
+                    .filter(|(t, _)| t.eq_ignore_ascii_case(h))
+                    .map(|(_, title)| title.as_str())
+                    .collect();
+                titles.sort_unstable();
+                titles.dedup();
+                if titles.is_empty() {
+                    h.to_string()
+                } else {
+                    format!("{} (SOP {})", h, titles.iter().map(|t| format!("\"{t}\"")).collect::<Vec<_>>().join(", "))
+                }
+            })
+            .collect();
+        let attributed = hits.iter().any(|h| ctx.denied_tool_sources.iter().any(|(t, _)| t.eq_ignore_ascii_case(h)));
+
         Some(AnomalyFinding::kill(
             AnomalyKind::UnauthorizedTool,
-            format!(
-                "Forbidden tool call: {} — denied by an SOP in force for this node",
-                hits.join(", ")
-            ),
+            if attributed {
+                format!("Forbidden tool call: {} — declared in deny_tools", named.join(", "))
+            } else {
+                format!("Forbidden tool call: {} — denied by an SOP in force for this node", named.join(", "))
+            },
         ))
     }
 }
@@ -2157,6 +2181,7 @@ pub mod test_support {
             calls_last_60s: 0,
             corroborating_detectors: 0,
             denied_tools: vec![],
+            denied_tool_sources: Vec::new(),
             injection_findings: vec![],
             injection_sources: vec![],
             tool_contract_changed: false,
@@ -3159,6 +3184,33 @@ mod tool_policy_tests {
         assert!(r.contains("kubectl") && r.contains("rm"));
         assert!(!r.contains("Read"));
     }
+
+    /// TD-474 item 6: the refusal names the SOP that declared the ban when the
+    /// context carries the provenance, and keeps the old wording when it does
+    /// not (a WASM guest or an older proxy builds no `denied_tool_sources`).
+    #[test]
+    fn the_reason_names_every_declaring_sop() {
+        let d = UnauthorizedToolDetector;
+        let mut ctx = base_ctx();
+        ctx.denied_tools = vec!["kubectl".into(), "rm".into()];
+        ctx.denied_tool_sources = vec![
+            ("kubectl".into(), "Never touch prod k8s".into()),
+            ("kubectl".into(), "Deploys go through CI".into()),
+            ("rm".into(), "No destructive shell".into()),
+        ];
+        ctx.tool_calls = vec![call("kubectl"), call("rm")];
+        let r = d.detect(&ctx).unwrap().reason;
+        assert!(r.contains("kubectl (SOP \"Deploys go through CI\", \"Never touch prod k8s\")"), "{r}");
+        assert!(r.contains("rm (SOP \"No destructive shell\")"), "{r}");
+        assert!(r.ends_with("declared in deny_tools"), "{r}");
+
+        let mut bare = base_ctx();
+        bare.denied_tools = vec!["kubectl".into()];
+        bare.tool_calls = vec![call("kubectl")];
+        let r = d.detect(&bare).unwrap().reason;
+        assert!(r.contains("denied by an SOP in force"), "unattributed wording must survive: {r}");
+        assert!(!r.contains("SOP \""));
+    }
 }
 
 #[cfg(test)]
@@ -3285,6 +3337,20 @@ mod workflow_and_harness_tests {
         let hit = d.detect(&ctx).unwrap();
         assert!(hit.blocks());
         assert!(hit.reason.contains("cursor"));
+    }
+
+    /// The org-ceiling sentinel (`sops::NARROWED_TO_NOTHING`) permits no
+    /// harness at all — a list of nothing-permitted, never the empty list
+    /// that means unrestricted — and the reason shows the operator why.
+    #[test]
+    fn a_ceiling_narrowed_to_nothing_refuses_every_harness_and_says_so() {
+        let d = CrossHarnessViolationDetector;
+        let mut ctx = base_ctx();
+        ctx.harness = "claude-code".into();
+        ctx.allowed_harnesses = vec![crate::sops::NARROWED_TO_NOTHING.to_string()];
+        let hit = d.detect(&ctx).unwrap();
+        assert!(hit.blocks());
+        assert!(hit.reason.contains(crate::sops::NARROWED_TO_NOTHING), "{}", hit.reason);
     }
 
     #[test]
@@ -4277,6 +4343,7 @@ mod sop_key_replay_vectors {
     fn ctx_for(v: &Vector) -> RequestContext {
         RequestContext {
             denied_tools: v.rules.deny_tools.clone(),
+            denied_tool_sources: Vec::new(),
             requires_before: v.rules.requires_before.iter().map(|(a, b)| (a.clone(), b.clone(), false)).collect(),
             forbid_after: v.rules.forbid_after.iter().map(|(a, b)| (a.clone(), b.clone(), false)).collect(),
             max_calls: v.rules.max_calls.clone(),

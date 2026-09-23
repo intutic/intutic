@@ -115,6 +115,7 @@ fn evaluate_sop_shadows(
         let sop_gov = crate::sops::governance_fields_from(sops, role);
         crate::wasm::context::RequestContext {
             denied_tools: sop_gov.denied_tools,
+            denied_tool_sources: sop_gov.denied_tool_sources,
             plan_steps: sop_gov.plan_steps,
             scope_paths: sop_gov.scope_paths,
             review_before: sop_gov.review_before,
@@ -150,6 +151,7 @@ fn evaluate_sop_shadows(
                 .collect();
             crate::sops::SopShadowReport {
                 title: s.title.clone(),
+                scope: s.scope,
                 would_act: !findings.is_empty(),
                 findings: findings.iter().map(|f| f.kind.as_str().to_string()).collect(),
             }
@@ -844,6 +846,7 @@ async fn resolve_finalize_judge_note(p: FinalizeJudgeParams<'_>) -> Option<Strin
             Some(p.control_plane_url),
             Some(p.workspace_id),
             Some(p.auth_token),
+            None,
         )
         .await;
         let sop_text = sops
@@ -2864,6 +2867,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         control_plane_url_for_sops.as_deref(),
         Some(workspace_id.as_str()),
         Some(raw_token),
+        Some(state.control_plane.as_ref()),
     )
     .await;
     // Shadow-mode SOPs (`mode: shadow` in front matter) never contribute to the
@@ -2924,6 +2928,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         // Tool bans from the SOPs in force for this node's role. Resolved here
         // so the detector remains a pure function of the context.
         denied_tools: gov.denied_tools,
+        denied_tool_sources: gov.denied_tool_sources,
         // The declared plan for this role, same resolution and same reason. Empty for
         // any workspace that has not written one, which is the overwhelming default.
         plan_steps: gov.plan_steps,

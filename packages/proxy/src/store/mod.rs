@@ -919,6 +919,15 @@ pub trait ControlPlaneCache: Send + Sync + 'static {
     /// Workspace-level SOP tier, used when the session carries none.
     async fn active_sop_tier(&self, workspace_id: &str) -> Option<String>;
 
+    /// The workspace's policy/config version — `v2:sync:config_version:{ws}`,
+    /// the counter the control plane bumps on every guardrail promote/retire
+    /// and config push (TD-474 item 5). `None` when there is no control plane,
+    /// the key is unset, or the read failed: the caller then falls back to
+    /// its TTL, exactly as before the version existed. Never a reason to
+    /// refuse anything — it only decides whether a cached SOP set is refetched
+    /// early.
+    async fn policy_version(&self, workspace_id: &str) -> Option<u64>;
+
     /// Approved-models allowlist for this workspace, read from
     /// `workspace:allowed_models:{workspace_id}`.
     ///
