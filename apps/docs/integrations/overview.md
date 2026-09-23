@@ -1,6 +1,6 @@
 # Integrations Overview
 
-Intutic supports 39 AI agent harnesses out of the box. The CLI auto-detects which harnesses are present in your workspace and syncs governance rules to each one.
+Intutic supports 42 AI agent harnesses out of the box. The CLI auto-detects which harnesses are present in your workspace and syncs governance rules to each one.
 
 ## Supported Harnesses
 
@@ -27,6 +27,7 @@ Intutic supports 39 AI agent harnesses out of the box. The CLI auto-detects whic
 | [LangGraph](/integrations/langgraph) | `.env.intutic` | `langgraph`/`langchain` in `pyproject.toml`, `requirements.txt`, or `uv.lock` | ✅ Stable |
 | [Grok Build](/integrations/grok) | `AGENTS.md` | `.grok/` or `AGENTS.md` in project, `~/.grok/`, or `grok` in `PATH` | ✅ Stable |
 | Muse Code | `AGENTS.md` | `.muse/` or `AGENTS.md` in project, `~/.config/muse/`, or `muse` in `PATH` | ✅ Stable |
+| [OpenCode](/integrations/opencode) | `AGENTS.md` + `.opencode/plugins/intutic-governance.js` | `.opencode/` or `opencode.json` in project, `$OPENCODE_CONFIG_DIR`/`~/.config/opencode/`, or `opencode` in `PATH` | ✅ Stable — the gate is a plugin OpenCode loads into its own process; MCP entries not proxy-wrapped yet (TD-487) |
 | [LangChain](/integrations/langchain) | `.env.intutic` | `langchain`/`langchain-core` in `pyproject.toml`, `requirements.txt`, or `uv.lock` | ✅ Stable |
 | [CrewAI](/integrations/crewai) | `.env.intutic` | `crewai` in `pyproject.toml`, `requirements.txt`, or `uv.lock` | ✅ Stable |
 | [Google ADK](/integrations/google-adk) | `.env.intutic` | `google-adk` in `pyproject.toml`, `requirements.txt`, or `uv.lock` | ✅ Stable |
@@ -44,7 +45,7 @@ Intutic supports 39 AI agent harnesses out of the box. The CLI auto-detects whic
 | [AWS Bedrock AgentCore](/integrations/agentcore) | none (delegates) | `bedrock-agentcore`/`bedrock-agentcore-starter-toolkit` in a Python manifest, `bedrock-agentcore`/`@aws/agentcore` in `package.json`, or `.bedrock_agentcore.yaml`/`agentcore/agentcore.json`/`aws-targets.json` at the workspace root | ✅ Stable — Runtime module only; hosts your own framework-SDK code, so the real tool gate is whichever already-supported framework adapter your code uses, see the integration page |
 | [dsh](/integrations/dsh) | `cordis.patch.yml` (Cordis plugin) | `$DSH_HOME`/`~/.dsh/`, `@deepseek-ai/dsh` in PATH/package.json | 🟡 Preview — developer preview, breaking changes possible |
 | [Xirp](/integrations/xirp) | none (delegates) | `~/.xirp`/`$XIRP_HOME`, `Xirp.app`, tmux-parented Claude Code/Codex/Gemini CLI processes | ✅ Stable — macOS only, no gate of its own |
-| [Agentic Orchestrator](/integrations/agentic-orchestrator) | none (delegates) | `agentico` in PATH, `~/.agentic-orchestrator/config.yaml` | ✅ Stable — OpenCode backend has no gate to delegate to (see docs) |
+| [Agentic Orchestrator](/integrations/agentic-orchestrator) | none (delegates) | `agentico` in PATH, `~/.agentic-orchestrator/config.yaml` | ✅ Stable — all three backends (Claude Code, Codex, OpenCode) delegate to their own gates |
 
 ## How integration works
 

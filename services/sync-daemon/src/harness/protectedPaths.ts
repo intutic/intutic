@@ -121,6 +121,14 @@ export const UNIVERSAL_PROTECTED_PATHS: readonly string[] = [
   // are the only two files `dshHooks.ts` writes.
   '.dsh/profiles',
   '.dsh/settings.yaml',
+
+  // OpenCode — the plugin directories OpenCode globs (`.opencode/plugin` and
+  // `.opencode/plugins` are both read; only the latter is written) plus the
+  // user-level one. The whole directory, not the one file, same as `.grok/
+  // hooks`: a second plugin dropped beside ours is the same surface.
+  '.opencode/plugins',
+  '.opencode/plugin',
+  '.config/opencode/plugins',
 ]
 
 // ───────────────────────────────────────────────────────────────────────────

@@ -70,7 +70,14 @@ export type HarnessModule = Record<string, (...args: unknown[]) => Promise<void>
  *  whose preExecute function THROWS to abort — no exit code, no stdout. Its
  *  unit is a whole workflow, so like `python-raise` it is exercised by its own
  *  describe block rather than the per-tool matrix. */
-export type GateContract = 'exit2' | 'stdout-cancel' | 'stdout-decision-deny' | 'python-raise' | 'js-throw' | 'waterfall-reject'
+/**
+ * `'plugin-throw'` — a per-tool-call gate that runs INSIDE the harness process
+ * as a loaded plugin and refuses by throwing (OpenCode). Distinct from
+ * `'js-throw'`, whose unit is a whole n8n WORKFLOW: the suites below look
+ * rows up by contract, and one value for both would let the workflow block
+ * silently claim the per-call gate.
+ */
+export type GateContract = 'exit2' | 'stdout-cancel' | 'stdout-decision-deny' | 'python-raise' | 'js-throw' | 'waterfall-reject' | 'plugin-throw'
 
 /** What runs the emitted artifact. */
 export type GateRunner = 'bash' | 'node' | 'python3'
@@ -473,6 +480,26 @@ export const GATES: readonly GateEntry[] = [
   },
 
   // ── refuses by throwing, at workflow granularity ────────────────────────
+  // ── OpenCode — a plugin OpenCode loads into its own process (TD-397) ─────
+  {
+    name: 'opencode',
+    module: '../../src/harness/openCodeHooks.js',
+    invoke: (m, root) => m.writeOpenCodeHooks(root, PROXY_URL, 'ws_test'),
+    artifact: '.opencode/plugins/intutic-governance.js',
+    runner: 'node',
+    contract: 'plugin-throw',
+    migrated: true,
+    note:
+      'per-tool-call, in-process: OpenCode imports the file and runs its tool.execute.before ' +
+      '(1.x) / tool execute.before (2.x) hook before every tool call; a throw is the refusal. ' +
+      'Driven by the "OpenCode plugin gate" block, which loads the file the way OpenCode does.',
+    mcpCalls: 'reachable',
+    mcpNote:
+      'The hook fires for MCP tools too (tools.ts runs it for every tool id), so an ' +
+      'mcp__<server>__<tool>-shaped call would be caught — but OpenCode 1.x names MCP tools ' +
+      '<server>_<tool> (mcp/catalog.ts), which the allowlist backstop does not parse. ' +
+      'Composition is TD-487.',
+  },
   {
     name: 'n8n',
     module: '../../src/harness/n8nHooks.js',
@@ -1012,13 +1039,10 @@ export const NO_GATE: ReadonlyArray<{
       'codex-check.js) — the SAME gate this registry already lists under that harness\'s own row, ' +
       'not a second one. This is the same `delegated` reasoning as Xirp\'s row above, not a new ' +
       'kind — see gateKind.ts. ' +
-      'IMPORTANT DIFFERENCE FROM XIRP: one of the three wrapped backends, OpenCode, has NO adapter ' +
-      'or gate anywhere in this registry at all. A feature run with `--providers opencode` (or the ' +
-      'default auto-join behavior when the `opencode` CLI is installed and authenticated) has ZERO ' +
-      'Intutic governance today — not "delegated to an existing gate" but genuinely ungoverned, ' +
-      'the same as any other unsupported harness. This row still classifies as NO_GATE/`delegated` ' +
-      'for the harness AS A WHOLE (claude- and codex-backed features ARE fully covered), but the ' +
-      'OpenCode gap is real and tracked, not merely "unconfirmed" — see TD-397.',
+      'The third backend, OpenCode, was the one gap: until TD-397 closed (2026-09-23, the ' +
+      '`opencode` row above) a feature run with `--providers opencode` had no gate to delegate ' +
+      'to. It now has the same per-worktree coverage as the other two — the plugin ' +
+      'openCodeHooks.ts writes is re-generated in every worktree by the same propagation.',
   },
 
   // ── B2: AWS Bedrock AgentCore Runtime — a "delegated" host, not a spawner ─
@@ -1036,8 +1060,8 @@ export const NO_GATE: ReadonlyArray<{
       '— it hosts framework-SDK code as a deployment target, which is a different shape of ' +
       '`delegated` (see gateKind.ts) worth naming explicitly: if the hosted code uses no ' +
       'framework this registry supports (raw boto3, a hand-rolled tool loop), coverage is ' +
-      'genuinely zero — the same honest gap Agentic Orchestrator\'s OpenCode backend has ' +
-      '(TD-397), not something this row can claim to fix. Detection (CONFIRMED against real ' +
+      'genuinely zero — an honest gap this row states rather than claims to fix. ' +
+      'Detection (CONFIRMED against real ' +
       'published artifacts — pip/npm package versions live-checked, config filenames confirmed ' +
       'by extracting and grepping the real tarballs/wheels, not assumed) covers the ' +
       '`bedrock-agentcore` PyPI/npm SDK, the `bedrock-agentcore-starter-toolkit` PyPI CLI, the ' +

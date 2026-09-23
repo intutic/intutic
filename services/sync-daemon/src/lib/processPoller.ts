@@ -83,6 +83,13 @@ const PROCESS_SIGNATURES: Array<{
     patterns: [/(^|[/\\\s])grok(\s|$)/],
   },
   {
+    name: 'OpenCode',
+    // Anchored like `grok`: `opencode` is a plain word that can appear in
+    // arguments and paths, so only an invoked command name counts. `opencode2`
+    // is the 2.x line's alternate binary name.
+    patterns: [/(^|[/\\\s])opencode2?(\s|$)/],
+  },
+  {
     name: 'dsh',
     // `dsh` is a two-letter... no, three-letter token — shorter and more
     // collision-prone than `grok` (which at least required a qualifier for

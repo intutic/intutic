@@ -382,6 +382,7 @@ export default defineConfig({
             { text: 'GitHub Copilot', link: '/integrations/github-copilot' },
             { text: 'LangGraph', link: '/integrations/langgraph' },
             { text: 'Grok Build', link: '/integrations/grok' },
+            { text: 'OpenCode', link: '/integrations/opencode' },
             { text: 'Muse Code', link: '/integrations/muse-code' },
             { text: 'dsh', link: '/integrations/dsh' },
             { text: 'Xirp', link: '/integrations/xirp' },

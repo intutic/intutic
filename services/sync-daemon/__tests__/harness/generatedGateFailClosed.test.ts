@@ -59,9 +59,10 @@ const jsExit2Gates = GATES.filter((g) => g.runner === 'node' && g.contract === '
 // rather than as a second parallel describe-block loop here.
 const jsCancelGates = GATES.filter((g) => g.contract === 'stdout-cancel' || g.contract === 'stdout-decision-deny')
 const n8nGate = GATES.find((g) => g.contract === 'js-throw')!
+const opencodeGate = GATES.find((g) => g.contract === 'plugin-throw')!
 
 /** The gates this file drives — everything with a per-call subprocess, plus n8n. */
-const DRIVEN = [...bashGates, ...jsExit2Gates, ...jsCancelGates, n8nGate]
+const DRIVEN = [...bashGates, ...jsExit2Gates, ...jsCancelGates, n8nGate, opencodeGate]
 
 beforeAll(async () => {
   for (const g of DRIVEN) {
@@ -479,5 +480,57 @@ describe('n8n workflow gate failure posture', () => {
       body.includes("process.on('uncaughtException'"),
       'the n8n module must not install process-level exit handlers — it runs in the n8n server process',
     ).toBe(false)
+  })
+})
+
+// ─── OpenCode: in-process plugin, refusal is a throw ──────────────────────────
+
+describe('OpenCode plugin gate failure posture', () => {
+  const root = () => roots.get(opencodeGate.name)!
+
+  async function drive(argsExpr: string): Promise<{ status: number | null; stderr: string }> {
+    const driver = join(root(), 'oc-fault-drv.mjs')
+    writeFileSync(
+      driver,
+      [
+        "import { pathToFileURL } from 'node:url';",
+        'const mod = await import(pathToFileURL(process.argv[2]).href);',
+        'const hooks = await mod.default.server({ directory: process.cwd() });',
+        "const hook = hooks && hooks['tool.execute.before'];",
+        "if (typeof hook !== 'function') { console.error('no hook'); process.exit(4); }",
+        `const args = ${argsExpr};`,
+        "Promise.resolve().then(() => hook({ tool: 'bash', sessionID: 's', callID: 'c' }, { args }))",
+        '  .then(() => process.exit(0), (e) => { console.error(String((e && e.message) || e)); process.exit(3); });',
+      ].join('\n'),
+    )
+    const r = await runProcess('node', [driver, join(root(), opencodeGate.artifact)], {
+      env: { ...process.env, HOME: root(), USERPROFILE: root(), INTUTIC_SNAPSHOT_RULES: join(home, 'no-such.rules') },
+    })
+    expect(r.status, 'driver could not load the plugin').not.toBe(4)
+    return { status: r.status, stderr: r.stderr }
+  }
+
+  it('an internal fault inside the gate refuses the call — a throw IS the fail-closed contract', async () => {
+    // Induced with an args object whose first read throws: the gate touches
+    // `filePath` before anything else.
+    const r = await drive('{ get filePath() { throw new Error("induced internal fault"); } }')
+    expect(r.status, `an internal fault did NOT refuse the call:\n${r.stderr}`).toBe(3)
+    expect(r.stderr).toContain('[Intutic Governance] BLOCKED')
+    expect(r.stderr).toContain('induced internal fault')
+  })
+
+  it('refuses arguments the gate cannot read (a string, null, an array) rather than allowing', async () => {
+    for (const expr of ['"npm run build"', 'null', '[1, 2]']) {
+      const r = await drive(expr)
+      expect(r.status, `args ${expr} were allowed`).toBe(3)
+      expect(r.stderr).toContain('[Intutic Governance] BLOCKED')
+    }
+  })
+
+  it("installs no process-level crash handlers — it runs inside the user's OpenCode process", () => {
+    const body = readFileSync(join(root(), opencodeGate.artifact), 'utf8')
+    expect(body).not.toContain("process.on('uncaughtException'")
+    expect(body).not.toContain("process.on('unhandledRejection'")
+    expect(body).not.toContain('process.exit(')
   })
 })

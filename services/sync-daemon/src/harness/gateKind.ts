@@ -65,14 +65,10 @@ import { HarnessType, type HarnessType as HarnessTypeT } from '@intutic/shared-t
  *                 gateRegistry.ts's NO_GATE rows for the reasoning this
  *                 precedent sets for future orchestrator/host-shaped
  *                 harnesses).
- *                 NOTE: "governed by whichever wrapped harness's own gate is
- *                 running" assumes that wrapped harness HAS a gate — Agentic
- *                 Orchestrator's `opencode` backend does not (no OpenCode
- *                 adapter exists in this registry at all), so `'delegated'`
- *                 slightly overclaims for that one backend; see TD-397. It
- *                 remains the correct classification for the harness AS A
- *                 WHOLE because its other two backends (claude, codex) are
- *                 fully gated. Distinct from
+ *                 Every wrapped backend of the two orchestrators has a gate of
+ *                 its own (Agentic Orchestrator's `opencode` backend since
+ *                 TD-397 closed with `openCodeHooks.ts`), so `'delegated'`
+ *                 claims exactly what happens. Distinct from
  *                 `'none'`: `'none'` means no enforcement point exists
  *                 ANYWHERE for this harness's tool calls; `'delegated'`
  *                 means one exists, just not one this harness's own row

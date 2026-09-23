@@ -15,7 +15,7 @@ fetch config → write harness files → compute hashes → report drift
 On each sync cycle the daemon:
 
 1. **Fetches** the latest SOP configuration from the control plane
-2. **Writes** harness-specific config files using 18 format-aware config writers
+2. **Writes** harness-specific config files using 19 format-aware config writers
 3. **Computes** content hashes for drift detection
 4. **Reports** any detected drift back to the control plane
 
