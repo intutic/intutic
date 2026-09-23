@@ -535,9 +535,24 @@ no threshold — a run stops only because an SOP said this action needs a person
 ::: warning Where the hold takes effect
 Two gates enforce this, and they are not equivalent.
 
-**The harness hook** (Claude Code and the other harnesses the daemon
-configures) blocks the tool call *before it runs*. The `git push` does not
-happen.
+**The harness hook** (every hook gate the daemon writes — Claude Code, Cursor,
+Goose, Cline and the rest of the [matrix](/reference/harness-security-matrix))
+blocks the tool call *before it runs*. The `git push` does not happen. The
+gate prints the hold id and how to resolve it:
+
+```
+[Intutic Guardrail] HELD: Held for human review: action:deploy — declared in review_before: [sop.local.review_before.action:deploy] Approve with: intutic decision approve hold_… (or: intutic decision reject hold_…)
+```
+
+`intutic decision approve <holdId>` lets that exact call — same tool, same
+command, same target — through once, for a short window, and only when the
+workspace has opted in (**Settings → Review holds**); a different command
+under the same rule is held again. Two hook gates cannot hold: the n8n
+workflow hook and the Open WebUI prompt filter refuse the call outright, since
+neither runs in a workspace where a hold could be recorded. `review_before:`
+tokens reach the gates through the policy snapshot `intutic connect` refreshes
+each cycle, so a token added to a local SOP takes effect within one sync
+without restarting anything.
 
 **The proxy** only learns of a tool call after the harness has already made it,
 so its hold stops everything the run does *next* — not the action itself. That

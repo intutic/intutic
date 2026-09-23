@@ -67,7 +67,7 @@ import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import { createLogger } from '@intutic/logger'
 import { newIso } from '@intutic/id'
-import { emitJsGate } from './gateBody.js'
+import { emitJsGate, REVIEW_REQUESTS_BASENAME } from './gateBody.js'
 
 const log = createLogger('sync-opencode-hooks')
 
@@ -119,7 +119,7 @@ try {
   });
 } catch {}
 
-${emitJsGate({ harness: 'opencode', contract: 'throw' })}
+${emitJsGate({ harness: 'opencode', contract: 'throw', reviewRequestFile: path.join(workspaceRoot, '.intutic', 'events', REVIEW_REQUESTS_BASENAME) })}
 
 let _intuticSessionId = '';
 function logEvent(verdict, toolName, reason) {

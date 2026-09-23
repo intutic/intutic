@@ -38,7 +38,7 @@ Tool call arrives
 ```
 
 1. **DLP Scanner** — 20 patterns matched against the serialised tool arguments. A hit blocks the call and opens an incident.
-2. **BLOCK: SOP match** — `VALIDATED` SOPs whose title begins `BLOCK:` are compiled to a pattern and tested against the tool name.
+2. **BLOCK: SOP match** — `VALIDATED` SOPs whose title begins `BLOCK:` are compiled to a pattern and tested against the tool name. A title beginning `REQUIRE_APPROVAL:` is the same rule at the `hold` tier: the harness hook gates refuse the call and record it for **Decisions → Held Changes** (`intutic decision approve <holdId>` lets that exact call through once); the proxy and the MCP proxy, which have no reviewer in the loop, treat it as a block.
 3. **SSO group policy** — resolves the caller's group privilege. `DENIED` or `REQUIRES_OBO` blocks.
 4. **Promoted findings** — repeat anomaly findings that have been promoted to enforcement. Only a promoted `KILL` blocks; a promoted `HIJACK` is recorded and falls through.
 

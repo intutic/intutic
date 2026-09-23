@@ -171,11 +171,17 @@ describe('review_before hook gate', () => {
     )
     await node_fs.rm(dir, { recursive: true, force: true })
 
+    // The hold itself lives in the shared gate body since v8: the script
+    // carries the classifier that turns `git push` into `action:deploy`, the
+    // one hold branch, and refuses through Claude Code's exit-2 contract.
+    // The token itself is no longer baked in — it reaches the gate as a
+    // `sop.local.review_before.action:deploy` rule in the policy snapshot.
     expect(script).toContain('action:deploy')
-    expect(script).toContain('Held for human review')
+    expect(script).toContain('function intuticHold(')
+    expect(script).not.toContain('const reviewBefore =')
     // exit(2) is Claude Code's block signal. Without it the hook observes and
     // the action proceeds — the exact inert-gate shape this feature replaces.
-    expect(script).toMatch(/Held for human review[\s\S]{0,600}process\.exit\(2\)/)
+    expect(script).toMatch(/rule\.severity === 'hold'[\s\S]{0,900}process\.exit\(2\)/)
   })
 
   it('makes no network call on the tool path', async () => {
@@ -190,11 +196,12 @@ describe('review_before hook gate', () => {
     await node_fs.rm(dir, { recursive: true, force: true })
 
     const holdBlock = script.slice(
-      script.indexOf('const reviewBefore'),
-      script.indexOf('SOP-compiled pattern blacklist'),
+      script.indexOf('function intuticApprovedBypass('),
+      script.indexOf('function intuticGuardEnvelope('),
     )
+    expect(holdBlock).toContain('function intuticHold(')
     expect(holdBlock).not.toContain('http')
-    expect(holdBlock).toContain('writeFileSync')
+    expect(holdBlock).toContain('appendFileSync')
   })
 })
 
