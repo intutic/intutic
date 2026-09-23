@@ -1,11 +1,11 @@
 ---
 title: Integrations
-description: Connect Intutic to 39 AI coding agents — IDE extensions, CLI tools, agent frameworks, orchestrators, and platforms. Auto-detected, zero config.
+description: Connect Intutic to 42 AI coding agents — IDE extensions, CLI tools, agent frameworks, orchestrators, and platforms. Auto-detected, zero config.
 ---
 
 # Integrations <Badge type="tip" text="Open-Core" />
 
-Intutic supports **39 AI agent harnesses** out of the box. Run `intutic init` in your project and the CLI auto-detects which agents are present, then syncs governance rules to each one.
+Intutic supports **42 AI agent harnesses** out of the box. Run `intutic init` in your project and the CLI auto-detects which agents are present, then syncs governance rules to each one.
 
 ```bash
 intutic init
@@ -42,6 +42,7 @@ Terminal-based agents that accept proxy environment variables or config files.
 | [**Codex**](/integrations/codex) | OpenAI's autonomous coding agent | `.env.intutic` |
 | [**Antigravity**](/integrations/antigravity) | Google's Gemini AI coding agent | `.gemini/settings.json` |
 | [**Grok Build**](/integrations/grok) | xAI's terminal coding agent | `AGENTS.md` |
+| [**OpenCode**](/integrations/opencode) | Open-source terminal coding agent (`opencode-ai` 1.x, `@opencode/cli` 2.x); gated by a plugin loaded into its own process | `AGENTS.md` + `.opencode/plugins/intutic-governance.js` |
 | [**Muse Code**](/integrations/muse-code) | Meta's beta terminal coding agent (model Muse Spark) | `AGENTS.md` |
 | [**dsh**](/integrations/dsh) <Badge type="warning" text="Preview" /> | DeepSeek's plugin-first ("Cordis") coding agent (developer preview) | `cordis.patch.yml` (Cordis plugin, not a rules file) |
 
@@ -84,7 +85,7 @@ Web UIs, desktop apps, and collaboration tools that host AI agents.
 | [**Claude Desktop**](/integrations/claude-desktop) | Anthropic's desktop application | `claude_desktop_config.json` |
 | [**GitHub Copilot**](/integrations/github-copilot) | GitHub's AI pair programmer | `.github/copilot-instructions.md` |
 | [**Xirp**](/integrations/xirp) | Spotify's macOS orchestrator for parallel Claude Code/Codex/Gemini CLI sessions, each in its own tmux session + git worktree | none — delegates to the wrapped harness |
-| [**Agentic Orchestrator**](/integrations/agentic-orchestrator) | DoorDash's open-source (Apache-2.0) desktop app + CLI (`agentico`) for multi-phase feature workflows across Claude Code/Codex/OpenCode, each in its own git worktree | none — delegates to the wrapped backend (OpenCode has no gate — see notes) |
+| [**Agentic Orchestrator**](/integrations/agentic-orchestrator) | DoorDash's open-source (Apache-2.0) desktop app + CLI (`agentico`) for multi-phase feature workflows across Claude Code/Codex/OpenCode, each in its own git worktree | none — delegates to the wrapped backend (Claude Code, Codex and OpenCode each have their own gate) |
 
 ---
 

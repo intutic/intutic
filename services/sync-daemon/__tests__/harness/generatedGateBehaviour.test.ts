@@ -478,6 +478,17 @@ for (const g of GATES) {
       })
       return
     }
+    if (g.contract === 'plugin-throw') {
+      // Per-tool-call, but in-process: OpenCode imports the file and calls
+      // the hook it returns, so there is no stdin envelope or exit code for
+      // runGate to drive. Covered by the "OpenCode plugin gate" block below,
+      // which loads the file the way OpenCode does and drives both hook
+      // shapes — a separate shape, not a skipped one.
+      it('is covered by its own plugin block, not the tool-call matrix', () => {
+        expect(g.runner).toBe('node')
+      })
+      return
+    }
 
     it('allows an ordinary command', async () => {
       const r = await runGate(g, { command: 'npm run build' })
@@ -1242,6 +1253,135 @@ describe('n8n workflow gate', () => {
     const r = await runWorkflow({ id: 'wf-alien', name: 'Alien', nodes: 42, connections: {} })
     expect(r.refused, 'an unreadable nodes shape was allowed — the gate fails open on contract change').toBe(true)
     expect(r.stderr).toMatch(/unrecognised workflow shape/)
+  })
+})
+
+describe('OpenCode plugin gate', () => {
+  const gate = GATES.find((g) => g.contract === 'plugin-throw')!
+  const pluginFile = () => join(roots.get(gate.name)!, gate.artifact)
+
+  /**
+   * Loads the emitted plugin the way OpenCode does — a dynamic `import()` of
+   * the ESM file — and drives ONE tool call through either hook shape:
+   * `server` is the 1.x `tool.execute.before(input, output)` hook the plugin
+   * function returns; `setup` is the 2.x `ctx.tool.hook('execute.before', cb)`
+   * registration, driven by a fake `ctx` that captures the callback. Returns
+   * whether the call was refused (the hook rejected) and what it said.
+   *
+   * An `.mjs` driver so the driver itself is ESM regardless of the temp
+   * tree's (absent) package.json; the plugin is `.js` with ESM syntax, which
+   * Node >= 22.7 detects — the same file Bun loads inside OpenCode.
+   */
+  async function runPlugin(
+    shape: 'server' | 'setup',
+    tool: string,
+    args: unknown,
+    snapshot?: string,
+  ): Promise<{ refused: boolean; stderr: string }> {
+    const driver = join(roots.get(gate.name)!, 'plugin-drv.mjs')
+    writeFileSync(
+      driver,
+      [
+        "import { pathToFileURL } from 'node:url';",
+        'const mod = await import(pathToFileURL(process.argv[2]).href);',
+        'const plugin = mod.default;',
+        "if (typeof plugin !== 'function' || typeof plugin.setup !== 'function' || typeof plugin.server !== 'function') {",
+        "  console.error('plugin has the wrong shape: ' + typeof plugin); process.exit(4);",
+        '}',
+        'const shape = process.argv[3], tool = process.argv[4], args = JSON.parse(process.argv[5]);',
+        'let run;',
+        "if (shape === 'server') {",
+        '  const hooks = await plugin.server({ directory: process.cwd() });',
+        "  const hook = hooks && hooks['tool.execute.before'];",
+        "  if (typeof hook !== 'function') { console.error('no tool.execute.before hook'); process.exit(4); }",
+        "  run = () => hook({ tool, sessionID: 'sess_test', callID: 'call_1' }, { args });",
+        '} else {',
+        '  let cb;',
+        "  await plugin.setup({ tool: { hook: async (name, fn) => { if (name === 'execute.before') cb = fn; } } });",
+        "  if (typeof cb !== 'function') { console.error('setup registered no execute.before hook'); process.exit(4); }",
+        "  run = () => cb({ tool, input: args, sessionID: 'sess_test' });",
+        '}',
+        'Promise.resolve().then(run).then(() => process.exit(0),',
+        '  (e) => { console.error(String((e && e.message) || e)); process.exit(3); });',
+      ].join('\n'),
+    )
+    const res = await runProcess('node', [driver, pluginFile(), shape, tool, JSON.stringify(args)], {
+      env: {
+        ...process.env,
+        HOME: roots.get(gate.name)!,
+        USERPROFILE: roots.get(gate.name)!,
+        INTUTIC_SNAPSHOT_RULES: snapshot ?? join(home, 'no-such.rules'),
+      },
+      timeoutMs: 20_000,
+    })
+    expect(res.status, `driver could not load the plugin: ${res.stderr}`).not.toBe(4)
+    return { refused: res.status !== 0, stderr: res.stderr }
+  }
+
+  for (const shape of ['server', 'setup'] as const) {
+    describe(`${shape === 'server' ? '1.x tool.execute.before' : '2.x tool execute.before'} hook`, () => {
+      it('allows an ordinary command', async () => {
+        const r = await runPlugin(shape, 'bash', { command: 'npm run build' })
+        expect(r.refused, `refused \`npm run build\`:\n${r.stderr}`).toBe(false)
+      })
+
+      it('throws on a governance-bypass command, naming the rule', async () => {
+        const r = await runPlugin(shape, 'bash', { command: 'chflags nouchg .intutic/hooks/x' })
+        expect(r.refused, 'a governance-bypass command was allowed').toBe(true)
+        expect(r.stderr).toMatch(/\[Intutic Governance\] BLOCKED/)
+        expect(r.stderr).toMatch(/\[[a-z_.-]+\]/)
+      })
+
+      it('refuses every path in the shared protected constant, as a command and as a write target', async () => {
+        for (const p of UNIVERSAL_PROTECTED_PATHS) {
+          const asCommand = await runPlugin(shape, 'bash', { command: `cat ${p}` })
+          expect(asCommand.refused, `\`cat ${p}\` was allowed`).toBe(true)
+          const asWrite = await runPlugin(shape, 'write', { filePath: p, content: 'x' })
+          expect(asWrite.refused, `write to ${p} was allowed`).toBe(true)
+        }
+      }, 180_000)
+
+      it('refuses a destructive command only when the snapshot supplies the rule', async () => {
+        const without = await runPlugin(shape, 'bash', { command: 'rm -rf /' })
+        expect(without.refused, 'destructive tier fired with no snapshot').toBe(false)
+        const withSnap = await runPlugin(shape, 'bash', { command: 'rm -rf /' }, snapshotRules)
+        expect(withSnap.refused, 'destructive command allowed with the snapshot present').toBe(true)
+      })
+
+      it('records the verdict with harnessType opencode', async () => {
+        await runPlugin(shape, 'bash', { command: 'chflags nouchg .intutic/hooks/x' })
+        const text = auditLogText(gate)
+        expect(text).toContain('"harnessType":"opencode"')
+        expect(text).toContain('"event":"tool_blocked"')
+      })
+    })
+  }
+
+  it('applies a WHERE clause from the snapshot: kubectl apply unpinned is refused, pinned is allowed', async () => {
+    const file = writeRulesFixture(
+      join(home, 'opencode-where.rules'),
+      buildSnapshotRules({
+        workspaceId: 'ws_test',
+        interventionMode: 'ENFORCE',
+        sopRules: [
+          {
+            id: 'sop.pin_images',
+            toolPattern: 'bash',
+            argPattern: 'kubectl\\s+apply(?!.*@sha256:)',
+            action: 'block',
+            reason: 'deploys must be digest-pinned',
+          },
+        ],
+        mcpAllowedServers: [],
+        sqlDropStrictBlock: false,
+      }),
+    )
+    const unpinned = await runPlugin('server', 'bash', { command: 'kubectl apply -f deploy.yaml' }, file)
+    const pinned = await runPlugin('server', 'bash', { command: 'kubectl apply -f deploy@sha256:abc.yaml' }, file)
+    // A rules file whose WHERE shape this test misreads must fail loudly, not
+    // vacuously: at least one of the two outcomes has to be a refusal.
+    expect(unpinned.refused || pinned.refused, 'neither call was refused — the WHERE rule never applied').toBe(true)
+    expect(pinned.refused, `the pinned apply was refused:\n${pinned.stderr}`).toBe(false)
   })
 })
 

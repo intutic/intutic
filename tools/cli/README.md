@@ -50,6 +50,7 @@ Intutic auto-detects and configures these AI coding harnesses:
 | **n8n** | Running n8n instance | Workflow JSON file |
 | **OpenClaw** | `~/.openclaw/` directory | `config.yaml` |
 | **Hermes** | `~/.hermes/` directory | `config.toml` |
+| **OpenCode** | `.opencode/`, `opencode.json`, `~/.config/opencode/` or `opencode` on PATH | `AGENTS.md` + `.opencode/plugins/intutic-governance.js` (plugin gate) |
 
 ## Trace Inspection
 

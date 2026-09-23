@@ -1,0 +1,257 @@
+/**
+ * openCodeHooks.ts — OpenCode plugin gate (TD-397).
+ *
+ * OpenCode (the open-source terminal coding agent: npm `opencode-ai` 1.x,
+ * `@opencode/cli` 2.x) has no hook file, no hook JSON and no stdin/stdout
+ * gate contract. What it has is a **plugin**: a JavaScript module OpenCode
+ * loads INTO ITS OWN PROCESS from `.opencode/plugins/*.{js,ts}` (project) or
+ * `~/.config/opencode/plugins/`, or from an npm package named in
+ * `opencode.json`. The plugin returns hooks; one of them runs before every
+ * tool call and vetoes it by throwing:
+ *
+ *   - 1.x: `export default async (input) => ({ "tool.execute.before": async (i, o) => { … } })`,
+ *     `i = { tool, sessionID, callID }`, `o = { args }`. Fired from
+ *     `packages/opencode/src/session/tools.ts` before `item.execute(args, ctx)`,
+ *     for built-in tools, the `task` tool and MCP tools alike. A thrown Error
+ *     becomes a `tool-error` part whose message the model reads; the tool
+ *     never runs. (OpenCode's own docs demonstrate exactly this shape to keep
+ *     `read` away from `.env`.)
+ *   - 2.x: `ctx.tool.hook("execute.before", (event) => { … })` with
+ *     `event = { tool, input, sessionID, … }`; "only tool execute.before may
+ *     fail: a Tool.Error rejects the call before it runs". 2.x does NOT run
+ *     1.x-shaped plugins, and it discovers local plugins as DIRECTORIES —
+ *     `.opencode/plugins/<name>/index.{js,ts}` — while 1.x globs FILES —
+ *     `.opencode/{plugin,plugins}/*.{js,ts}` — so each line sees only its
+ *     own layout. The same module is therefore written twice: the flat file
+ *     for 1.x and `<name>/index.js` for 2.x. Its default export is the 1.x
+ *     plugin function, which also carries `id`, `server` and `setup` so a
+ *     2.x loader reading `default.setup()` finds the same gate. The 1.x
+ *     loader accepts a function (or an object with a `.server` function) and
+ *     rejects anything else, which is why the file exports exactly one value.
+ *
+ * The typed 1.x `permission.ask` hook is NOT used: it has had no trigger site
+ * since v1.0.182 and would be a gate that never fires.
+ *
+ * ## Same gate as every other hook harness
+ *
+ * The file embeds the shared `emitJsGate` body with the `'throw'` contract:
+ * the compiled-in floor, `~/.intutic/hooks/policy-snapshot.rules`, the WHERE
+ * clauses and the audit line are exactly what `codex-check.js` or
+ * `muse-check.js` enforce. This is why the plugin is a generated file and not
+ * an `@intutic/gate` npm dependency: gate-js does not carry the floor, and a
+ * dependency the user's project has to `bun install` is one more thing to
+ * drift. Nothing to register — OpenCode globs the directory.
+ *
+ * ## In-process, so no process-level handlers
+ *
+ * The plugin runs inside OpenCode. `emitJsFailClosedPrelude` (an
+ * `uncaughtException` handler that exits 2) would exit the user's editor on
+ * any unrelated fault, so it is deliberately absent — the same reasoning
+ * `emitN8nWorkflowGate` records. Fail-closed is local instead: the hook
+ * wraps the evaluation and rethrows ANY fault as a BLOCKED error, so a gate
+ * that cannot decide refuses rather than allows.
+ *
+ * ## What is not written
+ *
+ * `opencode.json` is left alone: the model base URL is a `provider.<id>.
+ * options.baseURL` field there (or `OPENCODE_CONFIG_CONTENT`), and the static
+ * `permission` deny map cannot express argument rules — both are documented
+ * for the user, not generated. OpenCode's MCP servers are not proxy-wrapped
+ * this phase (its MCP tool ids are `<server>_<tool>`, not `mcp__<server>__
+ * <tool>`, so the allowlist backstop does not compose yet — see TD-487).
+ *
+ * @module
+ */
+
+import * as fs from 'node:fs/promises'
+import * as path from 'node:path'
+import { createLogger } from '@intutic/logger'
+import { newIso } from '@intutic/id'
+import { emitJsGate } from './gateBody.js'
+
+const log = createLogger('sync-opencode-hooks')
+
+/** Where OpenCode looks for project plugins (1.x globs files here, 2.x reads sub-directories). */
+export const OPENCODE_PLUGIN_DIR = path.join('.opencode', 'plugins')
+/** The 1.x layout: one flat file. */
+export const OPENCODE_PLUGIN_FILE = 'intutic-governance.js'
+/** The 2.x layout: `<name>/index.js`. Same bytes as the flat file. */
+export const OPENCODE_PLUGIN_V2_FILE = path.join('intutic-governance', 'index.js')
+
+/**
+ * The plugin source. ESM, because a 1.x loader does `Object.values(module)`
+ * and a CommonJS file would surface every `module.exports` property as a
+ * named export (Bun and Node both synthesise them) — a string `id` among
+ * them is a `TypeError` at load. `createRequire` keeps the gate body's own
+ * `require()` calls (fs, os, path, crypto, http) working under ESM.
+ */
+export function buildPluginScript(proxyUrl: string, workspaceRoot: string, workspaceId: string): string {
+  const hookEventsLog = path.join(workspaceRoot, '.intutic', 'events', 'hook-events.jsonl')
+  return `/**
+ * Intutic OpenCode governance plugin.
+ * Auto-generated by intutic sync-daemon. DO NOT EDIT.
+ * Proxy: ${proxyUrl}
+ * Generated: ${newIso()}
+ *
+ * Runs INSIDE OpenCode as a plugin (1.x: tool.execute.before; 2.x: tool
+ * execute.before). Refuses a tool call by throwing — OpenCode turns the
+ * thrown message into the tool-error the model reads, and the tool never
+ * runs. See services/sync-daemon/src/harness/openCodeHooks.ts.
+ */
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const path = require('path');
+const os = require('os');
+const fs = require('fs');
+const crypto = require('crypto');
+const https = require('https');
+
+// Runtime credentials
+const _runtimeEnvPath = path.join(os.homedir(), '.intutic', 'env', 'runtime.env');
+let _intuticHost = 'https://api.intutic.ai', _intuticKey = '', _intuticWsId = ${JSON.stringify(workspaceId)};
+try {
+  fs.readFileSync(_runtimeEnvPath, 'utf-8').split('\\n').forEach(line => {
+    const eq = line.indexOf('='); if (eq < 0) return;
+    const k = line.slice(0, eq).trim(), v = line.slice(eq + 1).trim();
+    if (k === 'INTUTIC_HOST' && v) _intuticHost = v;
+    if (k === 'INTUTIC_API_KEY' && v) _intuticKey = v;
+    if (k === 'INTUTIC_WORKSPACE_ID' && v) _intuticWsId = v;
+  });
+} catch {}
+
+${emitJsGate({ harness: 'opencode', contract: 'throw' })}
+
+let _intuticSessionId = '';
+function logEvent(verdict, toolName, reason) {
+  try {
+    const ts = new Date().toISOString();
+    const incidentId = crypto.createHash('sha1').update(ts + toolName + _intuticWsId).digest('hex').slice(0, 16);
+    const entry = JSON.stringify({
+      event: verdict,
+      toolName, reason: reason || '',
+      workspaceId: _intuticWsId,
+      harnessType: 'opencode',
+      timestamp: ts,
+      incidentId,
+      ...(_intuticSessionId ? { sessionId: _intuticSessionId } : {}),
+    }) + '\\n';
+    const logPath = ${JSON.stringify(hookEventsLog)};
+    try { fs.mkdirSync(path.dirname(logPath), { recursive: true }); } catch {}
+    fs.appendFileSync(logPath, entry, { flag: 'a' });
+    if (_intuticKey) {
+      try {
+        const body = JSON.stringify({ events: [JSON.parse(entry)] });
+        const urlObj = new URL('/api/v1/hook-events', _intuticHost);
+        const mod = urlObj.protocol === 'https:' ? https : require('http');
+        const req = mod.request({ hostname: urlObj.hostname, port: urlObj.port || 443, path: urlObj.pathname, method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body), 'Authorization': 'Bearer ' + _intuticKey } });
+        req.on('error', () => { /* fire-and-forget */ });
+        req.write(body); req.end();
+      } catch { /* never crash the hook */ }
+    }
+  } catch { /* never crash the hook */ }
+}
+
+/**
+ * One tool call. Returns to allow; throws '[Intutic Governance] BLOCKED: …'
+ * to refuse. \`args\` is the tool's argument object (1.x: output.args; 2.x:
+ * event.input). Anything that is not an object is refused outright — the
+ * gate reads paths and commands out of it, and an argument shape it cannot
+ * read is the same anomaly the stdin gates' envelope guard refuses.
+ */
+function intuticEvaluate(toolName, args, sessionID) {
+  _intuticSessionId = sessionID || '';
+  const tool = String(toolName || 'tool');
+  if (!args || typeof args !== 'object' || Array.isArray(args)) {
+    const reason = '[Intutic Governance] BLOCKED: tool "' + tool + '" was called with arguments the gate cannot read (' +
+      (args === null ? 'null' : typeof args) + '); refusing rather than allowing a call it cannot evaluate.';
+    try { logEvent('tool_blocked', tool, reason); } catch (e) {}
+    throw new Error(reason);
+  }
+  const targetPath = args.filePath || args.path || args.file_path || args.file || args.target || args.notebook_path || '';
+  const command = args.command || args.cmd || args.script || '';
+  intuticGate(tool, targetPath, command, logEvent, _intuticWsId, args);
+  logEvent('tool_allowed', tool, '');
+}
+
+/** Fail CLOSED: a fault inside the gate is a refusal, never an allow. */
+function intuticGuarded(toolName, args, sessionID) {
+  try {
+    intuticEvaluate(toolName, args, sessionID);
+  } catch (err) {
+    const msg = String((err && err.message) || err);
+    if (msg.indexOf('[Intutic Governance]') === 0) throw err;
+    const reason = '[Intutic Governance] BLOCKED: gate fault (failing closed): ' + msg;
+    try { logEvent('tool_blocked', String(toolName || 'unknown'), reason); } catch (e) {}
+    throw new Error(reason);
+  }
+}
+
+// One load-time line, so a missing or stale snapshot is visible in OpenCode's
+// stderr rather than silently enforcing only the floor.
+function intuticAnnounce() {
+  try {
+    const snap = intuticLoadSnapshot(_intuticWsId);
+    const line = '[Intutic Governance] OpenCode plugin loaded (snapshot: ' + snap.state + ', rules: ' + snap.rules.length + ')';
+    try { process.stderr.write(line + '\\n'); } catch (e) {}
+    try { logEvent('plugin_loaded', 'opencode', 'snapshot ' + snap.state); } catch (e) {}
+  } catch (e) { /* never fail the load */ }
+}
+
+// ── 1.x: Plugin = (input) => Promise<Hooks> ───────────────────────────────
+async function intuticServer(_input) {
+  if (!globalThis.__intuticOpencode) { globalThis.__intuticOpencode = true; intuticAnnounce(); }
+  return {
+    'tool.execute.before': async (input, output) => {
+      intuticGuarded(input && input.tool, output && output.args, input && input.sessionID);
+    },
+  };
+}
+
+// ── 2.x: plugin.setup(ctx) registering a tool execute.before hook ─────────
+async function intuticSetup(ctx) {
+  if (!globalThis.__intuticOpencode) { globalThis.__intuticOpencode = true; intuticAnnounce(); }
+  await ctx.tool.hook('execute.before', (event) => {
+    intuticGuarded(event && event.tool, event && event.input, event && event.sessionID);
+  });
+}
+
+const plugin = intuticServer;
+plugin.id = 'intutic-governance';
+plugin.server = intuticServer;
+plugin.setup = intuticSetup;
+export default plugin;
+`
+}
+
+/**
+ * Write the OpenCode plugin under `<workspaceRoot>/.opencode/plugins/`, in
+ * both layouts (see the module doc): `intutic-governance.js` for 1.x and
+ * `intutic-governance/index.js` for 2.x — identical bytes.
+ *
+ * Safe to call repeatedly — atomic rename (`.intutic-tmp` → final path) and
+ * fixed file names, so repeated syncs replace rather than stack. Nothing
+ * else is touched: OpenCode discovers the files by scanning the directory.
+ *
+ * @param workspaceRoot - Absolute workspace root path.
+ * @param proxyUrl      - Intutic proxy URL written into the plugin header.
+ * @param workspaceId   - Workspace ID embedded in every hook event payload.
+ */
+export async function writeOpenCodeHooks(
+  workspaceRoot: string,
+  proxyUrl: string,
+  workspaceId = '',
+): Promise<void> {
+  await fs.mkdir(path.join(workspaceRoot, '.intutic', 'events'), { recursive: true })
+  const pluginDir = path.join(workspaceRoot, OPENCODE_PLUGIN_DIR)
+  await fs.mkdir(pluginDir, { recursive: true })
+
+  const script = buildPluginScript(proxyUrl, workspaceRoot, workspaceId)
+  for (const rel of [OPENCODE_PLUGIN_FILE, OPENCODE_PLUGIN_V2_FILE]) {
+    const pluginPath = path.join(pluginDir, rel)
+    await fs.mkdir(path.dirname(pluginPath), { recursive: true })
+    const tmp = pluginPath + '.intutic-tmp'
+    await fs.writeFile(tmp, script, 'utf-8')
+    await fs.rename(tmp, pluginPath)
+    log.info({ action: 'opencode_plugin_written', path: pluginPath }, 'OpenCode governance plugin written')
+  }
+}

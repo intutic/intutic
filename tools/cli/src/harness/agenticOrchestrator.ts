@@ -34,12 +34,11 @@
  * env vars, Codex's `~/.codex/config.toml`, OpenCode's own config), exactly
  * as it already is when those backends run standalone.
  *
- * KNOWN GAP (see module doc on `HarnessType.AGENTIC_ORCHESTRATOR` and
- * TD-397): OpenCode is one of the three wrapped backends but has no adapter
- * or gate anywhere in this registry — a feature run against the
- * `opencode:` provider has no Intutic governance today, unlike a Claude
- * Code- or Codex-backed feature. This adapter cannot fix that; it can only
- * detect that Agentic Orchestrator itself is present.
+ * All three wrapped backends have adapters of their own (`claudeCode.ts`,
+ * `codex.ts`, `opencode.ts` — the last since TD-397 closed on 2026-09-23),
+ * so a feature run against any `--providers` value is governed by that
+ * backend's gate inside the worktree. This adapter only detects that
+ * Agentic Orchestrator itself is present.
  *
  * See `services/sync-daemon/__tests__/harness/gateRegistry.ts`'s NO_GATE
  * row for `agentic-orchestrator` for the full governance rationale, and
@@ -110,9 +109,9 @@ export const agenticOrchestratorAdapter: IHarnessAdapter = {
 
   // Agentic Orchestrator introduces no config format of its own — see
   // module doc. Nothing to write; each wrapped backend's own adapter
-  // (claudeCode.ts / codex.ts — OpenCode has none, see TD-397) is what
-  // writes real governance content, once per worktree Agentic Orchestrator
-  // creates (the sync daemon's worktree propagation, not this adapter).
+  // (claudeCode.ts / codex.ts / opencode.ts) is what writes real governance
+  // content, once per worktree Agentic Orchestrator creates (the sync
+  // daemon's worktree propagation, not this adapter).
   async writeConfig(_workspaceRoot: string, _sops: SyncSopEntry[], _proxyUrl: string): Promise<string | null> {
     return null
   },

@@ -106,6 +106,13 @@ const PROCESS_SIGNATURES: Array<{
     patterns: [/(^|[/\\\s])grok(\s|$)/],
   },
   {
+    name: 'OpenCode',
+    // See services/sync-daemon/src/lib/processPoller.ts's copy of this table
+    // — anchored on the invoked command name like `grok`, since `opencode`
+    // can appear in arguments and paths. `opencode2` is the 2.x binary name.
+    patterns: [/(^|[/\\\s])opencode2?(\s|$)/],
+  },
+  {
     name: 'dsh',
     // See services/sync-daemon/src/lib/processPoller.ts's copy of this table
     // for the full false-positive reasoning — `dsh` is even shorter and more
