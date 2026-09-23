@@ -178,6 +178,12 @@ export const HarnessType = {
   MUSE_CODE: 'muse-code',
   /** xAI Grok Build (binary `grok`, GA 2026-05, open-sourced 2026-07-15). */
   GROK: 'grok',
+  /** OpenCode (the open-source terminal coding agent: npm `opencode-ai` 1.x,
+   *  `@opencode/cli` 2.x). Gated by a generated plugin OpenCode loads into
+   *  its own process — `.opencode/plugins/intutic-governance.js`, hook
+   *  `tool.execute.before` (1.x) / `tool execute.before` (2.x), which throws
+   *  to refuse — see `services/sync-daemon/src/harness/openCodeHooks.ts`. */
+  OPENCODE: 'opencode',
   /** DeepSeek's "dsh" (binary `dsh`, `@deepseek-ai/dsh`). Developer preview
    *  since 2026-08-13; gated via a Cordis plugin (`@intutic/gate/dsh`), not a
    *  generated hook file — see gateRegistry.ts's `dsh` row. */
@@ -206,12 +212,11 @@ export const HarnessType = {
    * `gateRegistry.ts`'s NO_GATE row for why it writes no config of its own
    * (`GateKind: 'delegated'`, same as Xirp).
    *
-   * UNLIKE Xirp, one of its three wrapped backends is NOT itself a supported
-   * Intutic harness: OpenCode has no adapter/gate anywhere in this registry.
-   * A feature run against the `opencode:` provider therefore has ZERO
-   * Intutic governance today, even though Claude Code- and Codex-backed
-   * features are fully covered by their own existing gates. This is a real
-   * gap, not merely unconfirmed — see TD-397.
+   * All three wrapped backends are themselves supported harnesses: Claude
+   * Code and Codex through their hook files, and OpenCode (since TD-397
+   * closed, 2026-09-23) through the plugin `openCodeHooks.ts` generates —
+   * the worktree propagation re-runs every backend's writer per worktree,
+   * so a feature run against any `--providers` value is governed.
    */
   AGENTIC_ORCHESTRATOR: 'agentic-orchestrator',
   // ─── Wave 1: Python-SDK-gated frameworks (no on-disk hook/config file) ───
@@ -448,16 +453,17 @@ export const HARNESS_COUNT = Object.keys(HarnessType).length
 /**
  * `HARNESS_COUNT` minus the harnesses with a confirmed, currently-open
  * support gap — the number safe to use in headline/marketing copy
- * ("works with N coding agents") without overclaiming. Each exclusion is a
- * harness with its own `docs/TECH_DEBT.md` entry describing a REAL,
+ * ("works with N coding agents") without overclaiming. Each exclusion must
+ * be a harness with its own `docs/TECH_DEBT.md` entry describing a REAL,
  * currently-unactionable gap (not a caveat, not a "documented, not a
- * defect" note):
+ * defect" note). The list is EMPTY since 2026-09-23 and the mechanism is
+ * kept so the next real gap goes here and nowhere else:
  *
- * - `agentic-orchestrator` (TD-397): its OpenCode backend has no Intutic
- *   gate to delegate to at all — not actionable by this integration alone,
- *   closes only when OpenCode itself gets an adapter.
- * - `autogen` (TD-374): `InterventionHandler.on_send` is blind to
- *   `AssistantAgent`'s own tool calls — they never reach `Gate.guard()`.
+ * - `agentic-orchestrator` was excluded under TD-397 while its OpenCode
+ *   backend had no gate; OpenCode is a harness of its own now.
+ * - `autogen` was excluded under TD-374 while `InterventionHandler.on_send`
+ *   was blind to `AssistantAgent`'s own tool calls; `IntuticWorkbench`
+ *   (2026-09-22) governs them.
  *
  * Deliberately does NOT exclude `mastra` — TD-380 is explicitly marked
  * "🟢 Documented, not a defect" in TECH_DEBT.md, a caveat about a call-site
@@ -468,8 +474,7 @@ export const HARNESS_COUNT = Object.keys(HarnessType).length
  * primary (interactive) path is fully covered, not a reason to undercount
  * the harness itself.
  */
-export const HARNESS_HEADLINE_COUNT =
-  HARNESS_COUNT - [HarnessType.AGENTIC_ORCHESTRATOR, HarnessType.AUTOGEN].length
+export const HARNESS_HEADLINE_COUNT = HARNESS_COUNT - [].length
 
 // ─── Execution Mode ──────────────────────────────────────────────────
 // HLD §3.4 — Agent execution modes

@@ -22,12 +22,12 @@ Most teams map one workspace to one code repository. This keeps governance rules
 
 ## Harnesses
 
-A **harness** is any AI coding agent that Intutic governs. Intutic ships **41 harness adapters**; two of them (AutoGen and the Agentic Orchestrator) carry a confirmed open support gap and are left out of the headline count of **39 supported harnesses** — 40 adapters auto-detected and config-synced by `intutic init`/`intutic connect` (some write directly into a generated hook file, others write `.env.intutic` pointing at a dedicated SDK-side gate (`@intutic/gate` / `intutic-clawde`) that lives in your own code), plus 1 that is operator-deployed rather than repo-detected (see the bridge-gated row below):
+A **harness** is any AI coding agent that Intutic governs. Intutic ships **42 harness adapters**, and the headline count is the same **42 supported harnesses** — no adapter carries an open support gap today (AutoGen's closed with its workbench gate and the Agentic Orchestrator's with OpenCode's own adapter, both in September 2026) — 41 adapters auto-detected and config-synced by `intutic init`/`intutic connect` (some write directly into a generated hook file, others write `.env.intutic` pointing at a dedicated SDK-side gate (`@intutic/gate` / `intutic-clawde`) that lives in your own code), plus 1 that is operator-deployed rather than repo-detected (see the bridge-gated row below):
 
 | Category | Harnesses |
 |----------|-----------|
 | IDE agents | Cursor, Windsurf, Continue, Cline, Roo Code, GitHub Copilot |
-| CLI agents | Claude Code, Aider, Codex, Goose, Pi, Grok Build, Muse Code, dsh (preview) |
+| CLI agents | Claude Code, Aider, Codex, Goose, Pi, Grok Build, Muse Code, OpenCode, dsh (preview) |
 | Platform agents | Antigravity, OpenHands, n8n, Claude Desktop, Open WebUI |
 | Specialized | OpenClaw, Hermes, LangGraph |
 | Orchestrators (delegate to already-gated harnesses) | Spotify Xirp, DoorDash Agentic Orchestrator, AWS Bedrock AgentCore Runtime |

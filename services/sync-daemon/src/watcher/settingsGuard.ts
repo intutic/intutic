@@ -29,6 +29,7 @@ import { writeOpenHandsHooks } from '../harness/openhandsHooks.js'
 import { writeGooseHooks } from '../harness/gooseHooks.js'
 import { writeWindsurfHooks } from '../harness/windsurfHooks.js'
 import { writeMuseHooks } from '../harness/museHooks.js'
+import { writeOpenCodeHooks, OPENCODE_PLUGIN_DIR, OPENCODE_PLUGIN_FILE, OPENCODE_PLUGIN_V2_FILE } from '../harness/openCodeHooks.js'
 import { writeGrokHooks } from '../harness/grokHooks.js'
 import { writeDshHooks, resolveDshHome, detectDshCoverageGap } from '../harness/dshHooks.js'
 import { isImmutable } from '../harness/gooseHardener.js'
@@ -80,6 +81,9 @@ export function buildProtectedPaths(workspaceRoot: string): string[] {
     path.join(home, '.config', 'muse', 'settings.json'),
     path.join(home, '.config', 'muse', 'intutic-managed-hooks.json'),
     path.join(workspaceRoot, '.muse', 'hooks.json'),
+    // ── OpenCode ─────────────────────────────────────────────────────
+    path.join(workspaceRoot, OPENCODE_PLUGIN_DIR, OPENCODE_PLUGIN_FILE),
+    path.join(workspaceRoot, OPENCODE_PLUGIN_DIR, OPENCODE_PLUGIN_V2_FILE),
     // ── Grok Build ───────────────────────────────────────────────────
     path.join(home, '.grok', 'hooks', 'intutic-governance.json'),
     path.join(workspaceRoot, '.grok', 'hooks', 'intutic-governance.json'),
@@ -289,6 +293,16 @@ export async function guardSettingsFile(
     return guardDshFile(changedPath, 'llm-pi-ai', workspaceRoot, proxyUrl)
   }
 
+  // ── OpenCode plugin: marker-substring guard, same shape as dsh ────
+  // The gate body stamps itself; a file without the stamp is not ours.
+  if (
+    changedPath === path.join(workspaceRoot, OPENCODE_PLUGIN_DIR, OPENCODE_PLUGIN_FILE) ||
+    changedPath === path.join(workspaceRoot, OPENCODE_PLUGIN_DIR, OPENCODE_PLUGIN_V2_FILE)
+  ) {
+    return guardMarkedFile(changedPath, 'Intutic gate body', 'opencode', () =>
+      writeOpenCodeHooks(workspaceRoot, proxyUrl, ''))
+  }
+
   // ── All other paths: file deleted or corrupted → log drift incident
   const exists = await fileExists(changedPath)
   if (!exists) {
@@ -394,6 +408,28 @@ async function guardJsonHookFile(
  * file for it to be considered intact — the plugin row id for a profile's
  * cordis.patch.yml, the llm-pi-ai section name for settings.yaml.
  */
+/**
+ * Generic form of {@link guardDshFile}: a file whose only integrity check is
+ * "still carries the marker our writer stamps". Deleted or tampered → the
+ * writer re-runs.
+ */
+async function guardMarkedFile(filePath: string, marker: string, harness: string, restore: () => Promise<void>): Promise<boolean> {
+  let raw: string
+  try {
+    raw = await fs.readFile(filePath, 'utf-8')
+  } catch {
+    log.warn({ action: `${harness}_file_deleted`, path: filePath }, `${harness} governance file deleted — restoring`)
+    await safeRestore(harness, restore)
+    return true
+  }
+  if (!raw.includes(marker)) {
+    log.warn({ action: `${harness}_marker_missing`, path: filePath }, `${harness} governance file tampered — restoring`)
+    await safeRestore(harness, restore)
+    return true
+  }
+  return false
+}
+
 async function guardDshFile(filePath: string, marker: string, workspaceRoot: string, proxyUrl: string): Promise<boolean> {
   let raw: string
   try {
