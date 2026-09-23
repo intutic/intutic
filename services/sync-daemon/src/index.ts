@@ -13,7 +13,7 @@
  * @module
  */
 
-export { startSyncLoop, syncOfflineTraces } from './syncLoop.js'
+export { startSyncLoop, syncOfflineTraces, refreshGateCaches } from './syncLoop.js'
 
 export { collectAgentReport, reportAgent } from './agentReporter.js'
 export { startHarnessSession, endAllOpenSessions, readGitInfo } from './sessionReporter.js'

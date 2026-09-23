@@ -85,6 +85,7 @@ async fn org_sop_applies_as_a_ceiling_through_the_full_fetch_parse_resolve_pipel
         Some(&control_plane_url),
         Some("ws_ceiling"),
         Some("vk_ceiling_deadbeef"),
+        None,
     )
     .await;
     assert_eq!(sops.len(), 2, "both the workspace row and the org row must be fetched");
@@ -121,6 +122,7 @@ async fn a_workspace_with_no_org_sop_at_all_is_unaffected_by_the_ceiling_logic()
         Some(&control_plane_url),
         Some("ws_no_ceiling"),
         Some("vk_no_ceiling_deadbeef"),
+        None,
     )
     .await;
     assert_eq!(sops.len(), 1);

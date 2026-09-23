@@ -43,6 +43,8 @@ export type NotificationEventType =
   | 'sop.cascade.invalidated'
   | 'sop.integrity.drift'
   | 'sop.lifecycle.transitioned'
+  /** A source-connector sync found an enforced SOP's upstream document changed and created a DRAFT successor awaiting review (TD-474 item 7). */
+  | 'sop.upstream.changed'
   // ── Policy guardrails (LLD #71) ──
   /** A SHADOW guardrail crossed the promotion thresholds; a named member decides. */
   | 'guardrail.ready'

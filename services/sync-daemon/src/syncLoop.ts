@@ -233,6 +233,33 @@ async function controlPlaneIsReachable(controlPlaneUrl: string): Promise<boolean
  *
  * @param options - Sync loop configuration.
  */
+/** The credentials every gate-side refresh takes. */
+export interface GateCacheRefreshOptions {
+  controlPlaneUrl: string
+  apiKey: string
+  workspaceId: string
+}
+
+/**
+ * Refresh the three gate-side caches every hook reads: the policy snapshot
+ * (`~/.intutic/hooks/policy-snapshot.rules`), the approved review-hold
+ * bypasses and the central egress policy. Called on EVERY sync cycle by both
+ * loops — this one and `intutic connect`'s — never only when the config
+ * version moved: policy changes without the version changing, and before
+ * this helper existed `connect` refreshed once at startup and never again, so
+ * a guardrail promoted mid-session reached a connected machine only on
+ * restart (TD-488). None of the three throw; the return says which of them
+ * landed.
+ */
+export async function refreshGateCaches(
+  opts: GateCacheRefreshOptions,
+): Promise<{ snapshot: boolean; bypasses: boolean; egress: boolean }> {
+  const snapshot = (await refreshPolicySnapshot(opts)) !== null
+  const bypasses = (await refreshApprovedBypasses(opts)) !== null
+  const egress = (await refreshEgressPolicy(opts)) !== null
+  return { snapshot, bypasses, egress }
+}
+
 export async function startSyncLoop(options: SyncLoopOptions): Promise<void> {
   const {
     controlPlaneUrl,
@@ -297,24 +324,18 @@ export async function startSyncLoop(options: SyncLoopOptions): Promise<void> {
     console.warn('[sync-daemon] Could not write runtime env file (non-fatal):', err)
   }
 
-  // Step 0b: Refresh the policy snapshot every gate reads.
+  // Step 0b–0d: Refresh the three gate-side caches every hook reads —
+  // policy snapshot, approved review_before bypasses, central egress policy.
   //
   // Deliberately here beside writeRuntimeEnv, and deliberately NOT inside
   // writeConfigFiles: that path is gated on the config version, so a snapshot
   // written there would go stale by construction on every cycle where the
-  // version did not move. Policy changes without the config version changing.
-  await refreshPolicySnapshot({ controlPlaneUrl, apiKey, workspaceId })
+  // version did not move. Policy changes without the config version changing,
+  // and a bypass an operator just approved has to reach the gate before the
+  // developer's very next retry. One helper, shared with `intutic connect`'s
+  // own loop, so the two cannot drift apart again (TD-488).
+  await refreshGateCaches({ controlPlaneUrl, apiKey, workspaceId })
 
-  // Step 0c: Refresh the approved review_before bypass cache, on the same
-  // cadence as the policy snapshot and for the same reason — a bypass an
-  // operator just approved has to reach the gate before the developer's very
-  // next retry, not on the next config-version bump.
-  await refreshApprovedBypasses({ controlPlaneUrl, apiKey, workspaceId })
-
-  // Step 0d: Refresh the central egress policy, same cadence — an admin who
-  // flips the workspace to `enforce` wants it on the developer's running proxy
-  // this cycle, not on the next restart. The proxy hot-reloads the file.
-  await refreshEgressPolicy({ controlPlaneUrl, apiKey, workspaceId })
 
   // Try to sync offline traces back to PostgreSQL
   try {
@@ -441,13 +462,9 @@ export async function startSyncLoop(options: SyncLoopOptions): Promise<void> {
           mcpProxyMode: result.settings?.mcpProxyMode,
           bypassEnforcementTier: result.settings?.bypassEnforcementTier,
         })
-        // Same reasoning as Step 0b: policy rides the sync cycle, not the
+        // Same reasoning as Step 0b–0d: policy rides the sync cycle, not the
         // config version.
-        await refreshPolicySnapshot({ controlPlaneUrl, apiKey, workspaceId })
-        // Same reasoning as Step 0c.
-        await refreshApprovedBypasses({ controlPlaneUrl, apiKey, workspaceId })
-        // Same reasoning as Step 0d.
-        await refreshEgressPolicy({ controlPlaneUrl, apiKey, workspaceId })
+        await refreshGateCaches({ controlPlaneUrl, apiKey, workspaceId })
 
         // Governed decisions log — opt-in only (WorkspaceSettings.decisionsLogEnabled,
         // default off: a growing context file is token spend the product must not

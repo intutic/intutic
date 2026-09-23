@@ -43,3 +43,23 @@ describe('resolveProxyAssetName', () => {
     expect(resolveProxyAssetName()).toBe(resolveProxyAssetName(process.platform, process.arch))
   })
 })
+
+// TD-488: the connect loop used to refresh the policy snapshot once, at
+// startup, and never again. The refresh now rides every applySyncConfig
+// (each poll and each pushed config_update). A source pin, because
+// `connect()` runs a full daemon (WebSocket, watcher, drain timers) that no
+// unit test should start; the helper itself is tested in the sync daemon.
+describe('connect refreshes the gate caches on every sync (TD-488)', () => {
+  it('applySyncConfig calls the shared refresh helper before anything version-gated', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { fileURLToPath } = await import('node:url')
+    const src = readFileSync(fileURLToPath(new URL('./connect.ts', import.meta.url)), 'utf8')
+    expect(src).toMatch(/refreshGateCaches,\s*\n/)
+    const body = src.slice(src.indexOf('async function applySyncConfig('))
+    const firstAwait = body.indexOf('await refreshGateCachesForConnect()')
+    const versionGate = body.indexOf('if (syncConfig.configVersion > localConfigVersion || force)')
+    expect(firstAwait).toBeGreaterThan(0)
+    expect(versionGate).toBeGreaterThan(0)
+    expect(firstAwait, 'the refresh must not sit inside the version-gated block').toBeLessThan(versionGate)
+  })
+})

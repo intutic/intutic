@@ -70,7 +70,8 @@ const MAX_INJECTED_BYTES: usize = 8 * 1024;
 /// restriction-monotonic under plain union, so an `Org`-scoped SOP needs
 /// no special handling there at all — it is just another entry in the
 /// slice `governance_fields_from` already unions over.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum SopScope {
     #[default]
     Workspace,
@@ -1140,6 +1141,9 @@ struct WorkspaceSopsResponse {
 struct WorkspaceCached {
     sops: Vec<Sop>,
     read_at: Instant,
+    /// The workspace's policy version at fetch time (TD-474 item 5); `None`
+    /// when no version was readable, in which case only the TTL applies.
+    version: Option<u64>,
 }
 
 fn workspace_cache() -> &'static Mutex<HashMap<String, WorkspaceCached>> {
@@ -1173,11 +1177,17 @@ async fn fetch_workspace_sops(
     control_plane_url: &str,
     workspace_id: &str,
     token: &str,
+    policy_version: Option<u64>,
 ) -> Vec<Sop> {
     {
         let cache = workspace_cache().lock().unwrap_or_else(|p| p.into_inner());
         if let Some(c) = cache.get(workspace_id) {
-            if c.read_at.elapsed() < CACHE_TTL {
+            // Within the TTL AND the workspace's policy version has not moved
+            // since the fetch (or no version is readable on either side): serve
+            // the cache. A bumped version — a guardrail promoted or retired —
+            // refetches now rather than up to CACHE_TTL later (TD-474 item 5).
+            let version_moved = matches!((policy_version, c.version), (Some(now), Some(then)) if now != then);
+            if c.read_at.elapsed() < CACHE_TTL && !version_moved {
                 return c.sops.clone();
             }
         }
@@ -1221,7 +1231,7 @@ async fn fetch_workspace_sops(
             let mut cache = workspace_cache().lock().unwrap_or_else(|p| p.into_inner());
             cache.insert(
                 workspace_id.to_string(),
-                WorkspaceCached { sops: sops.clone(), read_at: Instant::now() },
+                WorkspaceCached { sops: sops.clone(), read_at: Instant::now(), version: policy_version },
             );
             sops
         }
@@ -1248,13 +1258,20 @@ pub async fn all_sops_for_workspace(
     control_plane_url: Option<&str>,
     workspace_id: Option<&str>,
     token: Option<&str>,
+    control_plane: Option<&dyn crate::store::ControlPlaneCache>,
 ) -> Vec<Sop> {
     if !crate::gateway::requires_vk_only() {
         return all_sops();
     }
     match (control_plane_url, workspace_id, token) {
         (Some(cp), Some(ws), Some(tok)) if ws != "unknown" && !ws.is_empty() => {
-            fetch_workspace_sops(http_client, cp, ws, tok).await
+            // Read BEFORE the fetch: a bump that lands during the request is
+            // seen as "moved" on the next request, never missed.
+            let version = match control_plane {
+                Some(store) => store.policy_version(ws).await,
+                None => None,
+            };
+            fetch_workspace_sops(http_client, cp, ws, tok, version).await
         }
         _ => Vec::new(),
     }
@@ -1386,6 +1403,9 @@ pub(crate) fn sop_status_snapshot() -> Option<SopStatusSnapshot> {
 pub struct GovernanceFields {
     pub risk_tier: Option<RiskLevel>,
     pub denied_tools: Vec<String>,
+    /// `(tool, SOP title)` for every `deny_tools` entry, so a refusal can name
+    /// the SOP that declared it — the union above cannot (TD-474 item 6).
+    pub denied_tool_sources: Vec<(String, String)>,
     pub plan_steps: Vec<String>,
     pub scope_paths: Vec<String>,
     pub review_before: Vec<String>,
@@ -1417,6 +1437,11 @@ pub fn split_by_mode(sops: &[Sop]) -> (Vec<Sop>, Vec<Sop>) {
 #[derive(Debug, Clone, Serialize)]
 pub struct SopShadowReport {
     pub title: String,
+    /// Where the SOP lives, so the control plane credits an org-scope title
+    /// against `org_sop_registry` rather than filing it as unknown (TD-474
+    /// item 8). Serialised as `"workspace"` / `"org"`; a control plane that
+    /// predates the field ignores it.
+    pub scope: SopScope,
     /// False when this SOP's declared fields matched nothing on this request.
     /// Both are reported, not just the acts — the acts alone have no
     /// denominator, exactly as `wasm::registry::ShadowReport::would_act`
@@ -1447,6 +1472,7 @@ pub fn governance_fields_from(sops: &[Sop], role: &str) -> GovernanceFields {
     GovernanceFields {
         risk_tier: sops.iter().filter(|s| s.applies_to(role)).filter_map(|s| s.risk_tier).max(),
         denied_tools: collect_denies(sops, role),
+        denied_tool_sources: collect_deny_sources(sops, role),
         plan_steps: collect_plan_steps(sops, role),
         scope_paths: collect_scope_paths(sops, role),
         review_before: collect_review_before(sops, role),
@@ -1483,7 +1509,51 @@ pub fn denied_tools_for_role(role: &str) -> Vec<String> {
     collect_denies(&all_sops(), role)
 }
 
-/// Harnesses permitted for this role. Empty means unrestricted.
+/// What an org ceiling leaves when a workspace list is disjoint from it.
+///
+/// The three allowlist keys read an EMPTY list as "unrestricted", which is the
+/// right default for a workspace that never declared one — but it made a
+/// ceiling that narrowed a list to nothing come out as *no ceiling at all*:
+/// the intersection was `[]`, and `[]` means everything. An org that pins
+/// `allow_harnesses: claude-code` over a workspace that declared `cursor`
+/// therefore permitted every harness. This sentinel is what such a narrowing
+/// yields instead: a value no harness name, path or plan step can equal, so
+/// the detectors read it as "restricted to nothing" — a harness is refused,
+/// every path is out of scope, every step is off-plan — and the reason they
+/// render carries it, so the operator sees why (TD-474, 2026-09-23).
+pub const NARROWED_TO_NOTHING: &str = "<none: workspace list disjoint from org ceiling>";
+
+/// Apply an org ceiling to a workspace list, never widening.
+///
+/// - no org list → the workspace list as declared (empty stays unrestricted);
+/// - org list, no workspace list → the org list IS the effective list (the
+///   ceiling applies to a workspace that declared nothing, rather than being
+///   skipped because there was nothing to narrow);
+/// - both, intersecting → the survivors;
+/// - both, disjoint → [`NARROWED_TO_NOTHING`], with a warning naming both.
+fn apply_org_ceiling(field: &str, workspace: Vec<String>, org: Vec<String>, survives: impl Fn(&String) -> bool) -> Vec<String> {
+    if org.is_empty() {
+        return workspace;
+    }
+    if workspace.is_empty() {
+        return org;
+    }
+    let before = workspace.len();
+    let out: Vec<String> = workspace.into_iter().filter(survives).collect();
+    if out.is_empty() {
+        tracing::warn!(
+            field,
+            workspace_entries = before,
+            org_ceiling = ?org,
+            "org ceiling narrowed the workspace {field} list to nothing — nothing is permitted, not everything"
+        );
+        return vec![NARROWED_TO_NOTHING.to_string()];
+    }
+    out
+}
+
+/// Harnesses permitted for this role. Empty means unrestricted; see
+/// [`NARROWED_TO_NOTHING`] for what an org ceiling that leaves nothing yields.
 pub fn allowed_harnesses_for_role(role: &str) -> Vec<String> {
     collect_harnesses(&all_sops(), role)
 }
@@ -1493,7 +1563,8 @@ pub fn allowed_harnesses_for_role(role: &str) -> Vec<String> {
 /// Empty means no SOP covering this role declared one, which is the default and must
 /// stay indistinguishable from "unconstrained". Plan adherence is opt-in: a workspace
 /// that never writes a plan is never measured against one.
-/// The path scope in force for `role`. Empty means unrestricted.
+/// The path scope in force for `role`. Empty means unrestricted (never the
+/// result of a ceiling — see [`NARROWED_TO_NOTHING`]).
 ///
 /// Sorted and deduped, unlike `collect_plan_steps` — this is a set of
 /// boundaries, and two SOPs naming the same directory should not make it count
@@ -1518,14 +1589,10 @@ fn collect_scope_paths(sops: &[Sop], role: &str) -> Vec<String> {
         .flat_map(|s| s.scope_paths.iter().cloned())
         .collect();
 
-    let mut out: Vec<String> = if org.is_empty() {
-        workspace
-    } else {
-        workspace
-            .into_iter()
-            .filter(|w| crate::plugins::anomaly::detectors::is_within_scope(w, &org))
-            .collect()
-    };
+    let org_ceiling = org.clone();
+    let mut out = apply_org_ceiling("scope_paths", workspace, org, |w| {
+        crate::plugins::anomaly::detectors::is_within_scope(w, &org_ceiling)
+    });
     out.sort();
     out.dedup();
     out
@@ -1651,19 +1718,13 @@ fn collect_plan_steps(sops: &[Sop], role: &str) -> Vec<String> {
         .flat_map(|s| s.plan_steps.iter().cloned())
         .collect();
 
-    if org.is_empty() {
-        return workspace;
-    }
     // Case-insensitive membership (plan_steps keeps the author's original
     // case, unlike allow_harnesses which is lowercased at parse time), but
     // the surviving entries keep the workspace's own casing and order --
     // the org set only decides membership, never supplies the text.
     let org_set: std::collections::HashSet<String> =
         org.iter().map(|s| s.to_ascii_lowercase()).collect();
-    workspace
-        .into_iter()
-        .filter(|w| org_set.contains(&w.to_ascii_lowercase()))
-        .collect()
+    apply_org_ceiling("plan_steps", workspace, org, |w| org_set.contains(&w.to_ascii_lowercase()))
 }
 
 fn collect_harnesses(sops: &[Sop], role: &str) -> Vec<String> {
@@ -1680,12 +1741,21 @@ fn collect_harnesses(sops: &[Sop], role: &str) -> Vec<String> {
 
     // allow_harnesses is lowercased at parse time (`list("allow_harnesses:", true)`),
     // so plain equality is already case-insensitive -- no normalisation needed here.
-    let mut out: Vec<String> = if org.is_empty() {
-        workspace
-    } else {
-        let org_set: std::collections::HashSet<&str> = org.iter().map(|s| s.as_str()).collect();
-        workspace.into_iter().filter(|w| org_set.contains(w.as_str())).collect()
-    };
+    let org_set: std::collections::HashSet<String> = org.iter().cloned().collect();
+    let mut out = apply_org_ceiling("allow_harnesses", workspace, org, |w| org_set.contains(w));
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Every `(tool, title)` pair behind [`collect_denies`]'s union, one per SOP
+/// that declares the tool. Sorted and deduped like the union.
+fn collect_deny_sources(sops: &[Sop], role: &str) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = sops
+        .iter()
+        .filter(|s| s.applies_to(role))
+        .flat_map(|s| s.deny_tools.iter().map(move |t| (t.clone(), s.title.clone())))
+        .collect();
     out.sort();
     out.dedup();
     out
@@ -2168,10 +2238,10 @@ mod tests {
         let client = reqwest::Client::new();
         // No control-plane URL, no workspace, no token — every combination of
         // "cannot resolve" must return empty, never the process-global set.
-        assert!(all_sops_for_workspace(&client, None, None, None).await.is_empty());
-        assert!(all_sops_for_workspace(&client, Some("http://127.0.0.1:1"), None, Some("vk_x")).await.is_empty());
-        assert!(all_sops_for_workspace(&client, Some("http://127.0.0.1:1"), Some("unknown"), Some("vk_x")).await.is_empty());
-        assert!(all_sops_for_workspace(&client, Some("http://127.0.0.1:1"), Some("ws_1"), None).await.is_empty());
+        assert!(all_sops_for_workspace(&client, None, None, None, None).await.is_empty());
+        assert!(all_sops_for_workspace(&client, Some("http://127.0.0.1:1"), None, Some("vk_x"), None).await.is_empty());
+        assert!(all_sops_for_workspace(&client, Some("http://127.0.0.1:1"), Some("unknown"), Some("vk_x"), None).await.is_empty());
+        assert!(all_sops_for_workspace(&client, Some("http://127.0.0.1:1"), Some("ws_1"), None, None).await.is_empty());
     }
 
     #[test]
@@ -3512,7 +3582,7 @@ mod sop_status_snapshot_tests {
             let mut cache = workspace_cache().lock().unwrap_or_else(|p| p.into_inner());
             cache.insert(
                 WS_A.to_string(),
-                WorkspaceCached { sops: vec![mk("A", "rule A"), mk("B", "rule B")], read_at: Instant::now() },
+                WorkspaceCached { sops: vec![mk("A", "rule A"), mk("B", "rule B")], read_at: Instant::now(), version: None },
             );
         }
         let after_fresh = sop_status_snapshot().expect("at least one fresh entry exists now");
@@ -3530,6 +3600,7 @@ mod sop_status_snapshot_tests {
                 WorkspaceCached {
                     sops: vec![mk("C", "rule C")],
                     read_at: Instant::now() - CACHE_TTL - Duration::from_secs(1),
+                version: None,
                 },
             );
         }
@@ -3593,11 +3664,22 @@ mod org_ceiling_tests {
     }
 
     #[test]
-    fn an_org_ceiling_never_widens_a_workspace_that_declared_nothing() {
+    fn an_org_ceiling_applies_to_a_workspace_that_declared_nothing() {
+        // An undeclared workspace list is unrestricted; the org ceiling is
+        // what restricts it. Reading "nothing to narrow" as "no ceiling"
+        // silently widened this case to every harness (TD-474).
         let org = Sop { allow_harnesses: vec!["claude-code".into()], ..sop(SopScope::Org, &[]) };
-        assert!(
-            collect_harnesses(&[org], "anyone").is_empty(),
-            "the workspace never declared allow_harnesses at all -- there is nothing for the org set to narrow"
+        assert_eq!(collect_harnesses(&[org], "anyone"), vec!["claude-code"]);
+    }
+
+    #[test]
+    fn a_disjoint_harness_narrowing_denies_rather_than_widening() {
+        let ws = Sop { allow_harnesses: vec!["cursor".into()], ..sop(SopScope::Workspace, &[]) };
+        let org = Sop { allow_harnesses: vec!["claude-code".into()], ..sop(SopScope::Org, &[]) };
+        assert_eq!(
+            collect_harnesses(&[ws, org], "anyone"),
+            vec![NARROWED_TO_NOTHING.to_string()],
+            "an intersection of nothing must be a list of nothing-permitted, never the empty list that means unrestricted"
         );
     }
 
@@ -3631,16 +3713,18 @@ mod org_ceiling_tests {
     }
 
     #[test]
-    fn an_org_scope_ceiling_never_widens_a_workspace_that_declared_nothing() {
+    fn an_org_scope_ceiling_applies_to_a_workspace_that_declared_nothing() {
         let org = Sop { scope_paths: vec!["infra".into()], ..sop(SopScope::Org, &[]) };
-        assert!(collect_scope_paths(&[org], "anyone").is_empty());
+        assert_eq!(collect_scope_paths(&[org], "anyone"), vec!["infra"]);
     }
 
     #[test]
-    fn a_workspace_scope_outside_the_org_ceiling_does_not_survive() {
+    fn a_workspace_scope_outside_the_org_ceiling_leaves_nothing_in_scope() {
+        // Previously asserted `.is_empty()` — which the detector reads as
+        // unrestricted, i.e. the ceiling widened the scope to everything.
         let ws = Sop { scope_paths: vec!["docs".into()], ..sop(SopScope::Workspace, &[]) };
         let org = Sop { scope_paths: vec!["infra".into()], ..sop(SopScope::Org, &[]) };
-        assert!(collect_scope_paths(&[ws, org], "anyone").is_empty());
+        assert_eq!(collect_scope_paths(&[ws, org], "anyone"), vec![NARROWED_TO_NOTHING.to_string()]);
     }
 
     // ── plan_steps ───────────────────────────────────────────────────
@@ -3666,9 +3750,16 @@ mod org_ceiling_tests {
     }
 
     #[test]
-    fn an_org_plan_ceiling_never_widens_a_workspace_that_declared_nothing() {
+    fn an_org_plan_ceiling_applies_to_a_workspace_that_declared_nothing() {
         let org = Sop { plan_steps: vec!["Read".into()], ..sop(SopScope::Org, &[]) };
-        assert!(collect_plan_steps(&[org], "anyone").is_empty());
+        assert_eq!(collect_plan_steps(&[org], "anyone"), vec!["Read"]);
+    }
+
+    #[test]
+    fn a_disjoint_plan_narrowing_leaves_nothing_on_plan() {
+        let ws = Sop { plan_steps: vec!["Edit".into()], ..sop(SopScope::Workspace, &[]) };
+        let org = Sop { plan_steps: vec!["Read".into()], ..sop(SopScope::Org, &[]) };
+        assert_eq!(collect_plan_steps(&[ws, org], "anyone"), vec![NARROWED_TO_NOTHING.to_string()]);
     }
 
     // ── The other 7 fields are untouched by scope: plain union already
@@ -3690,5 +3781,52 @@ mod org_ceiling_tests {
         let org = Sop { risk_tier: Some(RiskLevel::Critical), ..sop(SopScope::Org, &[]) };
         let gov = governance_fields_from(&[ws, org], "anyone");
         assert_eq!(gov.risk_tier, Some(RiskLevel::Critical));
+    }
+}
+
+/// TD-474 item 5: a workspace's cached SOP set is served within `CACHE_TTL`
+/// only while the workspace's policy version has not moved. Deterministic
+/// without a server: an unreachable control plane makes a forced refetch
+/// return the fail-closed empty set, so "the cache was bypassed" is
+/// observable as "nothing came back".
+#[cfg(test)]
+mod workspace_cache_version_tests {
+    use super::*;
+
+    fn seeded(ws: &str, version: Option<u64>) {
+        let mut cache = workspace_cache().lock().unwrap_or_else(|p| p.into_inner());
+        cache.insert(
+            ws.to_string(),
+            WorkspaceCached {
+                sops: vec![Sop { title: "cached".into(), ..Default::default() }],
+                read_at: Instant::now(),
+                version,
+            },
+        );
+    }
+
+    #[tokio::test]
+    async fn a_moved_policy_version_bypasses_a_fresh_cache_entry() {
+        const WS: &str = "__test_version_moved_ws__";
+        let client = reqwest::Client::new();
+        seeded(WS, Some(1));
+        // Same version: served from the cache, no fetch attempted.
+        let same = fetch_workspace_sops(&client, "http://127.0.0.1:1", WS, "vk_x", Some(1)).await;
+        assert_eq!(same.len(), 1, "an unmoved version must serve the cached set");
+        // No version readable on this request: the TTL alone governs — still served.
+        let unknown = fetch_workspace_sops(&client, "http://127.0.0.1:1", WS, "vk_x", None).await;
+        assert_eq!(unknown.len(), 1, "an unreadable version must not force a refetch");
+        // Moved version: refetched now; the unreachable control plane fails closed to empty.
+        let moved = fetch_workspace_sops(&client, "http://127.0.0.1:1", WS, "vk_x", Some(2)).await;
+        assert!(moved.is_empty(), "a moved version must bypass the fresh cache entry");
+    }
+
+    #[tokio::test]
+    async fn a_cache_entry_fetched_without_a_version_keeps_ttl_behaviour() {
+        const WS: &str = "__test_version_absent_ws__";
+        let client = reqwest::Client::new();
+        seeded(WS, None);
+        let served = fetch_workspace_sops(&client, "http://127.0.0.1:1", WS, "vk_x", Some(7)).await;
+        assert_eq!(served.len(), 1, "with no version recorded at fetch time only the TTL applies");
     }
 }

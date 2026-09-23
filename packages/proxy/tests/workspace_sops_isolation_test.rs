@@ -68,6 +68,7 @@ async fn two_workspaces_on_one_gateway_process_get_isolated_sop_sets() {
         Some(&control_plane_url),
         Some("ws_alpha"),
         Some("vk_alpha_deadbeef"),
+        None,
     )
     .await;
     let beta = all_sops_for_workspace(
@@ -75,6 +76,7 @@ async fn two_workspaces_on_one_gateway_process_get_isolated_sop_sets() {
         Some(&control_plane_url),
         Some("ws_beta"),
         Some("vk_beta_deadbeef"),
+        None,
     )
     .await;
 
@@ -114,6 +116,7 @@ async fn two_workspaces_on_one_gateway_process_get_isolated_sop_sets() {
         Some(&control_plane_url),
         Some("ws_alpha"),
         Some("vk_alpha_deadbeef"),
+        None,
     )
     .await;
     assert_eq!(alpha_again.len(), 1);

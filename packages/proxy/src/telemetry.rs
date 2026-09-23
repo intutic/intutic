@@ -731,11 +731,13 @@ mod tests {
         let mut trace = base_trace();
         trace.sop_shadow_reports = vec![crate::sops::SopShadowReport {
             title: "Never delete prod".into(),
+            scope: crate::sops::SopScope::Org,
             would_act: true,
             findings: vec!["POLICY_VIOLATION".into()],
         }];
         let v = serde_json::to_value(&trace).unwrap();
         assert_eq!(v["sop_shadow_reports"][0]["title"], "Never delete prod");
+        assert_eq!(v["sop_shadow_reports"][0]["scope"], "org");
         assert_eq!(v["sop_shadow_reports"][0]["would_act"], true);
 
         trace.sop_shadow_reports = Vec::new();

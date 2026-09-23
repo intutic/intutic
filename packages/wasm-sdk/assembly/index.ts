@@ -107,6 +107,12 @@ export class RequestContext {
 
   /** Tool names the SOPs in force forbid for this node. Empty = unrestricted. */
   denied_tools: string[] = [];
+  /**
+   * The SOP title behind each `denied_tools` entry, one pair per (tool, SOP):
+   * a tool two SOPs deny appears twice. Absent (empty) on an older host, so a
+   * rule that wants to name the SOP in its reason must fall back to the tool.
+   */
+  denied_tool_sources: DeniedToolSource[] = [];
   /** Prompt-injection pattern names matched in this request. */
   injection_findings: string[] = [];
   /**
@@ -193,6 +199,12 @@ export class RequestContext {
 }
 
 /** `A -> B` with `adjacent` true when written `A ~> B`. */
+/** One `(tool, SOP title)` pair from `denied_tool_sources`. */
+class DeniedToolSource {
+  tool: string = "";
+  sop_title: string = "";
+}
+
 class OrderingRule {
   from: string = "";
   to: string = "";
@@ -388,6 +400,7 @@ function parseRequestContext(jsonBytes: Uint8Array): RequestContext {
   if (!isNaN(workflow_budget_usd)) ctx.workflow_budget_usd = workflow_budget_usd;
 
   ctx.denied_tools = parseStringArray(jsonObj, "denied_tools");
+  ctx.denied_tool_sources = parseDeniedToolSources(jsonObj, "denied_tool_sources");
   ctx.injection_findings = parseStringArray(jsonObj, "injection_findings");
   ctx.injection_sources = parseStringArray(jsonObj, "injection_sources");
   ctx.allowed_harnesses = parseStringArray(jsonObj, "allowed_harnesses");
@@ -580,6 +593,24 @@ function parseRequestContext(jsonBytes: Uint8Array): RequestContext {
 }
 
 /** Parse `[[from, to, adjacent], …]` — the wire shape of an ordering rule. */
+function parseDeniedToolSources(obj: JSON.Obj, key: string): DeniedToolSource[] {
+  const out: DeniedToolSource[] = [];
+  const arr = obj.getArr(key);
+  if (!arr) return out;
+  const rows = arr.valueOf();
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if (row === null || !row.isArr) continue;
+    const parts = (<JSON.Arr>row).valueOf();
+    if (parts.length < 2) continue;
+    const d = new DeniedToolSource();
+    d.tool = parts[0].toString();
+    d.sop_title = parts[1].toString();
+    out.push(d);
+  }
+  return out;
+}
+
 function parseOrderingRules(obj: JSON.Obj, key: string): OrderingRule[] {
   const out: OrderingRule[] = [];
   const arr = obj.getArr(key);

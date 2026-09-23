@@ -190,6 +190,7 @@ Declaring these in a SOP makes the proxy's own detectors enforce them. They are
 | Field | Type | Declared as |
 | :--- | :--- | :--- |
 | `denied_tools` | `string[]` | `deny_tools:` |
+| `denied_tool_sources` | `[string, string][]` | `(tool, SOP title)` behind each `denied_tools` entry; absent when empty |
 | `allowed_harnesses` | `string[]` | `allow_harnesses:` |
 | `plan_steps` | `string[]` | `plan_steps:` |
 | `scope_paths` | `string[]` | `scope_paths:` |
