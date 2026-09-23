@@ -1075,6 +1075,11 @@ impl ControlPlaneCache for NullControlPlaneCache {
         None
     }
 
+    /// No control plane, no version: the TTL stays the floor.
+    async fn policy_version(&self, _workspace_id: &str) -> Option<u64> {
+        None
+    }
+
     /// A standalone proxy has no control plane to have configured a
     /// workspace-level allowlist — but Wave 6.3 (audit-remediation) gives it
     /// a LOCAL one instead: `~/.intutic/config.json`'s `allowedModels`, read

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import * as http from 'node:http'
 import * as net from 'node:net'
+import { Redis } from 'ioredis'
 
 /** Type-only view of the module under test; the value import is dynamic (see below). */
 type PolicyCacheModule = typeof import('../../daemon/policyCache.js')
@@ -121,6 +122,39 @@ describe('policyCache Unit Tests', () => {
   it('tracks cache entries stats correctly', () => {
     const stats = getCacheStats()
     expect(stats.entries).toBeGreaterThanOrEqual(1)
+  })
+
+  it('refetches a fresh entry when the workspace config version moved (TD-474 item 5)', async () => {
+    const ws = 'ws_version_bump_test'
+    const key = `v2:sync:config_version:${ws}`
+    const valkey = new Redis(process.env['VALKEY_URL'] ?? process.env['REDIS_URL'] ?? 'redis://localhost:6379', { lazyConnect: true, maxRetriesPerRequest: 1 })
+    try {
+      await valkey.connect()
+    } catch {
+      valkey.disconnect()
+      return // no Valkey in this environment; the TTL path is covered above
+    }
+    try {
+      await valkey.set(key, '1')
+      invalidatePolicy(ws)
+      const before = requestCount
+      const first = await resolvePolicy(ws)
+      expect(first?.configVersion).toBe(1)
+      expect(requestCount).toBe(before + 1)
+
+      // Same version: a fresh hit, no fetch.
+      await resolvePolicy(ws)
+      expect(requestCount).toBe(before + 1)
+
+      // A promote/retire bumped it: the next hit refetches within the TTL.
+      await valkey.incr(key)
+      const refreshed = await resolvePolicy(ws)
+      expect(requestCount).toBe(before + 2)
+      expect(refreshed?.configVersion).toBe(2)
+    } finally {
+      await valkey.del(key)
+      valkey.disconnect()
+    }
   })
 
   // Placed last, on its own workspaceId, so it does not perturb the exact

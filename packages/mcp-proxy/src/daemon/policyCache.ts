@@ -90,6 +90,27 @@ export interface ResolvedPolicy {
    */
   mcpAnomalyOverrides: Record<string, 'steer' | 'reask' | 'kill' | 'off'>
   cachedAt:      number
+  /**
+   * The workspace's `v2:sync:config_version` at fetch time (TD-474 item 5).
+   * A guardrail promote/retire bumps it; a fresh LRU hit whose version no
+   * longer matches refetches instead of waiting out the TTL. Absent when
+   * Valkey could not be read — then the TTL is the floor, as before.
+   */
+  configVersion?: number
+}
+
+/** Same key `packages/db`'s `configVersionKey` builds; this package does not depend on it. */
+const configVersionKey = (workspaceId: string) => `v2:sync:config_version:${workspaceId}`
+
+async function readConfigVersion(workspaceId: string): Promise<number | undefined> {
+  try {
+    const raw = await valkey.get(configVersionKey(workspaceId))
+    if (raw === null) return undefined
+    const n = Number(raw)
+    return Number.isFinite(n) ? n : undefined
+  } catch {
+    return undefined
+  }
 }
 
 // Simple LRU map (insertion-order eviction)
@@ -202,6 +223,9 @@ function parsePolicyResponse(raw: string): PolicyResponseBody | null {
 }
 
 async function fetchFromControlPlane(workspaceId: string): Promise<ResolvedPolicy | null> {
+  // Read BEFORE the fetch: a bump that lands during the request is then seen
+  // as "changed" on the next hit and refetched, never missed.
+  const versionAtFetch = await readConfigVersion(workspaceId)
   return new Promise((resolve) => {
     const path = `/api/v1/policy/resolve?workspaceId=${encodeURIComponent(workspaceId)}`
     const url  = new URL(path, getCpUrl())
@@ -252,6 +276,7 @@ async function fetchFromControlPlane(workspaceId: string): Promise<ResolvedPolic
             mcpAnomalyMode:   parsed.mcpAnomalyMode,
             mcpAnomalyOverrides: parsed.mcpAnomalyOverrides,
             cachedAt:         Date.now(),
+            configVersion:    versionAtFetch,
           })
         })
       }
@@ -371,6 +396,27 @@ export async function resolvePolicy(workspaceId: string): Promise<ResolvedPolicy
   const cached = lru.get(workspaceId)
 
   if (cached && !isStale(cached)) {
+    // A fresh entry is still refetched when the workspace's config version
+    // moved since it was fetched (a guardrail promote/retire bumps it) — one
+    // Valkey GET per hit, the same class of read as the Valkey-backed miss
+    // path below. A failed refetch keeps serving the cached entry.
+    if (cached.configVersion !== undefined) {
+      const current = await readConfigVersion(workspaceId)
+      if (current !== undefined && current !== cached.configVersion) {
+        const fresh = await fetchFromControlPlane(workspaceId)
+        if (fresh) {
+          lru.delete(workspaceId)
+          evictIfFull()
+          lru.set(workspaceId, fresh)
+          try {
+            await valkey.set(`mcp_daemon:policy:${workspaceId}`, JSON.stringify(fresh), 'PX', getPolicyTtlMs())
+          } catch {
+            // Same reasoning as the stale-refresh branch below.
+          }
+          return fresh
+        }
+      }
+    }
     // Touch for LRU recency
     lru.delete(workspaceId)
     lru.set(workspaceId, cached)

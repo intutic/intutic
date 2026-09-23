@@ -109,6 +109,7 @@ fn base_ctx() -> RequestContext {
         calls_last_60s: 0,
             corroborating_detectors: 0,
         denied_tools: vec![],
+        denied_tool_sources: Vec::new(),
         injection_findings: vec![],
         injection_sources: vec![],
         tool_contract_changed: false,

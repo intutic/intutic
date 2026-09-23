@@ -621,7 +621,7 @@ _Generated from `services/control-plane/src/routes/*.ts` by `generate-api-catalo
 | DELETE | `/api/v1/connectors/:connectorId` | Authenticated |  |
 | PATCH | `/api/v1/connectors/:connectorId` | Authenticated |  |
 | POST | `/api/v1/connectors/:connectorId/sync` | Authenticated |  |
-| POST | `/api/v1/connectors/:connectorId/test` | Authenticated |  |
+| POST | `/api/v1/connectors/:connectorId/test` | Authenticated (OWNER/ADMIN for `gdrive`) | Probe a memory provider, or a Google Drive source (lists one document with the stored credential) |
 | DELETE | `/api/v1/connectors/virustotal` | OWNER/ADMIN | Remove the stored VT API key (OWNER/ADMIN) |
 | GET | `/api/v1/connectors/virustotal` | OWNER/ADMIN | Read masked VT credential status (OWNER/ADMIN) |
 | POST | `/api/v1/connectors/virustotal` | OWNER/ADMIN | Upsert the workspace's VT API key (OWNER/ADMIN) |

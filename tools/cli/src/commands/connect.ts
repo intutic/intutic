@@ -48,6 +48,7 @@ import { SyncWsClient,
   warnIfDshCoverageGap,
   writeRuntimeEnv,
   refreshPolicySnapshot,
+  refreshGateCaches,
   runComplianceProbes,
   drainHookEvents,
   drainReviewRequests,
@@ -498,10 +499,24 @@ export async function runConnect(opts: {
   let localConfigVersion = safeConfig.configVersion
   let lastCachedConfig: SyncConfigPayload | null = null
 
+  // The three gate-side caches every hook reads — the policy snapshot, the
+  // approved review-hold bypasses and the central egress policy. Refreshed on
+  // EVERY applySyncConfig (each poll and each pushed config_update), not only
+  // when the config version moved: policy changes without the config version
+  // changing, and a guardrail promoted, a hold approved or an egress mode
+  // flipped mid-session used to reach a connected machine only on restart —
+  // this function was called once, at startup (TD-488). Parity with the
+  // daemon's own loop (`syncLoop.ts`'s Steps 0b–0d). None of these throw.
+  async function refreshGateCachesForConnect(): Promise<void> {
+    const landed = await refreshGateCaches({ controlPlaneUrl, apiKey: safeCreds.apiKey, workspaceId: safeCreds.workspaceId })
+    if (!landed.snapshot) log.dim('Policy snapshot refresh failed (will retry next sync); built-in protections are unaffected.')
+  }
+
   // 3. Define configuration applier function
   async function applySyncConfig(syncConfig: SyncConfigPayload, force = false): Promise<number> {
     let sopsWritten = 0
     lastCachedConfig = syncConfig
+    await refreshGateCachesForConnect()
 
     if (syncConfig.configVersion > localConfigVersion || force) {
       log.info(`Applying configuration v${syncConfig.configVersion}...`)
@@ -963,7 +978,8 @@ export async function runConnect(opts: {
   // Without this, every fresh install runs its first poll interval with no
   // snapshot — the gates enforce the static floor and nothing else. Seeding here
   // narrows that window to "the fetch failed, and we said so" instead of "always,
-  // briefly". `refreshPolicySnapshot` never throws.
+  // briefly". `refreshPolicySnapshot` never throws. Every later refresh rides
+  // `applySyncConfig` (see `refreshGateCaches`).
   const seeded = await refreshPolicySnapshot({
     controlPlaneUrl,
     apiKey: safeCreds.apiKey,
@@ -975,6 +991,7 @@ export async function runConnect(opts: {
         'will not apply until the next successful sync. Built-in protections are unaffected.',
     )
   }
+  await refreshGateCaches({ controlPlaneUrl, apiKey: safeCreds.apiKey, workspaceId: safeCreds.workspaceId })
 
   // Sync offline traces back to PostgreSQL on startup
   try {

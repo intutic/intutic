@@ -1093,6 +1093,16 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
             .filter(|s| !s.is_empty())
     }
 
+    async fn policy_version(&self, workspace_id: &str) -> Option<u64> {
+        let mut conn = self.conn();
+        // Same key `packages/db`'s `configVersionKey` builds.
+        let key = format!("v2:sync:config_version:{}", workspace_id);
+        match tokio::time::timeout(KEYWORDS_TIMEOUT, conn.get::<_, Option<String>>(&key)).await {
+            Ok(Ok(Some(s))) => s.trim().parse::<u64>().ok(),
+            _ => None,
+        }
+    }
+
     async fn allowed_models(&self, workspace_id: &str) -> Option<Vec<String>> {
         let mut conn = self.conn();
         let key = format!("workspace:allowed_models:{}", workspace_id);

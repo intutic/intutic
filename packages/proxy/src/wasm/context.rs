@@ -221,6 +221,13 @@ pub struct RequestContext {
     /// never "deny everything unlisted".
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub denied_tools: Vec<String>,
+    /// `(tool, SOP title)` for every entry in `denied_tools`, so a refusal can
+    /// say which SOP declared the ban rather than "an SOP in force". Empty
+    /// whenever `denied_tools` is; absent from a context built without SOP
+    /// titles (a WASM guest or a test fixture), which is why the detector
+    /// falls back to the unattributed wording (TD-474 item 6).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub denied_tool_sources: Vec<(String, String)>,
     /// The steps this node's SOPs declare its task should consist of.
     ///
     /// Resolved on the request path like `denied_tools`, so the detector stays a pure
@@ -393,6 +400,7 @@ mod tests {
             calls_last_60s: 2,
             corroborating_detectors: 0,
             denied_tools: vec![],
+            denied_tool_sources: Vec::new(),
             injection_findings: vec![],
             injection_sources: vec![],
             tool_contract_changed: false,

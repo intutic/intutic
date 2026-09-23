@@ -113,7 +113,7 @@ guardrail cites it.
 ## Honest limits
 
 - **PDF and Word documents are not ingested.** Export them to Markdown, or put
-  them in a Google Drive folder and let Drive convert them.
+  them in a Google Drive folder and let Drive convert them. **Test connection** (an owner or admin) exchanges the stored credential and lists one document in the folder, so a wrong key or an unshared folder is found before the first sync.
 - **Shadow evidence for a front-matter guardrail comes from a proxy that
   reports traces to the control plane** — a gateway-mode proxy, or a
   standalone proxy attached to a workspace. A proxy with no control plane
