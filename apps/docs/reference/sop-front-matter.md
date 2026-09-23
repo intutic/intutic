@@ -19,7 +19,7 @@ ignore it.
 | `allow_harnesses:` | `claude-code, cursor` | Restricts which harnesses a role may use. |
 | `plan_steps:` | `Read, Edit, Bash, action:run_tests` | Work drifting outside the declared steps is steered. |
 | `scope_paths:` | `src, docs` | File access outside these paths is steered. |
-| `review_before:` | `action:deploy` | Holds the run for human approval. |
+| `review_before:` | `action:deploy` | Holds the run for human approval — at every hook gate before the call runs, and at the proxy after it. |
 | `requires_before:` | `A -> B` | B is refused unless A appeared earlier. |
 | `forbid_after:` | `A -> B` | B is refused if A appeared earlier. |
 | `max_calls:` | `A <= N` | Refuses the N+1th call of A. |

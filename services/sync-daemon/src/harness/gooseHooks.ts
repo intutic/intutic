@@ -20,7 +20,7 @@ import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { newIso } from '@intutic/id'
 import { hardenGoosePlugin, unharden } from './gooseHardener.js'
-import { emitShellGate, SHELL_EXTRACT, SHELL_FAIL_CLOSED } from './gateBody.js'
+import { emitShellGate, SHELL_EXTRACT, SHELL_FAIL_CLOSED, REVIEW_REQUESTS_BASENAME } from './gateBody.js'
 
 const log = createLogger('sync-goose-hooks')
 
@@ -135,7 +135,7 @@ log_event() {
   fi
 }
 
-${emitShellGate({ harness: 'goose' })}
+${emitShellGate({ harness: 'goose', reviewRequestFile: path.join(workspaceRoot, '.intutic', 'events', REVIEW_REQUESTS_BASENAME) })}
 
 log_event "tool_allowed" "\$TOOL" ""
 exit 0

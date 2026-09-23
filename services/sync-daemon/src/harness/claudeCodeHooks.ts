@@ -19,6 +19,9 @@ import type { SyncSopEntry } from '@intutic/shared-types'
 import { createLogger } from '@intutic/logger'
 import { emitJsGate, emitJsFailClosedPrelude,
   emitPreImageCapture,
+  REVIEW_REQUESTS_BASENAME as GATE_REVIEW_REQUESTS_BASENAME,
+  REVIEW_REQUESTS_LOG as GATE_REVIEW_REQUESTS_LOG,
+  REVIEW_REQUEST_VERSION as GATE_REVIEW_REQUEST_VERSION,
 } from './gateBody.js'
 import { emitRedactor } from './holdRedaction.js'
 
@@ -39,20 +42,14 @@ function toStringArray(value: unknown): string[] {
 /** Path to the local hook event log file appended by generated hook scripts. */
 export const HOOK_EVENTS_LOG = '.intutic/events/hook-events.jsonl'
 
-/** Basename of the review-hold log. One record per line, appended. */
-export const REVIEW_REQUESTS_BASENAME = 'review-requests.jsonl'
-
-/** Path to the review-hold log, relative to the workspace root. */
-export const REVIEW_REQUESTS_LOG = `.intutic/events/${REVIEW_REQUESTS_BASENAME}`
-
 /**
- * Record version written by the hook and expected by the drain.
- *
- * Bumped when the shape changes. The drain rejects anything it does not
- * recognise rather than guessing, because a half-understood hold produces a
- * decision row that looks complete and is not.
+ * The hold record's file and version live in gateBody.ts since v8, beside the
+ * one hold branch every gate shares; re-exported here because the drain and
+ * its callers import them from this module.
  */
-export const REVIEW_REQUEST_VERSION = 1
+export const REVIEW_REQUESTS_BASENAME = GATE_REVIEW_REQUESTS_BASENAME
+export const REVIEW_REQUESTS_LOG = GATE_REVIEW_REQUESTS_LOG
+export const REVIEW_REQUEST_VERSION = GATE_REVIEW_REQUEST_VERSION
 
 // Zod schema to parse SOP evaluation criteria and tool restrictions
 /**
@@ -376,7 +373,7 @@ try {
 // It is emitted from harness/gateBody.ts now. That does not make the escaping
 // easier; it makes there be one of it, with one set of tests.
 ${emitPreImageCapture()}
-${emitJsGate({ harness: 'claude-code', contract: 'exit2' })}
+${emitJsGate({ harness: 'claude-code', contract: 'exit2', reviewRequestFile })}
 ${emitRedactor()}
 
 /**
@@ -432,82 +429,12 @@ function logEvent(verdict, toolName, reason, sessionId) {
   } catch { /* never crash the hook */ }
 }
 
-// Where a hold is recorded for the daemon to pick up. Local file, not a network
-// call: this runs before every tool invocation, and a hook that waits on HTTP is
-// a hook that makes every agent slower.
-const REVIEW_REQUEST_FILE = ${JSON.stringify(reviewRequestFile)};
-
-// Where the sync-daemon writes approved review_before bypasses it polled from
-// GET /api/v1/decisions/approved-bypasses — same directory as the policy
-// snapshot, for the same reason: \`.intutic/hooks\` is already in
-// UNIVERSAL_PROTECTED_PATHS, so every gate already refuses an agent's own
-// attempt to write here, with no new protected-path entry required.
-const APPROVED_BYPASSES_FILE = path.join(os.homedir(), '.intutic', 'hooks', 'approved-bypasses.jsonl');
-
-/**
- * Looks for a valid, unexpired, EXACT-match approved bypass for this call.
- *
- * Reads the local cache only — no network call on the tool path, same
- * discipline as the review-hold write below. Returns the matching entry, or
- * null on ANY reason not to bypass: missing file, failed digest or workspace
- * check, no matching line, or an entry whose \`expiresAt\` has passed. Every one
- * of those null cases falls through to the ordinary hold — this function can
- * only ever make enforcement MORE permissive for the one call it matches
- * exactly, never less permissive for any other, and a failure to read it
- * fails closed toward the hold, not open past it.
- *
- * The expiry check compares the entry's own \`expiresAt\` against wall-clock
- * \`Date.now()\` — not the file's age. A cache the daemon has not refreshed in
- * a while must not let a long-past-TTL entry through just because nothing
- * rewrote the file; per-entry expiry is what a stale file degrades to
- * "fewer valid bypasses", never "bypasses whose TTL no longer applies".
- */
-function _intuticApprovedBypass(workspaceId, sopRuleId, toolNameNormalized, targetHash) {
-  let raw;
-  try {
-    raw = fs.readFileSync(APPROVED_BYPASSES_FILE, 'utf-8');
-  } catch (e) {
-    return null; // absent cache — nothing has ever been approved, or not synced yet
-  }
-  let digestLine = null;
-  let workspaceLine = null;
-  const body = [];
-  for (const line of raw.split('\\n')) {
-    if (line.indexOf('#digest ') === 0) { digestLine = line.slice(8).trim(); continue; }
-    if (line.indexOf('#workspace ') === 0) { workspaceLine = line.slice(11).trim(); continue; }
-    if (!line || line.charAt(0) === '#') continue;
-    body.push(line);
-  }
-  // Integrity, same two checks as the policy snapshot: an unverified digest is
-  // a comment, and an unchecked workspace id means another workspace's
-  // approvals would bypass rules here.
-  try {
-    const actual = crypto.createHash('sha256').update(body.join('\\n')).digest('hex').slice(0, 32);
-    if (digestLine && actual !== digestLine) return null;
-  } catch (e) {
-    return null;
-  }
-  if (workspaceLine && workspaceId && workspaceLine !== workspaceId) return null;
-
-  const now = Date.now();
-  for (const line of body) {
-    let entry;
-    try {
-      entry = JSON.parse(line);
-    } catch (e) {
-      continue; // one malformed line must not hide the rest
-    }
-    if (!entry || typeof entry !== 'object') continue;
-    if (entry.workspaceId !== workspaceId) continue;
-    if (entry.sopRuleId !== sopRuleId) continue;
-    if (entry.toolNameNormalized !== toolNameNormalized) continue;
-    if (entry.targetHash !== targetHash) continue;
-    const exp = Date.parse(entry.expiresAt);
-    if (!exp || isNaN(exp) || now >= exp) continue; // expired — fail closed toward the hold
-    return entry;
-  }
-  return null;
-}
+// Review holds (\`review_before:\` / \`REQUIRE_APPROVAL:\`) are evaluated by the
+// shared gate above since gate body v8: a \`hold\` rule in the policy snapshot
+// refuses the call, records it to .intutic/events/review-requests.jsonl for
+// the daemon to drain, and honours an exact, unexpired approved bypass from
+// ~/.intutic/hooks/approved-bypasses.jsonl. The bespoke copy of that logic
+// this file used to carry — the one no other harness had — is gone.
 
 // Read stdin containing Claude's tool context
 let inputData = '';
@@ -538,141 +465,10 @@ process.stdin.on('end', () => {
       toolInput.new_path || toolInput.target || toolInput.notebook_path || '';
     const shellCmd = String(toolInput.command || toolInput.cmd || toolInput.script || '');
     intuticGate(rawToolName, targetPath, shellCmd,
-      (v, t, r) => logEvent(v, t, r, sessionId), _intuticWsId, toolInput);
+      (v, t, r) => logEvent(v, t, r, sessionId), _intuticWsId, toolInput, sessionId);
 
-    // 2. Review holds — the pre-execution half of \`review_before:\`.
-    //
-    // Unlike the pattern blacklist below, this is not a permanent denial. The
-    // action is legitimate; someone asked to see it first. Blocking here is what
-    // makes the review genuinely *pre*-acceptance: the proxy only ever learns of
-    // a tool call after the harness ran it, so its own hold stops everything
-    // *after* the push rather than the push.
-    //
-    // Entirely local — a file write and an exit code, no network call on the
-    // tool path. The daemon picks the request up and tells the control plane.
-    const reviewBefore = ${JSON.stringify(constraints.reviewBefore)};
-    if (reviewBefore.length > 0) {
-      // The same coarse mapping the proxy's classifier uses, kept minimal on
-      // purpose: a hook that tries to be clever about shell commands is a hook
-      // that blocks real work. Anything it cannot classify falls through to the
-      // proxy's own gate — but only as an *observation*: this hook is what runs
-      // before the tool executes, while the proxy sees the call in the next
-      // request's history, after it happened. So a needle missing here is a
-      // review_before SOP that watches instead of holding.
-      //
-      // These lists mirror the proxy's actions.rs, and hookActionParity.test.ts
-      // fails if they diverge in either direction: a needle only the hook knows
-      // would hold a call the proxy then allows, which reads as a spurious hold.
-      const actions = [];
-      if (['bash', 'shell', 'run_command', 'terminal', 'execute'].includes(toolName)) {
-        const cmd = String(toolInput.command || toolInput.cmd || toolInput.script || '').toLowerCase();
-        const map = [
-          ['action:deploy', ['git push', 'kubectl apply', 'kubectl rollout', 'helm upgrade', 'helm install', 'terraform apply', 'docker push', 'serverless deploy', 'fly deploy', 'vercel deploy', 'gcloud run deploy', 'aws deploy', 'aws s3 sync', 'eb deploy']],
-          ['action:publish', ['npm publish', 'pnpm publish', 'yarn publish', 'cargo publish', 'twine upload', 'poetry publish', 'gem push', 'docker manifest push']],
-          ['action:release', ['gh release create', 'git tag', 'npm version', 'cargo release', 'goreleaser release', 'semantic-release']],
-          ['action:db_write', ['insert into', 'update ', 'delete from', 'drop table', 'truncate ', 'alter table']],
-        ];
-        for (const [action, needles] of map) {
-          if (needles.some((n) => cmd.includes(n))) actions.push(action);
-        }
-      }
-      // Raw tool names count too: "review_before: Write" is the natural thing to
-      // write, and the eight action tokens do not cover the edit tools.
-      const candidates = [...actions, toolName, rawToolName];
-      const hit = reviewBefore.find((r) =>
-        candidates.some((c) => String(c).toLowerCase() === String(r).toLowerCase()),
-      );
-      if (hit) {
-        // Bypass check, immediately before the hold would otherwise fire.
-        //
-        // Opt-in, short-lived and exact-match — see decisionMiningService.ts's
-        // maybeWriteReviewHoldBypass for the write side. The key material is
-        // computed the SAME way at both ends: intuticNormalise (the shared
-        // gate's own normaliser, already in scope above) on the tool name, and
-        // a sha256 of the normalised command/target pair, joined by a NUL so
-        // e.g. command="a" target="b" cannot collide with command="ab"
-        // target="". Nothing here relaxes the rule itself or matches fuzzily —
-        // a different command under the same review_before rule gets its own
-        // hash and is held exactly as before.
-        const _intuticToolNameNormalized = intuticNormalise(rawToolName);
-        const _intuticTargetHash = crypto
-          .createHash('sha256')
-          .update(intuticNormalise(shellCmd) + '\\u0000' + intuticNormalise(targetPath))
-          .digest('hex');
-        const _intuticBypass = _intuticApprovedBypass(
-          _intuticWsId,
-          hit,
-          _intuticToolNameNormalized,
-          _intuticTargetHash,
-        );
-        if (_intuticBypass) {
-          // Let it through — but LOUDLY. This is itself part of the audit
-          // trail the whole review_before/decision-review effort exists to
-          // produce: a bypass nobody can see used is no better than the
-          // silent "observe-only" gap it replaces.
-          const bypassReason =
-            \`Approved bypass for review_before:\${hit} — approved by \${_intuticBypass.decidedBy} \` +
-            \`on hold \${_intuticBypass.holdId}\`;
-          console.error(\`[Intutic Guardrail] BYPASSED: \${bypassReason}\`);
-          logEvent('hold_approved_bypass_used', toolName, bypassReason, sessionId);
-          // Deliberately no exit(2) and no new hold below: falls through to
-          // the pattern blacklist and the ordinary allow path, exactly as if
-          // review_before had not matched this one already-reviewed call.
-        } else {
-        try {
-          // \`fs\` and \`path\`, not the daemon's \`node_fs\` / \`node_path\` aliases.
-          // Those are this module's import names; the emitted script binds
-          // \`const fs = require('fs')\`. The original write used the daemon's
-          // names, so every hold threw ReferenceError into the catch below and
-          // the request file was never created at all — the reason it had no
-          // reader is that it had no writer either.
-          fs.mkdirSync(path.dirname(REVIEW_REQUEST_FILE), { recursive: true });
-          // Appended, never overwritten. This wrote a single .json with
-          // writeFileSync, so two holds inside one drain window left only the
-          // second — and holds cluster, because an agent that trips a review
-          // rule usually trips it again on its next step.
-          //
-          // The snapshot is redacted here rather than in the daemon. Doing it
-          // on the way out would mean the plaintext had already been written to
-          // .intutic/events/, and a file that exists is a file that ends up in
-          // a bug report.
-          fs.appendFileSync(
-            REVIEW_REQUEST_FILE,
-            JSON.stringify({
-              v: ${REVIEW_REQUEST_VERSION},
-              holdId: 'hold_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10),
-              reason: hit,
-              tool: rawToolName,
-              sessionId: sessionId,
-              workspaceId: _intuticWsId,
-              at: new Date().toISOString(),
-              // Bypass-key material, computed once above and carried on the
-              // hold so the control plane can write an exact-match Valkey
-              // entry later without ever needing the raw command/target.
-              toolNameNormalized: _intuticToolNameNormalized,
-              targetHash: _intuticTargetHash,
-              context: __intuticSnapshot({
-                tool: rawToolName,
-                toolInput: toolInput,
-                cwd: process.cwd(),
-                reason: hit,
-              }),
-            }) + '\\n',
-          );
-        } catch (e) {
-          // The hold still blocks even if the record cannot be written — the
-          // exit code below is what stops the tool. But say so: a hold that
-          // blocks and is never recorded is a developer stopped for a reason
-          // nobody can review, which is the worst of both outcomes.
-          console.error('[Intutic Guardrail] could not record the hold: ' + (e && e.message ? e.message : e));
-        }
-        const reason = \`Held for human review: \${hit} — declared in review_before:\`;
-        console.error(\`[Intutic Guardrail] HELD: \${reason} Approve with: intutic decision approve <holdId> (or: intutic decision reject <holdId>)\`);
-        logEvent('tool_blocked', toolName, reason, sessionId);
-        process.exit(2);
-        }
-      }
-    }
+    // 2. Review holds: handled inside intuticGate (gate body v8) — see the
+    //    note above the stdin handler.
 
     // 3. SOP-compiled pattern blacklist
     const patterns = ${JSON.stringify(constraints.patterns)};
@@ -960,7 +756,7 @@ export async function drainHookEvents(
  * workspace has opted in with `reviewHoldBypassEnabled`, and even then it
  * covers only the identical call, for at most `reviewHoldBypassTtlMinutes`.
  * A workspace that never sets that flag gets the original, unconditional
- * observe-only behaviour. See `claudeCodeHooks.ts`'s `_intuticApprovedBypass`
+ * observe-only behaviour. See `gateBody.ts`'s `intuticApprovedBypass` (every gate, since v8)
  * and `decisionMiningService.ts`'s `maybeWriteReviewHoldBypass` for the
  * mechanism.
  */

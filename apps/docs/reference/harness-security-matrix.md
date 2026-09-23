@@ -16,6 +16,16 @@ This document is the canonical reference for what Intutic enforces, how, and the
 | **C — Drift Guard** | File watcher + 30s poll cycle | Detects and restores tampered governance configs | 25 paths across all harnesses; every path is now also written into every discovered `git worktree` of a watched repo, not only the main checkout — see [Worktree Coverage](#worktree-coverage) |
 | **D — Response Gate** | Proxy-side inspection of the LLM *response* before it is forwarded to the client | Withholds a model-emitted `tool_calls[]` naming a denied tool before the client's tool runner sees it | Every harness whose LLM traffic traverses the proxy (Vector B scope); harness-agnostic, no client hook required |
 
+### Vector A — review holds
+
+Every Vector A gate evaluates the same policy snapshot, and since gate body v8
+that includes the `hold` tier: a `review_before:` token or a
+`REQUIRE_APPROVAL:` SOP refuses the call through the harness's own blocking
+contract, records a hold for **Decisions → Held Changes**, and lets the exact
+same call through once `intutic decision approve <holdId>` has run (workspace
+opt-in, short TTL). The n8n workflow hook and the Open WebUI prompt filter
+refuse a hold outright — neither runs in a workspace that could record one.
+
 ### Vector D — Response Gate
 
 The response gate (`response_gate.rs`, open-core, default-on) is the product's only harness-agnostic **pre-execution** tool gate: because every response byte passes through the proxy before the client sees it, a denied tool call is refused before it ever reaches the harness's tool runner — no per-harness hook, no harness cooperation. It understands the Anthropic (`tool_use` blocks), OpenAI chat-completions (`tool_calls[]`), and OpenAI Responses (`function_call` output items) wire shapes, on both streaming and non-streaming paths. When a call is withheld, the agent receives an explicit in-band message that the call never ran, so it does not blindly retry.

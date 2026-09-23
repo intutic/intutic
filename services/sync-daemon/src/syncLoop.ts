@@ -29,9 +29,10 @@ import type {
   SyncConfigPayload,
   SopFileHash,
   WorkspaceSettings,
+  SyncSopEntry,
 } from '@intutic/shared-types'
 import { deriveEnforcementInputs } from '@intutic/shared-types'
-import { writeConfigFiles, HARNESS_FILES, applyConfigEdits } from './configWriter.js'
+import { writeConfigFiles, HARNESS_FILES, applyConfigEdits, loadLocalSopEntries } from './configWriter.js'
 import type { ConfigEditApplyOutcome } from './configWriter.js'
 import { injectMcpServer } from './harness/mcpAutoWrite.js'
 import { discoverWorktrees } from './lib/gitWorktrees.js'
@@ -41,6 +42,7 @@ import {
   drainHookEvents,
   drainReviewRequests,
   REVIEW_REQUESTS_LOG,
+  parseSopConstraints,
 } from './harness/claudeCodeHooks.js'
 import { writeRuntimeEnv } from './lib/runtimeEnv.js'
 import { refreshPolicySnapshot } from './lib/policySnapshot.js'
@@ -238,6 +240,24 @@ export interface GateCacheRefreshOptions {
   controlPlaneUrl: string
   apiKey: string
   workspaceId: string
+  /** See {@link PolicySnapshotOptions.localHoldTokens}. */
+  localHoldTokens?: readonly string[]
+}
+
+/**
+ * The `review_before:` tokens the snapshot compiles into hold rules: from the
+ * synced SOPs' front matter and JSON blocks, the workspace settings, and the
+ * local `.intutic/sops`. The same parse the Claude Code writer runs for its
+ * pattern blacklist, so the two cannot disagree about what is held.
+ */
+export async function localHoldTokensFor(
+  workspaceRoot: string,
+  sops: SyncSopEntry[],
+  settings: Record<string, unknown> | undefined,
+  harnesses: HarnessType[] = [],
+): Promise<string[]> {
+  const local = await loadLocalSopEntries(workspaceRoot, harnesses)
+  return parseSopConstraints([...sops, ...local], settings).reviewBefore
 }
 
 /**
@@ -334,7 +354,10 @@ export async function startSyncLoop(options: SyncLoopOptions): Promise<void> {
   // and a bypass an operator just approved has to reach the gate before the
   // developer's very next retry. One helper, shared with `intutic connect`'s
   // own loop, so the two cannot drift apart again (TD-488).
-  await refreshGateCaches({ controlPlaneUrl, apiKey, workspaceId })
+  await refreshGateCaches({
+    controlPlaneUrl, apiKey, workspaceId,
+    localHoldTokens: await localHoldTokensFor(workspaceRoot, [], undefined),
+  })
 
 
   // Try to sync offline traces back to PostgreSQL
@@ -464,7 +487,12 @@ export async function startSyncLoop(options: SyncLoopOptions): Promise<void> {
         })
         // Same reasoning as Step 0b–0d: policy rides the sync cycle, not the
         // config version.
-        await refreshGateCaches({ controlPlaneUrl, apiKey, workspaceId })
+        await refreshGateCaches({
+          controlPlaneUrl, apiKey, workspaceId,
+          localHoldTokens: await localHoldTokensFor(
+            workspaceRoot, latestSops, latestSettings as unknown as Record<string, unknown> | undefined, latestHarnesses,
+          ),
+        })
 
         // Governed decisions log — opt-in only (WorkspaceSettings.decisionsLogEnabled,
         // default off: a growing context file is token spend the product must not

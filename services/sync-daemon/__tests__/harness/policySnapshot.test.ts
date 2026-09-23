@@ -152,7 +152,7 @@ describe('validateRule', () => {
 })
 
 describe('buildSnapshotRules', () => {
-  it('drops every non-block rule', () => {
+  it('drops a plain warn rule; block and require_approval ship, the latter as hold', () => {
     const rules = buildSnapshotRules(
       policy({
         sopRules: [
@@ -162,8 +162,36 @@ describe('buildSnapshotRules', () => {
         ],
       }),
     )
-    const sopIds = rules.filter((r) => r.id.startsWith('sop.')).map((r) => r.id)
-    expect(sopIds).toEqual(['sop.s1'])
+    const sop = rules.filter((r) => r.id.startsWith('sop.'))
+    expect(sop.map((r) => [r.id, r.severity])).toEqual([['sop.s1', 'block'], ['sop.s3', 'hold']])
+    // The gate prints the reason on a HELD line; it has to say what is happening.
+    expect(sop[1]!.reason).toBe('Held for human review: ask')
+    expect(sop[1]!.subject).toBe('tool')
+  })
+
+  it('compiles local review_before tokens into hold rules: action tokens on the action subject, tool names on the tool subject', () => {
+    const rules = buildSnapshotRules(policy({ sopRules: [] }), ['action:deploy', 'Write', 'action:deploy', ' ', 'no spaces here'])
+    const local = rules.filter((r) => r.id.startsWith('sop.local.'))
+    expect(local.map((r) => [r.id, r.subject, r.severity, r.ignoreCase])).toEqual([
+      ['sop.local.review_before.action:deploy', 'action', 'hold', true],
+      ['sop.local.review_before.Write', 'tool', 'hold', true],
+    ])
+    // Whole-token: the gate matches against a space-padded string.
+    expect(local[0]!.source).toBe(' (action:deploy) ')
+    expect(new RegExp(local[0]!.source, 'i').test(' action:deploy action:db_write ')).toBe(true)
+    expect(new RegExp(local[0]!.source, 'i').test(' action:deployment ')).toBe(false)
+    expect(local[0]!.reason).toMatch(/^Held for human review: action:deploy/)
+  })
+
+  it('demotes hold rules to shadow under SILENT_LOG like everything else', () => {
+    const rules = buildSnapshotRules(
+      policy({
+        interventionMode: 'SILENT_LOG',
+        sopRules: [{ id: 's3', toolPattern: 'Edit', action: 'require_approval', reason: 'ask' }],
+      }),
+      ['action:deploy'],
+    )
+    expect(rules.filter((r) => r.id.startsWith('sop.')).map((r) => r.severity)).toEqual(['shadow', 'shadow'])
   })
 
   it('admits a warn rule only when the control plane marks it as a guardrail projection (LLD #71)', () => {
@@ -177,6 +205,7 @@ describe('buildSnapshotRules', () => {
           // The same shapes without the origin are still dropped.
           { id: 's_warn', toolPattern: 'Write', action: 'warn', reason: 'careful' },
           { id: 's_forged', toolPattern: 'Edit', action: 'warn', reason: 'x', origin: 'sop' },
+          // require_approval ships as a hold whatever its origin (gate body v8).
           { id: 'guardrail.pgr_ask', toolPattern: '^Edit$', action: 'require_approval', reason: 'ask', origin: 'guardrail' },
         ],
       }),
@@ -185,6 +214,7 @@ describe('buildSnapshotRules', () => {
     expect(sop.map((r) => [r.id, r.severity])).toEqual([
       ['sop.guardrail.pgr_shadow', 'warn'],
       ['sop.guardrail.pgr_enforce', 'block'],
+      ['sop.guardrail.pgr_ask', 'hold'],
     ])
     expect(sop[0]!.source).toBe(' (Bash) ')
     expect(sop[0]!.argPattern).toBe('(?=[\\s\\S]*terraform\\ apply)')
