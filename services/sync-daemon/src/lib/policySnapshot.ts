@@ -576,7 +576,10 @@ function localHoldPattern(token: string, shadow: boolean): GuardPattern | null {
     log.warn({ action: 'local_hold_token_rejected', token }, 'review_before token is not a plain identifier — not shipped to the gate')
     return null
   }
-  const source = ` (${token.replace(/[.]/g, '\\.')}) `
+  // The identifier check above already excludes every metacharacter; the
+  // full escape is still applied so the pattern is safe by construction and
+  // not by the guard three lines up.
+  const source = ` (${token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}) `
   return {
     id: `sop.local.review_before.${token}`,
     source,
