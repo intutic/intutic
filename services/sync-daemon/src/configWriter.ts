@@ -54,6 +54,7 @@ import { writePiHooks } from './harness/piHooks.js'
 import { writeCodexHooks } from './harness/codexHooks.js'
 import { writeGithubCopilotHooks } from './harness/githubCopilotHooks.js'
 import { writeMuseHooks } from './harness/museHooks.js'
+import { writeOpenCodeHooks } from './harness/openCodeHooks.js'
 import { writeGrokHooks } from './harness/grokHooks.js'
 
 // ─── Harness config file mapping ─────────────────────────────────────
@@ -90,6 +91,10 @@ export const HARNESS_FILES: Record<HarnessType, string> = {
   // read. Formatted by `formatMarkdown`, the same `---`-separated formatter
   // Cursor/Claude Code/Windsurf/GitHub Copilot already share below.
   grok: 'AGENTS.md',
+  // OpenCode reads AGENTS.md (CLAUDE.md fallback) — the same markdown rules
+  // file Muse/Grok get. The gate is the plugin `writeOpenCodeHooks` writes
+  // below, not this file.
+  opencode: 'AGENTS.md',
   // dsh has no workspace-relative rules file (governance lives entirely
   // under $DSH_HOME) — empty, same as goose/openhands below: this writer's
   // per-harness chain deliberately does not call writeDshHooks either (see
@@ -104,9 +109,9 @@ export const HARNESS_FILES: Record<HarnessType, string> = {
   // same as n8n before it gained a writer.
   xirp: '',
   // Agentic Orchestrator writes no config of its own either — same
-  // "delegated" shape as Xirp (orchestrates already-gated Claude Code/Codex,
-  // plus OpenCode which has no gate at all — see gateRegistry.ts's NO_GATE
-  // row and tools/cli/src/harness/agenticOrchestrator.ts, and TD-397).
+  // "delegated" shape as Xirp (orchestrates already-gated Claude Code, Codex
+  // and OpenCode — see gateRegistry.ts's NO_GATE row and
+  // tools/cli/src/harness/agenticOrchestrator.ts).
   'agentic-orchestrator': '',
   // Wave 1 SDK-gated frameworks — same rationale as langgraph: no on-disk
   // hook/config file exists to gate tool calls, so each writes .env.intutic
@@ -368,6 +373,12 @@ export async function writeConfigFiles(
       if (harness === 'muse-code') {
         try { await writeMuseHooks(workspaceRoot, proxyUrl, workspaceId) } catch (e) {
           console.warn('[sync-daemon] writeMuseHooks failed (non-fatal):', e) }
+      }
+      // AGENTS.md above carries the rules text; this writes the plugin
+      // OpenCode loads into its own process, which is the gate (TD-397).
+      if (harness === 'opencode') {
+        try { await writeOpenCodeHooks(workspaceRoot, proxyUrl, workspaceId) } catch (e) {
+          console.warn('[sync-daemon] writeOpenCodeHooks failed (non-fatal):', e) }
       }
       // AGENTS.md above governs prompt-level rules only; the gate is what
       // refuses tool calls, and the config.toml model base_url merge is what
@@ -631,6 +642,7 @@ function formatContent(
       return formatLanggraph(sops, proxyUrl)
 
     case 'muse-code':
+    case 'opencode':
       // AGENTS.md — same markdown shape as CLAUDE.md/.cursorrules/.windsurfrules.
       return formatMarkdown(sops)
 

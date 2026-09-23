@@ -20,8 +20,8 @@
  * UNLIKE Xirp/Agentic Orchestrator, Runtime does not spawn an
  * already-installed CLI harness as a subprocess — it hosts framework-SDK
  * code as a deployment target. If that code uses no framework this registry
- * supports (raw boto3, a hand-rolled tool loop), coverage is genuinely zero,
- * the same honest gap Agentic Orchestrator's OpenCode backend has (TD-397).
+ * supports (raw boto3, a hand-rolled tool loop), coverage is genuinely zero
+ * — an honest gap, stated rather than papered over.
  *
  * # Detection signals (all live-verified against real published artifacts —
  * see packages/shared-types/src/enums.ts's HarnessType.AGENTCORE_RUNTIME doc

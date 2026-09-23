@@ -190,7 +190,7 @@ The `createMarkdownAdapter()` factory in [base.ts](../../../tools/cli/src/harnes
 
 ## Related
 
-- [Integrations Hub](/integrations/) — All 39 harnesses with setup guides
+- [Integrations Hub](/integrations/) — All 42 harnesses with setup guides
 - [Enforcement Actions](/concepts/enforcement-actions) — BYPASS/ENHANCE/HIJACK/KILL verdicts
 - [Getting Started](/guide/getting-started) — Install and connect your first harness
 - [Core Concepts](/guide/concepts) — Workspaces, SOPs, scoring

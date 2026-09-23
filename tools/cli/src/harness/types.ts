@@ -57,6 +57,9 @@ export const HARNESS_CONFIG_FILES: Record<HarnessType, string> = {
   // file in this codebase already shares (Cursor, Claude Code, Windsurf,
   // GitHub Copilot) — not a bespoke format.
   'grok': 'AGENTS.md',
+  // OpenCode reads AGENTS.md (CLAUDE.md fallback) — see opencode.ts. The gate
+  // is the plugin `openCodeHooks.ts` generates, not this file.
+  'opencode': 'AGENTS.md',
   // dsh has no workspace-relative rules file in the research this phase could
   // verify — its config lives entirely under $DSH_HOME (profiles/*/cordis.patch.yml,
   // settings.yaml), not the project workspace. Empty, matching goose/cline/
@@ -69,8 +72,7 @@ export const HARNESS_CONFIG_FILES: Record<HarnessType, string> = {
   'xirp': '',
   // Agentic Orchestrator writes no config of its own — see
   // agenticOrchestrator.ts's module doc. It orchestrates other CLI backends
-  // (Claude Code, Codex, OpenCode), whose own adapters do the real writing
-  // (OpenCode has none today — see TD-397).
+  // (Claude Code, Codex, OpenCode), whose own adapters do the real writing.
   'agentic-orchestrator': '',
   // Wave 1 SDK-gated frameworks — same rationale as langgraph above: no
   // on-disk hook/config file exists to gate tool calls, so each of these

@@ -104,7 +104,7 @@ import {
  *   picks the fail-open reading of that ambiguity rather than blocking every
  *   MCP call the first time a v6 gate meets an old snapshot).
  */
-export const GATE_VERSION = 6
+export const GATE_VERSION = 7
 
 /**
  * How old a snapshot may be before a gate reports it as stale.
@@ -131,7 +131,13 @@ export const SNAPSHOT_STALE_AFTER_DAYS = 7
  * Build does not recognise `cancel`, and Cline/Roo Code do not recognise
  * `decision`. A gate that uses the wrong one is silently inert.
  */
-export type BlockContract = 'exit2' | 'stdout-cancel' | 'stdout-decision-deny'
+/**
+ * `'throw'` is for a gate that runs INSIDE the harness process (OpenCode's
+ * plugin hook): the refusal is a thrown Error carrying the BLOCKED message,
+ * which the host turns into the tool-error the model reads. No exit code, no
+ * stdout — the same in-process posture the n8n workflow gate takes.
+ */
+export type BlockContract = 'exit2' | 'stdout-cancel' | 'stdout-decision-deny' | 'throw'
 
 /** Single-quotes a string for shell, safely. */
 function shq(s: string): string {
@@ -715,7 +721,11 @@ export function emitJsGate(opts: JsGateOptions): string {
       : opts.contract === 'stdout-decision-deny'
         ? `      process.stdout.write(JSON.stringify({ decision: 'deny', reason: reason }) + '\\n');\n` +
           `      process.exit(0);`
-        : `      process.exit(2);`
+        : opts.contract === 'throw'
+          // The envelope guard's reason already carries the prefix; a rule's
+          // reason does not. One message shape either way.
+          ? `      throw new Error(String(reason).indexOf('[Intutic Governance]') === 0 ? String(reason) : '[Intutic Governance] BLOCKED: ' + reason);`
+          : `      process.exit(2);`
 
   return `
 // ── Intutic gate body v${GATE_VERSION} — harness: ${opts.harness} ────────────
@@ -916,6 +926,12 @@ ${refuse}
       } else {
         try { console.error('[Intutic Governance] BLOCKED: ' + _mcpReason); } catch (e) {}
         try { record('tool_blocked', toolName, _mcpReason); } catch (e) {}
+        // \`reason\` is what \`\${refuse}\` reads. The rule loop's own \`reason\` is
+        // block-scoped to that loop, so without this the two stdout contracts
+        // and the throw contract would hit a ReferenceError here — a refusal
+        // that crashes is still a refusal for exit-code gates, and a
+        // ReferenceError for the others.
+        var reason = _mcpReason;
 ${refuse}
       }
     }
