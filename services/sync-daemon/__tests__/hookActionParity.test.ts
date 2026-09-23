@@ -29,7 +29,9 @@ const RUST = readFileSync(
   join(__dirname, '../../../packages/proxy/src/plugins/anomaly/actions.rs'),
   'utf-8',
 )
-const HOOK = readFileSync(join(__dirname, '../src/harness/claudeCodeHooks.ts'), 'utf-8')
+// The needles live in the shared gate body since v8 (`ACTION_NEEDLES`), where
+// every gate — not only Claude Code's — classifies a command for a hold.
+const HOOK = readFileSync(join(__dirname, '../src/harness/gateBody.ts'), 'utf-8')
 
 /** The string literals of a `const NAME: &[&str] = &[...]` in the Rust source. */
 function rustPatterns(name: string): string[] {

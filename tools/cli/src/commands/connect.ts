@@ -49,6 +49,7 @@ import { SyncWsClient,
   writeRuntimeEnv,
   refreshPolicySnapshot,
   refreshGateCaches,
+  localHoldTokensFor,
   runComplianceProbes,
   drainHookEvents,
   drainReviewRequests,
@@ -507,8 +508,18 @@ export async function runConnect(opts: {
   // flipped mid-session used to reach a connected machine only on restart —
   // this function was called once, at startup (TD-488). Parity with the
   // daemon's own loop (`syncLoop.ts`'s Steps 0b–0d). None of these throw.
+  //
+  // The snapshot also carries this workspace's `review_before:` tokens as hold
+  // rules (synced SOPs, settings and local `.intutic/sops`), so every gate —
+  // not only the Claude Code hook — holds on them (TD-474 item 4).
   async function refreshGateCachesForConnect(): Promise<void> {
-    const landed = await refreshGateCaches({ controlPlaneUrl, apiKey: safeCreds.apiKey, workspaceId: safeCreds.workspaceId })
+    const localHoldTokens = await localHoldTokensFor(
+      safeConfig.workspaceRoot,
+      lastCachedConfig?.sops ?? [],
+      lastCachedConfig?.settings as unknown as Record<string, unknown> | undefined,
+      safeConfig.harnesses as HarnessType[],
+    )
+    const landed = await refreshGateCaches({ controlPlaneUrl, apiKey: safeCreds.apiKey, workspaceId: safeCreds.workspaceId, localHoldTokens })
     if (!landed.snapshot) log.dim('Policy snapshot refresh failed (will retry next sync); built-in protections are unaffected.')
   }
 
@@ -991,7 +1002,7 @@ export async function runConnect(opts: {
         'will not apply until the next successful sync. Built-in protections are unaffected.',
     )
   }
-  await refreshGateCaches({ controlPlaneUrl, apiKey: safeCreds.apiKey, workspaceId: safeCreds.workspaceId })
+  await refreshGateCachesForConnect()
 
   // Sync offline traces back to PostgreSQL on startup
   try {

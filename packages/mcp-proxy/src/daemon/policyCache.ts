@@ -103,6 +103,13 @@ export interface ResolvedPolicy {
 const configVersionKey = (workspaceId: string) => `v2:sync:config_version:${workspaceId}`
 
 async function readConfigVersion(workspaceId: string): Promise<number | undefined> {
+  // Only a connected client is asked. With Valkey down, ioredis queues the GET
+  // and rejects it after `maxRetriesPerRequest` reconnect attempts — hundreds
+  // of milliseconds on every cache hit, on the tool-call path. Unknown version
+  // means "serve the cached entry", which is what the cache did before the
+  // version existed. The miss path below still connects lazily, so a reachable
+  // Valkey reaches `ready` on the first fetch.
+  if (valkey.status !== 'ready') return undefined
   try {
     const raw = await valkey.get(configVersionKey(workspaceId))
     if (raw === null) return undefined

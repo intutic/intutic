@@ -194,6 +194,13 @@ export interface PolicySnapshotOptions {
   workspaceId: string
   /** Override the directory (tests). */
   snapshotDir?: string
+  /**
+   * `review_before:` tokens from the workspace's local SOPs and settings
+   * (`parseSopConstraints(...).reviewBefore`). Each becomes a `hold` rule,
+   * `sop.local.review_before.<token>`, so every gate holds on them — not only
+   * the Claude Code hook that used to bake them in (TD-474 item 4).
+   */
+  localHoldTokens?: readonly string[]
 }
 
 /**
@@ -319,8 +326,13 @@ function toGuardPattern(
   // of `warn` ("has not earned the right to block yet"), and it is still
   // additive: a warn rule blocks nothing. `validateRule` below still applies,
   // so a catch-all guardrail is refused the same way.
+  //
+  // And `require_approval` (a `REQUIRE_APPROVAL:` SOP title): shipped at
+  // severity `hold` since gate body v8. Refuses like block, records the call
+  // for review, and an approved bypass lets the exact call through once.
   const guardrail = rule.origin === 'guardrail'
-  if (rule.action !== 'block' && !(guardrail && rule.action === 'warn')) return null
+  const hold = rule.action === 'require_approval'
+  if (rule.action !== 'block' && !hold && !(guardrail && rule.action === 'warn')) return null
 
   const why = validateRule(rule.toolPattern, rule.id)
   if (why) {
@@ -366,11 +378,21 @@ function toGuardPattern(
     // cannot tell which flags would have been blocks. A guardrail in SHADOW
     // is the one rule that ships as `warn` on purpose (see above); under
     // SILENT_LOG it demotes to `shadow` with everything else.
-    severity: shadow ? ('shadow' as GuardPattern['severity']) : rule.action === 'warn' ? ('warn' as GuardPattern['severity']) : 'block',
-    reason: rule.reason || `Blocked by SOP ${rule.id}`,
+    severity: shadow
+      ? ('shadow' as GuardPattern['severity'])
+      : hold
+        ? ('hold' as GuardPattern['severity'])
+        : rule.action === 'warn'
+          ? ('warn' as GuardPattern['severity'])
+          : 'block',
+    reason: hold
+      ? `Held for human review: ${rule.reason || `SOP ${rule.id}`}`
+      : rule.reason || `Blocked by SOP ${rule.id}`,
     rationale: guardrail
       ? 'Projected from a cited policy guardrail by the control plane (LLD #71).'
-      : 'Resolved from a BLOCK: SOP title by the control plane.',
+      : hold
+        ? 'Resolved from a REQUIRE_APPROVAL: SOP title by the control plane.'
+        : 'Resolved from a BLOCK: SOP title by the control plane.',
     matches: [],
     notMatches: [],
     ...(argPattern ? { argPattern } : {}),
@@ -484,13 +506,17 @@ function sanitizeMcpServerNames(names: readonly string[]): string[] {
 
 /** Builds the rule set a snapshot would carry, without writing it. Exported so
  *  a test can assert the contents rather than re-deriving them. */
-export function buildSnapshotRules(policy: ResolvedPolicy): GuardPattern[] {
+export function buildSnapshotRules(policy: ResolvedPolicy, localHoldTokens: readonly string[] = []): GuardPattern[] {
   // `shadow` names the advisory GuardPattern severity these rules are demoted
   // to; the workspace-level trigger is intervention mode SILENT_LOG.
   const shadow = isSilentLogMode(policy)
 
   const sopRules = policy.sopRules
     .map((r) => toGuardPattern(r, shadow))
+    .filter((r): r is GuardPattern => r !== null)
+
+  const localHolds = [...new Set(localHoldTokens.map((t) => t.trim()).filter(Boolean))]
+    .map((t) => localHoldPattern(t, shadow))
     .filter((r): r is GuardPattern => r !== null)
 
   const destructive = DESTRUCTIVE_COMMAND_PATTERNS.map((p) => {
@@ -535,7 +561,33 @@ export function buildSnapshotRules(policy: ResolvedPolicy): GuardPattern[] {
     severity: shadow ? ('shadow' as GuardPattern['severity']) : SKILL_SURFACE_TIER_SEVERITY,
   }))
 
-  return [...sopRules, ...destructive, ...skillSurface]
+  return [...sopRules, ...localHolds, ...destructive, ...skillSurface]
+}
+
+/**
+ * A local `review_before:` token as a hold rule. `action:*` tokens match the
+ * gate's action subject (the tokens it classifies a shell command to);
+ * anything else is a tool name. Case-insensitive, as the bespoke Claude Code
+ * hold was. A token that is not a plain identifier is refused with a log line
+ * rather than escaped into a regex nobody can read back.
+ */
+function localHoldPattern(token: string, shadow: boolean): GuardPattern | null {
+  if (!/^[A-Za-z0-9_:.-]+$/.test(token)) {
+    log.warn({ action: 'local_hold_token_rejected', token }, 'review_before token is not a plain identifier — not shipped to the gate')
+    return null
+  }
+  const source = ` (${token.replace(/[.]/g, '\\.')}) `
+  return {
+    id: `sop.local.review_before.${token}`,
+    source,
+    subject: token.startsWith('action:') ? 'action' : 'tool',
+    ignoreCase: true,
+    severity: shadow ? 'shadow' : 'hold',
+    reason: `Held for human review: ${token} — declared in review_before:`,
+    rationale: 'A local SOP or the workspace settings asked to see this action before it runs.',
+    matches: [],
+    notMatches: [],
+  }
 }
 
 /**
@@ -549,8 +601,9 @@ export function buildSnapshotRules(policy: ResolvedPolicy): GuardPattern[] {
 export async function writePolicySnapshot(
   policy: ResolvedPolicy,
   snapshotDir: string = DEFAULT_SNAPSHOT_DIR,
+  localHoldTokens: readonly string[] = [],
 ): Promise<{ digest: string; ruleCount: number }> {
-  const rules = buildSnapshotRules(policy)
+  const rules = buildSnapshotRules(policy, localHoldTokens)
   const lines = rules.map(toRulesLine)
   const digest = createHash('sha256').update(lines.join('\n')).digest('hex').slice(0, 32)
   // One timestamp shared by both artifacts. Two `new Date()` calls would put
@@ -691,7 +744,7 @@ export async function refreshPolicySnapshot(
   const policy = await fetchResolvedPolicy(opts)
   if (!policy) return null
   try {
-    return await writePolicySnapshot(policy, opts.snapshotDir ?? DEFAULT_SNAPSHOT_DIR)
+    return await writePolicySnapshot(policy, opts.snapshotDir ?? DEFAULT_SNAPSHOT_DIR, opts.localHoldTokens ?? [])
   } catch (err) {
     log.warn({ action: 'policy_snapshot_write_failed', err }, 'Could not write policy snapshot')
     return null

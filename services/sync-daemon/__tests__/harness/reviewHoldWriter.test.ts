@@ -20,9 +20,13 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { spawn } from 'node:child_process'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createHash } from 'node:crypto'
 import { updatePreToolUseHooks, REVIEW_REQUESTS_LOG } from '../../src/harness/claudeCodeHooks.js'
+import { toRulesLine } from '../../src/harness/gateBody.js'
+import { buildSnapshotRules } from '../../src/lib/policySnapshot.js'
 
 /** Assembled at runtime — a credential-shaped literal in source is the hazard. */
 const AWS_KEY = 'AK' + 'IA' + 'QRSTUVWX34567890'
@@ -33,7 +37,9 @@ function run(
   input: string,
 ): Promise<{ status: number; stderr: string }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, { stdio: ['pipe', 'pipe', 'pipe'] })
+    // The hold reaches the gate as a rule in the policy snapshot (gate body
+    // v8), not as a token baked into the script.
+    const child = spawn(cmd, args, { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, INTUTIC_SNAPSHOT_RULES: snapshotPath } })
     let stderr = ''
     child.stderr.setEncoding('utf8')
     child.stderr.on('data', (d: string) => {
@@ -49,6 +55,18 @@ function run(
 let root: string
 let hookPath: string
 let logPath: string
+let snapshotPath: string
+
+/** The snapshot the daemon would write for this workspace: the SOP's
+ *  `review_before: action:deploy` compiled to a hold rule. */
+function writeSnapshot(target: string, tokens: string[]): void {
+  const lines = buildSnapshotRules(
+    { workspaceId: '', interventionMode: 'ENFORCE', sopRules: [], mcpAllowedServers: [], sqlDropStrictBlock: false },
+    tokens,
+  ).map(toRulesLine)
+  const digest = createHash('sha256').update(lines.join('\n')).digest('hex').slice(0, 32)
+  writeFileSync(target, `#digest ${digest}\n#generated ${new Date().toISOString()}\n${lines.join('\n')}\n`)
+}
 
 /** A SOP whose fenced block and front matter both declare the hold. */
 const SOP = [
@@ -67,6 +85,8 @@ beforeEach(async () => {
     { sopId: 'sop_hold', title: 'Hold', content: SOP, contentHash: 'h', harnessTargets: [] },
   ] as never)
   hookPath = join(root, '.intutic', 'hooks', 'claude-code-check.js')
+  snapshotPath = join(root, 'policy-snapshot.rules')
+  writeSnapshot(snapshotPath, ['action:deploy'])
 })
 
 afterEach(async () => {
@@ -112,7 +132,7 @@ describe('the generated hook records a hold', () => {
 
     expect(record.v, 'the drain rejects an unversioned record').toBe(1)
     expect(record.holdId).toMatch(/^hold_/)
-    expect(record.reason).toBe('action:deploy')
+    expect(record.reason, 'the rule id — what the bypass and the review queue key on').toBe('sop.local.review_before.action:deploy')
     expect(record.tool).toBe('Bash')
     expect(record.sessionId, 'the trace is resolved on this').toBe('ses_hold_1')
     expect(() => new Date(record.at).toISOString()).not.toThrow()

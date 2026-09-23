@@ -13,13 +13,13 @@
  * @module
  */
 
-export { startSyncLoop, syncOfflineTraces, refreshGateCaches } from './syncLoop.js'
+export { startSyncLoop, syncOfflineTraces, refreshGateCaches, localHoldTokensFor } from './syncLoop.js'
 
 export { collectAgentReport, reportAgent } from './agentReporter.js'
 export { startHarnessSession, endAllOpenSessions, readGitInfo } from './sessionReporter.js'
 export type { SyncLoopOptions, SyncResult } from './syncLoop.js'
 
-export { writeConfigFiles } from './configWriter.js'
+export { writeConfigFiles, loadLocalSopEntries } from './configWriter.js'
 export type { WriteResult } from './configWriter.js'
 
 export { computeFileHashes, hashFile } from './hashReporter.js'
