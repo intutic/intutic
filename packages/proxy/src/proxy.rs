@@ -634,15 +634,46 @@ static PROXY_INSTANCE_ID: std::sync::OnceLock<String> = std::sync::OnceLock::new
 /// bucket rather than a session. That produced 353 "sessions" for 2,649 traces,
 /// one of them holding 148 traces from ten separate agent runs.
 ///
-/// A proxy process is in practice one developer's working session: it is started
-/// for the run and dies with it. That is a vastly better unit than "this
-/// workspace, this harness, forever".
+/// A LOCAL proxy process is in practice one developer's working session: it is
+/// started for the run and dies with it. That is a vastly better unit than "this
+/// workspace, this harness, forever". A SHARED gateway pod is not: one process
+/// serves every developer of a workspace for the pod's whole life, so its
+/// instance id would be a pod-sized bucket wearing a session's shape. The id
+/// says which it is — `proxy_<uuid>` for a local process, `gw_<uuid>` for a
+/// gateway (`INTUTIC_GATEWAY_ID` set, or `INTUTIC_GATEWAY_REQUIRE_VK=true`, the
+/// two signals `main.rs` already reads) — and the control plane's
+/// `agent_sessions_resolved` view classifies a `gw` instance as an aggregate
+/// bucket, never a run (TD-231, Wave 5.5).
 ///
 /// This is NOT a claim about who the agent is, and it deliberately does not touch
 /// `tool_history_scope` or `judge_session_scope`. Their scoping is load-bearing —
 /// read the doc comments there before changing anything near them.
 pub fn proxy_instance_id() -> &'static str {
-    PROXY_INSTANCE_ID.get_or_init(|| format!("proxy_{}", uuid::Uuid::new_v4()))
+    PROXY_INSTANCE_ID
+        .get_or_init(|| format!("{}{}", instance_id_prefix(is_shared_gateway_env()), uuid::Uuid::new_v4()))
+}
+
+/// `gw_` for a shared gateway, `proxy_` for a local process. Pure, so the mint
+/// above stays a one-line `OnceLock` and the choice is testable without one.
+pub(crate) fn instance_id_prefix(shared_gateway: bool) -> &'static str {
+    if shared_gateway { "gw_" } else { "proxy_" }
+}
+
+/// Whether this process is a shared multi-tenant gateway rather than one
+/// developer's local proxy: a self-hosted gateway identity is configured, or
+/// the gateway VK requirement is on. Both are read by `main.rs` at startup.
+pub(crate) fn is_shared_gateway_env() -> bool {
+    is_shared_gateway(
+        std::env::var("INTUTIC_GATEWAY_ID").ok().as_deref(),
+        std::env::var("INTUTIC_GATEWAY_REQUIRE_VK").ok().as_deref(),
+    )
+}
+
+/// The decision behind `is_shared_gateway_env`, over the two values, so it is
+/// testable without touching the process environment.
+pub(crate) fn is_shared_gateway(gateway_id: Option<&str>, require_vk: Option<&str>) -> bool {
+    gateway_id.map(|v| !v.trim().is_empty()).unwrap_or(false)
+        || require_vk.map(|v| v.trim().eq_ignore_ascii_case("true")).unwrap_or(false)
 }
 
 /// Scope key for the per-session tool history the sequence detectors read.
@@ -9622,11 +9653,38 @@ mod tests {
         assert_eq!(first, second, "the id must be stable for the process lifetime");
         let uuid = first
             .strip_prefix("proxy_")
+            .or_else(|| first.strip_prefix("gw_"))
             .expect("the id must be prefixed so it is recognisable in a log or a trace row");
         assert!(
             uuid::Uuid::parse_str(uuid).is_ok(),
             "the id must carry a uuid, not a guessable counter: {first}"
         );
+    }
+
+    /// A shared gateway pod's id must not wear a local process's shape: the
+    /// control plane classifies `proxy…` as a per-run session and `gw…` as an
+    /// aggregate bucket (TD-231, Wave 5.5), and the prefix is the only thing on
+    /// the trace that tells them apart.
+    #[test]
+    fn a_shared_gateway_mints_a_gw_prefix_and_a_local_proxy_does_not() {
+        assert_eq!(instance_id_prefix(false), "proxy_");
+        assert_eq!(instance_id_prefix(true), "gw_");
+        // Both prefixes survive the control plane's sanitiser (`[^a-z0-9]` stripped,
+        // first 32 kept) as distinguishable, short leaders: "proxy" and "gw".
+        let sanitise = |s: &str| s.chars().filter(|c| c.is_ascii_alphanumeric()).take(32).collect::<String>();
+        assert!(sanitise(&format!("{}{}", instance_id_prefix(true), uuid::Uuid::new_v4())).starts_with("gw"));
+        assert!(sanitise(&format!("{}{}", instance_id_prefix(false), uuid::Uuid::new_v4())).starts_with("proxy"));
+    }
+
+    /// The two gateway signals `main.rs` reads are the ones that flip the prefix;
+    /// nothing else does, and a blank or false value is not a gateway.
+    #[test]
+    fn the_gateway_prefix_follows_the_gateway_signals() {
+        assert!(!is_shared_gateway(None, None), "a local proxy has neither signal");
+        assert!(!is_shared_gateway(None, Some("false")), "REQUIRE_VK=false is not a gateway");
+        assert!(is_shared_gateway(None, Some("TRUE")));
+        assert!(is_shared_gateway(Some("gw_alpha"), None));
+        assert!(!is_shared_gateway(Some("  "), None), "a blank id is not an identity");
     }
 
     #[test]
