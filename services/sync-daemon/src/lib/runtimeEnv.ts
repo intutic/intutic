@@ -14,6 +14,7 @@
  *   INTUTIC_HOST=https://api.intutic.ai
  *   INTUTIC_API_KEY=sk-live-...
  *   INTUTIC_WORKSPACE_ID=ws_...
+ *   INTUTIC_VALKEY_URL=redis://127.0.0.1:6379   (only when a local Valkey is running)
  *
  * LLD #14 — Dual-path hook telemetry (WS-A1)
  *
@@ -45,6 +46,13 @@ export interface RuntimeEnvOptions {
   mcpProxyMode?: string
   /** WS-5 Q3: 'rewrite' | 'immutable' | 'alert-only' (default: 'rewrite') */
   bypassEnforcementTier?: string
+  /**
+   * The local Valkey the MCP governance proxies share their anomaly session
+   * window through (Wave 5.3, TD-437). Written as `INTUTIC_VALKEY_URL` only
+   * when the caller has one running; omitted otherwise, so a proxy never
+   * probes a Valkey nobody started.
+   */
+  valkeyUrl?: string
 }
 
 /**
@@ -65,6 +73,7 @@ export async function writeRuntimeEnv(opts: RuntimeEnvOptions): Promise<void> {
   const host = (opts.controlPlaneUrl ?? '').replace(/[\r\n]/g, '')
   const key = (opts.apiKey ?? '').replace(/[\r\n]/g, '')
   const wsId = (opts.workspaceId ?? '').replace(/[\r\n]/g, '')
+  const valkeyUrl = (opts.valkeyUrl ?? '').replace(/[\r\n]/g, '')
 
   const content = [
     `# Intutic hook runtime credentials — auto-generated. DO NOT EDIT.`,
@@ -77,6 +86,7 @@ export async function writeRuntimeEnv(opts: RuntimeEnvOptions): Promise<void> {
     `INTUTIC_MCP_FAIL_OPEN=${(opts.mcpProxyFailBehavior ?? 'open') !== 'closed' ? 'true' : 'false'}`,
     `INTUTIC_MCP_PROXY_MODE=${opts.mcpProxyMode ?? 'per-session'}`,
     `INTUTIC_BYPASS_TIER=${opts.bypassEnforcementTier ?? 'rewrite'}`,
+    ...(valkeyUrl ? [`INTUTIC_VALKEY_URL=${valkeyUrl}`] : []),
     ``,
     `# LLM proxy routing (uncomment when Intutic Rust proxy is running on port 8080)`,
     `# GOOSE_BASE_URL=http://127.0.0.1:8080`,

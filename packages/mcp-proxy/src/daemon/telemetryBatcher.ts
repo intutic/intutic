@@ -13,6 +13,7 @@ import fs    from 'node:fs'
 import path  from 'node:path'
 import os    from 'node:os'
 import { Redis } from 'ioredis'
+import { describeConnectionError } from '../valkeyErrors.js'
 import { createLogger } from '@intutic/logger'
 
 const logger = createLogger('mcp-proxy.telemetryBatcher')
@@ -29,20 +30,6 @@ const valkey = new Redis(VALKEY_URL, {
   maxRetriesPerRequest: 3,
 })
 
-/**
- * Renders a connection error as one line. Not just `err.message`: Node's
- * dual-stack connect reports a refused Valkey as an AggregateError holding one
- * child error per address family, and an AggregateError's own `.message` is the
- * empty string — so the most common outage there is logged `"err":""` and told
- * an operator nothing. Message text only, so a credentialed VALKEY_URL cannot
- * reach the log through an error property bag.
- */
-function describeConnectionError(err: Error): string {
-  if (err instanceof AggregateError && err.errors.length > 0) {
-    return err.errors.map((e: unknown) => (e instanceof Error ? e.message : String(e))).join('; ')
-  }
-  return err.message || err.name
-}
 
 valkey.on('error', (err: Error) => {
   logger.warn({ err: describeConnectionError(err) }, 'telemetryBatcher Valkey connection error')
