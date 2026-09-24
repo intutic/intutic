@@ -878,6 +878,8 @@ export async function runConnect(opts: {
         mcpProxyFailBehavior: syncConfig.settings?.mcpProxyFailBehavior,
         mcpProxyMode: syncConfig.settings?.mcpProxyMode,
         bypassEnforcementTier: syncConfig.settings?.bypassEnforcementTier,
+        // Shared by the MCP proxies for their session window (Wave 5.3, TD-437) — only when it is running.
+        valkeyUrl: valkeyResult.running ? valkeyUrl : undefined,
       })
     } catch (err) {
       log.warn(`Could not write runtime env file (non-fatal): ${err instanceof Error ? err.message : String(err)}`)
@@ -979,6 +981,8 @@ export async function runConnect(opts: {
       controlPlaneUrl,
       apiKey: safeCreds.apiKey,
       workspaceId: safeCreds.workspaceId,
+      // Shared by the MCP proxies for their session window (Wave 5.3, TD-437) — only when it is running.
+      valkeyUrl: valkeyResult.running ? valkeyUrl : undefined,
     })
   } catch (err) {
     log.warn(`Could not write runtime env file (non-fatal): ${err instanceof Error ? err.message : String(err)}`)

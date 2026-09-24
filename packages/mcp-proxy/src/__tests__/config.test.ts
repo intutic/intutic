@@ -68,6 +68,39 @@ describe('loadConfig', () => {
     expect(config.realServerCommand).toEqual(['node', 'server.js', '--port', '8080'])
   })
 
+  it('reads INTUTIC_VALKEY_URL from runtime.env, lets the environment win, and has no default (Wave 5.3)', async () => {
+    // The test runner itself may carry VALKEY_URL (the docker stack); isolate.
+    const saved = { VALKEY_URL: process.env['VALKEY_URL'], INTUTIC_VALKEY_URL: process.env['INTUTIC_VALKEY_URL'] }
+    delete process.env['VALKEY_URL']
+    delete process.env['INTUTIC_VALKEY_URL']
+    try {
+      await node_fs.writeFile(runtimeEnvPath, 'INTUTIC_WORKSPACE_ID=ws-test-1234\nINTUTIC_VALKEY_URL=redis://127.0.0.1:6390\n', 'utf-8')
+      const fromFile = await loadConfig(['--', 'node', 'server.js'])
+      expect(fromFile.valkeyUrl).toBe('redis://127.0.0.1:6390')
+      expect(fromFile.sessionScope, 'a wrapped proxy has a parent to share with').toMatch(/^ws-test-1234:mcp:/)
+
+      process.env['VALKEY_URL'] = 'redis://env-host:6379'
+      expect((await loadConfig(['--', 'node', 'server.js'])).valkeyUrl).toBe('redis://env-host:6379')
+      delete process.env['VALKEY_URL']
+
+      await node_fs.writeFile(runtimeEnvPath, 'INTUTIC_WORKSPACE_ID=ws-test-1234\n', 'utf-8')
+      expect((await loadConfig(['--', 'node', 'server.js'])).valkeyUrl, 'a stdio proxy must not probe a Valkey nobody configured').toBeUndefined()
+    } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k]
+        else process.env[k] = v
+      }
+    }
+  })
+
+  it('falls back to INTUTIC_HOST — the key the sync daemon actually writes — for the control plane URL (TD-490)', async () => {
+    await node_fs.writeFile(runtimeEnvPath, 'INTUTIC_HOST=https://api.example.test\nINTUTIC_WORKSPACE_ID=ws-test-1234\n', 'utf-8')
+    expect((await loadConfig(['--', 'node', 'server.js'])).controlPlaneUrl).toBe('https://api.example.test')
+
+    await node_fs.writeFile(runtimeEnvPath, 'INTUTIC_HOST=https://api.example.test\nINTUTIC_CONTROL_PLANE_URL=https://explicit.example.test\n', 'utf-8')
+    expect((await loadConfig(['--', 'node', 'server.js'])).controlPlaneUrl, 'the explicit key still wins').toBe('https://explicit.example.test')
+  })
+
   it('defaults failOpen to true when not specified', async () => {
     const testEnvContent = [
       'INTUTIC_WORKSPACE_ID=ws-test-1234',
