@@ -103,8 +103,10 @@ export class ToolCallInterceptor {
    * CURRENT attempt, so existing consumers keyed on `tool_blocked` must see
    * it, exactly like every other new block reason in this package.
    */
-  private applyReaskLadder(key: string, baseReason: string, toolName: string, toolInput: unknown): Decision {
-    const attempts = this.session.incrReaskAttempt(key)
+  private async applyReaskLadder(key: string, baseReason: string, toolName: string, toolInput: unknown): Promise<Decision> {
+    // Shared across the session's sibling proxy processes when a session
+    // store is configured (Wave 5.3); the per-process counter otherwise.
+    const attempts = await this.session.incrReaskAttemptShared(key)
     if (attempts > REASK_MAX_ATTEMPTS) {
       const hardenedReason =
         `${baseReason} — hardened to an unconditional block after ${REASK_MAX_ATTEMPTS} reask ` +
@@ -298,9 +300,14 @@ export class ToolCallInterceptor {
     // instead. Position: after injection, before WASM (Phase 3, not yet
     // built) and allow.
     const anomalyMode: AnomalyMode = this.policy.getAnomalyMode() ?? this.anomalyModeDefault
-    if (anomalyMode !== 'off') {
+    // The session window — the shared one across this session's sibling
+    // proxy processes when a store is configured (Wave 5.3, TD-437), the
+    // per-process one otherwise. One round trip at most per tools/call, and
+    // none when nothing below would read it.
+    const window = anomalyMode !== 'off' || this.wasmRunner ? await this.session.loadWindow(toolName) : undefined
+    if (anomalyMode !== 'off' && window) {
       try {
-        const prospective = this.session.prospectiveSequence(toolName)
+        const prospective = window.prospective
         const findings = evaluateSequenceDetectors(prospective, toolName, toolInput)
         corroboratingDetectorsForContext = findings.length
         const overrides = { ...this.anomalyOverridesDefault, ...this.policy.getAnomalyOverrides() }
@@ -330,7 +337,7 @@ export class ToolCallInterceptor {
           if (effective === 'reask') {
             // Keyed per-detector-id, independent of every other detector's
             // (and every WASM rule's — see applyReaskLadder) own counter.
-            return this.applyReaskLadder(finding.detectorId, finding.reason, toolName, toolInput)
+            return await this.applyReaskLadder(finding.detectorId, finding.reason, toolName, toolInput)
           }
 
           // 'steer': report only. Findings are sorted most-severe-first
@@ -362,8 +369,8 @@ export class ToolCallInterceptor {
           toolCallId: node_crypto.randomUUID(),
           toolName,
           toolArguments: toolInput,
-          toolSequence: this.session.prospectiveSequence(toolName),
-          callsLast60s: this.session.callsInLastMs(),
+          toolSequence: window?.prospective ?? this.session.prospectiveSequence(toolName),
+          callsLast60s: window?.callsLast60s ?? this.session.callsInLastMs(),
           dlpFindingDescriptions: dlpFindingsForContext.map((f) => f.description),
           injectionFindings: injectionFindingsForContext,
           injectionSources: injectionSourcesForContext,
@@ -379,7 +386,7 @@ export class ToolCallInterceptor {
         if (verdict.code === 'reask') {
           // Keyed per-rule-id, independent of every anomaly detector's own
           // counter — see applyReaskLadder's doc comment.
-          return this.applyReaskLadder(`wasm:${verdict.ruleId}`, verdict.reason, toolName, toolInput)
+          return await this.applyReaskLadder(`wasm:${verdict.ruleId}`, verdict.reason, toolName, toolInput)
         }
         // 'allow': fall through.
       } catch (err) {

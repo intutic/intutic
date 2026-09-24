@@ -8,6 +8,7 @@
  */
 
 import * as node_fs from 'node:fs/promises'
+import { deriveSessionScope } from './sessionScope.js'
 import * as node_os from 'node:os'
 import * as node_path from 'node:path'
 
@@ -129,6 +130,20 @@ export interface ProxyConfig {
    * "fall through to the home default."
    */
   mcpWasmDir: string | undefined
+  /**
+   * The Valkey the session window is shared through (Wave 5.3, TD-437):
+   * `INTUTIC_VALKEY_URL` or `VALKEY_URL` from the environment, else
+   * `INTUTIC_VALKEY_URL` from runtime.env (written by `intutic connect` / the
+   * sync daemon when their local Valkey is running). No localhost default —
+   * a stdio proxy must not probe a Valkey nobody configured; absent means
+   * the per-process window, exactly as before.
+   */
+  valkeyUrl: string | undefined
+  /**
+   * The shared-window scope this process shares with its sibling proxies
+   * (`sessionScope.ts`); `undefined` = per-process window.
+   */
+  sessionScope: string | undefined
 }
 
 const DEFAULT_EVENTS_PATH = node_path.join(node_os.homedir(), '.intutic', 'events', 'hook-events.jsonl')
@@ -257,9 +272,15 @@ export async function loadConfig(argv: string[] = process.argv.slice(2)): Promis
   const runtimeEnv = await parseEnvFile(RUNTIME_ENV_PATH)
   const cli = parseCliArgs(argv)
 
+  // `INTUTIC_HOST` is what the sync daemon actually writes to runtime.env
+  // (`runtimeEnv.ts`) and what the hook scripts read. This loader read only
+  // `INTUTIC_CONTROL_PLANE_URL`, which nothing writes there, so every
+  // per-session proxy on a connected machine fetched policy from
+  // localhost:3001 unless the shell happened to export the variable (TD-490).
   const controlPlaneUrl =
     process.env['INTUTIC_CONTROL_PLANE_URL'] ??
     runtimeEnv['INTUTIC_CONTROL_PLANE_URL'] ??
+    runtimeEnv['INTUTIC_HOST'] ??
     'http://localhost:3001'
 
   const apiKey =
@@ -327,6 +348,12 @@ export async function loadConfig(argv: string[] = process.argv.slice(2)): Promis
       ? 'block'
       : 'warn'
 
+  const valkeyUrl =
+    (process.env['INTUTIC_VALKEY_URL'] ?? process.env['VALKEY_URL'] ?? runtimeEnv['INTUTIC_VALKEY_URL'] ?? '').trim() || undefined
+  // Derived here, in the already-async loader, so the proxy constructor stays
+  // synchronous and tests can hand a scope in directly.
+  const sessionScope = await deriveSessionScope(workspaceId)
+
   const rawAnomalyMode = process.env['INTUTIC_MCP_ANOMALY_MODE'] ?? runtimeEnv['INTUTIC_MCP_ANOMALY_MODE']
   const mcpAnomalyMode: 'enforce' | 'warn' | 'off' =
     rawAnomalyMode === 'warn' || rawAnomalyMode === 'off' ? rawAnomalyMode : 'enforce'
@@ -349,5 +376,7 @@ export async function loadConfig(argv: string[] = process.argv.slice(2)): Promis
     mcpAnomalyMode,
     mcpAnomalyOverrides: parseAnomalyOverrides(process.env['INTUTIC_MCP_ANOMALY_OVERRIDES']),
     mcpWasmDir: runtimeEnv['INTUTIC_WASM_LOCAL_DIR'] || undefined,
+    valkeyUrl,
+    sessionScope,
   }
 }

@@ -295,8 +295,8 @@ export async function startSyncLoop(options: SyncLoopOptions): Promise<void> {
   let trajectoryMonitor: TrajectoryMonitor | null = null
   let trajectorySubscriber: Redis | null = null
 
+  const valkeyUrl = process.env.VALKEY_URL ?? 'redis://127.0.0.1:6379'
   if ((process.env.VALKEY_URL || apiKey) && (await controlPlaneIsReachable(controlPlaneUrl))) {
-    const valkeyUrl = process.env.VALKEY_URL ?? 'redis://127.0.0.1:6379'
     trajectoryMonitor = new TrajectoryMonitor({
       valkeyUrl,
       controlPlaneUrl,
@@ -339,7 +339,10 @@ export async function startSyncLoop(options: SyncLoopOptions): Promise<void> {
   // Step 0: Write runtime env file (hook scripts source this for credentials)
   // Runs once at startup and then again on every iteration.
   try {
-    await writeRuntimeEnv({ controlPlaneUrl, apiKey, workspaceId })
+    // The Valkey URL rides along only when this loop is itself using one
+    // (the trajectory monitor connected): the MCP proxies share their session
+    // window through it (Wave 5.3, TD-437).
+    await writeRuntimeEnv({ controlPlaneUrl, apiKey, workspaceId, valkeyUrl: trajectoryMonitor ? valkeyUrl : undefined })
   } catch (err) {
     console.warn('[sync-daemon] Could not write runtime env file (non-fatal):', err)
   }
@@ -484,6 +487,7 @@ export async function startSyncLoop(options: SyncLoopOptions): Promise<void> {
           mcpProxyFailBehavior: result.settings?.mcpProxyFailBehavior,
           mcpProxyMode: result.settings?.mcpProxyMode,
           bypassEnforcementTier: result.settings?.bypassEnforcementTier,
+          valkeyUrl: trajectoryMonitor ? valkeyUrl : undefined,
         })
         // Same reasoning as Step 0b–0d: policy rides the sync cycle, not the
         // config version.
