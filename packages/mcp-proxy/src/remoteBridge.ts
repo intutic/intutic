@@ -202,6 +202,15 @@ export async function runRemoteProxy(config: ProxyConfig): Promise<void> {
     shutdown('stdin_closed')
   })
 
+  // Readiness, for whatever supervises this process: the remote transport is
+  // connected, the policy refresh is running and stdin is being read. A
+  // harness never waits for this — stdin is buffered, so a message written
+  // before this line is still served — but anything that budgets per-request
+  // latency (remote-bridge.test.ts's harness) must not charge this process's
+  // own boot to its first request: node start-up plus this module graph is
+  // ~200 ms idle and seconds on a loaded CI runner, all of it before here.
+  log.info({ action: 'remote_bridge_ready' }, 'MCP governance remote bridge ready')
+
   // Keep the process alive until `shutdown()` calls `process.exit()` — stdin
   // close, a signal, or the remote transport closing unexpectedly.
   await new Promise<never>(() => {})
