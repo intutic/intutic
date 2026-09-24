@@ -60,7 +60,7 @@ import { watch } from 'chokidar'
 // silenced exactly this, at the cost of also erasing the instance type.)
 import { Redis } from 'ioredis'
 import { TrajectoryMonitor } from './trajectoryMonitor.js'
-import { collectAgentReport, reportAgent, type AgentReport } from './agentReporter.js'
+import { collectAgentReport, reportAgent, fetchLocalProxyInstanceId, type AgentReport } from './agentReporter.js'
 import { startHarnessSession, endAllOpenSessions } from './sessionReporter.js'
 import type { TraceEvent } from './trajectoryMonitor.js'
 
@@ -759,6 +759,12 @@ export async function runSyncIteration(ctx: IterationContext): Promise<SyncResul
   // `services/control-plane` itself, so this publicly-mirrored module still
   // never imports from the enterprise-only service.
   const harnessGovernanceInputs: Partial<Record<HarnessType, GovernanceCoverageInputs>> = {}
+  // The local proxy's instance id, read once per iteration (not per harness):
+  // step 5c registers each harness's git/task context onto that process's own
+  // session row (TD-231, Wave 5.6). `null` — no local proxy, or a shared
+  // gateway — keeps the `ses_` fallback. Skipped when there is no harness to
+  // report, so a workspace with no SOP targets never probes the proxy.
+  const proxyInstanceId = harnesses.length > 0 ? await fetchLocalProxyInstanceId() : null
   for (const harness of harnesses) {
     const filename = HARNESS_FILES[harness]
     const configSynced = filename
@@ -787,16 +793,18 @@ export async function runSyncIteration(ctx: IterationContext): Promise<SyncResul
       alreadyEmitted: skillFlaggedThisCycle,
     })
 
-    // 5c. Open a real session for the harness (once per daemon run — the
-    // reporter dedupes). This is what switches on branch/commit capture and
-    // the task-context cascade; without it sessions only ever existed as
-    // server-minted synthetic rows.
+    // 5c. Report the harness session (once per harness per proxy process —
+    // the reporter dedupes). This is what switches on branch/commit capture
+    // and the task-context cascade. With a local proxy the context lands on
+    // the proxy's own row, the one its traces are filed under; without one a
+    // `ses_` row is opened (see sessionReporter.ts).
     await startHarnessSession({
       controlPlaneUrl,
       apiKey,
       workspaceId,
       harnessType: harness,
       workspaceRoot,
+      ...(proxyInstanceId ? { proxyInstanceId } : {}),
     })
   }
 

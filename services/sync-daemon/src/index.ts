@@ -15,7 +15,7 @@
 
 export { startSyncLoop, syncOfflineTraces, refreshGateCaches, localHoldTokensFor } from './syncLoop.js'
 
-export { collectAgentReport, reportAgent } from './agentReporter.js'
+export { collectAgentReport, reportAgent, fetchLocalProxyInstanceId } from './agentReporter.js'
 export { startHarnessSession, endAllOpenSessions, readGitInfo } from './sessionReporter.js'
 export type { SyncLoopOptions, SyncResult } from './syncLoop.js'
 
