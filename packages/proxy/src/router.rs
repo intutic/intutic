@@ -6,6 +6,7 @@
 //! - POST /v1/responses          (OpenAI Responses API — Codex CLI)
 //! - POST /v1beta/models/:model  (Gemini v1beta — Antigravity)
 //! - GET  /health                (Health check)
+//! - GET  /intutic/instance      (This process's instance id — loopback only)
 
 use std::net::SocketAddr;
 
@@ -55,6 +56,16 @@ pub fn build_router(state: AppState) -> Router {
         // `/health` and `/intutic/egress` above, this number grows with the
         // developer's actual usage, and the listener binds `0.0.0.0`.
         .route("/intutic/spend", get(spend_status))
+        // This process's `proxy_instance_id` (TD-231, Wave 5.6). The sync
+        // daemon reads it over loopback so it can register the session row
+        // the control plane derives for this process and put the workspace's
+        // git/task context on it — the row the traces land on. Loopback-only
+        // like `/intutic/spend`: the id is not a secret (every trace carries
+        // it), but the listener binds `0.0.0.0`, and a LAN peer holding the
+        // workspace key could otherwise write its own branch onto a
+        // teammate's row. Not folded into `/health`, which load balancers
+        // and readiness probes hit unauthenticated.
+        .route("/intutic/instance", get(instance_status))
         // Sandbox attestation callback (LLD #63 §6, TD-333). A `--sandbox`
         // container's firewall permits egress ONLY to this proxy — it cannot
         // reach the control plane directly — so this is the one path a
@@ -167,6 +178,32 @@ async fn spend_status(
             "enforced": crate::proxy::local_budget_enforced(),
         })),
     )
+}
+
+/// The body `GET /intutic/instance` answers with. Pure, so the shape is
+/// unit-tested without a listener: the id carries the prefix `proxy_instance_id`
+/// mints (`proxy_` for a local process, `gw_` for a shared gateway) and
+/// `shared_gateway` says the same thing as a boolean, so a reader never has to
+/// parse the prefix to know whether the row behind this id is one developer's
+/// session or a pod-sized aggregate (`LEGACY_BUCKET` in the control plane).
+fn instance_body() -> serde_json::Value {
+    json!({
+        "proxy_instance_id": crate::proxy::proxy_instance_id(),
+        "shared_gateway": crate::proxy::is_shared_gateway_env(),
+    })
+}
+
+/// `GET /intutic/instance` — this process's instance id, loopback-only.
+async fn instance_status(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+) -> impl axum::response::IntoResponse {
+    if !spend_peer_allowed(&addr) {
+        return (
+            StatusCode::FORBIDDEN,
+            axum::Json(json!({"error": "loopback only"})),
+        );
+    }
+    (StatusCode::OK, axum::Json(instance_body()))
 }
 
 /// `GET /intutic/probes` — the last SCHEDULED guard-liveness run, loopback-only.
@@ -517,5 +554,37 @@ mod run_probes_tests {
         assert_eq!(body["total"], recorded.verdicts.len());
         assert!(body.get("failed").is_some_and(|v| v.is_number()));
         assert!(body.get("ran_at").is_some_and(|v| v.is_number()));
+    }
+}
+
+#[cfg(test)]
+mod instance_status_tests {
+    use super::*;
+
+    #[test]
+    fn the_body_carries_the_minted_id_and_the_matching_gateway_flag() {
+        let body = instance_body();
+        let id = body["proxy_instance_id"].as_str().expect("id is a string");
+        let shared = body["shared_gateway"].as_bool().expect("flag is a bool");
+        // Whatever this test process's env says, the two fields must agree:
+        // the daemon refuses to register a `gw_` id, and it must be able to
+        // trust either field alone.
+        assert_eq!(id, crate::proxy::proxy_instance_id());
+        assert_eq!(shared, crate::proxy::is_shared_gateway_env());
+        assert_eq!(id.starts_with("gw_"), shared);
+        assert!(id.starts_with("proxy_") || id.starts_with("gw_"), "{id}");
+    }
+
+    #[test]
+    fn the_route_is_behind_the_same_loopback_guard_as_spend() {
+        // The guard is shared, not copied: a LAN peer is refused here for the
+        // reason `spend_peer_allowed` documents.
+        let src = include_str!("router.rs");
+        let handler = src
+            .split("async fn instance_status(")
+            .nth(1)
+            .expect("instance_status handler present");
+        let head = &handler[..handler.find("instance_body()").expect("handler answers with instance_body")];
+        assert!(head.contains("spend_peer_allowed(&addr)"), "instance_status must check the peer before answering");
     }
 }
