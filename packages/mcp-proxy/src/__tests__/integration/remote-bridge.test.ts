@@ -251,6 +251,18 @@ interface ProxyHarness {
   stop: () => Promise<void>
 }
 
+/**
+ * How long a freshly spawned proxy may take to log `remote_bridge_ready`.
+ *
+ * Separate from the per-request budget on purpose. Node start-up plus the
+ * proxy's module graph is ~200 ms on an idle laptop and several seconds on a
+ * hosted runner where `turbo test` runs every package's vitest at once (this
+ * file measured 30–49 s there against under 4 s locally). Charging that boot
+ * to the first request is what made the initialize round-trip and every
+ * other first-request-after-spawn case flake at 5 s.
+ */
+const STARTUP_BUDGET_MS = 20_000
+
 /** Spawns `dist/index.js` (the built proxy) exactly the way a harness would
  *  — piped stdio, args after the binary path — and gives back a small
  *  request/response driver over its stdout/stdin plus the raw stderr log
@@ -264,6 +276,28 @@ function startProxy(args: string[], env: NodeJS.ProcessEnv): ProxyHarness {
   const buffered = new Map<string | number, Record<string, unknown>>()
   const waiters = new Map<string | number, (v: Record<string, unknown>) => void>()
   const stderrLines: string[] = []
+
+  // Settles when the bridge logs `remote_bridge_ready` (remoteBridge.ts): the
+  // remote transport is connected and stdin is being read. Rejects if the
+  // process exits first or the startup budget runs out, naming the stderr
+  // tail either way so a boot failure reads as one, not as a slow request.
+  let markReady: () => void = () => {}
+  let failReady: (err: Error) => void = () => {}
+  const ready = new Promise<void>((resolve, reject) => {
+    markReady = resolve
+    failReady = reject
+  })
+  // A harness that never awaits a response (none today) must not surface an
+  // unhandled rejection from a settled-late `ready`.
+  ready.catch(() => {})
+  const startupTimer = setTimeout(
+    () => failReady(new Error(`proxy did not log remote_bridge_ready within ${STARTUP_BUDGET_MS}ms; stderr: ${stderrLines.slice(-5).join(' | ')}`)),
+    STARTUP_BUDGET_MS,
+  )
+  child.once('exit', (code, signal) => {
+    clearTimeout(startupTimer)
+    failReady(new Error(`proxy exited (code=${String(code)} signal=${String(signal)}) before remote_bridge_ready; stderr: ${stderrLines.slice(-5).join(' | ')}`))
+  })
 
   const outRl = readline.createInterface({ input: child.stdout, terminal: false })
   outRl.on('line', (line) => {
@@ -285,13 +319,23 @@ function startProxy(args: string[], env: NodeJS.ProcessEnv): ProxyHarness {
   })
 
   const errRl = readline.createInterface({ input: child.stderr, terminal: false })
-  errRl.on('line', (line) => { stderrLines.push(line) })
+  errRl.on('line', (line) => {
+    stderrLines.push(line)
+    if (line.includes('"remote_bridge_ready"')) {
+      clearTimeout(startupTimer)
+      markReady()
+    }
+  })
 
   function send(msg: unknown): void {
     child.stdin.write(JSON.stringify(msg) + '\n')
   }
 
-  function waitForResponse(id: string | number, timeoutMs = 5000): Promise<Record<string, unknown>> {
+  async function waitForResponse(id: string | number, timeoutMs = 5000): Promise<Record<string, unknown>> {
+    // The request budget starts when the bridge is ready, not when it was
+    // spawned — see STARTUP_BUDGET_MS. Any message already sent is sitting in
+    // the child's stdin buffer and is served the moment it starts reading.
+    await ready
     const existing = buffered.get(id)
     if (existing) {
       buffered.delete(id)
