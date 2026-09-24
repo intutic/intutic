@@ -200,8 +200,8 @@ pub(crate) fn loop_reviewed_key(loop_run_id: &str) -> String {
 /// report `LoopDetected`, four of which reask, so `ConsecutiveRepeat`,
 /// `PingPong`, `RecursionDepth` and `FanOutExplosion` shared one three-strike
 /// budget. Two spins plus one wide fan-out was a hard block.
-fn reask_attempt_key(session_id: &str, detector_id: &str) -> String {
-    format!("intutic:reask:{}:{}", session_id, detector_id)
+fn reask_attempt_key(scope: &str, detector_id: &str) -> String {
+    format!("intutic:reask:{}:{}", scope, detector_id)
 }
 
 /// Lifetime of a reask allowance.
@@ -869,9 +869,9 @@ impl LocalStore for ValkeyStore {
             .await;
     }
 
-    async fn incr_reask_attempt(&self, session_id: &str, detector_id: &str) -> u32 {
+    async fn incr_reask_attempt(&self, scope: &str, detector_id: &str) -> u32 {
         let mut conn = self.conn();
-        let key = reask_attempt_key(session_id, detector_id);
+        let key = reask_attempt_key(scope, detector_id);
 
         let n: Result<i64, redis::RedisError> = redis::cmd("INCR")
             .arg(&key)
@@ -882,7 +882,7 @@ impl LocalStore for ValkeyStore {
             // Counter unreachable. Report "first time" — see the trait doc: the
             // alternative direction turns a cache outage into blocked agents.
             tracing::warn!(
-                session_id = %session_id,
+                scope = %scope,
                 detector = %detector_id,
                 "Reask counter unavailable; treating this as the first attempt"
             );

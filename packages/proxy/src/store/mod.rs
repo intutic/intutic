@@ -846,7 +846,12 @@ pub trait LocalStore: Send + Sync + 'static {
     /// "escalate" — would turn a Valkey outage into a wave of blocked agents.
     /// Under-counting means an agent gets more chances than configured when the
     /// cache is down, which is the harmless direction.
-    async fn incr_reask_attempt(&self, session_id: &str, detector_id: &str) -> u32;
+    ///
+    /// `scope` MUST be `proxy::tool_history_scope`'s output — the
+    /// workspace-qualified key — never the raw `x-session-id` header. No
+    /// harness sets that header, so it was "unknown" for all traffic and the
+    /// ladder was one budget shared by every tenant (TD-489).
+    async fn incr_reask_attempt(&self, scope: &str, detector_id: &str) -> u32;
 
     /// A loop run's cost so far, and the ceiling it was started with.
     ///

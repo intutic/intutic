@@ -3405,9 +3405,14 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 //
                 // `detector_id` is stamped by `evaluate_all`, so a finding that
                 // reached here always carries one.
+                // Keyed on the tool-history SCOPE, not the raw `x-session-id`
+                // header: no harness sets that header, so it was "unknown" for
+                // all traffic and `intutic:reask:unknown:{detector}` was one
+                // ladder shared by every tenant — workspace A's reasks
+                // escalated workspace B's to a 403 (TD-489).
                 let attempts = state
                     .store
-                    .incr_reask_attempt(&session_id, r.detector_id)
+                    .incr_reask_attempt(&tool_scope_id, r.detector_id)
                     .await;
 
                 if attempts >= crate::plugins::anomaly::REASK_MAX_ATTEMPTS {
@@ -3530,7 +3535,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 if !shadow_enforcement =>
             {
                 let rule_id = policy_id.unwrap_or_else(|| "wasm".to_string());
-                let attempts = state.store.incr_reask_attempt(&session_id, &rule_id).await;
+                // Same scope as the anomaly ladder above (TD-489).
+                let attempts = state.store.incr_reask_attempt(&tool_scope_id, &rule_id).await;
 
                 if attempts >= crate::plugins::anomaly::REASK_MAX_ATTEMPTS {
                     tracing::warn!(
@@ -9367,14 +9373,14 @@ mod tests {
         let s = crate::store::MemoryStore::new();
 
         assert_eq!(
-            s.incr_reask_attempt("ses_a", "LOOP_DETECTED").await,
+            s.incr_reask_attempt("ws_a:ses_a", "LOOP_DETECTED").await,
             1,
             "the first trip must report 1, not 0 — the hot path compares this \
              against REASK_MAX_ATTEMPTS directly",
         );
-        assert_eq!(s.incr_reask_attempt("ses_a", "LOOP_DETECTED").await, 2);
+        assert_eq!(s.incr_reask_attempt("ws_a:ses_a", "LOOP_DETECTED").await, 2);
         assert_eq!(
-            s.incr_reask_attempt("ses_a", "LOOP_DETECTED").await,
+            s.incr_reask_attempt("ws_a:ses_a", "LOOP_DETECTED").await,
             REASK_MAX_ATTEMPTS,
             "the third trip must hit the ceiling and escalate to a block",
         );
@@ -9396,18 +9402,18 @@ mod tests {
     ///
     /// Now keyed on `detector_id`, and the case that matters is asserted below.
     #[tokio::test]
-    async fn reask_allowances_are_per_detector_and_per_session() {
+    async fn reask_allowances_are_per_detector_and_per_scope() {
         use crate::store::LocalStore;
         let s = crate::store::MemoryStore::new();
 
-        assert_eq!(s.incr_reask_attempt("ses_a", "consecutive_repeat").await, 1);
-        assert_eq!(s.incr_reask_attempt("ses_a", "consecutive_repeat").await, 2);
+        assert_eq!(s.incr_reask_attempt("ws_a:ses_a", "consecutive_repeat").await, 1);
+        assert_eq!(s.incr_reask_attempt("ws_a:ses_a", "consecutive_repeat").await, 2);
 
         // THE CASE THE OLD KEY GOT WRONG. `fan_out_explosion` and
         // `consecutive_repeat` both report LOOP_DETECTED. Under the old key this
         // returned 3 and blocked the request.
         assert_eq!(
-            s.incr_reask_attempt("ses_a", "fan_out_explosion").await,
+            s.incr_reask_attempt("ws_a:ses_a", "fan_out_explosion").await,
             1,
             "two detectors sharing an AnomalyKind must not share an allowance — \
              spinning twice then fanning out wide is two corrections, not three \
@@ -9415,14 +9421,58 @@ mod tests {
         );
 
         assert_eq!(
-            s.incr_reask_attempt("ses_a", "prompt_injection").await,
+            s.incr_reask_attempt("ws_a:ses_a", "prompt_injection").await,
             1,
             "a detector with its own kind, likewise",
         );
         assert_eq!(
-            s.incr_reask_attempt("ses_b", "consecutive_repeat").await,
+            s.incr_reask_attempt("ws_a:ses_b", "consecutive_repeat").await,
             1,
             "a different session starts its own allowance",
+        );
+    }
+
+    /// The scope is the WORKSPACE-qualified tool-history scope, never the raw
+    /// `x-session-id` header. No harness sets that header, so it was
+    /// "unknown" for all traffic and both call sites keyed the ladder on it:
+    /// `intutic:reask:unknown:{detector}` was one three-strike budget shared
+    /// by every tenant of the proxy — workspace A's two reasks made workspace
+    /// B's first trip a hard block (TD-489).
+    #[tokio::test]
+    async fn reask_allowances_are_never_shared_across_workspaces() {
+        use crate::store::LocalStore;
+        let s = crate::store::MemoryStore::new();
+        let alpha = tool_history_scope("ws_alpha", "unknown", None, None, None);
+        let beta = tool_history_scope("ws_beta", "unknown", None, None, None);
+        assert_ne!(alpha, beta, "two workspaces with no session header must not share a scope");
+
+        assert_eq!(s.incr_reask_attempt(&alpha, "consecutive_repeat").await, 1);
+        assert_eq!(s.incr_reask_attempt(&alpha, "consecutive_repeat").await, 2);
+        assert_eq!(s.incr_reask_attempt(&alpha, "consecutive_repeat").await, 3);
+        assert_eq!(
+            s.incr_reask_attempt(&beta, "consecutive_repeat").await,
+            1,
+            "workspace beta's first trip must be its first, whatever alpha did",
+        );
+    }
+
+    /// The call sites, pinned by source: the tool-history fix (`tool_history_scope`)
+    /// missed the reask ladder once already, and a test over `MemoryStore` cannot
+    /// see which variable the hot path passes.
+    #[test]
+    fn reask_ladders_are_keyed_on_the_tool_history_scope_at_both_call_sites() {
+        let src = include_str!("proxy.rs");
+        // Assembled at runtime so this test's own text is not a match.
+        let scoped = ["incr_reask_attempt(&", "tool_scope_id"].concat();
+        let raw = ["incr_reask_attempt(&", "session_id"].concat();
+        assert_eq!(
+            src.matches(scoped.as_str()).count(),
+            2,
+            "both the anomaly and the WASM reask ladders must key on tool_scope_id",
+        );
+        assert!(
+            !src.contains(raw.as_str()),
+            "a reask ladder keyed on the raw x-session-id header is shared across tenants (TD-489)",
         );
     }
 

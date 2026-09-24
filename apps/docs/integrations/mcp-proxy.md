@@ -105,6 +105,32 @@ variants:
 4. **SOP policy rules** — workspace-defined `block` / `warn` / `require_approval` rules matched against tool name and serialized arguments. `require_approval` is treated as `block` in this headless proxy (there is no interactive approval UI in the loop).
 5. **Prompt-injection scan** (request direction) — see [Prompt-injection scanning](#prompt-injection-scanning) below.
 
+### Anomaly-detection session scope
+
+The sequence detectors (`consecutive_repeat`, `ping_pong_cycle`, `landmark_cycle`,
+`tool_diversity_collapse`) and the reask ladder read a rolling window of the
+session's tool calls. `intutic connect` wraps **each** MCP server with its own
+proxy process, so a harness session with three servers runs three proxies — and
+until Wave 5.3 each kept its own window, so a loop that alternated between two
+servers was invisible and a reask budget reset per server.
+
+The window is now shared through the local Valkey `intutic connect` runs: the
+daemon writes `INTUTIC_VALKEY_URL` into `~/.intutic/env/runtime.env` when its
+Valkey is up, and every proxy of one harness session — identified by the
+harness process that spawned them (`<workspace>:mcp:<parent pid>:<start token>`;
+`INTUTIC_MCP_SESSION_SCOPE` overrides it) — reads and appends the same
+60-entry sequence, the same 60-second call window and the same reask counters
+(one hour, set when a counter is created). One Valkey round trip per
+`tools/call`, and none when the window is not shared.
+
+It is never a hard dependency: with no URL configured, with Valkey down, or
+when a read takes longer than 200 ms, the proxy uses its own in-process window
+— exactly the behaviour before Wave 5.3. Standalone `intutic start` writes no
+runtime env, so sharing there needs `VALKEY_URL` in the harness's environment.
+Tool names are shared bare (the `tool_sequence` WASM rules see), so two servers
+that both expose a tool called `search` count as one; `session_id` in the WASM
+context stays per process.
+
 An empty allowlist means unrestricted at every allowlist step above — never
 "permit nothing." A control-plane outage triggers **fail-open** behavior by
 default (`mcpProxyFailBehavior`): DLP/SOP/TOFU checks that error out allow the

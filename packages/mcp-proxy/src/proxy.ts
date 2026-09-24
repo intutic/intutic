@@ -38,6 +38,7 @@ import { redactText as redactMcpText } from './dlp.js'
 import { scanText, injectionSeverity, setDynamicInjectionPatterns, type InjectionSource } from './injection.js'
 import { toolPoisoning, dlpEscalation } from './anomaly/index.js'
 import { SessionState } from './session.js'
+import { ValkeySessionStore, type SharedSessionStore } from './sessionStore.js'
 import { WasmRunner } from './wasm/runner.js'
 import { checkTofu, decideTofuAction } from './tofu.js'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
@@ -458,15 +459,18 @@ export class McpGovernanceProxy {
   private readonly emitter: GovernanceEmitter
   private readonly interceptor: ToolCallInterceptor
   /**
-   * Phase 2's in-process session state — the tool-call sequence and
-   * per-detector reask counters. ONE instance per proxy process (see
-   * session.ts's doc comment on why that scope is correct, not a cut
-   * corner), shared with the interceptor (for detection + reask counting),
-   * `handleHarnessLine` (for post-decision recording), and this class's own
-   * `handleServerLine` (for caching the post-curation tools/list the
-   * tool_poisoning detector reads).
+   * Phase 2's session state — the tool-call sequence and per-detector reask
+   * counters. ONE instance per proxy process, shared with the interceptor
+   * (for detection + reask counting), `handleHarnessLine` (for post-decision
+   * recording), and this class's own `handleServerLine` (for caching the
+   * post-curation tools/list the tool_poisoning detector reads). Since Wave
+   * 5.3 (TD-437) it is also shared ACROSS the session's sibling proxy
+   * processes through `sessionStore` when a Valkey URL is configured — see
+   * session.ts's module doc.
    */
   private readonly session: SessionState
+  /** The Valkey-backed shared window, when `config.valkeyUrl` is set and this is not the standalone entry. */
+  private readonly sessionStore: SharedSessionStore | undefined
   /**
    * Phase 3's WASM custom-rule runner — owns the one dedicated
    * `worker_threads` Worker and the `~/.intutic/wasm/` directory loader.
@@ -493,7 +497,17 @@ export class McpGovernanceProxy {
       config.mcpProxyMode
     )
 
-    this.session = new SessionState()
+    // The standalone `intutic` entry fronts no real server and records no
+    // calls worth sharing; every wrapped server gets the shared window.
+    this.sessionStore =
+      config.valkeyUrl && !config.standalone ? new ValkeySessionStore(config.valkeyUrl) : undefined
+    this.session = new SessionState({ scope: config.sessionScope, store: this.sessionStore })
+    log.info(
+      { action: 'session_scope', scope: config.sessionScope ?? null, shared: Boolean(this.sessionStore && config.sessionScope) },
+      this.sessionStore && config.sessionScope
+        ? 'Anomaly session window shared with sibling proxies through Valkey'
+        : 'Anomaly session window is per-process',
+    )
     this.wasmRunner = new WasmRunner(config.mcpWasmDir)
 
     this.interceptor = new ToolCallInterceptor(
@@ -566,6 +580,7 @@ export class McpGovernanceProxy {
     this.wasmWatch?.close()
     this.wasmWatch = null
     void this.wasmRunner.shutdown()
+    void this.sessionStore?.close()
   }
 
   /**

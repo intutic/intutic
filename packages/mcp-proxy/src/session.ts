@@ -1,29 +1,37 @@
 /**
- * session.ts — SessionState: in-process, per-proxy-process session state for
- * Phase 2 anomaly detection.
+ * session.ts — SessionState: a proxy process's anomaly session state, shared
+ * with its sibling processes through Valkey when one is configured.
  *
- * ## Scope: one process, one session, no cross-session persistence
+ * ## Scope: one harness session, several processes
  *
- * Each `McpGovernanceProxy` process fronts exactly one real MCP server for
- * exactly one harness session (the same fact `tofu.ts`'s module doc and
- * `config.ts`'s `serverName` field are built around). This class holds that
- * session's tool-call history and per-detector reask counters in a plain
- * object, in memory, for the lifetime of the process — there is no Valkey
- * key, no cross-session read, no persistence across a process restart. That
- * is a genuine v1 scope limit, not an oversight: the Rust LLM-traffic proxy's
- * anomaly plugin is a long-lived multi-tenant service with a Valkey-backed
- * rolling window (`tool_history_scope` in `proxy.rs`) shared across a
- * session's requests as they arrive at different proxy instances behind a
- * load balancer. This MCP proxy is a single stdio child process per session
- * — there is no second instance to share state with, so an in-process object
- * is both sufficient and correctly scoped, not a cut corner. Recorded as a TD
- * entry (see the Phase 2 report) so the limit is a decision on record, not a
- * silent gap discovered later.
+ * The sync daemon wraps EACH MCP server entry with its own `McpGovernanceProxy`
+ * process (`mcpAutoWrite.ts`'s `wrapWithProxy`, in both `per-session` and
+ * `daemon` mode), so one harness session runs one proxy per wrapped server.
+ * This class holds the tool-call sequence and the per-detector reask counters
+ * the anomaly detectors read. Until Wave 5.3 (TD-437) that state was
+ * per-process only — a cross-server ping-pong was invisible, a reask budget
+ * reset per server and per restart — and the module doc claimed there was
+ * "no second instance to share state with", which was never true of the
+ * wrapping the daemon writes.
+ *
+ * Now, when `SessionState` is given a scope (`sessionScope.ts`: the workspace
+ * plus the parent harness process) and a store (`sessionStore.ts`: the
+ * Rust proxy's Valkey window shape under its own namespace), the sequence,
+ * the 60 s call window and the reask counters are read from and written to
+ * the shared window, so every sibling sees every sibling's calls. The
+ * in-process copy is still kept and is the fallback whenever the store is
+ * absent, not connected, slow or failing — never a hard dependency, and
+ * exactly today's behaviour in every one of those cases.
+ *
+ * Per process, deliberately: `toolsList` and `toolContractChanged` describe
+ * THIS process's server (TOFU pins per {workspace, server}), and `sessionId`
+ * is the random per-process id handed to WASM rules as `session_id`.
  *
  * @module
  */
 
 import * as node_crypto from 'node:crypto'
+import type { SharedSessionStore } from './sessionStore.js'
 
 /**
  * Ported from the Rust proxy's `TOOL_SEQUENCE_CAP` (referenced by
@@ -42,7 +50,33 @@ export interface ToolsListEntry {
 /** Rolling window Phase 3's `calls_last_60s` context field is computed over. */
 const CALLS_WINDOW_MS = 60_000
 
+export interface SessionStateOptions {
+  /** The shared-window scope (`sessionScope.ts`); absent = per-process only. */
+  scope?: string
+  /** The shared store; absent = per-process only. */
+  store?: SharedSessionStore
+}
+
+/** What `decide()` evaluates against: the sequence AS IF the candidate were next. */
+export interface SessionWindow {
+  prospective: readonly string[]
+  callsLast60s: number
+  /** Whether the shared window answered; `false` means the per-process copy was used. */
+  shared: boolean
+}
+
 export class SessionState {
+  /** The shared-window scope, when this process has one. */
+  readonly scope: string | undefined
+  private readonly store: SharedSessionStore | undefined
+  /** The most recent write-behind, so tests can await it before reading back. */
+  private lastWrite: Promise<unknown> = Promise.resolve()
+
+  constructor(opts: SessionStateOptions = {}) {
+    this.scope = opts.scope
+    this.store = opts.scope ? opts.store : undefined
+  }
+
   /**
    * A per-process identifier standing in for `RequestContext.session_id`
    * (Phase 3, `wasm/context.ts`) — this proxy has no wire-level session id
@@ -87,15 +121,63 @@ export class SessionState {
    */
   private toolsList: ToolsListEntry[] = []
 
-  /** Append a tool name to the rolling window, evicting the oldest past the cap. */
+  /**
+   * Append a tool name to the rolling window, evicting the oldest past the
+   * cap — locally always, and to the shared window as a write-behind when
+   * there is one (the tool-call path does not wait on it).
+   */
   recordCall(toolName: string): void {
+    const now = Date.now()
     this.sequence.push(toolName)
-    this.timestamps.push(Date.now())
+    this.timestamps.push(now)
     if (this.sequence.length > TOOL_SEQUENCE_CAP) {
       const drop = this.sequence.length - TOOL_SEQUENCE_CAP
       this.sequence.splice(0, drop)
       this.timestamps.splice(0, drop)
     }
+    if (this.store && this.scope) {
+      this.lastWrite = this.store.recordCall(this.scope, toolName, now).catch(() => false)
+    }
+  }
+
+  /**
+   * The window `decide()` evaluates against: the shared sequence plus the
+   * candidate when the shared window answers, else the per-process copy.
+   * `callsLast60s` excludes the candidate either way, matching what
+   * `callsInLastMs()` returns before the call is recorded.
+   */
+  async loadWindow(toolName: string): Promise<SessionWindow> {
+    if (this.store && this.scope) {
+      const snapshot = await this.store.readWindow(this.scope, Date.now(), CALLS_WINDOW_MS)
+      if (snapshot) {
+        const next = [...snapshot.sequence, toolName]
+        return {
+          prospective: next.length > TOOL_SEQUENCE_CAP ? next.slice(next.length - TOOL_SEQUENCE_CAP) : next,
+          callsLast60s: snapshot.callsLast60s,
+          shared: true,
+        }
+      }
+    }
+    return { prospective: this.prospectiveSequence(toolName), callsLast60s: this.callsInLastMs(), shared: false }
+  }
+
+  /**
+   * The reask ladder's counter, shared when the store answers. The local map
+   * is always bumped too, so a mid-ladder fallback keeps counting from where
+   * it was rather than restarting at one.
+   */
+  async incrReaskAttemptShared(key: string): Promise<number> {
+    const local = this.incrReaskAttempt(key)
+    if (this.store && this.scope) {
+      const shared = await this.store.incrReaskAttempt(this.scope, key)
+      if (shared !== undefined) return shared
+    }
+    return local
+  }
+
+  /** Awaits the most recent write-behind; tests only. */
+  async flush(): Promise<void> {
+    await this.lastWrite
   }
 
   /**

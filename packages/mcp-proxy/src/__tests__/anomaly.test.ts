@@ -275,6 +275,16 @@ describe('SessionState', () => {
     expect(s.incrReaskAttempt('ping_pong_cycle')).toBe(1) // independent counter
     expect(s.getReaskAttempts('consecutive_repeat')).toBe(2)
   })
+
+  it('loadWindow without a shared store is exactly the local prospective sequence and call count (Wave 5.3)', async () => {
+    const s = new SessionState()
+    s.recordCall('a')
+    s.recordCall('b')
+    const window = await s.loadWindow('c')
+    expect(window).toEqual({ prospective: s.prospectiveSequence('c'), callsLast60s: s.callsInLastMs(), shared: false })
+    expect(s.scope).toBeUndefined()
+    expect(await s.incrReaskAttemptShared('k')).toBe(s.getReaskAttempts('k'))
+  })
 })
 
 /**
