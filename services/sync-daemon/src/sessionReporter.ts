@@ -6,13 +6,29 @@
  * capture and the Jira/Linear/GitHub task-context cascade) had no production
  * caller: sessions only ever existed as synthetic `ssp_` rows minted
  * server-side. The daemon knows everything the route wants — workspace root,
- * harness, git branch and commit — so it opens one session per harness per
- * daemon run when the harness is first detected, and ends them all on
- * shutdown (PATCH /api/v1/sessions/:id/end).
+ * harness, git branch and commit — so it reports them once per harness per
+ * daemon run when the harness is first detected.
  *
- * Dedupe lives here (module state keyed workspace+harness), so callers —
- * `startSyncLoop`'s iteration as well as the CLI's inline connect loop — can
- * call `startHarnessSession` every iteration and only the first one POSTs.
+ * WHICH row it reports them onto (TD-231, Wave 5.6): when a local proxy is
+ * reachable, the caller passes that process's `proxyInstanceId` and the
+ * control plane puts the context on the proxy's OWN row — the
+ * `ssp_<ws>_<harness>_<instance>` session it derives for that process's
+ * traces, so the branch, the task and the cost sit on one row (AI intensity
+ * reads them together) and the hook gate's blocks resolve to the same row.
+ * That row's lifecycle stays the control plane's 30-minute idle rule; the
+ * daemon never ends it, because an externally started proxy keeps serving
+ * after the daemon stops and an ended row would vanish from Active Sessions
+ * and from the hook gate's resolver while traces still attach to it. A
+ * respawned proxy has a new instance id, so it gets a new row on the next
+ * iteration. Without an instance id (no local proxy, or a shared gateway —
+ * `fetchLocalProxyInstanceId` refuses a `gw_` id) the daemon opens a `ses_`
+ * STANDARD row as before and ends it on shutdown
+ * (PATCH /api/v1/sessions/:id/end).
+ *
+ * Dedupe lives here (module state keyed workspace+harness+instance), so
+ * callers — `startSyncLoop`'s iteration as well as the CLI's inline connect
+ * loop — can call `startHarnessSession` every iteration and only the first
+ * one POSTs. Git context is captured once per key, not on a branch switch.
  * Everything is best-effort: a dead control plane costs a warning, never the
  * sync loop.
  *
@@ -26,8 +42,16 @@ import type { HarnessType } from '@intutic/shared-types'
 
 const execFileP = promisify(execFile)
 
-/** sessionIds opened this daemon run, keyed `${workspaceId}:${harness}`. */
+/**
+ * sessionIds this daemon run opened AND owns the lifecycle of — the `ses_`
+ * rows `endAllOpenSessions` ends. Keyed `${workspaceId}:${harness}:`.
+ */
 const openSessions = new Map<string, string>()
+/**
+ * Proxy rows this run registered context onto, keyed
+ * `${workspaceId}:${harness}:${proxyInstanceId}`. Dedupe only — never ended.
+ */
+const registeredProxyRows = new Map<string, string>()
 /** Keys with a POST in flight or already attempted (success or not) — one try per run. */
 const attempted = new Set<string>()
 
@@ -57,8 +81,9 @@ export async function readGitInfo(workspaceRoot: string): Promise<GitInfo> {
 }
 
 /**
- * Open a session for a harness if this run has not already done so.
- * Returns the sessionId when one is open (new or previously created).
+ * Report a harness session once per run — onto the local proxy's own row when
+ * `proxyInstanceId` is given (see the module doc), else as a new `ses_` row.
+ * Returns the sessionId when one is known (new or previously created).
  */
 export async function startHarnessSession(opts: {
   controlPlaneUrl: string
@@ -67,9 +92,15 @@ export async function startHarnessSession(opts: {
   harnessType: HarnessType
   workspaceRoot: string
   agentRole?: string
+  /**
+   * The local proxy process's instance id (`fetchLocalProxyInstanceId`).
+   * Present: the context is registered onto that process's proxy row, which
+   * this module never ends. Absent: a `ses_` row, ended on shutdown.
+   */
+  proxyInstanceId?: string
 }): Promise<string | null> {
-  const key = `${opts.workspaceId}:${opts.harnessType}`
-  const existing = openSessions.get(key)
+  const key = `${opts.workspaceId}:${opts.harnessType}:${opts.proxyInstanceId ?? ''}`
+  const existing = opts.proxyInstanceId ? registeredProxyRows.get(key) : openSessions.get(key)
   if (existing) return existing
   if (attempted.has(key)) return null
   attempted.add(key)
@@ -83,6 +114,7 @@ export async function startHarnessSession(opts: {
         workspaceId: opts.workspaceId,
         harnessType: opts.harnessType,
         ...(opts.agentRole ? { agentRole: opts.agentRole } : {}),
+        ...(opts.proxyInstanceId ? { proxyInstanceId: opts.proxyInstanceId } : {}),
         ...git,
         reportedAt: newIso(),
       }),
@@ -94,7 +126,7 @@ export async function startHarnessSession(opts: {
     }
     const body = (await res.json()) as { sessionId?: string }
     if (body.sessionId) {
-      openSessions.set(key, body.sessionId)
+      ;(opts.proxyInstanceId ? registeredProxyRows : openSessions).set(key, body.sessionId)
       return body.sessionId
     }
     return null
@@ -107,10 +139,15 @@ export async function startHarnessSession(opts: {
   }
 }
 
-/** End every session this run opened. Called from shutdown paths. */
+/**
+ * End every `ses_` session this run opened. Called from shutdown paths. Proxy
+ * rows registered through `proxyInstanceId` are forgotten, not ended — the
+ * module doc says why.
+ */
 export async function endAllOpenSessions(controlPlaneUrl: string, apiKey: string): Promise<void> {
   const entries = [...openSessions.entries()]
   openSessions.clear()
+  registeredProxyRows.clear()
   attempted.clear()
   await Promise.allSettled(
     entries.map(async ([, sessionId]) => {
