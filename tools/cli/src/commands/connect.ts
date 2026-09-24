@@ -58,6 +58,7 @@ import { SyncWsClient,
   TrajectoryMonitor,
   collectAgentReport,
   reportAgent,
+  fetchLocalProxyInstanceId,
   startHarnessSession,
   endAllOpenSessions,
 } from '@intutic/sync-daemon'
@@ -359,6 +360,11 @@ export async function runConnect(opts: {
 
   // 2.5. Manage LiteLLM-Rust Proxy Gateway Process
   const proxyPort = parseInt(process.env.PORT || '4000', 10)
+  // The daemon-side probes (`fetchEgressStatus`, `fetchGuardProbes`,
+  // `fetchLocalProxyInstanceId`) read the proxy at `INTUTIC_PROXY_URL`,
+  // defaulting to port 4000; connect knows the port it will spawn on, so an
+  // operator running on another `PORT` still gets probed at the right one.
+  process.env.INTUTIC_PROXY_URL ??= `http://127.0.0.1:${proxyPort}`
   let exeCmd = 'cargo'
   let exeArgs = ['run', '--manifest-path', node_path.join(safeConfig.workspaceRoot, 'packages', 'proxy', 'Cargo.toml')]
   // Populated only on the branch that actually spawns the proxy; the DR
@@ -1252,9 +1258,13 @@ export async function runConnect(opts: {
         // does, at dim level because this runs every poll interval.
         log.dim(`Offline trace sync failed (will retry next poll): ${err instanceof Error ? err.message : String(err)}`)
       }
-      // Register agents + open one real session per harness (the reporter
-      // dedupes sessions per run). connect's inline loop bypassed both,
-      // leaving the dashboard graph empty for the primary user path.
+      // Register agents + report one session per harness (the reporter
+      // dedupes per run and per proxy process). connect's inline loop bypassed
+      // both, leaving the dashboard graph empty for the primary user path.
+      // The local proxy's instance id is read once per iteration: with it the
+      // harness's git/task context lands on the proxy's own session row, the
+      // one its traces are filed under (TD-231, Wave 5.6).
+      const proxyInstanceId = safeConfig.harnesses.length > 0 ? await fetchLocalProxyInstanceId() : null
       for (const harnessType of safeConfig.harnesses) {
         try {
           const report = await collectAgentReport({
@@ -1272,6 +1282,7 @@ export async function runConnect(opts: {
             workspaceId: safeCreds.workspaceId,
             harnessType,
             workspaceRoot: process.cwd(),
+            ...(proxyInstanceId ? { proxyInstanceId } : {}),
           })
         } catch (err) {
           // Per-harness isolation is deliberate: one harness failing to register

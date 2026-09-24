@@ -55,6 +55,16 @@ export const CreateSessionSchema = z.object({
 
   /** Execution mode — defaults to STANDARD on the server. */
   executionMode: z.enum(constValues(ExecutionMode)).optional(),
+
+  /**
+   * The local proxy process this session's traces are filed under (TD-231).
+   * When set, the server records the git/task context on the row it derives
+   * for that process's traces — a PROXY row named by the server, never a new
+   * `ses_` id — and ignores `executionMode` / `userId`. Mutually exclusive with
+   * a caller-supplied session id. Sent by the sync daemon, which reads the id
+   * from the proxy's loopback `GET /intutic/instance`.
+   */
+  proxyInstanceId: z.string().min(1).max(64).optional(),
 })
 
 /** Inferred type for a create-session request payload. */

@@ -221,6 +221,34 @@ export async function fetchGuardProbes(): Promise<GuardProbesFacet | null> {
   }
 }
 
+/**
+ * Read the local proxy's process-lifetime instance id (`GET /intutic/instance`,
+ * loopback-only like the two probes above; TD-231, Wave 5.6). The control
+ * plane derives one `agent_sessions` row per (workspace, harness, instance)
+ * for the traces that proxy publishes; knowing the id lets the daemon register
+ * that same row with the workspace's git/task context instead of opening a
+ * separate `ses_` session the traces never join.
+ *
+ * Returns `null` — and the caller falls back to a `ses_` session — for an
+ * unreachable or non-managed proxy, a non-OK answer, a malformed body, and for
+ * a SHARED GATEWAY (`shared_gateway: true`, or an id that does not carry the
+ * local `proxy_` prefix): a gateway pod's row aggregates every developer
+ * behind it, so one developer's branch must never be written onto it.
+ */
+export async function fetchLocalProxyInstanceId(): Promise<string | null> {
+  let base = process.env.INTUTIC_PROXY_URL ?? 'http://localhost:4000'
+  while (base.endsWith('/')) base = base.slice(0, -1)
+  try {
+    const res = await fetch(`${base}/intutic/instance`, { signal: AbortSignal.timeout(2000) })
+    if (!res.ok) return null
+    const body = (await res.json()) as { proxy_instance_id?: unknown; shared_gateway?: unknown }
+    if (typeof body.proxy_instance_id !== 'string' || body.shared_gateway === true) return null
+    return body.proxy_instance_id.startsWith('proxy_') ? body.proxy_instance_id : null
+  } catch {
+    return null
+  }
+}
+
 /** Count `.wasm` rules under `~/.intutic/wasm` (best-effort). */
 async function countWasmRules(): Promise<number> {
   const dir = join(process.env.HOME ?? '', '.intutic', 'wasm')
