@@ -115,7 +115,12 @@ pub async fn local_judge_finalize(
     };
 
     let url = format!("{}/v1/chat/completions", litellm_local_url());
-    let mut req = http_client.post(&url).json(&serde_json::json!({
+    // `url` is `LITELLM_LOCAL_URL` — an org's SELF-HOSTED LiteLLM on its own
+    // private network (default `http://litellm:4000`, a cluster-internal
+    // service name), which is the point of the local judge: the content never
+    // leaves that network. TLS on that hop is the operator's choice, made in
+    // the same env var; nothing here can upgrade a scheme the operator set.
+    let mut req = http_client.post(&url).json(&serde_json::json!({ // codeql[rust/non-https-url]
         "model": model,
         "messages": [
             { "role": "system", "content": system_prompt(sop_text) },
