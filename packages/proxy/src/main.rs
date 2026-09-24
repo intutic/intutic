@@ -83,7 +83,11 @@ fn handle_enforce(args: &[String]) -> anyhow::Result<()> {
     let cfg = egress_enforce_config_from_flags(args.get(1..).unwrap_or(&[]))?;
     match sub {
         "generate" => {
-            print!("{}", firewall::generate_egress_enforcement(&cfg));
+            // The generated ruleset is what the operator asked to see, on
+            // stdout, to review before `apply`. The "uid" in it is the
+            // numeric OS user the proxy runs as (`--uid`, default the current
+            // user) — an exemption in a firewall rule, not a credential.
+            print!("{}", firewall::generate_egress_enforcement(&cfg)); // codeql[rust/cleartext-logging]
             Ok(())
         }
         "apply" => {
