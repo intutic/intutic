@@ -57,7 +57,14 @@ import { createHash } from 'node:crypto'
  * so the fixture has to be real. That is the point: the test can no longer pass
  * against a snapshot the product would refuse.
  */
-function writeRulesFixture(target: string, patterns: readonly GuardPattern[], workspaceId = ''): string {
+function writeRulesFixture(
+  target: string,
+  patterns: readonly GuardPattern[],
+  workspaceId = '',
+  /** Extra `#`-prefixed header lines, e.g. the `#mcpservers` header
+   *  `writePolicySnapshot` emits. Metadata, so outside the digest. */
+  extraHeaders: readonly string[] = [],
+): string {
   const lines = patterns.map(toRulesLine)
   const digest = createHash('sha256').update(lines.join('\n')).digest('hex').slice(0, 32)
   writeFileSync(
@@ -65,6 +72,7 @@ function writeRulesFixture(target: string, patterns: readonly GuardPattern[], wo
     `#digest ${digest}\n` +
       (workspaceId ? `#workspace ${workspaceId}\n` : '') +
       `#generated ${new Date().toISOString()}\n` +
+      extraHeaders.map((h) => `${h}\n`).join('') +
       lines.join('\n') +
       '\n',
   )
@@ -764,6 +772,41 @@ for (const g of GATES) {
       assertCleanExit(g, unrelated, 'make test under a hold rule')
       expect(wasBlocked(g, unrelated), `${g.name} held \`make test\``).toBe(false)
     })
+
+    if (g.contract === 'stdout-cancel' || g.contract === 'stdout-decision-deny') {
+      it('refuses an MCP server off the allowlist with a verdict that names the rule, not a crash (regression pin)', async () => {
+        // The M3 allowlist backstop sits after the rule loop, whose `reason`
+        // is block-scoped to that loop. The stdout contracts' `${refuse}`
+        // snippet reads `reason`, so before the `var reason = _mcpReason`
+        // at that site the emitted gate threw a ReferenceError there: the
+        // writer's outer catch still failed closed, but the verdict lost its
+        // reason and the audit line said "crashed" instead of naming the
+        // rule. Same `#mcpservers <severity> <servers>` header
+        // `writePolicySnapshot` emits.
+        const snap = writeRulesFixture(
+          join(home, `mcp-${g.name}.rules`),
+          DESTRUCTIVE_COMMAND_PATTERNS,
+          'ws_test',
+          ['#mcpservers block allowed-server'],
+        )
+        const r = await runGate(g, {}, { tool: 'mcp__other__x', snapshot: snap })
+        assertCleanExit(g, r, 'an MCP call to a server off the allowlist')
+        expect(wasBlocked(g, r), `${g.name} let mcp__other__x through. stderr: ${r.stderr.slice(0, 300)}`).toBe(true)
+        const verdict = r.stdout
+          .split('\n')
+          .filter((l) => l.trim())
+          .map((l) => { try { return JSON.parse(l) } catch { return null } })
+          .find((o) => o && (o.cancel === true || o.decision === 'deny'))
+        expect(verdict, `${g.name} printed no verdict object`).toBeTruthy()
+        expect(String(verdict.reason)).toContain('[mcp_allowlist]')
+        expect(String(verdict.reason)).not.toMatch(/crash|ReferenceError/i)
+        expect(auditLogText(g)).toMatch(/tool_blocked.*mcp_allowlist|mcp_allowlist.*tool_blocked/)
+
+        const allowed = await runGate(g, {}, { tool: 'mcp__allowed-server__x', snapshot: snap })
+        assertCleanExit(g, allowed, 'an MCP call to an allowlisted server')
+        expect(wasBlocked(g, allowed), `${g.name} blocked an allowlisted server`).toBe(false)
+      })
+    }
 
     it('still blocks unconditionally on a name-only tool rule (regression pin)', async () => {
       // A rule with no argPattern must behave exactly as before this change.
