@@ -7,7 +7,132 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.10.1] - 2026-09-24
+
+The first tagged release since 1.10.0: everything that reached `main` between
+2026-07-29 and 2026-09-24, including the entries previously listed under
+Unreleased.
+
+### Added
+
+- **Graph guardrails and anomaly detection on the proxy**: graph-aware node
+  identity and a detector registry; graph-wide budget and orphan detection;
+  broadcast findings to sibling nodes; trajectory recorded on every trace;
+  broadcast safety valves, fan-out and schema-drift detectors; tool-description
+  poisoning detection; a landmark cycle detector (period-3 cycles and
+  `action:`-interleaved spins); a REASK rung between HIJACK and KILL; any detector
+  can hold a run (`Disposition::Ask`); NOTIFY out-of-band; shadow mode (evaluate
+  everything, enforce nothing, record it all); temporal policy primitives
+  (time-windowed call rate, `tool_sequence` fold); a code-as-action detector;
+  ordering rules declarable with the defaults as the floor; the first measured
+  false-positive rate and anomaly-chain benchmark this product has had.
+- **SOPs are enforceable**: `deny_tools`, role-scoped SOP subscription,
+  `.intutic/sops` found by walking up from the working directory, an
+  `INTUTIC_SOPS_DIR` override, a loud startup warning naming every detector an
+  empty SOP set disables, `REFINED` treated as advisory.
+- **Policy Clause Ledger**: the Guardrail IR, renderers and five-way vector
+  parity; guardrail warn rules through the daemon and proxy; the shared SOP-file
+  renderer and replay vectors; the guardrails CLI and wire types; the predicate
+  evaluator and `compile --candidate`; `--token-file`; guardrails pull; anchored
+  hook-rule exclusions and the ledger CLI.
+- **WASM rules**: a rule can reask, with a starter rule library; the guest sees
+  every field the host sends; a governance module can say why it blocked; hot
+  reload of `~/.intutic/wasm/`; a 16 MB guest-memory ceiling; `denied_tool_sources`
+  in the guest context; the guest SDK parses it.
+- **Harness coverage**: LangGraph, Muse Code, Grok Build, `@intutic/gate`, the
+  Python SDK adapters, dsh, Mastra, Vercel AI SDK, OpenAI Agents SDK, TrueForge
+  (embedded and standalone-server modes), OpenCode (the 42nd governed harness,
+  with a `throw` gate contract), AutoGen in-process workbench, Managed Agents
+  `watch()` reconnects; four more harnesses get real pre-tool gates; gates
+  enforce WHERE clauses; `hold` at every hook gate — one mechanism for
+  `review_before` and REQUIRE_APPROVAL; local hold tokens; Windsurf's real
+  Cascade hook events and the JetBrains plugin's AI traffic through the TLS
+  MITM proxy.
+- **MCP governance proxy**: injection, anomaly and WASM governance ported from
+  the Rust proxy; MCP curation parity; the remote MCP bridge (streamable HTTP
+  and SSE) and its daemon mode; the per-server MCP allowlist; workspace
+  injection patterns and landmark fixtures; `read_referenced_file` resolver; a
+  shared anomaly session window across a harness session's sibling proxies;
+  `remote_bridge_ready` in the log once the bridge is serving.
+- **Gateway and BYO keys**: a `vk_`-only front door with cache tenancy pin,
+  render-guard and per-workspace SOP resolution; enforced BYO-key
+  refuse-on-missing-key gate; in-proxy heartbeat, config-version ack and
+  SOP-status piggyback; automatic self-rotation that survives Docker recreate
+  and Kubernetes reschedule; a local judge for self-hosted gateways; a shared
+  gateway mints a `gw_` instance id so the control plane never mistakes a pod
+  for a developer's session; `GET /intutic/instance` (loopback-only) tells the
+  daemon which proxy process it is talking to, so the workspace's git and task
+  context lands on the proxy's own session row.
+- **Multi-provider key wizard** (registry, proxy routing for Mistral and
+  OpenRouter); org signup, team management, gateway registration and
+  provider-credentials CLI commands; `ControlPlaneClient` in the SDKs; a
+  per-key model allowlist intersection; org-creation region parameter.
+- **Sandbox and egress**: mandatory egress enforcement and an on-demand secure
+  sandbox runtime; central egress-policy distribution with a Firecracker
+  in-guest e2e; require-sandbox policy and egress-denial observability; sandbox
+  attestation as a proxy signal a rule can gate on; sandbox-usage telemetry;
+  enterprise CA/MDM rollout and the device-enforcement CLI.
+- **Streaming and DLP**: the stream is held back so a split secret cannot escape;
+  `/v1/responses` as a first-class shape; a model-emitted tool call refused before
+  the client runs it; the DLP pattern set operator-configurable; secrets redacted
+  before forwarding upstream; tool definitions pinned per workspace with the input
+  schema hashed; response-injection snippet capture and the response-echo corpus.
+- **Routing**: a routing reward that can notice a worse answer; cache-honest
+  counterfactual, workspace-isolated session scope and a warm-prefix guard;
+  unservable-model recovery; guard-liveness probes; `GET /intutic/spend`
+  (loopback-only) and a local spend-trajectory detector; cache-token fields on
+  trace details; mirror original-side cost and latency.
+- **Open-core CLI and daemon**: `intutic start` (one-command standalone, no
+  Valkey), `intutic integrity`, `intutic doctor`, local traces reader, the
+  policy snapshot, findings CLI with a Reason column, daemon `status|stop|start`
+  for the proxy and MCP targets, a proxy service unit, `connect` exits when told
+  to (exit deadline, second-signal exit, SIGKILL escalation); agent and session
+  reporting from the daemon; `/fix` and `/draw` prompt commands with local
+  Obsidian/Logseq/Foam vault search; OTel across the mcp-daemon and CLI; GitOps
+  for SOPs (faithful push, round-trip pull, drift status); the model catalog and
+  cohort wizard.
+- **Docs**: Compliance Evidence guide, Kafka/CDC delivery guarantees for SIEM
+  export, capability matrix, governance controls checklist, egress as a guardrail,
+  sandbox platform guide, org/tenancy hierarchy, provider keys and self-hosted
+  gateway coverage, five integration pages, the harness security matrix.
+
+### Changed
+
+- The proxy attributes traces to the harness that made the request; each proxy
+  process carries a per-process instance id on every trace.
+- Judge failures are reported `UNAVAILABLE`, never a fabricated clean pass;
+  mid-stream judge chunking runs on same-provider streams; BYO workspace judge
+  model; open-weight judge default with governance-card labeling.
+- Advisory anomaly findings no longer block the request; the exfiltration rule
+  fires on a one-line exfiltration; the tool pin is scoped per harness.
+- `@intutic/anomaly-taxonomy` extracted as the single source of truth; a
+  taxonomy value is not an identity — detectors carry `detector_id`.
+- Requests are bound to the authenticated workspace and honour deactivation; a
+  key is validated against the control plane on a cache miss; the proxy fails
+  closed when a virtual key cannot be validated.
+- The pricing bundle is pinned to a LiteLLM commit and re-pinned on drift (the
+  drift check gates the deploy); Linux release binaries build against glibc 2.35.
+- Published latency claims retracted where no benchmark stood behind them;
+  hallucination and context-drift auto-resolution no longer claimed.
+
 ### Fixed
+
+- Loop governance never fired: the circuit breaker's budget scalar was never
+  written and the proxy had no run id to read; now verified live (403
+  `LOOP_RUN_TERMINATED` after Kill, 403 `WORKFLOW_BUDGET_BREACH` over budget).
+- Streaming responses accrued no spend, so the local cap never fired; the cost
+  gate answered every request instead of forwarding it; five inert controls
+  brought to life; the token-baseline key hardcoded a segment nothing produced.
+- `intutic exec` sent agent traffic and API keys to a remote host (1.7.2); the
+  CLI shipped a stale proxy binary (1.7.1); the proxy admitted a request on a
+  published key prefix; a redactor that missed its own examples.
+- The remote-bridge test harness charged the child proxy's boot to its 5 s
+  request timer (the source of the CI timeouts); the MCP-allowlist refusal
+  names its rule on the stdout-contract gates; the reask ladder keyed reasks
+  across tenants; the MCP proxy never read the control-plane URL the daemon
+  wrote; `install-hooks.js` failed inside a git worktree.
+- `intutic doctor`'s daemon-log check read a path nothing writes; the daemon's
+  dead ContextGraph scan and BrainIndexer removed with three dead wires.
 
 - **Loop governance never fired.** A user could set a per-loop budget and press
   Kill in the dashboard, and the agent kept running. The control plane wrote loop
@@ -24,6 +149,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   writes — the installer logs to `sync-daemon.log` and `mcp-daemon.log`.
 - Dropped the sync daemon's dead ContextGraph scan and BrainIndexer, and three
   proxy/CLI wires that no longer connected to anything.
+
+### Security
+
+- CodeQL runs over the whole tree on PRs and main alike, with test code excused
+  and counted; polynomial regexes replaced (gate-js, guardrailRender,
+  providerVerification); cleartext-logging sites fixed or dismissed at the site
+  with reasoning; Dependabot advisories cleared before 1.6.0 and js-yaml raised
+  for CVE-2026-59870; contiguous credential-shaped test literals assembled at
+  runtime.
 
 ### Documentation
 

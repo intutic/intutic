@@ -1,6 +1,6 @@
 {
   "name": "@intutic/gate",
-  "version": "1.10.0",
+  "version": "1.10.1",
   "description": "Intutic pre-execution tool gate for JS/TS agent frameworks without a shipped Intutic harness (Mastra, the Vercel AI SDK, LangChain.js, dsh, and hand-rolled agent loops)",
   "type": "module",
   "license": "MIT",
