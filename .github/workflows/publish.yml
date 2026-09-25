@@ -317,7 +317,12 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm turbo run build
           mkdir -p dist-cli
-          pnpm exec pkg tools/cli/package.json --targets node18-macos-arm64,node18-macos-x64,node18-linux-x64,node18-win-x64 --out-path dist-cli
+          # `pkg` is a devDependency of tools/cli, not of the root, so its bin
+          # resolves only from that package: a root-level `pnpm exec pkg`
+          # failed the v1.10.1 tag run with "Command \"pkg\" not found" and
+          # blocked the GitHub release and the npm publish behind it. Run it
+          # in the package; paths below are relative to tools/cli.
+          pnpm --filter @intutic/cli exec pkg package.json --targets node18-macos-arm64,node18-macos-x64,node18-linux-x64,node18-win-x64 --out-path ../../dist-cli
           mv dist-cli/cli-macos-arm64 dist-cli/cli-macos-arm64 2>/dev/null || true
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
