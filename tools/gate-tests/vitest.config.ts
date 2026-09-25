@@ -2,7 +2,7 @@ import { defineConfig } from 'vitest/config'
 
 /**
  * Tests for the repo's gate scripts, which decide whether an unsupported claim
- * can ship and which sat outside every test runner: `vitest.workspace.ts` globs
+ * can ship and which sat outside every test runner: `vitest.projects.config.ts` globs
  * `packages/*` and `services/*`, and the scripts live under `tools/`.
  *
  * ## Why this is a sibling directory rather than `tools/scripts` itself

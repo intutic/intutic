@@ -2,7 +2,7 @@ import { defineConfig } from 'vitest/config'
 
 /**
  * This package had no test script and no config, so it appeared in neither
- * `turbo test` nor `vitest.workspace.ts` (which globs
+ * `turbo test` nor `vitest.projects.config.ts` (which globs
  * `packages/star/vitest.config.ts`). The template every rule author copies was
  * the one package in the repo with no coverage at all.
  *
