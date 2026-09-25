@@ -649,6 +649,32 @@ mod tests {
     use super::*;
     use crate::plugins::anomaly::detectors::test_support::ctx_with_sequence;
 
+    /// Pin the default registry's budget inputs for the duration of a test.
+    ///
+    /// `with_defaults()` wires `SpendTrajectoryDetector` to
+    /// `local_config::get_max_daily_budget`, which reads `$HOME/.intutic/
+    /// config.json` through a process-global cache. Under the test runner
+    /// that cache is shared with `local_spend`'s and `local_config`'s tests,
+    /// which write caps such as 25.50 under a scratch `HOME`. Served to a
+    /// fixture whose `budget_remaining_usd` is 10.0, that cap reads as
+    /// $15.50 already spent, and once the runner's local day is more than
+    /// 10% elapsed the projection overshoots — CI at 02:36 UTC failed
+    /// `clean_sequence_bypasses` and `empty_sequence_is_not_an_anomaly` on a
+    /// PR that touched no Rust. Holding `HOME_LOCK` with an empty scratch
+    /// `HOME` and a cleared cache makes the cap the 10.0 default, so the
+    /// detector sees $0 spent whatever the clock says. Same discipline as
+    /// `local_spend`'s and `store/memory`'s `HOME`-mutating tests.
+    fn quiet_budget_home() -> std::sync::MutexGuard<'static, ()> {
+        let guard = crate::test_support::HOME_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = std::env::temp_dir().join("intutic_anomaly_registry_test_home");
+        let _ = std::fs::remove_dir_all(&home);
+        std::env::set_var("HOME", &home);
+        crate::local_config::reset_cache_for_test();
+        guard
+    }
+
     #[test]
     fn taxonomy_strings_match_platform_values() {
         // These are the wire values. If one of these assertions fails, the
@@ -744,6 +770,7 @@ mod tests {
 
     #[test]
     fn clean_sequence_bypasses() {
+        let _home = quiet_budget_home();
         let reg = DetectorRegistry::with_defaults();
         let ctx = ctx_with_sequence(&["list_dir", "view_file", "replace_file_content"]);
         assert!(matches!(reg.evaluate(&ctx), Verdict::Bypass));
@@ -768,6 +795,7 @@ mod tests {
 
     #[test]
     fn empty_sequence_is_not_an_anomaly() {
+        let _home = quiet_budget_home();
         let reg = DetectorRegistry::with_defaults();
         let ctx = ctx_with_sequence(&[]);
         assert!(reg.evaluate_all(&ctx).is_empty());
