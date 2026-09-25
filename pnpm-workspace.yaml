@@ -52,8 +52,8 @@ minimumReleaseAgeExclude:
 # closing GHSA-frvp-7c67-39w9 without any guard exclusion.)
 overrides:
   brace-expansion: '^5.0.9' # CVE-2026-13149, CVE-2026-14257, + the 2026-08 bypass of the 14257 mitigation
-  fast-uri: '^3.1.5' # CVE-2026-16221, CVE-2026-13676, + host confusion via backslash authority introducer
-  js-yaml: '^4.3.1' # CVE-2026-59869, CVE-2026-59870 (quadratic !!omap resolution, unfixed in 4.3.0)
+  fast-uri: '^3.1.6' # CVE-2026-16221, CVE-2026-13676, + host confusion via backslash authority introducer; CVE-2026-75899/75931/75975/76172 (SSRF via repeated hostname / malformed IPv6, host confusion via IDN + percent-encoded scheme)
+  js-yaml: '^4.3.2' # CVE-2026-59869, CVE-2026-59870 (quadratic !!omap resolution, unfixed in 4.3.0); CVE-2026-84375 (maxTotalMergeKeys did not bound CPU on empty merge sources)
   # Scoped, not a blanket `nanoid` override: @intutic/control-plane and
   # @intutic/id depend on nanoid v3 directly (CJS, not vulnerable — the GHSA
   # range is >=4.0.0 <5.1.16) and nanoid v4+ is ESM-only, which breaks their
@@ -65,4 +65,6 @@ overrides:
   uuid: '^11.1.1' # CVE-2026-41907
   # @modelcontextprotocol/sdk pins hono ^4.11.4 and resolves it to a version
   # below the fix. 4.12.31 satisfies that range, so this needs no SDK bump.
-  hono: '^4.12.34' # CVE-2026-59895/6/7, + ReDoS in CORS middleware via Access-Control-Request-Headers
+  hono: '^4.13.5' # CVE-2026-59895/6/7, + ReDoS in CORS middleware via Access-Control-Request-Headers; CVE-2026-84363/84364/84365 (query parser past the fragment, unbounded dot-notation nesting in parseBody, toSSG incomplete fix)
+  qs: '^6.16.0' # CVE-2026-82417 (DoS via attacker-controlled isBuffer), CVE-2026-82562 (array-limit bypass via bracket-key comma parsing)
+  devalue: '^5.9.2' # CVE-2026-81176 (DoS via malformed input)
