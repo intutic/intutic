@@ -322,7 +322,12 @@ jobs:
           # failed the v1.10.1 tag run with "Command \"pkg\" not found" and
           # blocked the GitHub release and the npm publish behind it. Run it
           # in the package; paths below are relative to tools/cli.
-          pnpm --filter @intutic/cli exec pkg package.json --targets node18-macos-arm64,node18-macos-x64,node18-linux-x64,node18-win-x64 --out-path ../../dist-cli
+          # node22 base binaries: pkg-fetch's v3.6 cache no longer carries node18
+          # (the retagged v1.10.1 run got "404 … node-v18.20.8-macos-arm64" and
+          # pkg cannot build macOS/Windows bases on a Linux runner). Node 22 is
+          # the runtime the images ship (node:22-alpine) and inside the CLI's
+          # engines range (>=20.19).
+          pnpm --filter @intutic/cli exec pkg package.json --targets node22-macos-arm64,node22-macos-x64,node22-linux-x64,node22-win-x64 --out-path ../../dist-cli
           mv dist-cli/cli-macos-arm64 dist-cli/cli-macos-arm64 2>/dev/null || true
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
