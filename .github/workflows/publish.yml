@@ -214,7 +214,12 @@ jobs:
             version="$(node -p "require('./$pkg/package.json').version")"
             # pnpm/npm pack's own naming convention: @scope/name -> scope-name-version.tgz
             tarball_name="$(echo "$name" | sed 's/^@//; s/\//-/')-$version.tgz"
-            tarball="npm-tarballs/$tarball_name"
+            # Explicit ./ — npm 11 parses a bare "dir/file.tgz" as a GitHub
+            # owner/repo shorthand before checking the filesystem, and the
+            # v1.10.1 tag run died on `git ls-remote
+            # ssh://git@github.com/npm-tarballs/…tgz.git` with the file
+            # sitting right there.
+            tarball="./npm-tarballs/$tarball_name"
             echo "📦 Publishing $name@$version ..."
             if [ ! -f "$tarball" ]; then
               echo "::error::expected tarball $tarball was not produced by build-npm-packages"
