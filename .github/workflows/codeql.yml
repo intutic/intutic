@@ -1,13 +1,21 @@
 name: CodeQL Security Analysis
 
 on:
-  push:
-    branches: [ main ]
+  # Every PR is analysed here; main is analysed by the weekly schedule and on
+  # demand. A `push: main` trigger ran the same analysis a second time on
+  # every merge — 19–29 job-minutes per merge that found nothing the PR run
+  # had not — while the org's Actions budget was being hit in a day of normal
+  # merging.
   pull_request:
     branches: [ main ]
   workflow_dispatch:
   schedule:
     - cron: '0 0 * * 0'
+
+# A new push to a PR supersedes the analysis of the previous one.
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
