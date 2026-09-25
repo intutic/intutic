@@ -26,6 +26,18 @@ import { createHash } from 'node:crypto'
 import { renderSopFile } from '../lib/sopFrontMatter.js'
 import { runSopsPush, runSopsPull, runSopsStatus, runSopsOrgList, runSopsOrgRm } from './sops.js'
 
+// Every shared mock, before every test in every describe: the module mocks
+// are file-wide, and `vi.restoreAllMocks()` in the afterEach hooks only
+// restores `vi.spyOn` spies on Vitest 4 — it no longer wipes a `vi.fn()`'s
+// call history or implementation — so a describe that reset only the mock it
+// drives saw the other mocks' calls from earlier tests ("not called" read
+// five posts made by five previous tests).
+beforeEach(() => {
+  getMock.mockReset()
+  postMock.mockReset()
+  delMock.mockReset()
+})
+
 describe('runSopsPush', () => {
   let sopsDir: string
   let exitCode: number | null
