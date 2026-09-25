@@ -28,7 +28,7 @@
   },
   "devDependencies": {
     "typescript": "^5.5",
-    "vitest": "^3"
+    "vitest": "^4"
   },
   "engines": {
     "node": ">=18"
