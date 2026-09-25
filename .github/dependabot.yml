@@ -19,3 +19,12 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      # github/codeql-action's init and analyze steps must run the same
+      # version: the analyze post-step refuses a config file written by a
+      # different init version ("Loaded a configuration file for version
+      # '4.37.9', but running version '4.38.1'"). Separate per-action PRs
+      # therefore always fail CodeQL; bump them as one PR.
+      codeql-action:
+        patterns:
+          - "github/codeql-action/*"
