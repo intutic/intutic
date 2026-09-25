@@ -119,7 +119,7 @@
     "@types/ws": "^8.18.1",
     "tsx": "^4",
     "typescript": "^5.5",
-    "vitest": "^3"
+    "vitest": "^4"
   },
   "engines": {
     "node": ">=20.19.0"
