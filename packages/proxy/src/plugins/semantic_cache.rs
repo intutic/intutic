@@ -139,14 +139,44 @@ async fn generate_embedding(
     Ok(embedding)
 }
 
+/// Default base URL of the TurboVec wrapper when `TURBOVEC_URL` is unset.
+const TURBOVEC_DEFAULT_BASE: &str = "http://localhost:8083";
+
+/// Resolve a TurboVec endpoint from the `TURBOVEC_URL` **base** URL.
+///
+/// `TURBOVEC_URL` is the service's base (`http://turbovec:8080`, what the
+/// enterprise compose file sets); the two routes hang off it. Until
+/// 2026-09-26 the query and the insert path each read the same variable
+/// and each defaulted to its own full route, so any single value an
+/// operator set — the compose one included — sent inserts to the query
+/// route or queries to the insert route. A value that already ends in one
+/// of the two routes is accepted and normalised so an older deployment's
+/// setting keeps working.
+fn turbovec_endpoint(route: &str) -> String {
+    let raw = std::env::var("TURBOVEC_URL").unwrap_or_else(|_| TURBOVEC_DEFAULT_BASE.to_string());
+    turbovec_endpoint_from(&raw, route)
+}
+
+pub(crate) fn turbovec_endpoint_from(raw: &str, route: &str) -> String {
+    let mut base = raw.trim().trim_end_matches('/').to_string();
+    for legacy in ["/vectors/query", "/vectors/insert"] {
+        if let Some(stripped) = base.strip_suffix(legacy) {
+            base = stripped.trim_end_matches('/').to_string();
+        }
+    }
+    if base.is_empty() {
+        base = TURBOVEC_DEFAULT_BASE.to_string();
+    }
+    format!("{base}{route}")
+}
+
 /// Query TurboVec nearest neighbor
 async fn query_turbovec(
     http_client: &reqwest::Client,
     vector: &[f32],
     workspace_id: &str,
 ) -> Result<Option<(String, f64)>, anyhow::Error> {
-    let turbovec_url = std::env::var("TURBOVEC_URL")
-        .unwrap_or_else(|_| "http://localhost:8083/vectors/query".to_string());
+    let turbovec_url = turbovec_endpoint("/vectors/query");
 
     let body = json!({
         "vector": vector,
@@ -343,8 +373,7 @@ pub async fn write_cache(
     if ff_semantic {
         match generate_embedding(http_client, &prompt_text).await {
             Ok(embedding) => {
-                let turbovec_url = std::env::var("TURBOVEC_URL")
-                    .unwrap_or_else(|_| "http://localhost:8083/vectors/insert".to_string());
+                let turbovec_url = turbovec_endpoint("/vectors/insert");
 
                 let body = json!({
                     "vector": embedding,
@@ -493,6 +522,39 @@ mod tests {
     /// call site inherits the refusal without knowing it exists. That is the
     /// difference between this and a comment saying "do not cache mirrored
     /// responses", which holds until someone adds the third caller.
+    #[test]
+    fn turbovec_url_is_a_base_and_both_routes_hang_off_it() {
+        assert_eq!(
+            turbovec_endpoint_from("http://turbovec:8080", "/vectors/query"),
+            "http://turbovec:8080/vectors/query"
+        );
+        assert_eq!(
+            turbovec_endpoint_from("http://turbovec:8080/", "/vectors/insert"),
+            "http://turbovec:8080/vectors/insert"
+        );
+    }
+
+    #[test]
+    fn a_legacy_full_route_in_turbovec_url_still_reaches_both_routes() {
+        // The pre-2026-09-26 shape: the whole query route in the variable.
+        assert_eq!(
+            turbovec_endpoint_from("http://localhost:8083/vectors/query", "/vectors/insert"),
+            "http://localhost:8083/vectors/insert"
+        );
+        assert_eq!(
+            turbovec_endpoint_from("http://localhost:8083/vectors/insert/", "/vectors/query"),
+            "http://localhost:8083/vectors/query"
+        );
+    }
+
+    #[test]
+    fn an_empty_turbovec_url_falls_back_to_the_default_base() {
+        assert_eq!(
+            turbovec_endpoint_from("  ", "/vectors/query"),
+            "http://localhost:8083/vectors/query"
+        );
+    }
+
     #[test]
     fn write_cache_takes_provenance_so_the_guard_cannot_be_forgotten() {
         let src = include_str!("semantic_cache.rs");
