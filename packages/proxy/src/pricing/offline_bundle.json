@@ -1,7 +1,7 @@
 {
   "_meta": {
-    "source": "https://raw.githubusercontent.com/BerriAI/litellm/d55deb776464a22bc18d409c86b7cf72e78c7140/model_prices_and_context_window.json",
-    "generated_at": "2026-09-24",
+    "source": "https://raw.githubusercontent.com/BerriAI/litellm/115668f43ea5f6ed5ce47ad9de0db2df0bf96ff1/model_prices_and_context_window.json",
+    "generated_at": "2026-09-26",
     "refresh_script": "tools/scripts/build-offline-pricing-bundle.ts",
     "note": "Baked into the proxy binary via include_str!(), so editing this file does nothing until the image is rebuilt. Regenerate with tools/scripts/build-offline-pricing-bundle.ts; drift against published rates is reported monthly by .github/workflows/pricing-drift.yml. Override with OFFLINE_PRICING_PATH."
   },
