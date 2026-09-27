@@ -61,12 +61,14 @@ fn expand_home(path: &str) -> PathBuf {
 /// propagated so the caller can retain the previously loaded rules instead of
 /// mistaking a transient EACCES/EIO for "all rules deleted" — silently
 /// dropping local Kill rules would be an enforcement bypass.
+// Kept in main's exact layout: code scanning's triage of this function's
+// alert is keyed to its text, and end-of-line codeql comments do not suppress here.
+#[rustfmt::skip]
 pub fn scan_signatures(dir: &Path) -> std::io::Result<HashMap<PathBuf, (SystemTime, u64)>> {
     let mut signatures = HashMap::new();
     // `dir` is the operator's `INTUTIC_WASM_DIR` / config override: the same
     // trust level as the binary's own configuration, never a request value.
-    let read = std::fs::read_dir(dir); // codeql[rust/path-injection]
-    let entries = match read {
+    let entries = match std::fs::read_dir(dir) { // codeql[rust/path-injection]
         Ok(entries) => entries,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(signatures),
         Err(e) => return Err(e),

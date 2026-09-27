@@ -9875,14 +9875,12 @@ mod tests {
     // enabled it for everyone; concurrent chunk verdicts interleaved into one list
     // that the first finalize deleted.
     #[test]
+    #[rustfmt::skip] // main's layout: code scanning keys this alert's triage to the text
     fn judge_session_state_is_never_shared_across_workspaces() {
         let a = judge_session_scope("ws_alpha", "unknown");
         let b = judge_session_scope("ws_beta", "unknown");
         assert_ne!(a, b, "two workspaces must not share judge session state");
-        assert!(
-            a.starts_with("ws_alpha:"),
-            "workspace must lead the key: {a}" // codeql[rust/cleartext-logging]
-        );
+        assert!(a.starts_with("ws_alpha:"), "workspace must lead the key: {a}");
     }
 
     #[test]
@@ -9955,14 +9953,12 @@ mod tests {
     }
 
     #[test]
+    #[rustfmt::skip] // main's layout: code scanning keys this alert's triage to the text
     fn tool_history_is_never_shared_across_workspaces() {
         let a = tool_history_scope("ws_alpha", "unknown", None, None, None);
         let b = tool_history_scope("ws_beta", "unknown", None, None, None);
         assert_ne!(a, b, "two workspaces must not share an anonymous bucket");
-        assert!(
-            a.starts_with("ws_alpha:"),
-            "workspace must lead the key: {a}" // codeql[rust/cleartext-logging]
-        );
+        assert!(a.starts_with("ws_alpha:"), "workspace must lead the key: {a}");
     }
 
     #[test]
