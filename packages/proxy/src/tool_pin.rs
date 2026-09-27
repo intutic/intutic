@@ -127,9 +127,15 @@ pub fn tool_objects(tools: &[serde_json::Value]) -> Vec<&serde_json::Value> {
 pub fn tool_objects_mut(tools: &mut [serde_json::Value]) -> Vec<&mut serde_json::Value> {
     let mut out = Vec::with_capacity(tools.len());
     for t in tools {
-        let is_gemini_wrapper = t.get("functionDeclarations").and_then(|d| d.as_array()).is_some();
+        let is_gemini_wrapper = t
+            .get("functionDeclarations")
+            .and_then(|d| d.as_array())
+            .is_some();
         if is_gemini_wrapper {
-            if let Some(decls) = t.get_mut("functionDeclarations").and_then(|d| d.as_array_mut()) {
+            if let Some(decls) = t
+                .get_mut("functionDeclarations")
+                .and_then(|d| d.as_array_mut())
+            {
                 out.extend(decls.iter_mut());
             }
         } else {
@@ -163,7 +169,10 @@ pub fn signature(body: &serde_json::Value) -> String {
             // before we get here.
             let src = t.get("function").unwrap_or(t);
             let name = src.get("name").and_then(|v| v.as_str()).unwrap_or("");
-            let desc = src.get("description").and_then(|v| v.as_str()).unwrap_or("");
+            let desc = src
+                .get("description")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             // Schema key differs by protocol; take whichever is present.
             let schema = src
                 .get("input_schema")
@@ -238,7 +247,10 @@ mod tests {
 
         let a = signature(&day_one);
         let b = signature(&day_thirty);
-        assert!(!a.is_empty(), "a declared Gemini tool array must produce a signature");
+        assert!(
+            !a.is_empty(),
+            "a declared Gemini tool array must produce a signature"
+        );
         assert_ne!(a, b, "a changed description must change the pin");
     }
 

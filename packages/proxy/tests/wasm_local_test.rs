@@ -6,9 +6,9 @@
 //! `ControlPlaneCache`, so `NullControlPlaneCache` covers them: local rules are
 //! precisely the half that does not come from a control plane.
 
+use intutic_proxy::store::{ControlPlaneCache, NullControlPlaneCache};
 use intutic_proxy::wasm::context::{RequestContext, RiskLevel, Verdict};
 use intutic_proxy::wasm::local_loader::{load_local_modules, scan_signatures};
-use intutic_proxy::store::{ControlPlaneCache, NullControlPlaneCache};
 use intutic_proxy::wasm::registry::PluginRegistry;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -78,7 +78,7 @@ fn test_ctx(workspace_id: &str) -> RequestContext {
         tool_sequence: vec![],
         tool_call_counts: vec![],
         calls_last_60s: 0,
-            corroborating_detectors: 0,
+        corroborating_detectors: 0,
         denied_tools: vec![],
         denied_tool_sources: Vec::new(),
         injection_findings: vec![],

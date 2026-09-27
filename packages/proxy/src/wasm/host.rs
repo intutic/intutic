@@ -73,8 +73,7 @@ pub fn check_imports_resolvable(module: &Module) -> anyhow::Result<()> {
     for import in module.imports() {
         // `env` is the only module the linker defines; anything else is
         // unresolvable by construction.
-        let known = import.module() == "env"
-            && HOST_IMPORTS.contains(&import.name());
+        let known = import.module() == "env" && HOST_IMPORTS.contains(&import.name());
         if !known {
             anyhow::bail!(
                 "imports `{}.{}`, which the proxy does not provide. Available \
@@ -153,12 +152,15 @@ fn read_referenced_file_impl(
     let memory = match caller.get_export("memory") {
         Some(wasmtime::Extern::Memory(memory)) => memory,
         _ => {
-            tracing::warn!("WASM plugin called read_referenced_file but no memory export was found");
+            tracing::warn!(
+                "WASM plugin called read_referenced_file but no memory export was found"
+            );
             return rf::ERR_BAD_ARGS;
         }
     };
 
-    if path_ptr < 0 || path_len <= 0 || path_len as usize > rf::MAX_GUEST_PATH_BYTES || out_cap < 0 {
+    if path_ptr < 0 || path_len <= 0 || path_len as usize > rf::MAX_GUEST_PATH_BYTES || out_cap < 0
+    {
         return rf::ERR_BAD_ARGS;
     }
 
@@ -308,7 +310,9 @@ pub fn register_host_imports(linker: &mut Linker<super::runner::WasmState>) -> a
          path_len: i32,
          out_ptr: i32,
          out_cap: i32|
-         -> i32 { read_referenced_file_impl(&mut caller, path_ptr, path_len, out_ptr, out_cap) },
+         -> i32 {
+            read_referenced_file_impl(&mut caller, path_ptr, path_len, out_ptr, out_cap)
+        },
     )?;
 
     // The `onnx_rules.runOnnxInference` host import was registered here and returned
@@ -366,14 +370,12 @@ mod tests {
     fn rejects_an_import_from_a_module_other_than_env() {
         let engine = Engine::default();
         // WASI is not linked. A rule reaching for the filesystem must not load.
-        assert!(
-            check_imports_resolvable(&module_importing(
-                &engine,
-                "wasi_snapshot_preview1",
-                "fd_write"
-            ))
-            .is_err()
-        );
+        assert!(check_imports_resolvable(&module_importing(
+            &engine,
+            "wasi_snapshot_preview1",
+            "fd_write"
+        ))
+        .is_err());
     }
 
     /// The other half. A check that refuses everything would also pass the test
@@ -468,17 +470,19 @@ mod referenced_file_tests {
             let module = Module::new(&engine, wat).expect("fixture should compile");
             let mut linker = Linker::new(&engine);
             register_host_imports(&mut linker).expect("host imports should register");
-            let mut store = Store::new(
-                &engine,
-                WasmState::new(Default::default(), Arc::new(files)),
-            );
+            let mut store =
+                Store::new(&engine, WasmState::new(Default::default(), Arc::new(files)));
             let instance = linker
                 .instantiate(&mut store, &module)
                 .expect("fixture should instantiate");
             let memory = instance
                 .get_memory(&mut store, "memory")
                 .expect("memory export");
-            Self { store, instance, memory }
+            Self {
+                store,
+                instance,
+                memory,
+            }
         }
 
         /// `expect` here is the "never a host abort" assertion: a trap inside
@@ -498,8 +502,8 @@ mod referenced_file_tests {
     }
 
     fn scratch(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir()
-            .join(format!("intutic-wasm-host-{}-{tag}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("intutic-wasm-host-{}-{tag}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -543,7 +547,11 @@ mod referenced_file_tests {
         let mut guest = Guest::new(&probe_module("secrets.yaml"), files);
 
         assert_eq!(guest.probe(4096), rf::ERR_REFUSED);
-        assert_eq!(guest.written(16), vec![0u8; 16], "nothing may be written on a refusal");
+        assert_eq!(
+            guest.written(16),
+            vec![0u8; 16],
+            "nothing may be written on a refusal"
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -553,10 +561,10 @@ mod referenced_file_tests {
     #[test]
     fn a_referenced_traversal_is_refused() {
         let root = scratch("traversal");
-        let outside = root
-            .parent()
-            .unwrap()
-            .join(format!("intutic-wasm-host-outside-{}.yaml", std::process::id()));
+        let outside = root.parent().unwrap().join(format!(
+            "intutic-wasm-host-outside-{}.yaml",
+            std::process::id()
+        ));
         std::fs::write(&outside, b"secret: yes").unwrap();
 
         let token = format!("../{}", outside.file_name().unwrap().to_str().unwrap());
@@ -587,7 +595,11 @@ mod referenced_file_tests {
 
         assert_eq!(guest.probe(0), rf::ERR_TOO_LARGE);
         assert_eq!(guest.probe(1024 * 1024), rf::ERR_TOO_LARGE);
-        assert_eq!(guest.written(64), vec![0u8; 64], "not one byte of a capped file");
+        assert_eq!(
+            guest.written(64),
+            vec![0u8; 64],
+            "not one byte of a capped file"
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -642,7 +654,11 @@ mod referenced_file_tests {
         let mut guest = Guest::new(&probe_module("d.yaml"), files);
 
         for i in 0..rf::MAX_READS_PER_EVALUATION {
-            assert_eq!(guest.probe(4096), 9, "call {i} should still be within budget");
+            assert_eq!(
+                guest.probe(4096),
+                9,
+                "call {i} should still be within budget"
+            );
         }
         assert_eq!(guest.probe(4096), rf::ERR_BUDGET);
         // Exhausted stays exhausted; the budget is not a rate limit.

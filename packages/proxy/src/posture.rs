@@ -112,7 +112,7 @@ pub struct Facets {
 #[derive(Debug, Clone)]
 pub struct FacetScore {
     pub facet: &'static str,
-    pub score: u32,   // 0..100
+    pub score: u32, // 0..100
     pub weight: u32,
     pub applies: bool,
     pub reason: String,
@@ -150,30 +150,63 @@ fn score_facet(facet: &str, f: &Facets) -> (u32, bool, String) {
                 .iter()
                 .filter(|b| **b)
                 .count() as u32;
-            (ratio(on, 4), true, format!("{on}/4 guardrail layers enforcing (DLP, WASM, hook gate, PCAS)"))
+            (
+                ratio(on, 4),
+                true,
+                format!("{on}/4 guardrail layers enforcing (DLP, WASM, hook gate, PCAS)"),
+            )
         }
         "sops" => {
             if f.sops_total == 0 {
                 (0, true, "no SOPs bound to this agent".into())
             } else {
-                (ratio(f.sops_enforced, f.sops_total), true, format!("{}/{} SOPs enforced", f.sops_enforced, f.sops_total))
+                (
+                    ratio(f.sops_enforced, f.sops_total),
+                    true,
+                    format!("{}/{} SOPs enforced", f.sops_enforced, f.sops_total),
+                )
             }
         }
         "budgets" => {
-            let s = if f.budget_hard_cap { 60 } else { 0 } + if f.budget_session_cap { 40 } else { 0 };
-            (s, true, format!(
-                "{}, {}",
-                if f.budget_hard_cap { "workspace cap" } else { "no workspace cap" },
-                if f.budget_session_cap { "session cap" } else { "no session cap" },
-            ))
+            let s =
+                if f.budget_hard_cap { 60 } else { 0 } + if f.budget_session_cap { 40 } else { 0 };
+            (
+                s,
+                true,
+                format!(
+                    "{}, {}",
+                    if f.budget_hard_cap {
+                        "workspace cap"
+                    } else {
+                        "no workspace cap"
+                    },
+                    if f.budget_session_cap {
+                        "session cap"
+                    } else {
+                        "no session cap"
+                    },
+                ),
+            )
         }
         "mcp_tools" => match f.mcp_total {
-            None | Some(0) => (100, false, "no MCP tools connected — nothing to scope".into()),
-            Some(total) => (ratio(f.mcp_scoped, total), true, format!("{}/{} MCP tools have explicit scopes", f.mcp_scoped, total)),
+            None | Some(0) => (
+                100,
+                false,
+                "no MCP tools connected — nothing to scope".into(),
+            ),
+            Some(total) => (
+                ratio(f.mcp_scoped, total),
+                true,
+                format!("{}/{} MCP tools have explicit scopes", f.mcp_scoped, total),
+            ),
         },
         "skills" => match f.skills_total {
             None | Some(0) => (100, false, "no skills declared".into()),
-            Some(total) => (ratio(f.skills_sourced, total), true, format!("{}/{} skills have a known source", f.skills_sourced, total)),
+            Some(total) => (
+                ratio(f.skills_sourced, total),
+                true,
+                format!("{}/{} skills have a known source", f.skills_sourced, total),
+            ),
         },
         "loops" => {
             if !f.loops_configured {
@@ -205,7 +238,11 @@ fn score_facet(facet: &str, f: &Facets) -> (u32, bool, String) {
         }
         "memory" => match f.memory_total {
             None | Some(0) => (100, false, "no memory provider connected".into()),
-            Some(total) => (ratio(f.memory_governed, total), true, format!("{}/{} memory providers governed", f.memory_governed, total)),
+            Some(total) => (
+                ratio(f.memory_governed, total),
+                true,
+                format!("{}/{} memory providers governed", f.memory_governed, total),
+            ),
         },
         _ => (0, false, String::new()),
     }
@@ -221,13 +258,22 @@ pub fn score(f: &Facets) -> PostureResult {
         .iter()
         .map(|&facet| {
             let (s, applies, reason) = score_facet(facet, f);
-            FacetScore { facet, score: s.min(100), weight: weight(facet), applies, reason }
+            FacetScore {
+                facet,
+                score: s.min(100),
+                weight: weight(facet),
+                applies,
+                reason,
+            }
         })
         .collect();
 
     let applicable: Vec<&FacetScore> = facets.iter().filter(|s| s.applies).collect();
     let total_weight: u32 = applicable.iter().map(|s| s.weight).sum::<u32>().max(1);
-    let weighted: f64 = applicable.iter().map(|s| s.score as f64 * s.weight as f64).sum();
+    let weighted: f64 = applicable
+        .iter()
+        .map(|s| s.score as f64 * s.weight as f64)
+        .sum();
     let raw_overall = ((weighted / total_weight as f64).round() as u32).min(100);
 
     // Guard-liveness cap: a failed probe is an enforcement outage, not a
@@ -248,7 +294,11 @@ pub fn score(f: &Facets) -> PostureResult {
         _ => guard_probes_capped,
     };
 
-    PostureResult { overall, band: band(overall), facets }
+    PostureResult {
+        overall,
+        band: band(overall),
+        facets,
+    }
 }
 
 #[cfg(test)]
@@ -258,11 +308,18 @@ mod tests {
     #[test]
     fn a_fully_guarded_agent_scores_green() {
         let f = Facets {
-            dlp: true, wasm_rules: 3, hook_gate: true, pcas: true,
-            sops_total: 2, sops_enforced: 2,
-            budget_hard_cap: true, budget_session_cap: true,
-            loops_configured: true, loops_bounded: true,
-            harness_known: true, harness_config_synced: true,
+            dlp: true,
+            wasm_rules: 3,
+            hook_gate: true,
+            pcas: true,
+            sops_total: 2,
+            sops_enforced: 2,
+            budget_hard_cap: true,
+            budget_session_cap: true,
+            loops_configured: true,
+            loops_bounded: true,
+            harness_known: true,
+            harness_config_synced: true,
             ..Default::default()
         };
         let r = score(&f);
@@ -272,7 +329,10 @@ mod tests {
 
     #[test]
     fn a_bare_agent_scores_red() {
-        let f = Facets { harness_known: true, ..Default::default() };
+        let f = Facets {
+            harness_known: true,
+            ..Default::default()
+        };
         let r = score(&f);
         assert_eq!(r.band, "red", "overall was {}", r.overall);
         assert!(r.overall < 40);
@@ -282,11 +342,18 @@ mod tests {
     fn unused_surfaces_do_not_penalise() {
         // Strong guardrails, no MCP/graph/skill/memory surface at all.
         let f = Facets {
-            dlp: true, wasm_rules: 1, hook_gate: true, pcas: true,
-            sops_total: 1, sops_enforced: 1,
-            budget_hard_cap: true, budget_session_cap: true,
-            loops_configured: true, loops_bounded: true,
-            harness_known: true, harness_config_synced: true,
+            dlp: true,
+            wasm_rules: 1,
+            hook_gate: true,
+            pcas: true,
+            sops_total: 1,
+            sops_enforced: 1,
+            budget_hard_cap: true,
+            budget_session_cap: true,
+            loops_configured: true,
+            loops_bounded: true,
+            harness_known: true,
+            harness_config_synced: true,
             ..Default::default()
         };
         assert!(score(&f).overall >= 85);
@@ -295,69 +362,131 @@ mod tests {
     #[test]
     fn guard_probes_failed_caps_the_score_at_50() {
         let f = Facets {
-            dlp: true, wasm_rules: 3, hook_gate: true, pcas: true,
-            sops_total: 2, sops_enforced: 2,
-            budget_hard_cap: true, budget_session_cap: true,
-            loops_configured: true, loops_bounded: true,
-            harness_known: true, harness_config_synced: true,
+            dlp: true,
+            wasm_rules: 3,
+            hook_gate: true,
+            pcas: true,
+            sops_total: 2,
+            sops_enforced: 2,
+            budget_hard_cap: true,
+            budget_session_cap: true,
+            loops_configured: true,
+            loops_bounded: true,
+            harness_known: true,
+            harness_config_synced: true,
             guard_probes_failed: None,
             ..Default::default()
         };
         let uncapped = score(&f).overall;
-        assert!(uncapped > 50, "fixture must score above the cap to test it: {uncapped}");
+        assert!(
+            uncapped > 50,
+            "fixture must score above the cap to test it: {uncapped}"
+        );
 
-        let capped = score(&Facets { guard_probes_failed: Some(1), ..f }).overall;
+        let capped = score(&Facets {
+            guard_probes_failed: Some(1),
+            ..f
+        })
+        .overall;
         assert_eq!(capped, 50);
     }
 
     #[test]
     fn a_zero_or_absent_guard_probes_failed_leaves_the_score_untouched() {
         let base = Facets {
-            dlp: true, wasm_rules: 3, hook_gate: true, pcas: true,
-            sops_total: 2, sops_enforced: 2,
-            budget_hard_cap: true, budget_session_cap: true,
-            loops_configured: true, loops_bounded: true,
-            harness_known: true, harness_config_synced: true,
+            dlp: true,
+            wasm_rules: 3,
+            hook_gate: true,
+            pcas: true,
+            sops_total: 2,
+            sops_enforced: 2,
+            budget_hard_cap: true,
+            budget_session_cap: true,
+            loops_configured: true,
+            loops_bounded: true,
+            harness_known: true,
+            harness_config_synced: true,
             ..Default::default()
         };
-        let without = score(&Facets { guard_probes_failed: None, ..base.clone() }).overall;
-        let zero = score(&Facets { guard_probes_failed: Some(0), ..base }).overall;
+        let without = score(&Facets {
+            guard_probes_failed: None,
+            ..base.clone()
+        })
+        .overall;
+        let zero = score(&Facets {
+            guard_probes_failed: Some(0),
+            ..base
+        })
+        .overall;
         assert_eq!(without, zero);
     }
 
     #[test]
     fn egress_off_or_monitor_caps_the_score_at_50() {
         let f = Facets {
-            dlp: true, wasm_rules: 3, hook_gate: true, pcas: true,
-            sops_total: 2, sops_enforced: 2,
-            budget_hard_cap: true, budget_session_cap: true,
-            loops_configured: true, loops_bounded: true,
-            harness_known: true, harness_config_synced: true,
+            dlp: true,
+            wasm_rules: 3,
+            hook_gate: true,
+            pcas: true,
+            sops_total: 2,
+            sops_enforced: 2,
+            budget_hard_cap: true,
+            budget_session_cap: true,
+            loops_configured: true,
+            loops_bounded: true,
+            harness_known: true,
+            harness_config_synced: true,
             egress_enforcing: None,
             ..Default::default()
         };
         let uncapped = score(&f).overall;
-        assert!(uncapped > 50, "fixture must score above the cap to test it: {uncapped}");
+        assert!(
+            uncapped > 50,
+            "fixture must score above the cap to test it: {uncapped}"
+        );
 
-        let capped_off = score(&Facets { egress_enforcing: Some(false), ..f.clone() }).overall;
+        let capped_off = score(&Facets {
+            egress_enforcing: Some(false),
+            ..f.clone()
+        })
+        .overall;
         assert_eq!(capped_off, 50);
 
-        let capped_enforce = score(&Facets { egress_enforcing: Some(true), ..f }).overall;
+        let capped_enforce = score(&Facets {
+            egress_enforcing: Some(true),
+            ..f
+        })
+        .overall;
         assert_eq!(capped_enforce, uncapped, "Enforce must not cap");
     }
 
     #[test]
     fn an_unread_egress_policy_leaves_the_score_untouched() {
         let base = Facets {
-            dlp: true, wasm_rules: 3, hook_gate: true, pcas: true,
-            sops_total: 2, sops_enforced: 2,
-            budget_hard_cap: true, budget_session_cap: true,
-            loops_configured: true, loops_bounded: true,
-            harness_known: true, harness_config_synced: true,
+            dlp: true,
+            wasm_rules: 3,
+            hook_gate: true,
+            pcas: true,
+            sops_total: 2,
+            sops_enforced: 2,
+            budget_hard_cap: true,
+            budget_session_cap: true,
+            loops_configured: true,
+            loops_bounded: true,
+            harness_known: true,
+            harness_config_synced: true,
             ..Default::default()
         };
-        let without = score(&Facets { egress_enforcing: None, ..base.clone() }).overall;
-        let enforcing = score(&Facets { egress_enforcing: Some(true), ..base }).overall;
+        let without = score(&Facets {
+            egress_enforcing: None,
+            ..base.clone()
+        })
+        .overall;
+        let enforcing = score(&Facets {
+            egress_enforcing: Some(true),
+            ..base
+        })
+        .overall;
         assert_eq!(without, enforcing);
     }
 

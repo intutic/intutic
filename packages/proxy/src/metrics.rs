@@ -163,8 +163,14 @@ mod tests {
     /// anyone renames an instrument, this fails before the dashboard lies.
     #[test]
     fn dashboard_series_names_match_instruments() {
-        assert_eq!(format!("{SNIP_COMPRESSION_RATIO}_bucket"), "snip_compression_ratio_bucket");
-        assert_eq!(format!("{SNIP_COMPRESSION_RATIO}_sum"), "snip_compression_ratio_sum");
+        assert_eq!(
+            format!("{SNIP_COMPRESSION_RATIO}_bucket"),
+            "snip_compression_ratio_bucket"
+        );
+        assert_eq!(
+            format!("{SNIP_COMPRESSION_RATIO}_sum"),
+            "snip_compression_ratio_sum"
+        );
         assert_eq!(format!("{SNIP_INPUT_BYTES}_sum"), "snip_input_bytes_sum");
         assert_eq!(format!("{SNIP_OUTPUT_BYTES}_sum"), "snip_output_bytes_sum");
         assert_eq!(format!("{SNIP_COMPACTED}_total"), "snip_compacted_total");

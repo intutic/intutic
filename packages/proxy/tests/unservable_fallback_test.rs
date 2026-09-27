@@ -107,7 +107,9 @@ intutic_settings:
         context_snapshot_rate: 0.0,
     };
     let app = intutic_proxy::router::build_router(state);
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
     let addr = listener.local_addr().expect("addr");
     tokio::spawn(async move {
         axum::serve(listener, app).await.ok();
@@ -134,7 +136,11 @@ intutic_settings:
         // credential-shaped literals in source, in every package.
         .header(
             "Authorization",
-            concat!("Bearer vk_", "0123456789abcdef0123456789abcdef", "_ws_unservable_test"),
+            concat!(
+                "Bearer vk_",
+                "0123456789abcdef0123456789abcdef",
+                "_ws_unservable_test"
+            ),
         )
         .header("x-workspace-id", "ws_unservable_test")
         .header("x-session-id", session_id)
@@ -193,7 +199,10 @@ intutic_settings:
     // a zero-reward pull moves the Beta posterior, which is observable as arm
     // state existing for the bad model where a fresh store has none.
     // (The precise posterior maths is reward.rs's own test surface.)
-    let arms = store.load_arms("ws_unservable_test").await.unwrap_or_default();
+    let arms = store
+        .load_arms("ws_unservable_test")
+        .await
+        .unwrap_or_default();
     assert!(
         arms.keys().any(|k| k.contains("stub-bad-model")),
         "the unservable pick must leave a learning record against the arm; \

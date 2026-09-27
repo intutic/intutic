@@ -81,7 +81,10 @@ impl CostPredictionGate {
         // NOT `.unwrap_or(0.0)`. Nothing in production writes this key, so it is
         // absent everywhere, and reading absent as a $0 ceiling made
         // `estimated_cost > threshold` true for every request forever.
-        let threshold = self.control_plane.predict_gate_threshold(workspace_id).await;
+        let threshold = self
+            .control_plane
+            .predict_gate_threshold(workspace_id)
+            .await;
 
         // 3. Look up historical baseline
         let bucket = counter::get_input_bucket(input_tokens);
@@ -194,7 +197,8 @@ impl CostPredictionGate {
             completion_tokens: 0,
             cached_at: String::new(),
         };
-        let body = crate::plugins::semantic_cache::construct_mock_response(protocol, &cached, model);
+        let body =
+            crate::plugins::semantic_cache::construct_mock_response(protocol, &cached, model);
         serde_json::to_vec(&body).unwrap_or_default()
     }
 
@@ -362,14 +366,13 @@ mod tests {
             "an Anthropic client must not receive an OpenAI envelope: {anthropic}"
         );
 
-        let openai: serde_json::Value = serde_json::from_slice(
-            &CostPredictionGate::format_gate_response(
+        let openai: serde_json::Value =
+            serde_json::from_slice(&CostPredictionGate::format_gate_response(
                 &est,
                 "gpt-4o",
                 &Protocol::OpenAIChatCompletions,
-            ),
-        )
-        .expect("valid json");
+            ))
+            .expect("valid json");
         assert!(openai["choices"][0]["message"]["content"]
             .as_str()
             .unwrap_or_default()
@@ -397,7 +400,10 @@ mod tests {
         ))
         .to_string();
         assert!(!body.contains("--force"), "no such parser on this path");
-        assert!(!body.contains("Settings"), "no such surface writes the threshold");
+        assert!(
+            !body.contains("Settings"),
+            "no such surface writes the threshold"
+        );
     }
 
     /// A stand-in whose only interesting answer is the threshold.
@@ -454,7 +460,11 @@ mod tests {
         async fn auto_judge_active(&self, _s: crate::store::JudgeScope, _id: &str) -> bool {
             false
         }
-        async fn break_glass_grant(&self, _t: &str, _w: &str) -> Option<crate::store::BreakGlassGrant> {
+        async fn break_glass_grant(
+            &self,
+            _t: &str,
+            _w: &str,
+        ) -> Option<crate::store::BreakGlassGrant> {
             None
         }
         async fn transition_baseline(&self, _w: &str) -> Option<String> {
@@ -466,7 +476,11 @@ mod tests {
         async fn wasm_binary(&self, _sha: &str) -> anyhow::Result<Option<Vec<u8>>> {
             Ok(None)
         }
-        async fn drain_notifications(&self, _s: crate::store::NotifyScope, _id: &str) -> Vec<String> {
+        async fn drain_notifications(
+            &self,
+            _s: crate::store::NotifyScope,
+            _id: &str,
+        ) -> Vec<String> {
             Vec::new()
         }
         async fn is_sandbox_attested(&self, _sid: &str) -> bool {

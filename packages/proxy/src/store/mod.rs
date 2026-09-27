@@ -305,7 +305,12 @@ pub enum BreakGlassScope {
 
 impl BreakGlassGrant {
     pub fn scope(&self) -> BreakGlassScope {
-        match self.policy_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        match self
+            .policy_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
             None => BreakGlassScope::Global,
             Some(id) => {
                 if let Some(rule) = id.strip_prefix("wasm:") {
@@ -325,7 +330,10 @@ mod break_glass_scope_tests {
     use super::*;
 
     fn grant(policy_id: Option<&str>) -> BreakGlassGrant {
-        BreakGlassGrant { request_id: "bgr_x".into(), policy_id: policy_id.map(String::from) }
+        BreakGlassGrant {
+            request_id: "bgr_x".into(),
+            policy_id: policy_id.map(String::from),
+        }
     }
 
     #[test]
@@ -337,13 +345,22 @@ mod break_glass_scope_tests {
 
     #[test]
     fn prefixed_ids_name_one_rule_or_one_detector() {
-        assert_eq!(grant(Some("wasm:pcas_exfiltration_001")).scope(), BreakGlassScope::WasmRule("pcas_exfiltration_001".into()));
-        assert_eq!(grant(Some("detector:consecutive_repeat")).scope(), BreakGlassScope::Detector("consecutive_repeat".into()));
+        assert_eq!(
+            grant(Some("wasm:pcas_exfiltration_001")).scope(),
+            BreakGlassScope::WasmRule("pcas_exfiltration_001".into())
+        );
+        assert_eq!(
+            grant(Some("detector:consecutive_repeat")).scope(),
+            BreakGlassScope::Detector("consecutive_repeat".into())
+        );
     }
 
     #[test]
     fn a_legacy_unprefixed_id_narrows_to_a_wasm_rule_never_to_global() {
-        assert_eq!(grant(Some("pcas_exfiltration_001")).scope(), BreakGlassScope::WasmRule("pcas_exfiltration_001".into()));
+        assert_eq!(
+            grant(Some("pcas_exfiltration_001")).scope(),
+            BreakGlassScope::WasmRule("pcas_exfiltration_001".into())
+        );
     }
 }
 
@@ -436,8 +453,10 @@ pub trait LocalStore: Send + Sync + 'static {
     /// All arms for a workspace, keyed by `arm:{model}:{tier}:{task}`. Arms
     /// that fail to decode are dropped, matching the caller's existing
     /// per-arm `.ok()` — a corrupt arm re-seeds rather than failing the route.
-    async fn load_arms(&self, workspace_id: &str)
-        -> anyhow::Result<HashMap<String, BanditArmState>>;
+    async fn load_arms(
+        &self,
+        workspace_id: &str,
+    ) -> anyhow::Result<HashMap<String, BanditArmState>>;
 
     /// Seed a fresh `Beta(1,1)` arm. Separate from `update_arm` because
     /// seeding must not count as a pull.
@@ -492,8 +511,7 @@ pub trait LocalStore: Send + Sync + 'static {
         cost_usd: f64,
     ) -> anyhow::Result<()>;
 
-    async fn incr_outage_failure(&self, workspace_id: &str, arm_key: &str)
-        -> anyhow::Result<()>;
+    async fn incr_outage_failure(&self, workspace_id: &str, arm_key: &str) -> anyhow::Result<()>;
 
     // ── Session routing ──────────────────────────────────────────────
     //
@@ -545,7 +563,12 @@ pub trait LocalStore: Send + Sync + 'static {
     /// neither cache bucket at all (both `None`) — a provider that does not
     /// report cache activity must not stamp a `Some(0)` that reads as
     /// "measured, and cold" for a model that may simply not report caching.
-    async fn record_session_cache(&self, scope: &str, model: &str, cache_read_bp: u32) -> anyhow::Result<()>;
+    async fn record_session_cache(
+        &self,
+        scope: &str,
+        model: &str,
+        cache_read_bp: u32,
+    ) -> anyhow::Result<()>;
 
     // ── Tool-sequence anomaly detection ──────────────────────────────
 
@@ -604,11 +627,7 @@ pub trait LocalStore: Send + Sync + 'static {
     /// Holds OAuth tokens and API keys. `MemoryStore` keeps these in process
     /// memory and never writes them to disk — see its module docs before
     /// making the local store durable.
-    async fn workspace_credential(
-        &self,
-        workspace_id: &str,
-        fields: &[&str],
-    ) -> Option<String>;
+    async fn workspace_credential(&self, workspace_id: &str, fields: &[&str]) -> Option<String>;
 
     /// Capture a credential observed on an inbound request (developer OAuth /
     /// Pro sessions), so later requests to the same workspace can reuse it.
@@ -693,7 +712,13 @@ pub trait LocalStore: Send + Sync + 'static {
     /// [`LocalStore::graph_members`]: this is on the hot path for every request
     /// in a graph, while reading the membership is only needed on the rare
     /// request that actually has something to broadcast.
-    async fn touch_graph_node(&self, workspace_id: &str, graph_id: &str, node_id: &str, ttl_secs: u64);
+    async fn touch_graph_node(
+        &self,
+        workspace_id: &str,
+        graph_id: &str,
+        node_id: &str,
+        ttl_secs: u64,
+    );
 
     /// Current members of a graph, including the caller.
     ///
@@ -760,7 +785,12 @@ pub trait LocalStore: Send + Sync + 'static {
     /// unknown. Callers must treat that as "no opinion" and not as "dead",
     /// since concluding a parent is gone on the basis of a store that never
     /// tracked it would orphan every node in a graph.
-    async fn is_graph_member(&self, workspace_id: &str, graph_id: &str, node_id: &str) -> Option<bool>;
+    async fn is_graph_member(
+        &self,
+        workspace_id: &str,
+        graph_id: &str,
+        node_id: &str,
+    ) -> Option<bool>;
 
     /// Add to a graph's running cost and return the new total.
     ///
@@ -770,7 +800,13 @@ pub trait LocalStore: Send + Sync + 'static {
     ///
     /// Returns `None` when the store cannot aggregate, which reads as "no
     /// spend signal" rather than zero.
-    async fn add_graph_spend(&self, workspace_id: &str, graph_id: &str, amount: f64, ttl_secs: u64) -> Option<f64>;
+    async fn add_graph_spend(
+        &self,
+        workspace_id: &str,
+        graph_id: &str,
+        amount: f64,
+        ttl_secs: u64,
+    ) -> Option<f64>;
 
     /// A graph's cost so far, across all nodes.
     async fn graph_spend(&self, workspace_id: &str, graph_id: &str) -> Option<f64>;
@@ -985,8 +1021,7 @@ pub trait ControlPlaneCache: Send + Sync + 'static {
     /// on published traces — was unreachable in practice. The control plane
     /// publishes a pointer keyed by the same workspace/member pair this proxy
     /// already resolved from the API key.
-    async fn active_loop_run(&self, workspace_id: &str, member_id: Option<&str>)
-        -> Option<String>;
+    async fn active_loop_run(&self, workspace_id: &str, member_id: Option<&str>) -> Option<String>;
 
     // ── Paid-tier gates ──────────────────────────────────────────────
 

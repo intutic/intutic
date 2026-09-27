@@ -259,7 +259,9 @@ impl ReferencedFiles {
     /// No file is readable. The state for every request whose rules do not ask
     /// for files, and for every deployment with no root configured.
     pub fn empty() -> Self {
-        Self { entries: Vec::new() }
+        Self {
+            entries: Vec::new(),
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -461,7 +463,12 @@ pub fn read_tokens(tokens: Vec<String>, root: &Path) -> ReferencedFiles {
             return ReferencedFiles {
                 entries: tokens
                     .into_iter()
-                    .map(|t| (t, Outcome::Refused("the configured manifest root does not resolve")))
+                    .map(|t| {
+                        (
+                            t,
+                            Outcome::Refused("the configured manifest root does not resolve"),
+                        )
+                    })
                     .collect(),
             };
         }
@@ -619,8 +626,10 @@ mod tests {
     /// `tag` is unique per call site, which is what keeps concurrent tests from
     /// deleting each other's directories.
     fn scratch(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir()
-            .join(format!("intutic-wasm-reffiles-{}-{tag}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "intutic-wasm-reffiles-{}-{tag}",
+            std::process::id()
+        ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -726,7 +735,10 @@ mod tests {
             json!({ "command": "kubectl apply -f k8s/deploy.yaml" })
         )]));
         let files = prefetch(&ctx, &root);
-        assert_eq!(files.lookup("k8s/deploy.yaml"), Ok(&b"image: app:latest"[..]));
+        assert_eq!(
+            files.lookup("k8s/deploy.yaml"),
+            Ok(&b"image: app:latest"[..])
+        );
         assert_eq!(files.readable_count(), 1);
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -755,10 +767,10 @@ mod tests {
     #[test]
     fn a_referenced_traversal_is_refused_without_touching_the_filesystem() {
         let root = scratch("traversal");
-        let outside = root.parent().unwrap().join(format!(
-            "intutic-wasm-outside-{}.yaml",
-            std::process::id()
-        ));
+        let outside = root
+            .parent()
+            .unwrap()
+            .join(format!("intutic-wasm-outside-{}.yaml", std::process::id()));
         std::fs::write(&outside, b"secret: yes").unwrap();
 
         let token = format!("../{}", outside.file_name().unwrap().to_str().unwrap());
@@ -766,7 +778,11 @@ mod tests {
             "Bash",
             json!({ "command": format!("kubectl apply -f {token}") })
         )]));
-        assert_eq!(candidate_tokens(&ctx), vec![token.clone()], "must be a candidate to be a real test");
+        assert_eq!(
+            candidate_tokens(&ctx),
+            vec![token.clone()],
+            "must be a candidate to be a real test"
+        );
 
         let files = prefetch(&ctx, &root);
         assert_eq!(files.lookup(&token), Err(ERR_REFUSED));
@@ -780,10 +796,10 @@ mod tests {
     #[test]
     fn an_absolute_path_outside_the_root_is_refused() {
         let root = scratch("absolute");
-        let outside = root.parent().unwrap().join(format!(
-            "intutic-wasm-abs-{}.yaml",
-            std::process::id()
-        ));
+        let outside = root
+            .parent()
+            .unwrap()
+            .join(format!("intutic-wasm-abs-{}.yaml", std::process::id()));
         std::fs::write(&outside, b"secret: yes").unwrap();
 
         let token = outside.to_str().unwrap().to_string();
@@ -816,10 +832,10 @@ mod tests {
     #[test]
     fn a_symlink_leading_out_of_the_root_is_refused() {
         let root = scratch("symlink");
-        let outside = root.parent().unwrap().join(format!(
-            "intutic-wasm-linked-{}.yaml",
-            std::process::id()
-        ));
+        let outside = root
+            .parent()
+            .unwrap()
+            .join(format!("intutic-wasm-linked-{}.yaml", std::process::id()));
         std::fs::write(&outside, b"secret: yes").unwrap();
         std::os::unix::fs::symlink(&outside, root.join("deploy.yaml")).unwrap();
 
@@ -916,7 +932,10 @@ mod tests {
         let files = read_tokens(vec!["d.yaml".to_string()], &root);
         let rendered = format!("{files:?}");
         assert!(!rendered.contains("super-secret-value"), "{rendered}");
-        assert!(rendered.contains("d.yaml") && rendered.contains("readable"), "{rendered}");
+        assert!(
+            rendered.contains("d.yaml") && rendered.contains("readable"),
+            "{rendered}"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 }

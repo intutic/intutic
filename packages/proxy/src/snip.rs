@@ -84,7 +84,13 @@ pub fn compact(text: &str, config: &SnipCompactorConfig) -> (String, f64) {
         );
         // Beside the log line, not instead of it — check-cache-telemetry.sh
         // reads the tracing fields; the dashboard reads these instruments.
-        crate::metrics::record_snip_compaction("json", "json_aware", text.len(), truncated.len(), ratio);
+        crate::metrics::record_snip_compaction(
+            "json",
+            "json_aware",
+            text.len(),
+            truncated.len(),
+            ratio,
+        );
         return (truncated, ratio);
     }
 
@@ -115,7 +121,13 @@ pub fn compact(text: &str, config: &SnipCompactorConfig) -> (String, f64) {
                             snip.input_hash = input_hash,
                             "snip.compacted"
                         );
-                        crate::metrics::record_snip_compaction(input_type, strategy, text.len(), truncated.len(), ratio);
+                        crate::metrics::record_snip_compaction(
+                            input_type,
+                            strategy,
+                            text.len(),
+                            truncated.len(),
+                            ratio,
+                        );
                         return (truncated, ratio);
                     }
                 }

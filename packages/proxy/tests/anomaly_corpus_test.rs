@@ -53,15 +53,17 @@ const MEASURED: &[&str] = &[
 /// exactly the drift worth noticing. These two are long trajectories with
 /// genuine repetition in them; they are false positives, and naming them is how
 /// a threshold change becomes visible rather than absorbed.
-const EXPECTED_BENIGN_FIRINGS: &[&str] = &["multi_turn_long_context_38", "multi_turn_long_context_46"];
+const EXPECTED_BENIGN_FIRINGS: &[&str] =
+    &["multi_turn_long_context_38", "multi_turn_long_context_46"];
 
 fn mutations() -> serde_json::Value {
     serde_json::from_str(include_str!("corpus/mutations.json")).expect("mutations.json parses")
 }
 
-fn apply(mutator: &str, seed: &[intutic_proxy::manifest::ToolInvocation])
-    -> Vec<intutic_proxy::manifest::ToolInvocation>
-{
+fn apply(
+    mutator: &str,
+    seed: &[intutic_proxy::manifest::ToolInvocation],
+) -> Vec<intutic_proxy::manifest::ToolInvocation> {
     match mutator {
         "repeat_run" => repeat_run(seed),
         "alternate_tail" => alternate_tail(seed),
@@ -225,8 +227,12 @@ async fn build_report() -> String {
         notinject_rows,
         tooldesc_rows,
     ));
-    out.push_str("  detector_id                  | measured           | benign_fired | mutant_cases\n");
-    out.push_str("  -----------------------------|--------------------|--------------|-------------\n");
+    out.push_str(
+        "  detector_id                  | measured           | benign_fired | mutant_cases\n",
+    );
+    out.push_str(
+        "  -----------------------------|--------------------|--------------|-------------\n",
+    );
 
     let mut ids: Vec<&str> = registered.clone();
     ids.sort();
@@ -402,7 +408,9 @@ async fn every_mutant_case_fires_its_expected_detector_and_nothing_else() {
             .map(|v| v.as_str().unwrap().to_string())
             .collect();
 
-        let seed = by_id.get(seed_id).unwrap_or_else(|| panic!("{case_id}: unknown seed {seed_id}"));
+        let seed = by_id
+            .get(seed_id)
+            .unwrap_or_else(|| panic!("{case_id}: unknown seed {seed_id}"));
 
         let before: BTreeSet<String> = fired(&build_ctx(&seed.calls).await).into_iter().collect();
         assert!(
@@ -440,12 +448,24 @@ async fn every_mutant_case_fires_its_expected_detector_and_nothing_else() {
 #[tokio::test]
 async fn the_context_builder_populates_the_fields_detectors_actually_guard_on() {
     let seeds = load_seeds();
-    let seed = seeds.iter().find(|s| !s.calls.is_empty()).expect("a non-empty seed");
+    let seed = seeds
+        .iter()
+        .find(|s| !s.calls.is_empty())
+        .expect("a non-empty seed");
     let ctx = build_ctx(&seed.calls).await;
 
-    assert!(!ctx.tool_calls.is_empty(), "UnauthorizedToolDetector guards on tool_calls");
-    assert!(!ctx.new_tool_calls.is_empty(), "ReviewGateDetector guards on new_tool_calls");
-    assert!(!ctx.tool_sequence.is_empty(), "the sequence detectors guard on tool_sequence");
+    assert!(
+        !ctx.tool_calls.is_empty(),
+        "UnauthorizedToolDetector guards on tool_calls"
+    );
+    assert!(
+        !ctx.new_tool_calls.is_empty(),
+        "ReviewGateDetector guards on new_tool_calls"
+    );
+    assert!(
+        !ctx.tool_sequence.is_empty(),
+        "the sequence detectors guard on tool_sequence"
+    );
     assert!(
         ctx.transition_baseline.is_none(),
         "a fitted baseline is derived from Intutic's own successful runs; using \
@@ -461,7 +481,10 @@ async fn the_context_builder_populates_the_fields_detectors_actually_guard_on() 
 #[tokio::test]
 async fn action_tokens_come_from_the_classifier_not_from_the_fixture() {
     let seeds = load_seeds();
-    let seed = seeds.iter().find(|s| s.id == "multi_turn_base_0").expect("seed");
+    let seed = seeds
+        .iter()
+        .find(|s| s.id == "multi_turn_base_0")
+        .expect("seed");
 
     let mutant = exfil_succession(&seed.calls);
     for inv in &mutant {
@@ -471,12 +494,21 @@ async fn action_tokens_come_from_the_classifier_not_from_the_fixture() {
             inv.name,
         );
         let flat = inv.input.to_string();
-        assert!(!flat.contains("action:"), "a mutator smuggled an action token through arguments");
+        assert!(
+            !flat.contains("action:"),
+            "a mutator smuggled an action token through arguments"
+        );
     }
 
     let ctx = build_ctx(&mutant).await;
-    let secret = ctx.tool_sequence.iter().position(|t| t == "action:secret_read");
-    let post = ctx.tool_sequence.iter().position(|t| t == "action:http_post");
+    let secret = ctx
+        .tool_sequence
+        .iter()
+        .position(|t| t == "action:secret_read");
+    let post = ctx
+        .tool_sequence
+        .iter()
+        .position(|t| t == "action:http_post");
     assert!(
         secret.is_some() && post.is_some(),
         "classify must synthesise both tokens: {:?}",
@@ -545,7 +577,10 @@ async fn a_poisoned_tool_description_reaches_the_registry() {
 
     let mut ctx = build_ctx(&[]).await;
     ctx.tools = vec![
-        ToolSchema { name: "add".into(), description: Some("Add two numbers.".into()) },
+        ToolSchema {
+            name: "add".into(),
+            description: Some("Add two numbers.".into()),
+        },
         ToolSchema {
             name: "store_value".into(),
             description: Some(
@@ -567,7 +602,11 @@ async fn a_poisoned_tool_description_reaches_the_registry() {
         intutic_proxy::plugins::anomaly::Disposition::Steer,
         "advisory until adjudications exist — the promotion rule governs the rest",
     );
-    assert!(hit.reason.contains("store_value"), "names the tool: {}", hit.reason);
+    assert!(
+        hit.reason.contains("store_value"),
+        "names the tool: {}",
+        hit.reason
+    );
     assert!(
         !hit.reason.contains("id_rsa"),
         "must not quote the payload into telemetry: {}",
@@ -595,7 +634,9 @@ async fn a_poisoned_tool_description_reaches_the_registry() {
 /// it — precisely the risk TD-248's own title warns about, one level up.
 #[tokio::test]
 async fn cycle_coverage_floor_has_empirical_headroom_against_real_traffic() {
-    use intutic_proxy::plugins::anomaly::detectors::{landmark_cycle_coverage, CYCLE_COVERAGE_FLOOR};
+    use intutic_proxy::plugins::anomaly::detectors::{
+        landmark_cycle_coverage, CYCLE_COVERAGE_FLOOR,
+    };
 
     let seeds = load_seeds();
     let mut reached_gate = 0usize;

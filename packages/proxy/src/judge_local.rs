@@ -120,15 +120,18 @@ pub async fn local_judge_finalize(
     // service name), which is the point of the local judge: the content never
     // leaves that network. TLS on that hop is the operator's choice, made in
     // the same env var; nothing here can upgrade a scheme the operator set.
-    let mut req = http_client.post(&url).json(&serde_json::json!({ // codeql[rust/non-https-url]
-        "model": model,
-        "messages": [
-            { "role": "system", "content": system_prompt(sop_text) },
-            { "role": "user", "content": full_content },
-        ],
-        "temperature": 0.0,
-        "response_format": { "type": "json_object" },
-    }));
+    let mut req = http_client
+        // codeql[rust/non-https-url]
+        .post(&url)
+        .json(&serde_json::json!({
+            "model": model,
+            "messages": [
+                { "role": "system", "content": system_prompt(sop_text) },
+                { "role": "user", "content": full_content },
+            ],
+            "temperature": 0.0,
+            "response_format": { "type": "json_object" },
+        }));
     if let Some(key) = litellm_local_api_key() {
         req = req.header("Authorization", format!("Bearer {}", key));
     }
@@ -178,7 +181,10 @@ mod tests {
     fn parse_verdict_defaults_unrecognised_and_compliant_to_compliant() {
         assert_eq!(parse_verdict("COMPLIANT"), LocalVerdict::Compliant);
         assert_eq!(parse_verdict("compliant"), LocalVerdict::Compliant);
-        assert_eq!(parse_verdict("something a local model made up"), LocalVerdict::Compliant);
+        assert_eq!(
+            parse_verdict("something a local model made up"),
+            LocalVerdict::Compliant
+        );
         assert_eq!(parse_verdict(""), LocalVerdict::Compliant);
     }
 

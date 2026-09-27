@@ -1,41 +1,32 @@
 pub mod commands;
 pub mod config;
 pub mod dlp;
-/// The single Intutic config/state directory resolution — see this
-/// module's own doc comment for the Windows path-mismatch bug it fixes.
-pub mod paths;
-pub mod manifest;
-pub mod memory;
-pub mod posture;
 pub mod graph;
 pub mod injection;
+pub mod manifest;
+pub mod memory;
 pub mod metering;
 pub mod metrics;
 pub mod otel_propagation;
+/// The single Intutic config/state directory resolution — see this
+/// module's own doc comment for the Windows path-mismatch bug it fixes.
+pub mod paths;
 pub mod plugins;
-pub mod protocol;
+pub mod posture;
 pub mod probes;
+pub mod protocol;
 pub mod proxy;
 pub mod router;
 pub mod snip;
-pub mod sops;
 pub mod snip_code;
 pub mod snip_json;
+pub mod sops;
 pub mod telemetry;
 pub mod tool_pin;
 pub mod tool_poison;
 pub mod wasm;
 // TLS MITM for Windsurf Cascade AI traffic interception
 pub mod ca_manager;
-pub mod hostname_filter;
-/// Offline model pricing — compile-time bundle + family prefix fallback (WS-5OP)
-pub mod pricing;
-pub mod routing;
-/// Provider token-usage parsing, normalized to disjoint billing buckets (TD-347)
-pub mod usage;
-/// Storage abstraction — Valkey-backed or in-memory (SPIKE, bandit slice only)
-pub mod store;
-pub mod tls_mitm;
 /// L1 egress enforcement — the deny decision consulted on every CONNECT (LLD #63)
 pub mod egress_policy;
 pub mod firewall;
@@ -43,14 +34,23 @@ pub mod firewall;
 pub mod gateway;
 /// Self-hosted gateway heartbeat client (LLD #66, gateway phase 4)
 pub mod heartbeat;
-pub mod k8s_token_writer;
+pub mod hostname_filter;
 /// Local judge for self-hosted gateways (LLD #68 §2 phase 2)
 pub mod judge_local;
-pub mod local_spend;
+pub mod k8s_token_writer;
 /// Local `~/.intutic/config.json` reader — cached daily-budget cap and
 /// approved-models allowlist for standalone deployments (Wave 6.3,
 /// audit-remediation).
 pub mod local_config;
+pub mod local_spend;
+/// Offline model pricing — compile-time bundle + family prefix fallback (WS-5OP)
+pub mod pricing;
+pub mod routing;
+/// Storage abstraction — Valkey-backed or in-memory (SPIKE, bandit slice only)
+pub mod store;
+pub mod tls_mitm;
+/// Provider token-usage parsing, normalized to disjoint billing buckets (TD-347)
+pub mod usage;
 
 /// Test-only shared state that would otherwise be duplicated per-module.
 ///

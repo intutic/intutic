@@ -517,7 +517,10 @@ mod tests {
     #[test]
     fn tool_call_counts_round_trips_as_pairs() {
         let v: serde_json::Value = serde_json::to_value(ctx()).unwrap();
-        assert_eq!(v["tool_call_counts"], serde_json::json!([["Glob", 1], ["View", 1]]));
+        assert_eq!(
+            v["tool_call_counts"],
+            serde_json::json!([["Glob", 1], ["View", 1]])
+        );
     }
 
     /// `calls_last_60s` is always present, unlike the `skip_serializing_if`
@@ -545,7 +548,10 @@ mod tests {
         let mut zero = ctx();
         zero.corroborating_detectors = 0;
         let v: serde_json::Value = serde_json::to_value(&zero).unwrap();
-        assert_eq!(v["corroborating_detectors"], 0, "zero is a real count, never omitted");
+        assert_eq!(
+            v["corroborating_detectors"], 0,
+            "zero is a real count, never omitted"
+        );
     }
 
     /// Replay-corpus snapshots captured before this field existed must read

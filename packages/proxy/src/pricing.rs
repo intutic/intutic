@@ -125,7 +125,8 @@ pub fn estimate_cost_cached(model: &str, usage: &crate::usage::TokenUsage) -> f6
 
     let uncached_cost = (usage.uncached_input.unwrap_or(0) as f64 / 1000.0) * input_rate;
     let cache_read_cost = (usage.cache_read_input.unwrap_or(0) as f64 / 1000.0) * cache_read_rate;
-    let cache_write_cost = (usage.cache_write_input.unwrap_or(0) as f64 / 1000.0) * cache_write_rate;
+    let cache_write_cost =
+        (usage.cache_write_input.unwrap_or(0) as f64 / 1000.0) * cache_write_rate;
     let output_cost = (usage.output.unwrap_or(0) as f64 / 1000.0) * price.output_cost_per_1k;
 
     uncached_cost + cache_read_cost + cache_write_cost + output_cost
@@ -251,7 +252,10 @@ mod tests {
     #[test]
     fn model_family_strips_version_suffix() {
         // claude-opus-4-5 -> claude-opus-4 (not a family key) -> claude-opus (is)
-        assert_eq!(model_family("claude-opus-4-5"), Some("claude-opus".to_string()));
+        assert_eq!(
+            model_family("claude-opus-4-5"),
+            Some("claude-opus".to_string())
+        );
         assert_eq!(
             model_family("claude-sonnet-4-5-20250929"),
             Some("claude-sonnet".to_string())
@@ -339,12 +343,15 @@ mod tests {
         // disappear on a bundle regeneration. This keeps the test's premise
         // ("this model has no cache tier") true regardless of what upstream
         // happens to publish at regeneration time.
-        let cached = estimate_cost_cached("claude-opus-not-a-real-version", &TokenUsage {
-            uncached_input: Some(0),
-            cache_read_input: Some(1000),
-            cache_write_input: Some(0),
-            output: Some(0),
-        });
+        let cached = estimate_cost_cached(
+            "claude-opus-not-a-real-version",
+            &TokenUsage {
+                uncached_input: Some(0),
+                cache_read_input: Some(1000),
+                cache_write_input: Some(0),
+                output: Some(0),
+            },
+        );
         let full_rate_equivalent = estimate_cost("claude-opus-not-a-real-version", 1000, 0);
         assert!(
             (cached - full_rate_equivalent).abs() < 1e-9,

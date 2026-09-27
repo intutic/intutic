@@ -28,6 +28,10 @@
 //! module doc already documents for a sibling field, and for the same reason:
 //! no test-observable sink exists for a published trace's contents yet.
 
+// `serial()`'s guard is held across awaits on purpose: it keeps these tests
+// from running concurrently for their whole duration.
+#![allow(clippy::await_holding_lock)]
+
 use std::sync::Arc;
 
 use wiremock::matchers::method;
@@ -66,7 +70,9 @@ intutic_settings:
         context_snapshot_rate: 0.0,
     };
     let app = intutic_proxy::router::build_router(state);
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
     let addr = listener.local_addr().expect("addr");
     tokio::spawn(async move {
         axum::serve(listener, app).await.ok();
@@ -102,7 +108,11 @@ async fn a_5xx_from_the_provider_still_reaches_the_caller_unchanged() {
         // credential-shaped literals in source, in every package.
         .header(
             "Authorization",
-            concat!("Bearer vk_", "0123456789abcdef0123456789abcdef", "_ws_5xx_test"),
+            concat!(
+                "Bearer vk_",
+                "0123456789abcdef0123456789abcdef",
+                "_ws_5xx_test"
+            ),
         )
         .header("x-workspace-id", "ws_5xx_test")
         .header("x-api-key", "sk-ant-test")
@@ -117,7 +127,10 @@ async fn a_5xx_from_the_provider_still_reaches_the_caller_unchanged() {
 
     let status = res.status();
     let body = res.text().await.expect("body reads");
-    assert_eq!(status, 503, "the provider's own 5xx must reach the caller: body={body}");
+    assert_eq!(
+        status, 503,
+        "the provider's own 5xx must reach the caller: body={body}"
+    );
     assert!(
         body.contains("overloaded_error"),
         "the provider's own error body must be forwarded, not replaced: {body}"
@@ -145,7 +158,11 @@ async fn a_connection_failure_still_resolves_to_a_prompt_502() {
         .post(format!("http://{}/v1/messages", addr))
         .header(
             "Authorization",
-            concat!("Bearer vk_", "0123456789abcdef0123456789abcdef", "_ws_conn_fail_test"),
+            concat!(
+                "Bearer vk_",
+                "0123456789abcdef0123456789abcdef",
+                "_ws_conn_fail_test"
+            ),
         )
         .header("x-workspace-id", "ws_conn_fail_test")
         .header("x-api-key", "sk-ant-test")
@@ -161,7 +178,10 @@ async fn a_connection_failure_still_resolves_to_a_prompt_502() {
     let elapsed = started.elapsed();
     let status = res.status();
     let body = res.text().await.expect("body reads");
-    assert_eq!(status, 502, "an unreachable provider must surface as Bad Gateway: body={body}");
+    assert_eq!(
+        status, 502,
+        "an unreachable provider must surface as Bad Gateway: body={body}"
+    );
     assert!(
         body.contains("upstream_error"),
         "the error code must say what failed: {body}"

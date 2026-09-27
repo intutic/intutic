@@ -55,11 +55,20 @@ pub fn detect(text: &str) -> Option<(Command, String)> {
     let lower = t.to_ascii_lowercase();
 
     for (prefixes, cmd) in [
-        (["/fix", "@fix", "/intutic-fix", "@intutic fix"], Command::Fix),
-        (["/draw", "@draw", "/intutic-draw", "@intutic draw"], Command::Draw),
+        (
+            ["/fix", "@fix", "/intutic-fix", "@intutic fix"],
+            Command::Fix,
+        ),
+        (
+            ["/draw", "@draw", "/intutic-draw", "@intutic draw"],
+            Command::Draw,
+        ),
     ] {
         for p in prefixes {
-            if lower == p || lower.starts_with(&format!("{p} ")) || lower.starts_with(&format!("{p}\n")) {
+            if lower == p
+                || lower.starts_with(&format!("{p} "))
+                || lower.starts_with(&format!("{p}\n"))
+            {
                 let prompt = t[p.len()..].trim().to_string();
                 return Some((cmd, prompt));
             }
@@ -248,8 +257,13 @@ impl Inventory {
             graph_workspace_scoped: true, // proxy namespaces all graph keys (TD-208)
             loops_configured: self.loop_run.is_some(),
             loops_bounded: self.loop_run.is_some(),
-            memory_total: (!self.memory_chunks.is_empty())
-                .then_some(self.memory_chunks.iter().map(|(p, _)| p).collect::<std::collections::HashSet<_>>().len() as u32),
+            memory_total: (!self.memory_chunks.is_empty()).then_some(
+                self.memory_chunks
+                    .iter()
+                    .map(|(p, _)| p)
+                    .collect::<std::collections::HashSet<_>>()
+                    .len() as u32,
+            ),
             memory_governed: self
                 .memory_chunks
                 .iter()
@@ -264,7 +278,8 @@ impl Inventory {
             // deliberate boot-time decision, even when that decision is the
             // default (Off). `Some(...)` accordingly, always.
             egress_enforcing: Some(
-                crate::egress_policy::global_policy().mode() == crate::egress_policy::EgressMode::Enforce,
+                crate::egress_policy::global_policy().mode()
+                    == crate::egress_policy::EgressMode::Enforce,
             ),
             ..Default::default()
         }
@@ -281,7 +296,9 @@ pub fn render_fix_card(prompt: &str, inv: &Inventory) -> String {
     out.push_str("### 🛡️ Intutic `/fix` — Prompt Enhancement\n\n");
 
     if prompt.is_empty() {
-        out.push_str("> _No prompt text after `/fix`. Add your prompt so Intutic can enhance it._\n\n");
+        out.push_str(
+            "> _No prompt text after `/fix`. Add your prompt so Intutic can enhance it._\n\n",
+        );
     } else {
         let words = prompt.split_whitespace().count();
         out.push_str(&format!(
@@ -295,20 +312,59 @@ pub fn render_fix_card(prompt: &str, inv: &Inventory) -> String {
     out.push_str("#### Primitives applied to this request\n\n");
     out.push_str("| Primitive | Status |\n|---|---|\n");
     out.push_str(&format!("| Input DLP | {} |\n", on_off(inv.dlp_scan_input)));
-    out.push_str(&format!("| Output DLP (incl. streaming) | {} |\n", on_off(inv.dlp_scan_output)));
-    out.push_str(&format!("| WASM rules | {} |\n", if inv.wasm_rule_count > 0 { format!("✅ {} loaded", inv.wasm_rule_count) } else { "—".into() }));
+    out.push_str(&format!(
+        "| Output DLP (incl. streaming) | {} |\n",
+        on_off(inv.dlp_scan_output)
+    ));
+    out.push_str(&format!(
+        "| WASM rules | {} |\n",
+        if inv.wasm_rule_count > 0 {
+            format!("✅ {} loaded", inv.wasm_rule_count)
+        } else {
+            "—".into()
+        }
+    ));
     out.push_str(&format!("| Hook gate | {} |\n", on_off(inv.hook_gate)));
-    out.push_str(&format!("| Policy enforcement | {} |\n", on_off(inv.policy_enforced)));
-    out.push_str(&format!("| Role SOPs (`{}`) | {} |\n", inv.role, if inv.applicable_sops.is_empty() { "—".into() } else { format!("✅ {}", inv.applicable_sops.len()) }));
-    out.push_str(&format!("| Skills | {} |\n", if inv.skills.is_empty() { "—".into() } else { format!("🎓 {}", inv.skills.join(", ")) }));
-    out.push_str(&format!("| MCP servers | {} |\n\n", if inv.mcp_servers.is_empty() { "—".into() } else { format!("🔌 {}", inv.mcp_servers.join(", ")) }));
+    out.push_str(&format!(
+        "| Policy enforcement | {} |\n",
+        on_off(inv.policy_enforced)
+    ));
+    out.push_str(&format!(
+        "| Role SOPs (`{}`) | {} |\n",
+        inv.role,
+        if inv.applicable_sops.is_empty() {
+            "—".into()
+        } else {
+            format!("✅ {}", inv.applicable_sops.len())
+        }
+    ));
+    out.push_str(&format!(
+        "| Skills | {} |\n",
+        if inv.skills.is_empty() {
+            "—".into()
+        } else {
+            format!("🎓 {}", inv.skills.join(", "))
+        }
+    ));
+    out.push_str(&format!(
+        "| MCP servers | {} |\n\n",
+        if inv.mcp_servers.is_empty() {
+            "—".into()
+        } else {
+            format!("🔌 {}", inv.mcp_servers.join(", "))
+        }
+    ));
 
     // Memory context from workspace providers, ranked by the control plane's
     // judge. Present only when the control plane returned chunks.
     if !inv.memory_chunks.is_empty() {
         out.push_str("#### Memory context\n\n");
         for (provider, text) in &inv.memory_chunks {
-            out.push_str(&format!("- **{}**: {}\n", provider, text.replace('\n', " ")));
+            out.push_str(&format!(
+                "- **{}**: {}\n",
+                provider,
+                text.replace('\n', " ")
+            ));
         }
         out.push('\n');
     }
@@ -339,7 +395,10 @@ pub fn render_fix_card(prompt: &str, inv: &Inventory) -> String {
             continue;
         }
         let (llm, _agentic) = posture::rubric_for(f.facet);
-        out.push_str(&format!("| {} | {} | {} | {} |\n", f.facet, f.score, f.reason, llm));
+        out.push_str(&format!(
+            "| {} | {} | {} | {} |\n",
+            f.facet, f.score, f.reason, llm
+        ));
     }
     out.push('\n');
 
@@ -366,7 +425,10 @@ pub fn render_draw_card(prompt: &str, inv: &Inventory) -> String {
     out.push_str("### 🎨 Intutic `/draw` — Agent Trajectory & Guardrails\n\n");
 
     if !prompt.is_empty() {
-        out.push_str(&format!("**Prompt:** {}\n\n", prompt.lines().next().unwrap_or(prompt)));
+        out.push_str(&format!(
+            "**Prompt:** {}\n\n",
+            prompt.lines().next().unwrap_or(prompt)
+        ));
     }
 
     if let Some(g) = &inv.graph {
@@ -374,20 +436,33 @@ pub fn render_draw_card(prompt: &str, inv: &Inventory) -> String {
             "**Graph:** `{}` · depth {}{}\n\n",
             g.graph_id,
             g.depth,
-            if g.parent_session_id.is_empty() { String::new() } else { format!(" · parent `{}`", g.parent_session_id) }
+            if g.parent_session_id.is_empty() {
+                String::new()
+            } else {
+                format!(" · parent `{}`", g.parent_session_id)
+            }
         ));
     }
     if let Some((lr_id, status)) = &inv.loop_run {
-        out.push_str(&format!("**Loop run:** `{}` — status {}\n\n", lr_id, status));
+        out.push_str(&format!(
+            "**Loop run:** `{}` — status {}\n\n",
+            lr_id, status
+        ));
     }
 
     out.push_str("```mermaid\nflowchart TD\n");
     out.push_str("  U[\"User prompt\"] --> P{\"Intutic proxy\"}\n");
     for (i, skill) in inv.skills.iter().enumerate() {
-        out.push_str(&format!("  A[\"Agent\"] -.->|skill| K{i}[\"🎓 {}\"]\n", escape_mermaid(skill)));
+        out.push_str(&format!(
+            "  A[\"Agent\"] -.->|skill| K{i}[\"🎓 {}\"]\n",
+            escape_mermaid(skill)
+        ));
     }
     for (i, server) in inv.mcp_servers.iter().enumerate() {
-        out.push_str(&format!("  A -.->|mcp| M{i}[\"🔌 {}\"]\n", escape_mermaid(server)));
+        out.push_str(&format!(
+            "  A -.->|mcp| M{i}[\"🔌 {}\"]\n",
+            escape_mermaid(server)
+        ));
     }
     if !inv.skills.is_empty() || !inv.mcp_servers.is_empty() {
         out.push_str("  U --> A\n  A --> P\n");
@@ -400,7 +475,10 @@ pub fn render_draw_card(prompt: &str, inv: &Inventory) -> String {
     if inv.policy_enforced || !inv.applicable_sops.is_empty() {
         out.push_str("  POL{\"Policy + SOP check\"}\n");
         for (i, sop) in inv.applicable_sops.iter().enumerate() {
-            out.push_str(&format!("  POL -->|role SOP| S{i}[\"{}\"]\n", escape_mermaid(&sop.title)));
+            out.push_str(&format!(
+                "  POL -->|role SOP| S{i}[\"{}\"]\n",
+                escape_mermaid(&sop.title)
+            ));
         }
     } else {
         out.push_str("  POL[\"No role SOPs configured\"]\n");
@@ -418,12 +496,23 @@ pub fn render_draw_card(prompt: &str, inv: &Inventory) -> String {
     out.push_str("1. Prompt enters the proxy on the tool-call path.\n");
     out.push_str(&format!(
         "2. {} guardrail layer(s) evaluate the request before it leaves the machine.\n",
-        [inv.dlp_scan_input, inv.wasm_rule_count > 0, inv.hook_gate, inv.policy_enforced].iter().filter(|b| **b).count()
+        [
+            inv.dlp_scan_input,
+            inv.wasm_rule_count > 0,
+            inv.hook_gate,
+            inv.policy_enforced
+        ]
+        .iter()
+        .filter(|b| **b)
+        .count()
     ));
     if inv.applicable_sops.is_empty() {
         out.push_str("3. No role SOPs constrain the trajectory — consider adding one under `.intutic/sops`.\n");
     } else {
-        out.push_str(&format!("3. {} role SOP(s) constrain which tools the agent may call.\n", inv.applicable_sops.len()));
+        out.push_str(&format!(
+            "3. {} role SOP(s) constrain which tools the agent may call.\n",
+            inv.applicable_sops.len()
+        ));
     }
     out.push_str("4. Response returns through output DLP, then to your harness.\n\n");
 
@@ -440,10 +529,15 @@ fn recommendations(inv: &Inventory) -> Vec<String> {
         r.push("Enable **output DLP** (`scan_output`) — it also scrubs streaming responses per SSE line.".to_string());
     }
     if inv.wasm_rule_count == 0 {
-        r.push("Add a **WASM rule** under `~/.intutic/wasm` to codify a custom guardrail.".to_string());
+        r.push(
+            "Add a **WASM rule** under `~/.intutic/wasm` to codify a custom guardrail.".to_string(),
+        );
     }
     if inv.applicable_sops.is_empty() {
-        r.push(format!("Write a **role SOP** for `{}` under `.intutic/sops` to constrain tool use.", inv.role));
+        r.push(format!(
+            "Write a **role SOP** for `{}` under `.intutic/sops` to constrain tool use.",
+            inv.role
+        ));
     }
     if !inv.mcp_servers.is_empty() {
         r.push(format!(
@@ -466,7 +560,11 @@ pub fn enhanced_prompt(prompt: &str, card: &str) -> String {
 }
 
 fn on_off(b: bool) -> &'static str {
-    if b { "✅ on" } else { "⚠️ off" }
+    if b {
+        "✅ on"
+    } else {
+        "⚠️ off"
+    }
 }
 
 fn band_emoji(band: &str) -> &'static str {
@@ -691,21 +789,33 @@ mod tests {
     #[test]
     fn gate_kind_classifies_sdk_gated_harnesses() {
         for h in SDK_GATED_HARNESSES {
-            assert_eq!(gate_kind_for_harness(h), GateKind::Sdk, "expected {h} to be Sdk-gated");
+            assert_eq!(
+                gate_kind_for_harness(h),
+                GateKind::Sdk,
+                "expected {h} to be Sdk-gated"
+            );
         }
     }
 
     #[test]
     fn gate_kind_classifies_delegated_harnesses() {
         for h in DELEGATED_GATE_HARNESSES {
-            assert_eq!(gate_kind_for_harness(h), GateKind::Delegated, "expected {h} to be Delegated");
+            assert_eq!(
+                gate_kind_for_harness(h),
+                GateKind::Delegated,
+                "expected {h} to be Delegated"
+            );
         }
     }
 
     #[test]
     fn gate_kind_classifies_no_gate_harnesses() {
         for h in NO_GATE_HARNESSES {
-            assert_eq!(gate_kind_for_harness(h), GateKind::None, "expected {h} to be None");
+            assert_eq!(
+                gate_kind_for_harness(h),
+                GateKind::None,
+                "expected {h} to be None"
+            );
         }
     }
 
@@ -716,7 +826,11 @@ mod tests {
         // exceptions above) — spot-check a representative sample instead,
         // same as the sets above use one representative harness each.
         for h in ["claude-code", "cursor", "grok", "muse-code", "dsh"] {
-            assert_eq!(gate_kind_for_harness(h), GateKind::Hook, "expected {h} to be Hook-gated");
+            assert_eq!(
+                gate_kind_for_harness(h),
+                GateKind::Hook,
+                "expected {h} to be Hook-gated"
+            );
         }
     }
 
@@ -725,16 +839,28 @@ mod tests {
         // Matches gateKindForHarness()'s own default — an unrecognised slug
         // (a client-supplied x-intutic-harness header can be anything) reads
         // as Hook rather than silently reporting no gate at all.
-        assert_eq!(gate_kind_for_harness("some-future-harness-not-yet-added"), GateKind::Hook);
+        assert_eq!(
+            gate_kind_for_harness("some-future-harness-not-yet-added"),
+            GateKind::Hook
+        );
     }
 
     #[test]
     fn detects_fix_and_draw_with_aliases() {
-        assert_eq!(detect("/fix write a loop").map(|(c, _)| c), Some(Command::Fix));
+        assert_eq!(
+            detect("/fix write a loop").map(|(c, _)| c),
+            Some(Command::Fix)
+        );
         assert_eq!(detect("@fix").map(|(c, _)| c), Some(Command::Fix));
-        assert_eq!(detect("/draw the graph").map(|(c, _)| c), Some(Command::Draw));
+        assert_eq!(
+            detect("/draw the graph").map(|(c, _)| c),
+            Some(Command::Draw)
+        );
         assert_eq!(detect("@draw").map(|(c, _)| c), Some(Command::Draw));
-        assert_eq!(detect("@intutic fix this").map(|(c, _)| c), Some(Command::Fix));
+        assert_eq!(
+            detect("@intutic fix this").map(|(c, _)| c),
+            Some(Command::Fix)
+        );
     }
 
     /// The slash form was `/vdraw` until 2026-08-01 — a typo, and one this test
@@ -759,7 +885,10 @@ mod tests {
             );
         }
         // The typo must not silently come back.
-        assert!(detect("/vdraw").is_none(), "/vdraw was a typo and should not parse");
+        assert!(
+            detect("/vdraw").is_none(),
+            "/vdraw was a typo and should not parse"
+        );
     }
 
     /// Every slash command the public reference documents must actually parse.
@@ -774,7 +903,10 @@ mod tests {
             .join("../../apps/docs/guide/agent-commands.md");
         let Ok(text) = std::fs::read_to_string(&doc) else {
             // Building the crate outside the monorepo. Say so rather than passing quietly.
-            eprintln!("NOTE: {} not present; command-reference parity unchecked", doc.display());
+            eprintln!(
+                "NOTE: {} not present; command-reference parity unchecked",
+                doc.display()
+            );
             return;
         };
 
@@ -797,7 +929,10 @@ mod tests {
             );
             checked += 1;
         }
-        assert!(checked >= 2, "expected the reference to document at least /fix and /draw");
+        assert!(
+            checked >= 2,
+            "expected the reference to document at least /fix and /draw"
+        );
     }
 
     #[test]
@@ -874,7 +1009,11 @@ mod tests {
         let mut inv = bare_inventory();
         inv.skills = vec!["rule-author".into()];
         inv.mcp_servers = vec!["notion".into()];
-        inv.graph = Some(GraphContext { graph_id: "g_review".into(), depth: 2, parent_session_id: "ses_parent".into() });
+        inv.graph = Some(GraphContext {
+            graph_id: "g_review".into(),
+            depth: 2,
+            parent_session_id: "ses_parent".into(),
+        });
         inv.loop_run = Some(("lr_42".into(), "RUNNING".into()));
         let card = render_draw_card("refactor", &inv);
         assert!(card.contains("g_review"));
