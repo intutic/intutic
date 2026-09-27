@@ -74,7 +74,7 @@ fn clean_ctx(sequence: Vec<String>) -> RequestContext {
         tool_sequence: sequence,
         tool_call_counts: Vec::new(),
         calls_last_60s: 0,
-            corroborating_detectors: 0,
+        corroborating_detectors: 0,
         transition_baseline: None,
         denied_tools: Vec::new(),
         denied_tool_sources: Vec::new(),
@@ -109,7 +109,9 @@ fn varied_sequence(n: usize) -> Vec<String> {
     const PALETTE: &[&str] = &[
         "Read", "Grep", "Edit", "Write", "Bash", "WebFetch", "Glob", "Task",
     ];
-    (0..n).map(|i| PALETTE[i % PALETTE.len()].to_string()).collect()
+    (0..n)
+        .map(|i| PALETTE[i % PALETTE.len()].to_string())
+        .collect()
 }
 
 /// A context with every declaration populated, as a workspace running real SOPs
@@ -130,7 +132,11 @@ fn declared_ctx(sequence: Vec<String>) -> RequestContext {
     // branch here rather than their built-in tables — which is what a workspace
     // that configured its SOPs actually pays.
     ctx.requires_before = vec![("action:run_tests".into(), "action:deploy".into(), false)];
-    ctx.forbid_after = vec![("action:secret_read".into(), "action:http_post".into(), false)];
+    ctx.forbid_after = vec![(
+        "action:secret_read".into(),
+        "action:http_post".into(),
+        false,
+    )];
     ctx.max_calls = vec![("action:deploy".into(), 3usize)];
     ctx.forbid_with = vec![("secrets()".into(), "action:http_post".into())];
     ctx.allowed_harnesses = vec!["claude-code".into(), "cursor".into()];

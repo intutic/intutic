@@ -20,6 +20,10 @@
 //! body. Running mirroring against a real provider costs real money on every
 //! sampled request and is an operator's decision, not a test's.
 
+// `serial()`'s guard is held across awaits on purpose: it keeps these tests
+// from running concurrently for their whole duration.
+#![allow(clippy::await_holding_lock)]
+
 use std::sync::Arc;
 
 use intutic_proxy::routing::integrity;
@@ -56,7 +60,7 @@ fn slot() -> mirror::MirrorSlot {
 }
 
 /// A flat price, so the assertion is about plumbing rather than the price table.
-fn flat_estimate() -> Arc<dyn Fn(&str, u32, u32) -> f64 + Send + Sync> {
+fn flat_estimate() -> mirror::CostEstimator {
     Arc::new(|_model: &str, prompt: u32, completion: u32| {
         (prompt as f64) * 0.000_001 + (completion as f64) * 0.000_002
     })
@@ -186,7 +190,11 @@ async fn does_not_score_an_upstream_error() {
         "a 503 says there was no answer, not that the answer was bad — scoring it \
          would charge the candidate for the provider's availability"
     );
-    assert_eq!(mirror::in_flight(), before, "the slot must release on this path too");
+    assert_eq!(
+        mirror::in_flight(),
+        before,
+        "the slot must release on this path too"
+    );
 }
 
 #[tokio::test]
@@ -326,7 +334,9 @@ async fn a_secret_in_the_mirror_response_never_crosses_the_publish_boundary_unsc
         requested_model: "expensive-model".to_string(),
         candidate_model: outcome.candidate_model.clone(),
         request_text: mirror::dlp_scrub("{\"messages\":[]}"),
-        original_response_text: mirror::dlp_scrub("{\"content\":[{\"type\":\"text\",\"text\":\"clean\"}]}"),
+        original_response_text: mirror::dlp_scrub(
+            "{\"content\":[{\"type\":\"text\",\"text\":\"clean\"}]}",
+        ),
         mirror_response_text: mirror::dlp_scrub(raw_response_text),
         mirror_faulted: outcome.integrity.fault.is_some(),
         mirror_latency_ms: outcome.latency_ms,
@@ -362,10 +372,14 @@ async fn a_secret_in_the_mirror_response_never_crosses_the_publish_boundary_unsc
 /// against, not a separate copy that could drift from it.
 #[test]
 fn mirroring_is_configured_reads_the_same_knob_should_mirror_does() {
-    let mut cfg = intutic_proxy::config::RoutingConfig::default();
-
-    cfg.mirror_sample_rate = 0.0;
-    assert!(!mirror::mirroring_is_configured(&cfg), "0.0 means mirroring is off");
+    let mut cfg = intutic_proxy::config::RoutingConfig {
+        mirror_sample_rate: 0.0,
+        ..Default::default()
+    };
+    assert!(
+        !mirror::mirroring_is_configured(&cfg),
+        "0.0 means mirroring is off"
+    );
 
     cfg.mirror_sample_rate = 0.01;
     assert!(

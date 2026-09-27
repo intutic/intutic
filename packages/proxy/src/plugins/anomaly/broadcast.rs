@@ -97,7 +97,9 @@ pub async fn broadcast_findings(
     // A graph of one is just a session, and telling a node about its own
     // finding is noise — it already received the verdict. Membership is
     // written on every request by the caller; this only reads it.
-    let members = store.graph_members(&ctx.workspace_id, &ctx.node.graph_id).await;
+    let members = store
+        .graph_members(&ctx.workspace_id, &ctx.node.graph_id)
+        .await;
     if members.len() < 2 {
         return;
     }
@@ -138,7 +140,10 @@ pub async fn broadcast_findings(
         } else {
             finding.detector_id
         };
-        if !store.claim_broadcast(&ctx.workspace_id, &ctx.node.graph_id, claim_key).await {
+        if !store
+            .claim_broadcast(&ctx.workspace_id, &ctx.node.graph_id, claim_key)
+            .await
+        {
             continue;
         }
         let Some(body) = payload(ctx, finding, timestamp) else {
@@ -183,7 +188,10 @@ mod tests {
         assert_eq!(parsed.category, "LOOP_DETECTED");
         assert_eq!(parsed.priority, "HIGH");
         assert!(parsed.body.contains("node-a"));
-        assert!(parsed.body.contains("planner"), "role gives siblings context");
+        assert!(
+            parsed.body.contains("planner"),
+            "role gives siblings context"
+        );
         assert!(parsed.body.contains("spinning on Bash"));
     }
 
@@ -250,7 +258,7 @@ mod suppression_tests {
     /// The origin is excluded from its own fan-out.
     #[test]
     fn siblings_exclude_the_originating_node() {
-        let members = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        let members = ["a".to_string(), "b".to_string(), "c".to_string()];
         let siblings: Vec<&String> = members.iter().filter(|m| **m != "a").collect();
         assert_eq!(siblings, vec!["b", "c"]);
     }

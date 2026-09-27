@@ -244,7 +244,9 @@ pub async fn check_cache(
     // 1. Exact Match Path
     if ff_exact {
         if let Some(cached) = store.cached_response(&sha256_hash).await {
-            store.incr_cache_counter(workspace_id, "exact_hits", 1).await;
+            store
+                .incr_cache_counter(workspace_id, "exact_hits", 1)
+                .await;
             // Calculate savings
             let raw_cost: f64 = body_json
                 .get("model")
@@ -317,6 +319,9 @@ pub enum ResponseProvenance {
     Mirrored,
 }
 
+// Ten request-scoped values from a single call site in proxy.rs; a struct
+// would exist only to satisfy the argument-count threshold.
+#[allow(clippy::too_many_arguments)]
 pub async fn write_cache(
     provenance: ResponseProvenance,
     store: &Arc<dyn LocalStore>,
@@ -367,7 +372,9 @@ pub async fn write_cache(
         .await?;
 
     // Increment cache size metric
-    store.incr_cache_counter(workspace_id, "cache_size", 1).await;
+    store
+        .incr_cache_counter(workspace_id, "cache_size", 1)
+        .await;
 
     // Write to TurboVec for semantic cache if enabled
     if ff_semantic {
@@ -589,7 +596,10 @@ mod tests {
         let calls = proxy.matches("semantic_cache::write_cache(").count();
         let stated = proxy.matches("ResponseProvenance::Served").count()
             + proxy.matches("ResponseProvenance::Mirrored").count();
-        assert!(calls > 0, "no call sites found — this test asserted nothing");
+        assert!(
+            calls > 0,
+            "no call sites found — this test asserted nothing"
+        );
         assert_eq!(
             calls, stated,
             "{calls} write_cache call(s) but {stated} stated provenance"
@@ -622,8 +632,14 @@ mod tests {
         // so a refactor to (say) truncating or reordering the salt still fails
         // this test even if it happens to still produce distinct hashes for
         // this particular pair of inputs.
-        assert_eq!(hash_a, compute_sha256("ws_alpha\ndelete all the customer records"));
-        assert_eq!(hash_b, compute_sha256("ws_beta\ndelete all the customer records"));
+        assert_eq!(
+            hash_a,
+            compute_sha256("ws_alpha\ndelete all the customer records")
+        );
+        assert_eq!(
+            hash_b,
+            compute_sha256("ws_beta\ndelete all the customer records")
+        );
     }
 
     /// The call sites are what actually matter — a correct `compute_sha256`
@@ -634,7 +650,9 @@ mod tests {
     #[test]
     fn cache_call_sites_salt_the_hash_with_workspace_id() {
         let src = include_str!("semantic_cache.rs");
-        let hits = src.matches("compute_sha256(&format!(\"{workspace_id}\\n{prompt_text}\"))").count();
+        let hits = src
+            .matches("compute_sha256(&format!(\"{workspace_id}\\n{prompt_text}\"))")
+            .count();
         // One in check_cache, one in write_cache.
         assert_eq!(
             hits, 2,

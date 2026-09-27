@@ -52,7 +52,11 @@ fn graph_key(workspace_id: &str, graph_id: &str, suffix: &str) -> String {
 /// unreadable list must degrade to "inherit", never to "unrestricted".
 pub(crate) fn string_list(v: Option<&serde_json::Value>) -> Vec<String> {
     v.and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|m| m.as_str().map(str::to_string)).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| m.as_str().map(str::to_string))
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -346,7 +350,11 @@ impl LocalStore for ValkeyStore {
             .unwrap_or_default();
         Ok(raw
             .into_iter()
-            .filter_map(|(k, v)| serde_json::from_str::<BanditArmState>(&v).ok().map(|s| (k, s)))
+            .filter_map(|(k, v)| {
+                serde_json::from_str::<BanditArmState>(&v)
+                    .ok()
+                    .map(|s| (k, s))
+            })
             .collect())
     }
 
@@ -358,7 +366,9 @@ impl LocalStore for ValkeyStore {
     ) -> anyhow::Result<()> {
         let mut conn = self.conn();
         let encoded = serde_json::to_string(state)?;
-        let _: () = conn.hset(bandit_key(workspace_id), arm_key, encoded).await?;
+        let _: () = conn
+            .hset(bandit_key(workspace_id), arm_key, encoded)
+            .await?;
         Ok(())
     }
 
@@ -421,24 +431,28 @@ impl LocalStore for ValkeyStore {
         // `calls` and `measured` are tracked separately for the same reason the
         // trace column is nullable: a call that produced no score must not be
         // counted as a clean one, or the fault rate is diluted by silence.
-        let _: () = conn.hincr(&key, format!("{candidate_model}:calls"), 1).await?;
+        let _: () = conn
+            .hincr(&key, format!("{candidate_model}:calls"), 1)
+            .await?;
         if measured {
-            let _: () = conn.hincr(&key, format!("{candidate_model}:measured"), 1).await?;
+            let _: () = conn
+                .hincr(&key, format!("{candidate_model}:measured"), 1)
+                .await?;
         }
         if faulted {
-            let _: () = conn.hincr(&key, format!("{candidate_model}:faults"), 1).await?;
+            let _: () = conn
+                .hincr(&key, format!("{candidate_model}:faults"), 1)
+                .await?;
         }
         // Micro-dollars, so the counter stays integral.
         let micros = (cost_usd * 1_000_000.0).round() as i64;
-        let _: () = conn.hincr(&key, format!("{candidate_model}:cost_micros"), micros).await?;
+        let _: () = conn
+            .hincr(&key, format!("{candidate_model}:cost_micros"), micros)
+            .await?;
         Ok(())
     }
 
-    async fn incr_outage_failure(
-        &self,
-        workspace_id: &str,
-        arm_key: &str,
-    ) -> anyhow::Result<()> {
+    async fn incr_outage_failure(&self, workspace_id: &str, arm_key: &str) -> anyhow::Result<()> {
         let mut conn = self.conn();
         let _: () = conn.hincr(outage_key(workspace_id), arm_key, 1).await?;
         Ok(())
@@ -453,9 +467,11 @@ impl LocalStore for ValkeyStore {
         let locked_model: Option<String> = conn.hget(&key, "lockedModel").await.ok().flatten();
         let sop_tier: Option<String> = conn.hget(&key, "sopTier").await.ok().flatten();
         let last_model: Option<String> = conn.hget(&key, "lastModel").await.ok().flatten();
-        let cache_warm_model: Option<String> = conn.hget(&key, "cacheWarmModel").await.ok().flatten();
+        let cache_warm_model: Option<String> =
+            conn.hget(&key, "cacheWarmModel").await.ok().flatten();
         let cache_read_bp: Option<u32> = conn.hget(&key, "cacheReadBp").await.ok().flatten();
-        let cache_observed_at: Option<i64> = conn.hget(&key, "cacheObservedAt").await.ok().flatten();
+        let cache_observed_at: Option<i64> =
+            conn.hget(&key, "cacheObservedAt").await.ok().flatten();
         Ok(SessionRouting {
             locked_model: locked_model.filter(|s| !s.is_empty()),
             sop_tier: sop_tier.filter(|s| !s.is_empty()),
@@ -492,7 +508,12 @@ impl LocalStore for ValkeyStore {
         Ok(())
     }
 
-    async fn record_session_cache(&self, scope: &str, model: &str, cache_read_bp: u32) -> anyhow::Result<()> {
+    async fn record_session_cache(
+        &self,
+        scope: &str,
+        model: &str,
+        cache_read_bp: u32,
+    ) -> anyhow::Result<()> {
         debug_assert!(scope.contains(':'), "session routing scope must be tool_history_scope's {{workspace}}:{{agent}} output, not a bare session id: {scope:?}");
         let mut conn = self.conn();
         let key = session_key(scope);
@@ -502,7 +523,10 @@ impl LocalStore for ValkeyStore {
                 &[
                     ("cacheWarmModel", model.to_string()),
                     ("cacheReadBp", cache_read_bp.to_string()),
-                    ("cacheObservedAt", chrono::Utc::now().timestamp().to_string()),
+                    (
+                        "cacheObservedAt",
+                        chrono::Utc::now().timestamp().to_string(),
+                    ),
                 ],
             )
             .await?;
@@ -526,13 +550,11 @@ impl LocalStore for ValkeyStore {
                 let _: Result<(), redis::RedisError> = conn.rpush(&key, tool).await;
             }
             if sequence.len() > cap {
-                let _: Result<(), redis::RedisError> =
-                    conn.ltrim(&key, -(cap as isize), -1).await;
+                let _: Result<(), redis::RedisError> = conn.ltrim(&key, -(cap as isize), -1).await;
                 let start = sequence.len() - cap;
                 sequence = sequence.split_off(start);
             }
-            let _: Result<(), redis::RedisError> =
-                conn.expire(&key, TOOL_SEQUENCE_TTL_SECS).await;
+            let _: Result<(), redis::RedisError> = conn.expire(&key, TOOL_SEQUENCE_TTL_SECS).await;
         }
         Ok(sequence)
     }
@@ -568,8 +590,7 @@ impl LocalStore for ValkeyStore {
         if new_call_count > 0 {
             // Same TTL discipline as `record_tool_sequence`: refreshed on
             // every write, so an idle session's window key still expires.
-            let _: Result<(), redis::RedisError> =
-                conn.expire(&key, TOOL_SEQUENCE_TTL_SECS).await;
+            let _: Result<(), redis::RedisError> = conn.expire(&key, TOOL_SEQUENCE_TTL_SECS).await;
         }
 
         let count: u32 = conn
@@ -591,16 +612,11 @@ impl LocalStore for ValkeyStore {
         // Same sliding TTL as the sequence itself: the two describe one
         // session and must expire together, or a fresh sequence would be
         // diffed against a stale count.
-        let _: Result<(), redis::RedisError> =
-            conn.expire(&key, TOOL_SEQUENCE_TTL_SECS).await;
+        let _: Result<(), redis::RedisError> = conn.expire(&key, TOOL_SEQUENCE_TTL_SECS).await;
         prev.unwrap_or(0)
     }
 
-    async fn workspace_credential(
-        &self,
-        workspace_id: &str,
-        fields: &[&str],
-    ) -> Option<String> {
+    async fn workspace_credential(&self, workspace_id: &str, fields: &[&str]) -> Option<String> {
         let mut conn = self.conn();
         let key = format!("workspace:credentials:{}", workspace_id);
         for field in fields {
@@ -616,8 +632,9 @@ impl LocalStore for ValkeyStore {
     async fn set_workspace_credential(&self, workspace_id: &str, field: &str, value: &str) {
         let mut conn = self.conn();
         let key = format!("workspace:credentials:{}", workspace_id);
-        let _: Result<(), redis::RedisError> =
-            redis::Cmd::hset(&key, field, value).query_async(&mut conn).await;
+        let _: Result<(), redis::RedisError> = redis::Cmd::hset(&key, field, value)
+            .query_async(&mut conn)
+            .await;
     }
 
     async fn cached_response(&self, hash: &str) -> Option<CachedResponse> {
@@ -716,9 +733,8 @@ impl LocalStore for ValkeyStore {
             "timestamp": chrono::Utc::now().to_rfc3339()
         });
         if let Ok(payload_str) = serde_json::to_string(&payload) {
-            let _: Result<(), redis::RedisError> = conn
-                .publish("intutic:system_anomalies", &payload_str)
-                .await;
+            let _: Result<(), redis::RedisError> =
+                conn.publish("intutic:system_anomalies", &payload_str).await;
         }
     }
 
@@ -740,7 +756,13 @@ impl LocalStore for ValkeyStore {
         let _: Result<(), redis::RedisError> = conn.expire(&key, NOTIFY_TTL_SECS).await;
     }
 
-    async fn touch_graph_node(&self, workspace_id: &str, graph_id: &str, node_id: &str, ttl_secs: u64) {
+    async fn touch_graph_node(
+        &self,
+        workspace_id: &str,
+        graph_id: &str,
+        node_id: &str,
+        ttl_secs: u64,
+    ) {
         let mut conn = self.conn();
         let key = graph_key(workspace_id, graph_id, "nodes");
         // Two writes, no read — this runs on every request in a graph, so the
@@ -785,7 +807,12 @@ impl LocalStore for ValkeyStore {
             .ok()
     }
 
-    async fn is_graph_member(&self, workspace_id: &str, graph_id: &str, node_id: &str) -> Option<bool> {
+    async fn is_graph_member(
+        &self,
+        workspace_id: &str,
+        graph_id: &str,
+        node_id: &str,
+    ) -> Option<bool> {
         let mut conn = self.conn();
         let key = graph_key(workspace_id, graph_id, "nodes");
         // An unknown graph is not the same as a dead node — if we never
@@ -797,7 +824,13 @@ impl LocalStore for ValkeyStore {
         conn.sismember(&key, node_id).await.ok()
     }
 
-    async fn add_graph_spend(&self, workspace_id: &str, graph_id: &str, amount: f64, ttl_secs: u64) -> Option<f64> {
+    async fn add_graph_spend(
+        &self,
+        workspace_id: &str,
+        graph_id: &str,
+        amount: f64,
+        ttl_secs: u64,
+    ) -> Option<f64> {
         let mut conn = self.conn();
         let key = graph_key(workspace_id, graph_id, "spend");
         let total: f64 = conn.incr(&key, amount).await.ok()?;
@@ -873,10 +906,8 @@ impl LocalStore for ValkeyStore {
         let mut conn = self.conn();
         let key = reask_attempt_key(scope, detector_id);
 
-        let n: Result<i64, redis::RedisError> = redis::cmd("INCR")
-            .arg(&key)
-            .query_async(&mut conn)
-            .await;
+        let n: Result<i64, redis::RedisError> =
+            redis::cmd("INCR").arg(&key).query_async(&mut conn).await;
 
         let Ok(n) = n else {
             // Counter unreachable. Report "first time" — see the trait doc: the
@@ -926,9 +957,7 @@ impl LocalStore for ValkeyStore {
         // No TTL: a loop run's lifetime is bounded by its own status, which is
         // already tracked, and expiring the spend under a live run would reset
         // its budget to zero-spent halfway through.
-        conn.incr(loop_spend_key(loop_run_id), amount)
-            .await
-            .ok()
+        conn.incr(loop_spend_key(loop_run_id), amount).await.ok()
     }
 
     async fn set_workflow_budget_if_absent(&self, loop_run_id: &str, budget: f64) -> bool {
@@ -1056,11 +1085,7 @@ impl ValkeyControlPlaneCache {
     /// without paying twice. Two sequential `get_gated` calls would double both
     /// the latency and the timeout budget on a path taken by every request of
     /// every governed run.
-    async fn mget_gated(
-        &self,
-        a: String,
-        b: String,
-    ) -> Option<(Option<String>, Option<String>)> {
+    async fn mget_gated(&self, a: String, b: String) -> Option<(Option<String>, Option<String>)> {
         let mut conn = self.conn();
         let mut cmd = redis::cmd("MGET");
         cmd.arg(&a).arg(&b);
@@ -1139,7 +1164,11 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
         if token.is_empty() {
             return ControlPlaneAuth::Rejected;
         }
-        let key_prefix = if token.len() > 12 { &token[..12] } else { token };
+        let key_prefix = if token.len() > 12 {
+            &token[..12]
+        } else {
+            token
+        };
 
         let mut conn = self.conn();
         let cache_val: Option<String> =
@@ -1189,7 +1218,9 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
         let verifier_ok = auth_json
             .get("tokenVerifier")
             .and_then(|v| v.as_str())
-            .is_some_and(|stored| constant_time_eq(stored.as_bytes(), sha256_hex(token).as_bytes()));
+            .is_some_and(|stored| {
+                constant_time_eq(stored.as_bytes(), sha256_hex(token).as_bytes())
+            });
         if !verifier_ok {
             return ControlPlaneAuth::Rejected;
         }
@@ -1361,7 +1392,9 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
         // Keyed on the token's SHA-256, never the token: the control plane
         // stores the hash in `break_glass_requests.token` and writes this key
         // from it, so a dump of either store yields nothing replayable.
-        let raw = self.get_gated(format!("bg:token:{}", sha256_hex(token))).await?;
+        let raw = self
+            .get_gated(format!("bg:token:{}", sha256_hex(token)))
+            .await?;
 
         // Present but unparseable must DENY, unlike feature_flags above — the
         // pre-scoping code treated key existence alone as valid, which is
@@ -1374,8 +1407,14 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
             return None;
         }
         let request_id = json.get("requestId")?.as_str()?.to_string();
-        let policy_id = json.get("policyId").and_then(|v| v.as_str()).map(String::from);
-        Some(BreakGlassGrant { request_id, policy_id })
+        let policy_id = json
+            .get("policyId")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        Some(BreakGlassGrant {
+            request_id,
+            policy_id,
+        })
     }
 
     async fn transition_baseline(&self, workspace_id: &str) -> Option<String> {
@@ -1385,7 +1424,10 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
         // to report, and a Result would invite a caller to fail the request over a
         // cache miss on an advisory heuristic.
         let mut conn = self.conn();
-        conn.get(format!("v2:transition:{}", workspace_id)).await.ok().flatten()
+        conn.get(format!("v2:transition:{}", workspace_id))
+            .await
+            .ok()
+            .flatten()
     }
 
     async fn wasm_plugins(&self, workspace_id: &str) -> anyhow::Result<Option<String>> {
@@ -1497,10 +1539,7 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
 
 /// `HMGET count sum reasoning_sum` on a baseline hash. `None` when the hash is
 /// absent or reports zero samples.
-async fn read_baseline_hash(
-    conn: &mut ConnectionManager,
-    key: &str,
-) -> Option<TokenBaseline> {
+async fn read_baseline_hash(conn: &mut ConnectionManager, key: &str) -> Option<TokenBaseline> {
     let values: Vec<Option<String>> = redis::cmd("HMGET")
         .arg(key)
         .arg("count")

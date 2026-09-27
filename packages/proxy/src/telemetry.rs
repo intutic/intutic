@@ -432,7 +432,6 @@ impl GraphTrace {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -514,7 +513,10 @@ mod tests {
         let mut t = base_trace();
         let v = serde_json::to_value(&t).unwrap();
         assert!(
-            v.as_object().unwrap().get("response_injection_findings").is_none(),
+            v.as_object()
+                .unwrap()
+                .get("response_injection_findings")
+                .is_none(),
             "empty must be omitted from the wire",
         );
 
@@ -552,7 +554,8 @@ mod tests {
         // Together that is 8 field mentions in struct literals, matching the
         // eight ExecutionTrace construction sites.
         assert_eq!(
-            src.matches("response_injection_findings: Vec::new()").count(),
+            src.matches("response_injection_findings: Vec::new()")
+                .count(),
             6,
             "expected exactly the 6 no-response trace sites to hardcode an empty Vec"
         );
@@ -662,7 +665,8 @@ mod tests {
     fn no_trace_site_invents_its_own_instance_id() {
         let src = include_str!("proxy.rs");
         assert_eq!(
-            src.matches("proxy_instance_id: proxy_instance_id()").count(),
+            src.matches("proxy_instance_id: proxy_instance_id()")
+                .count(),
             8,
             "every one of the eight trace sites must publish the process id \
              (the original five, plus the three failure sites this phase adds \
@@ -683,7 +687,9 @@ mod tests {
     fn no_trace_site_omits_the_context_snapshot() {
         let src = include_str!("proxy.rs");
         assert!(
-            src.matches("context_snapshot: context_snapshot_for_trace.clone()").count() >= 5,
+            src.matches("context_snapshot: context_snapshot_for_trace.clone()")
+                .count()
+                >= 5,
             "a trace site has lost its context_snapshot field — the replay \
              corpus silently stops sampling that path"
         );
@@ -718,7 +724,9 @@ mod tests {
     fn no_trace_site_omits_the_sop_shadow_reports() {
         let src = include_str!("proxy.rs");
         assert!(
-            src.matches("sop_shadow_reports: sop_shadow_reports.clone()").count() >= 5,
+            src.matches("sop_shadow_reports: sop_shadow_reports.clone()")
+                .count()
+                >= 5,
             "a trace site has lost its sop_shadow_reports field"
         );
     }
@@ -786,7 +794,11 @@ mod tests {
         });
         let v = serde_json::to_value(&trace).unwrap();
         assert!(
-            v["upstream_error"].as_object().unwrap().get("status").is_none(),
+            v["upstream_error"]
+                .as_object()
+                .unwrap()
+                .get("status")
+                .is_none(),
             "a connection failure has no status; the key must be omitted, not null"
         );
         assert_eq!(v["upstream_error"]["kind"], "transport_error");
@@ -837,7 +849,10 @@ mod tests {
         let obj = v.as_object().unwrap();
         assert!(!obj.contains_key("agent_role"));
         assert!(!obj.contains_key("parent_node_id"));
-        assert!(!obj.contains_key("anomalies"), "clean requests carry no list");
+        assert!(
+            !obj.contains_key("anomalies"),
+            "clean requests carry no list"
+        );
         assert!(obj.contains_key("graph_id"));
     }
 

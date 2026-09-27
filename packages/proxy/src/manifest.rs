@@ -145,9 +145,8 @@ pub fn extract_request_tool_invocations(body: &serde_json::Value) -> Vec<ToolInv
                             .get("function")
                             .and_then(|f| f.get("arguments"))
                             .map(|a| match a.as_str() {
-                                Some(raw) => serde_json::from_str(raw).unwrap_or_else(|_| {
-                                    serde_json::Value::String(raw.to_string())
-                                }),
+                                Some(raw) => serde_json::from_str(raw)
+                                    .unwrap_or_else(|_| serde_json::Value::String(raw.to_string())),
                                 None => a.clone(),
                             })
                             .unwrap_or(serde_json::Value::Null);
@@ -169,7 +168,10 @@ pub fn extract_request_tool_invocations(body: &serde_json::Value) -> Vec<ToolInv
             if let Some(role) = msg.get("role").and_then(|r| r.as_str()) {
                 if role == "tool" || role == "function" {
                     if let Some(name) = msg.get("name").and_then(|n| n.as_str()) {
-                        let input = msg.get("content").cloned().unwrap_or(serde_json::Value::Null);
+                        let input = msg
+                            .get("content")
+                            .cloned()
+                            .unwrap_or(serde_json::Value::Null);
                         // A tool-role message is the harness reporting output.
                         tool_names.push(ToolInvocation {
                             name: name.to_string(),
@@ -268,14 +270,26 @@ const MAX_ENTRIES: usize = 100;
 
 /// Path fragments naming infrastructure a change can take down.
 const INFRA_PATH_FRAGMENTS: &[&str] = &[
-    "terraform", ".tf", "k8s/", "kubernetes/", "helm/", "dockerfile", "docker-compose", ".tfstate",
+    "terraform",
+    ".tf",
+    "k8s/",
+    "kubernetes/",
+    "helm/",
+    "dockerfile",
+    "docker-compose",
+    ".tfstate",
 ];
 
 /// Path fragments naming the pipeline that ships everything else.
 ///
 /// Separate from infra because editing CI is how an agent changes what every
 /// *future* change is checked against — a second-order blast radius.
-const CI_PATH_FRAGMENTS: &[&str] = &[".github/workflows", ".gitlab-ci", "jenkinsfile", ".circleci"];
+const CI_PATH_FRAGMENTS: &[&str] = &[
+    ".github/workflows",
+    ".gitlab-ci",
+    "jenkinsfile",
+    ".circleci",
+];
 
 /// Path fragments naming version control's own state.
 const VCS_PATH_FRAGMENTS: &[&str] = &[".git/", ".gitignore", ".gitmodules", ".gitattributes"];
@@ -306,7 +320,10 @@ impl ChangeOp {
     /// scope is not a change, and folding reads in would make every scoped SOP
     /// fire constantly until someone switched the feature off.
     pub fn is_mutation(&self) -> bool {
-        matches!(self, ChangeOp::Write | ChangeOp::Edit | ChangeOp::Delete | ChangeOp::Move)
+        matches!(
+            self,
+            ChangeOp::Write | ChangeOp::Edit | ChangeOp::Delete | ChangeOp::Move
+        )
     }
 }
 
@@ -342,23 +359,50 @@ pub struct ChangeEntry {
 }
 
 /// Tool names harnesses use for "create a file".
-const WRITE_TOOLS: &[&str] = &["write", "write_file", "writefile", "create_file", "createfile"];
+const WRITE_TOOLS: &[&str] = &[
+    "write",
+    "write_file",
+    "writefile",
+    "create_file",
+    "createfile",
+];
 /// Tool names harnesses use for "change part of a file".
-const EDIT_TOOLS: &[&str] =
-    &["edit", "edit_file", "editfile", "multiedit", "apply_patch", "str_replace", "notebookedit"];
+const EDIT_TOOLS: &[&str] = &[
+    "edit",
+    "edit_file",
+    "editfile",
+    "multiedit",
+    "apply_patch",
+    "str_replace",
+    "notebookedit",
+];
 const DELETE_TOOLS: &[&str] = &["delete_file", "deletefile", "remove_file", "rm_file"];
 const MOVE_TOOLS: &[&str] = &["move_file", "movefile", "rename_file", "rename"];
 
 /// Argument keys that name a filesystem path.
-const PATH_KEYS: &[&str] = &["file_path", "filepath", "path", "filename", "target_file", "notebook_path"];
+const PATH_KEYS: &[&str] = &[
+    "file_path",
+    "filepath",
+    "path",
+    "filename",
+    "target_file",
+    "notebook_path",
+];
 /// Argument keys that carry a shell command.
 const COMMAND_KEYS: &[&str] = &["command", "cmd", "script"];
 /// Argument keys that name a URL.
 const URL_KEYS: &[&str] = &["url", "uri"];
 /// Argument keys whose value is *content*. Their length is recorded; their text
 /// never is. This is the line between a manifest and a copy of the agent's work.
-const CONTENT_KEYS: &[&str] =
-    &["content", "file_text", "new_string", "new_str", "text", "body", "source"];
+const CONTENT_KEYS: &[&str] = &[
+    "content",
+    "file_text",
+    "new_string",
+    "new_str",
+    "text",
+    "body",
+    "source",
+];
 
 /// Read one recognised key, if the arguments are an object carrying it.
 ///
@@ -418,7 +462,10 @@ fn classify_risk(target: &str, kind: TargetKind) -> Vec<String> {
         frags.iter().any(|f| lower.contains(f))
     }
 
-    if hit(&lower, crate::plugins::anomaly::actions::SECRET_PATH_FRAGMENTS) {
+    if hit(
+        &lower,
+        crate::plugins::anomaly::actions::SECRET_PATH_FRAGMENTS,
+    ) {
         risk.push("secret_path".into());
     }
     if hit(&lower, crate::plugins::anomaly::actions::PII_PATH_FRAGMENTS) {
@@ -439,7 +486,13 @@ fn classify_risk(target: &str, kind: TargetKind) -> Vec<String> {
     risk
 }
 
-fn entry(tool: &str, op: ChangeOp, target: String, kind: TargetKind, bytes: Option<u64>) -> ChangeEntry {
+fn entry(
+    tool: &str,
+    op: ChangeOp,
+    target: String,
+    kind: TargetKind,
+    bytes: Option<u64>,
+) -> ChangeEntry {
     let target = clip(target);
     ChangeEntry {
         tool: tool.to_string(),
@@ -476,7 +529,10 @@ pub fn manifest_from_invocations(invocations: &[ToolInvocation]) -> Vec<ChangeEn
         // landed. Recorded as two entries so each is risk-classified.
         if tool_is(name, MOVE_TOOLS) {
             let from = keyed(&call.input, &["source", "source_path", "from", "old_path"]);
-            let to = keyed(&call.input, &["destination", "destination_path", "to", "new_path"]);
+            let to = keyed(
+                &call.input,
+                &["destination", "destination_path", "to", "new_path"],
+            );
             if from.is_some() || to.is_some() {
                 for t in [from, to].into_iter().flatten() {
                     out.push(entry(name, ChangeOp::Move, t, TargetKind::Path, None));
@@ -508,7 +564,13 @@ pub fn manifest_from_invocations(invocations: &[ToolInvocation]) -> Vec<ChangeEn
             (ChangeOp::Fetch, URL_KEYS, TargetKind::Url)
         } else {
             // No rule for this tool. Say so rather than say nothing.
-            out.push(entry(name, ChangeOp::Unknown, String::new(), TargetKind::Opaque, bytes));
+            out.push(entry(
+                name,
+                ChangeOp::Unknown,
+                String::new(),
+                TargetKind::Opaque,
+                bytes,
+            ));
             continue;
         };
 
@@ -630,9 +692,16 @@ mod tests {
             ]},
         ]});
         let inv = extract_request_tool_invocations(&body);
-        assert_eq!(inv.len(), 2, "the result block must survive extraction: {inv:?}");
+        assert_eq!(
+            inv.len(),
+            2,
+            "the result block must survive extraction: {inv:?}"
+        );
         assert_eq!(inv[1].source, InvocationSource::Result);
-        assert_eq!(inv[1].name, "Read", "the name comes from the tool_use it answers");
+        assert_eq!(
+            inv[1].name, "Read",
+            "the name comes from the tool_use it answers"
+        );
 
         let seq = expand_tool_actions(&inv);
         assert!(
@@ -717,10 +786,14 @@ mod tests {
         assert!(extract_request_tool_invocations(&body).is_empty());
     }
 
-// ─── manifest ───────────────────────────────────────────────────────
+    // ─── manifest ───────────────────────────────────────────────────────
 
     fn call(name: &str, input: serde_json::Value) -> ToolInvocation {
-        ToolInvocation { name: name.into(), input, source: InvocationSource::Call }
+        ToolInvocation {
+            name: name.into(),
+            input,
+            source: InvocationSource::Call,
+        }
     }
 
     /// The defect this module exists to avoid.
@@ -736,7 +809,10 @@ mod tests {
              "content": "{\"file_path\": \"/etc/shadow\", \"content\": \"root:x:0:0\"}"},
         ]}]});
         let m = manifest_from_invocations(&extract_request_tool_invocations(&body));
-        assert!(m.is_empty(), "a tool result is output, not an argument: {m:?}");
+        assert!(
+            m.is_empty(),
+            "a tool result is output, not an argument: {m:?}"
+        );
     }
 
     /// A manifest records *what* was touched, never the content written to it.
@@ -753,7 +829,10 @@ mod tests {
         assert_eq!(m[0].op, ChangeOp::Write);
         assert_eq!(m[0].bytes, Some(secret.len() as u64));
         let wire = serde_json::to_string(&m).unwrap();
-        assert!(!wire.contains(secret), "content must never reach the manifest");
+        assert!(
+            !wire.contains(secret),
+            "content must never reach the manifest"
+        );
     }
 
     /// Keys matter. `flatten_input` cannot tell these apart, which is why the
@@ -765,7 +844,10 @@ mod tests {
             serde_json::json!({"pattern": "/etc/passwd"}),
         )]);
         assert_eq!(m[0].op, ChangeOp::Unknown);
-        assert!(m[0].target.is_empty(), "a search pattern is not a touched path");
+        assert!(
+            m[0].target.is_empty(),
+            "a search pattern is not a touched path"
+        );
     }
 
     /// Silence and "nothing happened" must not look the same.
@@ -781,7 +863,10 @@ mod tests {
     fn a_pathological_argument_is_truncated_and_capped() {
         let huge = "x".repeat(50_000);
         let m = manifest_from_invocations(&[call("Bash", serde_json::json!({"command": huge}))]);
-        assert!(m[0].target.len() <= TARGET_MAX + 4, "target must be clipped");
+        assert!(
+            m[0].target.len() <= TARGET_MAX + 4,
+            "target must be clipped"
+        );
 
         let many: Vec<ToolInvocation> = (0..500)
             .map(|i| call("Write", serde_json::json!({"file_path": format!("/f{i}")})))
@@ -798,8 +883,13 @@ mod tests {
             ("/repo/.git/config", "vcs_path"),
         ];
         for (path, tag) in cases {
-            let m = manifest_from_invocations(&[call("Write", serde_json::json!({"file_path": path}))]);
-            assert!(m[0].risk.iter().any(|r| r == tag), "{path} should tag {tag}: {:?}", m[0].risk);
+            let m =
+                manifest_from_invocations(&[call("Write", serde_json::json!({"file_path": path}))]);
+            assert!(
+                m[0].risk.iter().any(|r| r == tag),
+                "{path} should tag {tag}: {:?}",
+                m[0].risk
+            );
         }
         let plain = manifest_from_invocations(&[call(
             "Write",
@@ -890,7 +980,10 @@ mod tests {
     fn only_mutations_report_as_mutations() {
         assert!(ChangeOp::Write.is_mutation() && ChangeOp::Delete.is_mutation());
         assert!(!ChangeOp::Read.is_mutation(), "reading is not changing");
-        assert!(!ChangeOp::Execute.is_mutation(), "the command's effect is not visible to us");
+        assert!(
+            !ChangeOp::Execute.is_mutation(),
+            "the command's effect is not visible to us"
+        );
     }
 
     /// Proves the fragment lists are *reused*, not copied. A second copy of a
@@ -902,7 +995,13 @@ mod tests {
         let src = include_str!("manifest.rs");
         let secret_needle = ["id", "ed25519"].join("_");
         let pii_needle = ["users", "csv"].join(".");
-        assert!(!src.contains(&secret_needle), "SECRET_PATH_FRAGMENTS must be imported, not duplicated");
-        assert!(!src.contains(&pii_needle), "PII_PATH_FRAGMENTS must be imported, not duplicated");
+        assert!(
+            !src.contains(&secret_needle),
+            "SECRET_PATH_FRAGMENTS must be imported, not duplicated"
+        );
+        assert!(
+            !src.contains(&pii_needle),
+            "PII_PATH_FRAGMENTS must be imported, not duplicated"
+        );
     }
 }

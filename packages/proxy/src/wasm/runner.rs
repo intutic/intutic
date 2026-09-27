@@ -96,8 +96,12 @@ fn read_guest_reason(
     instance: &wasmtime::Instance,
     memory: &wasmtime::Memory,
 ) -> Option<String> {
-    let ptr_fn = instance.get_typed_func::<(), i32>(&mut *store, "reason_ptr").ok()?;
-    let len_fn = instance.get_typed_func::<(), i32>(&mut *store, "reason_len").ok()?;
+    let ptr_fn = instance
+        .get_typed_func::<(), i32>(&mut *store, "reason_ptr")
+        .ok()?;
+    let len_fn = instance
+        .get_typed_func::<(), i32>(&mut *store, "reason_len")
+        .ok()?;
 
     let ptr = ptr_fn.call(&mut *store, ()).ok()?;
     let len = len_fn.call(&mut *store, ()).ok()?;
@@ -253,7 +257,8 @@ pub async fn evaluate_wasm_rule(
                          treating it as a block. Return 1 to block, or 3 to reask."
                     );
                     Verdict::Kill {
-                        reason: "Blocked by custom WASM governance rule (legacy code 2)".to_string(),
+                        reason: "Blocked by custom WASM governance rule (legacy code 2)"
+                            .to_string(),
                         policy_id: None,
                     }
                 }
@@ -263,8 +268,7 @@ pub async fn evaluate_wasm_rule(
                 // has incremented the counter. `policy_id` is filled in by the
                 // registry, the only layer that knows the rule id.
                 3 => Verdict::Reask {
-                    reason: "Refused by custom WASM governance rule — revise and retry"
-                        .to_string(),
+                    reason: "Refused by custom WASM governance rule — revise and retry".to_string(),
                     attempts_remaining: 0,
                     policy_id: None,
                 },
@@ -291,7 +295,6 @@ pub async fn evaluate_wasm_rule(
         }
     }
 }
-
 
 /// Whole-evaluation behaviour around `env.read_referenced_file`.
 ///
@@ -337,8 +340,8 @@ mod referenced_file_evaluation_tests {
     }
 
     fn scratch(tag: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir()
-            .join(format!("intutic-wasm-runner-{}-{tag}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("intutic-wasm-runner-{}-{tag}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -371,13 +374,8 @@ mod referenced_file_evaluation_tests {
         std::fs::write(root.join("deploy.yaml"), b"image: app:latest").unwrap();
 
         let ctx = ctx();
-        let without = evaluate_wasm_rule(
-            &engine,
-            &module,
-            &ctx,
-            &Arc::new(ReferencedFiles::empty()),
-        )
-        .await;
+        let without =
+            evaluate_wasm_rule(&engine, &module, &ctx, &Arc::new(ReferencedFiles::empty())).await;
         let with = evaluate_wasm_rule(
             &engine,
             &module,
@@ -436,13 +434,8 @@ mod referenced_file_evaluation_tests {
 
         // Nothing readable: the refusal is a negative code, the rule allows,
         // and — importantly — the evaluation completes rather than trapping.
-        let allowed = evaluate_wasm_rule(
-            &engine,
-            &module,
-            &ctx,
-            &Arc::new(ReferencedFiles::empty()),
-        )
-        .await;
+        let allowed =
+            evaluate_wasm_rule(&engine, &module, &ctx, &Arc::new(ReferencedFiles::empty())).await;
         assert_eq!(allowed, Verdict::Bypass);
 
         let _ = std::fs::remove_dir_all(&root);
@@ -471,7 +464,9 @@ mod guest_reason_tests {
         let instance = linker
             .instantiate(&mut store, &module)
             .expect("fixture should instantiate");
-        let memory = instance.get_memory(&mut store, "memory").expect("memory export");
+        let memory = instance
+            .get_memory(&mut store, "memory")
+            .expect("memory export");
         read_guest_reason(&mut store, &instance, &memory)
     }
 

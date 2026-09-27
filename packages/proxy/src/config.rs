@@ -24,7 +24,6 @@ pub enum RoutingMode {
     Enforce,
 }
 
-
 /// Top-level configuration structure
 #[derive(Debug, Deserialize, Clone)]
 pub struct ProxyConfig {
@@ -135,7 +134,10 @@ pub struct ResponseGateConfig {
 
 impl Default for ResponseGateConfig {
     fn default() -> Self {
-        Self { enabled: true, fail_closed: true }
+        Self {
+            enabled: true,
+            fail_closed: true,
+        }
     }
 }
 
@@ -161,7 +163,10 @@ pub struct ResponseInjectionSnippetConfig {
 
 impl Default for ResponseInjectionSnippetConfig {
     fn default() -> Self {
-        Self { enabled: true, window_bytes: 200 }
+        Self {
+            enabled: true,
+            window_bytes: 200,
+        }
     }
 }
 
@@ -177,18 +182,12 @@ fn default_snippet_window_bytes() -> usize {
 /// correctly reads as "unbudgeted" — and the detector could therefore never fire.
 /// This gives open core a writer without changing the enterprise behaviour: the
 /// value is only ever set if no ceiling exists.
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Default)]
 pub struct WorkflowConfig {
     /// Ceiling in USD applied to a loop run that arrives without one. `None`
     /// leaves runs uncapped, which is the behaviour before this setting existed.
     #[serde(default)]
     pub default_budget_usd: Option<f64>,
-}
-
-impl Default for WorkflowConfig {
-    fn default() -> Self {
-        Self { default_budget_usd: None }
-    }
 }
 
 /// Local markdown memory vaults (Obsidian, Logseq, Foam, or any notes folder).
@@ -209,7 +208,10 @@ pub struct MemoryConfig {
 
 impl Default for MemoryConfig {
     fn default() -> Self {
-        Self { enabled: true, vaults: Vec::new() }
+        Self {
+            enabled: true,
+            vaults: Vec::new(),
+        }
     }
 }
 
@@ -246,7 +248,6 @@ pub struct PolicyConfig {
     /// Timeout in milliseconds for the policy check HTTP call.
     #[serde(default = "default_policy_timeout_ms")]
     pub timeout_ms: u64,
-
     // Multi-region failover was removed on 2026-07-30. `current_region`,
     // `fallback_region`, `fallback_region_url` and `effective_control_plane_url()`
     // lived here: the accessor was called only by its own tests while production
@@ -782,7 +783,11 @@ pub fn load_config(path: &str) -> anyhow::Result<ProxyConfig> {
             String::from("{}")
         }
         Err(e) => {
-            return Err(anyhow::anyhow!("Failed to read config file '{}': {}", path, e));
+            return Err(anyhow::anyhow!(
+                "Failed to read config file '{}': {}",
+                path,
+                e
+            ));
         }
     };
     let mut config: ProxyConfig = serde_yaml::from_str(&contents)?;
@@ -866,10 +871,6 @@ mod tests {
     use std::sync::Mutex;
 
     static ENV_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
-
-
-
-
 
     /// Absent `routing:` block yields control-plane-deferred defaults.
     #[test]
@@ -993,7 +994,10 @@ intutic_settings:
 
         let routing = &config.intutic_settings.routing;
         assert_eq!(routing.enabled, Some(true));
-        assert_eq!(routing.candidate_models, vec!["claude-3-5-sonnet", "gpt-4o"]);
+        assert_eq!(
+            routing.candidate_models,
+            vec!["claude-3-5-sonnet", "gpt-4o"]
+        );
         assert_eq!(
             routing.anthropic_model_override.as_deref(),
             Some("claude-opus-4-5")
@@ -1040,8 +1044,7 @@ intutic_settings:
             ("shadow", RoutingMode::Shadow),
             ("enforce", RoutingMode::Enforce),
         ] {
-            let got: RoutingMode =
-                serde_yaml::from_str(&format!("{raw}")).expect("mode parses");
+            let got: RoutingMode = serde_yaml::from_str(raw).expect("mode parses");
             assert_eq!(got, want, "`{raw}` must parse to {want:?}");
         }
     }
@@ -1138,7 +1141,10 @@ intutic_settings:
 
         let cfg = load_config(path.to_str().unwrap()).expect("loads");
         assert_eq!(
-            cfg.intutic_settings.routing.mirror_candidate_model.as_deref(),
+            cfg.intutic_settings
+                .routing
+                .mirror_candidate_model
+                .as_deref(),
             Some("brand-new-unreleased-model"),
             "model_list validation must not silently drop a mirror candidate \
              it has never heard of — that is precisely the model this field \

@@ -135,7 +135,11 @@ fn corpus_is_not_empty_and_matches_its_pinned_size() {
     );
 
     let unique: BTreeSet<&str> = ids.iter().copied().collect();
-    assert_eq!(unique.len(), rows.len(), "duplicate id in response_echo corpus");
+    assert_eq!(
+        unique.len(),
+        rows.len(),
+        "duplicate id in response_echo corpus"
+    );
 
     for row in &rows {
         assert!(!row.text.trim().is_empty(), "{}: empty text", row.id);
@@ -157,7 +161,10 @@ fn the_response_echo_baseline_is_current_and_byte_stable() {
 
     if std::env::var("INTUTIC_WRITE_BASELINE").is_ok() {
         std::fs::write(
-            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/corpus/response_echo/BASELINE.txt"),
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/corpus/response_echo/BASELINE.txt"
+            ),
             &report,
         )
         .expect("write baseline");
@@ -194,7 +201,9 @@ fn build_report() -> String {
 
     let mut out = String::new();
     out.push_str(BASELINE_HEADER);
-    out.push_str(&format!("Corpus: {total} self-authored rows (resp_echo_0001..resp_echo_{total:04}).\n\n"));
+    out.push_str(&format!(
+        "Corpus: {total} self-authored rows (resp_echo_0001..resp_echo_{total:04}).\n\n"
+    ));
     out.push_str(
         "Both scan entry points agree on every row (see \
          `both_scan_entry_points_agree_on_every_row`); the counts below come \
@@ -246,16 +255,39 @@ number in this file in documentation.
 /// `injection.rs`'s own `response_scan_fires_on_benign_discussion_of_injection_by_design`,
 /// which pins the identical shape as intentional, not a bug to chase to zero.
 const EXPECTED_ECHO_FIRINGS: &[(&str, &[&str])] = &[
-    ("resp_echo_0001", &["override-instructions", "reveal-system-prompt"]),
+    (
+        "resp_echo_0001",
+        &["override-instructions", "reveal-system-prompt"],
+    ),
     ("resp_echo_0002", &["override-instructions"]),
     ("resp_echo_0003", &["override-instructions"]),
     ("resp_echo_0004", &["reveal-system-prompt"]),
     ("resp_echo_0005", &["role-reassignment"]),
     ("resp_echo_0006", &["guardrail-bypass"]),
-    ("resp_echo_0007", &["override-instructions", "role-reassignment"]),
-    ("resp_echo_0008", &["guardrail-bypass", "override-instructions", "reveal-system-prompt"]),
-    ("resp_echo_0009", &["guardrail-bypass", "override-instructions", "role-reassignment"]),
-    ("resp_echo_0012", &["override-instructions", "role-reassignment"]),
+    (
+        "resp_echo_0007",
+        &["override-instructions", "role-reassignment"],
+    ),
+    (
+        "resp_echo_0008",
+        &[
+            "guardrail-bypass",
+            "override-instructions",
+            "reveal-system-prompt",
+        ],
+    ),
+    (
+        "resp_echo_0009",
+        &[
+            "guardrail-bypass",
+            "override-instructions",
+            "role-reassignment",
+        ],
+    ),
+    (
+        "resp_echo_0012",
+        &["override-instructions", "role-reassignment"],
+    ),
     ("resp_echo_0015", &["role-reassignment"]),
     ("resp_echo_0017", &["override-instructions"]),
     ("resp_echo_0018", &["override-instructions"]),
@@ -265,13 +297,19 @@ const EXPECTED_ECHO_FIRINGS: &[(&str, &[&str])] = &[
     ("resp_echo_0023", &["guardrail-bypass"]),
     ("resp_echo_0024", &["reveal-system-prompt"]),
     ("resp_echo_0026", &["override-instructions"]),
-    ("resp_echo_0027", &["override-instructions", "role-reassignment"]),
+    (
+        "resp_echo_0027",
+        &["override-instructions", "role-reassignment"],
+    ),
     ("resp_echo_0028", &["reveal-system-prompt"]),
     ("resp_echo_0029", &["override-instructions"]),
     ("resp_echo_0030", &["override-instructions"]),
     ("resp_echo_0031", &["override-instructions"]),
     ("resp_echo_0032", &["override-instructions"]),
-    ("resp_echo_0033", &["override-instructions", "reveal-system-prompt"]),
+    (
+        "resp_echo_0033",
+        &["override-instructions", "reveal-system-prompt"],
+    ),
     ("resp_echo_0034", &["role-reassignment"]),
     ("resp_echo_0035", &["override-instructions"]),
     ("resp_echo_0036", &["reveal-system-prompt"]),
@@ -283,7 +321,12 @@ const EXPECTED_ECHO_FIRINGS: &[(&str, &[&str])] = &[
     ("resp_echo_0044", &["reveal-system-prompt"]),
     (
         "resp_echo_0046",
-        &["guardrail-bypass", "override-instructions", "reveal-system-prompt", "role-reassignment"],
+        &[
+            "guardrail-bypass",
+            "override-instructions",
+            "reveal-system-prompt",
+            "role-reassignment",
+        ],
     ),
     ("resp_echo_0047", &["reveal-system-prompt"]),
     ("resp_echo_0048", &["role-reassignment"]),
@@ -318,7 +361,12 @@ fn benign_echo_firings_are_pinned_by_id() {
 
     let expected: BTreeMap<String, Vec<String>> = EXPECTED_ECHO_FIRINGS
         .iter()
-        .map(|(id, pats)| ((*id).to_string(), pats.iter().map(|p| p.to_string()).collect()))
+        .map(|(id, pats)| {
+            (
+                (*id).to_string(),
+                pats.iter().map(|p| p.to_string()).collect(),
+            )
+        })
         .collect();
 
     assert_eq!(
@@ -376,7 +424,10 @@ fn both_scan_entry_points_agree_on_every_row() {
     // fire, so a regression that accidentally scanned the tool_use block's
     // JSON (and found nothing there) couldn't hide behind an
     // already-empty expected result.
-    let firing_row = rows.iter().find(|r| !fired_raw(&r.text).is_empty()).expect("a firing row exists");
+    let firing_row = rows
+        .iter()
+        .find(|r| !fired_raw(&r.text).is_empty())
+        .expect("a firing row exists");
     let with_tool_use = serde_json::json!({
         "content": [
             { "type": "text", "text": firing_row.text },
@@ -394,8 +445,14 @@ fn both_scan_entry_points_agree_on_every_row() {
     // different so a regression that only read `content[0]` /
     // `choices[0]` would visibly lose one row's patterns rather than
     // coincidentally still passing.
-    let a = rows.iter().find(|r| r.id == "resp_echo_0002").expect("resp_echo_0002 exists"); // override-instructions
-    let b = rows.iter().find(|r| r.id == "resp_echo_0005").expect("resp_echo_0005 exists"); // role-reassignment
+    let a = rows
+        .iter()
+        .find(|r| r.id == "resp_echo_0002")
+        .expect("resp_echo_0002 exists"); // override-instructions
+    let b = rows
+        .iter()
+        .find(|r| r.id == "resp_echo_0005")
+        .expect("resp_echo_0005 exists"); // role-reassignment
     let combined_expected: Vec<String> = {
         let mut set: BTreeSet<String> = BTreeSet::new();
         set.extend(fired_raw(&a.text));
@@ -404,7 +461,10 @@ fn both_scan_entry_points_agree_on_every_row() {
     };
     assert_eq!(
         combined_expected,
-        vec!["override-instructions".to_string(), "role-reassignment".to_string()],
+        vec![
+            "override-instructions".to_string(),
+            "role-reassignment".to_string()
+        ],
         "test fixture assumption broke -- pick two rows with different, known pattern sets",
     );
 
@@ -482,7 +542,11 @@ fn snippet_is_captured_and_bounded_for_a_firing_row() {
             echo.pattern,
             names
         );
-        assert!(!echo.snippet.is_empty(), "{}: snippet must be non-empty for a firing row", echo.pattern);
+        assert!(
+            !echo.snippet.is_empty(),
+            "{}: snippet must be non-empty for a firing row",
+            echo.pattern
+        );
         // Generous bound: window_bytes plus room for redaction-placeholder
         // growth (a [REDACTED_CATEGORY] marker can be longer than what it
         // replaced).
@@ -510,7 +574,8 @@ fn snippet_only_populated_on_wrapped_provider_bodies_that_actually_fire() {
     let names = fired_raw(&firing_row.text);
     let window_bytes = 200;
 
-    let expected = intutic_proxy::injection::response_echoes(&firing_row.text, &names, window_bytes);
+    let expected =
+        intutic_proxy::injection::response_echoes(&firing_row.text, &names, window_bytes);
 
     for (label, body) in [
         ("anthropic", wrap_anthropic(&firing_row.text)),
@@ -533,6 +598,10 @@ fn snippet_only_populated_on_wrapped_provider_bodies_that_actually_fire() {
         .find(|r| fired_raw(&r.text).is_empty())
         .expect("a non-firing row exists");
     let anthropic_clean = wrap_anthropic(&clean_row.text);
-    assert!(intutic_proxy::injection::response_echoes_from_body(&anthropic_clean, &[], window_bytes)
-        .is_empty());
+    assert!(intutic_proxy::injection::response_echoes_from_body(
+        &anthropic_clean,
+        &[],
+        window_bytes
+    )
+    .is_empty());
 }

@@ -128,14 +128,19 @@ fn integrity_reads_stream_completion_not_the_raw_same_provider_flag() {
     );
 
     // And exactly one definition of it, above both consumers.
-    let defs = PROXY_RS.matches("let stream_complete = done_received || !is_same_provider;").count();
+    let defs = PROXY_RS
+        .matches("let stream_complete = done_received || !is_same_provider;")
+        .count();
     assert_eq!(
         defs, 1,
         "one definition of stream completion, read by both the integrity score and the \
          local reward. Two definitions is how they came to disagree."
     );
     assert!(
-        PROXY_RS.find("let stream_complete = done_received").unwrap() < at,
+        PROXY_RS
+            .find("let stream_complete = done_received")
+            .unwrap()
+            < at,
         "the definition must precede the integrity call that reads it"
     );
 }

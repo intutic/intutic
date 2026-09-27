@@ -49,7 +49,10 @@ async fn a_session_the_control_plane_wrote_reads_as_attested() {
     // route, since that route lives in the control plane, not this crate —
     // this test only needs to prove the READ side of the contract.
     let key = format!("session:sandbox_attested:{session_id}");
-    let _: () = conn.set_ex(&key, "1", 86_400).await.expect("SET must succeed against a live Valkey");
+    let _: () = conn
+        .set_ex(&key, "1", 86_400)
+        .await
+        .expect("SET must succeed against a live Valkey");
 
     let cp = ValkeyControlPlaneCache::new(std::sync::Arc::new(conn));
     assert!(

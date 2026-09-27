@@ -21,7 +21,11 @@ use redis::AsyncCommands;
 use std::sync::Arc;
 use std::time::Duration;
 
-type Backend = (&'static str, Arc<dyn LocalStore>, Arc<dyn ControlPlaneCache>);
+type Backend = (
+    &'static str,
+    Arc<dyn LocalStore>,
+    Arc<dyn ControlPlaneCache>,
+);
 
 async fn valkey_conn() -> Option<Arc<redis::aio::ConnectionManager>> {
     let url = std::env::var("VALKEY_URL").ok()?;
@@ -68,7 +72,9 @@ async fn cleanup(scope: &PinScope) {
         return;
     };
     let mut conn = valkey.as_ref().clone();
-    let _: Result<(), _> = conn.del(format!("v2:sopblock:{}", scope.storage_key())).await;
+    let _: Result<(), _> = conn
+        .del(format!("v2:sopblock:{}", scope.storage_key()))
+        .await;
 }
 
 fn pinned(block: &str, fingerprint: &str) -> PinnedSopBlock {
@@ -97,7 +103,11 @@ async fn a_pin_survives_a_changed_render_within_its_ttl_and_refreshes_after_it_e
             short_ttl,
         )
         .await;
-        assert_eq!(first, Some("BLOCK_V1".to_string()), "[{name}] first request pins its own render");
+        assert_eq!(
+            first,
+            Some("BLOCK_V1".to_string()),
+            "[{name}] first request pins its own render"
+        );
 
         // Simulate the underlying SOP set changing mid-session (a SOP
         // edited, a tier flipped) — a fresh render now produces different
@@ -179,10 +189,22 @@ async fn distinct_workspace_role_combinations_never_share_a_pin_despite_a_shared
         // the role half of the key is load-bearing too, not just workspace.
         let scope_a_other_role = PinScope::new(&format!("{ws_a}:anonymous"), "reviewer");
 
-        let a = resolve_injection_block(store.as_ref(), &scope_a, Some("ALPHA_BLOCK".into()), "fp_a", 600)
-            .await;
-        let b = resolve_injection_block(store.as_ref(), &scope_b, Some("BETA_BLOCK".into()), "fp_b", 600)
-            .await;
+        let a = resolve_injection_block(
+            store.as_ref(),
+            &scope_a,
+            Some("ALPHA_BLOCK".into()),
+            "fp_a",
+            600,
+        )
+        .await;
+        let b = resolve_injection_block(
+            store.as_ref(),
+            &scope_b,
+            Some("BETA_BLOCK".into()),
+            "fp_b",
+            600,
+        )
+        .await;
         let a_other_role = resolve_injection_block(
             store.as_ref(),
             &scope_a_other_role,
@@ -209,9 +231,14 @@ async fn distinct_workspace_role_combinations_never_share_a_pin_despite_a_shared
         // still return its OWN pinned bytes, not another scope's — proof
         // the pins are genuinely distinct storage entries, not the same one
         // read three times by coincidence of test ordering.
-        let a_again =
-            resolve_injection_block(store.as_ref(), &scope_a, Some("SHOULD_NOT_WIN".into()), "x", 600)
-                .await;
+        let a_again = resolve_injection_block(
+            store.as_ref(),
+            &scope_a,
+            Some("SHOULD_NOT_WIN".into()),
+            "x",
+            600,
+        )
+        .await;
         assert_eq!(a_again, Some("ALPHA_BLOCK".to_string()), "[{name}]");
 
         cleanup(&scope_a).await;
@@ -228,13 +255,15 @@ async fn zero_max_age_disables_pinning_entirely() {
         let scope = PinScope::new(&unique_tag("killswitch"), "deployer");
 
         let first =
-            resolve_injection_block(store.as_ref(), &scope, Some("BLOCK_A".into()), "fp_a", 0).await;
+            resolve_injection_block(store.as_ref(), &scope, Some("BLOCK_A".into()), "fp_a", 0)
+                .await;
         assert_eq!(first, Some("BLOCK_A".to_string()), "[{name}]");
 
         // If pinning were active, this would still return "BLOCK_A". With
         // max_age_secs=0 it must reflect the fresh render every time.
         let second =
-            resolve_injection_block(store.as_ref(), &scope, Some("BLOCK_B".into()), "fp_b", 0).await;
+            resolve_injection_block(store.as_ref(), &scope, Some("BLOCK_B".into()), "fp_b", 0)
+                .await;
         assert_eq!(
             second,
             Some("BLOCK_B".to_string()),
@@ -290,7 +319,10 @@ async fn concurrent_first_pins_for_the_same_scope_converge_on_one_winner() {
         }
 
         let winner = results[0].clone();
-        assert!(winner.is_some(), "[{name}] a race among first-pins must still produce a block");
+        assert!(
+            winner.is_some(),
+            "[{name}] a race among first-pins must still produce a block"
+        );
         for (i, r) in results.iter().enumerate() {
             assert_eq!(
                 r, &winner,
@@ -320,10 +352,17 @@ async fn pin_sop_block_nx_contract_returns_the_winner_not_the_caller() {
     for (name, store, _cp) in backends().await {
         let scope = PinScope::new(&unique_tag("nx"), "deployer");
 
-        let first_write = store.pin_sop_block(&scope, &pinned("FIRST", "fp1"), 600).await;
-        assert_eq!(first_write.block, "FIRST", "[{name}] the first writer wins its own value");
+        let first_write = store
+            .pin_sop_block(&scope, &pinned("FIRST", "fp1"), 600)
+            .await;
+        assert_eq!(
+            first_write.block, "FIRST",
+            "[{name}] the first writer wins its own value"
+        );
 
-        let second_write = store.pin_sop_block(&scope, &pinned("SECOND", "fp2"), 600).await;
+        let second_write = store
+            .pin_sop_block(&scope, &pinned("SECOND", "fp2"), 600)
+            .await;
         assert_eq!(
             second_write.block, "FIRST",
             "[{name}] a second write against an already-pinned scope must return the \

@@ -153,7 +153,10 @@ fn evaluate_sop_shadows(
                 title: s.title.clone(),
                 scope: s.scope,
                 would_act: !findings.is_empty(),
-                findings: findings.iter().map(|f| f.kind.as_str().to_string()).collect(),
+                findings: findings
+                    .iter()
+                    .map(|f| f.kind.as_str().to_string())
+                    .collect(),
             }
         })
         .collect()
@@ -415,7 +418,10 @@ async fn validate_key_via_control_plane(
             .and_then(|v| v.parse::<u64>().ok())
             .map(|secs| secs.min(2) * 1000)
             .unwrap_or(250);
-        tracing::warn!(wait_ms, "Control-plane key validation rate-limited; retrying once");
+        tracing::warn!(
+            wait_ms,
+            "Control-plane key validation rate-limited; retrying once"
+        );
         tokio::time::sleep(std::time::Duration::from_millis(wait_ms)).await;
         let retry = client
             .get(&url)
@@ -650,14 +656,23 @@ static PROXY_INSTANCE_ID: std::sync::OnceLock<String> = std::sync::OnceLock::new
 /// `tool_history_scope` or `judge_session_scope`. Their scoping is load-bearing —
 /// read the doc comments there before changing anything near them.
 pub fn proxy_instance_id() -> &'static str {
-    PROXY_INSTANCE_ID
-        .get_or_init(|| format!("{}{}", instance_id_prefix(is_shared_gateway_env()), uuid::Uuid::new_v4()))
+    PROXY_INSTANCE_ID.get_or_init(|| {
+        format!(
+            "{}{}",
+            instance_id_prefix(is_shared_gateway_env()),
+            uuid::Uuid::new_v4()
+        )
+    })
 }
 
 /// `gw_` for a shared gateway, `proxy_` for a local process. Pure, so the mint
 /// above stays a one-line `OnceLock` and the choice is testable without one.
 pub(crate) fn instance_id_prefix(shared_gateway: bool) -> &'static str {
-    if shared_gateway { "gw_" } else { "proxy_" }
+    if shared_gateway {
+        "gw_"
+    } else {
+        "proxy_"
+    }
 }
 
 /// Whether this process is a shared multi-tenant gateway rather than one
@@ -674,7 +689,9 @@ pub(crate) fn is_shared_gateway_env() -> bool {
 /// testable without touching the process environment.
 pub(crate) fn is_shared_gateway(gateway_id: Option<&str>, require_vk: Option<&str>) -> bool {
     gateway_id.map(|v| !v.trim().is_empty()).unwrap_or(false)
-        || require_vk.map(|v| v.trim().eq_ignore_ascii_case("true")).unwrap_or(false)
+        || require_vk
+            .map(|v| v.trim().eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
 }
 
 /// Scope key for the per-session tool history the sequence detectors read.
@@ -887,15 +904,20 @@ async fn resolve_finalize_judge_note(p: FinalizeJudgeParams<'_>) -> Option<Strin
             .collect::<Vec<_>>()
             .join("\n\n---\n\n");
 
-        return match crate::judge_local::local_judge_finalize(p.http_client, p.full_content, &sop_text).await {
+        return match crate::judge_local::local_judge_finalize(
+            p.http_client,
+            p.full_content,
+            &sop_text,
+        )
+        .await
+        {
             Ok(outcome) => match outcome.verdict {
                 crate::judge_local::LocalVerdict::Compliant => None,
-                crate::judge_local::LocalVerdict::Violation | crate::judge_local::LocalVerdict::Ambiguous => {
-                    Some(format!(
-                        "\n\n--- Intutic LLM-as-a-Judge (local) final Security Synthesis ---\n\n{}\n\n",
-                        outcome.reasoning
-                    ))
-                }
+                crate::judge_local::LocalVerdict::Violation
+                | crate::judge_local::LocalVerdict::Ambiguous => Some(format!(
+                    "\n\n--- Intutic LLM-as-a-Judge (local) final Security Synthesis ---\n\n{}\n\n",
+                    outcome.reasoning
+                )),
             },
             Err(reason) => Some(judge_unavailable_note(&reason)),
         };
@@ -980,7 +1002,9 @@ fn get_model_provider(model: &str) -> Provider {
         // routes to OpenRouter (the actual destination for that string),
         // not Mistral's own direct API.
         Provider::OpenRouter
-    } else if m.starts_with("mistral") || m.starts_with("open-mixtral") || m.starts_with("codestral")
+    } else if m.starts_with("mistral")
+        || m.starts_with("open-mixtral")
+        || m.starts_with("codestral")
     {
         Provider::Mistral
     } else {
@@ -1139,7 +1163,10 @@ async fn fetch_provider_credential(
                 Provider::OpenRouter => "openrouter_config",
                 _ => unreachable!(),
             };
-            if let Some(raw) = store.workspace_credential(workspace_id, &[config_field]).await {
+            if let Some(raw) = store
+                .workspace_credential(workspace_id, &[config_field])
+                .await
+            {
                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&raw) {
                     if let Some(key) = parsed.get("apiKey").and_then(|v| v.as_str()) {
                         if !key.is_empty() {
@@ -1363,9 +1390,9 @@ fn extract_wasm_tool_calls(body: &serde_json::Value) -> Vec<crate::wasm::context
     tc_list
 }
 
-/// The tool calls newly observed this turn, given the cumulative extract and
-/// how many calls this session had already reported.
-///
+// The tool calls newly observed this turn, given the cumulative extract and
+// how many calls this session had already reported.
+//
 // ─── Main proxy handler ──────────────────────────────────────────────
 
 /// Whether the on-disk daily cap may actually refuse a request.
@@ -1496,8 +1523,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // because most harnesses accept a base URL and nothing else. Strip it first
     // so provider detection, protocol detection and the upstream URL below all
     // see the path the caller actually meant.
-    let (path_identity, uri_path) =
-        crate::graph::split_identity_path(request.uri().path());
+    let (path_identity, uri_path) = crate::graph::split_identity_path(request.uri().path());
     let provider = Provider::from_path(&uri_path);
     let protocol = crate::protocol::detect(&uri_path);
     let headers = request.headers().clone();
@@ -2037,22 +2063,31 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     std::env::var("INTUTIC_LOCAL_VAULTS").ok().as_deref(),
                 )
             {
-                for chunk in crate::memory::search(
-                    &prompt,
-                    &state.config.intutic_settings.memory.vaults,
-                ) {
-                    memory_chunks.push((format!("vault:{}/{}", chunk.vault, chunk.note), chunk.text));
+                for chunk in
+                    crate::memory::search(&prompt, &state.config.intutic_settings.memory.vaults)
+                {
+                    memory_chunks
+                        .push((format!("vault:{}/{}", chunk.vault, chunk.note), chunk.text));
                 }
             }
 
             if matches!(cmd, crate::commands::Command::Fix) && !prompt.is_empty() {
-                if let Some(cp_url) = state.config.intutic_settings.policy.control_plane_url.as_deref() {
+                if let Some(cp_url) = state
+                    .config
+                    .intutic_settings
+                    .policy
+                    .control_plane_url
+                    .as_deref()
+                {
                     let client = reqwest::Client::builder()
                         .timeout(std::time::Duration::from_secs(6))
                         .build();
                     if let Ok(client) = client {
                         let resp = client
-                            .post(format!("{}/api/v1/fix/enhance", cp_url.trim_end_matches('/')))
+                            .post(format!(
+                                "{}/api/v1/fix/enhance",
+                                cp_url.trim_end_matches('/')
+                            ))
                             .bearer_auth(raw_token)
                             .json(&serde_json::json!({ "prompt": prompt, "role": node.agent_role }))
                             .send()
@@ -2060,12 +2095,21 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                         if let Ok(resp) = resp {
                             if resp.status().is_success() {
                                 if let Ok(body) = resp.json::<serde_json::Value>().await {
-                                    if let Some(chunks) = body.pointer("/data/chunks").and_then(|c| c.as_array()) {
+                                    if let Some(chunks) =
+                                        body.pointer("/data/chunks").and_then(|c| c.as_array())
+                                    {
                                         for chunk in chunks {
-                                            let provider = chunk.get("provider").and_then(|p| p.as_str()).unwrap_or("memory");
-                                            let text = chunk.get("text").and_then(|t| t.as_str()).unwrap_or("");
+                                            let provider = chunk
+                                                .get("provider")
+                                                .and_then(|p| p.as_str())
+                                                .unwrap_or("memory");
+                                            let text = chunk
+                                                .get("text")
+                                                .and_then(|t| t.as_str())
+                                                .unwrap_or("");
                                             if !text.is_empty() {
-                                                memory_chunks.push((provider.to_string(), text.to_string()));
+                                                memory_chunks
+                                                    .push((provider.to_string(), text.to_string()));
                                             }
                                         }
                                     }
@@ -2077,7 +2121,11 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             }
 
             let inv = crate::commands::Inventory {
-                role: if node.agent_role.is_empty() { "unscoped".into() } else { node.agent_role.clone() },
+                role: if node.agent_role.is_empty() {
+                    "unscoped".into()
+                } else {
+                    node.agent_role.clone()
+                },
                 dlp_scan_input: dlp.enabled && dlp.scan_input,
                 dlp_scan_output: dlp.enabled && dlp.scan_output,
                 wasm_rule_count,
@@ -2145,7 +2193,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 if rewritten {
                     body_str = serde_json::to_string(&body_json).unwrap_or(body_str);
                     body_bytes = axum::body::Bytes::from(body_str.clone().into_bytes());
-                    tracing::info!(command = "fix", "Non-blocking /fix: enhanced prompt forwarded upstream");
+                    tracing::info!(
+                        command = "fix",
+                        "Non-blocking /fix: enhanced prompt forwarded upstream"
+                    );
                     answer_locally = false;
                 } else {
                     tracing::warn!("Non-blocking /fix could not rewrite the message; answering locally instead");
@@ -2154,10 +2205,14 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
 
             if answer_locally {
                 let wire = wire_for(&protocol, &provider);
-                let is_streaming = body_json.get("stream").and_then(|v| v.as_bool()).unwrap_or(false);
+                let is_streaming = body_json
+                    .get("stream")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
 
                 if is_streaming {
-                    let (tx, rx) = tokio::sync::mpsc::channel::<Result<axum::body::Bytes, std::io::Error>>(10);
+                    let (tx, rx) =
+                        tokio::sync::mpsc::channel::<Result<axum::body::Bytes, std::io::Error>>(10);
                     let sse = crate::commands::streaming_body(wire, &model, &card);
                     tokio::spawn(async move {
                         let _ = tx.send(Ok(axum::body::Bytes::from(sse))).await;
@@ -2171,14 +2226,26 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     }
                     return response
                         .body(Body::from_stream(ReceiverStream::new(rx)))
-                        .unwrap_or_else(|_| json_error(StatusCode::INTERNAL_SERVER_ERROR, "command_error", "Failed to construct streaming response"));
+                        .unwrap_or_else(|_| {
+                            json_error(
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                "command_error",
+                                "Failed to construct streaming response",
+                            )
+                        });
                 } else {
                     let body = crate::commands::non_streaming_body(wire, &model, &card);
                     return Response::builder()
                         .status(StatusCode::OK)
                         .header("content-type", "application/json")
                         .body(Body::from(serde_json::to_vec(&body).unwrap_or_default()))
-                        .unwrap_or_else(|_| json_error(StatusCode::INTERNAL_SERVER_ERROR, "command_error", "Failed to construct response"));
+                        .unwrap_or_else(|_| {
+                            json_error(
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                "command_error",
+                                "Failed to construct response",
+                            )
+                        });
                 }
             }
         }
@@ -2411,7 +2478,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
 
     if let Some(ref key) = key_record {
         let prompt_tokens = (body_str.len() as f64 / 4.0).max(1.0) as u32;
-        let max_tokens = body_json.get("max_tokens").and_then(|v| v.as_u64()).unwrap_or(4096) as u32;
+        let max_tokens = body_json
+            .get("max_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(4096) as u32;
         let estimated_cost = pricing::estimate_cost(&model, prompt_tokens, max_tokens);
 
         if let Err(e) = check_budget(key, estimated_cost) {
@@ -2675,7 +2745,11 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         .get("x-intutic-break-glass")
         .and_then(|v| v.to_str().ok())
     {
-        match state.control_plane.break_glass_grant(bg_token, &workspace_id).await {
+        match state
+            .control_plane
+            .break_glass_grant(bg_token, &workspace_id)
+            .await
+        {
             Some(grant) => {
                 let scope = grant.scope();
                 tracing::info!(workspace_id = %workspace_id, request_id = %grant.request_id, scope = ?scope, "Active break-glass override token detected");
@@ -2693,7 +2767,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         }
     }
 
-    let bypass_everything = matches!(break_glass_scope, Some(crate::store::BreakGlassScope::Global));
+    let bypass_everything = matches!(
+        break_glass_scope,
+        Some(crate::store::BreakGlassScope::Global)
+    );
 
     // ── Step 4b: WASM custom rules ───────────────────────────────────
     let session_id = headers
@@ -2777,7 +2854,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         for tool in &tool_sequence {
             *counts.entry(tool.as_str()).or_insert(0) += 1;
         }
-        counts.into_iter().map(|(tool, n)| (tool.to_string(), n)).collect()
+        counts
+            .into_iter()
+            .map(|(tool, n)| (tool.to_string(), n))
+            .collect()
     };
 
     // Genuinely new state, unlike the fold above: `tool_sequence` carries no
@@ -2830,7 +2910,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         state.config.intutic_settings.workflow.default_budget_usd,
     ) {
         if default_budget > 0.0 {
-            state.store.set_workflow_budget_if_absent(id, default_budget).await;
+            state
+                .store
+                .set_workflow_budget_if_absent(id, default_budget)
+                .await;
         }
     }
     let (workflow_spend, workflow_budget) = match workflow_run_id.as_deref() {
@@ -2875,13 +2958,19 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         // stays a pure function of the context rather than reaching for I/O
         // mid-evaluation.
         node.graph_spend_usd = state.store.graph_spend(&workspace_id, &node.graph_id).await;
-        node.graph_node_count = state.store.graph_node_count(&workspace_id, &node.graph_id).await;
+        node.graph_node_count = state
+            .store
+            .graph_node_count(&workspace_id, &node.graph_id)
+            .await;
         node.graph_budget_usd = Some(crate::local_spend::get_max_daily_budget());
 
         // The workspace segment makes the drain key match the broadcast
         // fan-out and keeps one tenant's queue unreachable from another's
         // graph-id choice.
-        Some(format!("{}:{}:{}", workspace_id, node.graph_id, node.node_id))
+        Some(format!(
+            "{}:{}:{}",
+            workspace_id, node.graph_id, node.node_id
+        ))
     };
 
     // Resolve the SOP set to enforce for this node's role — the process-global
@@ -2941,7 +3030,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         // basis for guessing a severity band, and `mod.rs:45-48` forbids
         // inventing one. `None` renders as `Low`, so a workspace that declares
         // nothing behaves exactly as before.
-        risk_tier: gov.risk_tier.unwrap_or(crate::wasm::context::RiskLevel::Low),
+        risk_tier: gov
+            .risk_tier
+            .unwrap_or(crate::wasm::context::RiskLevel::Low),
         dlp_findings,
         tool_sequence,
         tool_call_counts,
@@ -2986,7 +3077,11 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         // the old whole-body scan produced it; `injection_sources` is the
         // new, separately-deduplicated signal.
         injection_findings: injection_scan.0,
-        injection_sources: injection_scan.1.iter().map(|s| s.as_str().to_string()).collect(),
+        injection_sources: injection_scan
+            .1
+            .iter()
+            .map(|s| s.as_str().to_string())
+            .collect(),
         tool_contract_changed,
         // Resolved from the route, not asserted by the caller.
         harness: provider.harness_name().to_string(),
@@ -3024,7 +3119,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     let findings = if bypass_everything {
         Vec::new()
     } else {
-        retain_findings_outside_break_glass_scope(anomaly_registry.evaluate_all(&wasm_ctx), break_glass_scope.as_ref())
+        retain_findings_outside_break_glass_scope(
+            anomaly_registry.evaluate_all(&wasm_ctx),
+            break_glass_scope.as_ref(),
+        )
     };
     wasm_ctx.corroborating_detectors =
         crate::plugins::anomaly::DetectorRegistry::corroborating_detector_ids(&findings).len()
@@ -3288,7 +3386,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 upstream_error: None,
                 graph: crate::telemetry::GraphTrace::from_node(
                     &wasm_ctx.node,
-                    findings.iter().map(|f| f.kind.as_str().to_string()).collect(),
+                    findings
+                        .iter()
+                        .map(|f| f.kind.as_str().to_string())
+                        .collect(),
                 ),
             };
             crate::local_spend::log_offline_trace(
@@ -3331,16 +3432,16 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                         "SHADOW: would have blocked this request"
                     );
                 } else {
-                crate::metrics::record_policy_refusal("anomaly", "kill");
-                return json_error(
-                    StatusCode::FORBIDDEN,
-                    "policy_denied",
-                    &format!(
-                        "Request blocked by anomaly policy [{}]: {}",
-                        k.kind.as_str(),
-                        k.reason
-                    ),
-                );
+                    crate::metrics::record_policy_refusal("anomaly", "kill");
+                    return json_error(
+                        StatusCode::FORBIDDEN,
+                        "policy_denied",
+                        &format!(
+                            "Request blocked by anomaly policy [{}]: {}",
+                            k.kind.as_str(),
+                            k.reason
+                        ),
+                    );
                 }
             }
 
@@ -3500,7 +3601,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
 
             // Advisory only: logged above, broadcast to siblings, and — from here —
             // carried onto the trace this request publishes. The request proceeds.
-            advisory_anomalies = findings.iter().map(|f| f.kind.as_str().to_string()).collect();
+            advisory_anomalies = findings
+                .iter()
+                .map(|f| f.kind.as_str().to_string())
+                .collect();
             advisory_findings = findings
                 .iter()
                 .map(crate::telemetry::FindingWire::from_finding)
@@ -3563,12 +3667,15 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // refusal, for the reason stated there: a workspace leaving shadow
             // mode must not arrive with its agents part-way to a hard block for
             // corrections nobody ever asked them to make.
-            crate::wasm::context::Verdict::Reask { reason, policy_id, .. }
-                if !shadow_enforcement =>
-            {
+            crate::wasm::context::Verdict::Reask {
+                reason, policy_id, ..
+            } if !shadow_enforcement => {
                 let rule_id = policy_id.unwrap_or_else(|| "wasm".to_string());
                 // Same scope as the anomaly ladder above (TD-489).
-                let attempts = state.store.incr_reask_attempt(&tool_scope_id, &rule_id).await;
+                let attempts = state
+                    .store
+                    .incr_reask_attempt(&tool_scope_id, &rule_id)
+                    .await;
 
                 if attempts >= crate::plugins::anomaly::REASK_MAX_ATTEMPTS {
                     tracing::warn!(
@@ -3774,8 +3881,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // flag wins over config for whether routing is *available*; `off` is the
     // operator saying not on this deployment, and an operator's stop must not be
     // overridden by a remote enable.
-    let routing_off =
-        state.config.intutic_settings.routing.mode == crate::config::RoutingMode::Off;
+    let routing_off = state.config.intutic_settings.routing.mode == crate::config::RoutingMode::Off;
     let bandit_active = !routing_off
         && match feature_flags {
             Some(f) => f.bandit_routing || f.shadow_routing,
@@ -3798,9 +3904,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // having enforced.
     let shadow_routing = match feature_flags {
         Some(f) => f.shadow_routing,
-        None => {
-            state.config.intutic_settings.routing.mode == crate::config::RoutingMode::Shadow
-        }
+        None => state.config.intutic_settings.routing.mode == crate::config::RoutingMode::Shadow,
     };
 
     let session_id = headers
@@ -3883,10 +3987,13 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 // Cache hit — the cached body was echo-scanned on the turn
                 // that produced it; re-reporting here would double-count.
                 response_injection_findings: Vec::new(),
-            context_snapshot: context_snapshot_for_trace.clone(),
-            // Served from cache — no upstream call was made.
-            upstream_error: None,
-        graph: crate::telemetry::GraphTrace::from_node(&node_for_trace, advisory_anomalies.clone()),
+                context_snapshot: context_snapshot_for_trace.clone(),
+                // Served from cache — no upstream call was made.
+                upstream_error: None,
+                graph: crate::telemetry::GraphTrace::from_node(
+                    &node_for_trace,
+                    advisory_anomalies.clone(),
+                ),
             };
 
             let trace_store = Arc::clone(&state.store);
@@ -3919,14 +4026,29 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         )
         .await
         {
-            Ok(res) => (res.model, res.sop_tier, res.task_type, res.prior_cache_read_ratio),
+            Ok(res) => (
+                res.model,
+                res.sop_tier,
+                res.task_type,
+                res.prior_cache_read_ratio,
+            ),
             Err(e) => {
                 tracing::warn!("Bandit routing failed: {}", e);
-                (model.clone(), "TIER_1".to_string(), "coding".to_string(), None)
+                (
+                    model.clone(),
+                    "TIER_1".to_string(),
+                    "coding".to_string(),
+                    None,
+                )
             }
         }
     } else {
-        (model.clone(), "TIER_1".to_string(), "coding".to_string(), None)
+        (
+            model.clone(),
+            "TIER_1".to_string(),
+            "coding".to_string(),
+            None,
+        )
     };
 
     // Shadow: the selection was made in full and is recorded, but the request is
@@ -4164,9 +4286,13 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         let require_provisioned = crate::gateway::provisioned_key_required_for(
             key_record.as_ref().and_then(|k| k.byok_required),
         );
-        let cred_opt =
-            fetch_provider_credential(&state.store, &workspace_id, &target_provider, require_provisioned)
-                .await;
+        let cred_opt = fetch_provider_credential(
+            &state.store,
+            &workspace_id,
+            &target_provider,
+            require_provisioned,
+        )
+        .await;
         // LLD #64 §4 — Enforced BYO-key. This is the actual gateway threat
         // model: a request authenticated with an Intutic `vk_` virtual key
         // (as opposed to a raw upstream credential passed straight through —
@@ -4246,7 +4372,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // provisioned key). Enforced BYO-key governs the vk_-authenticated
             // gateway path only.
             if let Some(cred) =
-                fetch_provider_credential(&state.store, &workspace_id, &target_provider, false).await
+                fetch_provider_credential(&state.store, &workspace_id, &target_provider, false)
+                    .await
             {
                 match target_provider {
                     Provider::Anthropic => {
@@ -4362,7 +4489,11 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // re-resolved, and a wrong retry is worse than a clear error.
     let fallback_plan: Option<(String, reqwest::header::HeaderMap, Vec<u8>)> =
         if routed_from_to.is_some() && is_same_provider {
-            Some((upstream_url.clone(), fwd_headers.clone(), body_bytes.to_vec()))
+            Some((
+                upstream_url.clone(),
+                fwd_headers.clone(),
+                body_bytes.to_vec(),
+            ))
         } else {
             None
         };
@@ -4385,7 +4516,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         Err(e) => {
             let desc = format!("Failed to reach LLM provider: {}", e);
             tracing::error!(upstream_url = %upstream_url, error = %e, "{}", desc);
-            state.store.publish_system_anomaly(&workspace_id, &desc).await;
+            state
+                .store
+                .publish_system_anomaly(&workspace_id, &desc)
+                .await;
 
             // The outage counter is a cloud-cron input; skip it when the local
             // reward loop owns learning (it records the same failure as a
@@ -4394,7 +4528,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 && state.reward_engine.cached_mode(&workspace_id) != Some(RewardMode::Local)
             {
                 let arm_key = format!("arm:{}:{}:{}", original_routed_model, sop_tier, task_type);
-                let _ = state.store.incr_outage_failure(&workspace_id, &arm_key).await;
+                let _ = state
+                    .store
+                    .incr_outage_failure(&workspace_id, &arm_key)
+                    .await;
             }
 
             if reward_eligible {
@@ -4557,7 +4694,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 && state.reward_engine.cached_mode(&workspace_id) != Some(RewardMode::Local)
             {
                 let arm_key = format!("arm:{}:{}:{}", bad_model, sop_tier, task_type);
-                let _ = state.store.incr_outage_failure(&workspace_id, &arm_key).await;
+                let _ = state
+                    .store
+                    .incr_outage_failure(&workspace_id, &arm_key)
+                    .await;
             }
             if reward_eligible {
                 spawn_reward_update(
@@ -4623,146 +4763,151 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         }
 
         if let Some(r) = recovered_resp {
-            upstream_status = StatusCode::from_u16(r.status().as_u16())
-                .unwrap_or(StatusCode::OK);
+            upstream_status = StatusCode::from_u16(r.status().as_u16()).unwrap_or(StatusCode::OK);
             upstream_resp = r;
         } else {
-        tracing::error!(
-            status = %err_status,
-            headers = ?err_headers,
-            body = %err_body,
-            request_body = %String::from_utf8_lossy(&body_bytes),
-            "Upstream returned error response!"
-        );
-
-        if bandit_active
-            && err_status.is_server_error()
-            && state.reward_engine.cached_mode(&workspace_id) != Some(RewardMode::Local)
-        {
-            let arm_key = format!("arm:{}:{}:{}", original_routed_model, sop_tier, task_type);
-            let _ = state.store.incr_outage_failure(&workspace_id, &arm_key).await;
-        }
-
-        // 4xx is the caller's fault, not the model's — only 5xx counts as a
-        // failed pull against the arm.
-        if reward_eligible && err_status.is_server_error() {
-            spawn_reward_update(
-                &state,
-                &workspace_id,
-                &original_routed_model,
-                &sop_tier,
-                &task_type,
-                reward_cfg.clone(),
-                RewardSignals {
-                    upstream_ok: false,
-                    latency_ms: start.elapsed().as_millis() as u32,
-                    token_anomaly: false,
-                    raw_cost_usd: 0.0,
-                    actual_cost_usd: 0.0,
-                    // No response to score; the failure already zeroes this.
-                    response_integrity: crate::routing::integrity::RIS_MAX,
-                },
+            tracing::error!(
+                status = %err_status,
+                headers = ?err_headers,
+                body = %err_body,
+                request_body = %String::from_utf8_lossy(&body_bytes),
+                "Upstream returned error response!"
             );
-        }
 
-        let final_prompt_tokens = (body_bytes.len() as f64 / 4.0).max(1.0) as u32;
-        let latency_ms = start.elapsed().as_millis() as u32;
-        // Honest failure classification. A 5xx is the provider's own fault; an
-        // unservable-model error that no same-provider retry could recover is
-        // the router's fault, not the caller's — either way this request did
-        // NOT go through, and `verdict: "allowed"` (which downstream mapping
-        // turns into `enforcement_action = 'BYPASS'`) said it did. 4xx errors
-        // that are neither of those (the caller's own bad request) are left
-        // as `"allowed"`, unchanged — that classification is out of scope
-        // here.
-        let computed_upstream_error = if err_status.is_server_error() {
-            Some(crate::telemetry::UpstreamError {
-                provider: provider_wire_id(&target_provider),
-                status: Some(err_status.as_u16()),
-                kind: crate::telemetry::UpstreamErrorKind::Http5xx,
-            })
-        } else if was_unservable_model_error {
-            Some(crate::telemetry::UpstreamError {
-                provider: provider_wire_id(&target_provider),
-                status: Some(err_status.as_u16()),
-                kind: crate::telemetry::UpstreamErrorKind::Unservable,
-            })
-        } else {
-            None
-        };
-        let verdict = if computed_upstream_error.is_some() {
-            "upstream_error"
-        } else {
-            "allowed"
-        };
-        let trace = ExecutionTrace {
-            // Error or short-circuit — no response body exists to score.
-            response_integrity: None,
-            quality_fault: None,
-            // Error or short-circuit before rule evaluation.
-            wasm_shadow_reports: Vec::new(),
-            sop_shadow_reports: sop_shadow_reports.clone(),
-            // Error or short-circuit — no response body was compacted.
-            tool_result_bytes_saved: 0,
-            // Never reached routing, so there is no counterfactual.
-            routing_shadow_model: None,
-            trace_id: uuid::Uuid::new_v4().to_string(),
-            session_id: session_id.clone(),
-            proxy_instance_id: proxy_instance_id().to_string(),
-            workspace_id: workspace_id.clone(),
-            virtual_key_id: key_prefix.to_string(),
-            model: model.clone(),
-            provider: provider.harness_name().to_string(),
-            raw_input_tokens: final_prompt_tokens,
-            compressed_input_tokens: final_prompt_tokens,
-            output_tokens: 0,
-            raw_cost_usd: 0.0,
-            actual_cost_usd: 0.0,
-            cache_hit: false,
-            // Error or short-circuit — no complete response, no provider usage.
-            cache_read_input_tokens: None,
-            cache_creation_input_tokens: None,
-            latency_ms,
-            verdict: verdict.to_string(),
-            harness_type: harness_type.clone(),
-            created_at: chrono::Utc::now().to_rfc3339(),
-            requested_model: model.clone(),
-            actual_model_routed: actual_model.clone(),
-            task_type: task_type.clone(),
-            tools: new_tool_calls.clone(),
-            change_manifest: change_manifest.clone(),
-            reconstruction_quality: 100,
-            token_anomaly: false,
-            break_glass: has_break_glass,
-            break_glass_request_id: break_glass_request_id.clone(),
-            loop_run_id: loop_run_id_header.clone(),
-            findings: advisory_findings.clone(),
-            // Upstream error or short-circuit — no response body to echo-scan.
-            response_injection_findings: Vec::new(),
-            context_snapshot: context_snapshot_for_trace.clone(),
-            upstream_error: computed_upstream_error,
-        graph: crate::telemetry::GraphTrace::from_node(&node_for_trace, advisory_anomalies.clone()),
-        };
-        let cache_store_clone = Arc::clone(&state.store);
-        tokio::spawn(async move {
-            let _ = cache_store_clone.publish_trace(&trace).await;
-        });
-
-        let mut resp_builder = Response::builder().status(err_status);
-        for (name, value) in err_headers.iter() {
-            let name_str = name.as_str().to_lowercase();
-            if name_str == "transfer-encoding"
-                || name_str == "content-encoding"
-                || name_str == "content-length"
+            if bandit_active
+                && err_status.is_server_error()
+                && state.reward_engine.cached_mode(&workspace_id) != Some(RewardMode::Local)
             {
-                continue;
+                let arm_key = format!("arm:{}:{}:{}", original_routed_model, sop_tier, task_type);
+                let _ = state
+                    .store
+                    .incr_outage_failure(&workspace_id, &arm_key)
+                    .await;
             }
-            resp_builder = resp_builder.header(name, value);
-        }
-        return resp_builder
-            .body(axum::body::Body::from(err_body))
-            .unwrap()
-            .into_response();
+
+            // 4xx is the caller's fault, not the model's — only 5xx counts as a
+            // failed pull against the arm.
+            if reward_eligible && err_status.is_server_error() {
+                spawn_reward_update(
+                    &state,
+                    &workspace_id,
+                    &original_routed_model,
+                    &sop_tier,
+                    &task_type,
+                    reward_cfg.clone(),
+                    RewardSignals {
+                        upstream_ok: false,
+                        latency_ms: start.elapsed().as_millis() as u32,
+                        token_anomaly: false,
+                        raw_cost_usd: 0.0,
+                        actual_cost_usd: 0.0,
+                        // No response to score; the failure already zeroes this.
+                        response_integrity: crate::routing::integrity::RIS_MAX,
+                    },
+                );
+            }
+
+            let final_prompt_tokens = (body_bytes.len() as f64 / 4.0).max(1.0) as u32;
+            let latency_ms = start.elapsed().as_millis() as u32;
+            // Honest failure classification. A 5xx is the provider's own fault; an
+            // unservable-model error that no same-provider retry could recover is
+            // the router's fault, not the caller's — either way this request did
+            // NOT go through, and `verdict: "allowed"` (which downstream mapping
+            // turns into `enforcement_action = 'BYPASS'`) said it did. 4xx errors
+            // that are neither of those (the caller's own bad request) are left
+            // as `"allowed"`, unchanged — that classification is out of scope
+            // here.
+            let computed_upstream_error = if err_status.is_server_error() {
+                Some(crate::telemetry::UpstreamError {
+                    provider: provider_wire_id(&target_provider),
+                    status: Some(err_status.as_u16()),
+                    kind: crate::telemetry::UpstreamErrorKind::Http5xx,
+                })
+            } else if was_unservable_model_error {
+                Some(crate::telemetry::UpstreamError {
+                    provider: provider_wire_id(&target_provider),
+                    status: Some(err_status.as_u16()),
+                    kind: crate::telemetry::UpstreamErrorKind::Unservable,
+                })
+            } else {
+                None
+            };
+            let verdict = if computed_upstream_error.is_some() {
+                "upstream_error"
+            } else {
+                "allowed"
+            };
+            let trace = ExecutionTrace {
+                // Error or short-circuit — no response body exists to score.
+                response_integrity: None,
+                quality_fault: None,
+                // Error or short-circuit before rule evaluation.
+                wasm_shadow_reports: Vec::new(),
+                sop_shadow_reports: sop_shadow_reports.clone(),
+                // Error or short-circuit — no response body was compacted.
+                tool_result_bytes_saved: 0,
+                // Never reached routing, so there is no counterfactual.
+                routing_shadow_model: None,
+                trace_id: uuid::Uuid::new_v4().to_string(),
+                session_id: session_id.clone(),
+                proxy_instance_id: proxy_instance_id().to_string(),
+                workspace_id: workspace_id.clone(),
+                virtual_key_id: key_prefix.to_string(),
+                model: model.clone(),
+                provider: provider.harness_name().to_string(),
+                raw_input_tokens: final_prompt_tokens,
+                compressed_input_tokens: final_prompt_tokens,
+                output_tokens: 0,
+                raw_cost_usd: 0.0,
+                actual_cost_usd: 0.0,
+                cache_hit: false,
+                // Error or short-circuit — no complete response, no provider usage.
+                cache_read_input_tokens: None,
+                cache_creation_input_tokens: None,
+                latency_ms,
+                verdict: verdict.to_string(),
+                harness_type: harness_type.clone(),
+                created_at: chrono::Utc::now().to_rfc3339(),
+                requested_model: model.clone(),
+                actual_model_routed: actual_model.clone(),
+                task_type: task_type.clone(),
+                tools: new_tool_calls.clone(),
+                change_manifest: change_manifest.clone(),
+                reconstruction_quality: 100,
+                token_anomaly: false,
+                break_glass: has_break_glass,
+                break_glass_request_id: break_glass_request_id.clone(),
+                loop_run_id: loop_run_id_header.clone(),
+                findings: advisory_findings.clone(),
+                // Upstream error or short-circuit — no response body to echo-scan.
+                response_injection_findings: Vec::new(),
+                context_snapshot: context_snapshot_for_trace.clone(),
+                upstream_error: computed_upstream_error,
+                graph: crate::telemetry::GraphTrace::from_node(
+                    &node_for_trace,
+                    advisory_anomalies.clone(),
+                ),
+            };
+            let cache_store_clone = Arc::clone(&state.store);
+            tokio::spawn(async move {
+                let _ = cache_store_clone.publish_trace(&trace).await;
+            });
+
+            let mut resp_builder = Response::builder().status(err_status);
+            for (name, value) in err_headers.iter() {
+                let name_str = name.as_str().to_lowercase();
+                if name_str == "transfer-encoding"
+                    || name_str == "content-encoding"
+                    || name_str == "content-length"
+                {
+                    continue;
+                }
+                resp_builder = resp_builder.header(name, value);
+            }
+            return resp_builder
+                .body(axum::body::Body::from(err_body))
+                .unwrap()
+                .into_response();
         }
     }
 
@@ -4859,8 +5004,11 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         let denied_tools_clone = wasm_ctx.denied_tools.clone();
         // Same reason as response_gate_cfg above: the stream task outlives
         // this scope, and the snippet-capture config has to travel with it.
-        let response_injection_snippet_cfg =
-            state.config.intutic_settings.response_injection_snippet.clone();
+        let response_injection_snippet_cfg = state
+            .config
+            .intutic_settings
+            .response_injection_snippet
+            .clone();
 
         spawn(async move {
             let mut stream = upstream_stream;
@@ -5059,9 +5207,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
 
                         while let Some(pos) = buffer.iter().position(|&b| b == b'\n') {
                             let line_bytes: Vec<u8> = buffer.drain(..=pos).collect();
-                            let mut line = String::from_utf8_lossy(&line_bytes[..line_bytes.len() - 1])
-                                .trim()
-                                .to_string();
+                            let mut line =
+                                String::from_utf8_lossy(&line_bytes[..line_bytes.len() - 1])
+                                    .trim()
+                                    .to_string();
 
                             // ── Output DLP (TD-210) ─────────────────────────
                             // Scrubbed BEFORE the line is forwarded and BEFORE
@@ -5177,12 +5326,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                     let (flush_prev, rewritten) =
                                         ah.process_line(&line, stream_shape);
                                     if let Some((args, idx, item)) = flush_prev {
-                                        if let Some(b) = arg_flush_bytes(
-                                            &args,
-                                            &protocol_clone,
-                                            idx,
-                                            &item,
-                                        ) {
+                                        if let Some(b) =
+                                            arg_flush_bytes(&args, &protocol_clone, idx, &item)
+                                        {
                                             if tx
                                                 .send(Ok(axum::body::Bytes::from(b)))
                                                 .await
@@ -5214,8 +5360,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                     && match stream_shape {
                                         DeltaShape::AnthropicText => line == "event: message_stop",
                                         DeltaShape::ResponsesOutputText => {
-                                            is_done_sentinel(&line)
-                                                || is_responses_terminal(&line)
+                                            is_done_sentinel(&line) || is_responses_terminal(&line)
                                         }
                                         _ => is_done_sentinel(&line),
                                     };
@@ -5251,12 +5396,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                     if let Some((args, idx, item)) =
                                         arg_holdback.as_mut().and_then(|a| a.flush())
                                     {
-                                        if let Some(b) = arg_flush_bytes(
-                                            &args,
-                                            &protocol_clone,
-                                            idx,
-                                            &item,
-                                        ) {
+                                        if let Some(b) =
+                                            arg_flush_bytes(&args, &protocol_clone, idx, &item)
+                                        {
                                             if tx
                                                 .send(Ok(axum::body::Bytes::from(b)))
                                                 .await
@@ -5303,11 +5445,17 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                             &protocol_clone,
                                             &provider_clone,
                                         );
-                                        if let Ok(pp) =
-                                            ResponsePostProcessor::new(Arc::clone(&cp_clone), harness, proto)
-                                        {
+                                        if let Ok(pp) = ResponsePostProcessor::new(
+                                            Arc::clone(&cp_clone),
+                                            harness,
+                                            proto,
+                                        ) {
                                             if let Some(gov_block) = pp
-                                                .process(&session_id_clone, &workspace_id_clone, graph_key_clone.as_deref())
+                                                .process(
+                                                    &session_id_clone,
+                                                    &workspace_id_clone,
+                                                    graph_key_clone.as_deref(),
+                                                )
                                                 .await
                                             {
                                                 let _ = tx
@@ -5404,9 +5552,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                                 false,
                                                 &holdback_addr,
                                             ) {
-                                                let _ = tx
-                                                    .send(Ok(axum::body::Bytes::from(b)))
-                                                    .await;
+                                                let _ =
+                                                    tx.send(Ok(axum::body::Bytes::from(b))).await;
                                             }
                                         }
                                         // Phase 7: Inject governance notifications before [DONE]
@@ -5418,16 +5565,19 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                             // block is written in the client's
                                             // shape — which for a Responses
                                             // client is still Responses.
-                                            let proto = postprocessor_protocol(
-                                                &protocol, &provider,
-                                            );
+                                            let proto =
+                                                postprocessor_protocol(&protocol, &provider);
                                             if let Ok(pp) = ResponsePostProcessor::new(
                                                 Arc::clone(&state.control_plane),
                                                 harness,
                                                 proto,
                                             ) {
                                                 if let Some(gov_block) = pp
-                                                    .process(&session_id, &workspace_id_clone, graph_key_clone.as_deref())
+                                                    .process(
+                                                        &session_id,
+                                                        &workspace_id_clone,
+                                                        graph_key_clone.as_deref(),
+                                                    )
                                                     .await
                                                 {
                                                     let _ = tx
@@ -5462,7 +5612,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                                 // erasing the input+cache buckets
                                                 // `message_start` below already set.
                                                 if let Some(usage) = json_val.get("usage") {
-                                                    let delta_usage = TokenUsage::from_anthropic(usage);
+                                                    let delta_usage =
+                                                        TokenUsage::from_anthropic(usage);
                                                     usage_acc.merge_from(delta_usage);
                                                     if delta_usage.uncached_input.is_some() {
                                                         prompt_tokens = usage_acc.total_input();
@@ -5474,7 +5625,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                             } else if current_event_type == "message_start" {
                                                 if let Some(msg) = json_val.get("message") {
                                                     if let Some(usage) = msg.get("usage") {
-                                                        let start_usage = TokenUsage::from_anthropic(usage);
+                                                        let start_usage =
+                                                            TokenUsage::from_anthropic(usage);
                                                         usage_acc.merge_from(start_usage);
                                                         if start_usage.uncached_input.is_some() {
                                                             prompt_tokens = usage_acc.total_input();
@@ -5521,8 +5673,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                             if let Some((args, idx, item)) =
                                 arg_holdback.as_mut().and_then(|a| a.flush())
                             {
-                                if let Some(b) =
-                                    arg_flush_bytes(&args, &protocol_clone, idx, &item)
+                                if let Some(b) = arg_flush_bytes(&args, &protocol_clone, idx, &item)
                                 {
                                     let _ = tx.send(Ok(axum::body::Bytes::from(b))).await;
                                 }
@@ -5631,7 +5782,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                             response_injection_findings: Vec::new(),
                             context_snapshot: context_snapshot_for_trace.clone(),
                             upstream_error: Some(crate::telemetry::UpstreamError {
-                                provider: provider_wire_id(&get_model_provider(&actual_model_clone)),
+                                provider: provider_wire_id(&get_model_provider(
+                                    &actual_model_clone,
+                                )),
                                 status: None,
                                 kind: crate::telemetry::UpstreamErrorKind::TransportError,
                             }),
@@ -5686,9 +5839,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // already sent its own terminal (bytes after a terminal are not a
             // stream any client can parse).
             if is_same_provider && !gate_tripped {
-                if let Some((args, idx, item)) =
-                    arg_holdback.as_mut().and_then(|a| a.flush())
-                {
+                if let Some((args, idx, item)) = arg_holdback.as_mut().and_then(|a| a.flush()) {
                     if let Some(b) = arg_flush_bytes(&args, &protocol_clone, idx, &item) {
                         let _ = tx.send(Ok(axum::body::Bytes::from(b))).await;
                     }
@@ -5795,7 +5946,6 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                             paragraph_history.clone()
                         };
 
-
                         let check_url = format!("{}/api/v1/judge/chunk", control_plane_url_clone);
                         tracing::info!(url = %check_url, "Sending trailing chunk to judge");
                         let api_key_for_trailing = client_api_key_clone.clone();
@@ -5898,55 +6048,55 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 };
 
                 if let Some(formatted_alert) = judge_note {
-                                let alert_block = match protocol_clone {
-                                    crate::protocol::Protocol::Anthropic => {
-                                        format!(
-                                            "event: content_block_delta\ndata: {}\n\n",
-                                            serde_json::json!({
-                                                "type": "content_block_delta",
-                                                "index": 0,
-                                                "delta": {
-                                                    "type": "text_delta",
-                                                    "text": formatted_alert
-                                                }
-                                            })
-                                        )
+                    let alert_block = match protocol_clone {
+                        crate::protocol::Protocol::Anthropic => {
+                            format!(
+                                "event: content_block_delta\ndata: {}\n\n",
+                                serde_json::json!({
+                                    "type": "content_block_delta",
+                                    "index": 0,
+                                    "delta": {
+                                        "type": "text_delta",
+                                        "text": formatted_alert
                                     }
-                                    // The synthesis is a whole message, not a
-                                    // delta on one, so it goes in as its own
-                                    // output item. `output_index` 0 is safe
-                                    // here in a way it would not be for the
-                                    // governance block: this branch only runs
-                                    // with the judge active, and the judge
-                                    // withholds the upstream's terminal event
-                                    // and every chunk behind it, so the client
-                                    // has been sent no output items at all.
-                                    crate::protocol::Protocol::OpenAIResponses => {
-                                        crate::commands::responses_message_events(
-                                            &formatted_alert,
-                                            0,
-                                            "msg_intutic_judge_gov",
-                                        )
-                                    }
-                                    _ => {
-                                        format!(
-                                            "data: {}\n\n",
-                                            serde_json::json!({
-                                                "choices": [{
-                                                    "delta": {
-                                                        "content": formatted_alert
-                                                    },
-                                                    "finish_reason": null,
-                                                    "index": 0
-                                                }],
-                                                "id": "intutic-judge-gov",
-                                                "object": "chat.completion.chunk"
-                                            })
-                                        )
-                                    }
-                                };
-                                tracing::info!("Injecting judge synthesis/unavailability block into stream");
-                                let _ = tx.send(Ok(axum::body::Bytes::from(alert_block))).await;
+                                })
+                            )
+                        }
+                        // The synthesis is a whole message, not a
+                        // delta on one, so it goes in as its own
+                        // output item. `output_index` 0 is safe
+                        // here in a way it would not be for the
+                        // governance block: this branch only runs
+                        // with the judge active, and the judge
+                        // withholds the upstream's terminal event
+                        // and every chunk behind it, so the client
+                        // has been sent no output items at all.
+                        crate::protocol::Protocol::OpenAIResponses => {
+                            crate::commands::responses_message_events(
+                                &formatted_alert,
+                                0,
+                                "msg_intutic_judge_gov",
+                            )
+                        }
+                        _ => {
+                            format!(
+                                "data: {}\n\n",
+                                serde_json::json!({
+                                    "choices": [{
+                                        "delta": {
+                                            "content": formatted_alert
+                                        },
+                                        "finish_reason": null,
+                                        "index": 0
+                                    }],
+                                    "id": "intutic-judge-gov",
+                                    "object": "chat.completion.chunk"
+                                })
+                            )
+                        }
+                    };
+                    tracing::info!("Injecting judge synthesis/unavailability block into stream");
+                    let _ = tx.send(Ok(axum::body::Bytes::from(alert_block))).await;
                 }
             }
 
@@ -6028,13 +6178,12 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // makes a clean stream *measured*; scoring only the truncations
             // would leave `AVG(response_integrity)` computed over an arm's
             // failures alone.
-            let integrity = crate::routing::integrity::score(
-                &crate::routing::integrity::ResponseFacts {
+            let integrity =
+                crate::routing::integrity::score(&crate::routing::integrity::ResponseFacts {
                     body: None,
                     request: None,
                     done_received: Some(stream_complete),
-                },
-            );
+                });
 
             let reconstruction_quality = if is_same_provider { 100 } else { 95 };
             let (raw_cost_usd, actual_cost_usd) = request_costs(
@@ -6086,7 +6235,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             {
                 response_injection_pattern_names
                     .into_iter()
-                    .map(|pattern| crate::injection::ResponseInjectionEcho { pattern, snippet: String::new() })
+                    .map(|pattern| crate::injection::ResponseInjectionEcho {
+                        pattern,
+                        snippet: String::new(),
+                    })
                     .collect()
             } else {
                 crate::injection::response_echoes(
@@ -6154,11 +6306,14 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 loop_run_id: loop_run_id_clone,
                 findings: advisory_findings.clone(),
                 response_injection_findings,
-            context_snapshot: context_snapshot_for_trace.clone(),
-            // The stream completed (this is the success trace; a mid-stream
-            // transport failure returns earlier, from its own trace above).
-            upstream_error: None,
-        graph: crate::telemetry::GraphTrace::from_node(&node_for_trace, advisory_anomalies.clone()),
+                context_snapshot: context_snapshot_for_trace.clone(),
+                // The stream completed (this is the success trace; a mid-stream
+                // transport failure returns earlier, from its own trace above).
+                upstream_error: None,
+                graph: crate::telemetry::GraphTrace::from_node(
+                    &node_for_trace,
+                    advisory_anomalies.clone(),
+                ),
             };
 
             // Accrue BEFORE publishing, and on the same values the trace
@@ -6197,15 +6352,15 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     headers_mut.insert("x-intutic-routed-to", v);
                 }
             }
-                    // Disclosed like the routed-from pair, and for the same reason:
-                // a model the caller asked for being served only because the
-                // router's own pick failed is a trust event. Presence is the
-                // signal; the value names the model that could not be served.
-                if let Some(bad) = &fallback_from {
-                    if let Ok(v) = axum::http::HeaderValue::from_str(bad) {
-                        headers_mut.insert("x-intutic-routing-fallback-from", v);
-                    }
+            // Disclosed like the routed-from pair, and for the same reason:
+            // a model the caller asked for being served only because the
+            // router's own pick failed is a trust event. Presence is the
+            // signal; the value names the model that could not be served.
+            if let Some(bad) = &fallback_from {
+                if let Ok(v) = axum::http::HeaderValue::from_str(bad) {
+                    headers_mut.insert("x-intutic-routing-fallback-from", v);
                 }
+            }
         }
         return response
             .body(Body::from_stream(ReceiverStream::new(rx)))
@@ -6330,108 +6485,66 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // not an estimate in a comment.
     let body_read_at = std::time::Instant::now();
 
-    let (mut final_body_bytes, prompt_tokens, completion_tokens, mut accumulated_content, usage_final) =
-        if is_same_provider {
-            let resp_json: serde_json::Value =
-                serde_json::from_slice(&resp_bytes).unwrap_or_default();
-            let mut text = String::new();
+    let (
+        mut final_body_bytes,
+        prompt_tokens,
+        completion_tokens,
+        mut accumulated_content,
+        usage_final,
+    ) = if is_same_provider {
+        let resp_json: serde_json::Value = serde_json::from_slice(&resp_bytes).unwrap_or_default();
+        let mut text = String::new();
 
-            // Provider-dispatched (TD-347), mirroring the same provider/protocol
-            // branching the text extraction below already does — Anthropic's
-            // shape, then the Responses vs. chat-completions split within
-            // OpenAI-wire, plus Gemini (which the text extraction below has no
-            // arm for, but whose `usageMetadata` shape is unambiguous and safe
-            // to read regardless).
-            let usage = if provider == Provider::Anthropic {
-                TokenUsage::from_anthropic(&resp_json)
-            } else if provider == Provider::Gemini {
-                TokenUsage::from_gemini_metadata(&resp_json)
-            } else if protocol == Protocol::OpenAIResponses {
-                TokenUsage::from_responses(&resp_json)
-            } else {
-                TokenUsage::from_openai_chat(&resp_json)
-            };
-            let prompt_tokens = usage.total_input();
-            let completion_tokens = usage.output.unwrap_or(0);
+        // Provider-dispatched (TD-347), mirroring the same provider/protocol
+        // branching the text extraction below already does — Anthropic's
+        // shape, then the Responses vs. chat-completions split within
+        // OpenAI-wire, plus Gemini (which the text extraction below has no
+        // arm for, but whose `usageMetadata` shape is unambiguous and safe
+        // to read regardless).
+        let usage = if provider == Provider::Anthropic {
+            TokenUsage::from_anthropic(&resp_json)
+        } else if provider == Provider::Gemini {
+            TokenUsage::from_gemini_metadata(&resp_json)
+        } else if protocol == Protocol::OpenAIResponses {
+            TokenUsage::from_responses(&resp_json)
+        } else {
+            TokenUsage::from_openai_chat(&resp_json)
+        };
+        let prompt_tokens = usage.total_input();
+        let completion_tokens = usage.output.unwrap_or(0);
 
-            if provider == Provider::Anthropic {
-                if let Some(content) = resp_json.get("content").and_then(|c| c.as_array()) {
-                    for block in content {
-                        if block.get("type").and_then(|t| t.as_str()) == Some("text") {
-                            if let Some(txt) = block.get("text").and_then(|t| t.as_str()) {
-                                text.push_str(txt);
-                            }
-                        }
-                    }
-                }
-            } else if protocol == Protocol::OpenAIResponses {
-                // A same-provider Responses body is forwarded untranslated, so
-                // its text is in `output[].content[].type == "output_text"` —
-                // there is no `choices[]` to read. Without this the judge and
-                // the semantic cache saw an empty response on every
-                // non-streaming Codex CLI request.
-                if let Some(output) = resp_json.get("output").and_then(|o| o.as_array()) {
-                    for item in output {
-                        let Some(content) = item.get("content").and_then(|c| c.as_array()) else {
-                            continue;
-                        };
-                        for part in content {
-                            if part.get("type").and_then(|t| t.as_str()) == Some("output_text") {
-                                if let Some(txt) = part.get("text").and_then(|t| t.as_str()) {
-                                    text.push_str(txt);
-                                }
-                            }
-                        }
-                    }
-                }
-            } else {
-                if let Some(choices) = resp_json.get("choices").and_then(|c| c.as_array()) {
-                    if let Some(first) = choices.first() {
-                        if let Some(txt) = first
-                            .get("message")
-                            .and_then(|m| m.get("content"))
-                            .and_then(|c| c.as_str())
-                        {
+        if provider == Provider::Anthropic {
+            if let Some(content) = resp_json.get("content").and_then(|c| c.as_array()) {
+                for block in content {
+                    if block.get("type").and_then(|t| t.as_str()) == Some("text") {
+                        if let Some(txt) = block.get("text").and_then(|t| t.as_str()) {
                             text.push_str(txt);
                         }
                     }
                 }
             }
-
-            (resp_bytes.to_vec(), prompt_tokens, completion_tokens, text, usage)
-        } else {
-            let upstream_json: serde_json::Value =
-                serde_json::from_slice(&resp_bytes).unwrap_or_default();
-            let translated = crate::protocol::openai::OpenAIAdapter::translate_response_to_openai(
-                &upstream_json,
-                &actual_model,
-                protocol == Protocol::OpenAIResponses,
-            );
-
-            // Parsed from the pre-translation UPSTREAM body, not `translated`
-            // (TD-347): `OpenAIAdapter::translate_response_to_openai` drops
-            // cache fields when it builds the OpenAI-shape body the client
-            // receives, and re-deriving from the original response avoids
-            // growing that translator's client-visible wire contract as part
-            // of this change — widening what the client sees is a separate,
-            // optional future PR. Dispatched on `target_provider` (the routed
-            // model's actual provider), matching the exhaustive match this
-            // same function uses to pick the cross-provider upstream path
-            // (`/v1/messages`, `/v1/chat/completions`, or Gemini's
-            // `generateContent`) — the upstream body's shape is always exactly
-            // one of those three, never the OpenAI-Responses shape.
-            let usage = match target_provider {
-                Provider::Anthropic => TokenUsage::from_anthropic(&upstream_json),
-                Provider::Gemini => TokenUsage::from_gemini_metadata(&upstream_json),
-                Provider::OpenAI | Provider::Mistral | Provider::OpenRouter => {
-                    TokenUsage::from_openai_chat(&upstream_json)
+        } else if protocol == Protocol::OpenAIResponses {
+            // A same-provider Responses body is forwarded untranslated, so
+            // its text is in `output[].content[].type == "output_text"` —
+            // there is no `choices[]` to read. Without this the judge and
+            // the semantic cache saw an empty response on every
+            // non-streaming Codex CLI request.
+            if let Some(output) = resp_json.get("output").and_then(|o| o.as_array()) {
+                for item in output {
+                    let Some(content) = item.get("content").and_then(|c| c.as_array()) else {
+                        continue;
+                    };
+                    for part in content {
+                        if part.get("type").and_then(|t| t.as_str()) == Some("output_text") {
+                            if let Some(txt) = part.get("text").and_then(|t| t.as_str()) {
+                                text.push_str(txt);
+                            }
+                        }
+                    }
                 }
-            };
-            let prompt_tokens = usage.total_input();
-            let completion_tokens = usage.output.unwrap_or(0);
-            let mut text = String::new();
-
-            if let Some(choices) = translated.get("choices").and_then(|c| c.as_array()) {
+            }
+        } else {
+            if let Some(choices) = resp_json.get("choices").and_then(|c| c.as_array()) {
                 if let Some(first) = choices.first() {
                     if let Some(txt) = first
                         .get("message")
@@ -6442,10 +6555,62 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     }
                 }
             }
+        }
 
-            let new_bytes = serde_json::to_vec(&translated).unwrap_or_else(|_| resp_bytes.to_vec());
-            (new_bytes, prompt_tokens, completion_tokens, text, usage)
+        (
+            resp_bytes.to_vec(),
+            prompt_tokens,
+            completion_tokens,
+            text,
+            usage,
+        )
+    } else {
+        let upstream_json: serde_json::Value =
+            serde_json::from_slice(&resp_bytes).unwrap_or_default();
+        let translated = crate::protocol::openai::OpenAIAdapter::translate_response_to_openai(
+            &upstream_json,
+            &actual_model,
+            protocol == Protocol::OpenAIResponses,
+        );
+
+        // Parsed from the pre-translation UPSTREAM body, not `translated`
+        // (TD-347): `OpenAIAdapter::translate_response_to_openai` drops
+        // cache fields when it builds the OpenAI-shape body the client
+        // receives, and re-deriving from the original response avoids
+        // growing that translator's client-visible wire contract as part
+        // of this change — widening what the client sees is a separate,
+        // optional future PR. Dispatched on `target_provider` (the routed
+        // model's actual provider), matching the exhaustive match this
+        // same function uses to pick the cross-provider upstream path
+        // (`/v1/messages`, `/v1/chat/completions`, or Gemini's
+        // `generateContent`) — the upstream body's shape is always exactly
+        // one of those three, never the OpenAI-Responses shape.
+        let usage = match target_provider {
+            Provider::Anthropic => TokenUsage::from_anthropic(&upstream_json),
+            Provider::Gemini => TokenUsage::from_gemini_metadata(&upstream_json),
+            Provider::OpenAI | Provider::Mistral | Provider::OpenRouter => {
+                TokenUsage::from_openai_chat(&upstream_json)
+            }
         };
+        let prompt_tokens = usage.total_input();
+        let completion_tokens = usage.output.unwrap_or(0);
+        let mut text = String::new();
+
+        if let Some(choices) = translated.get("choices").and_then(|c| c.as_array()) {
+            if let Some(first) = choices.first() {
+                if let Some(txt) = first
+                    .get("message")
+                    .and_then(|m| m.get("content"))
+                    .and_then(|c| c.as_str())
+                {
+                    text.push_str(txt);
+                }
+            }
+        }
+
+        let new_bytes = serde_json::to_vec(&translated).unwrap_or_else(|_| resp_bytes.to_vec());
+        (new_bytes, prompt_tokens, completion_tokens, text, usage)
+    };
 
     if judge_active {
         let control_plane_url = std::env::var("CONTROL_PLANE_URL").unwrap_or_default();
@@ -6492,11 +6657,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
 
         let judge_note: Option<String> = match judge_finalize_deadline_ms() {
             Some(deadline_ms) => {
-                match tokio::time::timeout(
-                    std::time::Duration::from_millis(deadline_ms),
-                    tail_task,
-                )
-                .await
+                match tokio::time::timeout(std::time::Duration::from_millis(deadline_ms), tail_task)
+                    .await
                 {
                     Ok(Ok(note)) => note,
                     Ok(Err(join_err)) => {
@@ -6524,72 +6686,69 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         };
 
         if let Some(formatted_alert) = judge_note {
-                        accumulated_content.push_str(&formatted_alert);
+            accumulated_content.push_str(&formatted_alert);
 
-                        if let Ok(mut resp_val) =
-                            serde_json::from_slice::<serde_json::Value>(&final_body_bytes)
-                        {
-                            tracing::info!(resp_val_keys = ?resp_val.as_object().map(|o| o.keys().collect::<Vec<_>>()), "Parsing resp_val structure keys");
-                            let mut mutated = false;
+            if let Ok(mut resp_val) = serde_json::from_slice::<serde_json::Value>(&final_body_bytes)
+            {
+                tracing::info!(resp_val_keys = ?resp_val.as_object().map(|o| o.keys().collect::<Vec<_>>()), "Parsing resp_val structure keys");
+                let mut mutated = false;
 
-                            // Check for content array (Anthropic format)
-                            if let Some(content_arr) =
-                                resp_val.get_mut("content").and_then(|c| c.as_array_mut())
-                            {
-                                tracing::info!(content_arr_len = %content_arr.len(), "Found content array in resp_val");
-                                for block in content_arr.iter_mut() {
-                                    if block.get("type").and_then(|t| t.as_str()) == Some("text") {
-                                        if let Some(txt_val) =
-                                            block.get_mut("text").and_then(|t| t.as_str())
-                                        {
-                                            tracing::info!(
-                                                "Found text block in content array - mutating"
-                                            );
-                                            let mut new_txt = txt_val.to_string();
-                                            new_txt.push_str(&formatted_alert);
-                                            block.as_object_mut().unwrap().insert(
-                                                "text".to_string(),
-                                                serde_json::Value::String(new_txt),
-                                            );
-                                            mutated = true;
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Check for choices array (OpenAI format)
-                            if let Some(choices_arr) =
-                                resp_val.get_mut("choices").and_then(|c| c.as_array_mut())
-                            {
-                                tracing::info!(choices_arr_len = %choices_arr.len(), "Found choices array in resp_val");
-                                if let Some(first_choice) = choices_arr.first_mut() {
-                                    if let Some(msg_obj) = first_choice
-                                        .get_mut("message")
-                                        .and_then(|m| m.as_object_mut())
-                                    {
-                                        if let Some(content_str) =
-                                            msg_obj.get("content").and_then(|c| c.as_str())
-                                        {
-                                            let mut new_txt = content_str.to_string();
-                                            new_txt.push_str(&formatted_alert);
-                                            msg_obj.insert(
-                                                "content".to_string(),
-                                                serde_json::Value::String(new_txt),
-                                            );
-                                            mutated = true;
-                                        }
-                                    }
-                                }
-                            }
-
-                            if mutated {
-                                tracing::info!("Injecting synthesized warning block into non-streaming response body");
-                                if let Ok(new_bytes) = serde_json::to_vec(&resp_val) {
-                                    final_body_bytes = new_bytes;
-                                }
+                // Check for content array (Anthropic format)
+                if let Some(content_arr) =
+                    resp_val.get_mut("content").and_then(|c| c.as_array_mut())
+                {
+                    tracing::info!(content_arr_len = %content_arr.len(), "Found content array in resp_val");
+                    for block in content_arr.iter_mut() {
+                        if block.get("type").and_then(|t| t.as_str()) == Some("text") {
+                            if let Some(txt_val) = block.get_mut("text").and_then(|t| t.as_str()) {
+                                tracing::info!("Found text block in content array - mutating");
+                                let mut new_txt = txt_val.to_string();
+                                new_txt.push_str(&formatted_alert);
+                                block
+                                    .as_object_mut()
+                                    .unwrap()
+                                    .insert("text".to_string(), serde_json::Value::String(new_txt));
+                                mutated = true;
+                                break;
                             }
                         }
+                    }
+                }
+
+                // Check for choices array (OpenAI format)
+                if let Some(choices_arr) =
+                    resp_val.get_mut("choices").and_then(|c| c.as_array_mut())
+                {
+                    tracing::info!(choices_arr_len = %choices_arr.len(), "Found choices array in resp_val");
+                    if let Some(first_choice) = choices_arr.first_mut() {
+                        if let Some(msg_obj) = first_choice
+                            .get_mut("message")
+                            .and_then(|m| m.as_object_mut())
+                        {
+                            if let Some(content_str) =
+                                msg_obj.get("content").and_then(|c| c.as_str())
+                            {
+                                let mut new_txt = content_str.to_string();
+                                new_txt.push_str(&formatted_alert);
+                                msg_obj.insert(
+                                    "content".to_string(),
+                                    serde_json::Value::String(new_txt),
+                                );
+                                mutated = true;
+                            }
+                        }
+                    }
+                }
+
+                if mutated {
+                    tracing::info!(
+                        "Injecting synthesized warning block into non-streaming response body"
+                    );
+                    if let Ok(new_bytes) = serde_json::to_vec(&resp_val) {
+                        final_body_bytes = new_bytes;
+                    }
+                }
+            }
         }
     }
 
@@ -6623,9 +6782,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // operator can act on is the only one that is honest.
             match serde_json::from_str::<serde_json::Value>(&redacted) {
                 Ok(after) => {
-                    if let Ok(before) =
-                        serde_json::from_str::<serde_json::Value>(&resp_str)
-                    {
+                    if let Ok(before) = serde_json::from_str::<serde_json::Value>(&resp_str) {
                         redaction_hijacks =
                             crate::plugins::hijack::substituted_calls(&before, &after);
                     }
@@ -6675,7 +6832,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // Write cache
     if !accumulated_content.is_empty() {
         let _ = crate::plugins::semantic_cache::write_cache(
-                    crate::plugins::semantic_cache::ResponseProvenance::Served,
+            crate::plugins::semantic_cache::ResponseProvenance::Served,
             &state.store,
             &state.http_client,
             &workspace_id,
@@ -6716,12 +6873,11 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // `ToolSchema` in the WASM context carries only name and description, so the
     // required properties have to come from the request body directly.
     let parsed_response: Option<serde_json::Value> = serde_json::from_slice(&final_body).ok();
-    let integrity =
-        crate::routing::integrity::score(&crate::routing::integrity::ResponseFacts {
-            body: parsed_response.as_ref(),
-            request: Some(&body_json),
-            done_received: None,
-        });
+    let integrity = crate::routing::integrity::score(&crate::routing::integrity::ResponseFacts {
+        body: parsed_response.as_ref(),
+        request: Some(&body_json),
+        done_received: None,
+    });
 
     // ── Response-side tool gate ───────────────────────────────────────
     //
@@ -6781,7 +6937,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // this one's. A lost write just means the next request's counterfactual
     // falls back to cache-blind.
     if let Some(bp) = cache_read_bp(&usage_final) {
-        let _ = state.store.record_session_cache(&tool_scope_id, &actual_model, bp).await;
+        let _ = state
+            .store
+            .record_session_cache(&tool_scope_id, &actual_model, bp)
+            .await;
     }
 
     // Mirror the configured/shadow candidate, if this request was sampled.
@@ -6834,7 +6993,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             let client = state.http_client.as_ref().clone();
             let ws = workspace_id.clone();
             let req_json = body_json.clone();
-            let estimate: std::sync::Arc<dyn Fn(&str, u32, u32) -> f64 + Send + Sync> =
+            let estimate: crate::routing::mirror::CostEstimator =
                 std::sync::Arc::new(|m: &str, p: u32, c: u32| estimate_model_cost(m, p, c));
             let mirror_store = Arc::clone(&state.store);
             let mirror_ws = ws.clone();
@@ -6948,7 +7107,6 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         }
     }
 
-
     let latency_ms = start.elapsed().as_millis() as u32;
 
     // Advisory echo scan of the model's own output, plus (Phase 4A) a
@@ -6961,22 +7119,24 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         .map(crate::injection::scan_response_body)
         .unwrap_or_default();
     let response_injection_snippet_cfg = &state.config.intutic_settings.response_injection_snippet;
-    let response_injection_findings = if response_injection_pattern_names.is_empty()
-        || !response_injection_snippet_cfg.enabled
-    {
-        response_injection_pattern_names
-            .into_iter()
-            .map(|pattern| crate::injection::ResponseInjectionEcho { pattern, snippet: String::new() })
-            .collect()
-    } else if let Some(body) = parsed_response.as_ref() {
-        crate::injection::response_echoes_from_body(
-            body,
-            &response_injection_pattern_names,
-            response_injection_snippet_cfg.window_bytes,
-        )
-    } else {
-        Vec::new()
-    };
+    let response_injection_findings =
+        if response_injection_pattern_names.is_empty() || !response_injection_snippet_cfg.enabled {
+            response_injection_pattern_names
+                .into_iter()
+                .map(|pattern| crate::injection::ResponseInjectionEcho {
+                    pattern,
+                    snippet: String::new(),
+                })
+                .collect()
+        } else if let Some(body) = parsed_response.as_ref() {
+            crate::injection::response_echoes_from_body(
+                body,
+                &response_injection_pattern_names,
+                response_injection_snippet_cfg.window_bytes,
+            )
+        } else {
+            Vec::new()
+        };
 
     if reward_eligible {
         spawn_reward_update(
@@ -7022,7 +7182,12 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         latency_ms,
         // Same string the request-side kill uses, so an audit of blocked tool
         // calls does not have to know which half of the turn caught it.
-        verdict: if response_denial.is_some() { "killed" } else { "allowed" }.to_string(),
+        verdict: if response_denial.is_some() {
+            "killed"
+        } else {
+            "allowed"
+        }
+        .to_string(),
         harness_type: harness_type.clone(),
         created_at: chrono::Utc::now().to_rfc3339(),
         requested_model: model.clone(),
@@ -7145,15 +7310,15 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 headers_mut.insert("x-intutic-routed-to", v);
             }
         }
-            // Disclosed like the routed-from pair, and for the same reason:
-            // a model the caller asked for being served only because the
-            // router's own pick failed is a trust event. Presence is the
-            // signal; the value names the model that could not be served.
-            if let Some(bad) = &fallback_from {
-                if let Ok(v) = axum::http::HeaderValue::from_str(bad) {
-                    headers_mut.insert("x-intutic-routing-fallback-from", v);
-                }
+        // Disclosed like the routed-from pair, and for the same reason:
+        // a model the caller asked for being served only because the
+        // router's own pick failed is a trust event. Presence is the
+        // signal; the value names the model that could not be served.
+        if let Some(bad) = &fallback_from {
+            if let Ok(v) = axum::http::HeaderValue::from_str(bad) {
+                headers_mut.insert("x-intutic-routing-fallback-from", v);
             }
+        }
     }
     response.body(Body::from(final_body)).unwrap_or_else(|_| {
         json_error(
@@ -7222,8 +7387,9 @@ fn compress_tool_results(body: Vec<u8>, config: &SnipCompactorConfig) -> (Vec<u8
                                             original_bytes = text.len(),
                                             "snip: compressed tool_result text block"
                                         );
-                                        bytes_saved = bytes_saved
-                                            .saturating_add(text.len().saturating_sub(compressed.len()) as u64);
+                                        bytes_saved = bytes_saved.saturating_add(
+                                            text.len().saturating_sub(compressed.len()) as u64,
+                                        );
                                         *text_val = serde_json::Value::String(compressed);
                                         compressed_any = true;
                                     }
@@ -7363,7 +7529,9 @@ fn delta_shape(protocol: &crate::protocol::Protocol, provider: &Provider) -> Del
         P::Gemini => DeltaShape::Unparsed,
         P::Unknown => match provider {
             Provider::Anthropic => DeltaShape::AnthropicText,
-            Provider::OpenAI | Provider::Mistral | Provider::OpenRouter => DeltaShape::OpenAIChatContent,
+            Provider::OpenAI | Provider::Mistral | Provider::OpenRouter => {
+                DeltaShape::OpenAIChatContent
+            }
             Provider::Gemini => DeltaShape::Unparsed,
         },
     }
@@ -7404,9 +7572,13 @@ fn wire_for(
 fn stream_delta_text(v: &serde_json::Value, shape: DeltaShape) -> Option<&str> {
     match shape {
         DeltaShape::AnthropicText => v.get("delta")?.get("text")?.as_str(),
-        DeltaShape::OpenAIChatContent => {
-            v.get("choices")?.as_array()?.first()?.get("delta")?.get("content")?.as_str()
-        }
+        DeltaShape::OpenAIChatContent => v
+            .get("choices")?
+            .as_array()?
+            .first()?
+            .get("delta")?
+            .get("content")?
+            .as_str(),
         // Type-guarded for the same reason the rewrite is: several Responses
         // events carry a bare-string `delta`, and only this one is assistant
         // text. `response.function_call_arguments.delta` is a tool call's
@@ -7442,7 +7614,10 @@ fn stream_usage(v: &serde_json::Value, shape: DeltaShape) -> TokenUsage {
         // `response` object — never at the top level, which is the only place
         // the chat-completions arm looked.
         DeltaShape::ResponsesOutputText => {
-            let usage = v.get("response").and_then(|r| r.get("usage")).or_else(|| v.get("usage"));
+            let usage = v
+                .get("response")
+                .and_then(|r| r.get("usage"))
+                .or_else(|| v.get("usage"));
             match usage {
                 Some(u) => TokenUsage::from_responses(u),
                 None => TokenUsage::default(),
@@ -7478,7 +7653,9 @@ fn postprocessor_protocol(
 
 /// Whether this SSE line is the chat-completions `[DONE]` sentinel.
 fn is_done_sentinel(line: &str) -> bool {
-    line.strip_prefix("data:").map(|d| d.trim() == "[DONE]").unwrap_or(false)
+    line.strip_prefix("data:")
+        .map(|d| d.trim() == "[DONE]")
+        .unwrap_or(false)
 }
 
 /// Terminal events for an OpenAI Responses stream.
@@ -7505,7 +7682,6 @@ fn is_responses_terminal(line: &str) -> bool {
         Some("response.completed") | Some("response.failed") | Some("response.incomplete")
     )
 }
-
 
 /// The `type` field of an SSE `data:` line's JSON payload, if it has one.
 ///
@@ -7576,11 +7752,17 @@ fn holdback_rewrite_line(
     let mut v: serde_json::Value = serde_json::from_str(data).ok()?;
     let next = match shape {
         DeltaShape::AnthropicText | DeltaShape::OpenAIChatContent => DeltaAddress {
-            index: v.get("index").and_then(|i| i.as_u64()).unwrap_or(addr.index),
+            index: v
+                .get("index")
+                .and_then(|i| i.as_u64())
+                .unwrap_or(addr.index),
             ..DeltaAddress::default()
         },
         DeltaShape::ResponsesOutputText => DeltaAddress {
-            index: v.get("output_index").and_then(|i| i.as_u64()).unwrap_or(addr.index),
+            index: v
+                .get("output_index")
+                .and_then(|i| i.as_u64())
+                .unwrap_or(addr.index),
             item_id: v
                 .get("item_id")
                 .and_then(|i| i.as_str())
@@ -7705,7 +7887,9 @@ impl ArgHoldback {
         let (new_index, new_item_id) = match shape {
             DeltaShape::AnthropicText => {
                 if v.get("type").and_then(|t| t.as_str()) != Some("content_block_delta")
-                    || v.get("delta").and_then(|d| d.get("type")).and_then(|t| t.as_str())
+                    || v.get("delta")
+                        .and_then(|d| d.get("type"))
+                        .and_then(|t| t.as_str())
                         != Some("input_json_delta")
                 {
                     return (None, None);
@@ -7755,8 +7939,7 @@ impl ArgHoldback {
             DeltaShape::Unparsed => return (None, None),
         };
 
-        let flush_prev = if self.active
-            && (new_index != self.index || new_item_id != self.item_id)
+        let flush_prev = if self.active && (new_index != self.index || new_item_id != self.item_id)
         {
             self.scrubber
                 .flush()
@@ -7769,9 +7952,7 @@ impl ArgHoldback {
         self.active = true;
 
         let slot = match shape {
-            DeltaShape::AnthropicText => {
-                v.get_mut("delta").and_then(|d| d.get_mut("partial_json"))
-            }
+            DeltaShape::AnthropicText => v.get_mut("delta").and_then(|d| d.get_mut("partial_json")),
             DeltaShape::OpenAIChatContent => v
                 .get_mut("choices")
                 .and_then(|c| c.get_mut(0))
@@ -7790,11 +7971,9 @@ impl ArgHoldback {
             return (flush_prev, None);
         };
         // `usize::MAX` holdback: push absorbs everything, returns "".
-        let _ = self.scrubber.push(&fragment.to_string());
+        let _ = self.scrubber.push(fragment);
         *slot = serde_json::Value::String(String::new());
-        let rewritten = serde_json::to_string(&v)
-            .ok()
-            .map(|s| format!("data: {s}"));
+        let rewritten = serde_json::to_string(&v).ok().map(|s| format!("data: {s}"));
         (flush_prev, rewritten)
     }
 
@@ -7950,7 +8129,10 @@ mod tests {
     mod key_context_byok {
         async fn parse(body: &str) -> Option<bool> {
             let resp = reqwest::Response::from(
-                axum::http::Response::builder().status(200).body(body.to_string()).unwrap(),
+                axum::http::Response::builder()
+                    .status(200)
+                    .body(body.to_string())
+                    .unwrap(),
             );
             super::super::parse_key_context(resp, "vk_test")
                 .await
@@ -7961,12 +8143,21 @@ mod tests {
 
         #[tokio::test]
         async fn key_context_carries_the_workspace_byok_answer() {
-            assert_eq!(parse(r#"{"workspaceId":"ws_a","byokRequired":true}"#).await, Some(true));
-            assert_eq!(parse(r#"{"workspaceId":"ws_a","byokRequired":false}"#).await, Some(false));
+            assert_eq!(
+                parse(r#"{"workspaceId":"ws_a","byokRequired":true}"#).await,
+                Some(true)
+            );
+            assert_eq!(
+                parse(r#"{"workspaceId":"ws_a","byokRequired":false}"#).await,
+                Some(false)
+            );
             // An older control plane (field absent or null) leaves it unknown,
             // which `gateway::provisioned_key_required` enforces under `paid`.
             assert_eq!(parse(r#"{"workspaceId":"ws_a"}"#).await, None);
-            assert_eq!(parse(r#"{"workspaceId":"ws_a","byokRequired":null}"#).await, None);
+            assert_eq!(
+                parse(r#"{"workspaceId":"ws_a","byokRequired":null}"#).await,
+                None
+            );
         }
     }
 
@@ -7982,16 +8173,29 @@ mod tests {
 
         #[test]
         fn a_detector_scoped_token_drops_only_the_named_detector_s_findings() {
-            let findings = vec![finding("consecutive_repeat"), finding("path_traversal"), finding("consecutive_repeat")];
-            let kept = super::super::retain_findings_outside_break_glass_scope(findings, Some(&BreakGlassScope::Detector("consecutive_repeat".into())));
-            assert_eq!(kept.iter().map(|f| f.detector_id).collect::<Vec<_>>(), vec!["path_traversal"]);
+            let findings = vec![
+                finding("consecutive_repeat"),
+                finding("path_traversal"),
+                finding("consecutive_repeat"),
+            ];
+            let kept = super::super::retain_findings_outside_break_glass_scope(
+                findings,
+                Some(&BreakGlassScope::Detector("consecutive_repeat".into())),
+            );
+            assert_eq!(
+                kept.iter().map(|f| f.detector_id).collect::<Vec<_>>(),
+                vec!["path_traversal"]
+            );
         }
 
         #[test]
         fn a_wasm_scoped_or_absent_token_leaves_every_finding_in_force() {
             for scope in [None, Some(BreakGlassScope::WasmRule("pcas_1".into()))] {
                 let findings = vec![finding("consecutive_repeat"), finding("path_traversal")];
-                let kept = super::super::retain_findings_outside_break_glass_scope(findings, scope.as_ref());
+                let kept = super::super::retain_findings_outside_break_glass_scope(
+                    findings,
+                    scope.as_ref(),
+                );
                 assert_eq!(kept.len(), 2, "scope {scope:?} must not drop findings");
             }
         }
@@ -8031,8 +8235,14 @@ mod tests {
             let usage = warm_usage();
             let (raw, actual) = request_costs(WARM_MODEL, WARM_MODEL, &usage, 0, 0, None);
 
-            assert_eq!(raw, actual, "no routing happened — the counterfactual IS what happened");
-            assert!(raw > 0.0, "sanity: a real cache-read-heavy call must not cost exactly zero");
+            assert_eq!(
+                raw, actual,
+                "no routing happened — the counterfactual IS what happened"
+            );
+            assert!(
+                raw > 0.0,
+                "sanity: a real cache-read-heavy call must not cost exactly zero"
+            );
 
             let reward = compute_reward(
                 &RewardSignals {
@@ -8063,8 +8273,7 @@ mod tests {
             let routed = "gpt-4o"; // a different model, no cache rate in the bundle
 
             let (raw_cold, _actual) = request_costs(requested, routed, &usage, 0, 0, None);
-            let (raw_warm, _actual2) =
-                request_costs(requested, routed, &usage, 0, 0, Some(0.8));
+            let (raw_warm, _actual2) = request_costs(requested, routed, &usage, 0, 0, Some(0.8));
 
             assert!(
                 raw_warm < raw_cold,
@@ -8097,9 +8306,15 @@ mod tests {
             let (raw_ratio, actual_ratio) =
                 request_costs("claude-sonnet-4-5", "gpt-4o", &empty, 400, 100, Some(0.9));
 
-            assert_eq!(raw_none, raw_ratio, "prior_cache_read_ratio must be ignored on the fallback path");
+            assert_eq!(
+                raw_none, raw_ratio,
+                "prior_cache_read_ratio must be ignored on the fallback path"
+            );
             assert_eq!(actual_none, actual_ratio);
-            assert_eq!(raw_none, pricing::estimate_cost("claude-sonnet-4-5", 400, 100));
+            assert_eq!(
+                raw_none,
+                pricing::estimate_cost("claude-sonnet-4-5", 400, 100)
+            );
         }
 
         #[test]
@@ -8171,7 +8386,9 @@ mod tests {
         fn assembled(lines: &[String]) -> String {
             let mut out = String::new();
             for line in lines {
-                let Some(data) = line.strip_prefix("data:") else { continue };
+                let Some(data) = line.strip_prefix("data:") else {
+                    continue;
+                };
                 let Ok(v) = serde_json::from_str::<serde_json::Value>(data.trim()) else {
                     continue;
                 };
@@ -8198,8 +8415,7 @@ mod tests {
 
             for frag in [frag1.as_str(), frag2.as_str()] {
                 let line = anthropic_arg_line(1, frag);
-                let (flush_prev, rewritten) =
-                    ah.process_line(&line, DeltaShape::AnthropicText);
+                let (flush_prev, rewritten) = ah.process_line(&line, DeltaShape::AnthropicText);
                 assert!(flush_prev.is_none(), "single block must not self-flush");
                 forwarded.push(rewritten.expect("arg lines must be absorbed"));
             }
@@ -8347,7 +8563,10 @@ mod tests {
 
         let (out, saved) = compress_tool_results(raw.clone(), &config);
 
-        assert_eq!(saved, 0, "a disabled compactor claimed a {saved}-byte saving");
+        assert_eq!(
+            saved, 0,
+            "a disabled compactor claimed a {saved}-byte saving"
+        );
         assert_eq!(out, raw, "a disabled compactor rewrote the body");
     }
 
@@ -8372,7 +8591,6 @@ mod tests {
         let res = extract_workspace_id(&headers, "raw_upstream_key");
         assert_eq!(res, "unknown");
     }
-
 
     // ── Streaming DLP holdback ────────────────────────────────────────────
     //
@@ -8650,7 +8868,10 @@ mod tests {
         );
         let text = client_text(&client, DeltaShape::OpenAIChatContent);
         assert!(!text.contains(SPLIT_WHOLE), "client received: {text}");
-        assert!(text.contains("[REDACTED_SECRET]"), "client received: {text}");
+        assert!(
+            text.contains("[REDACTED_SECRET]"),
+            "client received: {text}"
+        );
         assert!(text.starts_with("Here is the key: "));
         assert!(text.ends_with(", use it."));
         // The trace, the judge and the semantic cache read `accumulated`; it
@@ -8872,7 +9093,10 @@ mod tests {
             DeltaShape::AnthropicText,
             &mut idx,
         );
-        assert_eq!(idx.index, 1, "a tool-call block moved the text block's index");
+        assert_eq!(
+            idx.index, 1,
+            "a tool-call block moved the text block's index"
+        );
     }
 
     /// Cross-provider streams reach the client as translated chunks, so the
@@ -8895,7 +9119,7 @@ mod tests {
         ] {
             let bytes =
                 holdback_flush_bytes("held tail", &protocol, false, &DeltaAddress::default())
-                .expect("a cross-provider flush must produce a chunk");
+                    .expect("a cross-provider flush must produce a chunk");
             assert!(bytes.starts_with("data: ") && bytes.ends_with("\n\n"));
             let v: serde_json::Value =
                 serde_json::from_str(bytes.trim().strip_prefix("data: ").unwrap()).unwrap();
@@ -8928,45 +9152,45 @@ mod tests {
     // `responses_stream`. That is stated once per module rather than once per
     // test, but it applies to all of them.
 
-    /// The terminal event, which is the fix these tests all sit on top of.
-    ///
-    /// `[DONE]` is the chat-completions sentinel. A Responses client given it
-    /// sees a stream that never ended, so `done_received` stayed false, the
-    /// integrity scorer recorded `Truncated` on a response that completed
-    /// perfectly, and the reward engine was taught to penalise the arm.
+    // The terminal event, which is the fix these tests all sit on top of.
+    //
+    // `[DONE]` is the chat-completions sentinel. A Responses client given it
+    // sees a stream that never ended, so `done_received` stayed false, the
+    // integrity scorer recorded `Truncated` on a response that completed
+    // perfectly, and the reward engine was taught to penalise the arm.
 
-    /// The only fixture in this file CAPTURED from the real API rather than
-    /// derived from the spec.
-    ///
-    /// Every other Responses fixture here was written from documentation, and
-    /// the failure mode of that is one-directional and silent: a shape we did
-    /// not anticipate simply does not match, which is exactly what shipped and
-    /// went unnoticed until `/v1/responses` was found to be governed as if it
-    /// were chat completions.
-    ///
-    /// This one is real bytes off the wire (an `sk-` key with no credits, so
-    /// the stream fails immediately). It cost nothing to obtain and it
-    /// immediately paid for itself: it ends with `event: response.failed`, a
-    /// well-formed terminal the proxy did not recognise. Response ids are
-    /// replaced; nothing else is touched.
+    // The only fixture in this file CAPTURED from the real API rather than
+    // derived from the spec.
+    //
+    // Every other Responses fixture here was written from documentation, and
+    // the failure mode of that is one-directional and silent: a shape we did
+    // not anticipate simply does not match, which is exactly what shipped and
+    // went unnoticed until `/v1/responses` was found to be governed as if it
+    // were chat completions.
+    //
+    // This one is real bytes off the wire (an `sk-` key with no credits, so
+    // the stream fails immediately). It cost nothing to obtain and it
+    // immediately paid for itself: it ends with `event: response.failed`, a
+    // well-formed terminal the proxy did not recognise. Response ids are
+    // replaced; nothing else is touched.
 
-    /// A CAPTURED successful Responses stream — the happy path the failed
-    /// capture could not reach.
-    ///
-    /// PROVENANCE, and the limit of what this proves: these are real bytes off
-    /// a real `/v1/responses` endpoint, but that endpoint is **llama.cpp's**
-    /// implementation, not OpenAI's. It is an independent implementation of the
-    /// same protocol rather than the reference one, so agreement here is strong
-    /// evidence the shape is right and is NOT proof OpenAI matches byte for
-    /// byte. The one fixture captured from OpenAI itself is the failed stream
-    /// alongside this; between them the envelope, the terminal and the usage
-    /// keys are confirmed against two independent servers.
-    ///
-    /// What it caught: nothing broken, which is itself the result — the
-    /// hand-written fixtures had the shape right. What it CONFIRMED is the
-    /// part that had been wrong in production: `usage.output_tokens` really is
-    /// the key, and it really does carry a true count. Output was previously
-    /// metered at 1 token for every Codex request.
+    // A CAPTURED successful Responses stream — the happy path the failed
+    // capture could not reach.
+    //
+    // PROVENANCE, and the limit of what this proves: these are real bytes off
+    // a real `/v1/responses` endpoint, but that endpoint is **llama.cpp's**
+    // implementation, not OpenAI's. It is an independent implementation of the
+    // same protocol rather than the reference one, so agreement here is strong
+    // evidence the shape is right and is NOT proof OpenAI matches byte for
+    // byte. The one fixture captured from OpenAI itself is the failed stream
+    // alongside this; between them the envelope, the terminal and the usage
+    // keys are confirmed against two independent servers.
+    //
+    // What it caught: nothing broken, which is itself the result — the
+    // hand-written fixtures had the shape right. What it CONFIRMED is the
+    // part that had been wrong in production: `usage.output_tokens` really is
+    // the key, and it really does carry a true count. Output was previously
+    // metered at 1 token for every Codex request.
 
     /// A CAPTURED streamed tool call — the fixture that stayed spec-derived
     /// through three previous passes because no model on hand emitted one.
@@ -8996,7 +9220,11 @@ mod tests {
             .lines()
             .filter_map(crate::protocol::tool_use_parser::parse_sse_chunk)
             .collect();
-        assert_eq!(started.len(), 1, "expected exactly one tool-use start, got {started:?}");
+        assert_eq!(
+            started.len(),
+            1,
+            "expected exactly one tool-use start, got {started:?}"
+        );
         assert_eq!(started[0].tool_name, "shell");
 
         // 2. THE ONE THAT MATTERS. Sixteen
@@ -9006,12 +9234,21 @@ mod tests {
         //    accumulated as assistant prose — feeding a serialised tool call to
         //    the judge, the semantic cache and the trace. Until this capture
         //    that guard was justified by the spec alone.
-        let arg_deltas = raw.matches("response.function_call_arguments.delta").count();
-        assert!(arg_deltas >= 10, "fixture should carry many argument deltas, saw {arg_deltas}");
+        let arg_deltas = raw
+            .matches("response.function_call_arguments.delta")
+            .count();
+        assert!(
+            arg_deltas >= 10,
+            "fixture should carry many argument deltas, saw {arg_deltas}"
+        );
         let mut text = String::new();
         for line in raw.lines() {
-            let Some(d) = line.strip_prefix("data: ") else { continue };
-            let Ok(v) = serde_json::from_str::<serde_json::Value>(d) else { continue };
+            let Some(d) = line.strip_prefix("data: ") else {
+                continue;
+            };
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(d) else {
+                continue;
+            };
             if let Some(t) = stream_delta_text(&v, DeltaShape::ResponsesOutputText) {
                 text.push_str(t);
             }
@@ -9049,8 +9286,12 @@ mod tests {
         //    logic must tolerate rather than assume away.
         let mut text = String::new();
         for line in raw.lines() {
-            let Some(d) = line.strip_prefix("data: ") else { continue };
-            let Ok(v) = serde_json::from_str::<serde_json::Value>(d) else { continue };
+            let Some(d) = line.strip_prefix("data: ") else {
+                continue;
+            };
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(d) else {
+                continue;
+            };
             if let Some(t) = stream_delta_text(&v, DeltaShape::ResponsesOutputText) {
                 text.push_str(t);
             }
@@ -9077,7 +9318,10 @@ mod tests {
             .and_then(|v| v.get("response").and_then(|r| r.get("usage")).cloned())
             .expect("a real terminal must carry usage");
         let out = usage.get("output_tokens").and_then(|t| t.as_u64()).unwrap();
-        assert!(out > 1, "output_tokens was {out} — the metering bug is back");
+        assert!(
+            out > 1,
+            "output_tokens was {out} — the metering bug is back"
+        );
         assert!(usage.get("input_tokens").and_then(|t| t.as_u64()).unwrap() > 1);
     }
 
@@ -9091,10 +9335,7 @@ mod tests {
         assert!(raw.contains("event: response.created"));
         assert!(raw.contains("event: response.failed"));
 
-        let terminal: Vec<&str> = raw
-            .lines()
-            .filter(|l| is_responses_terminal(l))
-            .collect();
+        let terminal: Vec<&str> = raw.lines().filter(|l| is_responses_terminal(l)).collect();
         assert_eq!(
             terminal.len(),
             1,
@@ -9106,7 +9347,8 @@ mod tests {
         // recognised, a cleanly-failed stream left `done_received` false, so
         // the integrity scorer called it Truncated and usage was never read.
         assert!(
-            !raw.lines().any(|l| sse_data_type(l).as_deref() == Some("response.completed")),
+            !raw.lines()
+                .any(|l| sse_data_type(l).as_deref() == Some("response.completed")),
             "this capture must NOT contain response.completed, or it proves nothing",
         );
     }
@@ -9126,15 +9368,26 @@ mod tests {
         assert!(!is_responses_terminal(
             r#"data: {"type":"response.output_text.delta","delta":"hi"}"#
         ));
-        assert!(!is_responses_terminal(r#"data: {"type":"error","error":{}}"#));
+        assert!(!is_responses_terminal(
+            r#"data: {"type":"error","error":{}}"#
+        ));
     }
 
     #[test]
     fn the_responses_terminal_is_response_completed_not_done() {
         let ev = get_terminal_stream_event(&crate::protocol::Protocol::OpenAIResponses, "gpt-5");
-        assert!(ev.contains("response.completed"), "wrong terminal event: {ev}");
-        assert!(!ev.contains("[DONE]"), "emitted the chat-completions sentinel: {ev}");
-        let data = ev.lines().find_map(|l| l.strip_prefix("data: ")).expect("a data line");
+        assert!(
+            ev.contains("response.completed"),
+            "wrong terminal event: {ev}"
+        );
+        assert!(
+            !ev.contains("[DONE]"),
+            "emitted the chat-completions sentinel: {ev}"
+        );
+        let data = ev
+            .lines()
+            .find_map(|l| l.strip_prefix("data: "))
+            .expect("a data line");
         serde_json::from_str::<serde_json::Value>(data).expect("terminal event must be JSON");
     }
 
@@ -9186,7 +9439,10 @@ mod tests {
             Ending::Complete,
             0,
         );
-        assert_eq!(client_text(&client, DeltaShape::ResponsesOutputText), body.concat());
+        assert_eq!(
+            client_text(&client, DeltaShape::ResponsesOutputText),
+            body.concat()
+        );
         assert_eq!(accumulated, body.concat());
     }
 
@@ -9217,7 +9473,10 @@ mod tests {
             &addr,
         )
         .expect("a same-provider Responses flush must produce an event");
-        let data = bytes.lines().find_map(|l| l.strip_prefix("data: ")).expect("a data line");
+        let data = bytes
+            .lines()
+            .find_map(|l| l.strip_prefix("data: "))
+            .expect("a data line");
         let v: serde_json::Value = serde_json::from_str(data).expect("valid JSON");
         assert_eq!(v["type"], "response.output_text.delta");
         assert_eq!(v["item_id"], "msg_seven");
@@ -9250,7 +9509,11 @@ mod tests {
                 "rewrote a line it had no business touching: {line}"
             );
         }
-        assert_eq!(sc.flush(), None, "a non-text event entered the holdback buffer");
+        assert_eq!(
+            sc.flush(),
+            None,
+            "a non-text event entered the holdback buffer"
+        );
         assert!(
             addr.item_id.is_empty(),
             "a non-text event moved the flush address to {}",
@@ -9278,7 +9541,10 @@ mod tests {
         assert_eq!(usage.output, Some(567));
         // The shape that shipped, on the same bytes, is the regression this
         // guards: nothing found, so nothing metered.
-        assert_eq!(stream_usage(&ev, DeltaShape::OpenAIChatContent), TokenUsage::default());
+        assert_eq!(
+            stream_usage(&ev, DeltaShape::OpenAIChatContent),
+            TokenUsage::default()
+        );
     }
 
     /// Chat completions must keep reading the names it has always read.
@@ -9308,13 +9574,28 @@ mod tests {
     fn the_wire_shape_follows_the_route_not_the_provider() {
         use crate::commands::WireProvider as W;
         use crate::protocol::Protocol as P;
-        assert!(matches!(wire_for(&P::OpenAIResponses, &Provider::OpenAI), W::OpenAIResponses));
-        assert!(matches!(wire_for(&P::OpenAIChatCompletions, &Provider::OpenAI), W::OpenAI));
-        assert!(matches!(wire_for(&P::Anthropic, &Provider::Anthropic), W::Anthropic));
+        assert!(matches!(
+            wire_for(&P::OpenAIResponses, &Provider::OpenAI),
+            W::OpenAIResponses
+        ));
+        assert!(matches!(
+            wire_for(&P::OpenAIChatCompletions, &Provider::OpenAI),
+            W::OpenAI
+        ));
+        assert!(matches!(
+            wire_for(&P::Anthropic, &Provider::Anthropic),
+            W::Anthropic
+        ));
         // The MITM/fallback route has no path to key on, so the provider is the
         // only signal — and stays the signal it always was.
-        assert!(matches!(wire_for(&P::Unknown, &Provider::Anthropic), W::Anthropic));
-        assert!(matches!(wire_for(&P::Unknown, &Provider::OpenAI), W::OpenAI));
+        assert!(matches!(
+            wire_for(&P::Unknown, &Provider::Anthropic),
+            W::Anthropic
+        ));
+        assert!(matches!(
+            wire_for(&P::Unknown, &Provider::OpenAI),
+            W::OpenAI
+        ));
     }
 
     /// Gemini is left unparsed **on purpose**, and this test is the record.
@@ -9329,8 +9610,14 @@ mod tests {
     #[test]
     fn gemini_streaming_is_deliberately_unparsed() {
         use crate::protocol::Protocol as P;
-        assert_eq!(delta_shape(&P::Gemini, &Provider::Gemini), DeltaShape::Unparsed);
-        assert_eq!(delta_shape(&P::Unknown, &Provider::Gemini), DeltaShape::Unparsed);
+        assert_eq!(
+            delta_shape(&P::Gemini, &Provider::Gemini),
+            DeltaShape::Unparsed
+        );
+        assert_eq!(
+            delta_shape(&P::Unknown, &Provider::Gemini),
+            DeltaShape::Unparsed
+        );
         let gemini_chunk: serde_json::Value = serde_json::from_str(
             r#"{"candidates":[{"content":{"parts":[{"text":"hi"}],"role":"model"}}]}"#,
         )
@@ -9338,17 +9625,14 @@ mod tests {
         assert_eq!(stream_delta_text(&gemini_chunk, DeltaShape::Unparsed), None);
         let mut sc = crate::dlp::StreamScrubber::new(derived());
         let mut addr = DeltaAddress::default();
-        assert!(
-            holdback_rewrite_line(
-                &mut sc,
-                &format!("data: {gemini_chunk}"),
-                DeltaShape::Unparsed,
-                &mut addr
-            )
-            .is_none()
-        );
+        assert!(holdback_rewrite_line(
+            &mut sc,
+            &format!("data: {gemini_chunk}"),
+            DeltaShape::Unparsed,
+            &mut addr
+        )
+        .is_none());
     }
-
 
     /// Two harnesses in one workspace are not a rug pull.
     ///
@@ -9388,7 +9672,8 @@ mod tests {
         assert_ne!(harness_a, harness_b, "test premise: the tool sets differ");
 
         assert_eq!(
-            s.pinned_tool_signature("ws_1", "claude-code", &harness_a).await,
+            s.pinned_tool_signature("ws_1", "claude-code", &harness_a)
+                .await,
             Some(harness_a.clone()),
             "the first request from a harness pins it",
         );
@@ -9407,7 +9692,8 @@ mod tests {
             ]
         }));
         assert_eq!(
-            s.pinned_tool_signature("ws_1", "claude-code", &harness_a_poisoned).await,
+            s.pinned_tool_signature("ws_1", "claude-code", &harness_a_poisoned)
+                .await,
             Some(harness_a),
             "the same harness serving an altered description still reports the ORIGINAL \
              pin, which is what the caller compares against to detect the rug pull",
@@ -9465,14 +9751,23 @@ mod tests {
         use crate::store::LocalStore;
         let s = crate::store::MemoryStore::new();
 
-        assert_eq!(s.incr_reask_attempt("ws_a:ses_a", "consecutive_repeat").await, 1);
-        assert_eq!(s.incr_reask_attempt("ws_a:ses_a", "consecutive_repeat").await, 2);
+        assert_eq!(
+            s.incr_reask_attempt("ws_a:ses_a", "consecutive_repeat")
+                .await,
+            1
+        );
+        assert_eq!(
+            s.incr_reask_attempt("ws_a:ses_a", "consecutive_repeat")
+                .await,
+            2
+        );
 
         // THE CASE THE OLD KEY GOT WRONG. `fan_out_explosion` and
         // `consecutive_repeat` both report LOOP_DETECTED. Under the old key this
         // returned 3 and blocked the request.
         assert_eq!(
-            s.incr_reask_attempt("ws_a:ses_a", "fan_out_explosion").await,
+            s.incr_reask_attempt("ws_a:ses_a", "fan_out_explosion")
+                .await,
             1,
             "two detectors sharing an AnomalyKind must not share an allowance — \
              spinning twice then fanning out wide is two corrections, not three \
@@ -9485,7 +9780,8 @@ mod tests {
             "a detector with its own kind, likewise",
         );
         assert_eq!(
-            s.incr_reask_attempt("ws_a:ses_b", "consecutive_repeat").await,
+            s.incr_reask_attempt("ws_a:ses_b", "consecutive_repeat")
+                .await,
             1,
             "a different session starts its own allowance",
         );
@@ -9503,7 +9799,10 @@ mod tests {
         let s = crate::store::MemoryStore::new();
         let alpha = tool_history_scope("ws_alpha", "unknown", None, None, None);
         let beta = tool_history_scope("ws_beta", "unknown", None, None, None);
-        assert_ne!(alpha, beta, "two workspaces with no session header must not share a scope");
+        assert_ne!(
+            alpha, beta,
+            "two workspaces with no session header must not share a scope"
+        );
 
         assert_eq!(s.incr_reask_attempt(&alpha, "consecutive_repeat").await, 1);
         assert_eq!(s.incr_reask_attempt(&alpha, "consecutive_repeat").await, 2);
@@ -9539,10 +9838,26 @@ mod tests {
     async fn swap_extracted_tool_count_round_trips() {
         use crate::store::LocalStore;
         let s = crate::store::MemoryStore::new();
-        assert_eq!(s.swap_extracted_tool_count("ses", 3).await, 0, "unseen session starts at 0");
-        assert_eq!(s.swap_extracted_tool_count("ses", 5).await, 3, "returns the previous count");
-        assert_eq!(s.swap_extracted_tool_count("ses", 1).await, 5, "compaction resets via the same swap");
-        assert_eq!(s.swap_extracted_tool_count("other", 1).await, 0, "sessions are independent");
+        assert_eq!(
+            s.swap_extracted_tool_count("ses", 3).await,
+            0,
+            "unseen session starts at 0"
+        );
+        assert_eq!(
+            s.swap_extracted_tool_count("ses", 5).await,
+            3,
+            "returns the previous count"
+        );
+        assert_eq!(
+            s.swap_extracted_tool_count("ses", 1).await,
+            5,
+            "compaction resets via the same swap"
+        );
+        assert_eq!(
+            s.swap_extracted_tool_count("other", 1).await,
+            0,
+            "sessions are independent"
+        );
     }
 
     // Two tenants must never land in the same tool-history bucket.
@@ -9564,7 +9879,7 @@ mod tests {
         let a = judge_session_scope("ws_alpha", "unknown");
         let b = judge_session_scope("ws_beta", "unknown");
         assert_ne!(a, b, "two workspaces must not share judge session state");
-        assert!(a.starts_with("ws_alpha:"), "workspace must lead the key: {a}");
+        assert!(a.starts_with("ws_alpha:"), "workspace must lead the key");
     }
 
     #[test]
@@ -9590,11 +9905,17 @@ mod tests {
         assert!(judge_checks_enabled(&h), "no header → checks enabled");
 
         h.insert(JUDGE_LOOP_GUARD_HEADER, "1".parse().unwrap());
-        assert!(!judge_checks_enabled(&h), "header present → checks disabled");
+        assert!(
+            !judge_checks_enabled(&h),
+            "header present → checks disabled"
+        );
 
         let mut h2 = HeaderMap::new();
         h2.insert(JUDGE_LOOP_GUARD_HEADER, "anything".parse().unwrap());
-        assert!(!judge_checks_enabled(&h2), "value is irrelevant, presence decides");
+        assert!(
+            !judge_checks_enabled(&h2),
+            "value is irrelevant, presence decides"
+        );
     }
 
     #[test]
@@ -9635,7 +9956,7 @@ mod tests {
         let a = tool_history_scope("ws_alpha", "unknown", None, None, None);
         let b = tool_history_scope("ws_beta", "unknown", None, None, None);
         assert_ne!(a, b, "two workspaces must not share an anonymous bucket");
-        assert!(a.starts_with("ws_alpha:"), "workspace must lead the key: {a}");
+        assert!(a.starts_with("ws_alpha:"), "workspace must lead the key");
     }
 
     #[test]
@@ -9656,7 +9977,10 @@ mod tests {
             "ws:member:mbr_1"
         );
         // Only genuinely unidentifiable callers share, and only inside one workspace.
-        assert_eq!(tool_history_scope("ws", "unknown", None, None, None), "ws:anonymous");
+        assert_eq!(
+            tool_history_scope("ws", "unknown", None, None, None),
+            "ws:anonymous"
+        );
     }
 
     #[test]
@@ -9678,7 +10002,10 @@ mod tests {
     fn the_instance_id_is_minted_once_for_the_whole_process() {
         let first = proxy_instance_id();
         let second = proxy_instance_id();
-        assert_eq!(first, second, "the id must be stable for the process lifetime");
+        assert_eq!(
+            first, second,
+            "the id must be stable for the process lifetime"
+        );
         let uuid = first
             .strip_prefix("proxy_")
             .or_else(|| first.strip_prefix("gw_"))
@@ -9699,20 +10026,44 @@ mod tests {
         assert_eq!(instance_id_prefix(true), "gw_");
         // Both prefixes survive the control plane's sanitiser (`[^a-z0-9]` stripped,
         // first 32 kept) as distinguishable, short leaders: "proxy" and "gw".
-        let sanitise = |s: &str| s.chars().filter(|c| c.is_ascii_alphanumeric()).take(32).collect::<String>();
-        assert!(sanitise(&format!("{}{}", instance_id_prefix(true), uuid::Uuid::new_v4())).starts_with("gw"));
-        assert!(sanitise(&format!("{}{}", instance_id_prefix(false), uuid::Uuid::new_v4())).starts_with("proxy"));
+        let sanitise = |s: &str| {
+            s.chars()
+                .filter(|c| c.is_ascii_alphanumeric())
+                .take(32)
+                .collect::<String>()
+        };
+        assert!(sanitise(&format!(
+            "{}{}",
+            instance_id_prefix(true),
+            uuid::Uuid::new_v4()
+        ))
+        .starts_with("gw"));
+        assert!(sanitise(&format!(
+            "{}{}",
+            instance_id_prefix(false),
+            uuid::Uuid::new_v4()
+        ))
+        .starts_with("proxy"));
     }
 
     /// The two gateway signals `main.rs` reads are the ones that flip the prefix;
     /// nothing else does, and a blank or false value is not a gateway.
     #[test]
     fn the_gateway_prefix_follows_the_gateway_signals() {
-        assert!(!is_shared_gateway(None, None), "a local proxy has neither signal");
-        assert!(!is_shared_gateway(None, Some("false")), "REQUIRE_VK=false is not a gateway");
+        assert!(
+            !is_shared_gateway(None, None),
+            "a local proxy has neither signal"
+        );
+        assert!(
+            !is_shared_gateway(None, Some("false")),
+            "REQUIRE_VK=false is not a gateway"
+        );
         assert!(is_shared_gateway(None, Some("TRUE")));
         assert!(is_shared_gateway(Some("gw_alpha"), None));
-        assert!(!is_shared_gateway(Some("  "), None), "a blank id is not an identity");
+        assert!(
+            !is_shared_gateway(Some("  "), None),
+            "a blank id is not an identity"
+        );
     }
 
     #[test]
@@ -9729,7 +10080,8 @@ mod tests {
     // member rung and nothing else.
     #[test]
     fn client_fingerprint_narrows_the_member_rung_only() {
-        let fp = client_user_fingerprint(&serde_json::json!({"metadata": {"user_id": "agent-7"}})).unwrap();
+        let fp = client_user_fingerprint(&serde_json::json!({"metadata": {"user_id": "agent-7"}}))
+            .unwrap();
         assert_eq!(fp.len(), 8);
         assert_eq!(
             tool_history_scope("ws", "unknown", None, Some("mbr_1"), Some(&fp)),
@@ -9746,7 +10098,10 @@ mod tests {
         );
         // Without a member there is nothing to narrow: a client-chosen value
         // must never become a bucket of its own above the member rung.
-        assert_eq!(tool_history_scope("ws", "unknown", None, None, Some(&fp)), "ws:anonymous");
+        assert_eq!(
+            tool_history_scope("ws", "unknown", None, None, Some(&fp)),
+            "ws:anonymous"
+        );
     }
 
     #[test]
@@ -9817,7 +10172,10 @@ mod tests {
 
         assert_eq!(reports.len(), 1);
         assert_eq!(reports[0].title, "Never touch prod k8s");
-        assert!(reports[0].would_act, "kubectl was called and is denied — this must be would_act: true");
+        assert!(
+            reports[0].would_act,
+            "kubectl was called and is denied — this must be would_act: true"
+        );
         assert!(!reports[0].findings.is_empty());
     }
 
@@ -9841,7 +10199,10 @@ mod tests {
         let reports = evaluate_sop_shadows(&[shadow_sop], "", &base_ctx(), &registry);
 
         assert_eq!(reports.len(), 1);
-        assert!(!reports[0].would_act, "no tool_calls were made — nothing to deny");
+        assert!(
+            !reports[0].would_act,
+            "no tool_calls were made — nothing to deny"
+        );
         assert!(reports[0].findings.is_empty());
     }
 
@@ -9876,8 +10237,15 @@ mod tests {
 
         let reports = evaluate_sop_shadows(&[shadow_sop], "", &ctx, &registry);
 
-        assert_eq!(reports.len(), 1, "still evaluated: the denominator must move");
-        assert!(!reports[0].would_act, "no WebFetch call — drift is not this SOP's finding");
+        assert_eq!(
+            reports.len(),
+            1,
+            "still evaluated: the denominator must move"
+        );
+        assert!(
+            !reports[0].would_act,
+            "no WebFetch call — drift is not this SOP's finding"
+        );
         assert!(reports[0].findings.is_empty());
     }
 
@@ -9908,7 +10276,11 @@ mod tests {
         let reports = evaluate_sop_shadows(&[shadow_sop], "", &ctx, &registry);
 
         assert!(reports[0].would_act);
-        assert_eq!(reports[0].findings, vec!["UNAUTHORIZED_TOOL".to_string()], "only the SOP's own finding, not the drift");
+        assert_eq!(
+            reports[0].findings,
+            vec!["UNAUTHORIZED_TOOL".to_string()],
+            "only the SOP's own finding, not the drift"
+        );
     }
 
     /// A shadow SOP scoped to a role the request did not report is not
@@ -9930,7 +10302,10 @@ mod tests {
 
         let reports = evaluate_sop_shadows(&[shadow_sop], "reviewer", &base_ctx(), &registry);
 
-        assert!(reports.is_empty(), "a shadow SOP scoped to another role must not be evaluated");
+        assert!(
+            reports.is_empty(),
+            "a shadow SOP scoped to another role must not be evaluated"
+        );
     }
 
     /// Gemini declares its tools somewhere else, and nothing read it.
@@ -10002,7 +10377,10 @@ mod tests {
         }
         for on in ["1", "true", "yes", ""] {
             std::env::set_var("INTUTIC_LOCAL_BUDGET_ENFORCE", on);
-            assert!(local_budget_enforced(), "{on:?} must not disable enforcement");
+            assert!(
+                local_budget_enforced(),
+                "{on:?} must not disable enforcement"
+            );
         }
         std::env::remove_var("INTUTIC_LOCAL_BUDGET_ENFORCE");
     }
@@ -10068,7 +10446,10 @@ mod tests {
         ] {
             let prim = prim.as_str();
             let n = src.matches(prim).count();
-            assert_eq!(n, 1, "{prim} has {n} call sites; it must live only in accrue_spend");
+            assert_eq!(
+                n, 1,
+                "{prim} has {n} call sites; it must live only in accrue_spend"
+            );
         }
 
         let streaming = src
@@ -10077,7 +10458,10 @@ mod tests {
         let non_streaming = src
             .find("    // ── Step 7: DLP scan — output (non-streaming flow)")
             .expect("the non-streaming flow marker moved");
-        assert!(streaming < non_streaming, "test premise: streaming returns first");
+        assert!(
+            streaming < non_streaming,
+            "test premise: streaming returns first"
+        );
 
         assert!(
             src[streaming..non_streaming].contains("accrue_spend("),
@@ -10112,7 +10496,9 @@ mod tests {
             std::env::set_var("ANTHROPIC_API_KEY", fake_key());
             let store: Arc<dyn LocalStore> = Arc::new(MemoryStore::new());
 
-            let enforced = fetch_provider_credential(&store, "ws_unprovisioned", &Provider::Anthropic, true).await;
+            let enforced =
+                fetch_provider_credential(&store, "ws_unprovisioned", &Provider::Anthropic, true)
+                    .await;
             assert_eq!(
                 enforced, None,
                 "an unprovisioned workspace must get nothing under enforcement, even though a \
@@ -10120,7 +10506,9 @@ mod tests {
                  what enforcement exists to stop an unprovisioned workspace from riding",
             );
 
-            let unenforced = fetch_provider_credential(&store, "ws_unprovisioned", &Provider::Anthropic, false).await;
+            let unenforced =
+                fetch_provider_credential(&store, "ws_unprovisioned", &Provider::Anthropic, false)
+                    .await;
             assert_eq!(
                 unenforced,
                 Some(fake_key()),
@@ -10143,10 +10531,18 @@ mod tests {
                 .set_workspace_credential("ws_provisioned", "anthropic_api_key", &own_key)
                 .await;
 
-            let enforced = fetch_provider_credential(&store, "ws_provisioned", &Provider::Anthropic, true).await;
-            let unenforced = fetch_provider_credential(&store, "ws_provisioned", &Provider::Anthropic, false).await;
+            let enforced =
+                fetch_provider_credential(&store, "ws_provisioned", &Provider::Anthropic, true)
+                    .await;
+            let unenforced =
+                fetch_provider_credential(&store, "ws_provisioned", &Provider::Anthropic, false)
+                    .await;
 
-            assert_eq!(enforced, Some(own_key.clone()), "a provisioned key must win under enforcement");
+            assert_eq!(
+                enforced,
+                Some(own_key.clone()),
+                "a provisioned key must win under enforcement"
+            );
             assert_eq!(unenforced, Some(own_key), "a provisioned key must also win when unenforced -- it is always preferred over the shared key");
         }
 
@@ -10162,7 +10558,11 @@ mod tests {
             let b = fetch_provider_credential(&store, "ws_b", &Provider::Anthropic, true).await;
 
             assert_eq!(a, None, "ws_a never provisioned a key");
-            assert_eq!(b, Some(own_key), "ws_b's own provisioned key is unaffected by ws_a's absence");
+            assert_eq!(
+                b,
+                Some(own_key),
+                "ws_b's own provisioned key is unaffected by ws_a's absence"
+            );
         }
     }
 
@@ -10185,7 +10585,10 @@ mod tests {
                 serde_json::from_slice(&body).expect("refusal body is valid JSON");
             assert_eq!(json["error"]["type"], "model_not_allowed");
             assert!(
-                json["error"]["message"].as_str().unwrap().contains("gpt-4o"),
+                json["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("gpt-4o"),
                 "the refused model name should be in the message: {json}"
             );
         }
@@ -10204,7 +10607,10 @@ mod tests {
         #[test]
         fn a_configured_list_refuses_a_model_outside_it() {
             let allowed = vec!["claude-sonnet-4-5".to_string()];
-            assert!(crate::metering::check_model_allowed("claude-sonnet-4-5", Some(&allowed), &[]).is_ok());
+            assert!(
+                crate::metering::check_model_allowed("claude-sonnet-4-5", Some(&allowed), &[])
+                    .is_ok()
+            );
             assert!(crate::metering::check_model_allowed("gpt-4o", Some(&allowed), &[]).is_err());
         }
 
@@ -10222,9 +10628,16 @@ mod tests {
             assert!(string_list(None).is_empty());
             assert!(string_list(Some(&serde_json::Value::Null)).is_empty());
 
-            let ws = vec!["claude-sonnet-4-5".to_string(), "claude-haiku-4-5".to_string()];
-            assert!(crate::metering::check_model_allowed("claude-haiku-4-5", Some(&ws), &key).is_ok());
-            assert!(crate::metering::check_model_allowed("claude-sonnet-4-5", Some(&ws), &key).is_err());
+            let ws = vec![
+                "claude-sonnet-4-5".to_string(),
+                "claude-haiku-4-5".to_string(),
+            ];
+            assert!(
+                crate::metering::check_model_allowed("claude-haiku-4-5", Some(&ws), &key).is_ok()
+            );
+            assert!(
+                crate::metering::check_model_allowed("claude-sonnet-4-5", Some(&ws), &key).is_err()
+            );
         }
     }
 }

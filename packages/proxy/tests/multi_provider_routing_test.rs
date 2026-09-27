@@ -32,9 +32,7 @@ use std::sync::Arc;
 use wiremock::matchers::{body_string_contains, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-async fn build_app(
-    store: Arc<intutic_proxy::store::MemoryStore>,
-) -> std::net::SocketAddr {
+async fn build_app(store: Arc<intutic_proxy::store::MemoryStore>) -> std::net::SocketAddr {
     let config: intutic_proxy::config::ProxyConfig = serde_yaml::from_str(
         r#"
 model_list: []
@@ -57,7 +55,9 @@ intutic_settings:
         context_snapshot_rate: 0.0,
     };
     let app = intutic_proxy::router::build_router(state);
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
     let addr = listener.local_addr().expect("addr");
     tokio::spawn(async move {
         axum::serve(listener, app).await.ok();
@@ -111,7 +111,11 @@ async fn mistral_model_routes_to_mistral_upstream_with_provisioned_key() {
         // credential-shaped literals in source, in every package.
         .header(
             "Authorization",
-            concat!("Bearer vk_", "0123456789abcdef0123456789abcdef", "_ws_mistral_routing_test"),
+            concat!(
+                "Bearer vk_",
+                "0123456789abcdef0123456789abcdef",
+                "_ws_mistral_routing_test"
+            ),
         )
         .header("x-workspace-id", workspace_id)
         .json(&serde_json::json!({
@@ -180,7 +184,11 @@ async fn openrouter_model_routes_to_openrouter_upstream_with_provisioned_key() {
         .post(format!("http://{}/v1/chat/completions", addr))
         .header(
             "Authorization",
-            concat!("Bearer vk_", "0123456789abcdef0123456789abcdef", "_ws_openrouter_routing_test"),
+            concat!(
+                "Bearer vk_",
+                "0123456789abcdef0123456789abcdef",
+                "_ws_openrouter_routing_test"
+            ),
         )
         .header("x-workspace-id", workspace_id)
         // OpenRouter's own `vendor/model` naming convention -- the `/`

@@ -86,7 +86,10 @@ impl TokenUsage {
     /// `None` here.
     pub fn from_openai_chat(v: &Value) -> Self {
         let usage = v.get("usage").unwrap_or(v);
-        let prompt_tokens = usage.get("prompt_tokens").and_then(|x| x.as_u64()).map(|x| x as u32);
+        let prompt_tokens = usage
+            .get("prompt_tokens")
+            .and_then(|x| x.as_u64())
+            .map(|x| x as u32);
         let cached_tokens = usage
             .get("prompt_tokens_details")
             .and_then(|d| d.get("cached_tokens"))
@@ -101,7 +104,10 @@ impl TokenUsage {
             uncached_input,
             cache_read_input: cached_tokens,
             cache_write_input: None,
-            output: usage.get("completion_tokens").and_then(|x| x.as_u64()).map(|x| x as u32),
+            output: usage
+                .get("completion_tokens")
+                .and_then(|x| x.as_u64())
+                .map(|x| x as u32),
         }
     }
 
@@ -110,7 +116,10 @@ impl TokenUsage {
     /// (`input_tokens`/`input_tokens_details.cached_tokens`).
     pub fn from_responses(v: &Value) -> Self {
         let usage = v.get("usage").unwrap_or(v);
-        let input_tokens = usage.get("input_tokens").and_then(|x| x.as_u64()).map(|x| x as u32);
+        let input_tokens = usage
+            .get("input_tokens")
+            .and_then(|x| x.as_u64())
+            .map(|x| x as u32);
         let cached_tokens = usage
             .get("input_tokens_details")
             .and_then(|d| d.get("cached_tokens"))
@@ -125,7 +134,10 @@ impl TokenUsage {
             uncached_input,
             cache_read_input: cached_tokens,
             cache_write_input: None,
-            output: usage.get("output_tokens").and_then(|x| x.as_u64()).map(|x| x as u32),
+            output: usage
+                .get("output_tokens")
+                .and_then(|x| x.as_u64())
+                .map(|x| x as u32),
         }
     }
 
@@ -137,7 +149,10 @@ impl TokenUsage {
     /// Gemini does not report a cache-write bucket.
     pub fn from_gemini_metadata(v: &Value) -> Self {
         let usage = v.get("usageMetadata").unwrap_or(v);
-        let prompt_tokens = usage.get("promptTokenCount").and_then(|x| x.as_u64()).map(|x| x as u32);
+        let prompt_tokens = usage
+            .get("promptTokenCount")
+            .and_then(|x| x.as_u64())
+            .map(|x| x as u32);
         let cached_tokens = usage
             .get("cachedContentTokenCount")
             .and_then(|x| x.as_u64())
@@ -151,7 +166,10 @@ impl TokenUsage {
             uncached_input,
             cache_read_input: cached_tokens,
             cache_write_input: None,
-            output: usage.get("candidatesTokenCount").and_then(|x| x.as_u64()).map(|x| x as u32),
+            output: usage
+                .get("candidatesTokenCount")
+                .and_then(|x| x.as_u64())
+                .map(|x| x as u32),
         }
     }
 

@@ -63,9 +63,18 @@ struct Body {
 /// a pasted file or a long history, and it is where the DLP scanner's cost used
 /// to become the dominant term.
 const BODIES: &[Body] = &[
-    Body { label: "1kb", kb: 1 },
-    Body { label: "8kb", kb: 8 },
-    Body { label: "32kb", kb: 32 },
+    Body {
+        label: "1kb",
+        kb: 1,
+    },
+    Body {
+        label: "8kb",
+        kb: 8,
+    },
+    Body {
+        label: "32kb",
+        kb: 32,
+    },
 ];
 
 fn make_body(kb: usize) -> String {

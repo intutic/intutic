@@ -30,8 +30,8 @@
 //! measures whether the candidate returns something *usable*, not something
 //! *right*.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -268,6 +268,10 @@ pub fn score_mirrored(
 /// publish_mirror_pair`, same channel-per-workspace shape as `publish_trace`)
 /// for a separate, later phase's subscriber to judge and immediately discard.
 /// This function never writes anywhere itself — see its caller in `proxy.rs`.
+/// Prices a mirrored response: `(model, prompt_tokens, completion_tokens) -> USD`.
+pub type CostEstimator = Arc<dyn Fn(&str, u32, u32) -> f64 + Send + Sync>;
+
+#[allow(clippy::too_many_arguments)] // one call site in proxy.rs, request-scoped values
 pub async fn run_mirror(
     _slot: MirrorSlot,
     http_client: reqwest::Client,
@@ -277,7 +281,7 @@ pub async fn run_mirror(
     request_json: Option<Value>,
     candidate_model: String,
     workspace_id: String,
-    estimate_cost: Arc<dyn Fn(&str, u32, u32) -> f64 + Send + Sync>,
+    estimate_cost: CostEstimator,
 ) -> Option<MirrorOutcome> {
     let started = std::time::Instant::now();
 
@@ -323,10 +327,7 @@ pub async fn run_mirror(
     }
 
     let parsed: Option<Value> = serde_json::from_slice(&bytes).ok();
-    let (prompt_tokens, completion_tokens) = parsed
-        .as_ref()
-        .map(usage_of)
-        .unwrap_or((0, 0));
+    let (prompt_tokens, completion_tokens) = parsed.as_ref().map(usage_of).unwrap_or((0, 0));
     let cost = estimate_cost(&candidate_model, prompt_tokens, completion_tokens);
 
     let mut outcome = score_mirrored(
@@ -462,7 +463,11 @@ mod tests {
         // And the refusal did not leak a slot.
         assert_eq!(in_flight(), MAX_CONCURRENT);
         drop(slots);
-        assert_eq!(in_flight(), 0, "slots must release on drop, not on a matched decrement");
+        assert_eq!(
+            in_flight(),
+            0,
+            "slots must release on drop, not on a matched decrement"
+        );
     }
 
     #[test]
@@ -490,7 +495,10 @@ mod tests {
             out.integrity.score < integrity::RIS_MAX,
             "an invented tool name must fault, or mirroring measures nothing"
         );
-        assert!(out.integrity.fault.is_some(), "a bare score is not auditable");
+        assert!(
+            out.integrity.fault.is_some(),
+            "a bare score is not auditable"
+        );
         assert_eq!(out.candidate_model, "cheap-model");
         assert_eq!(out.latency_ms, 120);
     }
@@ -546,7 +554,10 @@ mod tests {
 
     #[test]
     fn reads_usage_from_either_provider_shape() {
-        assert_eq!(usage_of(&json!({"usage":{"input_tokens":10,"output_tokens":5}})), (10, 5));
+        assert_eq!(
+            usage_of(&json!({"usage":{"input_tokens":10,"output_tokens":5}})),
+            (10, 5)
+        );
         assert_eq!(
             usage_of(&json!({"usage":{"prompt_tokens":7,"completion_tokens":3}})),
             (7, 3)

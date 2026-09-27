@@ -151,7 +151,11 @@ async fn same_provider_stream_sends_mid_stream_chunks_to_the_judge() {
         // credential-shaped literals in source, in every package.
         .header(
             "Authorization",
-            concat!("Bearer vk_", "0123456789abcdef0123456789abcdef", "_ws_judge_stream_test"),
+            concat!(
+                "Bearer vk_",
+                "0123456789abcdef0123456789abcdef",
+                "_ws_judge_stream_test"
+            ),
         )
         .header("x-workspace-id", "ws_judge_stream_test")
         .header("x-session-id", "ses_judge_stream_test")
@@ -178,7 +182,10 @@ async fn same_provider_stream_sends_mid_stream_chunks_to_the_judge() {
         body.contains("Intutic LLM-as-a-Judge final Security Synthesis"),
         "no synthesis block in stream:\n{body}"
     );
-    assert!(body.contains("All three segments verified clean."), "{body}");
+    assert!(
+        body.contains("All three segments verified clean."),
+        "{body}"
+    );
 
     // The load-bearing count: a same-provider stream used to produce ZERO
     // mid-stream chunk calls (one whole-body trailing chunk only). Three calls

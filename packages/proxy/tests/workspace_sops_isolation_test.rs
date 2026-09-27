@@ -58,7 +58,10 @@ async fn spawn_stand_in() -> SocketAddr {
 
 #[tokio::test]
 async fn two_workspaces_on_one_gateway_process_get_isolated_sop_sets() {
-    init_gateway_config(GatewayConfig { require_vk: true, ..Default::default() });
+    init_gateway_config(GatewayConfig {
+        require_vk: true,
+        ..Default::default()
+    });
     let addr = spawn_stand_in().await;
     let control_plane_url = format!("http://{addr}");
     let client = reqwest::Client::new();
@@ -97,7 +100,9 @@ async fn two_workspaces_on_one_gateway_process_get_isolated_sop_sets() {
         "alpha's resolved SOPs must not contain beta's policy"
     );
     assert!(
-        !alpha.iter().any(|s| s.deny_tools.contains(&"beta-secret-tool".to_string())),
+        !alpha
+            .iter()
+            .any(|s| s.deny_tools.contains(&"beta-secret-tool".to_string())),
         "alpha's resolved deny_tools must not contain beta's secret tool"
     );
     assert!(
@@ -105,7 +110,9 @@ async fn two_workspaces_on_one_gateway_process_get_isolated_sop_sets() {
         "beta's resolved SOPs must not contain alpha's policy"
     );
     assert!(
-        !beta.iter().any(|s| s.deny_tools.contains(&"alpha-secret-tool".to_string())),
+        !beta
+            .iter()
+            .any(|s| s.deny_tools.contains(&"alpha-secret-tool".to_string())),
         "beta's resolved deny_tools must not contain alpha's secret tool"
     );
 
