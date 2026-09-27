@@ -76,8 +76,8 @@ fn read_expectations(dir: &PathBuf) -> Vec<(String, Expected)> {
         };
         if let Some(stem) = name.strip_suffix(".expected.json") {
             let raw = std::fs::read_to_string(&path).expect("readable expectation");
-            let parsed: Expected =
-                serde_json::from_str(&raw).unwrap_or_else(|e| panic!("{name}: malformed expectation — {e}"));
+            let parsed: Expected = serde_json::from_str(&raw)
+                .unwrap_or_else(|e| panic!("{name}: malformed expectation — {e}"));
             out.push((stem.to_string(), parsed));
         }
     }
@@ -112,8 +112,16 @@ fn every_guardrail_ir_fixture_parses_to_the_fields_the_ir_meant() {
             .find(|s| s.title == stem)
             .unwrap_or_else(|| panic!("{stem}: not loaded (titles are file stems)"));
 
-        assert_eq!(sorted(&sop.deny_tools), want.deny_tools, "{stem}: deny_tools");
-        assert_eq!(sorted(&sop.review_before), want.review_before, "{stem}: review_before");
+        assert_eq!(
+            sorted(&sop.deny_tools),
+            want.deny_tools,
+            "{stem}: deny_tools"
+        );
+        assert_eq!(
+            sorted(&sop.review_before),
+            want.review_before,
+            "{stem}: review_before"
+        );
         assert_eq!(sorted(&sop.roles), want.roles, "{stem}: roles");
 
         let got: BTreeSet<(String, String, bool)> = sop.requires_before.iter().cloned().collect();
@@ -133,20 +141,33 @@ fn every_guardrail_ir_fixture_parses_to_the_fields_the_ir_meant() {
         assert_eq!(got, want_fa, "{stem}: forbid_after");
 
         let got: BTreeSet<(String, usize)> = sop.max_calls.iter().cloned().collect();
-        let want_mc: BTreeSet<(String, usize)> =
-            want.max_calls.iter().map(|b| (b.token.clone(), b.limit)).collect();
+        let want_mc: BTreeSet<(String, usize)> = want
+            .max_calls
+            .iter()
+            .map(|b| (b.token.clone(), b.limit))
+            .collect();
         assert_eq!(got, want_mc, "{stem}: max_calls");
 
         let got: BTreeSet<(String, String)> = sop.forbid_with.iter().cloned().collect();
-        let want_fw: BTreeSet<(String, String)> =
-            want.forbid_with.iter().map(|t| (t.taint.clone(), t.token.clone())).collect();
+        let want_fw: BTreeSet<(String, String)> = want
+            .forbid_with
+            .iter()
+            .map(|t| (t.taint.clone(), t.token.clone()))
+            .collect();
         assert_eq!(got, want_fw, "{stem}: forbid_with");
 
         let shadow = matches!(sop.mode, SopMode::Shadow);
-        assert_eq!(shadow, want.mode == "shadow", "{stem}: mode (want {})", want.mode);
+        assert_eq!(
+            shadow,
+            want.mode == "shadow",
+            "{stem}: mode (want {})",
+            want.mode
+        );
 
         assert!(
-            sop.allow_harnesses.is_empty() && sop.plan_steps.is_empty() && sop.scope_paths.is_empty(),
+            sop.allow_harnesses.is_empty()
+                && sop.plan_steps.is_empty()
+                && sop.scope_paths.is_empty(),
             "{stem}: a generated guardrail produced an allowlist, which the IR does not offer"
         );
     }
@@ -174,9 +195,22 @@ fn informational_source_and_cite_lines_reach_no_enforcing_field() {
 
     // Nothing from the two annotation lines leaked into a field the detectors read.
     let raw = std::fs::read_to_string(dir.join("04-informational-keys.md")).expect("fixture file");
-    assert!(raw.contains("\nsource: https://"), "the fixture no longer carries a source: line");
-    assert!(raw.contains("\ncite: "), "the fixture no longer carries a cite: line");
-    for field in [&sop.deny_tools, &sop.review_before, &sop.roles, &sop.plan_steps, &sop.scope_paths, &sop.allow_harnesses] {
+    assert!(
+        raw.contains("\nsource: https://"),
+        "the fixture no longer carries a source: line"
+    );
+    assert!(
+        raw.contains("\ncite: "),
+        "the fixture no longer carries a cite: line"
+    );
+    for field in [
+        &sop.deny_tools,
+        &sop.review_before,
+        &sop.roles,
+        &sop.plan_steps,
+        &sop.scope_paths,
+        &sop.allow_harnesses,
+    ] {
         for v in field {
             assert!(
                 !v.contains("https://") && !v.starts_with("source") && !v.starts_with("cite"),

@@ -182,7 +182,10 @@ mod tests {
     #[test]
     fn a_populated_list_is_returned_verbatim() {
         let (_guard, dir) = fresh_home();
-        write_config(dir.path(), r#"{"allowedModels": ["claude-3-5-sonnet", "gpt-4o"]}"#);
+        write_config(
+            dir.path(),
+            r#"{"allowedModels": ["claude-3-5-sonnet", "gpt-4o"]}"#,
+        );
         assert_eq!(
             get_allowed_models(),
             Some(vec!["claude-3-5-sonnet".to_string(), "gpt-4o".to_string()])
@@ -202,7 +205,10 @@ mod tests {
     #[test]
     fn both_camel_case_and_snake_case_keys_parse() {
         let (_guard, dir) = fresh_home();
-        write_config(dir.path(), r#"{"max_daily_budget_usd": 42.5, "allowed_models": ["gpt-4o"]}"#);
+        write_config(
+            dir.path(),
+            r#"{"max_daily_budget_usd": 42.5, "allowed_models": ["gpt-4o"]}"#,
+        );
         assert_eq!(get_max_daily_budget(), 42.5);
         assert_eq!(get_allowed_models(), Some(vec!["gpt-4o".to_string()]));
     }

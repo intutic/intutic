@@ -305,7 +305,11 @@ impl Default for EgressEnforceConfig {
 pub fn generate_egress_nftables(cfg: &EgressEnforceConfig) -> String {
     let mut out = String::new();
     writeln!(out, "#!/usr/sbin/nft -f").unwrap();
-    writeln!(out, "# Intutic egress enforcement — default-deny (LLD #63 §5). Generated; DO NOT EDIT.").unwrap();
+    writeln!(
+        out,
+        "# Intutic egress enforcement — default-deny (LLD #63 §5). Generated; DO NOT EDIT."
+    )
+    .unwrap();
     writeln!(out, "add table inet intutic_egress").unwrap();
     writeln!(out, "delete table inet intutic_egress").unwrap();
     writeln!(out, "table inet intutic_egress {{").unwrap();
@@ -339,20 +343,44 @@ pub fn generate_egress_nftables(cfg: &EgressEnforceConfig) -> String {
 pub fn generate_egress_iptables(cfg: &EgressEnforceConfig) -> String {
     let mut out = String::new();
     writeln!(out, "#!/bin/sh").unwrap();
-    writeln!(out, "# Intutic egress enforcement — default-deny (LLD #63 §5). Generated; DO NOT EDIT.").unwrap();
+    writeln!(
+        out,
+        "# Intutic egress enforcement — default-deny (LLD #63 §5). Generated; DO NOT EDIT."
+    )
+    .unwrap();
     writeln!(out, "set -e").unwrap();
     writeln!(out, "iptables -F INTUTIC_EGRESS 2>/dev/null || true").unwrap();
-    writeln!(out, "iptables -D OUTPUT -j INTUTIC_EGRESS 2>/dev/null || true").unwrap();
+    writeln!(
+        out,
+        "iptables -D OUTPUT -j INTUTIC_EGRESS 2>/dev/null || true"
+    )
+    .unwrap();
     writeln!(out, "iptables -X INTUTIC_EGRESS 2>/dev/null || true").unwrap();
     writeln!(out, "iptables -N INTUTIC_EGRESS").unwrap();
     writeln!(out, "iptables -A INTUTIC_EGRESS -o lo -j ACCEPT").unwrap();
-    writeln!(out, "iptables -A INTUTIC_EGRESS -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT").unwrap();
+    writeln!(
+        out,
+        "iptables -A INTUTIC_EGRESS -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT"
+    )
+    .unwrap();
     if cfg.allow_dns {
-        writeln!(out, "iptables -A INTUTIC_EGRESS -p udp --dport 53 -j ACCEPT").unwrap();
-        writeln!(out, "iptables -A INTUTIC_EGRESS -p tcp --dport 53 -j ACCEPT").unwrap();
+        writeln!(
+            out,
+            "iptables -A INTUTIC_EGRESS -p udp --dport 53 -j ACCEPT"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "iptables -A INTUTIC_EGRESS -p tcp --dport 53 -j ACCEPT"
+        )
+        .unwrap();
     }
     if let Some(uid) = cfg.proxy_uid {
-        writeln!(out, "iptables -A INTUTIC_EGRESS -m owner --uid-owner {uid} -j ACCEPT").unwrap();
+        writeln!(
+            out,
+            "iptables -A INTUTIC_EGRESS -m owner --uid-owner {uid} -j ACCEPT"
+        )
+        .unwrap();
     }
     for cidr in cfg.allow_cidrs.iter().filter(|c| !c.contains(':')) {
         writeln!(out, "iptables -A INTUTIC_EGRESS -d {cidr} -j ACCEPT").unwrap();
@@ -369,11 +397,19 @@ pub fn generate_egress_iptables(cfg: &EgressEnforceConfig) -> String {
 /// the main ruleset to take effect — see `apply_egress_enforcement`.
 pub fn generate_egress_pf(cfg: &EgressEnforceConfig) -> String {
     let mut out = String::new();
-    writeln!(out, "# Intutic egress enforcement — default-deny (LLD #63 §5). Generated; DO NOT EDIT.").unwrap();
+    writeln!(
+        out,
+        "# Intutic egress enforcement — default-deny (LLD #63 §5). Generated; DO NOT EDIT."
+    )
+    .unwrap();
     writeln!(out, "block drop out all").unwrap();
     writeln!(out, "pass out quick on lo0 all").unwrap();
     if cfg.allow_dns {
-        writeln!(out, "pass out quick proto {{ tcp udp }} to any port 53 keep state").unwrap();
+        writeln!(
+            out,
+            "pass out quick proto {{ tcp udp }} to any port 53 keep state"
+        )
+        .unwrap();
     }
     if let Some(uid) = cfg.proxy_uid {
         writeln!(out, "pass out quick proto tcp user {uid} keep state").unwrap();
@@ -391,9 +427,9 @@ pub fn generate_egress_enforcement(cfg: &EgressEnforceConfig) -> String {
         Platform::MacOs => generate_egress_pf(cfg),
         // Windows egress enforcement is not implemented; the redirect-only
         // generator above is the extent of Windows support today.
-        Platform::Windows => String::from(
-            "# Windows default-deny egress is not implemented — see LLD #63 §7.\n",
-        ),
+        Platform::Windows => {
+            String::from("# Windows default-deny egress is not implemented — see LLD #63 §7.\n")
+        }
     }
 }
 
@@ -485,7 +521,9 @@ pub fn remove_egress_enforcement(platform: Platform) -> anyhow::Result<()> {
             Ok(())
         }
         Platform::MacOs => {
-            let _ = Command::new("pfctl").args(["-a", "intutic_egress", "-F", "rules"]).status();
+            let _ = Command::new("pfctl")
+                .args(["-a", "intutic_egress", "-F", "rules"])
+                .status();
             Ok(())
         }
         Platform::Windows => Ok(()),
@@ -505,8 +543,12 @@ pub fn status_egress_enforcement(platform: Platform) -> EgressStatus {
                 return EgressStatus {
                     backend: "nft".to_string(),
                     active,
-                    detail: if active { "intutic_egress table present" } else { "no intutic_egress table" }
-                        .to_string(),
+                    detail: if active {
+                        "intutic_egress table present"
+                    } else {
+                        "no intutic_egress table"
+                    }
+                    .to_string(),
                 };
             }
             if which("iptables") {
@@ -518,11 +560,19 @@ pub fn status_egress_enforcement(platform: Platform) -> EgressStatus {
                 return EgressStatus {
                     backend: "iptables".to_string(),
                     active,
-                    detail: if active { "INTUTIC_EGRESS chain present" } else { "no INTUTIC_EGRESS chain" }
-                        .to_string(),
+                    detail: if active {
+                        "INTUTIC_EGRESS chain present"
+                    } else {
+                        "no INTUTIC_EGRESS chain"
+                    }
+                    .to_string(),
                 };
             }
-            EgressStatus { backend: "none".to_string(), active: false, detail: "no firewall backend".to_string() }
+            EgressStatus {
+                backend: "none".to_string(),
+                active: false,
+                detail: "no firewall backend".to_string(),
+            }
         }
         Platform::MacOs => {
             let active = Command::new("pfctl")
@@ -530,7 +580,11 @@ pub fn status_egress_enforcement(platform: Platform) -> EgressStatus {
                 .output()
                 .map(|o| o.status.success() && !o.stdout.is_empty())
                 .unwrap_or(false);
-            EgressStatus { backend: "pf".to_string(), active, detail: "pf intutic_egress anchor".to_string() }
+            EgressStatus {
+                backend: "pf".to_string(),
+                active,
+                detail: "pf intutic_egress anchor".to_string(),
+            }
         }
         Platform::Windows => EgressStatus {
             backend: "none".to_string(),
@@ -715,8 +769,14 @@ mod tests {
             ..enforce_cfg()
         };
         let rules = generate_egress_nftables(&cfg);
-        assert!(!rules.contains("skuid"), "no uid carve-out when uid is None");
-        assert!(!rules.contains("dport 53"), "no DNS rule when allow_dns is false");
+        assert!(
+            !rules.contains("skuid"),
+            "no uid carve-out when uid is None"
+        );
+        assert!(
+            !rules.contains("dport 53"),
+            "no DNS rule when allow_dns is false"
+        );
         // still default-drop
         assert!(rules.contains("policy drop;"));
     }
@@ -731,9 +791,16 @@ mod tests {
         assert!(rules.contains("-m owner --uid-owner 1000 -j ACCEPT"));
         assert!(rules.contains("-d 10.0.0.0/8 -j ACCEPT"));
         // the final rule in the chain is the default deny
-        let drop_idx = rules.find("INTUTIC_EGRESS -j DROP").expect("must have a DROP");
-        let hook_idx = rules.find("-A OUTPUT -j INTUTIC_EGRESS").expect("must hook OUTPUT");
-        assert!(drop_idx < hook_idx, "DROP must be appended before the chain is hooked in");
+        let drop_idx = rules
+            .find("INTUTIC_EGRESS -j DROP")
+            .expect("must have a DROP");
+        let hook_idx = rules
+            .find("-A OUTPUT -j INTUTIC_EGRESS")
+            .expect("must hook OUTPUT");
+        assert!(
+            drop_idx < hook_idx,
+            "DROP must be appended before the chain is hooked in"
+        );
     }
 
     #[test]

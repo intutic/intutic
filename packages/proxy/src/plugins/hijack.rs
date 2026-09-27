@@ -90,9 +90,7 @@ pub fn substituted_calls(before: &Value, after: &Value) -> Vec<HijackedCall> {
     }
 
     let mut out = Vec::new();
-    for ((o_name, o_args, o_raw), (h_name, h_args, h_raw)) in
-        originals.into_iter().zip(corrected)
-    {
+    for ((o_name, o_args, o_raw), (h_name, h_args, h_raw)) in originals.into_iter().zip(corrected) {
         // A name that changed means the two lists are not the same calls, so
         // the positional assumption above did not hold for this entry.
         if o_name != h_name {
@@ -131,11 +129,7 @@ fn args_value(parsed: &Option<Value>, raw: &Option<String>) -> Value {
 /// workspace from the authenticated key, and a tenant id supplied by a caller
 /// is a claim rather than an authorisation — the same rule `HoldSchema` states
 /// for the daemon's holds, and this endpoint is reachable by every proxy.
-pub fn report_body(
-    session_id: &str,
-    trace_id: &str,
-    calls: &[HijackedCall],
-) -> Value {
+pub fn report_body(session_id: &str, trace_id: &str, calls: &[HijackedCall]) -> Value {
     serde_json::json!({
         "substitutions": calls
             .iter()
@@ -235,7 +229,11 @@ mod tests {
             serde_json::from_str(&after_str).expect("redaction must leave valid JSON");
 
         let hijacks = substituted_calls(&before, &after);
-        assert_eq!(hijacks.len(), 1, "expected one substituted call: {hijacks:?}");
+        assert_eq!(
+            hijacks.len(),
+            1,
+            "expected one substituted call: {hijacks:?}"
+        );
         assert_eq!(hijacks[0].tool, "bash");
         assert!(
             hijacks[0].original["arguments"]["command"]
@@ -273,7 +271,10 @@ mod tests {
         let hijacks = substituted_calls(&before, &after);
         assert_eq!(hijacks.len(), 1);
         assert_eq!(hijacks[0].tool, "deploy");
-        assert_eq!(hijacks[0].original["arguments"]["token"], concat!("AKIA", "IOSFODNN7EXAMPLE"));
+        assert_eq!(
+            hijacks[0].original["arguments"]["token"],
+            concat!("AKIA", "IOSFODNN7EXAMPLE")
+        );
         assert!(hijacks[0].hijacked["arguments"]["token"]
             .as_str()
             .unwrap()
@@ -374,7 +375,10 @@ mod tests {
         }];
         let body = report_body("ses_1", "tr_1", &calls);
         let s = serde_json::to_string(&body).unwrap();
-        assert!(!s.contains("workspaceId"), "the report claimed a tenant: {s}");
+        assert!(
+            !s.contains("workspaceId"),
+            "the report claimed a tenant: {s}"
+        );
 
         let entry = &body["substitutions"][0];
         assert_eq!(entry["v"], 1);
@@ -406,7 +410,13 @@ mod tests {
         .unwrap();
         let hijacks = substituted_calls(&before, &after);
         assert_eq!(hijacks.len(), 1);
-        assert_eq!(hijacks[0].original["arguments"], concat!("{not json AKIA", "IOSFODNN7EXAMPLE"));
-        assert_eq!(hijacks[0].hijacked["arguments"], "{not json [REDACTED_SECRET]");
+        assert_eq!(
+            hijacks[0].original["arguments"],
+            concat!("{not json AKIA", "IOSFODNN7EXAMPLE")
+        );
+        assert_eq!(
+            hijacks[0].hijacked["arguments"],
+            "{not json [REDACTED_SECRET]"
+        );
     }
 }

@@ -62,7 +62,9 @@ async fn local_judge_answers_finalize_without_calling_the_control_plane() {
     let cp = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/api/v1/policy/check"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "action": "allow" })))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({ "action": "allow" })),
+        )
         .mount(&cp)
         .await;
 
@@ -93,7 +95,8 @@ async fn local_judge_answers_finalize_without_calling_the_control_plane() {
     });
 
     let config: intutic_proxy::config::ProxyConfig =
-        serde_yaml::from_str("model_list: []\nintutic_settings: {}\n").expect("minimal config parses");
+        serde_yaml::from_str("model_list: []\nintutic_settings: {}\n")
+            .expect("minimal config parses");
     let state = intutic_proxy::proxy::AppState {
         config,
         wasm_registry: intutic_proxy::wasm::registry::PluginRegistry::new(None)
@@ -106,7 +109,9 @@ async fn local_judge_answers_finalize_without_calling_the_control_plane() {
         context_snapshot_rate: 0.0,
     };
     let app = intutic_proxy::router::build_router(state);
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
     let addr = listener.local_addr().expect("addr");
     tokio::spawn(async move {
         axum::serve(listener, app).await.ok();
@@ -119,7 +124,11 @@ async fn local_judge_answers_finalize_without_calling_the_control_plane() {
         .post(format!("http://{}/v1/chat/completions", addr))
         .header(
             "Authorization",
-            concat!("Bearer vk_", "0123456789abcdef0123456789abcdef", "_ws_local_judge_test"),
+            concat!(
+                "Bearer vk_",
+                "0123456789abcdef0123456789abcdef",
+                "_ws_local_judge_test"
+            ),
         )
         .header("x-workspace-id", "ws_local_judge_test")
         .header("x-session-id", "ses_local_judge_test_1")
@@ -158,8 +167,15 @@ async fn local_judge_answers_finalize_without_calling_the_control_plane() {
     );
 
     // And the local LiteLLM really was the one asked.
-    let local_reqs = local_litellm.received_requests().await.expect("wiremock recording on");
-    assert_eq!(local_reqs.len(), 1, "expected exactly one call to the local judge's LiteLLM");
+    let local_reqs = local_litellm
+        .received_requests()
+        .await
+        .expect("wiremock recording on");
+    assert_eq!(
+        local_reqs.len(),
+        1,
+        "expected exactly one call to the local judge's LiteLLM"
+    );
 
     // ── Scenario 2: local judge configured but unreachable — degrades to
     //    the SAME UNAVAILABLE convention the SaaS-unavailable path uses. ──
@@ -169,7 +185,11 @@ async fn local_judge_answers_finalize_without_calling_the_control_plane() {
         .post(format!("http://{}/v1/chat/completions", addr))
         .header(
             "Authorization",
-            concat!("Bearer vk_", "0123456789abcdef0123456789abcdef", "_ws_local_judge_test"),
+            concat!(
+                "Bearer vk_",
+                "0123456789abcdef0123456789abcdef",
+                "_ws_local_judge_test"
+            ),
         )
         .header("x-workspace-id", "ws_local_judge_test")
         .header("x-session-id", "ses_local_judge_test_2")

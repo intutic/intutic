@@ -619,7 +619,9 @@ mod tool_result_pairing_tests {
         let out = OpenAIAdapter::translate_request_to_anthropic(&req, false);
         let msgs = out["messages"].as_array().expect("messages");
 
-        let blocks = msgs[2]["content"].as_array().expect("tool result is a block list");
+        let blocks = msgs[2]["content"]
+            .as_array()
+            .expect("tool result is a block list");
         assert_eq!(
             blocks.len(),
             1,
@@ -652,7 +654,10 @@ mod tool_result_pairing_tests {
         assert_eq!(uses[0]["id"], "call_a");
 
         let results = msgs[1]["content"].as_array().unwrap();
-        assert_eq!(msgs[1]["role"], "user", "a tool result is a user-role message");
+        assert_eq!(
+            msgs[1]["role"], "user",
+            "a tool result is a user-role message"
+        );
         assert_eq!(results[0]["type"], "tool_result");
         assert_eq!(results[0]["tool_use_id"], "call_a");
     }

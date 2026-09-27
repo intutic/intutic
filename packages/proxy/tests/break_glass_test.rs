@@ -31,7 +31,9 @@ fn the_break_glass_denial_log_carries_only_a_truncated_hash() {
         .find(marker)
         .expect("break-glass denial log message vanished from proxy.rs");
     // The tracing::warn! call starts a few lines above its message literal.
-    let block_start = PROXY_RS[..at].rfind("tracing::warn!").expect("no tracing::warn! before the denial message");
+    let block_start = PROXY_RS[..at]
+        .rfind("tracing::warn!")
+        .expect("no tracing::warn! before the denial message");
     let block = &PROXY_RS[block_start..at];
     assert!(
         block.contains("token_hash"),

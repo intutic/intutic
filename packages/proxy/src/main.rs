@@ -6,7 +6,10 @@
 //!
 //! Architecture: See docs/lld/02-proxy-gateway.lld.md
 
-use intutic_proxy::{config, dlp, egress_policy, firewall, gateway, heartbeat, proxy, router, routing, sops, store, telemetry, wasm};
+use intutic_proxy::{
+    config, dlp, egress_policy, firewall, gateway, heartbeat, proxy, router, routing, sops, store,
+    telemetry, wasm,
+};
 
 use std::net::SocketAddr;
 use tracing_subscriber::layer::SubscriberExt;
@@ -16,7 +19,9 @@ use tracing_subscriber::util::SubscriberInitExt;
 /// proxy uid to the current user on unix — the common single-user case where
 /// the same account runs `intutic start` and `intutic enforce apply`; override
 /// with `--uid` when the proxy runs as a different account.
-fn egress_enforce_config_from_flags(flags: &[String]) -> anyhow::Result<firewall::EgressEnforceConfig> {
+fn egress_enforce_config_from_flags(
+    flags: &[String],
+) -> anyhow::Result<firewall::EgressEnforceConfig> {
     let mut cfg = firewall::EgressEnforceConfig::default();
     #[cfg(unix)]
     if cfg.proxy_uid.is_none() {
@@ -115,7 +120,9 @@ fn handle_enforce(args: &[String]) -> anyhow::Result<()> {
             );
             Ok(())
         }
-        other => anyhow::bail!("unknown enforce subcommand '{other}' (generate|apply|remove|status)"),
+        other => {
+            anyhow::bail!("unknown enforce subcommand '{other}' (generate|apply|remove|status)")
+        }
     }
 }
 
@@ -150,59 +157,54 @@ async fn main() -> anyhow::Result<()> {
     // constructing the exporter and provider explicitly. The provider is kept
     // rather than discarded so shutdown can flush pending spans — the old
     // `global::shutdown_tracer_provider()` no longer exists.
-    let (otel_layer, tracer_provider, meter_provider) = if std::env::var(
-        "OTEL_EXPORTER_OTLP_ENDPOINT",
-    )
-    .is_ok()
-    {
-        use opentelemetry::trace::TracerProvider;
-        use opentelemetry_otlp::{MetricExporter, SpanExporter, WithExportConfig};
-        use opentelemetry_sdk::metrics::SdkMeterProvider;
-        use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider};
-        use opentelemetry_sdk::Resource;
+    let (otel_layer, tracer_provider, meter_provider) =
+        if std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").is_ok() {
+            use opentelemetry::trace::TracerProvider;
+            use opentelemetry_otlp::{MetricExporter, SpanExporter, WithExportConfig};
+            use opentelemetry_sdk::metrics::SdkMeterProvider;
+            use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider};
+            use opentelemetry_sdk::Resource;
 
-        let resource = Resource::builder()
-            .with_service_name(service_name)
-            .build();
+            let resource = Resource::builder().with_service_name(service_name).build();
 
-        let exporter = SpanExporter::builder()
-            .with_tonic()
-            .with_endpoint(otel_endpoint.clone())
-            .build()
-            .expect("Failed to build OTLP span exporter");
+            let exporter = SpanExporter::builder()
+                .with_tonic()
+                .with_endpoint(otel_endpoint.clone())
+                .build()
+                .expect("Failed to build OTLP span exporter");
 
-        let provider = SdkTracerProvider::builder()
-            .with_batch_exporter(exporter)
-            .with_sampler(Sampler::AlwaysOn)
-            .with_resource(resource.clone())
-            .build();
+            let provider = SdkTracerProvider::builder()
+                .with_batch_exporter(exporter)
+                .with_sampler(Sampler::AlwaysOn)
+                .with_resource(resource.clone())
+                .build();
 
-        let tracer = provider.tracer("intutic-proxy");
-        let layer = tracing_opentelemetry::layer().with_tracer(tracer);
+            let tracer = provider.tracer("intutic-proxy");
+            let layer = tracing_opentelemetry::layer().with_tracer(tracer);
 
-        // Metrics: same endpoint, same gate, mirror of the tracer pattern
-        // (TD-161). Push over OTLP — see metrics.rs for why there is no
-        // /metrics pull endpoint. Installed as the global provider BEFORE any
-        // instrument is first used: metrics.rs's LazyLock instruments bind
-        // whichever provider is global at first deref, and the first deref is
-        // either register_observables() below or a per-request record, both
-        // after this line.
-        let metric_exporter = MetricExporter::builder()
-            .with_tonic()
-            .with_endpoint(otel_endpoint.clone())
-            .build()
-            .expect("Failed to build OTLP metric exporter");
+            // Metrics: same endpoint, same gate, mirror of the tracer pattern
+            // (TD-161). Push over OTLP — see metrics.rs for why there is no
+            // /metrics pull endpoint. Installed as the global provider BEFORE any
+            // instrument is first used: metrics.rs's LazyLock instruments bind
+            // whichever provider is global at first deref, and the first deref is
+            // either register_observables() below or a per-request record, both
+            // after this line.
+            let metric_exporter = MetricExporter::builder()
+                .with_tonic()
+                .with_endpoint(otel_endpoint.clone())
+                .build()
+                .expect("Failed to build OTLP metric exporter");
 
-        let meters = SdkMeterProvider::builder()
-            .with_periodic_exporter(metric_exporter)
-            .with_resource(resource)
-            .build();
-        opentelemetry::global::set_meter_provider(meters.clone());
+            let meters = SdkMeterProvider::builder()
+                .with_periodic_exporter(metric_exporter)
+                .with_resource(resource)
+                .build();
+            opentelemetry::global::set_meter_provider(meters.clone());
 
-        (Some(layer), Some(provider), Some(meters))
-    } else {
-        (None, None, None)
-    };
+            (Some(layer), Some(provider), Some(meters))
+        } else {
+            (None, None, None)
+        };
 
     // Bridge the egress atomics as observable counters. A no-op when no
     // meter provider was installed above.
@@ -290,8 +292,7 @@ async fn main() -> anyhow::Result<()> {
             .filter(|&s| s > 0)
             .unwrap_or(30);
         tokio::spawn(async move {
-            let mut interval =
-                tokio::time::interval(std::time::Duration::from_secs(reload_secs));
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(reload_secs));
             interval.tick().await; // the immediate first tick is the startup load above
             loop {
                 interval.tick().await;
@@ -484,10 +485,9 @@ async fn main() -> anyhow::Result<()> {
             // no-op on every boot after the first.
             match store::migrate_local_learning(&store, &store::local_snapshot_path()).await {
                 Ok(0) => {}
-                Ok(n) => tracing::info!(
-                    "carried {} bandit arm(s) over from standalone learning",
-                    n
-                ),
+                Ok(n) => {
+                    tracing::info!("carried {} bandit arm(s) over from standalone learning", n)
+                }
                 Err(e) => tracing::warn!("could not carry over standalone learning: {}", e),
             }
             (
@@ -511,7 +511,9 @@ async fn main() -> anyhow::Result<()> {
     // outcome is visible only at debug log level. `valkey.is_none()`, not a
     // separately-tracked bool: it is exactly the condition the match above
     // branches on.
-    if valkey.is_none() && routing::mirror::mirroring_is_configured(&config.intutic_settings.routing) {
+    if valkey.is_none()
+        && routing::mirror::mirroring_is_configured(&config.intutic_settings.routing)
+    {
         tracing::warn!(
             mirror_sample_rate = config.intutic_settings.routing.mirror_sample_rate,
             "Running standalone with mirroring configured — mirrored requests are billed \

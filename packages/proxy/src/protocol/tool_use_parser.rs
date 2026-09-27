@@ -282,7 +282,10 @@ fn try_parse_openai_responses(json: &Value) -> Option<ToolUseEvent> {
         // `output_index`, the position this item occupies in `response.output`.
         // The refusal is written as its own output item, so it has to know
         // which index the withheld one claimed.
-        block_index: json.get("output_index").and_then(|i| i.as_u64()).unwrap_or(0),
+        block_index: json
+            .get("output_index")
+            .and_then(|i| i.as_u64())
+            .unwrap_or(0),
     })
 }
 

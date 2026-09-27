@@ -97,13 +97,21 @@ pub struct Integrity {
 impl Integrity {
     /// Checked, and nothing was wrong.
     pub fn clean() -> Self {
-        Self { score: RIS_MAX, fault: None, measured: true }
+        Self {
+            score: RIS_MAX,
+            fault: None,
+            measured: true,
+        }
     }
 
     /// Nothing was checked. Scores like a clean response — this is a quality
     /// signal, not a transport check — but says so.
     pub fn unmeasured() -> Self {
-        Self { score: RIS_MAX, fault: None, measured: false }
+        Self {
+            score: RIS_MAX,
+            fault: None,
+            measured: false,
+        }
     }
 }
 
@@ -121,7 +129,9 @@ pub struct ResponseFacts<'a> {
 
 /// Tool names the request declared, with their required properties.
 fn declared_tools(request: Option<&Value>) -> Vec<(String, Vec<String>)> {
-    let Some(req) = request else { return Vec::new() };
+    let Some(req) = request else {
+        return Vec::new();
+    };
     let mut out = Vec::new();
 
     // Anthropic: top-level `tools[]` with `input_schema`.
@@ -129,13 +139,17 @@ fn declared_tools(request: Option<&Value>) -> Vec<(String, Vec<String>)> {
     if let Some(tools) = req.get("tools").and_then(|t| t.as_array()) {
         for t in tools {
             let f = t.get("function").unwrap_or(t);
-            let Some(name) = f.get("name").and_then(|n| n.as_str()) else { continue };
+            let Some(name) = f.get("name").and_then(|n| n.as_str()) else {
+                continue;
+            };
             let schema = f.get("input_schema").or_else(|| f.get("parameters"));
             let required = schema
                 .and_then(|s| s.get("required"))
                 .and_then(|r| r.as_array())
                 .map(|r| {
-                    r.iter().filter_map(|v| v.as_str().map(str::to_string)).collect::<Vec<_>>()
+                    r.iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
             out.push((name.to_string(), required));
@@ -164,7 +178,11 @@ pub fn response_tool_calls(body: &Value) -> Vec<(String, Option<Value>, Option<S
     if let Some(content) = body.get("content").and_then(|c| c.as_array()) {
         for block in content {
             if block.get("type").and_then(|t| t.as_str()) == Some("tool_use") {
-                let name = block.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
+                let name = block
+                    .get("name")
+                    .and_then(|n| n.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 calls.push((name, block.get("input").cloned(), None));
             }
         }
@@ -184,7 +202,11 @@ pub fn response_tool_calls(body: &Value) -> Vec<(String, Option<Value>, Option<S
             };
             for tc in tcs {
                 let f = tc.get("function").unwrap_or(tc);
-                let name = f.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
+                let name = f
+                    .get("name")
+                    .and_then(|n| n.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 match f.get("arguments").and_then(|a| a.as_str()) {
                     Some(raw) => match serde_json::from_str::<Value>(raw) {
                         Ok(v) => calls.push((name, Some(v), None)),
@@ -204,7 +226,11 @@ pub fn response_tool_calls(body: &Value) -> Vec<(String, Option<Value>, Option<S
             if item.get("type").and_then(|t| t.as_str()) != Some("function_call") {
                 continue;
             }
-            let name = item.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
+            let name = item
+                .get("name")
+                .and_then(|n| n.as_str())
+                .unwrap_or("")
+                .to_string();
             match item.get("arguments").and_then(|a| a.as_str()) {
                 Some(raw) => match serde_json::from_str::<Value>(raw) {
                     Ok(v) => calls.push((name, Some(v), None)),
@@ -255,10 +281,13 @@ fn is_truncated(body: &Value, done_received: Option<bool>) -> bool {
 fn has_content(body: &Value) -> bool {
     if let Some(content) = body.get("content").and_then(|c| c.as_array()) {
         for block in content {
-            if block.get("type").and_then(|t| t.as_str()) == Some("text") {
-                if block.get("text").and_then(|t| t.as_str()).is_some_and(|s| !s.trim().is_empty()) {
-                    return true;
-                }
+            if block.get("type").and_then(|t| t.as_str()) == Some("text")
+                && block
+                    .get("text")
+                    .and_then(|t| t.as_str())
+                    .is_some_and(|s| !s.trim().is_empty())
+            {
+                return true;
             }
         }
     }
@@ -381,7 +410,11 @@ pub fn score(facts: &ResponseFacts<'_>) -> Integrity {
         fault = fault.or(Some(QualityFault::Degenerate));
     }
 
-    Integrity { score, fault, measured: true }
+    Integrity {
+        score,
+        fault,
+        measured: true,
+    }
 }
 
 #[cfg(test)]
@@ -390,7 +423,11 @@ mod tests {
     use serde_json::json;
 
     fn facts<'a>(body: &'a Value, request: &'a Value) -> ResponseFacts<'a> {
-        ResponseFacts { body: Some(body), request: Some(request), done_received: None }
+        ResponseFacts {
+            body: Some(body),
+            request: Some(request),
+            done_received: None,
+        }
     }
 
     const REQ: fn() -> Value = || {
@@ -420,7 +457,11 @@ mod tests {
             ]
         });
         let calls = response_tool_calls(&body);
-        assert_eq!(calls.len(), 1, "expected exactly the function_call item: {calls:?}");
+        assert_eq!(
+            calls.len(),
+            1,
+            "expected exactly the function_call item: {calls:?}"
+        );
         assert_eq!(calls[0].0, "Bash");
         // `arguments` is a JSON string on the wire and must come back parsed,
         // the same as chat completions — argument-level policy depends on it.
@@ -507,21 +548,32 @@ mod tests {
         let body = json!({"content": [
             {"type": "tool_use", "name": "Bash", "input": {"timeout": 30}}
         ]});
-        assert_eq!(score(&facts(&body, &REQ())).fault, Some(QualityFault::MissingRequiredArgument));
+        assert_eq!(
+            score(&facts(&body, &REQ())).fault,
+            Some(QualityFault::MissingRequiredArgument)
+        );
     }
 
     /// The non-streaming path had no truncation check at all — `done_received`
     /// covers the stream and nothing covered a `max_tokens` stop.
     #[test]
     fn a_max_tokens_stop_is_truncation() {
-        let body = json!({"stop_reason": "max_tokens", "content": [{"type": "text", "text": "half"}]});
-        assert_eq!(score(&facts(&body, &REQ())).fault, Some(QualityFault::Truncated));
+        let body =
+            json!({"stop_reason": "max_tokens", "content": [{"type": "text", "text": "half"}]});
+        assert_eq!(
+            score(&facts(&body, &REQ())).fault,
+            Some(QualityFault::Truncated)
+        );
     }
 
     #[test]
     fn an_openai_length_finish_is_truncation() {
-        let body = json!({"choices": [{"finish_reason": "length", "message": {"content": "half"}}]});
-        assert_eq!(score(&facts(&body, &REQ())).fault, Some(QualityFault::Truncated));
+        let body =
+            json!({"choices": [{"finish_reason": "length", "message": {"content": "half"}}]});
+        assert_eq!(
+            score(&facts(&body, &REQ())).fault,
+            Some(QualityFault::Truncated)
+        );
     }
 
     #[test]
@@ -549,15 +601,26 @@ mod tests {
     /// A test that supplies a body cannot catch that, which is why it did not.
     #[test]
     fn body_none_still_scores_truncation() {
-        let f = ResponseFacts { body: None, request: None, done_received: Some(false) };
+        let f = ResponseFacts {
+            body: None,
+            request: None,
+            done_received: Some(false),
+        };
         let r = score(&f);
         assert_eq!(
             r.fault,
             Some(QualityFault::Truncated),
             "a stream that never terminated must fault even with no body to inspect",
         );
-        assert!(r.score < RIS_MAX, "and it must cost the arm something: {}", r.score);
-        assert!(r.measured, "it WAS measured — the terminal event is the observation");
+        assert!(
+            r.score < RIS_MAX,
+            "and it must cost the arm something: {}",
+            r.score
+        );
+        assert!(
+            r.measured,
+            "it WAS measured — the terminal event is the observation"
+        );
     }
 
     /// Nothing at all is unmeasured. A completed stream is not nothing.
@@ -586,7 +649,11 @@ mod tests {
     #[test]
     fn nothing_at_all_is_unmeasured_but_a_finished_stream_is_not() {
         // No body, no terminal event: nothing was looked at.
-        let nothing = ResponseFacts { body: None, request: None, done_received: None };
+        let nothing = ResponseFacts {
+            body: None,
+            request: None,
+            done_received: None,
+        };
         let r = score(&nothing);
         assert_eq!(r.score, RIS_MAX);
         assert_eq!(r.fault, None);
@@ -624,14 +691,21 @@ mod tests {
     #[test]
     fn a_non_stream_is_not_treated_as_unfinished() {
         let body = json!({"content": [{"type": "text", "text": "done"}]});
-        let f = ResponseFacts { body: Some(&body), request: Some(&REQ()), done_received: None };
+        let f = ResponseFacts {
+            body: Some(&body),
+            request: Some(&REQ()),
+            done_received: None,
+        };
         assert_eq!(score(&f).score, RIS_MAX);
     }
 
     #[test]
     fn nothing_at_all_with_tools_declared_is_degenerate() {
         let body = json!({"content": []});
-        assert_eq!(score(&facts(&body, &REQ())).fault, Some(QualityFault::Degenerate));
+        assert_eq!(
+            score(&facts(&body, &REQ())).fault,
+            Some(QualityFault::Degenerate)
+        );
     }
 
     /// Without declared tools an empty turn is odd, not a governance signal —
@@ -647,7 +721,11 @@ mod tests {
     /// to the model would blame the wrong arm. `upstream_ok` covers transport.
     #[test]
     fn an_unparseable_body_scores_clean_rather_than_blaming_the_model() {
-        let f = ResponseFacts { body: None, request: None, done_received: None };
+        let f = ResponseFacts {
+            body: None,
+            request: None,
+            done_received: None,
+        };
         let r = score(&f);
         assert_eq!(r.score, RIS_MAX);
         assert!(r.fault.is_none());
@@ -661,7 +739,10 @@ mod tests {
             "stop_reason": "max_tokens",
             "content": [{"type": "tool_use", "name": "Deploy", "input": {}}]
         });
-        assert_eq!(score(&facts(&body, &REQ())).fault, Some(QualityFault::UnknownTool));
+        assert_eq!(
+            score(&facts(&body, &REQ())).fault,
+            Some(QualityFault::UnknownTool)
+        );
     }
 
     #[test]
@@ -699,8 +780,14 @@ mod tests {
         // to this model.
         for (f, s) in [
             (QualityFault::UnknownTool, "unknown_tool"),
-            (QualityFault::ToolArgumentsNotJson, "tool_arguments_not_json"),
-            (QualityFault::MissingRequiredArgument, "missing_required_argument"),
+            (
+                QualityFault::ToolArgumentsNotJson,
+                "tool_arguments_not_json",
+            ),
+            (
+                QualityFault::MissingRequiredArgument,
+                "missing_required_argument",
+            ),
             (QualityFault::Truncated, "truncated"),
             (QualityFault::Degenerate, "degenerate"),
         ] {
@@ -722,7 +809,11 @@ mod streaming_symmetry_tests {
     /// worse than the hardcoded 100 this scorer was repaired to replace.
     #[test]
     fn a_clean_stream_is_measured_not_merely_unrecorded() {
-        let clean = score(&ResponseFacts { body: None, request: None, done_received: Some(true) });
+        let clean = score(&ResponseFacts {
+            body: None,
+            request: None,
+            done_received: Some(true),
+        });
         assert!(
             clean.measured,
             "a stream that delivered its terminal event was observed; storing NULL for it \
@@ -731,10 +822,16 @@ mod streaming_symmetry_tests {
         assert_eq!(clean.score, RIS_MAX);
         assert!(clean.fault.is_none());
 
-        let truncated =
-            score(&ResponseFacts { body: None, request: None, done_received: Some(false) });
+        let truncated = score(&ResponseFacts {
+            body: None,
+            request: None,
+            done_received: Some(false),
+        });
         assert!(truncated.measured);
-        assert!(truncated.score < clean.score, "truncation must cost something");
+        assert!(
+            truncated.score < clean.score,
+            "truncation must cost something"
+        );
 
         // The asymmetry is the defect: both are observations of the same check.
         assert_eq!(
@@ -746,7 +843,11 @@ mod streaming_symmetry_tests {
     /// No body and no terminal signal is still nothing.
     #[test]
     fn absent_signal_stays_unmeasured() {
-        let none = score(&ResponseFacts { body: None, request: None, done_received: None });
+        let none = score(&ResponseFacts {
+            body: None,
+            request: None,
+            done_received: None,
+        });
         assert!(
             !none.measured,
             "with no body and no terminal event there is nothing to have measured, and \

@@ -253,7 +253,10 @@ mod slash_command_tests {
 
     #[test]
     fn a_docs_url_is_not_a_command() {
-        assert_eq!(find_slash_command("see https://example.com/intutic/setup"), None);
+        assert_eq!(
+            find_slash_command("see https://example.com/intutic/setup"),
+            None
+        );
     }
 
     #[test]

@@ -75,7 +75,10 @@ async fn spawn_stand_in() -> SocketAddr {
 
 #[tokio::test]
 async fn org_sop_applies_as_a_ceiling_through_the_full_fetch_parse_resolve_pipeline() {
-    init_gateway_config(GatewayConfig { require_vk: true, ..Default::default() });
+    init_gateway_config(GatewayConfig {
+        require_vk: true,
+        ..Default::default()
+    });
     let addr = spawn_stand_in().await;
     let control_plane_url = format!("http://{addr}");
     let client = reqwest::Client::new();
@@ -88,7 +91,11 @@ async fn org_sop_applies_as_a_ceiling_through_the_full_fetch_parse_resolve_pipel
         None,
     )
     .await;
-    assert_eq!(sops.len(), 2, "both the workspace row and the org row must be fetched");
+    assert_eq!(
+        sops.len(),
+        2,
+        "both the workspace row and the org row must be fetched"
+    );
 
     let gov = governance_fields_from(&sops, "anyone");
 
@@ -112,7 +119,10 @@ async fn org_sop_applies_as_a_ceiling_through_the_full_fetch_parse_resolve_pipel
 
 #[tokio::test]
 async fn a_workspace_with_no_org_sop_at_all_is_unaffected_by_the_ceiling_logic() {
-    init_gateway_config(GatewayConfig { require_vk: true, ..Default::default() });
+    init_gateway_config(GatewayConfig {
+        require_vk: true,
+        ..Default::default()
+    });
     let addr = spawn_stand_in().await;
     let control_plane_url = format!("http://{addr}");
     let client = reqwest::Client::new();
@@ -133,5 +143,8 @@ async fn a_workspace_with_no_org_sop_at_all_is_unaffected_by_the_ceiling_logic()
         vec!["claude-code".to_string(), "cursor".to_string()],
         "no org SOP exists at all -- an empty org set must never be read as an empty ceiling"
     );
-    assert_eq!(gov.scope_paths, vec!["docs".to_string(), "infra/k8s".to_string()]);
+    assert_eq!(
+        gov.scope_paths,
+        vec!["docs".to_string(), "infra/k8s".to_string()]
+    );
 }

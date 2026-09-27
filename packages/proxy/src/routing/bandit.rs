@@ -208,7 +208,9 @@ fn pick_with_family_preference(
     let max_sample = sampled
         .iter()
         .map(|(_, s)| *s)
-        .fold(None, |acc: Option<f64>, s| Some(acc.map_or(s, |m| m.max(s))))?;
+        .fold(None, |acc: Option<f64>, s| {
+            Some(acc.map_or(s, |m| m.max(s)))
+        })?;
 
     if let Some(family) = prefer_family {
         // Among same-family arms inside the window, still prefer the
@@ -281,7 +283,10 @@ fn cache_guard_decision(
     // agree here even though `prior_cache_read_ratio`'s exact-match
     // requirement (needed for accurate repricing) would not treat them as
     // the same observation.
-    let same_family = match (pricing::model_family(warm_model), pricing::model_family(requested_model)) {
+    let same_family = match (
+        pricing::model_family(warm_model),
+        pricing::model_family(requested_model),
+    ) {
         (Some(a), Some(b)) => a == b,
         _ => false,
     };
@@ -289,9 +294,9 @@ fn cache_guard_decision(
         return None;
     }
 
-    let fresh = session
-        .cache_observed_at
-        .is_some_and(|observed| now_unix.saturating_sub(observed) <= cfg.cache_guard_max_age_secs as i64);
+    let fresh = session.cache_observed_at.is_some_and(|observed| {
+        now_unix.saturating_sub(observed) <= cfg.cache_guard_max_age_secs as i64
+    });
     if !fresh {
         return None;
     }
@@ -333,6 +338,7 @@ pub struct RouteDecision {
 ///
 /// `candidate_models` comes from `intutic_settings.routing.candidate_models`;
 /// requests for models outside the pool bypass the bandit entirely.
+#[allow(clippy::too_many_arguments)] // one call site, request-scoped values
 pub async fn route_model(
     store: &Arc<dyn LocalStore>,
     control_plane: &Arc<dyn ControlPlaneCache>,
@@ -430,9 +436,13 @@ pub async fn route_model(
     // Wave 3.4: strong, fresh evidence the requested model is already warm
     // for this scope declines sampling outright — see cache_guard_decision's
     // doc comment for why this does NOT set the session lock.
-    if let Some(pinned_model) =
-        cache_guard_decision(&session, requested_model, prompt.len(), chrono::Utc::now().timestamp(), routing_cfg)
-    {
+    if let Some(pinned_model) = cache_guard_decision(
+        &session,
+        requested_model,
+        prompt.len(),
+        chrono::Utc::now().timestamp(),
+        routing_cfg,
+    ) {
         tracing::debug!(scope = %scope, model = %pinned_model, "Cache-honesty guard declined to sample");
         return Ok(RouteDecision {
             model: pinned_model,
@@ -475,9 +485,7 @@ pub async fn route_model(
                     pulls: 0,
                     last_updated: chrono::Utc::now().to_rfc3339(),
                 };
-                let _ = store
-                    .seed_arm(workspace_id, &arm_key, &default_state)
-                    .await;
+                let _ = store.seed_arm(workspace_id, &arm_key, &default_state).await;
                 arms.push((model.to_string(), default_state));
             }
         }
@@ -487,9 +495,7 @@ pub async fn route_model(
     if total_pulls < 20 {
         tracing::debug!(workspace_id = %workspace_id, total_pulls = %total_pulls, "Total pulls < 20 — using requested model");
         let selected_model = requested_model.to_string();
-        let _ = store
-            .set_session_locked_model(scope, &selected_model)
-            .await;
+        let _ = store.set_session_locked_model(scope, &selected_model).await;
         return Ok(RouteDecision {
             model: selected_model,
             sop_tier: resolved_sop_tier,
@@ -502,9 +508,7 @@ pub async fn route_model(
     let best_model = select_arm(arms, requested_model, prefer_family.as_deref());
 
     // Lock selected model for the scope
-    let _ = store
-        .set_session_locked_model(scope, &best_model)
-        .await;
+    let _ = store.set_session_locked_model(scope, &best_model).await;
 
     Ok(RouteDecision {
         model: best_model,
@@ -687,7 +691,10 @@ mod tests {
             "model claude-x not found (internal replication lag)"
         ));
         // A rate limit names the model and is not about servability.
-        assert!(!is_unservable_model_error(429, "rate limit for model gpt-4o"));
+        assert!(!is_unservable_model_error(
+            429,
+            "rate limit for model gpt-4o"
+        ));
     }
 
     // ── Same-family tie-break (`pick_with_family_preference`) ─────────────
@@ -789,7 +796,10 @@ mod tests {
 
     #[test]
     fn pick_with_family_preference_empty_arms_returns_none() {
-        assert_eq!(pick_with_family_preference(vec![], Some("claude-opus")), None);
+        assert_eq!(
+            pick_with_family_preference(vec![], Some("claude-opus")),
+            None
+        );
         assert_eq!(pick_with_family_preference(vec![], None), None);
     }
 
@@ -824,7 +834,13 @@ mod tests {
         #[test]
         fn no_observation_and_a_small_prompt_samples() {
             let session = SessionRouting::default();
-            let decision = cache_guard_decision(&session, "claude-sonnet-4-5", 100, NOW, &RoutingConfig::default());
+            let decision = cache_guard_decision(
+                &session,
+                "claude-sonnet-4-5",
+                100,
+                NOW,
+                &RoutingConfig::default(),
+            );
             assert_eq!(decision, None);
         }
 
@@ -845,10 +861,16 @@ mod tests {
         #[test]
         fn the_cold_start_heuristic_is_disabled_by_a_zero_threshold() {
             let session = SessionRouting::default();
-            let mut cfg = RoutingConfig::default();
-            cfg.cache_guard_cold_start_prompt_bytes = 0;
-            let decision = cache_guard_decision(&session, "claude-sonnet-4-5", 1_000_000, NOW, &cfg);
-            assert_eq!(decision, None, "0 must disable just the heuristic, not crash or always-fire");
+            let cfg = RoutingConfig {
+                cache_guard_cold_start_prompt_bytes: 0,
+                ..Default::default()
+            };
+            let decision =
+                cache_guard_decision(&session, "claude-sonnet-4-5", 1_000_000, NOW, &cfg);
+            assert_eq!(
+                decision, None,
+                "0 must disable just the heuristic, not crash or always-fire"
+            );
         }
 
         #[test]
@@ -877,8 +899,13 @@ mod tests {
         #[test]
         fn fresh_warm_same_family_declines_to_sample() {
             let session = warm_session("claude-sonnet-4-5-20250929", 10, 9_000);
-            let decision =
-                cache_guard_decision(&session, "claude-sonnet-4-5", 100, NOW, &RoutingConfig::default());
+            let decision = cache_guard_decision(
+                &session,
+                "claude-sonnet-4-5",
+                100,
+                NOW,
+                &RoutingConfig::default(),
+            );
             assert_eq!(
                 decision.as_deref(),
                 Some("claude-sonnet-4-5"),
@@ -889,17 +916,29 @@ mod tests {
         #[test]
         fn different_family_falls_through_to_sample() {
             let session = warm_session("gpt-4o", 10, 9_000);
-            let decision =
-                cache_guard_decision(&session, "claude-sonnet-4-5", 100, NOW, &RoutingConfig::default());
+            let decision = cache_guard_decision(
+                &session,
+                "claude-sonnet-4-5",
+                100,
+                NOW,
+                &RoutingConfig::default(),
+            );
             assert_eq!(decision, None);
         }
 
         #[test]
         fn stale_observation_samples() {
             let cfg = RoutingConfig::default();
-            let session = warm_session("claude-sonnet-4-5", cfg.cache_guard_max_age_secs as i64 + 1, 9_000);
+            let session = warm_session(
+                "claude-sonnet-4-5",
+                cfg.cache_guard_max_age_secs as i64 + 1,
+                9_000,
+            );
             let decision = cache_guard_decision(&session, "claude-sonnet-4-5", 100, NOW, &cfg);
-            assert_eq!(decision, None, "an observation older than max_age_secs must sample, not decline");
+            assert_eq!(
+                decision, None,
+                "an observation older than max_age_secs must sample, not decline"
+            );
         }
 
         #[test]
@@ -922,11 +961,16 @@ mod tests {
         fn max_age_secs_zero_is_the_kill_switch() {
             // Fresh (age 0) and hot (10000bp) — would decline under any other
             // config — but max_age_secs: 0 must still fall through to sampling.
-            let mut cfg = RoutingConfig::default();
-            cfg.cache_guard_max_age_secs = 0;
+            let cfg = RoutingConfig {
+                cache_guard_max_age_secs: 0,
+                ..Default::default()
+            };
             let session = warm_session("claude-sonnet-4-5", 0, 10_000);
             let decision = cache_guard_decision(&session, "claude-sonnet-4-5", 100, NOW, &cfg);
-            assert_eq!(decision, None, "cache_guard_max_age_secs: 0 must disable the guard entirely");
+            assert_eq!(
+                decision, None,
+                "cache_guard_max_age_secs: 0 must disable the guard entirely"
+            );
         }
     }
 }

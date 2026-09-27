@@ -42,7 +42,10 @@ pub fn intutic_dir() -> PathBuf {
             }
         }
         let home = std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\".to_string());
-        PathBuf::from(home).join("AppData").join("Roaming").join("intutic")
+        PathBuf::from(home)
+            .join("AppData")
+            .join("Roaming")
+            .join("intutic")
     } else {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
         PathBuf::from(home).join(".intutic")
@@ -80,7 +83,10 @@ mod tests {
         std::env::set_var("APPDATA", "C:\\Users\\test\\AppData\\Roaming");
         let dir = intutic_dir();
         std::env::remove_var("APPDATA");
-        assert_eq!(dir, PathBuf::from("C:\\Users\\test\\AppData\\Roaming\\intutic"));
+        assert_eq!(
+            dir,
+            PathBuf::from("C:\\Users\\test\\AppData\\Roaming\\intutic")
+        );
     }
 
     #[cfg(windows)]
@@ -91,6 +97,9 @@ mod tests {
         std::env::set_var("USERPROFILE", "C:\\Users\\test");
         let dir = intutic_dir();
         std::env::remove_var("USERPROFILE");
-        assert_eq!(dir, PathBuf::from("C:\\Users\\test\\AppData\\Roaming\\intutic"));
+        assert_eq!(
+            dir,
+            PathBuf::from("C:\\Users\\test\\AppData\\Roaming\\intutic")
+        );
     }
 }

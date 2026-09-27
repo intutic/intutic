@@ -129,7 +129,11 @@ impl ResponsePostProcessor {
         // Skipped entirely for a graph of one, which is every single-agent
         // request.
         if let Some(key) = graph_key {
-            match self.notification_client.drain_graph_notifications(key).await {
+            match self
+                .notification_client
+                .drain_graph_notifications(key)
+                .await
+            {
                 Ok(graph_notifs) => {
                     notifications.extend(graph_notifs.into_iter().map(|n| (n, "graph")))
                 }
@@ -312,7 +316,11 @@ mod tests {
         async fn auto_judge_active(&self, _s: crate::store::JudgeScope, _id: &str) -> bool {
             false
         }
-        async fn break_glass_grant(&self, _t: &str, _w: &str) -> Option<crate::store::BreakGlassGrant> {
+        async fn break_glass_grant(
+            &self,
+            _t: &str,
+            _w: &str,
+        ) -> Option<crate::store::BreakGlassGrant> {
             None
         }
         async fn transition_baseline(&self, _w: &str) -> Option<String> {
@@ -406,7 +414,10 @@ mod tests {
         let pp = processor(Arc::clone(&cache), Protocol::OpenAIResponses);
 
         let out = pp.process("ses_test", "wk_test", None).await;
-        assert!(out.is_none(), "Responses API cannot carry a governance block");
+        assert!(
+            out.is_none(),
+            "Responses API cannot carry a governance block"
+        );
         assert!(
             cache.recorded.lock().unwrap().is_empty(),
             "an undeliverable card must not be reported delivered — its row honestly keeps delivered_at NULL"

@@ -305,7 +305,11 @@ pub async fn migrate_local_learning(
             if existing.contains_key(&arm_key) {
                 continue;
             }
-            if store.seed_arm(&workspace_id, &arm_key, &state).await.is_ok() {
+            if store
+                .seed_arm(&workspace_id, &arm_key, &state)
+                .await
+                .is_ok()
+            {
                 seeded += 1;
             }
         }
@@ -372,7 +376,9 @@ impl MemoryStore {
     fn touch_scope(&self, scope: &str) {
         let cap = self.scope_cap.unwrap_or(DEFAULT_SCOPE_CAP).max(1);
         let evicted: Vec<String> = {
-            let Ok(mut idx) = self.scope_index.lock() else { return };
+            let Ok(mut idx) = self.scope_index.lock() else {
+                return;
+            };
             if !idx.seen.insert(scope.to_string()) {
                 return;
             }
@@ -390,21 +396,35 @@ impl MemoryStore {
             return;
         }
         if let Ok(mut m) = self.sessions.lock() {
-            for k in &evicted { m.remove(k); }
+            for k in &evicted {
+                m.remove(k);
+            }
         }
         if let Ok(mut m) = self.tool_sequences.lock() {
-            for k in &evicted { m.remove(k); }
+            for k in &evicted {
+                m.remove(k);
+            }
         }
         if let Ok(mut m) = self.call_timestamps.lock() {
-            for k in &evicted { m.remove(k); }
+            for k in &evicted {
+                m.remove(k);
+            }
         }
         if let Ok(mut m) = self.extracted_tool_counts.lock() {
-            for k in &evicted { m.remove(k); }
+            for k in &evicted {
+                m.remove(k);
+            }
         }
         if let Ok(mut m) = self.tool_signatures.lock() {
-            for k in &evicted { m.remove(k); }
+            for k in &evicted {
+                m.remove(k);
+            }
         }
-        tracing::debug!(evicted = evicted.len(), cap, "forgot the oldest-seen tool-history scopes");
+        tracing::debug!(
+            evicted = evicted.len(),
+            cap,
+            "forgot the oldest-seen tool-history scopes"
+        );
     }
 
     /// Persists learning to `~/.intutic/bandit-state.json`, loading any
@@ -612,11 +632,7 @@ impl LocalStore for MemoryStore {
         Ok(())
     }
 
-    async fn incr_outage_failure(
-        &self,
-        _workspace_id: &str,
-        _arm_key: &str,
-    ) -> anyhow::Result<()> {
+    async fn incr_outage_failure(&self, _workspace_id: &str, _arm_key: &str) -> anyhow::Result<()> {
         Ok(())
     }
 
@@ -649,7 +665,12 @@ impl LocalStore for MemoryStore {
         Ok(())
     }
 
-    async fn record_session_cache(&self, scope: &str, model: &str, cache_read_bp: u32) -> anyhow::Result<()> {
+    async fn record_session_cache(
+        &self,
+        scope: &str,
+        model: &str,
+        cache_read_bp: u32,
+    ) -> anyhow::Result<()> {
         debug_assert!(scope.contains(':'), "session routing scope must be tool_history_scope's {{workspace}}:{{agent}} output, not a bare session id: {scope:?}");
         {
             let mut sessions = lock(&self.sessions, "session")?;
@@ -697,7 +718,7 @@ impl LocalStore for MemoryStore {
             let window_start = now_unix_secs - window_secs;
 
             entry.retain(|&ts| ts >= window_start);
-            entry.extend(std::iter::repeat(now_unix_secs).take(new_call_count));
+            entry.extend(std::iter::repeat_n(now_unix_secs, new_call_count));
 
             entry.len() as u32
         };
@@ -710,17 +731,15 @@ impl LocalStore for MemoryStore {
             let Ok(mut counts) = lock(&self.extracted_tool_counts, "tool-count") else {
                 return 0;
             };
-            counts.insert(session_id.to_string(), new_count).unwrap_or(0)
+            counts
+                .insert(session_id.to_string(), new_count)
+                .unwrap_or(0)
         };
         self.touch_scope(session_id);
         prev
     }
 
-    async fn workspace_credential(
-        &self,
-        workspace_id: &str,
-        fields: &[&str],
-    ) -> Option<String> {
+    async fn workspace_credential(&self, workspace_id: &str, fields: &[&str]) -> Option<String> {
         let creds = self.credentials.lock().ok()?;
         let ws = creds.get(workspace_id)?;
         fields
@@ -851,7 +870,14 @@ impl LocalStore for MemoryStore {
     }
 
     /// No-op: membership needs state shared across processes.
-    async fn touch_graph_node(&self, _workspace_id: &str, _graph_id: &str, _node_id: &str, _ttl_secs: u64) {}
+    async fn touch_graph_node(
+        &self,
+        _workspace_id: &str,
+        _graph_id: &str,
+        _node_id: &str,
+        _ttl_secs: u64,
+    ) {
+    }
 
     /// Always empty.
     ///
@@ -910,7 +936,12 @@ impl LocalStore for MemoryStore {
     ///
     /// Returning `Some(false)` here would declare every parent gone and orphan
     /// an entire graph on a store that never tracked it.
-    async fn is_graph_member(&self, _workspace_id: &str, _graph_id: &str, _node_id: &str) -> Option<bool> {
+    async fn is_graph_member(
+        &self,
+        _workspace_id: &str,
+        _graph_id: &str,
+        _node_id: &str,
+    ) -> Option<bool> {
         None
     }
 
@@ -918,7 +949,13 @@ impl LocalStore for MemoryStore {
     ///
     /// Zero would read as "this graph has cost nothing", which is exactly the
     /// wrong conclusion to hand a budget detector.
-    async fn add_graph_spend(&self, _workspace_id: &str, _graph_id: &str, _amount: f64, _ttl_secs: u64) -> Option<f64> {
+    async fn add_graph_spend(
+        &self,
+        _workspace_id: &str,
+        _graph_id: &str,
+        _amount: f64,
+        _ttl_secs: u64,
+    ) -> Option<f64> {
         None
     }
 
@@ -946,9 +983,7 @@ impl LocalStore for MemoryStore {
             // A poisoned lock must not escalate — see the trait doc.
             return 1;
         };
-        let n = m
-            .entry(format!("{scope}|{detector_id}"))
-            .or_insert(0);
+        let n = m.entry(format!("{scope}|{detector_id}")).or_insert(0);
         *n = n.saturating_add(1);
         *n
     }
@@ -1140,7 +1175,11 @@ impl ControlPlaneCache for NullControlPlaneCache {
 
     /// No control plane means no break-glass issuer, so no token can be valid.
     /// Standalone has nothing to break out of — policies come from local config.
-    async fn break_glass_grant(&self, _token: &str, _workspace_id: &str) -> Option<BreakGlassGrant> {
+    async fn break_glass_grant(
+        &self,
+        _token: &str,
+        _workspace_id: &str,
+    ) -> Option<BreakGlassGrant> {
         None
     }
 
@@ -1219,12 +1258,20 @@ mod null_control_plane_cache_tests {
     /// runs `cargo test` (a developer's real `~/.intutic/config.json` could
     /// otherwise make this test's result depend on who's running it).
     #[tokio::test]
+    // HOME_LOCK is held across the await on purpose: it serialises HOME with
+    // every other test that sets it, for the whole test.
+    #[allow(clippy::await_holding_lock)]
     async fn standalone_has_no_allowed_models_restriction_with_no_local_config() {
-        let _lock = crate::test_support::HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = crate::test_support::HOME_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let dir = std::env::temp_dir().join(format!(
             "intutic-memory-test-home-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         let _ = std::fs::create_dir_all(&dir);
         std::env::set_var("HOME", &dir);
@@ -1241,12 +1288,20 @@ mod null_control_plane_cache_tests {
     /// actually returns when one is configured — this is the enforcement
     /// this whole build exists to light up.
     #[tokio::test]
+    // HOME_LOCK is held across the await on purpose: it serialises HOME with
+    // every other test that sets it, for the whole test.
+    #[allow(clippy::await_holding_lock)]
     async fn standalone_honours_a_configured_local_allowlist() {
-        let _lock = crate::test_support::HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = crate::test_support::HOME_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let dir = std::env::temp_dir().join(format!(
             "intutic-memory-test-home-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         let intutic_dir = dir.join(".intutic");
         let _ = std::fs::create_dir_all(&intutic_dir);
@@ -1259,7 +1314,10 @@ mod null_control_plane_cache_tests {
         crate::local_config::reset_cache_for_test();
 
         let cp = NullControlPlaneCache;
-        assert_eq!(cp.allowed_models("ws_1").await, Some(vec!["claude-3-5-sonnet".to_string()]));
+        assert_eq!(
+            cp.allowed_models("ws_1").await,
+            Some(vec!["claude-3-5-sonnet".to_string()])
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -1331,31 +1389,88 @@ mod scope_bound_tests {
         let store = MemoryStore::with_scope_cap(3);
         for i in 0..3 {
             let scope = format!("ws:member:m:fp:{i:08x}");
-            store.set_session_locked_model(&scope, "claude-haiku-4-5").await.unwrap();
-            store.record_tool_sequence(&scope, &["Bash".to_string()], 10).await.unwrap();
-            store.record_calls_and_count_window(&scope, 1, 1_000, 60).await.unwrap();
+            store
+                .set_session_locked_model(&scope, "claude-haiku-4-5")
+                .await
+                .unwrap();
+            store
+                .record_tool_sequence(&scope, &["Bash".to_string()], 10)
+                .await
+                .unwrap();
+            store
+                .record_calls_and_count_window(&scope, 1, 1_000, 60)
+                .await
+                .unwrap();
             store.swap_extracted_tool_count(&scope, 1).await;
         }
         let first = "ws:member:m:fp:00000000";
-        assert!(store.session_routing(first).await.unwrap().locked_model.is_some());
+        assert!(store
+            .session_routing(first)
+            .await
+            .unwrap()
+            .locked_model
+            .is_some());
 
         // The fourth scope pushes the first one out — of all the maps at once.
         let fourth = "ws:member:m:fp:00000003";
-        store.set_session_locked_model(fourth, "claude-haiku-4-5").await.unwrap();
+        store
+            .set_session_locked_model(fourth, "claude-haiku-4-5")
+            .await
+            .unwrap();
 
-        assert!(store.session_routing(first).await.unwrap().locked_model.is_none(), "sessions");
+        assert!(
+            store
+                .session_routing(first)
+                .await
+                .unwrap()
+                .locked_model
+                .is_none(),
+            "sessions"
+        );
         // The scopes that survived are untouched, and re-touching a live scope
         // evicts nothing.
-        store.set_session_locked_model(fourth, "claude-sonnet-4-5").await.unwrap();
-        assert!(store.session_routing("ws:member:m:fp:00000001").await.unwrap().locked_model.is_some());
-        assert!(store.session_routing("ws:member:m:fp:00000002").await.unwrap().locked_model.is_some());
+        store
+            .set_session_locked_model(fourth, "claude-sonnet-4-5")
+            .await
+            .unwrap();
+        assert!(store
+            .session_routing("ws:member:m:fp:00000001")
+            .await
+            .unwrap()
+            .locked_model
+            .is_some());
+        assert!(store
+            .session_routing("ws:member:m:fp:00000002")
+            .await
+            .unwrap()
+            .locked_model
+            .is_some());
 
         // The evicted scope's other maps are empty too. Reading them through
         // the writers re-creates the scope as a NEW one (first-seen order),
         // which in turn pushes out the next-oldest — that is the FIFO rule,
         // not a leak.
-        assert!(store.record_tool_sequence(first, &[], 10).await.unwrap().is_empty(), "tool_sequences");
-        assert_eq!(store.swap_extracted_tool_count(first, 0).await, 0, "extracted_tool_counts");
-        assert!(store.session_routing("ws:member:m:fp:00000001").await.unwrap().locked_model.is_none(), "next-oldest evicted by the re-created scope");
+        assert!(
+            store
+                .record_tool_sequence(first, &[], 10)
+                .await
+                .unwrap()
+                .is_empty(),
+            "tool_sequences"
+        );
+        assert_eq!(
+            store.swap_extracted_tool_count(first, 0).await,
+            0,
+            "extracted_tool_counts"
+        );
+        assert!(
+            store
+                .session_routing("ws:member:m:fp:00000001")
+                .await
+                .unwrap()
+                .locked_model
+                .is_none(),
+            "next-oldest evicted by the re-created scope"
+        );
     }
 }

@@ -100,6 +100,9 @@ fn system_prompt(sop_text: &str) -> String {
 /// judge unreachable" from "local judge unreachable" from the wire
 /// format, which is the point: this is a routing change, not a new
 /// failure mode to learn.
+// Kept in main's exact layout: code scanning's triage of this function's
+// alert is keyed to its text, and end-of-line codeql comments do not suppress here.
+#[rustfmt::skip]
 pub async fn local_judge_finalize(
     http_client: &reqwest::Client,
     full_content: &str,
@@ -178,7 +181,10 @@ mod tests {
     fn parse_verdict_defaults_unrecognised_and_compliant_to_compliant() {
         assert_eq!(parse_verdict("COMPLIANT"), LocalVerdict::Compliant);
         assert_eq!(parse_verdict("compliant"), LocalVerdict::Compliant);
-        assert_eq!(parse_verdict("something a local model made up"), LocalVerdict::Compliant);
+        assert_eq!(
+            parse_verdict("something a local model made up"),
+            LocalVerdict::Compliant
+        );
         assert_eq!(parse_verdict(""), LocalVerdict::Compliant);
     }
 

@@ -24,7 +24,14 @@ const MAX_FILE_BYTES: u64 = 256 * 1024;
 /// How many snippets a search returns at most.
 const MAX_CHUNKS: usize = 5;
 /// Directories never worth walking inside a vault.
-const SKIP_DIRS: [&str; 6] = [".obsidian", ".trash", ".git", "node_modules", ".logseq", ".foam"];
+const SKIP_DIRS: [&str; 6] = [
+    ".obsidian",
+    ".trash",
+    ".git",
+    "node_modules",
+    ".logseq",
+    ".foam",
+];
 /// Marker directories that identify a folder as a notes vault.
 const VAULT_MARKERS: [&str; 3] = [".obsidian", ".logseq", ".foam"];
 /// Characters of context returned around a match.
@@ -142,7 +149,11 @@ fn collect_notes(root: &Path, budget: &mut usize) -> Vec<PathBuf> {
             if path.extension().and_then(|e| e.to_str()) != Some("md") {
                 continue;
             }
-            if entry.metadata().map(|m| m.len() > MAX_FILE_BYTES).unwrap_or(true) {
+            if entry
+                .metadata()
+                .map(|m| m.len() > MAX_FILE_BYTES)
+                .unwrap_or(true)
+            {
                 continue;
             }
             notes.push(path);
@@ -261,13 +272,20 @@ mod tests {
     fn workspace_policy_off_beats_local_config_on() {
         assert!(vaults_allowed(true, None));
         assert!(vaults_allowed(true, Some("on")));
-        assert!(!vaults_allowed(true, Some("off")), "workspace policy must win");
-        assert!(!vaults_allowed(false, None), "developer's own config still counts");
+        assert!(
+            !vaults_allowed(true, Some("off")),
+            "workspace policy must win"
+        );
+        assert!(
+            !vaults_allowed(false, None),
+            "developer's own config still counts"
+        );
     }
 
     /// Build a throwaway vault; returns its root.
     fn make_vault(tag: &str, marker: Option<&str>, notes: &[(&str, &str)]) -> PathBuf {
-        let root = std::env::temp_dir().join(format!("intutic-vault-{}-{}", std::process::id(), tag));
+        let root =
+            std::env::temp_dir().join(format!("intutic-vault-{}-{}", std::process::id(), tag));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         if let Some(m) = marker {
@@ -285,11 +303,17 @@ mod tests {
             "rank",
             Some(".obsidian"),
             &[
-                ("infra.md", "We run postgres with pgbouncer. Migrations go through the pipeline."),
+                (
+                    "infra.md",
+                    "We run postgres with pgbouncer. Migrations go through the pipeline.",
+                ),
                 ("lunch.md", "Team likes ramen on Thursdays."),
             ],
         );
-        let hits = search("postgres migration policy", &[vault.to_string_lossy().into_owned()]);
+        let hits = search(
+            "postgres migration policy",
+            &[vault.to_string_lossy().into_owned()],
+        );
         assert!(!hits.is_empty(), "expected a match");
         assert_eq!(hits[0].note, "infra");
         assert!(hits[0].text.contains("postgres"));
@@ -306,8 +330,14 @@ mod tests {
                 ("one.md", "postgres postgres postgres postgres"),
             ],
         );
-        let hits = search("postgres migration", &[vault.to_string_lossy().into_owned()]);
-        assert_eq!(hits[0].note, "both", "distinct-term coverage must beat repetition");
+        let hits = search(
+            "postgres migration",
+            &[vault.to_string_lossy().into_owned()],
+        );
+        assert_eq!(
+            hits[0].note, "both",
+            "distinct-term coverage must beat repetition"
+        );
         let _ = std::fs::remove_dir_all(&vault);
     }
 
@@ -315,23 +345,42 @@ mod tests {
     fn no_vault_and_no_match_return_nothing_rather_than_erroring() {
         assert!(search("anything at all", &["/nonexistent/intutic/vault".into()]).is_empty());
         let vault = make_vault("empty", Some(".obsidian"), &[("x.md", "unrelated prose")]);
-        assert!(search("postgres migration", &[vault.to_string_lossy().into_owned()]).is_empty());
+        assert!(search(
+            "postgres migration",
+            &[vault.to_string_lossy().into_owned()]
+        )
+        .is_empty());
         let _ = std::fs::remove_dir_all(&vault);
     }
 
     #[test]
     fn short_query_terms_are_ignored_so_the_and_of_do_not_match_everything() {
-        let vault = make_vault("stop", Some(".obsidian"), &[("n.md", "the and of a to it is")]);
+        let vault = make_vault(
+            "stop",
+            Some(".obsidian"),
+            &[("n.md", "the and of a to it is")],
+        );
         assert!(search("the and of", &[vault.to_string_lossy().into_owned()]).is_empty());
         let _ = std::fs::remove_dir_all(&vault);
     }
 
     #[test]
     fn marker_directories_and_dotfolders_are_not_walked() {
-        let vault = make_vault("skip", Some(".obsidian"), &[("real.md", "postgres migration")]);
+        let vault = make_vault(
+            "skip",
+            Some(".obsidian"),
+            &[("real.md", "postgres migration")],
+        );
         // A note hidden inside the marker dir must not be returned.
-        std::fs::write(vault.join(".obsidian").join("cache.md"), "postgres migration cache").unwrap();
-        let hits = search("postgres migration", &[vault.to_string_lossy().into_owned()]);
+        std::fs::write(
+            vault.join(".obsidian").join("cache.md"),
+            "postgres migration cache",
+        )
+        .unwrap();
+        let hits = search(
+            "postgres migration",
+            &[vault.to_string_lossy().into_owned()],
+        );
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].note, "real");
         let _ = std::fs::remove_dir_all(&vault);
@@ -341,15 +390,26 @@ mod tests {
     fn oversized_notes_are_skipped() {
         let big = "postgres migration ".repeat(20_000); // > 256 KiB
         let vault = make_vault("big", Some(".obsidian"), &[("huge.md", big.as_str())]);
-        assert!(search("postgres migration", &[vault.to_string_lossy().into_owned()]).is_empty());
+        assert!(search(
+            "postgres migration",
+            &[vault.to_string_lossy().into_owned()]
+        )
+        .is_empty());
         let _ = std::fs::remove_dir_all(&vault);
     }
 
     #[test]
     fn a_configured_folder_needs_no_marker_directory() {
         let vault = make_vault("plain", None, &[("notes.md", "postgres migration runbook")]);
-        let hits = search("postgres migration", &[vault.to_string_lossy().into_owned()]);
-        assert_eq!(hits.len(), 1, "explicitly configured folders are vaults by decree");
+        let hits = search(
+            "postgres migration",
+            &[vault.to_string_lossy().into_owned()],
+        );
+        assert_eq!(
+            hits.len(),
+            1,
+            "explicitly configured folders are vaults by decree"
+        );
         let _ = std::fs::remove_dir_all(&vault);
     }
 
@@ -357,7 +417,10 @@ mod tests {
     fn snippets_do_not_split_multibyte_characters() {
         let body = format!("{} postgres migration {}", "é".repeat(200), "ü".repeat(200));
         let vault = make_vault("utf8", Some(".obsidian"), &[("u.md", body.as_str())]);
-        let hits = search("postgres migration", &[vault.to_string_lossy().into_owned()]);
+        let hits = search(
+            "postgres migration",
+            &[vault.to_string_lossy().into_owned()],
+        );
         assert_eq!(hits.len(), 1);
         assert!(hits[0].text.contains("postgres"));
         let _ = std::fs::remove_dir_all(&vault);

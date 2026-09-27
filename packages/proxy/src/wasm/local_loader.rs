@@ -61,6 +61,9 @@ fn expand_home(path: &str) -> PathBuf {
 /// propagated so the caller can retain the previously loaded rules instead of
 /// mistaking a transient EACCES/EIO for "all rules deleted" — silently
 /// dropping local Kill rules would be an enforcement bypass.
+// Kept in main's exact layout: code scanning's triage of this function's
+// alert is keyed to its text, and end-of-line codeql comments do not suppress here.
+#[rustfmt::skip]
 pub fn scan_signatures(dir: &Path) -> std::io::Result<HashMap<PathBuf, (SystemTime, u64)>> {
     let mut signatures = HashMap::new();
     // `dir` is the operator's `INTUTIC_WASM_DIR` / config override: the same
@@ -99,7 +102,6 @@ pub fn parse_priority(file_name: &str) -> (u32, String) {
     }
     (DEFAULT_PRIORITY, stem.to_string())
 }
-
 
 /// Compile every rule file in the given signature set (from
 /// [`scan_signatures`]). Fail-open per file: a corrupt or mid-copy file is
@@ -216,10 +218,7 @@ mod tests {
         let missing = PathBuf::from("/nonexistent/intutic-wasm-test");
         assert!(scan_signatures(&missing).unwrap().is_empty());
 
-        let dir = std::env::temp_dir().join(format!(
-            "intutic-wasm-scan-{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("intutic-wasm-scan-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("notes.txt"), b"not a rule").unwrap();
@@ -234,10 +233,7 @@ mod tests {
     #[test]
     fn scan_propagates_unreadable_dir_instead_of_faking_empty() {
         use std::os::unix::fs::PermissionsExt;
-        let dir = std::env::temp_dir().join(format!(
-            "intutic-wasm-noperm-{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("intutic-wasm-noperm-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o000)).unwrap();
