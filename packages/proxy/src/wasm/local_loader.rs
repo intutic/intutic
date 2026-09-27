@@ -65,8 +65,8 @@ pub fn scan_signatures(dir: &Path) -> std::io::Result<HashMap<PathBuf, (SystemTi
     let mut signatures = HashMap::new();
     // `dir` is the operator's `INTUTIC_WASM_DIR` / config override: the same
     // trust level as the binary's own configuration, never a request value.
-    // codeql[rust/path-injection]
-    let entries = match std::fs::read_dir(dir) {
+    let read = std::fs::read_dir(dir); // codeql[rust/path-injection]
+    let entries = match read {
         Ok(entries) => entries,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(signatures),
         Err(e) => return Err(e),
