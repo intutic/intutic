@@ -9881,7 +9881,7 @@ mod tests {
         assert_ne!(a, b, "two workspaces must not share judge session state");
         assert!(
             a.starts_with("ws_alpha:"),
-            "workspace must lead the key: {a}"
+            "workspace must lead the key: {a}" // codeql[rust/cleartext-logging]
         );
     }
 
@@ -9961,7 +9961,7 @@ mod tests {
         assert_ne!(a, b, "two workspaces must not share an anonymous bucket");
         assert!(
             a.starts_with("ws_alpha:"),
-            "workspace must lead the key: {a}"
+            "workspace must lead the key: {a}" // codeql[rust/cleartext-logging]
         );
     }
 
