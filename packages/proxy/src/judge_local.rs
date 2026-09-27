@@ -100,6 +100,9 @@ fn system_prompt(sop_text: &str) -> String {
 /// judge unreachable" from "local judge unreachable" from the wire
 /// format, which is the point: this is a routing change, not a new
 /// failure mode to learn.
+// Kept in main's exact layout: code scanning's triage of this function's
+// alert is keyed to its text, and end-of-line codeql comments do not suppress here.
+#[rustfmt::skip]
 pub async fn local_judge_finalize(
     http_client: &reqwest::Client,
     full_content: &str,
@@ -120,8 +123,7 @@ pub async fn local_judge_finalize(
     // service name), which is the point of the local judge: the content never
     // leaves that network. TLS on that hop is the operator's choice, made in
     // the same env var; nothing here can upgrade a scheme the operator set.
-    let req = http_client.post(&url); // codeql[rust/non-https-url]
-    let mut req = req.json(&serde_json::json!({
+    let mut req = http_client.post(&url).json(&serde_json::json!({ // codeql[rust/non-https-url]
         "model": model,
         "messages": [
             { "role": "system", "content": system_prompt(sop_text) },
