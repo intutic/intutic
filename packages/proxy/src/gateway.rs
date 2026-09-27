@@ -46,6 +46,14 @@ pub struct GatewayConfig {
     /// in `proxy.rs`.
     #[serde(default)]
     pub require_provisioned_key: bool,
+    /// Narrows `require_provisioned_key` to the workspaces the control plane
+    /// marks `byokRequired` on their key (paid plans, minus trials and the
+    /// operator's exempt list) — the hosted gateway's posture, where a free
+    /// trial may ride the platform key but a paying tier brings its own. Set
+    /// by `INTUTIC_GATEWAY_REQUIRE_PROVISIONED_KEY=paid`. Has no effect while
+    /// `require_provisioned_key` is off. See `provisioned_key_required`.
+    #[serde(default)]
+    pub provisioned_key_paid_only: bool,
     /// LLD #68 §2 phase 2 — local judge for self-hosted gateways. When true,
     /// finalize-time judge evaluation is answered by a LOCAL LiteLLM
     /// instance (`LITELLM_LOCAL_URL`, see `judge_local.rs`) instead of
@@ -78,14 +86,19 @@ impl GatewayConfig {
             },
             Err(_) => cfg.require_vk,
         };
-        let require_provisioned_key = match std::env::var("INTUTIC_GATEWAY_REQUIRE_PROVISIONED_KEY") {
-            Ok(v) => match v.trim().to_ascii_lowercase().as_str() {
-                "1" | "true" => true,
-                "0" | "false" => false,
-                _ => cfg.require_provisioned_key,
-            },
-            Err(_) => cfg.require_provisioned_key,
-        };
+        // `paid` turns enforcement on for paying workspaces only; `true` keeps
+        // its original meaning (every workspace), so a deployment already
+        // running with `true` is unchanged.
+        let (require_provisioned_key, provisioned_key_paid_only) =
+            match std::env::var("INTUTIC_GATEWAY_REQUIRE_PROVISIONED_KEY") {
+                Ok(v) => match v.trim().to_ascii_lowercase().as_str() {
+                    "1" | "true" => (true, false),
+                    "paid" => (true, true),
+                    "0" | "false" => (false, false),
+                    _ => (cfg.require_provisioned_key, cfg.provisioned_key_paid_only),
+                },
+                Err(_) => (cfg.require_provisioned_key, cfg.provisioned_key_paid_only),
+            };
         let local_judge = match std::env::var("INTUTIC_GATEWAY_LOCAL_JUDGE") {
             Ok(v) => match v.trim().to_ascii_lowercase().as_str() {
                 "1" | "true" => true,
@@ -94,7 +107,7 @@ impl GatewayConfig {
             },
             Err(_) => cfg.local_judge,
         };
-        GatewayConfig { require_vk, require_provisioned_key, local_judge }
+        GatewayConfig { require_vk, require_provisioned_key, provisioned_key_paid_only, local_judge }
     }
 }
 
@@ -130,6 +143,21 @@ pub fn requires_vk_only() -> bool {
 /// tiny wrapper for the same reason as `requires_vk_only` above.
 pub fn requires_provisioned_key() -> bool {
     gateway_config().require_provisioned_key
+}
+
+/// Whether this request's workspace must use its own provider key, given the
+/// installed config and the key record's `byokRequired` (from the control
+/// plane's cached auth entry or `/auth/key-context`).
+pub fn provisioned_key_required_for(byok_required: Option<bool>) -> bool {
+    provisioned_key_required(gateway_config(), byok_required)
+}
+
+/// The pure decision behind `provisioned_key_required_for`. Under `paid`, only
+/// an explicit `Some(false)` exempts a workspace: an entry that predates the
+/// field (or a control plane that never sends it) enforces, so a missing
+/// answer can never put a paying workspace on the platform key.
+pub fn provisioned_key_required(cfg: &GatewayConfig, byok_required: Option<bool>) -> bool {
+    cfg.require_provisioned_key && !(cfg.provisioned_key_paid_only && byok_required == Some(false))
 }
 
 /// True if `local_judge` is on (LLD #68 §2 phase 2). A tiny wrapper for the
@@ -316,6 +344,41 @@ mod tests {
         // construction (separate, non-interacting `match` arms in
         // `from_config_and_env`), so there is no runtime behavior here that
         // needs a cross-var test to catch.
+
+        // `paid` = enforcement on, narrowed to paying workspaces; `true` keeps
+        // meaning every workspace, even over a config that said paid-only.
+        std::env::set_var("INTUTIC_GATEWAY_REQUIRE_PROVISIONED_KEY", "paid");
+        let paid = GatewayConfig::from_config_and_env(&GatewayConfig::default());
+        assert!(paid.require_provisioned_key && paid.provisioned_key_paid_only);
+        std::env::set_var("INTUTIC_GATEWAY_REQUIRE_PROVISIONED_KEY", "true");
+        let all = GatewayConfig::from_config_and_env(&GatewayConfig {
+            require_provisioned_key: true,
+            provisioned_key_paid_only: true,
+            ..Default::default()
+        });
+        assert!(all.require_provisioned_key && !all.provisioned_key_paid_only);
+        std::env::remove_var("INTUTIC_GATEWAY_REQUIRE_PROVISIONED_KEY");
+    }
+
+    #[test]
+    fn provisioned_key_required_by_mode_and_workspace_answer() {
+        let off = GatewayConfig::default();
+        let all = GatewayConfig { require_provisioned_key: true, ..Default::default() };
+        let paid = GatewayConfig {
+            require_provisioned_key: true,
+            provisioned_key_paid_only: true,
+            ..Default::default()
+        };
+        for answer in [Some(true), Some(false), None] {
+            assert!(!provisioned_key_required(&off, answer), "off never enforces ({answer:?})");
+            assert!(provisioned_key_required(&all, answer), "true enforces everywhere ({answer:?})");
+        }
+        assert!(provisioned_key_required(&paid, Some(true)), "paid plan brings its own key");
+        assert!(!provisioned_key_required(&paid, Some(false)), "trial/exempt rides the platform key");
+        assert!(provisioned_key_required(&paid, None), "no answer from the control plane enforces");
+        // paid-only without the main switch is inert.
+        let inert = GatewayConfig { provisioned_key_paid_only: true, ..Default::default() };
+        assert!(!provisioned_key_required(&inert, Some(true)));
     }
 
     #[test]

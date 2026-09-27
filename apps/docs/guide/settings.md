@@ -63,7 +63,9 @@ provider is separate engineering work per provider, and the dashboard says so ra
 implying a saved key is already in effect.
 
 If your workspace's gateway has BYO-key enforcement turned on, requests fail with `402
-byok_required` until a key is provisioned here for the provider being called. Also available
+byok_required` until a key is provisioned here for the provider being called. A gateway can
+enforce this for every workspace or for paid plans only, in which case trials keep using the
+gateway's own provider key. Also available
 from the CLI:
 
 ```bash

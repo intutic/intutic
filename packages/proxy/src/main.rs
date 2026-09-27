@@ -338,7 +338,14 @@ async fn main() -> anyhow::Result<()> {
              INTUTIC_GATEWAY_REQUIRE_VK=true for a shared multi-tenant gateway."
         );
     }
-    if gateway::requires_provisioned_key() {
+    if gateway::requires_provisioned_key() && gateway::gateway_config().provisioned_key_paid_only {
+        tracing::warn!(
+            "Gateway front door: REQUIRE_PROVISIONED_KEY=paid (LLD #64 §4) — a workspace the \
+             control plane marks byokRequired (paid plan, not in a trial, not exempt) with no \
+             provisioned upstream API key is refused with 402; trials and exempt workspaces \
+             ride this pod's shared provider key."
+        );
+    } else if gateway::requires_provisioned_key() {
         tracing::warn!(
             "Gateway front door: REQUIRE_PROVISIONED_KEY (LLD #64 §4) — a workspace with no \
              deliberately provisioned upstream API key is refused with 402 rather than falling \
@@ -349,8 +356,8 @@ async fn main() -> anyhow::Result<()> {
             "Gateway front door: BYO-key enforcement off — an unprovisioned workspace rides the \
              shared provider key (today's behaviour). Set \
              intutic_settings.gateway.require_provisioned_key or \
-             INTUTIC_GATEWAY_REQUIRE_PROVISIONED_KEY=true to require each workspace provision \
-             its own key."
+             INTUTIC_GATEWAY_REQUIRE_PROVISIONED_KEY=true (every workspace) or =paid (paying \
+             workspaces only) to require a workspace provision its own key."
         );
     }
 
