@@ -14,9 +14,7 @@
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode, Uri};
 
-use intutic_proxy::egress_policy::{
-    denied_count, init_global_policy, EgressMode, EgressPolicy,
-};
+use intutic_proxy::egress_policy::{denied_count, init_global_policy, EgressMode, EgressPolicy};
 use intutic_proxy::tls_mitm::handle_connect;
 
 fn connect_req(authority: &str) -> Request<Body> {

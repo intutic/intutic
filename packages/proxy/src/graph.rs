@@ -150,10 +150,17 @@ fn non_empty(value: Option<String>) -> Option<String> {
 }
 
 /// Resolve a value from baggage first, then a fallback header.
-fn resolve(headers: &HeaderMap, baggage: Option<&str>, key: &str, fallback: &str) -> Option<String> {
-    baggage
-        .and_then(|b| baggage_value(b, key))
-        .or_else(|| header_str(headers, fallback).filter(|s| !s.is_empty()).map(|s| truncate(s.to_string())))
+fn resolve(
+    headers: &HeaderMap,
+    baggage: Option<&str>,
+    key: &str,
+    fallback: &str,
+) -> Option<String> {
+    baggage.and_then(|b| baggage_value(b, key)).or_else(|| {
+        header_str(headers, fallback)
+            .filter(|s| !s.is_empty())
+            .map(|s| truncate(s.to_string()))
+    })
 }
 
 /// The identity segments carried in a request path, if any.
@@ -340,7 +347,10 @@ mod tests {
     #[test]
     fn baggage_percent_decoding() {
         let h = headers(&[("baggage", "gen_ai.agent.name=code%20reviewer")]);
-        assert_eq!(identity_from_headers(&h, "ses_1").agent_role, "code reviewer");
+        assert_eq!(
+            identity_from_headers(&h, "ses_1").agent_role,
+            "code reviewer"
+        );
     }
 
     #[test]
@@ -470,9 +480,9 @@ mod tests {
         // Silently swallowing segments would forward the request to a URL the
         // caller never asked for, which is worse than ignoring the identity.
         for path in [
-            "/_i/g1/n1/v1/messages",        // depth segment is not a number
-            "/_i/g1/n1",                    // too few segments
-            "/_intutic-predict",            // merely starts with the same letters
+            "/_i/g1/n1/v1/messages", // depth segment is not a number
+            "/_i/g1/n1",             // too few segments
+            "/_intutic-predict",     // merely starts with the same letters
         ] {
             let (id, out) = split_identity_path(path);
             assert!(id.is_none(), "{path} should not parse as identity");

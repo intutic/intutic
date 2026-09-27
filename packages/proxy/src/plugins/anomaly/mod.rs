@@ -415,31 +415,31 @@ impl DetectorRegistry {
             detectors: vec![
                 Box::new(ConsecutiveRepeatDetector::default()),
                 Box::new(PingPongCycleDetector::default()),
-                Box::new(LandmarkCycleDetector::default()),
+                Box::new(LandmarkCycleDetector),
                 Box::new(RecursionDepthDetector::default()),
-                Box::new(FanOutExplosionDetector::default()),
+                Box::new(FanOutExplosionDetector),
                 Box::new(TransitionProbabilityDetector::default()),
                 Box::new(MissingPredecessorDetector::default()),
                 Box::new(ForbiddenSuccessionDetector::default()),
-                Box::new(CallCeilingDetector::default()),
-                Box::new(TaintCooccurrenceDetector::default()),
-                Box::new(CodeAsActionDetector::default()),
+                Box::new(CallCeilingDetector),
+                Box::new(TaintCooccurrenceDetector),
+                Box::new(CodeAsActionDetector),
                 Box::new(PlanAdherenceDetector::default()),
-                Box::new(ScopePathDetector::default()),
-                Box::new(ReviewGateDetector::default()),
+                Box::new(ScopePathDetector),
+                Box::new(ReviewGateDetector),
                 Box::new(DlpEscalationDetector::default()),
                 Box::new(ToolDiversityCollapseDetector::default()),
-                Box::new(SchemaDriftDetector::default()),
+                Box::new(SchemaDriftDetector),
                 Box::new(ContextGrowthDetector::default()),
-                Box::new(BudgetExhaustionDetector::default()),
+                Box::new(BudgetExhaustionDetector),
                 Box::new(SpendTrajectoryDetector::default()),
-                Box::new(SpawnBudgetBreachDetector::default()),
-                Box::new(OrphanExecutionDetector::default()),
-                Box::new(UnauthorizedToolDetector::default()),
+                Box::new(SpawnBudgetBreachDetector),
+                Box::new(OrphanExecutionDetector),
+                Box::new(UnauthorizedToolDetector),
                 Box::new(PromptInjectionDetector::default()),
-                Box::new(ToolPoisoningDetector::default()),
-                Box::new(WorkflowBudgetBreachDetector::default()),
-                Box::new(CrossHarnessViolationDetector::default()),
+                Box::new(ToolPoisoningDetector),
+                Box::new(WorkflowBudgetBreachDetector),
+                Box::new(CrossHarnessViolationDetector),
             ],
         }
     }
@@ -576,7 +576,11 @@ impl DetectorRegistry {
             "{} (corroborated: {} other independent detector{} also fired on this request)",
             worst.reason,
             corroborating_ids.len() - 1,
-            if corroborating_ids.len() - 1 == 1 { "" } else { "s" },
+            if corroborating_ids.len() - 1 == 1 {
+                ""
+            } else {
+                "s"
+            },
         );
         Some(escalated)
     }
@@ -741,10 +745,8 @@ mod tests {
             .map(str::to_string)
             .collect();
 
-        let mut rust_values: Vec<String> = ALL_KINDS
-            .iter()
-            .map(|k| k.as_str().to_string())
-            .collect();
+        let mut rust_values: Vec<String> =
+            ALL_KINDS.iter().map(|k| k.as_str().to_string()).collect();
 
         ts_values.sort();
         rust_values.sort();
@@ -757,10 +759,7 @@ mod tests {
 
     #[test]
     fn severity_matches_platform_map() {
-        assert_eq!(
-            AnomalyKind::DataExfiltration.severity(),
-            Severity::Critical
-        );
+        assert_eq!(AnomalyKind::DataExfiltration.severity(), Severity::Critical);
         assert_eq!(AnomalyKind::PromptInjection.severity(), Severity::Critical);
         assert_eq!(AnomalyKind::LoopDetected.severity(), Severity::High);
         assert_eq!(AnomalyKind::TokenWaste.severity(), Severity::Medium);
@@ -819,10 +818,9 @@ mod tests {
         ctx.plan_steps = vec!["list_dir".into()];
 
         assert!(
-            reg.evaluate_all(&ctx)
-                .iter()
-                .any(|f| f.kind == AnomalyKind::ScopeViolation
-                    && f.reason.contains("declared plan")),
+            reg.evaluate_all(&ctx).iter().any(
+                |f| f.kind == AnomalyKind::ScopeViolation && f.reason.contains("declared plan")
+            ),
             "the registry must reach PlanAdherenceDetector"
         );
     }
@@ -886,9 +884,9 @@ mod tests {
 
         let findings = reg.evaluate_all(&ctx);
         assert!(
-            findings
-                .iter()
-                .any(|f| f.reason.contains(crate::plugins::anomaly::detectors::REVIEW_HOLD_MARKER)),
+            findings.iter().any(|f| f
+                .reason
+                .contains(crate::plugins::anomaly::detectors::REVIEW_HOLD_MARKER)),
             "the registry must reach ReviewGateDetector"
         );
         assert!(
@@ -912,8 +910,8 @@ mod tests {
         // A period-3 cycle: invisible to every other detector on the built-in
         // path, which `a_three_cycle_escapes_the_builtin_table_entirely` pins.
         let ctx = ctx_with_sequence(&[
-            "Read", "Grep", "Bash", "Read", "Grep", "Bash",
-            "Read", "Grep", "Bash", "Read", "Grep", "Bash",
+            "Read", "Grep", "Bash", "Read", "Grep", "Bash", "Read", "Grep", "Bash", "Read", "Grep",
+            "Bash",
         ]);
         assert!(
             reg.evaluate_all(&ctx)
@@ -931,11 +929,10 @@ mod tests {
         use crate::plugins::anomaly::detectors::CYCLE_PERIOD_MARKER;
         let reg = DetectorRegistry::with_defaults();
         let ctx = ctx_with_sequence(&["Read", "Grep", "Bash"]);
-        assert!(
-            !reg.evaluate_all(&ctx)
-                .iter()
-                .any(|f| f.reason.contains(CYCLE_PERIOD_MARKER))
-        );
+        assert!(!reg
+            .evaluate_all(&ctx)
+            .iter()
+            .any(|f| f.reason.contains(CYCLE_PERIOD_MARKER)));
     }
 
     /// Every marker a reachability test keys on must be pairwise disjoint.
@@ -1051,7 +1048,10 @@ mod coverage_tests {
             ),
             (
                 "BUDGET_BREACH",
-                RequestContext { budget_remaining_usd: 0.0, ..base_ctx() },
+                RequestContext {
+                    budget_remaining_usd: 0.0,
+                    ..base_ctx()
+                },
             ),
             (
                 "TOKEN_WASTE",
@@ -1211,7 +1211,9 @@ mod coverage_tests {
             .expect("an Ask must be found regardless of its wording or kind");
         assert_eq!(hold.kind, AnomalyKind::DataExfiltration);
         assert!(
-            !hold.reason.contains(crate::plugins::anomaly::detectors::REVIEW_HOLD_MARKER),
+            !hold
+                .reason
+                .contains(crate::plugins::anomaly::detectors::REVIEW_HOLD_MARKER),
             "test premise: this finding is invisible to the old substring matcher",
         );
     }
@@ -1352,7 +1354,11 @@ mod coverage_tests {
         // secrets()+http_post, for the one-REPL-call-bundles-everything shape
         // that per-call gates cannot see into.
         // 27: spend_trajectory — the local daily-cap projection (TD-481).
-        assert_eq!(ids.len(), 27, "registry size changed — update this test deliberately");
+        assert_eq!(
+            ids.len(),
+            27,
+            "registry size changed — update this test deliberately"
+        );
 
         for id in &ids {
             assert!(!id.is_empty(), "a registered detector has no id");
@@ -1392,7 +1398,9 @@ mod coverage_tests {
             );
         }
         assert!(
-            findings.iter().any(|f| f.detector_id == "consecutive_repeat"),
+            findings
+                .iter()
+                .any(|f| f.detector_id == "consecutive_repeat"),
             "the spin detector must be identifiable by name, not just by kind",
         );
     }

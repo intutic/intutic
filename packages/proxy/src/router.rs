@@ -498,7 +498,9 @@ mod spend_status_tests {
             .await
             .unwrap();
         let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        assert!(body.get("local_spend_usd_today").is_some_and(|v| v.is_number()));
+        assert!(body
+            .get("local_spend_usd_today")
+            .is_some_and(|v| v.is_number()));
         assert!(body.get("local_cap_usd").is_some_and(|v| v.is_number()));
         assert!(body.get("enforced").is_some_and(|v| v.is_boolean()));
     }
@@ -584,7 +586,12 @@ mod instance_status_tests {
             .split("async fn instance_status(")
             .nth(1)
             .expect("instance_status handler present");
-        let head = &handler[..handler.find("instance_body()").expect("handler answers with instance_body")];
-        assert!(head.contains("spend_peer_allowed(&addr)"), "instance_status must check the peer before answering");
+        let head = &handler[..handler
+            .find("instance_body()")
+            .expect("handler answers with instance_body")];
+        assert!(
+            head.contains("spend_peer_allowed(&addr)"),
+            "instance_status must check the peer before answering"
+        );
     }
 }

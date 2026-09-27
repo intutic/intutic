@@ -11,13 +11,12 @@
 use intutic_proxy::config::{RewardConfig, RoutingConfig};
 use intutic_proxy::routing::bandit::route_model;
 use intutic_proxy::routing::reward::{apply_update, RewardEngine, RewardSignals};
-use intutic_proxy::store::{
-    CachedResponse, ControlPlaneAuth, ControlPlaneCache, FeatureFlags, HardCapStatus, JudgeScope,
-    LocalStore, MemoryStore, NotifyScope, NullControlPlaneCache, Ownership,
-    ValkeyControlPlaneCache, ValkeyStore,
-    BreakGlassScope,
-};
 use intutic_proxy::store::valkey::sha256_hex;
+use intutic_proxy::store::{
+    BreakGlassScope, CachedResponse, ControlPlaneAuth, ControlPlaneCache, FeatureFlags,
+    HardCapStatus, JudgeScope, LocalStore, MemoryStore, NotifyScope, NullControlPlaneCache,
+    Ownership, ValkeyControlPlaneCache, ValkeyStore,
+};
 use redis::AsyncCommands;
 use std::sync::Arc;
 
@@ -37,7 +36,11 @@ const TASK_TYPE: &str = "coding";
 /// so moving a workspace local cannot lose fidelity.
 const EPSILON: f64 = 1e-12;
 
-type Backend = (&'static str, Arc<dyn LocalStore>, Arc<dyn ControlPlaneCache>);
+type Backend = (
+    &'static str,
+    Arc<dyn LocalStore>,
+    Arc<dyn ControlPlaneCache>,
+);
 
 async fn valkey_conn() -> Option<Arc<redis::aio::ConnectionManager>> {
     let url = std::env::var("VALKEY_URL").ok()?;
@@ -110,7 +113,15 @@ async fn local_mode_claims_ownership_and_updates_arm() {
         let cfg = RewardConfig::default();
 
         engine
-            .record(&store, &ws, MODEL, SOP_TIER, TASK_TYPE, success_signals(), &cfg)
+            .record(
+                &store,
+                &ws,
+                MODEL,
+                SOP_TIER,
+                TASK_TYPE,
+                success_signals(),
+                &cfg,
+            )
             .await;
 
         assert_eq!(
@@ -200,7 +211,15 @@ async fn twenty_rewards_exit_cold_start_and_enable_sampling() {
 
         for _ in 0..20 {
             engine
-                .record(&store, &ws, MODEL, SOP_TIER, TASK_TYPE, success_signals(), &cfg)
+                .record(
+                    &store,
+                    &ws,
+                    MODEL,
+                    SOP_TIER,
+                    TASK_TYPE,
+                    success_signals(),
+                    &cfg,
+                )
                 .await;
         }
 
@@ -228,7 +247,8 @@ async fn twenty_rewards_exit_cold_start_and_enable_sampling() {
         )
         .await
         .unwrap();
-        let (selected, sop_tier, task_type) = (decision.model, decision.sop_tier, decision.task_type);
+        let (selected, sop_tier, task_type) =
+            (decision.model, decision.sop_tier, decision.task_type);
         assert!(
             candidates.contains(&selected),
             "[{name}] sampled model {selected} must come from the candidate pool"
@@ -266,7 +286,11 @@ async fn two_workspaces_with_identical_agent_suffixes_must_not_share_a_lock() {
         let a = store.session_routing(&scope_a).await.unwrap();
         let b = store.session_routing(&scope_b).await.unwrap();
 
-        assert_eq!(a.locked_model.as_deref(), Some("claude-3-5-sonnet"), "[{name}]");
+        assert_eq!(
+            a.locked_model.as_deref(),
+            Some("claude-3-5-sonnet"),
+            "[{name}]"
+        );
         assert!(
             b.locked_model.is_none(),
             "[{name}] workspace B must not see workspace A's lock despite an identical agent suffix"
@@ -285,7 +309,9 @@ async fn two_workspaces_with_identical_agent_suffixes_must_not_share_a_lock() {
 #[should_panic(expected = "session routing scope must be")]
 async fn a_bare_session_id_with_no_colon_trips_the_scope_guard() {
     let store = MemoryStore::new();
-    let _ = store.set_session_locked_model("ses_bare_no_colon", "claude-3-5-sonnet").await;
+    let _ = store
+        .set_session_locked_model("ses_bare_no_colon", "claude-3-5-sonnet")
+        .await;
 }
 
 /// The bytes the enterprise reward cron reads must not change. Field names are
@@ -326,8 +352,7 @@ async fn valkey_wire_format_is_unchanged() {
         );
     }
     // And it must still deserialize into the shared struct both sides use.
-    let _: intutic_proxy::routing::bandit::BanditArmState =
-        serde_json::from_str(arm_json).unwrap();
+    let _: intutic_proxy::routing::bandit::BanditArmState = serde_json::from_str(arm_json).unwrap();
 
     cleanup(&ws, None).await;
 }
@@ -448,7 +473,11 @@ async fn managed_auth_still_rejects_unknown_keys() {
 #[tokio::test]
 async fn standalone_gates_are_all_closed() {
     let cp = NullControlPlaneCache;
-    assert_eq!(cp.hard_block("ws").await, HardCapStatus::Clear, "no cap without a control plane");
+    assert_eq!(
+        cp.hard_block("ws").await,
+        HardCapStatus::Clear,
+        "no cap without a control plane"
+    );
     assert!(
         cp.break_glass_grant("any-token", "ws").await.is_none(),
         "no issuer means no valid break-glass token"
@@ -516,7 +545,10 @@ async fn break_glass_grant_is_scoped_to_the_issuing_workspace() {
 
     // A key written under the RAW token (the pre-hashing layout) is not a grant.
     let _: () = conn.set(format!("bg:token:{}", token), r#"{"requestId":"bgr_raw","workspaceId":"x","policyId":null,"expiresAt":"2099-01-01T00:00:00.000Z"}"#).await.unwrap();
-    assert!(cp.break_glass_grant(&token, "x").await.is_none(), "the lookup is by hash; a raw-token key must not grant");
+    assert!(
+        cp.break_glass_grant(&token, "x").await.is_none(),
+        "the lookup is by hash; a raw-token key must not grant"
+    );
     let _: Result<(), _> = conn.del(format!("bg:token:{}", token)).await;
 
     let _: Result<(), _> = conn.del(&key).await;
@@ -535,9 +567,18 @@ async fn break_glass_grant_carries_its_scope() {
     let mut conn = valkey.as_ref().clone();
     let cp = ValkeyControlPlaneCache::new(valkey.clone());
     for (policy_id, expected) in [
-        ("wasm:pcas_exfiltration_001", BreakGlassScope::WasmRule("pcas_exfiltration_001".into())),
-        ("detector:consecutive_repeat", BreakGlassScope::Detector("consecutive_repeat".into())),
-        ("pcas_exfiltration_001", BreakGlassScope::WasmRule("pcas_exfiltration_001".into())),
+        (
+            "wasm:pcas_exfiltration_001",
+            BreakGlassScope::WasmRule("pcas_exfiltration_001".into()),
+        ),
+        (
+            "detector:consecutive_repeat",
+            BreakGlassScope::Detector("consecutive_repeat".into()),
+        ),
+        (
+            "pcas_exfiltration_001",
+            BreakGlassScope::WasmRule("pcas_exfiltration_001".into()),
+        ),
     ] {
         let token = format!("bg_{}", unique_ws("token"));
         let key = format!("bg:token:{}", sha256_hex(&token));
@@ -548,7 +589,10 @@ async fn break_glass_grant_carries_its_scope() {
             )
             .await
             .unwrap();
-        let grant = cp.break_glass_grant(&token, &ws).await.expect("a scoped token is still a grant for its workspace");
+        let grant = cp
+            .break_glass_grant(&token, &ws)
+            .await
+            .expect("a scoped token is still a grant for its workspace");
         assert_eq!(grant.scope(), expected, "policyId {policy_id}");
         let _: Result<(), _> = conn.del(&key).await;
     }
@@ -659,13 +703,19 @@ async fn calls_last_60s_counts_the_window_not_the_whole_history() {
             .record_calls_and_count_window(&session, 0, now + 7_200, 60)
             .await
             .unwrap();
-        assert_eq!(count, 0, "[{name}] the earlier burst has aged out of the window");
+        assert_eq!(
+            count, 0,
+            "[{name}] the earlier burst has aged out of the window"
+        );
 
         let count = store
             .record_calls_and_count_window(&session, 1, now + 7_200, 60)
             .await
             .unwrap();
-        assert_eq!(count, 1, "[{name}] only the fresh call is in the new window");
+        assert_eq!(
+            count, 1,
+            "[{name}] only the fresh call is in the new window"
+        );
 
         // Same TTL discipline as `tool_sequence`'s key: capped by aging out
         // entries is not the same guarantee as the key itself expiring, and
@@ -720,8 +770,7 @@ async fn response_cache_round_trips_and_preserves_wire_format() {
 
         if let Some(valkey) = valkey_conn().await {
             let mut conn = valkey.as_ref().clone();
-            let raw: Option<String> =
-                conn.get(format!("cache:response:{}", hash)).await.unwrap();
+            let raw: Option<String> = conn.get(format!("cache:response:{}", hash)).await.unwrap();
             if let Some(raw) = raw {
                 let json: serde_json::Value = serde_json::from_str(&raw).unwrap();
                 for field in ["promptTokens", "completionTokens", "cachedAt"] {
@@ -750,7 +799,15 @@ async fn standalone_learning_survives_restart() {
         let engine = RewardEngine::new();
         for _ in 0..20 {
             engine
-                .record(&store, &ws, MODEL, SOP_TIER, TASK_TYPE, success_signals(), &cfg)
+                .record(
+                    &store,
+                    &ws,
+                    MODEL,
+                    SOP_TIER,
+                    TASK_TYPE,
+                    success_signals(),
+                    &cfg,
+                )
                 .await;
         }
         store
@@ -799,10 +856,19 @@ async fn corrupt_snapshot_starts_fresh_instead_of_failing() {
     assert!(store.load_arms("anything").await.unwrap().is_empty());
 
     // And it must recover: a subsequent update overwrites the bad file.
-    store.update_arm("ws", "arm:a:b:c", 1.0, "now").await.unwrap();
+    store
+        .update_arm("ws", "arm:a:b:c", 1.0, "now")
+        .await
+        .unwrap();
     let reloaded: Arc<dyn LocalStore> = Arc::new(MemoryStore::durable_at(path.clone()));
     assert_eq!(
-        reloaded.load_arms("ws").await.unwrap().get("arm:a:b:c").unwrap().pulls,
+        reloaded
+            .load_arms("ws")
+            .await
+            .unwrap()
+            .get("arm:a:b:c")
+            .unwrap()
+            .pulls,
         1
     );
 
@@ -822,7 +888,10 @@ async fn ephemeral_store_writes_nothing() {
     .ok();
 
     let store: Arc<dyn LocalStore> = Arc::new(MemoryStore::new());
-    store.update_arm("ws", "arm:x:y:z", 1.0, "now").await.unwrap();
+    store
+        .update_arm("ws", "arm:x:y:z", 1.0, "now")
+        .await
+        .unwrap();
 
     let after = std::fs::metadata(
         std::path::PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| "/tmp".into()))
@@ -855,7 +924,15 @@ async fn upgrading_to_valkey_carries_standalone_learning() {
         let engine = RewardEngine::new();
         for _ in 0..20 {
             engine
-                .record(&local, &ws, MODEL, SOP_TIER, TASK_TYPE, success_signals(), &cfg)
+                .record(
+                    &local,
+                    &ws,
+                    MODEL,
+                    SOP_TIER,
+                    TASK_TYPE,
+                    success_signals(),
+                    &cfg,
+                )
                 .await;
         }
     }
@@ -984,9 +1061,18 @@ async fn live_control_plane_distinguishes_clear_from_blocked() {
 async fn standalone_token_and_notification_reads_are_empty() {
     let cp = NullControlPlaneCache;
     assert_eq!(cp.predict_gate_threshold("ws").await, None);
-    assert!(cp.token_baseline("ws", "claude-3-5-sonnet", "0-5k").await.is_none());
-    assert!(cp.drain_notifications(NotifyScope::Session, "s").await.is_empty());
-    assert!(cp.drain_notifications(NotifyScope::Workspace, "w").await.is_empty());
+    assert!(cp
+        .token_baseline("ws", "claude-3-5-sonnet", "0-5k")
+        .await
+        .is_none());
+    assert!(cp
+        .drain_notifications(NotifyScope::Session, "s")
+        .await
+        .is_empty());
+    assert!(cp
+        .drain_notifications(NotifyScope::Workspace, "w")
+        .await
+        .is_empty());
 }
 
 /// Draining is read-and-delete in one atomic step, so a notification is
@@ -1009,7 +1095,10 @@ async fn draining_notifications_consumes_them_once() {
     let first = cp.drain_notifications(NotifyScope::Session, &sid).await;
     assert_eq!(first.len(), 1, "first drain must yield the notification");
     let second = cp.drain_notifications(NotifyScope::Session, &sid).await;
-    assert!(second.is_empty(), "a drained notification must not reappear");
+    assert!(
+        second.is_empty(),
+        "a drained notification must not reappear"
+    );
 }
 
 /// Two processes sharing one snapshot must not erase each other's learning.
@@ -1068,8 +1157,14 @@ async fn backends_agree_within_epsilon() {
     let now = chrono::Utc::now().to_rfc3339();
 
     for r in &rewards {
-        valkey_store.update_arm(&ws, &field, *r, &now).await.unwrap();
-        memory_store.update_arm(&ws, &field, *r, &now).await.unwrap();
+        valkey_store
+            .update_arm(&ws, &field, *r, &now)
+            .await
+            .unwrap();
+        memory_store
+            .update_arm(&ws, &field, *r, &now)
+            .await
+            .unwrap();
     }
 
     let v_arms = valkey_store.load_arms(&ws).await.unwrap();
@@ -1077,7 +1172,10 @@ async fn backends_agree_within_epsilon() {
     let v = v_arms.get(&field).unwrap();
     let m = m_arms.get(&field).unwrap();
 
-    assert_eq!(v.pulls, m.pulls, "pull counts are integers and must be exact");
+    assert_eq!(
+        v.pulls, m.pulls,
+        "pull counts are integers and must be exact"
+    );
     let d_alpha = (v.alpha - m.alpha).abs();
     let d_beta = (v.beta - m.beta).abs();
     eprintln!(
@@ -1087,8 +1185,14 @@ async fn backends_agree_within_epsilon() {
         d_beta,
         EPSILON
     );
-    assert!(d_alpha < EPSILON, "alpha drift {d_alpha:e} exceeds {EPSILON:e}");
-    assert!(d_beta < EPSILON, "beta drift {d_beta:e} exceeds {EPSILON:e}");
+    assert!(
+        d_alpha < EPSILON,
+        "alpha drift {d_alpha:e} exceeds {EPSILON:e}"
+    );
+    assert!(
+        d_beta < EPSILON,
+        "beta drift {d_beta:e} exceeds {EPSILON:e}"
+    );
 
     // Independently: the in-memory result is exactly the in-tree oracle, so
     // any drift is attributable to the Valkey side.
@@ -1133,8 +1237,15 @@ async fn graph_keys_are_isolated_between_workspaces() {
     let a = store.graph_members(&ws_a, &graph).await;
     let b = store.graph_members(&ws_b, &graph).await;
     assert_eq!(a.len(), 2, "tenant A sees only its own nodes");
-    assert_eq!(b, vec!["node-b1".to_string()], "tenant B sees only its own node");
-    assert!(!a.contains(&"node-b1".to_string()), "A must not see B's node");
+    assert_eq!(
+        b,
+        vec!["node-b1".to_string()],
+        "tenant B sees only its own node"
+    );
+    assert!(
+        !a.contains(&"node-b1".to_string()),
+        "A must not see B's node"
+    );
 
     // Spend must not aggregate across tenants — it feeds the budget detector.
     store.add_graph_spend(&ws_a, &graph, 5.0, 60).await;
@@ -1181,7 +1292,10 @@ async fn graph_keys_are_isolated_between_workspaces() {
     let b_drain = cp
         .drain_notifications(NotifyScope::Graph, &format!("{ws_b}:{graph}:node-a2"))
         .await;
-    assert!(b_drain.is_empty(), "B must not drain A's queue for an identically-named node");
+    assert!(
+        b_drain.is_empty(),
+        "B must not drain A's queue for an identically-named node"
+    );
     let a_drain = cp
         .drain_notifications(NotifyScope::Graph, &format!("{ws_a}:{graph}:node-a2"))
         .await;

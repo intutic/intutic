@@ -194,9 +194,7 @@ impl RewardEngine {
         let arm_key = format!("arm:{}:{}:{}", routed_model, sop_tier, task_type);
         let now = chrono::Utc::now().to_rfc3339();
 
-        let res = store
-            .update_arm(workspace_id, &arm_key, reward, &now)
-            .await;
+        let res = store.update_arm(workspace_id, &arm_key, reward, &now).await;
 
         match res {
             Ok(_) => {
@@ -269,7 +267,10 @@ impl RewardEngine {
                 self.refresh_local_ownership(store, workspace_id).await;
                 RewardMode::Local
             }
-            None => match store.claim_local_ownership(workspace_id, MARKER_TTL_SECS).await {
+            None => match store
+                .claim_local_ownership(workspace_id, MARKER_TTL_SECS)
+                .await
+            {
                 Ok(ClaimOutcome::Claimed) => {
                     // Fresh claim: drop any stale outage backlog so a later
                     // cloud takeover cannot double-count failures the local
@@ -340,7 +341,10 @@ mod tests {
             (r - NO_FAULT_BASELINE).abs() < 1e-9,
             "expected the {NO_FAULT_BASELINE} baseline, got {r}"
         );
-        assert!(r < 1.0, "a 1.0 baseline leaves no headroom for a cheapness bonus");
+        assert!(
+            r < 1.0,
+            "a 1.0 baseline leaves no headroom for a cheapness bonus"
+        );
     }
 
     #[test]
@@ -430,9 +434,7 @@ mod tests {
         // Baseline minus the full cost penalty. The asymmetry is deliberate:
         // −cost_penalty arrives at ratio 2, while +cost_penalty needs ratio→0.
         // Cheap is capped; expensive is punished fast.
-        assert!(
-            (compute_reward(&s, &cfg) - (NO_FAULT_BASELINE - cfg.cost_penalty)).abs() < 1e-9
-        );
+        assert!((compute_reward(&s, &cfg) - (NO_FAULT_BASELINE - cfg.cost_penalty)).abs() < 1e-9);
         // 100× cost → still capped.
         let s = RewardSignals {
             raw_cost_usd: 0.01,
@@ -440,9 +442,7 @@ mod tests {
             response_integrity: crate::routing::integrity::RIS_MAX,
             ..ok_signals()
         };
-        assert!(
-            (compute_reward(&s, &cfg) - (NO_FAULT_BASELINE - cfg.cost_penalty)).abs() < 1e-9
-        );
+        assert!((compute_reward(&s, &cfg) - (NO_FAULT_BASELINE - cfg.cost_penalty)).abs() < 1e-9);
     }
 
     #[test]

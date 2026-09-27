@@ -230,7 +230,11 @@ struct HeartbeatBody {
 /// without a running server, same discipline as `gateway::token_allowed`.
 /// SOP status is passed in rather than read from inside this function, so
 /// purity holds regardless of what `sops::sop_status_snapshot` does.
-fn build_heartbeat_body(uptime_seconds: u64, sop_count: Option<u32>, sop_hash: Option<String>) -> HeartbeatBody {
+fn build_heartbeat_body(
+    uptime_seconds: u64,
+    sop_count: Option<u32>,
+    sop_hash: Option<String>,
+) -> HeartbeatBody {
     HeartbeatBody {
         status: "online",
         proxy_version: env!("CARGO_PKG_VERSION"),
@@ -266,7 +270,9 @@ fn should_self_rotate(key_rotated_at: Option<&str>, rotation_interval: Duration)
         return false;
     };
     let age = chrono::Utc::now().signed_duration_since(parsed.with_timezone(&chrono::Utc));
-    age.to_std().map(|age| age >= rotation_interval).unwrap_or(false)
+    age.to_std()
+        .map(|age| age >= rotation_interval)
+        .unwrap_or(false)
 }
 
 /// Writes `token` to `path` via write-then-rename: the temp file is written
@@ -334,7 +340,10 @@ pub fn spawn_heartbeat_loop(http_client: Arc<reqwest::Client>, cfg: HeartbeatCon
                     if let Some(rotation_interval) = rotation_interval {
                         match resp.json::<HeartbeatResponse>().await {
                             Ok(parsed) => {
-                                if should_self_rotate(parsed.key_rotated_at.as_deref(), rotation_interval) {
+                                if should_self_rotate(
+                                    parsed.key_rotated_at.as_deref(),
+                                    rotation_interval,
+                                ) {
                                     self_rotate(
                                         &http_client,
                                         &self_rotate_url,
@@ -476,13 +485,20 @@ mod tests {
     #[test]
     fn heartbeat_body_omits_sop_fields_when_none() {
         let json = serde_json::to_value(build_heartbeat_body(1, None, None)).unwrap();
-        assert!(json.get("sopCount").is_none(), "None must omit the key, not null it");
-        assert!(json.get("sopHash").is_none(), "None must omit the key, not null it");
+        assert!(
+            json.get("sopCount").is_none(),
+            "None must omit the key, not null it"
+        );
+        assert!(
+            json.get("sopHash").is_none(),
+            "None must omit the key, not null it"
+        );
     }
 
     #[test]
     fn heartbeat_body_includes_sop_fields_when_present() {
-        let json = serde_json::to_value(build_heartbeat_body(7, Some(3), Some("abc123".into()))).unwrap();
+        let json =
+            serde_json::to_value(build_heartbeat_body(7, Some(3), Some("abc123".into()))).unwrap();
         assert_eq!(json["sopCount"], 3);
         assert_eq!(json["sopHash"], "abc123");
     }
@@ -567,7 +583,10 @@ mod tests {
         //    step 4); a set value is picked up verbatim when the file does
         //    not exist (ENOENT falls back silently, gateway_token unchanged
         //    — see step 9 below for the explicit assertion of that).
-        std::env::set_var("INTUTIC_GATEWAY_TOKEN_STATE_FILE", "/tmp/gateway-token-state");
+        std::env::set_var(
+            "INTUTIC_GATEWAY_TOKEN_STATE_FILE",
+            "/tmp/gateway-token-state",
+        );
         assert_eq!(
             HeartbeatConfig::from_env().unwrap().token_state_file,
             Some(PathBuf::from("/tmp/gateway-token-state"))
@@ -632,7 +651,10 @@ mod tests {
             "https://cp.example.com/".trim_end_matches('/'),
             "gw_abc"
         );
-        assert_eq!(joined, "https://cp.example.com/api/v1/gateways/gw_abc/heartbeat");
+        assert_eq!(
+            joined,
+            "https://cp.example.com/api/v1/gateways/gw_abc/heartbeat"
+        );
     }
 
     #[test]
@@ -642,7 +664,10 @@ mod tests {
             "https://cp.example.com/".trim_end_matches('/'),
             "gw_abc"
         );
-        assert_eq!(joined, "https://cp.example.com/api/v1/gateways/gw_abc/self-rotate");
+        assert_eq!(
+            joined,
+            "https://cp.example.com/api/v1/gateways/gw_abc/self-rotate"
+        );
     }
 
     #[test]
@@ -663,7 +688,8 @@ mod tests {
         assert!(should_self_rotate(Some(&stale.to_rfc3339()), interval));
 
         // Exactly at the boundary counts as due (>=), not "not yet."
-        let boundary = chrono::Utc::now() - chrono::Duration::days(30) - chrono::Duration::seconds(5);
+        let boundary =
+            chrono::Utc::now() - chrono::Duration::days(30) - chrono::Duration::seconds(5);
         assert!(should_self_rotate(Some(&boundary.to_rfc3339()), interval));
     }
 
@@ -682,9 +708,13 @@ mod tests {
     fn heartbeat_response_deserializes_key_rotated_at() {
         let json = serde_json::json!({ "ok": true, "desiredConfigVersion": 0, "keyRotatedAt": "2026-08-13T00:00:00.000Z" });
         let parsed: HeartbeatResponse = serde_json::from_value(json).unwrap();
-        assert_eq!(parsed.key_rotated_at.as_deref(), Some("2026-08-13T00:00:00.000Z"));
+        assert_eq!(
+            parsed.key_rotated_at.as_deref(),
+            Some("2026-08-13T00:00:00.000Z")
+        );
 
-        let json_null = serde_json::json!({ "ok": true, "desiredConfigVersion": 0, "keyRotatedAt": null });
+        let json_null =
+            serde_json::json!({ "ok": true, "desiredConfigVersion": 0, "keyRotatedAt": null });
         let parsed_null: HeartbeatResponse = serde_json::from_value(json_null).unwrap();
         assert_eq!(parsed_null.key_rotated_at, None);
     }

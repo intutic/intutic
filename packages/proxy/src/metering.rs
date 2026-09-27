@@ -139,7 +139,10 @@ mod check_model_allowed_tests {
 
     #[test]
     fn a_model_on_the_list_is_allowed() {
-        let allowed = vec!["claude-sonnet-4-5".to_string(), "claude-opus-4-1".to_string()];
+        let allowed = vec![
+            "claude-sonnet-4-5".to_string(),
+            "claude-opus-4-1".to_string(),
+        ];
         assert!(check_model_allowed("claude-sonnet-4-5", Some(&allowed), &[]).is_ok());
         assert!(check_model_allowed("claude-opus-4-1", Some(&allowed), &[]).is_ok());
     }

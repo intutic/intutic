@@ -194,9 +194,10 @@ pub fn gate_response(
     }
 
     let Some(body) = body else {
-        return cfg
-            .fail_closed
-            .then_some(Denial { reason: DenialReason::Unparseable, block_index: 0 });
+        return cfg.fail_closed.then_some(Denial {
+            reason: DenialReason::Unparseable,
+            block_index: 0,
+        });
     };
 
     // Shared with the routing-integrity scorer rather than reimplemented: it
@@ -214,7 +215,10 @@ pub fn gate_response(
     hits.sort();
     hits.dedup();
 
-    Some(Denial { reason: DenialReason::Tools(hits), block_index: 0 })
+    Some(Denial {
+        reason: DenialReason::Tools(hits),
+        block_index: 0,
+    })
 }
 
 /// Evaluate one SSE line, before it is forwarded.
@@ -428,8 +432,14 @@ mod tests {
             "the refusal body still contains a tool call: {out}"
         );
         let rendered = out.to_string();
-        assert!(rendered.contains("bash"), "the refusal must name the tool it blocked");
-        assert!(!rendered.contains("rm -rf /"), "the refusal leaked the blocked arguments");
+        assert!(
+            rendered.contains("bash"),
+            "the refusal must name the tool it blocked"
+        );
+        assert!(
+            !rendered.contains("rm -rf /"),
+            "the refusal leaked the blocked arguments"
+        );
 
         let openai_out = refusal_body(WireProvider::OpenAI, "gpt-x", &d);
         assert!(
@@ -497,7 +507,10 @@ mod tests {
 
     #[test]
     fn disabled_gate_never_fires() {
-        let off = ResponseGateConfig { enabled: false, fail_closed: true };
+        let off = ResponseGateConfig {
+            enabled: false,
+            fail_closed: true,
+        };
         let body = anthropic_response("bash");
         assert!(gate_response(&off, Some(&body), &denied()).is_none());
         assert!(gate_response(&off, None, &denied()).is_none());
@@ -511,7 +524,10 @@ mod tests {
         let d = gate_response(&cfg(), None, &denied()).expect("default must fail closed");
         assert_eq!(d.reason, DenialReason::Unparseable);
 
-        let open = ResponseGateConfig { enabled: true, fail_closed: false };
+        let open = ResponseGateConfig {
+            enabled: true,
+            fail_closed: false,
+        };
         assert!(gate_response(&open, None, &denied()).is_none());
     }
 
@@ -576,25 +592,40 @@ mod tests {
         let d = gate_stream_line(&cfg(), ANTHROPIC_TOOL_LINE, &denied()).unwrap();
         let tail = refusal_tail(WireProvider::Anthropic, &d);
 
-        assert!(tail.contains("event: message_stop"), "stream never terminates: {tail}");
-        assert!(!tail.contains("\"type\":\"tool_use\""), "the tail re-emitted the tool call");
+        assert!(
+            tail.contains("event: message_stop"),
+            "stream never terminates: {tail}"
+        );
+        assert!(
+            !tail.contains("\"type\":\"tool_use\""),
+            "the tail re-emitted the tool call"
+        );
 
         let mut payloads = 0;
         for line in tail.lines() {
-            let Some(data) = line.strip_prefix("data: ") else { continue };
+            let Some(data) = line.strip_prefix("data: ") else {
+                continue;
+            };
             payloads += 1;
             let v: Value = serde_json::from_str(data)
                 .unwrap_or_else(|e| panic!("tail emitted invalid JSON ({e}): {data}"));
             // Every block event must carry the withheld block's index, never 0
             // — index 0 belongs to the text the model already finished.
             if let Some(i) = v.get("index") {
-                assert_eq!(i.as_u64(), Some(1), "tail wrote at the wrong block index: {data}");
+                assert_eq!(
+                    i.as_u64(),
+                    Some(1),
+                    "tail wrote at the wrong block index: {data}"
+                );
             }
         }
         assert_eq!(payloads, 5, "unexpected Anthropic tail shape: {tail}");
 
         // Each SSE event must be blank-line separated.
-        assert!(tail.ends_with("\n\n"), "tail does not close its last event: {tail:?}");
+        assert!(
+            tail.ends_with("\n\n"),
+            "tail does not close its last event: {tail:?}"
+        );
     }
 
     #[test]
@@ -602,22 +633,37 @@ mod tests {
         let d = gate_stream_line(&cfg(), OPENAI_TOOL_LINE, &denied()).unwrap();
         let tail = refusal_tail(WireProvider::OpenAI, &d);
 
-        assert!(tail.ends_with("data: [DONE]\n\n"), "stream never terminates: {tail}");
-        assert!(!tail.contains("tool_calls"), "the tail re-emitted the tool call");
+        assert!(
+            tail.ends_with("data: [DONE]\n\n"),
+            "stream never terminates: {tail}"
+        );
+        assert!(
+            !tail.contains("tool_calls"),
+            "the tail re-emitted the tool call"
+        );
 
         let mut finish_reasons = Vec::new();
         for line in tail.lines() {
-            let Some(data) = line.strip_prefix("data: ") else { continue };
+            let Some(data) = line.strip_prefix("data: ") else {
+                continue;
+            };
             if data == "[DONE]" {
                 continue;
             }
             let v: Value = serde_json::from_str(data)
                 .unwrap_or_else(|e| panic!("tail emitted invalid JSON ({e}): {data}"));
             finish_reasons.push(
-                v["choices"][0]["finish_reason"].as_str().unwrap_or("null").to_string(),
+                v["choices"][0]["finish_reason"]
+                    .as_str()
+                    .unwrap_or("null")
+                    .to_string(),
             );
         }
-        assert_eq!(finish_reasons, vec!["null", "stop"], "unexpected OpenAI tail shape: {tail}");
+        assert_eq!(
+            finish_reasons,
+            vec!["null", "stop"],
+            "unexpected OpenAI tail shape: {tail}"
+        );
     }
 
     /// Non-streaming Responses was blind too, and for a different reason than
@@ -637,7 +683,10 @@ mod tests {
     /// And the refusal body it is replaced with must be a Responses body.
     #[test]
     fn responses_refusal_body_is_a_response_object_with_no_tool_call() {
-        let d = Denial { reason: DenialReason::Tools(vec!["Bash".into()]), block_index: 0 };
+        let d = Denial {
+            reason: DenialReason::Tools(vec!["Bash".into()]),
+            block_index: 0,
+        };
         let out = refusal_body(WireProvider::OpenAIResponses, "gpt-5", &d);
         assert_eq!(out["object"], "response");
         assert_eq!(out["output"][0]["content"][0]["type"], "output_text");
@@ -646,8 +695,14 @@ mod tests {
             .unwrap()
             .contains("Blocked tool call"));
         let s = serde_json::to_string(&out).unwrap();
-        assert!(!s.contains("function_call"), "the refusal carried an executable call: {s}");
-        assert!(!s.contains("choices"), "emitted a chat-completions body: {s}");
+        assert!(
+            !s.contains("function_call"),
+            "the refusal carried an executable call: {s}"
+        );
+        assert!(
+            !s.contains("choices"),
+            "emitted a chat-completions body: {s}"
+        );
     }
 
     // ── OpenAI Responses (Codex CLI) ──────────────────────────────────────
@@ -711,18 +766,35 @@ mod tests {
             tail.contains("event: response.completed"),
             "stream never terminates in the Responses shape: {tail}"
         );
-        assert!(!tail.contains("[DONE]"), "emitted the chat-completions sentinel: {tail}");
-        assert!(!tail.contains("chat.completion"), "emitted a chat-completions chunk: {tail}");
-        assert!(!tail.contains("function_call"), "the tail re-emitted the tool call");
-        assert!(!tail.contains("tool_calls"), "the tail re-emitted the tool call");
-        assert!(tail.ends_with("\n\n"), "tail does not close its last event: {tail:?}");
+        assert!(
+            !tail.contains("[DONE]"),
+            "emitted the chat-completions sentinel: {tail}"
+        );
+        assert!(
+            !tail.contains("chat.completion"),
+            "emitted a chat-completions chunk: {tail}"
+        );
+        assert!(
+            !tail.contains("function_call"),
+            "the tail re-emitted the tool call"
+        );
+        assert!(
+            !tail.contains("tool_calls"),
+            "the tail re-emitted the tool call"
+        );
+        assert!(
+            tail.ends_with("\n\n"),
+            "tail does not close its last event: {tail:?}"
+        );
         assert_payloads_parse(&tail);
 
         // The refusal claims the index the withheld item had, and carries the
         // message the agent is supposed to read.
         let mut types = Vec::new();
         for line in tail.lines() {
-            let Some(data) = line.strip_prefix("data: ") else { continue };
+            let Some(data) = line.strip_prefix("data: ") else {
+                continue;
+            };
             let v: Value = serde_json::from_str(data).unwrap();
             if let Some(t) = v["type"].as_str() {
                 types.push(t.to_string());
@@ -744,7 +816,10 @@ mod tests {
             ],
             "unexpected Responses tail sequence"
         );
-        assert!(tail.contains("Blocked tool call"), "the agent is not told why");
+        assert!(
+            tail.contains("Blocked tool call"),
+            "the agent is not told why"
+        );
     }
 
     /// Composition, on the shape where the gate used to see nothing at all: the
@@ -762,9 +837,18 @@ mod tests {
         ];
         let (sse, tripped) = replay(&lines, WireProvider::OpenAIResponses);
         assert!(tripped, "the denied call was never caught");
-        assert!(!sse.contains("function_call"), "the denied call reached the client: {sse}");
-        assert!(!sse.contains("rm -rf"), "the arguments reached the client: {sse}");
-        assert!(sse.contains("Let me run that."), "text before the call was dropped");
+        assert!(
+            !sse.contains("function_call"),
+            "the denied call reached the client: {sse}"
+        );
+        assert!(
+            !sse.contains("rm -rf"),
+            "the arguments reached the client: {sse}"
+        );
+        assert!(
+            sse.contains("Let me run that."),
+            "text before the call was dropped"
+        );
         assert!(
             sse.contains("event: response.completed"),
             "the cut stream never terminates: {sse}"
@@ -806,7 +890,9 @@ mod tests {
     /// Every `data:` payload in an SSE body must be valid JSON or `[DONE]`.
     fn assert_payloads_parse(sse: &str) {
         for line in sse.lines() {
-            let Some(data) = line.strip_prefix("data: ") else { continue };
+            let Some(data) = line.strip_prefix("data: ") else {
+                continue;
+            };
             if data == "[DONE]" {
                 continue;
             }
@@ -846,11 +932,26 @@ mod tests {
         );
 
         assert!(tripped, "the gate never fired");
-        assert!(!sse.contains("tool_use"), "the tool-use event reached the client: {sse}");
-        assert!(!sse.contains("rm -rf /"), "the tool arguments reached the client: {sse}");
-        assert!(sse.contains("I will run it."), "text emitted before the call was dropped");
-        assert!(sse.contains("event: message_stop"), "stream never terminates: {sse}");
-        assert!(sse.contains("[Intutic] Blocked tool call"), "no in-band reason: {sse}");
+        assert!(
+            !sse.contains("tool_use"),
+            "the tool-use event reached the client: {sse}"
+        );
+        assert!(
+            !sse.contains("rm -rf /"),
+            "the tool arguments reached the client: {sse}"
+        );
+        assert!(
+            sse.contains("I will run it."),
+            "text emitted before the call was dropped"
+        );
+        assert!(
+            sse.contains("event: message_stop"),
+            "stream never terminates: {sse}"
+        );
+        assert!(
+            sse.contains("[Intutic] Blocked tool call"),
+            "no in-band reason: {sse}"
+        );
         assert_payloads_parse(&sse);
 
         // The refusal opens block 1 — the index the tool wanted — and closes
@@ -864,7 +965,11 @@ mod tests {
             .filter(|v| v.get("type").and_then(|t| t.as_str()) == Some("content_block_stop"))
             .filter_map(|v| v.get("index").and_then(|i| i.as_u64()))
             .collect();
-        assert_eq!(stops, vec![0, 1], "blocks were not opened and closed once each: {sse}");
+        assert_eq!(
+            stops,
+            vec![0, 1],
+            "blocks were not opened and closed once each: {sse}"
+        );
     }
 
     #[test]
@@ -884,11 +989,26 @@ mod tests {
         );
 
         assert!(tripped, "the gate never fired");
-        assert!(!sse.contains("tool_calls"), "the tool-call delta reached the client: {sse}");
-        assert!(!sse.contains("rm -rf /"), "the tool arguments reached the client: {sse}");
-        assert!(sse.contains("I will run it."), "text emitted before the call was dropped");
-        assert!(sse.trim_end().ends_with("data: [DONE]"), "stream never terminates: {sse}");
-        assert!(sse.contains("[Intutic] Blocked tool call"), "no in-band reason: {sse}");
+        assert!(
+            !sse.contains("tool_calls"),
+            "the tool-call delta reached the client: {sse}"
+        );
+        assert!(
+            !sse.contains("rm -rf /"),
+            "the tool arguments reached the client: {sse}"
+        );
+        assert!(
+            sse.contains("I will run it."),
+            "text emitted before the call was dropped"
+        );
+        assert!(
+            sse.trim_end().ends_with("data: [DONE]"),
+            "stream never terminates: {sse}"
+        );
+        assert!(
+            sse.contains("[Intutic] Blocked tool call"),
+            "no in-band reason: {sse}"
+        );
         assert_payloads_parse(&sse);
     }
 
@@ -917,7 +1037,10 @@ mod tests {
         assert!(d.log_message().contains("bash"));
         assert!(d.agent_message().contains("bash"));
 
-        let u = Denial { reason: DenialReason::Unparseable, block_index: 0 };
+        let u = Denial {
+            reason: DenialReason::Unparseable,
+            block_index: 0,
+        };
         assert!(u.log_message().contains("UNAUTHORIZED_TOOL"));
         assert!(!u.agent_message().is_empty());
     }

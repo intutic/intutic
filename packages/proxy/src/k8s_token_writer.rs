@@ -240,7 +240,10 @@ mod tests {
             "gw-secret",
             "INTUTIC_GATEWAY_TOKEN",
         );
-        writer.patch_token("gwk_new_rotated_token").await.expect("patch succeeds");
+        writer
+            .patch_token("gwk_new_rotated_token")
+            .await
+            .expect("patch succeeds");
     }
 
     #[tokio::test]
@@ -256,7 +259,14 @@ mod tests {
             .mount(&server)
             .await;
 
-        let writer = K8sSecretWriter::new(server.uri(), "tok", None, "gw-ns", "gw-secret", "MY_TOKEN_KEY");
+        let writer = K8sSecretWriter::new(
+            server.uri(),
+            "tok",
+            None,
+            "gw-ns",
+            "gw-secret",
+            "MY_TOKEN_KEY",
+        );
         writer.patch_token("gwk_x").await.expect("patch succeeds");
     }
 
@@ -268,8 +278,18 @@ mod tests {
             .mount(&server)
             .await;
 
-        let writer = K8sSecretWriter::new(server.uri(), "tok", None, "gw-ns", "gw-secret", "INTUTIC_GATEWAY_TOKEN");
+        let writer = K8sSecretWriter::new(
+            server.uri(),
+            "tok",
+            None,
+            "gw-ns",
+            "gw-secret",
+            "INTUTIC_GATEWAY_TOKEN",
+        );
         let err = writer.patch_token("gwk_x").await.unwrap_err();
-        assert!(err.contains("403"), "error should surface the status code: {err}");
+        assert!(
+            err.contains("403"),
+            "error should surface the status code: {err}"
+        );
     }
 }

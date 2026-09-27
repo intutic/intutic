@@ -53,7 +53,9 @@ async fn non_streaming_response_calls_finalize_only_never_chunk() {
     let cp = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/api/v1/policy/check"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "action": "allow" })))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({ "action": "allow" })),
+        )
         .mount(&cp)
         .await;
     // Deliberately NOT mocking /api/v1/judge/chunk: a call there falls
@@ -80,7 +82,8 @@ async fn non_streaming_response_calls_finalize_only_never_chunk() {
     std::env::set_var("JUDGE_FINALIZE_DEADLINE_MS", "0");
 
     let config: intutic_proxy::config::ProxyConfig =
-        serde_yaml::from_str("model_list: []\nintutic_settings: {}\n").expect("minimal config parses");
+        serde_yaml::from_str("model_list: []\nintutic_settings: {}\n")
+            .expect("minimal config parses");
     let state = intutic_proxy::proxy::AppState {
         config,
         wasm_registry: intutic_proxy::wasm::registry::PluginRegistry::new(None)
@@ -93,7 +96,9 @@ async fn non_streaming_response_calls_finalize_only_never_chunk() {
         context_snapshot_rate: 0.0,
     };
     let app = intutic_proxy::router::build_router(state);
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
     let addr = listener.local_addr().expect("addr");
     tokio::spawn(async move {
         axum::serve(listener, app).await.ok();
@@ -105,7 +110,11 @@ async fn non_streaming_response_calls_finalize_only_never_chunk() {
         .post(format!("http://{}/v1/chat/completions", addr))
         .header(
             "Authorization",
-            concat!("Bearer vk_", "0123456789abcdef0123456789abcdef", "_ws_nonstream_test"),
+            concat!(
+                "Bearer vk_",
+                "0123456789abcdef0123456789abcdef",
+                "_ws_nonstream_test"
+            ),
         )
         .header("x-workspace-id", "ws_nonstream_test")
         .header("x-session-id", "ses_nonstream_test")
@@ -121,10 +130,7 @@ async fn non_streaming_response_calls_finalize_only_never_chunk() {
     let body = res.text().await.expect("body reads");
     assert!(status.is_success(), "proxy returned {status}: {body}");
 
-    assert!(
-        body.contains("First paragraph about the deploy."),
-        "{body}"
-    );
+    assert!(body.contains("First paragraph about the deploy."), "{body}");
     assert!(
         body.contains("All three paragraphs verified clean in one pass."),
         "expected the finalize synthesis spliced into the response body:\n{body}"

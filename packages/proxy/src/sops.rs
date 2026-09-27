@@ -33,13 +33,13 @@
 //! between an agent and a capability. Enforcement is the detectors and the
 //! WASM rules, which do not consult the role. See ADR-009.
 
+use crate::store::{LocalStore, PinScope, PinnedSopBlock};
+use crate::wasm::context::RiskLevel;
+use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
-use crate::store::{LocalStore, PinScope, PinnedSopBlock};
-use crate::wasm::context::RiskLevel;
-use serde::Serialize;
 
 /// How long a resolved set is reused before the directory is re-read.
 ///
@@ -227,7 +227,7 @@ impl Sop {
             return false;
         }
         let role = role.to_ascii_lowercase();
-        self.roles.iter().any(|r| *r == role)
+        self.roles.contains(&role)
     }
 }
 
@@ -269,7 +269,10 @@ impl FrontMatter {
     /// author believes is active, so the text is kept as policy prose rather
     /// than discarded.
     fn body_only(raw: &str) -> Self {
-        Self { body: raw.trim().to_string(), ..Self::default() }
+        Self {
+            body: raw.trim().to_string(),
+            ..Self::default()
+        }
     }
 }
 
@@ -338,7 +341,11 @@ fn parse_front_matter(raw: &str) -> FrontMatter {
             .flat_map(|v| v.split(','))
             .map(|r| {
                 let t = r.trim().trim_matches(['"', '\'', '[', ']']).to_string();
-                if lower { t.to_ascii_lowercase() } else { t }
+                if lower {
+                    t.to_ascii_lowercase()
+                } else {
+                    t
+                }
             })
             .filter(|r| !r.is_empty())
             .collect()
@@ -459,7 +466,12 @@ fn parse_items<T>(
                 vec![v.to_string()]
             }
         })
-        .map(|r| r.trim().trim_matches(['"', '\'', '[', ']']).trim().to_string())
+        .map(|r| {
+            r.trim()
+                .trim_matches(['"', '\'', '[', ']'])
+                .trim()
+                .to_string()
+        })
         .filter(|r| !r.is_empty())
     {
         match f(&raw) {
@@ -505,7 +517,9 @@ fn parse_count_bound(raw: &str) -> Result<(String, usize), String> {
 /// it were real" failure. So the rule is "these two together, in this request".
 fn parse_cooccurrence(raw: &str) -> Result<(String, String), String> {
     let Some((lhs, rhs)) = raw.split_once(',') else {
-        return Err(format!("{raw:?}: expected `taint(), token` — e.g. `secrets(), action:http_post`"));
+        return Err(format!(
+            "{raw:?}: expected `taint(), token` — e.g. `secrets(), action:http_post`"
+        ));
     };
     let taint = lhs.trim().to_ascii_lowercase();
     if !matches!(taint.as_str(), "secrets()" | "pii()") {
@@ -517,7 +531,9 @@ fn parse_cooccurrence(raw: &str) -> Result<(String, String), String> {
     }
     let token = rhs.trim();
     if token.is_empty() {
-        return Err(format!("{raw:?}: the right side must name a tool or action"));
+        return Err(format!(
+            "{raw:?}: the right side must name a tool or action"
+        ));
     }
     // The same guard `parse_ordering` and `parse_count_bound` already carry, and
     // for the same reason — it was the one of the three siblings written without
@@ -553,7 +569,12 @@ fn parse_rules(front: &str, key: &str) -> (Vec<(String, String, bool)>, Vec<Stri
         .lines()
         .filter_map(|l| l.trim().strip_prefix(key))
         .flat_map(|v| v.split(','))
-        .map(|r| r.trim().trim_matches(['"', '\'', '[', ']']).trim().to_string())
+        .map(|r| {
+            r.trim()
+                .trim_matches(['"', '\'', '[', ']'])
+                .trim()
+                .to_string()
+        })
         .filter(|r| !r.is_empty())
     {
         match parse_ordering(&raw) {
@@ -816,9 +837,18 @@ mod enforceability_tests {
     fn a_declared_risk_tier_parses_and_the_highest_wins() {
         let parse = |raw: &str| parse_front_matter(raw).risk_tier;
 
-        assert_eq!(parse("---\nrisk_tier: HIGH\n---\nbody"), Some(RiskLevel::High));
-        assert_eq!(parse("---\nrisk_tier: critical\n---\nbody"), Some(RiskLevel::Critical));
-        assert_eq!(parse("---\nrisk_tier: \"Medium\"\n---\nbody"), Some(RiskLevel::Medium));
+        assert_eq!(
+            parse("---\nrisk_tier: HIGH\n---\nbody"),
+            Some(RiskLevel::High)
+        );
+        assert_eq!(
+            parse("---\nrisk_tier: critical\n---\nbody"),
+            Some(RiskLevel::Critical)
+        );
+        assert_eq!(
+            parse("---\nrisk_tier: \"Medium\"\n---\nbody"),
+            Some(RiskLevel::Medium)
+        );
 
         // Unstated is None, not a silent Low — the caller renders the default,
         // so "declared low" and "declared nothing" stay distinguishable here.
@@ -833,9 +863,15 @@ mod enforceability_tests {
     /// Two SOPs applying to one role: the work is as risky as the riskiest.
     #[test]
     fn the_highest_declared_band_wins_across_sops() {
-        let mut low = Sop { risk_tier: Some(RiskLevel::Low), ..Default::default() };
+        let mut low = Sop {
+            risk_tier: Some(RiskLevel::Low),
+            ..Default::default()
+        };
         low.roles = vec!["implementer".into()];
-        let mut high = Sop { risk_tier: Some(RiskLevel::Critical), ..Default::default() };
+        let mut high = Sop {
+            risk_tier: Some(RiskLevel::Critical),
+            ..Default::default()
+        };
         high.roles = vec!["implementer".into()];
 
         let best = [low, high]
@@ -866,26 +902,35 @@ mod enforceability_tests {
     #[test]
     fn an_ordering_only_sop_counts_as_enforceable() {
         let ordering = Sop {
-            requires_before: vec![(
-                "action:run_tests".into(),
-                "action:deploy".into(),
-                false,
-            )],
+            requires_before: vec![("action:run_tests".into(), "action:deploy".into(), false)],
             ..Default::default()
         };
-        assert!(is_enforceable(&ordering), "requires_before enforces an order");
+        assert!(
+            is_enforceable(&ordering),
+            "requires_before enforces an order"
+        );
 
         let ceiling = Sop {
             max_calls: vec![("action:deploy".into(), 1usize)],
             ..Default::default()
         };
-        assert!(is_enforceable(&ceiling), "max_calls is a hard ceiling that kills");
+        assert!(
+            is_enforceable(&ceiling),
+            "max_calls is a hard ceiling that kills"
+        );
 
         let forbid = Sop {
-            forbid_after: vec![("action:secret_read".into(), "action:http_post".into(), false)],
+            forbid_after: vec![(
+                "action:secret_read".into(),
+                "action:http_post".into(),
+                false,
+            )],
             ..Default::default()
         };
-        assert!(is_enforceable(&forbid), "forbid_after is the exfiltration rule");
+        assert!(
+            is_enforceable(&forbid),
+            "forbid_after is the exfiltration rule"
+        );
 
         let taint = Sop {
             forbid_with: vec![("secrets()".into(), "action:http_post".into())],
@@ -922,7 +967,10 @@ mod enforceability_tests {
         );
 
         let msg = inert_sops_warning(&SopsSource::NotFound, &["tiers".to_string()], true);
-        assert!(msg.contains("risk_tier"), "the warning must name the field: {msg}");
+        assert!(
+            msg.contains("risk_tier"),
+            "the warning must name the field: {msg}"
+        );
         assert!(
             msg.contains("WASM"),
             "the warning must say where it does reach: {msg}"
@@ -1019,7 +1067,11 @@ fn inert_sops_warning(source: &SopsSource, titles: &[String], any_risk_tier: boo
 fn report_resolution(source: &SopsSource, cwd: &Path, sops: &[Sop]) {
     let count = sops.len();
     if count == 0 {
-        tracing::warn!(source = source.label(), "{}", empty_sops_warning(source, cwd));
+        tracing::warn!(
+            source = source.label(),
+            "{}",
+            empty_sops_warning(source, cwd)
+        );
         return;
     }
 
@@ -1035,7 +1087,11 @@ fn report_resolution(source: &SopsSource, cwd: &Path, sops: &[Sop]) {
             .iter()
             .filter(|s| !is_enforceable(s))
             .any(|s| s.risk_tier.is_some());
-        tracing::warn!(source = source.label(), "{}", inert_sops_warning(source, &inert, any_risk_tier));
+        tracing::warn!(
+            source = source.label(),
+            "{}",
+            inert_sops_warning(source, &inert, any_risk_tier)
+        );
         return;
     }
     if !inert.is_empty() {
@@ -1186,7 +1242,8 @@ async fn fetch_workspace_sops(
             // since the fetch (or no version is readable on either side): serve
             // the cache. A bumped version — a guardrail promoted or retired —
             // refetches now rather than up to CACHE_TTL later (TD-474 item 5).
-            let version_moved = matches!((policy_version, c.version), (Some(now), Some(then)) if now != then);
+            let version_moved =
+                matches!((policy_version, c.version), (Some(now), Some(then)) if now != then);
             if c.read_at.elapsed() < CACHE_TTL && !version_moved {
                 return c.sops.clone();
             }
@@ -1231,7 +1288,11 @@ async fn fetch_workspace_sops(
             let mut cache = workspace_cache().lock().unwrap_or_else(|p| p.into_inner());
             cache.insert(
                 workspace_id.to_string(),
-                WorkspaceCached { sops: sops.clone(), read_at: Instant::now(), version: policy_version },
+                WorkspaceCached {
+                    sops: sops.clone(),
+                    read_at: Instant::now(),
+                    version: policy_version,
+                },
             );
             sops
         }
@@ -1425,7 +1486,9 @@ pub struct GovernanceFields {
 /// declared fields out of the live `RequestContext` entirely, rather than
 /// relying on every detector to separately know to ignore them.
 pub fn split_by_mode(sops: &[Sop]) -> (Vec<Sop>, Vec<Sop>) {
-    sops.iter().cloned().partition(|s| s.mode != SopMode::Shadow)
+    sops.iter()
+        .cloned()
+        .partition(|s| s.mode != SopMode::Shadow)
 }
 
 /// One shadow-mode SOP's outcome on one request.
@@ -1470,7 +1533,11 @@ pub fn governance_fields_from(sops: &[Sop], role: &str) -> GovernanceFields {
     forbid_with.dedup();
 
     GovernanceFields {
-        risk_tier: sops.iter().filter(|s| s.applies_to(role)).filter_map(|s| s.risk_tier).max(),
+        risk_tier: sops
+            .iter()
+            .filter(|s| s.applies_to(role))
+            .filter_map(|s| s.risk_tier)
+            .max(),
         denied_tools: collect_denies(sops, role),
         denied_tool_sources: collect_deny_sources(sops, role),
         plan_steps: collect_plan_steps(sops, role),
@@ -1531,7 +1598,12 @@ pub const NARROWED_TO_NOTHING: &str = "<none: workspace list disjoint from org c
 ///   skipped because there was nothing to narrow);
 /// - both, intersecting → the survivors;
 /// - both, disjoint → [`NARROWED_TO_NOTHING`], with a warning naming both.
-fn apply_org_ceiling(field: &str, workspace: Vec<String>, org: Vec<String>, survives: impl Fn(&String) -> bool) -> Vec<String> {
+fn apply_org_ceiling(
+    field: &str,
+    workspace: Vec<String>,
+    org: Vec<String>,
+    survives: impl Fn(&String) -> bool,
+) -> Vec<String> {
     if org.is_empty() {
         return workspace;
     }
@@ -1724,7 +1796,9 @@ fn collect_plan_steps(sops: &[Sop], role: &str) -> Vec<String> {
     // the org set only decides membership, never supplies the text.
     let org_set: std::collections::HashSet<String> =
         org.iter().map(|s| s.to_ascii_lowercase()).collect();
-    apply_org_ceiling("plan_steps", workspace, org, |w| org_set.contains(&w.to_ascii_lowercase()))
+    apply_org_ceiling("plan_steps", workspace, org, |w| {
+        org_set.contains(&w.to_ascii_lowercase())
+    })
 }
 
 fn collect_harnesses(sops: &[Sop], role: &str) -> Vec<String> {
@@ -1754,7 +1828,11 @@ fn collect_deny_sources(sops: &[Sop], role: &str) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = sops
         .iter()
         .filter(|s| s.applies_to(role))
-        .flat_map(|s| s.deny_tools.iter().map(move |t| (t.clone(), s.title.clone())))
+        .flat_map(|s| {
+            s.deny_tools
+                .iter()
+                .map(move |t| (t.clone(), s.title.clone()))
+        })
         .collect();
     out.sort();
     out.dedup();
@@ -1970,10 +2048,7 @@ pub fn inject_into_body(
                 *existing = format!("{block}\n\n{existing}");
             }
             Some(Value::Array(blocks)) => {
-                blocks.insert(
-                    0,
-                    serde_json::json!({ "type": "text", "text": block }),
-                );
+                blocks.insert(0, serde_json::json!({ "type": "text", "text": block }));
             }
             _ => {
                 obj.insert("system".into(), Value::String(block.to_string()));
@@ -1984,10 +2059,7 @@ pub fn inject_into_body(
             let Some(Value::Array(messages)) = obj.get_mut("messages") else {
                 return false;
             };
-            messages.insert(
-                0,
-                serde_json::json!({ "role": "system", "content": block }),
-            );
+            messages.insert(0, serde_json::json!({ "role": "system", "content": block }));
         }
 
         // The Responses API carries its system text in `instructions`.
@@ -2070,10 +2142,15 @@ mod mode_tests {
             mode: SopMode::Shadow,
             ..Sop::default()
         };
-        let (enforcing, shadow) =
-            split_by_mode(&[enforcing_sop.clone(), shadow_sop.clone()]);
-        assert_eq!(enforcing.iter().map(|s| &s.title).collect::<Vec<_>>(), vec!["enforcing"]);
-        assert_eq!(shadow.iter().map(|s| &s.title).collect::<Vec<_>>(), vec!["shadow"]);
+        let (enforcing, shadow) = split_by_mode(&[enforcing_sop.clone(), shadow_sop.clone()]);
+        assert_eq!(
+            enforcing.iter().map(|s| &s.title).collect::<Vec<_>>(),
+            vec!["enforcing"]
+        );
+        assert_eq!(
+            shadow.iter().map(|s| &s.title).collect::<Vec<_>>(),
+            vec!["shadow"]
+        );
     }
 
     #[test]
@@ -2111,7 +2188,10 @@ mod tests {
     // ── Per-workspace resolution (LLD #64 §6 increment 4, TD-334) ──────────
 
     fn sop_with_risk(title: &str, roles: &[&str], risk: RiskLevel) -> Sop {
-        Sop { risk_tier: Some(risk), ..sop(title, roles) }
+        Sop {
+            risk_tier: Some(risk),
+            ..sop(title, roles)
+        }
     }
 
     /// The chain `the_request_context_resolves_its_risk_tier_from_sops`
@@ -2121,7 +2201,11 @@ mod tests {
     /// the field's only producer, silently defeating every rule gated on it).
     #[test]
     fn governance_fields_from_resolves_risk_tier_from_sops() {
-        let sops = vec![sop_with_risk("deploy-policy", &["deployer"], RiskLevel::Critical)];
+        let sops = vec![sop_with_risk(
+            "deploy-policy",
+            &["deployer"],
+            RiskLevel::Critical,
+        )];
         let gov = governance_fields_from(&sops, "deployer");
         assert_eq!(gov.risk_tier, Some(RiskLevel::Critical));
 
@@ -2166,8 +2250,14 @@ mod tests {
         assert_eq!(gov.review_before, vec!["action:deploy".to_string()]);
         assert_eq!(gov.allowed_harnesses, vec!["claude-code".to_string()]);
         assert_eq!(gov.max_calls, vec![("Bash".to_string(), 3)]);
-        assert_eq!(gov.forbid_with, vec![("taint".to_string(), "token".to_string())]);
-        assert!(gov.governance_block.is_some(), "an applicable SOP with a body must render a block");
+        assert_eq!(
+            gov.forbid_with,
+            vec![("taint".to_string(), "token".to_string())]
+        );
+        assert!(
+            gov.governance_block.is_some(),
+            "an applicable SOP with a body must render a block"
+        );
 
         // And a role with no applicable SOP gets none of it.
         let gov_other = governance_fields_from(&sops, "reviewer");
@@ -2182,10 +2272,19 @@ mod tests {
     #[test]
     fn parse_sop_content_parses_front_matter_and_body() {
         let raw = "---\nroles: deployer\ndeny_tools: rm, curl\nrisk_tier: high\n---\nDo not delete production data.";
-        let parsed = parse_sop_content("my-sop".to_string(), raw, "test-source", SopScope::Workspace).expect("should parse");
+        let parsed = parse_sop_content(
+            "my-sop".to_string(),
+            raw,
+            "test-source",
+            SopScope::Workspace,
+        )
+        .expect("should parse");
         assert_eq!(parsed.title, "my-sop");
         assert_eq!(parsed.roles, vec!["deployer".to_string()]);
-        assert_eq!(parsed.deny_tools, vec!["rm".to_string(), "curl".to_string()]);
+        assert_eq!(
+            parsed.deny_tools,
+            vec!["rm".to_string(), "curl".to_string()]
+        );
         assert_eq!(parsed.risk_tier, Some(RiskLevel::High));
         assert_eq!(parsed.body, "Do not delete production data.");
     }
@@ -2196,8 +2295,16 @@ mod tests {
     #[test]
     fn parse_sop_content_keeps_a_declaration_only_sop() {
         let raw = "---\nscope_paths: infra/\n---\n";
-        let parsed = parse_sop_content("scope-only".to_string(), raw, "test-source", SopScope::Workspace);
-        assert!(parsed.is_some(), "a declaration-only SOP must not be dropped");
+        let parsed = parse_sop_content(
+            "scope-only".to_string(),
+            raw,
+            "test-source",
+            SopScope::Workspace,
+        );
+        assert!(
+            parsed.is_some(),
+            "a declaration-only SOP must not be dropped"
+        );
         assert_eq!(parsed.unwrap().scope_paths, vec!["infra/".to_string()]);
     }
 
@@ -2205,8 +2312,17 @@ mod tests {
     /// the counterpart to the declaration-only case above.
     #[test]
     fn parse_sop_content_drops_genuinely_empty_content() {
-        assert!(parse_sop_content("empty".to_string(), "", "test-source", SopScope::Workspace).is_none());
-        assert!(parse_sop_content("empty2".to_string(), "---\n---\n", "test-source", SopScope::Workspace).is_none());
+        assert!(
+            parse_sop_content("empty".to_string(), "", "test-source", SopScope::Workspace)
+                .is_none()
+        );
+        assert!(parse_sop_content(
+            "empty2".to_string(),
+            "---\n---\n",
+            "test-source",
+            SopScope::Workspace
+        )
+        .is_none());
     }
 
     /// `all_sops_for_workspace` must never fall back to the process-global set
@@ -2233,15 +2349,44 @@ mod tests {
             require_vk: true,
             ..Default::default()
         });
-        assert!(crate::gateway::requires_vk_only(), "test precondition: gateway mode must be on");
+        assert!(
+            crate::gateway::requires_vk_only(),
+            "test precondition: gateway mode must be on"
+        );
 
         let client = reqwest::Client::new();
         // No control-plane URL, no workspace, no token — every combination of
         // "cannot resolve" must return empty, never the process-global set.
-        assert!(all_sops_for_workspace(&client, None, None, None, None).await.is_empty());
-        assert!(all_sops_for_workspace(&client, Some("http://127.0.0.1:1"), None, Some("vk_x"), None).await.is_empty());
-        assert!(all_sops_for_workspace(&client, Some("http://127.0.0.1:1"), Some("unknown"), Some("vk_x"), None).await.is_empty());
-        assert!(all_sops_for_workspace(&client, Some("http://127.0.0.1:1"), Some("ws_1"), None, None).await.is_empty());
+        assert!(all_sops_for_workspace(&client, None, None, None, None)
+            .await
+            .is_empty());
+        assert!(all_sops_for_workspace(
+            &client,
+            Some("http://127.0.0.1:1"),
+            None,
+            Some("vk_x"),
+            None
+        )
+        .await
+        .is_empty());
+        assert!(all_sops_for_workspace(
+            &client,
+            Some("http://127.0.0.1:1"),
+            Some("unknown"),
+            Some("vk_x"),
+            None
+        )
+        .await
+        .is_empty());
+        assert!(all_sops_for_workspace(
+            &client,
+            Some("http://127.0.0.1:1"),
+            Some("ws_1"),
+            None,
+            None
+        )
+        .await
+        .is_empty());
     }
 
     #[test]
@@ -2312,7 +2457,10 @@ mod tests {
 
         let out = render(&sops, "reviewer").unwrap();
         assert!(out.contains("## general"));
-        assert!(!out.contains("## deploy"), "deploy policy is not this node's");
+        assert!(
+            !out.contains("## deploy"),
+            "deploy policy is not this node's"
+        );
     }
 
     #[test]
@@ -2336,11 +2484,11 @@ mod tests {
                 plan_steps: Vec::new(),
                 scope_paths: Vec::new(),
                 review_before: Vec::new(),
-            requires_before: Vec::new(),
-            forbid_after: Vec::new(),
-            mode: SopMode::default(),
-            max_calls: Vec::new(),
-            forbid_with: Vec::new(),
+                requires_before: Vec::new(),
+                forbid_after: Vec::new(),
+                mode: SopMode::default(),
+                max_calls: Vec::new(),
+                forbid_with: Vec::new(),
             })
             .collect();
         let out = render(&big, "any").unwrap();
@@ -2543,7 +2691,11 @@ mod injection_tests {
     #[test]
     fn openai_gets_a_leading_system_message() {
         let mut b = serde_json::json!({"messages": [{"role": "user", "content": "hi"}]});
-        assert!(inject_into_body(&mut b, &Protocol::OpenAIChatCompletions, BLOCK));
+        assert!(inject_into_body(
+            &mut b,
+            &Protocol::OpenAIChatCompletions,
+            BLOCK
+        ));
         let m = b["messages"].as_array().unwrap();
         assert_eq!(m.len(), 2);
         assert_eq!(m[0]["role"], "system");
@@ -2556,7 +2708,11 @@ mod injection_tests {
         // Nothing sensible to do, and inventing a messages array would send a
         // request the caller never wrote.
         let mut b = serde_json::json!({"model": "gpt-4"});
-        assert!(!inject_into_body(&mut b, &Protocol::OpenAIChatCompletions, BLOCK));
+        assert!(!inject_into_body(
+            &mut b,
+            &Protocol::OpenAIChatCompletions,
+            BLOCK
+        ));
         assert!(b.get("messages").is_none());
     }
 
@@ -2760,13 +2916,21 @@ mod discovery_tests {
         assert_eq!(
             s.requires_before,
             vec![
-                ("action:run_tests".to_string(), "action:deploy".to_string(), false),
+                (
+                    "action:run_tests".to_string(),
+                    "action:deploy".to_string(),
+                    false
+                ),
                 ("action:lint".to_string(), "action:merge".to_string(), false),
             ],
         );
         assert_eq!(
             s.forbid_after,
-            vec![("action:secret_read".to_string(), "action:http_post".to_string(), false)],
+            vec![(
+                "action:secret_read".to_string(),
+                "action:http_post".to_string(),
+                false
+            )],
         );
     }
 
@@ -2873,7 +3037,10 @@ mod discovery_tests {
     fn a_rule_naming_a_shell_command_is_rejected() {
         let err = parse_ordering("git push -> action:deploy").expect_err("must be refused");
         assert!(err.contains("shell command"), "{err}");
-        assert!(err.contains("action:"), "the message must name the vocabulary: {err}");
+        assert!(
+            err.contains("action:"),
+            "the message must name the vocabulary: {err}"
+        );
 
         // And the correct form is accepted.
         assert!(parse_ordering("action:run_tests -> action:deploy").is_ok());
@@ -2999,7 +3166,10 @@ mod discovery_tests {
                 std::slice::from_ref(&sop),
             )
         });
-        assert!(logged.contains("WARN"), "an inert SOP set must warn: {logged}");
+        assert!(
+            logged.contains("WARN"),
+            "an inert SOP set must warn: {logged}"
+        );
         assert!(
             logged.contains("Ship steps need a human"),
             "the warning must name the file an operator has to go and fix: {logged}"
@@ -3018,8 +3188,14 @@ mod discovery_tests {
                 &[enforcing_sop("enforced"), inert],
             )
         });
-        assert!(!logged.contains("WARN"), "a mixed set is not a fault: {logged}");
-        assert!(logged.contains("Reference only"), "name the advisory ones: {logged}");
+        assert!(
+            !logged.contains("WARN"),
+            "a mixed set is not a fault: {logged}"
+        );
+        assert!(
+            logged.contains("Reference only"),
+            "name the advisory ones: {logged}"
+        );
     }
 
     #[test]
@@ -3064,7 +3240,10 @@ mod discovery_tests {
                 &[enforcing_sop("a"), enforcing_sop("b"), enforcing_sop("c")],
             )
         });
-        assert!(!logged.contains("WARN"), "loading SOPs is not a fault: {logged}");
+        assert!(
+            !logged.contains("WARN"),
+            "loading SOPs is not a fault: {logged}"
+        );
         assert!(
             logged.contains(SOPS_DIR_ENV),
             "the load line must say which source won: {logged}"
@@ -3203,7 +3382,9 @@ mod harness_policy_tests {
 
     #[test]
     fn allow_harnesses_parse_and_lowercase() {
-        let fm = parse_front_matter("---\nroles: reviewer\nallow_harnesses: Claude-Code, cursor\n---\nx");
+        let fm = parse_front_matter(
+            "---\nroles: reviewer\nallow_harnesses: Claude-Code, cursor\n---\nx",
+        );
         let roles = fm.roles;
         let harnesses = fm.allow_harnesses;
         assert_eq!(roles, vec!["reviewer"]);
@@ -3224,11 +3405,11 @@ mod harness_policy_tests {
                 plan_steps: Vec::new(),
                 scope_paths: Vec::new(),
                 review_before: Vec::new(),
-            requires_before: Vec::new(),
-            forbid_after: Vec::new(),
-            mode: SopMode::default(),
-            max_calls: Vec::new(),
-            forbid_with: Vec::new(),
+                requires_before: Vec::new(),
+                forbid_after: Vec::new(),
+                mode: SopMode::default(),
+                max_calls: Vec::new(),
+                forbid_with: Vec::new(),
             },
             Sop {
                 risk_tier: None,
@@ -3241,11 +3422,11 @@ mod harness_policy_tests {
                 plan_steps: Vec::new(),
                 scope_paths: Vec::new(),
                 review_before: Vec::new(),
-            requires_before: Vec::new(),
-            forbid_after: Vec::new(),
-            mode: SopMode::default(),
-            max_calls: Vec::new(),
-            forbid_with: Vec::new(),
+                requires_before: Vec::new(),
+                forbid_after: Vec::new(),
+                mode: SopMode::default(),
+                max_calls: Vec::new(),
+                forbid_with: Vec::new(),
             },
         ];
         assert_eq!(collect_harnesses(&sops, "reviewer"), vec!["claude-code"]);
@@ -3268,7 +3449,10 @@ mod plan_step_tests {
         );
         let plan = fm.plan_steps;
         let body = fm.body;
-        assert_eq!(plan, vec!["Read", "Edit", "action:run_tests", "action:deploy"]);
+        assert_eq!(
+            plan,
+            vec!["Read", "Edit", "action:run_tests", "action:deploy"]
+        );
         assert_eq!(body, "## Policy");
     }
 
@@ -3276,7 +3460,10 @@ mod plan_step_tests {
     fn an_sop_with_no_plan_declares_none() {
         let fm = parse_front_matter("---\nroles: reviewer\n---\nx");
         let plan = fm.plan_steps;
-        assert!(plan.is_empty(), "absent must mean absent, never 'allow nothing'");
+        assert!(
+            plan.is_empty(),
+            "absent must mean absent, never 'allow nothing'"
+        );
     }
 
     /// Ordering is preserved on purpose. The set comparison does not need it,
@@ -3296,11 +3483,11 @@ mod plan_step_tests {
                 plan_steps: vec!["Read".into(), "Edit".into(), "action:deploy".into()],
                 scope_paths: Vec::new(),
                 review_before: Vec::new(),
-            requires_before: Vec::new(),
-            forbid_after: Vec::new(),
-            mode: SopMode::default(),
-            max_calls: Vec::new(),
-            forbid_with: Vec::new(),
+                requires_before: Vec::new(),
+                forbid_after: Vec::new(),
+                mode: SopMode::default(),
+                max_calls: Vec::new(),
+                forbid_with: Vec::new(),
             },
             Sop {
                 risk_tier: None,
@@ -3313,11 +3500,11 @@ mod plan_step_tests {
                 plan_steps: vec!["Grep".into()],
                 scope_paths: Vec::new(),
                 review_before: Vec::new(),
-            requires_before: Vec::new(),
-            forbid_after: Vec::new(),
-            mode: SopMode::default(),
-            max_calls: Vec::new(),
-            forbid_with: Vec::new(),
+                requires_before: Vec::new(),
+                forbid_after: Vec::new(),
+                mode: SopMode::default(),
+                max_calls: Vec::new(),
+                forbid_with: Vec::new(),
             },
         ];
         assert_eq!(
@@ -3391,17 +3578,22 @@ mod scope_and_review_tests {
 
     #[test]
     fn review_before_parses_action_tokens_and_tool_names() {
-        let fm = parse_front_matter(
-            "---\nroles: deployer\nreview_before: action:deploy, Bash\n---\nx",
-        );
+        let fm =
+            parse_front_matter("---\nroles: deployer\nreview_before: action:deploy, Bash\n---\nx");
         assert_eq!(fm.review_before, vec!["action:deploy", "Bash"]);
     }
 
     #[test]
     fn an_sop_declaring_neither_has_both_empty() {
         let fm = parse_front_matter("---\nroles: reviewer\n---\nx");
-        assert!(fm.scope_paths.is_empty(), "absent must mean absent, never 'deny everything'");
-        assert!(fm.review_before.is_empty(), "nothing is held until someone asks for it");
+        assert!(
+            fm.scope_paths.is_empty(),
+            "absent must mean absent, never 'deny everything'"
+        );
+        assert!(
+            fm.review_before.is_empty(),
+            "nothing is held until someone asks for it"
+        );
     }
 
     #[test]
@@ -3456,7 +3648,10 @@ mod scope_and_review_tests {
             forbid_with: Vec::new(),
         };
         let sops = vec![mk("packages/proxy"), mk("infra"), mk("packages/proxy")];
-        assert_eq!(collect_scope_paths(&sops, "anyone"), vec!["infra", "packages/proxy"]);
+        assert_eq!(
+            collect_scope_paths(&sops, "anyone"),
+            vec!["infra", "packages/proxy"]
+        );
     }
 
     /// An SOP whose only content is a scope must survive the empty-body guard.
@@ -3466,7 +3661,11 @@ mod scope_and_review_tests {
     fn a_scope_only_sop_is_not_discarded() {
         let dir = std::env::temp_dir().join(format!("intutic-scope-sop-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
-        std::fs::write(dir.join("scope.md"), "---\nroles: deployer\nscope_paths: infra\n---\n").unwrap();
+        std::fs::write(
+            dir.join("scope.md"),
+            "---\nroles: deployer\nscope_paths: infra\n---\n",
+        )
+        .unwrap();
         let sops = read_dir_sops(&dir);
         let _ = std::fs::remove_dir_all(&dir);
 
@@ -3478,7 +3677,11 @@ mod scope_and_review_tests {
     fn a_review_before_only_sop_is_not_discarded() {
         let dir = std::env::temp_dir().join(format!("intutic-rev-sop-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
-        std::fs::write(dir.join("hold.md"), "---\nreview_before: action:deploy\n---\n").unwrap();
+        std::fs::write(
+            dir.join("hold.md"),
+            "---\nreview_before: action:deploy\n---\n",
+        )
+        .unwrap();
         let sops = read_dir_sops(&dir);
         let _ = std::fs::remove_dir_all(&dir);
 
@@ -3507,7 +3710,10 @@ mod cross_language_fixture_tests {
         let raw = include_str!("../tests/fixtures/review-before-sop.md");
         let fm = parse_front_matter(raw);
 
-        assert_eq!(fm.review_before, vec!["action:deploy", "action:publish", "Bash"]);
+        assert_eq!(
+            fm.review_before,
+            vec!["action:deploy", "action:publish", "Bash"]
+        );
         assert_eq!(fm.scope_paths, vec!["packages/proxy", "infra/"]);
         assert_eq!(fm.roles, vec!["deployer"]);
         assert!(fm.body.starts_with("## Deploy policy"));
@@ -3542,7 +3748,10 @@ mod sop_status_snapshot_tests {
     fn fingerprint_sop_set_is_deterministic_and_order_independent() {
         let a = vec![mk("A", "rule A"), mk("B", "rule B")];
         let b = vec![mk("B", "rule B"), mk("A", "rule A")];
-        assert_eq!(fingerprint_sop_set("ws_1", &a), fingerprint_sop_set("ws_1", &b));
+        assert_eq!(
+            fingerprint_sop_set("ws_1", &a),
+            fingerprint_sop_set("ws_1", &b)
+        );
     }
 
     #[test]
@@ -3582,7 +3791,11 @@ mod sop_status_snapshot_tests {
             let mut cache = workspace_cache().lock().unwrap_or_else(|p| p.into_inner());
             cache.insert(
                 WS_A.to_string(),
-                WorkspaceCached { sops: vec![mk("A", "rule A"), mk("B", "rule B")], read_at: Instant::now(), version: None },
+                WorkspaceCached {
+                    sops: vec![mk("A", "rule A"), mk("B", "rule B")],
+                    read_at: Instant::now(),
+                    version: None,
+                },
             );
         }
         let after_fresh = sop_status_snapshot().expect("at least one fresh entry exists now");
@@ -3600,11 +3813,12 @@ mod sop_status_snapshot_tests {
                 WorkspaceCached {
                     sops: vec![mk("C", "rule C")],
                     read_at: Instant::now() - CACHE_TTL - Duration::from_secs(1),
-                version: None,
+                    version: None,
                 },
             );
         }
-        let after_stale = sop_status_snapshot().expect("still at least the fresh entry from step 1");
+        let after_stale =
+            sop_status_snapshot().expect("still at least the fresh entry from step 1");
         assert_eq!(
             after_stale.sop_count, after_fresh.sop_count,
             "a stale (past-TTL) entry must not be counted"
@@ -3613,7 +3827,10 @@ mod sop_status_snapshot_tests {
         // 3. The process-global cache path is additive too.
         {
             let mut guard = CACHE.lock().unwrap_or_else(|p| p.into_inner());
-            *guard = Some(Cached { sops: vec![mk("D", "rule D")], read_at: Instant::now() });
+            *guard = Some(Cached {
+                sops: vec![mk("D", "rule D")],
+                read_at: Instant::now(),
+            });
         }
         let after_global = sop_status_snapshot().expect("global cache entry now present");
         assert_eq!(
@@ -3641,15 +3858,25 @@ mod org_ceiling_tests {
     use super::*;
 
     fn sop(scope: SopScope, roles: &[&str]) -> Sop {
-        Sop { scope, roles: roles.iter().map(|r| r.to_string()).collect(), ..Default::default() }
+        Sop {
+            scope,
+            roles: roles.iter().map(|r| r.to_string()).collect(),
+            ..Default::default()
+        }
     }
 
     // ── allow_harnesses ──────────────────────────────────────────────
 
     #[test]
     fn org_ceiling_narrows_harnesses_by_intersection() {
-        let ws = Sop { allow_harnesses: vec!["claude-code".into(), "cursor".into()], ..sop(SopScope::Workspace, &[]) };
-        let org = Sop { allow_harnesses: vec!["claude-code".into()], ..sop(SopScope::Org, &[]) };
+        let ws = Sop {
+            allow_harnesses: vec!["claude-code".into(), "cursor".into()],
+            ..sop(SopScope::Workspace, &[])
+        };
+        let org = Sop {
+            allow_harnesses: vec!["claude-code".into()],
+            ..sop(SopScope::Org, &[])
+        };
         assert_eq!(collect_harnesses(&[ws, org], "anyone"), vec!["claude-code"]);
     }
 
@@ -3658,7 +3885,10 @@ mod org_ceiling_tests {
         // An org SOP that exists but says nothing about allow_harnesses must
         // not zero out every workspace SOP's declaration -- an empty org set
         // means "no ceiling", not "ceiling of nothing".
-        let ws = Sop { allow_harnesses: vec!["claude-code".into()], ..sop(SopScope::Workspace, &[]) };
+        let ws = Sop {
+            allow_harnesses: vec!["claude-code".into()],
+            ..sop(SopScope::Workspace, &[])
+        };
         let org = sop(SopScope::Org, &[]); // declares nothing
         assert_eq!(collect_harnesses(&[ws, org], "anyone"), vec!["claude-code"]);
     }
@@ -3668,14 +3898,23 @@ mod org_ceiling_tests {
         // An undeclared workspace list is unrestricted; the org ceiling is
         // what restricts it. Reading "nothing to narrow" as "no ceiling"
         // silently widened this case to every harness (TD-474).
-        let org = Sop { allow_harnesses: vec!["claude-code".into()], ..sop(SopScope::Org, &[]) };
+        let org = Sop {
+            allow_harnesses: vec!["claude-code".into()],
+            ..sop(SopScope::Org, &[])
+        };
         assert_eq!(collect_harnesses(&[org], "anyone"), vec!["claude-code"]);
     }
 
     #[test]
     fn a_disjoint_harness_narrowing_denies_rather_than_widening() {
-        let ws = Sop { allow_harnesses: vec!["cursor".into()], ..sop(SopScope::Workspace, &[]) };
-        let org = Sop { allow_harnesses: vec!["claude-code".into()], ..sop(SopScope::Org, &[]) };
+        let ws = Sop {
+            allow_harnesses: vec!["cursor".into()],
+            ..sop(SopScope::Workspace, &[])
+        };
+        let org = Sop {
+            allow_harnesses: vec!["claude-code".into()],
+            ..sop(SopScope::Org, &[])
+        };
         assert_eq!(
             collect_harnesses(&[ws, org], "anyone"),
             vec![NARROWED_TO_NOTHING.to_string()],
@@ -3685,9 +3924,18 @@ mod org_ceiling_tests {
 
     #[test]
     fn harnesses_still_union_within_a_single_scope() {
-        let ws_a = Sop { allow_harnesses: vec!["claude-code".into()], ..sop(SopScope::Workspace, &[]) };
-        let ws_b = Sop { allow_harnesses: vec!["cursor".into()], ..sop(SopScope::Workspace, &[]) };
-        assert_eq!(collect_harnesses(&[ws_a, ws_b], "anyone"), vec!["claude-code", "cursor"]);
+        let ws_a = Sop {
+            allow_harnesses: vec!["claude-code".into()],
+            ..sop(SopScope::Workspace, &[])
+        };
+        let ws_b = Sop {
+            allow_harnesses: vec!["cursor".into()],
+            ..sop(SopScope::Workspace, &[])
+        };
+        assert_eq!(
+            collect_harnesses(&[ws_a, ws_b], "anyone"),
+            vec!["claude-code", "cursor"]
+        );
     }
 
     // ── scope_paths ──────────────────────────────────────────────────
@@ -3696,8 +3944,14 @@ mod org_ceiling_tests {
     fn org_ceiling_narrows_scope_paths_by_containment_not_string_equality() {
         // packages/proxy/... IS inside packages/proxy -- containment, not
         // byte-equality, must be what decides survival.
-        let ws = Sop { scope_paths: vec!["infra/k8s".into(), "docs".into()], ..sop(SopScope::Workspace, &[]) };
-        let org = Sop { scope_paths: vec!["infra".into()], ..sop(SopScope::Org, &[]) };
+        let ws = Sop {
+            scope_paths: vec!["infra/k8s".into(), "docs".into()],
+            ..sop(SopScope::Workspace, &[])
+        };
+        let org = Sop {
+            scope_paths: vec!["infra".into()],
+            ..sop(SopScope::Org, &[])
+        };
         assert_eq!(
             collect_scope_paths(&[ws, org], "anyone"),
             vec!["infra/k8s"],
@@ -3707,14 +3961,23 @@ mod org_ceiling_tests {
 
     #[test]
     fn an_org_sop_declaring_no_scope_paths_imposes_no_ceiling() {
-        let ws = Sop { scope_paths: vec!["packages/proxy".into()], ..sop(SopScope::Workspace, &[]) };
+        let ws = Sop {
+            scope_paths: vec!["packages/proxy".into()],
+            ..sop(SopScope::Workspace, &[])
+        };
         let org = sop(SopScope::Org, &[]);
-        assert_eq!(collect_scope_paths(&[ws, org], "anyone"), vec!["packages/proxy"]);
+        assert_eq!(
+            collect_scope_paths(&[ws, org], "anyone"),
+            vec!["packages/proxy"]
+        );
     }
 
     #[test]
     fn an_org_scope_ceiling_applies_to_a_workspace_that_declared_nothing() {
-        let org = Sop { scope_paths: vec!["infra".into()], ..sop(SopScope::Org, &[]) };
+        let org = Sop {
+            scope_paths: vec!["infra".into()],
+            ..sop(SopScope::Org, &[])
+        };
         assert_eq!(collect_scope_paths(&[org], "anyone"), vec!["infra"]);
     }
 
@@ -3722,9 +3985,18 @@ mod org_ceiling_tests {
     fn a_workspace_scope_outside_the_org_ceiling_leaves_nothing_in_scope() {
         // Previously asserted `.is_empty()` — which the detector reads as
         // unrestricted, i.e. the ceiling widened the scope to everything.
-        let ws = Sop { scope_paths: vec!["docs".into()], ..sop(SopScope::Workspace, &[]) };
-        let org = Sop { scope_paths: vec!["infra".into()], ..sop(SopScope::Org, &[]) };
-        assert_eq!(collect_scope_paths(&[ws, org], "anyone"), vec![NARROWED_TO_NOTHING.to_string()]);
+        let ws = Sop {
+            scope_paths: vec!["docs".into()],
+            ..sop(SopScope::Workspace, &[])
+        };
+        let org = Sop {
+            scope_paths: vec!["infra".into()],
+            ..sop(SopScope::Org, &[])
+        };
+        assert_eq!(
+            collect_scope_paths(&[ws, org], "anyone"),
+            vec![NARROWED_TO_NOTHING.to_string()]
+        );
     }
 
     // ── plan_steps ───────────────────────────────────────────────────
@@ -3738,28 +4010,52 @@ mod org_ceiling_tests {
         // Org declares a different case than the workspace -- membership
         // must still match, and the surviving text must keep the
         // workspace's own casing and order.
-        let org = Sop { plan_steps: vec!["read".into(), "ACTION:DEPLOY".into()], ..sop(SopScope::Org, &[]) };
-        assert_eq!(collect_plan_steps(&[ws, org], "anyone"), vec!["Read", "action:deploy"]);
+        let org = Sop {
+            plan_steps: vec!["read".into(), "ACTION:DEPLOY".into()],
+            ..sop(SopScope::Org, &[])
+        };
+        assert_eq!(
+            collect_plan_steps(&[ws, org], "anyone"),
+            vec!["Read", "action:deploy"]
+        );
     }
 
     #[test]
     fn an_org_sop_declaring_no_plan_steps_imposes_no_ceiling() {
-        let ws = Sop { plan_steps: vec!["Read".into(), "Edit".into()], ..sop(SopScope::Workspace, &[]) };
+        let ws = Sop {
+            plan_steps: vec!["Read".into(), "Edit".into()],
+            ..sop(SopScope::Workspace, &[])
+        };
         let org = sop(SopScope::Org, &[]);
-        assert_eq!(collect_plan_steps(&[ws, org], "anyone"), vec!["Read", "Edit"]);
+        assert_eq!(
+            collect_plan_steps(&[ws, org], "anyone"),
+            vec!["Read", "Edit"]
+        );
     }
 
     #[test]
     fn an_org_plan_ceiling_applies_to_a_workspace_that_declared_nothing() {
-        let org = Sop { plan_steps: vec!["Read".into()], ..sop(SopScope::Org, &[]) };
+        let org = Sop {
+            plan_steps: vec!["Read".into()],
+            ..sop(SopScope::Org, &[])
+        };
         assert_eq!(collect_plan_steps(&[org], "anyone"), vec!["Read"]);
     }
 
     #[test]
     fn a_disjoint_plan_narrowing_leaves_nothing_on_plan() {
-        let ws = Sop { plan_steps: vec!["Edit".into()], ..sop(SopScope::Workspace, &[]) };
-        let org = Sop { plan_steps: vec!["Read".into()], ..sop(SopScope::Org, &[]) };
-        assert_eq!(collect_plan_steps(&[ws, org], "anyone"), vec![NARROWED_TO_NOTHING.to_string()]);
+        let ws = Sop {
+            plan_steps: vec!["Edit".into()],
+            ..sop(SopScope::Workspace, &[])
+        };
+        let org = Sop {
+            plan_steps: vec!["Read".into()],
+            ..sop(SopScope::Org, &[])
+        };
+        assert_eq!(
+            collect_plan_steps(&[ws, org], "anyone"),
+            vec![NARROWED_TO_NOTHING.to_string()]
+        );
     }
 
     // ── The other 7 fields are untouched by scope: plain union already
@@ -3770,15 +4066,27 @@ mod org_ceiling_tests {
 
     #[test]
     fn deny_tools_unions_across_workspace_and_org_scope_with_no_special_handling() {
-        let ws = Sop { deny_tools: vec!["rm".into()], ..sop(SopScope::Workspace, &[]) };
-        let org = Sop { deny_tools: vec!["curl".into()], ..sop(SopScope::Org, &[]) };
+        let ws = Sop {
+            deny_tools: vec!["rm".into()],
+            ..sop(SopScope::Workspace, &[])
+        };
+        let org = Sop {
+            deny_tools: vec!["curl".into()],
+            ..sop(SopScope::Org, &[])
+        };
         assert_eq!(collect_denies(&[ws, org], "anyone"), vec!["curl", "rm"]);
     }
 
     #[test]
     fn risk_tier_takes_the_max_across_workspace_and_org_scope() {
-        let ws = Sop { risk_tier: Some(RiskLevel::Low), ..sop(SopScope::Workspace, &[]) };
-        let org = Sop { risk_tier: Some(RiskLevel::Critical), ..sop(SopScope::Org, &[]) };
+        let ws = Sop {
+            risk_tier: Some(RiskLevel::Low),
+            ..sop(SopScope::Workspace, &[])
+        };
+        let org = Sop {
+            risk_tier: Some(RiskLevel::Critical),
+            ..sop(SopScope::Org, &[])
+        };
         let gov = governance_fields_from(&[ws, org], "anyone");
         assert_eq!(gov.risk_tier, Some(RiskLevel::Critical));
     }
@@ -3798,7 +4106,10 @@ mod workspace_cache_version_tests {
         cache.insert(
             ws.to_string(),
             WorkspaceCached {
-                sops: vec![Sop { title: "cached".into(), ..Default::default() }],
+                sops: vec![Sop {
+                    title: "cached".into(),
+                    ..Default::default()
+                }],
                 read_at: Instant::now(),
                 version,
             },
@@ -3812,13 +4123,24 @@ mod workspace_cache_version_tests {
         seeded(WS, Some(1));
         // Same version: served from the cache, no fetch attempted.
         let same = fetch_workspace_sops(&client, "http://127.0.0.1:1", WS, "vk_x", Some(1)).await;
-        assert_eq!(same.len(), 1, "an unmoved version must serve the cached set");
+        assert_eq!(
+            same.len(),
+            1,
+            "an unmoved version must serve the cached set"
+        );
         // No version readable on this request: the TTL alone governs — still served.
         let unknown = fetch_workspace_sops(&client, "http://127.0.0.1:1", WS, "vk_x", None).await;
-        assert_eq!(unknown.len(), 1, "an unreadable version must not force a refetch");
+        assert_eq!(
+            unknown.len(),
+            1,
+            "an unreadable version must not force a refetch"
+        );
         // Moved version: refetched now; the unreachable control plane fails closed to empty.
         let moved = fetch_workspace_sops(&client, "http://127.0.0.1:1", WS, "vk_x", Some(2)).await;
-        assert!(moved.is_empty(), "a moved version must bypass the fresh cache entry");
+        assert!(
+            moved.is_empty(),
+            "a moved version must bypass the fresh cache entry"
+        );
     }
 
     #[tokio::test]
@@ -3827,6 +4149,10 @@ mod workspace_cache_version_tests {
         let client = reqwest::Client::new();
         seeded(WS, None);
         let served = fetch_workspace_sops(&client, "http://127.0.0.1:1", WS, "vk_x", Some(7)).await;
-        assert_eq!(served.len(), 1, "with no version recorded at fetch time only the TTL applies");
+        assert_eq!(
+            served.len(),
+            1,
+            "with no version recorded at fetch time only the TTL applies"
+        );
     }
 }

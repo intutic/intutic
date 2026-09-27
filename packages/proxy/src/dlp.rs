@@ -118,12 +118,7 @@ static PATTERNS: Lazy<Vec<DlpPattern>> = Lazy::new(|| {
             r"\bSG\.[0-9A-Za-z_-]{20,24}\.[0-9A-Za-z_-]{39,50}\b",
             "redact",
         ),
-        (
-            "npm_token",
-            "secret",
-            r"\bnpm_[A-Za-z0-9]{36}\b",
-            "redact",
-        ),
+        ("npm_token", "secret", r"\bnpm_[A-Za-z0-9]{36}\b", "redact"),
         (
             "pypi_token",
             "secret",
@@ -155,12 +150,7 @@ static PATTERNS: Lazy<Vec<DlpPattern>> = Lazy::new(|| {
             r"\bey[a-zA-Z0-9]{17,}\.ey[a-zA-Z0-9/_-]{17,}\.[a-zA-Z0-9/_-]{10,}={0,2}",
             "redact",
         ),
-        (
-            "ssn",
-            "pii",
-            r"\b\d{3}-\d{2}-\d{4}\b",
-            "redact",
-        ),
+        ("ssn", "pii", r"\b\d{3}-\d{2}-\d{4}\b", "redact"),
         (
             "bearer_token",
             "credential",
@@ -266,9 +256,7 @@ static CUSTOM: once_cell::sync::OnceCell<Vec<DlpPattern>> = once_cell::sync::Onc
 /// compile time and completely wrong for a value an operator types into a
 /// ConfigMap: a typo there would abort the process at the first request that
 /// happened to reach the scanner, with a panic naming no pattern.
-pub fn install_custom_patterns(
-    defs: &[crate::config::CustomDlpPattern],
-) -> Result<usize, String> {
+pub fn install_custom_patterns(defs: &[crate::config::CustomDlpPattern]) -> Result<usize, String> {
     let mut out = Vec::with_capacity(defs.len());
     for d in defs {
         if !matches!(d.action.as_str(), "block" | "redact") {
@@ -626,9 +614,7 @@ impl LenWalker<'_> {
                 b'\\' => {
                     // `\w`/`\d`/`\s` inside a class widen it past ASCII.
                     match self.next_byte()? {
-                        b'd' | b'D' | b'w' | b'W' | b's' | b'S' | b'p' | b'P' => {
-                            ascii_only = false
-                        }
+                        b'd' | b'D' | b'w' | b'W' | b's' | b'S' | b'p' | b'P' => ascii_only = false,
                         _ => {}
                     }
                 }
@@ -1071,7 +1057,9 @@ mod tests {
         let ordinary = concat!("AKIA", "IOSFODNN7EXAMPLE");
         let findings = scan(ordinary);
         assert!(
-            !findings.iter().any(|f| f.pattern_name == "dev_env_honeytoken"),
+            !findings
+                .iter()
+                .any(|f| f.pattern_name == "dev_env_honeytoken"),
             "an unrelated AWS key must not be misidentified as the honeytoken: {findings:?}"
         );
         // It must still be caught by the generic pattern — this test is about
@@ -1088,7 +1076,12 @@ mod tests {
     // produces NO findings, and would start failing if a realistic custom
     // pattern leaked into their fixtures.
 
-    fn def(name: &str, category: &str, regex: &str, action: &str) -> crate::config::CustomDlpPattern {
+    fn def(
+        name: &str,
+        category: &str,
+        regex: &str,
+        action: &str,
+    ) -> crate::config::CustomDlpPattern {
         crate::config::CustomDlpPattern {
             name: name.into(),
             category: category.into(),
@@ -1099,12 +1092,8 @@ mod tests {
 
     #[test]
     fn custom_patterns_are_scanned_alongside_the_builtins() {
-        let installed = install_custom_patterns(&[def(
-            "zz_test_phi",
-            "phi",
-            r"ZZTESTPHIZZ-\d{4}",
-            "redact",
-        )]);
+        let installed =
+            install_custom_patterns(&[def("zz_test_phi", "phi", r"ZZTESTPHIZZ-\d{4}", "redact")]);
         // Another test in this binary may have installed first; either outcome
         // is fine, what matters is that the pattern is active afterwards.
         assert!(installed.is_ok() || installed.is_err());
@@ -1112,7 +1101,9 @@ mod tests {
         if CUSTOM.get().is_some() {
             let findings = scan("record ZZTESTPHIZZ-4471 attached");
             assert!(
-                findings.iter().any(|f| f.pattern_name == "zz_test_phi" && f.category == "phi"),
+                findings
+                    .iter()
+                    .any(|f| f.pattern_name == "zz_test_phi" && f.category == "phi"),
                 "custom pattern did not fire: {findings:?}"
             );
             // And the built-ins still work with a custom set installed.
@@ -1124,7 +1115,10 @@ mod tests {
     fn custom_pattern_with_a_bad_regex_is_rejected_by_name() {
         let err = install_custom_patterns(&[def("broken", "phi", "([unclosed", "redact")])
             .expect_err("a malformed regex must not be accepted");
-        assert!(err.contains("broken"), "the error must name the pattern: {err}");
+        assert!(
+            err.contains("broken"),
+            "the error must name the pattern: {err}"
+        );
     }
 
     #[test]
@@ -1194,7 +1188,10 @@ mod tests {
     #[test]
     fn openai_keys_detected_via_magic_substring() {
         // Legacy: sk- + 20 alnum + T3BlbkFJ + 20 alnum.
-        let legacy = format!("sk-{}T3BlbkFJ{}", "a1B2c3D4e5F6g7H8i9J0", "K1l2M3n4O5p6Q7r8S9t0");
+        let legacy = format!(
+            "sk-{}T3BlbkFJ{}",
+            "a1B2c3D4e5F6g7H8i9J0", "K1l2M3n4O5p6Q7r8S9t0"
+        );
         assert!(names(&legacy).contains(&"openai_api_key".into()));
         // Project-scoped: symmetric 58-char halves around the magic.
         let half = "a".repeat(58);
@@ -1209,14 +1206,38 @@ mod tests {
             // Assembled at runtime: a contiguous literal in this shape trips
             // GitHub push protection — correctly, which is its own kind of
             // proof the pattern is worth having.
-            (format!("xox{}-123456789012-123456789012-AbCdEfGhIjKlMnOp", "b"), "slack_token"),
-            (format!("https://hooks.slack.com/services/{}", "A".repeat(44)), "slack_webhook_url"),
-            (format!("AIza{}", "SyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6c"), "google_api_key"),
-            (format!("sk_live_{}", "a1B2c3D4e5F6g7H8i9J0k1L2"), "stripe_key"),
-            (format!("SG.{}.{}", "a".repeat(22), "b".repeat(43)), "sendgrid_api_key"),
-            (format!("npm_{}", "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"), "npm_token"),
-            (format!("pypi-AgEIcHlwaS5vcmc{}", "x".repeat(60)), "pypi_token"),
-            (format!("hf_{}", "AbCdEfGhIjKlMnOpQrStUvWxYzAbCdEfGh"), "huggingface_token"),
+            (
+                format!("xox{}-123456789012-123456789012-AbCdEfGhIjKlMnOp", "b"),
+                "slack_token",
+            ),
+            (
+                format!("https://hooks.slack.com/services/{}", "A".repeat(44)),
+                "slack_webhook_url",
+            ),
+            (
+                format!("AIza{}", "SyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6c"),
+                "google_api_key",
+            ),
+            (
+                format!("sk_live_{}", "a1B2c3D4e5F6g7H8i9J0k1L2"),
+                "stripe_key",
+            ),
+            (
+                format!("SG.{}.{}", "a".repeat(22), "b".repeat(43)),
+                "sendgrid_api_key",
+            ),
+            (
+                format!("npm_{}", "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"),
+                "npm_token",
+            ),
+            (
+                format!("pypi-AgEIcHlwaS5vcmc{}", "x".repeat(60)),
+                "pypi_token",
+            ),
+            (
+                format!("hf_{}", "AbCdEfGhIjKlMnOpQrStUvWxYzAbCdEfGh"),
+                "huggingface_token",
+            ),
         ];
         for (tok, expected) in cases {
             assert!(
@@ -1235,10 +1256,18 @@ mod tests {
             "svc_user", "hunter22secret"
         );
         let findings = scan(&text);
-        assert!(findings.iter().any(|f| f.pattern_name == "db_connection_string"));
+        assert!(findings
+            .iter()
+            .any(|f| f.pattern_name == "db_connection_string"));
         let redacted = redact(&text, &findings);
-        assert!(!redacted.contains("hunter22secret"), "password must be gone");
-        assert!(redacted.contains("db.internal:5432/app"), "host stays legible");
+        assert!(
+            !redacted.contains("hunter22secret"),
+            "password must be gone"
+        );
+        assert!(
+            redacted.contains("db.internal:5432/app"),
+            "host stays legible"
+        );
     }
 
     /// The loop and the `RegexSet` it replaced must agree on every finding.
@@ -1260,7 +1289,7 @@ mod tests {
         // per this module's convention — no contiguous credential literal.
         let body = format!(
             "deploy log\n\
-             aws {} ok\n\
+             aws {}{} ok\n\
              gh {}_{} ok\n\
              anthropic sk-ant-{} ok\n\
              gitlab glpat-{} ok\n\
@@ -1273,7 +1302,8 @@ mod tests {
              auth Bearer abc123DEF456ghi789\n\
              key {}\n\
              and a lot of ordinary prose to make the body worth scanning. {}",
-            format!("{}{}", "ASIA", "JEXAMPLEKEY234AB"),
+            "ASIA",
+            "JEXAMPLEKEY234AB",
             "ghp",
             "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8",
             "abcdefghijklmnop",
@@ -1289,8 +1319,7 @@ mod tests {
         );
 
         // The old strategy, reconstructed verbatim.
-        let prefilter =
-            regex::RegexSet::new(PATTERNS.iter().map(|p| p.regex.as_str())).unwrap();
+        let prefilter = regex::RegexSet::new(PATTERNS.iter().map(|p| p.regex.as_str())).unwrap();
         let mut via_set = Vec::new();
         for idx in prefilter.matches(&body) {
             let pattern = &PATTERNS[idx];
@@ -1381,7 +1410,10 @@ mod stream_scrub_tests {
 
     #[test]
     fn secret_inside_a_delta_is_redacted_and_named() {
-        let line = concat!(r#"data: {"delta":{"text":"key: AKIA"#, r#"IOSFODNN7EXAMPLE done"}}"#);
+        let line = concat!(
+            r#"data: {"delta":{"text":"key: AKIA"#,
+            r#"IOSFODNN7EXAMPLE done"}}"#
+        );
         let (scrubbed, names) = scrub_stream_text(line).expect("must find the key");
         assert!(!scrubbed.contains(concat!("AKIA", "IOSFODNN7EXAMPLE")));
         assert!(scrubbed.contains("[REDACTED_SECRET]"));
@@ -1394,7 +1426,10 @@ mod stream_scrub_tests {
     #[test]
     fn block_action_material_is_contained_by_redaction() {
         // Output-side doctrine: containment, not stream-kill.
-        let line = concat!(r#"data: {"delta":{"text":"-----BEGIN "#, r#"OPENSSH PRIVATE KEY----- b"}}"#);
+        let line = concat!(
+            r#"data: {"delta":{"text":"-----BEGIN "#,
+            r#"OPENSSH PRIVATE KEY----- b"}}"#
+        );
         let (scrubbed, names) = scrub_stream_text(line).unwrap();
         assert!(!scrubbed.contains("BEGIN OPENSSH"));
         assert!(names.contains(&"private_key".to_string()));
@@ -1450,7 +1485,10 @@ mod redaction_before_forward_tests {
     fn redacting_inside_json_keeps_it_valid() {
         // Fixture is runtime-assembled: the repo convention forbids contiguous
         // credential-shaped literals in source, in every package.
-        let body = concat!(r#"{"messages":[{"role":"user","content":"key AKIA"#, r#"IOSFODNN7EXAMPLE here"}]}"#);
+        let body = concat!(
+            r#"{"messages":[{"role":"user","content":"key AKIA"#,
+            r#"IOSFODNN7EXAMPLE here"}]}"#
+        );
         let findings = scan(body);
         assert!(!findings.is_empty(), "the fixture must actually match");
 
@@ -1459,7 +1497,10 @@ mod redaction_before_forward_tests {
             serde_json::from_str(&redacted).expect("redacted body must still be valid JSON");
 
         let content = parsed["messages"][0]["content"].as_str().unwrap();
-        assert!(!content.contains(concat!("AKIA", "IOSFODNN7EXAMPLE")), "secret must be gone");
+        assert!(
+            !content.contains(concat!("AKIA", "IOSFODNN7EXAMPLE")),
+            "secret must be gone"
+        );
         assert!(content.contains("REDACTED"));
     }
 
@@ -1469,7 +1510,10 @@ mod redaction_before_forward_tests {
     fn the_replacement_needs_no_json_escaping() {
         let findings = scan(concat!("AKIA", "IOSFODNN7EXAMPLE"));
         let out = redact(concat!("AKIA", "IOSFODNN7EXAMPLE"), &findings);
-        assert!(!out.contains('"'), "a quote would break the enclosing string");
+        assert!(
+            !out.contains('"'),
+            "a quote would break the enclosing string"
+        );
         assert!(!out.contains('\\'), "a backslash would break escaping");
     }
 
@@ -1483,7 +1527,11 @@ mod redaction_before_forward_tests {
             r#"012345678901234567890123456789012345","c":"123-45-6789"}"#
         );
         let findings = scan(body);
-        assert!(findings.len() >= 3, "expected three matches, got {}", findings.len());
+        assert!(
+            findings.len() >= 3,
+            "expected three matches, got {}",
+            findings.len()
+        );
 
         let redacted = redact(body, &findings);
         serde_json::from_str::<serde_json::Value>(&redacted).expect("still valid JSON");
@@ -1497,7 +1545,10 @@ mod redaction_before_forward_tests {
         // replace_range panics on a non-char-boundary. Regex offsets are byte
         // offsets, so a body with multibyte text before the secret is the case
         // that would expose it.
-        let body = concat!(r#"{"m":"日本語のテキスト AKIA"#, r#"IOSFODNN7EXAMPLE です"}"#);
+        let body = concat!(
+            r#"{"m":"日本語のテキスト AKIA"#,
+            r#"IOSFODNN7EXAMPLE です"}"#
+        );
         let findings = scan(body);
         let redacted = redact(body, &findings);
         let parsed: serde_json::Value = serde_json::from_str(&redacted).unwrap();
@@ -1512,7 +1563,6 @@ mod redaction_before_forward_tests {
         assert_eq!(redact(body, &scan(body)), body);
     }
 }
-
 
 #[cfg(test)]
 mod holdback_tests {
@@ -1733,7 +1783,10 @@ mod holdback_tests {
             released.push_str(&sc.push(std::str::from_utf8(chunk).unwrap()));
         }
         released.push_str(&sc.flush().unwrap_or_default());
-        assert!(!released.contains("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"), "got: {released}");
+        assert!(
+            !released.contains("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"),
+            "got: {released}"
+        );
         assert!(!released.contains("S1gnATur3S1gnATur3"), "got: {released}");
     }
 
@@ -1844,7 +1897,11 @@ mod holdback_tests {
             derive_holdback().bytes,
             &[&token[..mid], &token[mid..], " trailing prose"],
         );
-        assert!(!out.contains("AgEIcHlwaS5vcmc"), "got a {}-byte leak", out.len());
+        assert!(
+            !out.contains("AgEIcHlwaS5vcmc"),
+            "got a {}-byte leak",
+            out.len()
+        );
         assert!(out.contains("[REDACTED_SECRET]"));
         assert!(out.ends_with(" trailing prose"));
     }

@@ -10,10 +10,10 @@ use tokio::sync::RwLock;
 use wasmtime::{Engine, Module};
 
 use super::context::{RequestContext, Verdict};
-use crate::store::ControlPlaneCache;
 use super::local_loader;
 use super::referenced_files::{self, ReferencedFiles};
 use super::runner::evaluate_wasm_rule;
+use crate::store::ControlPlaneCache;
 
 /// Wall-clock ceiling on reading every file one request references.
 ///
@@ -181,7 +181,8 @@ impl PluginRegistry {
         control_plane: &Arc<dyn ControlPlaneCache>,
         ctx: &RequestContext,
     ) -> (Verdict, Vec<ShadowReport>) {
-        self.evaluate_with_shadow_exempting(control_plane, ctx, None).await
+        self.evaluate_with_shadow_exempting(control_plane, ctx, None)
+            .await
     }
 
     /// `evaluate_with_shadow`, with one rule left unevaluated: a break-glass
@@ -196,7 +197,9 @@ impl PluginRegistry {
         exempt_rule_id: Option<&str>,
     ) -> (Verdict, Vec<ShadowReport>) {
         let mut shadow = Vec::new();
-        let verdict = self.evaluate_inner(control_plane, ctx, &mut shadow, exempt_rule_id).await;
+        let verdict = self
+            .evaluate_inner(control_plane, ctx, &mut shadow, exempt_rule_id)
+            .await;
         (verdict, shadow)
     }
 
@@ -206,7 +209,8 @@ impl PluginRegistry {
         ctx: &RequestContext,
     ) -> Verdict {
         let mut sink = Vec::new();
-        self.evaluate_inner(control_plane, ctx, &mut sink, None).await
+        self.evaluate_inner(control_plane, ctx, &mut sink, None)
+            .await
     }
 
     async fn evaluate_inner(
@@ -321,14 +325,16 @@ impl PluginRegistry {
                 // on its second *distinct* correction rather than on a repeated
                 // failure to correct — the exact inversion the counter exists to
                 // prevent, already documented for `detector_id` in proxy.rs.
-                Verdict::Reask { reason, attempts_remaining, policy_id } => {
-                    if pending_reask.is_none() {
-                        pending_reask = Some(Verdict::Reask {
-                            reason,
-                            attempts_remaining,
-                            policy_id: policy_id.or_else(|| Some(m.rule_id.clone())),
-                        });
-                    }
+                Verdict::Reask {
+                    reason,
+                    attempts_remaining,
+                    policy_id,
+                } if pending_reask.is_none() => {
+                    pending_reask = Some(Verdict::Reask {
+                        reason,
+                        attempts_remaining,
+                        policy_id: policy_id.or_else(|| Some(m.rule_id.clone())),
+                    });
                 }
                 _ => {}
             }
@@ -370,9 +376,8 @@ impl PluginRegistry {
         };
 
         let started = Instant::now();
-        let read = tokio::task::spawn_blocking(move || {
-            referenced_files::read_tokens(tokens, &root)
-        });
+        let read =
+            tokio::task::spawn_blocking(move || referenced_files::read_tokens(tokens, &root));
         let files = match tokio::time::timeout(PREFETCH_BUDGET, read).await {
             Ok(Ok(files)) => files,
             Ok(Err(e)) => {
@@ -553,12 +558,16 @@ impl PluginRegistry {
                             sha256: desc.sha256,
                             priority: desc.priority,
                             mode: desc.mode,
-                            reads_referenced_files:
-                                super::host::module_reads_referenced_files(&module),
+                            reads_referenced_files: super::host::module_reads_referenced_files(
+                                &module,
+                            ),
                             module,
                         });
                     } else {
-                        tracing::warn!("WASM binary missing from control plane for hash: {}", desc.sha256);
+                        tracing::warn!(
+                            "WASM binary missing from control plane for hash: {}",
+                            desc.sha256
+                        );
                     }
                 }
             }
@@ -588,10 +597,9 @@ mod tests {
     /// worse of the two failure directions.
     #[test]
     fn a_descriptor_without_mode_enforces() {
-        let d: WasmPluginDescriptor = serde_json::from_str(
-            r#"{"ruleId":"r1","name":"n","sha256":"abc","priority":100}"#,
-        )
-        .expect("a descriptor without mode must still parse");
+        let d: WasmPluginDescriptor =
+            serde_json::from_str(r#"{"ruleId":"r1","name":"n","sha256":"abc","priority":100}"#)
+                .expect("a descriptor without mode must still parse");
         assert_eq!(d.mode, RuleMode::Enforce);
     }
 
@@ -633,10 +641,17 @@ mod tests {
             would_act: true,
             verdict: format!(
                 "{:?}",
-                Verdict::Kill { reason: "x".into(), policy_id: None }
+                Verdict::Kill {
+                    reason: "x".into(),
+                    policy_id: None
+                }
             ),
         };
-        assert!(r.verdict.contains("Kill"), "the real verdict must survive: {}", r.verdict);
+        assert!(
+            r.verdict.contains("Kill"),
+            "the real verdict must survive: {}",
+            r.verdict
+        );
         assert!(!r.verdict.contains("WOULD_HAVE"));
     }
 

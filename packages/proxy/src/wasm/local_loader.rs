@@ -65,7 +65,8 @@ pub fn scan_signatures(dir: &Path) -> std::io::Result<HashMap<PathBuf, (SystemTi
     let mut signatures = HashMap::new();
     // `dir` is the operator's `INTUTIC_WASM_DIR` / config override: the same
     // trust level as the binary's own configuration, never a request value.
-    let entries = match std::fs::read_dir(dir) { // codeql[rust/path-injection]
+    // codeql[rust/path-injection]
+    let entries = match std::fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(signatures),
         Err(e) => return Err(e),
@@ -99,7 +100,6 @@ pub fn parse_priority(file_name: &str) -> (u32, String) {
     }
     (DEFAULT_PRIORITY, stem.to_string())
 }
-
 
 /// Compile every rule file in the given signature set (from
 /// [`scan_signatures`]). Fail-open per file: a corrupt or mid-copy file is
@@ -216,10 +216,7 @@ mod tests {
         let missing = PathBuf::from("/nonexistent/intutic-wasm-test");
         assert!(scan_signatures(&missing).unwrap().is_empty());
 
-        let dir = std::env::temp_dir().join(format!(
-            "intutic-wasm-scan-{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("intutic-wasm-scan-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("notes.txt"), b"not a rule").unwrap();
@@ -234,10 +231,7 @@ mod tests {
     #[test]
     fn scan_propagates_unreadable_dir_instead_of_faking_empty() {
         use std::os::unix::fs::PermissionsExt;
-        let dir = std::env::temp_dir().join(format!(
-            "intutic-wasm-noperm-{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("intutic-wasm-noperm-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o000)).unwrap();

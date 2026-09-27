@@ -107,7 +107,12 @@ impl GatewayConfig {
             },
             Err(_) => cfg.local_judge,
         };
-        GatewayConfig { require_vk, require_provisioned_key, provisioned_key_paid_only, local_judge }
+        GatewayConfig {
+            require_vk,
+            require_provisioned_key,
+            provisioned_key_paid_only,
+            local_judge,
+        }
     }
 }
 
@@ -119,7 +124,10 @@ static GATEWAY_CONFIG: OnceLock<GatewayConfig> = OnceLock::new();
 pub fn init_gateway_config(cfg: GatewayConfig) -> bool {
     let require_vk = cfg.require_vk;
     let _ = GATEWAY_CONFIG.set(cfg);
-    GATEWAY_CONFIG.get().map(|c| c.require_vk).unwrap_or(require_vk)
+    GATEWAY_CONFIG
+        .get()
+        .map(|c| c.require_vk)
+        .unwrap_or(require_vk)
 }
 
 /// The installed config, or the safe default (`require_vk: false`) if none
@@ -242,7 +250,10 @@ mod tests {
     fn require_vk_accepts_only_vk_prefixed_tokens() {
         assert!(token_allowed("vk_abc123_ws_xyz", true));
         assert!(!token_allowed("sk-ant-oat-raw-oauth-token", true));
-        assert!(!token_allowed("Bearer vk_looks_like_it_but_has_a_prefix", true));
+        assert!(!token_allowed(
+            "Bearer vk_looks_like_it_but_has_a_prefix",
+            true
+        ));
         assert!(!token_allowed("", true));
     }
 
@@ -255,21 +266,51 @@ mod tests {
     fn env_var_scenarios_run_sequentially_to_avoid_a_cross_test_race() {
         // 1. Env override true wins over config false.
         std::env::set_var("INTUTIC_GATEWAY_REQUIRE_VK", "true");
-        assert!(GatewayConfig::from_config_and_env(&GatewayConfig { require_vk: false, ..Default::default() }).require_vk);
+        assert!(
+            GatewayConfig::from_config_and_env(&GatewayConfig {
+                require_vk: false,
+                ..Default::default()
+            })
+            .require_vk
+        );
 
         // 2. Env override false wins over config true.
         std::env::set_var("INTUTIC_GATEWAY_REQUIRE_VK", "0");
-        assert!(!GatewayConfig::from_config_and_env(&GatewayConfig { require_vk: true, ..Default::default() }).require_vk);
+        assert!(
+            !GatewayConfig::from_config_and_env(&GatewayConfig {
+                require_vk: true,
+                ..Default::default()
+            })
+            .require_vk
+        );
 
         // 3. An unrecognised env value must not silently harden a config-false
         //    workspace — a typo in a hardening flag stays whatever config said.
         std::env::set_var("INTUTIC_GATEWAY_REQUIRE_VK", "yesplease");
-        assert!(!GatewayConfig::from_config_and_env(&GatewayConfig { require_vk: false, ..Default::default() }).require_vk);
+        assert!(
+            !GatewayConfig::from_config_and_env(&GatewayConfig {
+                require_vk: false,
+                ..Default::default()
+            })
+            .require_vk
+        );
 
         // 4. No env var set at all keeps the config value, either direction.
         std::env::remove_var("INTUTIC_GATEWAY_REQUIRE_VK");
-        assert!(!GatewayConfig::from_config_and_env(&GatewayConfig { require_vk: false, ..Default::default() }).require_vk);
-        assert!(GatewayConfig::from_config_and_env(&GatewayConfig { require_vk: true, ..Default::default() }).require_vk);
+        assert!(
+            !GatewayConfig::from_config_and_env(&GatewayConfig {
+                require_vk: false,
+                ..Default::default()
+            })
+            .require_vk
+        );
+        assert!(
+            GatewayConfig::from_config_and_env(&GatewayConfig {
+                require_vk: true,
+                ..Default::default()
+            })
+            .require_vk
+        );
     }
 
     #[test]
@@ -363,21 +404,42 @@ mod tests {
     #[test]
     fn provisioned_key_required_by_mode_and_workspace_answer() {
         let off = GatewayConfig::default();
-        let all = GatewayConfig { require_provisioned_key: true, ..Default::default() };
+        let all = GatewayConfig {
+            require_provisioned_key: true,
+            ..Default::default()
+        };
         let paid = GatewayConfig {
             require_provisioned_key: true,
             provisioned_key_paid_only: true,
             ..Default::default()
         };
         for answer in [Some(true), Some(false), None] {
-            assert!(!provisioned_key_required(&off, answer), "off never enforces ({answer:?})");
-            assert!(provisioned_key_required(&all, answer), "true enforces everywhere ({answer:?})");
+            assert!(
+                !provisioned_key_required(&off, answer),
+                "off never enforces ({answer:?})"
+            );
+            assert!(
+                provisioned_key_required(&all, answer),
+                "true enforces everywhere ({answer:?})"
+            );
         }
-        assert!(provisioned_key_required(&paid, Some(true)), "paid plan brings its own key");
-        assert!(!provisioned_key_required(&paid, Some(false)), "trial/exempt rides the platform key");
-        assert!(provisioned_key_required(&paid, None), "no answer from the control plane enforces");
+        assert!(
+            provisioned_key_required(&paid, Some(true)),
+            "paid plan brings its own key"
+        );
+        assert!(
+            !provisioned_key_required(&paid, Some(false)),
+            "trial/exempt rides the platform key"
+        );
+        assert!(
+            provisioned_key_required(&paid, None),
+            "no answer from the control plane enforces"
+        );
         // paid-only without the main switch is inert.
-        let inert = GatewayConfig { provisioned_key_paid_only: true, ..Default::default() };
+        let inert = GatewayConfig {
+            provisioned_key_paid_only: true,
+            ..Default::default()
+        };
         assert!(!provisioned_key_required(&inert, Some(true)));
     }
 
@@ -395,12 +457,21 @@ mod tests {
     // feature.
     #[test]
     fn org_pin_decision_covers_match_mismatch_and_unknown() {
-        assert_eq!(org_pin_decision("org_a", Some("org_a")), OrgPinDecision::Allow);
-        assert_eq!(org_pin_decision("org_a", Some("org_b")), OrgPinDecision::Mismatch);
+        assert_eq!(
+            org_pin_decision("org_a", Some("org_a")),
+            OrgPinDecision::Allow
+        );
+        assert_eq!(
+            org_pin_decision("org_a", Some("org_b")),
+            OrgPinDecision::Mismatch
+        );
         assert_eq!(org_pin_decision("org_a", None), OrgPinDecision::Unverified);
         // Exact string equality — no prefix/suffix leniency that could let
         // "org_a2" ride "org_a"'s cell.
-        assert_eq!(org_pin_decision("org_a", Some("org_a2")), OrgPinDecision::Mismatch);
+        assert_eq!(
+            org_pin_decision("org_a", Some("org_a2")),
+            OrgPinDecision::Mismatch
+        );
     }
 
     // Deliberately does NOT test cell_org_pin() itself: it reads a

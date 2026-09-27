@@ -125,7 +125,10 @@ impl Cidr {
                     None => 32,
                 };
                 let bits = u32::from(v4);
-                Some(Cidr::V4 { net: mask_u32(bits, prefix), prefix })
+                Some(Cidr::V4 {
+                    net: mask_u32(bits, prefix),
+                    prefix,
+                })
             }
             IpAddr::V6(v6) => {
                 let prefix = match prefix_part {
@@ -133,16 +136,17 @@ impl Cidr {
                     None => 128,
                 };
                 let bits = u128::from(v6);
-                Some(Cidr::V6 { net: mask_u128(bits, prefix), prefix })
+                Some(Cidr::V6 {
+                    net: mask_u128(bits, prefix),
+                    prefix,
+                })
             }
         }
     }
 
     fn contains(&self, ip: &IpAddr) -> bool {
         match (self, ip) {
-            (Cidr::V4 { net, prefix }, IpAddr::V4(v4)) => {
-                mask_u32(u32::from(*v4), *prefix) == *net
-            }
+            (Cidr::V4 { net, prefix }, IpAddr::V4(v4)) => mask_u32(u32::from(*v4), *prefix) == *net,
             (Cidr::V6 { net, prefix }, IpAddr::V6(v6)) => {
                 mask_u128(u128::from(*v6), *prefix) == *net
             }
@@ -227,12 +231,15 @@ impl EgressPolicy {
             }
         }
 
-        Self::from_entries(mode, entries.into_iter())
+        Self::from_entries(mode, entries)
     }
 
     /// Core constructor, split out so tests can build a policy without touching
     /// process env.
-    pub fn from_entries<I: IntoIterator<Item = String>>(mode: EgressMode, entries: I) -> EgressPolicy {
+    pub fn from_entries<I: IntoIterator<Item = String>>(
+        mode: EgressMode,
+        entries: I,
+    ) -> EgressPolicy {
         let mut host_rules = Vec::new();
         let mut cidr_rules = Vec::new();
         for e in entries {
@@ -246,7 +253,11 @@ impl EgressPolicy {
                 host_rules.push(e.to_ascii_lowercase());
             }
         }
-        EgressPolicy { mode, host_rules, cidr_rules }
+        EgressPolicy {
+            mode,
+            host_rules,
+            cidr_rules,
+        }
     }
 
     pub fn mode(&self) -> EgressMode {
@@ -259,7 +270,11 @@ impl EgressPolicy {
     /// developer's local infra allowances are never dropped by a central list.
     /// A central `mode` of `None` (central management not configured) leaves the
     /// local mode untouched.
-    pub fn with_central(&self, central_mode: Option<EgressMode>, central_allow: &[String]) -> EgressPolicy {
+    pub fn with_central(
+        &self,
+        central_mode: Option<EgressMode>,
+        central_allow: &[String],
+    ) -> EgressPolicy {
         let mut host_rules = self.host_rules.clone();
         let mut cidr_rules = self.cidr_rules.clone();
         for e in central_allow {
@@ -478,10 +493,7 @@ mod tests {
     use super::*;
 
     fn enforce(entries: &[&str]) -> EgressPolicy {
-        EgressPolicy::from_entries(
-            EgressMode::Enforce,
-            entries.iter().map(|s| s.to_string()),
-        )
+        EgressPolicy::from_entries(EgressMode::Enforce, entries.iter().map(|s| s.to_string()))
     }
 
     #[test]
@@ -530,7 +542,10 @@ mod tests {
         let p = enforce(&["203.0.113.0/24", "2001:db8::/32"]);
         assert_eq!(p.decide("203.0.113.255", 443), EgressDecision::Allow);
         assert_eq!(p.decide("203.0.114.0", 443), EgressDecision::Deny);
-        assert_eq!(p.decide("2001:db8:dead:beef::1", 443), EgressDecision::Allow);
+        assert_eq!(
+            p.decide("2001:db8:dead:beef::1", 443),
+            EgressDecision::Allow
+        );
         assert_eq!(p.decide("2001:dead::1", 443), EgressDecision::Deny);
     }
 
@@ -544,10 +559,7 @@ mod tests {
 
     #[test]
     fn monitor_never_denies_but_flags() {
-        let p = EgressPolicy::from_entries(
-            EgressMode::Monitor,
-            ["github.com".to_string()].into_iter(),
-        );
+        let p = EgressPolicy::from_entries(EgressMode::Monitor, ["github.com".to_string()]);
         assert_eq!(p.decide("api.anthropic.com", 443), EgressDecision::Mitm);
         assert_eq!(p.decide("github.com", 443), EgressDecision::Allow);
         // would be denied under Enforce, but Monitor lets it through + flags
@@ -558,7 +570,10 @@ mod tests {
     fn ipv6_literals_are_not_mangled_by_port_stripping() {
         let p = enforce(&["2001:db8::/32"]);
         // bare IPv6 literal (the form that a naive split(':') breaks)
-        assert_eq!(p.decide("2001:db8:dead:beef::1", 443), EgressDecision::Allow);
+        assert_eq!(
+            p.decide("2001:db8:dead:beef::1", 443),
+            EgressDecision::Allow
+        );
         // bracketed, no port
         assert_eq!(p.decide("[2001:db8::5]", 443), EgressDecision::Allow);
         // bracketed, with a port suffix that must be stripped
@@ -591,13 +606,23 @@ mod tests {
 
     // ── Central policy distribution (LLD #63 §4) ──────────────────────────
 
-    fn write_egress_file(dir: &std::path::Path, workspace: &str, mode_json: &str, allow: &[&str], digest_over: &str) -> std::path::PathBuf {
+    fn write_egress_file(
+        dir: &std::path::Path,
+        workspace: &str,
+        mode_json: &str,
+        allow: &[&str],
+        digest_over: &str,
+    ) -> std::path::PathBuf {
         let digest = {
             let mut h = Sha256::new();
             h.update(digest_over.as_bytes());
             format!("{:x}", h.finalize())[..32].to_string()
         };
-        let allow_json = allow.iter().map(|a| format!("\"{a}\"")).collect::<Vec<_>>().join(",");
+        let allow_json = allow
+            .iter()
+            .map(|a| format!("\"{a}\""))
+            .collect::<Vec<_>>()
+            .join(",");
         let text = format!(
             "{{\"workspace\":\"{workspace}\",\"digest\":\"{digest}\",\"mode\":{mode_json},\"allow\":[{allow_json}]}}"
         );
@@ -610,10 +635,19 @@ mod tests {
     fn central_file_loads_and_verifies_digest() {
         let dir = std::env::temp_dir();
         // canonical = "enforce\ngithub.com\n10.0.0.0/8"
-        let p = write_egress_file(&dir, "wk_1", "\"enforce\"", &["github.com", "10.0.0.0/8"], "enforce\ngithub.com\n10.0.0.0/8");
+        let p = write_egress_file(
+            &dir,
+            "wk_1",
+            "\"enforce\"",
+            &["github.com", "10.0.0.0/8"],
+            "enforce\ngithub.com\n10.0.0.0/8",
+        );
         let central = load_local_egress_file(&p, Some("wk_1")).expect("valid file loads");
         assert_eq!(central.mode, Some(EgressMode::Enforce));
-        assert_eq!(central.allow, vec!["github.com".to_string(), "10.0.0.0/8".to_string()]);
+        assert_eq!(
+            central.allow,
+            vec!["github.com".to_string(), "10.0.0.0/8".to_string()]
+        );
         std::fs::remove_file(&p).ok();
     }
 
@@ -630,7 +664,13 @@ mod tests {
     fn central_file_rejected_on_digest_mismatch() {
         let dir = std::env::temp_dir();
         // digest computed over the WRONG canonical → must be rejected (tamper/truncation)
-        let p = write_egress_file(&dir, "wk_1", "\"enforce\"", &["github.com"], "enforce\nWRONG");
+        let p = write_egress_file(
+            &dir,
+            "wk_1",
+            "\"enforce\"",
+            &["github.com"],
+            "enforce\nWRONG",
+        );
         assert!(load_local_egress_file(&p, Some("wk_1")).is_none());
         std::fs::remove_file(&p).ok();
     }
@@ -649,10 +689,10 @@ mod tests {
     #[test]
     fn with_central_mode_authoritative_allow_unioned() {
         let base = enforce(&["local.corp"]); // Enforce, allow local.corp
-        // central: monitor + allow github.com
+                                             // central: monitor + allow github.com
         let merged = base.with_central(Some(EgressMode::Monitor), &["github.com".to_string()]);
         assert_eq!(merged.mode(), EgressMode::Monitor); // central mode wins
-        // both local and central allow entries survive
+                                                        // both local and central allow entries survive
         assert_eq!(merged.decide("local.corp", 443), EgressDecision::Allow);
         assert_eq!(merged.decide("github.com", 443), EgressDecision::Allow);
         // central mode None leaves local mode untouched
@@ -666,6 +706,9 @@ mod tests {
         // Without init_global_policy(), the accessor must behave as Off so an
         // uninitialised policy never denies.
         assert_eq!(global_policy().mode(), EgressMode::Off);
-        assert_eq!(global_policy().decide("anything.com", 443), EgressDecision::Allow);
+        assert_eq!(
+            global_policy().decide("anything.com", 443),
+            EgressDecision::Allow
+        );
     }
 }
