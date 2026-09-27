@@ -482,6 +482,7 @@ async fn parse_key_context(
             .get("orgId")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string()),
+        byok_required: body.get("byokRequired").and_then(|v| v.as_bool()),
     }))
 }
 
@@ -4158,7 +4159,11 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // Inject credentials
     let mut creds_injected = false;
     if raw_token.starts_with("vk_") {
-        let require_provisioned = crate::gateway::requires_provisioned_key();
+        // Under `paid`, the workspace's own answer (the key record's
+        // `byokRequired`) decides; under `true`, every workspace is enforced.
+        let require_provisioned = crate::gateway::provisioned_key_required_for(
+            key_record.as_ref().and_then(|k| k.byok_required),
+        );
         let cred_opt =
             fetch_provider_credential(&state.store, &workspace_id, &target_provider, require_provisioned)
                 .await;
@@ -7942,6 +7947,29 @@ pub fn get_terminal_stream_event(protocol: &crate::protocol::Protocol, model: &s
 
 #[cfg(test)]
 mod tests {
+    mod key_context_byok {
+        async fn parse(body: &str) -> Option<bool> {
+            let resp = reqwest::Response::from(
+                axum::http::Response::builder().status(200).body(body.to_string()).unwrap(),
+            );
+            super::super::parse_key_context(resp, "vk_test")
+                .await
+                .expect("parses")
+                .expect("known key")
+                .byok_required
+        }
+
+        #[tokio::test]
+        async fn key_context_carries_the_workspace_byok_answer() {
+            assert_eq!(parse(r#"{"workspaceId":"ws_a","byokRequired":true}"#).await, Some(true));
+            assert_eq!(parse(r#"{"workspaceId":"ws_a","byokRequired":false}"#).await, Some(false));
+            // An older control plane (field absent or null) leaves it unknown,
+            // which `gateway::provisioned_key_required` enforces under `paid`.
+            assert_eq!(parse(r#"{"workspaceId":"ws_a"}"#).await, None);
+            assert_eq!(parse(r#"{"workspaceId":"ws_a","byokRequired":null}"#).await, None);
+        }
+    }
+
     mod break_glass_scope {
         use crate::plugins::anomaly::{AnomalyFinding, AnomalyKind};
         use crate::store::BreakGlassScope;

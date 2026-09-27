@@ -42,6 +42,11 @@ pub struct VirtualKeyRecord {
     /// "unverified", revalidates via the control plane, and fail-closes if
     /// still unknown. Never used for anything on the shared gateway.
     pub org_id: Option<String>,
+    /// Whether the key's workspace must use its own provider key (the control
+    /// plane's `byokRequired`: paid plan, not in a trial, not exempt). Read
+    /// only under `INTUTIC_GATEWAY_REQUIRE_PROVISIONED_KEY=paid`, where `None`
+    /// (an entry written before the field existed) counts as required.
+    pub byok_required: Option<bool>,
 }
 
 /// Check if the estimated cost fits within the remaining budget (with 20% safety margin)
