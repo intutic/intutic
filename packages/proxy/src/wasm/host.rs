@@ -286,8 +286,10 @@ pub fn register_host_imports(linker: &mut Linker<super::runner::WasmState>) -> a
                 let end = ptr + len;
                 if end <= data.len() {
                     let utf16_data: Vec<u16> = data[ptr..end]
-                        .chunks_exact(2)
-                        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
+                        .map(|chunk| u16::from_le_bytes(*chunk))
                         .collect();
                     if let Ok(msg) = String::from_utf16(&utf16_data) {
                         tracing::info!("[WASM TRACE] {} (n={})", msg, n);
