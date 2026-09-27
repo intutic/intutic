@@ -43,6 +43,13 @@ export interface AuthContext {
    * what its workspace approves, never widen it.
    */
   allowedModels?: string[]
+  /**
+   * Whether this key's workspace must use its own provider key on the hosted
+   * gateway (paid plans, unless listed in `INTUTIC_BYOK_EXEMPT_WORKSPACES`).
+   * The proxy reads it only when `INTUTIC_GATEWAY_REQUIRE_PROVISIONED_KEY=paid`;
+   * absence there means "required", never "exempt".
+   */
+  byokRequired?: boolean
 }
 
 // ─── JWT ─────────────────────────────────────────────────────────────
