@@ -1254,6 +1254,7 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
                 .get("orgId")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string()),
+            byok_required: auth_json.get("byokRequired").and_then(|v| v.as_bool()),
         }))
     }
 
