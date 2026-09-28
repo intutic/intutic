@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-09-27
+
+A milestone release: no public API, wire format or configuration value that
+worked on 1.10.x stops working.
+
+### Changed
+
+- **`TURBOVEC_URL` is a base URL.** Both semantic-cache routes now hang off it
+  (`<base>/vectors/query`, `<base>/vectors/insert`), matching the TurboVec
+  service. A legacy value naming one of those endpoints is still accepted: the
+  proxy strips the route back to the base.
+- The offline pricing bundle is re-pinned to current LiteLLM upstream twice
+  (2026-09-26, 2026-09-27), picking up moved Azure `gpt-4o-mini` and OpenRouter
+  DeepSeek rates.
+
+### Added
+
+- **BYO-key for paid workspaces only**: `INTUTIC_GATEWAY_REQUIRE_PROVISIONED_KEY=paid`
+  refuses (`402 byok_required`) only the workspaces the control plane marks
+  `byokRequired` on the key; trials and exempt workspaces keep the gateway's own
+  provider key. `true` still means every workspace, and unset/`false` is unchanged.
+  `AuthContext.byokRequired` in `@intutic/shared-types`.
+
+### Fixed
+
+- npm publishing passes tarballs by an explicit `./` path (npm 11 read a bare
+  `dir/file.tgz` as a GitHub shorthand).
+
+### Internal
+
+- The proxy is `rustfmt`-formatted and clippy-clean under `-D warnings`; CI now
+  gates both, on a pinned Rust 1.98.0 toolchain.
+
 ## [1.10.1] - 2026-09-24
 
 The first tagged release since 1.10.0: everything that reached `main` between
