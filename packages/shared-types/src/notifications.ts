@@ -50,6 +50,9 @@ export type NotificationEventType =
   | 'guardrail.ready'
   /** The passage a guardrail cites changed upstream; promotion is refused until re-confirmed. */
   | 'guardrail.stale'
+  // ── Governance judge ──
+  /** A judged response is waiting for a person in the judge review queue: the typed judge was unsure, or it is a spot check of one it cleared (LLD #72). */
+  | 'judge.review.queued'
   // ── FinOps & budget ──
   | 'finops.budget.exceeded'
   | 'finops.budget.threshold'
