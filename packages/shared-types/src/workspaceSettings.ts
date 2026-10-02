@@ -24,6 +24,14 @@ export type { McpProxyFailBehavior, McpProxyMode, BypassEnforcementTier }
  * sync-daemon before writing runtime.env.
  */
 /** BYOC trace-storage configuration (mirrors the control plane's WorkspaceByocConfig). */
+/**
+ * Who answers the judge cascade's typed stage-1 questions (LLD #72 Phase 7).
+ * `platform` is the self-hosted typed judge; `jev` is TypeSafe's Jev, called
+ * with the workspace's own TypeSafe key (provider `typesafe`).
+ */
+export const TYPED_JUDGE_BACKENDS = ['platform', 'jev'] as const
+export type TypedJudgeBackend = (typeof TYPED_JUDGE_BACKENDS)[number]
+
 export interface ByocStorageConfig {
   provider: 'gcs' | 's3' | 'disabled'
   bucketName?: string
@@ -505,6 +513,23 @@ export interface WorkspaceSettings {
   managedJudgeModel?: string | null
 
   /**
+   * Which typed judge answers the finalize judge's stage-1 questions
+   * (LLD #72 Phase 7). `platform` (the default) is Intutic's self-hosted
+   * typed judge. `jev` is TypeSafe's Jev, called with this workspace's own
+   * TypeSafe key from the key wizard (provider `typesafe`); the control
+   * plane refuses `jev` while no such key is stored, and there is no
+   * platform-held Jev key.
+   *
+   * Choosing `jev` sends judged content (the workspace's SOP text and the
+   * agent's response) to TypeSafe, hosted in the United States, under the
+   * workspace's own agreement with TypeSafe. Until the operator configures a
+   * Jev score band, Jev runs beside the platform judge and its answers are
+   * only recorded; the platform judge still decides. Chunk judging, SOP
+   * attribution and self-hosted gateways never call Jev.
+   */
+  typedJudgeBackend?: TypedJudgeBackend
+
+  /**
    * Opt-in VirusTotal hash lookup for skill-bundled SCRIPTS (Phase S4,
    * TD-361). When true, and only when a `connector_credentials` row for
    * provider `'virustotal'` is also stored, `POST .../skills/report`
@@ -626,6 +651,9 @@ export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
   // Platform trusted monitor judges by default — see the field doc for what
   // setting a workspace's own model trades away.
   managedJudgeModel: null,
+  // The self-hosted typed judge. Jev is opt-in per workspace and needs the
+  // workspace's own TypeSafe key — see the field doc.
+  typedJudgeBackend: 'platform',
   // Off by default — see the field doc for why a growing auto-written
   // context file must be opt-in.
   decisionsLogEnabled: false,

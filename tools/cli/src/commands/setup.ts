@@ -170,7 +170,9 @@ export async function runSetup(opts: SetupOpts, io: SetupIO = createClackIO()): 
   // ── Step 3: provider ──
   const providerId = await io.select({
     message: 'Which LLM provider do you want to configure?',
-    options: PROVIDER_REGISTRY.map((def) => ({
+    // Judge-only credentials (TypeSafe's Jev) are not LLM providers to route
+    // through; they are set in the key wizard or `intutic credentials set`.
+    options: PROVIDER_REGISTRY.filter((def) => !def.judgeOnly).map((def) => ({
       value: def.id,
       label: def.displayName,
       hint: def.routingLive ? 'live' : 'not yet routable',
