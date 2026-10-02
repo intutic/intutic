@@ -904,12 +904,7 @@ async fn resolve_finalize_judge_note(p: FinalizeJudgeParams<'_>) -> Option<Strin
             .collect::<Vec<_>>()
             .join("\n\n---\n\n");
 
-        return match crate::judge_local::local_judge_finalize(
-            p.http_client,
-            p.full_content,
-            &sop_text,
-        )
-        .await
+        return match crate::judge_local::local_judge(p.http_client, p.full_content, &sop_text).await
         {
             Ok(outcome) => match outcome.verdict {
                 crate::judge_local::LocalVerdict::Compliant => None,

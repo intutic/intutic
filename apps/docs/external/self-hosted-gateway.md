@@ -159,6 +159,11 @@ infrastructure. It does **not**, today, keep every part of Intutic's evaluation 
     that generates the `litellm_config.yaml`, env block, and Helm values a local judge needs —
     local files only, never a remote API call, matching this document's own point that
     local-judge config is not remotely settable.
+  - An optional typed stage clears clean responses without a free-text call
+    (`INTUTIC_GATEWAY_LOCAL_JUDGE_TYPED_LO`, `INTUTIC_GATEWAY_LOCAL_JUDGE_TYPED_HI`,
+    `LITELLM_LOCAL_TYPED_JUDGE_MODEL`). It needs a model that returns log-probabilities and a
+    band you measured for that model — see
+    [On-Prem Judge Setup](/external/on-prem-judge#typed-stage-optional).
 - **Workspace-chosen judge model (opt-in) runs the managed judge on YOUR model and YOUR
   provider key.** Set a judge model under Settings → LLM Judge (or `managedJudgeModel` in
   workspace settings). Judge calls for that workspace then run on the model you named, routed
