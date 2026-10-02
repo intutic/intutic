@@ -25,12 +25,28 @@ export type { McpProxyFailBehavior, McpProxyMode, BypassEnforcementTier }
  */
 /** BYOC trace-storage configuration (mirrors the control plane's WorkspaceByocConfig). */
 /**
- * Who answers the judge cascade's typed stage-1 questions (LLD #72 Phase 7).
- * `platform` is the self-hosted typed judge; `jev` is TypeSafe's Jev, called
- * with the workspace's own TypeSafe key (provider `typesafe`).
+ * Who answers the judge cascade's typed stage-1 questions (LLD #72 Phase 7,
+ * 7b). `platform` is the self-hosted typed judge; `jev` is TypeSafe's Jev and
+ * `glide` is Fastino's GLiDE, each called with the workspace's own key for
+ * the provider in `TYPED_JUDGE_BACKEND_PROVIDER`.
  */
-export const TYPED_JUDGE_BACKENDS = ['platform', 'jev'] as const
+export const TYPED_JUDGE_BACKENDS = ['platform', 'jev', 'glide'] as const
 export type TypedJudgeBackend = (typeof TYPED_JUDGE_BACKENDS)[number]
+
+/** The provider-key id (`PROVIDER_REGISTRY`) each hosted typed judge backend runs on. */
+export const TYPED_JUDGE_BACKEND_PROVIDER = { jev: 'typesafe', glide: 'fastino' } as const satisfies Record<Exclude<TypedJudgeBackend, 'platform'>, string>
+
+/**
+ * Who chose a hosted typed judge backend whose data terms need an explicit
+ * yes (today `glide`), and when. The control plane writes it: a settings PUT
+ * sends only `{ backend }` beside `typedJudgeBackend`, and the route stamps
+ * the authenticated member and the time.
+ */
+export interface TypedJudgeBackendAck {
+  backend: TypedJudgeBackend
+  memberId: string
+  at: string
+}
 
 export interface ByocStorageConfig {
   provider: 'gcs' | 's3' | 'disabled'
@@ -526,8 +542,24 @@ export interface WorkspaceSettings {
    * Jev score band, Jev runs beside the platform judge and its answers are
    * only recorded; the platform judge still decides. Chunk judging, SOP
    * attribution and self-hosted gateways never call Jev.
+   *
+   * `glide` is Fastino's GLiDE (LLD #72 Phase 7b), on this workspace's own
+   * Fastino key (provider `fastino`), under the same rules: refused without
+   * a stored key, shadow only until the operator configures a GLiDE band,
+   * never on chunks, personal SOPs or self-hosted gateways. Fastino keeps
+   * inputs and outputs indefinitely, may train on them without an
+   * Enterprise opt-out and offers no DPA, so choosing it also needs
+   * `typedJudgeBackendAck` in the same request.
    */
   typedJudgeBackend?: TypedJudgeBackend
+
+  /**
+   * The acknowledgment recorded when `typedJudgeBackend` was set to a
+   * backend that requires one (`glide`). Server-written: see
+   * `TypedJudgeBackendAck`. Cleared when the backend changes to one that
+   * needs none, so it always describes the current choice.
+   */
+  typedJudgeBackendAck?: TypedJudgeBackendAck | null
 
   /**
    * Opt-in VirusTotal hash lookup for skill-bundled SCRIPTS (Phase S4,
@@ -651,8 +683,8 @@ export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
   // Platform trusted monitor judges by default — see the field doc for what
   // setting a workspace's own model trades away.
   managedJudgeModel: null,
-  // The self-hosted typed judge. Jev is opt-in per workspace and needs the
-  // workspace's own TypeSafe key — see the field doc.
+  // The self-hosted typed judge. Jev and GLiDE are opt-in per workspace and
+  // need the workspace's own provider key — see the field doc.
   typedJudgeBackend: 'platform',
   // Off by default — see the field doc for why a growing auto-written
   // context file must be opt-in.
