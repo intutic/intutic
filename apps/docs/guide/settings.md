@@ -60,7 +60,8 @@ Each provider row shows a **Live** or **Not yet routable** badge. **Live** means
 actually forwards requests to that provider once a key is set. **Not yet routable** means the
 key is stored and ready, but the gateway does not yet route to it — routing support for a new
 provider is separate engineering work per provider, and the dashboard says so rather than
-implying a saved key is already in effect.
+implying a saved key is already in effect. **TypeSafe (Jev judge)** is marked **Judge only**:
+its key is used by the typed judge (below), never for routing.
 
 If your workspace's gateway has BYO-key enforcement turned on, requests fail with `402
 byok_required` until a key is provisioned here for the provider being called. A gateway can
@@ -109,6 +110,33 @@ Trade-offs, stated plainly rather than implied:
 Use **Test** before saving — it runs one real, tiny completion through the exact path a judge
 call would take (your provisioned credential, the platform gateway), so a typo'd model name or
 a missing key fails here rather than during a live judge call.
+
+### Typed judge backend
+
+The finalize judge first asks typed yes/no questions about each response, and answers with a
+probability. **Typed judge** chooses who answers them:
+
+- **Platform (self-hosted, default)**: Intutic's own typed judge. Content stays on Intutic's
+  infrastructure.
+- **Jev by TypeSafe (your own key)**: TypeSafe's Jev, called with your workspace's TypeSafe key.
+  Add the key first under Provider Keys (**TypeSafe (Jev judge)**); until then the option is
+  disabled, and the API refuses it with `409`. There is no Intutic-held Jev key.
+
+What choosing Jev means:
+- Judged content (your SOP text and your agents' responses) is sent to TypeSafe, hosted in the
+  United States, under your workspace's own agreement with TypeSafe. TypeSafe says it does not
+  train on inputs. It keeps data according to its
+  [privacy policy](https://typesafe.ai/legal/privacy-policy), unless you have a zero-data-retention
+  agreement with TypeSafe. Jev usage is billed to your TypeSafe account.
+- **Jev does not decide yet.** Jev's scores need their own calibrated band, and the operator has
+  not configured one. Until then Jev runs alongside the platform judge: its answers are recorded
+  to fit that band, and the platform judge still decides every verdict. Once a band is
+  configured, Jev's answers decide the confident cases, and verdicts record that Jev made the call.
+- If Jev fails or your key is removed, the platform judge decides.
+- Only finalize verdicts use Jev. Mid-stream chunk checks and SOP attribution stay on the platform.
+- **Self-hosted gateways:** not available. A gateway's local judge never calls Jev.
+
+The setting is `typedJudgeBackend` (`"platform"` or `"jev"`) on `PUT /api/v1/workspace/settings`.
 
 ### On-Behalf-Of (OBO) Tokens
 

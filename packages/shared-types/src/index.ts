@@ -39,10 +39,12 @@ export {
   DEFAULT_WORKSPACE_SETTINGS,
   resolveWorkspaceSettings,
   resolveSecurityProbeSampleRate,
+  TYPED_JUDGE_BACKENDS,
 } from './workspaceSettings.js'
 
 export type {
   WorkspaceSettings,
+  TypedJudgeBackend,
   McpProxyFailBehavior as McpProxyFailBehaviorType,
   McpProxyMode as McpProxyModeType,
   BypassEnforcementTier as BypassEnforcementTierType,
