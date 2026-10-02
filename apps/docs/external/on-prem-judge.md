@@ -73,6 +73,46 @@ It walks you through:
 None of these are applied automatically — copy what you need into your actual compose env file
 or `values.yaml`, then restart the gateway.
 
+## Typed stage (optional)
+
+The local judge can run a typed stage before the free-text call. This is the same cascade the
+SaaS judge uses. The judge model answers two yes/no questions about the response, one token
+each, and the gateway reads `p(yes)` from the token log-probabilities. The two answers combine
+into one score, the mean log-odds of a violation. Then:
+
+- **Below the band:** the response is clean. No free-text call is made.
+- **Above the band:** the verdict is `VIOLATION`. The free-text judge still runs once, for the
+  reasoning text. If it does not agree, or it fails, the note names the typed probability
+  instead. The verdict stays `VIOLATION` either way.
+- **Inside the band:** the free-text judge decides, exactly as without the typed stage.
+
+If a typed call fails (an HTTP error, or a response without yes/no log-probabilities), the
+gateway logs a warning and the free-text judge decides. With no workspace SOP, the typed stage
+is skipped.
+
+```bash
+INTUTIC_GATEWAY_LOCAL_JUDGE_TYPED_LO=-4      # log-odds; below this is clean
+INTUTIC_GATEWAY_LOCAL_JUDGE_TYPED_HI=2.461   # log-odds; above this is a violation
+LITELLM_LOCAL_TYPED_JUDGE_MODEL=             # optional; defaults to LITELLM_LOCAL_JUDGE_MODEL
+```
+
+In Helm, set `proxy.localJudgeTypedLo`, `proxy.localJudgeTypedHi` and, optionally,
+`litellm.typedJudgeModel`.
+
+The typed stage is on only when both bounds are set, are numbers, and `LO` is below `HI`.
+Anything else logs one warning and leaves it off. There is no default band.
+
+**Measure your own band.** `-4` and `2.461` are the values validated for Qwen3.6-27B, the SaaS
+judge's model. They are the only measured example. Another model scores differently, so these
+numbers are a starting point, not a setting to copy. Run a labelled set of your own responses
+through your model and pick the band from those scores.
+
+**The model must return log-probabilities.** The typed calls send `logprobs: true` and
+`top_logprobs: 5` with `max_tokens: 1`. vLLM, Ollama and OpenAI return them. A model or server
+that does not return them makes every typed call fall back to the free-text judge, so the typed
+stage only adds latency. Above or inside the band, a request makes three judge calls in place of one;
+`JUDGE_FINALIZE_DEADLINE_MS` covers all of them.
+
 ## If the same model should also be served by the shared (non-local) LiteLLM deployment
 
 Adding a model name to `infra/kubernetes/base/litellm/config.yaml` (the SaaS-side LiteLLM
