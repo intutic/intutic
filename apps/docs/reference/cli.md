@@ -121,6 +121,11 @@ intutic judge configure [options]
 4. Prints the Helm values snippet (`proxy.localJudge`, `litellm.enabled`, `litellm.judgeModel`)
    for `tools/helm/intutic-gateway`
 
+The optional typed stage's variables (`INTUTIC_GATEWAY_LOCAL_JUDGE_TYPED_LO`,
+`INTUTIC_GATEWAY_LOCAL_JUDGE_TYPED_HI`, `LITELLM_LOCAL_TYPED_JUDGE_MODEL`) are not printed: the
+band must be measured for your model. See
+[On-Prem Judge Setup](/external/on-prem-judge#typed-stage-optional).
+
 **Example:**
 
 ```bash
