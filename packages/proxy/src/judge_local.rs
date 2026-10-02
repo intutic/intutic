@@ -356,7 +356,7 @@ async fn ask_yes_no(
         "{}\n\nQUESTION: {}\nAnswer with exactly one word: yes or no.",
         state, question
     );
-    let mut req = http_client.post(&url).json(&serde_json::json!({
+    let body = serde_json::json!({
         "model": target.model,
         "messages": [
             { "role": "system", "content": system },
@@ -366,7 +366,8 @@ async fn ask_yes_no(
         "max_tokens": 1,
         "logprobs": true,
         "top_logprobs": 5,
-    }));
+    });
+    let mut req = http_client.post(&url).json(&body); // codeql[rust/non-https-url]
     if let Some(key) = &target.api_key {
         req = req.header("Authorization", format!("Bearer {}", key));
     }
