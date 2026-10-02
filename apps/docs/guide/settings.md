@@ -121,6 +121,11 @@ probability. **Typed judge** chooses who answers them:
 - **Jev by TypeSafe (your own key)**: TypeSafe's Jev, called with your workspace's TypeSafe key.
   Add the key first under Provider Keys (**TypeSafe (Jev judge)**); until then the option is
   disabled, and the API refuses it with `409`. There is no Intutic-held Jev key.
+- **GLiDE by Fastino (your own key)**: Fastino's GLiDE, called with your workspace's Fastino key.
+  Add the key first under Provider Keys (**Fastino (GLiDE judge)**); until then the option is
+  disabled, and the API refuses it with `409`. Fastino's data terms are stricter than TypeSafe's,
+  so you must also tick an acknowledgment before saving (read below). There is no Intutic-held
+  GLiDE key.
 
 What choosing Jev means:
 - Judged content (your SOP text and your agents' responses) is sent to TypeSafe, hosted in the
@@ -136,7 +141,28 @@ What choosing Jev means:
 - Only finalize verdicts use Jev. Mid-stream chunk checks and SOP attribution stay on the platform.
 - **Self-hosted gateways:** not available. A gateway's local judge never calls Jev.
 
-The setting is `typedJudgeBackend` (`"platform"` or `"jev"`) on `PUT /api/v1/workspace/settings`.
+What choosing GLiDE means:
+- Judged content (your SOP text and your agents' responses) is sent to Fastino, hosted on AWS in
+  the United States.
+- **Fastino keeps inputs and outputs indefinitely, and may train its models on them** unless you
+  have an Enterprise opt-out with Fastino.
+- **Fastino offers no data processing agreement.** Don't choose GLiDE if your agents' output may
+  contain personal data covered by the GDPR or similar rules.
+- Fastino lists its subprocessors on its
+  [Trust & Safety page](https://docs.fastino.ai/trust-safety.md).
+- **GLiDE does not decide.** Until the operator configures a GLiDE band, GLiDE runs alongside the
+  platform judge: its answers are recorded, and the platform judge decides every verdict. GLiDE's
+  probabilities have not been measured on Intutic's labelled sets yet, so no band is shipped.
+- GLiDE usage is billed to your Fastino account. A call that takes longer than 20 seconds is
+  abandoned and the platform judge decides; so does any GLiDE error, or a removed key.
+- Only finalize verdicts against workspace SOPs use GLiDE. Mid-stream chunk checks, personal SOPs
+  and SOP attribution stay on the platform.
+- **Self-hosted gateways:** not available. A gateway's local judge never calls GLiDE.
+
+The setting is `typedJudgeBackend` (`"platform"`, `"jev"` or `"glide"`) on
+`PUT /api/v1/workspace/settings`. Choosing `"glide"` needs
+`"typedJudgeBackendAck": { "backend": "glide" }` in the same request, or the API answers `400`.
+The workspace records which member acknowledged the terms, and when.
 
 ### On-Behalf-Of (OBO) Tokens
 
