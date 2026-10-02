@@ -270,7 +270,7 @@ If you run your own control plane and need webhooks to reach an internal system,
 INTUTIC_WEBHOOK_ALLOWED_HOSTS=servicenow.corp.example,*.hooks.corp.example
 ```
 
-A listed host may resolve to a private address; every other destination stays guarded. Even a listed host still needs `https`, and can never reach loopback or link-local (cloud metadata) addresses. If your internal system uses a private certificate authority, give the control plane that CA through `NODE_EXTRA_CA_CERTS`.
+A listed host may resolve to a private address; every other destination stays guarded. Even a listed host still needs `https`, and can never reach loopback or link-local (cloud metadata) addresses. The same list also covers SIEM export destinations: webhook, Splunk HEC and Datadog intake URLs, and syslog hosts. If your internal system uses a private certificate authority, give the control plane that CA through `NODE_EXTRA_CA_CERTS`.
 
 ### Rule Filters
 
