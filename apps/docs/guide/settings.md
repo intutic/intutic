@@ -223,18 +223,33 @@ If agents are using stale governance rules, try invalidating the MCP cache from 
 
 ## Notifications
 
-Route governance events and alerts to external channels like Slack, webhooks, or email.
+Route governance events and alerts to Slack, email, PagerDuty or webhooks.
 
 ### Channel Routing
 
 - **Slack Integration** — Connect your Slack workspace via OAuth and route alerts to specific Slack channel IDs.
-- **Webhooks** — Send JSON payloads to generic HTTP endpoints. Secure webhooks with an optional HMAC signing secret.
+- **Email** — Send alerts to up to 20 addresses; each recipient gets their own message.
+- **PagerDuty** — Trigger incidents through an Events API v2 routing key.
+- **Webhooks** — Send JSON payloads to generic HTTPS endpoints. Secure webhooks with an optional HMAC signing secret.
+
+### Webhook destinations
+
+A webhook URL must use `https` and reach a public address. Intutic refuses webhook URLs that point at private networks, loopback, link-local or cloud-metadata addresses, or internal hostnames such as `localhost`, `*.internal` or `*.svc.cluster.local`. The check runs when you save the rule and again on every send, against the address the connection actually opens, so a hostname that later resolves inward is refused too. Redirects are not followed.
+
+If you run your own control plane and need webhooks to reach an internal system, such as an on-prem ServiceNow, list those hosts in the control plane's `INTUTIC_WEBHOOK_ALLOWED_HOSTS` environment variable. It is a comma-separated list of exact hostnames, IP addresses or `*.suffix` wildcards:
+
+```bash
+INTUTIC_WEBHOOK_ALLOWED_HOSTS=servicenow.corp.example,*.hooks.corp.example
+```
+
+A listed host may resolve to a private address; every other destination stays guarded. Even a listed host still needs `https`, and can never reach loopback or link-local (cloud metadata) addresses. If your internal system uses a private certificate authority, give the control plane that CA through `NODE_EXTRA_CA_CERTS`.
 
 ### Rule Filters
 
 Define custom routing rules filtering by event types:
 - `anomaly.detected` — Triggers when an ARE anomaly is flagged
-- `budget.threshold` — Triggers when a workspace/department budget limit is breached
+- `finops.budget.threshold` — Triggers when a workspace/department budget limit is breached
+- `judge.review.queued` — Triggers when the governance judge queues a response for a person to rule on
 - `trajectory.alert` — Triggers on goal drift or looped trace behaviors
 - `decision.pending` — Triggers when a hijacked action requires manual administrator review
 
