@@ -39,7 +39,7 @@ If you deploy on **Bedrock AgentCore Runtime**, the same per-provider reality ap
 pip install intutic-clawde[strands]
 ```
 
-Strands has a typed hooks system with a documented pre-tool-call veto: `strands.hooks.BeforeToolCallEvent.cancel_tool` (verified against a real `strands-agents==1.52.0` install — source read, then driven through a full agent loop, not inferred from docs). `IntuticHookProvider` subscribes to that event and cancels denied calls:
+Strands has a typed hooks system with a documented pre-tool-call veto: `strands.hooks.BeforeToolCallEvent.cancel_tool` (verified against a real `strands-agents` install — source read, then driven through a full agent loop, not inferred from docs; the `strands` extra requires `strands-agents>=1.57.2`). `IntuticHookProvider` subscribes to that event and cancels denied calls:
 
 ```python
 from strands import Agent
@@ -62,7 +62,27 @@ On a deny, the tool body never runs; the model receives an error-status tool res
 
 **Fail-closed posture:** unlike CrewAI's dispatcher (which swallows hook exceptions and *allows* the call), Strands propagates a raising hook and aborts the whole run — confirmed empirically against the real dispatcher. So an unexpected gate error, or a missing `install_gate(...)`, aborts loudly instead of running tools unguarded.
 
-**Registration is per-Agent, not process-global.** Each `Agent` (including every node agent inside a multi-agent `Graph`/`Swarm`) needs the hook passed to it.
+**Registration is per-Agent, not process-global.** Each `Agent` needs the hook passed to it — for multi-agent orchestrators use `install_multiagent()` (below).
+
+**Bidirectional streaming agents (`BidiAgent`).** `strands.bidi.BidiAgent` dispatches tools through the same executor and fires the same `BeforeToolCallEvent`, so it is gated the same way — `BidiAgent(model=..., tools=[...], hooks=[IntuticHookProvider()])` or `install(bidi_agent)`. This covers both tool calls the model requests during a live session and direct `bidi_agent.tool.<name>(...)` calls. (Bidi moved from `strands.experimental` to the stable `strands.bidi` namespace in strands-agents 1.57.2, which is why that is the extra's floor.)
+
+### Multi-agent `Graph` / `Swarm`
+
+A Strands hook lives on one agent, and every node of a `Graph` or `Swarm` wraps its own agent — a node built without the hook would run its tools ungoverned. `install_multiagent()` gates the whole orchestrator in one call:
+
+```python
+from strands.multiagent import GraphBuilder, Swarm
+from intutic_clawde.gate.adapters.strands import install_multiagent
+
+graph = builder.build()
+install_multiagent(graph)   # or install_multiagent(swarm)
+```
+
+- **Every node, nested ones included.** It walks the orchestrator's nodes, recursing into nested `Graph`/`Swarm` executors, and installs the gate on every agent that does not already carry an `IntuticHookProvider`. Calling it twice is a no-op; agents constructed with `hooks=[IntuticHookProvider()]` are left as they are.
+- **Refuses what it cannot gate.** A node whose executor runs its tools outside this process — e.g. a remote A2A agent — raises a `TypeError` naming the node, before anything is installed. Gate that agent in its own runtime, or remove the node.
+- **Fail-closed for later changes.** It also registers a `BeforeNodeCallEvent` hook on each orchestrator: if a node is about to run and its agent carries no Intutic gate (a node added or replaced after the call), the node is cancelled with a `[Intutic Governance] BLOCKED: ...` message — a `Graph` fails and stops, a `Swarm` ends with status `FAILED`. Re-run `install_multiagent()` after changing nodes.
+
+The per-tool `BeforeToolCallEvent` gate is still what evaluates policy inside each node; the node hook only guarantees that gate is present.
 
 ### 4. MCP tools
 
@@ -92,7 +112,6 @@ Same structural gaps as every SDK-gated framework — see [LangGraph's "What the
 
 - **Bedrock/SageMaker egress is ungoverned by the proxy** (see the table above). Tool calls remain fully gated; prompts/responses to those providers are not inspected. See TD-420.
 - **Hook ordering:** another hook registered to run after this one could mutate `tool_use` post-approval; Strands offers no "always last" guarantee (the adapter registers late, at order 99, to narrow this). See TD-421.
-- The experimental **`BidiAgent`** (bidirectional streaming) fires a different event class this adapter does not subscribe to. See TD-422.
 
 ## Config details
 
@@ -103,4 +122,4 @@ Same structural gaps as every SDK-gated framework — see [LangGraph's "What the
 | Detection | `strands-agents` in `pyproject.toml`, `requirements.txt`, or `uv.lock` |
 | Format | Shell environment variables |
 | Write strategy | Atomic (write to `.intutic-tmp`, then rename) |
-| Tool gate | SDK-side (`intutic_clawde.gate.adapters.strands.IntuticHookProvider`, a `BeforeToolCallEvent.cancel_tool` hook) — no sync-daemon hook file |
+| Tool gate | SDK-side (`intutic_clawde.gate.adapters.strands.IntuticHookProvider`, a `BeforeToolCallEvent.cancel_tool` hook; `install_multiagent()` for `Graph`/`Swarm`) — no sync-daemon hook file |
