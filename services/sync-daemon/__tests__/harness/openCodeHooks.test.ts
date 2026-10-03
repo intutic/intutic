@@ -10,7 +10,13 @@ import { mkdtemp, rm, readFile, readdir, stat } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { writeOpenCodeHooks, buildPluginScript, OPENCODE_PLUGIN_DIR, OPENCODE_PLUGIN_FILE, OPENCODE_PLUGIN_V2_FILE } from '../../src/harness/openCodeHooks.js'
+import * as nodeFs from 'node:fs'
+import * as nodePath from 'node:path'
+import * as nodeOs from 'node:os'
+import {
+  writeOpenCodeHooks, buildPluginScript, OPENCODE_PLUGIN_DIR, OPENCODE_PLUGIN_FILE, OPENCODE_PLUGIN_V2_FILE,
+  OPENCODE_MCP_ID_JS,
+} from '../../src/harness/openCodeHooks.js'
 
 const PROXY_URL = 'http://127.0.0.1:4000'
 const hasBun = spawnSync('bun', ['--version'], { encoding: 'utf8' }).status === 0
@@ -74,5 +80,83 @@ describe('writeOpenCodeHooks', () => {
     })
     expect(r.status, `bun run failed:\n${r.stderr}\n${r.stdout}`).toBe(0)
     expect(r.stdout).toContain('[Intutic Governance] BLOCKED')
+  })
+})
+
+/** The embedded id-composition JavaScript, evaluated exactly as the plugin
+ *  carries it (the plugin supplies `fs`, `path` and `os` from its require). */
+function loadMcpId(): {
+  id: (tool: string, names: string[]) => string
+  names: (dirs: string[]) => string[]
+} {
+  const factory = new Function('fs', 'path', 'os',
+    OPENCODE_MCP_ID_JS + '\nreturn { id: intuticOpenCodeMcpId, names: intuticOpenCodeMcpServerNames };')
+  return factory(nodeFs, nodePath, nodeOs)
+}
+
+describe('OpenCode MCP tool id composition (TD-487)', () => {
+  const { id, names } = loadMcpId()
+
+  it('composes <server>_<tool> into mcp__<server>__<tool>', () => {
+    expect(id('github_create_issue', ['github'])).toBe('mcp__github__create_issue')
+  })
+
+  it('chooses the LONGEST configured server name, so a server name containing _ is not split', () => {
+    expect(id('my_db_query', ['my', 'my_db'])).toBe('mcp__my_db__query')
+    expect(id('my_db_query', ['my_db', 'my'])).toBe('mcp__my_db__query')
+    expect(id('my_search', ['my', 'my_db'])).toBe('mcp__my__search')
+  })
+
+  it('matches OpenCode\'s sanitized server name but composes the configured one', () => {
+    expect(id('docs_site_fetch', ['docs.site'])).toBe('mcp__docs.site__fetch')
+  })
+
+  it('passes built-in and unconfigured tools through unchanged', () => {
+    for (const t of ['bash', 'read', 'apply_patch', 'todo_write', 'github', 'github_']) {
+      expect(id(t, ['github'])).toBe(t)
+    }
+    expect(id('bash', [])).toBe('bash')
+    expect(id('mcp__a__b', ['mcp'])).toBe('mcp__a__b')
+  })
+
+  describe('reads server names from the OpenCode config files', () => {
+    let home: string
+    let project: string
+    const saved: Record<string, string | undefined> = {}
+    const vars = ['HOME', 'USERPROFILE', 'XDG_CONFIG_HOME', 'OPENCODE_CONFIG_DIR', 'OPENCODE_CONFIG', 'OPENCODE_CONFIG_CONTENT']
+    beforeEach(async () => {
+      for (const v of vars) saved[v] = process.env[v]
+      home = await mkdtemp(join(tmpdir(), 'intutic-opencode-home-'))
+      project = await mkdtemp(join(tmpdir(), 'intutic-opencode-proj-'))
+      process.env.HOME = home
+      process.env.USERPROFILE = home
+      for (const v of vars.slice(2)) delete process.env[v]
+    })
+    afterEach(async () => {
+      for (const v of vars) {
+        if (saved[v] === undefined) delete process.env[v]
+        else process.env[v] = saved[v]
+      }
+      await rm(home, { recursive: true, force: true })
+      await rm(project, { recursive: true, force: true })
+    })
+
+    it('global .json, project .jsonc with comments and trailing commas, .opencode/, and OPENCODE_CONFIG_CONTENT', () => {
+      nodeFs.mkdirSync(join(home, '.config', 'opencode'), { recursive: true })
+      nodeFs.writeFileSync(join(home, '.config', 'opencode', 'opencode.json'), JSON.stringify({ mcp: { github: {} }, theme: 'x' }))
+      nodeFs.writeFileSync(
+        join(project, 'opencode.jsonc'),
+        '{\n  // a comment with "quotes" and // slashes\n  "mcp": { "my_db": {}, /* inline */ "url_thing": { "url": "https://a.b//c" }, },\n}\n',
+      )
+      nodeFs.mkdirSync(join(project, '.opencode'), { recursive: true })
+      nodeFs.writeFileSync(join(project, '.opencode', 'opencode.json'), JSON.stringify({ mcp: { inner: {} } }))
+      process.env.OPENCODE_CONFIG_CONTENT = JSON.stringify({ mcp: { fromenv: {} } })
+      expect(names([project]).sort()).toEqual(['fromenv', 'github', 'inner', 'my_db', 'url_thing'])
+    })
+
+    it('an unreadable or malformed file contributes nothing and does not throw', () => {
+      nodeFs.writeFileSync(join(project, 'opencode.json'), '{ "mcp": ')
+      expect(names([project, join(project, 'missing')])).toEqual([])
+    })
   })
 })

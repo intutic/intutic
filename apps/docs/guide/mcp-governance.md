@@ -19,7 +19,7 @@ tool definitions changing after a user has already trusted it.
 `intutic connect` and the sync daemon's continuous sync loop rewrite each
 stdio MCP server entry in a harness config (`~/.claude/mcp.json`, Claude
 Desktop, Cursor, Cline, Windsurf, Continue, Goose, OpenHands, Muse Code, Grok
-Build — twelve config paths across ten harnesses) so that the
+Build, OpenCode — fourteen config paths across eleven harnesses) so that the
 `@intutic/mcp-governance-proxy` binary fronts it: the harness spawns the
 proxy, the proxy spawns the real server, and every `tools/call` and
 `tools/list` passes through governance in between.
@@ -42,7 +42,17 @@ server declared in both places produces two distinct rows in this page's
 registry and reporting, not a merged one; see `mcpAutoWrite.ts`'s module doc
 comment for why that is correct rather than a double-count to fix.
 
-**dsh is NOT yet in the twelve config paths above.** dsh's MCP-client
+OpenCode's `mcp` block (`opencode.json`, project and global) has its own
+shape: a `local` server's `command` is one array and its env map is
+`environment`, and a `remote` server is `{ type: "remote", url, headers }`.
+Both are wrapped with the same proxy argv as every other harness; a wrapped
+remote server becomes a `local` entry running the bridge. Already-wrapped
+entries are recognised from the command, since OpenCode's schema has no room
+for the `__intutic_wrapped` marker. A remote server configured with `oauth`
+is left unwrapped, and JSONC files are skipped rather than rewritten — see
+[the OpenCode page](/integrations/opencode#mcp-servers).
+
+**dsh is NOT yet in the fourteen config paths above.** dsh's MCP-client
 composition (whether an MCP server is a `cordis.patch.yml` plugin row, a
 separate config section, or something else) was not researched during dsh's
 onboarding phase — that phase's time budget went to the higher-priority
@@ -363,14 +373,14 @@ apply to that gate's unit of evaluation at all.
 | Goose, OpenHands, Hermes, Antigravity, Pi | ⚠️ reachable | Bash-family: the gate script runs unconditionally for every tool call, matcher or not; each harness's own MCP tool-naming convention was not independently verified during M3. |
 | Openclaw | ⚠️ reachable | No matcher on its `PreToolUse` registration — runs for every tool call; tool-naming convention unconfirmed. |
 | Grok Build | ⚠️ reachable | No matcher on its `PreToolUse` registration — runs for every tool call; tool-naming convention not independently verified (not installable in the environment this integration was built in). |
-| OpenCode | ⚠️ reachable | The plugin hook fires for every tool id, MCP tools included (confirmed from `session/tools.ts`), but OpenCode 1.x names MCP tools `<server>_<tool>` (its `mcp/catalog.ts`), not `mcp__<server>__<tool>`, so the allowlist backstop does not parse them and OpenCode's `mcp` config block is not proxy-wrapped yet — TD-487. |
+| OpenCode | ✅ yes | The plugin hook fires for every tool id, MCP tools included (confirmed from `session/tools.ts`). OpenCode 1.x names MCP tools `sanitize(server)_sanitize(tool)` (its `mcp/catalog.ts`, read from source); the plugin composes that into `mcp__<server>__<tool>` against the server names in the OpenCode config files, longest name first, so the allowlist applies (TD-487). OpenCode 2.x MCP ids are not verified. |
 | dsh | ⚠️ reachable | `tools/pre-execute` fires unconditionally for every tool call (confirmed from `@deepseek-ai/dsh-tools`'s shipped types — it is the registry's own dispatch point, not an opt-in matcher). dsh's own MCP tool-naming convention was not independently verified — MCP composition itself was out of scope for this phase, see the note above and TD-370. |
 | n8n | ❌ n/a | This gate's unit of evaluation is a workflow NODE TYPE (n8n's own dot-namespaced convention), never a `mcp__<server>__<tool>` tool-call name — confirmed by reading `emitN8nWorkflowGate`. |
 | Open WebUI | ❌ n/a | This gate evaluates PROMPT TEXT, not a tool call — no tool name of any shape reaches it. |
 | LangGraph | ❌ n/a | No generated gate file — the SDK-side `intutic_clawde.gate` is out of scope for this phase's per-harness matcher work. |
 | Aider | ❌ n/a | No `PreToolUse` hook mechanism exists for this harness at all (see `NO_GATE` in `gateRegistry.ts`). |
 | Xirp | ❌ n/a (delegated) | Not itself an AI agent — no tool calls of its own to match. An `mcp__<server>__<tool>`-shaped call made inside a Xirp-managed session is whatever the WRAPPED harness (Claude Code, Codex, …) sends, and is covered by that harness's own row above — provided the wrapped harness's gate files reach the `git worktree` the call runs in, which is what [Worktree Coverage](/reference/harness-security-matrix#worktree-coverage) (TD-390) now ensures. |
-| Agentic Orchestrator | ❌ n/a (delegated) | Not itself an AI agent — no tool calls of its own to match. An `mcp__<server>__<tool>`-shaped call made inside a session is whatever the WRAPPED backend (Claude Code, Codex, or OpenCode) sends. Claude Code/Codex calls are covered by that backend's own row above under the same worktree-coverage guarantee as Xirp; OpenCode calls are covered by the OpenCode row above (the plugin fires for MCP tools; the `<server>_<tool>` naming caveat there applies). |
+| Agentic Orchestrator | ❌ n/a (delegated) | Not itself an AI agent — no tool calls of its own to match. An `mcp__<server>__<tool>`-shaped call made inside a session is whatever the WRAPPED backend (Claude Code, Codex, or OpenCode) sends. Claude Code/Codex calls are covered by that backend's own row above under the same worktree-coverage guarantee as Xirp; OpenCode calls are covered by the OpenCode row above (the plugin fires for MCP tools and composes their ids for the allowlist). |
 
 ## What this phase deliberately does not cover
 

@@ -55,7 +55,7 @@ description = "File support for asyncio."
 optional = true
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "aiofiles-24.1.0-py3-none-any.whl", hash = "sha256:b4ec55f4195e3eb5d7abd1bf7e061763e864dd4954231fb8539a0ef8bb8260e5"},
     {file = "aiofiles-24.1.0.tar.gz", hash = "sha256:22a075c9e5a3810f0c2e48f3008c94d68c65d763b9b03857924c99e57355166c"},
@@ -68,7 +68,7 @@ description = "Happy Eyeballs for asyncio"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "(extra == \"crewai\" or extra == \"google-adk\") and python_version < \"3.14\" or extra == \"google-adk\""
+markers = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"google-adk\") or extra == \"google-adk\""
 files = [
     {file = "aiohappyeyeballs-2.7.1-py3-none-any.whl", hash = "sha256:9243213661e29250eb41368e5daa826fc017156c3b8a11440826b2e3ed376472"},
     {file = "aiohappyeyeballs-2.7.1.tar.gz", hash = "sha256:065665c041c42a5938ed220bdcd7230f22527fbec085e1853d2402c8a3615d9d"},
@@ -81,7 +81,7 @@ description = "Async http client/server framework (asyncio)"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "(extra == \"crewai\" or extra == \"google-adk\") and python_version < \"3.14\" or extra == \"google-adk\""
+markers = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"google-adk\") or extra == \"google-adk\""
 files = [
     {file = "aiohttp-3.14.3-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:eb0495d778817619273c108784292be161a924b9f5ae5cbbc70a2caa6838250b"},
     {file = "aiohttp-3.14.3-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:c3c200cf9757edd785051dc699c7ecbec22110dbfcb3fefc7a9f9695eda8ea7a"},
@@ -225,7 +225,7 @@ description = "aiosignal: a list of registered asynchronous callbacks"
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "(extra == \"crewai\" or extra == \"google-adk\") and python_version < \"3.14\" or extra == \"google-adk\""
+markers = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"google-adk\") or extra == \"google-adk\""
 files = [
     {file = "aiosignal-1.4.0-py3-none-any.whl", hash = "sha256:053243f8b92b990551949e63930a839ff0cf0b0ebbe0597b0f3fb19e1a0fe82e"},
     {file = "aiosignal-1.4.0.tar.gz", hash = "sha256:f47eecd9468083c2029cc99945502cb7708b082c232f9aca65da147157b251c7"},
@@ -242,7 +242,7 @@ description = "asyncio bridge to the standard sqlite3 module"
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "(extra == \"crewai\" or extra == \"google-adk\") and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"google-adk\")"
 files = [
     {file = "aiosqlite-0.21.0-py3-none-any.whl", hash = "sha256:2549cf4057f95f53dcba16f2b64e8e2791d7e1adedb13197dd8ed77bb226d7d0"},
     {file = "aiosqlite-0.21.0.tar.gz", hash = "sha256:131bb8056daa3bc875608c631c678cda73922a2d4ba8aec373b19f18c17e7aa3"},
@@ -279,7 +279,7 @@ description = "Document parameters, class attributes, return types, and variable
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "(extra == \"crewai\" or extra == \"google-adk\") and python_version < \"3.14\" or extra == \"google-adk\""
+markers = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"google-adk\") or extra == \"google-adk\""
 files = [
     {file = "annotated_doc-0.0.5-py3-none-any.whl", hash = "sha256:117bac03a25ede5df5440e855b32d556049ca169ead221505badf432fed4b101"},
     {file = "annotated_doc-0.0.5.tar.gz", hash = "sha256:c7e58ce09192557605d8bbd92836d7e1d520ac9580096042c0bfd197efacf1bb"},
@@ -296,7 +296,7 @@ files = [
     {file = "annotated_types-0.8.0-py3-none-any.whl", hash = "sha256:f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0"},
     {file = "annotated_types-0.8.0.tar.gz", hash = "sha256:13b2beaad985e05e2d6407ee4c4f35590b11f8d693a258a561055cac8f64cab7"},
 ]
-markers = {main = "python_version < \"3.14\" and (extra == \"crewai\" or extra == \"langchain\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\" or extra == \"autogen\" or extra == \"ag2\" or extra == \"pydantic-ai\") or extra == \"langchain\" or extra == \"strands\" or extra == \"openai-agents\" or extra == \"google-adk\" or extra == \"autogen\" or extra == \"ag2\" or extra == \"pydantic-ai\""}
+markers = {main = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"langchain\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\" or extra == \"autogen\" or extra == \"ag2\" or extra == \"pydantic-ai\") or extra == \"langchain\" or extra == \"strands\" or extra == \"openai-agents\" or extra == \"google-adk\" or extra == \"autogen\" or extra == \"ag2\" or extra == \"pydantic-ai\""}
 
 [[package]]
 name = "anthropic"
@@ -339,7 +339,7 @@ files = [
     {file = "anyio-4.14.2-py3-none-any.whl", hash = "sha256:9f505dda5ac9f0c8309b5e8bd445a8c2bf7246f3ce950121e45ea15bc41d1494"},
     {file = "anyio-4.14.2.tar.gz", hash = "sha256:cfa139f3ed1a23ee8f88a145ddb5ac7605b8bbfd8592baacd7ce3d8bb4313c7f"},
 ]
-markers = {main = "(extra == \"crewai\" or extra == \"smolagents\" or extra == \"langchain\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\" or extra == \"ag2\" or extra == \"pydantic-ai\") and (python_version < \"3.14\" or extra == \"openai-agents\" or extra == \"pydantic-ai\" or extra == \"strands\" or extra == \"langchain\" or extra == \"google-adk\" or extra == \"ag2\" or extra == \"smolagents\")"}
+markers = {main = "(python_version <= \"3.13\" or extra == \"openai-agents\" or extra == \"pydantic-ai\" or extra == \"strands\" or extra == \"langchain\" or extra == \"google-adk\" or extra == \"ag2\" or extra == \"smolagents\") and (extra == \"crewai\" or extra == \"smolagents\" or extra == \"langchain\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\" or extra == \"ag2\" or extra == \"pydantic-ai\")"}
 
 [package.dependencies]
 exceptiongroup = {version = ">=1.0.2", markers = "python_version < \"3.11\""}
@@ -356,7 +356,7 @@ description = "A small Python module for determining appropriate platform-specif
 optional = true
 python-versions = "*"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "appdirs-1.4.4-py2.py3-none-any.whl", hash = "sha256:a841dacd6b99318a741b166adb07e19ee71a274450e68237b4650ca1055ab128"},
     {file = "appdirs-1.4.4.tar.gz", hash = "sha256:7d5d0167b2b1ba821647616af46a749d1c653740dd0d2415100fe26e27afdf41"},
@@ -382,7 +382,7 @@ description = "Classes Without Boilerplate"
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "(extra == \"crewai\" or extra == \"google-adk\" or extra == \"openai-agents\" or extra == \"strands\") and (python_version < \"3.14\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\")"
+markers = "(python_version <= \"3.13\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\") and (extra == \"crewai\" or extra == \"google-adk\" or extra == \"openai-agents\" or extra == \"strands\")"
 files = [
     {file = "attrs-26.1.0-py3-none-any.whl", hash = "sha256:c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309"},
     {file = "attrs-26.1.0.tar.gz", hash = "sha256:d03ceb89cb322a8fd706d4fb91940737b6642aa36998fe130a9bc96c985eff32"},
@@ -505,7 +505,7 @@ description = "Function decoration for backoff and retry"
 optional = true
 python-versions = ">=3.7,<4.0"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "backoff-2.2.1-py3-none-any.whl", hash = "sha256:63579f9a0628e06278f7e47b7d7d5b6ce20dc65c5e96a6f3ca99a6adca0396e8"},
     {file = "backoff-2.2.1.tar.gz", hash = "sha256:03f829f5bb1923180821643f8753b0502c3b682293992485b0eef2807afa5cba"},
@@ -518,7 +518,7 @@ description = "Modern password hashing for your software and your servers"
 optional = true
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "bcrypt-5.0.0-cp313-cp313t-macosx_10_12_universal2.whl", hash = "sha256:f3c08197f3039bec79cee59a606d62b96b16669cff3949f21e74796b6e3cd2be"},
     {file = "bcrypt-5.0.0-cp313-cp313t-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:200af71bc25f22006f4069060c88ed36f8aa4ff7f53e67ff04d2ab3f1e79a5b2"},
@@ -638,7 +638,7 @@ description = "A simple, correct Python build frontend"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "build-1.5.0-py3-none-any.whl", hash = "sha256:13f3eecb844759ab66efec90ca17639bbf14dc06cb2fdf37a9010322d9c50a6f"},
     {file = "build-1.5.0.tar.gz", hash = "sha256:302c22c3ba2a0fd5f3911918651341ebb3896176cbdec15bd421f80b1afc7647"},
@@ -699,7 +699,7 @@ description = "Foreign Function Interface for Python calling C code."
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "platform_python_implementation != \"PyPy\" and (extra == \"crewai\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\") and (python_version < \"3.14\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\")"
+markers = "platform_python_implementation != \"PyPy\" and (python_version <= \"3.13\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\") and (extra == \"crewai\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\")"
 files = [
     {file = "cffi-2.1.1-cp310-cp310-macosx_10_15_x86_64.whl", hash = "sha256:baed1e86cc735622097354b9d1281406caf42ff42a886d29faa8e8d1630333be"},
     {file = "cffi-2.1.1-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:ca82be1a1d406ecfe1d25dc16cb33488e5a16bf4438c9fb590484ea29d92478b"},
@@ -995,7 +995,7 @@ description = "Chroma."
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "chromadb-1.1.1-cp39-abi3-macosx_10_12_x86_64.whl", hash = "sha256:27fe0e25ef0f83fb09c30355ab084fe6f246808a7ea29e8c19e85cf45785b90d"},
     {file = "chromadb-1.1.1-cp39-abi3-macosx_11_0_arm64.whl", hash = "sha256:95aed58869683f12e7dcbf68b039fe5f576dbe9d1b86b8f4d014c9d077ccafd2"},
@@ -1044,7 +1044,7 @@ description = "Composable command line interface toolkit"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "python_version < \"3.14\" and (extra == \"crewai\" or extra == \"google-adk\" or extra == \"smolagents\") or python_version < \"3.14\" and sys_platform != \"emscripten\" and (extra == \"crewai\" or extra == \"openai-agents\" or extra == \"strands\") or python_version >= \"3.14\" and sys_platform != \"emscripten\" and (extra == \"openai-agents\" or extra == \"strands\") or (extra == \"google-adk\" or extra == \"smolagents\") and python_version >= \"3.14\""
+markers = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"google-adk\" or extra == \"smolagents\") or python_version <= \"3.13\" and sys_platform != \"emscripten\" and (extra == \"crewai\" or extra == \"openai-agents\" or extra == \"strands\") or python_version >= \"3.14\" and sys_platform != \"emscripten\" and (extra == \"openai-agents\" or extra == \"strands\") or (extra == \"google-adk\" or extra == \"smolagents\") and python_version >= \"3.14\""
 files = [
     {file = "click-8.4.2-py3-none-any.whl", hash = "sha256:e6f9f66136c816745b9d65817da91d61d957fb16e02e4dcd0552553c5a197b76"},
     {file = "click-8.4.2.tar.gz", hash = "sha256:9a6cea6e60b17ebe0a44c5cc636d94f09bd66142c1cd7d8b4cd731c4917a15f6"},
@@ -1064,7 +1064,7 @@ files = [
     {file = "colorama-0.4.6-py2.py3-none-any.whl", hash = "sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6"},
     {file = "colorama-0.4.6.tar.gz", hash = "sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44"},
 ]
-markers = {main = "python_version < \"3.14\" and extra == \"crewai\" and os_name == \"nt\" or python_version < \"3.14\" and platform_system == \"Windows\" and (extra == \"crewai\" or extra == \"google-adk\" or extra == \"smolagents\" or extra == \"openai-agents\") or python_version < \"3.14\" and sys_platform != \"emscripten\" and platform_system == \"Windows\" and (extra == \"crewai\" or extra == \"openai-agents\" or extra == \"strands\") or python_version >= \"3.14\" and platform_system == \"Windows\" and (sys_platform != \"emscripten\" or extra == \"google-adk\" or extra == \"smolagents\") and (extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\" or extra == \"smolagents\")", dev = "sys_platform == \"win32\""}
+markers = {main = "python_version <= \"3.13\" and extra == \"crewai\" and os_name == \"nt\" or python_version <= \"3.13\" and platform_system == \"Windows\" and (extra == \"crewai\" or extra == \"google-adk\" or extra == \"smolagents\" or extra == \"openai-agents\") or python_version <= \"3.13\" and sys_platform != \"emscripten\" and platform_system == \"Windows\" and (extra == \"crewai\" or extra == \"openai-agents\" or extra == \"strands\") or python_version >= \"3.14\" and platform_system == \"Windows\" and (sys_platform != \"emscripten\" or extra == \"google-adk\" or extra == \"smolagents\") and (extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\" or extra == \"smolagents\")", dev = "sys_platform == \"win32\""}
 
 [[package]]
 name = "crewai"
@@ -1073,7 +1073,7 @@ description = "Cutting-edge framework for orchestrating role-playing, autonomous
 optional = true
 python-versions = "<3.14,>=3.10"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "crewai-1.15.16-py3-none-any.whl", hash = "sha256:a93ae2c78b42dacdb932c2e4bbba2efb108ac610c23cf5453d8d59000858665b"},
     {file = "crewai-1.15.16.tar.gz", hash = "sha256:38f75f499a5e6a5dc78369a3f5384452b791bc4852a1ff38c342aca4e04e8264"},
@@ -1139,7 +1139,7 @@ description = "CLI for CrewAI — scaffold, run, deploy and manage AI agent crew
 optional = true
 python-versions = "<3.14,>=3.10"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "crewai_cli-1.15.16-py3-none-any.whl", hash = "sha256:b98848f2cffe03fcefe69eeeb64e8dca8ec0fcc7f00437c419ad1972dd4a8c2c"},
     {file = "crewai_cli-1.15.16.tar.gz", hash = "sha256:6d8f0c03bb05e88114b1a60e93aced09db2cc0a83f6811ec83f2e902fda14426"},
@@ -1170,7 +1170,7 @@ description = "Shared utilities for CrewAI — version, paths, user-data, teleme
 optional = true
 python-versions = "<3.14,>=3.10"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "crewai_core-1.15.16-py3-none-any.whl", hash = "sha256:7a74e6ddbecd9df042dd459fd5e19a308b576958469bfa134ceb12dc6814106b"},
     {file = "crewai_core-1.15.16.tar.gz", hash = "sha256:c8d5548e223f32262243e91ee83b6976002616a26fc10951b3d5f1c05f10697f"},
@@ -1197,7 +1197,7 @@ description = "cryptography is a package which provides cryptographic recipes an
 optional = true
 python-versions = "!=3.9.0,!=3.9.1,>=3.9"
 groups = ["main"]
-markers = "(extra == \"crewai\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\") and (python_version < \"3.14\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\")"
+markers = "(python_version <= \"3.13\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\") and (extra == \"crewai\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\")"
 files = [
     {file = "cryptography-50.0.0-cp311-abi3-macosx_11_0_arm64.whl", hash = "sha256:031e2d5dd4bb9caa3ca9c82e5a197fd8ae680232cee62603d1a813f3f07e3d03"},
     {file = "cryptography-50.0.0-cp311-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:fd9192b7b70c573d7f214eb1ae35e00d359f6f5e4b27c7e21e30de1fc6204645"},
@@ -1261,7 +1261,7 @@ description = "A library to handle automated deprecations"
 optional = true
 python-versions = "*"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "deprecation-2.1.0-py2.py3-none-any.whl", hash = "sha256:a10811591210e1fb0e768a8c25517cabeabcba6f0bf96564f8ff45189f90b14a"},
     {file = "deprecation-2.1.0.tar.gz", hash = "sha256:72b3bde64e5d778694b0cf68178aed03d15e15477116add3fb773e581f9518ff"},
@@ -1294,7 +1294,7 @@ files = [
     {file = "docstring_parser-0.18.0-py3-none-any.whl", hash = "sha256:b3fcbed555c47d8479be0796ef7e19c2670d428d72e96da63f3a40122860374b"},
     {file = "docstring_parser-0.18.0.tar.gz", hash = "sha256:292510982205c12b1248696f44959db3cdd1740237a968ea1e2e7a900eeb2015"},
 ]
-markers = {main = "(extra == \"crewai\" or extra == \"strands\") and python_version < \"3.14\" or extra == \"strands\""}
+markers = {main = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"strands\") or extra == \"strands\""}
 
 [package.extras]
 dev = ["pre-commit (>=2.16.0) ; python_version >= \"3.9\"", "pydoctor (>=25.4.0)", "pytest"]
@@ -1308,7 +1308,7 @@ description = "Module for converting between datetime.timedelta and Go's Duratio
 optional = true
 python-versions = "*"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "durationpy-0.10-py3-none-any.whl", hash = "sha256:3b41e1b601234296b4fb368338fdcd3e13e0b4fb5b67345948f4f2bf9868b286"},
     {file = "durationpy-0.10.tar.gz", hash = "sha256:1fa6893409a6e739c9c72334fc65cca1f355dbdd93405d30f726deb5bde42fba"},
@@ -1321,7 +1321,7 @@ description = "An implementation of lxml.xmlfile for the standard library"
 optional = true
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "et_xmlfile-2.0.0-py3-none-any.whl", hash = "sha256:7a91720bc756843502c3b7504c77b8fe44217c85c537d85037f0f536151b2caa"},
     {file = "et_xmlfile-2.0.0.tar.gz", hash = "sha256:dab3f4764309081ce75662649be815c4c9081e88f0837825f90fd28317d4da54"},
@@ -1400,7 +1400,7 @@ description = "A platform independent file lock."
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "(extra == \"crewai\" or extra == \"smolagents\") and python_version < \"3.14\" or extra == \"smolagents\""
+markers = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"smolagents\") or extra == \"smolagents\""
 files = [
     {file = "filelock-3.32.3-py3-none-any.whl", hash = "sha256:7f0ca4bcc0e181c60dbbd8aa9ab5b120ebb99e4e064e83636340056f833a1f09"},
     {file = "filelock-3.32.3.tar.gz", hash = "sha256:0ffa185a3540854c95caa7fa76b76cb219d907415e2c5dc9af25fd970563487f"},
@@ -1413,7 +1413,7 @@ description = "The FlatBuffers serialization format for Python"
 optional = true
 python-versions = "*"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "flatbuffers-25.12.19-py2.py3-none-any.whl", hash = "sha256:7634f50c427838bb021c2d66a3d1168e9d199b0607e6329399f04846d42e20b4"},
 ]
@@ -1425,7 +1425,7 @@ description = "A list-like structure which implements collections.abc.MutableSeq
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "(extra == \"crewai\" or extra == \"google-adk\") and python_version < \"3.14\" or extra == \"google-adk\""
+markers = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"google-adk\") or extra == \"google-adk\""
 files = [
     {file = "frozenlist-1.8.0-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:b37f6d31b3dcea7deb5e9696e529a6aa4a898adc33db82da12e4c60a7c4d2011"},
     {file = "frozenlist-1.8.0-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:ef2b7b394f208233e471abc541cc6991f907ffd47dc72584acee3147899d6565"},
@@ -1566,7 +1566,7 @@ description = "File-system specification"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "(extra == \"crewai\" or extra == \"smolagents\") and python_version < \"3.14\" or extra == \"smolagents\""
+markers = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"smolagents\") or extra == \"smolagents\""
 files = [
     {file = "fsspec-2026.7.0-py3-none-any.whl", hash = "sha256:b57ddbafedfaef7018c1ecab32aa200a9d7ca26b77965f64e48b70061249d279"},
     {file = "fsspec-2026.7.0.tar.gz", hash = "sha256:c803c40f4cf860b49dea58ee3e1c33cb9c790520e233537e1340049f89b82a88"},
@@ -1756,7 +1756,7 @@ description = "RE2 Python bindings"
 optional = true
 python-versions = "~=3.9"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "google_re2-1.1.20251105-1-cp310-cp310-macosx_13_0_arm64.whl", hash = "sha256:88bd426c1904f3562049bf766301bbc4f7a4bcb8f61e92f8cc833faac1cf2a92"},
     {file = "google_re2-1.1.20251105-1-cp310-cp310-macosx_13_0_x86_64.whl", hash = "sha256:a486dc10bb07f3c34b9908541368e21ab6d77972569427200db077126668fbf3"},
@@ -1822,7 +1822,7 @@ description = "Common protobufs used in Google APIs"
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "googleapis_common_protos-1.75.0-py3-none-any.whl", hash = "sha256:961ed60399c457ceb0ee8f285a84c870aabc9c6a832b9d37bb281b5bebde43ed"},
     {file = "googleapis_common_protos-1.75.0.tar.gz", hash = "sha256:53a062ff3c32552fbd62c11fe23768b78e4ddf0494d5e5fd97d3f4689c75fbbd"},
@@ -1875,7 +1875,7 @@ description = "HTTP/2-based RPC framework"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "grpcio-1.83.0-cp310-cp310-linux_armv7l.whl", hash = "sha256:fba099b716e73512d61b97f71ea3c31a72abb36904036e316bf4dd148ca8dcc8"},
     {file = "grpcio-1.83.0-cp310-cp310-macosx_11_0_universal2.whl", hash = "sha256:6755ed67cc3e454d51ae9f6e1915b80d3942fa4de956ef48dacd45ab7f40b727"},
@@ -1947,7 +1947,7 @@ files = [
     {file = "h11-0.16.0-py3-none-any.whl", hash = "sha256:63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86"},
     {file = "h11-0.16.0.tar.gz", hash = "sha256:4e35b956cf45792e4caa5885e69fba00bdbc6ffafbfa020300e549b208ee5ff1"},
 ]
-markers = {main = "(python_version < \"3.14\" and (extra == \"crewai\" or extra == \"smolagents\" or extra == \"langchain\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\" or extra == \"ag2\") or extra == \"smolagents\" or extra == \"langchain\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\" or extra == \"ag2\" or extra == \"pydantic-ai\" and sys_platform != \"emscripten\") and python_version < \"3.14\" or python_version >= \"3.14\" and (extra == \"openai-agents\" or extra == \"strands\" or extra == \"langchain\" or extra == \"google-adk\" or extra == \"ag2\" or extra == \"smolagents\") or (extra == \"openai-agents\" or extra == \"pydantic-ai\") and sys_platform != \"emscripten\" and python_version >= \"3.14\""}
+markers = {main = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"smolagents\" or extra == \"langchain\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\" or extra == \"ag2\") or extra == \"pydantic-ai\" and sys_platform != \"emscripten\" and python_version <= \"3.13\" or python_version >= \"3.14\" and (extra == \"openai-agents\" or extra == \"strands\" or extra == \"langchain\" or extra == \"google-adk\" or extra == \"ag2\" or extra == \"smolagents\") or (extra == \"openai-agents\" or extra == \"pydantic-ai\") and sys_platform != \"emscripten\" and python_version >= \"3.14\"", dev = "sys_platform != \"emscripten\""}
 
 [[package]]
 name = "hf-xet"
@@ -1956,7 +1956,7 @@ description = "Fast transfer of large files with the Hugging Face Hub."
 optional = true
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "(platform_machine == \"x86_64\" or platform_machine == \"amd64\" or platform_machine == \"AMD64\" or platform_machine == \"arm64\" or platform_machine == \"aarch64\") and (extra == \"crewai\" or extra == \"smolagents\") and (python_version < \"3.14\" or extra == \"smolagents\")"
+markers = "(platform_machine == \"x86_64\" or platform_machine == \"amd64\" or platform_machine == \"AMD64\" or platform_machine == \"arm64\" or platform_machine == \"aarch64\") and (python_version <= \"3.13\" or extra == \"smolagents\") and (extra == \"crewai\" or extra == \"smolagents\")"
 files = [
     {file = "hf_xet-1.6.0-cp314-cp314t-macosx_10_12_x86_64.whl", hash = "sha256:70cbb9c896901600128cb9b6f06e132954fbede1db30f31f7c6c63f84cb7c31d"},
     {file = "hf_xet-1.6.0-cp314-cp314t-macosx_11_0_arm64.whl", hash = "sha256:23379c2f9ec8696d952b16414a2bae72cad86a52df869b050698ba60f538c675"},
@@ -2033,7 +2033,7 @@ description = "A collection of framework independent HTTP protocol utils."
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "httptools-0.8.0-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:bf3b6f807c8541503cecfbb8a8dffb385640d0d96102f3d112aa8740f9b7c826"},
     {file = "httptools-0.8.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:da684f2e1aa2ee9bdcb083f3f3a68c5956750b375bc5df864d3a5f0c42a40b77"},
@@ -2120,7 +2120,7 @@ description = "Consume Server-Sent Event (SSE) messages with HTTPX."
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "(extra == \"crewai\" or extra == \"openai-agents\" or extra == \"strands\") and (python_version < \"3.14\" or extra == \"openai-agents\" or extra == \"strands\")"
+markers = "(python_version <= \"3.13\" or extra == \"openai-agents\" or extra == \"strands\") and (extra == \"crewai\" or extra == \"openai-agents\" or extra == \"strands\")"
 files = [
     {file = "httpx_sse-0.4.3-py3-none-any.whl", hash = "sha256:0ac1c9fe3c0afad2e0ebb25a934a59f4c7823b60792691f779fad2c5568830fc"},
     {file = "httpx_sse-0.4.3.tar.gz", hash = "sha256:9b1ed0127459a66014aec3c56bebd93da3c1bc8bb6618c8082039a44889a755d"},
@@ -2175,7 +2175,7 @@ description = "Client library to download and publish models, datasets and other
 optional = true
 python-versions = ">=3.10.0"
 groups = ["main"]
-markers = "(extra == \"crewai\" or extra == \"smolagents\") and python_version < \"3.14\" or extra == \"smolagents\""
+markers = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"smolagents\") or extra == \"smolagents\""
 files = [
     {file = "huggingface_hub-1.28.0-py3-none-any.whl", hash = "sha256:58a8bacb03072edfc38067065e9dc24bbb34805410fcd36a1632de0b329660bb"},
     {file = "huggingface_hub-1.28.0.tar.gz", hash = "sha256:46a2e950c09234de54093d587d1675382f0d08dbd600d9fb599b5932f5b2c6cb"},
@@ -2252,7 +2252,7 @@ description = "Read resources from Python packages"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "importlib_resources-7.1.0-py3-none-any.whl", hash = "sha256:1bd7b48b4088eddb2cd16382150bb515af0bd2c70128194392725f82ad2c96a1"},
     {file = "importlib_resources-7.1.0.tar.gz", hash = "sha256:0722d4c6212489c530f2a145a34c0a7a3b4721bc96a15fada5930e2a0b760708"},
@@ -2285,7 +2285,7 @@ description = "structured outputs for llm"
 optional = true
 python-versions = "<4.0,>=3.9"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "instructor-1.15.4-py3-none-any.whl", hash = "sha256:00e0ecda80fd9746fb6d082d3f9641e193adb1d8849f0775f91519a82aeff968"},
     {file = "instructor-1.15.4.tar.gz", hash = "sha256:ea2280c3678d0f6891c4d826104f95624b680e69877113a6345b1d7c9027ba0f"},
@@ -2336,7 +2336,7 @@ description = "A very fast and expressive template engine."
 optional = true
 python-versions = ">=3.7"
 groups = ["main"]
-markers = "(extra == \"crewai\" or extra == \"smolagents\") and python_version < \"3.14\" or extra == \"smolagents\""
+markers = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"smolagents\") or extra == \"smolagents\""
 files = [
     {file = "jinja2-3.1.6-py3-none-any.whl", hash = "sha256:85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67"},
     {file = "jinja2-3.1.6.tar.gz", hash = "sha256:0137fb05990d35f1275a587e9aee6d56da821fc83491a0fb838183be43f66d6d"},
@@ -2466,7 +2466,7 @@ files = [
     {file = "jiter-0.14.0-graalpy312-graalpy250_312_native-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:67f00d94b281174144d6532a04b66a12cb866cbdc47c3af3bfe2973677f9861a"},
     {file = "jiter-0.14.0.tar.gz", hash = "sha256:e8a39e66dac7153cf3f964a12aad515afa8d74938ec5cc0018adcdae5367c79e"},
 ]
-markers = {main = "(extra == \"crewai\" or extra == \"openai-agents\") and python_version < \"3.14\"", dev = "python_version < \"3.14\""}
+markers = {main = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"openai-agents\")", dev = "python_version <= \"3.13\""}
 
 [[package]]
 name = "jiter"
@@ -2591,7 +2591,7 @@ description = "JSON Matching Expressions"
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "(extra == \"crewai\" or extra == \"strands\") and python_version < \"3.14\" or extra == \"strands\""
+markers = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"strands\") or extra == \"strands\""
 files = [
     {file = "jmespath-1.1.0-py3-none-any.whl", hash = "sha256:a5663118de4908c91729bea0acadca56526eb2698e83de10cd116ae0f4e97c64"},
     {file = "jmespath-1.1.0.tar.gz", hash = "sha256:472c87d80f36026ae83c6ddd0f1d05d4e510134ed462851fd5f754c8c3cbb88d"},
@@ -2623,7 +2623,7 @@ description = "A package to repair broken json strings"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "json_repair-0.60.1-py3-none-any.whl", hash = "sha256:ba6ff974f2a8bef2f7768144a7f03f870a816443f03da27a49cdd0ec31a78049"},
     {file = "json_repair-0.60.1.tar.gz", hash = "sha256:841661cdd2df507c9a4e189097f38ca6bc372e06d4b4e36d72e590f68176c290"},
@@ -2639,7 +2639,7 @@ description = "A Python implementation of the JSON5 data format."
 optional = true
 python-versions = ">=3.8.0"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "json5-0.10.0-py3-none-any.whl", hash = "sha256:19b23410220a7271e8377f81ba8aacba2fdd56947fbb137ee5977cbe1f5e8dfa"},
     {file = "json5-0.10.0.tar.gz", hash = "sha256:e66941c8f0a02026943c52c2eb34ebeb2a6f819a0be05920a6f5243cd30fd559"},
@@ -2684,7 +2684,7 @@ description = "jsonref is a library for automatic dereferencing of JSON Referenc
 optional = true
 python-versions = ">=3.7"
 groups = ["main"]
-markers = "(extra == \"crewai\" or extra == \"autogen\") and python_version < \"3.14\" or extra == \"autogen\""
+markers = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"autogen\") or extra == \"autogen\""
 files = [
     {file = "jsonref-1.1.0-py3-none-any.whl", hash = "sha256:590dc7773df6c21cbf948b5dac07a72a251db28b0238ceecce0a2abfa8ec30a9"},
     {file = "jsonref-1.1.0.tar.gz", hash = "sha256:32fe8e1d85af0fdefbebce950af85590b22b60f9e95443176adbde4e1ecea552"},
@@ -2697,7 +2697,7 @@ description = "An implementation of JSON Schema validation for Python"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "(extra == \"crewai\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\") and (python_version < \"3.14\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\")"
+markers = "(python_version <= \"3.13\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\") and (extra == \"crewai\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\")"
 files = [
     {file = "jsonschema-4.26.0-py3-none-any.whl", hash = "sha256:d489f15263b8d200f8387e64b4c3a75f06629559fb73deb8fdfb525f2dab50ce"},
     {file = "jsonschema-4.26.0.tar.gz", hash = "sha256:0c26707e2efad8aa1bfc5b7ce170f3fccc2e4918ff85989ba9ffa9facb2be326"},
@@ -2720,7 +2720,7 @@ description = "The JSON Schema meta-schemas and vocabularies, exposed as a Regis
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "(extra == \"crewai\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\") and (python_version < \"3.14\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\")"
+markers = "(python_version <= \"3.13\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\") and (extra == \"crewai\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\")"
 files = [
     {file = "jsonschema_specifications-2025.9.1-py3-none-any.whl", hash = "sha256:98802fee3a11ee76ecaca44429fda8a41bff98b00a0f2838151b113f210cc6fe"},
     {file = "jsonschema_specifications-2025.9.1.tar.gz", hash = "sha256:b540987f239e745613c7a9176f3edb72b832a4ac465cf02712288397832b5e8d"},
@@ -2736,7 +2736,7 @@ description = "Kubernetes python client"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "kubernetes-36.0.3-py2.py3-none-any.whl", hash = "sha256:8fde9241c4b298e6374a069dcf728359b4e72c2fb29489a975ba4e1c047cf10f"},
     {file = "kubernetes-36.0.3.tar.gz", hash = "sha256:36993ed25ce59b789c9341473a228fcf268504a2fec7c2b2b1531d73072e5ce7"},
@@ -2764,7 +2764,7 @@ description = "Lance Namespace interface and plugin registry"
 optional = true
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "lance_namespace-0.11.1-py3-none-any.whl", hash = "sha256:07643fce9a42ad4d58cc8bf91e3f592bc7f4cbd8d0ad5233223506debf67551c"},
     {file = "lance_namespace-0.11.1.tar.gz", hash = "sha256:f67cfbbe0647b7cb42f23b673e7edf8a75b7d8a047265a916492f8d247ee1bc2"},
@@ -2780,7 +2780,7 @@ description = "Lance Namespace Specification"
 optional = true
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "lance_namespace_urllib3_client-0.11.1-py3-none-any.whl", hash = "sha256:36537f529294da6d884ba0fe783704483f0a75463497c7705fd083a4d0257990"},
     {file = "lance_namespace_urllib3_client-0.11.1.tar.gz", hash = "sha256:145a9e9424d7597487249b5b95ee274423bf2910e1a9160b6a07b676b61ea46a"},
@@ -2799,7 +2799,7 @@ description = "lancedb"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "lancedb-0.30.0-cp39-abi3-macosx_11_0_arm64.whl", hash = "sha256:be2a9a43a65c330ccfd08115afb26106cd8d16788522fe7693d3a1f4e01ad321"},
     {file = "lancedb-0.30.0-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:be6a4ba2a1799a426cbf2ba5ea2559a7389a569e9a31f2409d531ceb59d42f35"},
@@ -3034,7 +3034,7 @@ description = "a modern parsing library"
 optional = true
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "lark-1.3.1-py3-none-any.whl", hash = "sha256:c629b661023a014c37da873b4ff58a817398d12635d3bbb2c5a03be7fe5d1e12"},
     {file = "lark-1.3.1.tar.gz", hash = "sha256:b426a7a6d6d53189d318f2b6236ab5d6429eaf09259f1ca33eb716eed10d2905"},
@@ -3053,7 +3053,7 @@ description = "Links recognition library with FULL unicode support."
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "linkify_it_py-2.1.0-py3-none-any.whl", hash = "sha256:0d252c1594ecba2ecedc444053db5d3a9b7ec1b0dd929c8f1d74dce89f86c05e"},
     {file = "linkify_it_py-2.1.0.tar.gz", hash = "sha256:43360231720999c10e9328dc3691160e27a718e280673d444c38d7d3aaa3b98b"},
@@ -3088,7 +3088,7 @@ description = "Python port of markdown-it. Markdown parsing, done right!"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "(extra == \"crewai\" or extra == \"smolagents\") and python_version < \"3.14\" or extra == \"smolagents\""
+markers = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"smolagents\") or extra == \"smolagents\""
 files = [
     {file = "markdown_it_py-4.2.0-py3-none-any.whl", hash = "sha256:9f7ebbcd14fe59494226453aed97c1070d83f8d24b6fc3a3bcf9a38092641c4a"},
     {file = "markdown_it_py-4.2.0.tar.gz", hash = "sha256:04a21681d6fbb623de53f6f364d352309d4094dd4194040a10fd51833e418d49"},
@@ -3114,7 +3114,7 @@ description = "Safely add untrusted strings to HTML/XML markup."
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "(extra == \"crewai\" or extra == \"smolagents\") and python_version < \"3.14\" or extra == \"smolagents\""
+markers = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"smolagents\") or extra == \"smolagents\""
 files = [
     {file = "markupsafe-3.0.3-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:2f981d352f04553a7171b8e44369f2af4055f888dfb147d55e42d29e29e74559"},
     {file = "markupsafe-3.0.3-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:e1c1493fb6e50ab01d20a22826e57520f1284df32f2d8601fdd90b6304601419"},
@@ -3214,7 +3214,7 @@ description = "Model Context Protocol SDK"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "(extra == \"crewai\" or extra == \"openai-agents\" or extra == \"strands\") and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"openai-agents\" or extra == \"strands\")"
 files = [
     {file = "mcp-1.28.1-py3-none-any.whl", hash = "sha256:2726bca5e7193f61c5dde8b12500a6de2d9acf6d1a1c0be9e8c2e706437991df"},
     {file = "mcp-1.28.1.tar.gz", hash = "sha256:d51e36a5f5644faea4f85ea649bfffa6bc6c26770d42798ad6a3de3d2ba69683"},
@@ -3282,7 +3282,7 @@ description = "Collection of plugins for markdown-it-py"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "mdit_py_plugins-0.6.1-py3-none-any.whl", hash = "sha256:214c82fb2ac524472ab6a5bcab1de80f73b50443e187f401bfd77efbc7c6481d"},
     {file = "mdit_py_plugins-0.6.1.tar.gz", hash = "sha256:a2bca0f039f39dbd35fb74ae1b5f998608c437463371f0ff7f49a19a17a114d0"},
@@ -3303,7 +3303,7 @@ description = "Markdown URL utilities"
 optional = true
 python-versions = ">=3.7"
 groups = ["main"]
-markers = "(extra == \"crewai\" or extra == \"smolagents\") and python_version < \"3.14\" or extra == \"smolagents\""
+markers = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"smolagents\") or extra == \"smolagents\""
 files = [
     {file = "mdurl-0.1.2-py3-none-any.whl", hash = "sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8"},
     {file = "mdurl-0.1.2.tar.gz", hash = "sha256:bb413d29f5eea38f31dd4754dd7377d4465116fb207585f97bf925588687c1ba"},
@@ -3316,7 +3316,7 @@ description = "Python extension for MurmurHash (MurmurHash3), a set of fast and 
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "mmh3-5.2.1-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:5d87a3584093e1a89987e3d36d82c98d9621b2cb944e22a420aa1401e096758f"},
     {file = "mmh3-5.2.1-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:30e4d2084df019880d55f6f7bea35328d9b464ebee090baa372c096dc77556fb"},
@@ -3442,7 +3442,7 @@ description = "Python library for arbitrary-precision floating-point arithmetic"
 optional = true
 python-versions = "*"
 groups = ["main"]
-markers = "python_version != \"3.13\" and extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version < \"3.13\" and extra == \"crewai\""
 files = [
     {file = "mpmath-1.3.0-py3-none-any.whl", hash = "sha256:a0b2b9fe80bbcd81a6647ff13108738cfb482d481d826cc0e02f5b35e5c88d2c"},
     {file = "mpmath-1.3.0.tar.gz", hash = "sha256:7a28eb2a9774d00c7bc92411c19a89209d5da7c4c9a9e227be8330a23a25b91f"},
@@ -3461,7 +3461,7 @@ description = "multidict implementation"
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "(extra == \"crewai\" or extra == \"google-adk\") and python_version < \"3.14\" or extra == \"google-adk\""
+markers = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"google-adk\") or extra == \"google-adk\""
 files = [
     {file = "multidict-6.7.1-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:c93c3db7ea657dd4637d57e74ab73de31bccefe144d3d4ce370052035bc85fb5"},
     {file = "multidict-6.7.1-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:974e72a2474600827abaeda71af0c53d9ebbc3c2eb7da37b37d7829ae31232d8"},
@@ -3621,7 +3621,7 @@ description = "Fundamental package for array computing in Python"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "python_version != \"3.13\" and extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version < \"3.13\" and extra == \"crewai\""
 files = [
     {file = "numpy-2.2.6-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:b412caa66f72040e6d268491a59f2c43bf03eb6c96dd8f0307829feb7fa2b6fb"},
     {file = "numpy-2.2.6-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:8e41fd67c52b86603a91c1a505ebaef50b3314de0213461c7a6e99c9a3beff90"},
@@ -3764,7 +3764,7 @@ description = "A generic, spec-compliant, thorough implementation of the OAuth r
 optional = true
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "oauthlib-3.3.1-py3-none-any.whl", hash = "sha256:88119c938d2b8fb88561af5f6ee0eec8cc8d552b7bb1f712743136eb7523b7a1"},
     {file = "oauthlib-3.3.1.tar.gz", hash = "sha256:0f0f8aa759826a193cf66c12ea1af1637f87b9b4622d46e866952bb022e538c9"},
@@ -3782,7 +3782,7 @@ description = "ONNX Runtime is a runtime accelerator for Machine Learning models
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "python_version != \"3.13\" and extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version < \"3.13\" and extra == \"crewai\""
 files = [
     {file = "onnxruntime-1.24.3-cp311-cp311-macosx_14_0_arm64.whl", hash = "sha256:3e6456801c66b095c5cd68e690ca25db970ea5202bd0c5b84a2c3ef7731c5a3c"},
     {file = "onnxruntime-1.24.3-cp311-cp311-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:8b2ebc54c6d8281dccff78d4b06e47d4cf07535937584ab759448390a70f4978"},
@@ -3869,7 +3869,7 @@ description = "The official Python library for the openai API"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "(extra == \"crewai\" or extra == \"openai-agents\") and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"openai-agents\")"
 files = [
     {file = "openai-2.54.0-py3-none-any.whl", hash = "sha256:89089789197ccdb87f173a03145ed1598d00795220c93e96cf712b1cbf5e5f2b"},
     {file = "openai-2.54.0.tar.gz", hash = "sha256:e3e6f8bc1ba30ddf381ace1a14340eed381cb984a1a59bd0f34b5be3b5d49cfa"},
@@ -3929,7 +3929,7 @@ description = "OpenAI Agents SDK"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "python_version < \"3.14\" and extra == \"openai-agents\""
+markers = "python_version <= \"3.13\" and extra == \"openai-agents\""
 files = [
     {file = "openai_agents-0.20.0-py3-none-any.whl", hash = "sha256:aaff662b802fa90762ad539e131b9ea387e12e3664b87bc75157ad1b3fc88850"},
     {file = "openai_agents-0.20.0.tar.gz", hash = "sha256:a6b37954877868ac233876a27dab1e2a461c53ecbd5fcf6e19e2d276d3e848cd"},
@@ -4017,7 +4017,7 @@ description = "A Python library to read/write Excel 2010 xlsx/xlsm files"
 optional = true
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "openpyxl-3.1.5-py2.py3-none-any.whl", hash = "sha256:5282c12b107bffeef825f4617dc029afaf41d0ea60823bbb665ef3079dc79de2"},
     {file = "openpyxl-3.1.5.tar.gz", hash = "sha256:cf0e3cf56142039133628b5acffe8ef0c12bc902d2aadd3e0fe5878dc08d1050"},
@@ -4033,7 +4033,7 @@ description = "OpenTelemetry Python API"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "python_version < \"3.14\" and (extra == \"crewai\" or extra == \"google-adk\" or extra == \"strands\" or extra == \"autogen\" or extra == \"pydantic-ai\") or extra == \"google-adk\" or extra == \"strands\" or extra == \"autogen\" or extra == \"pydantic-ai\""
+markers = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"google-adk\" or extra == \"strands\" or extra == \"autogen\" or extra == \"pydantic-ai\") or extra == \"google-adk\" or extra == \"strands\" or extra == \"autogen\" or extra == \"pydantic-ai\""
 files = [
     {file = "opentelemetry_api-1.42.1-py3-none-any.whl", hash = "sha256:51a69edacadbc03a8950ace1c4c21099cacc538820ac2c9e36277e78cebba714"},
     {file = "opentelemetry_api-1.42.1.tar.gz", hash = "sha256:56c63bea9f77b62856be8c47600474acad853b2924b99b1687c4cb6297166716"},
@@ -4049,7 +4049,7 @@ description = "OpenTelemetry Protobuf encoding"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "opentelemetry_exporter_otlp_proto_common-1.42.1-py3-none-any.whl", hash = "sha256:f48d395ab815b444da118868977e9798ea354c25737d5cf39578ae894011c140"},
     {file = "opentelemetry_exporter_otlp_proto_common-1.42.1.tar.gz", hash = "sha256:04f1f01fb597c4249dfcd7f8b861c902c2102369d376d9d346ff38de4469a2ee"},
@@ -4065,7 +4065,7 @@ description = "OpenTelemetry Collector Protobuf over gRPC Exporter"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "opentelemetry_exporter_otlp_proto_grpc-1.42.1-py3-none-any.whl", hash = "sha256:0ae1177e2038b18a929b3098215243631ef91136cba26b7e2b12790ceb7e87cc"},
     {file = "opentelemetry_exporter_otlp_proto_grpc-1.42.1.tar.gz", hash = "sha256:975c4461f167dd8ed8857d68d3b6b25f3d272eab896f6a9470d0f5b90e2faf15"},
@@ -4093,7 +4093,7 @@ description = "OpenTelemetry Collector Protobuf over HTTP Exporter"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "opentelemetry_exporter_otlp_proto_http-1.42.1-py3-none-any.whl", hash = "sha256:00a16da1b312a1d6c7233d600d557c91df71125af73020f3b9a7765bd699d59d"},
     {file = "opentelemetry_exporter_otlp_proto_http-1.42.1.tar.gz", hash = "sha256:bf142a21035d7571ac3a09cb2e5639f49886f243972883cfe777ed3bf02b734d"},
@@ -4155,7 +4155,7 @@ description = "OpenTelemetry Python Proto"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "opentelemetry_proto-1.42.1-py3-none-any.whl", hash = "sha256:dedb74cba2886c59c7789b227a7a670613025a07489040050aedff6e5c0fb43c"},
     {file = "opentelemetry_proto-1.42.1.tar.gz", hash = "sha256:c6a51e6b4f05ae63565f3a113217f3d2bfaec68f78c02d7a6c85f9010d1cfca6"},
@@ -4171,7 +4171,7 @@ description = "OpenTelemetry Python SDK"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "python_version < \"3.14\" and (extra == \"crewai\" or extra == \"google-adk\" or extra == \"strands\") or extra == \"google-adk\" or extra == \"strands\""
+markers = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"google-adk\" or extra == \"strands\") or extra == \"google-adk\" or extra == \"strands\""
 files = [
     {file = "opentelemetry_sdk-1.42.1-py3-none-any.whl", hash = "sha256:083cd4bbfaa5aa7b5a9e552430d9951219967cfb27aa61feb13a77aba1fc839d"},
     {file = "opentelemetry_sdk-1.42.1.tar.gz", hash = "sha256:8c834e8f8c9ba4171d4ec843d0cb8a67e4c7394d3f9e9297e582cbd9456ddbf7"},
@@ -4192,7 +4192,7 @@ description = "OpenTelemetry Semantic Conventions"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "python_version < \"3.14\" and (extra == \"crewai\" or extra == \"google-adk\" or extra == \"strands\") or extra == \"google-adk\" or extra == \"strands\""
+markers = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"google-adk\" or extra == \"strands\") or extra == \"google-adk\" or extra == \"strands\""
 files = [
     {file = "opentelemetry_semantic_conventions-0.63b1-py3-none-any.whl", hash = "sha256:dfe5ef4dee82586b746f522b818ceb298d00b3d59f660042bd79404bff8d0682"},
     {file = "opentelemetry_semantic_conventions-0.63b1.tar.gz", hash = "sha256:3daf963611334b365e98a57438183eb012d3bfb40b2d931a9af613476b8701a9"},
@@ -4209,7 +4209,7 @@ description = "Fast, correct Python JSON library supporting dataclasses, datetim
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "(extra == \"crewai\" or extra == \"langchain\") and python_version < \"3.14\" or extra == \"langchain\""
+markers = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"langchain\") or extra == \"langchain\""
 files = [
     {file = "orjson-3.12.0-cp310-cp310-macosx_10_15_x86_64.macosx_11_0_arm64.macosx_10_15_universal2.whl", hash = "sha256:747843254519dd43b93eee3153a19e5a509334320c4d2f823ec879232db5c796"},
     {file = "orjson-3.12.0-cp310-cp310-manylinux2014_armv7l.manylinux_2_17_armv7l.whl", hash = "sha256:7c2ad193c8004254f34b499f3bd2c80f043d10754aff2b38f93da574f4883f98"},
@@ -4345,7 +4345,7 @@ description = "A decorator to automatically detect mismatch when overriding a me
 optional = true
 python-versions = ">=3.6"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "overrides-7.7.0-py3-none-any.whl", hash = "sha256:c7ed9d062f78b8e4c1a7b70bd8796b35ead4d9f510227ef9c5dc7626c60d7e49"},
     {file = "overrides-7.7.0.tar.gz", hash = "sha256:55158fa3d93b98cc75299b1e67078ad9003ca27945c76162c1c0766d6f91820a"},
@@ -4362,7 +4362,7 @@ files = [
     {file = "packaging-26.3-py3-none-any.whl", hash = "sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c"},
     {file = "packaging-26.3.tar.gz", hash = "sha256:94edc256424af38762eb31306eed28beb9f0efc50a8837492c9d6fd6004aed79"},
 ]
-markers = {main = "python_version < \"3.14\" and (extra == \"crewai\" or extra == \"langchain\" or extra == \"smolagents\" or extra == \"google-adk\" or extra == \"ag2\" or extra == \"strands\") or extra == \"langchain\" or extra == \"smolagents\" or extra == \"google-adk\" or extra == \"ag2\" or extra == \"strands\""}
+markers = {main = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"langchain\" or extra == \"smolagents\" or extra == \"google-adk\" or extra == \"ag2\" or extra == \"strands\") or extra == \"langchain\" or extra == \"smolagents\" or extra == \"google-adk\" or extra == \"ag2\" or extra == \"strands\""}
 
 [[package]]
 name = "pdfminer-six"
@@ -4371,7 +4371,7 @@ description = "PDF parser and analyzer"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "pdfminer_six-20260107-py3-none-any.whl", hash = "sha256:366585ba97e80dffa8f00cebe303d2f381884d8637af4ce422f1df3ef38111a9"},
     {file = "pdfminer_six-20260107.tar.gz", hash = "sha256:96bfd431e3577a55a0efd25676968ca4ce8fd5b53f14565f85716ff363889602"},
@@ -4391,7 +4391,7 @@ description = "Plumb a PDF for detailed information about each char, rectangle, 
 optional = true
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "pdfplumber-0.11.10-py3-none-any.whl", hash = "sha256:7741ea81bf165b474b153e6789d10d18e06b6ddcf3ec84289c3ef2fed6802580"},
     {file = "pdfplumber-0.11.10.tar.gz", hash = "sha256:b95b2d28c66efb0a794a83b88c6c6aea5987532a445d20a1cbcfa657022e6e57"},
@@ -4409,7 +4409,7 @@ description = "Python datetimes made easy"
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "pendulum-3.2.0-cp310-cp310-macosx_10_12_x86_64.whl", hash = "sha256:4a6bf778c6b42830b001c714dae5b9dad78da38e2e08203a4b0f5d53f8fa5e63"},
     {file = "pendulum-3.2.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:625209bb7133d990905e8935e1c04f0a82315ae777b67910969b16f665d62c0b"},
@@ -4494,7 +4494,7 @@ description = "Python Imaging Library (fork)"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "python_version < \"3.14\" and (extra == \"crewai\" or extra == \"autogen\" or extra == \"smolagents\") or extra == \"autogen\" or extra == \"smolagents\""
+markers = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"autogen\" or extra == \"smolagents\") or extra == \"autogen\" or extra == \"smolagents\""
 files = [
     {file = "pillow-12.3.0-cp310-cp310-macosx_10_10_x86_64.whl", hash = "sha256:6c0016e7b354317c4e9e525b937ac8596c38d2d232b419529b9cd7a1cd46e39a"},
     {file = "pillow-12.3.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:bcc33feacfaefce60c12fd500a277533bdc02b10a19f7f6d348763d8140bbba7"},
@@ -4600,7 +4600,7 @@ description = "A small Python package for determining appropriate platform-speci
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "platformdirs-4.11.3-py3-none-any.whl", hash = "sha256:5ed065d443751de711da036041a7a214122efc4a4de393b3f4137ba5576540e7"},
     {file = "platformdirs-4.11.3.tar.gz", hash = "sha256:66a73d38a849810252df809a3d8bcbda8e26f6c189920e7535ad608a48dbb5ab"},
@@ -4629,7 +4629,7 @@ description = "Wraps the portalocker recipe for easy usage"
 optional = true
 python-versions = ">=3.5"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "portalocker-2.7.0-py2.py3-none-any.whl", hash = "sha256:a07c5b4f3985c3cf4798369631fb7011adb498e2a46d8440efc75a8f29a0f983"},
     {file = "portalocker-2.7.0.tar.gz", hash = "sha256:032e81d534a88ec1736d03f780ba073f047a06c478b06e2937486f334e955c51"},
@@ -4650,7 +4650,7 @@ description = "Integrate PostHog into any python application."
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "posthog-5.4.0-py3-none-any.whl", hash = "sha256:284dfa302f64353484420b52d4ad81ff5c2c2d1d607c4e2db602ac72761831bd"},
     {file = "posthog-5.4.0.tar.gz", hash = "sha256:701669261b8d07cdde0276e5bc096b87f9e200e3b9589c5ebff14df658c5893c"},
@@ -4675,7 +4675,7 @@ description = "Accelerated property cache"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "(extra == \"crewai\" or extra == \"google-adk\") and python_version < \"3.14\" or extra == \"google-adk\""
+markers = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"google-adk\") or extra == \"google-adk\""
 files = [
     {file = "propcache-0.5.2-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:d5a81be28596d6559f6131ef33e10200de6e17643b3c74ce03f9eb103be6ae8b"},
     {file = "propcache-0.5.2-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:29cbaac5ea0212663e6845e04b5e188d5a6ae6dd919810ac835bf1d3b42c3f4c"},
@@ -4807,7 +4807,7 @@ description = ""
 optional = true
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "(extra == \"crewai\" or extra == \"autogen\") and python_version < \"3.14\" or extra == \"autogen\""
+markers = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"autogen\") or extra == \"autogen\""
 files = [
     {file = "protobuf-5.29.6-cp310-abi3-win32.whl", hash = "sha256:62e8a3114992c7c647bce37dcc93647575fc52d50e48de30c6fcb28a6a291eb1"},
     {file = "protobuf-5.29.6-cp310-abi3-win_amd64.whl", hash = "sha256:7e6ad413275be172f67fdee0f43484b6de5a904cc1c3ea9804cb6fe2ff366eda"},
@@ -4829,7 +4829,7 @@ description = "Python library for Apache Arrow"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "pyarrow-25.0.1-cp310-cp310-macosx_12_0_arm64.whl", hash = "sha256:0b1edbb2f385a6a65e9711b62ba86ac54a7816a3f8d17bb3e8a5929d65fb2485"},
     {file = "pyarrow-25.0.1-cp310-cp310-macosx_12_0_x86_64.whl", hash = "sha256:a4dd8bf99a8fac133efc0ed6a92f5fddbe2adba0d0f6dd720e39ba9855cea85c"},
@@ -4912,7 +4912,7 @@ description = "Fast Base64 encoding/decoding"
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "pybase64-1.5.0-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:30b0bc5add7b5ffbf9e8f84ad8cbbeeac420da70666d32bedecdbf2051e15592"},
     {file = "pybase64-1.5.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:43885294c9e7c79c4a43c42fe759a82e92d8822fe3e7f2f8b23af90e5dbc4269"},
@@ -5136,7 +5136,7 @@ description = "C parser in Python"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "platform_python_implementation != \"PyPy\" and implementation_name != \"PyPy\" and (extra == \"crewai\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\") and (python_version < \"3.14\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\")"
+markers = "platform_python_implementation != \"PyPy\" and implementation_name != \"PyPy\" and (python_version <= \"3.13\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\") and (extra == \"crewai\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\")"
 files = [
     {file = "pycparser-3.0-py3-none-any.whl", hash = "sha256:b727414169a36b7d524c1c3e31839a521725078d7b2ff038656844266160a992"},
     {file = "pycparser-3.0.tar.gz", hash = "sha256:600f49d217304a5902ac3c37e1281c9fe94e4d0489de643a9504c5cdfdfc6b29"},
@@ -5153,7 +5153,7 @@ files = [
     {file = "pydantic-2.12.5-py3-none-any.whl", hash = "sha256:e561593fccf61e8a20fc46dfc2dfe075b8be7d0188df33f221ad1f0139180f9d"},
     {file = "pydantic-2.12.5.tar.gz", hash = "sha256:4d351024c75c0f085a9febbb665ce8c0c6ec5d30e903bdb6394b7ede26aebb49"},
 ]
-markers = {main = "python_version < \"3.14\" and (extra == \"crewai\" or extra == \"langchain\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\" or extra == \"autogen\" or extra == \"ag2\" or extra == \"pydantic-ai\")", dev = "python_version < \"3.14\""}
+markers = {main = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"langchain\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\" or extra == \"autogen\" or extra == \"ag2\" or extra == \"pydantic-ai\")", dev = "python_version <= \"3.13\""}
 
 [package.dependencies]
 annotated-types = ">=0.6.0"
@@ -5382,7 +5382,7 @@ files = [
     {file = "pydantic_core-2.41.5-pp311-pypy311_pp73-win_amd64.whl", hash = "sha256:56121965f7a4dc965bff783d70b907ddf3d57f6eba29b6d2e5dabfaf07799c51"},
     {file = "pydantic_core-2.41.5.tar.gz", hash = "sha256:08daa51ea16ad373ffd5e7606252cc32f07bc72b28284b6bc9c6df804816476e"},
 ]
-markers = {main = "python_version < \"3.14\" and (extra == \"crewai\" or extra == \"langchain\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\" or extra == \"autogen\" or extra == \"ag2\" or extra == \"pydantic-ai\")", dev = "python_version < \"3.14\""}
+markers = {main = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"langchain\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\" or extra == \"autogen\" or extra == \"ag2\" or extra == \"pydantic-ai\")", dev = "python_version <= \"3.13\""}
 
 [package.dependencies]
 typing-extensions = ">=4.14.1"
@@ -5547,7 +5547,7 @@ description = "Settings management using Pydantic"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "(extra == \"crewai\" or extra == \"openai-agents\" or extra == \"strands\") and (python_version < \"3.14\" or extra == \"openai-agents\" or extra == \"strands\")"
+markers = "(python_version <= \"3.13\" or extra == \"openai-agents\" or extra == \"strands\") and (extra == \"crewai\" or extra == \"openai-agents\" or extra == \"strands\")"
 files = [
     {file = "pydantic_settings-2.15.0-py3-none-any.whl", hash = "sha256:0ba092c291c94baceb5eff768aa0d56400a457585bc0175925a5a5510303da42"},
     {file = "pydantic_settings-2.15.0.tar.gz", hash = "sha256:694b793e84f766ba76a90ebdefc01d0a9a045dab0382bee70393da93712ad117"},
@@ -5576,7 +5576,7 @@ files = [
     {file = "pygments-2.21.0-py3-none-any.whl", hash = "sha256:2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9"},
     {file = "pygments-2.21.0.tar.gz", hash = "sha256:610ca751c9bc2492b38eb9a38a7fbc93edbbb2d7182edaf34e66ae493dee5c8c"},
 ]
-markers = {main = "(extra == \"crewai\" or extra == \"smolagents\") and python_version < \"3.14\" or extra == \"smolagents\""}
+markers = {main = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"smolagents\") or extra == \"smolagents\""}
 
 [package.extras]
 windows-terminal = ["colorama (>=0.4.6)"]
@@ -5588,7 +5588,7 @@ description = "JSON Web Token implementation in Python"
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "(extra == \"crewai\" or extra == \"openai-agents\" or extra == \"strands\") and (python_version < \"3.14\" or extra == \"openai-agents\" or extra == \"strands\")"
+markers = "(python_version <= \"3.13\" or extra == \"openai-agents\" or extra == \"strands\") and (extra == \"crewai\" or extra == \"openai-agents\" or extra == \"strands\")"
 files = [
     {file = "pyjwt-2.13.0-py3-none-any.whl", hash = "sha256:66adcc2aff09b3f1bbd95fc1e1577df8ac8723c978552fd43304c8a290ac5728"},
     {file = "pyjwt-2.13.0.tar.gz", hash = "sha256:41571c89ca91598c79e8ef18a2d07367d4810fbbd6f637794879baf1b7703423"},
@@ -5608,7 +5608,7 @@ description = "Python bindings to PDFium"
 optional = true
 python-versions = ">=3.6"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "pypdfium2-5.13.0-py3-none-android_23_arm64_v8a.whl", hash = "sha256:882f4bbd4b17a335b43603169a14cde9341de12b238acd5c39e690cbca7c4293"},
     {file = "pypdfium2-5.13.0-py3-none-android_23_armeabi_v7a.whl", hash = "sha256:d96929bde3bd64c771ab3558ca1ffd7704cc4d872ab92cd9f8f8b8a20f7f36b8"},
@@ -5641,7 +5641,7 @@ description = "A SQL query builder API for Python"
 optional = true
 python-versions = "*"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "pypika-0.51.1-py2.py3-none-any.whl", hash = "sha256:77985b4d7ce71b9905255bf12468cf598349e98837c037541cfc240e528aec46"},
     {file = "pypika-0.51.1.tar.gz", hash = "sha256:c30c7c1048fbf056fd3920c5a2b88b0c29dd190a9b2bee971fd17e4abe4d0ebe"},
@@ -5657,7 +5657,7 @@ description = "Wrappers to call pyproject.toml-based build backend hooks."
 optional = true
 python-versions = ">=3.7"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "pyproject_hooks-1.2.0-py3-none-any.whl", hash = "sha256:9e5c6bfa8dcc30091c74b0cf803c81fdd29d94f01992a7707bc97babb1141913"},
     {file = "pyproject_hooks-1.2.0.tar.gz", hash = "sha256:1e859bd5c40fae9448642dd871adf459e5e2084186e8d2c2a79a824c970da1f8"},
@@ -5694,7 +5694,7 @@ description = "Extensions to the standard Python datetime module"
 optional = true
 python-versions = "!=3.0.*,!=3.1.*,!=3.2.*,>=2.7"
 groups = ["main"]
-markers = "(extra == \"crewai\" or extra == \"strands\") and python_version < \"3.14\" or extra == \"strands\""
+markers = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"strands\") or extra == \"strands\""
 files = [
     {file = "python-dateutil-2.9.0.post0.tar.gz", hash = "sha256:37dd54208da7e1cd875388217d5e00ebd4179249f90fb72437e91a35459a0ad3"},
     {file = "python_dateutil-2.9.0.post0-py2.py3-none-any.whl", hash = "sha256:a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427"},
@@ -5710,7 +5710,7 @@ description = "Read key-value pairs from a .env file and set them as environment
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "python_version < \"3.14\" and (extra == \"crewai\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\" or extra == \"ag2\" or extra == \"smolagents\") or python_version >= \"3.14\" and (extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\" or extra == \"ag2\" or extra == \"smolagents\")"
+markers = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\" or extra == \"ag2\" or extra == \"smolagents\") or python_version >= \"3.14\" and (extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\" or extra == \"ag2\" or extra == \"smolagents\")"
 files = [
     {file = "python_dotenv-1.2.3-py3-none-any.whl", hash = "sha256:904552145e8bfed22162c09dab1c2b9b54fefa7b23ba780f4f26ca0316b0f0d9"},
     {file = "python_dotenv-1.2.3.tar.gz", hash = "sha256:a20a594dabeaa385725aa239d5244871c143ecb356add8a20fcf23773a6c3a35"},
@@ -5726,7 +5726,7 @@ description = "A streaming multipart parser for Python"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "(python_version < \"3.14\" or extra == \"strands\" or extra == \"google-adk\" or extra == \"openai-agents\") and (extra == \"crewai\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\")"
+markers = "(python_version <= \"3.13\" or extra == \"strands\" or extra == \"google-adk\" or extra == \"openai-agents\") and (extra == \"crewai\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\")"
 files = [
     {file = "python_multipart-0.0.32-py3-none-any.whl", hash = "sha256:ff6d3f776f16878c894e52e107296ffc890e913c611b1a4ec6c44e2821fe2e23"},
     {file = "python_multipart-0.0.32.tar.gz", hash = "sha256:be54b7f3fa167bb83e4fcd936b887b708f4e57fe75911c02aebf53efaf8d938e"},
@@ -5739,7 +5739,7 @@ description = "Python for Windows Extensions"
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "sys_platform == \"win32\" and python_version < \"3.14\" and (extra == \"crewai\" or extra == \"openai-agents\" or extra == \"strands\") or sys_platform == \"win32\" and (extra == \"openai-agents\" or extra == \"strands\") or platform_system == \"Windows\" and python_version < \"3.14\" and extra == \"crewai\""
+markers = "python_version <= \"3.13\" and sys_platform == \"win32\" and (extra == \"crewai\" or extra == \"openai-agents\" or extra == \"strands\") or python_version <= \"3.13\" and platform_system == \"Windows\" and extra == \"crewai\" or sys_platform == \"win32\" and (extra == \"openai-agents\" or extra == \"strands\")"
 files = [
     {file = "pywin32-312-cp310-cp310-win32.whl", hash = "sha256:772235332b5d1024c696f11cea1ae4be7930f0a8b894bb43db14e3f435f1ff7e"},
     {file = "pywin32-312-cp310-cp310-win_amd64.whl", hash = "sha256:5dbc35d2b5320dc07f25fa31269cfb767471002b17de5eb067d03da68c7cb2db"},
@@ -5854,7 +5854,7 @@ description = "JSON Referencing + Python"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "(extra == \"crewai\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\") and (python_version < \"3.14\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\")"
+markers = "(python_version <= \"3.13\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\") and (extra == \"crewai\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\")"
 files = [
     {file = "referencing-0.37.0-py3-none-any.whl", hash = "sha256:381329a9f99628c9069361716891d34ad94af76e461dcb0335825aecc7692231"},
     {file = "referencing-0.37.0.tar.gz", hash = "sha256:44aefc3142c5b842538163acb373e24cce6632bd54bdb01b21ad5863489f50d8"},
@@ -5872,7 +5872,7 @@ description = "Alternative regular expression module, to replace re."
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "(extra == \"crewai\" or extra == \"ag2\") and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"ag2\")"
 files = [
     {file = "regex-2026.1.15-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:4e3dd93c8f9abe8aa4b6c652016da9a3afa190df5ad822907efe6b206c09896e"},
     {file = "regex-2026.1.15-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:97499ff7862e868b1977107873dd1a06e151467129159a6ffd07b66706ba3a9f"},
@@ -6161,7 +6161,7 @@ description = "OAuthlib authentication support for Requests."
 optional = true
 python-versions = ">=3.4"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "requests-oauthlib-2.0.0.tar.gz", hash = "sha256:b3dffaebd884d8cd778494369603a9e7b58d29111bf6b41bdc2dcd87203af4e9"},
     {file = "requests_oauthlib-2.0.0-py2.py3-none-any.whl", hash = "sha256:7dd8a5c40426b779b0868c404bdef9768deccf22749cde15852df527e6269b36"},
@@ -6197,7 +6197,7 @@ description = "Render rich text, tables, progress bars, syntax highlighting, mar
 optional = true
 python-versions = ">=3.8.0"
 groups = ["main"]
-markers = "(extra == \"crewai\" or extra == \"smolagents\") and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"smolagents\")"
 files = [
     {file = "rich-14.3.4-py3-none-any.whl", hash = "sha256:07e7adb4690f68864777b1450859253bed81a99a31ac321ac1817b2313558952"},
     {file = "rich-14.3.4.tar.gz", hash = "sha256:817e02727f2b25b40ef56f5aa2217f400c8489f79ca8f46ea2b70dd5e14558a9"},
@@ -6237,7 +6237,7 @@ description = "Python bindings to Rust's persistent data structures (rpds)"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "python_version != \"3.13\" and (extra == \"crewai\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\") and python_version < \"3.14\""
+markers = "python_version < \"3.13\" and (extra == \"crewai\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\")"
 files = [
     {file = "rpds_py-0.30.0-cp310-cp310-macosx_10_12_x86_64.whl", hash = "sha256:679ae98e00c0e8d68a7fda324e16b90fd5260945b45d3b824c892cec9eea3288"},
     {file = "rpds_py-0.30.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:4cc2206b76b4f576934f0ed374b10d7ca5f457858b157ca52064bdfc26b9fc00"},
@@ -6509,7 +6509,7 @@ description = "Tool to Detect Surrounding Shell"
 optional = true
 python-versions = ">=3.7"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "shellingham-1.5.4-py2.py3-none-any.whl", hash = "sha256:7ecfff8f2fd72616f7481040475a65b2bf8af90a56c89140852d1120324e8686"},
     {file = "shellingham-1.5.4.tar.gz", hash = "sha256:8dbca0739d487e5bd35ab3ca4b36e11c4078f3a234bfce294b0a0291363404de"},
@@ -6522,7 +6522,7 @@ description = "Python 2 and 3 compatibility utilities"
 optional = true
 python-versions = "!=3.0.*,!=3.1.*,!=3.2.*,>=2.7"
 groups = ["main"]
-markers = "(extra == \"crewai\" or extra == \"strands\") and python_version < \"3.14\" or extra == \"strands\""
+markers = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"strands\") or extra == \"strands\""
 files = [
     {file = "six-1.17.0-py2.py3-none-any.whl", hash = "sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274"},
     {file = "six-1.17.0.tar.gz", hash = "sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81"},
@@ -6583,7 +6583,7 @@ files = [
     {file = "sniffio-1.3.1-py3-none-any.whl", hash = "sha256:2f6da418d1f1e0fddd844478f41680e794e6051915791a034ff65e5f100525a2"},
     {file = "sniffio-1.3.1.tar.gz", hash = "sha256:f4324edc670a0f49750a81b895f35c3adb843cca46f0530f79fc1babb23789dc"},
 ]
-markers = {main = "python_version < \"3.14\" and (extra == \"crewai\" or extra == \"openai-agents\" or extra == \"langchain\" or extra == \"google-adk\") or extra == \"openai-agents\" or extra == \"langchain\" or extra == \"google-adk\""}
+markers = {main = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"openai-agents\" or extra == \"langchain\" or extra == \"google-adk\") or extra == \"openai-agents\" or extra == \"langchain\" or extra == \"google-adk\""}
 
 [[package]]
 name = "sse-starlette"
@@ -6592,7 +6592,7 @@ description = "SSE plugin for Starlette"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "(extra == \"crewai\" or extra == \"openai-agents\" or extra == \"strands\") and (python_version < \"3.14\" or extra == \"openai-agents\" or extra == \"strands\")"
+markers = "(python_version <= \"3.13\" or extra == \"openai-agents\" or extra == \"strands\") and (extra == \"crewai\" or extra == \"openai-agents\" or extra == \"strands\")"
 files = [
     {file = "sse_starlette-3.4.8-py3-none-any.whl", hash = "sha256:6e82314c786709a3cd9520f2285cf9fff90e181e598e8a357b0cf80f66afba0d"},
     {file = "sse_starlette-3.4.8.tar.gz", hash = "sha256:ed89ffbb75cbf78a5fe2f2109cd584792ee7f9dfac96f791db546df8f15f3f9c"},
@@ -6616,7 +6616,7 @@ description = "The little ASGI library that shines."
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "(extra == \"crewai\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\") and (python_version < \"3.14\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\")"
+markers = "(python_version <= \"3.13\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\") and (extra == \"crewai\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\")"
 files = [
     {file = "starlette-1.6.0-py3-none-any.whl", hash = "sha256:a86dd39d14bb45f85a3d18525215a9ef0cfd1f192ac793220e72598c90335f0c"},
     {file = "starlette-1.6.0.tar.gz", hash = "sha256:d4e3ac5e546444960c710297a3c9fc3f7ebae1b7e963f3d36173b49da535be9b"},
@@ -6631,15 +6631,15 @@ full = ["httpx (>=0.27.0,<0.29.0)", "httpx2 (>=2.0.0)", "itsdangerous", "jinja2"
 
 [[package]]
 name = "strands-agents"
-version = "1.52.0"
+version = "1.57.2"
 description = "A model-driven approach to building AI agents in just a few lines of code"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
 markers = "extra == \"strands\""
 files = [
-    {file = "strands_agents-1.52.0-py3-none-any.whl", hash = "sha256:768ff0e865df9f18154a2111f71e0c7683b8505e897704b89981cf7f11667bee"},
-    {file = "strands_agents-1.52.0.tar.gz", hash = "sha256:e79f08527cf3b03ace3ead081f71ee43ee33de7285a4faa9ecafaef4618afeb0"},
+    {file = "strands_agents-1.57.2-py3-none-any.whl", hash = "sha256:c0d4726e63cfbb75cbe381c40d76029aaefb7f29555476e8080f626376c9fe00"},
+    {file = "strands_agents-1.57.2.tar.gz", hash = "sha256:6df1e6617b81c07d258631ef6dcf5e4388a93b561729d3696cd44113f2c530d7"},
 ]
 
 [package.dependencies]
@@ -6648,7 +6648,7 @@ botocore = ">=1.29.0,<2.0.0"
 docstring-parser = ">=0.15,<1.0"
 httpx = ">=0.28.1,<1.0.0"
 jsonschema = ">=4.0.0,<5.0.0"
-mcp = ">=1.23.0,<2.0.0"
+mcp = ">=1.23.0,<2.2"
 opentelemetry-api = ">=1.30.0,<2.0.0"
 opentelemetry-instrumentation-threading = ">=0.51b0,<1.0b0"
 opentelemetry-sdk = ">=1.30.0,<2.0.0"
@@ -6658,25 +6658,28 @@ typing-extensions = ">=4.13.2,<5.0.0"
 watchdog = ">=6.0.0,<7.0.0"
 
 [package.extras]
-a2a = ["a2a-sdk (>=0.3.0,<0.4.0)", "a2a-sdk[sql] (>=0.3.0,<0.4.0)", "fastapi (>=0.133.0,<1.0.0)", "httpx (>=0.28.1,<1.0.0)", "starlette (>=1.0.0,<2.0.0)", "uvicorn (>=0.34.2,<1.0.0)"]
-all = ["a2a-sdk (>=0.3.0,<0.4.0)", "a2a-sdk[sql] (>=0.3.0,<0.4.0)", "anthropic (>=0.21.0,<1.0.0)", "aws-bedrock-token-generator (>=1.1.0,<2.0.0)", "boto3-stubs[sagemaker-runtime] (>=1.26.0,<2.0.0)", "cedar-policy-mcp-schema-generator (==0.6.0)", "cedarpy (==4.8.7)", "fastapi (>=0.133.0,<1.0.0)", "google-genai (>=1.67.0,<3.0.0)", "httpx (>=0.28.1,<1.0.0)", "litellm (>=1.75.9,<=1.95.0)", "llama-api-client (>=0.1.0,<1.0.0)", "mistralai (>=2.0.0,<3.0.0)", "ollama (>=0.4.8,<1.0.0)", "openai (>=1.68.0,<3.0.0)", "opentelemetry-exporter-otlp-proto-http (>=1.30.0,<2.0.0)", "sphinx (>=5.0.0,<10.0.0)", "sphinx-autodoc-typehints (>=1.12.0,<4.0.0)", "sphinx-rtd-theme (>=1.0.0,<4.0.0)", "starlette (>=1.0.0,<2.0.0)", "uvicorn (>=0.34.2,<1.0.0)", "writer-sdk (>=2.2.0,<4.0.0)"]
+a2a = ["a2a-sdk (>=0.3.0,<0.4.0)", "a2a-sdk[sql] (>=0.3.0,<0.4.0)", "fastapi (>=0.133.0,<1.0.0)", "httpx (>=0.28.1,<1.0.0)", "sqlalchemy (>=2.0.0,<2.1.0)", "starlette (>=1.0.0,<2.0.0)", "uvicorn (>=0.34.2,<1.0.0)"]
+all = ["a2a-sdk (>=0.3.0,<0.4.0)", "a2a-sdk[sql] (>=0.3.0,<0.4.0)", "anthropic (>=0.21.0,<1.0.0)", "aws-bedrock-token-generator (>=1.1.0,<2.0.0)", "aws-sdk-bedrock-runtime[awscrt] (>=0.11.0,<0.12.0) ; python_version >= \"3.12\"", "awscrt (==0.32.2) ; python_version >= \"3.12\"", "beautifulsoup4 (>=4.9.0,<5.0.0)", "boto3-stubs[sagemaker-runtime] (>=1.26.0,<2.0.0)", "cedar-policy-mcp-schema-generator (==0.6.1)", "cedarpy (==4.12.0)", "fastapi (>=0.133.0,<1.0.0)", "google-genai (>=1.67.0,<3.0.0)", "google-genai (>=2.0.0,<3.0.0)", "httpx (>=0.28.1,<1.0.0)", "litellm (>=1.75.9,<=1.96.0)", "llama-api-client (>=0.1.0,<1.0.0)", "markdownify (>=1.1.0,<2.0.0)", "mistralai (>=2.0.0,<3.0.0)", "numpy (>=2.0.0,<3.0.0)", "ollama (>=0.4.8,<1.0.0)", "openai (>=1.68.0,<3.0.0)", "opentelemetry-exporter-otlp-proto-http (>=1.30.0,<2.0.0)", "prompt-toolkit (>=3.0.0,<4.0.0)", "pywebrtc-audio (>=0.2.0,<0.3.0)", "rich (>=15.0.0,<16.0.0)", "smithy-aws-core (>=0.11.0,<0.12.0) ; python_version >= \"3.12\"", "smithy-core (>=0.8.0,<0.9.0) ; python_version >= \"3.12\"", "smithy-http[awscrt] (==0.5.0) ; python_version >= \"3.12\"", "sphinx (>=5.0.0,<10.0.0)", "sphinx-autodoc-typehints (>=1.12.0,<4.0.0)", "sphinx-rtd-theme (>=1.0.0,<4.0.0)", "sqlalchemy (>=2.0.0,<2.1.0)", "starlette (>=1.0.0,<2.0.0)", "uvicorn (>=0.34.2,<1.0.0)", "websockets (>=16.0.0,<17.0.0)", "writer-sdk (>=2.2.0,<4.0.0)"]
 anthropic = ["anthropic (>=0.21.0,<1.0.0)"]
-bidi = ["aws-sdk-bedrock-runtime (>=0.4.0,<1.0.0) ; python_version >= \"3.12\"", "smithy-aws-core (>=0.4.0,<1.0.0) ; python_version >= \"3.12\""]
-bidi-all = ["a2a-sdk (>=0.3.0,<0.4.0)", "a2a-sdk[sql] (>=0.3.0,<0.4.0)", "aws-sdk-bedrock-runtime (>=0.4.0,<1.0.0) ; python_version >= \"3.12\"", "fastapi (>=0.133.0,<1.0.0)", "google-genai (>=1.67.0,<3.0.0)", "httpx (>=0.28.1,<1.0.0)", "opentelemetry-exporter-otlp-proto-http (>=1.30.0,<2.0.0)", "prompt-toolkit (>=3.0.0,<4.0.0)", "pyaudio (>=0.2.13,<1.0.0)", "smithy-aws-core (>=0.4.0,<1.0.0) ; python_version >= \"3.12\"", "sphinx (>=5.0.0,<10.0.0)", "sphinx-autodoc-typehints (>=1.12.0,<4.0.0)", "sphinx-rtd-theme (>=1.0.0,<4.0.0)", "starlette (>=1.0.0,<2.0.0)", "uvicorn (>=0.34.2,<1.0.0)", "websockets (>=15.0.0,<17.0.0)"]
-bidi-gemini = ["google-genai (>=1.67.0,<3.0.0)"]
-bidi-io = ["prompt-toolkit (>=3.0.0,<4.0.0)", "pyaudio (>=0.2.13,<1.0.0)"]
-bidi-openai = ["websockets (>=15.0.0,<17.0.0)"]
-cedar = ["cedar-policy-mcp-schema-generator (==0.6.0)", "cedarpy (==4.8.7)"]
-dev = ["commitizen (>=4.4.0,<5.0.0)", "hatch (>=1.0.0,<2.0.0)", "moto (>=5.1.0,<6.0.0)", "mypy (>=1.15.0,<2.0.0)", "pre-commit (>=3.2.0,<4.7.0)", "pytest (>=9.0.0,<10.0.0)", "pytest-asyncio (>=1.0.0,<1.5.0)", "pytest-cov (>=7.0.0,<8.0.0)", "pytest-timeout (>=2.0.0,<3.0.0)", "pytest-xdist (>=3.0.0,<4.0.0)", "ruff (>=0.13.0,<0.17.0)", "tenacity (>=9.0.0,<10.0.0)"]
+bidi = ["aws-sdk-bedrock-runtime[awscrt] (>=0.11.0,<0.12.0) ; python_version >= \"3.12\"", "awscrt (==0.32.2) ; python_version >= \"3.12\"", "smithy-aws-core (>=0.11.0,<0.12.0) ; python_version >= \"3.12\"", "smithy-core (>=0.8.0,<0.9.0) ; python_version >= \"3.12\"", "smithy-http[awscrt] (==0.5.0) ; python_version >= \"3.12\""]
+bidi-aec = ["numpy (>=2.0.0,<3.0.0)", "pywebrtc-audio (>=0.2.0,<0.3.0)"]
+bidi-all = ["a2a-sdk (>=0.3.0,<0.4.0)", "a2a-sdk[sql] (>=0.3.0,<0.4.0)", "aws-sdk-bedrock-runtime[awscrt] (>=0.11.0,<0.12.0) ; python_version >= \"3.12\"", "awscrt (==0.32.2) ; python_version >= \"3.12\"", "fastapi (>=0.133.0,<1.0.0)", "google-genai (>=2.0.0,<3.0.0)", "httpx (>=0.28.1,<1.0.0)", "numpy (>=2.0.0,<3.0.0)", "opentelemetry-exporter-otlp-proto-http (>=1.30.0,<2.0.0)", "prompt-toolkit (>=3.0.0,<4.0.0)", "pywebrtc-audio (>=0.2.0,<0.3.0)", "rich (>=15.0.0,<16.0.0)", "smithy-aws-core (>=0.11.0,<0.12.0) ; python_version >= \"3.12\"", "smithy-core (>=0.8.0,<0.9.0) ; python_version >= \"3.12\"", "smithy-http[awscrt] (==0.5.0) ; python_version >= \"3.12\"", "sphinx (>=5.0.0,<10.0.0)", "sphinx-autodoc-typehints (>=1.12.0,<4.0.0)", "sphinx-rtd-theme (>=1.0.0,<4.0.0)", "sqlalchemy (>=2.0.0,<2.1.0)", "starlette (>=1.0.0,<2.0.0)", "uvicorn (>=0.34.2,<1.0.0)", "websockets (>=16.0.0,<17.0.0)"]
+bidi-google = ["google-genai (>=2.0.0,<3.0.0)"]
+bidi-io = ["prompt-toolkit (>=3.0.0,<4.0.0)", "rich (>=15.0.0,<16.0.0)"]
+bidi-openai = ["websockets (>=16.0.0,<17.0.0)"]
+bidi-pyaudio = ["pyaudio (>=0.2.0,<0.3.0)"]
+cedar = ["cedar-policy-mcp-schema-generator (==0.6.1)", "cedarpy (==4.12.0)"]
+dev = ["commitizen (>=4.4.0,<5.0.0)", "hatch (>=1.0.0,<2.0.0)", "moto (>=5.1.0,<6.0.0)", "mypy (>=1.15.0,<3.0.0)", "pre-commit (>=3.2.0,<4.7.0)", "pytest (>=9.0.0,<10.0.0)", "pytest-asyncio (>=1.0.0,<1.5.0)", "pytest-cov (>=7.0.0,<8.0.0)", "pytest-timeout (>=2.0.0,<3.0.0)", "pytest-xdist (>=3.0.0,<4.0.0)", "ruff (>=0.16.0,<0.17.0)", "tenacity (>=9.0.0,<10.0.0)"]
 docs = ["sphinx (>=5.0.0,<10.0.0)", "sphinx-autodoc-typehints (>=1.12.0,<4.0.0)", "sphinx-rtd-theme (>=1.0.0,<4.0.0)"]
 gemini = ["google-genai (>=1.67.0,<3.0.0)"]
-litellm = ["litellm (>=1.75.9,<=1.95.0)", "openai (>=1.68.0,<3.0.0)"]
+litellm = ["litellm (>=1.75.9,<=1.96.0)", "openai (>=1.68.0,<3.0.0)"]
 llamaapi = ["llama-api-client (>=0.1.0,<1.0.0)"]
 mistral = ["mistralai (>=2.0.0,<3.0.0)"]
 ollama = ["ollama (>=0.4.8,<1.0.0)"]
 openai = ["aws-bedrock-token-generator (>=1.1.0,<2.0.0)", "openai (>=1.68.0,<3.0.0)"]
 otel = ["opentelemetry-exporter-otlp-proto-http (>=1.30.0,<2.0.0)"]
 sagemaker = ["boto3-stubs[sagemaker-runtime] (>=1.26.0,<2.0.0)", "openai (>=1.68.0,<3.0.0)"]
+web-fetch = ["beautifulsoup4 (>=4.9.0,<5.0.0)", "markdownify (>=1.1.0,<2.0.0)"]
 writer = ["writer-sdk (>=2.2.0,<4.0.0)"]
 
 [[package]]
@@ -6686,7 +6689,7 @@ description = "Computer algebra system (CAS) in Python"
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "python_version != \"3.13\" and extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version < \"3.13\" and extra == \"crewai\""
 files = [
     {file = "sympy-1.14.0-py3-none-any.whl", hash = "sha256:e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5"},
     {file = "sympy-1.14.0.tar.gz", hash = "sha256:d3d3fe8df1e5a0b42f0e7bdf50541697dbe7d23746e894990c030e2b05e72517"},
@@ -6705,7 +6708,7 @@ description = "Retry code until it succeeds"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "python_version < \"3.14\" and (extra == \"crewai\" or extra == \"langchain\" or extra == \"google-adk\") or extra == \"langchain\" or extra == \"google-adk\""
+markers = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"langchain\" or extra == \"google-adk\") or extra == \"langchain\" or extra == \"google-adk\""
 files = [
     {file = "tenacity-9.1.4-py3-none-any.whl", hash = "sha256:6095a360c919085f28c6527de529e76a06ad89b23659fa881ae0649b867a9d55"},
     {file = "tenacity-9.1.4.tar.gz", hash = "sha256:adb31d4c263f2bd041081ab33b498309a57c77f9acf2db65aadf0898179cf93a"},
@@ -6738,7 +6741,7 @@ description = "Modern Text User Interface framework"
 optional = true
 python-versions = "<4.0,>=3.9"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "textual-8.2.8-py3-none-any.whl", hash = "sha256:267375fd402dc8d981457212efa71f0e3365fd17bba144ba9bb3ed7563cb374a"},
     {file = "textual-8.2.8.tar.gz", hash = "sha256:3f106a9fbc73e39dd266c9712432087de78a6d644084c7c241d6a25c3169115b"},
@@ -6844,7 +6847,7 @@ description = ""
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "tokenizers-0.23.1-cp310-abi3-macosx_10_12_x86_64.whl", hash = "sha256:e03d6ffcbe0d56ee9c1ccd070e70a13fa750727c0277e138152acbc0252c2224"},
     {file = "tokenizers-0.23.1-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:e0948bbb1ac1d7cdfc9fb6d62c596e3b7550036ad60ecd654a66ad273326324e"},
@@ -6893,7 +6896,7 @@ description = "A lil' TOML writer"
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "tomli_w-1.1.0-py3-none-any.whl", hash = "sha256:1403179c78193e3184bfaade390ddbd071cba48a32a2e62ba11aae47490c63f7"},
     {file = "tomli_w-1.1.0.tar.gz", hash = "sha256:49e847a3a304d516a169a601184932ef0f6b61623fe680f836a2aa7128ed0d33"},
@@ -6906,7 +6909,7 @@ description = "Fast, Extensible Progress Meter"
 optional = true
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "(python_version < \"3.14\" or extra == \"smolagents\") and (extra == \"crewai\" or extra == \"smolagents\" or extra == \"openai-agents\")"
+markers = "(python_version <= \"3.13\" or extra == \"smolagents\") and (extra == \"crewai\" or extra == \"smolagents\" or extra == \"openai-agents\")"
 files = [
     {file = "tqdm-4.70.0-py3-none-any.whl", hash = "sha256:7f585706bfddbdebf89daac705b2dfcc16890130727d3197ca62c732b4310953"},
     {file = "tqdm-4.70.0.tar.gz", hash = "sha256:55b0b0dbd97462d06ebee91e4dac24ed4d4702be82b24f07e6c1d27e08cea220"},
@@ -6941,7 +6944,7 @@ description = "Typer, build great CLIs. Easy to code. Based on Python type hints
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "typer-0.27.1-py3-none-any.whl", hash = "sha256:53150287edd11baeb4e4722c8e394fcdf8181c0ae89485cba8d25c778d5edd56"},
     {file = "typer-0.27.1.tar.gz", hash = "sha256:a79bef8469a79c45498e7b814ecf8d603cc7644e9acbd9e19cac0334240b18df"},
@@ -6964,7 +6967,7 @@ files = [
     {file = "typing_extensions-4.16.0-py3-none-any.whl", hash = "sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8"},
     {file = "typing_extensions-4.16.0.tar.gz", hash = "sha256:dc983d19a509c94dba722ee6abd33940f7c05a89e243c47e907eb4db6f1a43e5"},
 ]
-markers = {main = "(extra == \"smolagents\" or extra == \"langchain\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\" or extra == \"ag2\" or extra == \"pydantic-ai\" or extra == \"crewai\" or extra == \"autogen\" or python_version == \"3.13\") and (python_version < \"3.14\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"langchain\" or extra == \"google-adk\" or extra == \"autogen\" or extra == \"ag2\" or extra == \"pydantic-ai\" or extra == \"smolagents\") and (extra == \"crewai\" or extra == \"langchain\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\" or extra == \"autogen\" or extra == \"ag2\" or extra == \"pydantic-ai\" or extra == \"smolagents\")"}
+markers = {main = "(python_version <= \"3.13\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"langchain\" or extra == \"google-adk\" or extra == \"autogen\" or extra == \"ag2\" or extra == \"pydantic-ai\" or extra == \"smolagents\") and (python_version < \"3.13\" or extra == \"crewai\" or extra == \"langchain\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\" or extra == \"autogen\" or extra == \"ag2\" or extra == \"pydantic-ai\" or extra == \"smolagents\") and (extra == \"smolagents\" or extra == \"langchain\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\" or extra == \"ag2\" or extra == \"pydantic-ai\" or extra == \"crewai\" or extra == \"autogen\")"}
 
 [[package]]
 name = "typing-inspection"
@@ -6977,7 +6980,7 @@ files = [
     {file = "typing_inspection-0.4.4-py3-none-any.whl", hash = "sha256:65b8397ba37ccbce054456aaccddfc91e6e3083c92824df348d96ca832f3f147"},
     {file = "typing_inspection-0.4.4.tar.gz", hash = "sha256:547274fa6b0a561ccf549cc9524b999a578e737d015d8709d021f9d0d13bea47"},
 ]
-markers = {main = "(extra == \"crewai\" or extra == \"langchain\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\" or extra == \"autogen\" or extra == \"ag2\" or extra == \"pydantic-ai\") and (python_version < \"3.14\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"langchain\" or extra == \"google-adk\" or extra == \"autogen\" or extra == \"ag2\" or extra == \"pydantic-ai\")"}
+markers = {main = "(python_version <= \"3.13\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"langchain\" or extra == \"google-adk\" or extra == \"autogen\" or extra == \"ag2\" or extra == \"pydantic-ai\") and (extra == \"crewai\" or extra == \"langchain\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\" or extra == \"autogen\" or extra == \"ag2\" or extra == \"pydantic-ai\")"}
 
 [package.dependencies]
 typing-extensions = ">=4.15.0"
@@ -6989,7 +6992,7 @@ description = "Provider of IANA time zone data"
 optional = true
 python-versions = ">=2"
 groups = ["main"]
-markers = "python_version < \"3.14\" and extra == \"crewai\" or extra == \"google-adk\" and platform_system == \"Windows\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\" or extra == \"google-adk\" and platform_system == \"Windows\""
 files = [
     {file = "tzdata-2026.3-py2.py3-none-any.whl", hash = "sha256:dc096730c87af6cab1b171c9d532be840741ff5d459015e7f6947bd7d7e54931"},
     {file = "tzdata-2026.3.tar.gz", hash = "sha256:4a1518b8993086a7982523e071643f3c0e5f213e75b21318e78bcabfff9d1415"},
@@ -7022,7 +7025,7 @@ description = "Micro subset of unicode data files for linkify-it-py projects."
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "uc_micro_py-2.0.0-py3-none-any.whl", hash = "sha256:3603a3859af53e5a39bc7677713c78ea6589ff188d70f4fee165db88e22b242c"},
     {file = "uc_micro_py-2.0.0.tar.gz", hash = "sha256:c53691e495c8db60e16ffc4861a35469b0ba0821fe409a8a7a0a71864d33a811"},
@@ -7161,7 +7164,7 @@ description = "An extremely fast Python package and project manager, written in 
 optional = true
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "uv-0.11.33-py3-none-linux_armv6l.whl", hash = "sha256:d629531a4e8f7cd76d861ec2e0035faef2675036a084d0a5b35dad5025ec62aa"},
     {file = "uv-0.11.33-py3-none-macosx_10_12_x86_64.whl", hash = "sha256:94fb388a86cf6c2f2610b427f1bf0897bc0f2771a869da41433e17f7d21a1a41"},
@@ -7191,7 +7194,7 @@ description = "The lightning-fast ASGI server."
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "(python_version < \"3.14\" and extra == \"crewai\" or ((python_version < \"3.14\" or extra == \"openai-agents\") and (extra == \"crewai\" or extra == \"openai-agents\") or extra == \"strands\") and sys_platform != \"emscripten\" or extra == \"google-adk\") and python_version < \"3.14\" or python_version >= \"3.14\" and (sys_platform != \"emscripten\" or extra == \"google-adk\") and (extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\")"
+markers = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"google-adk\") or python_version <= \"3.13\" and sys_platform != \"emscripten\" and (extra == \"crewai\" or extra == \"openai-agents\" or extra == \"strands\") or python_version >= \"3.14\" and (sys_platform != \"emscripten\" or extra == \"google-adk\") and (extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\")"
 files = [
     {file = "uvicorn-0.52.4-py3-none-any.whl", hash = "sha256:f86e41a149d7d05a9969337e3946a9c171c06a5d42680896daaba624aeac8da1"},
     {file = "uvicorn-0.52.4.tar.gz", hash = "sha256:73acfee47a0b133c5de13d219492d62d8a31e935f4fe6e41a232451a15379f86"},
@@ -7218,7 +7221,7 @@ description = "Fast implementation of asyncio event loop on top of libuv"
 optional = true
 python-versions = ">=3.8.1"
 groups = ["main"]
-markers = "extra == \"crewai\" and sys_platform != \"win32\" and sys_platform != \"cygwin\" and platform_python_implementation != \"PyPy\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\" and sys_platform != \"win32\" and sys_platform != \"cygwin\" and platform_python_implementation != \"PyPy\""
 files = [
     {file = "uvloop-0.22.1-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:ef6f0d4cc8a9fa1f6a910230cd53545d9a14479311e87e3cb225495952eb672c"},
     {file = "uvloop-0.22.1-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:7cd375a12b71d33d46af85a3343b35d98e8116134ba404bd657b3b1d15988792"},
@@ -7327,7 +7330,7 @@ description = "Simple, modern and high performance file watching and code reload
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "watchfiles-1.2.0-cp310-cp310-macosx_10_12_x86_64.whl", hash = "sha256:bb68bf4df85abebe5efddc53cf2075520f243a59868d9b3973278b23e76962a9"},
     {file = "watchfiles-1.2.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:c16cb06dd17d43b9d185094268459eac92c9538356f050e55b54e82cf700e1d4"},
@@ -7448,7 +7451,7 @@ description = "WebSocket client for Python with low level API options"
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "websocket_client-1.9.0-py3-none-any.whl", hash = "sha256:af248a825037ef591efbf6ed20cc5faa03d3b47b9e5a2230a529eeee1c1fc3ef"},
     {file = "websocket_client-1.9.0.tar.gz", hash = "sha256:9e813624b6eb619999a97dc7958469217c3176312b3a16a4bd1bc7e08a46ec98"},
@@ -7466,7 +7469,7 @@ description = "An implementation of the WebSocket Protocol (RFC 6455 & 7692)"
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "python_version < \"3.14\" and (extra == \"crewai\" or extra == \"langchain\" or extra == \"google-adk\" or extra == \"openai-agents\") or extra == \"langchain\" or extra == \"google-adk\" or extra == \"openai-agents\""
+markers = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"langchain\" or extra == \"google-adk\" or extra == \"openai-agents\") or extra == \"langchain\" or extra == \"google-adk\" or extra == \"openai-agents\""
 files = [
     {file = "websockets-15.0.1-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:d63efaa0cd96cf0c5fe4d581521d9fa87744540d4bc999ae6e08595a1014b45b"},
     {file = "websockets-15.0.1-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:ac60e3b188ec7574cb761b08d50fcedf9d77f1530352db4eef1707fe9dee7205"},
@@ -7875,7 +7878,7 @@ description = "Yet another URL library"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "(extra == \"crewai\" or extra == \"google-adk\") and python_version < \"3.14\" or extra == \"google-adk\""
+markers = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"google-adk\") or extra == \"google-adk\""
 files = [
     {file = "yarl-1.24.5-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:88f50c94e21a0a7f14042c015b0eba1881af78562e7bf007e0033e624da59750"},
     {file = "yarl-1.24.5-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:6efbccc3d7f75d5b03105172a8dc86d82ba4da86817952529dd93185f4a88be2"},
@@ -8136,4 +8139,4 @@ strands = ["strands-agents"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.10"
-content-hash = "e1a359568908118a5074f230eed490b80343febc653f41f885db203a35a2d7be"
+content-hash = "208e8e504c33e03773f18ca58ab9e63566ab8aa416dabf9ea7858ee8dbc4f12b"
