@@ -1458,6 +1458,48 @@ describe('OpenCode plugin gate', () => {
     })
   }
 
+  it('composes OpenCode <server>_<tool> MCP ids into mcp__<server>__<tool> for the allowlist, longest configured server name first (TD-487)', async () => {
+    const root = roots.get(gate.name)!
+    const configPath = join(root, 'opencode.json')
+    writeFileSync(
+      configPath,
+      // JSONC, as OpenCode accepts it: a comment and a trailing comma.
+      '{\n  // servers\n  "mcp": {\n' +
+        '    "github": { "type": "local", "command": ["npx", "server-github"] },\n' +
+        '    "my": { "type": "local", "command": ["my-mcp"] },\n' +
+        '    "my_db": { "type": "local", "command": ["db-mcp"] },\n' +
+        '    "docs.site": { "type": "remote", "url": "https://docs.example/mcp" },\n' +
+        '  }\n}\n',
+    )
+    const snap = writeRulesFixture(join(home, 'opencode-mcp.rules'), DESTRUCTIVE_COMMAND_PATTERNS, 'ws_test', [
+      '#mcpservers block github,my',
+    ])
+    try {
+      for (const shape of ['server', 'setup'] as const) {
+        const cases: Array<[string, boolean]> = [
+          ['github_create_issue', false], // mcp__github__create_issue — allowlisted
+          ['my_search', false], // mcp__my__search — allowlisted
+          ['my_db_query', true], // mcp__my_db__query, NOT mcp__my__db_query
+          ['docs_site_fetch', true], // OpenCode sanitizes "docs.site" to docs_site
+          ['unknown_tool', false], // no configured server: passes through unchanged
+          ['bash', false],
+        ]
+        for (const [tool, wantRefused] of cases) {
+          const r = await runPlugin(shape, tool, { command: 'npm run build' }, snap)
+          expect(r.refused, `${shape}: ${tool} refused=${r.refused}. stderr: ${r.stderr.slice(0, 300)}`).toBe(wantRefused)
+          if (wantRefused) expect(r.stderr).toContain('[mcp_allowlist]')
+        }
+      }
+      const text = auditLogText(gate)
+      expect(text).toContain('"toolName":"mcp__my_db__query"')
+      expect(text).toContain('"toolName":"mcp__docs.site__fetch"')
+      expect(text).toContain('"toolName":"mcp__github__create_issue"')
+      expect(text).toContain('"toolName":"unknown_tool"')
+    } finally {
+      rmSync(configPath, { force: true })
+    }
+  })
+
   it('holds a deploy under a local review_before rule and records it at the workspace path — an ES module has no __filename, so the writer passes the path', async () => {
     const file = writeRulesFixture(
       join(home, 'opencode-hold.rules'),
