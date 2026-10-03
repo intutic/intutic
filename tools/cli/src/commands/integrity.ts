@@ -103,6 +103,8 @@ interface RecomputeResponse {
   recomputedRoot: string | null
   changedTraceIds: string[]
   missingTraceIds: string[]
+  /** Missing because the 3-year trace retention deleted them (absent from older servers). */
+  retentionExpired?: boolean
 }
 
 interface ChainBreak {
@@ -190,7 +192,7 @@ export type SignatureState =
 // ─── The guard ──────────────────────────────────────────────────────
 
 export type IntegrityFinding =
-  | { kind: 'recompute'; verdict: RecomputeVerdict }
+  | { kind: 'recompute'; verdict: RecomputeVerdict; retentionExpired?: boolean }
   | { kind: 'signature'; state: SignatureState }
   | { kind: 'chain'; breaks: number }
   | { kind: 'configChain'; breaks: number; contentMismatches: number }
@@ -224,7 +226,9 @@ export type IntegrityFinding =
 export function failsIntegrity(finding: IntegrityFinding): boolean {
   switch (finding.kind) {
     case 'recompute':
-      return finding.verdict !== 'match'
+      // Traces the 3-year retention deleted are the schedule working, not a
+      // finding; the signed root still stands and its signature is still checked.
+      return finding.verdict !== 'match' && finding.retentionExpired !== true
     case 'signature':
       return finding.state === 'invalid'
     case 'chain':
@@ -620,7 +624,7 @@ export async function runIntegrityVerify(
 
   const signature = verifyRootSignature(detail.root, await fetchSigningKeys(controlPlaneUrl))
   const findings: IntegrityFinding[] = [
-    { kind: 'recompute', verdict: recompute.verdict },
+    { kind: 'recompute', verdict: recompute.verdict, retentionExpired: recompute.retentionExpired === true },
     { kind: 'signature', state: signature },
   ]
   const failed = findings.some(failsIntegrity)
@@ -635,6 +639,7 @@ export async function runIntegrityVerify(
           recomputedRoot: recompute.recomputedRoot,
           changedTraceIds: recompute.changedTraceIds,
           missingTraceIds: recompute.missingTraceIds,
+          retentionExpired: recompute.retentionExpired === true,
           signature,
           leafSchemaVersion: detail.root.leaf_schema_version,
           leafCount: detail.root.leaf_count,
@@ -664,6 +669,10 @@ export async function runIntegrityVerify(
         log.field('Re-derived', recompute.recomputedRoot ?? '—')
         break
       case 'missing_traces':
+        if (recompute.retentionExpired) {
+          log.info(`Re-derivation: past retention — ${recompute.missingTraceIds.length} covered trace(s) were deleted after the 3-year trace retention.`)
+          break
+        }
         log.error(`Re-derivation: MISSING TRACES — ${recompute.missingTraceIds.length} covered trace(s) are gone.`)
         log.field('Missing', sampleIds(recompute.missingTraceIds))
         break

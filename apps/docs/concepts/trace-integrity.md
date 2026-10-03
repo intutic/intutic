@@ -43,7 +43,13 @@ curl -XPOST https://<control-plane>/api/v1/integrity/roots/<rootId>/recompute
 | :--- | :--- |
 | `match` | Every covered trace still hashes to what was sealed. |
 | `mismatch` | At least one trace changed after sealing. The response **names the trace ids**. |
-| `missing_traces` | A covered trace is gone. Reported separately, because a deletion is a different problem from an edit. |
+| `missing_traces` | A covered trace is gone. Reported separately, because a deletion is a different problem from an edit. When the root was sealed more than 3 years ago the response also carries `retentionExpired: true`: the traces were deleted by the 3-year trace retention, and the signed root still stands. |
+
+Traces are kept for 3 years, then deleted by the daily retention sweep. A trace
+covered by a root sealed less than 3 years ago waits for that root to age out, so
+whether a missing trace was expected is always decidable from the root's own age.
+Roots and leaves are never deleted by the sweep. Copies mirrored to your own bucket
+follow that bucket's lifecycle rules.
 
 That re-derivation *is* the verification. It is also why traces are sealed by a
 sweep rather than chained together as they arrive: a per-trace chain can only be
