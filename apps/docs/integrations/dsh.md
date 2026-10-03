@@ -3,7 +3,7 @@
 Integrate Intutic governance with [DeepSeek's "dsh"](https://github.com/deepseek-ai/deepseek-harness) — a **developer preview** (`@deepseek-ai/dsh`, first published 2026-08-13) plugin-first coding-agent harness built on DeepSeek's own "Cordis" extensibility framework.
 
 ::: warning PREVIEW — breaking changes possible
-dsh is a developer preview with its own stated breaking-changes policy. This integration is pinned against a tested version range (`@intutic/gate` `^0.1.0` in the profile's own `package.json`) rather than `latest`, matching the honesty style already established for [Muse Code](/reference/harness-security-matrix#muse-code) and [Grok Build](/reference/harness-security-matrix#grok-build) — but a preview product can still change its plugin API, its `tools/pre-execute` payload shape, or its `settings.yaml` schema out from under a pinned integration. See [TD-370](https://github.com/intutic/intutic/blob/main/docs/TECH_DEBT.md) for exactly what this integration confirmed against a real install and what remains open.
+dsh is a developer preview with its own stated breaking-changes policy. This integration was last verified — including a live session — against `@deepseek-ai/dsh` **0.2.0-rc.2**, and declares `@intutic/gate` `^2.0.0` in a profile's `package.json` when the profile has no declaration of its own. A preview product can still change its plugin API, its `tools/pre-execute` payload shape, or its configuration layout between releases (0.2 moved live configuration out of `settings.yaml` and into each profile's `cordis.patch.yml`). See [TD-370](https://github.com/intutic/intutic/blob/main/docs/TECH_DEBT.md) for exactly what this integration confirmed against a real install and what remains open.
 :::
 
 ## How it works
@@ -12,14 +12,14 @@ Unlike every other native harness Intutic supports, dsh has no `hooks.json`/shel
 
 That module is a genuine [Cordis Plugin](https://github.com/cordiverse/cordis) subscribed to dsh's `tools/pre-execute` event — a `waterfall` (Cordis's cooperative, composable event-dispatch mode) that runs before every tool call. It calls into `@intutic/gate`'s own four-tier `Gate.guard()` evaluator and returns `{kind: 'deny', reason}` to veto a call, or calls the waterfall's `next()` to let it (and any other listener, including dsh's own built-in approval flow) proceed.
 
-Intutic's sync daemon does not generate this plugin file — it already exists, published on npm. What the daemon writes is the **registration**: a row in every existing dsh profile's `cordis.patch.yml` naming the plugin, plus the `@intutic/gate` dependency declaration in that profile's `package.json`, plus proxy routes merged into `settings.yaml`'s `llm-deepseek` (dsh's default LLM route) and `llm-pi-ai` (a kept selectable route) sections for LLM egress. It also (re)generates `$DSH_HOME/INSTALL.md` on every sync — see step 5 and "What gets written" below.
+Intutic's sync daemon does not generate this plugin file — it already exists, published on npm. What the daemon writes is the **registration**: a row in every existing dsh profile's `cordis.patch.yml` naming the plugin, plus the `@intutic/gate` dependency declaration in that profile's `package.json`, plus — in that same `cordis.patch.yml` — a `baseURL` override on the `llm-deepseek` entry, dsh's default LLM route, for LLM egress. It also (re)generates `$DSH_HOME/INSTALL.md` on every sync — see step 5 and "What gets written" below.
 
 ## Setup
 
 ### 1. dsh detection
 
 dsh is detected by any of:
-- `$DSH_HOME` (defaults to `~/.dsh/`) containing `settings.yaml`, `.credentials.yaml`, or a `profiles/` directory, **or**
+- `$DSH_HOME` (defaults to `~/.dsh/`) containing `settings.yaml` (left by dsh releases before 0.2), `.credentials.yaml`, or a `profiles/` directory, **or**
 - the `dsh` binary being found in your `PATH`.
 
 ### 2. Initialize Intutic
@@ -57,7 +57,18 @@ Intutic declares `@intutic/gate` in your profile's `package.json`, but — like 
 dsh plugin --profile myproject add @intutic/gate
 ```
 
-(or `cd $DSH_HOME/profiles/myproject && pnpm install`, if you manage the profile's `node_modules` directly). Until this runs, the `cordis.patch.yml` row Intutic wrote names a module Node cannot yet resolve, and dsh's own loader reports that row failed to activate — a **fail-loud** gap you will see in dsh's own diagnostics, not a silent one.
+dsh 0.2 installs it as a plain profile dependency and prints `@intutic/gate declares no dsh.bundle — installed as a plain dependency, not a profile layer`. That warning is expected: the `cordis.patch.yml` row Intutic wrote is what loads the plugin. (`cd $DSH_HOME/profiles/myproject && pnpm add @intutic/gate` is equivalent.)
+
+::: danger Until this step runs, dsh is NOT governed
+Without the package, dsh cannot import the row's module. It prints two lines on stderr at every start and then runs the session with **no gate**:
+
+```
+dsh: warning: 1 entry did not activate
+intutic-governance (@intutic/gate/dsh): failed to import
+```
+
+dsh offers no way for a profile row to make startup fail instead, so this step is permanent and manual. `intutic status` shows which profiles are registered but not yet activated.
+:::
 
 The CLI's own onboarding text (shown after `intutic init`/`intutic connect --harness dsh`) prints this same command, per profile, so you don't have to come back to this page to find it.
 
@@ -73,18 +84,20 @@ Two places surface the TD-370 "silent no-profile window" and the pending activat
 ## What gets written
 
 - **Plugin registration:** a `{ insert: [{ id: 'intutic-governance', name: '@intutic/gate/dsh', config: {...} }] }` row merged into every existing `$DSH_HOME/profiles/*/cordis.patch.yml` — a structural YAML edit (via the `yaml` package's `parseDocument`/`setIn`) that preserves every other row and any comments/formatting around it.
-- **Dependency:** `@intutic/gate` added to that profile's `package.json` `dependencies` (see step 5 above for why this alone is not enough).
-- **LLM egress — default route:** `settings.yaml`'s `llm-deepseek.baseURL` is overridden to the local Intutic proxy. `llm-deepseek` is dsh's **actual default** LLM route (the native DeepSeek adapter `dsh-base`'s own `agent-default-model` row points at) — this merge is what redirects a fresh profile's default egress, no further configuration needed. Only `baseURL` is touched; every other field in that section (`apiKeyEnv`, `thinking`, `models`, ...) round-trips untouched.
-- **LLM egress — selectable route:** an `intutic` route also merged into `settings.yaml`'s `llm-pi-ai.providers` map (`baseURL` pointed at the local Intutic proxy). `llm-pi-ai` is not dsh's default route and mounts dormant until a `llm-pi-ai:` section exists at all — this merge keeps it available as an explicit, user-selectable alternative alongside the default-route merge above, it does not replace it.
+- **Dependency:** `@intutic/gate` `^2.0.0` added to that profile's `package.json` `dependencies` only when the profile declares none — a range `dsh plugin add` already wrote is left alone (see step 5 above for why the declaration alone is not enough).
+- **LLM egress — default route:** a `{ id: llm-deepseek, config: { baseURL: <proxy> } }` override in the same `cordis.patch.yml`. In dsh 0.2 the `llm-deepseek` entry is `@deepseek-ai/dsh-llm-deepseek-api-key`, which serves the `deepseek-official` provider that `dsh-base`'s `agent-default-model` row selects (`deepseek-flash`). A Cordis override replaces the entry's whole `config`, so when the profile already overrides `llm-deepseek` (for example after a Models-page save), only `baseURL` is set on that row and its other fields (`apiKeyEnv`, `reasoningEffort`, `models`, ...) are kept. Requests then go to `<proxy>/v1/messages` in the Anthropic Messages format.
+- **Not redirected:** the signed-in DeepSeek *account* route (`llm-deepseek-account`), whose token dsh only releases to DeepSeek's own origin, and `llm-pi-ai` routes you configure yourself. Earlier versions of this integration also wrote an `llm-pi-ai` route into `$DSH_HOME/settings.yaml`; dsh 0.2 no longer reads that file (it imports it once into the first profile that boots and renames it `settings.yaml.imported`), so Intutic no longer writes it.
 - **`$DSH_HOME/INSTALL.md`:** regenerated every sync (write-if-changed) — lists the manual `dsh plugin --profile <name> add @intutic/gate` command for every currently-registered profile. See step 5 above.
+- **Protected paths:** agent tool calls that touch `.dsh/profiles`, `.dsh/cordis.patch.yml` (the home-level patch layer, which outranks every profile's) or `.dsh/settings.yaml` are blocked by the generated gates.
 - **No rules file.** dsh has no workspace-relative rules/instructions file this integration writes governance text into — its config lives entirely under `$DSH_HOME`, not the project workspace.
 
 ## Pre-tool hooks (blocking)
 
-dsh's veto contract is **confirmed**, not assumed — this integration was authored against a real `npm pack` and read of `@deepseek-ai/dsh`, `@deepseek-ai/cordis`, and `@deepseek-ai/dsh-tools`'s shipped TypeScript declarations, not solely from documentation:
+dsh's veto contract is **confirmed**, not assumed — read from `@deepseek-ai/dsh-tools`'s shipped code (re-read for 0.2.0-rc.2) and observed in a live 0.2.0-rc.2 session:
 
 - The event is `tools/pre-execute`, declared by `@deepseek-ai/dsh-tools` — dsh's own tool-execution pipeline's "reorderable allow/deny/ask gate." It fires for **every** tool call unconditionally, not behind an opt-in matcher.
-- It is a genuine Cordis `waterfall`: `(exec, next) => Promise<PreToolDecision>`. `PreToolDecision` is `{kind:'allow'}` | `{kind:'deny', reason}` | `{kind:'ask', reason?}`.
+- It is a genuine Cordis `waterfall`: `(exec, next) => Promise<PreToolDecision>`. `PreToolDecision` is `{kind:'allow'}` | `{kind:'deny', reason}` | `{kind:'ask', reason?}` | `{kind:'cancel'}` (`cancel` is new in 0.2).
+- A deny reaches the model as an error tool result (`Error: <reason>`) and the tool never runs. An `ask` goes to dsh's approval service, and becomes a deny when no approval service is mounted. Guards that run after the waterfall can only deny, so nothing later turns Intutic's deny back into an allow.
 - Intutic's plugin calls `next()` on allow (so later listeners — including dsh's own built-in approval flow — still run) and returns `{kind:'deny', reason}` without calling `next()` to veto, per Cordis's own waterfall semantics ("a listener that does not call `next()` vetoes the rest of the chain").
 - A crash inside the gate (anything other than its own structured refusal) is treated as "cannot evaluate" and denied — fail-closed, the same posture every other harness's gate in this product takes.
 
@@ -98,10 +111,12 @@ Every decision is appended to `.intutic/events/hook-events.jsonl` and drained to
 
 See [TD-370](https://github.com/intutic/intutic/blob/main/docs/TECH_DEBT.md) for the complete record. In short:
 
-1. Three of dsh's own npm packages (`@deepseek-ai/dsh-permission`, `@deepseek-ai/dsh-settings-local`, `@deepseek-ai/dsh-fs-policy`) are access-restricted and could not be inspected directly — this integration's `settings.yaml` schema and dsh's own native sandbox/approval interaction are inferred from sibling packages' documentation, not read from source.
-2. The `llm-pi-ai` route this integration also merges into is **not** dsh's default LLM route (`llm-deepseek`, the native DeepSeek adapter, is) and mounts dormant until configured — that merge alone adds only a selectable route. Default egress redirection is handled separately, by the `llm-deepseek.baseURL` merge described above.
+1. The Intutic proxy has no DeepSeek route of its own yet. dsh's redirected default-route requests reach the proxy, but the proxy picks an upstream by model name and sends an unrecognised model such as `deepseek-flash` to its OpenAI-compatible upstream (`OPENAI_UPSTREAM_URL`, `api.openai.com` by default). Unless that upstream serves `deepseek-flash`, dsh model calls through the proxy do not complete today.
+2. The signed-in DeepSeek account route is not redirected (see "What gets written").
 3. A machine where dsh has never been run has no profile to register into until the user's first `dsh --profile <name>` run.
-4. The plugin still needs a manual dependency install (step 5 above) before it actually loads.
+4. The plugin needs a manual install per profile (step 5 above). Until then dsh warns and runs **ungoverned** — this is a permanent, accepted step.
+
+(The three access-restricted dsh packages earlier versions of this page listed are no longer dsh dependencies as of 0.2; their roles moved to public packages that were read directly.)
 
 ## Config details
 
@@ -109,13 +124,14 @@ See [TD-370](https://github.com/intutic/intutic/blob/main/docs/TECH_DEBT.md) for
 |----------|-------|
 | Harness type | `dsh` |
 | Config file | none (dsh has no workspace-relative rules file) |
-| Registration files | `$DSH_HOME/profiles/*/cordis.patch.yml`, `$DSH_HOME/profiles/*/package.json`, `$DSH_HOME/settings.yaml` |
+| Registration files | `$DSH_HOME/profiles/*/cordis.patch.yml` (plugin row + `llm-deepseek` egress row), `$DSH_HOME/profiles/*/package.json` |
 | Gate module | [`@intutic/gate/dsh`](https://www.npmjs.com/package/@intutic/gate) — a real, checked-in TypeScript Cordis plugin, not a generated script |
 | Detection | `$DSH_HOME`/`~/.dsh/` (`settings.yaml`, `.credentials.yaml`, or `profiles/`), or `dsh` in `PATH` |
 | Format | YAML |
 | Write strategy | Structural YAML edit (write-if-changed), atomic rename |
-| Block contract | Cordis waterfall — returns `{kind:'deny', reason}` without calling `next()` — confirmed against real `@deepseek-ai/dsh-tools` type declarations |
+| Block contract | Cordis waterfall — returns `{kind:'deny', reason}` without calling `next()` — confirmed against `@deepseek-ai/dsh-tools`' shipped code and in a live session |
+| Last verified | `@deepseek-ai/dsh` 0.2.0-rc.2, 2026-10-03 |
 
-::: tip Not fully live-verified
-dsh could not be run interactively in the environment this integration was built in. The `tools/pre-execute` event, the `PreToolDecision` shape, and the `cordis.patch.yml`/profile structure are confirmed by reading dsh's own shipped TypeScript declarations (a stronger bar than documentation alone) — but an actual blocked tool call, end to end inside a running `dsh` session, was not observed. See TD-370.
+::: tip Live-verified against dsh 0.2.0-rc.2
+On 2026-10-03 a headless `dsh` 0.2.0-rc.2 session ran against a local scripted model, with `@intutic/gate` 2.0.0 installed through `dsh plugin add` and a policy snapshot that blocks one command. The model's request for that command was refused: the command never ran and the model received the block reason as an error tool result, while a command the snapshot does not match ran normally. Every model request went to the `baseURL` Intutic wrote. Not covered: a real DeepSeek endpoint, the Intutic proxy in the path (see Known gaps), and the web/ACP templates' approval UIs.
 :::
