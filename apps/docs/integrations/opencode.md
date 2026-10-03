@@ -50,13 +50,14 @@ OpenCode has no base-URL environment variable. To route model traffic through th
 }
 ```
 
-Intutic does not write `opencode.json` — it is your file, and a wholesale rewrite of it is exactly the kind of change the drift guard exists to catch. The plugin gate governs tool calls whether or not the egress is routed.
+Intutic does not write your provider settings — `opencode.json` is your file, and a wholesale rewrite of it is exactly the kind of change the drift guard exists to catch. The one block it edits is `mcp` (see [MCP servers](#mcp-servers)). The plugin gate governs tool calls whether or not the egress is routed.
 
 ## What gets written
 
 - **Rules file:** `AGENTS.md` — governance text, formatted the same `---`-separated way as `.cursorrules`/`CLAUDE.md`/`.windsurfrules`. Written only when the workspace has SOPs.
 - **Plugin:** `.opencode/plugins/intutic-governance.js` and `.opencode/plugins/intutic-governance/index.js` — the gate, written twice with identical bytes because the two OpenCode lines discover local plugins differently: 1.x globs files in `.opencode/plugins/`, 2.x reads `<name>/index.js` sub-directories, and each ignores the other's layout. An ES module with the shared gate body embedded; a `tool.execute.before` hook for 1.x and a `tool` `execute.before` hook for 2.x in the same module. Written atomically; repeated syncs replace, never stack.
-- **Not written:** `opencode.json` (egress and the optional static `permission` map are yours), and OpenCode's MCP server entries are not proxy-wrapped yet — see below.
+- **MCP servers:** the `mcp` block of `opencode.json` (project) and `~/.config/opencode/opencode.json` (global) — each server is fronted by the MCP governance proxy. Every other key is left as it was. See [MCP servers](#mcp-servers).
+- **Not written:** the rest of `opencode.json` (egress and the optional static `permission` map are yours).
 
 ## Pre-tool hooks (blocking)
 
@@ -70,9 +71,20 @@ Every decision is appended to `.intutic/events/hook-events.jsonl` and drained to
 OpenCode's own `permission` map in `opencode.json` (1.x; `permissions` array in 2.x) can deny tools or bash-command globs — `"bash": { "rm -rf *": "deny" }`. It is static: no argument-pattern rules, no policy snapshot, no audit line. It is belt-and-braces beside the plugin, not a substitute, and Intutic leaves it to you.
 :::
 
-::: warning OpenCode MCP tool calls
-The plugin runs for MCP tools too, but OpenCode 1.x names them `<server>_<tool>`, not the `mcp__<server>__<tool>` shape the per-server MCP allowlist parses, and OpenCode's `mcp` config block is not proxy-wrapped by `intutic connect` yet. An MCP call is still evaluated against every path and command rule; the server allowlist does not apply to it. Tracked as TD-487.
-:::
+## MCP servers
+
+`intutic connect`, and every sync cycle after it, rewrites each server in the `mcp` block of `opencode.json` so that the [MCP governance proxy](/guide/mcp-governance) fronts it. Tool-description poisoning checks, DLP on results and TOFU pinning then apply to OpenCode's MCP traffic as they do for every other harness.
+
+- A `local` server's `command` becomes `["node", <proxy>, "--workspace-id", <ws>, "--server-name", <name>, "--", ...original command]`. `environment`, `cwd`, `enabled` and `timeout` are kept.
+- A `remote` server becomes a `local` entry that runs the proxy in bridge mode (`--remote-url <url> --remote-transport http`). Its `headers` move to the `INTUTIC_REMOTE_HEADERS` environment variable, so they never appear in the process list.
+- A `remote` server with an `oauth` object is left as it is. The bridge forwards static headers only, so wrapping it would stop OpenCode's own OAuth flow from authenticating it. The plugin still gates its calls.
+- An `intutic` server entry is added, the same as for the other harnesses.
+
+Only the `mcp` block is touched. Other keys, their order and the file's indentation are kept. A wrapped server is recognised by its command (the proxy path and `--workspace-id`), not by a marker key, because OpenCode's config schema has no such key. Running the merge again on an already-wrapped file writes nothing. Two files are edited, and only if they already exist: `opencode.json` in the project root and `~/.config/opencode/opencode.json` (`$XDG_CONFIG_HOME/opencode/` when that is set). A file with comments or trailing commas is skipped, because rewriting it would delete the comments; `intutic` logs `opencode_config_unparseable` instead. `opencode.jsonc` is never edited, so a server declared there is not wrapped.
+
+### MCP tool names and the allowlist
+
+OpenCode names an MCP tool `<server>_<tool>`, with anything outside `A-Z a-z 0-9 _ -` replaced by `_`. The per-server [MCP allowlist](/guide/mcp-governance) expects `mcp__<server>__<tool>`. The underscore is ambiguous (`my_db_query` could be server `my` or server `my_db`), so on each tool call the plugin reads the server names from the OpenCode config files: global, `$OPENCODE_CONFIG_DIR`, `$OPENCODE_CONFIG`, the project's `opencode.json{,c}` and `.opencode/opencode.json{,c}`, and `$OPENCODE_CONFIG_CONTENT`. It rewrites the id using the longest configured server name that prefixes it, so `my_db_query` becomes `mcp__my_db__query` when a server named `my_db` exists. Built-in tools and anything that matches no configured server are passed through unchanged. The composed id is the one recorded in the audit line.
 
 ## Config details
 
@@ -81,6 +93,7 @@ The plugin runs for MCP tools too, but OpenCode 1.x names them `<server>_<tool>`
 | Harness type | `opencode` |
 | Config file | `AGENTS.md` |
 | Plugin files | `.opencode/plugins/intutic-governance.js` (1.x layout), `.opencode/plugins/intutic-governance/index.js` (2.x layout) — same bytes |
+| MCP servers | `mcp` block of `opencode.json` (project) and `~/.config/opencode/opencode.json`, proxy-wrapped |
 | Detection | `.opencode/`, `opencode.json{,c}` in the project; `$OPENCODE_CONFIG_DIR` or `~/.config/opencode/`; `opencode`/`opencode2` in `PATH` |
 | Format | Markdown (rules), ES module (plugin) |
 | Write strategy | Atomic (write to `.intutic-tmp`, then rename) |

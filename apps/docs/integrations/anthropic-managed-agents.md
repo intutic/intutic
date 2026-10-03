@@ -22,7 +22,7 @@ Every other SDK-gated adapter in this directory (Strands, OpenAI Agents, LangCha
 |---|---|---|
 | `agent.tool_use` (built-in tools), hosted session | Only if the tool's `permission_policy` is `always_ask`, or `auto` and the server's judgement is `ask` | `IntuticSessionConfirmer` answers the pause with a `Gate.guard()` verdict |
 | `agent.tool_use`, **self-hosted** `EnvironmentWorker` | Same as hosted — identical mechanism | Same — `IntuticSessionConfirmer` does not care where the tool body runs |
-| `agent.mcp_tool_use` (MCP tools) | Only if the MCP toolset's `permission_policy` is `always_ask` (Anthropic's docs say this is the toolset default — verify against your account) | Same as `agent.tool_use` |
+| `agent.mcp_tool_use` (MCP tools) | Only if the MCP toolset's `permission_policy` is `always_ask`. Set it explicitly; don't rely on a default | Same as `agent.tool_use` |
 | `agent.custom_tool_use` (your own tools) | Never — no `permission_policy` concept | `wrapManagedAgentsCustomTool`/`wrapManagedAgentsCustomTools` (TS) or `@guard` applied **before** `@beta_tool` (Python) — see below |
 | A tool configured `auto` | Only the calls the server judges `ask` | Those pauses are answered like `always_ask` ones. Calls the server judges `allow` run without reaching Intutic (same ceiling as `always_allow`); calls it judges `deny` (high-risk) never run. Unknown future `evaluation` variants are ignored — the top-level `evaluated_permission` alone decides. |
 | A subagent's pause, cross-posted to the primary thread's stream | Same as the subagent's own tool | Answered once, by `tool_use_id`. The event's `session_thread_id` is informational and is not sent back in the confirmation. |

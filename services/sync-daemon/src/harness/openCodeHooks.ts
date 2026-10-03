@@ -53,12 +53,24 @@
  *
  * ## What is not written
  *
- * `opencode.json` is left alone: the model base URL is a `provider.<id>.
- * options.baseURL` field there (or `OPENCODE_CONFIG_CONTENT`), and the static
- * `permission` deny map cannot express argument rules — both are documented
- * for the user, not generated. OpenCode's MCP servers are not proxy-wrapped
- * this phase (its MCP tool ids are `<server>_<tool>`, not `mcp__<server>__
- * <tool>`, so the allowlist backstop does not compose yet — see TD-487).
+ * This writer leaves `opencode.json` alone: the model base URL is a
+ * `provider.<id>.options.baseURL` field there (or `OPENCODE_CONFIG_CONTENT`),
+ * and the static `permission` deny map cannot express argument rules — both
+ * are documented for the user, not generated. The file's `mcp` block is
+ * proxy-wrapped by `mcpAutoWrite.ts` (`injectOpenCode`, TD-487), which edits
+ * that block and nothing else.
+ *
+ * ## MCP tool ids
+ *
+ * OpenCode names an MCP tool `<server>_<tool>` (`mcp/catalog.ts`: both halves
+ * passed through `sanitize`, which turns anything outside `[A-Za-z0-9_-]`
+ * into `_`), where the gate's per-server allowlist expects
+ * `mcp__<server>__<tool>`. The underscore is ambiguous — `my_db_query` could
+ * be server `my`, tool `db_query` or server `my_db`, tool `query` — so the
+ * plugin reads the server names from the OpenCode config files on each call
+ * and composes the id against the LONGEST sanitized name that prefixes it
+ * (`OPENCODE_MCP_ID_JS`). A tool that matches no configured server — every
+ * built-in — passes through unchanged.
  *
  * @module
  */
@@ -77,6 +89,78 @@ export const OPENCODE_PLUGIN_DIR = path.join('.opencode', 'plugins')
 export const OPENCODE_PLUGIN_FILE = 'intutic-governance.js'
 /** The 2.x layout: `<name>/index.js`. Same bytes as the flat file. */
 export const OPENCODE_PLUGIN_V2_FILE = path.join('intutic-governance', 'index.js')
+
+/**
+ * The JavaScript embedded in the plugin that composes OpenCode's MCP tool id
+ * into `mcp__<server>__<tool>` (see the module doc). A string rather than a
+ * TypeScript function so the plugin and the unit test run the same text —
+ * tests evaluate it directly.
+ *
+ * `intuticOpenCodeMcpId(tool, names)` is pure: `names` are the configured
+ * server names (the keys of OpenCode's `mcp` blocks). The composed id carries
+ * the configured name, which is what the workspace allowlist lists.
+ *
+ * `intuticOpenCodeMcpServerNames(dirs)` reads those names from the files
+ * OpenCode itself loads them from: the global config dir
+ * (`$XDG_CONFIG_HOME|~/.config` + `/opencode`), `$OPENCODE_CONFIG_DIR`,
+ * `$OPENCODE_CONFIG`, `opencode.json{,c}` and `.opencode/opencode.json{,c}`
+ * in each of `dirs`, and `$OPENCODE_CONFIG_CONTENT`. JSONC is accepted
+ * (comments and trailing commas stripped outside strings); an unreadable file
+ * contributes nothing. Read per call, so a server added mid-session is seen.
+ */
+export const OPENCODE_MCP_ID_JS = `
+function intuticOpenCodeSanitize(v) { return String(v).replace(/[^a-zA-Z0-9_-]/g, '_'); }
+function intuticOpenCodeMcpId(tool, names) {
+  tool = String(tool);
+  if (tool.indexOf('mcp__') === 0) return tool;
+  var best = null, bestLen = -1;
+  for (var i = 0; i < names.length; i++) {
+    var s = intuticOpenCodeSanitize(names[i]);
+    if (s.length > bestLen && tool.length > s.length + 1 && tool.slice(0, s.length + 1) === s + '_') {
+      best = names[i]; bestLen = s.length;
+    }
+  }
+  return best === null ? tool : 'mcp__' + best + '__' + tool.slice(bestLen + 1);
+}
+function intuticParseJsonc(text) {
+  var out = '', i = 0, n = text.length;
+  while (i < n) {
+    var c = text[i];
+    if (c === '"') {
+      var j = i + 1;
+      while (j < n && text[j] !== '"') j += text[j] === '\\\\' ? 2 : 1;
+      out += text.slice(i, j + 1); i = j + 1;
+    } else if (c === '/' && text[i + 1] === '/') {
+      while (i < n && text[i] !== '\\n') i++;
+    } else if (c === '/' && text[i + 1] === '*') {
+      var end = text.indexOf('*/', i + 2); i = end < 0 ? n : end + 2;
+    } else { out += c; i++; }
+  }
+  return JSON.parse(out.replace(/,(\\s*[}\\]])/g, '$1'));
+}
+function intuticOpenCodeMcpServerNames(dirs) {
+  var names = [];
+  function add(text) {
+    try {
+      var cfg = intuticParseJsonc(text);
+      if (cfg && cfg.mcp && typeof cfg.mcp === 'object') {
+        for (var k in cfg.mcp) if (names.indexOf(k) < 0) names.push(k);
+      }
+    } catch (e) {}
+  }
+  function addFile(p) { try { add(fs.readFileSync(p, 'utf-8')); } catch (e) {} }
+  var configDirs = [path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'opencode')];
+  if (process.env.OPENCODE_CONFIG_DIR) configDirs.push(process.env.OPENCODE_CONFIG_DIR);
+  for (var d = 0; d < dirs.length; d++) { configDirs.push(dirs[d]); configDirs.push(path.join(dirs[d], '.opencode')); }
+  for (var c = 0; c < configDirs.length; c++) {
+    addFile(path.join(configDirs[c], 'opencode.json'));
+    addFile(path.join(configDirs[c], 'opencode.jsonc'));
+  }
+  if (process.env.OPENCODE_CONFIG) addFile(process.env.OPENCODE_CONFIG);
+  if (process.env.OPENCODE_CONFIG_CONTENT) add(process.env.OPENCODE_CONFIG_CONTENT);
+  return names;
+}
+`
 
 /**
  * The plugin source. ESM, because a 1.x loader does `Object.values(module)`
@@ -120,6 +204,10 @@ try {
 } catch {}
 
 ${emitJsGate({ harness: 'opencode', contract: 'throw', reviewRequestFile: path.join(workspaceRoot, '.intutic', 'events', REVIEW_REQUESTS_BASENAME) })}
+${OPENCODE_MCP_ID_JS}
+// Directories whose opencode.json may declare MCP servers: the workspace this
+// plugin was written for, and the directory OpenCode reports (1.x input).
+const _intuticConfigDirs = [${JSON.stringify(workspaceRoot)}];
 
 let _intuticSessionId = '';
 function logEvent(verdict, toolName, reason) {
@@ -160,7 +248,10 @@ function logEvent(verdict, toolName, reason) {
  */
 function intuticEvaluate(toolName, args, sessionID) {
   _intuticSessionId = sessionID || '';
-  const tool = String(toolName || 'tool');
+  let tool = String(toolName || 'tool');
+  // OpenCode's MCP ids are <server>_<tool>; compose them into the
+  // mcp__<server>__<tool> shape the allowlist reads (TD-487).
+  if (tool.indexOf('_') > 0) tool = intuticOpenCodeMcpId(tool, intuticOpenCodeMcpServerNames(_intuticConfigDirs));
   if (!args || typeof args !== 'object' || Array.isArray(args)) {
     const reason = '[Intutic Governance] BLOCKED: tool "' + tool + '" was called with arguments the gate cannot read (' +
       (args === null ? 'null' : typeof args) + '); refusing rather than allowing a call it cannot evaluate.';
@@ -198,7 +289,10 @@ function intuticAnnounce() {
 }
 
 // ── 1.x: Plugin = (input) => Promise<Hooks> ───────────────────────────────
-async function intuticServer(_input) {
+async function intuticServer(input) {
+  if (input && typeof input.directory === 'string' && _intuticConfigDirs.indexOf(input.directory) < 0) {
+    _intuticConfigDirs.push(input.directory);
+  }
   if (!globalThis.__intuticOpencode) { globalThis.__intuticOpencode = true; intuticAnnounce(); }
   return {
     'tool.execute.before': async (input, output) => {
