@@ -72,7 +72,9 @@ pytest = "^9.0.3"
 # extras-resolution incident: it is not `optional = true` and not part of any
 # extra. PyPI reports `anthropic==0.122.0` (the version installed while
 # building this adapter) as `Requires-Python: >=3.9`, no upper bound, so it
-# needs no explicit `python = "..."` constraint either way.
+# needs no explicit `python = "..."` constraint either way. Locked at 1.11.0
+# since TD-429 (`Requires-Python: >=3.10`, inside this package's `^3.10`;
+# switches its HTTP client from httpx to httpx2 — dev group only).
 anthropic = ">=0.122.0"
 
 [build-system]

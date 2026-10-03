@@ -300,28 +300,27 @@ markers = {main = "python_version < \"3.14\" and (extra == \"crewai\" or extra =
 
 [[package]]
 name = "anthropic"
-version = "0.122.0"
+version = "1.11.0"
 description = "The official Python library for the anthropic API"
 optional = false
-python-versions = ">=3.9"
+python-versions = ">=3.10"
 groups = ["dev"]
 files = [
-    {file = "anthropic-0.122.0-py3-none-any.whl", hash = "sha256:45ec906452ffae6b5f7f0c53d01f50bfb7e4ce878d7ae8e4309d13171e557e67"},
-    {file = "anthropic-0.122.0.tar.gz", hash = "sha256:ffec56ae96657c8d19fa575ec96f140f380c353a07ab7d61b92eb18ee6536601"},
+    {file = "anthropic-1.11.0-py3-none-any.whl", hash = "sha256:52f97b2c485cca7ac66058374f5073a3febb7e6849b16989c145d602a3efee21"},
+    {file = "anthropic-1.11.0.tar.gz", hash = "sha256:3906fabac7ad7b5b46c6186040398fc7826885c77ce34e4dd7849de16fc8d0f8"},
 ]
 
 [package.dependencies]
-anyio = ">=3.5.0,<5"
-distro = ">=1.7.0,<2"
+anyio = ">=4.1.0,<5"
 docstring-parser = ">=0.15,<1"
-httpx = ">=0.25.0,<1"
+httpx2 = ">=2.0.0,<3"
 jiter = ">=0.4.0,<1"
-pydantic = ">=1.9.0,<3"
+pydantic = ">=1.10.0,<3"
 sniffio = ">=1,<2"
 typing-extensions = ">=4.14,<5"
 
 [package.extras]
-aiohttp = ["aiohttp (>=3,<4)", "httpx-aiohttp (>=0.1.9,<1)"]
+aiohttp = ["aiohttp (>=3.10.0,<4)"]
 aws = ["boto3 (>=1.28.57,<2)", "botocore (>=1.31.57,<2)"]
 bedrock = ["boto3 (>=1.28.57,<2)", "botocore (>=1.31.57,<2)"]
 google-cloud = ["google-auth[requests] (>=2,<3)"]
@@ -664,7 +663,7 @@ description = "Pure Python implementation of Google Common Expression Language"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "extra == \"crewai\" and python_version < \"3.14\""
+markers = "python_version <= \"3.13\" and extra == \"crewai\""
 files = [
     {file = "cel_python-0.5.0-py3-none-any.whl", hash = "sha256:d0f85008b89655c2bb18d797d2fa3f96f2ed80f4a3b43b0e8138c6646581e5f6"},
     {file = "cel_python-0.5.0.tar.gz", hash = "sha256:3eb0a619e8df0f338d0430cda01427a742e77e3c433a1c7c3ebd409cd804c45a"},
@@ -672,7 +671,7 @@ files = [
 
 [package.dependencies]
 google-re2 = [
-    {version = ">=1.1.20240702", markers = "python_version != \"3.13\""},
+    {version = ">=1.1.20240702"},
     {version = ">=1.1.20250722", markers = "python_version == \"3.13\""},
 ]
 jmespath = ">=1.0.1"
@@ -687,7 +686,7 @@ version = "2026.7.22"
 description = "Python package for providing Mozilla's CA Bundle."
 optional = false
 python-versions = ">=3.7"
-groups = ["main", "dev"]
+groups = ["main"]
 files = [
     {file = "certifi-2026.7.22-py3-none-any.whl", hash = "sha256:62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775"},
     {file = "certifi-2026.7.22.tar.gz", hash = "sha256:741e2c3b351ddf169a738da9f2c048608ff7f2c5cc02f1ebc6b118bb090d5d55"},
@@ -1275,14 +1274,14 @@ packaging = "*"
 name = "distro"
 version = "1.9.0"
 description = "Distro - an OS platform information API"
-optional = false
+optional = true
 python-versions = ">=3.6"
-groups = ["main", "dev"]
+groups = ["main"]
+markers = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"langchain\" or extra == \"openai-agents\" or extra == \"google-adk\") or extra == \"langchain\" or extra == \"openai-agents\" or extra == \"google-adk\""
 files = [
     {file = "distro-1.9.0-py3-none-any.whl", hash = "sha256:7bffd925d65168f85027d8da9af6bddab658135b840670a223589bc0c8ef02b2"},
     {file = "distro-1.9.0.tar.gz", hash = "sha256:2fa77c6fd8940f116ee1d6b94a2f90b13b5ea8d019b98bc8bafdcabcdd9bdbed"},
 ]
-markers = {main = "python_version < \"3.14\" and (extra == \"crewai\" or extra == \"langchain\" or extra == \"openai-agents\" or extra == \"google-adk\") or extra == \"langchain\" or extra == \"openai-agents\" or extra == \"google-adk\""}
 
 [[package]]
 name = "docstring-parser"
@@ -1985,14 +1984,14 @@ tests = ["pytest"]
 name = "httpcore"
 version = "1.0.9"
 description = "A minimal low-level HTTP client."
-optional = false
+optional = true
 python-versions = ">=3.8"
-groups = ["main", "dev"]
+groups = ["main"]
+markers = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"smolagents\" or extra == \"langchain\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\" or extra == \"ag2\") or extra == \"smolagents\" or extra == \"langchain\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\" or extra == \"ag2\""
 files = [
     {file = "httpcore-1.0.9-py3-none-any.whl", hash = "sha256:2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55"},
     {file = "httpcore-1.0.9.tar.gz", hash = "sha256:6e34463af53fd2ab5d807f399a9b45ea31c3dfa2276f15a2c3f00afff6e176e8"},
 ]
-markers = {main = "python_version < \"3.14\" and (extra == \"crewai\" or extra == \"smolagents\" or extra == \"langchain\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\" or extra == \"ag2\") or extra == \"smolagents\" or extra == \"langchain\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\" or extra == \"ag2\""}
 
 [package.dependencies]
 certifi = "*"
@@ -2008,14 +2007,14 @@ trio = ["trio (>=0.22.0,<1.0)"]
 name = "httpcore2"
 version = "2.12.0"
 description = "A minimal low-level HTTP client."
-optional = true
+optional = false
 python-versions = ">=3.10"
-groups = ["main"]
-markers = "extra == \"pydantic-ai\" and sys_platform != \"emscripten\" or (extra == \"pydantic-ai\" or extra == \"openai-agents\") and sys_platform != \"emscripten\" and python_version >= \"3.14\""
+groups = ["main", "dev"]
 files = [
     {file = "httpcore2-2.12.0-py3-none-any.whl", hash = "sha256:7e04258ce01013d7d615e5b910a3b27fac937d7a95038227e79652b4ba3b4ceb"},
     {file = "httpcore2-2.12.0.tar.gz", hash = "sha256:9293522bba0aa7c4c8e9e3f040c16575bd8868e155a77fa30c7a9085a5eae648"},
 ]
+markers = {main = "extra == \"pydantic-ai\" and sys_platform != \"emscripten\" or (extra == \"pydantic-ai\" or extra == \"openai-agents\") and sys_platform != \"emscripten\" and python_version >= \"3.14\"", dev = "sys_platform != \"emscripten\""}
 
 [package.dependencies]
 h11 = ">=0.16"
@@ -2092,14 +2091,14 @@ files = [
 name = "httpx"
 version = "0.28.1"
 description = "The next generation HTTP client."
-optional = false
+optional = true
 python-versions = ">=3.8"
-groups = ["main", "dev"]
+groups = ["main"]
+markers = "python_version <= \"3.13\" and (extra == \"crewai\" or extra == \"smolagents\" or extra == \"langchain\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\" or extra == \"ag2\") or extra == \"smolagents\" or extra == \"langchain\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\" or extra == \"ag2\""
 files = [
     {file = "httpx-0.28.1-py3-none-any.whl", hash = "sha256:d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad"},
     {file = "httpx-0.28.1.tar.gz", hash = "sha256:75e98c5f16b0f35b567856f597f06ff2270a374470a5c2392242528e3e3e42fc"},
 ]
-markers = {main = "python_version < \"3.14\" and (extra == \"crewai\" or extra == \"smolagents\" or extra == \"langchain\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\" or extra == \"ag2\") or extra == \"smolagents\" or extra == \"langchain\" or extra == \"openai-agents\" or extra == \"strands\" or extra == \"google-adk\" or extra == \"ag2\""}
 
 [package.dependencies]
 anyio = "*"
@@ -2131,14 +2130,14 @@ files = [
 name = "httpx2"
 version = "2.12.0"
 description = "The next generation HTTP client."
-optional = true
+optional = false
 python-versions = ">=3.10"
-groups = ["main"]
-markers = "extra == \"pydantic-ai\" or (extra == \"openai-agents\" or extra == \"pydantic-ai\") and python_version >= \"3.14\""
+groups = ["main", "dev"]
 files = [
     {file = "httpx2-2.12.0-py3-none-any.whl", hash = "sha256:cc8b6eecb8661c146b8f89a60e97456ee086e91a784ed31ac450c3a9e613dd36"},
     {file = "httpx2-2.12.0.tar.gz", hash = "sha256:7631fe9887a8a2275f4a2540e053aa670fcc50742864a9ae7c66e609fdcf12cf"},
 ]
+markers = {main = "extra == \"pydantic-ai\" or (extra == \"openai-agents\" or extra == \"pydantic-ai\") and python_version >= \"3.14\""}
 
 [package.dependencies]
 anyio = {version = ">=4.10", markers = "sys_platform != \"emscripten\""}
@@ -2160,14 +2159,14 @@ zstd = ["backports-zstd (>=1.0.0) ; python_version <= \"3.13\""]
 name = "httpx2-jsfetch"
 version = "1.0"
 description = "httpx2 transports for Emscripten/Pyodide, backed by the JavaScript fetch API."
-optional = true
+optional = false
 python-versions = ">=3.12"
-groups = ["main"]
-markers = "sys_platform == \"emscripten\" and python_version >= \"3.12\" and extra == \"pydantic-ai\" or sys_platform == \"emscripten\" and python_version >= \"3.14\" and (extra == \"pydantic-ai\" or extra == \"openai-agents\")"
+groups = ["main", "dev"]
 files = [
     {file = "httpx2_jsfetch-1.0-py3-none-any.whl", hash = "sha256:cb916b707601e69a07721aabc8f3f6659be3a6893bc1ff5c6f9e02241df2da32"},
     {file = "httpx2_jsfetch-1.0.tar.gz", hash = "sha256:70a0e3eabfef7cce5ad9c629f7d01ca05e418f586646f4ddf14782e4c1454c60"},
 ]
+markers = {main = "sys_platform == \"emscripten\" and python_version >= \"3.12\" and extra == \"pydantic-ai\" or sys_platform == \"emscripten\" and python_version >= \"3.14\" and (extra == \"pydantic-ai\" or extra == \"openai-agents\")", dev = "sys_platform == \"emscripten\" and python_version >= \"3.12\""}
 
 [[package]]
 name = "huggingface-hub"
@@ -6878,14 +6877,14 @@ testing = ["datasets", "numpy", "pytest", "pytest-asyncio", "requests", "ruff", 
 name = "tomli"
 version = "2.0.2"
 description = "A lil' TOML parser"
-optional = true
+optional = false
 python-versions = ">=3.8"
 groups = ["main", "dev"]
 files = [
     {file = "tomli-2.0.2-py3-none-any.whl", hash = "sha256:2ebe24485c53d303f690b0ec092806a085f07af5a5aa1464f3931eec36caaa38"},
     {file = "tomli-2.0.2.tar.gz", hash = "sha256:d46d457a85337051c36524bc5349dd91b1877838e2979ac5ced3e710ed8a60ed"},
 ]
-markers = {main = "extra == \"crewai\" and python_version < \"3.14\"", dev = "python_version == \"3.10\""}
+markers = {main = "python_version <= \"3.13\" and extra == \"crewai\"", dev = "python_version == \"3.10\""}
 
 [[package]]
 name = "tomli-w"
@@ -6926,14 +6925,14 @@ telegram = ["envwrap", "requests"]
 name = "truststore"
 version = "0.10.4"
 description = "Verify certificates using native system trust stores"
-optional = true
+optional = false
 python-versions = ">=3.10"
-groups = ["main"]
-markers = "extra == \"pydantic-ai\" and sys_platform != \"emscripten\" or (extra == \"pydantic-ai\" or extra == \"openai-agents\") and sys_platform != \"emscripten\" and python_version >= \"3.14\""
+groups = ["main", "dev"]
 files = [
     {file = "truststore-0.10.4-py3-none-any.whl", hash = "sha256:adaeaecf1cbb5f4de3b1959b42d41f6fab57b2b1666adb59e89cb0b53361d981"},
     {file = "truststore-0.10.4.tar.gz", hash = "sha256:9d91bd436463ad5e4ee4aba766628dd6cd7010cf3e2461756b3303710eebc301"},
 ]
+markers = {main = "extra == \"pydantic-ai\" and sys_platform != \"emscripten\" or (extra == \"pydantic-ai\" or extra == \"openai-agents\") and sys_platform != \"emscripten\" and python_version >= \"3.14\"", dev = "sys_platform != \"emscripten\""}
 
 [[package]]
 name = "typer"

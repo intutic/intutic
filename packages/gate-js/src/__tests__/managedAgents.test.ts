@@ -8,7 +8,7 @@
  *      no network, no real Anthropic client construction (that needs an API
  *      key). Gate evaluation itself is exercised for real (`IntuticGateRefusal`
  *      thrown/not-thrown) rather than stubbed to a canned verdict.
- *   2. Structural type checks against the REAL `@anthropic-ai/sdk@0.117.1`
+ *   2. Structural type checks against the REAL `@anthropic-ai/sdk@0.131.0`
  *      shipped types (a devDependency of this package only, never imported
  *      by managedAgents.ts itself): a real `BetaManagedAgentsAgentToolUseEvent`
  *      / `...AgentMCPToolUseEvent` is assignable to this module's structural
@@ -16,7 +16,9 @@
  *      to the real `BetaManagedAgentsUserToolConfirmationEventParams`, and a
  *      real `Anthropic` client's `beta.sessions.events` satisfies
  *      `ManagedAgentsSessionEventsClientLike`. TypeScript rejects this file
- *      if the real shapes drift.
+ *      if the real shapes drift — note `pnpm typecheck` excludes
+ *      `__tests__/**` (tsconfig.json) and vitest does not typecheck, so this
+ *      only bites under an explicit `tsc` over the test files.
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Anthropic } from '@anthropic-ai/sdk'
@@ -24,8 +26,10 @@ import type {
   BetaManagedAgentsAgentCustomToolUseEvent,
   BetaManagedAgentsAgentMCPToolUseEvent,
   BetaManagedAgentsAgentToolUseEvent,
+  BetaManagedAgentsSessionEventType,
   BetaManagedAgentsUserToolConfirmationEventParams,
 } from '@anthropic-ai/sdk/resources/beta/sessions/events'
+import type { BetaManagedAgentsAutoPolicy } from '@anthropic-ai/sdk/resources/beta/agents/agents'
 import { IntuticGateRefusal } from '../errors.js'
 import { Gate, install } from '../gate.js'
 import {
@@ -111,8 +115,90 @@ function _typeCheckOnly(anthropic: Anthropic): void {
   void eventsClient
   const client: ManagedAgentsClientLike = anthropic
   void client
+
+  // ---- 0.131 additions (TD-429) ----
+  // The new `auto` permission policy exists with this exact shape.
+  const autoPolicy: BetaManagedAgentsAutoPolicy = { type: 'auto' }
+  void autoPolicy
+
+  // The fixtures below are REAL event shapes (auto-produced ask, cross-posted
+  // subagent pause, auto allow/deny), so the runtime tests exercise payloads
+  // the SDK itself can describe.
+  const realAutoAsk: BetaManagedAgentsAgentToolUseEvent = AUTO_ASK_EVENT
+  const realCrossPosted: BetaManagedAgentsAgentMCPToolUseEvent = CROSS_POSTED_SUBAGENT_EVENT
+  const realAutoAllow: BetaManagedAgentsAgentToolUseEvent = AUTO_ALLOW_EVENT
+  const realAutoDeny: BetaManagedAgentsAgentToolUseEvent = AUTO_DENY_EVENT
+  void realAutoAsk
+  void realCrossPosted
+  void realAutoAllow
+  void realAutoDeny
+
+  // poll()'s `types` filter stays inside the SDK's event-type union.
+  const listed: BetaManagedAgentsSessionEventType[] = [] as import('../managedAgents.js').ManagedAgentsListedEventType[]
+  void listed
+
+  // The confirmation params carry no session_thread_id (the SDK's params
+  // type has none; the server routes by tool_use_id).
+  // @ts-expect-error — not a field of the real params type
+  const withThread: BetaManagedAgentsUserToolConfirmationEventParams = { type: 'user.tool_confirmation', tool_use_id: 't', result: 'allow', session_thread_id: 'sthr_1' }
+  void withThread
 }
 void _typeCheckOnly
+
+// ------------------------------------------------------------------------
+// 0.131 fixtures (TD-429), checked against the real SDK types above.
+// ------------------------------------------------------------------------
+
+/** `auto` policy, server reached no judgement -> held for client approval. */
+const AUTO_ASK_EVENT = {
+  id: 'sevt_auto_ask',
+  type: 'agent.tool_use',
+  name: 'bash',
+  input: { command: BLOCKED_COMMAND },
+  processed_at: '2026-10-03T00:00:00Z',
+  evaluated_permission: 'ask',
+  evaluation: { type: 'auto', evaluated_permission: { type: 'ask', reason_code: 'indeterminate' } },
+} as const satisfies BetaManagedAgentsAgentToolUseEvent
+
+/** `auto` policy, judged safe -> ran without pausing. */
+const AUTO_ALLOW_EVENT = {
+  id: 'sevt_auto_allow',
+  type: 'agent.tool_use',
+  name: 'bash',
+  input: { command: BLOCKED_COMMAND },
+  processed_at: '2026-10-03T00:00:00Z',
+  evaluated_permission: 'allow',
+  evaluation: { type: 'auto', evaluated_permission: { type: 'allow' } },
+} as const satisfies BetaManagedAgentsAgentToolUseEvent
+
+/** `auto` policy, judged high-risk -> the server already refused it. */
+const AUTO_DENY_EVENT = {
+  id: 'sevt_auto_deny',
+  type: 'agent.tool_use',
+  name: 'bash',
+  input: { command: ALLOWED_COMMAND },
+  processed_at: '2026-10-03T00:00:00Z',
+  evaluated_permission: 'deny',
+  evaluation: { type: 'auto', evaluated_permission: { type: 'deny', reason_code: 'high_risk' } },
+} as const satisfies BetaManagedAgentsAgentToolUseEvent
+
+/** A subagent's MCP pause, cross-posted onto the primary thread's stream. */
+const CROSS_POSTED_SUBAGENT_EVENT = {
+  id: 'sevt_sub_mcp',
+  type: 'agent.mcp_tool_use',
+  name: 'deploy',
+  mcp_server_name: 'ops-server',
+  input: { command: ALLOWED_COMMAND },
+  processed_at: '2026-10-03T00:00:00Z',
+  evaluated_permission: 'ask',
+  evaluation: { type: 'always_ask' },
+  session_thread_id: 'sthr_subagent_1',
+} as const satisfies BetaManagedAgentsAgentMCPToolUseEvent
+
+/** Mutable copies for the runtime tests (the consts above are readonly). */
+function asEvent(e: object): ManagedAgentsSessionEventLike {
+  return structuredClone(e) as ManagedAgentsSessionEventLike
+}
 
 // ------------------------------------------------------------------------
 // Structural fakes for the plumbing tests.
@@ -283,13 +369,57 @@ describe('confirmationForEvent', () => {
     expect(confirmation?.deny_message).toContain('boom')
   })
 
-  it('echoes session_thread_id back when present', async () => {
+  it('never echoes session_thread_id (server-set; the confirmation is routed by tool_use_id)', async () => {
     const gate = gateFor(ALLOWED_COMMAND)
     const event = toolUseEvent({ input: { command: ALLOWED_COMMAND }, session_thread_id: 'thread_7' })
 
     const confirmation = await confirmationForEvent(event, { gate })
 
-    expect(confirmation?.session_thread_id).toBe('thread_7')
+    expect(confirmation).toEqual({ type: 'user.tool_confirmation', tool_use_id: 'evt_1', result: 'allow' })
+  })
+
+  // ---- 0.131: the `auto` permission policy (TD-429) ----
+
+  it('answers an auto-produced ask exactly like an always_ask pause (gate verdict on the arguments)', async () => {
+    const gate = gateFor(BLOCKED_COMMAND)
+
+    const confirmation = await confirmationForEvent(asEvent(AUTO_ASK_EVENT), { gate })
+
+    expect(gate.calls).toEqual([{ toolName: 'bash', toolInput: { command: BLOCKED_COMMAND } }])
+    expect(confirmation).toEqual({
+      type: 'user.tool_confirmation',
+      tool_use_id: 'sevt_auto_ask',
+      result: 'deny',
+      deny_message: '[Intutic Governance] BLOCKED: deploy must reference a digest-pinned image',
+    })
+  })
+
+  it('sends nothing for auto allow (never paused) or auto deny (server already refused it)', async () => {
+    const gate = gateFor(ALLOWED_COMMAND)
+
+    expect(await confirmationForEvent(asEvent(AUTO_ALLOW_EVENT), { gate })).toBeNull()
+    expect(await confirmationForEvent(asEvent(AUTO_DENY_EVENT), { gate })).toBeNull()
+    expect(gate.calls).toEqual([])
+  })
+
+  it('ignores unknown future evaluation variants: the top-level evaluated_permission alone decides, nothing crashes', async () => {
+    const gate = gateFor(ALLOWED_COMMAND)
+    const futureAsk = toolUseEvent({
+      id: 'f1',
+      evaluated_permission: 'ask',
+      evaluation: { type: 'auto', evaluated_permission: { type: 'escalate', reason_code: 'something_new', extra: [1] } },
+    })
+    const futurePolicy = toolUseEvent({
+      id: 'f2',
+      evaluated_permission: 'allow',
+      evaluation: { type: 'some_future_policy', detail: { nested: true } },
+    })
+    const garbageEvaluation = toolUseEvent({ id: 'f3', evaluated_permission: 'deny', evaluation: 'not-an-object' })
+
+    expect((await confirmationForEvent(futureAsk, { gate }))?.result).toBe('allow')
+    expect(await confirmationForEvent(futurePolicy, { gate })).toBeNull()
+    expect(await confirmationForEvent(garbageEvaluation, { gate })).toBeNull()
+    expect(gate.calls).toHaveLength(1)
   })
 
   it('picks up the process-wide installed gate when none is passed explicitly', async () => {
@@ -308,7 +438,7 @@ describe('IntuticSessionConfirmer', () => {
     const gate = new FakeGate('allow')
     const { client, events } = fakeClient([
       toolUseEvent({ id: 't1', input: { command: ALLOWED_COMMAND } }),
-      { id: 'conf_1', type: 'user.tool_confirmation', tool_use_id: 't2', result: 'allow' },
+      asEvent({ id: 'conf_1', type: 'user.tool_confirmation', tool_use_id: 't2', result: 'allow' }),
       toolUseEvent({ id: 't2', input: { command: ALLOWED_COMMAND } }), // already answered per the confirmation above
       toolUseEvent({ id: 't3', input: { command: ALLOWED_COMMAND }, evaluated_permission: 'allow' }), // never paused
     ])
@@ -384,6 +514,26 @@ describe('IntuticSessionConfirmer', () => {
     }
 
     expect(sent.map((c) => c.tool_use_id)).toEqual(['t1', 't2'])
+  })
+
+  it('answers a cross-posted subagent pause exactly once, even when seen on both list() and the stream (TD-429)', async () => {
+    const gate = new FakeGate('allow')
+    const { client, events } = fakeClient(
+      [asEvent(CROSS_POSTED_SUBAGENT_EVENT)],
+      [asEvent(CROSS_POSTED_SUBAGENT_EVENT), { id: 'end', type: 'session.status_terminated' }],
+    )
+    const confirmer = new IntuticSessionConfirmer(client, 'sess_1', { gate })
+
+    const sent: UserToolConfirmationParams[] = []
+    for await (const c of confirmer.watch()) sent.push(c)
+    // A re-delivered requires_action webhook for the same pause is a no-op too.
+    sent.push(...(await confirmer.handleWebhook({ type: 'session.requires_action', id: 'sess_1' })))
+
+    expect(gate.calls).toEqual([
+      { toolName: 'deploy', toolInput: { command: ALLOWED_COMMAND, mcp_server_name: 'ops-server' } },
+    ])
+    expect(events.sent).toEqual([{ type: 'user.tool_confirmation', tool_use_id: 'sevt_sub_mcp', result: 'allow' }])
+    expect(sent).toEqual(events.sent)
   })
 
   // ── TD-428: reconnect ──────────────────────────────────────────────
@@ -576,7 +726,7 @@ describe('wrapManagedAgentsCustomTool / wrapManagedAgentsCustomTools', () => {
 
   it('wrapping twice does not double-gate', async () => {
     const gate = new FakeGate('allow')
-    const tool = { name: 'x', run: async () => 'ok' }
+    const tool = { name: 'x', run: async (_args: Record<string, unknown>) => 'ok' }
 
     const once = wrapManagedAgentsCustomTool(tool, { gate })
     const twice = wrapManagedAgentsCustomTool(once, { gate })
@@ -588,8 +738,8 @@ describe('wrapManagedAgentsCustomTool / wrapManagedAgentsCustomTools', () => {
   it('wrapManagedAgentsCustomTools wraps a whole collection', async () => {
     const gate = new FakeGate('refuse')
     const tools = [
-      { name: 'a', run: async () => 'a' },
-      { name: 'b', run: async () => 'b' },
+      { name: 'a', run: async (_args: Record<string, unknown>) => 'a' },
+      { name: 'b', run: async (_args: Record<string, unknown>) => 'b' },
     ]
 
     const wrapped = wrapManagedAgentsCustomTools(tools, { gate })
@@ -599,7 +749,7 @@ describe('wrapManagedAgentsCustomTool / wrapManagedAgentsCustomTools', () => {
   })
 
   it('throws (refusing to run unguarded) when no gate is configured', async () => {
-    const tool = { name: 'x', run: async () => 'ok' }
+    const tool = { name: 'x', run: async (_args: Record<string, unknown>) => 'ok' }
     const wrapped = wrapManagedAgentsCustomTool(tool)
 
     await expect(wrapped.run({})).rejects.toThrow('No gate configured')

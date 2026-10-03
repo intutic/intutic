@@ -10,7 +10,7 @@ Managed Agents is architecturally different from every framework in this directo
 
 Every other SDK-gated adapter in this directory (Strands, OpenAI Agents, LangChain, ...) attaches a hook INSIDE your process's tool-call loop: the gate runs, then the tool body runs, in the same call stack. Managed Agents has no such loop on your side — Anthropic runs it. Your backend receives a stream (or webhook notification) of session **events** and must respond to the ones that pause:
 
-- **`agent.tool_use`** (built-in agent-toolset tools — bash, edit, read, write, glob, grep, web_fetch, web_search) and **`agent.mcp_tool_use`** (MCP-server tools) both carry `evaluated_permission: "allow" | "ask" | "deny"`. A call the server evaluated to `"ask"` — e.g. because the tool's `permission_policy` is `always_ask` — **pauses the whole session** until your backend sends a `user.tool_confirmation` event (`result: "allow" | "deny"` + an optional `deny_message`). Anthropic's own docs: "Denied tools do not run." This is a real, verified pre-execution veto — not an audit log.
+- **`agent.tool_use`** (built-in agent-toolset tools — bash, edit, read, write, glob, grep, web_fetch, web_search) and **`agent.mcp_tool_use`** (MCP-server tools) both carry `evaluated_permission: "allow" | "ask" | "deny"`. A call the server evaluated to `"ask"` — e.g. because the tool's `permission_policy` is `always_ask` — **pauses the whole session** until your backend sends a `user.tool_confirmation` event (`result: "allow" | "deny"` + an optional `deny_message`). Anthropic's own docs: "Denied tools do not run." This is a real, verified pre-execution veto — not an audit log. Under the `auto` policy (typed in `@anthropic-ai/sdk` 0.131 and `anthropic` 1.11), the server judges each call itself and records why on the event's `evaluation` field; when it reaches no judgement the top-level value is `"ask"` and the call pauses exactly like an `always_ask` one.
 - **`agent.custom_tool_use`** — a tool YOUR code implements — has no `evaluated_permission` and no pause concept at all: it always executes in whichever client is listening for its name. This is the one surface that looks like every other adapter in this directory (a local function call you can wrap).
 - Self-hosted sessions run built-in agent-toolset tools inside your own `EnvironmentWorker` sandbox — but that sandbox is built on the SAME `agent.tool_use` / confirmation mechanism, so it is covered the same way as a hosted session. What differs is only where the tool BODY executes, not how the pre-execution veto works.
 
@@ -20,10 +20,12 @@ Every other SDK-gated adapter in this directory (Strands, OpenAI Agents, LangCha
 
 | Surface | Pauses? | How Intutic governs it |
 |---|---|---|
-| `agent.tool_use` (built-in tools), hosted session | Only if the tool's `permission_policy` is `always_ask` | `IntuticSessionConfirmer` answers the pause with a `Gate.guard()` verdict |
+| `agent.tool_use` (built-in tools), hosted session | Only if the tool's `permission_policy` is `always_ask`, or `auto` and the server's judgement is `ask` | `IntuticSessionConfirmer` answers the pause with a `Gate.guard()` verdict |
 | `agent.tool_use`, **self-hosted** `EnvironmentWorker` | Same as hosted — identical mechanism | Same — `IntuticSessionConfirmer` does not care where the tool body runs |
 | `agent.mcp_tool_use` (MCP tools) | Only if the MCP toolset's `permission_policy` is `always_ask` (Anthropic's docs say this is the toolset default — verify against your account) | Same as `agent.tool_use` |
 | `agent.custom_tool_use` (your own tools) | Never — no `permission_policy` concept | `wrapManagedAgentsCustomTool`/`wrapManagedAgentsCustomTools` (TS) or `@guard` applied **before** `@beta_tool` (Python) — see below |
+| A tool configured `auto` | Only the calls the server judges `ask` | Those pauses are answered like `always_ask` ones. Calls the server judges `allow` run without reaching Intutic (same ceiling as `always_allow`); calls it judges `deny` (high-risk) never run. Unknown future `evaluation` variants are ignored — the top-level `evaluated_permission` alone decides. |
+| A subagent's pause, cross-posted to the primary thread's stream | Same as the subagent's own tool | Answered once, by `tool_use_id`. The event's `session_thread_id` is informational and is not sent back in the confirmation. |
 | A tool configured `always_allow` | Never | **Not governed by Intutic at all** — the call never reaches your backend as an event to answer. This is an architectural ceiling, not a bug: see [TD-425](https://github.com/intutic/intutic/blob/main/docs/TECH_DEBT.md). Configure the tools you want gated as `always_ask`. |
 | The sandbox tool BODY (self-hosted) | N/A | **Not governed** — once a call is allowed, what the tool implementation does inside your `EnvironmentWorker` is outside this adapter's reach, same posture as every adapter toward a framework's built-in tool bodies. |
 
@@ -35,7 +37,7 @@ npm install @intutic/gate @anthropic-ai/sdk
 
 ### 1. Configure your session's tools to pause
 
-When creating (or updating) the session, set `permission_policy: { type: "always_ask" }` on the tools/toolsets you want Intutic to see. A tool left `always_allow` never reaches Intutic — see the coverage table above.
+When creating (or updating) the session, set `permission_policy: { type: "always_ask" }` on the tools/toolsets you want Intutic to see. A tool left `always_allow` never reaches Intutic. `{ type: "auto" }` is a middle ground: Intutic sees only the calls the server can't judge on its own — see the coverage table above.
 
 ### 2. Wire the confirmer
 

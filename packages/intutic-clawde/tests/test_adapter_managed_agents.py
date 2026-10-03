@@ -9,9 +9,10 @@ Two layers:
     `managed_agents.py` itself), constructed the same way the real SDK
     would hand them to a caller iterating `events.list()`/`.stream()`. This
     checks the adapter's duck-typed field reads (`.type`,
-    `.evaluated_permission`, `.input`, `.mcp_server_name`,
-    `.session_thread_id`) against the actual shipped shapes, not a
-    hand-rolled guess at them.
+    `.evaluated_permission`, `.input`, `.mcp_server_name`) against the
+    actual shipped shapes, not a hand-rolled guess at them. Locked at
+    `anthropic==1.11.0` since TD-429; the `auto`-policy fixtures below are
+    VALIDATED (`model_validate`) against its real models.
   * `IntuticSessionConfirmer` is exercised against a small structural
     `_FakeClient` (`.beta.sessions.events.list/send/stream`) — same
     "structural mock of the SDK" bar `openai.test.ts` sets, since building a
@@ -46,6 +47,12 @@ from anthropic.types.beta.sessions import (  # noqa: E402
     BetaManagedAgentsAgentMCPToolUseEvent,
     BetaManagedAgentsAgentToolUseEvent,
 )
+
+# 1.x-only names (TD-429). Skip just the auto-policy tests on an older pin
+# rather than the whole module.
+_sessions_types = pytest.importorskip("anthropic.types.beta.sessions")
+HAS_AUTO_POLICY = hasattr(_sessions_types, "BetaManagedAgentsAgentToolEvaluationAuto")
+needs_auto = pytest.mark.skipif(not HAS_AUTO_POLICY, reason="anthropic < 1.x has no auto permission policy")
 
 BLOCKED_COMMAND = "kubectl apply -f k8s/x.yaml"
 ALLOWED_COMMAND = "git status"
@@ -205,13 +212,15 @@ class TestConfirmationForEvent:
         assert "gate crashed" in confirmation["deny_message"]
         assert "boom" in confirmation["deny_message"]
 
-    def test_session_thread_id_is_echoed_back_when_present(self, tmp_path, monkeypatch):
+    def test_session_thread_id_is_never_echoed(self, tmp_path, monkeypatch):
+        # Server-set and informational; the confirmation is routed by
+        # tool_use_id and the params type has no such field.
         g = make_gate(tmp_path, monkeypatch, rules=[BLOCK_RULE])
         event = _tool_use_event(command=ALLOWED_COMMAND, session_thread_id="thread_7")
 
         confirmation = confirmation_for_event(event, gate=g)
 
-        assert confirmation["session_thread_id"] == "thread_7"
+        assert confirmation == {"type": "user.tool_confirmation", "tool_use_id": "evt_1", "result": "allow"}
 
     def test_plain_dict_events_work_too(self, tmp_path, monkeypatch):
         """Not every caller goes through the SDK's pydantic models — a
@@ -498,3 +507,107 @@ class TestIntuticSessionConfirmer:
         confirmer = IntuticSessionConfirmer(client, "sess_1", gate=g)
         list(confirmer.watch(idle_timeout_s=30.0))
         assert client.events.stream_kwargs == [{"timeout": 30.0}]
+
+
+# ---------------------------------------------------------------------------
+# TD-429: the 1.x `auto` permission policy and cross-posted subagent pauses.
+# ---------------------------------------------------------------------------
+
+def _validated_tool_use(**fields: Any) -> BetaManagedAgentsAgentToolUseEvent:
+    base: Dict[str, Any] = dict(
+        type="agent.tool_use", name="shell", processed_at="2026-10-03T00:00:00Z",
+    )
+    base.update(fields)
+    return BetaManagedAgentsAgentToolUseEvent.model_validate(base)
+
+
+@needs_auto
+class TestAutoPermissionPolicy:
+    def test_auto_policy_type_exists(self):
+        from anthropic.types.beta import BetaManagedAgentsAutoPolicy
+
+        assert BetaManagedAgentsAutoPolicy.model_validate({"type": "auto"}).type == "auto"
+
+    def test_auto_produced_ask_is_answered_with_a_gate_verdict(self, tmp_path, monkeypatch):
+        g = make_gate(tmp_path, monkeypatch, rules=[BLOCK_RULE])
+        event = _validated_tool_use(
+            id="sevt_auto_ask",
+            input={"command": BLOCKED_COMMAND},
+            evaluated_permission="ask",
+            evaluation={"type": "auto", "evaluated_permission": {"type": "ask", "reason_code": "indeterminate"}},
+        )
+        assert type(event.evaluation).__name__ == "BetaManagedAgentsAgentToolEvaluationAuto"
+
+        confirmation = confirmation_for_event(event, gate=g)
+
+        assert confirmation["tool_use_id"] == "sevt_auto_ask"
+        assert confirmation["result"] == "deny"
+        assert "digest-pinned" in confirmation["deny_message"]
+
+    def test_auto_allow_and_auto_deny_need_no_answer(self, tmp_path, monkeypatch):
+        g = make_gate(tmp_path, monkeypatch, rules=[BLOCK_RULE])
+        allow = _validated_tool_use(
+            id="a", input={"command": BLOCKED_COMMAND}, evaluated_permission="allow",
+            evaluation={"type": "auto", "evaluated_permission": {"type": "allow"}},
+        )
+        deny = _validated_tool_use(
+            id="d", input={"command": ALLOWED_COMMAND}, evaluated_permission="deny",
+            evaluation={"type": "auto", "evaluated_permission": {"type": "deny", "reason_code": "high_risk"}},
+        )
+        seen = []
+        monkeypatch.setattr(g, "guard", lambda *a: seen.append(a))
+
+        assert confirmation_for_event(allow, gate=g) is None
+        assert confirmation_for_event(deny, gate=g) is None
+        assert seen == []
+
+    def test_unknown_future_evaluation_variants_are_ignored_not_crashing(self, tmp_path, monkeypatch):
+        """The SDK marks both unions open ("clients must tolerate unknown
+        variants"). The top-level evaluated_permission alone decides."""
+        g = make_gate(tmp_path, monkeypatch, rules=[BLOCK_RULE])
+        future_ask = _tool_use_event(
+            command=ALLOWED_COMMAND, id="f1", permission="ask",
+            evaluation={"type": "auto", "evaluated_permission": {"type": "escalate", "reason_code": "new", "x": [1]}},
+        )
+        future_policy = _tool_use_event(
+            command=BLOCKED_COMMAND, id="f2", permission="allow",
+            evaluation={"type": "some_future_policy", "detail": {"nested": True}},
+        )
+        garbage = {
+            "id": "f3", "type": "agent.tool_use", "name": "shell", "input": {"command": ALLOWED_COMMAND},
+            "evaluated_permission": "deny", "evaluation": "not-an-object",
+        }
+        # A 1.11 client parsing a newer server's payload: the SDK's own lenient
+        # construction must not reject the unknown variant either.
+        parsed = BetaManagedAgentsAgentToolUseEvent.construct(
+            id="f4", type="agent.tool_use", name="shell", input={"command": ALLOWED_COMMAND},
+            processed_at="2026-10-03T00:00:00Z", evaluated_permission="ask",
+            evaluation={"type": "auto", "evaluated_permission": {"type": "escalate"}},
+        )
+
+        assert confirmation_for_event(future_ask, gate=g)["result"] == "allow"
+        assert confirmation_for_event(future_policy, gate=g) is None
+        assert confirmation_for_event(garbage, gate=g) is None
+        assert confirmation_for_event(parsed, gate=g)["result"] == "allow"
+
+
+class TestCrossPostedSubagentPause:
+    def _cross_posted(self) -> BetaManagedAgentsAgentMCPToolUseEvent:
+        return BetaManagedAgentsAgentMCPToolUseEvent.model_validate(dict(
+            id="sevt_sub_mcp", type="agent.mcp_tool_use", name="deploy", mcp_server_name="ops-server",
+            input={"command": ALLOWED_COMMAND}, processed_at="2026-10-03T00:00:00Z",
+            evaluated_permission="ask", session_thread_id="sthr_subagent_1",
+        ))
+
+    def test_answered_exactly_once_across_list_stream_and_webhook(self, tmp_path, monkeypatch):
+        g = make_gate(tmp_path, monkeypatch, rules=[BLOCK_RULE])
+        terminal = {"id": "end", "type": "session.status_terminated"}
+        client = _FakeClient(listed=[self._cross_posted()], streamed=[self._cross_posted(), terminal])
+        confirmer = IntuticSessionConfirmer(client, "sess_1", gate=g)
+
+        sent = list(confirmer.watch())
+        sent += confirmer.handle_webhook({"type": "session.requires_action", "id": "sess_1"})
+
+        events = client.beta.sessions.events
+        assert events.sent == [{"type": "user.tool_confirmation", "tool_use_id": "sevt_sub_mcp", "result": "allow"}]
+        assert sent == events.sent
