@@ -60,8 +60,7 @@ Each provider row shows a **Live** or **Not yet routable** badge. **Live** means
 actually forwards requests to that provider once a key is set. **Not yet routable** means the
 key is stored and ready, but the gateway does not yet route to it — routing support for a new
 provider is separate engineering work per provider, and the dashboard says so rather than
-implying a saved key is already in effect. **TypeSafe (Jev judge)** is marked **Judge only**:
-its key is used by the typed judge (below), never for routing.
+implying a saved key is already in effect.
 
 If your workspace's gateway has BYO-key enforcement turned on, requests fail with `402
 byok_required` until a key is provisioned here for the provider being called. A gateway can
@@ -79,90 +78,18 @@ A provider needing more than one field (e.g. Azure OpenAI: endpoint, deployment,
 repeated `--field key=value` flag, one per field — the wizard's dynamic form and the CLI submit
 the same shape.
 
-New: **Guided Setup**, next to Provider Keys, walks through provisioning a provider, verifying
-it against the provider's own API, and (optionally) picking a judge model in one flow. See
+New: **Guided Setup**, next to Provider Keys, walks through provisioning a provider and verifying
+it against the provider's own API in one flow. See
 [the cohort wizard](/guide/cohort-wizard) for the full step-by-step (it's also available from
 the CLI as `intutic setup`, for anyone who'd rather not click through it).
 
-### LLM Judge
+### Judges
 
-By default, this workspace's LLM-as-judge checks run on Intutic's platform trusted monitor —
-a **cost-optimized open-weight judge model**, included with the platform, so no per-token
-frontier charges land on your bill. Choosing your own judge here — including a frontier model
-(Anthropic, OpenAI) — is the explicit upgrade: it routes via your own provider key (BYO) and
-bills to you. The picker lists models from Intutic's [model catalog](/reference/model-catalog),
-filtered by default to providers you've already provisioned a credential for under Provider
-Keys — a model shown disabled needs either a credential or "Show all providers" to reveal why. A
-**Custom model name** field is always available underneath: an on-prem LiteLLM deployment can
-serve a model under any alias, and this workspace setting only validates the name's character
-shape, never catalog membership, so a custom alias is always accepted, not just tolerated.
-Saving a name outside the catalog shows a **custom model** badge rather than an error.
-
-Trade-offs, stated plainly rather than implied:
-- Choosing your own judge **replaces** Intutic's independent trusted monitor for this workspace.
-  Every verdict is stamped `[workspace-judge]`; a judge equal to the model that produced the work
-  is additionally stamped `[self-graded]`.
-- Judged content still transits Intutic's gateway to your provider — this is a billing/model-
-  choice feature, not a data-locality one. For content to stay entirely on your infrastructure,
-  see [the on-prem judge](/external/on-prem-judge).
-- Chunk-level judging bills per paragraph, to your provider key.
-
-Use **Test** before saving — it runs one real, tiny completion through the exact path a judge
-call would take (your provisioned credential, the platform gateway), so a typo'd model name or
-a missing key fails here rather than during a live judge call.
-
-### Typed judge backend
-
-The finalize judge first asks typed yes/no questions about each response, and answers with a
-probability. **Typed judge** chooses who answers them:
-
-- **Platform (self-hosted, default)**: Intutic's own typed judge. Content stays on Intutic's
-  infrastructure.
-- **Jev by TypeSafe (your own key)**: TypeSafe's Jev, called with your workspace's TypeSafe key.
-  Add the key first under Provider Keys (**TypeSafe (Jev judge)**); until then the option is
-  disabled, and the API refuses it with `409`. There is no Intutic-held Jev key.
-- **GLiDE by Fastino (your own key)**: Fastino's GLiDE, called with your workspace's Fastino key.
-  Add the key first under Provider Keys (**Fastino (GLiDE judge)**); until then the option is
-  disabled, and the API refuses it with `409`. Fastino's data terms are stricter than TypeSafe's,
-  so you must also tick an acknowledgment before saving (read below). There is no Intutic-held
-  GLiDE key.
-
-What choosing Jev means:
-- Judged content (your SOP text and your agents' responses) is sent to TypeSafe, hosted in the
-  United States, under your workspace's own agreement with TypeSafe. TypeSafe says it does not
-  train on inputs. It keeps data according to its
-  [privacy policy](https://typesafe.ai/legal/privacy-policy), unless you have a zero-data-retention
-  agreement with TypeSafe. Jev usage is billed to your TypeSafe account.
-- **Jev does not decide yet.** Jev's scores need their own calibrated band, and the operator has
-  not configured one. Until then Jev runs alongside the platform judge: its answers are recorded
-  to fit that band, and the platform judge still decides every verdict. Once a band is
-  configured, Jev's answers decide the confident cases, and verdicts record that Jev made the call.
-- If Jev fails or your key is removed, the platform judge decides.
-- Only finalize verdicts use Jev. Mid-stream chunk checks and SOP attribution stay on the platform.
-- **Self-hosted gateways:** not available. A gateway's local judge never calls Jev.
-
-What choosing GLiDE means:
-- Judged content (your SOP text and your agents' responses) is sent to Fastino, hosted on AWS in
-  the United States.
-- **Fastino keeps inputs and outputs indefinitely, and may train its models on them** unless you
-  have an Enterprise opt-out with Fastino.
-- **Fastino offers no data processing agreement.** Don't choose GLiDE if your agents' output may
-  contain personal data covered by the GDPR or similar rules.
-- Fastino lists its subprocessors on its
-  [Trust & Safety page](https://docs.fastino.ai/trust-safety.md).
-- **GLiDE does not decide.** Until the operator configures a GLiDE band, GLiDE runs alongside the
-  platform judge: its answers are recorded, and the platform judge decides every verdict. GLiDE's
-  probabilities have not been measured on Intutic's labelled sets yet, so no band is shipped.
-- GLiDE usage is billed to your Fastino account. A call that takes longer than 20 seconds is
-  abandoned and the platform judge decides; so does any GLiDE error, or a removed key.
-- Only finalize verdicts against workspace SOPs use GLiDE. Mid-stream chunk checks, personal SOPs
-  and SOP attribution stay on the platform.
-- **Self-hosted gateways:** not available. A gateway's local judge never calls GLiDE.
-
-The setting is `typedJudgeBackend` (`"platform"`, `"jev"` or `"glide"`) on
-`PUT /api/v1/workspace/settings`. Choosing `"glide"` needs
-`"typedJudgeBackendAck": { "backend": "glide" }` in the same request, or the API answers `400`.
-The workspace records which member acknowledged the terms, and when.
+Judges run only on self-hosted open-weight models. On Intutic SaaS that is Intutic's own
+open-weight judge, included with the platform; on a
+[self-hosted gateway](/external/self-hosted-gateway) it is the model your own LiteLLM serves
+(see [the on-prem judge](/external/on-prem-judge)). No workspace can pick a hosted judge model,
+and `PUT /api/v1/workspace/settings` rejects `managedJudgeModel` with `400`.
 
 ### On-Behalf-Of (OBO) Tokens
 

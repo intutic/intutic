@@ -1189,7 +1189,6 @@ _Generated from `services/control-plane/src/routes/*.ts` by `generate-api-catalo
 | GET | `/api/v1/workspace/dashboard` | Authenticated | Aggregated dashboard summary |
 | GET | `/api/v1/workspace/decisions-digest` | Authenticated |  |
 | GET | `/api/v1/workspace/egress-policy` | Authenticated |  |
-| POST | `/api/v1/workspace/judge-model/test` | OWNER/ADMIN |  |
 | GET | `/api/v1/workspace/leaderboard` | Authenticated |  |
 | GET | `/api/v1/workspace/onboarding-status` | Authenticated |  |
 | POST | `/api/v1/workspace/onboarding/complete` | Authenticated |  |
