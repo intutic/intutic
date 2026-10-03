@@ -129,7 +129,8 @@ Intutic helps your organization meet regulatory requirements for AI governance:
   self-service endpoint, within the one-month window Article 12(3) allows.
   Identity and credential records are purged; execution traces are retained
   under their 3-year compliance obligation but de-identified, so they can no
-  longer be attributed to the subject. Free-text and structured content is
+  longer be attributed to the subject. Traces are deleted once they are 3 years
+  old. Free-text and structured content is
   scrubbed on **exact identifier match** (name, email, account identifiers);
   indirect references — "the engineer who approved this" — are handled on
   specific request.
