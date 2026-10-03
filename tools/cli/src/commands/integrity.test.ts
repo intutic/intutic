@@ -589,6 +589,11 @@ describe('failsIntegrity', () => {
     expect(failsIntegrity({ kind: 'recompute', verdict: 'match' })).toBe(false)
   })
 
+  it('does not fail on traces the 3-year retention deleted', () => {
+    expect(failsIntegrity({ kind: 'recompute', verdict: 'missing_traces', retentionExpired: true })).toBe(false)
+    expect(failsIntegrity({ kind: 'recompute', verdict: 'missing_traces', retentionExpired: false })).toBe(true)
+  })
+
   it('fails on a rejected signature and on nothing else about signatures', () => {
     expect(failsIntegrity({ kind: 'signature', state: 'invalid' })).toBe(true)
     // The distinction the exit code exists to preserve: a key we no longer

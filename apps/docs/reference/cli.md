@@ -364,6 +364,7 @@ deliberate about which findings are failures:
 | Re-derivation `match` | `0` | The stored root is the root of the traces on disk. |
 | Re-derivation mismatch | `1` | A covered trace changed after sealing. |
 | `missing_traces` | `1` | A covered trace is gone. The leaf survives it, so the root still names it. |
+| `missing_traces`, past retention | `0` | The root is older than 3 years and the 3-year trace retention deleted its traces. Reported, not failed. |
 | Signature `valid` | `0` | Verified against the key the root names. |
 | Signature `invalid` | `1` | A key we hold **rejected** it. |
 | Signature `unverifiable` | `0` | The root names a key the JWKS does not publish — a key-retention gap, not evidence of forgery. |
