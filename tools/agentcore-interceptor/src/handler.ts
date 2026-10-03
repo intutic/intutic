@@ -56,7 +56,7 @@ import type {
 
 // ─── Configuration (env vars — see apps/docs/integrations/agentcore.md) ───
 
-interface InterceptorConfig {
+export interface InterceptorConfig {
   /** e.g. https://your-intutic-control-plane.example.com */
   controlPlaneUrl: string
   /** A workspace virtual key (`vk_...`), sent as `Authorization: Bearer`. */
@@ -69,7 +69,13 @@ interface InterceptorConfig {
   gatewayId?: string
 }
 
-function readConfig(): InterceptorConfig {
+/**
+ * Reads the Lambda's configuration from its environment. Exported for an
+ * operator composing their own interceptor (see
+ * {@link composeRequestInterceptor}); throws when a required variable is
+ * missing, so a misconfigured Lambda fails loudly on its first invocation.
+ */
+export function readConfig(): InterceptorConfig {
   const controlPlaneUrl = process.env.INTUTIC_CONTROL_PLANE_URL
   const apiKey = process.env.INTUTIC_API_KEY
   if (!controlPlaneUrl) throw new Error('INTUTIC_CONTROL_PLANE_URL is not configured')
@@ -84,7 +90,7 @@ function readConfig(): InterceptorConfig {
   }
 }
 
-interface GatewayCheckResponse {
+export interface GatewayCheckResponse {
   allowed: boolean
   reason?: string
 }
@@ -97,7 +103,7 @@ interface GatewayCheckResponse {
  * genuine failure to get an answer at all (network error, timeout,
  * non-2xx, unparseable body), which the caller maps to `config.failOpen`.
  */
-async function checkToolCall(
+export async function checkToolCall(
   config: InterceptorConfig,
   args: { toolName: string; toolInput: unknown; sessionId?: string },
 ): Promise<GatewayCheckResponse> {
@@ -208,6 +214,73 @@ function handleResponseInterceptor(event: McpResponseInterceptorEvent): McpInter
         body: gatewayResponse.body,
       },
     },
+  }
+}
+
+/**
+ * Your own REQUEST-interceptor logic, for {@link composeRequestInterceptor}.
+ * Return `transformedGatewayRequest` to let the call continue (optionally
+ * with a rewritten body), or `transformedGatewayResponse` to answer or reject
+ * it yourself.
+ */
+export type RequestInterceptorLogic = (
+  event: McpRequestInterceptorEvent,
+) => McpInterceptorOutput | Promise<McpInterceptorOutput>
+
+/**
+ * Composes an operator's own REQUEST-interceptor logic with Intutic's check
+ * into ONE Lambda handler. A gateway takes at most one REQUEST interceptor
+ * (see apps/docs/integrations/agentcore.md), so two cannot be attached side
+ * by side.
+ *
+ * Order and outcomes:
+ *
+ * 1. `ownLogic` runs first. If it short-circuits
+ *    (`transformedGatewayResponse`), that answer is returned as-is and
+ *    Intutic is never called.
+ * 2. Otherwise Intutic checks the body `ownLogic` forwards, which may be a
+ *    rewrite of the original, because that is what reaches the target. Only
+ *    `tools/call` is checked, the same as {@link handler}.
+ * 3. Allowed: `ownLogic`'s output is returned unchanged. Denied: the Intutic
+ *    denial is returned instead.
+ * 4. A control-plane failure follows `INTUTIC_FAIL_OPEN` (closed by default),
+ *    exactly as {@link handler} does. If `ownLogic` THROWS, the call is denied
+ *    regardless of that flag: the flag is about Intutic's availability, and
+ *    letting an unchecked call through because the operator's own code
+ *    crashed would be failing open on someone else's behalf.
+ *
+ * RESPONSE events pass through unchanged, as in {@link handler}.
+ */
+export function composeRequestInterceptor(
+  ownLogic: RequestInterceptorLogic,
+): (event: McpInterceptorEvent) => Promise<McpInterceptorOutput> {
+  return async (event) => {
+    const config = readConfig()
+
+    if ('gatewayResponse' in event.mcp && event.mcp.gatewayResponse != null) {
+      return handleResponseInterceptor(event as McpResponseInterceptorEvent)
+    }
+    const requestEvent = event as McpRequestInterceptorEvent
+
+    let own: McpInterceptorOutput
+    try {
+      own = await ownLogic(requestEvent)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      return denyResponse(
+        requestEvent.mcp.gatewayRequest.body.id,
+        `custom interceptor logic failed (${message}) — failing closed`,
+      )
+    }
+    if (own.mcp.transformedGatewayResponse) return own
+
+    const forwarded = (own.mcp.transformedGatewayRequest?.body ??
+      requestEvent.mcp.gatewayRequest.body) as McpRequestInterceptorEvent['mcp']['gatewayRequest']['body']
+    const verdict = await handleRequestInterceptor(
+      { ...requestEvent, mcp: { ...requestEvent.mcp, gatewayRequest: { ...requestEvent.mcp.gatewayRequest, body: forwarded } } },
+      config,
+    )
+    return verdict.mcp.transformedGatewayResponse ? verdict : own
   }
 }
 
