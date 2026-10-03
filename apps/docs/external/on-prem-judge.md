@@ -20,17 +20,19 @@ turning it on always means applying a file you generated and reviewed yourself.
 
 It walks you through:
 
-1. **Pick a judge model** — from the [model catalog](/reference/model-catalog), unfiltered (a
-   local LiteLLM deployment can serve any model any provider offers, not just the ones Intutic's
-   managed gateway can route to), or type a custom reference — including a bare local alias like
-   `my-org/local-qwen-judge` that isn't in any catalog at all.
+1. **Pick a judge model** — a self-hosted model from the [model catalog](/reference/model-catalog)
+   (Ollama models; Ollama Cloud's `-cloud` models are hosted and excluded), or type a custom
+   reference — including a bare local alias like `my-org/local-qwen-judge` that isn't in any
+   catalog at all. Judges run only on self-hosted models: a custom reference that names a hosted
+   provider (`anthropic/...`, `openai/...`, `openrouter/...`, an Ollama Cloud model…) is refused,
+   even with your own key, and nothing is written.
 2. **`litellm_config.yaml`** is written to the path you gave — the same `model_list` shape
    `infra/compose/litellm_config.yaml`'s hand-written example uses. Intutic's platform default
    is a cost-optimized open-weight judge behind the stable alias `intutic-openweight-judge`;
    reusing that alias on-prem keeps every env and Helm snippet deployment-shape-independent —
-   only the `litellm_params` backing changes per deployment. To keep judging entirely in-org,
-   edit the generated file (following `infra/compose/litellm_config.yaml`'s BYO-model section)
-   so the alias points at your own Ollama/vLLM server:
+   only the `litellm_params` backing changes per deployment. Whatever name you use, it must be
+   backed by your own Ollama/vLLM server (following `infra/compose/litellm_config.yaml`'s
+   BYO-model section):
 
    ```yaml
    model_list:
@@ -44,9 +46,8 @@ It walks you through:
      master_key: os.environ/LITELLM_MASTER_KEY
    ```
 
-   A frontier judge is the explicit upgrade, never the default — back the alias (or a model
-   name of your own) with e.g. `model: anthropic/claude-haiku-4-5-20251001` and
-   `api_key: os.environ/ANTHROPIC_API_KEY` instead, billed to your own provider key.
+   Don't back the alias with a hosted API (Anthropic, OpenAI, OpenRouter, Ollama Cloud…):
+   judges run only on self-hosted models.
 
 3. **An env block** is printed for Docker Compose / bare-metal deployments. Note that
    `LITELLM_LOCAL_JUDGE_MODEL` deliberately has **no default** — an unset value fails loud at

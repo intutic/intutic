@@ -41,7 +41,7 @@ program
 // ── Cohort setup wizard (LLD #70) ────────────────────────────────────────
 program
   .command('setup')
-  .description('Guided setup: detect harnesses, configure a provider credential, verify it, and (optionally) a judge model')
+  .description('Guided setup: detect harnesses, configure a provider credential, and verify it')
   .option('--dev', 'Use local control plane (http://localhost:3001)')
   .action(async (opts) => {
     const { runSetup } = await import('./commands/setup.js')
@@ -54,7 +54,7 @@ const judgeCmd = program
 
 judgeCmd
   .command('configure')
-  .description('Generate local artifacts (litellm_config.yaml, env, Helm values) for an on-prem judge — never a remote API call')
+  .description('Generate local artifacts (litellm_config.yaml, env, Helm values) for an on-prem judge on a self-hosted model — never a remote API call')
   .option('--out <path>', 'Where to write litellm_config.yaml', './litellm_config.yaml')
   .action(async (opts) => {
     const { runJudgeConfigure } = await import('./commands/judge.js')
