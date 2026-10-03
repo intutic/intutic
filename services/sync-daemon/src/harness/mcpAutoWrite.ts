@@ -15,11 +15,14 @@
  * - Muse Code:        ~/.config/muse/settings.json (`mcp_servers` section)
  * - Grok Build:       ~/.grok/config.toml + <workspaceRoot>/.grok/config.toml
  *                      ([mcp_servers.*] tables)
+ * - OpenCode:         ~/.config/opencode/opencode.json + <workspaceRoot>/opencode.json
+ *                      (`mcp` block — TD-487; see `injectOpenCode`)
  *
- * That is 12 config paths across 10 `HarnessType` values (Cursor and Grok
- * Build each own two paths — global/project for Cursor, user/project for
- * Grok Build). `discoverMcpServers` below reads all twelve read-only, for
- * reporting; the injectors above are the only thing that writes.
+ * That is 14 config paths across 11 `HarnessType` values (Cursor, Grok
+ * Build and OpenCode each own two paths — global/project for Cursor and
+ * OpenCode, user/project for Grok Build). `discoverMcpServers` below reads
+ * all fourteen read-only, for reporting; the injectors above are the only
+ * thing that writes.
  *
  * # Grok Build's compat-path overlap — dedup, not a bug
  *
@@ -233,6 +236,18 @@ function grokUserConfigPath(): string {
 
 function grokProjectConfigPath(workspaceRoot: string): string {
   return node_path.join(workspaceRoot, '.grok', 'config.toml')
+}
+
+/** OpenCode's global config: `$XDG_CONFIG_HOME/opencode/opencode.json`, which
+ *  is `~/.config/opencode/opencode.json` unless XDG_CONFIG_HOME is set (OpenCode
+ *  resolves it through xdg-basedir). Only the `.json` spelling — see `injectOpenCode`. */
+function openCodeGlobalConfigPath(): string {
+  const base = process.env['XDG_CONFIG_HOME'] || node_path.join(node_os.homedir(), '.config')
+  return node_path.join(base, 'opencode', 'opencode.json')
+}
+
+function openCodeProjectConfigPath(workspaceRoot: string): string {
+  return node_path.join(workspaceRoot, 'opencode.json')
 }
 
 // ─── Proxy Wrapping ───────────────────────────────────────────────────────────
@@ -896,6 +911,163 @@ async function injectGrok(workspaceId: string, workspaceRoot: string): Promise<v
   await injectGrokConfig(grokUserConfigPath(), workspaceId, workspaceRoot)
 }
 
+// ─── Target: OpenCode ─────────────────────────────────────────────────────────
+
+/**
+ * One server in OpenCode's `mcp` block (`opencode.json`, schema
+ * `McpLocalConfig` / `McpRemoteConfig` in OpenCode's `config/mcp.ts`):
+ *   - local:  `{ type: "local", command: [cmd, ...args], environment?, cwd?, enabled?, timeout? }`
+ *   - remote: `{ type: "remote", url, headers?, oauth?, enabled?, timeout? }`
+ * `command` is ONE array (program and arguments together), and the env map is
+ * `environment`, not `env` — the two differences from every other JSON harness.
+ */
+interface OpenCodeMcpEntry {
+  type?: unknown
+  command?: unknown
+  environment?: Record<string, string>
+  url?: unknown
+  headers?: Record<string, string>
+  oauth?: unknown
+  [key: string]: unknown
+}
+
+/** The proxy binary path `resolveProxyBin` returns, in either of its two forms. */
+const PROXY_BIN_PATTERN = /(?:^|[\\/])(?:@intutic[\\/]mcp-governance-proxy|packages[\\/]mcp-proxy)[\\/]dist[\\/]index\.js$/
+
+/**
+ * Whether an OpenCode entry is already fronted by the governance proxy, read
+ * from the command SHAPE — `["node", <proxy bin>, "--workspace-id", …]` —
+ * because an OpenCode entry cannot carry the `__intutic_wrapped` marker every
+ * other harness uses: OpenCode's config schema has no such key, and a key the
+ * schema does not declare is at best dropped and at worst refused.
+ */
+function isOpenCodeWrapped(entry: OpenCodeMcpEntry): boolean {
+  const c = entry.command
+  return (
+    Array.isArray(c) &&
+    c[0] === 'node' &&
+    typeof c[1] === 'string' &&
+    PROXY_BIN_PATTERN.test(c[1]) &&
+    c.includes('--workspace-id')
+  )
+}
+
+/**
+ * Wrap one OpenCode server. Translates the entry into the `command`/`args`/
+ * `env` (or `url`/`headers`) shape `wrapWithProxy` takes, so the proxy argv —
+ * `--workspace-id`, `--server-name`, then `--` and the real command, or
+ * `--remote-url`/`--remote-transport` for a remote server — is built in one
+ * place for every harness, then translates the result back into a `local`
+ * entry. Keys OpenCode defines for a local server (`cwd`, `enabled`,
+ * `timeout`, and anything unrecognised) are carried over unchanged.
+ *
+ * Left alone: an already-wrapped entry, an entry of neither type, a local
+ * entry with no command, and a remote entry with an `oauth` object. The
+ * proxy's remote bridge forwards static headers only, so wrapping a server
+ * that relies on OpenCode's own OAuth flow would silently stop it from
+ * authenticating; it stays ungoverned by the MCP proxy instead (the plugin
+ * gate still sees its calls).
+ */
+function wrapOpenCodeEntry(
+  entry: OpenCodeMcpEntry,
+  workspaceId: string,
+  workspaceRoot: string,
+  serverName: string,
+): OpenCodeMcpEntry {
+  if (isOpenCodeWrapped(entry)) return entry
+  const { type, command, environment, url, headers, oauth, ...rest } = entry
+
+  let wrapped: McpServerEntry
+  if (type === 'local' && Array.isArray(command) && command.length > 0 && command.every((a) => typeof a === 'string')) {
+    const [cmd, ...args] = command as string[]
+    wrapped = wrapWithProxy({ command: cmd, args, env: environment }, workspaceId, workspaceRoot, serverName)
+  } else if (type === 'remote' && typeof url === 'string' && (oauth === undefined || oauth === false)) {
+    // OpenCode tries streamable HTTP first, then SSE; the bridge's `http` is
+    // the streamable transport. `type` is OpenCode's discriminator, not a
+    // transport hint, so it is not passed through.
+    wrapped = wrapWithProxy({ url, headers }, workspaceId, workspaceRoot, serverName)
+  } else {
+    return entry
+  }
+
+  // `rest` holds keys valid on a local entry (cwd/enabled/timeout/…); a
+  // remote entry's url/headers/oauth are now carried by the argv and env.
+  return {
+    type: 'local',
+    command: [wrapped.command!, ...(wrapped.args ?? [])],
+    environment: wrapped.env,
+    ...rest,
+  }
+}
+
+/**
+ * Merge the governance proxy into ONE OpenCode config file's `mcp` block.
+ *
+ * Narrow by design, like Muse's `settings.json`: `opencode.json` is the
+ * user's file (providers, permissions, agents, themes), so only `mcp` is
+ * rewritten and every other key is written back as it was parsed, in its
+ * original order, with the file's own indentation. The file is never created
+ * — a missing `opencode.json` means this scope has no OpenCode config to
+ * govern. OpenCode reads `opencode.json` as JSONC; a file that carries
+ * comments or trailing commas does not parse as JSON and is skipped
+ * (`opencode_config_unparseable`), never rewritten, since a rewrite would
+ * strip the comments. `opencode.jsonc` is not touched for the same reason.
+ * Write-if-changed and atomic, like every target here.
+ */
+async function injectOpenCodeConfig(configPath: string, workspaceId: string, workspaceRoot: string): Promise<void> {
+  let raw: string
+  try {
+    raw = await node_fs.readFile(configPath, 'utf-8')
+  } catch {
+    return
+  }
+
+  let doc: unknown
+  try {
+    doc = JSON.parse(raw)
+  } catch (err) {
+    log.warn(
+      { action: 'opencode_config_unparseable', path: configPath, err: (err as Error).message },
+      'opencode.json is not plain JSON (comments?) — MCP servers in it are not proxy-wrapped',
+    )
+    return
+  }
+  if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return
+  const config = doc as Record<string, unknown>
+
+  const existing =
+    config['mcp'] && typeof config['mcp'] === 'object' && !Array.isArray(config['mcp'])
+      ? (config['mcp'] as Record<string, OpenCodeMcpEntry>)
+      : {}
+
+  const intutic = buildIntuticMcpEntry(workspaceRoot)
+  const servers: Record<string, OpenCodeMcpEntry> = {
+    intutic: { type: 'local', command: [intutic.command!, ...(intutic.args ?? [])], environment: intutic.env },
+    ...existing,
+  }
+  const next: Record<string, OpenCodeMcpEntry> = {}
+  for (const [name, entry] of Object.entries(servers)) {
+    next[name] =
+      name === 'intutic' || !entry || typeof entry !== 'object'
+        ? entry
+        : wrapOpenCodeEntry(entry, workspaceId, workspaceRoot, name)
+  }
+
+  if (isDeepStrictEqual(next, config['mcp'])) return
+  config['mcp'] = next
+
+  const indent = raw.match(/^([ \t]+)\S/m)?.[1] ?? 2
+  const tmp = configPath + '.intutic-tmp'
+  await node_fs.writeFile(tmp, JSON.stringify(config, null, indent) + '\n', 'utf-8')
+  await node_fs.rename(tmp, configPath)
+  log.info({ action: 'opencode_mcp_injected', path: configPath }, 'OpenCode opencode.json mcp block updated')
+}
+
+async function injectOpenCode(workspaceId: string, workspaceRoot: string): Promise<void> {
+  await injectOpenCodeConfig(openCodeProjectConfigPath(workspaceRoot), workspaceId, workspaceRoot)
+  await injectOpenCodeConfig(openCodeGlobalConfigPath(), workspaceId, workspaceRoot)
+}
+
 // ─── Discovery (read-only — writes nothing) ───────────────────────────────────
 
 /** Classify a raw server entry's transport + wrapped status, tolerant of any shape. */
@@ -1094,9 +1266,43 @@ async function discoverGrok(workspaceRoot: string): Promise<DiscoveredMcpServer[
   return [...project, ...user]
 }
 
+/** Classify an OpenCode `mcp` entry. A wrapped entry is a `local` one whose
+ *  argv names the proxy; its true transport is read back from that argv
+ *  (`--remote-url` / `--remote-transport`), since OpenCode entries cannot
+ *  carry `__intutic_original`. */
+function classifyOpenCodeEntry(entry: unknown): { transport: DiscoveredMcpServer['transport']; wrapped: boolean } {
+  if (!entry || typeof entry !== 'object') return { transport: 'unknown', wrapped: false }
+  const e = entry as OpenCodeMcpEntry
+  const wrapped = isOpenCodeWrapped(e)
+  if (wrapped) {
+    const argv = e.command as string[]
+    if (!argv.includes('--remote-url')) return { transport: 'stdio', wrapped }
+    const t = argv[argv.indexOf('--remote-transport') + 1]
+    return { transport: t === 'sse' ? 'sse' : 'http', wrapped }
+  }
+  if (e.type === 'local' && Array.isArray(e.command)) return { transport: 'stdio', wrapped }
+  if (e.type === 'remote' && typeof e.url === 'string') return { transport: 'http', wrapped }
+  return { transport: 'unknown', wrapped }
+}
+
+async function discoverOpenCodeConfig(configPath: string): Promise<DiscoveredMcpServer[]> {
+  if (!existsSync(configPath)) return []
+  const current = await readJsonFile<{ mcp?: Record<string, unknown> }>(configPath, {})
+  const mcp = current.mcp && typeof current.mcp === 'object' ? current.mcp : {}
+  return Object.entries(mcp).map(([name, entry]) => ({ server: name, harness: 'opencode', ...classifyOpenCodeEntry(entry) }))
+}
+
+async function discoverOpenCode(workspaceRoot: string): Promise<DiscoveredMcpServer[]> {
+  const [project, global] = await Promise.all([
+    discoverOpenCodeConfig(openCodeProjectConfigPath(workspaceRoot)),
+    discoverOpenCodeConfig(openCodeGlobalConfigPath()),
+  ])
+  return [...project, ...global]
+}
+
 /**
  * Discover every MCP server declared in any harness config this daemon knows
- * how to parse — the same 12 config paths / 10 harnesses `injectMcpServer`
+ * how to parse — the same 14 config paths / 11 harnesses `injectMcpServer`
  * wraps — without writing anything. Used for reporting (agentReporter's
  * `mcp_tools` facet) so visibility does not silently lag behind whatever
  * `injectMcpServer` was last run against.
@@ -1126,6 +1332,7 @@ export async function discoverMcpServers(workspaceRoot: string): Promise<Discove
     discoverGoose(),
     discoverMuse(),
     discoverGrok(workspaceRoot),
+    discoverOpenCode(workspaceRoot),
   ])
   return results.flat().filter((s) => s.server !== 'intutic')
 }
@@ -1172,6 +1379,8 @@ export async function injectMcpServer(workspaceRoot: string, workspaceId = 'unkn
       log.error({ err: (err as Error).message, target: 'muse-code' }, 'MCP injection failed')),
     injectGrok(workspaceId, workspaceRoot).catch((err) =>
       log.error({ err: (err as Error).message, target: 'grok' }, 'MCP injection failed')),
+    injectOpenCode(workspaceId, workspaceRoot).catch((err) =>
+      log.error({ err: (err as Error).message, target: 'opencode' }, 'MCP injection failed')),
   ])
 
   log.info({ action: 'mcp_inject_complete', workspaceRoot }, 'MCP server injection complete')

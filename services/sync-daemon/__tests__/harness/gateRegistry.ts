@@ -493,12 +493,15 @@ export const GATES: readonly GateEntry[] = [
       'per-tool-call, in-process: OpenCode imports the file and runs its tool.execute.before ' +
       '(1.x) / tool execute.before (2.x) hook before every tool call; a throw is the refusal. ' +
       'Driven by the "OpenCode plugin gate" block, which loads the file the way OpenCode does.',
-    mcpCalls: 'reachable',
+    mcpCalls: 'yes',
     mcpNote:
-      'The hook fires for MCP tools too (tools.ts runs it for every tool id), so an ' +
-      'mcp__<server>__<tool>-shaped call would be caught — but OpenCode 1.x names MCP tools ' +
-      '<server>_<tool> (mcp/catalog.ts), which the allowlist backstop does not parse. ' +
-      'Composition is TD-487.',
+      'The hook fires for MCP tools too (tools.ts runs it for every tool id). OpenCode 1.x ' +
+      'names them sanitize(server) + "_" + sanitize(tool) (mcp/catalog.ts, read from source); ' +
+      'the plugin composes that into mcp__<server>__<tool> against the server names in the ' +
+      'OpenCode config files, longest sanitized name first, so the allowlist backstop parses ' +
+      'it (TD-487). Pinned by the "OpenCode plugin gate" block\'s allowlist cases and ' +
+      'openCodeHooks.test.ts. 2.x MCP ids are not verified; a 2.x id that is not ' +
+      '<server>_<tool>-shaped passes through unchanged.',
   },
   {
     name: 'n8n',

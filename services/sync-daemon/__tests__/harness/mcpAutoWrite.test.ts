@@ -417,3 +417,156 @@ describe('Goose YAML structural editing', () => {
     expect(parsed.mcp.intutic).toBeDefined()
   })
 })
+
+describe('injectMcpServer — OpenCode opencode.json mcp block (TD-487)', () => {
+  let ctx: Ctx
+  let prevXdg: string | undefined
+
+  afterEach(() => {
+    if (ctx) teardown(ctx)
+    if (prevXdg === undefined) delete process.env.XDG_CONFIG_HOME
+    else process.env.XDG_CONFIG_HOME = prevXdg
+  })
+
+  function setupOpenCode(): Ctx {
+    prevXdg = process.env.XDG_CONFIG_HOME
+    delete process.env.XDG_CONFIG_HOME
+    return setup()
+  }
+
+  const projectPath = (c: Ctx) => join(c.root, 'opencode.json')
+  const globalPath = (c: Ctx) => join(c.home, '.config', 'opencode', 'opencode.json')
+
+  const userConfig = {
+    $schema: 'https://opencode.ai/config.json',
+    provider: { anthropic: { options: { baseURL: 'http://127.0.0.1:4000' } } },
+    permission: { bash: { 'rm -rf *': 'deny' } },
+    mcp: {
+      github: {
+        type: 'local',
+        command: ['npx', '-y', 'server-github'],
+        environment: { GITHUB_TOKEN: '{env:GITHUB_TOKEN}' },
+        enabled: true,
+        timeout: 9000,
+      },
+      docs: { type: 'remote', url: 'https://docs.example/mcp', headers: { 'X-Team': 'core' } },
+      sso: { type: 'remote', url: 'https://sso.example/mcp', oauth: { clientId: 'abc' } },
+    },
+    theme: 'opencode',
+  }
+
+  it('wraps a local server: ["node", <proxy>, "--workspace-id", ws, "--server-name", name, "--", ...original]', async () => {
+    ctx = setupOpenCode()
+    writeFileSync(projectPath(ctx), JSON.stringify(userConfig, null, 2) + '\n')
+
+    await injectMcpServer(ctx.root, 'ws_test')
+
+    const written = JSON.parse(readFileSync(projectPath(ctx), 'utf-8'))
+    const gh = written.mcp.github
+    expect(gh.type).toBe('local')
+    expect(gh.command[0]).toBe('node')
+    expect(gh.command[1]).toMatch(/mcp-(governance-)?proxy[\\/]dist[\\/]index\.js$/)
+    expect(gh.command.slice(2)).toEqual([
+      '--workspace-id', 'ws_test', '--server-name', 'github', '--', 'npx', '-y', 'server-github',
+    ])
+    expect(gh.environment).toEqual({ GITHUB_TOKEN: '{env:GITHUB_TOKEN}', INTUTIC_WORKSPACE_ID: 'ws_test' })
+    // OpenCode keys survive; no marker key the OpenCode schema does not define.
+    expect(gh.enabled).toBe(true)
+    expect(gh.timeout).toBe(9000)
+    expect(Object.keys(gh).sort()).toEqual(['command', 'enabled', 'environment', 'timeout', 'type'])
+    expect(written.mcp.intutic).toMatchObject({ type: 'local' })
+    expect(written.mcp.intutic.command[0]).toBe('node')
+  })
+
+  it('wraps a remote server through the bridge, headers in env, and leaves an OAuth remote alone', async () => {
+    ctx = setupOpenCode()
+    writeFileSync(projectPath(ctx), JSON.stringify(userConfig, null, 2) + '\n')
+
+    await injectMcpServer(ctx.root, 'ws_test')
+
+    const written = JSON.parse(readFileSync(projectPath(ctx), 'utf-8'))
+    const docs = written.mcp.docs
+    expect(docs.type).toBe('local')
+    expect(docs.command.slice(2)).toEqual([
+      '--workspace-id', 'ws_test', '--server-name', 'docs',
+      '--remote-url', 'https://docs.example/mcp', '--remote-transport', 'http',
+    ])
+    expect(JSON.parse(docs.environment.INTUTIC_REMOTE_HEADERS)).toEqual({ 'X-Team': 'core' })
+    expect(Object.keys(docs).sort()).toEqual(['command', 'environment', 'type'])
+    // The bridge forwards static headers only; an OAuth server would stop authenticating.
+    expect(written.mcp.sso).toEqual(userConfig.mcp.sso)
+  })
+
+  it('never touches non-mcp keys, keeps their order and the file\'s indentation', async () => {
+    ctx = setupOpenCode()
+    writeFileSync(projectPath(ctx), JSON.stringify(userConfig, null, 4) + '\n')
+
+    await injectMcpServer(ctx.root, 'ws_test')
+
+    const raw = readFileSync(projectPath(ctx), 'utf-8')
+    const written = JSON.parse(raw)
+    expect(Object.keys(written)).toEqual(Object.keys(userConfig))
+    for (const k of ['$schema', 'provider', 'permission', 'theme'] as const) {
+      expect(written[k]).toEqual(userConfig[k])
+    }
+    expect(raw).toMatch(/^\{\n {4}"\$schema"/)
+    expect(raw.endsWith('}\n')).toBe(true)
+  })
+
+  it('is idempotent: an already-wrapped config (detected from the command shape) is written zero times', async () => {
+    ctx = setupOpenCode()
+    writeFileSync(projectPath(ctx), JSON.stringify(userConfig, null, 2) + '\n')
+    await injectMcpServer(ctx.root, 'ws_test')
+    const first = readFileSync(projectPath(ctx), 'utf-8')
+    const mtime = statSync(projectPath(ctx)).mtimeMs
+
+    await injectMcpServer(ctx.root, 'ws_test')
+
+    expect(readFileSync(projectPath(ctx), 'utf-8')).toBe(first)
+    expect(statSync(projectPath(ctx)).mtimeMs).toBe(mtime)
+    const gh = JSON.parse(first).mcp.github
+    expect(gh.command.filter((a: string) => a === '--workspace-id')).toHaveLength(1)
+  })
+
+  it('wraps the global config too, never creates a missing file, and skips a JSONC file rather than stripping its comments', async () => {
+    ctx = setupOpenCode()
+    mkdirSync(join(ctx.home, '.config', 'opencode'), { recursive: true })
+    writeFileSync(globalPath(ctx), JSON.stringify({ mcp: { fs: { type: 'local', command: ['mcp-fs', '/tmp'] } } }))
+    const jsonc = '{\n  // my servers\n  "mcp": { "x": { "type": "local", "command": ["x"] } }\n}\n'
+    const otherRoot = mkdtempSync(join(tmpdir(), 'intutic-mcpautowrite-oc-'))
+    try {
+      writeFileSync(join(otherRoot, 'opencode.json'), jsonc)
+
+      await injectMcpServer(ctx.root, 'ws_test')
+      await injectMcpServer(otherRoot, 'ws_test')
+
+      const global = JSON.parse(readFileSync(globalPath(ctx), 'utf-8'))
+      expect(global.mcp.fs.command.slice(-3)).toEqual(['--', 'mcp-fs', '/tmp'])
+      expect(() => statSync(projectPath(ctx))).toThrow()
+      expect(readFileSync(join(otherRoot, 'opencode.json'), 'utf-8')).toBe(jsonc)
+    } finally {
+      rmSync(otherRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('discoverMcpServers reports OpenCode servers with their true transport and wrapped status', async () => {
+    ctx = setupOpenCode()
+    writeFileSync(projectPath(ctx), JSON.stringify(userConfig, null, 2) + '\n')
+
+    const before = (await discoverMcpServers(ctx.root)).filter((s) => s.harness === 'opencode')
+    expect(before).toEqual(expect.arrayContaining([
+      { server: 'github', harness: 'opencode', transport: 'stdio', wrapped: false },
+      { server: 'docs', harness: 'opencode', transport: 'http', wrapped: false },
+    ]))
+
+    await injectMcpServer(ctx.root, 'ws_test')
+
+    const after = (await discoverMcpServers(ctx.root)).filter((s) => s.harness === 'opencode')
+    expect(after).toEqual(expect.arrayContaining([
+      { server: 'github', harness: 'opencode', transport: 'stdio', wrapped: true },
+      { server: 'docs', harness: 'opencode', transport: 'http', wrapped: true },
+      { server: 'sso', harness: 'opencode', transport: 'http', wrapped: false },
+    ]))
+    expect(after.some((s) => s.server === 'intutic')).toBe(false)
+  })
+})
