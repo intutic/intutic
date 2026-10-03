@@ -396,6 +396,7 @@ export default defineConfig({
             { text: 'Google ADK', link: '/integrations/google-adk' },
             { text: 'OpenAI Agents SDK', link: '/integrations/openai-agents' },
             { text: 'Strands Agents', link: '/integrations/strands' },
+            { text: 'Microsoft Agent Framework', link: '/integrations/microsoft-agent-framework' },
             { text: 'Mastra', link: '/integrations/mastra' },
             { text: 'Vercel AI SDK', link: '/integrations/vercel-ai-sdk' },
             { text: 'eve', link: '/integrations/eve' },
