@@ -39,6 +39,8 @@ Every `intutic skill audit` (or sync-daemon report) that includes bundled-script
 3. Waits for a **pacing slot** — VirusTotal's free-tier public API allows roughly 4 requests/minute, so lookups for one workspace are spaced out rather than bursted, even when a report carries dozens of hashes at once.
 4. Calls `GET /api/v3/files/{sha256}` and records the verdict.
 
+The sync daemon reports each skill's bundled-script hashes (never their content) on every sync cycle, so hashes from a daemon report are processed at most once per 24 hours per workspace — a hash VirusTotal has never seen does not spend a lookup every cycle. Verdicts are matched to a skill by those hashes, so two skills with the same name but different scripts are scored separately.
+
 ## Budget and pacing
 
 | Control | Default | Notes |
@@ -51,7 +53,7 @@ The Integrations panel shows today's usage (`used / cap`) live, reading the same
 
 ## Fail-secure, always
 
-An API error, a timeout, a malformed response, or an exhausted daily budget all leave a hash **unjudged** — never defaulted to "clean." Only an explicit `flagged: false` verdict from a successful VirusTotal response counts as "checked, not flagged." A hash VirusTotal has never seen (a 404) is recorded as `unknown`, distinct from both `flagged` and a confirmed clean result.
+An API error, a timeout, a malformed response, or an exhausted daily budget all leave a hash **unjudged** — never defaulted to "clean." Only an explicit `flagged: false` verdict from a successful VirusTotal response counts as "checked, not flagged." A hash VirusTotal has never seen (a 404) records nothing: it stays unjudged, distinct from both `flagged` and a confirmed clean result, and is looked up again later.
 
 ## Effect on the posture score
 
