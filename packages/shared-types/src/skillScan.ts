@@ -36,22 +36,31 @@
  * reader as much as an agent, and routinely contains the exact imperative
  * security language ("block any call that…", "never embed secrets", "do
  * not allow…") that a tool description never does — precisely the shape
- * this module's patterns key on. The false-positive rate of THESE patterns
- * on a corpus of REAL, BENIGN skill files is UNMEASURED. One known-benign
- * fixture is checked here (see the sync-daemon test referenced below), but
- * one fixture is not a corpus, and a corpus of skill markdown comparable in
- * size and provenance to `tooldesc.jsonl` does not exist yet.
+ * this module's patterns key on.
  *
- * Because of that gap, this phase is deliberately REPORT-ONLY. Nothing in
- * this codebase blocks, refuses, or auto-deletes a skill on the strength of
- * a finding from this module. `enableLocalSkillAuditDelete` (the existing
+ * **Measured since (TD-358):** `src/__tests__/corpus/skills/` vendors 350
+ * real, benign `SKILL.md` files from four MIT/Apache-2.0 skill collections
+ * at pinned commits (provenance, licences and bias statement in that
+ * directory's `PROVENANCE.md`; the reviewed result in `BASELINE.txt`).
+ * `skillScanCorpus.test.ts` runs {@link scanSkillContent} over every file
+ * and pins the result: nine of the ten patterns fire on ZERO of the 350;
+ * `read-sensitive-path` fires on 11, every one reviewed and benign (mostly
+ * skills promising NOT to load `.env`). Zero of 350 is a bound, not a proof
+ * — the rule-of-three 95% upper bound is ~0.86% of skills per pattern — and
+ * the corpus is published, curated skill collections, not the long tail of
+ * what developers write locally. RULE_AUTHOR_SKILL (see below) is still
+ * checked separately.
+ *
+ * This module itself stays REPORT-ONLY: nothing here blocks, refuses, or
+ * auto-deletes a skill. `enableLocalSkillAuditDelete` (the existing
  * workspace setting `tools/cli/src/commands/skill.ts` already consumes for
  * the legacy rule-file audit) is extended to cover these findings too, but
  * that is an explicit opt-in a workspace operator chooses, not a default —
- * see the CLI command for the exact gate. Building enforcement on top of
- * these patterns is follow-up work, gated on first measuring the
- * false-positive rate against a real benign-skill corpus the way
- * `tool_poison.rs` was. See `docs/TECH_DEBT.md` for the tracking entries.
+ * see the CLI command for the exact gate. The one enforcement built on the
+ * measurement is {@link SKILL_CONTENT_BLOCK_PATTERN_IDS}: the zero-hit
+ * patterns, shipped to the tool-call gates through the sync daemon's policy
+ * snapshot (`skill_content.*`, see `services/sync-daemon/src/lib/policySnapshot.ts`)
+ * where one sync cycle retracts them. See `docs/TECH_DEBT.md` TD-358.
  *
  * # Fixture discipline
  *
@@ -391,6 +400,36 @@ export const SKILL_SCAN_PATTERNS: readonly SkillScanPattern[] = [
   },
 ]
 
+/**
+ * The patterns licensed for a content-conditional BLOCK tier, by id.
+ *
+ * Membership is earned by measurement, not judgement: an id belongs here only
+ * if its pattern fires on ZERO files of the vendored benign-skill corpus
+ * (`src/__tests__/corpus/skills/`, ≥100 skills required).
+ * `skillScanCorpus.test.ts` enforces that in one direction — an id listed here
+ * that fires on any corpus file fails the build — so a corpus refresh that
+ * finds a false positive forces this list to shrink in the same change.
+ *
+ * `read-sensitive-path` is deliberately absent: 11 benign hits in 350 skills
+ * (see `BASELINE.txt`). It stays report-only.
+ *
+ * This list does not block anything by itself. The sync daemon turns it into
+ * `skill_content.*` gate rules (`SKILL_CONTENT_PATTERNS` in
+ * `services/sync-daemon/src/harness/protectedPaths.ts`) shipped through the
+ * policy snapshot at `SKILL_CONTENT_TIER_SEVERITY`.
+ */
+export const SKILL_CONTENT_BLOCK_PATTERN_IDS: readonly string[] = [
+  'hidden-instruction-block',
+  'conceal-from-user',
+  'sidechannel-exfil',
+  'cross-skill-shadowing',
+  'agent-directed-precondition',
+  'instruction-override',
+  'html-comment-hidden-instruction',
+  'markdown-exfil-link',
+  'obfuscated-eval-instruction',
+]
+
 /** Compiled once, in table order, so a scan is one pass per pattern. */
 const COMPILED: ReadonlyArray<{ pattern: SkillScanPattern; re: RegExp }> = SKILL_SCAN_PATTERNS.map((pattern) => ({
   pattern,
@@ -451,6 +490,11 @@ function assertSkillScanTableSane(patterns: readonly SkillScanPattern[]): void {
 }
 
 assertSkillScanTableSane(SKILL_SCAN_PATTERNS)
+for (const id of SKILL_CONTENT_BLOCK_PATTERN_IDS) {
+  if (!SKILL_SCAN_PATTERNS.some((p) => p.id === id)) {
+    throw new Error(`SKILL_CONTENT_BLOCK_PATTERN_IDS names an unknown pattern: ${id}`)
+  }
+}
 
 /**
  * Scan skill markdown content for the patterns above.

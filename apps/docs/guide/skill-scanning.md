@@ -217,18 +217,18 @@ tenants; this is a workspace-scoped, opt-in hash check on a skill-bundled
 signal beyond the identical-hash verdict cache described on the integration
 page.
 
-## Report-only, deliberately, this phase
+## The scanner reports; two gate tiers enforce
 
-Nothing in this codebase blocks, refuses, or auto-deletes a skill on the
-strength of a finding from **this scanner** — that stays true after the
-block-tier promotion below, which does not run `scanSkillContent` at all.
-Findings from the CONTENT scan are surfaced — in the CLI output, in the
-control-plane report, in the posture score — and nothing more, unless an
-operator has explicitly opted into the existing `enableLocalSkillAuditDelete`
-pruning gate. Enforcement of skill-file CONTENT is deliberately future,
-unbuilt work; see
-[TECH_DEBT.md](https://github.com/intutic/intutic/blob/main/docs/TECH_DEBT.md)
-for the tracked follow-ups.
+The scanner itself never blocks, refuses, or auto-deletes a skill. Its
+findings show up in the CLI output, the control-plane report, and the
+posture score, and that is all, unless an operator has opted into the
+existing `enableLocalSkillAuditDelete` pruning gate. The sync daemon's
+`skill_flagged` event and the `intutic skill scan-staged` pre-commit check
+stay warn-only.
+
+Enforcement happens in the tool-call gates, before a write lands, in two
+separate tiers described below: one checks **where** a write goes, the
+other checks **what** it writes.
 
 ## Block-tier skill-directory protection
 
@@ -288,15 +288,69 @@ the floor-only behavior described above, exactly the retraction lever
 `DESTRUCTIVE_TIER_SEVERITY` already provides for the destructive-command
 tier.
 
-**What this does not do.** It does not scan or judge skill CONTENT — that
-remains the unchanged, unblocking scanner described above, gated on the
-corpus measurement TD-358 tracks. It does not catch a skill file reached
+**What this does not do.** It does not judge skill CONTENT. That is the
+separate tier below. It does not catch a skill file reached
 through a shell redirect, a symlink, or a relative path walk (`subject:
 'target'`, matching the tool's own path argument, not a bare mention in a
 command string). And SHADOW-mode workspaces see the promotion downgraded to
 `shadow` (observe, don't act) on the snapshot side, same as every other
 snapshot-delivered rule — the floor's own `warn` copy is unaffected by
 `interventionMode` either way.
+
+## Block-tier skill-content protection
+
+The content tier refuses a write into `.agents/skills/**` or
+`.claude/skills/**` when the text being written matches one of the scanner's
+patterns that has been **measured** at zero false positives on real, benign
+skills. It lives in `SKILL_CONTENT_PATTERNS`
+(`services/sync-daemon/src/harness/protectedPaths.ts`) and
+`SKILL_CONTENT_TIER_SEVERITY` (`services/sync-daemon/src/lib/policySnapshot.ts`),
+and it is `block` today.
+
+**The measurement.** `packages/shared-types/src/__tests__/corpus/skills/`
+vendors 350 published `SKILL.md` files from four MIT and Apache-2.0
+collections (anthropics/skills, obra/superpowers, wshobson/agents,
+K-Dense-AI/claude-scientific-skills), each pinned to an upstream commit.
+`PROVENANCE.md` there lists sources, licences and exclusions, and
+`BASELINE.txt` holds the reviewed result. A test runs `scanSkillContent`
+over every file and pins the exact set of hits:
+
+| Pattern | Benign skills hit | Content tier |
+|---|---|---|
+| `read-sensitive-path` | 11 of 350 (3.1%) | not included, stays report-only |
+| the other nine | 0 of 350 | `block` |
+
+All 11 `read-sensitive-path` hits were reviewed and are benign. Most are
+skills promising **not** to load `.env`. That pattern keys on a verb near a
+path and cannot tell "never read `.env`" from "read `.env`".
+
+**How it ships.** Through the policy snapshot only, never the compiled-in
+floor. Flipping `SKILL_CONTENT_TIER_SEVERITY` to `'warn'` retracts it in one
+sync cycle. SHADOW-mode workspaces get `shadow`, as with every snapshot rule.
+Each rule matches the write's target path against the skill roots, then
+matches the pattern inside the text being written: the `content`,
+`new_string`/`newString`, `new_str` or `file_text` value of the tool input.
+An edit that **removes** a poisoned line (it appears only in `old_string`)
+is not refused, and neither is a search for one.
+
+**What zero means.** Zero hits in 350 puts the 95% upper bound on a
+pattern's per-skill false-positive rate at about 0.86%. That is a bound, not
+a guarantee. The corpus is curated, published collections rather than the
+skills developers write locally, and no recall is measured.
+
+**Relationship to the path tier.** While `SKILL_SURFACE_TIER_SEVERITY` is
+`block`, the path tier already refuses every write into a skill directory,
+so today the content tier mostly changes the reason the developer sees. It
+becomes the only refusal if the path tier is retracted to `warn`. Each tier
+can be retracted without the other, with one exception: the `@intutic/gate-js`
+and `intutic-clawde` gates do not evaluate the snapshot's argument column, so
+there the content rules behave as path-only blocks.
+
+**What it does not catch.** A skill file written through a shell redirect or
+heredoc (a `grep` for the same text could not be told apart), diff-shaped
+editors (`apply_patch`, `replace_in_file`), symlinked or relative-walk
+targets, some phrasings split across a line break, and anything the patterns
+do not already match.
 
 ## Semantic analysis (optional)
 
@@ -370,7 +424,7 @@ severity for `'malicious'`, MEDIUM for `'suspicious'`).
 
 **Verdicts are advisory, not enforcement.** Nothing in this codebase blocks,
 refuses, or auto-prunes a skill on the strength of a semantic-judge finding
-— consistent with the "report-only, deliberately, this phase" stance the
+— consistent with the report-only stance the
 deterministic scanner takes above. See docs/TECH_DEBT.md's TD-357 entry for
 the corpus-measurement caveat this carries forward.
 
@@ -383,20 +437,13 @@ the house style this page follows.
 
 Specifically:
 
-- **The false-positive rate on real skill markdown is unmeasured.** The
-  seed patterns this scanner ports are measured at 0 false positives — but
-  on 10,753 real **tool descriptions**, a corpus `tool_poison.rs` vendors at
-  `packages/proxy/tests/corpus/tooldesc/`. Skill markdown is a different,
-  longer, more discursive genre, written for a human reader as much as an
-  agent, and it routinely contains exactly the kind of imperative security
-  language ("block any call that…", "never embed secrets…") this scanner's
-  patterns key on. One known-benign fixture — the `intutic-rule-author`
-  skill this project bundles into every workspace, which is full of that
-  exact language — is checked clean in this codebase's own test suite. One
-  fixture is not a corpus. A benign-skill corpus comparable in size and
-  provenance to the tool-description one does not exist yet, and until it
-  does, this scanner's real-world false-positive rate is a claim nobody can
-  back with a number.
+- **The false-positive rate is measured on published skills, not on yours.**
+  On the 350-skill benign corpus described
+  [above](#block-tier-skill-content-protection), nine patterns fire on zero
+  files and `read-sensitive-path` on 11. Published collections are cleaner
+  and more uniform than the skills developers write locally, so treat these
+  rates as lower bounds. The `intutic-rule-author` skill this project bundles,
+  which is full of imperative security language, is also checked clean.
 - **Recall against real attacks is not measured either**, for the same
   reason `tool_poison.rs` does not claim one: the positive fixtures are
   hand-built from a published attack taxonomy, so they show the documented

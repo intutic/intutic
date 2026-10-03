@@ -1,0 +1,59 @@
+skillScan.ts — benign-skill corpus baseline (TD-358)
+====================================================
+
+Produced by:
+    INTUTIC_WRITE_BASELINE=1 pnpm --filter @intutic/shared-types exec vitest run skillScanCorpus
+
+Every file below is a real, published, benign SKILL.md. Nothing was written or
+chosen for this scanner, so every hit is a false positive by construction. Each
+hit was read in context and confirmed benign before being recorded.
+
+Corpus: 350 SKILL.md files
+  anthropics-skills              14  github.com/anthropics/skills @ 8a1541c4a3ffa5a20a5a91de0dcf3f0bab1d1ef4
+  k-dense-scientific-skills     137  github.com/K-Dense-AI/claude-scientific-skills @ 154988403bb5a18e9d3c0ce4e6d5e2e4b184a298
+  obra-superpowers               15  github.com/obra/superpowers @ 8ca22dba9a94f28898bbce59f2537ff4d87c747d
+  wshobson-agents               184  github.com/wshobson/agents @ 156b7a5e7a8b93642628a339ee4039c925b34c7f
+
+  pattern                          | files_hit | rate    | content tier
+  ---------------------------------|-----------|---------|-------------
+  hidden-instruction-block         |         0 |   0.00% | block-eligible
+  conceal-from-user                |         0 |   0.00% | block-eligible
+  sidechannel-exfil                |         0 |   0.00% | block-eligible
+  read-sensitive-path              |        11 |   3.14% | warn (report-only)
+  cross-skill-shadowing            |         0 |   0.00% | block-eligible
+  agent-directed-precondition      |         0 |   0.00% | block-eligible
+  instruction-override             |         0 |   0.00% | block-eligible
+  html-comment-hidden-instruction  |         0 |   0.00% | block-eligible
+  markdown-exfil-link              |         0 |   0.00% | block-eligible
+  obfuscated-eval-instruction      |         0 |   0.00% | block-eligible
+
+WHAT ZERO MEANS HERE
+
+  Zero hits in 350 files bounds the per-skill false-positive rate at about
+  0.86% (rule of three, 95% upper bound) — not zero. The corpus is curated,
+  published skill collections; locally written skills are a longer, messier tail.
+  No recall is claimed: there is no vendored corpus of real poisoned skills.
+
+Benign files that tripped a pattern, with the excerpt the scanner reports:
+  read-sensitive-path  k-dense-scientific-skills/skills/autoskill/SKILL.md
+      …inspection. ### 2. Review and promote Open `~/.autoskill/proposed/<ts>/report.md`, edit drafts i…
+  read-sensitive-path  k-dense-scientific-skills/skills/database-lookup/SKILL.md
+      …amed key in `.env` if needed** — do not read or display the whole `.env` file. Look up only the exact key requi…
+  read-sensitive-path  k-dense-scientific-skills/skills/exa-search/SKILL.md
+      …root and contains `EXA_API_KEY`. If so, load it: ```bash dotenv -f .env run -- uv run "$SKILL_PATH/scripts/exa_…
+  read-sensitive-path  k-dense-scientific-skills/skills/hypogenic/SKILL.md
+      …er import `hypogenic`, contact a model, load `.env`, enumerate the environment, or execute…
+  read-sensitive-path  k-dense-scientific-skills/skills/labarchive-integration/SKILL.md
+      …HIVES_* environment variables and never load .env files. metadata: version: "1.4" las…
+  read-sensitive-path  k-dense-scientific-skills/skills/latchbio-integration/SKILL.md
+      …hrough the supported OAuth flow; do not read, print, copy, or parse `~/.latch/token` manually: ```bash latch login l…
+  read-sensitive-path  k-dense-scientific-skills/skills/omero-integration/SKILL.md
+      …nly named OMERO_* variables; they never load .env files. metadata: version: "1.6" las…
+  read-sensitive-path  k-dense-scientific-skills/skills/paperclip/SKILL.md
+      …files. Paperclip does not automatically load a project `.env`. If the user has supplied a **trusted,…
+  read-sensitive-path  k-dense-scientific-skills/skills/peer-review/SKILL.md
+      …ct improvement, or unrelated research - Read broad environment state, `.env` files, API keys, or credentials - Call…
+  read-sensitive-path  k-dense-scientific-skills/skills/protocolsio-integration/SKILL.md
+      …xecute is supplied. The scripts never load .env files or execute mutations. metadata:…
+  read-sensitive-path  wshobson-agents/plugins/block-no-verify/skills/block-no-verify-hook/SKILL.md
+      …ings.json`: ```bash mkdir -p ~/.claude cat > ~/.claude/settings.json << 'EOF' { "hooks": {…
