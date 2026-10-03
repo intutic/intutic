@@ -52,15 +52,6 @@ export interface ProviderDefinition {
   fields: ProviderCredentialField[]
   /** See module doc — whether packages/proxy currently routes to this provider. */
   routingLive: boolean
-  /**
-   * The credential is for the judge, not for routing: the proxy never sends
-   * agent traffic to this provider, and never will. The key wizard shows
-   * "Judge only" for it instead of "Not yet routable", and pickers that
-   * choose a routing provider leave it out. Today: TypeSafe's Jev and
-   * Fastino's GLiDE, a workspace's own typed judge (LLD #72 Phase 7 and 7b,
-   * `typedJudgeBackend`).
-   */
-  judgeOnly?: true
 }
 
 /**
@@ -165,28 +156,6 @@ export const PROVIDER_REGISTRY: ProviderDefinition[] = [
     docsUrl: 'https://github.com/ollama/ollama/blob/main/docs/api.md',
     fields: [{ key: 'apiBase', label: 'Server URL', type: 'text', required: true, placeholder: 'http://localhost:11434' }],
     routingLive: false,
-  },
-  {
-    // A workspace's own typed judge (LLD #72 Phase 7), chosen with the
-    // `typedJudgeBackend` workspace setting. Never a platform-held key: the
-    // control plane reads it only from this workspace's stored blob.
-    id: 'typesafe',
-    displayName: 'TypeSafe (Jev judge)',
-    docsUrl: 'https://docs.typesafe.ai',
-    fields: [{ key: 'apiKey', label: 'API Key', type: 'password', required: true }],
-    routingLive: false,
-    judgeOnly: true,
-  },
-  {
-    // GLiDE, a workspace's own typed judge (LLD #72 Phase 7b), chosen with
-    // `typedJudgeBackend` = 'glide'. Same rules as TypeSafe above: judge only,
-    // read only from this workspace's stored blob, never a platform key.
-    id: 'fastino',
-    displayName: 'Fastino (GLiDE judge)',
-    docsUrl: 'https://docs.fastino.ai',
-    fields: [{ key: 'apiKey', label: 'API Key', type: 'password', required: true }],
-    routingLive: false,
-    judgeOnly: true,
   },
 ]
 

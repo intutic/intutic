@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { MODEL_CATALOG, findCatalogModel, judgeModelChoices, normalizeModelRef } from '../modelCatalog.js'
-import { PROVIDER_REGISTRY, isKnownProviderId } from '../providers.js'
+import { MODEL_CATALOG, findCatalogModel, isHostedModelRef, normalizeModelRef, selfHostedJudgeModelChoices } from '../modelCatalog.js'
+import { isKnownProviderId } from '../providers.js'
 
 const GENERATED_FILE = fileURLToPath(new URL('../modelCatalog.generated.ts', import.meta.url))
 
@@ -26,16 +26,6 @@ describe('MODEL_CATALOG invariants', () => {
   it('has no duplicate refs', () => {
     const refs = MODEL_CATALOG.map((e) => e.ref)
     expect(new Set(refs).size).toBe(refs.length)
-  })
-
-  it('every routingLive provider has at least one judgeCapable entry', () => {
-    // Guards against a future upstream regen silently emptying the SaaS judge
-    // picker's default list — see judgeModelChoices' saasRoutableOnly filter.
-    const routableProviders = PROVIDER_REGISTRY.filter((p) => p.routingLive).map((p) => p.id)
-    for (const providerId of routableProviders) {
-      const hasJudgeCapable = MODEL_CATALOG.some((e) => e.provider === providerId && e.judgeCapable)
-      expect(hasJudgeCapable, `no judgeCapable model for routable provider "${providerId}"`).toBe(true)
-    }
   })
 
   it('judgeCapable entries meet the stated floor (>= 256 max output, >= 8192 context, not deprecated)', () => {
@@ -116,27 +106,28 @@ describe('findCatalogModel', () => {
   })
 })
 
-describe('judgeModelChoices', () => {
-  it('defaults to routable providers only', () => {
-    const choices = judgeModelChoices()
-    const routableIds = new Set(PROVIDER_REGISTRY.filter((p) => p.routingLive).map((p) => p.id))
-    for (const c of choices) {
-      expect(routableIds.has(c.provider)).toBe(true)
-      expect(c.judgeCapable).toBe(true)
-    }
-  })
-
-  it('includes non-routable providers when saasRoutableOnly is false', () => {
-    const allChoices = judgeModelChoices({ saasRoutableOnly: false })
-    const defaultChoices = judgeModelChoices()
-    expect(allChoices.length).toBeGreaterThanOrEqual(defaultChoices.length)
-  })
-
-  it('filters to the requested providers', () => {
-    const choices = judgeModelChoices({ providers: ['anthropic'], saasRoutableOnly: false })
-    for (const c of choices) {
-      expect(c.provider).toBe('anthropic')
-    }
+describe('selfHostedJudgeModelChoices', () => {
+  it('offers only judge-capable models from self-hosted providers, never Ollama Cloud', () => {
+    const choices = selfHostedJudgeModelChoices()
     expect(choices.length).toBeGreaterThan(0)
+    for (const c of choices) {
+      expect(c.provider).toBe('ollama')
+      expect(c.judgeCapable).toBe(true)
+      expect(c.id.endsWith('-cloud'), c.ref).toBe(false)
+    }
+  })
+})
+
+describe('isHostedModelRef', () => {
+  it('hosted vendor prefixes and Ollama Cloud are hosted', () => {
+    for (const ref of ['anthropic/claude-haiku-4-5', 'openai/gpt-4o', 'gemini/gemini-1.5-pro', 'openrouter/x/y', 'mistral/m', 'ollama/gpt-oss:20b-cloud']) {
+      expect(isHostedModelRef(ref), ref).toBe(true)
+    }
+  })
+
+  it('self-hosted Ollama models and bare local aliases are not', () => {
+    for (const ref of ['ollama/llama3', 'my-local-qwen', 'intutic-openweight-judge', 'hosted_vllm/qwen2.5-14b']) {
+      expect(isHostedModelRef(ref), ref).toBe(false)
+    }
   })
 })

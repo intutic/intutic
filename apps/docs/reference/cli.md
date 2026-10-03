@@ -48,8 +48,8 @@ intutic init [options]
 
 ## `intutic setup`
 
-Guided setup wizard — detect harnesses, configure a provider credential, verify it, and
-optionally choose a judge model, in one interactive flow. Unlike `intutic init`, this command
+Guided setup wizard — detect harnesses, configure a provider credential, and verify it, in one
+interactive flow. Unlike `intutic init`, this command
 prompts; it is the interactive counterpart, not a replacement — `init` stays flag-driven and
 safe for CI. See [the cohort wizard guide](/guide/cohort-wizard) for a full narrative walkthrough
 of every step.
@@ -74,11 +74,11 @@ intutic setup [options]
    confirmation before proceeding anyway; a rate-limited or unreachable response is reported but
    does not block
 5. Saves the credential (`PUT /api/v1/workspace/provider-credentials/:provider`, same route
-   `intutic credentials set` hits) or writes the local env file
-6. Optionally picks a judge model from [Intutic's model catalog](/reference/model-catalog) (or a
-   custom name), saves it (same route the dashboard's Settings → LLM Judge panel uses), and — in
-   connected mode — runs the same test round-trip the panel's own Test button does, reporting
-   which stage (shape/provider/completion) it reached
+   `intutic credentials set` hits) or writes the local env file; local mode then points you at
+   `intutic judge configure` for an on-prem judge
+
+There is no judge-model step: judges run only on self-hosted models, so a workspace has no
+judge model to choose.
 
 **Examples:**
 
@@ -111,9 +111,11 @@ intutic judge configure [options]
 | `--out <path>` | Where to write `litellm_config.yaml` (default: `./litellm_config.yaml`) |
 
 **What it does:**
-1. Prompts for a judge model — from the model catalog (any provider, not filtered to ones
-   Intutic's managed gateway can route to, since a local LiteLLM instance can serve anything) or
-   a custom model reference
+1. Prompts for a judge model — a self-hosted model from the
+   [model catalog](/reference/model-catalog) (Ollama; Ollama Cloud excluded) or a custom
+   reference such as `ollama/llama3.1` or a local alias your LiteLLM serves. Judges run only on
+   self-hosted models: a custom reference that names a hosted provider (Anthropic, OpenAI,
+   OpenRouter, Ollama Cloud…) is refused and nothing is written
 2. Writes a `litellm_config.yaml` `model_list` entry in the same shape
    `infra/compose/litellm_config.yaml`'s hand-written example uses
 3. Prints the env block (`INTUTIC_GATEWAY_LOCAL_JUDGE`, `LITELLM_LOCAL_URL`,

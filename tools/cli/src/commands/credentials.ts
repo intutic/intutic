@@ -69,11 +69,7 @@ export async function runCredentialsList(opts: CredentialsCliOpts): Promise<void
       log.field('Provider', r.provider)
       log.field(
         'Routing',
-        r.routingLive
-          ? pc.green('live — the proxy forwards requests to it')
-          : getProviderDefinition(r.provider)?.judgeOnly
-            ? pc.cyan('judge only — the judge calls it with this key; never a routing target')
-            : pc.yellow('not yet routable'),
+        r.routingLive ? pc.green('live — the proxy forwards requests to it') : pc.yellow('not yet routable'),
       )
       log.field(
         'Provisioned',
@@ -154,9 +150,7 @@ export async function runCredentialsSet(
     }
 
     log.success(`${provider}: provisioned (…${res.lastFour ?? '????'}).`)
-    if (getProviderDefinition(provider)?.judgeOnly) {
-      log.info(`${provider} is a judge credential: choose it as the typed judge in the dashboard (Settings → Typed judge).`)
-    } else if (!res.routingLive) {
+    if (!res.routingLive) {
       log.warn(
         `${provider} is stored but not yet routable — the proxy does not forward requests to it. ` +
           'Its credential is safe to have on file ahead of that support landing.',

@@ -6,7 +6,7 @@
 // Generated: 2026-09-28
 //
 // See packages/shared-types/src/modelCatalog.ts for the ModelCatalogEntry type
-// and the helpers (findCatalogModel, normalizeModelRef, judgeModelChoices) that
+// and the helpers (findCatalogModel, normalizeModelRef, selfHostedJudgeModelChoices) that
 // consume this data. LLD #70.
 
 export const MODEL_CATALOG_GENERATED = [
