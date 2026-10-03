@@ -47,8 +47,12 @@ smolagents = {version = ">=1.26.0", optional = true}
 # strands-agents reports ">=3.10" with NO upper bound at 1.52.0 (the version
 # installed while building this adapter), so — unlike crewai above — it needs
 # no explicit `python = "..."` constraint for Poetry's solver to accept the
-# full ^3.10 range this project declares.
-strands-agents = {version = ">=1.52.0", optional = true}
+# full ^3.10 range this project declares. Floor raised to 1.57.2 (still
+# ">=3.10", no upper bound): bidi graduated to the stable `strands.bidi`
+# namespace there, and since 1.55.0 the shared ToolExecutor fires the stable
+# BeforeToolCallEvent for BidiAgent too — the adapter's BidiAgent coverage
+# (TD-422) depends on both.
+strands-agents = {version = ">=1.57.2", optional = true}
 
 [tool.poetry.extras]
 langchain = ["langchain"]
