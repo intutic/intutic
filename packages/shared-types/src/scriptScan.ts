@@ -136,6 +136,44 @@ export const MAX_FILES_PER_SKILL = 40
 /** 256 KiB. */
 export const MAX_SCRIPT_SCAN_BYTES = 262_144
 
+/**
+ * 8 MiB. Largest bundled file the sync daemon will read to sha256-hash for
+ * its `scripts` facet (TD-486). Larger than {@link MAX_SCRIPT_SCAN_BYTES} on
+ * purpose: a file too big to content-scan is still worth a hash-only
+ * VirusTotal lookup. A file over this cap is counted in `total` and neither
+ * hashed nor scanned — the daemon re-walks every skill on every sync cycle,
+ * so its reads stay bounded. The CLI's `auditScriptFile` hashes whatever it
+ * reads, uncapped; it runs on demand, not on a loop.
+ */
+export const MAX_SCRIPT_HASH_BYTES = 8 * 1024 * 1024
+
+/**
+ * A skill's bundled-script summary, as the sync daemon reports it in the
+ * `skills[].scripts` facet of `POST /api/v1/agents/report`. Shared so the
+ * daemon (`collectSkillScripts`) and the control plane
+ * (`agentPosture.ts`, `virusTotalService.ts`) agree on the wire shape.
+ */
+export interface SkillScriptsFacet {
+  /** Every bundled file the walk found, scanned or not. */
+  total: number
+  /** How many of `total` were content-scanned — excludes unreadable files,
+   *  files over the byte cap, and files whose language could not be
+   *  determined. */
+  scanned: number
+  /** How many of `scanned` came back with at least one finding. */
+  flagged: number
+  /**
+   * sha256 (lowercase hex) of each bundled file the daemon could read
+   * within {@link MAX_SCRIPT_HASH_BYTES}, one entry per file in walk order
+   * (TD-486). Hashes only — file content never leaves the machine. The
+   * control plane joins VirusTotal verdicts to the skill on these. ABSENT
+   * (not empty) from a daemon build that predates TD-486; the control
+   * plane falls back to a name-keyed join only in that case. An empty
+   * array means nothing was hashable, and gets no fallback.
+   */
+  sha256?: string[]
+}
+
 /** Extensions this module recognizes, lowercase, without the leading dot. */
 const EXTENSION_LANGUAGE: Readonly<Record<string, ScriptLanguage>> = {
   sh: 'shell',
