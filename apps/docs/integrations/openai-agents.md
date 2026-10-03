@@ -85,7 +85,10 @@ The underlying `openai` client reads `OPENAI_BASE_URL` whenever no explicit
 `intutic exec`) routes all chat traffic through the Intutic proxy with
 **zero code** — unlike the Vercel AI SDK, which requires in-code provider
 construction. The SDK's default transport is the OpenAI Responses API, whose
-wire shape the proxy already parses (response gate included).
+wire shape the proxy already parses (response gate included). This path is
+tested end to end with a local stand-in for the Responses API, both directly
+and through the proxy in standalone mode; a round trip against OpenAI itself
+has not been run.
 
 ::: danger Tracing exports bypass the proxy — handle this
 `@openai/agents` ships with tracing **on by default**, and its exporter POSTs
@@ -160,7 +163,10 @@ UI), pass the run config `toolExecution: { preApprovalInputGuardrails: true }`
 
 **Realtime / voice agents:** `@openai/agents-realtime` honours
 `FunctionTool.inputGuardrails` through the same mechanism, so a guardrail
-injected here also gates voice-agent tool calls.
+injected here also gates voice-agent tool calls. `wrapAgent` works on a
+`RealtimeAgent` unchanged; a refused call never runs and the BLOCKED message is
+sent back as the call's output (tested against a real `RealtimeSession` with a
+stand-in transport — not yet against a live realtime connection).
 
 ### 3. Non-function tools — what `wrapAgent`/`wrapTools` does with each
 

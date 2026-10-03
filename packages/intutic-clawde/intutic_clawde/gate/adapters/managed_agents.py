@@ -12,7 +12,9 @@ CrewAI tool.
 latest published release at the time this adapter was built; the TypeScript
 twin, `@intutic/gate/managed-agents`, was checked against
 ``@anthropic-ai/sdk@0.117.1`` — its latest) was downloaded and its shipped
-source read directly:
+source read directly. Re-read against ``anthropic==1.11.0`` (TD-429 bump;
+the 1.x line keeps every ``beta.sessions`` name this module and its tests
+use) — see "1.x additions" below:
 
 * ``anthropic/resources/beta/sessions/events.py`` — every request this
   package issues (``.list()``, ``.send()``, ``.stream()``) sends
@@ -21,7 +23,12 @@ source read directly:
   documents the value for callers building their own request.
 * ``anthropic/types/beta/sessions/beta_managed_agents_user_tool_confirmation_event_params.py``
   — the wire shape this module builds: ``{"type": "user.tool_confirmation",
-  "tool_use_id", "result": "allow"|"deny", "deny_message"?, "session_thread_id"?}``.
+  "tool_use_id", "result": "allow"|"deny", "deny_message"?}``. There is no
+  ``session_thread_id`` param (0.122.0 and 1.11.0 alike); on the tool-use
+  event it marks a pause cross-posted from a subagent thread and is
+  "Informational only: the server routes the matching ``user.tool_confirmation``
+  ... by ``tool_use_id``, so clients do not send it back." Earlier versions of
+  this module echoed it — removed.
 * ``anthropic/types/beta/sessions/beta_managed_agents_agent_tool_use_event.py``
   and ``..._agent_mcp_tool_use_event.py`` — both carry
   ``evaluated_permission: "allow"|"ask"|"deny"|None``. A tool call the server
@@ -33,6 +40,17 @@ source read directly:
   denied the call (no confirmation is expected or accepted); ``"allow"`` or
   unset means the call never paused at all. **This is the real, documented
   pre-execution veto this module answers — it is not observe-only.**
+* **1.x additions.** A third ``permission_policy``, ``auto``
+  (``BetaManagedAgentsAutoPolicy``): the server judges each invocation. The
+  tool-use events gain ``evaluation`` (``always_allow`` | ``always_ask`` |
+  ``auto``, the last carrying ``BetaManagedAgentsAgentAutoEvaluatedPermission``
+  — an OPEN union with an open ``reason_code`` registry) whose type "always
+  equals the event's top-level evaluated_permission". This module keeps
+  reading only the top-level value: an ``auto`` judgement of ``ask`` is
+  answered exactly like ``always_ask``, ``auto`` ``allow``/``deny`` need no
+  answer, and ``evaluation`` is never inspected, so unknown variants cannot
+  change a verdict or crash. A subagent pause cross-posted to the primary
+  stream is answered once (``_answered`` dedups it across list and stream).
 * ``anthropic/lib/tools/_beta_session_runner.py`` (``SessionToolRunner``) is
   Anthropic's OWN reference dispatcher: it executes ``agent.tool_use`` /
   ``agent.custom_tool_use`` calls and posts their results, but it does
@@ -218,14 +236,12 @@ def confirmation_for_event(event: Any, *, gate: Optional[Gate] = None) -> Option
         if server:
             tool_input.setdefault("mcp_server_name", server)
 
+    # No session_thread_id: the server routes by tool_use_id (module doc).
     result: Dict[str, Any] = {
         "type": "user.tool_confirmation",
         "tool_use_id": event_id,
         "result": "allow",
     }
-    session_thread_id = _field(event, "session_thread_id")
-    if session_thread_id:
-        result["session_thread_id"] = session_thread_id
 
     g = gate or active()
     if g is None:
