@@ -543,11 +543,40 @@ async fn policy_check(
 
 // ─── Helper: extract virtual key and workspace info ───────────────────
 
-/// Extract workspace_id from the virtual key prefix or request body.
+/// The workspace a virtual key names in its own text, when the key uses one of
+/// the layouts the control plane mints.
 ///
-/// Virtual keys are in the format `vk_{workspace_prefix}_{random}`.
-/// Workspace ID is embedded after the second underscore segment,
-/// or read from an `x-workspace-id` header.
+/// - `vk_<32 hex>_<workspaceId>` (`apiKeyService.createApiKey`). Any non-empty
+///   workspace id: requiring a `ws_` prefix made every key for a workspace
+///   whose id has another shape (demo and imported workspaces) answer 403 at
+///   the gateway (TD-495).
+/// - Legacy `vk_<ws_…>_<32 chars>`.
+///
+/// `None` for anything else, notably attenuated child keys (`vk_<nanoid(32)>`),
+/// which carry no workspace at all. Their nanoid alphabet includes `_`, so the
+/// old split-on-underscore fallback invented a workspace for about 40 % of
+/// them and Step 2.6 then refused the request.
+fn workspace_from_vk(token: &str) -> Option<String> {
+    let rest = token.strip_prefix("vk_")?;
+    if rest.len() > 33
+        && rest.as_bytes()[32] == b'_'
+        && rest.as_bytes()[..32].iter().all(u8::is_ascii_hexdigit)
+    {
+        return Some(rest[33..].to_string());
+    }
+    if rest.len() > 33 {
+        let sep_idx = rest.len() - 33;
+        if rest.as_bytes()[sep_idx] == b'_' && rest[..sep_idx].starts_with("ws_") {
+            return Some(rest[..sep_idx].to_string());
+        }
+    }
+    None
+}
+
+/// Extract workspace_id from the `x-workspace-id` header or the virtual key.
+///
+/// Before authentication only. Once the control plane has authenticated the
+/// key, its record decides the workspace (Step 2.6).
 fn extract_workspace_id(headers: &HeaderMap, auth: &str) -> String {
     // Prefer explicit header (set by harness agent on session start)
     if let Some(v) = headers.get("x-workspace-id") {
@@ -555,26 +584,11 @@ fn extract_workspace_id(headers: &HeaderMap, auth: &str) -> String {
             return s.to_string();
         }
     }
-    // Fall back to extracting from virtual key: vk_<random>_<workspaceId> or vk_<workspaceId>_<random>
+    if let Some(wid) = workspace_from_vk(auth) {
+        return wid;
+    }
+    // Generic fallback for unmanaged test keys (split on last underscore).
     if let Some(rest) = auth.strip_prefix("vk_") {
-        // Suffix format: vk_<32_hex>_<workspaceId>
-        if rest.len() > 33 && rest.as_bytes()[32] == b'_' {
-            let suffix = &rest[33..];
-            if suffix.starts_with("ws_") {
-                return suffix.to_string();
-            }
-        }
-        // Legacy format: vk_<workspaceId>_<32_hex>
-        if rest.len() > 33 {
-            let sep_idx = rest.len() - 33;
-            if rest.as_bytes()[sep_idx] == b'_' {
-                let prefix = &rest[..sep_idx];
-                if prefix.starts_with("ws_") {
-                    return prefix.to_string();
-                }
-            }
-        }
-        // Generic fallback for test keys (split on last underscore)
         if let Some(last_idx) = rest.rfind('_') {
             return rest[..last_idx].to_string();
         }
@@ -1535,18 +1549,26 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         }
     }
 
-    if raw_token.starts_with("vk_") {
-        let key_wid = extract_workspace_id(&HeaderMap::new(), raw_token);
+    // What the caller explicitly claims: the header, or the workspace a minted
+    // key names in its own text. Step 2.6 checks this, never the generic
+    // fallback, against the authenticated record.
+    let header_workspace = headers
+        .get("x-workspace-id")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+    let key_workspace = workspace_from_vk(raw_token);
 
-        if workspace_id != "unknown" && workspace_id != key_wid {
+    if let Some(ref key_wid) = key_workspace {
+        if header_workspace.as_ref().is_some_and(|h| h != key_wid) {
             return json_error(
                 StatusCode::FORBIDDEN,
                 "workspace_mismatch",
                 "x-workspace-id header does not match the workspace authorized by the provided API key"
             );
         }
-        workspace_id = key_wid;
+        workspace_id = key_wid.clone();
     }
+    let claimed_workspace = key_workspace.or(header_workspace);
     let key_prefix = if raw_token.len() > 12 {
         &raw_token[..12]
     } else {
@@ -2343,7 +2365,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // request that asked for a different one.
     if let Some(ref key) = key_record {
         if let Some(ref authed_ws) = key.team_id {
-            if workspace_id != "unknown" && workspace_id != *authed_ws {
+            if claimed_workspace
+                .as_ref()
+                .is_some_and(|claimed| claimed != authed_ws)
+            {
                 tracing::warn!(
                     requested = %workspace_id,
                     authenticated = %authed_ws,
@@ -8542,6 +8567,44 @@ mod tests {
         let headers = HeaderMap::new();
         let res = extract_workspace_id(&headers, "vk_WorkspaceB_somekey");
         assert_eq!(res, "WorkspaceB");
+    }
+
+    // TD-495: a minted key names its workspace after `<32 hex>_` whatever the
+    // id's shape, and an attenuated child key names none.
+    #[test]
+    fn workspace_from_vk_accepts_any_minted_workspace_id() {
+        let hex = "0123456789abcdef0123456789abcdef";
+        assert_eq!(
+            workspace_from_vk(&format!("vk_{hex}_wk_demo-workspace-1")).as_deref(),
+            Some("wk_demo-workspace-1")
+        );
+        assert_eq!(
+            workspace_from_vk(&format!("vk_{hex}_ws_abc")).as_deref(),
+            Some("ws_abc")
+        );
+        assert_eq!(
+            workspace_from_vk(&format!("vk_ws_legacy_{hex}")).as_deref(),
+            Some("ws_legacy")
+        );
+    }
+
+    #[test]
+    fn workspace_from_vk_names_no_workspace_for_attenuated_keys() {
+        // vk_<nanoid(32)>: the alphabet includes `_`, so the old
+        // split-on-underscore fallback invented a workspace for these.
+        assert_eq!(
+            workspace_from_vk("vk_V1StGXR8_Z5jdHi6B-myT_Q3kLm9pA2b"),
+            None
+        );
+        assert_eq!(
+            workspace_from_vk("vk_V1StGXR8Z5jdHi6BmyTQ3kLm9pA2bcdE"),
+            None
+        );
+        // Not 32 hex before the separator: not the minted layout.
+        assert_eq!(
+            workspace_from_vk("vk_zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz_wk_demo"),
+            None
+        );
     }
 
     #[test]

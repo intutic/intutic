@@ -27,7 +27,7 @@ Intutic supports 42 AI agent harnesses out of the box. The CLI auto-detects whic
 | [LangGraph](/integrations/langgraph) | `.env.intutic` | `langgraph`/`langchain` in `pyproject.toml`, `requirements.txt`, or `uv.lock` | ✅ Stable |
 | [Grok Build](/integrations/grok) | `AGENTS.md` | `.grok/` or `AGENTS.md` in project, `~/.grok/`, or `grok` in `PATH` | ✅ Stable |
 | Muse Code | `AGENTS.md` | `.muse/` or `AGENTS.md` in project, `~/.config/muse/`, or `muse` in `PATH` | ✅ Stable |
-| [OpenCode](/integrations/opencode) | `AGENTS.md` + `.opencode/plugins/intutic-governance.js` | `.opencode/` or `opencode.json` in project, `$OPENCODE_CONFIG_DIR`/`~/.config/opencode/`, or `opencode` in `PATH` | ✅ Stable — the gate is a plugin OpenCode loads into its own process; MCP entries not proxy-wrapped yet (TD-487) |
+| [OpenCode](/integrations/opencode) | `AGENTS.md` + `.opencode/plugins/intutic-governance.js` | `.opencode/` or `opencode.json` in project, `$OPENCODE_CONFIG_DIR`/`~/.config/opencode/`, or `opencode` in `PATH` | ✅ Stable — the gate is a plugin OpenCode loads into its own process; `opencode.json` MCP servers are proxy-wrapped |
 | [LangChain](/integrations/langchain) | `.env.intutic` | `langchain`/`langchain-core` in `pyproject.toml`, `requirements.txt`, or `uv.lock` | ✅ Stable |
 | [CrewAI](/integrations/crewai) | `.env.intutic` | `crewai` in `pyproject.toml`, `requirements.txt`, or `uv.lock` | ✅ Stable |
 | [Google ADK](/integrations/google-adk) | `.env.intutic` | `google-adk` in `pyproject.toml`, `requirements.txt`, or `uv.lock` | ✅ Stable |

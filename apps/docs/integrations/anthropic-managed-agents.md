@@ -22,9 +22,9 @@ Every other SDK-gated adapter in this directory (Strands, OpenAI Agents, LangCha
 |---|---|---|
 | `agent.tool_use` (built-in tools), hosted session | Only if the tool's `permission_policy` is `always_ask` | `IntuticSessionConfirmer` answers the pause with a `Gate.guard()` verdict |
 | `agent.tool_use`, **self-hosted** `EnvironmentWorker` | Same as hosted — identical mechanism | Same — `IntuticSessionConfirmer` does not care where the tool body runs |
-| `agent.mcp_tool_use` (MCP tools) | Only if the MCP toolset's `permission_policy` is `always_ask` (Anthropic's docs say this is the toolset default — verify against your account) | Same as `agent.tool_use` |
+| `agent.mcp_tool_use` (MCP tools) | Only if the MCP toolset's `permission_policy` is `always_ask`. Set it explicitly; don't rely on a default | Same as `agent.tool_use` |
 | `agent.custom_tool_use` (your own tools) | Never — no `permission_policy` concept | `wrapManagedAgentsCustomTool`/`wrapManagedAgentsCustomTools` (TS) or `@guard` applied **before** `@beta_tool` (Python) — see below |
-| A tool configured `always_allow` | Never | **Not governed by Intutic at all** — the call never reaches your backend as an event to answer. This is an architectural ceiling, not a bug: see [TD-425](https://github.com/intutic/intutic/blob/main/docs/TECH_DEBT.md). Configure the tools you want gated as `always_ask`. |
+| A tool configured `always_allow`, or `auto` when Anthropic's evaluator allows the call | Never | **Not governed by Intutic at all** — the call never reaches your backend as an event to answer. This is an architectural ceiling, not a bug: see [TD-425](https://github.com/intutic/intutic/blob/main/docs/TECH_DEBT.md). Configure the tools you want gated as `always_ask`. |
 | The sandbox tool BODY (self-hosted) | N/A | **Not governed** — once a call is allowed, what the tool implementation does inside your `EnvironmentWorker` is outside this adapter's reach, same posture as every adapter toward a framework's built-in tool bodies. |
 
 ## Setup — TypeScript
