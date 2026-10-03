@@ -349,7 +349,7 @@ export const HarnessType = {
    * OR the local dev-loop config files the `agentcore` CLI (npm
    * `@aws/agentcore`, CONFIRMED at 0.27.0) and the Python
    * `bedrock-agentcore-starter-toolkit` (CONFIRMED at 0.3.11) write:
-   * `.bedrock_agentcore.yaml`, `agentcore/agentcore.json`, `aws-targets.json`
+   * `.bedrock_agentcore.yaml`, `agentcore/agentcore.json`, `agentcore/aws-targets.json`
    * — all three confirmed by extracting the real published tarballs/wheels
    * and grepping their compiled/source output for the literal filenames.
    *
