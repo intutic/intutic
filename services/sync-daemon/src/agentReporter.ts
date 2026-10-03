@@ -15,7 +15,7 @@
  * @module
  */
 
-import { readFile, readdir, access } from 'node:fs/promises'
+import { readFile, readdir, access, open } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { newIso } from '@intutic/id'
@@ -26,7 +26,9 @@ import {
   MAX_SKILL_DIR_DEPTH,
   MAX_FILES_PER_SKILL,
   MAX_SCRIPT_SCAN_BYTES,
+  MAX_SCRIPT_HASH_BYTES,
   type HarnessType,
+  type SkillScriptsFacet,
 } from '@intutic/shared-types'
 import { discoverMcpServers } from './harness/mcpAutoWrite.js'
 import { gateKindForHarness } from './harness/gateKind.js'
@@ -100,18 +102,10 @@ interface AgentFacets {
      * `MAX_SCRIPT_SCAN_BYTES`. Omitted (not `{total: 0, ...}`) when the
      * skill has no bundled files at all — `agentPosture.ts`'s `skills`
      * scorer treats an absent facet as "nothing to say," not as a finding.
+     * Carries each readable file's sha256 (TD-486) — see
+     * `SkillScriptsFacet` in `@intutic/shared-types`.
      */
-    scripts?: {
-      /** Every bundled file the walk found, scanned or not. */
-      total: number
-      /** How many of `total` were actually content-scanned — excludes
-       *  unreadable files, files over the byte cap (refused, not skipped),
-       *  and files whose language `detectScriptLanguage` could not
-       *  determine. */
-      scanned: number
-      /** How many of `scanned` came back with at least one finding. */
-      flagged: number
-    }
+    scripts?: SkillScriptsFacet
     /**
      * sha256 of the `SKILL.md` content this row describes (Phase S5,
      * TD-357) — lets `services/control-plane/src/routes/agents.ts` look up
@@ -299,10 +293,13 @@ async function collectSops(workspaceRoot: string): Promise<AgentFacets['sops']> 
  * skill has no bundled files at all, so `collectSkills` can omit `scripts`
  * entirely for the common case of a skill that is only a `SKILL.md` — see
  * that field's own doc comment on the `AgentFacets['skills']` item type.
+ *
+ * TD-486: also sha256-hashes every bundled file it can read within
+ * `MAX_SCRIPT_HASH_BYTES`, so the control plane can join VirusTotal
+ * verdicts to this skill by hash instead of by name. Only the hashes are
+ * reported — never file content.
  */
-async function collectSkillScripts(
-  skillDir: string,
-): Promise<{ total: number; scanned: number; flagged: number } | undefined> {
+async function collectSkillScripts(skillDir: string): Promise<SkillScriptsFacet | undefined> {
   const files: string[] = []
 
   async function walk(dir: string, depth: number): Promise<void> {
@@ -331,13 +328,16 @@ async function collectSkillScripts(
 
   let scanned = 0
   let flagged = 0
+  const sha256: string[] = []
   for (const filePath of files) {
-    let buffer: Buffer
+    let buffer: Buffer | null
     try {
-      buffer = await readFile(filePath)
+      buffer = await readFileWithin(filePath, MAX_SCRIPT_HASH_BYTES)
     } catch {
       continue // unreadable — counted in `total`, not `scanned`
     }
+    if (buffer === null) continue // over the hash cap — counted in `total`, neither hashed nor scanned
+    sha256.push(createHash('sha256').update(buffer).digest('hex'))
     if (buffer.length > MAX_SCRIPT_SCAN_BYTES) continue // refused, not silently skipped or scanned
     const firstLine = buffer.toString('utf8', 0, Math.min(buffer.length, 200)).split('\n')[0]
     const language = detectScriptLanguage(filePath, firstLine)
@@ -347,7 +347,18 @@ async function collectSkillScripts(
     if (!result.clean) flagged++
   }
 
-  return { total: files.length, scanned, flagged }
+  return { total: files.length, scanned, flagged, sha256 }
+}
+
+/** Reads `filePath` only if it is at most `maxBytes` long (checked on the open handle, before reading); `null` when it is larger. */
+async function readFileWithin(filePath: string, maxBytes: number): Promise<Buffer | null> {
+  const handle = await open(filePath, 'r')
+  try {
+    if ((await handle.stat()).size > maxBytes) return null
+    return await handle.readFile()
+  } finally {
+    await handle.close()
+  }
 }
 
 /**
