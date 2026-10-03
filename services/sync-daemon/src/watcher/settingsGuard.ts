@@ -100,7 +100,6 @@ export function buildProtectedPaths(workspaceRoot: string): string[] {
     // watching the parent directory catches every profile's file without
     // needing to know their names in advance.
     path.join(resolveDshHome(), 'profiles'),
-    path.join(resolveDshHome(), 'settings.yaml'),
   ]
 }
 
@@ -276,21 +275,22 @@ export async function guardSettingsFile(
     return true
   }
 
-  // ── dsh: any profile's cordis.patch.yml, or settings.yaml ─────────
+  // ── dsh: any profile's cordis.patch.yml ──────────────────────────
   // Re-running the writer re-merges into EVERY existing profile (not just
   // the one whose file changed) — cheap (write-if-changed per file) and
   // avoids threading "which profile" through this generic path-triggered
   // callback. YAML content, so `guardJsonHookFile`'s `JSON.parse` marker
-  // check does not apply; a plain substring check for the plugin row id or
-  // the llm-pi-ai route is enough to decide "does this look tampered".
+  // check does not apply; a plain substring check for the plugin row id and
+  // the proxy URL (the `llm-deepseek` egress row's `baseURL`, which lives in
+  // this same file since dsh 0.2) is enough to decide "does this look
+  // tampered". `$DSH_HOME/settings.yaml` is no longer watched: dsh 0.2
+  // renames it to `settings.yaml.imported` on boot, and this writer no
+  // longer writes it.
   if (
     changedPath.startsWith(path.join(resolveDshHome(), 'profiles') + path.sep) &&
     changedPath.endsWith('cordis.patch.yml')
   ) {
-    return guardDshFile(changedPath, 'intutic-governance', workspaceRoot, proxyUrl)
-  }
-  if (changedPath === path.join(resolveDshHome(), 'settings.yaml')) {
-    return guardDshFile(changedPath, 'llm-pi-ai', workspaceRoot, proxyUrl)
+    return guardDshFile(changedPath, ['intutic-governance', proxyUrl], workspaceRoot, proxyUrl)
   }
 
   // ── OpenCode plugin: marker-substring guard, same shape as dsh ────
@@ -402,11 +402,10 @@ async function guardJsonHookFile(
 }
 
 /**
- * dsh's YAML files, restored by re-running `writeDshHooks` (which
- * merge-writes into every existing profile plus settings.yaml — see
- * dshHooks.ts). `marker` is the literal substring that must survive in the
- * file for it to be considered intact — the plugin row id for a profile's
- * cordis.patch.yml, the llm-pi-ai section name for settings.yaml.
+ * dsh's profile YAML files, restored by re-running `writeDshHooks` (which
+ * merge-writes into every existing profile — see dshHooks.ts). Every one of
+ * `markers` is a literal substring that must survive in the file for it to
+ * be considered intact.
  */
 /**
  * Generic form of {@link guardDshFile}: a file whose only integrity check is
@@ -430,7 +429,7 @@ async function guardMarkedFile(filePath: string, marker: string, harness: string
   return false
 }
 
-async function guardDshFile(filePath: string, marker: string, workspaceRoot: string, proxyUrl: string): Promise<boolean> {
+async function guardDshFile(filePath: string, markers: string[], workspaceRoot: string, proxyUrl: string): Promise<boolean> {
   let raw: string
   try {
     raw = await fs.readFile(filePath, 'utf-8')
@@ -440,7 +439,7 @@ async function guardDshFile(filePath: string, marker: string, workspaceRoot: str
     return true
   }
 
-  if (!raw.includes(marker)) {
+  if (!markers.every((marker) => raw.includes(marker))) {
     log.warn({ action: 'dsh_marker_missing', path: filePath }, 'dsh governance file tampered — restoring')
     await safeRestore('dsh', () => writeDshHooks(workspaceRoot, proxyUrl, ''))
     return true
