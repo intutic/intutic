@@ -38,7 +38,7 @@ The `agentcore-runtime` adapter is detected via any of:
 - `bedrock-agentcore` in a Python manifest (`pyproject.toml`, `requirements.txt`, `uv.lock`) or in `package.json` dependencies — the SDK itself (confirmed live: PyPI `bedrock-agentcore` at 1.22.0, npm `bedrock-agentcore` at 0.4.3)
 - `bedrock-agentcore-starter-toolkit` in a Python manifest — the optional Python CLI/dev-loop toolkit (confirmed at 0.3.11)
 - `@aws/agentcore` in `package.json` — the npm CLI (confirmed at 0.27.0)
-- `.bedrock_agentcore.yaml`, `agentcore/agentcore.json`, or `aws-targets.json` at the workspace root — config files the CLIs above write during `agentcore configure`/`agentcore launch`/`agentcore deploy`
+- `.bedrock_agentcore.yaml` at the workspace root, or `agentcore/agentcore.json` / `agentcore/aws-targets.json` — config files the CLIs above write during `agentcore configure`/`agentcore launch`/`agentcore deploy`
 
 It writes **no config of its own**. Runtime hosts your agent code unchanged, so the actual tool-call gate is whichever already-supported framework adapter your code uses — if your project also matches `strands-agents`, `langgraph`, `crewai`, etc., THAT adapter writes the real `.env.intutic` proxy configuration and the gate stays SDK-side exactly as documented on that framework's own page. If your Runtime-hosted code uses no framework this product supports (raw `boto3`, a hand-rolled tool loop), coverage is genuinely zero — the same honest gap the [Agentic Orchestrator](/integrations/agentic-orchestrator) integration has for its OpenCode backend.
 
@@ -80,7 +80,37 @@ The exact event/response JSON shapes this Lambda implements (`interceptorInputVe
 
 ### Composing with your own Lambda logic
 
-Because a gateway can have only ONE REQUEST interceptor, if you need custom logic of your own (auth, header injection, model-routing rewrites, ...) on the same gateway, it must be composed into a single Lambda alongside Intutic's check — not two separate interceptors. The straightforward pattern: call your own logic first, and only invoke `checkToolCall` (exported from `tools/agentcore-interceptor/src/handler.ts`) for `tools/call` requests your logic didn't already reject.
+A gateway can have only ONE REQUEST interceptor. If you need logic of your own on the same gateway (auth, header injection, model-routing rewrites, and so on), it has to run in the same Lambda as Intutic's check, not in a second interceptor. `tools/agentcore-interceptor/src/handler.ts` exports `composeRequestInterceptor` for this:
+
+```ts
+import { composeRequestInterceptor } from './handler.js'
+
+export const handler = composeRequestInterceptor(async (event) => {
+  const body = event.mcp.gatewayRequest.body
+  if (!event.mcp.gatewayRequest.headers?.['X-Tenant']) {
+    // Your own rejection: returned as-is, and Intutic is never called.
+    return {
+      interceptorOutputVersion: '1.0',
+      mcp: {
+        transformedGatewayResponse: {
+          statusCode: 200,
+          body: { jsonrpc: '2.0', id: body.id, error: { code: -32001, message: 'missing tenant' } },
+        },
+      },
+    }
+  }
+  // Let the call continue. Rewriting the body here is fine.
+  return { interceptorOutputVersion: '1.0', mcp: { transformedGatewayRequest: { body } } }
+})
+```
+
+What the composed handler does:
+
+- **Your logic runs first.** If it returns `transformedGatewayResponse`, that response goes back unchanged and Intutic is never called.
+- **Otherwise Intutic checks the body your logic forwards**, rewrites included, because that is what reaches the target. Only `tools/call` is checked. If Intutic allows the call, your output is returned unchanged. If it denies, the caller gets the Intutic denial instead.
+- **Failures fail closed.** A control-plane failure follows `INTUTIC_FAIL_OPEN`, exactly as the stock handler does. If your logic throws, the call is denied regardless of that flag.
+
+If you need a different order, `checkToolCall(config, { toolName, toolInput, sessionId })` and `readConfig()` are exported too. `checkToolCall` returns `{ allowed, reason? }` and throws only when it gets no answer at all. Deciding what that means is then up to you.
 
 ### Short-circuit and streaming behavior
 
@@ -139,7 +169,7 @@ Send a `tools/call` request through the gateway for a tool your workspace has a 
 |---|---|
 | Harness type (Runtime only) | `agentcore-runtime` — no entry for Gateway (server-side, like [QM](/integrations/qm)) |
 | Config file (Runtime) | none — delegates entirely to whichever framework adapter your code uses |
-| Detection (Runtime) | `bedrock-agentcore`/`bedrock-agentcore-starter-toolkit`/`@aws/agentcore` in a manifest, or `.bedrock_agentcore.yaml`/`agentcore/agentcore.json`/`aws-targets.json` at the workspace root |
+| Detection (Runtime) | `bedrock-agentcore`/`bedrock-agentcore-starter-toolkit`/`@aws/agentcore` in a manifest, or `.bedrock_agentcore.yaml`/`agentcore/agentcore.json`/`agentcore/aws-targets.json` |
 | Gateway endpoint | `POST /api/v1/integrations/agentcore/gateway-check` |
 | Gateway auth | `Authorization: Bearer vk_...` (standard workspace virtual key — no special header scheme) |
 | Gateway request | `{ toolName: string, toolInput?: unknown, sessionId?: string, gatewayId?: string }` |

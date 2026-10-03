@@ -1069,7 +1069,7 @@ export const NO_GATE: ReadonlyArray<{
       'by extracting and grepping the real tarballs/wheels, not assumed) covers the ' +
       '`bedrock-agentcore` PyPI/npm SDK, the `bedrock-agentcore-starter-toolkit` PyPI CLI, the ' +
       '`@aws/agentcore` npm CLI, and the `.bedrock_agentcore.yaml`/`agentcore/agentcore.json`/ ' +
-      '`aws-targets.json` config files those CLIs write. Deployment-target caveats that are NOT ' +
+      '`agentcore/aws-targets.json` config files those CLIs write. Deployment-target caveats that are NOT ' +
       'a gate concern — environment-variable caps (<=50 vars, <=5000 chars each, CONFIRMED ' +
       'against the CreateAgentRuntime API reference), VPC/NAT egress topology (PUBLIC network ' +
       'mode is the default; private egress needs an explicit NAT setup this adapter cannot do ' +
