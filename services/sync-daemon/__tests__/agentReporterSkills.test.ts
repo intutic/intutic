@@ -15,7 +15,10 @@ import * as fs from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
+import { MAX_SCRIPT_HASH_BYTES } from '@intutic/shared-types'
 import { collectAgentReport } from '../src/agentReporter.js'
+
+const sha256Of = (content: string | Buffer) => createHash('sha256').update(content).digest('hex')
 
 describe('collectAgentReport — skills facet content scanning', () => {
   let workspaceRoot: string
@@ -172,7 +175,7 @@ describe('collectAgentReport — skills facet bundled-script enumeration (TD-356
 
     const r = await report()
     const entry = r.facets.skills.find((s: any) => s.name === 'with-clean-script') as any
-    expect(entry.scripts).toEqual({ total: 1, scanned: 1, flagged: 0 })
+    expect(entry.scripts).toEqual({ total: 1, scanned: 1, flagged: 0, sha256: [sha256Of('#!/bin/sh\necho "hello"\n')] })
   })
 
   it('flags a skill whose bundled script trips a pattern', async () => {
@@ -183,7 +186,7 @@ describe('collectAgentReport — skills facet bundled-script enumeration (TD-356
 
     const r = await report()
     const entry = r.facets.skills.find((s: any) => s.name === 'with-malicious-script') as any
-    expect(entry.scripts).toEqual({ total: 1, scanned: 1, flagged: 1 })
+    expect(entry.scripts).toMatchObject({ total: 1, scanned: 1, flagged: 1 })
   })
 
   it('counts an unrecognized-language file in total but not in scanned', async () => {
@@ -194,7 +197,8 @@ describe('collectAgentReport — skills facet bundled-script enumeration (TD-356
 
     const r = await report()
     const entry = r.facets.skills.find((s: any) => s.name === 'with-binary') as any
-    expect(entry.scripts).toEqual({ total: 1, scanned: 0, flagged: 0 })
+    // Not scannable, but still hashed — a hash-only VirusTotal lookup does not need a known language.
+    expect(entry.scripts).toEqual({ total: 1, scanned: 0, flagged: 0, sha256: [sha256Of(Buffer.from([0x00, 0x01, 0x02]))] })
   })
 
   it('still enumerates scripts when SKILL.md itself is unreadable', async () => {
@@ -206,7 +210,7 @@ describe('collectAgentReport — skills facet bundled-script enumeration (TD-356
     const r = await report()
     const entry = r.facets.skills.find((s: any) => s.name === 'unreadable-with-script') as any
     expect(entry.scanned).toBe(false)
-    expect(entry.scripts).toEqual({ total: 1, scanned: 1, flagged: 0 })
+    expect(entry.scripts).toMatchObject({ total: 1, scanned: 1, flagged: 0 })
   })
 
   it('never follows a symlinked bundled file', async () => {
@@ -220,5 +224,37 @@ describe('collectAgentReport — skills facet bundled-script enumeration (TD-356
     const r = await report()
     const entry = r.facets.skills.find((s: any) => s.name === 'with-symlink') as any
     expect(entry.scripts).toBeUndefined()
+  })
+
+  // TD-486: the control plane joins VirusTotal verdicts on these hashes.
+  it('reports the sha256 of each bundled script, matching crypto.createHash over the file bytes', async () => {
+    const dir = join(workspaceRoot, '.agents', 'skills', 'two-scripts')
+    await fs.mkdir(join(dir, 'lib'), { recursive: true })
+    await fs.writeFile(join(dir, 'SKILL.md'), '# Skill\n', 'utf8')
+    const first = '#!/bin/sh\necho one\n'
+    const second = 'print("two")\n'
+    await fs.writeFile(join(dir, 'one.sh'), first, 'utf8')
+    await fs.writeFile(join(dir, 'lib', 'two.py'), second, 'utf8')
+
+    const r = await report()
+    const entry = r.facets.skills.find((s: any) => s.name === 'two-scripts') as any
+    expect(entry.scripts.total).toBe(2)
+    expect([...entry.scripts.sha256].sort()).toEqual([sha256Of(first), sha256Of(second)].sort())
+    // Hashes only — no file content anywhere in the reported skill row.
+    expect(JSON.stringify(entry)).not.toContain('echo one')
+    expect(JSON.stringify(entry)).not.toContain('print("two")')
+  })
+
+  it('counts a file over MAX_SCRIPT_HASH_BYTES in total but neither hashes nor scans it', async () => {
+    const dir = join(workspaceRoot, '.agents', 'skills', 'with-huge-file')
+    await fs.mkdir(dir, { recursive: true })
+    await fs.writeFile(join(dir, 'SKILL.md'), '# Skill\n', 'utf8')
+    await fs.writeFile(join(dir, 'huge.sh'), Buffer.alloc(MAX_SCRIPT_HASH_BYTES + 1, 0x61))
+    const small = '#!/bin/sh\necho small\n'
+    await fs.writeFile(join(dir, 'small.sh'), small, 'utf8')
+
+    const r = await report()
+    const entry = r.facets.skills.find((s: any) => s.name === 'with-huge-file') as any
+    expect(entry.scripts).toEqual({ total: 2, scanned: 1, flagged: 0, sha256: [sha256Of(small)] })
   })
 })
