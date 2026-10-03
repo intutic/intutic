@@ -128,6 +128,9 @@ export const HARNESS_FILES: Record<HarnessType, string> = {
   // A4: AWS Strands Agents — same Python SDK-gated rationale as the Wave 1
   // family above (gate ships in intutic_clawde.gate.adapters.strands).
   strands: '.env.intutic',
+  // TD-375: Microsoft Agent Framework — same Python SDK-gated rationale
+  // (gate ships in intutic_clawde.gate.adapters.agent_framework).
+  'agent-framework': '.env.intutic',
   // T2: JS/TS SDK-gated frameworks — same rationale as the Wave 1 Python
   // family above, but the blocking gate ships in @intutic/gate
   // (packages/gate-js) rather than intutic-clawde. See formatContent's
@@ -666,6 +669,7 @@ function formatContent(
     case 'pydantic-ai':
     case 'smolagents':
     case 'strands':
+    case 'agent-framework':
       return formatSdkGatedEnv(sops, proxyUrl, SDK_GATED_FRAMEWORKS[harness])
 
     case 'mastra':
@@ -793,7 +797,8 @@ function formatLanggraph(sops: SyncSopEntry[], proxyUrl: string): string {
  * `@guard`/`guard_tools` helpers, which need no optional import.
  */
 const SDK_GATED_FRAMEWORKS: Record<
-  'langchain' | 'crewai' | 'autogen' | 'ag2' | 'google-adk' | 'openai-agents' | 'pydantic-ai' | 'smolagents' | 'strands',
+  'langchain' | 'crewai' | 'autogen' | 'ag2' | 'google-adk' | 'openai-agents' | 'pydantic-ai' | 'smolagents' | 'strands'
+  | 'agent-framework',
   { label: string; pipExtra?: string; importLine: string; docsSlug: string }
 > = {
   langchain: {
@@ -848,6 +853,13 @@ const SDK_GATED_FRAMEWORKS: Record<
     pipExtra: 'strands',
     importLine: 'from intutic_clawde.gate.adapters.strands import IntuticHookProvider',
     docsSlug: 'strands',
+  },
+  // TD-375: Microsoft Agent Framework — dedicated adapter module from day one.
+  'agent-framework': {
+    label: 'Microsoft Agent Framework',
+    pipExtra: 'agent-framework',
+    importLine: 'from intutic_clawde.gate.adapters.agent_framework import IntuticFunctionMiddleware',
+    docsSlug: 'microsoft-agent-framework',
   },
 }
 

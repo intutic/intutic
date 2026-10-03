@@ -22,7 +22,7 @@ Most teams map one workspace to one code repository. This keeps governance rules
 
 ## Harnesses
 
-A **harness** is any AI coding agent that Intutic governs. Intutic ships **42 harness adapters**, and the headline count is the same **42 supported harnesses** — no adapter carries an open support gap today (AutoGen's closed with its workbench gate and the Agentic Orchestrator's with OpenCode's own adapter, both in September 2026) — 41 adapters auto-detected and config-synced by `intutic init`/`intutic connect` (some write directly into a generated hook file, others write `.env.intutic` pointing at a dedicated SDK-side gate (`@intutic/gate` / `intutic-clawde`) that lives in your own code), plus 1 that is operator-deployed rather than repo-detected (see the bridge-gated row below):
+A **harness** is any AI coding agent that Intutic governs. Intutic ships **43 harness adapters**, and the headline count is the same **43 supported harnesses** — no adapter carries an open support gap today (AutoGen's closed with its workbench gate and the Agentic Orchestrator's with OpenCode's own adapter, both in September 2026) — 42 adapters auto-detected and config-synced by `intutic init`/`intutic connect` (some write directly into a generated hook file, others write `.env.intutic` pointing at a dedicated SDK-side gate (`@intutic/gate` / `intutic-clawde`) that lives in your own code), plus 1 that is operator-deployed rather than repo-detected (see the bridge-gated row below):
 
 | Category | Harnesses |
 |----------|-----------|
@@ -31,7 +31,7 @@ A **harness** is any AI coding agent that Intutic governs. Intutic ships **42 ha
 | Platform agents | Antigravity, OpenHands, n8n, Claude Desktop, Open WebUI |
 | Specialized | OpenClaw, Hermes, LangGraph |
 | Orchestrators (delegate to already-gated harnesses) | Spotify Xirp, DoorDash Agentic Orchestrator, AWS Bedrock AgentCore Runtime |
-| SDK-gated frameworks (`@intutic/gate` / `intutic-clawde`; `.env.intutic` points at the SDK gate instead of a generated hook file) | LangChain, CrewAI, AutoGen, AG2, Google ADK, OpenAI Agents SDK, Pydantic AI, smolagents, AWS Strands Agents, Mastra, Vercel AI SDK, eve, TrueForge (embedded), AI SDK Harness, AI SDK Workflow |
+| SDK-gated frameworks (`@intutic/gate` / `intutic-clawde`; `.env.intutic` points at the SDK gate instead of a generated hook file) | LangChain, CrewAI, AutoGen, AG2, Google ADK, OpenAI Agents SDK, Pydantic AI, smolagents, AWS Strands Agents, Microsoft Agent Framework, Mastra, Vercel AI SDK, eve, TrueForge (embedded), AI SDK Harness, AI SDK Workflow |
 | Bridge-gated (out-of-process Intutic-operated service; not auto-detected by `intutic init` — operator-deployed instead) | TrueForge (standalone/hosted server — `services/trueforge-bridge`) |
 
 The `intutic init` command auto-detects which harnesses are present in your repo and writes governance config into each one's native config file. See [How It Works](/guide/how-it-works) for details on per-harness routing.
