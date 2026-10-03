@@ -138,12 +138,15 @@ infrastructure. It does **not**, today, keep every part of Intutic's evaluation 
 
 - **By default, LLM-as-judge evaluation stays on Intutic's Cloud control plane.** The proxy
   POSTs chunk/response content to `{CONTROL_PLANE_URL}/api/v1/judge/...` for evaluation
-  (default `https://app.intutic.ai`) unless you opt into the local judge below.
+  (default `https://app.intutic.ai`) unless you opt into the local judge below. There it runs
+  on Intutic's own self-hosted open-weight models, never a third-party hosted API.
 - **Local judge (opt-in) keeps finalize-time judging entirely on your infrastructure.** Set
   `INTUTIC_GATEWAY_LOCAL_JUDGE=true` (Docker/bare-metal) or `proxy.localJudge: true` (Helm),
   point `LITELLM_LOCAL_URL` / `proxy.localJudge` + `litellm.judgeModel` at a model in your own
   bundled LiteLLM's `model_list`, and finalize-time content is judged there instead — it never
-  reaches `CONTROL_PLANE_URL`. This is a **smaller capability than the SaaS judge**, not a
+  reaches `CONTROL_PLANE_URL`. That model must be self-hosted (Ollama, vLLM, or another server
+  you run): judges never call a hosted API such as Anthropic, OpenAI, OpenRouter or Ollama Cloud,
+  even with your own key. This is a **smaller capability than the SaaS judge**, not a
   drop-in replacement, and the gap is deliberate, not an oversight:
   - Verdicts are `COMPLIANT | VIOLATION | AMBIGUOUS` only (no SaaS-judge chunk-log
     reconciliation vocabulary).
@@ -164,26 +167,11 @@ infrastructure. It does **not**, today, keep every part of Intutic's evaluation 
     `LITELLM_LOCAL_TYPED_JUDGE_MODEL`). It needs a model that returns log-probabilities and a
     band you measured for that model — see
     [On-Prem Judge Setup](/external/on-prem-judge#typed-stage-optional).
-- **Workspace-chosen judge model (opt-in) runs the managed judge on YOUR model and YOUR
-  provider key.** Set a judge model under Settings → LLM Judge (or `managedJudgeModel` in
-  workspace settings). Judge calls for that workspace then run on the model you named, routed
-  through Intutic's platform gateway with your workspace's own credential — so judge inference
-  is billed to your provider key, and any model your provisioned providers serve works (an
-  OpenRouter-hosted Qwen, your fine-tune, anything). Trade-offs, stated plainly:
-  - This **replaces Intutic's independent trusted monitor** for your workspace. The judged
-    party choosing its own judge is a real reduction in monitoring independence — every verdict
-    is stamped `[workspace-judge]`, and a judge equal to the model that produced the work is
-    additionally stamped `[self-graded]`. The stamps are not removable.
-  - Judged **content still transits Intutic's control plane and gateway** on its way to your
-    provider — this is a billing/model-choice feature, NOT a data-locality one. The local judge
-    above remains the keep-content-in-org option.
-  - Chunk-level judging fires per paragraph, on your key — budget accordingly.
-  - A DLP or budget KILL on the judge call itself fails safe as a judge-unavailable note.
-- **If your judge LLM is unreachable** — local, SaaS, or workspace-chosen — the proxy reports
+- **If your judge LLM is unreachable** — local or SaaS — the proxy reports
   this honestly rather than silently passing every check: a response is annotated `Intutic
   LLM-as-a-Judge: verdict UNAVAILABLE — treat as unverified, not as clean`, instead of
   defaulting to a clean verdict. A local judge never falls back to calling the SaaS judge on
-  its own failure, and a workspace-chosen judge never silently reverts to the platform monitor.
+  its own failure.
 
 ## Related
 

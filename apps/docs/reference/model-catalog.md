@@ -2,10 +2,9 @@
 
 Intutic ships a generated catalog of LLM models — which provider offers each one, its context
 window, output token limit, per-1K token cost, and whether it's a reasonable fit for judging
-another model's work. It's what powers the model picker under
-[Settings → LLM Judge](/guide/settings#llm-judge) and the [cohort wizard](/guide/cohort-wizard),
-and it's available directly from `@intutic/shared-types` for anything else you build against
-Intutic's provider registry.
+another model's work. It's what powers the self-hosted model picker in
+[`intutic judge configure`](/reference/cli#intutic-judge-configure), and it's available directly
+from `@intutic/shared-types` for anything else you build against Intutic's provider registry.
 
 ## Where it comes from
 
@@ -45,11 +44,14 @@ The catalog spans every provider in the registry (Anthropic, OpenAI, Gemini, Mis
 OpenRouter, Azure OpenAI, AWS Bedrock, Google Vertex AI, Cohere, Ollama) — but "in the catalog"
 and "routable by Intutic's managed gateway today" are different questions. Only
 `routingLive: true` providers (Anthropic, OpenAI, Gemini, Mistral, OpenRouter as of this
-writing — see [Provider Keys](/guide/settings#provider-keys)) can actually be reached through
-the SaaS judge path; the rest are real, browsable catalog entries for providers whose *routing*
-is separate, real engineering, not yet built. `judgeModelChoices({ saasRoutableOnly: true })`
-(the default) filters to what's actually usable today; pass `false` to see the full catalog,
-appropriate for an on-prem judge where a self-hosted LiteLLM deployment can serve anything.
+writing — see [Provider Keys](/guide/settings#provider-keys)) can be reached through the
+gateway; the rest are real, browsable catalog entries for providers whose *routing* is
+separate, real engineering, not yet built.
+
+Judges are a narrower question still: they run only on self-hosted models. Of the registry,
+only Ollama is self-hosted (`SELF_HOSTED_MODEL_PROVIDER_IDS`), and its Ollama Cloud models
+(`ollama/<name>:<size>-cloud`) run on ollama.com, so they count as hosted.
+`selfHostedJudgeModelChoices()` returns the judge-capable entries left after that filter.
 
 ## What makes a model judge-capable
 
@@ -68,10 +70,21 @@ separate, workspace-specific decision.
 ## Using it in code
 
 ```ts
-import { judgeModelChoices, findCatalogModel, normalizeModelRef } from '@intutic/shared-types'
+import {
+  selfHostedJudgeModelChoices,
+  isHostedModelRef,
+  findCatalogModel,
+  normalizeModelRef,
+} from '@intutic/shared-types'
 
-// Models a workspace with provisioned Anthropic + OpenAI credentials could pick as a judge
-const choices = judgeModelChoices({ providers: ['anthropic', 'openai'], saasRoutableOnly: true })
+// Judge-capable models an on-prem judge may use (Ollama, Ollama Cloud excluded)
+const choices = selfHostedJudgeModelChoices()
+
+// Refuse a hosted judge model
+isHostedModelRef('anthropic/claude-haiku-4-5') // → true
+isHostedModelRef('ollama/gpt-oss:120b-cloud')  // → true (Ollama Cloud)
+isHostedModelRef('ollama/llama3.1')            // → false
+isHostedModelRef('my-org/local-qwen')          // → false (a local alias, not a registry provider)
 
 // Look up a model by its canonical ref or bare id
 const entry = findCatalogModel('claude-haiku-4-5')
@@ -83,16 +96,14 @@ normalizeModelRef('anthropic/anthropic/claude-haiku-4-5')
 
 ## Custom and BYO model names
 
-A name outside the catalog is always legal — an on-prem LiteLLM deployment can serve any model
-under any alias it chooses. Nothing that validates `managedJudgeModel` (the settings PUT, the
-judge-model test route) checks catalog membership; it only checks the character shape. Catalog
-membership is informational — the dashboard shows an amber **custom model** badge for a name it
-doesn't recognize, never a validation error. See [the cohort wizard](/guide/cohort-wizard) and
-[the on-prem judge](/external/on-prem-judge) for where this matters in practice.
+A name outside the catalog is legal — an on-prem LiteLLM deployment can serve any model under
+any alias it chooses, and `intutic judge configure` accepts such a name with a warning. Catalog
+membership is informational. What is refused is a hosted model: a custom judge reference for
+which `isHostedModelRef()` is true. See [the on-prem judge](/external/on-prem-judge) for where
+this matters in practice.
 
 ## Related
 
-- [Settings & Configuration — LLM Judge](/guide/settings#llm-judge)
-- [The cohort wizard](/guide/cohort-wizard)
+- [Settings & Configuration — Judges](/guide/settings#judges)
 - [On-prem judge setup](/external/on-prem-judge)
 - [Provider Keys](/guide/settings#provider-keys)

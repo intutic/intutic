@@ -1,7 +1,6 @@
 /**
  * `intutic setup` — the cohort setup wizard (LLD #70, model catalog & cohort
- * wizard): codescan → provider → credentials → verify → persist → judge
- * model → summary. Mirrors the dashboard's `SetupWizard.tsx` step order
+ * wizard): codescan → provider → credentials → verify → persist → summary. Mirrors the dashboard's `SetupWizard.tsx` step order
  * (minus the parts that need a browser) and, wherever a step corresponds to
  * an existing flag-driven command, calls exactly what that command calls —
  * `detectHarnesses` (same as `intutic init`), the provider-credentials PUT
@@ -23,8 +22,6 @@ import { join } from 'node:path'
 import {
   PROVIDER_REGISTRY,
   getProviderDefinition,
-  judgeModelChoices,
-  findCatalogModel,
   type ProviderDefinition,
 } from '@intutic/shared-types'
 import { findWorkspaceRoot } from './init.js'
@@ -40,17 +37,6 @@ import { probeProviderCredential } from '../lib/providerProbe.js'
 // mirrors the CLI's already-tested contracts for THIRD-PARTY embedders ("the
 // CLI's own already-tested contracts, not re-derived"); the CLI depending on
 // it would invert that relationship, and no other command here does.
-
-/** Result of POST /api/v1/workspace/judge-model/test (mirrors the dashboard's useJudgeModel.ts). */
-interface JudgeModelTestResult {
-  ok: boolean
-  model?: string
-  provider?: string
-  latencyMs?: number
-  stage?: 'shape' | 'provider' | 'completion'
-  error?: string
-  upstreamStatus?: number
-}
 
 // Exported (not just module-private) so a test's SetupIO implementation can
 // return the SAME unique-symbol value the SetupIO interface's method
@@ -170,9 +156,7 @@ export async function runSetup(opts: SetupOpts, io: SetupIO = createClackIO()): 
   // ── Step 3: provider ──
   const providerId = await io.select({
     message: 'Which LLM provider do you want to configure?',
-    // Judge-only credentials (TypeSafe's Jev) are not LLM providers to route
-    // through; they are set in the key wizard or `intutic credentials set`.
-    options: PROVIDER_REGISTRY.filter((def) => !def.judgeOnly).map((def) => ({
+    options: PROVIDER_REGISTRY.map((def) => ({
       value: def.id,
       label: def.displayName,
       hint: def.routingLive ? 'live' : 'not yet routable',
@@ -215,77 +199,9 @@ export async function runSetup(opts: SetupOpts, io: SetupIO = createClackIO()): 
     writeFileSync(envPath, envLines.join('\n') + '\n', { mode: 0o600 })
     io.note(envLines.map((l) => l.replace(/=.*/, '=<redacted>')).join('\n'), `Written to ${envPath}`)
     io.log.warn(`${envPath} contains a secret — do not commit it. Source it yourself before running your harness.`)
-  }
-
-  // ── Step 7: judge model ──
-  const wantJudge = await io.confirm({
-    message: "Set up an LLM-as-judge model for this workspace's checks?",
-    initialValue: false,
-  })
-  let judgeModel: string | null = null
-  if (wantJudge === true) {
-    const choices = judgeModelChoices({ saasRoutableOnly: mode === 'connected' })
-    const CUSTOM = '__custom__'
-    const pick = await io.select({
-      message: 'Judge model',
-      options: [
-        ...choices.slice(0, 20).map((m) => ({ value: m.ref, label: `${m.displayName} (${m.provider})` })),
-        { value: CUSTOM, label: 'Enter a custom model name…' },
-      ],
-    })
-    if (pick !== CANCELLED) {
-      judgeModel = pick === CUSTOM ? null : pick
-      if (pick === CUSTOM) {
-        const custom = await io.text({ message: 'Custom judge model name' })
-        judgeModel = custom === CANCELLED ? null : custom || null
-      }
-    }
-  }
-
-  if (judgeModel) {
-    if (!findCatalogModel(judgeModel)) {
-      io.log.warn(`'${judgeModel}' is not in the known model catalog — treating it as a custom/BYO alias.`)
-    }
-    if (mode === 'connected') {
-      const client = createApiClient(resolveControlPlaneUrl(opts.dev), creds!.apiKey)
-      try {
-        await client.put('/api/v1/workspace/settings', { managedJudgeModel: judgeModel })
-        io.log.success(`Judge model set to ${judgeModel}.`)
-      } catch (err) {
-        io.log.error(`Failed to save judge model: ${err instanceof Error ? err.message : String(err)}`)
-      }
-
-      // Same round-trip the dashboard's JudgeModelPanel Test button runs
-      // (POST /api/v1/workspace/judge-model/test, workspace.ts) — a real,
-      // tiny completion through the exact path a workspace judge would
-      // take. Reported, not gating: the setting is already saved above, the
-      // same way the dashboard's Save and Test are independent actions.
-      io.log.info('Verifying the judge model…')
-      try {
-        const testResult = await client.post<JudgeModelTestResult>('/api/v1/workspace/judge-model/test', {
-          model: judgeModel,
-        })
-        if (testResult.ok) {
-          io.log.success(
-            `Judge model verified — routes via ${testResult.provider}, ${testResult.latencyMs}ms round-trip.`,
-          )
-        } else {
-          io.log.warn(
-            `Judge model test failed at the ${testResult.stage} stage: ${testResult.error}` +
-              (testResult.stage === 'provider'
-                ? ' (this only means it cannot be tested right now — the setting above is already saved)'
-                : ''),
-          )
-        }
-      } catch (err) {
-        io.log.warn(`Could not run the judge model test: ${err instanceof Error ? err.message : String(err)}`)
-      }
-    } else {
-      io.note(
-        `On-prem judge setup isn't finished by this command — run:\n  intutic judge configure`,
-        'Next step',
-      )
-    }
+    // Judges run only on self-hosted models (owner rule, 2026-10-03), so there
+    // is no judge model to pick here; an on-prem local judge is set up apart.
+    io.note('To run judges on-prem, point the local judge at a self-hosted model:\n  intutic judge configure', 'Next step')
   }
 
   io.outro(pc.bold('Setup complete.'))

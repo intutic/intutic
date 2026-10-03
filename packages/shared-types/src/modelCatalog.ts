@@ -102,41 +102,38 @@ export function findCatalogModel(input: string): ModelCatalogEntry | undefined {
 }
 
 /**
- * The models a judge-model picker should offer.
- *
- * Default (`saasRoutableOnly: true`, the default): only providers the Rust
- * proxy's `get_model_provider` / this package's `inferProviderForModel` can
- * actually route — `LIVE_ROUTING_PROVIDER_IDS`'s wider cousin,
- * `routingLive` from `PROVIDER_REGISTRY` (see providers.ts). A catalog entry
- * for e.g. Bedrock is real and browsable, but the managed SaaS judge cannot
- * reach it yet (LLD #67 §3's deferred list) — surfacing it in the default
- * list would be a model a workspace could pick and then watch fail with no
- * useful error. Pass `saasRoutableOnly: false` for an on-prem judge picker,
- * where a local LiteLLM deployment can serve anything.
+ * Providers whose models run on infrastructure the operator controls. Every
+ * other registry provider is a hosted API. Judges are self-hosted only (owner
+ * rule, 2026-10-03; LLD #72), so these are the only providers a judge model
+ * may come from.
  */
-export function judgeModelChoices(opts?: {
-  providers?: string[]
-  saasRoutableOnly?: boolean
-}): ModelCatalogEntry[] {
-  const saasRoutableOnly = opts?.saasRoutableOnly ?? true
-  const providerFilter = opts?.providers ? new Set(opts.providers) : undefined
+export const SELF_HOSTED_MODEL_PROVIDER_IDS: ReadonlySet<string> = new Set(['ollama'])
 
-  return MODEL_CATALOG.filter((e) => {
-    if (!e.judgeCapable) return false
-    if (providerFilter && !providerFilter.has(e.provider)) return false
-    if (saasRoutableOnly && !ROUTABLE_PROVIDER_IDS.has(e.provider)) return false
-    return true
-  })
+/**
+ * Ollama Cloud models (`ollama/<name>:<size>-cloud`) carry the self-hosted
+ * provider's prefix but run on ollama.com, so they are hosted too.
+ */
+const isOllamaCloudId = (id: string): boolean => id.endsWith('-cloud')
+
+/**
+ * True when `ref` names a hosted model: a registry provider prefix other than
+ * a self-hosted one, or an Ollama Cloud model. A bare alias (`my-local-qwen`)
+ * or an unknown prefix is not hosted by this test: it is whatever the
+ * operator's own LiteLLM serves under that name.
+ */
+export function isHostedModelRef(ref: string): boolean {
+  const { provider, id } = normalizeModelRef(ref)
+  if (!provider) return false
+  if (SELF_HOSTED_MODEL_PROVIDER_IDS.has(provider)) return isOllamaCloudId(id)
+  return PROVIDER_REGISTRY.some((p) => p.id === provider)
 }
 
 /**
- * Providers the Rust proxy's `get_model_provider` / this package's
- * `inferProviderForModel` can actually resolve a model to — `PROVIDER_REGISTRY`
- * entries with `routingLive: true` (today: anthropic, openai, gemini, mistral,
- * openrouter). Derived directly from the registry rather than duplicated as a
- * separate constant, so a provider gaining live routing (LLD #67 §3) updates
- * this filter automatically instead of needing a second edit here.
+ * The catalog models an on-prem judge picker may offer (`intutic judge
+ * configure`): judge-capable entries from self-hosted providers, Ollama Cloud
+ * excluded. There is no hosted judge choice anywhere (owner rule,
+ * 2026-10-03), so this replaced `judgeModelChoices`.
  */
-const ROUTABLE_PROVIDER_IDS = new Set<string>(
-  PROVIDER_REGISTRY.filter((p) => p.routingLive).map((p) => p.id),
-)
+export function selfHostedJudgeModelChoices(): ModelCatalogEntry[] {
+  return MODEL_CATALOG.filter((e) => e.judgeCapable && !isHostedModelRef(e.ref))
+}

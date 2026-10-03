@@ -65,56 +65,29 @@ class FakeIO implements SetupIO {
 
 beforeEach(() => {
   putMock.mockReset().mockResolvedValue({})
-  postMock.mockReset().mockResolvedValue({ ok: true, provider: 'anthropic', latencyMs: 250 })
+  postMock.mockReset()
   probeMock.mockReset().mockResolvedValue({ status: 'valid', detail: 'looks valid' })
 })
 
 describe('runSetup — connected mode', () => {
-  it('happy path: provider -> credential -> verify -> save -> judge model, hitting the same PUT routes the standalone commands use', async () => {
+  it('happy path: provider -> credential -> verify -> save, hitting the same PUT route the standalone command uses', async () => {
     const io = new FakeIO([
       'connected', // mode
       'anthropic', // provider
       'sk-ant-test-key-1234567890', // apiKey (password prompt)
-      true, // wantJudge
-      'anthropic/claude-haiku-4-5', // judge model select
     ])
 
     await runSetup({}, io)
 
-    expect(putMock).toHaveBeenNthCalledWith(1, '/api/v1/workspace/provider-credentials/anthropic', {
+    expect(putMock).toHaveBeenCalledTimes(1)
+    expect(putMock).toHaveBeenCalledWith('/api/v1/workspace/provider-credentials/anthropic', {
       apiKey: 'sk-ant-test-key-1234567890',
     })
-    expect(putMock).toHaveBeenNthCalledWith(2, '/api/v1/workspace/settings', {
-      managedJudgeModel: 'anthropic/claude-haiku-4-5',
-    })
-    // The same round-trip the dashboard's JudgeModelPanel Test button runs,
-    // fired automatically after the save -- not just a PUT-and-hope.
-    expect(postMock).toHaveBeenCalledWith('/api/v1/workspace/judge-model/test', {
-      model: 'anthropic/claude-haiku-4-5',
-    })
+    // Judges are self-hosted only: no judge-model prompt, settings PUT, or test call.
+    expect(postMock).not.toHaveBeenCalled()
+    expect(io.calls.some((c) => c.method === 'confirm')).toBe(false)
     expect(io.calls.some((c) => c.method === 'log.success' && String(c.arg).includes('credential saved'))).toBe(true)
-    expect(io.calls.some((c) => c.method === 'log.success' && String(c.arg).includes('Judge model verified'))).toBe(true)
-  })
-
-  it('a failed judge-model test reports the stage but does not undo the already-saved setting', async () => {
-    postMock.mockResolvedValue({ ok: false, stage: 'completion', error: 'upstream returned 500' })
-    const io = new FakeIO([
-      'connected',
-      'anthropic',
-      'sk-ant-test-key-1234567890',
-      true,
-      'anthropic/claude-haiku-4-5',
-    ])
-
-    await runSetup({}, io)
-
-    // The setting is saved regardless of the test outcome.
-    expect(putMock).toHaveBeenNthCalledWith(2, '/api/v1/workspace/settings', {
-      managedJudgeModel: 'anthropic/claude-haiku-4-5',
-    })
-    expect(
-      io.calls.some((c) => c.method === 'log.warn' && String(c.arg).includes('failed at the completion stage')),
-    ).toBe(true)
+    expect(io.calls.at(-1)).toEqual({ method: 'outro', arg: expect.stringContaining('Setup complete') })
   })
 
   it('an invalid credential (401) prompts to save anyway, and declining cancels before any PUT', async () => {
@@ -139,7 +112,6 @@ describe('runSetup — connected mode', () => {
       'openai',
       'sk-bad-key-1234567890',
       true, // "save anyway?" -> yes
-      false, // wantJudge -> no
     ])
 
     await runSetup({}, io)
@@ -153,12 +125,6 @@ describe('runSetup — connected mode', () => {
     await runSetup({}, io)
     expect(io.calls.some((c) => c.method === 'log.error' && String(c.arg).includes('Not authenticated'))).toBe(true)
     expect(putMock).not.toHaveBeenCalled()
-  })
-
-  it('skipping the judge-model step sends no settings PUT', async () => {
-    const io = new FakeIO(['connected', 'anthropic', 'sk-ant-test-key-1234567890', false])
-    await runSetup({}, io)
-    expect(putMock).toHaveBeenCalledTimes(1) // credential only, no settings PUT
   })
 })
 
@@ -181,7 +147,6 @@ describe('runSetup — local mode', () => {
       'local',
       'anthropic',
       'sk-ant-' + 'local-key-1234567890',
-      false, // wantJudge
     ])
 
     await runSetup({}, io)
@@ -194,5 +159,7 @@ describe('runSetup — local mode', () => {
     const noteCall = io.calls.find((c) => c.method === 'note' && String((c.arg as { title?: string }).title).includes('.intutic.env'))
     expect(noteCall).toBeDefined()
     expect(JSON.stringify(noteCall)).not.toContain('sk-ant-' + 'local-key-1234567890')
+    // No judge-model prompt; the on-prem judge is pointed at a self-hosted model separately.
+    expect(io.calls.some((c) => c.method === 'note' && String((c.arg as { msg?: string }).msg).includes('intutic judge configure'))).toBe(true)
   })
 })
