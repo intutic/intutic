@@ -539,6 +539,7 @@ export {
 
 export {
   SKILL_SCAN_PATTERNS,
+  SKILL_CONTENT_BLOCK_PATTERN_IDS,
   scanSkillContent,
   excerptFor,
   EXCERPT_RADIUS,

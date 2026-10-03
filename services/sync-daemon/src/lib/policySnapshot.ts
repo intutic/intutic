@@ -63,6 +63,7 @@ import { createLogger } from '@intutic/logger'
 import { toRulesLine, GATE_VERSION, RULES_COLUMNS } from '../harness/gateBody.js'
 import {
   DESTRUCTIVE_COMMAND_PATTERNS,
+  SKILL_CONTENT_PATTERNS,
   SKILL_SURFACE_PATTERNS,
   assertPortableEre,
   type GuardPattern,
@@ -143,6 +144,26 @@ export const DESTRUCTIVE_TIER_SEVERITY: 'block' | 'warn' = 'warn'
  * `DESTRUCTIVE_TIER_SEVERITY`.
  */
 export const SKILL_SURFACE_TIER_SEVERITY: 'block' | 'warn' = 'block'
+
+/**
+ * Whether the skill-CONTENT tier (`SKILL_CONTENT_PATTERNS`, `skill_content.*`)
+ * ships as `block` or as `warn`.
+ *
+ * `block`, licensed by a measurement rather than by argument, unlike
+ * `SKILL_SURFACE_TIER_SEVERITY` above. TD-358 held content enforcement at warn
+ * until `scanSkillContent`'s false-positive rate on real benign skills had been
+ * measured. It now has: 350 vendored SKILL.md files
+ * (`packages/shared-types/src/__tests__/corpus/skills/`), and the nine patterns
+ * in this tier fire on none of them. The tenth, `read-sensitive-path`, fired on
+ * 11 and is not in the tier. Zero of 350 is a bound (about 0.86% at 95%), not
+ * a proof, which is why this ships here, where flipping the constant to
+ * `'warn'` retracts it in one sync cycle, and never in `staticFloorPatterns()`.
+ *
+ * The same argument `SKILL_SURFACE_TIER_SEVERITY` makes about what `warn`
+ * buys holds here: a poisoned skill file written under warn is already on
+ * disk for the next session to load and trust.
+ */
+export const SKILL_CONTENT_TIER_SEVERITY: 'block' | 'warn' = 'block'
 
 /** Rules the control plane resolved for this workspace. Mirrors the
  *  `GET /api/v1/policy/resolve` response — including `argPattern`, the
@@ -561,7 +582,16 @@ export function buildSnapshotRules(policy: ResolvedPolicy, localHoldTokens: read
     severity: shadow ? ('shadow' as GuardPattern['severity']) : SKILL_SURFACE_TIER_SEVERITY,
   }))
 
-  return [...sopRules, ...localHolds, ...destructive, ...skillSurface]
+  // Skill-CONTENT tier (TD-358): a skill-directory write whose written text
+  // matches a pattern measured at zero benign-corpus false positives. No
+  // floor copy exists, so no `.tier` suffix is needed; SILENT_LOG demotes it
+  // to shadow like every other dynamic-tier rule.
+  const skillContent = SKILL_CONTENT_PATTERNS.map((p) => ({
+    ...p,
+    severity: shadow ? ('shadow' as GuardPattern['severity']) : SKILL_CONTENT_TIER_SEVERITY,
+  }))
+
+  return [...sopRules, ...localHolds, ...destructive, ...skillSurface, ...skillContent]
 }
 
 /**
