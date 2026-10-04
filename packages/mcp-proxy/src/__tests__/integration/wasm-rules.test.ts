@@ -209,7 +209,7 @@ describe('WasmRunner + read_referenced_file (TD-441) and the memory ceiling (TD-
     }
   }, 60_000)
 
-  it('a rule that grows guest memory past 16MB has its verdict discarded (fail-open), not enforced', async () => {
+  it('a rule cannot grow guest memory past 16MB: the grow is refused and its verdict stands', async () => {
     const wasmDir = mkdtempSync(join(tmpdir(), 'intutic-mcp-wasm-memory-'))
     try {
       const wasmPath = await compileScratchRule(
@@ -217,8 +217,9 @@ describe('WasmRunner + read_referenced_file (TD-441) and the memory ceiling (TD-
         [
           'export function allocate(size: i32): i32 { return 1024; }',
           'export function evaluate(offset: i32, len: i32): i32 {',
-          '  memory.grow(300);', // 300 pages = 18.75MB, over the 16MB ceiling
-          '  return 1;',
+          // 300 pages = 18.75MB, over the 16MB ceiling: V8 returns -1 and
+          // memory stays put, so the rule blocks only if the grow was refused.
+          '  return memory.grow(300) == -1 ? 1 : 0;',
           '}',
         ].join('\n'),
         outDir,
@@ -227,7 +228,7 @@ describe('WasmRunner + read_referenced_file (TD-441) and the memory ceiling (TD-
       const runner = new WasmRunner(wasmDir)
       try {
         await runner.rescan()
-        expect((await runner.evaluate(baseContext)).code).toBe('allow')
+        expect((await runner.evaluate(baseContext)).code).toBe('block')
       } finally {
         await runner.shutdown()
       }

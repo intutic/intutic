@@ -198,7 +198,7 @@ skill on the strength of a Cisco `skill-scanner` verdict alone. See
 ## VirusTotal hash lookup (opt-in, hash-only)
 
 **Hash-only, stated up front: this lookup never uploads file content.** A
-separate, later phase (S4, TD-361) added an **opt-in** integration that
+separate, later phase (S4, TD-486) added an **opt-in** integration that
 checks the sha256 hash `auditScriptFile` already computes for every bundled
 script (see [Bundled scripts](#bundled-scripts) above) against VirusTotal's
 public `GET /api/v3/files/{sha256}` endpoint — never `POST /api/v3/files`
