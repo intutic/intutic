@@ -37,7 +37,29 @@
  *   - The decision shape is `PreToolDecision = {kind:'allow'} | {kind:'deny',
  *     reason} | {kind:'ask', reason?}` (confirmed from
  *     `@deepseek-ai/dsh-tools`'s shipped `.d.ts`) — `'deny'`, not the phase
- *     brief's guessed `'reject'`.
+ *     brief's guessed `'reject'`. dsh 0.2 widened it (`deny` gained an
+ *     optional `info`, `ask` an optional `displayReason`, and a new
+ *     `{kind:'cancel'}` exists); this listener never produces those, but a
+ *     later listener's `next()` result may be one, so the type below says so.
+ *
+ * ## Re-verified against dsh 0.2.0-rc.2 (2026-10-03, TD-370)
+ *
+ * Read from `@deepseek-ai/dsh-tools@0.2.0-rc.2`'s shipped `lib/index.js`, not
+ * only its types: the registry runs the `tools/pre-execute` waterfall with
+ * `() => ({kind:'allow'})` as the terminal `next()`; a `deny` becomes the
+ * tool result `Error: <reason>` with `isError: true` and the tool body never
+ * runs; an `ask` goes to `ctx.approval` (`dsh-user-approval`, mounted by
+ * `dsh-base` with policy `ask`) and, when no approval service is mounted, is
+ * itself converted to a deny. Guards registered with `ctx.tools.guard()` run
+ * after the waterfall and can only deny, so nothing downstream turns this
+ * listener's deny back into an allow. Every other shipped listener
+ * (`dsh-tool-jobs`, `dsh-workspace-changes`, `dsh-hooks-claude-code`, the
+ * optional `dsh-experimental-auto-review`) calls `next()` before deciding,
+ * so this listener is reached; auto-review returns the downstream result
+ * whenever it is not `allow`. Observed end to end in a live headless
+ * 0.2.0-rc.2 session against a local mock model: the blocked `bash` call
+ * never ran and the model's next request carried the deny reason as an
+ * `is_error` tool_result (uat/evidence/live-verify/dsh-0.2.md).
  *
  * `ctx.tools.guard()` (a separate, monotonic, explicitly SYNCHRONOUS
  * mechanism dsh also exposes) was considered and rejected: `@intutic/gate`'s
@@ -88,8 +110,13 @@ export interface DshToolExecution {
   readonly arguments: unknown
 }
 
-/** The confirmed real `PreToolDecision` union from `@deepseek-ai/dsh-tools`. */
-export type DshPreToolDecision = { kind: 'allow' } | { kind: 'deny'; reason: string } | { kind: 'ask'; reason?: string }
+/** The slice of the real `PreToolDecision` union from `@deepseek-ai/dsh-tools`
+ *  (0.2.0-rc.2) this plugin returns or passes through from `next()`. */
+export type DshPreToolDecision =
+  | { kind: 'allow' }
+  | { kind: 'deny'; reason: string }
+  | { kind: 'ask'; reason?: string }
+  | { kind: 'cancel' }
 
 /**
  * Structural stand-in for the Cordis `Context` this plugin needs — see the
