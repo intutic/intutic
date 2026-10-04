@@ -33,6 +33,7 @@
 //! between an agent and a capability. Enforcement is the detectors and the
 //! WASM rules, which do not consult the role. See ADR-009.
 
+use crate::plugins::sql_guard::{SqlGuardPolicy, SqlGuardSeverity};
 use crate::store::{LocalStore, PinScope, PinnedSopBlock};
 use crate::wasm::context::RiskLevel;
 use serde::Serialize;
@@ -211,6 +212,14 @@ pub struct Sop {
     pub forbid_after: Vec<(String, String, bool)>,
     /// `Enforce` (default) or `Shadow` — see [`SopMode`].
     pub mode: SopMode,
+    /// `sql_guard: refuse|warn` — the DSN-aware destructive-SQL rule
+    /// (`plugins::sql_guard`, TD-480). `None` means this SOP leaves it off.
+    /// Set to `Refuse` when only `sql_allow_dsns:` is written, because
+    /// declaring an allowlist is asking for the rule.
+    pub sql_guard: Option<SqlGuardSeverity>,
+    /// `sql_allow_dsns:` — target patterns destructive SQL may run against.
+    /// Case is kept as written; matching lowercases both sides.
+    pub sql_allow_dsns: Vec<String>,
 }
 
 impl Sop {
@@ -255,6 +264,8 @@ struct FrontMatter {
     risk_tier: Option<RiskLevel>,
     /// `mode: shadow` in front matter, or `Enforce` (the default) otherwise.
     mode: SopMode,
+    sql_guard: Option<SqlGuardSeverity>,
+    sql_allow_dsns: Vec<String>,
     /// Rules that failed to parse, kept so they can be reported rather than
     /// dropped. A malformed ordering rule must not read as "no rule declared".
     rule_errors: Vec<String>,
@@ -317,6 +328,31 @@ fn parse_mode(front: &str) -> SopMode {
     }
 }
 
+/// `sql_guard: refuse|warn`, with any parse error.
+///
+/// An unrecognised value enforces as `refuse` and is reported, the same
+/// direction `parse_mode` fails in: a typo must never be what switches a guard
+/// off. An `sql_allow_dsns:` with no `sql_guard:` turns the rule on at
+/// `refuse`, because writing an allowlist is asking for it.
+fn parse_sql_guard(front: &str, any_allowlist: bool) -> (Option<SqlGuardSeverity>, Option<String>) {
+    let raw = front
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix("sql_guard:"))
+        .next()
+        .map(|v| v.trim().trim_matches(['"', '\'']).to_string());
+    match raw {
+        Some(v) => match SqlGuardSeverity::parse(&v) {
+            Ok(sev) => (Some(sev), None),
+            Err(e) => (
+                Some(SqlGuardSeverity::Refuse),
+                Some(format!("sql_guard: {e}")),
+            ),
+        },
+        None if any_allowlist => (Some(SqlGuardSeverity::Refuse), None),
+        None => (None, None),
+    }
+}
+
 /// Split optional front matter from the body.
 ///
 /// Intentionally not a YAML parser. The directives that matter are
@@ -357,6 +393,9 @@ fn parse_front_matter(raw: &str) -> FrontMatter {
     // does NOT, because a comma is its own separator between taint and token.
     let counts = parse_items(front, "max_calls:", true, parse_count_bound);
     let cooccur = parse_items(front, "forbid_with:", false, parse_cooccurrence);
+    // Patterns keep their case as written; the matcher lowercases both sides.
+    let sql_allow_dsns = list("sql_allow_dsns:", false);
+    let (sql_guard, sql_guard_error) = parse_sql_guard(front, !sql_allow_dsns.is_empty());
 
     FrontMatter {
         roles: list("roles:", true),
@@ -383,11 +422,14 @@ fn parse_front_matter(raw: &str) -> FrontMatter {
         forbid_after: forbids.0,
         max_calls: counts.0,
         forbid_with: cooccur.0,
+        sql_guard,
+        sql_allow_dsns,
         rule_errors: {
             let mut e = requires.1;
             e.extend(forbids.1);
             e.extend(counts.1);
             e.extend(cooccur.1);
+            e.extend(sql_guard_error);
             e
         },
         body: body.trim_start_matches("\n---").trim().to_string(),
@@ -615,6 +657,7 @@ fn parse_sop_content(title: String, raw: &str, source: &str, scope: SopScope) ->
         && fm.forbid_after.is_empty()
         && fm.max_calls.is_empty()
         && fm.forbid_with.is_empty()
+        && fm.sql_guard.is_none()
         && fm.rule_errors.is_empty()
     {
         return None;
@@ -645,6 +688,8 @@ fn parse_sop_content(title: String, raw: &str, source: &str, scope: SopScope) ->
         max_calls: fm.max_calls,
         forbid_with: fm.forbid_with,
         mode: fm.mode,
+        sql_guard: fm.sql_guard,
+        sql_allow_dsns: fm.sql_allow_dsns,
     })
 }
 
@@ -992,7 +1037,7 @@ mod enforceability_tests {
 /// lists that disagree is the same defect class as the tool-name lists in
 /// `actions.rs` — one place, or they drift.
 const ENFORCING_FIELDS: &str = "deny_tools, allow_harnesses, plan_steps, scope_paths, \
-     review_before, requires_before, forbid_after, max_calls or forbid_with";
+     review_before, requires_before, forbid_after, max_calls, forbid_with, sql_guard or sql_allow_dsns";
 
 /// Does this SOP declare anything the proxy can act on?
 ///
@@ -1017,6 +1062,7 @@ fn is_enforceable(sop: &Sop) -> bool {
         || !sop.forbid_after.is_empty()
         || !sop.max_calls.is_empty()
         || !sop.forbid_with.is_empty()
+        || sop.sql_guard.is_some()
 }
 
 /// What to say when policy loaded but none of it can fire.
@@ -1475,6 +1521,10 @@ pub struct GovernanceFields {
     pub max_calls: Vec<(String, usize)>,
     pub forbid_with: Vec<(String, String)>,
     pub allowed_harnesses: Vec<String>,
+    /// The destructive-SQL rule in force, if any SOP declares one. Enforced
+    /// on the response side (`plugins::response_gate`), not by a detector —
+    /// see `plugins::sql_guard` for why.
+    pub sql_guard: Option<SqlGuardPolicy>,
     pub governance_block: Option<String>,
 }
 
@@ -1548,8 +1598,45 @@ pub fn governance_fields_from(sops: &[Sop], role: &str) -> GovernanceFields {
         max_calls,
         forbid_with,
         allowed_harnesses: collect_harnesses(sops, role),
+        sql_guard: sql_guard_from(sops, role, false),
         governance_block: render(sops, role),
     }
+}
+
+/// The SQL guard `sops` declare for `role`, or `None` when none does.
+///
+/// * severity — the strictest any applicable SOP declares;
+/// * allowlist — workspace-scope patterns union into `allow`, org-scope ones
+///   into `org_allow`, which `SqlGuardPolicy::permits` applies as a ceiling
+///   (a target must pass both lists that are non-empty). An org SOP that
+///   declares the guard with no patterns imposes no ceiling, the same
+///   convention `apply_org_ceiling` follows for the other allowlists.
+///
+/// `shadow` marks the result as a `mode: shadow` set's: evaluated and logged,
+/// never enforced. The caller passes the enforcing and shadow sets
+/// separately, so a shadow SOP's allowlist can never widen an enforcing one.
+pub fn sql_guard_from(sops: &[Sop], role: &str, shadow: bool) -> Option<SqlGuardPolicy> {
+    let applicable: Vec<&Sop> = sops
+        .iter()
+        .filter(|s| s.sql_guard.is_some() && s.applies_to(role))
+        .collect();
+    let severity = applicable.iter().filter_map(|s| s.sql_guard).max()?;
+    let patterns = |scope: SopScope| -> Vec<String> {
+        let mut v: Vec<String> = applicable
+            .iter()
+            .filter(|s| s.scope == scope)
+            .flat_map(|s| s.sql_allow_dsns.iter().cloned())
+            .collect();
+        v.sort();
+        v.dedup();
+        v
+    };
+    Some(SqlGuardPolicy {
+        severity,
+        allow: patterns(SopScope::Workspace),
+        org_allow: patterns(SopScope::Org),
+        shadow,
+    })
 }
 
 /// Build the governance block for a node in a given role.
@@ -2182,6 +2269,8 @@ mod tests {
             mode: SopMode::default(),
             max_calls: Vec::new(),
             forbid_with: Vec::new(),
+            sql_guard: None,
+            sql_allow_dsns: Vec::new(),
         }
     }
 
@@ -2489,6 +2578,8 @@ mod tests {
                 mode: SopMode::default(),
                 max_calls: Vec::new(),
                 forbid_with: Vec::new(),
+                sql_guard: None,
+                sql_allow_dsns: Vec::new(),
             })
             .collect();
         let out = render(&big, "any").unwrap();
@@ -2549,6 +2640,8 @@ mod render_determinism_tests {
             mode: SopMode::default(),
             max_calls: Vec::new(),
             forbid_with: Vec::new(),
+            sql_guard: None,
+            sql_allow_dsns: Vec::new(),
         }
     }
 
@@ -2901,6 +2994,8 @@ mod discovery_tests {
             mode: SopMode::default(),
             max_calls: fm.max_calls,
             forbid_with: fm.forbid_with,
+            sql_guard: fm.sql_guard,
+            sql_allow_dsns: fm.sql_allow_dsns,
         }
     }
 
@@ -2965,6 +3060,96 @@ mod discovery_tests {
             vec![("secrets()".to_string(), "action:http_post".to_string())],
             "here the comma separates the two SIDES of one rule, not two rules"
         );
+    }
+
+    // ── sql_guard / sql_allow_dsns (TD-480) ─────────────────────────────
+
+    #[test]
+    fn sql_guard_parses_and_is_off_by_default() {
+        let s = sop_from_raw(
+            "db",
+            "---\nsql_guard: warn\nsql_allow_dsns: postgres://localhost/*, sqlite:*\n---\n# body\n",
+        );
+        assert_eq!(s.sql_guard, Some(SqlGuardSeverity::Warn));
+        assert_eq!(s.sql_allow_dsns, vec!["postgres://localhost/*", "sqlite:*"]);
+        assert!(is_enforceable(&s));
+
+        let plain = sop_from_raw("db", "---\ndeny_tools: WebFetch\n---\n# body\n");
+        assert_eq!(plain.sql_guard, None, "no key, no rule");
+        assert!(sql_guard_from(&[plain], "", false).is_none());
+    }
+
+    /// Writing an allowlist is asking for the rule; a misspelt severity must
+    /// not be what turns it off.
+    #[test]
+    fn sql_guard_fails_toward_refuse() {
+        let s = sop_from_raw("db", "---\nsql_allow_dsns: postgres://localhost/*\n---\n");
+        assert_eq!(s.sql_guard, Some(SqlGuardSeverity::Refuse));
+        let fm = parse_front_matter("---\nsql_guard: refsue\n---\n");
+        assert_eq!(fm.sql_guard, Some(SqlGuardSeverity::Refuse));
+        assert_eq!(fm.rule_errors.len(), 1, "{:?}", fm.rule_errors);
+        // A declaration-only SOP is still a SOP.
+        assert!(parse_sop_content(
+            "t".into(),
+            "---\nsql_guard: refuse\n---\n",
+            "src",
+            SopScope::Workspace
+        )
+        .is_some());
+    }
+
+    #[test]
+    fn sql_guard_resolution_takes_strictest_and_never_lets_org_widen() {
+        let ws = Sop {
+            sql_guard: Some(SqlGuardSeverity::Warn),
+            sql_allow_dsns: vec!["postgres://*".into()],
+            ..Sop::default()
+        };
+        let org = Sop {
+            scope: SopScope::Org,
+            sql_guard: Some(SqlGuardSeverity::Refuse),
+            sql_allow_dsns: vec!["postgres://localhost/*".into()],
+            ..Sop::default()
+        };
+        let other_role = Sop {
+            sql_guard: Some(SqlGuardSeverity::Refuse),
+            sql_allow_dsns: vec!["mysql://*".into()],
+            roles: vec!["dba".into()],
+            ..Sop::default()
+        };
+        let p = sql_guard_from(&[ws, org, other_role], "coder", false).unwrap();
+        assert_eq!(p.severity, SqlGuardSeverity::Refuse);
+        assert_eq!(p.allow, vec!["postgres://*"]);
+        assert_eq!(p.org_allow, vec!["postgres://localhost/*"]);
+        use crate::plugins::sql_guard::Target;
+        assert!(p.permits(&Target::Known("postgres://localhost/app".into())));
+        assert!(!p.permits(&Target::Known("postgres://db.prod/app".into())));
+        assert!(
+            !p.permits(&Target::Known("mysql://db/app".into())),
+            "another role's allowlist leaked"
+        );
+    }
+
+    /// Shadow SOPs stay out of the enforcing set, so their allowlist cannot
+    /// widen it; resolved separately they come back marked shadow.
+    #[test]
+    fn shadow_sql_guard_is_resolved_apart_from_the_enforcing_one() {
+        let enforcing = Sop {
+            sql_guard: Some(SqlGuardSeverity::Refuse),
+            sql_allow_dsns: vec!["sqlite:*".into()],
+            ..Sop::default()
+        };
+        let shadow = Sop {
+            mode: SopMode::Shadow,
+            sql_guard: Some(SqlGuardSeverity::Refuse),
+            sql_allow_dsns: vec!["postgres://*".into()],
+            ..Sop::default()
+        };
+        let (enf, shd) = split_by_mode(&[enforcing, shadow]);
+        let gov = governance_fields_from(&enf, "");
+        assert_eq!(gov.sql_guard.as_ref().unwrap().allow, vec!["sqlite:*"]);
+        let sp = sql_guard_from(&shd, "", true).unwrap();
+        assert!(sp.shadow && !sp.refuses());
     }
 
     /// The asymmetry above has a sharp edge: because `forbid_with:` does not
@@ -3318,6 +3503,8 @@ mod deny_tests {
             mode: SopMode::default(),
             max_calls: Vec::new(),
             forbid_with: Vec::new(),
+            sql_guard: None,
+            sql_allow_dsns: Vec::new(),
         }
     }
 
@@ -3410,6 +3597,8 @@ mod harness_policy_tests {
                 mode: SopMode::default(),
                 max_calls: Vec::new(),
                 forbid_with: Vec::new(),
+                sql_guard: None,
+                sql_allow_dsns: Vec::new(),
             },
             Sop {
                 risk_tier: None,
@@ -3427,6 +3616,8 @@ mod harness_policy_tests {
                 mode: SopMode::default(),
                 max_calls: Vec::new(),
                 forbid_with: Vec::new(),
+                sql_guard: None,
+                sql_allow_dsns: Vec::new(),
             },
         ];
         assert_eq!(collect_harnesses(&sops, "reviewer"), vec!["claude-code"]);
@@ -3488,6 +3679,8 @@ mod plan_step_tests {
                 mode: SopMode::default(),
                 max_calls: Vec::new(),
                 forbid_with: Vec::new(),
+                sql_guard: None,
+                sql_allow_dsns: Vec::new(),
             },
             Sop {
                 risk_tier: None,
@@ -3505,6 +3698,8 @@ mod plan_step_tests {
                 mode: SopMode::default(),
                 max_calls: Vec::new(),
                 forbid_with: Vec::new(),
+                sql_guard: None,
+                sql_allow_dsns: Vec::new(),
             },
         ];
         assert_eq!(
@@ -3535,6 +3730,8 @@ mod plan_step_tests {
             mode: SopMode::default(),
             max_calls: Vec::new(),
             forbid_with: Vec::new(),
+            sql_guard: None,
+            sql_allow_dsns: Vec::new(),
         }];
         assert!(collect_plan_steps(&sops, "reviewer").is_empty());
         assert!(collect_plan_steps(&sops, "").is_empty());
@@ -3622,6 +3819,8 @@ mod scope_and_review_tests {
             mode: SopMode::default(),
             max_calls: Vec::new(),
             forbid_with: Vec::new(),
+            sql_guard: None,
+            sql_allow_dsns: Vec::new(),
         }];
         assert!(collect_scope_paths(&sops, "reviewer").is_empty());
         assert!(collect_review_before(&sops, "reviewer").is_empty());
@@ -3646,6 +3845,8 @@ mod scope_and_review_tests {
             mode: SopMode::default(),
             max_calls: Vec::new(),
             forbid_with: Vec::new(),
+            sql_guard: None,
+            sql_allow_dsns: Vec::new(),
         };
         let sops = vec![mk("packages/proxy"), mk("infra"), mk("packages/proxy")];
         assert_eq!(
@@ -3741,6 +3942,8 @@ mod sop_status_snapshot_tests {
             mode: SopMode::default(),
             max_calls: Vec::new(),
             forbid_with: Vec::new(),
+            sql_guard: None,
+            sql_allow_dsns: Vec::new(),
         }
     }
 

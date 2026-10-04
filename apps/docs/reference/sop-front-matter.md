@@ -9,7 +9,7 @@ looks and what `INTUTIC_SOPS_DIR` is for.
 
 ## The keys
 
-Nine keys can block, steer or hold a run. Everything else in a SOP is prose,
+Ten keys can block, steer or hold a run. Everything else in a SOP is prose,
 injected into the agent's context and advisory by construction — the model may
 ignore it.
 
@@ -24,6 +24,7 @@ ignore it.
 | `forbid_after:` | `A -> B` | B is refused if A appeared earlier. |
 | `max_calls:` | `A <= N` | Refuses the N+1th call of A. |
 | `forbid_with:` | `taint(), token` | Refuses the two together in one request. |
+| `sql_guard:` | `refuse` or `warn`, with `sql_allow_dsns:` | Refuses (or logs) destructive SQL in a shell call aimed at a database not on the allowlist. See [Destructive SQL](#destructive-sql). |
 
 ::: warning Two shapes that look right and match nothing
 
@@ -185,6 +186,73 @@ of one rule. Write one rule per line. Two rules on one line used to be swallowed
 into the first rule's token, producing a rule that could never fire; that is now
 refused at load, but the asymmetry with `max_calls:` directly above is worth
 knowing.
+
+## Destructive SQL
+
+```yaml
+---
+sql_guard: refuse
+sql_allow_dsns: postgres://localhost/*, postgres://localhost:*, postgres://scratch-*.internal/*, sqlite:*
+---
+```
+
+Off unless a SOP covering the node's role declares it. When on, the proxy reads
+every call to a shell tool (`Bash`, `shell`, `run_command`, `execute_command`,
+`terminal`, …) **in the model's response, before the harness receives it**, and
+looks for a SQL client — `psql`, `mysql` / `mariadb`, `sqlite3`, `dropdb` —
+about to run `DROP TABLE` / `DATABASE` / `SCHEMA`, `TRUNCATE`, or `DELETE`
+with no `WHERE`. It reads the SQL from `-c` / `--command`, `-e` / `--execute`,
+sqlite3's trailing argument, a heredoc, a here-string, or an `echo … |` pipe,
+and it reads `bash -c "…"` and argv arrays (`["psql", "-c", …]`) as commands.
+Comments and string literals are ignored, so `SELECT 'drop table'` is not a
+drop.
+
+It then works out **which database** the command targets — a
+`postgres://` / `postgresql://` / `mysql://` URI, the `-h` / `-p` / `-d`
+(psql) or `-h` / `-P` / `-D` (mysql) flags, a `host=… dbname=…` string,
+inline `PGHOST=` / `PGPORT=` / `PGDATABASE=`, or the sqlite file — and matches
+it, in a credential-free form, against `sql_allow_dsns:`:
+
+| Command | Target matched |
+| :--- | :--- |
+| `psql -h db.prod -p 5432 -d app -c "…"` | `postgres://db.prod:5432/app` |
+| `psql postgres://<USER>:<PASSWORD>@localhost/app_dev -c "…"` | `postgres://localhost/app_dev` |
+| `mysql -h 127.0.0.1 -D shop -e "…"` | `mysql://127.0.0.1/shop` |
+| `sqlite3 /tmp/scratch.db "…"` | `sqlite:/tmp/scratch.db` |
+
+A target on the allowlist passes untouched — which is what keeps migrations
+against a scratch database working. Anything else is refused: the call is
+withheld and the agent is told which statement, which client and which target,
+in place of the call. **A target the proxy cannot read off the command is never
+on the allowlist**: `psql "$DATABASE_URL"`, `-h $(…)`, no host named at all (the
+client would fall back to `PGHOST` or the local socket, neither of which the
+proxy can see), or a script that switches connection with `\connect`. Name the
+host and database explicitly on the command line.
+
+| Key | Values |
+| :--- | :--- |
+| `sql_guard:` | `refuse` (withhold the call) or `warn` (forward it and log). An unrecognised value enforces as `refuse` and is reported at load — a typo never switches the guard off. To turn it off, remove the key. |
+| `sql_allow_dsns:` | Comma-separated patterns. `*` matches any run of characters (including `/` and `:`), `?` one. Matching ignores case; `postgresql://` is read as `postgres://` and any `user:password@` in a pattern is ignored. Writing `sql_allow_dsns:` without `sql_guard:` turns the rule on at `refuse`. An empty allowlist refuses every destructive statement. |
+
+Write `postgres://localhost/*` **and** `postgres://localhost:*` to admit local
+databases on any port: `postgres://localhost*` would also admit
+`postgres://localhost.example.com/…`. A pattern containing a comma (a
+multi-host URI) cannot be written, because the list splits on commas.
+
+When several SOPs apply, the strictest severity wins and workspace-scope
+allowlists are combined. An org-scope SOP's allowlist is a **ceiling**: a target
+must match it as well as the workspace list, so a workspace can narrow the org's
+allowlist but never widen it. Under `mode: shadow`, a SOP's SQL guard never
+withholds anything and its matches are logged by the proxy (they are not part of
+the trace's shadow report, which covers the detector-backed keys). Passwords
+never appear in what the proxy logs or tells the agent — the target is rendered
+without user, password, query string or password flags.
+
+What it does not see: SQL in a file (`psql -f`, `mysql < file.sql`), SQL issued
+from a program (`python -c …`), and migration tools (`prisma migrate reset`,
+`rails db:drop`) — none of these are SQL-client invocations, and a migration
+command passes untouched. The response gate must be on
+(`intutic_settings.response_gate.enabled`, the default); with it off, so is this.
 
 ## The `action:` vocabulary
 

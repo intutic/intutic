@@ -10,10 +10,11 @@
  *
  * ## 1. The veto surface is per-tool `needsApproval`, not an agent option
  *
- * Confirmed against a real install (`@ai-sdk/workflow@1.0.69`):
- * `WorkflowAgent`/`WorkflowAgentOptions` carry ZERO approval fields — the
- * string `toolApproval` does not appear anywhere in the package's shipped
- * `.d.ts`. The veto surface is `needsApproval` (boolean | function) on the
+ * Confirmed against a real install (`@ai-sdk/workflow@1.0.69`, re-read on
+ * 2.0.58): `WorkflowAgent`/`WorkflowAgentOptions` carry NO approval-policy
+ * field — 1.x's shipped `.d.ts` never mentions `toolApproval`, and 2.x adds
+ * only `experimental_toolApprovalSecret`, an HMAC secret that signs approval
+ * requests so a replayed approval can be verified, not a veto. The veto surface is `needsApproval` (boolean | function) on the
  * TOOL definition, exactly as the framework's own workflow-agent docs
  * describe under "Tool Approval". The compiled agent loop confirms the
  * semantics (dist/index.js): `needsApproval == null` → no approval; a
@@ -23,9 +24,9 @@
  * later — so this framework, uniquely in this package, has a real
  * human-in-the-loop lane for the gate to route into.
  *
- * (`ai@7.0.68` marks tool-level `needsApproval` `@deprecated` in favour of
- * generateText-level `toolApproval` — but `@ai-sdk/workflow`'s OWN agent loop
- * reads the tool-level field and exposes no other veto surface, so it is the
+ * (`ai@7` — still in 7.0.127 — marks tool-level `needsApproval` `@deprecated`
+ * in favour of generateText-level `toolApproval` — but `@ai-sdk/workflow`'s
+ * OWN agent loop (1.x and 2.0.58 alike) reads the tool-level field and exposes no other veto surface, so it is the
  * correct — indeed the only — integration point here. Noted in the TD entry
  * this phase filed, so a future @ai-sdk/workflow release moving to the
  * generateText-shaped surface gets caught rather than silently ungated.)
@@ -34,11 +35,13 @@
  *
  * A durable workflow retries failed steps. Confirmed against real installs
  * (`workflow@4.8.3` re-exporting `@workflow/errors@4.2.1` via
- * `@workflow/core`): the runtime's retry/abort decision consults
- * `FatalError.is(err)` (`@workflow/core`'s `runtime/step-handler.js` — a
- * fatal error "bubbl[es] up to parent workflow"; anything else is retried
- * toward `maxAttempts`), and `FatalError.is()` DUCK-TYPES: it checks
- * `err.name === 'FatalError'` on any Error-shaped object, precisely because
+ * `@workflow/core`; re-read on `workflow@5.0.1` / `@workflow/errors@5.0.1`):
+ * the runtime's retry/abort decision consults `FatalError.is(err)`
+ * (`@workflow/core`'s `runtime/step-handler.js` in 4.x,
+ * `runtime/step-executor.js` in 5.x — a fatal error "bubbl[es] up to parent
+ * workflow"; anything else is retried toward `maxAttempts`), and
+ * `FatalError.is()` DUCK-TYPES: it checks `err.name === 'FatalError'` (5.x
+ * also accepts `err.fatal === true`) on any Error-shaped object, precisely because
  * workflows execute in a separate `vm` realm where `instanceof` fails across
  * the boundary. A plain `IntuticGateRefusal` thrown from `needsApproval` or a
  * tool body would therefore be RETRIED — a governance denial replayed on a

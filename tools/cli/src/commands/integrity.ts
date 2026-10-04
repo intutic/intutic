@@ -3,7 +3,7 @@
  *
  * Subcommands:
  *   - `intutic integrity roots [--loop-run <id>] [--json]`
- *   - `intutic integrity verify <root_id> [--json]`
+ *   - `intutic integrity verify <root_id> [--against <file>] [--json]`
  *   - `intutic integrity chain [--json]`
  *   - `intutic integrity config-chain [--json]`
  *
@@ -22,6 +22,7 @@
  */
 
 import { createPublicKey, verify as nodeVerify, type JsonWebKey } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
 import { log } from '../lib/logger.js'
 import { NOT_AUTHENTICATED } from '../lib/authMessages.js'
 import { loadCredentials } from '../config/store.js'
@@ -196,6 +197,7 @@ export type IntegrityFinding =
   | { kind: 'signature'; state: SignatureState }
   | { kind: 'chain'; breaks: number }
   | { kind: 'configChain'; breaks: number; contentMismatches: number }
+  | { kind: 'mirror'; mismatchedFields: string[] }
 
 /**
  * Whether a finding should fail the command, and therefore the customer's CI.
@@ -235,7 +237,77 @@ export function failsIntegrity(finding: IntegrityFinding): boolean {
       return finding.breaks > 0
     case 'configChain':
       return finding.breaks > 0 || finding.contentMismatches > 0
+    case 'mirror':
+      // The copy in the customer's own bucket disagrees with what the control
+      // plane serves today. That is the one finding the operator cannot produce
+      // a clean answer to by re-signing, so it always fails.
+      return finding.mismatchedFields.length > 0
   }
+}
+
+// ─── Mirrored copy comparison ───────────────────────────────────────
+
+/**
+ * Fields of a BYOC-mirrored root (camelCase, as the sweep writes it) and the
+ * detail endpoint's column (snake_case) each must equal.
+ */
+const MIRROR_FIELDS: ReadonlyArray<readonly [string, string]> = [
+  ['rootId', 'root_id'],
+  ['workspaceId', 'workspace_id'],
+  ['loopRunId', 'loop_run_id'],
+  ['leafSchemaVersion', 'leaf_schema_version'],
+  ['merkleRoot', 'merkle_root'],
+  ['leafCount', 'leaf_count'],
+  ['samplePreimage', 'sample_preimage'],
+  ['signatureAlg', 'signature_alg'],
+  ['signature', 'signature'],
+  ['signingKeyId', 'signing_key_id'],
+  ['previousRoot', 'previous_root'],
+  ['signingPreimageVersion', 'signing_preimage_version'],
+]
+
+function sameValue(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null)
+}
+
+/**
+ * Which fields of the customer's mirrored copy disagree with what the control
+ * plane serves for the same root (TD-249).
+ *
+ * This is the check that does not depend on trusting the operator: the copy
+ * was written to a bucket the customer owns at seal time, and the comparison
+ * runs on the customer's machine. A root the operator rewrote and re-signed
+ * still verifies against the published key — it does not match this.
+ *
+ * A field absent from the copy is not compared, because copies written before
+ * it existed would otherwise fail; the root and the leaf set are always
+ * required. Mirrors `diffMirroredRoot` in
+ * services/control-plane/src/services/traceRootSweep.ts, which runs the same
+ * comparison from the server side over a sample.
+ */
+export function diffAgainstMirror(
+  copy: Record<string, unknown>,
+  detail: { root: Record<string, unknown>; leaves: Array<{ trace_id: string; leaf_index: number; leaf_hash: string }> },
+): string[] {
+  const differs: string[] = []
+  for (const [copyField, column] of MIRROR_FIELDS) {
+    if (copyField !== 'merkleRoot' && !(copyField in copy)) continue
+    // An absent column means a pre-113 control plane, which only ever signed v1.
+    const served =
+      column === 'signing_preimage_version'
+        ? preimageVersionOf(detail.root as unknown as SignedRootRow)
+        : detail.root[column]
+    if (!sameValue(copy[copyField], served)) differs.push(copyField)
+  }
+  const copied = Array.isArray(copy['leaves']) ? (copy['leaves'] as Array<Record<string, unknown>>) : null
+  const ours = detail.leaves
+    .map((l) => [Number(l.leaf_index), String(l.trace_id), String(l.leaf_hash)] as const)
+    .sort((a, b) => a[0] - b[0])
+  const theirs = copied
+    ?.map((l) => [Number(l['leafIndex']), String(l['traceId']), String(l['leafHash'])] as const)
+    .sort((a, b) => a[0] - b[0])
+  if (!theirs || !sameValue(theirs, ours)) differs.push('leaves')
+  return differs
 }
 
 // ─── Signature verification ─────────────────────────────────────────
@@ -595,12 +667,29 @@ export async function runIntegrityRoots(
  */
 export async function runIntegrityVerify(
   rootId: string,
-  opts: IntegrityCliOpts,
+  opts: IntegrityCliOpts & { against?: string },
 ): Promise<void> {
   const creds = await loadCredentials()
   if (!creds) {
     log.error(NOT_AUTHENTICATED)
     process.exit(1)
+  }
+
+  // Read before any request: a copy that cannot be read is a check that did
+  // not run, and exiting 0 after "verifying" without it would pass CI on a
+  // comparison nobody made.
+  let mirrorCopy: Record<string, unknown> | null = null
+  if (opts.against) {
+    try {
+      const parsed: unknown = JSON.parse(await readFile(opts.against, 'utf8'))
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        throw new Error('not a JSON object')
+      }
+      mirrorCopy = parsed as Record<string, unknown>
+    } catch (err) {
+      log.error(`Cannot read mirrored root ${opts.against}: ${err instanceof Error ? err.message : String(err)}`)
+      process.exit(1)
+    }
   }
 
   const controlPlaneUrl = resolveControlPlaneUrl(opts.dev)
@@ -627,6 +716,10 @@ export async function runIntegrityVerify(
     { kind: 'recompute', verdict: recompute.verdict, retentionExpired: recompute.retentionExpired === true },
     { kind: 'signature', state: signature },
   ]
+  const mirrorMismatch = mirrorCopy
+    ? diffAgainstMirror(mirrorCopy, detail as unknown as Parameters<typeof diffAgainstMirror>[1])
+    : null
+  if (mirrorMismatch) findings.push({ kind: 'mirror', mismatchedFields: mirrorMismatch })
   const failed = findings.some(failsIntegrity)
 
   if (opts.json) {
@@ -643,6 +736,7 @@ export async function runIntegrityVerify(
           signature,
           leafSchemaVersion: detail.root.leaf_schema_version,
           leafCount: detail.root.leaf_count,
+          ...(mirrorMismatch ? { mirror: { file: opts.against, mismatchedFields: mirrorMismatch } } : {}),
           failed,
         },
         null,
@@ -681,6 +775,16 @@ export async function runIntegrityVerify(
     console.log('')
     console.log(`  ${pc.dim('Signature:')} ${colorSignature(signature)}`)
     log.dim(`  ${signatureNote(signature, controlPlaneUrl)}`)
+
+    if (mirrorMismatch) {
+      console.log('')
+      if (mirrorMismatch.length === 0) {
+        log.success(`Mirrored copy: match — ${opts.against} agrees with what the control plane serves.`)
+      } else {
+        log.error(`Mirrored copy: MISMATCH — ${opts.against} differs in ${mirrorMismatch.join(', ')}.`)
+        log.dim('  The copy in your bucket was written at seal time; the control plane now serves something else.')
+      }
+    }
   }
 
   if (failed) process.exit(1)

@@ -10,16 +10,17 @@
  * framework for durable backend AI agents: an agent is a directory (`agent/`
  * with `instructions.md`, `agent/tools/*.ts`, `agent/connections/*.ts`,
  * `agent/hooks/*.ts`, ...) that eve builds by walking the tree. It is a
- * pre-1.0 PREVIEW product (0.39.1 at the time of writing, very active) —
+ * pre-1.0 PREVIEW product (integrated at 0.39.1, re-verified at 0.71.0; very active) —
  * see docs/TECH_DEBT.md TD-410 for the churn shield this adapter carries,
  * the same posture the dsh integration established.
  *
  * ## The veto mechanism — CONFIRMED against a real install, not assumed
  *
- * `eve@0.39.1` is installed as a devDependency of this package and its
- * shipped `.d.ts` files were read directly (not inferred from docs alone).
+ * `eve@0.71.0` is installed as a devDependency of this package and its
+ * shipped `.d.ts` files were read directly (not inferred from docs alone;
+ * first against 0.39.1, re-read for 0.71.0 — paths below are 0.71.0's).
  * eve's per-tool veto point is the `approval` property on a tool definition
- * (`dist/src/public/definitions/tool.d.ts`), and the same `Approval` type is
+ * (`dist/src/tools/definition.d.ts`), and the same `Approval` type is
  * accepted per-connection by `defineMcpClientConnection` /
  * `defineOpenAPIConnection` (`dist/src/public/definitions/connections/
  * {mcp,openapi}.d.ts`), gating ALL of that connection's tools. There is NO
@@ -29,10 +30,13 @@
  * (`docs/patterns/multi-tenant-approvals.md`), and exactly the shape this
  * adapter exports.
  *
- * The confirmed policy contract (`dist/src/public/definitions/approval.d.ts`):
+ * The confirmed policy contract (`dist/src/approval/definition.d.ts`,
+ * re-exported by `dist/src/public/definitions/approval.d.ts` and
+ * `eve/tools/approval`):
  *
  * ```ts
  * export interface ApprovalContext<TInput = Record<string, unknown>> extends SessionContext {
+ *   readonly abortSignal: AbortSignal                 // added after 0.39.1; unused here
  *   readonly approvedTools: ReadonlySet<string>
  *   readonly callId: string
  *   readonly toolInput?: ApprovalToolInput<TInput>   // Readonly<TInput> | TInput; CAN be undefined
@@ -82,7 +86,10 @@
  * events. Handlers are OBSERVE-ONLY by eve's own contract ("fire after eve
  * has accepted and durably recorded each event ... cannot inject model
  * context") — {@link intuticAuditHooks} is telemetry, not enforcement; the
- * enforcement surface is {@link intuticApproval}. LOAD-BEARING caveat,
+ * enforcement surface is {@link intuticApproval}. (Since 0.39.1 a hook may
+ * call `ctx.cancel()` to cancel the whole running turn, but it still cannot
+ * veto or rewrite one tool call, and it runs after the event is recorded;
+ * this adapter never calls it.) LOAD-BEARING caveat,
  * verified against `dist/src/protocol/message.d.ts`: these two events carry
  * `requestId`/`responderPrincipalId`/`turnId`/`stepIndex` but NOT the tool
  * name or input.
@@ -105,7 +112,7 @@
  * 'tool-approval'` request `intuticApproval()`'s `'user-approval'` return
  * value produces. Each request in that ONE event already carries
  * `requestId` AND `action.toolName` TOGETHER (`InputRequest`,
- * `dist/src/runtime/input/types.d.ts`'s `inputRequestSchema` — confirmed by
+ * `dist/src/shared/input.d.ts`'s `inputRequestSchema` — confirmed by
  * the shipped zod schema, not just prose; corroborated by
  * `docs/tools/human-in-the-loop.md`'s explicit statement that "`toolName` and
  * `requestId` identify the action and request"). {@link intuticAuditHooks}
@@ -129,7 +136,9 @@
  * `resolutions[]` of `{ kind, outcome, requestId, response? }`, no tool name).
  * {@link intuticAuditHooks} subscribes to it as well, so bare-policy
  * settlements are audited, with the same cache-or-synthetic tool naming; the
- * `{ request, response }` form fires both events and is recorded once.
+ * `{ request, response }` form fires both events and is recorded once. eve
+ * 0.71 added the `'cancelled'` outcome: a pending request withdrawn because
+ * its turn was cancelled (or the relaying run ended) before anyone answered.
  *
  * ## LLM egress — documented honestly, not oversold
  *
@@ -169,8 +178,9 @@ const MAX_TRACKED_SETTLEMENTS = 1024
 
 /** Structural copy of eve's `ApprovalStatus` — this package does not depend
  *  on `eve` at runtime, so the shape is declared here rather than imported.
- *  Confirmed field-for-field against `eve@0.39.1`'s
- *  `dist/src/public/definitions/approval.d.ts` (see module doc), including
+ *  Confirmed field-for-field against `eve@0.71.0`'s
+ *  `dist/src/approval/definition.d.ts` (see module doc; unchanged since
+ *  0.39.1), including
  *  the boolean back-compat forms this adapter itself never returns. */
 export type EveApprovalStatus =
   | undefined
@@ -186,8 +196,8 @@ export type EveApprovalStatus =
 
 /** Structural copy of the slice of eve's `ApprovalContext` this adapter
  *  reads (`toolName`, `toolInput`). The real context is wider — it extends
- *  `SessionContext` and also carries `approvedTools`/`callId` — so the real
- *  type is assignable to this one, which is what makes a policy declared
+ *  `SessionContext` and also carries `approvedTools`/`callId`/`abortSignal`
+ *  — so the real type is assignable to this one, which is what makes a policy declared
  *  against this slice assignable to eve's own `ApprovalPolicy`. */
 export interface EveApprovalContext {
   /** Final runtime tool name. Path-derived for authored tools
@@ -388,7 +398,7 @@ export interface EveApprovalSettledEvent {
 
 /**
  * Structural copy of one element of eve's `InputRequestedStreamEvent.data.requests`
- * (`InputRequest`, `dist/src/runtime/input/types.d.ts`'s `inputRequestSchema`,
+ * (`InputRequest`, `dist/src/shared/input.d.ts`'s `inputRequestSchema`,
  * read from the shipped zod schema, not just its `.d.ts`) — narrowed to the
  * fields this module reads. Unlike {@link EveApprovalCandidateEvent} /
  * {@link EveApprovalSettledEvent}, this DOES carry the real tool name
@@ -425,10 +435,13 @@ export interface EveInputRequestedEvent {
  * resolutions` (`InputResolution`, `dist/src/protocol/message.d.ts`): the
  * server-accepted terminal outcome of one human-input request. Like
  * `approval.settled` it carries no tool name — only `requestId`.
+ * `'cancelled'` was added after 0.39.1 (present in 0.71.0): the request was
+ * withdrawn, unanswered, because its turn was cancelled or the run relaying
+ * it ended — nobody decided, so it audits as `tool_flagged`, not a veto.
  */
 export interface EveInputResolution {
   readonly kind: 'question' | 'session-limit' | 'tool-approval'
-  readonly outcome: 'answered' | 'approved' | 'denied' | 'ignored' | 'invalid'
+  readonly outcome: 'answered' | 'approved' | 'cancelled' | 'denied' | 'ignored' | 'invalid'
   readonly requestId: string
   readonly response?: {
     readonly optionId?: string
@@ -531,7 +544,8 @@ export interface IntuticAuditHooksOptions {
  *   settlement of a BARE approval policy, for which eve emits no
  *   `approval.settled` — → `tool_allowed` for `'approved'`, `tool_blocked`
  *   (a human veto, as above) for `'denied'`, and `tool_flagged` for any
- *   other outcome (`'ignored'`/`'invalid'`).
+ *   other outcome (`'ignored'`/`'invalid'`, and `'cancelled'` — withdrawn
+ *   unanswered with its turn, not a human decision).
  *
  * The `{ request, response }` approval form fires BOTH `approval.settled` and
  * `input.resolved` for the same request (in that order, observed live); each
@@ -545,8 +559,9 @@ export interface IntuticAuditHooksOptions {
  * fallback exists and is not itself a bug.
  *
  * These hooks are TELEMETRY, not enforcement: eve runs hook handlers after
- * events are durably recorded, and they cannot veto anything (eve's own
- * "observe-only" hook contract). The enforcement surface is
+ * events are durably recorded, and they cannot veto a tool call (eve's own
+ * "observe-only" hook contract; `ctx.cancel()` only cancels the whole turn,
+ * and these handlers never call it). The enforcement surface is
  * {@link intuticApproval}. Handlers never throw — a telemetry failure must
  * not break the run (`GateClient.emit`'s own never-throws contract).
  */

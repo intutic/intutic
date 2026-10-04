@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { generateKeyPairSync, sign as nodeSign, createPublicKey, KeyObject } from 'node:crypto'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
+  diffAgainstMirror,
   failsIntegrity,
   keyPublication,
   runIntegrityChain,
@@ -368,6 +372,48 @@ describe('command exit status', () => {
     expect(await exitCodeOf(() => runIntegrityVerify('tmr_1', {}))).toBe(1)
   })
 
+  // TD-249: `--against` compares the copy the customer's own bucket holds. The
+  // control plane can re-sign a rewritten root and pass every other check here.
+  describe('--against a mirrored copy', () => {
+    const matchRecompute = { ok: true, verdict: 'match', storedRoot: 'a', recomputedRoot: 'a', changedTraceIds: [], missingTraceIds: [] }
+    function mirroredCopy(over: Record<string, unknown> = {}): string {
+      const dir = mkdtempSync(join(tmpdir(), 'intutic-mirror-'))
+      const file = join(dir, 'tmr_1.json')
+      writeFileSync(file, JSON.stringify({
+        rootId: 'tmr_1',
+        workspaceId: 'wk_alpha',
+        merkleRoot: 'a'.repeat(64),
+        previousRoot: 'b'.repeat(64),
+        leaves: [{ leafIndex: 0, traceId: 'tr_a', leafHash: 'x' }],
+        ...over,
+      }))
+      return file
+    }
+    function stubVerify() {
+      vi.stubGlobal('fetch', stubFetch([
+        ['/recompute', 200, matchRecompute],
+        ['/integrity/roots/tmr_1', 200, rootDetail],
+        [JWKS_SUFFIX, 200, { keys: [] }],
+      ]))
+    }
+
+    it('exits 0 when the copy agrees with what the control plane serves', async () => {
+      stubVerify()
+      expect(await exitCodeOf(() => runIntegrityVerify('tmr_1', { against: mirroredCopy() }))).toBeNull()
+    })
+
+    it('exits 1 when the served root was rewritten — even though it re-derives and the signature is fine', async () => {
+      stubVerify()
+      const file = mirroredCopy({ merkleRoot: 'c'.repeat(64) })
+      expect(await exitCodeOf(() => runIntegrityVerify('tmr_1', { against: file }))).toBe(1)
+    })
+
+    it('exits 1 when the copy cannot be read, rather than passing a comparison it never made', async () => {
+      stubVerify()
+      expect(await exitCodeOf(() => runIntegrityVerify('tmr_1', { against: '/nonexistent/tmr_1.json' }))).toBe(1)
+    })
+  })
+
   it('says nothing is sealed yet, rather than printing an empty table', async () => {
     const printed: string[] = []
     vi.mocked(console.log).mockImplementation((...args: unknown[]) => {
@@ -617,5 +663,48 @@ describe('failsIntegrity', () => {
     expect(failsIntegrity({ kind: 'configChain', breaks: 1, contentMismatches: 0 })).toBe(true)
     expect(failsIntegrity({ kind: 'configChain', breaks: 0, contentMismatches: 1 })).toBe(true)
     expect(failsIntegrity({ kind: 'configChain', breaks: 0, contentMismatches: 0 })).toBe(false)
+  })
+})
+
+describe('diffAgainstMirror', () => {
+  const detail = {
+    root: { root_id: 'tmr_1', workspace_id: 'wk_alpha', merkle_root: 'a', previous_root: 'p', signature: 's', leaf_count: 1 },
+    leaves: [{ trace_id: 'tr_a', leaf_index: 0, leaf_hash: 'x' }],
+  }
+  const copy = {
+    rootId: 'tmr_1', workspaceId: 'wk_alpha', merkleRoot: 'a', previousRoot: 'p', signature: 's', leafCount: 1,
+    leaves: [{ leafIndex: 0, traceId: 'tr_a', leafHash: 'x' }],
+  }
+
+  it('finds nothing between a copy and the root it was made from', () => {
+    expect(diffAgainstMirror(copy, detail)).toEqual([])
+  })
+
+  it('names each field that moved, including a relinked chain and a swapped leaf', () => {
+    expect(diffAgainstMirror({ ...copy, previousRoot: 'q' }, detail)).toEqual(['previousRoot'])
+    expect(
+      diffAgainstMirror({ ...copy, leaves: [{ leafIndex: 0, traceId: 'tr_b', leafHash: 'x' }] }, detail),
+    ).toEqual(['leaves'])
+  })
+
+  it('skips fields an older copy never carried, but always requires the root and the leaves', () => {
+    const older: Record<string, unknown> = { ...copy }
+    delete older['previousRoot']
+    delete older['signature']
+    expect(diffAgainstMirror(older, detail)).toEqual([])
+    const hollow: Record<string, unknown> = { ...copy }
+    delete hollow['merkleRoot']
+    delete hollow['leaves']
+    expect(diffAgainstMirror(hollow, detail)).toEqual(['merkleRoot', 'leaves'])
+  })
+
+  it('reads an absent signing_preimage_version as 1, as the signature check does', () => {
+    expect(diffAgainstMirror({ ...copy, signingPreimageVersion: 1 }, detail)).toEqual([])
+    expect(diffAgainstMirror({ ...copy, signingPreimageVersion: 2 }, detail)).toEqual(['signingPreimageVersion'])
+  })
+
+  it('fails the run on any mismatch', () => {
+    expect(failsIntegrity({ kind: 'mirror', mismatchedFields: ['merkleRoot'] })).toBe(true)
+    expect(failsIntegrity({ kind: 'mirror', mismatchedFields: [] })).toBe(false)
   })
 })

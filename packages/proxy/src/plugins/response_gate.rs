@@ -31,6 +31,12 @@
 //! this that wants to gate on argument *values* must not assume the streaming
 //! path can see them.
 //!
+//! The one argument-level rule, the destructive-SQL guard (`sql_guard:` in a
+//! SOP, TD-480), gets its arguments on a stream the other way: while it is in
+//! force, the lines of a *shell-tool* block are held back until the block ends
+//! and evaluated whole — see [`crate::plugins::sql_guard::StreamHold`]. Every
+//! other block, and every stream with no SQL guard declared, flows unheld.
+//!
 //! # Wire shapes it does not see
 //!
 //! Anthropic (`content[].type == "tool_use"`, `content_block_start`), OpenAI
@@ -90,12 +96,16 @@ use serde_json::Value;
 use crate::commands::WireProvider;
 use crate::config::ResponseGateConfig;
 use crate::plugins::anomaly::AnomalyKind;
+use crate::plugins::sql_guard::{self, SqlGuardPolicy, SqlViolation};
 
 /// Why the gate refused a response.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DenialReason {
     /// Tool names the role's SOPs forbid, sorted and deduped.
     Tools(Vec<String>),
+    /// A shell call that would run destructive SQL against a database the
+    /// role's `sql_allow_dsns:` does not admit (`plugins::sql_guard`, TD-480).
+    DestructiveSql(SqlViolation),
     /// The body did not parse, so the gate could not show it carried no denied
     /// call. Only ever produced when `fail_closed` is set.
     Unparseable,
@@ -136,8 +146,13 @@ impl Denial {
                 AnomalyKind::UnauthorizedTool.as_str(),
                 t.join(", ")
             ),
+            DenialReason::DestructiveSql(v) => format!(
+                "Response blocked by anomaly policy [{}]: {}",
+                AnomalyKind::ToolAbuse.as_str(),
+                v.log_message()
+            ),
             DenialReason::Unparseable => format!(
-                "Response blocked by anomaly policy [{}]: response body did not parse, and a tool deny list is in force — cannot show it carries no forbidden call",
+                "Response blocked by anomaly policy [{}]: response body did not parse, and a tool deny list or SQL guard is in force — cannot show it carries no forbidden call",
                 AnomalyKind::UnauthorizedTool.as_str()
             ),
         }
@@ -156,8 +171,9 @@ impl Denial {
                  Do not retry it — continue without that tool, or ask an operator to change the policy.",
                 t.join(", ")
             ),
+            DenialReason::DestructiveSql(v) => v.agent_message(),
             DenialReason::Unparseable => {
-                "[Intutic] The model's response could not be parsed, and a tool deny list is in force \
+                "[Intutic] The model's response could not be parsed, and a tool deny list or SQL guard is in force \
                  for this agent role, so the proxy could not show the response carried no forbidden \
                  tool call. The response was withheld. Retry the request."
                     .to_string()
@@ -219,6 +235,52 @@ pub fn gate_response(
         reason: DenialReason::Tools(hits),
         block_index: 0,
     })
+}
+
+/// Evaluate a complete, parsed response body against the SQL guard in force.
+///
+/// Returns the refusal, if an enforcing `refuse` policy is violated, and every
+/// other violation (`warn`, shadow) for the caller to log. Argument-level, so
+/// on a stream this is [`sql_guard::StreamHold`]'s job instead.
+///
+/// Inert when the gate is disabled or no SOP declares `sql_guard:` — the same
+/// two-level fail direction the deny list follows, including `fail_closed` for
+/// a body that will not parse while a `refuse` policy is in force.
+pub fn gate_response_sql(
+    cfg: &ResponseGateConfig,
+    body: Option<&Value>,
+    policies: &[SqlGuardPolicy],
+) -> (Option<Denial>, Vec<SqlViolation>) {
+    if !cfg.enabled || policies.is_empty() {
+        return (None, Vec::new());
+    }
+    let Some(body) = body else {
+        let refusing = policies.iter().any(SqlGuardPolicy::refuses);
+        let denial = (cfg.fail_closed && refusing).then_some(Denial {
+            reason: DenialReason::Unparseable,
+            block_index: 0,
+        });
+        return (denial, Vec::new());
+    };
+    let mut denial = None;
+    let mut notes = Vec::new();
+    for (name, args, raw) in crate::routing::integrity::response_tool_calls(body) {
+        // Arguments that did not parse as JSON are still a command string.
+        let args = args
+            .or_else(|| raw.map(Value::String))
+            .unwrap_or(Value::Null);
+        for v in sql_guard::evaluate(policies, &name, &args) {
+            if denial.is_none() && v.refuses() {
+                denial = Some(Denial {
+                    reason: DenialReason::DestructiveSql(v),
+                    block_index: 0,
+                });
+            } else {
+                notes.push(v);
+            }
+        }
+    }
+    (denial, notes)
 }
 
 /// Evaluate one SSE line, before it is forwarded.
@@ -529,6 +591,94 @@ mod tests {
             fail_closed: false,
         };
         assert!(gate_response(&open, None, &denied()).is_none());
+    }
+
+    // ── Destructive-SQL guard (TD-480) ──────────────────────────────────
+
+    fn sql_policy(
+        severity: crate::plugins::sql_guard::SqlGuardSeverity,
+        shadow: bool,
+    ) -> Vec<SqlGuardPolicy> {
+        vec![SqlGuardPolicy {
+            severity,
+            allow: vec!["postgres://localhost/*".into()],
+            org_allow: Vec::new(),
+            shadow,
+        }]
+    }
+
+    #[test]
+    fn sql_guard_refuses_a_production_drop_and_passes_an_allowlisted_one() {
+        use crate::plugins::sql_guard::SqlGuardSeverity::Refuse;
+        let prod = openai_response(
+            "Bash",
+            r#"{"command":"psql -h db.prod -d app -c 'DROP TABLE users'"}"#,
+        );
+        let (d, notes) = gate_response_sql(&cfg(), Some(&prod), &sql_policy(Refuse, false));
+        let d = d.expect("must refuse");
+        assert!(matches!(d.reason, DenialReason::DestructiveSql(_)));
+        assert!(notes.is_empty());
+        let out = refusal_body(WireProvider::OpenAI, "gpt-x", &d);
+        assert!(crate::routing::integrity::response_tool_calls(&out).is_empty());
+        assert!(out.to_string().contains("postgres://db.prod/app"));
+
+        let local = openai_response(
+            "Bash",
+            r#"{"command":"psql -h localhost -d app -c 'DROP TABLE users'"}"#,
+        );
+        assert_eq!(
+            gate_response_sql(&cfg(), Some(&local), &sql_policy(Refuse, false)),
+            (None, Vec::new())
+        );
+    }
+
+    #[test]
+    fn sql_guard_warn_and_shadow_report_without_refusing() {
+        use crate::plugins::sql_guard::SqlGuardSeverity::{Refuse, Warn};
+        let prod = openai_response(
+            "Bash",
+            r#"{"command":"psql -h db.prod -d app -c 'TRUNCATE events'"}"#,
+        );
+        for policies in [sql_policy(Warn, false), sql_policy(Refuse, true)] {
+            let (d, notes) = gate_response_sql(&cfg(), Some(&prod), &policies);
+            assert!(d.is_none());
+            assert_eq!(notes.len(), 1);
+        }
+    }
+
+    #[test]
+    fn sql_guard_is_inert_without_a_policy_or_with_the_gate_off() {
+        use crate::plugins::sql_guard::SqlGuardSeverity::Refuse;
+        let prod = openai_response(
+            "Bash",
+            r#"{"command":"psql -h db.prod -c 'DROP TABLE users'"}"#,
+        );
+        assert_eq!(
+            gate_response_sql(&cfg(), Some(&prod), &[]),
+            (None, Vec::new())
+        );
+        assert_eq!(gate_response_sql(&cfg(), None, &[]), (None, Vec::new()));
+        let off = ResponseGateConfig {
+            enabled: false,
+            fail_closed: true,
+        };
+        assert_eq!(
+            gate_response_sql(&off, Some(&prod), &sql_policy(Refuse, false)),
+            (None, Vec::new())
+        );
+    }
+
+    #[test]
+    fn sql_guard_unparseable_body_fails_closed_only_under_refuse() {
+        use crate::plugins::sql_guard::SqlGuardSeverity::{Refuse, Warn};
+        let (d, _) = gate_response_sql(&cfg(), None, &sql_policy(Refuse, false));
+        assert_eq!(d.unwrap().reason, DenialReason::Unparseable);
+        assert!(gate_response_sql(&cfg(), None, &sql_policy(Warn, false))
+            .0
+            .is_none());
+        assert!(gate_response_sql(&cfg(), None, &sql_policy(Refuse, true))
+            .0
+            .is_none());
     }
 
     // ── Streaming ───────────────────────────────────────────────────────
