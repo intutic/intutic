@@ -784,6 +784,27 @@ export const NO_GATE: ReadonlyArray<{
       'Anthropic/OpenAI/LiteLLM providers honor .env.intutic’s base-URL vars. See ' +
       'TD-420..423 and apps/docs/integrations/strands.md.',
   },
+  {
+    file: null,
+    harness: 'agent-framework',
+    why:
+      'no on-disk config/hook file exists — Microsoft Agent Framework tools (@tool ' +
+      'functions and MCP-materialised FunctionTools) run in the agent’s own Python ' +
+      'process. The blocking gate ships SDK-side (intutic_clawde.gate.adapters.' +
+      'agent_framework.IntuticFunctionMiddleware, an agent_framework FunctionMiddleware). ' +
+      'A separate framework from autogen above (TD-375), not a new version of it. ' +
+      'Verified live against agent-framework-core==1.20.0 by reading ' +
+      'agent_framework/_middleware.py + _tools.py directly AND driving a real Agent ' +
+      'through a stub chat client: on a deny the middleware sets context.result to the ' +
+      'refusal and never calls call_next(), so the tool body never runs, the model ' +
+      'receives the refusal as the tool result, and the loop continues. ' +
+      'MiddlewareTermination was rejected because it ends the loop before the model sees ' +
+      'the result. A gate error raises MiddlewareFailure, which the framework propagates ' +
+      'out of Agent.run() instead of turning it into a tool result (fail-CLOSED; an ' +
+      'ordinary exception would be converted and the loop would keep going). Egress: ' +
+      'the OpenAI/Anthropic clients honor .env.intutic’s base-URL vars; Azure ' +
+      'OpenAI/Foundry clients do not. See apps/docs/integrations/microsoft-agent-framework.md.',
+  },
 
   // -- T2: JS/TS SDK-gated frameworks (same family as langchain/langgraph
   // above, but the blocking gate ships in @intutic/gate -- packages/gate-js --

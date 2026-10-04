@@ -1,11 +1,11 @@
 ---
 title: Integrations
-description: Connect Intutic to 42 AI coding agents — IDE extensions, CLI tools, agent frameworks, orchestrators, and platforms. Auto-detected, zero config.
+description: Connect Intutic to 43 AI coding agents — IDE extensions, CLI tools, agent frameworks, orchestrators, and platforms. Auto-detected, zero config.
 ---
 
 # Integrations <Badge type="tip" text="Open-Core" />
 
-Intutic supports **42 AI agent harnesses** out of the box. Run `intutic init` in your project and the CLI auto-detects which agents are present, then syncs governance rules to each one.
+Intutic supports **43 AI agent harnesses** out of the box. Run `intutic init` in your project and the CLI auto-detects which agents are present, then syncs governance rules to each one.
 
 ```bash
 intutic init
@@ -62,6 +62,7 @@ Autonomous coding agents that run multi-step tasks with tool use.
 | [**Pydantic AI**](/integrations/pydantic-ai) | Pydantic's typed agent framework | `.env.intutic` + SDK gate |
 | [**smolagents**](/integrations/smolagents) | Hugging Face's code-executing agent framework | `.env.intutic` + SDK gate |
 | [**Strands Agents**](/integrations/strands) | AWS's open-source agent framework (Bedrock AgentCore default) | `.env.intutic` + SDK gate |
+| [**Microsoft Agent Framework**](/integrations/microsoft-agent-framework) | Microsoft's AutoGen + Semantic Kernel successor (`agent-framework`) | `.env.intutic` + SDK gate |
 | [**Mastra**](/integrations/mastra) | TypeScript agent framework | `.env.intutic` + SDK gate |
 | [**Vercel AI SDK**](/integrations/vercel-ai-sdk) | Vercel's `ai` package (v6+) | `.env.intutic` + SDK gate |
 | [**eve**](/integrations/eve) <Badge type="warning" text="Preview" /> | Vercel's filesystem-first durable backend agent framework | `.env.intutic` + SDK gate (per-tool/connection `approval`) |
