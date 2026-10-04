@@ -7,14 +7,15 @@
  *
  * ## Divergences from the Rust runner (all recorded as TD entries)
  *
- * - **50ms per-rule deadline, not 5ms + fuel metering.** Wasmtime's `Store`
- *   can price guest instructions with fuel and enforce a hard wall-clock
- *   timeout independently; V8's WebAssembly has no fuel-equivalent
- *   instruction metering accessible from `worker_threads`, so a wall-clock
- *   race against a `postMessage` round trip (which also pays IPC overhead
- *   the in-process Wasmtime call never did) is the only backstop available
- *   here. 50ms, not 5ms, to keep that overhead from false-positiving a
- *   legitimate rule under normal load.
+ * - **Fuel: the same 1,000,000-instruction budget, metered a different
+ *   way.** V8 has no fuel hook, so `fuel.ts` rewrites each rule at load to
+ *   count its own instructions and trap when the budget runs out (TD-440).
+ *   A rule that exhausts it fails open for that call, as under Wasmtime.
+ * - **50ms per-rule deadline, not 5ms.** Fuel bounds the guest's own work;
+ *   the deadline is the backstop for everything else, and it races a
+ *   `postMessage` round trip that pays IPC overhead the in-process Wasmtime
+ *   call never did. 50ms, not 5ms, keeps that overhead from
+ *   false-positiving a legitimate rule under normal load.
  * - **Guest memory ceiling: the same 16MB, enforced a different way.**
  *   `runner.rs` sets a `StoreLimits` cap; V8 has no such hook, but it does
  *   enforce the maximum a module declares, so `worker.ts` rewrites the
@@ -50,7 +51,10 @@ const EVALUATE_TIMEOUT_MS = 50
  *  pathological file must not hang a rescan forever. */
 const COMPILE_TIMEOUT_MS = 3_000
 
-/** Consecutive per-rule timeouts before that rule is disabled until the next rescan. */
+/**
+ * Consecutive per-rule runaways (a timeout, or the instruction budget running
+ * out) before that rule is disabled until the next rescan.
+ */
 const MAX_CONSECUTIVE_TIMEOUTS = 3
 
 export type WasmVerdict =
@@ -302,7 +306,7 @@ export class WasmRunner implements CompileBridge {
     files?: ReferencedFilesTable,
   ): Promise<{ code: number; reason?: string } | null> {
     const id = this.allocId()
-    const reply = await this.send<{ ok: boolean; code?: number; reason?: string; error?: string }>(
+    const reply = await this.send<{ ok: boolean; code?: number; reason?: string; error?: string; fuelExhausted?: boolean }>(
       { type: 'evaluate', id, ruleId, bytes: toArrayBuffer(contextBytes), ...(files ? { files } : {}) },
       EVALUATE_TIMEOUT_MS,
     )
@@ -312,20 +316,21 @@ export class WasmRunner implements CompileBridge {
       // fails open — plus the MCP-specific per-rule consecutive-timeout
       // disable ladder the task calls for.
       log.warn({ action: 'wasm_evaluate_timeout', ruleId, timeoutMs: EVALUATE_TIMEOUT_MS }, 'WASM rule evaluation timed out — failing open')
-      const attempts = (this.consecutiveTimeouts.get(ruleId) ?? 0) + 1
-      this.consecutiveTimeouts.set(ruleId, attempts)
       // terminate + lazily respawn: the NEXT evaluate() call pays the
       // respawn cost via ensureWorker()/rescan(force); triggered here so a
       // wedged worker does not keep timing out every rule behind it in this
       // same evaluate() loop.
       await this.respawnWorker()
-      if (attempts >= MAX_CONSECUTIVE_TIMEOUTS) {
-        this.disabledRuleIds.add(ruleId)
-        log.warn(
-          { action: 'wasm_rule_disabled', ruleId, consecutiveTimeouts: attempts },
-          'WASM rule disabled after consecutive timeouts — will retry on the next policy-driven rescan',
-        )
-      }
+      this.countRunaway(ruleId)
+      return null
+    }
+
+    if (!reply.ok && reply.fuelExhausted) {
+      // The budget trapped the guest, so the worker is healthy: no respawn,
+      // but the same disable ladder as a timeout, since it is the same
+      // runaway rule caught sooner.
+      log.warn({ action: 'wasm_evaluate_fuel_exhausted', ruleId }, 'WASM rule ran out of its instruction budget — failing open')
+      this.countRunaway(ruleId)
       return null
     }
 
@@ -340,6 +345,18 @@ export class WasmRunner implements CompileBridge {
     // A clean reply resets this rule's timeout streak.
     this.consecutiveTimeouts.delete(ruleId)
     return { code: reply.code ?? -1, reason: reply.reason }
+  }
+
+  private countRunaway(ruleId: string): void {
+    const attempts = (this.consecutiveTimeouts.get(ruleId) ?? 0) + 1
+    this.consecutiveTimeouts.set(ruleId, attempts)
+    if (attempts >= MAX_CONSECUTIVE_TIMEOUTS) {
+      this.disabledRuleIds.add(ruleId)
+      log.warn(
+        { action: 'wasm_rule_disabled', ruleId, consecutiveRunaways: attempts },
+        'WASM rule disabled after consecutive timeouts or budget exhaustion — will retry on the next policy-driven rescan',
+      )
+    }
   }
 
   /** Terminates the worker. Safe to call even if one was never spawned. */
