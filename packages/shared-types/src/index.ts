@@ -143,6 +143,14 @@ export {
   IR_KINDS,
   FRONT_MATTER_KINDS,
   isFrontMatterIr,
+  SETTING_KINDS,
+  SETTING_KIND_KEYS,
+  isSettingIr,
+  settingValues,
+  isEgressHostEntry,
+  MODEL_ID_RE,
+  MAX_SETTING_VALUES,
+  MIN_EGRESS_CIDR_PREFIX,
   validateGuardrailIr,
   canonicalizeIr,
   irTokens,
@@ -161,6 +169,8 @@ export type {
   HookRuleIr,
   WasmPredicateIr,
   FrontMatterIr,
+  SettingIr,
+  SettingKey,
   IrKind,
   IrValidation,
 } from './guardrailIr.js'
@@ -181,8 +191,9 @@ export {
   MAX_REASON_CHARS,
   MAX_QUOTE_IN_REASON,
   renderGuardrailSopFile,
+  renderWorkspaceSetting,
 } from './guardrailRender.js'
-export type { HookRuleCitation, RenderedHookRule, ParsedFrontMatter, GuardrailSopFileInput } from './guardrailRender.js'
+export type { HookRuleCitation, RenderedHookRule, RenderedWorkspaceSetting, ParsedFrontMatter, GuardrailSopFileInput } from './guardrailRender.js'
 
 export {
   GUARDRAIL_STATUSES,

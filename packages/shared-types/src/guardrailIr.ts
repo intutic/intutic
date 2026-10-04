@@ -23,13 +23,21 @@
  *   `max_calls`, `forbid_with`). `~>` adjacency is not offered; `->` only.
  * - `wasm_predicate` — the existing closed predicate DSL, verdict 3 (reask)
  *   only. A generated rule can never originate a block.
+ * - the two settings-class kinds (TD-474 item 2): `allowed_models` and
+ *   `egress_allow`, each a list of values for one workspace setting
+ *   (`SETTING_KIND_KEYS`). Neither carries roles — a workspace setting has no
+ *   per-role form — and neither is projected into a rule endpoint: a promoted
+ *   one is written into the setting the proxy already enforces.
  * - `none` — "this passage contains no enforceable rule", so the corpus can
  *   measure over-generation.
  *
  * Deliberately absent: the three allowlist keys (`allow_harnesses`,
  * `plan_steps`, `scope_paths` — intersection-composed, empty-means-unrestricted;
  * a generated allowlist can silently deny everything), raw regexes, raw
- * AssemblyScript, `BLOCK:` titles, DLP patterns, SSL graphs, verdict 1, OR.
+ * AssemblyScript, `BLOCK:` titles, DLP patterns (they live only in the proxy's
+ * own config file; no setting carries them and nothing validates a generated
+ * regex for ReDoS), `egressMode` (posture, never generated), SSL graphs,
+ * verdict 1, OR.
  *
  * Structural impossibilities match the Rust parser's own refusals: a token with
  * whitespace (a shell command) cannot exist, a `forbid_with` taint is an enum,
@@ -174,6 +182,73 @@ const WasmPredicateSchema = z
   })
   .strict()
 
+/**
+ * A model id as the proxy compares it: `check_model_allowed` in
+ * `packages/proxy/src/metering.rs` is an exact, case-sensitive string match
+ * against the request's `model`, so the id is kept as written.
+ */
+export const MODEL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/
+export const MAX_SETTING_VALUES = 32
+
+const ModelId = z.string().regex(MODEL_ID_RE, 'a model id is one token: `claude-sonnet-4-5`, `gpt-4o`, `openrouter/meta-llama/llama-3-70b`')
+
+const HOST_LABEL_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/
+const IPV4_RE = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?:\/(\d{1,2}))?$/
+/** The widest CIDR a generated entry may name: a /8 is a whole private range, anything wider is a catch-all. */
+export const MIN_EGRESS_CIDR_PREFIX = 8
+
+/**
+ * An egress allow entry in a form `packages/proxy/src/egress_policy.rs`
+ * honours, and narrow enough to mean something:
+ *
+ * - a host, `api.example.com` — the proxy matches it and its subdomains;
+ * - a suffix, `.example.com` — the same match, written as a domain;
+ * - an IPv4 address or CIDR, `10.0.0.0/8` — matched against IP-literal
+ *   CONNECT targets only (the proxy never resolves a name); octets without
+ *   leading zeros, which Rust's parser refuses.
+ *
+ * Refused the way a catch-all hook pattern is refused: `*` (the proxy has no
+ * wildcard, so it would be inert), a bare TLD or single label (`com` would
+ * allow every `.com` host), and a CIDR wider than /8 (`0.0.0.0/0` is
+ * everything). IPv6 is honoured by the proxy but not offered here.
+ */
+export function isEgressHostEntry(value: string): boolean {
+  if (value !== value.trim()) return false
+  const v = value.toLowerCase()
+  const ip = v.match(IPV4_RE)
+  if (ip) {
+    // Rust's `IpAddr::from_str` refuses a leading-zero octet (`010.20.0.0`),
+    // so the proxy would treat it as a host name that never matches.
+    if (ip.slice(1, 5).some((o) => Number(o) > 255 || (o!.length > 1 && o!.startsWith('0')))) return false
+    if (ip[5] === undefined) return true
+    const prefix = Number(ip[5])
+    return prefix >= MIN_EGRESS_CIDR_PREFIX && prefix <= 32
+  }
+  const host = v.startsWith('.') ? v.slice(1) : v
+  if (host.length === 0 || host.length > 253) return false
+  const labels = host.split('.')
+  if (labels.length < 2) return false
+  if (!labels.every((l) => HOST_LABEL_RE.test(l))) return false
+  // A numeric last label is an IP fragment, not a domain.
+  return /[a-z]/.test(labels[labels.length - 1]!)
+}
+
+const HostEntry = z
+  .string()
+  .min(1)
+  .max(253)
+  .refine(isEgressHostEntry, {
+    message: 'an egress entry is a host (`api.example.com`), a suffix with at least two labels (`.example.com`) or an IPv4 CIDR no wider than /8 (`10.0.0.0/8`) — never `*`, `0.0.0.0/0` or a bare TLD',
+  })
+
+const AllowedModelsSchema = z
+  .object({ kind: z.literal('allowed_models'), models: z.array(ModelId).min(1).max(MAX_SETTING_VALUES) })
+  .strict()
+
+const EgressAllowSchema = z
+  .object({ kind: z.literal('egress_allow'), hosts: z.array(HostEntry).min(1).max(MAX_SETTING_VALUES) })
+  .strict()
+
 const NoneSchema = z.object({ kind: z.literal('none'), reason: Rationale }).strict()
 
 export const GuardrailIrSchema = z.discriminatedUnion('kind', [
@@ -185,6 +260,8 @@ export const GuardrailIrSchema = z.discriminatedUnion('kind', [
   MaxCallsSchema,
   ForbidWithSchema,
   WasmPredicateSchema,
+  AllowedModelsSchema,
+  EgressAllowSchema,
   NoneSchema,
 ])
 
@@ -192,6 +269,7 @@ export type GuardrailIr = z.infer<typeof GuardrailIrSchema>
 export type HookRuleIr = z.infer<typeof HookRuleSchema>
 export type WasmPredicateIr = z.infer<typeof WasmPredicateSchema>
 export type FrontMatterIr = Extract<GuardrailIr, { kind: 'deny_tools' | 'review_before' | 'requires_before' | 'forbid_after' | 'max_calls' | 'forbid_with' }>
+export type SettingIr = Extract<GuardrailIr, { kind: 'allowed_models' | 'egress_allow' }>
 export type IrKind = GuardrailIr['kind']
 
 /** Every kind, in one place, for the lint gate (`check-guardrail-ir-keys.js`). */
@@ -204,6 +282,8 @@ export const IR_KINDS = [
   'max_calls',
   'forbid_with',
   'wasm_predicate',
+  'allowed_models',
+  'egress_allow',
   'none',
 ] as const
 
@@ -219,6 +299,25 @@ export const FRONT_MATTER_KINDS = [
 
 export function isFrontMatterIr(ir: GuardrailIr): ir is FrontMatterIr {
   return (FRONT_MATTER_KINDS as readonly string[]).includes(ir.kind)
+}
+
+/** The settings-class kinds: each is a list of values for one workspace setting (TD-474 item 2). */
+export const SETTING_KINDS = ['allowed_models', 'egress_allow'] as const
+
+/**
+ * The `WorkspaceSettings` key each settings-class kind writes on promotion.
+ * `check-guardrail-ir-keys.js` asserts each value is declared there.
+ */
+export const SETTING_KIND_KEYS = { allowed_models: 'allowedModels', egress_allow: 'egressAllow' } as const
+export type SettingKey = (typeof SETTING_KIND_KEYS)[keyof typeof SETTING_KIND_KEYS]
+
+export function isSettingIr(ir: GuardrailIr): ir is SettingIr {
+  return (SETTING_KINDS as readonly string[]).includes(ir.kind)
+}
+
+/** A settings-class IR's values, as the setting holds them: sorted, deduplicated; hosts lower-cased (the proxy lower-cases them), model ids kept as written (the proxy compares them exactly). */
+export function settingValues(ir: SettingIr): string[] {
+  return ir.kind === 'allowed_models' ? uniqueSorted(ir.models) : uniqueSorted(ir.hosts.map((h) => h.trim().toLowerCase()))
 }
 
 export type IrValidation = { ok: true; ir: GuardrailIr } | { ok: false; reason: string }
@@ -265,7 +364,7 @@ function uniqueSorted(values: readonly string[]): string[] {
  * matches `Bash` case-sensitively).
  */
 export function canonicalizeIr(ir: GuardrailIr): string {
-  const roles = ir.kind === 'none' ? undefined : ir.roles && ir.roles.length ? uniqueSorted(ir.roles.map((r) => r.toLowerCase())) : undefined
+  const roles = 'roles' in ir && ir.roles && ir.roles.length ? uniqueSorted(ir.roles.map((r) => r.toLowerCase())) : undefined
   let core: Record<string, unknown>
   switch (ir.kind) {
     case 'hook_rule':
@@ -293,6 +392,12 @@ export function canonicalizeIr(ir: GuardrailIr): string {
       break
     case 'wasm_predicate':
       core = { predicate: ir.predicate, verdict: ir.verdict }
+      break
+    case 'allowed_models':
+      core = { models: settingValues(ir) }
+      break
+    case 'egress_allow':
+      core = { hosts: settingValues(ir) }
       break
     case 'none':
       core = {}
@@ -323,6 +428,8 @@ export function irTokens(ir: GuardrailIr): string[] {
     case 'forbid_with':
       return [ir.token]
     case 'wasm_predicate':
+    case 'allowed_models':
+    case 'egress_allow':
     case 'none':
       return []
   }

@@ -146,6 +146,31 @@ describe('intutic guardrails show', () => {
     expect(out).toContain('PROPOSED (system)')
   })
 
+  it('a settings-class guardrail prints the setting it writes, and for egress that it applies without shadow evidence (TD-474 item 2)', async () => {
+    fetchMock.mockResolvedValueOnce(
+      ok({
+        guardrail: {
+          ...summary({ guardrailId: 'pgr_e', target: 'workspace_setting', status: 'PROPOSED', ir: { kind: 'egress_allow', hosts: ['artifacts.internal.example.com'] }, rendered: { kind: 'workspace_setting', key: 'egressAllow', values: ['artifacts.internal.example.com'] } }),
+          validation: [],
+          passage: null,
+          events: [],
+        },
+      }),
+    )
+    await runGuardrailsShow('pgr_e', {})
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const out = printed()
+    expect(out).toContain('egressAllow: artifacts.internal.example.com')
+    expect(out).toContain('No shadow evidence exists for egress')
+    expect(out).toContain('monitor or enforce')
+  })
+
+  it('--target accepts workspace_setting', async () => {
+    fetchMock.mockResolvedValue(ok({ guardrails: [] }))
+    await runGuardrailsList({ target: 'workspace_setting' })
+    expect(new URL(fetchMock.mock.calls[0]![0] as string).searchParams.get('target')).toBe('workspace_setting')
+  })
+
   it('a missing guardrail exits 1 with a named error', async () => {
     fetchMock.mockResolvedValue(ok({ error: 'Guardrail not found' }, 404))
     await swallowExit(runGuardrailsShow('pgr_nope', {}))
@@ -188,6 +213,13 @@ describe('intutic guardrails reject / replay', () => {
     fetchMock.mockResolvedValue(ok({ ok: true, guardrail: { ...summary({ status: 'REJECTED' }), validation: [], passage: null, events: [] } }))
     await runGuardrailsReject('pgr_1', { reason: '  duplicates a hand-written SOP ' })
     expect(JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body))).toEqual({ reason: 'duplicates a hand-written SOP' })
+  })
+
+  it('replay names an egress allow list\'s missing source instead of reporting zero fires as a measurement (TD-474 item 2)', async () => {
+    fetchMock.mockResolvedValue(ok({ replay: { source: 'none', windowDays: 30, captured: 0, fires: 0, sample: [], truncated: false, unsupported: ["egress_allow: no egress observation source; would-deny decisions stay in the proxy's local log"] } }))
+    await runGuardrailsReplay('pgr_e', {})
+    expect(printed()).toContain('nothing captured can answer this')
+    expect(printed()).toContain('no egress observation source')
   })
 
   it('replay prints N of M and what could not be replayed', async () => {

@@ -1021,7 +1021,7 @@ intutic guardrails list
 | Option | Description |
 |--------|-------------|
 | `--status <status>` | `PROPOSED`, `SHADOW`, `ENFORCING`, `REJECTED` or `RETIRED` |
-| `--target <target>` | `hook_rule`, `sop_front_matter` or `wasm_rule` |
+| `--target <target>` | `hook_rule`, `sop_front_matter`, `wasm_rule` or `workspace_setting` |
 | `--doc <docId>` | Only guardrails cited from this document |
 | `--limit <n>` | Max rows (default 50, capped at 200) |
 | `--json` | Output as JSON |
@@ -1053,7 +1053,7 @@ intutic guardrails show <guardrailId>
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-For a hook rule, prints the tool and input patterns and the exact stderr line a developer sees on a block; for a front-matter rule, the lines the proxy reads; for a WASM rule, the predicate source. A SHADOW guardrail also prints the server's readiness reasons verbatim.
+For a hook rule, prints the tool and input patterns and the exact stderr line a developer sees on a block; for a front-matter rule, the lines the proxy reads; for a WASM rule, the predicate source; for a workspace setting, the setting and the values it proposes. A SHADOW guardrail also prints the server's readiness reasons verbatim.
 
 ---
 ## `intutic guardrails approve-shadow <guardrailId>`
@@ -1083,7 +1083,7 @@ PROPOSED → SHADOW. A hook rule is distributed at severity `warn`; a front-matt
 ---
 ## `intutic guardrails promote <guardrailId>`
 
-Promote a shadow guardrail to enforcing once the server says it is ready.
+Promote a shadow guardrail to enforcing once the server says it is ready (an egress allow list is applied from proposed).
 
 ```bash
 intutic guardrails promote <guardrailId>
@@ -1099,12 +1099,12 @@ intutic guardrails promote <guardrailId>
 
 | Option | Description |
 |--------|-------------|
-| `--acknowledge-no-traffic` | Promote a rule that no observed traffic exercised |
+| `--acknowledge-no-traffic` | Promote a rule that no observed traffic exercised, or apply an egress allow list, which has no shadow evidence |
 | `--json` | Output as JSON |
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-SHADOW → ENFORCING under the [promotion rule](/concepts/enforcement-actions#the-promotion-rule); refused (exit 1, with the reasons) until it holds. A WASM guardrail is promoted through its rule candidate instead, and this command says so.
+SHADOW → ENFORCING under the [promotion rule](/concepts/enforcement-actions#the-promotion-rule); refused (exit 1, with the reasons) until it holds. A WASM guardrail is promoted through its rule candidate instead, and this command says so. An allowed-models guardrail writes the workspace's `allowedModels`; an egress allow list has no shadow, so it goes PROPOSED → ENFORCING with `--acknowledge-no-traffic` and only adds its entries to `egressAllow` (see [Settings: allowed models and egress](/guide/policy-guardrails#settings-allowed-models-and-egress)).
 
 ---
 ## `intutic guardrails reject <guardrailId>`
