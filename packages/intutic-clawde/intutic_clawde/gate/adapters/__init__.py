@@ -46,4 +46,9 @@ Modules (A4 — AWS Strands Agents; same verified-against-a-real-install
 discipline):
   strands.py           IntuticHookProvider (BeforeToolCallEvent.cancel_tool) +
                         install(agent)
+
+Modules (TD-375 — Microsoft Agent Framework; same verified-against-a-real-install
+discipline):
+  agent_framework.py   IntuticFunctionMiddleware (FunctionMiddleware, no call_next()
+                        on deny) + install(agent)
 """

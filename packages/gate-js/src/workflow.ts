@@ -1,6 +1,7 @@
 /**
- * `@ai-sdk/workflow` adapter: `intuticNeedsApproval()`, `withIntuticApproval()`,
- * `wrapWorkflowTools()`, and the FatalError-compatible `IntuticWorkflowRefusal`.
+ * `@ai-sdk/workflow` adapter: `withIntuticApproval()`, `intuticNeedsApproval()`,
+ * `intuticApprovalStep()`, `wrapWorkflowTools()`, and the FatalError-compatible
+ * `IntuticWorkflowRefusal`.
  *
  * `@intutic/gate/workflow` — the same idea `vercel.ts` implements for the base
  * `ai` package (wrap the framework's own veto point around this package's
@@ -56,11 +57,50 @@
  * "no gate configured" case, which is deterministic and would fail every
  * retry identically) is made fatal.
  *
+ * ## 3. `needsApproval` runs in the workflow VM — the gate must run in a step
+ *
+ * Observed in a live run on the Workflow DevKit's local world (TD-498):
+ * `WorkflowAgent`'s loop runs inside the `"use workflow"` function, so it
+ * calls `needsApproval` in the workflow VM, which has no Node.js modules.
+ * `Gate` reads its policy snapshot with `node:fs`, so evaluating it there
+ * fails with `require is not defined` — and when the workflow bundle pulls
+ * `node:fs` in at module level, EVERY workflow sharing that bundle fails at
+ * load (observed with `workflow/nitro`).
+ *
+ * So the gate runs in a STEP, which has full Node.js and is durable. The
+ * caller declares one `"use step"` function in their own module — the
+ * directive must sit in a module the workflow bundler transforms, and the
+ * step's body must build/receive the `Gate` itself, because step arguments
+ * are serialized and a `Gate` instance is not serializable — whose body is
+ * {@link intuticApprovalStep}, and passes it as `{ step }`:
+ *
+ * ```ts
+ * export async function intuticGate(toolName: string, input: unknown) {
+ *   'use step'
+ *   return intuticApprovalStep(toolName, input, { gate: new Gate({ ... }) })
+ * }
+ * // in the workflow: tools: withIntuticApproval(tools, { step: intuticGate })
+ * ```
+ *
+ * With `{ step }`, the `needsApproval` this module builds only calls the step
+ * (a durable step invocation from the VM's point of view) and maps its
+ * boolean; nothing Node-only runs in the VM. This module itself is safe to
+ * import into workflow code: it imports nothing that touches Node.js
+ * (`errors.ts`, `registry.ts`, `wrapTools.ts`; `Gate` is a type-only
+ * import). Without `{ step }`, the gate is evaluated in-process, which still
+ * works wherever Node.js is available (inside a step, or any plain `ai`
+ * loop); called in the workflow VM it throws an {@link IntuticWorkflowRefusal}
+ * naming this fix instead of failing with `require is not defined`.
+ *
  * @module
  */
 
-import { active as activeGate, type Gate, type ToolInput } from './gate.js'
+// Nothing imported here may touch Node.js at module load: this module is
+// bundled into workflow VM code (see module doc, section 3). `gate.ts` is
+// type-only; the installed gate comes from the Node-free registry.
+import type { Gate, ToolInput } from './gate.js'
 import { IntuticGateRefusal } from './errors.js'
+import { active as activeGate } from './registry.js'
 import { wrapTools, type AnyFn, type ExecutableTool } from './wrapTools.js'
 
 /**
@@ -122,9 +162,16 @@ export type WorkflowNeedsApproval = (
   options: WorkflowNeedsApprovalOptions,
 ) => Promise<boolean>
 
-export interface IntuticNeedsApprovalOptions {
-  /** Overrides the process-wide installed gate (`install(new Gate(...))`). */
-  gate?: Gate
+/**
+ * The `"use step"` function the caller declares to run the gate (see module
+ * doc, section 3): called with the tool name and the call's input — both
+ * serializable — it resolves `true` when a human should approve the call and
+ * throws {@link IntuticWorkflowRefusal} when the gate blocks it. Its body is
+ * {@link intuticApprovalStep}.
+ */
+export type IntuticGateStep = (toolName: string, input: unknown) => Promise<boolean>
+
+interface OnAllowOption {
   /**
    * What an ALLOWED call maps to. `needsApproval` answers "does a human need
    * to approve this?", which is a different question from "may this run?" —
@@ -142,8 +189,57 @@ export interface IntuticNeedsApprovalOptions {
    * the decision to a human approver as though the gate had no verdict, and
    * returning `false` would RUN the tool — the one thing a block must never
    * do.
+   *
+   * With `{ step }`, `'human'` here and the step's own answer are OR-ed:
+   * either one asking for a human is enough.
    */
   onAllow?: 'auto' | 'human'
+}
+
+export type IntuticNeedsApprovalOptions =
+  | (OnAllowOption & {
+      /**
+       * Evaluate the gate in this `"use step"` function — required when the
+       * `needsApproval` runs in the workflow VM, i.e. on a `WorkflowAgent`
+       * (see module doc, section 3). The step builds or receives its own
+       * `Gate`; a `gate` cannot be passed here, since the VM cannot hold one.
+       */
+      step: IntuticGateStep
+      gate?: never
+    })
+  | (OnAllowOption & {
+      /** Evaluate in-process, Node.js only. Overrides the process-wide
+       *  installed gate (`install(new Gate(...))`). */
+      gate?: Gate
+      step?: undefined
+    })
+
+/** Options for {@link intuticApprovalStep} — the in-process evaluation, so no
+ *  `step`. */
+export type IntuticApprovalStepOptions = OnAllowOption & { gate?: Gate }
+
+// Set on the workflow VM's global object by the Workflow DevKit runtime
+// (`@workflow/core`'s `workflow.js`: `vmGlobalThis[WORKFLOW_USE_STEP] =
+// useStep`); never set in the Node.js realm where steps execute.
+const WORKFLOW_USE_STEP = Symbol.for('WORKFLOW_USE_STEP')
+
+function inWorkflowSandbox(): boolean {
+  return typeof (globalThis as Record<symbol, unknown>)[WORKFLOW_USE_STEP] === 'function'
+}
+
+function refuseInWorkflowSandbox(helper: string): void {
+  if (!inWorkflowSandbox()) return
+  // Fail closed, FatalError-shaped, and NAME THE FIX: the gate needs
+  // Node.js, which the workflow VM does not have, and retrying cannot
+  // change that.
+  throw new IntuticWorkflowRefusal(
+    `${helper} ran inside the workflow sandbox, which has no Node.js, so the gate cannot evaluate ` +
+      'the call there. Run it in a "use step" function: declare ' +
+      "`async function intuticGate(toolName, input) { 'use step'; return intuticApprovalStep(toolName, input, { gate }) }` " +
+      'and pass { step: intuticGate } to withIntuticApproval()/intuticNeedsApproval(). ' +
+      'Refusing to run the tool unguarded.',
+    'WORKFLOW_SANDBOX',
+  )
 }
 
 function requireGate(gate: Gate | undefined, helper: string): Gate {
@@ -170,26 +266,64 @@ function renderWorkflowToolInput(input: unknown): ToolInput {
 }
 
 /**
- * Build an async `needsApproval` function for ONE workflow tool:
+ * The gate evaluation for ONE call, written to be the body of the caller's
+ * `"use step"` function (see module doc, section 3):
  *
  * ```ts
- * import { WorkflowAgent } from '@ai-sdk/workflow'
- * import { Gate, install } from '@intutic/gate'
- * import { intuticNeedsApproval } from '@intutic/gate/workflow'
+ * // workflows/intutic-gate.ts
+ * import { Gate } from '@intutic/gate'
+ * import { intuticApprovalStep } from '@intutic/gate/workflow'
  *
- * install(new Gate({ workspaceId: process.env.INTUTIC_WORKSPACE_ID }))
+ * export async function intuticGate(toolName: string, input: unknown): Promise<boolean> {
+ *   'use step'
+ *   return intuticApprovalStep(toolName, input, {
+ *     gate: new Gate({ workspaceId: process.env.INTUTIC_WORKSPACE_ID }),
+ *   })
+ * }
+ * ```
  *
- * const agent = new WorkflowAgent({
- *   model,
- *   tools: {
- *     deployService: {
- *       description: '...',
- *       inputSchema,
- *       execute: deployStep,
- *       needsApproval: intuticNeedsApproval('deployService'),
- *     },
- *   },
- * })
+ * Reference `@intutic/gate` only inside step bodies in that module: the
+ * workflow bundler also bundles it into the VM with the step bodies
+ * replaced, and a module-level use would keep the Node-only gate there.
+ *
+ * Verdict mapping: BLOCK → throws {@link IntuticWorkflowRefusal} (fatal — the
+ * step runs once and the run fails instead of retry-looping; see module doc);
+ * ALLOW → `false`, or `true` with `onAllow: 'human'`. A non-refusal crash in
+ * the gate is re-thrown untouched (the step retries — correct for
+ * transients). Requires a gate (`{ gate }` or `install()` in the process
+ * that runs steps); called in the workflow VM itself, it throws naming the
+ * fix.
+ */
+export async function intuticApprovalStep(
+  toolName: string,
+  input: unknown,
+  opts: IntuticApprovalStepOptions = {},
+): Promise<boolean> {
+  refuseInWorkflowSandbox('intuticApprovalStep()')
+  const g = requireGate(opts.gate, 'intuticApprovalStep()')
+  try {
+    await g.guard(toolName, renderWorkflowToolInput(input))
+  } catch (exc) {
+    if (exc instanceof IntuticGateRefusal && !(exc instanceof IntuticWorkflowRefusal)) {
+      throw IntuticWorkflowRefusal.from(exc)
+    }
+    throw exc
+  }
+  return opts.onAllow === 'human'
+}
+
+/**
+ * Build an async `needsApproval` function for ONE workflow tool. On a
+ * `WorkflowAgent`, pass the caller's gate step (see
+ * {@link intuticApprovalStep}):
+ *
+ * ```ts
+ * deployService: {
+ *   description: '...',
+ *   inputSchema,
+ *   execute: deployStep,
+ *   needsApproval: intuticNeedsApproval('deployService', { step: intuticGate }),
+ * },
  * ```
  *
  * The tool name is a parameter because the framework's `needsApproval`
@@ -197,6 +331,12 @@ function renderWorkflowToolInput(input: unknown): ToolInput {
  * has no `toolName` field (confirmed against the shipped types). Use
  * {@link withIntuticApproval} to attach this to a whole tools record without
  * hand-repeating each name.
+ *
+ * With `{ step }`, the returned function only calls the step and maps its
+ * answer — safe in the workflow VM. Without it, the gate is evaluated
+ * in-process (`{ gate }` or the installed gate), which needs Node.js: fine in
+ * a plain `ai` loop or inside a step, and in the workflow VM it throws an
+ * {@link IntuticWorkflowRefusal} naming the `{ step }` fix.
  *
  * Verdict mapping: BLOCK → throws {@link IntuticWorkflowRefusal} (fatal —
  * aborts instead of retry-looping; see module doc); ALLOW → `false` or `true`
@@ -207,18 +347,16 @@ export function intuticNeedsApproval(
   toolName: string,
   opts: IntuticNeedsApprovalOptions = {},
 ): WorkflowNeedsApproval {
-  const onAllow = opts.onAllow ?? 'auto'
-  return async (input, _options) => {
-    const g = requireGate(opts.gate, 'intuticNeedsApproval()')
-    try {
-      await g.guard(toolName, renderWorkflowToolInput(input))
-    } catch (exc) {
-      if (exc instanceof IntuticGateRefusal && !(exc instanceof IntuticWorkflowRefusal)) {
-        throw IntuticWorkflowRefusal.from(exc)
-      }
-      throw exc
-    }
-    return onAllow === 'human'
+  const human = (opts.onAllow ?? 'auto') === 'human'
+  const step = opts.step
+  if (step !== undefined) {
+    // A refusal thrown by the step reaches here already FatalError-shaped
+    // (it crossed the step boundary as one) and is rethrown untouched.
+    return async (input) => (await step(toolName, input)) || human
+  }
+  return async (input) => {
+    refuseInWorkflowSandbox('intuticNeedsApproval()')
+    return intuticApprovalStep(toolName, input, { gate: opts.gate, onAllow: opts.onAllow })
   }
 }
 
@@ -235,13 +373,29 @@ export interface WorkflowToolLike {
  * `needsApproval` the tool already declares:
  *
  * ```ts
- * const agent = new WorkflowAgent({ model, tools: withIntuticApproval(tools) })
+ * import { WorkflowAgent } from '@ai-sdk/workflow'
+ * import { withIntuticApproval } from '@intutic/gate/workflow'
+ * import { intuticGate } from './intutic-gate' // the "use step" function
+ *
+ * export async function deployAgent(messages: ModelMessage[]) {
+ *   'use workflow'
+ *   const agent = new WorkflowAgent({
+ *     model,
+ *     tools: withIntuticApproval(tools, { step: intuticGate }),
+ *   })
+ *   // ...
+ * }
  * ```
+ *
+ * (`{ step }` is what makes this work on a `WorkflowAgent`, whose
+ * `needsApproval` runs in the workflow VM — see {@link intuticApprovalStep}
+ * and the module doc, section 3. Without it the gate is evaluated
+ * in-process, which needs Node.js.)
  *
  * For each tool (the record KEY is the tool name reported to the gate — the
  * same identity the framework itself dispatches on):
  *
- *   1. `Gate.guard()` runs first. BLOCK throws {@link IntuticWorkflowRefusal}.
+ *   1. The gate runs first. BLOCK throws {@link IntuticWorkflowRefusal}.
  *   2. On allow, the tool's OWN prior `needsApproval` still applies: a
  *      boolean is returned as-is; a function is awaited with the original
  *      arguments; a tool with none falls back to `onAllow` ('auto' → false).
@@ -285,7 +439,9 @@ export function withIntuticApproval<T extends Record<string, WorkflowToolLike>>(
  * "no gate configured" handling and the record-key-is-tool-name convention —
  * is `wrapTools`'s own behaviour, reused rather than reimplemented.
  *
- * Prefer {@link withIntuticApproval} as the primary integration: it uses the
+ * Call it inside the tool's `"use step"` body (it evaluates the gate
+ * in-process, so it needs Node.js). Prefer {@link withIntuticApproval} as the
+ * primary integration: it uses the
  * framework's own pre-execution veto surface, refuses BEFORE the durable
  * step ever starts, and keeps the human-approval lane available. This
  * execute-level wrapper is defense in depth (or the option for callers whose

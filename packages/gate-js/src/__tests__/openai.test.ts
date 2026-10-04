@@ -19,11 +19,30 @@
  *      refusal, the BLOCKED message becomes the model-visible tool output,
  *      and (the MCP gotcha) that `wrapAgent` gates tools materialized from
  *      `agent.mcpServers`, which never appear in `agent.tools` at all.
+ *   4. TD-408: a REAL `RealtimeSession` (`@openai/agents-realtime`) fed a
+ *      `function_call` by a stand-in transport, and the real Runner +
+ *      `OpenAIResponsesModel` + `openai` HTTP client routed by
+ *      `OPENAI_BASE_URL` to a local `node:http` Responses API stub —
+ *      optionally through the built Rust proxy (standalone) when
+ *      `<repo>/target/release/intutic-proxy` or `INTUTIC_PROXY_BIN` exists.
+ *      Nothing leaves 127.0.0.1.
  */
 import { afterEach, describe, expect, it } from 'vitest'
+import { EventEmitter as NodeEventEmitter } from 'node:events'
+import { spawn, type ChildProcess } from 'node:child_process'
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { createServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
+import { tmpdir } from 'node:os'
+import { join, resolve as resolvePath } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { RealtimeAgent, RealtimeSession } from '@openai/agents-realtime'
+import type { RealtimeTransportLayer, TransportToolCallEvent } from '@openai/agents-realtime'
 import {
   Agent,
+  OpenAIProvider,
   RunContext,
+  Runner,
   RunToolApprovalItem,
   ToolGuardrailFunctionOutputFactory,
   Usage,
@@ -798,5 +817,353 @@ describe('installOpenAiGate', () => {
     delete process.env.OPENAI_AGENTS_DISABLE_TRACING
     suppressAgentsTracingExport()
     expect(process.env.OPENAI_AGENTS_DISABLE_TRACING).toBe('1')
+  })
+})
+
+// ------------------------------------------------------------------------
+// TD-408 item 2: REAL @openai/agents-realtime RealtimeSession.
+//
+// The realtime session dispatches tool calls itself (realtimeSession.js:
+// `transport.on('function_call')` -> #handleFunctionCall ->
+// runToolInputGuardrails -> invokeFunctionTool only on a non-reject). A fake
+// RealtimeTransportLayer stands in for the WebSocket/WebRTC connection (no
+// API key, no network) and emits a `function_call` exactly as the OpenAI
+// transport does; everything after that is the real session.
+// ------------------------------------------------------------------------
+
+/** Every non-emitter member of the real transport interface is checked here;
+ *  the emitter methods come from node's EventEmitter, whose loose signatures
+ *  TypeScript will not match against the SDK's keyed generic ones (hence the
+ *  single cast at the RealtimeSession call site). */
+class FakeRealtimeTransport
+  extends NodeEventEmitter
+  implements Omit<RealtimeTransportLayer, 'on' | 'off' | 'emit' | 'once'>
+{
+  status: RealtimeTransportLayer['status'] = 'disconnected'
+  readonly muted = null
+  outputs: Array<{ callId: string; output: string; startResponse: boolean }> = []
+  private outputWaiters: Array<() => void> = []
+  async connect(): Promise<void> {
+    this.status = 'connected'
+  }
+  sendEvent(): void {}
+  sendMessage(): void {}
+  addImage(): void {}
+  sendAudio(): void {}
+  updateSessionConfig(): void {}
+  close(): void {
+    this.status = 'disconnected'
+  }
+  mute(): void {}
+  sendFunctionCallOutput(toolCall: TransportToolCallEvent, output: string, startResponse: boolean): void {
+    this.outputs.push({ callId: toolCall.callId, output, startResponse })
+    for (const w of this.outputWaiters.splice(0)) w()
+  }
+  interrupt(): void {}
+  resetHistory(): void {}
+  sendMcpResponse(): void {}
+  /** Resolves once the session has answered a function call. */
+  nextOutput(): Promise<void> {
+    return new Promise((resolve) => this.outputWaiters.push(resolve))
+  }
+}
+
+async function driveRealtimeFunctionCall(gate: Gate, args: Record<string, unknown>) {
+  let executed = false
+  const agent = wrapAgent(
+    new RealtimeAgent({ name: 'voice-ops', tools: [newFunctionTool(() => (executed = true))] }),
+    { gate },
+  )
+  const transport = new FakeRealtimeTransport()
+  const session = new RealtimeSession(agent, { transport: transport as unknown as RealtimeTransportLayer })
+  const errors: unknown[] = []
+  session.on('error', (e) => errors.push(e))
+  await session.connect({ apiKey: 'unused-by-fake-transport' })
+
+  const answered = transport.nextOutput()
+  const event: TransportToolCallEvent = {
+    type: 'function_call',
+    name: 'delete_everything',
+    callId: 'call_rt_1',
+    arguments: JSON.stringify(args),
+    responseId: 'resp_rt_1',
+  }
+  transport.emit('function_call', event)
+  await answered
+  session.close()
+  return { executed, outputs: transport.outputs, errors }
+}
+
+describe('real @openai/agents-realtime RealtimeSession (TD-408 item 2)', () => {
+  it('a gate-refused realtime function_call never executes; the BLOCKED message is sent back as the call output', async () => {
+    const gate = new FakeGate('refuse')
+
+    const { executed, outputs, errors } = await driveRealtimeFunctionCall(gate, { path: 'prod.db' })
+
+    expect(errors).toEqual([])
+    expect(executed).toBe(false)
+    expect(gate.calls).toEqual([{ toolName: 'delete_everything', toolInput: { path: 'prod.db' } }])
+    expect(outputs).toHaveLength(1)
+    expect(outputs[0]!.callId).toBe('call_rt_1')
+    expect(outputs[0]!.output).toContain('[Intutic Governance] BLOCKED: nope')
+  })
+
+  it('an allowed realtime function_call executes and its result is sent back', async () => {
+    const gate = new FakeGate('allow')
+
+    const { executed, outputs, errors } = await driveRealtimeFunctionCall(gate, { path: 'scratch.txt' })
+
+    expect(errors).toEqual([])
+    expect(executed).toBe(true)
+    expect(outputs.map((o) => o.output)).toEqual(['deleted'])
+  })
+})
+
+// ------------------------------------------------------------------------
+// TD-408 item 4 (partial): the REAL Runner + REAL OpenAIResponsesModel + the
+// real `openai` HTTP client, pointed via OPENAI_BASE_URL (the env-only
+// routing openai.ts's module doc describes) at a local node:http stub of the
+// Responses API. Optionally through the built Rust proxy in standalone mode
+// (INTUTIC_STANDALONE=1, every *_UPSTREAM_URL pointed at the stub) when
+// <repo>/target/release/intutic-proxy exists. Nothing leaves 127.0.0.1:
+// tracing is disabled on the Runner and the stub records every request.
+// ------------------------------------------------------------------------
+
+interface StubRequest {
+  path: string
+  authorization: string | undefined
+  body: { input?: unknown; tools?: unknown }
+}
+
+function responsesStubPayload(n: number): Record<string, unknown> {
+  const base = {
+    id: `resp_stub_${n}`,
+    object: 'response',
+    created_at: 0,
+    status: 'completed',
+    model: 'gpt-stub',
+    parallel_tool_calls: true,
+    tool_choice: 'auto',
+    tools: [],
+    usage: {
+      input_tokens: 1,
+      input_tokens_details: { cached_tokens: 0 },
+      output_tokens: 1,
+      output_tokens_details: { reasoning_tokens: 0 },
+      total_tokens: 2,
+    },
+  }
+  if (n === 1) {
+    return {
+      ...base,
+      output: [
+        {
+          type: 'function_call',
+          id: 'fc_stub_1',
+          call_id: 'call_stub_1',
+          name: 'delete_everything',
+          arguments: JSON.stringify({ path: 'prod.db' }),
+          status: 'completed',
+        },
+      ],
+    }
+  }
+  return {
+    ...base,
+    output: [
+      {
+        type: 'message',
+        id: 'msg_stub_1',
+        role: 'assistant',
+        status: 'completed',
+        content: [{ type: 'output_text', text: 'done', annotations: [] }],
+      },
+    ],
+  }
+}
+
+async function startResponsesStub(): Promise<{ url: string; requests: StubRequest[]; close: () => Promise<void> }> {
+  const requests: StubRequest[] = []
+  const server = createServer((req, res) => {
+    const chunks: Buffer[] = []
+    req.on('data', (c: Buffer) => chunks.push(c))
+    req.on('end', () => {
+      const raw = Buffer.concat(chunks).toString('utf-8')
+      let body: StubRequest['body']
+      try {
+        body = raw ? JSON.parse(raw) : {}
+      } catch {
+        body = {}
+      }
+      requests.push({ path: req.url ?? '', authorization: req.headers.authorization, body })
+      if (req.method === 'POST' && (req.url ?? '').endsWith('/responses')) {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify(responsesStubPayload(requests.filter((r) => r.path.endsWith('/responses')).length)))
+        return
+      }
+      res.writeHead(404, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ error: { message: `stub: no route for ${req.method} ${req.url}` } }))
+    })
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const { port } = server.address() as AddressInfo
+  return {
+    url: `http://127.0.0.1:${port}`,
+    requests,
+    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+  }
+}
+
+/** Runs the real Runner against `baseUrl` (set as OPENAI_BASE_URL, read by
+ *  the `openai` client the provider constructs), restoring env afterwards. */
+async function runAgainstResponsesEndpoint(baseUrl: string, gate: Gate) {
+  const saved = process.env.OPENAI_BASE_URL
+  process.env.OPENAI_BASE_URL = `${baseUrl}/v1`
+  try {
+    let executed = false
+    // Test-only placeholder, assembled at runtime; the stub never checks it.
+    const apiKey = ['sk', 'test', 'fixture'].join('-')
+    const provider = new OpenAIProvider({ apiKey, useResponses: true })
+    const agent = wrapAgent(
+      new Agent({ name: 'ops', model: 'gpt-stub', tools: [newFunctionTool(() => (executed = true))] }),
+      { gate },
+    )
+    const runner = new Runner({ modelProvider: provider, tracingDisabled: true })
+    const result = await runner.run(agent, 'wipe it')
+    return { executed, result }
+  } finally {
+    if (saved === undefined) delete process.env.OPENAI_BASE_URL
+    else process.env.OPENAI_BASE_URL = saved
+  }
+}
+
+function functionCallOutputsSent(requests: StubRequest[]): string[] {
+  const outputs: string[] = []
+  for (const r of requests) {
+    const input = Array.isArray(r.body.input) ? (r.body.input as Array<Record<string, unknown>>) : []
+    for (const item of input) {
+      if (item['type'] === 'function_call_output') outputs.push(JSON.stringify(item['output']))
+    }
+  }
+  return outputs
+}
+
+describe('real Runner over HTTP against a local Responses API stub (TD-408)', () => {
+  it('a gate-refused tool call from a real /v1/responses round trip never executes; the BLOCKED output goes back on the wire', async () => {
+    const stub = await startResponsesStub()
+    try {
+      const gate = new FakeGate('refuse')
+      const { executed, result } = await runAgainstResponsesEndpoint(stub.url, gate)
+
+      expect(executed).toBe(false)
+      expect(result.finalOutput).toBe('done')
+      expect(gate.calls).toEqual([{ toolName: 'delete_everything', toolInput: { path: 'prod.db' } }])
+      // Two real HTTP calls, both to the stub, both carrying the client's key.
+      expect(stub.requests.map((r) => r.path)).toEqual(['/v1/responses', '/v1/responses'])
+      expect(stub.requests.every((r) => r.authorization?.startsWith('Bearer ') === true)).toBe(true)
+      // The tool was declared to the model, and the second request carries the
+      // guardrail's rejection as the function_call_output.
+      expect(JSON.stringify(stub.requests[0]!.body.tools)).toContain('delete_everything')
+      const sent = functionCallOutputsSent(stub.requests)
+      expect(sent).toHaveLength(1)
+      expect(sent[0]).toContain('[Intutic Governance] BLOCKED: nope')
+    } finally {
+      await stub.close()
+    }
+  })
+
+  // The cargo workspace root is the repo root, so the release binary lands in
+  // <repo>/target/release. INTUTIC_PROXY_BIN points at one elsewhere (e.g. a
+  // worktree without its own cargo build).
+  const proxyBinary =
+    process.env.INTUTIC_PROXY_BIN ??
+    resolvePath(fileURLToPath(new URL('.', import.meta.url)), '../../../../target/release/intutic-proxy')
+  const haveProxy = existsSync(proxyBinary)
+
+  describe.skipIf(!haveProxy)('through the built Rust proxy (standalone mode)', () => {
+    let proxy: ChildProcess | undefined
+    let proxyHome: string | undefined
+    let proxyLog = ''
+
+    afterEach(async () => {
+      if (proxy && proxy.exitCode === null) {
+        const exited = new Promise((resolve) => proxy!.once('exit', resolve))
+        proxy.kill('SIGTERM')
+        await exited
+      }
+      proxy = undefined
+      if (proxyHome) rmSync(proxyHome, { recursive: true, force: true })
+      proxyHome = undefined
+    })
+
+    async function freePort(): Promise<number> {
+      const s = createServer()
+      await new Promise<void>((resolve) => s.listen(0, '127.0.0.1', resolve))
+      const { port } = s.address() as AddressInfo
+      await new Promise<void>((resolve) => s.close(() => resolve()))
+      return port
+    }
+
+    async function waitForHealth(url: string, timeoutMs: number): Promise<void> {
+      const deadline = Date.now() + timeoutMs
+      while (Date.now() < deadline) {
+        if (proxy?.exitCode !== null && proxy?.exitCode !== undefined) {
+          throw new Error(`proxy exited (${proxy.exitCode}) before becoming healthy:\n${proxyLog}`)
+        }
+        try {
+          const res = await fetch(`${url}/health`)
+          if (res.ok) return
+        } catch {
+          // not listening yet
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100))
+      }
+      throw new Error(`proxy did not become healthy within ${timeoutMs}ms:\n${proxyLog}`)
+    }
+
+    it('the blocked call still never executes when the Responses traffic crosses the proxy', async () => {
+      const stub = await startResponsesStub()
+      try {
+        const port = await freePort()
+        proxyHome = mkdtempSync(join(tmpdir(), 'intutic-proxy-home-'))
+        proxyLog = ''
+        // A scrubbed env: standalone (no control plane, no Valkey probe), a
+        // throwaway HOME, and EVERY provider upstream pointed at the stub so
+        // nothing the proxy forwards can reach a hosted API.
+        proxy = spawn(proxyBinary, [], {
+          env: {
+            PATH: process.env.PATH ?? '',
+            HOME: proxyHome,
+            PORT: String(port),
+            INTUTIC_STANDALONE: '1',
+            OPENAI_UPSTREAM_URL: stub.url,
+            ANTHROPIC_UPSTREAM_URL: stub.url,
+            GEMINI_UPSTREAM_URL: stub.url,
+            MISTRAL_UPSTREAM_URL: stub.url,
+            OPENROUTER_UPSTREAM_URL: stub.url,
+            RUST_LOG: 'warn',
+          },
+          stdio: ['ignore', 'pipe', 'pipe'],
+        })
+        proxy.stdout?.on('data', (c: Buffer) => (proxyLog += c.toString()))
+        proxy.stderr?.on('data', (c: Buffer) => (proxyLog += c.toString()))
+        const proxyUrl = `http://127.0.0.1:${port}`
+        await waitForHealth(proxyUrl, 15_000)
+
+        const gate = new FakeGate('refuse')
+        const { executed, result } = await runAgainstResponsesEndpoint(proxyUrl, gate)
+
+        expect(executed).toBe(false)
+        expect(result.finalOutput).toBe('done')
+        expect(gate.calls).toEqual([{ toolName: 'delete_everything', toolInput: { path: 'prod.db' } }])
+        // The proxy forwarded both turns to the stub (its OPENAI_UPSTREAM_URL).
+        expect(stub.requests.filter((r) => r.path.endsWith('/responses'))).toHaveLength(2)
+        const sent = functionCallOutputsSent(stub.requests)
+        expect(sent).toHaveLength(1)
+        expect(sent[0]).toContain('[Intutic Governance] BLOCKED: nope')
+      } finally {
+        await stub.close()
+      }
+    }, 30_000)
   })
 })

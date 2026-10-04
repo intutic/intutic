@@ -1,6 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { handler } from './handler.js'
-import type { McpRequestInterceptorEvent, McpResponseInterceptorEvent, JsonRpcErrorBody } from './types.js'
+import { handler, composeRequestInterceptor, checkToolCall, readConfig } from './handler.js'
+import type {
+  McpRequestInterceptorEvent,
+  McpResponseInterceptorEvent,
+  McpInterceptorOutput,
+  JsonRpcErrorBody,
+} from './types.js'
 
 const CONTROL_PLANE_URL = 'https://control-plane.example.com'
 const API_KEY = 'vk_test_key_1234567890'
@@ -238,6 +243,127 @@ describe('AgentCore Gateway interceptor Lambda handler', () => {
         statusCode: 200,
         body: event.mcp.gatewayResponse.body,
       })
+    })
+  })
+  describe('exported building blocks', () => {
+    it('readConfig reads the same environment the handler does', () => {
+      process.env.AGENTCORE_GATEWAY_ID = 'gw-1'
+      expect(readConfig()).toEqual({
+        controlPlaneUrl: CONTROL_PLANE_URL,
+        apiKey: API_KEY,
+        timeoutMs: 3000,
+        failOpen: false,
+        gatewayId: 'gw-1',
+      })
+    })
+
+    it('checkToolCall returns the control-plane verdict', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ allowed: false, reason: 'nope' }) }))
+      await expect(checkToolCall(readConfig(), { toolName: 'rm', toolInput: {} })).resolves.toEqual({
+        allowed: false,
+        reason: 'nope',
+      })
+    })
+  })
+
+  describe('composeRequestInterceptor', () => {
+    const passThrough = (event: McpRequestInterceptorEvent): McpInterceptorOutput => ({
+      interceptorOutputVersion: '1.0',
+      mcp: { transformedGatewayRequest: { body: event.mcp.gatewayRequest.body } },
+    })
+
+    it('returns own-logic rejection without calling Intutic', async () => {
+      const fetchMock = vi.fn()
+      vi.stubGlobal('fetch', fetchMock)
+      const rejection: McpInterceptorOutput = {
+        interceptorOutputVersion: '1.0',
+        mcp: {
+          transformedGatewayResponse: {
+            statusCode: 200,
+            body: { jsonrpc: '2.0', id: 1, error: { code: -32001, message: 'missing tenant header' } },
+          },
+        },
+      }
+      const composed = composeRequestInterceptor(() => rejection)
+
+      const result = await composed(toolsCallEvent())
+
+      expect(fetchMock).not.toHaveBeenCalled()
+      expect(result).toEqual(rejection)
+    })
+
+    it('denies when own logic passes but Intutic denies', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ allowed: false, reason: 'BLOCK: no deletes' }) }))
+      const own = vi.fn(passThrough)
+      const composed = composeRequestInterceptor(own)
+
+      const result = await composed(toolsCallEvent({ name: 'delete_repo', id: 9 }))
+
+      expect(own).toHaveBeenCalledTimes(1)
+      expect(result.mcp.transformedGatewayRequest).toBeUndefined()
+      const err = result.mcp.transformedGatewayResponse?.body as JsonRpcErrorBody
+      expect(err.id).toBe(9)
+      expect(err.error.message).toBe('Blocked by Intutic governance: BLOCK: no deletes')
+    })
+
+    it('returns own-logic output, rewrites included, when both allow', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ allowed: true }) })
+      vi.stubGlobal('fetch', fetchMock)
+      const composed = composeRequestInterceptor((event) => {
+        const body = event.mcp.gatewayRequest.body
+        return {
+          interceptorOutputVersion: '1.0',
+          mcp: { transformedGatewayRequest: { body: { ...body, params: { ...body.params, name: 'read_file_v2' } } } },
+        }
+      })
+
+      const result = await composed(toolsCallEvent({ name: 'read_file' }))
+
+      // Intutic checks what will actually reach the target: the rewritten call.
+      expect(JSON.parse(fetchMock.mock.calls[0]![1].body).toolName).toBe('read_file_v2')
+      expect((result.mcp.transformedGatewayRequest?.body as { params: { name: string } }).params.name).toBe('read_file_v2')
+    })
+
+    it('fails closed on an Intutic network error', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')))
+      const composed = composeRequestInterceptor(passThrough)
+
+      const result = await composed(toolsCallEvent())
+
+      expect(result.mcp.transformedGatewayRequest).toBeUndefined()
+      const err = result.mcp.transformedGatewayResponse?.body as JsonRpcErrorBody
+      expect(err.error.message).toContain('ECONNREFUSED')
+      expect(err.error.message).toContain('failing closed')
+    })
+
+    it('fails closed when own logic throws, even with INTUTIC_FAIL_OPEN=true', async () => {
+      process.env.INTUTIC_FAIL_OPEN = 'true'
+      const fetchMock = vi.fn()
+      vi.stubGlobal('fetch', fetchMock)
+      const composed = composeRequestInterceptor(() => {
+        throw new Error('tenant lookup crashed')
+      })
+
+      const result = await composed(toolsCallEvent())
+
+      expect(fetchMock).not.toHaveBeenCalled()
+      const err = result.mcp.transformedGatewayResponse?.body as JsonRpcErrorBody
+      expect(err.error.message).toContain('tenant lookup crashed')
+    })
+
+    it('passes RESPONSE events through without running own logic', async () => {
+      const own = vi.fn(passThrough)
+      const composed = composeRequestInterceptor(own)
+      const body = { jsonrpc: '2.0', id: 1, result: {} }
+      const result = await composed({
+        interceptorInputVersion: '1.0',
+        mcp: {
+          gatewayRequest: toolsCallEvent().mcp.gatewayRequest,
+          gatewayResponse: { statusCode: 200, body },
+        },
+      })
+      expect(own).not.toHaveBeenCalled()
+      expect(result.mcp.transformedGatewayResponse).toEqual({ statusCode: 200, body })
     })
   })
 })

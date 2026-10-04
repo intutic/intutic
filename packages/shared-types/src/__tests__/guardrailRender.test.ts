@@ -107,6 +107,10 @@ function flattenLists(irs: readonly GuardrailIr[]): GuardrailIr[] {
 
 // ─── Round trip ───────────────────────────────────────────────────────
 
+// The 2,000-case property runs take about 5 s on a loaded CI runner, right at
+// vitest's default timeout, and failed a PR on 2026-10-03 at 5.25 s.
+const PROPERTY_RUN_TIMEOUT_MS = 30_000
+
 describe('front matter: parse(render(ir)) is the IR', () => {
   it('holds for 2,000 seeded single-rule renders, and the render is byte-stable', () => {
     for (let seed = 1; seed <= 2000; seed++) {
@@ -126,7 +130,7 @@ describe('front matter: parse(render(ir)) is the IR', () => {
         throw new Error(`seed ${seed}: ${err instanceof Error ? err.message : String(err)}\nIR: ${JSON.stringify(ir)}`, { cause: err })
       }
     }
-  })
+  }, PROPERTY_RUN_TIMEOUT_MS)
 
   it('holds for 300 seeded multi-rule renders (sets compared, since a shared roles line applies to every rule)', () => {
     for (let seed = 1; seed <= 300; seed++) {
@@ -361,7 +365,7 @@ describe('front matter: seeded single-token mutations are refused, never re-read
     const expected = Object.entries(MUTATIONS).flatMap(([kind, ms]) => ms.map((m) => `${kind}/${m.name}`))
     expect([...exercised.keys()].sort(), 'a mutation kind the sweep never reached asserts nothing').toEqual(expected.sort())
     for (const [name, n] of exercised) expect(n, name).toBeGreaterThan(20)
-  })
+  }, PROPERTY_RUN_TIMEOUT_MS)
 })
 
 // ─── Seeded hook rules ────────────────────────────────────────────────

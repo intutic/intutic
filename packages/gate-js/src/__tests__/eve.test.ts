@@ -33,6 +33,7 @@ import {
   type EveApprovalContext,
   type EveApprovalStatus,
   type EveInputRequestedEvent,
+  type EveInputResolvedEvent,
 } from '../eve.js'
 
 // Same pattern vercel.test.ts / dsh.test.ts use: a Gate whose guard() is
@@ -105,6 +106,11 @@ function _typeCheckOnly(): void {
   // handler can be handed the real thing.
   const acceptsRealInputRequested = (real: HookEventMap['input.requested']): EveInputRequestedEvent => real
   void acceptsRealInputRequested
+
+  // TD-498: same for 'input.resolved', the event a bare approval policy
+  // settles through.
+  const acceptsRealInputResolved = (real: HookEventMap['input.resolved']): EveInputResolvedEvent => real
+  void acceptsRealInputResolved
 }
 void _typeCheckOnly
 
@@ -253,7 +259,12 @@ describe('real eve definition machinery accepts this adapter', () => {
     const hooks = intuticAuditHooks({ client: new FakeGateClient() })
     const definition = defineHook(hooks)
     expect(definition).toBe(hooks) // defineHook is eve's identity-with-types helper
-    expect(Object.keys(hooks.events)).toEqual(['input.requested', 'approval.candidate', 'approval.settled'])
+    expect(Object.keys(hooks.events)).toEqual([
+      'input.requested',
+      'approval.candidate',
+      'approval.settled',
+      'input.resolved',
+    ])
   })
 })
 
@@ -453,10 +464,115 @@ describe('intuticAuditHooks: input.requested and requestId -> toolName correlati
     )
     await hooks.events['approval.settled']({ type: 'approval.settled', data: { ...base, outcome: 'approved' } }, ctx)
     client.emitted = []
-    // Same requestId settles again (should not happen in practice, but the
-    // cache must not serve a stale mapping if it somehow does) — falls back.
-    await hooks.events['approval.settled']({ type: 'approval.settled', data: { ...base, outcome: 'approved' } }, ctx)
+    // A later event for the same requestId (should not happen in practice,
+    // but the cache must not serve a stale mapping if it somehow does) —
+    // falls back to the synthetic name.
+    await hooks.events['approval.candidate'](
+      { type: 'approval.candidate', data: { ...base, candidateId: 'c-2', outcome: 'stale' } },
+      ctx,
+    )
     expect(client.emitted[0]!.toolName).toBe(EVE_APPROVAL_TOOL_NAME)
+  })
+})
+
+// TD-498: a BARE approval policy (`approval: intuticApproval(...)`) settles
+// through `input.resolved` only — eve emits approval.candidate/settled just
+// for the `{ request, response }` form, which fires both (settled first).
+describe('intuticAuditHooks: input.resolved (bare-policy settlements) and de-duplication', () => {
+  const ctx = { session: { id: 'sess-1' }, agent: { name: 'root' } }
+  const batch = { sequence: 0, stepIndex: 0, turnId: 't-1' }
+  const settledBase = { requestId: 'req-1', responderPrincipalId: 'user:alice', sequence: 1, stepIndex: 0, turnId: 't-1' }
+
+  function requested(hooks: ReturnType<typeof intuticAuditHooks>, requestId: string, toolName: string) {
+    return hooks.events['input.requested'](
+      {
+        type: 'input.requested',
+        data: { ...batch, requests: [{ requestId, kind: 'tool-approval', action: { callId: 'c', toolName } }] },
+      },
+      ctx,
+    )
+  }
+  function resolved(
+    hooks: ReturnType<typeof intuticAuditHooks>,
+    ...resolutions: EveInputResolvedEvent['data']['resolutions']
+  ) {
+    return hooks.events['input.resolved']({ type: 'input.resolved', data: { ...batch, resolutions } }, ctx)
+  }
+
+  it("'approved' → tool_allowed under the real tool name when input.requested was seen", async () => {
+    const client = new FakeGateClient()
+    const hooks = intuticAuditHooks({ client })
+    await requested(hooks, 'req-1', 'run_command_hitl')
+    client.emitted = []
+    const resolution = { requestId: 'req-1', kind: 'tool-approval', outcome: 'approved' } as const
+    await resolved(hooks, resolution)
+    expect(client.emitted).toEqual([
+      {
+        event: 'tool_allowed',
+        toolName: 'run_command_hitl',
+        reason: 'eve approval resolved: approved (request req-1)',
+        toolInput: resolution,
+      },
+    ])
+  })
+
+  it("'denied' → tool_blocked labelled as a human veto; other outcomes → tool_flagged; cold cache → eve:approval", async () => {
+    const client = new FakeGateClient()
+    await resolved(
+      intuticAuditHooks({ client }),
+      { requestId: 'req-d', kind: 'tool-approval', outcome: 'denied' },
+      { requestId: 'req-i', kind: 'tool-approval', outcome: 'ignored' },
+    )
+    expect(client.emitted.map((e) => [e.event, e.toolName])).toEqual([
+      ['tool_blocked', EVE_APPROVAL_TOOL_NAME],
+      ['tool_flagged', EVE_APPROVAL_TOOL_NAME],
+    ])
+    expect(client.emitted[0]!.reason).toContain('Human veto')
+    expect(client.emitted[0]!.reason).toContain('not an Intutic gate refusal')
+    expect(client.emitted[1]!.reason).toContain("'ignored'")
+    expect(client.emitted[1]!.reason).toContain('req-i')
+  })
+
+  it("skips 'question' and 'session-limit' resolutions — not Intutic's approval mechanism", async () => {
+    const client = new FakeGateClient()
+    await resolved(
+      intuticAuditHooks({ client }),
+      { requestId: 'req-q', kind: 'question', outcome: 'answered', response: { requestId: 'req-q', text: 'hi' } },
+      { requestId: 'req-s', kind: 'session-limit', outcome: 'approved' },
+    )
+    expect(client.emitted).toEqual([])
+  })
+
+  it('{ request, response } form: approval.settled then input.resolved for one request is recorded ONCE (the settled event, which names the responder)', async () => {
+    const client = new FakeGateClient()
+    const hooks = intuticAuditHooks({ client })
+    await requested(hooks, 'req-1', 'deploy_service')
+    client.emitted = []
+    await hooks.events['approval.settled']({ type: 'approval.settled', data: { ...settledBase, outcome: 'approved' } }, ctx)
+    await resolved(hooks, { requestId: 'req-1', kind: 'tool-approval', outcome: 'approved' })
+    expect(client.emitted).toHaveLength(1)
+    expect(client.emitted[0]).toMatchObject({ event: 'tool_allowed', toolName: 'deploy_service' })
+    expect(client.emitted[0]!.reason).toContain('approved by user:alice')
+  })
+
+  it('the reverse order is recorded once too (input.resolved first, then approval.settled)', async () => {
+    const client = new FakeGateClient()
+    const hooks = intuticAuditHooks({ client })
+    await resolved(hooks, { requestId: 'req-1', kind: 'tool-approval', outcome: 'approved' })
+    await hooks.events['approval.settled']({ type: 'approval.settled', data: { ...settledBase, outcome: 'approved' } }, ctx)
+    expect(client.emitted).toHaveLength(1)
+    expect(client.emitted[0]!.reason).toBe('eve approval resolved: approved (request req-1)')
+  })
+
+  it('a different request settled through each event is recorded for both — the de-duplication is per request id', async () => {
+    const client = new FakeGateClient()
+    const hooks = intuticAuditHooks({ client })
+    await hooks.events['approval.settled']({ type: 'approval.settled', data: { ...settledBase, outcome: 'approved' } }, ctx)
+    await resolved(hooks, { requestId: 'req-2', kind: 'tool-approval', outcome: 'approved' })
+    expect(client.emitted.map((e) => e.reason)).toEqual([
+      expect.stringContaining('request req-1'),
+      expect.stringContaining('request req-2'),
+    ])
   })
 })
 

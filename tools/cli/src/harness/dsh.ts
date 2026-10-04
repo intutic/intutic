@@ -6,8 +6,8 @@
  * adapter could write governance text into (see `types.ts`'s
  * `HARNESS_CONFIG_FILES.dsh`). The governance-critical half — the
  * `tools/pre-execute` Cordis plugin registration (`cordis.patch.yml` per
- * profile), the profile's `@intutic/gate` dependency, and the `settings.yaml`
- * `llm-pi-ai` proxy route — is delegated entirely to
+ * profile), the profile's `@intutic/gate` dependency, and the `llm-deepseek`
+ * egress override in that same patch file — is delegated entirely to
  * `@intutic/sync-daemon`'s `dshHooks.ts`, the same split Goose/Muse Code's
  * adapters use for their own plugin installation.
  *
@@ -76,7 +76,7 @@ export const dshAdapter: IHarnessAdapter = {
   async writeConfig(workspaceRoot: string, _sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
     // No rules/markdown file for dsh — `sops` are not consulted here (same
     // "no text-rules file" posture as goose.ts's own adapter). The plugin
-    // registration + settings.yaml merge is the entirety of what this
+    // registration + egress row in each profile patch is the entirety of what this
     // harness gets, and it happens for every existing profile, not one file.
     await writeDshHooks(workspaceRoot, proxyUrl, '')
 

@@ -1,7 +1,8 @@
 /**
  * sdkGatedAdapters.test.ts — table-driven coverage for the Wave 1 SDK-gated
  * framework adapters (langchain.ts, crewai.ts, autogen.ts, ag2.ts,
- * googleAdk.ts, openaiAgents.ts, pydanticAi.ts, smolagents.ts).
+ * googleAdk.ts, openaiAgents.ts, pydanticAi.ts, smolagents.ts), plus
+ * strands.ts and agentFramework.ts.
  *
  * Each is built from `makeSdkGatedAdapter` and shares langgraph.ts's shape
  * exactly (see langgraph.test.ts) — one table here instead of eight
@@ -24,6 +25,7 @@ import { openaiAgentsAdapter } from './openaiAgents.js'
 import { pydanticAiAdapter } from './pydanticAi.js'
 import { smolagentsAdapter } from './smolagents.js'
 import { strandsAdapter } from './strands.js'
+import { agentFrameworkAdapter } from './agentFramework.js'
 import { ALL_ADAPTERS } from './detector.js'
 import { HARNESS_CONFIG_FILES } from './types.js'
 
@@ -108,7 +110,47 @@ const CASES: Case[] = [
     negative: 'strands==0.1\nfastapi\n',
     importSnippet: 'intutic_clawde.gate.adapters.strands',
   },
+  {
+    name: 'agent-framework',
+    adapter: agentFrameworkAdapter,
+    positive: 'agent-framework-core>=1.20.0\n',
+    // "agent-framework" is a generic phrase: another project's package that
+    // merely ends in it must NOT trigger (AGENT_FRAMEWORK_TOKEN in
+    // agentFramework.ts anchors the start of the name).
+    negative: 'my-agent-framework==0.1\nfastapi\n',
+    importSnippet: 'intutic_clawde.gate.adapters.agent_framework',
+  },
 ]
+
+describe('agent-framework detection spellings', () => {
+  let root: string
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'intutic-agent-framework-spellings-'))
+  })
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true })
+  })
+
+  it.each([
+    ['requirements.txt', 'agent-framework\n'],
+    ['requirements.txt', 'Agent_Framework_Core==1.20.0\n'],
+    ['pyproject.toml', 'dependencies = ["agent-framework-openai>=1.15"]\n'],
+    ['uv.lock', '[[package]]\nname = "agent-framework-core"\nversion = "1.20.0"\n'],
+  ])('detects %s containing %j', async (manifest, content) => {
+    await writeFile(join(root, manifest), content, 'utf-8')
+    expect(await agentFrameworkAdapter.detect(root)).toBe(true)
+  })
+
+  it.each(['agent-frameworks==1.0\n', 'acme.agent-framework==1.0\n', 'agent_frameworkx\n'])(
+    'does not detect %j',
+    async (content) => {
+      await writeFile(join(root, 'requirements.txt'), content, 'utf-8')
+      expect(await agentFrameworkAdapter.detect(root)).toBe(false)
+    },
+  )
+})
 
 describe.each(CASES)('$name adapter', ({ name, adapter, positive, negative, importSnippet }) => {
   let root: string

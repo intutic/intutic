@@ -170,6 +170,7 @@ function toolCallResult(toolCallId: string, toolName: string, input: unknown) {
     ],
     finishReason: { unified: 'tool-calls' as const, raw: undefined },
     usage: USAGE,
+    warnings: [],
   }
 }
 
