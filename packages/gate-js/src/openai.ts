@@ -105,9 +105,11 @@
  * ## Realtime
  *
  * `@openai/agents-realtime` honours `FunctionTool.inputGuardrails` through
- * the same `runToolInputGuardrails` helper (verified in its shipped
- * `realtimeSession.js`), so a guardrail injected by this module also gates
- * voice-agent tool calls.
+ * the same `runToolInputGuardrails` helper (`realtimeSession.js`), so a
+ * guardrail injected by this module also gates voice-agent tool calls.
+ * `__tests__/openai.test.ts` drives a real `RealtimeSession` (0.16.1) with a
+ * stand-in transport emitting `function_call`: a refused call never executes
+ * and the BLOCKED message goes back via `sendFunctionCallOutput` (TD-408).
  *
  * ## LLM egress and the tracing DLP leak
  *
