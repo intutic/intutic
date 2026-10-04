@@ -99,3 +99,47 @@ documentation, a security whitepaper, or an incident response as if it were
 an independent measurement of the response-echo scan's real-world noise
 floor — it is a regression pin on our own regexes, authored by us, and
 nothing more.
+
+## SWE-rebench OpenHands trajectories — fetched, not vendored (TD-248)
+
+- **Source:** `nebius/SWE-rebench-openhands-trajectories` (67,074 OpenHands
+  runs on SWE-rebench tasks, OpenAI-format `tool_calls`), read through the
+  Hugging Face datasets-server rows API.
+- **Licence:** CC-BY-4.0 — redistribution is permitted with attribution, so
+  vendoring is allowed; it is not done because a useful extract is ~35 MB of
+  third-party data in a tree mirrored to the public repo, which is a decision
+  for a maintainer rather than a test.
+- **Extract:** `openhands/extract.py <out.jsonl>` — 10 pages of 100 rows at
+  offsets drawn with seed 248. The rows API is not revision-pinned; there is no
+  SHA256SUMS because there is no stable artifact to sum.
+- **Consumer:** `tests/coding_agent_cycle_floor_test.rs`, skipped (loudly)
+  unless `INTUTIC_CODING_CORPUS` names the extract.
+
+### Labels, and what they are not
+
+`exit_status` and `resolved` are the dataset's own. `AgentStuckInLoopError` is
+OpenHands' StuckDetector — a heuristic, not a human saying the run looped — and
+the 100-iteration cap is a budget, not a loop. There is no human-labelled
+"genuinely looping" set in this or any corpus surveyed for TD-248.
+
+### Measured 2026-10-04 (seed-248 sample, 1,000 trajectories)
+
+Calls per trajectory: min 32, median 61, p90 96, max 100. Tool vocabulary:
+`execute_bash`, `str_replace_editor`, `think`, `finish`, `task_tracker`.
+
+| outcome | runs | reached gate | cleared floor | `landmark_cycle` fired on some request | fired on the last request |
+|---|---:|---:|---:|---:|---:|
+| submitted, resolved | 453 | 453 | 453 | 374 (82.6%) | 100 |
+| submitted, unresolved | 459 | 459 | 459 | 388 (84.5%) | 106 |
+| hit the 100-iteration cap | 83 | 83 | 83 | 81 | 23 |
+| `AgentStuckInLoopError` | 5 | 5 | 5 | 4 | 0 |
+
+Per request: 64,583 evaluations, 56,653 reached the gate, **0** fell below
+`CYCLE_COVERAGE_FLOOR`, 9,927 (17.5% of gated) fired `landmark_cycle`. Minimum
+final-window coverage 0.875. A 200-run sample of `SWE-bench/SWE-smith-trajectories`
+(MIT, `tool` split, three tool names) agrees: every final window at coverage 1.0.
+
+So on coding-agent traffic the floor is not a gate at all — with three to five
+tool names, every name recurs in any 24-call window — and the false-positive
+rate is set by `CYCLE_MATCH_RATIO` over bare tool names, which fires on the
+large majority of runs that finished successfully.

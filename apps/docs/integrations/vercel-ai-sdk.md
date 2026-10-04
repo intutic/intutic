@@ -54,7 +54,7 @@ const model = openai('gpt-5-mini')
 
 ### 3. Gate local tool execution (SDK)
 
-The `ai` package exposes a documented pre-execution veto point — a `toolApproval` callback accepted by `generateText`, `streamText`, and `ToolLoopAgent` — which `intuticToolApproval()` implements:
+The `ai` package exposes a documented pre-execution veto point — a `toolApproval` callback accepted by `generateText`, `streamText`, and `ToolLoopAgent` — which `intuticToolApproval()` implements. It was confirmed against the shipped types of `ai` 7.0.68 and is tested against the real `generateText()` loop on `ai` 7.0.127:
 
 ```ts
 import { generateText } from 'ai'

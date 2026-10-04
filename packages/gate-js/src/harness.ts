@@ -12,7 +12,9 @@
  *
  * `@ai-sdk/harness@1.0.75` (plus `@ai-sdk/harness-claude-code@1.0.78` and
  * `@ai-sdk/harness-grok-build@1.0.12`) were installed and their shipped
- * `.d.ts`/compiled source read directly (not inferred from docs alone):
+ * `.d.ts`/compiled source read directly (not inferred from docs alone);
+ * points 1-3 re-read on `@ai-sdk/harness@1.0.138` (the current devDependency,
+ * on `ai@7.0.127`) — only the continuation element type changed (point 2):
  *
  * 1. **The `toolApproval` setting is STATIC.** `HarnessAgentSettings.toolApproval`
  *    is `HarnessAgentToolApprovalConfiguration = Readonly<Record<string,
@@ -25,9 +27,12 @@
  *    let the turn pause, and answer each pending approval with the gate
  *    (see {@link intuticApprovalResponder}).
  * 2. **The portable answer path is continuation-based.**
- *    `HarnessAgentToolApprovalContinuation` carries `{ approvalResponse,
- *    toolCall }`; `continueTurn`/`continueGenerate`/`continueStream` accept
- *    `toolApprovalContinuations` (dist/agent/index.d.ts). The adapter-session
+ *    `continueTurn`/`continueGenerate`/`continueStream` accept
+ *    `toolApprovalContinuations` (dist/agent/index.d.ts) — in 1.0.75 an array
+ *    of `HarnessAgentToolApprovalContinuation` (`{ approvalResponse, toolCall
+ *    }`), since 1.0.101 an array of bare `ToolApprovalResponse` parts (the
+ *    old type is no longer exported in 1.0.138); see
+ *    {@link HarnessToolApprovalContinuation} for how one value serves both. The adapter-session
  *    method `session.submitToolApproval?({approvalId, approved, reason})` is
  *    OPTIONAL (`dist/index.d.ts` — `HarnessV1PromptControl`), and support
  *    genuinely varies per adapter: `@ai-sdk/harness-claude-code@1.0.78`
@@ -82,7 +87,8 @@ import { active as activeGate, type Gate, type ToolInput } from './gate.js'
 import { IntuticGateRefusal } from './errors.js'
 
 /** Structural copy of `ai`'s `ToolApprovalResponse` prompt part (re-exported
- *  from `@ai-sdk/provider-utils@5.0.27` — confirmed field-for-field). This is
+ *  from `@ai-sdk/provider-utils` — confirmed field-for-field on 5.0.27 and
+ *  5.0.53). This is
  *  the part a `role: 'tool'` message carries to answer an approval request. */
 export interface HarnessToolApprovalResponse {
   type: 'tool-approval-response'
@@ -92,7 +98,7 @@ export interface HarnessToolApprovalResponse {
   providerExecuted?: boolean
 }
 
-/** Structural copy of the `toolCall` member of `@ai-sdk/harness`'s
+/** Structural copy of the `toolCall` member of `@ai-sdk/harness` <= 1.0.100's
  *  `HarnessAgentToolApprovalContinuation` (dist/agent/index.d.ts). */
 export interface HarnessToolCallPart {
   readonly type: 'tool-call'
@@ -113,6 +119,8 @@ export interface HarnessToolCallPart {
  *     `ToolApprovalResponse` and keys it by its top-level `approvalId`; an
  *     element without one is silently ignored and the paused turn never
  *     resumes (observed live, `uat/evidence/live-verify/harness-docker/`).
+ *     Still the contract in 1.0.138, whose `collectHarnessAgentToolApproval
+ *     Continuations` also returns bare `ToolApprovalResponse` parts.
  *
  * So each continuation IS the `tool-approval-response` part (top-level
  * fields) and also carries `approvalResponse`/`toolCall` for older runtimes.
@@ -582,6 +590,14 @@ export function recommendedHarnessSettings(
 // `onSession` (reserved for genuinely per-session state, which this module
 // has none of at this scope).
 //
+// `@ai-sdk/harness@1.0.138` (not 1.0.75) also records each successful run
+// as an empty `~/.ai-sdk-harness/.on-bootstrap/<sha256(bootstrapHash)>.ok`
+// marker, and `HarnessAgent` re-runs `onBootstrap` on every session it
+// acquires unless that marker is present (`skipOnBootstrapIfMarked`) — so a
+// sandbox that never went through template creation still gets these files,
+// and a new `bootstrapHash` (new rules) re-writes them. Our writes are
+// overwrite-idempotent, so a re-run is harmless.
+//
 // ## What `intuticSandboxBootstrap()` writes, and why it is NOT a byte copy
 // of the laptop artifacts
 //
@@ -862,7 +878,10 @@ function sandboxClaudeSettings(hookScriptSandboxPath: string): {
  * project-level file alone never fired. User-level settings load for every
  * session regardless of cwd. An existing user settings file is merged into
  * (our hooks appended), never overwritten; an unparseable one fails the
- * bootstrap loudly rather than leaving the sandbox ungated.
+ * bootstrap loudly rather than leaving the sandbox ungated. Re-running is
+ * idempotent: entries that already invoke this same hook script are replaced,
+ * not duplicated — `@ai-sdk/harness` >= 1.0.138 re-runs `onBootstrap` on a
+ * session whose marker is missing, and a new `bootstrapHash` re-runs it too.
  */
 async function writeSandboxUserSettings(
   session: SandboxWriteSession,
@@ -890,7 +909,11 @@ async function writeSandboxUserSettings(
     }
     const base = existing !== null && typeof existing === 'object' && !Array.isArray(existing) ? (existing as Record<string, unknown>) : {}
     const hooks = (base.hooks ?? {}) as Record<string, unknown>
-    const pre = Array.isArray(hooks.PreToolUse) ? hooks.PreToolUse : []
+    const ourCommand = `node ${hookScriptSandboxPath}`
+    const isOurs = (entry: unknown): boolean =>
+      Array.isArray((entry as { hooks?: unknown } | null)?.hooks) &&
+      ((entry as { hooks: unknown[] }).hooks).some((h) => (h as { command?: unknown } | null)?.command === ourCommand)
+    const pre = (Array.isArray(hooks.PreToolUse) ? hooks.PreToolUse : []).filter((e: unknown) => !isOurs(e))
     merged = { ...base, hooks: { ...hooks, PreToolUse: [...pre, ...ours.hooks.PreToolUse] } }
   }
   await session.writeTextFile({ path, content: JSON.stringify(merged, null, 2) + '\n' })

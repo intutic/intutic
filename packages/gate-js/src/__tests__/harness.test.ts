@@ -33,7 +33,6 @@ import type {
   HarnessAgentPermissionMode,
   HarnessAgentSandboxConfig,
   HarnessAgentToolApprovalConfiguration,
-  HarnessAgentToolApprovalContinuation,
 } from '@ai-sdk/harness/agent'
 import {
   collectHarnessAgentToolApprovalContinuations,
@@ -92,9 +91,15 @@ afterEach(() => {
 // ------------------------------------------------------------------------
 function _typeCheckOnly(): void {
   // Our continuations must be assignable where continueGenerate/continueStream
-  // expect the real HarnessAgentToolApprovalContinuation[].
+  // take them — read off the real method signature, so a rename or reshape
+  // of the element type fails here. Since @ai-sdk/harness 1.0.101 that
+  // element is a bare `ToolApprovalResponse` (the old
+  // `HarnessAgentToolApprovalContinuation` export is gone in 1.0.138);
+  // ours still also carries the `{ approvalResponse, toolCall }` members that
+  // <= 1.0.100 reads, which the excess fields do not affect.
+  type RealContinuations = NonNullable<Parameters<HarnessAgent['continueGenerate']>[0]['toolApprovalContinuations']>
   const ours: HarnessToolApprovalContinuation[] = []
-  const real: readonly HarnessAgentToolApprovalContinuation[] = ours
+  const real: RealContinuations = ours
   void real
 
   // Our static approval record must satisfy HarnessAgentSettings.toolApproval.
@@ -276,8 +281,13 @@ describe('the REAL collector round-trips this responder’s approval responses',
 
     const collected = collectHarnessAgentToolApprovalContinuations({ messages })
     expect(collected).toHaveLength(1)
-    expect(collected[0]!.approvalResponse).toEqual(ours[0]!.approvalResponse)
-    expect(collected[0]!.toolCall).toEqual(ours[0]!.toolCall)
+    // Since 1.0.101 the collector returns the bare `tool-approval-response`
+    // part, which is exactly our continuation's top level (and its nested
+    // `approvalResponse`, kept for <= 1.0.100).
+    const { approvalResponse, toolCall, ...topLevel } = ours[0]!
+    void toolCall
+    expect(collected[0]).toEqual(approvalResponse)
+    expect(collected[0]).toEqual(topLevel)
   })
 })
 
@@ -698,6 +708,28 @@ describe('intuticSandboxBootstrap', () => {
     ])
   })
 
+  it('re-running onBootstrap replaces its own user-level entries instead of duplicating them', async () => {
+    // @ai-sdk/harness 1.0.138 re-runs onBootstrap on any session without the
+    // marker, and a changed bootstrapHash re-runs it on a sandbox that
+    // already has our entries.
+    const first = fakeSession({
+      '/home/sandbox/.claude/settings.json': JSON.stringify({ hooks: { PreToolUse: [{ matcher: 'Read', hooks: [] }] } }),
+    })
+    await intuticSandboxBootstrap().onBootstrap({ session: first, workDir: '/w' })
+    const afterFirst = first.written.find((w) => w.path === '/home/sandbox/.claude/settings.json')!.content
+    const second = fakeSession({ '/home/sandbox/.claude/settings.json': afterFirst })
+    await intuticSandboxBootstrap({ policySnapshotRules: 'changed' }).onBootstrap({ session: second, workDir: '/w' })
+    const user = JSON.parse(second.written.find((w) => w.path === '/home/sandbox/.claude/settings.json')!.content)
+    expect(user.hooks.PreToolUse.map((h: { matcher: string }) => h.matcher)).toEqual([
+      'Read',
+      'Bash',
+      'Edit',
+      'Write',
+      'MultiEdit',
+      'mcp__.*',
+    ])
+  })
+
   it('fails the bootstrap loudly when HOME cannot be resolved or user settings are unparseable', async () => {
     await expect(intuticSandboxBootstrap().onBootstrap({ session: fakeSession({}, ''), workDir: '/w' })).rejects.toThrow(
       /cannot resolve the sandbox HOME/,
@@ -761,7 +793,18 @@ describe('intuticSandboxBootstrap', () => {
       })
 
       expect(runCalls).toContain('pwd')
-      const paths = written.map((w) => w.path).sort()
+      // @ai-sdk/harness 1.0.138 (not 1.0.75) itself writes an empty
+      // `~/.ai-sdk-harness/.on-bootstrap/<sha256(bootstrapHash)>.ok` marker
+      // after onBootstrap succeeds (so a resumed sandbox can skip a re-run).
+      // It is the framework's file, not ours — written last, and only because
+      // our onBootstrap returned without throwing.
+      const marker = written.at(-1)!
+      expect(marker.path).toMatch(/^\/home\/vercel-sandbox\/\.ai-sdk-harness\/\.on-bootstrap\/[0-9a-f]{64}\.ok$/)
+      expect(marker.content).toBe('')
+      const paths = written
+        .slice(0, -1)
+        .map((w) => w.path)
+        .sort()
       expect(paths).toEqual(
         [
           '/home/vercel-sandbox/.claude/settings.json',

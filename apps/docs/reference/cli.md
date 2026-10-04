@@ -353,6 +353,7 @@ intutic integrity verify <root_id> [options]
 
 | Option | Description |
 |--------|-------------|
+| `--against <file>` | Also compare with the copy of this root mirrored to your own bucket (BYOC). See [Checking your copy](/concepts/trace-integrity#checking-your-copy). |
 | `--json` | Output as JSON instead of a report |
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
@@ -370,6 +371,9 @@ deliberate about which findings are failures:
 | Signature `unverifiable` | `0` | The root names a key the JWKS does not publish — a key-retention gap, not evidence of forgery. |
 | Signature `unsigned` | `0` | The deployment seals roots without signing them, which is supported. |
 | `keys_unavailable` | `0` | The JWKS could not be fetched. No verdict was reached, so none is reported. |
+| `--against` copy matches | `0` | The copy in your bucket agrees with what the control plane serves. |
+| `--against` copy differs | `1` | The served root, its chain link, its signature or its leaves are not what was mirrored to you at seal time. |
+| `--against` file unreadable | `1` | The comparison you asked for did not happen, so the command does not pass. |
 
 The distinction between **invalid** and **unverifiable** is load-bearing. A rotated-out key
 that was never added to `TRACE_SIGNING_RETIRED_KEYS` would otherwise turn every historical
@@ -381,6 +385,7 @@ key is a different claim.
 
 ```bash
 intutic integrity verify tmr_abc123
+intutic integrity verify tmr_abc123 --against ./roots/ws_abc/tmr_abc123.json
 ```
 
 ---
