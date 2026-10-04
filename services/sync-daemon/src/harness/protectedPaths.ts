@@ -61,7 +61,7 @@
  * @module
  */
 
-import { SECRET_VALUE_PATTERNS } from '@intutic/shared-types'
+import { SECRET_VALUE_PATTERNS, SKILL_CONTENT_BLOCK_PATTERN_IDS, SKILL_SCAN_PATTERNS } from '@intutic/shared-types'
 
 /** Governance config that must hold still, for every harness. */
 export const UNIVERSAL_PROTECTED_PATHS: readonly string[] = [
@@ -659,12 +659,9 @@ export const SECRET_CONTENT_PATTERNS: readonly GuardPattern[] = assertGuardTable
  * exists to flag — narrower than `UNIVERSAL_PROTECTED_PATHS`'s "any mention"
  * rule on purpose, since that rule blocks and this one only advises.
  *
- * A future promotion to `block` on skill CONTENT (not path) is a different,
- * later, and still-open decision — it needs the corpus measurement TD-358
- * describes, which this change does not supply. It should ship through the
- * same policy-snapshot channel the way this path-tier promotion and
- * `DESTRUCTIVE_COMMAND_PATTERNS` both do, so it too is retractable in a sync
- * cycle rather than a release if the measurement turns out wrong.
+ * Blocking on skill CONTENT (not path) is a separate table,
+ * {@link SKILL_CONTENT_PATTERNS}, licensed by the benign-corpus measurement
+ * TD-358 asked for and shipped only through the policy snapshot.
  */
 export const SKILL_SURFACE_PATTERNS: readonly GuardPattern[] = assertGuardTableSane([
   {
@@ -714,6 +711,165 @@ export const SKILL_SURFACE_PATTERNS: readonly GuardPattern[] = assertGuardTableS
     ],
   },
 ])
+
+/**
+ * Rewrites a case-insensitive JS `RegExp` source into a case-SENSITIVE one that
+ * means the same thing in JS and Python `re`, for use as an `argPattern`.
+ *
+ * Why: an `argPattern` is compiled with no flags by every gate family
+ * (`new RegExp(p)` in the JS gates, `re.compile(p)` in the bash gates'
+ * python3 helper), and there is no inline case-insensitive flag both engines
+ * accept — JS rejects a leading `(?i)`. The `skillScan.ts` patterns are matched
+ * case-insensitively, so each ASCII letter becomes `[xX]`.
+ *
+ * Also rewrites `\s` outside a character class to `(?:\s|\\[nrt])`. An
+ * argPattern sees `JSON.stringify(tool_input)`, where a newline in the content
+ * is the two characters `\n`; without this, `do not\ntell the user` would stop
+ * matching the moment the words wrap. Known residual gap: a `\b` directly after
+ * such an escape sees `n` as a word character, so a few line-wrapped phrasings
+ * still slip. That costs recall, not precision.
+ *
+ * Throws on a letter range inside a class (`[a-z]`). None of the scan patterns
+ * has one, and folding one correctly is more code than the case deserves.
+ */
+export function caseFoldedArgSource(source: string): string {
+  let out = ''
+  let inClass = false
+  for (let i = 0; i < source.length; i++) {
+    const c = source[i]!
+    if (c === '\\') {
+      const next = source[i + 1] ?? ''
+      out += !inClass && next === 's' ? '(?:\\s|\\\\[nrt])' : c + next
+      i++
+      continue
+    }
+    const isLetter = /[A-Za-z]/.test(c)
+    if (inClass) {
+      if (c === ']') inClass = false
+      if (isLetter && (source[i + 1] === '-' || source[i - 1] === '-')) {
+        throw new Error(`caseFoldedArgSource: letter range in a character class is not supported: ${source}`)
+      }
+      out += isLetter ? c.toLowerCase() + c.toUpperCase() : c
+      continue
+    }
+    if (c === '[') {
+      inClass = true
+      out += c
+      if (source[i + 1] === '^') {
+        out += '^'
+        i++
+      }
+      continue
+    }
+    out += isLetter ? `[${c.toLowerCase()}${c.toUpperCase()}]` : c
+  }
+  return out
+}
+
+/**
+ * The JSON keys whose string value is content being WRITTEN, across the
+ * harnesses' write and edit tools: `content` (Write, write_file, write_to_file,
+ * OpenCode write), `new_string` / `newString` (Edit, MultiEdit's `edits[]`,
+ * OpenCode edit), `new_str` / `file_text` (str_replace_editor). `old_string`
+ * is left out on purpose: an edit that REMOVES a poisoned line is the fix, not
+ * the attack. Diff-shaped editors (`apply_patch`, Cline's `replace_in_file`)
+ * carry old and new text in one field and are not covered.
+ */
+const WRITTEN_CONTENT_KEYS = ['content', 'new_string', 'newString', 'new_str', 'file_text']
+
+/**
+ * Skill-CONTENT block tier (TD-358): a write into a skill directory whose
+ * written text matches one of the `skillScan.ts` patterns measured at zero
+ * false positives on the benign-skill corpus (`SKILL_CONTENT_BLOCK_PATTERN_IDS`;
+ * `packages/shared-types/src/__tests__/corpus/skills/`, 350 real skills).
+ * `read-sensitive-path` fired on 11 of them and is not here.
+ *
+ * Each rule is two conditions, which a GuardPattern can express: `source`
+ * matches the write's target path against the skill surface (subject
+ * `target`, as in {@link SKILL_SURFACE_PATTERNS}), and `argPattern`, which
+ * every gate family already evaluates for SOP WHERE clauses, matches the
+ * pattern inside the value of a {@link WRITTEN_CONTENT_KEYS} key of the
+ * serialized tool input.
+ *
+ * **Snapshot-only, never in `staticFloorPatterns()`**, as TD-358 required: a
+ * content judgement ships where one sync cycle retracts it
+ * (`SKILL_CONTENT_TIER_SEVERITY` in `lib/policySnapshot.ts`). The table's own
+ * `warn` is a placeholder the snapshot builder always overrides.
+ *
+ * **What it adds over the path tier.** In steady state
+ * `skill_surface.*.tier` already refuses every write under a skill directory,
+ * so today this tier mostly changes the reason the developer reads. It
+ * becomes the only refusal if the path tier is retracted to `warn`. That
+ * independence is the point: the blanket path block and the narrow content
+ * block can each be retracted without the other. One exception: the
+ * `@intutic/gate-js` and `intutic-clawde` snapshot readers do not read the
+ * `.rules` argPattern column (true of every WHERE rule shipped this way), so
+ * in those two the content rules act as path-only blocks — the same calls
+ * `skill_surface.*.tier` already refuses. Retracting only the path tier would
+ * not unblock benign skill writes there; flip both constants.
+ *
+ * **What it does not catch.** A write through a shell redirect or heredoc
+ * (`cat > .claude/skills/x/SKILL.md`). `subject: 'command'` cannot tell that
+ * from a `grep '<system>' .claude/skills/`, and the corpus measured skill
+ * files, not commands. It also misses diff-shaped editors (see
+ * {@link WRITTEN_CONTENT_KEYS}), symlinked or relative-walk targets (the same
+ * limits as the path tier), and some line-wrapped phrasings (see
+ * {@link caseFoldedArgSource}).
+ */
+export const SKILL_CONTENT_PATTERNS: readonly GuardPattern[] = assertGuardTableSane(
+  SKILL_CONTENT_BLOCK_PATTERN_IDS.map((id): GuardPattern => {
+    const scan = SKILL_SCAN_PATTERNS.find((p) => p.id === id)!
+    const argPattern =
+      `"(?:${WRITTEN_CONTENT_KEYS.join('|')})":"(?:[^"\\\\]|\\\\.)*?(?:${caseFoldedArgSource(scan.source)})`
+    assertSkillContentArgSane(id, argPattern, scan.matches, scan.notMatches)
+    return {
+      id: `skill_content.${id}`,
+      source: '\\.(agents|claude)/skills/',
+      subject: 'target',
+      severity: 'warn',
+      reason:
+        `Write into a skill file contains a ${scan.category.replace('_', ' ')} pattern ` +
+        `(${id}): ${scan.description}`,
+      rationale:
+        'See SKILL_CONTENT_PATTERNS. Zero hits on the 350-skill benign corpus licenses the block; ' +
+        'shell-redirect writes, diff-shaped editors and symlinked targets are not caught.',
+      matches: [' .claude/skills/x/SKILL.md ', ' /w/.agents/skills/y/SKILL.md '],
+      notMatches: [' src/skills/x.md ', ' .claude/settings.json ', ' README.md '],
+      argPattern,
+    }
+  }),
+)
+
+/**
+ * The argPattern half of {@link SKILL_CONTENT_PATTERNS}' fixture contract,
+ * which `assertGuardTableSane` does not check: every one of the scan pattern's
+ * own `matches` must fire when written as `content`, in either case, and none
+ * of its `notMatches` may. The same text as `old_string` must NOT fire.
+ */
+function assertSkillContentArgSane(
+  id: string,
+  argPattern: string,
+  matches: readonly string[],
+  notMatches: readonly string[],
+): void {
+  const re = new RegExp(argPattern)
+  const target = '/w/.claude/skills/x/SKILL.md'
+  for (const m of matches) {
+    for (const v of [m, m.toUpperCase(), m.toLowerCase()]) {
+      if (!re.test(JSON.stringify({ file_path: target, content: v }))) {
+        throw new Error(`SKILL_CONTENT_PATTERNS ${id}: argPattern misses declared match ${JSON.stringify(v)}`)
+      }
+    }
+    if (re.test(JSON.stringify({ file_path: target, old_string: m, new_string: 'fixed' }))) {
+      throw new Error(`SKILL_CONTENT_PATTERNS ${id}: argPattern fires on old_string — removing the line would be refused`)
+    }
+  }
+  for (const nm of notMatches) {
+    if (re.test(JSON.stringify({ file_path: target, content: nm }))) {
+      throw new Error(`SKILL_CONTENT_PATTERNS ${id}: argPattern matches declared notMatch ${JSON.stringify(nm)}`)
+    }
+  }
+}
 
 /**
  * Commands that destroy the machine or its data irrecoverably.
