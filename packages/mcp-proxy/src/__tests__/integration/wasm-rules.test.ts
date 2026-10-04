@@ -5,7 +5,7 @@
  * shaped directory, evaluated through the real `worker_threads` worker.
  *
  * Two purpose-built fixtures exercise paths no shipped rule needs to:
- * `infinite-loop` (the 50ms timeout path) and `math-random` (the
+ * `infinite-loop` (stopped by the instruction budget, TD-440) and `math-random` (the
  * import-validation-at-load-time rejection — `Math.random()` compiles to
  * `env.seed`, outside the frozen 4-import set).
  *
@@ -19,7 +19,7 @@
  * @module
  */
 
-import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
 import { spawn } from 'node:child_process'
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, copyFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -239,7 +239,7 @@ describe('WasmRunner + read_referenced_file (TD-441) and the memory ceiling (TD-
 })
 
 describe('WasmRunner + purpose-built fixtures', () => {
-  it('an infinite-loop rule fails open (ALLOW) after the 50ms deadline, and does not hang the proxy', async () => {
+  it('an infinite-loop rule is stopped by its instruction budget and fails open (ALLOW), without waiting out the deadline', async () => {
     const wasmDir = mkdtempSync(join(tmpdir(), 'intutic-mcp-wasm-loop-'))
     try {
       const wasmPath = await compileScratchRule(
@@ -254,14 +254,14 @@ describe('WasmRunner + purpose-built fixtures', () => {
         await runner.rescan()
         expect(runner.getLoadedRuleIds()).toContain('local:10_infinite-loop.wasm')
 
-        const started = Date.now()
+        // The deadline path terminates and respawns the worker; the budget
+        // path traps inside a healthy worker and never does. So no respawn
+        // proves the budget stopped the loop, without a timing assertion.
+        const respawn = vi.spyOn(runner as unknown as { respawnWorker: () => Promise<void> }, 'respawnWorker')
         const verdict: WasmVerdict = await runner.evaluate(baseContext)
-        const elapsed = Date.now() - started
 
         expect(verdict).toEqual({ code: 'allow' })
-        // Generous ceiling — the 50ms guest deadline plus worker
-        // terminate+respawn overhead, not a tight timing assertion.
-        expect(elapsed).toBeLessThan(5_000)
+        expect(respawn).not.toHaveBeenCalled()
       } finally {
         await runner.shutdown()
       }
@@ -270,7 +270,7 @@ describe('WasmRunner + purpose-built fixtures', () => {
     }
   }, 30_000)
 
-  it('disables an infinite-loop rule after 3 consecutive timeouts, and a later evaluate() no longer waits on it', async () => {
+  it('disables an infinite-loop rule after 3 consecutive budget exhaustions, and a later evaluate() skips it', async () => {
     const wasmDir = mkdtempSync(join(tmpdir(), 'intutic-mcp-wasm-loop3-'))
     try {
       const wasmPath = await compileScratchRule(
@@ -287,8 +287,7 @@ describe('WasmRunner + purpose-built fixtures', () => {
           const v = await runner.evaluate(baseContext)
           expect(v).toEqual({ code: 'allow' })
         }
-        // A 4th call: the rule is disabled now, so this should resolve fast
-        // (no 50ms wait on a rule that will never answer).
+        // A 4th call: the rule is disabled now, so it is not run at all.
         const started = Date.now()
         const v4 = await runner.evaluate(baseContext)
         const elapsed = Date.now() - started

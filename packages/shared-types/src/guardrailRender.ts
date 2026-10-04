@@ -18,6 +18,11 @@
  *   re-parsed and compared to the IR it came from — and so the cargo fixture
  *   test can prove the Rust side reads the same fields.
  *
+ * - **Workspace settings** (`allowed_models`, `egress_allow`) become
+ *   `{key, values}` — the `WorkspaceSettings` key and the values a promotion
+ *   writes into it. Nothing parses them back but the zod schema the settings
+ *   route already declares; the values are the IR's own, canonicalised.
+ *
  * Every renderer is byte-stable: the same IR always yields the same bytes, so
  * a rendered artifact is content-addressable and a reviewer diffing two
  * versions sees only what changed.
@@ -29,8 +34,25 @@ import {
   type GuardrailIr,
   type HookRuleIr,
   type FrontMatterIr,
+  type SettingIr,
+  type SettingKey,
   isFrontMatterIr,
+  settingValues,
+  SETTING_KIND_KEYS,
 } from './guardrailIr.js'
+
+// ─── Workspace settings ───────────────────────────────────────────────
+
+export interface RenderedWorkspaceSetting {
+  kind: 'workspace_setting'
+  key: SettingKey
+  values: string[]
+}
+
+/** The setting a settings-class guardrail writes on promotion, and the values it proposes — sorted, deduplicated, byte-stable. */
+export function renderWorkspaceSetting(ir: SettingIr): RenderedWorkspaceSetting {
+  return { kind: 'workspace_setting', key: SETTING_KIND_KEYS[ir.kind], values: settingValues(ir) }
+}
 
 // ─── Hook rules ────────────────────────────────────────────────────────
 

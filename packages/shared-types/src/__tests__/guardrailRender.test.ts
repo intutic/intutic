@@ -18,6 +18,9 @@ import {
   type GuardrailIr,
   type FrontMatterIr,
   type HookRuleIr,
+  irTokens,
+  SETTING_KINDS,
+  SETTING_KIND_KEYS,
 } from '../guardrailIr.js'
 import {
   renderHookRule,
@@ -31,6 +34,7 @@ import {
   frontMatterToIrs,
   isEnforceableFrontMatter,
   MAX_REASON_CHARS,
+  renderWorkspaceSetting,
 } from '../guardrailRender.js'
 
 // ─── Seeded generator ─────────────────────────────────────────────────
@@ -266,6 +270,21 @@ describe('validateGuardrailIr', () => {
     expect(ok({ kind: 'forbid_with', taint: 'pii()', token: 'action:http_post' })).toBe(true)
     expect(ok({ kind: 'wasm_predicate', title: 't', rationale: 'r', verdict: 3, predicate: { all: [{ field: 'harness', op: 'equals', value: 'cursor' }] } })).toBe(true)
     expect(ok({ kind: 'none', reason: 'no rule here' })).toBe(true)
+    expect(ok({ kind: 'allowed_models', models: ['claude-sonnet-4-5', 'openrouter/meta-llama/llama-3-70b', 'gpt-4o:latest'] })).toBe(true)
+    expect(ok({ kind: 'egress_allow', hosts: ['api.example.com', '.internal.example.com', '10.0.0.0/8', '192.168.1.5'] })).toBe(true)
+  })
+
+  it('settings-class kinds: no roles, 1–32 values, model ids are single tokens, egress entries are never a catch-all', () => {
+    expect(ok({ kind: 'allowed_models', models: ['gpt-4o'], roles: ['deployer'] })).toBe(false)
+    expect(ok({ kind: 'egress_allow', hosts: ['api.example.com'], roles: ['deployer'] })).toBe(false)
+    expect(ok({ kind: 'allowed_models', models: [] })).toBe(false)
+    expect(ok({ kind: 'allowed_models', models: Array.from({ length: 33 }, (_, i) => `model-${i}`) })).toBe(false)
+    expect(ok({ kind: 'allowed_models', models: ['gpt 4o'] })).toBe(false)
+    expect(ok({ kind: 'allowed_models', models: ['-gpt'] })).toBe(false)
+    // Leading-zero octets: Rust's `IpAddr::from_str` refuses them, so the entry would load and never match.
+    for (const host of ['*', '*.example.com', '0.0.0.0/0', '10.0.0.0/7', 'com', '.com', 'localhost', '256.0.0.1', '::1', 'a_b.example.com', '010.20.0.0/16', '10.020.0.0/16', '10.0.0.01']) {
+      expect(reason({ kind: 'egress_allow', hosts: [host] }), host).toMatch(/never `\*`, `0\.0\.0\.0\/0` or a bare TLD/)
+    }
   })
 
   it('refuses a token with whitespace — a command is not a tool', () => {
@@ -300,6 +319,23 @@ describe('canonicalizeIr', () => {
     const b = canonicalizeIr({ kind: 'hook_rule', title: 'two', tools: ['Bash', 'Write', 'Bash'], roles: ['sre'] })
     expect(a).toBe(b)
     expect(canonicalizeIr({ kind: 'deny_tools', tools: ['Bash'] })).not.toBe(canonicalizeIr({ kind: 'review_before', tokens: ['Bash'] }))
+  })
+
+  it('sorts and deduplicates setting values; hosts are lower-cased, model ids keep their case (the proxy compares them exactly)', () => {
+    expect(canonicalizeIr({ kind: 'egress_allow', hosts: ['B.example.com', 'a.example.com', 'b.example.com'] })).toBe('{"hosts":["a.example.com","b.example.com"],"kind":"egress_allow"}')
+    expect(canonicalizeIr({ kind: 'allowed_models', models: ['gpt-4o', 'GPT-4o', 'gpt-4o'] })).toBe('{"kind":"allowed_models","models":["GPT-4o","gpt-4o"]}')
+    expect(irTokens({ kind: 'allowed_models', models: ['gpt-4o'] })).toEqual([])
+    expect(irTokens({ kind: 'egress_allow', hosts: ['api.example.com'] })).toEqual([])
+  })
+})
+
+describe('renderWorkspaceSetting', () => {
+  it('names the WorkspaceSettings key each kind writes and the canonical values, byte-stable', () => {
+    expect(Object.keys(SETTING_KIND_KEYS).sort()).toEqual([...SETTING_KINDS].sort())
+    expect(renderWorkspaceSetting({ kind: 'allowed_models', models: ['gpt-4o', 'claude-sonnet-4-5', 'gpt-4o'] })).toEqual({ kind: 'workspace_setting', key: 'allowedModels', values: ['claude-sonnet-4-5', 'gpt-4o'] })
+    const a = renderWorkspaceSetting({ kind: 'egress_allow', hosts: ['10.0.0.0/8', 'API.example.com'] })
+    expect(a).toEqual({ kind: 'workspace_setting', key: 'egressAllow', values: ['10.0.0.0/8', 'api.example.com'] })
+    expect(JSON.stringify(renderWorkspaceSetting({ kind: 'egress_allow', hosts: ['api.example.com', '10.0.0.0/8'] }))).toBe(JSON.stringify(a))
   })
 })
 

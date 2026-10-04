@@ -46,7 +46,13 @@ export function guardrailIdFromSopTitle(title: string): string | null {
 }
 export type GuardrailStatus = (typeof GUARDRAIL_STATUSES)[number]
 
-export const GUARDRAIL_TARGETS = ['hook_rule', 'sop_front_matter', 'wasm_rule'] as const
+/**
+ * `workspace_setting` (TD-474 item 2) is the one target no rule endpoint
+ * projects: an `allowed_models` or `egress_allow` guardrail is written into
+ * the workspace setting the proxy already enforces when a member promotes it,
+ * and unwound when it is retired.
+ */
+export const GUARDRAIL_TARGETS = ['hook_rule', 'sop_front_matter', 'wasm_rule', 'workspace_setting'] as const
 export type GuardrailTarget = (typeof GUARDRAIL_TARGETS)[number]
 
 export const GUARDRAIL_EVENT_TYPES = [
@@ -98,7 +104,7 @@ export interface GuardrailSummary {
   target: GuardrailTarget
   status: GuardrailStatus
   ir: GuardrailIr
-  /** hook_rule: {toolPattern, argPattern?, reason}; sop_front_matter: {lines}; wasm_rule: {source}. */
+  /** hook_rule: {toolPattern, argPattern?, reason}; sop_front_matter: {lines}; wasm_rule: {source}; workspace_setting: {key, values}. */
   rendered: unknown
   roles: string[]
   scope: string
@@ -162,13 +168,14 @@ export interface GuardrailReadiness {
 }
 
 export interface GuardrailReplay {
-  source: 'enforcement_log' | 'context_snapshots'
+  /** `execution_traces`: an allowed-models guardrail, one request per trace. `none`: nothing captured can answer (egress has no replay source). */
+  source: 'enforcement_log' | 'context_snapshots' | 'execution_traces' | 'none'
   windowDays: number
   captured: number
   fires: number
   sample: Array<{ toolName: string; at: string; excerpt: string }>
   truncated: boolean
-  /** Keys this replay cannot answer for (`review_before` holds rather than acts). */
+  /** Keys this replay cannot answer for (`review_before` holds rather than acts; `egress_allow` has no captured source). */
   unsupported: string[]
 }
 
