@@ -15,13 +15,12 @@
  *   the in-process Wasmtime call never did) is the only backstop available
  *   here. 50ms, not 5ms, to keep that overhead from false-positiving a
  *   legitimate rule under normal load.
- * - **Guest memory ceiling is checked, not enforced mid-call.** `runner.rs`
- *   sets a 16MB `StoreLimits` cap that stops a `memory.grow` as it happens;
- *   V8 exposes no such hook on a module-exported memory, so `worker.ts`
- *   refuses a module whose initial memory is over 16MB and discards the
- *   verdict of one that grew past it during the call (reported as a
- *   failure, fail-open like a trap). The growth itself is bounded only by
- *   V8 (TD-440's remainder).
+ * - **Guest memory ceiling: the same 16MB, enforced a different way.**
+ *   `runner.rs` sets a `StoreLimits` cap; V8 has no such hook, but it does
+ *   enforce the maximum a module declares, so `worker.ts` rewrites the
+ *   module's memory section to declare 16MB as its maximum before compiling
+ *   (`memoryCap.ts`). A `memory.grow` past it returns -1 as it would under
+ *   Wasmtime. Not a divergence any more; TD-440 records how it got here.
  * - **`read_referenced_file` is served from a pre-read table**
  *   (`referencedFiles.ts`, the port of `referenced_files.rs`), prefetched
  *   once per `evaluate()` only when a loaded rule imports the function and
