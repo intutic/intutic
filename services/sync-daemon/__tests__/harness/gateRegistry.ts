@@ -848,10 +848,16 @@ export const NO_GATE: ReadonlyArray<{
       '(true=user-approval, false=not-applicable). There is NO agent-level default approval ' +
       'field (agent-definition d.ts carries zero approval fields — verified), so coverage is ' +
       'per-tool/per-connection attachment, eve\'s own documented multi-tenant-approvals pattern. ' +
-      'An observe-only audit emitter (intuticAuditHooks(), on eve\'s approval.candidate/' +
-      'approval.settled hook events) maps eve\'s human-approval lifecycle onto tool_allowed/' +
-      'tool_blocked/tool_flagged — telemetry only, and request-scoped (those events carry no ' +
-      'tool name — verified against the shipped protocol types; TD-411). ' +
+      'An observe-only audit emitter (intuticAuditHooks(), on eve\'s input.requested/' +
+      'approval.candidate/approval.settled hook events) maps eve\'s human-approval lifecycle onto ' +
+      'tool_allowed/tool_blocked/tool_flagged — telemetry only; settlement attribution is ' +
+      'best-effort (the approval events carry no tool name — verified against the shipped ' +
+      'protocol types; TD-411). LIVE-VERIFIED 2026-10-03 on a self-hosted eve build + eve start ' +
+      '(local Workflow world, scripted model, no account): deny never runs the body, a thrown ' +
+      'policy fails the turn, a parked user-approval call survives a SIGKILL + restart and is ' +
+      're-gated on resume. approval.candidate/approval.settled fire only for the ' +
+      '{ request, response } approval form; a bare policy settles via input.resolved, which the ' +
+      'audit hook does not read. Not exercised: a Vercel deployment, Vercel Sandbox, a real model. ' +
       'DOCUMENTED LIMITATION (not an Intutic defect): eve routes models through the Vercel AI ' +
       'Gateway by default, whose wire protocol the Intutic proxy does not parse — gateway-routed ' +
       'egress is ungoverned (TD-412); only the in-code direct-provider path ' +
@@ -980,8 +986,13 @@ export const NO_GATE: ReadonlyArray<{
       'by test against the REAL FatalError.is from the workflow package. One tracked wrinkle: ' +
       'ai@7.0.68 marks tool-level needsApproval @deprecated in favour of generateText-level ' +
       'toolApproval, but @ai-sdk/workflow\'s own loop reads the tool-level field and exposes no ' +
-      'other surface — the correct integration point today, watched for drift in TD-419. No live ' +
-      'durable run was exercised (needs a Workflow DevKit deployment — TD-418). See ' +
+      'other surface — the correct integration point today, watched for drift in TD-419. ' +
+      'LIVE-VERIFIED 2026-10-03 on the Workflow DevKit local world (nitro dev + workflow/nitro, ' +
+      'scripted model, no account): needsApproval executes in the workflow VM, where the gate\'s ' +
+      'node:fs access fails ("require is not defined"), so the gate must be called from a ' +
+      '"use step" function; from there a refusal runs once (a plain throw: 4 attempts), an ' +
+      'approval pause ends the run with a tool-approval-request, and a resumed run carrying the ' +
+      'approval re-gates the call. Not exercised: a hosted world (TD-418). See ' +
       'apps/docs/integrations/ai-sdk-workflow.md.',
   },
 

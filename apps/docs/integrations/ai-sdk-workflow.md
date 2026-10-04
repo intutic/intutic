@@ -2,10 +2,11 @@
 
 Integrate Intutic governance with Vercel's [`@ai-sdk/workflow`](https://ai-sdk.dev/) — the `WorkflowAgent` class for durable AI agents built on the Workflow DevKit (`workflow`).
 
-Two facts about this runtime shape the whole integration; both were confirmed against real installs (`@ai-sdk/workflow@1.0.69`, `workflow@4.8.3`), not inferred from docs:
+Three facts about this runtime shape the whole integration. All three were confirmed against real installs (`@ai-sdk/workflow@1.0.69`, `workflow@4.8.3`) and observed in live runs on the Workflow DevKit's local world (`@workflow/world-local`), not inferred from docs:
 
-1. **The veto surface is per-tool `needsApproval` — the agent has no approval option.** `WorkflowAgent`/`WorkflowAgentOptions` carry zero approval fields; the agent loop evaluates each tool's own `needsApproval` (boolean or async function) before executing it, and a call that needs approval pauses **durably** — the run suspends, and a human can approve hours later.
-2. **The durable runtime retries thrown errors.** A denial that throws a plain error is not a stop — it is a *retry schedule*. The runtime's retry/abort decision duck-types on `error.name === 'FatalError'` (`FatalError.is()`), so this adapter's refusals carry that name. Without it, a governance denial would be replayed toward max attempts, failing identically every time.
+1. **The veto surface is per-tool `needsApproval` — the agent has no approval option.** `WorkflowAgent`/`WorkflowAgentOptions` carry zero approval fields; the agent loop evaluates each tool's own `needsApproval` (boolean or async function) before executing it. A call that needs approval ends the run with a `tool-approval-request` on the run's stream and no tool result. The run does not stay suspended. To approve it, hours later or after a restart, you start a **new** run whose messages carry a `tool-approval-response`. The agent then re-evaluates `needsApproval` for the approved call before executing it.
+2. **`needsApproval` runs in the workflow sandbox, not in Node.js.** The agent loop runs inside the `"use workflow"` function, so `needsApproval` executes in the workflow VM, which has no Node.js modules. The gate reads its policy snapshot from disk and cannot run there. Evaluate it inside a `"use step"` function, as shown below. Attaching `withIntuticApproval()` directly to a `WorkflowAgent` built inside a workflow fails every run with `ReferenceError: require is not defined`. With `workflow/nitro` the failure covered every workflow in the app, because they all share one workflow bundle.
+3. **Steps retry thrown errors.** A plain error thrown from a step is retried: 3 retries, so 4 attempts in all, before the step fails. The runtime decides retry-vs-abort with `FatalError.is()`, which checks `error.name === 'FatalError'`, so this adapter's refusals carry that name and run exactly once. A plain error thrown directly in workflow code is not retried; it fails the run immediately.
 
 ## Setup
 
@@ -32,41 +33,64 @@ Detection requires `@ai-sdk/workflow` in `package.json`. The unscoped `workflow`
 npm install @intutic/gate
 ```
 
+The gate runs inside a `"use step"` function, and each tool's `needsApproval` calls that step:
+
 ```ts
-import { WorkflowAgent } from '@ai-sdk/workflow'
-import { Gate, install } from '@intutic/gate'
-import { withIntuticApproval } from '@intutic/gate/workflow'
+// workflows/intutic-gate.ts
+import { Gate } from '@intutic/gate'
+import { intuticNeedsApproval } from '@intutic/gate/workflow'
 
-install(new Gate({ workspaceId: process.env.INTUTIC_WORKSPACE_ID }))
-
-const agent = new WorkflowAgent({
-  model,
-  tools: withIntuticApproval({
-    deployService: { description: '...', inputSchema, execute: deployStep },
-    queryStatus:  { description: '...', inputSchema, execute: queryStep },
-  }),
-})
+export async function intuticGate(toolName: string, input: unknown): Promise<boolean> {
+  'use step'
+  const gate = new Gate({ workspaceId: process.env.INTUTIC_WORKSPACE_ID })
+  return intuticNeedsApproval(toolName, { gate })(input, { toolCallId: toolName })
+}
 ```
 
-`withIntuticApproval()` attaches an async `needsApproval` to every tool (the record key is the tool name the gate sees — the same identity the framework dispatches on). Per call:
+```ts
+// workflows/deploy-agent.ts
+import { WorkflowAgent } from '@ai-sdk/workflow'
+import type { ModelMessage } from 'ai'
+import { getWritable } from 'workflow'
+import { intuticGate } from './intutic-gate'
 
-- **BLOCK** → throws `IntuticWorkflowRefusal` — the run aborts with the `[Intutic Governance] BLOCKED: ...` message. It does not retry (see below), and it does not get handed to a human approver as though the gate had no verdict.
-- **ALLOW** → resolves `false` by default (the gate evaluated the call; no human pause), or `true` with `{ onAllow: 'human' }` — the gate allows AND the framework's own durable human-approval pause still happens. This is the one framework in the catalog where "route allowed-but-sensitive calls to a human who can answer hours later" is natively expressible, so the option exists.
-- A tool that already declared its own `needsApproval` keeps it: the gate composes with it (gate first; a prior "always ask a human" still asks).
+export async function deployAgent(messages: ModelMessage[]) {
+  'use workflow'
+  const agent = new WorkflowAgent({
+    model,
+    tools: {
+      deployService: {
+        description: '...',
+        inputSchema,
+        execute: deployStep,
+        needsApproval: (input) => intuticGate('deployService', input),
+      },
+    },
+  })
+  const result = await agent.stream({ messages, writable: getWritable() })
+  return result.messages
+}
+```
 
-For a single tool, `intuticNeedsApproval('toolName')` builds just the function — the tool name is a parameter because the framework's `needsApproval` signature does not carry it.
+Use `@intutic/gate` only inside `"use step"` function bodies in any module a workflow imports. The workflow bundler also bundles those modules, with step bodies replaced. If the gate is used at module level, for example a `Gate` subclass declared at the top of the file, it stays in the workflow bundle and fails with `require is not defined`. Do not attach `withIntuticApproval()` or a bare `intuticNeedsApproval()` to a `WorkflowAgent` directly. They evaluate the gate wherever `needsApproval` is called, and in a `WorkflowAgent` that is the workflow sandbox.
+
+The tool name is a parameter because the framework's `needsApproval` signature does not carry it. Per call:
+
+- **BLOCK**: the step throws `IntuticWorkflowRefusal` once, with no retry. `needsApproval` rethrows it, and the run fails. `run.returnValue` rejects with a `WorkflowRunFailedError` whose message contains the `[Intutic Governance] BLOCKED: ...` text. A blocked call is never handed to a human approver as though the gate had no verdict.
+- **ALLOW**: resolves `false` by default, so the call runs without a human pause. With `intuticNeedsApproval(toolName, { gate, onAllow: 'human' })` it resolves `true`: the gate allows the call and the framework's human-approval pause still happens. The run ends with a `tool-approval-request`. The approval arrives as a `tool-approval-response` in the messages of a later run, which can start hours later or after a server restart. That later run calls `needsApproval` again before executing, so the gate is re-evaluated against the policy in force at approval time. If that policy now blocks the call, the agent turns the refusal into an error tool-result. The call never runs, and the run completes.
+- To keep a tool's own approval rule as well, combine the two in its `needsApproval` function, for example `async (input) => (await intuticGate('x', input)) || mustAskHuman(input)`.
 
 ### Denials must abort, not retry — why refusals here are `FatalError`-shaped
 
-Durable workflows retry failed steps by design. The runtime decides retry-vs-abort with `FatalError.is(err)`, which checks `err.name === 'FatalError'` — a duck-type, because workflow code executes in a separate `vm` realm where `instanceof` fails across the boundary. A plain `IntuticGateRefusal` thrown from `needsApproval` or a tool body would therefore be **retried**: the same governance denial, re-evaluated on a timer, burning the step's attempt budget to arrive at the same refusal.
+Steps are retried by design. In a local run, a plain error thrown from a step ran 4 times (3 retries, about a second apart) before the step failed. The runtime decides retry-vs-abort with `FatalError.is(err)`, which checks `err.name === 'FatalError'`. It checks the name, not `instanceof`, because workflow code runs in a separate `vm` realm where `instanceof` fails across the boundary. A plain `IntuticGateRefusal` thrown from the gate step would therefore be retried, re-evaluating the same denial 3 more times.
 
-`IntuticWorkflowRefusal` is an `IntuticGateRefusal` subclass with `name = 'FatalError'` (and `fatal: true`): the message prefix, `.reason`, `.code`, and `.incidentId` are all intact, and the real runtime's duck-check aborts the run on it. This is pinned by test against the actual `FatalError.is` exported by the `workflow` package, not a re-implementation.
+`IntuticWorkflowRefusal` is an `IntuticGateRefusal` subclass with `name = 'FatalError'` and `fatal: true`. Thrown from the gate step, it runs exactly once. Inside the workflow it arrives as a `FatalError` with the message intact, and `FatalError.is()` returns `true`. Only the name and message cross the step boundary: `.reason`, `.code` and `.incidentId` are lost, and `instanceof Error` is `false` in the workflow realm. Match on the `[Intutic Governance] BLOCKED:` message prefix, which is what `IntuticWorkflowRefusal.is()` checks.
 
-The asymmetry is deliberate: a **non-refusal** crash inside the gate (a transient network failure in a remote tier) is re-thrown untouched — retryable, which is exactly what a durable runtime should do with a transient failure. Only real verdicts (and the deterministic "no gate configured" error, which would fail identically on every retry) are fatal.
+The asymmetry is deliberate. A **non-refusal** crash inside the gate, such as a transient network failure in a remote tier, is re-thrown untouched. It is retried, which is what a durable runtime should do with a transient failure. Only real verdicts are fatal, plus the deterministic "no gate configured" error, which would fail the same way on every retry.
 
 ### Execute-level wrapping (defense in depth)
 
-`wrapWorkflowTools(tools)` is the [`wrapTools`](/integrations/langgraph) equivalent for workflow tool definitions: it gates each tool's `execute` directly, with the thrown refusal converted to the fatal shape (a workflow tool's `execute` is a durable step — the same retry trap applies). Prefer `withIntuticApproval()` as the primary integration — it refuses *before* the durable step starts and keeps the human-approval lane available; running both double-guards harmlessly but emits duplicate gate telemetry.
+`wrapWorkflowTools(tools)` is the [`wrapTools`](/integrations/langgraph) equivalent for workflow tool definitions: it gates each tool's `execute` directly and converts a refusal to the fatal shape. Call it inside the tool's step. A refusal there runs once and the tool body never executes. The run does not fail, though: `WorkflowAgent` turns a failed tool step into an error tool-result and continues, and the model sees `{"fatal":true,"name":"FatalError"}` without the BLOCKED reason. Prefer the `needsApproval` gate as the primary integration. It refuses before the tool step starts and keeps the human-approval lane available. Running both guards each call twice and emits duplicate gate telemetry, but does no other harm.
 
 ## What gets written
 
@@ -76,7 +100,7 @@ Same `.env.intutic` shape as every other SDK-gated framework — proxy URLs plus
 
 Same structural gaps as every SDK-gated framework — see [LangGraph's "What the adapter does NOT do"](/integrations/langgraph#what-the-adapter-does-not-do). Two additions specific to this runtime:
 
-- **No live durable run was exercised.** This integration was verified against the shipped types and the real `FatalError.is`/`collect` machinery, but exercising an end-to-end suspend/approve/resume cycle needs a Workflow DevKit deployment (workflow-server or Vercel), which was not available — see `docs/TECH_DEBT.md` TD-418.
+- **Verified live on the local world only.** Everything above was observed on the Workflow DevKit's local world (`nitro dev` with `workflow/nitro`, state in `.workflow-data`) with a scripted model and no account or keys. That covers the approval pause, a SIGKILL and restart followed by an approved resume, refusal versus plain-error retry counts, and the refusal's shape across the step boundary. Not exercised: a hosted world (Vercel Workflow or another production world) with its own queue and retry delivery, a real model provider, and an approval that arrives after hours of wall-clock time rather than after a restart. See `docs/TECH_DEBT.md` TD-418.
 - **The integration point is watched for drift.** `ai@7.0.68` marks tool-level `needsApproval` as deprecated in favour of `generateText`-level `toolApproval` — but `@ai-sdk/workflow`'s own agent loop reads the tool-level field and exposes no other veto surface, so it is the correct (and only) integration point today. If a future `@ai-sdk/workflow` release moves to the `toolApproval`-shaped surface, this adapter must move with it — see TD-419.
 
 ## Config details
@@ -88,5 +112,5 @@ Same structural gaps as every SDK-gated framework — see [LangGraph's "What the
 | Detection | `@ai-sdk/workflow` in `package.json` (`dependencies`, `devDependencies`, or `peerDependencies`); the unscoped `workflow` package alone is not a trigger |
 | Format | Shell environment variables |
 | Write strategy | Atomic (write to `.intutic-tmp`, then rename) |
-| Tool gate | SDK-side (`@intutic/gate/workflow`'s `intuticNeedsApproval()`/`withIntuticApproval()` on each tool's `needsApproval`) — no sync-daemon hook file |
+| Tool gate | SDK-side: `@intutic/gate/workflow`'s `intuticNeedsApproval()`, called from a `"use step"` function that each tool's `needsApproval` invokes. No sync-daemon hook file |
 | Denial semantics | `IntuticWorkflowRefusal` (`name: 'FatalError'`) — aborts the durable run instead of retry-looping |
