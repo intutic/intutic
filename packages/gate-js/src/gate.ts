@@ -339,14 +339,6 @@ function joinPath(a: string, b: string): string {
   return `${trimTrailingSlashes(a)}/${trimLeadingSlashes(b)}`
 }
 
-// Module-level active gate, so wrapped tools do not need the instance
-// threaded through every call site.
-let _active: Gate | null = null
-
-export function install(gate: Gate | null): void {
-  _active = gate
-}
-
-export function active(): Gate | null {
-  return _active
-}
+// The process-wide active gate lives in registry.ts, which imports no Node.js
+// built-ins (see that module's doc); re-exported so the API is unchanged.
+export { install, active } from './registry.js'

@@ -35,7 +35,7 @@ describe('wrapTool: plain function', () => {
   it('propagates IntuticGateRefusal and never calls the real implementation', async () => {
     const gate = new FakeGate(true)
     let ran = false
-    const fn = async () => {
+    const fn = async (_input: { command: string }) => {
       ran = true
       return 'should not happen'
     }
@@ -93,8 +93,8 @@ describe('wrapTools: collections', () => {
   it('wraps an array using each tool own name', async () => {
     const gate = new FakeGate()
     const tools = [
-      { name: 'a', execute: async () => 'a-ran' },
-      { name: 'b', execute: async () => 'b-ran' },
+      { name: 'a', execute: async (_input: unknown) => 'a-ran' },
+      { name: 'b', execute: async (_input: unknown) => 'b-ran' },
     ]
     const [a, b] = wrapTools(tools, gate)
     await a!.execute({})

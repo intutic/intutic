@@ -966,9 +966,11 @@ const JS_SDK_GATED_FRAMEWORKS: Record<
   },
   'ai-sdk-workflow': {
     label: 'AI SDK Workflow',
-    importLine: "import { intuticNeedsApproval, withIntuticApproval } from '@intutic/gate/workflow'",
+    importLine: "import { intuticApprovalStep, withIntuticApproval } from '@intutic/gate/workflow'",
     usageSummary:
-      'new WorkflowAgent({ ..., tools: withIntuticApproval(tools) }) — attaches an async ' +
+      'new WorkflowAgent({ ..., tools: withIntuticApproval(tools, { step: intuticGate }) }), where ' +
+      "intuticGate is your own \"use step\" function returning intuticApprovalStep(toolName, input, { gate }) " +
+      '(needsApproval runs in the workflow sandbox, which has no Node.js). Attaches an async ' +
       'needsApproval per tool (WorkflowAgent itself has no approval option). BLOCK throws a ' +
       'FatalError-compatible refusal so the durable runtime aborts instead of retry-looping ' +
       "the denial; ALLOW resolves false (or true with { onAllow: 'human' }).",

@@ -170,9 +170,15 @@ type-checked and exercised in `src/__tests__/harness.test.ts`):
 `WorkflowAgent` has **zero approval fields** (confirmed against
 `@ai-sdk/workflow@1.0.69`); its veto surface is per-tool `needsApproval`,
 which pauses a call **durably** (a human can approve hours later).
-`intuticNeedsApproval(toolName)` builds that function from `Gate.guard()`;
-`withIntuticApproval(tools)` attaches it to a whole record, composing with any
-`needsApproval` a tool already declares.
+`WorkflowAgent` calls `needsApproval` inside the workflow VM, which has no
+Node.js, so the gate runs in a `"use step"` function you declare, whose body is
+`intuticApprovalStep(toolName, input, { gate })`.
+`withIntuticApproval(tools, { step })` attaches a `needsApproval` that calls
+that step to every tool in a record, composing with any `needsApproval` a tool
+already declares; `intuticNeedsApproval(toolName, { step })` builds one. This
+module imports nothing that needs Node.js, so workflow code can import it.
+Without `{ step }` the gate is evaluated in-process (Node.js only; in the
+workflow VM it throws a refusal naming the `{ step }` fix).
 
 The durable runtime **retries** thrown errors — and its retry/abort decision
 duck-types on `error.name === 'FatalError'` (`FatalError.is()`, confirmed

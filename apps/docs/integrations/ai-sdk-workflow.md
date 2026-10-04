@@ -5,7 +5,7 @@ Integrate Intutic governance with Vercel's [`@ai-sdk/workflow`](https://ai-sdk.d
 Three facts about this runtime shape the whole integration. All three were confirmed against real installs (`@ai-sdk/workflow@1.0.69`, `workflow@4.8.3`) and observed in live runs on the Workflow DevKit's local world (`@workflow/world-local`), not inferred from docs:
 
 1. **The veto surface is per-tool `needsApproval` — the agent has no approval option.** `WorkflowAgent`/`WorkflowAgentOptions` carry zero approval fields; the agent loop evaluates each tool's own `needsApproval` (boolean or async function) before executing it. A call that needs approval ends the run with a `tool-approval-request` on the run's stream and no tool result. The run does not stay suspended. To approve it, hours later or after a restart, you start a **new** run whose messages carry a `tool-approval-response`. The agent then re-evaluates `needsApproval` for the approved call before executing it.
-2. **`needsApproval` runs in the workflow sandbox, not in Node.js.** The agent loop runs inside the `"use workflow"` function, so `needsApproval` executes in the workflow VM, which has no Node.js modules. The gate reads its policy snapshot from disk and cannot run there. Evaluate it inside a `"use step"` function, as shown below. Attaching `withIntuticApproval()` directly to a `WorkflowAgent` built inside a workflow fails every run with `ReferenceError: require is not defined`. With `workflow/nitro` the failure covered every workflow in the app, because they all share one workflow bundle.
+2. **`needsApproval` runs in the workflow sandbox, not in Node.js.** The agent loop runs inside the `"use workflow"` function, so `needsApproval` executes in the workflow VM, which has no Node.js modules. The gate reads its policy snapshot from disk and cannot run there. It runs in a `"use step"` function you declare, and `withIntuticApproval(tools, { step })` makes each tool's `needsApproval` call that step, as shown below.
 3. **Steps retry thrown errors.** A plain error thrown from a step is retried: 3 retries, so 4 attempts in all, before the step fails. The runtime decides retry-vs-abort with `FatalError.is()`, which checks `error.name === 'FatalError'`, so this adapter's refusals carry that name and run exactly once. A plain error thrown directly in workflow code is not retried; it fails the run immediately.
 
 ## Setup
@@ -33,23 +33,27 @@ Detection requires `@ai-sdk/workflow` in `package.json`. The unscoped `workflow`
 npm install @intutic/gate
 ```
 
-The gate runs inside a `"use step"` function, and each tool's `needsApproval` calls that step:
+Declare one `"use step"` function that evaluates the gate. Its body is `intuticApprovalStep()`:
 
 ```ts
 // workflows/intutic-gate.ts
 import { Gate } from '@intutic/gate'
-import { intuticNeedsApproval } from '@intutic/gate/workflow'
+import { intuticApprovalStep } from '@intutic/gate/workflow'
 
 export async function intuticGate(toolName: string, input: unknown): Promise<boolean> {
   'use step'
-  const gate = new Gate({ workspaceId: process.env.INTUTIC_WORKSPACE_ID })
-  return intuticNeedsApproval(toolName, { gate })(input, { toolCallId: toolName })
+  return intuticApprovalStep(toolName, input, {
+    gate: new Gate({ workspaceId: process.env.INTUTIC_WORKSPACE_ID }),
+  })
 }
 ```
+
+Then pass it as `{ step }` when you attach the gate to the agent's tools:
 
 ```ts
 // workflows/deploy-agent.ts
 import { WorkflowAgent } from '@ai-sdk/workflow'
+import { withIntuticApproval } from '@intutic/gate/workflow'
 import type { ModelMessage } from 'ai'
 import { getWritable } from 'workflow'
 import { intuticGate } from './intutic-gate'
@@ -58,27 +62,30 @@ export async function deployAgent(messages: ModelMessage[]) {
   'use workflow'
   const agent = new WorkflowAgent({
     model,
-    tools: {
-      deployService: {
-        description: '...',
-        inputSchema,
-        execute: deployStep,
-        needsApproval: (input) => intuticGate('deployService', input),
+    tools: withIntuticApproval(
+      {
+        deployService: { description: '...', inputSchema, execute: deployStep },
+        queryStatus: { description: '...', inputSchema, execute: queryStep },
       },
-    },
+      { step: intuticGate },
+    ),
   })
   const result = await agent.stream({ messages, writable: getWritable() })
   return result.messages
 }
 ```
 
-Use `@intutic/gate` only inside `"use step"` function bodies in any module a workflow imports. The workflow bundler also bundles those modules, with step bodies replaced. If the gate is used at module level, for example a `Gate` subclass declared at the top of the file, it stays in the workflow bundle and fails with `require is not defined`. Do not attach `withIntuticApproval()` or a bare `intuticNeedsApproval()` to a `WorkflowAgent` directly. They evaluate the gate wherever `needsApproval` is called, and in a `WorkflowAgent` that is the workflow sandbox.
+The step has to be your own function: the `"use step"` directive only takes effect in a module the workflow bundler transforms, and step arguments are serialized, so the step builds its `Gate` itself rather than receiving one. With `{ step }`, the `needsApproval` that `withIntuticApproval()` attaches only calls the step and reads its answer, so nothing that needs Node.js runs in the workflow sandbox. `@intutic/gate/workflow` itself imports nothing that needs Node.js, so importing it into workflow code is safe.
 
-The tool name is a parameter because the framework's `needsApproval` signature does not carry it. Per call:
+Use the `@intutic/gate` root package only inside `"use step"` function bodies in any module a workflow imports. The workflow bundler also bundles those modules, with step bodies replaced. If the gate is used at module level, for example a `Gate` constructed or `install()` called at the top of a workflow file, it stays in the workflow bundle and fails with `ReferenceError: require is not defined`. With `workflow/nitro` that failure covered every workflow in the app, because they all share one workflow bundle.
+
+For a single tool, `intuticNeedsApproval('deployService', { step: intuticGate })` builds just its `needsApproval` function. The tool name is a parameter because the framework's `needsApproval` signature does not carry it; `withIntuticApproval()` uses each record key. Without `{ step }`, both helpers evaluate the gate in-process. That still works wherever Node.js is available, such as a plain `ai` tool loop or inside a step. On a `WorkflowAgent` it fails the run with `[Intutic Governance] BLOCKED: intuticNeedsApproval() ran inside the workflow sandbox...`, which names this fix. Other workflows are unaffected.
+
+Per call:
 
 - **BLOCK**: the step throws `IntuticWorkflowRefusal` once, with no retry. `needsApproval` rethrows it, and the run fails. `run.returnValue` rejects with a `WorkflowRunFailedError` whose message contains the `[Intutic Governance] BLOCKED: ...` text. A blocked call is never handed to a human approver as though the gate had no verdict.
-- **ALLOW**: resolves `false` by default, so the call runs without a human pause. With `intuticNeedsApproval(toolName, { gate, onAllow: 'human' })` it resolves `true`: the gate allows the call and the framework's human-approval pause still happens. The run ends with a `tool-approval-request`. The approval arrives as a `tool-approval-response` in the messages of a later run, which can start hours later or after a server restart. That later run calls `needsApproval` again before executing, so the gate is re-evaluated against the policy in force at approval time. If that policy now blocks the call, the agent turns the refusal into an error tool-result. The call never runs, and the run completes.
-- To keep a tool's own approval rule as well, combine the two in its `needsApproval` function, for example `async (input) => (await intuticGate('x', input)) || mustAskHuman(input)`.
+- **ALLOW**: resolves `false` by default, so the call runs without a human pause. With `withIntuticApproval(tools, { step: intuticGate, onAllow: 'human' })` it resolves `true`: the gate allows the call and the framework's human-approval pause still happens. The run ends with a `tool-approval-request`. The approval arrives as a `tool-approval-response` in the messages of a later run, which can start hours later or after a server restart. That later run calls `needsApproval` again before executing, so the gate is re-evaluated against the policy in force at approval time. If that policy now blocks the call, the agent turns the refusal into an error tool-result. The call never runs, and the run completes.
+- A tool that already declares its own `needsApproval` keeps it. The gate runs first, and a prior "always ask a human" still asks.
 
 ### Denials must abort, not retry — why refusals here are `FatalError`-shaped
 
@@ -112,5 +119,5 @@ Same structural gaps as every SDK-gated framework — see [LangGraph's "What the
 | Detection | `@ai-sdk/workflow` in `package.json` (`dependencies`, `devDependencies`, or `peerDependencies`); the unscoped `workflow` package alone is not a trigger |
 | Format | Shell environment variables |
 | Write strategy | Atomic (write to `.intutic-tmp`, then rename) |
-| Tool gate | SDK-side: `@intutic/gate/workflow`'s `intuticNeedsApproval()`, called from a `"use step"` function that each tool's `needsApproval` invokes. No sync-daemon hook file |
+| Tool gate | SDK-side: `@intutic/gate/workflow`'s `withIntuticApproval(tools, { step })` / `intuticNeedsApproval(toolName, { step })` on each tool's `needsApproval`, with the gate evaluated by `intuticApprovalStep()` in a `"use step"` function you declare. No sync-daemon hook file |
 | Denial semantics | `IntuticWorkflowRefusal` (`name: 'FatalError'`) — aborts the durable run instead of retry-looping |
