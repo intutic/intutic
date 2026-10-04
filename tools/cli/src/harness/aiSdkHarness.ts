@@ -10,7 +10,7 @@
  * framework, hence `requiresAnyPrefix` rather than a single required package.
  *
  * TWO DOCUMENTED LIMITATIONS carried into the generated `.env.intutic`
- * (both confirmed against `@ai-sdk/harness@1.0.75`'s shipped types — see
+ * (both confirmed against `@ai-sdk/harness@1.0.75`'s shipped types, re-read on 1.0.138 — see
  * `@intutic/gate/harness`'s module doc for the full record):
  *
  *   1. Tool execution is SERVER-SIDE, in Vercel Sandbox microVMs — the

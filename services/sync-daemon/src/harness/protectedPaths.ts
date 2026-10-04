@@ -1030,8 +1030,9 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: readonly GuardPattern[] = assertGuard
       'Demoted from the hook gate\'s hard block. Against a local development ' +
       'database this is what a migration looks like, and the gate cannot tell a ' +
       'dev DSN from a production one — the proxy can, and that is where a block ' +
-      'belongs. Warn keeps the signal without owning a decision it lacks the ' +
-      'context to make.',
+      'belongs: a SOP declaring `sql_guard:` with an `sql_allow_dsns:` allowlist ' +
+      'refuses it at the LLM proxy (packages/proxy/src/plugins/sql_guard.rs). ' +
+      'Warn keeps the signal without owning a decision it lacks the context to make.',
     matches: [' DROP TABLE users ', ' drop database app ', ' TRUNCATE TABLE events '],
     notMatches: [' SELECT * FROM users ', ' echo drop it ', ' git stash drop '],
   },

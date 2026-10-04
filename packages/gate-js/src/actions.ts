@@ -142,6 +142,8 @@ export const SHELL_TOOLS: readonly string[] = [
   'shell',
   'run_command',
   'runcommand',
+  // Cline / Roo Code's shell tool (kept in step with the Rust SHELL_TOOLS).
+  'execute_command',
   'terminal',
   'execute',
   'exec',

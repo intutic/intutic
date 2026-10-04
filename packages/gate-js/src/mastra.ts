@@ -19,7 +19,9 @@
  * ## Confirmed against a real install
  *
  * `@mastra/core@1.59.0` was installed in a scratch directory and its shipped
- * `.d.ts`/compiled source read directly (not inferred from docs alone):
+ * `.d.ts`/compiled source read directly (not inferred from docs alone);
+ * re-read on 1.74.0, the current devDependency (moved with `ai` 7.0.127,
+ * whose `ai/test` mock 1.59's bundled provider types reject), unchanged:
  *
  * `dist/tools/types.d.ts`:
  * ```ts
@@ -102,7 +104,8 @@ import { IntuticGateRefusal } from './errors.js'
 /** Structural copy of `@mastra/core`'s `ToolHookContext` — this package does
  *  not depend on `@mastra/core` at runtime, so the shape is declared here
  *  rather than imported. Confirmed field-for-field against
- *  `@mastra/core@1.59.0`'s `dist/tools/types.d.ts` (see module doc). */
+ *  `@mastra/core@1.59.0`'s `dist/tools/types.d.ts` (see module doc), and
+ *  unchanged in 1.74.0. */
 export interface MastraToolHookContext {
   /** The name exposed to the model for this tool call. */
   toolName: string

@@ -1,7 +1,7 @@
 /**
  * Tests for `@intutic/gate/eve`.
  *
- * `eve@0.39.1` IS installed as a devDependency (see package.json) and its
+ * `eve@0.71.0` IS installed as a devDependency (see package.json) and its
  * real exports are BOTH imported for structural type checks (a drift in
  * eve's `Approval`/`ApprovalStatus`/hook shapes rejects this file) AND
  * exercised at runtime where the machinery allows it without a live agent
@@ -75,7 +75,7 @@ afterEach(() => {
 })
 
 // ------------------------------------------------------------------------
-// Structural type checks against the REAL eve@0.39.1 types. Never invoked —
+// Structural type checks against the REAL eve@0.71.0 types. Never invoked —
 // a drift in eve's `Approval`/`ApprovalStatus`/`ApprovalContext` shapes
 // fails this file's compile, not a caller's.
 // ------------------------------------------------------------------------
@@ -531,6 +531,16 @@ describe('intuticAuditHooks: input.resolved (bare-policy settlements) and de-dup
     expect(client.emitted[0]!.reason).toContain('not an Intutic gate refusal')
     expect(client.emitted[1]!.reason).toContain("'ignored'")
     expect(client.emitted[1]!.reason).toContain('req-i')
+  })
+
+  it("'cancelled' (eve 0.71: a pending request withdrawn with its cancelled turn) → tool_flagged, not a human veto", async () => {
+    const client = new FakeGateClient()
+    const hooks = intuticAuditHooks({ client })
+    await requested(hooks, 'req-c', 'run_command_hitl')
+    client.emitted = []
+    await resolved(hooks, { requestId: 'req-c', kind: 'tool-approval', outcome: 'cancelled' })
+    expect(client.emitted.map((e) => [e.event, e.toolName])).toEqual([['tool_flagged', 'run_command_hitl']])
+    expect(client.emitted[0]!.reason).toContain("'cancelled'")
   })
 
   it("skips 'question' and 'session-limit' resolutions — not Intutic's approval mechanism", async () => {

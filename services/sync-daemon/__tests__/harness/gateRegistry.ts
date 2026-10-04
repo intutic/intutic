@@ -819,7 +819,7 @@ export const NO_GATE: ReadonlyArray<{
       'the agent\'s own Node.js process. The blocking gate ships as a TypeScript SDK adapter, ' +
       '@intutic/gate/mastra\'s intuticHooks(), built on @mastra/core\'s documented ' +
       'Agent({ hooks: { beforeToolCall } }) veto point — CONFIRMED against a real install ' +
-      '(@mastra/core@1.59.0): returning {proceed:false, output} from beforeToolCall skips the ' +
+      '(@mastra/core@1.59.0, re-read on 1.74.0): returning {proceed:false, output} from beforeToolCall skips the ' +
       'real execute() and hands output back to the model as the tool result; this applies to ' +
       'every tool in the agent\'s assembled tool dictionary, MCP-sourced tools (@mastra/mcp) ' +
       'included, since wrapToolsWithHooks wraps generically over the assembled record with no ' +
@@ -840,7 +840,7 @@ export const NO_GATE: ReadonlyArray<{
       'no on-disk config/hook file exists — Vercel AI SDK tools run as plain objects in the ' +
       'agent\'s own Node.js process. The blocking gate ships as a TypeScript SDK adapter, ' +
       '@intutic/gate/vercel\'s intuticToolApproval(), built on the `ai` package\'s documented ' +
-      '`toolApproval` veto point — CONFIRMED against a real install (ai@7.0.68): resolving to ' +
+      '`toolApproval` veto point — CONFIRMED against a real install (ai@7.0.68, re-read on 7.0.127): resolving to ' +
       '{type:"denied", reason} vetoes the call before execution, and \'not-applicable\' (or ' +
       'undefined) means this gate has no opinion and the call proceeds. ' +
       'DOCUMENTED LIMITATION (not an Intutic defect): unlike almost every other harness here, ' +
@@ -862,8 +862,8 @@ export const NO_GATE: ReadonlyArray<{
       'ships as a TypeScript SDK adapter, @intutic/gate/eve\'s intuticApproval() (and ' +
       'intuticConnectionApproval() for MCP/OpenAPI connections), built on eve\'s documented ' +
       'per-tool/per-connection `approval` policy surface — CONFIRMED against a real install ' +
-      '(eve@0.39.1, devDependency of packages/gate-js): ApprovalPolicy receives ' +
-      '{ toolName, toolInput?, approvedTools, callId } + session context and returns an AI SDK 7 ' +
+      '(eve@0.71.0, devDependency of packages/gate-js; first verified at 0.39.1): ApprovalPolicy receives ' +
+      '{ toolName, toolInput?, approvedTools, callId, abortSignal } + session context and returns an AI SDK 7 ' +
       'approval status; {type:"denied", reason} vetoes the call before execute() runs, ' +
       '"not-applicable" continues without a prompt, and booleans are back-compat ' +
       '(true=user-approval, false=not-applicable). There is NO agent-level default approval ' +
@@ -960,7 +960,7 @@ export const NO_GATE: ReadonlyArray<{
       'do not even run on the developer\'s machine: `@ai-sdk/harness` (HarnessAgent) executes ' +
       'them server-side in Vercel Sandbox microVMs. The blocking gate ships as ' +
       '@intutic/gate/harness, and its veto surface is the framework\'s tool-approval FLOW, not ' +
-      'a callback: CONFIRMED against a real install (@ai-sdk/harness@1.0.75) that ' +
+      'a callback: CONFIRMED against a real install (@ai-sdk/harness@1.0.75, re-read on 1.0.138) that ' +
       'HarnessAgentSettings.toolApproval is a STATIC Readonly<Record<string, ToolApprovalStatus>> ' +
       'whose own doc comment says "without callback support" — so intuticStaticApprovals() marks ' +
       'every custom tool \'user-approval\' (pausing each call) and intuticApprovalResponder() ' +
@@ -991,15 +991,16 @@ export const NO_GATE: ReadonlyArray<{
       'no on-disk config/hook file exists — @ai-sdk/workflow (WorkflowAgent) tools are plain ' +
       'objects in the agent\'s own Node.js process, durably orchestrated by the Workflow DevKit. ' +
       'The blocking gate ships as @intutic/gate/workflow. CONFIRMED against a real install ' +
-      '(@ai-sdk/workflow@1.0.69): WorkflowAgent/WorkflowAgentOptions carry ZERO approval fields ' +
-      '(the string toolApproval appears nowhere in the package\'s shipped .d.ts) — the veto ' +
+      '(@ai-sdk/workflow@1.0.69, re-read on 2.0.58): WorkflowAgent/WorkflowAgentOptions carry NO ' +
+      'approval-policy field (2.x adds only experimental_toolApprovalSecret, an HMAC secret that ' +
+      'signs approval requests, not a veto) — the veto ' +
       'surface is per-tool needsApproval (boolean | async fn), which the compiled agent loop ' +
       'evaluates as needsApproval(input, {toolCallId, messages, context}) and which pauses the ' +
       'run DURABLY (a human can approve hours later). intuticNeedsApproval()/withIntuticApproval() ' +
       'implement it: BLOCK throws, ALLOW resolves false (or true with onAllow:\'human\' to keep ' +
       'the human pause). LOAD-BEARING RETRY SEMANTICS, confirmed against workflow@4.8.3\'s real ' +
-      'machinery (not re-derived): the durable runtime\'s retry/abort decision consults ' +
-      'FatalError.is(err) (@workflow/core runtime/step-handler.js), which DUCK-TYPES on ' +
+      'machinery (not re-derived) and re-read on 5.0.1: the durable runtime\'s retry/abort decision consults ' +
+      'FatalError.is(err) (@workflow/core runtime/step-handler.js; step-executor.js in 5.x), which DUCK-TYPES on ' +
       'err.name === \'FatalError\' because workflows execute in a separate vm realm where ' +
       'instanceof fails — a plain IntuticGateRefusal would therefore be RETRIED toward ' +
       'maxAttempts, replaying a governance denial on a timer. This adapter\'s refusals are ' +

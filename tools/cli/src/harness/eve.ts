@@ -20,7 +20,7 @@
  *
  * PREVIEW-CHURN NOTE (same shield the dsh integration established): eve is a
  * fast-moving preview product. `@intutic/gate/eve` was verified against
- * eve@0.39.1's shipped `.d.ts` — see that module's doc for exactly what was
+ * eve@0.71.0's shipped `.d.ts` (first 0.39.1) — see that module's doc for exactly what was
  * confirmed vs. assumed, and docs/TECH_DEBT.md TD-410/TD-411/TD-412.
  *
  * LLM-egress note carried into the generated `.env.intutic`: eve routes

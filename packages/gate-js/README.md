@@ -131,8 +131,9 @@ minimum versions).
 `HarnessAgent` runs coding-agent runtimes (Claude Code, Grok Build, ...)
 **server-side, in Vercel Sandbox microVMs** — a materially different execution
 model from every other adapter in this package, and its veto surface differs
-to match. Confirmed against `@ai-sdk/harness@1.0.75` (a devDependency,
-type-checked and exercised in `src/__tests__/harness.test.ts`):
+to match. Confirmed against `@ai-sdk/harness@1.0.75` and re-verified on
+1.0.138 with `ai` 7.0.127 (a devDependency, type-checked and exercised in
+`src/__tests__/harness.test.ts`):
 
 - The `toolApproval` setting is a **static** `Readonly<Record<string,
   ToolApprovalStatus>>` — "without callback support" (the shipped doc's own
@@ -167,8 +168,9 @@ type-checked and exercised in `src/__tests__/harness.test.ts`):
 
 ## `@intutic/gate/workflow` — Vercel `@ai-sdk/workflow` (durable workflow agents)
 
-`WorkflowAgent` has **zero approval fields** (confirmed against
-`@ai-sdk/workflow@1.0.69`); its veto surface is per-tool `needsApproval`,
+`WorkflowAgent` has **no approval-policy field** (confirmed against
+`@ai-sdk/workflow@1.0.69` and 2.0.58; 2.x needs `workflow` 5); its veto
+surface is per-tool `needsApproval`,
 which pauses a call **durably** (a human can approve hours later).
 `WorkflowAgent` calls `needsApproval` inside the workflow VM, which has no
 Node.js, so the gate runs in a `"use step"` function you declare, whose body is
@@ -182,8 +184,8 @@ workflow VM it throws a refusal naming the `{ step }` fix).
 
 The durable runtime **retries** thrown errors — and its retry/abort decision
 duck-types on `error.name === 'FatalError'` (`FatalError.is()`, confirmed
-against `workflow@4.8.3`'s real machinery, because workflows run in a separate
-`vm` realm where `instanceof` fails). A plain `IntuticGateRefusal` thrown from
+against `workflow@4.8.3`'s and 5.0.1's real machinery, because workflows run in
+a separate `vm` realm where `instanceof` cannot be relied on). A plain `IntuticGateRefusal` thrown from
 `needsApproval` would be retried toward max attempts — a governance denial
 replayed on a timer. This adapter therefore throws `IntuticWorkflowRefusal`:
 still an `IntuticGateRefusal` (message, `.reason`/`.code`/`.incidentId`
@@ -224,7 +226,7 @@ Eight adapters exist today, one source file each: `@intutic/gate/dsh`
 (`src/vercel.ts`), `@intutic/gate/openai` (`src/openai.ts` — see above),
 `@intutic/gate/eve` (`src/eve.ts` — approval policies for eve's
 per-tool/per-connection `approval` surface, plus the observe-only
-`intuticAuditHooks()`; verified against a pinned `eve@0.39.1` install — a
+`intuticAuditHooks()`; verified against a pinned `eve@0.71.0` install — a
 pre-1.0 Preview product, see its module doc and TD-410), `@intutic/gate/harness`
 (`src/harness.ts` — see above), `@intutic/gate/workflow` (`src/workflow.ts`
 — see above), and `@intutic/gate/managed-agents` (`src/managedAgents.ts` — see

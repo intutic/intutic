@@ -14,8 +14,17 @@ harder question an auditor actually asks: **how would you know if one changed?**
 `execution_traces` carries a `BEFORE UPDATE OR DELETE` trigger that raises on any
 attempt to modify a recorded trace. That stops accidents and it stops the
 application. It does not stop the party who runs the database — a superuser can
-drop a trigger, edit a row, and recreate the trigger, and nothing in the product
-would notice.
+drop a trigger, edit a row, and recreate the trigger.
+
+The `audit_log_integrity` compliance probe reads the catalogue on every run and
+compares each guard with what the migrations installed: present, enabled,
+attached to the shipped function, firing on the shipped events, with no `WHEN`
+clause or column list narrowing it, with the shipped arguments, and with a
+function body whose hash matches the migration's. Any difference fails the probe
+and is logged at error level. What it cannot see is a guard that was switched
+off, used, and put back exactly as it was between two runs, or a session that
+skipped triggers with `session_replication_role = replica` — neither leaves
+anything in the catalogue. That window is what the roots below are for.
 
 So a control that ends there reduces to *trust the operator*, which is the one
 claim an external auditor exists in order not to have to accept.
@@ -274,8 +283,9 @@ same party holds the key.
 
 It becomes evidence when the customer holds a copy the operator cannot rewrite.
 Configure BYOC storage and each root — with its full leaf list — is written to
-your bucket as it is sealed, where a later re-derivation is checked against
-*your* copy rather than ours. The compliance probe reports
+your bucket as it is sealed, and can later be compared with what we serve — by
+the compliance probe from our side, and by you from yours (see
+[Checking your copy](#checking-your-copy)). The compliance probe reports
 `externallyVerifiable: false` until that is true, and says so in its remediation
 even when it passes.
 :::
@@ -335,6 +345,50 @@ the root sealed ten minutes ago whose bucket has since recovered. Read
 than assuming either.
 :::
 
+### Checking your copy
+
+A root rewritten in our database and re-signed with our key verifies cleanly
+against the published key. The only thing it cannot match is the copy that was
+written to your bucket when the root was sealed. Two checks compare them.
+
+**From our side.** Each `audit_log_integrity` run re-reads up to five mirrored
+roots, chosen at random across everything mirrored (not just the newest), and
+compares the root, the chain link, the signature, the key id, the versions and
+the full leaf list with the rows we hold. A difference fails the probe and names
+the root and fields (`mismatchedMirrorCopies`). A copy that is gone is reported
+as `mirrorCopiesMissing`; a copy we are not allowed to read — the common case if
+you granted write-only credentials — as `mirrorCopiesUnreadable`. Neither fails
+the probe, and the remediation says the comparison did not happen.
+
+This is still us checking ourselves. It catches the database drifting from your
+bucket — a DBA edit, a restored backup, a guard bypassed by someone who does not
+also control the application — but an operator who controls this code, or who
+can overwrite your bucket with the credentials you gave us, defeats it.
+
+**From your side**, which does not depend on us:
+
+1. Put a retention lock on the `roots/` prefix — a GCS
+   [Bucket Lock retention policy](https://cloud.google.com/storage/docs/bucket-lock)
+   or S3 [Object Lock](https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lock.html)
+   in compliance mode — so the credentials you gave Intutic can add root objects
+   but not replace or delete them. Without it, the copy is only as independent as
+   those credentials. (On a versioned S3 bucket, compare the object's first
+   version.)
+2. Compare a copy with what the control plane serves now:
+
+   ```bash
+   gsutil cp gs://<bucket>/<prefix>roots/<workspaceId>/<root_id>.json .   # or: aws s3 cp s3://…
+   intutic integrity verify <root_id> --against ./<root_id>.json
+   ```
+
+   This re-derives the root, checks its signature, and exits `1` if the copy in
+   your bucket differs from the served root in any field it carries — including
+   `previousRoot` and the leaf list. Run it over a sample of your `roots/`
+   objects on a schedule; every object is a root we cannot quietly take back.
+3. Run `intutic integrity chain`. A root deleted outright leaves no object to
+   compare against on our side, but your bucket still has it — and the walk
+   reports the gap it left.
+
 ### Rotation
 
 `signing_key_id` is the RFC 7638 thumbprint of the key that signed a given root.
@@ -388,6 +442,12 @@ the operator of rewriting history over their own key management.
 - **A root is deleted outright.** Re-derivation cannot see this; the chain walk
   can, and reports a break naming the roots on either side of the gap. What
   neither can do is tell you what the missing root said.
+- **An append-only guard is disabled, dropped or replaced.** The probe fails and
+  names the guard and what changed; the error log carries every finding. Re-apply
+  it from the migrations, then read the root checks — they say whether anything a
+  root covers changed in the meantime.
+- **The database disagrees with your mirrored copy.** The probe fails and names
+  the root and the fields. Your bucket's copy is the one written at seal time.
 - **A covered trace is deleted.** The leaf survives its trace on purpose — there
   is no cascade from `execution_traces` — so the root still states which traces
   it covered and `/recompute` returns `missing_traces` naming them. Had the leaf

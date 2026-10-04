@@ -83,21 +83,21 @@
     "yaml": "^2.9.0"
   },
   "devDependencies": {
-    "@ai-sdk/harness": "^1.0.75",
+    "@ai-sdk/harness": "^1.0.138",
     "@anthropic-ai/sdk": "^0.131.0",
-    "@ai-sdk/openai": "^4.0.43",
-    "@ai-sdk/workflow": "^1.0.69",
-    "@mastra/core": "^1.59.0",
+    "@ai-sdk/openai": "^4.0.83",
+    "@ai-sdk/workflow": "^2.0.58",
+    "@mastra/core": "^1.74.0",
     "@deepseek-ai/cordis": "^4.0.1",
     "@openai/agents": "0.16.1",
     "@openai/agents-realtime": "0.16.1",
     "@truefoundry/trueforge-core": "^0.1.4",
     "@types/node": "^22",
-    "ai": "^7.0.68",
-    "eve": "^0.39.1",
+    "ai": "^7.0.127",
+    "eve": "^0.71.0",
     "typescript": "^5.5",
     "vitest": "^4",
-    "workflow": "^4.8.3",
+    "workflow": "^5.0.1",
     "zod": "^4.2.0"
   },
   "engines": {
