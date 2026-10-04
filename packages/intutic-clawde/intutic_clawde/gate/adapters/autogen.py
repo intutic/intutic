@@ -68,7 +68,8 @@ module existing (see ``framework.py``'s module doc). This handler is for the
 narrower, still-real case: a custom multi-agent system built directly on
 ``AgentRuntime``/``RoutedAgent`` that dispatches ``FunctionCall`` messages
 between agents explicitly. See TD-374 for the tracked version of this gap and
-TD-375 for the Semantic-Kernel-convergence watch item.
+TD-375 for Microsoft Agent Framework, the AutoGen + Semantic Kernel successor,
+which has its own adapter (``agent_framework.py``), not this one.
 
 Optional import: importing this module never fails even without
 autogen-core installed. Only instantiating ``IntuticInterventionHandler``

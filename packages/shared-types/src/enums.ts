@@ -258,6 +258,15 @@ export const HarnessType = {
    *  provider (Bedrock, SigV4-signed via boto3) is NOT routable through the
    *  Intutic proxy — see apps/docs/integrations/strands.md. */
   STRANDS: 'strands',
+  /** Microsoft Agent Framework (`agent-framework` / `agent-framework-core` on
+   *  PyPI, imported as `agent_framework` — the AutoGen + Semantic Kernel
+   *  successor; a separate framework from AUTOGEN, see TD-375). Detected via
+   *  `agent-framework`/`agent_framework` in Python dependency manifests. Gate:
+   *  `intutic_clawde.gate.adapters.agent_framework`'s
+   *  `IntuticFunctionMiddleware`, a `FunctionMiddleware` that short-circuits
+   *  denied calls without `call_next()` (verified against a real
+   *  agent-framework-core==1.20.0 install). */
+  AGENT_FRAMEWORK: 'agent-framework',
   // ─── T2: JS/TS SDK-gated frameworks (no on-disk hook/config file) ───────
   // Same family as LANGCHAIN/LANGGRAPH above, but JS/TS-native: the blocking
   // gate ships in @intutic/gate (packages/gate-js), a subpath adapter per

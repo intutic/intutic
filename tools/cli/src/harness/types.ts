@@ -88,6 +88,9 @@ export const HARNESS_CONFIG_FILES: Record<HarnessType, string> = {
   // A4: AWS Strands Agents — same Python SDK-gated rationale as the Wave 1
   // family above (gate ships in intutic_clawde.gate.adapters.strands).
   'strands': '.env.intutic',
+  // TD-375: Microsoft Agent Framework — same Python SDK-gated rationale
+  // (gate ships in intutic_clawde.gate.adapters.agent_framework).
+  'agent-framework': '.env.intutic',
   // T2: JS/TS SDK-gated frameworks — same rationale as the Wave 1 Python
   // family above, but the blocking gate ships in @intutic/gate
   // (packages/gate-js) rather than intutic-clawde.

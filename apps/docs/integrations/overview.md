@@ -1,6 +1,6 @@
 # Integrations Overview
 
-Intutic supports 42 AI agent harnesses out of the box. The CLI auto-detects which harnesses are present in your workspace and syncs governance rules to each one.
+Intutic supports 43 AI agent harnesses out of the box. The CLI auto-detects which harnesses are present in your workspace and syncs governance rules to each one.
 
 ## Supported Harnesses
 
@@ -37,6 +37,7 @@ Intutic supports 42 AI agent harnesses out of the box. The CLI auto-detects whic
 | Pydantic AI | `.env.intutic` | `pydantic-ai`/`pydantic-ai-slim` in `pyproject.toml`, `requirements.txt`, or `uv.lock` | ✅ Stable |
 | smolagents | `.env.intutic` | `smolagents` in `pyproject.toml`, `requirements.txt`, or `uv.lock` | ✅ Stable — gates the generated code string pre-execution (`CodeAgent`'s "tool call" IS code execution) |
 | [Strands Agents](/integrations/strands) | `.env.intutic` | `strands-agents` in `pyproject.toml`, `requirements.txt`, or `uv.lock` | ✅ Stable — default (Bedrock) LLM egress is NOT proxy-routable; tool gate unaffected (see docs) |
+| [Microsoft Agent Framework](/integrations/microsoft-agent-framework) | `.env.intutic` | `agent-framework`/`agent-framework-core` (or `agent_framework`) in `pyproject.toml`, `requirements.txt`, or `uv.lock` | ✅ Stable — Azure OpenAI/Foundry clients are not routed by `.env.intutic`; tool gate unaffected (see docs) |
 | [Mastra](/integrations/mastra) | `.env.intutic` | `@mastra/core` in `package.json` | ✅ Stable — per-call `hooks` passed to `.generate()`/`.stream()` override agent-level hooks (see docs) |
 | [Vercel AI SDK](/integrations/vercel-ai-sdk) | `.env.intutic` | `ai` (major ≥ 6) plus any `@ai-sdk/*` package in `package.json` | ✅ Stable — LLM-egress routing is in-code only, see the integration page |
 | [eve](/integrations/eve) | `.env.intutic` | `eve` in `package.json` AND an `agent/` directory (compound) | 🟡 Preview — pre-1.0 product; default AI Gateway egress not proxy-governable, see the integration page |
