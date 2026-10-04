@@ -810,6 +810,7 @@ integrity
 integrity
   .command('verify <root_id>')
   .description('Re-derive a root from the live traces and check its signature (exit 1 on mismatch)')
+  .option('--against <file>', 'Also compare with the copy of this root mirrored to your own bucket (BYOC)')
   .option('--json', 'Output as JSON instead of a report')
   .option('--dev', 'Use local control plane (http://localhost:3001)')
   .action(async (rootId, opts) => {

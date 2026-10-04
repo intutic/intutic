@@ -133,7 +133,7 @@ PII_PATH_FRAGMENTS = ["customer", "users.csv", "pii", "personal", "gdpr", "payro
 #
 # An agent's shell tool should carry one of these names (lowercase) so that
 # tool_is() matches and the proxy classifies its arguments at all.
-SHELL_TOOLS = ["bash", "shell", "run_command", "runcommand", "terminal", "execute", "exec"]
+SHELL_TOOLS = ["bash", "shell", "run_command", "runcommand", "execute_command", "terminal", "execute", "exec"]
 
 # Tool names harnesses use for "read a file".
 READ_TOOLS = ["read", "readfile", "view", "cat", "open_file"]

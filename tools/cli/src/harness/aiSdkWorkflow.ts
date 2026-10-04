@@ -13,7 +13,7 @@
  * with both declares `@ai-sdk/workflow` anyway, which is the trigger.
  *
  * DOCUMENTED SEMANTICS carried into the generated `.env.intutic` (confirmed
- * against `@ai-sdk/workflow@1.0.69` + `workflow@4.8.3` — see
+ * against `@ai-sdk/workflow@1.0.69` + `workflow@4.8.3`, re-verified on 2.0.58 + 5.0.1 — see
  * `@intutic/gate/workflow`'s module doc for the full record): WorkflowAgent
  * has no agent-level approval option; the veto surface is per-tool
  * `needsApproval`, and a refusal thrown from it must be FatalError-compatible

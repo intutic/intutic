@@ -31,6 +31,7 @@ pub mod budget_gate;
 pub mod hijack;
 pub mod response_gate;
 pub mod semantic_cache;
+pub mod sql_guard;
 
 use crate::wasm::context::{RequestContext, Verdict};
 

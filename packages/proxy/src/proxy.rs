@@ -2980,6 +2980,21 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // would-act evaluation happens separately, once the anomaly registry exists.
     let (enforcing_sops, shadow_mode_sops) = crate::sops::split_by_mode(&resolved_sops);
     let gov = crate::sops::governance_fields_from(&enforcing_sops, &node.agent_role);
+    // The destructive-SQL rule (TD-480), enforced on the response side below.
+    // The shadow set is resolved apart from the enforcing one, so a shadow
+    // SOP's allowlist can never widen an enforcing SOP's. Empty — the default
+    // for every workspace that declares no `sql_guard:` — makes both response
+    // gates skip it entirely.
+    let sql_guard_policies: Vec<crate::plugins::sql_guard::SqlGuardPolicy> = gov
+        .sql_guard
+        .clone()
+        .into_iter()
+        .chain(crate::sops::sql_guard_from(
+            &shadow_mode_sops,
+            &node.agent_role,
+            true,
+        ))
+        .collect();
 
     // Session-scoped, not node-scoped — see RequestContext::sandbox_attested's
     // doc comment. Resolved here, once, like the other control-plane reads
@@ -4986,6 +5001,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         // same policy from the same source.
         let response_gate_cfg = state.config.intutic_settings.response_gate.clone();
         let denied_tools_clone = wasm_ctx.denied_tools.clone();
+        let sql_guard_policies_clone = sql_guard_policies.clone();
         // Same reason as response_gate_cfg above: the stream task outlives
         // this scope, and the snippet-capture config has to travel with it.
         let response_injection_snippet_cfg = state
@@ -5052,6 +5068,18 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // site, which is what let `/v1/responses` be treated as chat
             // completions at four separate places.
             let stream_shape = delta_shape(&protocol_clone, &provider_clone);
+            // Destructive-SQL guard (TD-480): holds a shell-tool block until
+            // its arguments are complete. `None` when no SOP declares
+            // `sql_guard:` or the response gate is off, so those streams run
+            // exactly the code they ran before. Released lines are queued in
+            // `sql_replay` and re-enter the loop below, past the DLP scrub and
+            // both gates they already went through.
+            let mut sql_hold = (response_gate_cfg.enabled && !sql_guard_policies_clone.is_empty())
+                .then(|| {
+                    crate::plugins::sql_guard::StreamHold::new(sql_guard_policies_clone.clone())
+                });
+            let mut sql_replay: std::collections::VecDeque<String> =
+                std::collections::VecDeque::new();
 
             // Mid-stream judge chunking: split newly-accumulated text at a
             // paragraph or code-fence boundary and spawn a /judge/chunk grade
@@ -5189,12 +5217,19 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     Ok(bytes) => {
                         buffer.extend_from_slice(&bytes);
 
-                        while let Some(pos) = buffer.iter().position(|&b| b == b'\n') {
-                            let line_bytes: Vec<u8> = buffer.drain(..=pos).collect();
-                            let mut line =
-                                String::from_utf8_lossy(&line_bytes[..line_bytes.len() - 1])
-                                    .trim()
-                                    .to_string();
+                        loop {
+                            let (mut line, replayed) = if let Some(l) = sql_replay.pop_front() {
+                                (l, true)
+                            } else if let Some(pos) = buffer.iter().position(|&b| b == b'\n') {
+                                let line_bytes: Vec<u8> = buffer.drain(..=pos).collect();
+                                let line =
+                                    String::from_utf8_lossy(&line_bytes[..line_bytes.len() - 1])
+                                        .trim()
+                                        .to_string();
+                                (line, false)
+                            } else {
+                                break;
+                            };
 
                             // ── Output DLP (TD-210) ─────────────────────────
                             // Scrubbed BEFORE the line is forwarded and BEFORE
@@ -5203,7 +5238,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                             // trace all see the redacted text. Streaming
                             // previously bypassed output DLP entirely — the
                             // branch returned before Step 7.
-                            if dlp_scan_output {
+                            if dlp_scan_output && !replayed {
                                 if let Some((scrubbed, names)) =
                                     crate::dlp::scrub_stream_text(&line)
                                 {
@@ -5225,14 +5260,48 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                             // request's history, after the harness ran it.
                             //
                             // Matches on the tool NAME only — OpenAI streams
-                            // `arguments` across later chunks, so argument-level
-                            // policy is non-streaming-only. See
-                            // `plugins::response_gate`.
-                            if let Some(denial) = crate::plugins::response_gate::gate_stream_line(
-                                &response_gate_cfg,
-                                &line,
-                                &denied_tools_clone,
-                            ) {
+                            // `arguments` across later chunks, so the deny list
+                            // decides on the name; the one argument-level rule
+                            // (the SQL hold below) buffers its blocks instead.
+                            // See `plugins::response_gate`.
+                            let name_denial = if replayed {
+                                None
+                            } else {
+                                crate::plugins::response_gate::gate_stream_line(
+                                    &response_gate_cfg,
+                                    &line,
+                                    &denied_tools_clone,
+                                )
+                            };
+                            // ── Destructive-SQL hold (TD-480) ───────────────
+                            // After the name gate, so a denied tool is refused
+                            // on its first line exactly as before; a held line
+                            // goes no further until its block is complete.
+                            let sql_denial = match sql_hold.as_mut() {
+                                Some(hold) if !replayed && name_denial.is_none() => {
+                                    let step = hold.push(std::mem::take(&mut line));
+                                    for v in &step.notes {
+                                        tracing::warn!(
+                                            workspace_id = %workspace_id_clone,
+                                            session_id = %session_id_clone,
+                                            "{}",
+                                            v.log_message()
+                                        );
+                                    }
+                                    match step.refuse {
+                                        Some((v, idx)) => Some(crate::plugins::response_gate::Denial {
+                                            reason: crate::plugins::response_gate::DenialReason::DestructiveSql(v),
+                                            block_index: idx,
+                                        }),
+                                        None => {
+                                            sql_replay.extend(step.emit);
+                                            continue;
+                                        }
+                                    }
+                                }
+                                _ => None,
+                            };
+                            if let Some(denial) = name_denial.or(sql_denial) {
                                 tracing::warn!(
                                     workspace_id = %workspace_id_clone,
                                     session_id = %session_id_clone,
@@ -5248,6 +5317,47 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                 } else {
                                     (crate::commands::WireProvider::OpenAI, denial.at_block(0))
                                 };
+                                // ── Holdback flush: gate path ───────────────
+                                // The refusal tail is a terminal event, and
+                                // nothing may follow it — so whatever the DLP
+                                // holdbacks are still sitting on has to go out
+                                // FIRST, or never. It used to be never: the
+                                // post-loop flush below suppresses emission
+                                // once `gate_tripped` is set, so text the model
+                                // wrote before the refused call (and, on OpenAI
+                                // chat, an earlier allowed call's buffered
+                                // arguments, whose flush waits for an index
+                                // change the withheld line never delivered)
+                                // was drained into the trace and lost to the
+                                // client. Anthropic closes its text block with
+                                // content_block_stop, which flushes in-stream;
+                                // OpenAI chat and Responses have no such event
+                                // before a tool call. Both flushes go through
+                                // their scrubbers (`flush` scans and redacts),
+                                // in the order the model wrote them: text, then
+                                // the call that followed it.
+                                if let Some(held) = dlp_holdback.as_mut().and_then(|s| s.flush()) {
+                                    accumulated_content.push_str(&held);
+                                    if let Some(b) = holdback_flush_bytes(
+                                        &held,
+                                        &protocol_clone,
+                                        is_same_provider,
+                                        &holdback_addr,
+                                    ) {
+                                        let _ = tx.send(Ok(axum::body::Bytes::from(b))).await;
+                                    }
+                                }
+                                if is_same_provider {
+                                    if let Some((args, idx, item)) =
+                                        arg_holdback.as_mut().and_then(|a| a.flush())
+                                    {
+                                        if let Some(b) =
+                                            arg_flush_bytes(&args, &protocol_clone, idx, &item)
+                                        {
+                                            let _ = tx.send(Ok(axum::body::Bytes::from(b))).await;
+                                        }
+                                    }
+                                }
                                 let tail =
                                     crate::plugins::response_gate::refusal_tail(wire, &denial);
                                 let _ = tx.send(Ok(axum::body::Bytes::from(tail))).await;
@@ -5789,6 +5899,19 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // round-trips and cache writes below are proxy overhead and must
             // not count against the routed model's latency SLO.
             let upstream_latency_ms = start.elapsed().as_millis() as u32;
+
+            // A shell-tool block the SQL hold was still waiting on when the
+            // upstream ended: the call never completed, so it is dropped rather
+            // than forwarded unverified. Logged, because the client sees a
+            // response with no tool call where the model began one.
+            if let Some(tool) = sql_hold.as_mut().and_then(|h| h.take_unfinished()) {
+                tracing::warn!(
+                    workspace_id = %workspace_id_clone,
+                    session_id = %session_id_clone,
+                    tool = %tool,
+                    "SQL guard: upstream ended inside a held shell-tool block; the incomplete call was withheld"
+                );
+            }
 
             // ── Holdback flush: end of stream ─────────────────────────────
             // The backstop for every stream that reached here without hitting
@@ -6878,7 +7001,25 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         &state.config.intutic_settings.response_gate,
         parsed_response.as_ref(),
         &wasm_ctx.denied_tools,
-    );
+    )
+    .or_else(|| {
+        // Argument-level: a shell call running destructive SQL against a
+        // database the role's `sql_allow_dsns:` does not admit (TD-480).
+        let (denial, notes) = crate::plugins::response_gate::gate_response_sql(
+            &state.config.intutic_settings.response_gate,
+            parsed_response.as_ref(),
+            &sql_guard_policies,
+        );
+        for v in notes {
+            tracing::warn!(
+                workspace_id = %workspace_id,
+                session_id = %session_id,
+                "{}",
+                v.log_message()
+            );
+        }
+        denial
+    });
     let final_body = match &response_denial {
         Some(denial) => {
             tracing::warn!(

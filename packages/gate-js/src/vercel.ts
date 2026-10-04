@@ -14,7 +14,7 @@
  *
  * `ai@7.0.68` + `@ai-sdk/openai@4.0.43` were installed in a scratch directory
  * and `node_modules/ai/dist/index.d.ts` read directly (not inferred from
- * docs alone). The relevant types:
+ * docs alone); re-read unchanged on `ai@7.0.127`. The relevant types:
  *
  * ```ts
  * type ToolApprovalStatus =
@@ -69,7 +69,7 @@ import { IntuticGateRefusal } from './errors.js'
 /** Structural copy of `ai`'s `ToolApprovalStatus` — this package does not
  *  depend on `ai` at runtime, so the shape is declared here rather than
  *  imported. Confirmed field-for-field against `ai@7.0.68`'s
- *  `dist/index.d.ts` (see module doc). */
+ *  `dist/index.d.ts` (see module doc), unchanged in `ai@7.0.127`. */
 export type VercelToolApprovalStatus =
   | undefined
   | 'not-applicable'

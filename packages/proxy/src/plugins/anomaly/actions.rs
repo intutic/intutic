@@ -162,6 +162,9 @@ pub(crate) const SHELL_TOOLS: &[&str] = &[
     "shell",
     "run_command",
     "runcommand",
+    // Cline / Roo Code's shell tool. `tool_is` matches by suffix, and
+    // `execute_command` ends in neither `run_command` nor `execute`.
+    "execute_command",
     "terminal",
     "execute",
     "exec",
