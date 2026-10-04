@@ -117,9 +117,15 @@ export const UNIVERSAL_PROTECTED_PATHS: readonly string[] = [
   // directory (every profile's cordis.patch.yml, not just one), the same
   // "the surface, not the one file" discipline `.grok/hooks` above uses —
   // dsh may have zero, one, or several profiles, and a tamper anywhere under
-  // it is the same threat. `.dsh/settings.yaml` is the LLM-egress half; both
-  // are the only two files `dshHooks.ts` writes.
+  // it is the same threat. `.dsh/cordis.patch.yml` is the home-level patch
+  // layer, applied AFTER every profile's own (dsh 0.2 `dsh-app-boot`: "the
+  // home-level file ... outranks it") — one `{ id: intutic-governance,
+  // disabled: true }` or `llm-deepseek` row there overrides both halves this
+  // writer puts in the profile files. `.dsh/settings.yaml` is no longer
+  // written, but dsh 0.2 still imports a leftover one into the next profile
+  // that boots, so it remains a way to rewrite the egress row.
   '.dsh/profiles',
+  '.dsh/cordis.patch.yml',
   '.dsh/settings.yaml',
 
   // OpenCode — the plugin directories OpenCode globs (`.opencode/plugin` and

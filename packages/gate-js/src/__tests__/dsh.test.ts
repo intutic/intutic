@@ -77,6 +77,12 @@ describe('createPreExecuteListener: allow path', () => {
     await listener({ name: 'weird_tool', arguments: 'a bare string' }, async () => ({ kind: 'allow' }))
     expect(gate.calls).toEqual([{ toolName: 'weird_tool', toolInput: { args: ['a bare string'] } }])
   })
+
+  it("passes a later listener's dsh 0.2 {kind:'cancel'} through unchanged on allow", async () => {
+    const listener = createPreExecuteListener(new FakeGate('allow'))
+    const decision = await listener({ name: 'bash', arguments: { command: 'ls' } }, async () => ({ kind: 'cancel' }))
+    expect(decision).toEqual({ kind: 'cancel' })
+  })
 })
 
 describe('createPreExecuteListener: deny path', () => {
