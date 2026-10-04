@@ -31,6 +31,7 @@ import { unsupportedWasmImports, WASM_HOST_IMPORTS } from '@intutic/shared-types
 import { createHostImports, newHostImportState } from './hostImports.js'
 import { ReferencedFiles, type ReferencedFilesTable } from './referencedFiles.js'
 import { capDeclaredMemory, WASM_PAGE_BYTES } from './memoryCap.js'
+import { DEFAULT_FUEL_BUDGET, FUEL_EXPORT, meterFuel } from './fuel.js'
 
 /**
  * Guest memory ceiling, `runner.rs`'s 16MB `StoreLimits` (TD-440). Enforced at
@@ -99,7 +100,7 @@ function importsUsingReadReferencedFile(module: WebAssembly.Module): boolean {
 function handleCompile(msg: CompileMessage): void {
   try {
     const capped = capDeclaredMemory(new Uint8Array(msg.bytes), MAX_GUEST_MEMORY_BYTES / WASM_PAGE_BYTES)
-    const module = new WebAssembly.Module(capped)
+    const module = new WebAssembly.Module(meterFuel(capped, DEFAULT_FUEL_BUDGET))
     if (WebAssembly.Module.imports(module).some((i) => i.kind === 'memory')) {
       throw new Error('WASM rule imports its memory; a rule must define and export its own')
     }
@@ -188,6 +189,9 @@ function handleEvaluate(msg: EvaluateMessage): void {
     return
   }
 
+  // Read in the catch below: a trap with the counter below zero is the
+  // instruction budget running out, not the rule's own `unreachable`.
+  let fuel: WebAssembly.Global | undefined
   try {
     // A holder object, not a reassigned `let`: the import object (needed by
     // `WebAssembly.Instance` below) has to exist BEFORE the instance's own
@@ -198,6 +202,8 @@ function handleEvaluate(msg: EvaluateMessage): void {
     const env: WebAssembly.ModuleImports = createHostImports(() => memoryHolder.current, hostState)
     const instance = new WebAssembly.Instance(module, { env })
     const exportsObj = instance.exports as Record<string, unknown>
+    const fuelExport = exportsObj[FUEL_EXPORT]
+    if (fuelExport instanceof WebAssembly.Global) fuel = fuelExport
 
     const memExport = exportsObj['memory']
     if (!(memExport instanceof WebAssembly.Memory)) {
@@ -241,12 +247,16 @@ function handleEvaluate(msg: EvaluateMessage): void {
     // A guest trap (including one following an `abort` call) lands here.
     // Reported as a failure, never re-thrown — the worker process must
     // survive one hostile or buggy rule to keep evaluating every other one.
+    const fuelExhausted = fuel !== undefined && (fuel.value as number) < 0
     parentPort?.postMessage({
       type: 'evaluate-result',
       id: msg.id,
       ruleId: msg.ruleId,
       ok: false,
-      error: err instanceof Error ? err.message : String(err),
+      fuelExhausted,
+      error: fuelExhausted
+        ? `WASM rule ran out of its ${DEFAULT_FUEL_BUDGET}-instruction budget`
+        : err instanceof Error ? err.message : String(err),
     })
   }
 }

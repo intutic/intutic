@@ -522,7 +522,7 @@ export async function runGuardrailsShow(guardrailId: string, opts: CommonOpts): 
   log.field('Guardrail', `${g.guardrailId} [${g.status}${g.sourceStale ? ', stale citation' : ''}] ${g.target}`)
   log.field('Cites', `"${g.clause.quote}"`)
   log.field('From', `${g.document.title} (${g.document.provider})${g.document.sourceUrl ? ` ${g.document.sourceUrl}` : ''} — passage ${g.clause.passageHash.slice(0, 12)}`)
-  const rendered = g.rendered as { toolPattern?: string; argPattern?: string; reason?: string; lines?: string; source?: string }
+  const rendered = g.rendered as { toolPattern?: string; argPattern?: string; reason?: string; lines?: string; source?: string; key?: string; values?: string[] }
   if (g.target === 'hook_rule' && rendered.toolPattern) {
     log.field('Tool pattern', rendered.toolPattern)
     if (rendered.argPattern) log.field('Input pattern', rendered.argPattern)
@@ -533,6 +533,15 @@ export async function runGuardrailsShow(guardrailId: string, opts: CommonOpts): 
   } else if (g.target === 'wasm_rule' && rendered.source) {
     log.field('Predicate source', '')
     for (const line of rendered.source.split('\n')) log.dim(`    ${line}`)
+  } else if (g.target === 'workspace_setting' && rendered.key && Array.isArray(rendered.values)) {
+    // A settings-class guardrail (TD-474 item 2) is a proposed value for one workspace setting.
+    log.field('Workspace setting', `${rendered.key}: ${rendered.values.join(', ')}`)
+    if (rendered.key === 'egressAllow') {
+      log.dim('    No shadow evidence exists for egress: `promote --acknowledge-no-traffic` adds these entries from PROPOSED, and only adds.')
+      log.dim('    Entries take effect only while the workspace egress mode is monitor or enforce.')
+    } else {
+      log.dim('    Measured in shadow on every proxied request; promotion writes the list, narrowed by the current one.')
+    }
   }
   if (g.status === 'REJECTED' && g.rejectedReason) log.field('Rejected', g.rejectedReason)
   if (readiness) printReadiness(readiness)
@@ -609,6 +618,13 @@ export async function runGuardrailsReconfirm(guardrailId: string, opts: CommonOp
   await transition(guardrailId, 'reconfirm', {}, opts, 'citation re-confirmed against a live passage.')
 }
 
+const REPLAY_SOURCE_LABEL: Record<GuardrailReplay['source'], string> = {
+  enforcement_log: 'hook-gate and proxy verdicts with a captured input',
+  context_snapshots: 'sampled request contexts',
+  execution_traces: 'requests through the proxy, by model',
+  none: 'nothing captured can answer this',
+}
+
 export async function runGuardrailsReplay(guardrailId: string, opts: CommonOpts): Promise<void> {
   const client = await getClient(opts.dev)
   const { status, body } = await client.postWithStatus<{ replay?: GuardrailReplay; error?: string }>(`${BASE}/guardrails/${enc(guardrailId)}/replay`, {})
@@ -627,7 +643,7 @@ export async function runGuardrailsReplay(guardrailId: string, opts: CommonOpts)
   }
   log.header(`Intutic — Replay ${guardrailId}`)
   log.field('Would have fired', `${r.fires} of ${r.captured} captured call(s)`)
-  log.field('Source', `${r.source === 'enforcement_log' ? 'hook-gate and proxy verdicts with a captured input' : 'sampled request contexts'}, last ${r.windowDays} day(s)${r.truncated ? ', capped' : ''}`)
+  log.field('Source', `${REPLAY_SOURCE_LABEL[r.source]}, last ${r.windowDays} day(s)${r.truncated ? ', capped' : ''}`)
   if (r.unsupported.length > 0) log.warn(`Cannot be replayed: ${r.unsupported.join(', ')}`)
   for (const s of r.sample) log.dim(`  ${s.at} ${s.toolName}: ${s.excerpt}`)
 }
