@@ -283,8 +283,7 @@ fn check_flushed_then_refused(
     }
     let last = body
         .lines()
-        .filter(|l| l.starts_with("data:"))
-        .last()
+        .rfind(|l| l.starts_with("data:"))
         .unwrap_or_default();
     if !last.contains(terminal) {
         return fail(&format!(
