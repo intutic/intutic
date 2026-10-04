@@ -164,8 +164,39 @@ jobs:
       - name: Run Vitest Suite (Sync Daemon, CLI, Packages)
         run: pnpm turbo test
 
+  changes:
+    name: Detect Rust inputs
+    runs-on: ubuntu-latest
+    # TD-491: the Rust job takes ~19 minutes and most PRs touch no Rust. It runs
+    # on every push to main, and on a PR only when an input of the crate's build
+    # or tests changed. That is more than packages/proxy: tests read the anomaly
+    # taxonomy, shared-types fixtures, the agent-commands doc and the bundled
+    # SOPs. When the diff cannot be computed, the job runs (fail open to testing).
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then echo "rust=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if ! changed=$(git diff --name-only "$BASE_SHA...$HEAD_SHA"); then
+            echo "rust=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          inputs='^(packages/proxy/|packages/anomaly-taxonomy/|packages/shared-types/fixtures/|infra/kubernetes/base/proxy/sops/|\.cargo/|Cargo\.(toml|lock)$|rust-toolchain|apps/docs/guide/agent-commands\.md$|\.github/workflows/ci\.yml$)'
+          if printf '%s\n' "$changed" | grep -qE "$inputs"; then rust=true; else rust=false; fi
+          echo "rust=$rust" >> "$GITHUB_OUTPUT"
+          echo "Rust inputs changed: $rust"
+
   rust:
     name: Rust Proxy (Build & Test)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     # Valkey is REQUIRED, not optional: tests/reward_test.rs and
     # tests/wasm_local_test.rs read VALKEY_URL and return early when it is
@@ -361,6 +392,9 @@ jobs:
     name: Build (TS Workspaces) - Bundle TS apps and packages
     runs-on: ubuntu-latest
     needs: [lint, typecheck, test, rust, python, secret-scan]
+    # A skipped Rust job (TD-491) must not skip Build, and a failed one must
+    # still stop it: always() alone would run Build after any failure.
+    if: ${{ !cancelled() && needs.lint.result == 'success' && needs.typecheck.result == 'success' && needs.test.result == 'success' && needs.python.result == 'success' && needs['secret-scan'].result == 'success' && (needs.rust.result == 'success' || needs.rust.result == 'skipped') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

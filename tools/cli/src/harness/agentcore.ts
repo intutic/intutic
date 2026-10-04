@@ -40,9 +40,12 @@
  *    commands write (confirmed via `bedrock_agentcore_starter_toolkit/cli/
  *    runtime/_configure_impl.py` and every other CLI subcommand module that
  *    reads it).
- * 5. `agentcore/agentcore.json` or `aws-targets.json` at the workspace root —
- *    the config files the npm `@aws/agentcore` CLI writes (confirmed via the
- *    literal strings in the published `dist/cli/index.mjs` bundle).
+ * 5. `agentcore/agentcore.json` or `agentcore/aws-targets.json` — the config
+ *    files the npm `@aws/agentcore` CLI writes. Both live in the project's
+ *    `agentcore/` directory, not at the root: confirmed by running
+ *    `agentcore create` (0.31.1) offline with no AWS credentials, whose real
+ *    output is vendored in `__fixtures__/agentcore-cli-0.31.1/`, and by the
+ *    `${root}/agentcore/aws-targets.json` paths in the 0.27.0 bundle.
  *
  * No ReDoS surface: every check below is a plain substring/property test
  * over locally-read files, never a regex over untrusted network input.
@@ -61,7 +64,7 @@ import type { IHarnessAdapter } from './types.js'
 const PYTHON_MANIFESTS = ['pyproject.toml', 'requirements.txt', 'uv.lock'] as const
 
 /** Config files the `agentcore` CLIs (npm + Python starter toolkit) write. */
-const CONFIG_FILE_SIGNALS = ['.bedrock_agentcore.yaml', 'agentcore/agentcore.json', 'aws-targets.json'] as const
+const CONFIG_FILE_SIGNALS = ['.bedrock_agentcore.yaml', 'agentcore/agentcore.json', 'agentcore/aws-targets.json'] as const
 
 async function hasAnyConfigFile(workspaceRoot: string): Promise<boolean> {
   for (const rel of CONFIG_FILE_SIGNALS) {

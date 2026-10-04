@@ -784,6 +784,27 @@ export const NO_GATE: ReadonlyArray<{
       'Anthropic/OpenAI/LiteLLM providers honor .env.intutic’s base-URL vars. See ' +
       'TD-420..423 and apps/docs/integrations/strands.md.',
   },
+  {
+    file: null,
+    harness: 'agent-framework',
+    why:
+      'no on-disk config/hook file exists — Microsoft Agent Framework tools (@tool ' +
+      'functions and MCP-materialised FunctionTools) run in the agent’s own Python ' +
+      'process. The blocking gate ships SDK-side (intutic_clawde.gate.adapters.' +
+      'agent_framework.IntuticFunctionMiddleware, an agent_framework FunctionMiddleware). ' +
+      'A separate framework from autogen above (TD-375), not a new version of it. ' +
+      'Verified live against agent-framework-core==1.20.0 by reading ' +
+      'agent_framework/_middleware.py + _tools.py directly AND driving a real Agent ' +
+      'through a stub chat client: on a deny the middleware sets context.result to the ' +
+      'refusal and never calls call_next(), so the tool body never runs, the model ' +
+      'receives the refusal as the tool result, and the loop continues. ' +
+      'MiddlewareTermination was rejected because it ends the loop before the model sees ' +
+      'the result. A gate error raises MiddlewareFailure, which the framework propagates ' +
+      'out of Agent.run() instead of turning it into a tool result (fail-CLOSED; an ' +
+      'ordinary exception would be converted and the loop would keep going). Egress: ' +
+      'the OpenAI/Anthropic clients honor .env.intutic’s base-URL vars; Azure ' +
+      'OpenAI/Foundry clients do not. See apps/docs/integrations/microsoft-agent-framework.md.',
+  },
 
   // -- T2: JS/TS SDK-gated frameworks (same family as langchain/langgraph
   // above, but the blocking gate ships in @intutic/gate -- packages/gate-js --
@@ -848,10 +869,16 @@ export const NO_GATE: ReadonlyArray<{
       '(true=user-approval, false=not-applicable). There is NO agent-level default approval ' +
       'field (agent-definition d.ts carries zero approval fields — verified), so coverage is ' +
       'per-tool/per-connection attachment, eve\'s own documented multi-tenant-approvals pattern. ' +
-      'An observe-only audit emitter (intuticAuditHooks(), on eve\'s approval.candidate/' +
-      'approval.settled hook events) maps eve\'s human-approval lifecycle onto tool_allowed/' +
-      'tool_blocked/tool_flagged — telemetry only, and request-scoped (those events carry no ' +
-      'tool name — verified against the shipped protocol types; TD-411). ' +
+      'An observe-only audit emitter (intuticAuditHooks(), on eve\'s input.requested/' +
+      'approval.candidate/approval.settled hook events) maps eve\'s human-approval lifecycle onto ' +
+      'tool_allowed/tool_blocked/tool_flagged — telemetry only; settlement attribution is ' +
+      'best-effort (the approval events carry no tool name — verified against the shipped ' +
+      'protocol types; TD-411). LIVE-VERIFIED 2026-10-03 on a self-hosted eve build + eve start ' +
+      '(local Workflow world, scripted model, no account): deny never runs the body, a thrown ' +
+      'policy fails the turn, a parked user-approval call survives a SIGKILL + restart and is ' +
+      're-gated on resume. approval.candidate/approval.settled fire only for the ' +
+      '{ request, response } approval form; a bare policy settles via input.resolved, which the ' +
+      'audit hook does not read. Not exercised: a Vercel deployment, Vercel Sandbox, a real model. ' +
       'DOCUMENTED LIMITATION (not an Intutic defect): eve routes models through the Vercel AI ' +
       'Gateway by default, whose wire protocol the Intutic proxy does not parse — gateway-routed ' +
       'egress is ungoverned (TD-412); only the in-code direct-provider path ' +
@@ -980,8 +1007,13 @@ export const NO_GATE: ReadonlyArray<{
       'by test against the REAL FatalError.is from the workflow package. One tracked wrinkle: ' +
       'ai@7.0.68 marks tool-level needsApproval @deprecated in favour of generateText-level ' +
       'toolApproval, but @ai-sdk/workflow\'s own loop reads the tool-level field and exposes no ' +
-      'other surface — the correct integration point today, watched for drift in TD-419. No live ' +
-      'durable run was exercised (needs a Workflow DevKit deployment — TD-418). See ' +
+      'other surface — the correct integration point today, watched for drift in TD-419. ' +
+      'LIVE-VERIFIED 2026-10-03 on the Workflow DevKit local world (nitro dev + workflow/nitro, ' +
+      'scripted model, no account): needsApproval executes in the workflow VM, where the gate\'s ' +
+      'node:fs access fails ("require is not defined"), so the gate must be called from a ' +
+      '"use step" function; from there a refusal runs once (a plain throw: 4 attempts), an ' +
+      'approval pause ends the run with a tool-approval-request, and a resumed run carrying the ' +
+      'approval re-gates the call. Not exercised: a hosted world (TD-418). See ' +
       'apps/docs/integrations/ai-sdk-workflow.md.',
   },
 
@@ -1069,7 +1101,7 @@ export const NO_GATE: ReadonlyArray<{
       'by extracting and grepping the real tarballs/wheels, not assumed) covers the ' +
       '`bedrock-agentcore` PyPI/npm SDK, the `bedrock-agentcore-starter-toolkit` PyPI CLI, the ' +
       '`@aws/agentcore` npm CLI, and the `.bedrock_agentcore.yaml`/`agentcore/agentcore.json`/ ' +
-      '`aws-targets.json` config files those CLIs write. Deployment-target caveats that are NOT ' +
+      '`agentcore/aws-targets.json` config files those CLIs write. Deployment-target caveats that are NOT ' +
       'a gate concern — environment-variable caps (<=50 vars, <=5000 chars each, CONFIRMED ' +
       'against the CreateAgentRuntime API reference), VPC/NAT egress topology (PUBLIC network ' +
       'mode is the default; private egress needs an explicit NAT setup this adapter cannot do ' +

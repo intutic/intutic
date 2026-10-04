@@ -36,14 +36,24 @@
  *    responder on the continuation path and treats `submitToolApproval` as an
  *    optimization when present ({@link intuticSubmitApprovals}).
  * 3. **Built-in sandbox tools are NOT governed by `toolApproval` at all.**
- *    They are governed only by `permissionMode: 'allow-reads' | 'allow-edits'
+ *    They are governed by `permissionMode: 'allow-reads' | 'allow-edits'
  *    | 'allow-all'`, which **defaults to `'allow-all'`** — the shipped doc
  *    comment says so verbatim: "Defaults to `'allow-all'`, preserving the
- *    existing bypass-permissions behavior unless users opt in." A HarnessAgent
- *    with default settings runs read/write/edit/bash/glob/grep in the sandbox
- *    with no approval step this gate could hook.
- *    {@link recommendedHarnessSettings} exists to steer callers off that
- *    default.
+ *    existing bypass-permissions behavior unless users opt in." Under
+ *    `'allow-all'` nothing pauses. Under the stricter modes the mode decides
+ *    WHICH built-ins pause, and each paused call is then a genuine per-call
+ *    approval this gate answers (TD-415, corrected): the
+ *    `@ai-sdk/harness-claude-code` bridge (`dist/bridge/index.mjs`,
+ *    `createPermissionSettings`/`nativeToolRequiresApproval`) adds `ask` rules
+ *    for bash-kind tools (`Bash`, `Monitor`) under `'allow-edits'`, and for
+ *    edit- and bash-kind tools under `'allow-reads'`, emitting a
+ *    `tool-approval-request` and blocking on the host's answer;
+ *    `@ai-sdk/harness/agent` records it as a pending approval with
+ *    `kind: 'builtin'`, pauses the turn, and delivers the continuation's
+ *    decision through the adapter's `submitToolApproval`. What never pauses:
+ *    read-kind built-ins (Read/Glob/Grep/WebFetch/...) in ANY mode, and
+ *    write/edit under `'allow-edits'`. {@link recommendedHarnessSettings}
+ *    exists to steer callers off the `'allow-all'` default.
  * 4. **Execution is server-side, in a sandbox.** The agent's tools run inside
  *    a microVM (`@ai-sdk/sandbox-vercel` and friends), NOT on the machine
  *    where the Intutic proxy runs — the laptop proxy cannot see sandbox
@@ -92,10 +102,22 @@ export interface HarnessToolCallPart {
   readonly providerExecuted?: boolean
 }
 
-/** Structural copy of `@ai-sdk/harness`'s `HarnessAgentToolApprovalContinuation`
- *  — the element type of the `toolApprovalContinuations` array
- *  `continueGenerate`/`continueStream` accept. */
-export interface HarnessToolApprovalContinuation {
+/**
+ * One element of the `toolApprovalContinuations` array
+ * `continueGenerate`/`continueStream` accept — shaped to satisfy BOTH
+ * upstream contracts, because the shape changed in a patch release:
+ *
+ *   - `@ai-sdk/harness` <= 1.0.100 reads `HarnessAgentToolApprovalContinuation`
+ *     = `{ approvalResponse, toolCall }`.
+ *   - `@ai-sdk/harness` >= 1.0.101 (2026-09-03) reads a bare
+ *     `ToolApprovalResponse` and keys it by its top-level `approvalId`; an
+ *     element without one is silently ignored and the paused turn never
+ *     resumes (observed live, `uat/evidence/live-verify/harness-docker/`).
+ *
+ * So each continuation IS the `tool-approval-response` part (top-level
+ * fields) and also carries `approvalResponse`/`toolCall` for older runtimes.
+ */
+export interface HarnessToolApprovalContinuation extends HarnessToolApprovalResponse {
   readonly approvalResponse: HarnessToolApprovalResponse
   readonly toolCall: HarnessToolCallPart
 }
@@ -269,14 +291,16 @@ export function intuticApprovalResponder(
             'than approving an unevaluated call.'
         }
       }
+      const approvalResponse: HarnessToolApprovalResponse = {
+        type: 'tool-approval-response',
+        approvalId: req.approvalId,
+        approved,
+        ...(reason !== undefined ? { reason } : {}),
+        ...(req.providerExecuted !== undefined ? { providerExecuted: req.providerExecuted } : {}),
+      }
       continuations.push({
-        approvalResponse: {
-          type: 'tool-approval-response',
-          approvalId: req.approvalId,
-          approved,
-          ...(reason !== undefined ? { reason } : {}),
-          ...(req.providerExecuted !== undefined ? { providerExecuted: req.providerExecuted } : {}),
-        },
+        ...approvalResponse, // read by @ai-sdk/harness >= 1.0.101
+        approvalResponse, // read by <= 1.0.100 (with toolCall)
         toolCall: {
           type: 'tool-call',
           toolCallId: req.toolCallId,
@@ -358,9 +382,10 @@ export interface IntuticStaticApprovalsOptions {
  * Two scope limits, stated plainly:
  *
  *   - This covers CUSTOM host-executed tools only. Built-in sandbox tools
- *     (read/write/edit/bash/...) never consult `toolApproval` — they are
- *     governed solely by `permissionMode`, which defaults to `'allow-all'`.
- *     See {@link recommendedHarnessSettings}.
+ *     (read/write/edit/bash/...) never consult `toolApproval` — which of them
+ *     pause is decided by `permissionMode` (default `'allow-all'`: none), and
+ *     a paused built-in reaches {@link intuticApprovalResponder} the same way
+ *     a custom tool's approval does. See {@link recommendedHarnessSettings}.
  *   - A tool absent from this record has status `undefined` =
  *     "not-applicable" and runs WITHOUT any approval pause. Pass the same
  *     `tools` record you give the agent (or every tool name), not a subset.
@@ -453,11 +478,13 @@ export interface RecommendedHarnessSettings {
    *     honour. So this recommendation is never a silent no-op for any
    *     adapter that accepts it at all.
    *
-   * What this does NOT close: TD-415's original per-call gap. This is a
-   * coarse, all-or-nothing exclusion decided once at session-construction
-   * time — never a `Gate.guard()`-evaluated verdict per call, and a
-   * workspace that genuinely needs `bash` available cannot use this
-   * filtering and is back to the original `permissionMode` gap for it.
+   * This is a coarse, all-or-nothing exclusion decided once at
+   * session-construction time — never a `Gate.guard()`-evaluated verdict per
+   * call. A workspace that genuinely needs `bash` passes `filterBash: false`
+   * and keeps `permissionMode: 'allow-edits'` (or `'allow-reads'`): every
+   * bash call then pauses as a builtin approval request and
+   * {@link intuticApprovalResponder} gives it a per-call verdict (see the
+   * `permissionMode` bullet on {@link recommendedHarnessSettings}).
    */
   inactiveTools?: readonly ['bash']
 }
@@ -469,9 +496,15 @@ export interface RecommendedHarnessSettings {
  *   - `permissionMode: 'allow-edits'` (or `'allow-reads'`) — because the
  *     framework's own default is `'allow-all'`, under which built-in sandbox
  *     tools (including `bash`) run with no approval surface this gate can
- *     reach. There is no per-call gate for built-ins at ANY permissionMode;
- *     the mode itself is the entire control, which is why steering it off
- *     `'allow-all'` matters.
+ *     reach. Under `'allow-edits'` every bash-kind built-in call pauses as a
+ *     `kind: 'builtin'` approval request that {@link intuticApprovalResponder}
+ *     answers per call; `'allow-reads'` adds write/edit to that. Read-kind
+ *     built-ins never pause in any mode — the mode is the only control for
+ *     them.
+ *   - `inactiveTools: ['bash']` (default) — removes bash outright. With the
+ *     default, bash calls never reach the gate because bash is never
+ *     callable; `filterBash: false` is the per-call alternative (bash stays
+ *     available and every call is gated as above).
  *   - a `networkPolicy` for the sandbox — `{ mode: 'deny-all' }` by default,
  *     or a `custom` allow-list (with the cloud-metadata CIDR denied) when
  *     `allowedHosts` is given. This is the honest egress-governance story for
@@ -603,22 +636,25 @@ export function recommendedHarnessSettings(
 // matter to this approach either way, since `onBootstrap` writes into the
 // sandbox filesystem directly, independent of adapter settings.
 //
-// ## What remains unverified (Half C, explicitly out of scope here)
+// ## Verified locally (Half C) — and what remains Vercel-only
 //
-// Whether the bridge inside a REAL sandbox actually runs this script as a
-// PreToolUse hook, whether the written files survive a snapshot/resume
-// cycle, and whether a `process.exit(2)` from this script genuinely stops
-// the tool call from the model's point of view — none of that is
-// verifiable without a live Vercel Sandbox deployment. See TD-417's updated
-// entry.
+// `uat/live-verify/harness-docker/` (enterprise) drives a real Claude Code
+// bridge turn in a Docker sandbox against a scripted local model: the bridge's
+// own PreToolUse dispatch runs this script, `process.exit(2)` stops the call
+// (the model receives an error tool result naming the block), and the files
+// survive a container stop/start + `resumeSession`. A true snapshot restore
+// (Vercel Sandbox) and Grok Build remain unverified. See TD-417.
 
 /** Structural copy of `@ai-sdk/provider-utils`'s `SandboxSession`, narrowed
- *  to the one method {@link intuticSandboxBootstrap}'s `onBootstrap` calls.
+ *  to the methods {@link intuticSandboxBootstrap}'s `onBootstrap` calls.
  *  Confirmed field-for-field against `@ai-sdk/provider-utils@5.0.27`'s
  *  shipped `dist/index.d.ts` (`WriteFileOptions<string>` plus its own
- *  `encoding` addition on `writeTextFile`). */
+ *  `encoding` addition on `writeTextFile`; `readTextFile` resolves `null`
+ *  for a missing file). */
 export interface SandboxWriteSession {
   writeTextFile(options: { path: string; content: string; encoding?: string }): PromiseLike<void>
+  readTextFile(options: { path: string; abortSignal?: AbortSignal }): PromiseLike<string | null>
+  run(options: { command: string; abortSignal?: AbortSignal }): PromiseLike<{ exitCode: number; stdout: string; stderr: string }>
 }
 
 /** Structural copy of `@ai-sdk/harness/agent`'s
@@ -789,6 +825,13 @@ process.stdin.on('end', () => {
  * `Bash`, `Edit`, `Write`, `MultiEdit`, and `mcp__.*`.
  */
 function renderSandboxClaudeSettings(hookScriptSandboxPath: string): string {
+  return JSON.stringify(sandboxClaudeSettings(hookScriptSandboxPath), null, 2) + '\n'
+}
+
+function sandboxClaudeSettings(hookScriptSandboxPath: string): {
+  permissions: { deny: string[] }
+  hooks: { PreToolUse: unknown[] }
+} {
   const hookEntry = (matcher: string) => ({
     matcher,
     hooks: [
@@ -800,13 +843,57 @@ function renderSandboxClaudeSettings(hookScriptSandboxPath: string): string {
       },
     ],
   })
-  const settings = {
+  return {
     permissions: { deny: [] as string[] },
     hooks: {
       PreToolUse: [hookEntry('Bash'), hookEntry('Edit'), hookEntry('Write'), hookEntry('MultiEdit'), hookEntry('mcp__.*')],
     },
   }
-  return JSON.stringify(settings, null, 2) + '\n'
+}
+
+/**
+ * The same `PreToolUse` registration merged into the sandbox user's
+ * `$HOME/.claude/settings.json`. Why this is needed (observed live, Docker
+ * sandbox + real Claude Code bridge, `uat/evidence/live-verify/harness-docker/`):
+ * `onBootstrap` receives the sandbox DEFAULT working directory, but unless the
+ * caller sets `sandboxConfig.workDir` every HarnessAgent session runs Claude
+ * Code in its own `<default>/claude-code-<sessionId>` directory, and Claude
+ * Code does not read project settings from a parent directory — so the
+ * project-level file alone never fired. User-level settings load for every
+ * session regardless of cwd. An existing user settings file is merged into
+ * (our hooks appended), never overwritten; an unparseable one fails the
+ * bootstrap loudly rather than leaving the sandbox ungated.
+ */
+async function writeSandboxUserSettings(
+  session: SandboxWriteSession,
+  hookScriptSandboxPath: string,
+  abortSignal?: AbortSignal,
+): Promise<void> {
+  const home = await session.run({ command: 'printf "%s" "$HOME"', ...(abortSignal ? { abortSignal } : {}) })
+  const homeDir = home.stdout.trim()
+  if (home.exitCode !== 0 || !homeDir.startsWith('/')) {
+    throw new Error(
+      `intuticSandboxBootstrap: cannot resolve the sandbox HOME (exit ${home.exitCode}); refusing to leave ` +
+        'the PreToolUse hook unregistered.',
+    )
+  }
+  const path = sandboxJoin(homeDir, '.claude/settings.json')
+  const ours = sandboxClaudeSettings(hookScriptSandboxPath)
+  const existingText = await session.readTextFile({ path, ...(abortSignal ? { abortSignal } : {}) })
+  let merged: Record<string, unknown> = ours
+  if (existingText !== null && existingText.trim() !== '') {
+    let existing: unknown
+    try {
+      existing = JSON.parse(existingText)
+    } catch {
+      throw new Error(`intuticSandboxBootstrap: ${path} exists but is not valid JSON; refusing to overwrite it.`)
+    }
+    const base = existing !== null && typeof existing === 'object' && !Array.isArray(existing) ? (existing as Record<string, unknown>) : {}
+    const hooks = (base.hooks ?? {}) as Record<string, unknown>
+    const pre = Array.isArray(hooks.PreToolUse) ? hooks.PreToolUse : []
+    merged = { ...base, hooks: { ...hooks, PreToolUse: [...pre, ...ours.hooks.PreToolUse] } }
+  }
+  await session.writeTextFile({ path, content: JSON.stringify(merged, null, 2) + '\n' })
 }
 
 /**
@@ -834,8 +921,11 @@ function renderSandboxClaudeSettings(hookScriptSandboxPath: string): string {
  * script implementing Tier A1 against it (see
  * {@link renderSandboxGateScript}) — plus `.claude/settings.json` at
  * `<workDir>/.claude/settings.json` registering that script as a
- * `PreToolUse` hook. See the module-level comment above this section for
- * what this does and does not cover, and why.
+ * `PreToolUse` hook, and the same registration merged into the sandbox user's
+ * `$HOME/.claude/settings.json` (see {@link writeSandboxUserSettings} — the
+ * project-level file alone does not reach per-session work directories). See
+ * the module-level comment above this section for what this does and does
+ * not cover, and why.
  */
 export function intuticSandboxBootstrap(opts: IntuticSandboxBootstrapOptions = {}): IntuticSandboxBootstrap {
   const bootstrapDir = opts.bootstrapDir ?? '.intutic/hooks'
@@ -854,7 +944,7 @@ export function intuticSandboxBootstrap(opts: IntuticSandboxBootstrapOptions = {
 
   return {
     bootstrapHash,
-    onBootstrap: async ({ session, workDir }) => {
+    onBootstrap: async ({ session, workDir, abortSignal }) => {
       // Absolute paths throughout, matching the laptop writer's own
       // convention (claudeCodeHooks.ts's hookEntry() always joins an
       // absolute workspaceRoot) - a PreToolUse hook's invocation cwd is not
@@ -868,6 +958,7 @@ export function intuticSandboxBootstrap(opts: IntuticSandboxBootstrapOptions = {
       for (const f of files) {
         await session.writeTextFile({ path: f.path, content: f.content })
       }
+      await writeSandboxUserSettings(session, scriptAbsPath, abortSignal)
     },
   }
 }

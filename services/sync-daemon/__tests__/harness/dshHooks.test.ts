@@ -17,10 +17,11 @@
  *  3. Idempotency: a second run against unchanged input writes zero bytes
  *     (write-if-changed) — `intutic connect` re-runs this every sync cycle.
  *  4. The profile's `package.json` `@intutic/gate` dependency merge.
- *  5. `settings.yaml`'s `llm-pi-ai.providers.intutic` merge — preserves every
- *     other provider and top-level section.
- *  6. The append-only fallback for a `cordis.patch.yml`/`settings.yaml` that
- *     does not parse as YAML at all.
+ *  5. The `llm-deepseek` egress row in each profile's `cordis.patch.yml`
+ *     (dsh 0.2 moved live config out of `$DSH_HOME/settings.yaml`) — sets
+ *     only `baseURL` on an existing override row, preserving its other fields.
+ *  6. The append-only fallback for a `cordis.patch.yml` that does not parse
+ *     as YAML at all.
  *  7. Tamper-restore: `settingsGuard.ts`'s `guardSettingsFile` re-running
  *     `writeDshHooks` after a simulated tamper.
  *
@@ -125,18 +126,14 @@ describe('dsh hooks writer', () => {
     await writeDshHooks(workspaceRoot, PROXY_URL, 'ws_test')
 
     const patchPath = node_path.join(profileDir, 'cordis.patch.yml')
-    const settingsPath = node_path.join(dshHome, 'settings.yaml')
     const afterFirst = await node_fs.readFile(patchPath, 'utf-8')
-    const settingsAfterFirst = await node_fs.readFile(settingsPath, 'utf-8')
     const statBefore = await node_fs.stat(patchPath)
 
     // A real filesystem mtime granularity can be coarse; assert on CONTENT
     // equality (the load-bearing claim) rather than relying on mtime alone.
     await writeDshHooks(workspaceRoot, PROXY_URL, 'ws_test')
     const afterSecond = await node_fs.readFile(patchPath, 'utf-8')
-    const settingsAfterSecond = await node_fs.readFile(settingsPath, 'utf-8')
     expect(afterSecond).toBe(afterFirst)
-    expect(settingsAfterSecond).toBe(settingsAfterFirst)
     const statAfter = await node_fs.stat(patchPath)
     // Same size is the portable half of "nothing was rewritten"; mtime
     // comparison is inherently flaky under fast successive writes on some
@@ -155,89 +152,93 @@ describe('dsh hooks writer', () => {
     await writeDshHooks(workspaceRoot, PROXY_URL, 'ws_test')
 
     const after = JSON.parse(await node_fs.readFile(manifestPath, 'utf-8'))
-    expect(after.dependencies['@intutic/gate']).toMatch(/^\^0\./)
+    // A range npm can actually satisfy with a `./dsh` export (2.0.0 is the
+    // first published version that has one; nothing ever matched ^0.x).
+    expect(after.dependencies['@intutic/gate']).toBe('^2.0.0')
     expect(after.dependencies['some-other-plugin']).toBe('^1.0.0')
     expect(after.dsh.profile.bundles).toEqual(['@deepseek-ai/dsh-base'])
   })
 
-  it("merges settings.yaml's llm-pi-ai.providers.intutic route, preserving other providers and sections", async () => {
-    await mkProfile(dshHome, 'myproject')
-    await node_fs.writeFile(
-      node_path.join(dshHome, 'settings.yaml'),
-      'someOtherSection:\n  key: value\nllm-pi-ai:\n  providers:\n    openai:\n      apiKeyEnv: OPENAI_API_KEY\n',
+  it('never rewrites an @intutic/gate declaration the profile already has (e.g. the one `dsh plugin add` wrote)', async () => {
+    const profileDir = await mkProfile(dshHome, 'myproject')
+    const manifestPath = node_path.join(profileDir, 'package.json')
+    const before = JSON.parse(await node_fs.readFile(manifestPath, 'utf-8'))
+    before.dependencies['@intutic/gate'] = 'file:/opt/local/gate-js'
+    await node_fs.writeFile(manifestPath, JSON.stringify(before, null, 2))
+    const bytesBefore = await node_fs.readFile(manifestPath, 'utf-8')
+
+    const { writeDshHooks } = await import('../../src/harness/dshHooks.js')
+    await writeDshHooks(workspaceRoot, PROXY_URL, 'ws_test')
+
+    expect(await node_fs.readFile(manifestPath, 'utf-8')).toBe(bytesBefore)
+  })
+
+  it("appends an llm-deepseek baseURL override row to the profile patch (dsh's DEFAULT route) and writes no settings.yaml", async () => {
+    const profileDir = await mkProfile(dshHome, 'myproject')
+    const { writeDshHooks } = await import('../../src/harness/dshHooks.js')
+    await writeDshHooks(workspaceRoot, PROXY_URL, 'ws_test')
+
+    const raw = await node_fs.readFile(node_path.join(profileDir, 'cordis.patch.yml'), 'utf-8')
+    const list = parseDocument(raw).toJS() as Array<Record<string, unknown>>
+    const rows = list.filter((r) => r.id === 'llm-deepseek')
+    expect(rows, raw).toEqual([{ id: 'llm-deepseek', config: { baseURL: PROXY_URL } }])
+    // dsh 0.2 imports-then-renames a harness-home settings.yaml; writing one
+    // would re-trigger that import on every boot.
+    expect(existsSync(node_path.join(dshHome, 'settings.yaml'))).toBe(false)
+  })
+
+  it('sets only baseURL on an EXISTING llm-deepseek override row, preserving its other fields and name assertion', async () => {
+    // The shape dsh 0.2's config-editor (and its one-time settings.yaml
+    // import) writes — observed live, see uat/evidence/live-verify/dsh-0.2.md.
+    const profileDir = await mkProfile(
+      dshHome,
+      'myproject',
+      "- id: llm-deepseek\n  name: '@deepseek-ai/dsh-llm-deepseek-api-key'\n  config:\n    reasoningEffort: max\n    apiKeyEnv: MY_DEEPSEEK_KEY\n    baseURL: https://api.deepseek.com/anthropic\n",
     )
-
     const { writeDshHooks } = await import('../../src/harness/dshHooks.js')
     await writeDshHooks(workspaceRoot, PROXY_URL, 'ws_test')
 
-    const raw = await node_fs.readFile(node_path.join(dshHome, 'settings.yaml'), 'utf-8')
-    const doc = parseDocument(raw)
-    const settings = doc.toJS() as {
-      someOtherSection?: { key?: string }
-      'llm-pi-ai'?: { providers?: Record<string, { baseURL?: string; apiKeyEnv?: string }> }
-    }
-    expect(settings.someOtherSection?.key).toBe('value')
-    expect(settings['llm-pi-ai']?.providers?.openai?.apiKeyEnv).toBe('OPENAI_API_KEY')
-    expect(settings['llm-pi-ai']?.providers?.intutic?.baseURL).toBe(PROXY_URL)
+    const raw = await node_fs.readFile(node_path.join(profileDir, 'cordis.patch.yml'), 'utf-8')
+    const rows = (parseDocument(raw).toJS() as Array<Record<string, unknown>>).filter((r) => r.id === 'llm-deepseek')
+    expect(rows).toEqual([
+      {
+        id: 'llm-deepseek',
+        name: '@deepseek-ai/dsh-llm-deepseek-api-key',
+        config: { reasoningEffort: 'max', apiKeyEnv: 'MY_DEEPSEEK_KEY', baseURL: PROXY_URL },
+      },
+    ])
   })
 
-  it("merges settings.yaml's llm-deepseek.baseURL (dsh's DEFAULT LLM route), preserving other llm-deepseek fields", async () => {
-    await mkProfile(dshHome, 'myproject')
-    await node_fs.writeFile(
-      node_path.join(dshHome, 'settings.yaml'),
-      'llm-deepseek:\n  apiKeyEnv: DEEPSEEK_API_KEY\n  thinking: enabled\n',
+  it('edits the LAST llm-deepseek override (the one the loader applies) and ignores insert-wrapped rows', async () => {
+    const profileDir = await mkProfile(
+      dshHome,
+      'myproject',
+      '- id: llm-deepseek\n  config:\n    reasoningEffort: low\n- insert:\n    - id: llm-deepseek-extra\n      name: x\n- id: llm-deepseek\n  config:\n    reasoningEffort: high\n',
     )
-
     const { writeDshHooks } = await import('../../src/harness/dshHooks.js')
     await writeDshHooks(workspaceRoot, PROXY_URL, 'ws_test')
 
-    const raw = await node_fs.readFile(node_path.join(dshHome, 'settings.yaml'), 'utf-8')
-    const doc = parseDocument(raw)
-    const settings = doc.toJS() as {
-      'llm-deepseek'?: { baseURL?: string; apiKeyEnv?: string; thinking?: string }
-    }
-    // The DEFAULT route's baseURL is redirected through the proxy...
-    expect(settings['llm-deepseek']?.baseURL).toBe(PROXY_URL)
-    // ...without disturbing the rest of that same section.
-    expect(settings['llm-deepseek']?.apiKeyEnv).toBe('DEEPSEEK_API_KEY')
-    expect(settings['llm-deepseek']?.thinking).toBe('enabled')
+    const list = parseDocument(await node_fs.readFile(node_path.join(profileDir, 'cordis.patch.yml'), 'utf-8')).toJS() as Array<Record<string, unknown>>
+    const rows = list.filter((r) => r.id === 'llm-deepseek')
+    expect(rows).toEqual([
+      { id: 'llm-deepseek', config: { reasoningEffort: 'low' } },
+      { id: 'llm-deepseek', config: { reasoningEffort: 'high', baseURL: PROXY_URL } },
+    ])
   })
 
-  it('seeds both llm-deepseek and llm-pi-ai sections on a fresh settings.yaml', async () => {
-    await mkProfile(dshHome, 'myproject')
+  it('appends the llm-deepseek row once (append-only fallback) when cordis.patch.yml does not parse', async () => {
+    const profileDir = node_path.join(dshHome, 'profiles', 'broken')
+    await node_fs.mkdir(profileDir, { recursive: true })
+    await node_fs.writeFile(node_path.join(profileDir, 'package.json'), JSON.stringify({ name: 'broken', dependencies: {} }))
+    await node_fs.writeFile(node_path.join(profileDir, 'cordis.patch.yml'), '- insert:\n    - id: timer\n   bad: indent\n')
 
     const { writeDshHooks } = await import('../../src/harness/dshHooks.js')
     await writeDshHooks(workspaceRoot, PROXY_URL, 'ws_test')
-
-    const raw = await node_fs.readFile(node_path.join(dshHome, 'settings.yaml'), 'utf-8')
-    const doc = parseDocument(raw)
-    const settings = doc.toJS() as {
-      'llm-deepseek'?: { baseURL?: string }
-      'llm-pi-ai'?: { providers?: Record<string, { baseURL?: string }> }
-    }
-    expect(settings['llm-deepseek']?.baseURL).toBe(PROXY_URL)
-    expect(settings['llm-pi-ai']?.providers?.intutic?.baseURL).toBe(PROXY_URL)
-  })
-
-  it('falls back to append-only text injection for BOTH llm sections when settings.yaml does not parse as YAML', async () => {
-    await mkProfile(dshHome, 'myproject')
-    const settingsPath = node_path.join(dshHome, 'settings.yaml')
-    const malformed = 'someKey: [unterminated\n'
-    await node_fs.writeFile(settingsPath, malformed)
-
-    const { writeDshHooks } = await import('../../src/harness/dshHooks.js')
     await writeDshHooks(workspaceRoot, PROXY_URL, 'ws_test')
 
-    const after = await node_fs.readFile(settingsPath, 'utf-8')
-    expect(after).toContain(malformed.trimEnd())
-    expect(after).toContain('llm-deepseek:')
-    expect(after).toContain('llm-pi-ai:')
-
-    // A second run must not duplicate either block.
-    await writeDshHooks(workspaceRoot, PROXY_URL, 'ws_test')
-    const afterSecond = await node_fs.readFile(settingsPath, 'utf-8')
-    expect(afterSecond.match(/llm-deepseek:/g)?.length).toBe(1)
-    expect(afterSecond.match(/llm-pi-ai:/g)?.length).toBe(1)
+    const after = await node_fs.readFile(node_path.join(profileDir, 'cordis.patch.yml'), 'utf-8')
+    expect(after.match(/id: llm-deepseek/g)?.length).toBe(1)
+    expect(after).toContain(`baseURL: ${JSON.stringify(PROXY_URL)}`)
   })
 
   it('writes $DSH_HOME/INSTALL.md naming every registered profile and the dsh plugin-add command', async () => {
@@ -367,26 +368,25 @@ describe('dsh settingsGuard tamper restore', () => {
     expect(restored).toContain('@intutic/gate/dsh')
   })
 
-  it('guardSettingsFile restores settings.yaml whose llm-pi-ai route was deleted', async () => {
-    await mkProfile(dshHome, 'myproject')
-    const settingsPath = node_path.join(dshHome, 'settings.yaml')
+  it('guardSettingsFile restores a profile cordis.patch.yml whose llm-deepseek egress row was deleted', async () => {
+    const profileDir = await mkProfile(dshHome, 'myproject')
+    const patchPath = node_path.join(profileDir, 'cordis.patch.yml')
 
     const { writeDshHooks } = await import('../../src/harness/dshHooks.js')
     await writeDshHooks(workspaceRoot, PROXY_URL, 'ws_test')
-    expect((await node_fs.readFile(settingsPath, 'utf-8')).includes('llm-pi-ai')).toBe(true)
 
-    await node_fs.writeFile(settingsPath, 'unrelated: true\n')
+    // Tamper: keep the plugin row, drop only the egress override.
+    const list = parseDocument(await node_fs.readFile(patchPath, 'utf-8')).toJS() as Array<Record<string, unknown>>
+    await node_fs.writeFile(patchPath, JSON.stringify(list.filter((r) => r.id !== 'llm-deepseek')))
+    expect(await node_fs.readFile(patchPath, 'utf-8')).not.toContain(PROXY_URL)
 
     const { guardSettingsFile } = await import('../../src/watcher/settingsGuard.js')
-    const tampered = await guardSettingsFile(settingsPath, workspaceRoot, [], PROXY_URL)
+    const tampered = await guardSettingsFile(patchPath, workspaceRoot, [], PROXY_URL)
     expect(tampered).toBe(true)
 
-    const restored = await node_fs.readFile(settingsPath, 'utf-8')
-    expect(restored).toContain('llm-pi-ai')
-    // The unrelated content settingsGuard's restore path went through
-    // (writeDshHooks -> mergeSettingsYaml) must survive — it re-parses
-    // whatever is on disk rather than starting from a blank slate.
-    expect(restored).toContain('unrelated: true')
+    const restored = await node_fs.readFile(patchPath, 'utf-8')
+    expect(restored).toContain('intutic-governance')
+    expect(restored).toContain(PROXY_URL)
   })
 
   it('guardSettingsFile restores a deleted profile cordis.patch.yml file entirely', async () => {
@@ -428,8 +428,7 @@ describe('dsh settingsGuard tamper restore', () => {
     const patchPath = node_path.join(profileDir, 'cordis.patch.yml')
     const restored = await node_fs.readFile(patchPath, 'utf-8')
     expect(restored).toContain('intutic-governance')
-    const settings = await node_fs.readFile(node_path.join(dshHome, 'settings.yaml'), 'utf-8')
-    expect(settings).toContain('llm-deepseek:')
+    expect(restored).toContain('llm-deepseek')
   })
 
   it('warnIfDshCoverageGap returns false and does not throw when dsh has never touched this machine', async () => {

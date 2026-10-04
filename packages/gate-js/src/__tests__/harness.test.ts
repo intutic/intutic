@@ -14,10 +14,14 @@
  *      round-trips our responses into continuations — not just that our
  *      types line up on paper.
  *
- * No live sandbox or HarnessAgent turn is exercised — that needs a Vercel
- * Sandbox deployment this environment does not have (see the TD entry this
- * phase filed). The runtime behaviour under test is this adapter's own
- * functions against a `FakeGate`, per wrapTools.test.ts's pattern.
+ *   3. A REAL `HarnessAgent` turn is driven against a fake adapter that
+ *      emits a builtin `bash` approval request exactly as the claude-code
+ *      bridge does (TD-415), proving the pause, the responder's verdict, and
+ *      the continuation through real framework code.
+ *
+ * No live sandbox is exercised — that needs a Vercel Sandbox deployment this
+ * environment does not have (see TD-416/TD-417). Gate decisions come from
+ * `FakeGate`-style stubs, per wrapTools.test.ts's pattern.
  */
 import { spawnSync } from 'node:child_process'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
@@ -31,8 +35,20 @@ import type {
   HarnessAgentToolApprovalConfiguration,
   HarnessAgentToolApprovalContinuation,
 } from '@ai-sdk/harness/agent'
-import { collectHarnessAgentToolApprovalContinuations, prepareHarnessSandboxTemplate } from '@ai-sdk/harness/agent'
-import type { HarnessV1BuiltinToolFiltering, HarnessV1NetworkPolicy, HarnessV1SandboxProvider } from '@ai-sdk/harness'
+import {
+  collectHarnessAgentToolApprovalContinuations,
+  HarnessAgent,
+  prepareHarnessSandboxTemplate,
+} from '@ai-sdk/harness/agent'
+import { HARNESS_V1_BUILTIN_TOOLS } from '@ai-sdk/harness'
+import type {
+  HarnessV1BuiltinToolFiltering,
+  HarnessV1NetworkPolicy,
+  HarnessV1PromptControl,
+  HarnessV1SandboxProvider,
+  HarnessV1StartOptions,
+  HarnessV1StreamPart,
+} from '@ai-sdk/harness'
 import type { ActiveTools, ModelMessage, Tool } from 'ai'
 import { IntuticGateRefusal } from '../errors.js'
 import { Gate, install } from '../gate.js'
@@ -137,11 +153,31 @@ describe('intuticApprovalResponder: allow path', () => {
     ])
     expect(continuations).toEqual([
       {
+        // Top level = the bare ToolApprovalResponse @ai-sdk/harness >= 1.0.101 reads.
+        type: 'tool-approval-response',
+        approvalId: 'ap_1',
+        approved: true,
+        // Nested = the { approvalResponse, toolCall } shape <= 1.0.100 reads.
         approvalResponse: { type: 'tool-approval-response', approvalId: 'ap_1', approved: true },
         toolCall: { type: 'tool-call', toolCallId: 'tc_1', toolName: 'read_file', input: { path: 'a.txt' } },
       },
     ])
     expect(gate.calls).toEqual([{ toolName: 'read_file', toolInput: { path: 'a.txt' } }])
+  })
+
+  it('each continuation IS its approval response at top level (the >= 1.0.101 contract, keyed by approvalId)', async () => {
+    // @ai-sdk/harness@1.0.101 changed toolApprovalContinuations to a bare
+    // ToolApprovalResponse[] and matches each by its top-level approvalId; an
+    // element without one is ignored and the paused turn never resumes
+    // (observed live in uat/evidence/live-verify/harness-docker/).
+    const respond = intuticApprovalResponder({ gate: new FakeGate('refuse') })
+    const [c] = await respond([
+      { approvalId: 'ap_9', toolCallId: 'tc_9', toolName: 'bash', input: { command: 'x' }, providerExecuted: true },
+    ])
+    const { approvalResponse, toolCall, ...topLevel } = c!
+    void toolCall
+    expect(topLevel).toEqual(approvalResponse)
+    expect(topLevel).toMatchObject({ type: 'tool-approval-response', approvalId: 'ap_9', approved: false, providerExecuted: true })
   })
 
   it('parses a pending-approval JSON-string input for both the gate and the continuation toolCall', async () => {
@@ -350,6 +386,228 @@ describe('recommendedHarnessSettings', () => {
 })
 
 // ------------------------------------------------------------------------
+// TD-415: built-in tools DO have a per-call approval pause — driven through
+// the REAL HarnessAgent.
+//
+// `@ai-sdk/harness-claude-code`'s in-sandbox bridge (dist/bridge/index.mjs,
+// 1.0.78 and still in 1.0.142) adds `ask` rules via
+// `createPermissionSettings` and routes the native `canUseTool` callback
+// through `nativeToolRequiresApproval` — `bash`-kind tools (Bash, Monitor)
+// under 'allow-edits', edit+bash kinds under 'allow-reads' — emitting a
+// providerExecuted `tool-call` plus a `tool-approval-request` and blocking on
+// the host's answer. `@ai-sdk/harness/agent` (dist/agent/index.js) turns that
+// part into a pending approval with `kind: "builtin"`, pauses the turn
+// (`finishForHostInputPause`), and on continuation delivers the decision via
+// the adapter control's `submitToolApproval` (`processPendingApprovalContinuation`).
+//
+// The fake adapter below reproduces exactly that wire behaviour (the bridge
+// itself needs a live sandbox); everything between it and the responder is
+// the real framework.
+// ------------------------------------------------------------------------
+
+describe('TD-415: a builtin bash approval pause, answered by intuticApprovalResponder through the REAL HarnessAgent', () => {
+  /** Refuses any call whose command contains `rm -rf` — a per-call verdict
+   *  on the arguments, not a per-tool switch. */
+  class CommandGate extends Gate {
+    calls: Array<{ toolName: string; toolInput: Record<string, unknown> }> = []
+    override async guard(toolName: string, toolInput: Record<string, unknown>): Promise<void> {
+      this.calls.push({ toolName, toolInput })
+      if (String(toolInput['command'] ?? '').includes('rm -rf')) {
+        throw new IntuticGateRefusal('recursive delete', 'TEST')
+      }
+    }
+  }
+
+  interface FakeBridgeLog {
+    startOptions: HarnessV1StartOptions[]
+    submittedApprovals: Array<{ approvalId: string; approved: boolean; reason?: string }>
+    executedCommands: string[]
+  }
+
+  const usage = {
+    inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
+    outputTokens: { total: 1, text: 1, reasoning: undefined },
+  }
+
+  /** Mirrors the claude-code bridge's `canUseTool` path for a bash-kind
+   *  native tool under a non-'allow-all' mode: emit the providerExecuted
+   *  tool-call + tool-approval-request, then wait for the host's decision;
+   *  the native tool runs only on `approved: true`. */
+  function fakeClaudeCodeLikeAdapter(command: string, log: FakeBridgeLog): HarnessAgentAdapter {
+    const approvalId = 'toolu_bash_1'
+    let resolveDecision!: (d: { approvalId: string; approved: boolean; reason?: string }) => void
+    const decision = new Promise<{ approvalId: string; approved: boolean; reason?: string }>((r) => {
+      resolveDecision = r
+    })
+    const control = (emit: (p: HarnessV1StreamPart) => void, done: Promise<void>): HarnessV1PromptControl => ({
+      submitToolResult: async () => {
+        throw new Error('no host tool in this test')
+      },
+      submitToolApproval: async (input) => {
+        log.submittedApprovals.push(input)
+        resolveDecision(input)
+      },
+      done,
+    })
+    return {
+      specificationVersion: 'harness-v1',
+      harnessId: 'fake-claude-code',
+      builtinTools: { bash: HARNESS_V1_BUILTIN_TOOLS.bash },
+      supportsBuiltinToolApprovals: true,
+      doStart: async (options: HarnessV1StartOptions) => {
+        log.startOptions.push(options)
+        return {
+          sessionId: options.sessionId,
+          isResume: false,
+          doPromptTurn: async ({ emit }) => {
+            emit({ type: 'stream-start' })
+            emit({
+              type: 'tool-call',
+              toolCallId: approvalId,
+              toolName: 'bash',
+              nativeName: 'Bash',
+              input: JSON.stringify({ command }),
+              providerExecuted: true,
+            })
+            emit({ type: 'tool-approval-request', approvalId, toolCallId: approvalId })
+            // The bridge's finishApprovalStep: the host side of this turn ends
+            // here; the native call stays blocked on requestToolApproval.
+            return control(emit, Promise.resolve())
+          },
+          doContinueTurn: async ({ emit }) => {
+            const done = (async () => {
+              const d = await decision
+              emit({ type: 'stream-start' })
+              if (d.approved) {
+                log.executedCommands.push(command)
+                emit({ type: 'tool-result', toolCallId: approvalId, toolName: 'bash', result: { stdout: 'ok' } })
+              }
+              // Closes the step that paused (the framework discards this
+              // first finish-step after a resumed approval).
+              emit({ type: 'finish-step', finishReason: { unified: 'tool-calls', raw: 'tool_use' }, usage })
+              // The model's follow-up step.
+              emit({ type: 'text-start', id: 't1' })
+              emit({
+                type: 'text-delta',
+                id: 't1',
+                delta: d.approved ? 'Listed the build dir.' : `Bash was denied: ${d.reason ?? ''}`,
+              })
+              emit({ type: 'text-end', id: 't1' })
+              emit({ type: 'finish-step', finishReason: { unified: 'stop', raw: 'end_turn' }, usage })
+              emit({ type: 'finish', finishReason: { unified: 'stop', raw: 'end_turn' }, totalUsage: usage })
+            })()
+            return control(emit, done)
+          },
+          doCompact: async () => {},
+          doSuspendTurn: async () => {
+            throw new Error('not exercised')
+          },
+          doDetach: async () => {
+            throw new Error('not exercised')
+          },
+          doStop: async () => {
+            throw new Error('not exercised')
+          },
+          doDestroy: async () => {},
+        }
+      },
+    }
+  }
+
+  function fakeSandboxProvider(): HarnessV1SandboxProvider {
+    const session = {
+      id: 'fake-sandbox',
+      defaultWorkingDirectory: '/sandbox',
+      ports: [],
+      getPortEndpoint: async () => ({ url: 'ws://unused' }),
+      getPortUrl: async () => 'ws://unused',
+      run: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
+      stop: async () => {},
+      restricted: () => session,
+    }
+    return {
+      specificationVersion: 'harness-sandbox-v1',
+      providerId: 'fake-sandbox-provider',
+      createSession: async () => session,
+    } as unknown as HarnessV1SandboxProvider
+  }
+
+  async function runPausedThenAnswered(command: string) {
+    const log: FakeBridgeLog = { startOptions: [], submittedApprovals: [], executedCommands: [] }
+    const gate = new CommandGate({ enforce: true })
+    // The per-call alternative to the default: keep bash ACTIVE (filterBash:
+    // false) under 'allow-edits', so every bash call pauses for the gate.
+    const { permissionMode } = recommendedHarnessSettings({ filterBash: false })
+    const agent = new HarnessAgent({
+      harness: fakeClaudeCodeLikeAdapter(command, log),
+      sandbox: fakeSandboxProvider(),
+      permissionMode,
+    })
+    const session = await agent.createSession()
+
+    const first = await agent.generate({ session, prompt: 'clean up the build dir' })
+    const pending = first.content.flatMap((part) =>
+      part.type === 'tool-approval-request'
+        ? [
+            {
+              approvalId: part.approvalId,
+              toolCallId: part.toolCall.toolCallId,
+              toolName: part.toolCall.toolName,
+              input: part.toolCall.input,
+              providerExecuted: part.toolCall.providerExecuted,
+            } satisfies HarnessApprovalRequest,
+          ]
+        : [],
+    )
+
+    // Nothing was submitted and nothing ran while the turn sat paused.
+    const pausedState = {
+      finishReason: first.finishReason,
+      pending,
+      submittedBeforeContinue: [...log.submittedApprovals],
+      executedBeforeContinue: [...log.executedCommands],
+    }
+
+    const toolApprovalContinuations = await intuticApprovalResponder({ gate })(pending)
+    const second = await agent.continueGenerate({ session, toolApprovalContinuations })
+    await session.destroy()
+    return { log, gate, pausedState, second }
+  }
+
+  it("the framework forwards permissionMode 'allow-edits' to the adapter and pauses the turn on the builtin approval request", async () => {
+    const { log, pausedState } = await runPausedThenAnswered('ls -la')
+    expect(log.startOptions[0]!.permissionMode).toBe('allow-edits')
+    expect(log.startOptions[0]!.builtinToolFiltering).toBeUndefined() // bash stays active
+    expect(pausedState.finishReason).toBe('tool-calls')
+    expect(pausedState.pending).toEqual([
+      { approvalId: 'toolu_bash_1', toolCallId: 'toolu_bash_1', toolName: 'bash', input: { command: 'ls -la' }, providerExecuted: true },
+    ])
+    expect(pausedState.submittedBeforeContinue).toEqual([])
+    expect(pausedState.executedBeforeContinue).toEqual([])
+  })
+
+  it('DENIES a destructive bash call: the decision reaches the adapter via submitToolApproval and bash never runs', async () => {
+    const { log, gate, second } = await runPausedThenAnswered('rm -rf /')
+    expect(gate.calls).toEqual([{ toolName: 'bash', toolInput: { command: 'rm -rf /' } }])
+    expect(log.submittedApprovals).toEqual([
+      { approvalId: 'toolu_bash_1', approved: false, reason: '[Intutic Governance] BLOCKED: recursive delete' },
+    ])
+    expect(log.executedCommands).toEqual([])
+    expect(second.text).toContain('[Intutic Governance] BLOCKED: recursive delete')
+    expect(second.finishReason).toBe('stop')
+  })
+
+  it('APPROVES a benign bash call: the continuation resumes the turn and the native tool runs', async () => {
+    const { log, gate, second } = await runPausedThenAnswered('ls -la')
+    expect(gate.calls).toEqual([{ toolName: 'bash', toolInput: { command: 'ls -la' } }])
+    expect(log.submittedApprovals).toEqual([{ approvalId: 'toolu_bash_1', approved: true }])
+    expect(log.executedCommands).toEqual(['ls -la'])
+    expect(second.text).toBe('Listed the build dir.')
+    expect(second.finishReason).toBe('stop')
+  })
+})
+
+// ------------------------------------------------------------------------
 // intuticSandboxBootstrap — TD-417 Half A
 // ------------------------------------------------------------------------
 
@@ -365,13 +623,24 @@ describe('intuticSandboxBootstrap', () => {
     expect(a.bootstrapHash).not.toBe(d.bootstrapHash) // workspace changed
   })
 
-  it('onBootstrap writes the rules file, the hook script, and .claude/settings.json under workDir', async () => {
+  /** Fake sandbox session: records writes, answers `printf "$HOME"`, and
+   *  serves `existing` files to readTextFile (null = absent, like the real one). */
+  function fakeSession(existing: Record<string, string> = {}, home = '/home/sandbox') {
     const written: Array<{ path: string; content: string }> = []
-    const session = {
+    return {
+      written,
       writeTextFile: async (opts: { path: string; content: string }) => {
         written.push(opts)
       },
+      readTextFile: async ({ path }: { path: string }) => existing[path] ?? null,
+      run: async ({ command }: { command: string }) =>
+        command.includes('$HOME') ? { exitCode: 0, stdout: home, stderr: '' } : { exitCode: 0, stdout: '', stderr: '' },
     }
+  }
+
+  it('onBootstrap writes the rules file, the hook script, and .claude/settings.json under workDir', async () => {
+    const session = fakeSession()
+    const written = session.written
     const bootstrap = intuticSandboxBootstrap({
       policySnapshotRules: 'destructive.rm_rf_root\tblock\t-\tcommand\tRecursive delete\t rm( +-[a-zA-Z-]+)+ +/( |\\*)\n',
     })
@@ -380,10 +649,15 @@ describe('intuticSandboxBootstrap', () => {
     const byPath = Object.fromEntries(written.map((w) => [w.path, w.content]))
     expect(Object.keys(byPath).sort()).toEqual(
       [
+        '/home/sandbox/.claude/settings.json',
         '/vercel/sandbox/claude-code-abc/.claude/settings.json',
         '/vercel/sandbox/claude-code-abc/.intutic/hooks/claude-code-check.js',
         '/vercel/sandbox/claude-code-abc/.intutic/hooks/policy-snapshot.rules',
       ].sort(),
+    )
+    // The user-level registration is identical to the project-level one.
+    expect(JSON.parse(byPath['/home/sandbox/.claude/settings.json']!)).toEqual(
+      JSON.parse(byPath['/vercel/sandbox/claude-code-abc/.claude/settings.json']!),
     )
     expect(byPath['/vercel/sandbox/claude-code-abc/.intutic/hooks/policy-snapshot.rules']).toContain(
       'destructive.rm_rf_root',
@@ -402,10 +676,34 @@ describe('intuticSandboxBootstrap', () => {
   })
 
   it('respects a custom bootstrapDir', async () => {
-    const written: Array<{ path: string }> = []
-    const session = { writeTextFile: async (opts: { path: string; content: string }) => void written.push(opts) }
+    const session = fakeSession()
     await intuticSandboxBootstrap({ bootstrapDir: '.custom-dir' }).onBootstrap({ session, workDir: '/w' })
-    expect(written.map((w) => w.path)).toContain('/w/.custom-dir/claude-code-check.js')
+    expect(session.written.map((w) => w.path)).toContain('/w/.custom-dir/claude-code-check.js')
+  })
+
+  it('merges into an existing user settings file instead of overwriting it', async () => {
+    const existing = JSON.stringify({ model: 'keep-me', hooks: { PreToolUse: [{ matcher: 'Read', hooks: [] }], Stop: [] } })
+    const session = fakeSession({ '/home/sandbox/.claude/settings.json': existing })
+    await intuticSandboxBootstrap().onBootstrap({ session, workDir: '/w' })
+    const user = JSON.parse(session.written.find((w) => w.path === '/home/sandbox/.claude/settings.json')!.content)
+    expect(user.model).toBe('keep-me')
+    expect(user.hooks.Stop).toEqual([])
+    expect(user.hooks.PreToolUse.map((h: { matcher: string }) => h.matcher)).toEqual([
+      'Read',
+      'Bash',
+      'Edit',
+      'Write',
+      'MultiEdit',
+      'mcp__.*',
+    ])
+  })
+
+  it('fails the bootstrap loudly when HOME cannot be resolved or user settings are unparseable', async () => {
+    await expect(intuticSandboxBootstrap().onBootstrap({ session: fakeSession({}, ''), workDir: '/w' })).rejects.toThrow(
+      /cannot resolve the sandbox HOME/,
+    )
+    const corrupt = fakeSession({ '/home/sandbox/.claude/settings.json': '{not json' })
+    await expect(intuticSandboxBootstrap().onBootstrap({ session: corrupt, workDir: '/w' })).rejects.toThrow(/not valid JSON/)
   })
 
   describe('driven through the REAL @ai-sdk/harness/agent orchestration', () => {
@@ -416,8 +714,10 @@ describe('intuticSandboxBootstrap', () => {
         run: async ({ command }: { command: string }) => {
           runCalls.push(command)
           if (command === 'pwd') return { exitCode: 0, stdout: '/vercel/sandbox', stderr: '' }
+          if (command.includes('$HOME')) return { exitCode: 0, stdout: '/home/vercel-sandbox', stderr: '' }
           return { exitCode: 0, stdout: '', stderr: '' } // mkdir -p
         },
+        readTextFile: async () => null,
         writeTextFile: async (opts: { path: string; content: string }) => {
           written.push(opts)
         },
@@ -464,6 +764,7 @@ describe('intuticSandboxBootstrap', () => {
       const paths = written.map((w) => w.path).sort()
       expect(paths).toEqual(
         [
+          '/home/vercel-sandbox/.claude/settings.json',
           '/vercel/sandbox/.claude/settings.json',
           '/vercel/sandbox/.intutic/hooks/claude-code-check.js',
           '/vercel/sandbox/.intutic/hooks/policy-snapshot.rules',

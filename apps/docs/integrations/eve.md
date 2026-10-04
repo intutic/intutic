@@ -3,7 +3,7 @@
 Integrate Intutic governance with [eve](https://github.com/vercel/eve) — Vercel's filesystem-first framework for **durable backend AI agents** (npm `eve`). An eve agent is a directory: `agent/` with `instructions.md`, `agent/tools/*.ts`, `agent/connections/*.ts`, `agent/hooks/*.ts`, which eve builds by walking the tree and compiles to Vercel Functions (with a local dev TUI).
 
 ::: warning PREVIEW — breaking changes possible
-eve is a pre-1.0, fast-moving product (`eve@0.39.1` at the time this integration was built; the repo is barely two months old and very active). `@intutic/gate/eve` was verified against a **pinned** real install of `eve@0.39.1` — its shipped type definitions and its runtime `defineTool`/`defineMcpClientConnection`/`defineHook` machinery — not against docs alone, matching the churn-shield posture the [dsh](/integrations/dsh) integration established. A preview product can still change its `approval` contract or hook event shapes out from under a pinned integration. See TD-410/TD-411/TD-412 in [TECH_DEBT.md](https://github.com/intutic/intutic/blob/main/docs/TECH_DEBT.md) for exactly what was confirmed and what remains open.
+eve is a pre-1.0, fast-moving product (`eve@0.39.1` at the time this integration was built; the repo is barely two months old and very active). `@intutic/gate/eve` was verified against a **pinned** real install of `eve@0.39.1` — its shipped type definitions and its runtime `defineTool`/`defineMcpClientConnection`/`defineHook` machinery — not against docs alone, matching the churn-shield posture the [dsh](/integrations/dsh) integration established. It was also run end to end on a self-hosted `eve build` + `eve start` server (local Workflow world, local sandbox) with a scripted model and no account or keys. The results are in the sections below. A preview product can still change its `approval` contract or hook event shapes out from under a pinned integration. See TD-410/TD-411/TD-412 in [TECH_DEBT.md](https://github.com/intutic/intutic/blob/main/docs/TECH_DEBT.md) for exactly what was confirmed and what remains open.
 :::
 
 eve is governed on three surfaces — two enforcing, one observing — and, like the [Vercel AI SDK](/integrations/vercel-ai-sdk) it is built on (`ai` v7), **LLM-egress routing is in-code only, and eve's default routing path cannot be proxied at all** (see the limitation below).
@@ -65,6 +65,12 @@ install(new Gate({ workspaceId: process.env.INTUTIC_WORKSPACE_ID }))
 
 On allow, `intuticApproval()` resolves to `'not-applicable'` — eve's own "no prompt needed" value, the same behaviour as an omitted `approval`. On deny, it resolves to `{ type: 'denied', reason }` with the `[Intutic Governance] BLOCKED: ...` message; the tool's `execute` never runs.
 
+Observed on a live `eve start` server (`eve@0.39.1`):
+
+- eve calls the policy before `execute`. On a denial the model receives an `execution-denied` result that carries the BLOCKED reason.
+- If the gate crashes with a non-refusal error, the policy throws and eve reports the turn as `failed`. The tool never runs, and eve parks the session so the user can retry.
+- When a call parked for `'user-approval'` is resumed, eve calls the policy again before executing it, including after a server restart. A human approval therefore cannot override a policy that has since started denying the call: the resumed call is refused.
+
 Want eve's human-in-the-loop flow **on top of** governance? Pass `{ onAllow: 'user-approval' }` — deny stays deny, but every governance-allowed call still parks for a person. For conditional flows (eve's `once()`, your own tenant policy), compose:
 
 ```ts
@@ -111,10 +117,20 @@ import { intuticAuditHooks } from '@intutic/gate/eve'
 export default defineHook(intuticAuditHooks())
 ```
 
-This subscribes to eve's `approval.candidate`/`approval.settled`/`input.requested` stream events and maps them onto Intutic's event vocabulary: a settled **approved** request emits `tool_allowed`, a settled **cancelled** request emits `tool_blocked` (labelled as a human veto, not a gate refusal), and anomalous candidate outcomes (`rejected`/`failed`/`timed-out`/`stale`) emit `tool_flagged`. Two honesty notes:
+This subscribes to eve's `input.requested`/`approval.candidate`/`approval.settled`/`input.resolved` stream events and maps them onto Intutic's event vocabulary: a settled **approved** request emits `tool_allowed`, a settled **cancelled** or **denied** request emits `tool_blocked` (labelled as a human veto, not a gate refusal), and anomalous candidate or resolution outcomes (`rejected`/`failed`/`timed-out`/`stale`, `ignored`/`invalid`) emit `tool_flagged`. Three notes:
 
 - eve hooks are **observe-only by eve's own contract** — they fire after events are durably recorded and cannot veto anything. This is telemetry for the dashboard, not enforcement; enforcement is step 2/3.
-- eve's `approval.candidate`/`approval.settled` events themselves **do not carry the tool name or input** (verified against the shipped protocol types) — but `intuticAuditHooks()` also subscribes to eve's third hookable event, `input.requested`, which fires once per batch of human-input requests and carries `requestId` AND `action.toolName` together for each one (confirmed against the shipped `InputRequest` zod schema). It emits a real, tool-identified `tool_flagged` at request time, and best-effort caches `requestId -> toolName` in memory so the LATER `approval.candidate`/`approval.settled` events also attribute to the real tool name — as long as that cache is still warm (same process, not yet evicted). When it is not — a genuinely long-parked, cross-restart approval, which eve's own docs confirm can survive a process restart — settlement falls back to the synthetic tool name `eve:approval` with the request id in the reason, exactly the prior behaviour, never worse.
+- eve's `approval.candidate`/`approval.settled` events themselves **do not carry the tool name or input** (verified against the shipped protocol types) — but `intuticAuditHooks()` also subscribes to eve's third hookable event, `input.requested`, which fires once per batch of human-input requests and carries `requestId` AND `action.toolName` together for each one (confirmed against the shipped `InputRequest` zod schema). It emits a real, tool-identified `tool_flagged` at request time, and best-effort caches `requestId -> toolName` in memory so the LATER `approval.candidate`/`approval.settled`/`input.resolved` events also attribute to the real tool name — as long as that cache is still warm (same process, not yet evicted). When it is not — a genuinely long-parked, cross-restart approval, which eve's own docs confirm can survive a process restart — settlement falls back to the synthetic tool name `eve:approval` with the request id in the reason, exactly the prior behaviour, never worse.
+- **Both approval forms are audited at settlement.** In `eve@0.39.1`, `approval.candidate` and `approval.settled` are emitted only for the configuration form, `approval: { request, response }`. A bare policy function, such as `approval: intuticApproval(...)`, settles through `input.resolved` instead, which carries the request id and outcome but no responder. `intuticAuditHooks()` reads both. The configuration form fires both events for the same request, `approval.settled` first, and the hook records that settlement once, from `approval.settled`, which also names the responder. The configuration form, with the gate as the request policy, looks like this:
+
+  ```ts
+  approval: {
+    request: intuticApproval({ onAllow: 'user-approval' }),
+    response: async (ctx) => ({ status: 'allowed' }), // decide whether ctx.responder may approve
+  },
+  ```
+
+  A pending call in this form must be answered with structured `inputResponses` (`{ requestId, optionId: 'approve' }`); eve does not accept a text "approve" for it. In a live run the events arrived in this order: `input.requested` when the call parked, then `approval.candidate` (`pending`), `approval.settled` and `input.resolved` when the responder answered. In the same process, the settlement was attributed to the real tool name. After a SIGKILL and restart between the two, it was attributed to `eve:approval`, as described above. `input.requested` was not re-delivered after the restart. A bare-policy approval resumed after a restart was recorded the same way, as one `tool_allowed` under `eve:approval`.
 
 ## Known, plain limitation: LLM egress
 
@@ -148,7 +164,7 @@ Same structural gaps as every SDK-gated framework — see [LangGraph's "What the
 
 - **No agent-level attach point.** A tool or connection whose definition omits `approval: intuticApproval(...)` is unguarded — there is no global default field to set and no build-step rewriting of your `agent/` directory. Coverage is exactly the tools/connections you attach it to.
 - **Framework default tools** (eve's built-in bash/file tools, `ask_question`, etc.) ship with their own definitions; gating one means overriding it in `agent/tools/` with an `approval` attached.
-- **No live end-to-end run was exercised** — the adapter is verified against eve's shipped types and real definition machinery (`defineTool`/`defineMcpClientConnection`/`defineHook` accept its exports at runtime), but not against a running `eve dev` session (TD-411).
+- **Verified live on a self-hosted server only.** The checks above ran on `eve build` + `eve start` with the default local Workflow world (`.eve/.workflow-data`), the `justbash()` sandbox, and a scripted `LanguageModel`, with no account or keys. Not exercised: a Vercel deployment (Vercel Workflow world, Vercel Sandbox and its snapshot and network policy), a real model provider or the AI Gateway, and `intuticConnectionApproval()` against a live MCP connection (TD-411).
 
 ## Config details
 
@@ -160,6 +176,6 @@ Same structural gaps as every SDK-gated framework — see [LangGraph's "What the
 | Format | Shell environment variables (LLM-egress vars are inert for eve's own model calls — see the limitation above) |
 | Write strategy | Atomic (write to `.intutic-tmp`, then rename) |
 | Tool gate | SDK-side (`@intutic/gate/eve`'s `intuticApproval()` / `intuticConnectionApproval()` on eve's per-tool/per-connection `approval` policies) — no sync-daemon hook file |
-| Audit | `intuticAuditHooks()` on eve's `approval.candidate`/`approval.settled`/`input.requested` hook events — observe-only, real tool-name attribution when the in-memory `requestId -> toolName` cache is warm, falling back to request-scoped (synthetic `eve:approval`) attribution when it is not |
+| Audit | `intuticAuditHooks()` on eve's `input.requested`/`approval.candidate`/`approval.settled`/`input.resolved` hook events — observe-only, real tool-name attribution when the in-memory `requestId -> toolName` cache is warm, falling back to request-scoped (synthetic `eve:approval`) attribution when it is not. A bare policy settles through `input.resolved`, the `{ request, response }` form through both `approval.settled` and `input.resolved`; each settlement is recorded once |
 | LLM-egress routing | In-code direct-provider path only (`withIntuticProxy(...)`); AI Gateway routing (eve's default) is not proxy-governable — TD-412 |
 | Status | **Preview** — pinned verification against `eve@0.39.1`; see TD-410 |

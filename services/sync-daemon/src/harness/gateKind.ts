@@ -140,6 +140,7 @@ export const SDK_GATED_HARNESSES: ReadonlySet<HarnessTypeT> = new Set([
   HarnessType.PYDANTIC_AI,
   HarnessType.SMOLAGENTS,
   HarnessType.STRANDS,
+  HarnessType.AGENT_FRAMEWORK,
   HarnessType.MASTRA,
   HarnessType.VERCEL_AI_SDK,
   HarnessType.EVE,
