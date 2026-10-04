@@ -30,16 +30,14 @@ import { parentPort } from 'node:worker_threads'
 import { unsupportedWasmImports, WASM_HOST_IMPORTS } from '@intutic/shared-types'
 import { createHostImports, newHostImportState } from './hostImports.js'
 import { ReferencedFiles, type ReferencedFilesTable } from './referencedFiles.js'
+import { capDeclaredMemory, WASM_PAGE_BYTES } from './memoryCap.js'
 
 /**
- * Guest memory ceiling, `runner.rs`'s 16MB `StoreLimits` (TD-440). V8 offers
- * no grow hook on a memory the module itself exports and `unsupportedWasmImports`
- * refuses an imported one, so this is enforced AFTER the call: a rule whose
- * memory grew past the ceiling has its verdict discarded and reported as a
- * failure (fail-open, like a trap), rather than being stopped mid-growth.
- * What it cannot do is bound the growth itself; that remainder stays in
- * TD-440. Checked before the call too, so a module that declares more than
- * the ceiling as its initial size never runs.
+ * Guest memory ceiling, `runner.rs`'s 16MB `StoreLimits` (TD-440). Enforced at
+ * load by `capDeclaredMemory`: the module's own memory is rewritten to declare
+ * this as its maximum, so V8 refuses any `memory.grow` past it (the call
+ * returns -1) instead of growing. A module whose initial size is already over
+ * it is refused, and so is an imported memory, which would sit outside the cap.
  */
 export const MAX_GUEST_MEMORY_BYTES = 16 * 1024 * 1024
 
@@ -100,7 +98,11 @@ function importsUsingReadReferencedFile(module: WebAssembly.Module): boolean {
 
 function handleCompile(msg: CompileMessage): void {
   try {
-    const module = new WebAssembly.Module(new Uint8Array(msg.bytes))
+    const capped = capDeclaredMemory(new Uint8Array(msg.bytes), MAX_GUEST_MEMORY_BYTES / WASM_PAGE_BYTES)
+    const module = new WebAssembly.Module(capped)
+    if (WebAssembly.Module.imports(module).some((i) => i.kind === 'memory')) {
+      throw new Error('WASM rule imports its memory; a rule must define and export its own')
+    }
     const unsupported = unsupportedWasmImports(module)
     if (unsupported.length > 0) {
       parentPort?.postMessage({
@@ -203,9 +205,6 @@ function handleEvaluate(msg: EvaluateMessage): void {
     }
     memoryHolder.current = memExport
     const memory = memExport
-    if (memory.buffer.byteLength > MAX_GUEST_MEMORY_BYTES) {
-      throw new Error(`WASM module declares ${memory.buffer.byteLength} bytes of initial memory, over the ${MAX_GUEST_MEMORY_BYTES}-byte ceiling`)
-    }
 
     const contextBytes = new Uint8Array(msg.bytes)
 
@@ -236,10 +235,6 @@ function handleEvaluate(msg: EvaluateMessage): void {
     // hostile length must not be able to buy extra time by doing so after
     // the verdict — same reasoning runner.rs states for its own placement.
     const reason = readGuestReason(exportsObj, memory)
-
-    if (memory.buffer.byteLength > MAX_GUEST_MEMORY_BYTES) {
-      throw new Error(`WASM rule grew guest memory to ${memory.buffer.byteLength} bytes, over the ${MAX_GUEST_MEMORY_BYTES}-byte ceiling; verdict discarded`)
-    }
 
     parentPort?.postMessage({ type: 'evaluate-result', id: msg.id, ruleId: msg.ruleId, ok: true, code, reason })
   } catch (err) {

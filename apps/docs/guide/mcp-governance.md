@@ -400,7 +400,7 @@ apply to that gate's unit of evaluation at all.
   claim (this server *is* dangerous, independent of your own history with
   it) that nothing here makes or relies on. This decline is about MCP
   *servers* specifically — a separate, narrower, opt-in integration
-  (Phase S4, TD-361) does check the sha256 hash of skill-bundled *scripts*
+  (Phase S4, TD-486) does check the sha256 hash of skill-bundled *scripts*
   against VirusTotal; see [Skill Scanning](/guide/skill-scanning#virustotal-hash-lookup-opt-in-hash-only)
   for that feature and why it does not reverse this decline.
 - **No automated promotion out of `candidate` status.** The registry table
