@@ -33,13 +33,14 @@ The Review tab shows each proposal as the cited passage beside the exact
 artifact the enforcer will read: for a hook rule, the very line a developer
 will see on stderr when it blocks.
 
-## Three targets, three enforcers
+## Four targets, four enforcers
 
 | The clause says | Target | Who enforces it | How it gets there |
 | :--- | :--- | :--- | :--- |
 | "never run *this* with *that* in the arguments" | `hook_rule` | the PreToolUse gate scripts in every connected harness, offline | the daemon's policy snapshot, refreshed every 30 s |
 | ordering, counts, denied tools, taint: `requires_before`, `forbid_after`, `max_calls`, `forbid_with`, `deny_tools`, `review_before` | `sop_front_matter` | the proxy's SOP detectors | the workspace SOP policy a gateway-mode proxy fetches; `intutic guardrails pull` for a proxy that reads SOPs from disk |
 | a context condition — which harness, role or environment may act, as a `wasm_predicate` clause | `wasm_rule` | a compiled WASM rule in the proxy | the rule-candidate pipeline: compiled from its source of record, gated, shadowed, promoted |
+| which models agents may use (`allowed_models`), or which hosts they may also reach (`egress_allow`) | `workspace_setting` | the proxy's approved-models check and its egress policy, through the workspace settings `allowedModels` and `egressAllow` | a promotion writes the setting, recorded as a settings change by the promoting member; retiring the guardrail undoes its own write |
 
 Hook rules are rendered from literal tool names and up to four literal
 argument fragments — the tool pattern is anchored, the argument pattern is a
@@ -68,8 +69,42 @@ There is no workspace setting, plan flag or feature flag that promotes a
 guardrail on its own; a test pins that none exists.
 
 Once promoted, the emitted artifact — a gate rule, a front-matter key, a
-compiled rule — is enforced by the same rung-1 machinery as a hand-authored
-one and is indistinguishable from it.
+compiled rule, a workspace setting — is enforced by the same rung-1 machinery
+as a hand-authored one and is indistinguishable from it.
+
+### Settings: allowed models and egress
+
+A settings-class guardrail proposes values for one workspace setting, and the
+card shows them beside the setting as it stands.
+
+- **Allowed models has a shadow.** Every request through the proxy is one
+  evaluation; a request whose model is outside the proposed list (narrowed by
+  the workspace's current list, if it has one) is a would-act, filed as a
+  shadowed finding with the request's trace id. Replay and the extraction
+  prompt read the same proxied requests — calls recorded by the OpenAI
+  Agents trace sink never went through the proxy and are not counted. It is
+  promoted under the same rule as any other guardrail, plus two refusals that
+  would otherwise lock the workspace out: the result is never empty, and no
+  live API key with its own model list is left with none of its models (the
+  refusal names the key by prefix). Zero would-acts over the 200 evaluations
+  is evidence that every request used a listed model, so it needs no
+  acknowledgement. Model ids are compared exactly, as the proxy compares
+  them. Promotion can only narrow the setting, and the setting, its
+  settings-change record and the promotion event are written together or not
+  at all. Retiring the guardrail puts back what was there before — but only
+  if the setting is still exactly what the guardrail wrote; a later change by
+  a person is left alone. Allowed-models guardrails unwind last in, first
+  out: while a newer one enforces, retiring or rejecting an older one is
+  refused and names the newer one to retire first.
+- **Egress has no shadow.** Would-deny decisions stay in the proxy's local
+  log, so nothing can measure an egress allow list and replay says so. It is
+  applied straight from proposed, by an owner or admin, with the same
+  acknowledgement a never-fired rule needs, and that caveat is recorded. It
+  only adds entries to `egressAllow` and never changes the egress mode;
+  entries take effect only while the mode is monitor or enforce. Retiring it
+  removes only the entries it brought in, and never one that another
+  enforcing egress guardrail still names — that entry stays until the last
+  guardrail naming it is retired.
 
 ## The citation travels
 
@@ -136,6 +171,11 @@ guardrail cites it.
   five-minute cache that a transition clears. No push exists.
 - **A gateway-mode proxy ignores the disk.** Pulled guardrail files are for a
   proxy that reads `.intutic/sops`; the two planes never merge.
+- **DLP rules are not generated.** A sentence about redacting or blocking
+  credentials, card numbers or personal data is answered as "no enforceable
+  rule". Data-loss patterns live only in the proxy's own configuration file —
+  there is no workspace setting to write them to — and a generated regular
+  expression would need a ReDoS check nothing here performs.
 
 ## From the terminal
 

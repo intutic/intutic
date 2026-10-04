@@ -398,7 +398,7 @@ guardrailsCmd
   .command('list')
   .description('List guardrails with their status and shadow evidence')
   .option('--status <status>', 'PROPOSED | SHADOW | ENFORCING | REJECTED | RETIRED')
-  .option('--target <target>', 'hook_rule | sop_front_matter | wasm_rule')
+  .option('--target <target>', 'hook_rule | sop_front_matter | wasm_rule | workspace_setting')
   .option('--doc <docId>', 'Only guardrails cited from this document')
   .option('--limit <n>', 'Max rows (default 50, capped at 200)')
   .option('--json', 'Output as JSON')
@@ -430,8 +430,8 @@ guardrailsCmd
 
 guardrailsCmd
   .command('promote <guardrailId>')
-  .description('Promote a shadow guardrail to enforcing once the server says it is ready')
-  .option('--acknowledge-no-traffic', 'Promote a rule that no observed traffic exercised')
+  .description('Promote a shadow guardrail to enforcing once the server says it is ready (an egress allow list is applied from proposed)')
+  .option('--acknowledge-no-traffic', 'Promote a rule that no observed traffic exercised, or apply an egress allow list, which has no shadow evidence')
   .option('--json', 'Output as JSON')
   .option('--dev', 'Use local control plane (http://localhost:3001)')
   .action(async (guardrailId, opts) => {
