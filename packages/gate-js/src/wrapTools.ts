@@ -29,7 +29,8 @@
  * rather than silently skipping enforcement.
  */
 
-import { active as activeGate, type Gate } from './gate.js'
+import type { Gate } from './gate.js'
+import { active as activeGate } from './registry.js'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type AnyFn = (...args: any[]) => any

@@ -1,0 +1,21 @@
+{
+  // Type-checks the tests (src/__tests__/**, excluded from the build config so
+  // they never reach dist/). vitest strips types without checking them, so
+  // without this pass the `_typeCheckOnly` assertions in the tests never
+  // compile. Run by this package's `typecheck` script.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "paths": {
+      // eve's shipped .d.ts files `import * as z from "zod"` without declaring
+      // zod as a dependency. An eve app always has its own zod 4 (eve tools
+      // need it), so that is what eve's types see there; inside this pnpm
+      // workspace the bare specifier would otherwise resolve to the hoisted
+      // zod 3, turning eve's enum fields into `unknown`. Point it at this
+      // package's zod 4 so the eve assertions check what a real app sees.
+      "zod": ["./node_modules/zod/index.d.cts"]
+    }
+  },
+  "include": ["src"],
+  "exclude": ["node_modules", "dist"]
+}

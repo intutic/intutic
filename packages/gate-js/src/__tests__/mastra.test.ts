@@ -148,6 +148,7 @@ function toolCallResult(toolCallId: string, toolName: string, input: unknown) {
     ],
     finishReason: { unified: 'tool-calls' as const, raw: undefined },
     usage: USAGE,
+    warnings: [],
   }
 }
 
@@ -156,6 +157,7 @@ function finalTextResult(text: string) {
     content: [{ type: 'text' as const, text }],
     finishReason: { unified: 'stop' as const, raw: undefined },
     usage: USAGE,
+    warnings: [],
   }
 }
 
@@ -188,6 +190,7 @@ describe('real @mastra/core Agent.generate() integration', () => {
     const agent = new Agent({
       id: 'ops',
       name: 'ops',
+      instructions: 'You run operations tasks.',
       model,
       tools: { delete_everything: deleteTool(() => (executed = true)) },
       hooks: intuticHooks({ gate }),
@@ -216,6 +219,7 @@ describe('real @mastra/core Agent.generate() integration', () => {
     const agent = new Agent({
       id: 'ops',
       name: 'ops',
+      instructions: 'You run operations tasks.',
       model,
       tools: { delete_everything: deleteTool(() => (executed = true)) },
       hooks: intuticHooks({ gate }),

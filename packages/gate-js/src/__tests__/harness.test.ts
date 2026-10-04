@@ -153,11 +153,31 @@ describe('intuticApprovalResponder: allow path', () => {
     ])
     expect(continuations).toEqual([
       {
+        // Top level = the bare ToolApprovalResponse @ai-sdk/harness >= 1.0.101 reads.
+        type: 'tool-approval-response',
+        approvalId: 'ap_1',
+        approved: true,
+        // Nested = the { approvalResponse, toolCall } shape <= 1.0.100 reads.
         approvalResponse: { type: 'tool-approval-response', approvalId: 'ap_1', approved: true },
         toolCall: { type: 'tool-call', toolCallId: 'tc_1', toolName: 'read_file', input: { path: 'a.txt' } },
       },
     ])
     expect(gate.calls).toEqual([{ toolName: 'read_file', toolInput: { path: 'a.txt' } }])
+  })
+
+  it('each continuation IS its approval response at top level (the >= 1.0.101 contract, keyed by approvalId)', async () => {
+    // @ai-sdk/harness@1.0.101 changed toolApprovalContinuations to a bare
+    // ToolApprovalResponse[] and matches each by its top-level approvalId; an
+    // element without one is ignored and the paused turn never resumes
+    // (observed live in uat/evidence/live-verify/harness-docker/).
+    const respond = intuticApprovalResponder({ gate: new FakeGate('refuse') })
+    const [c] = await respond([
+      { approvalId: 'ap_9', toolCallId: 'tc_9', toolName: 'bash', input: { command: 'x' }, providerExecuted: true },
+    ])
+    const { approvalResponse, toolCall, ...topLevel } = c!
+    void toolCall
+    expect(topLevel).toEqual(approvalResponse)
+    expect(topLevel).toMatchObject({ type: 'tool-approval-response', approvalId: 'ap_9', approved: false, providerExecuted: true })
   })
 
   it('parses a pending-approval JSON-string input for both the gate and the continuation toolCall', async () => {
@@ -603,13 +623,24 @@ describe('intuticSandboxBootstrap', () => {
     expect(a.bootstrapHash).not.toBe(d.bootstrapHash) // workspace changed
   })
 
-  it('onBootstrap writes the rules file, the hook script, and .claude/settings.json under workDir', async () => {
+  /** Fake sandbox session: records writes, answers `printf "$HOME"`, and
+   *  serves `existing` files to readTextFile (null = absent, like the real one). */
+  function fakeSession(existing: Record<string, string> = {}, home = '/home/sandbox') {
     const written: Array<{ path: string; content: string }> = []
-    const session = {
+    return {
+      written,
       writeTextFile: async (opts: { path: string; content: string }) => {
         written.push(opts)
       },
+      readTextFile: async ({ path }: { path: string }) => existing[path] ?? null,
+      run: async ({ command }: { command: string }) =>
+        command.includes('$HOME') ? { exitCode: 0, stdout: home, stderr: '' } : { exitCode: 0, stdout: '', stderr: '' },
     }
+  }
+
+  it('onBootstrap writes the rules file, the hook script, and .claude/settings.json under workDir', async () => {
+    const session = fakeSession()
+    const written = session.written
     const bootstrap = intuticSandboxBootstrap({
       policySnapshotRules: 'destructive.rm_rf_root\tblock\t-\tcommand\tRecursive delete\t rm( +-[a-zA-Z-]+)+ +/( |\\*)\n',
     })
@@ -618,10 +649,15 @@ describe('intuticSandboxBootstrap', () => {
     const byPath = Object.fromEntries(written.map((w) => [w.path, w.content]))
     expect(Object.keys(byPath).sort()).toEqual(
       [
+        '/home/sandbox/.claude/settings.json',
         '/vercel/sandbox/claude-code-abc/.claude/settings.json',
         '/vercel/sandbox/claude-code-abc/.intutic/hooks/claude-code-check.js',
         '/vercel/sandbox/claude-code-abc/.intutic/hooks/policy-snapshot.rules',
       ].sort(),
+    )
+    // The user-level registration is identical to the project-level one.
+    expect(JSON.parse(byPath['/home/sandbox/.claude/settings.json']!)).toEqual(
+      JSON.parse(byPath['/vercel/sandbox/claude-code-abc/.claude/settings.json']!),
     )
     expect(byPath['/vercel/sandbox/claude-code-abc/.intutic/hooks/policy-snapshot.rules']).toContain(
       'destructive.rm_rf_root',
@@ -640,10 +676,34 @@ describe('intuticSandboxBootstrap', () => {
   })
 
   it('respects a custom bootstrapDir', async () => {
-    const written: Array<{ path: string }> = []
-    const session = { writeTextFile: async (opts: { path: string; content: string }) => void written.push(opts) }
+    const session = fakeSession()
     await intuticSandboxBootstrap({ bootstrapDir: '.custom-dir' }).onBootstrap({ session, workDir: '/w' })
-    expect(written.map((w) => w.path)).toContain('/w/.custom-dir/claude-code-check.js')
+    expect(session.written.map((w) => w.path)).toContain('/w/.custom-dir/claude-code-check.js')
+  })
+
+  it('merges into an existing user settings file instead of overwriting it', async () => {
+    const existing = JSON.stringify({ model: 'keep-me', hooks: { PreToolUse: [{ matcher: 'Read', hooks: [] }], Stop: [] } })
+    const session = fakeSession({ '/home/sandbox/.claude/settings.json': existing })
+    await intuticSandboxBootstrap().onBootstrap({ session, workDir: '/w' })
+    const user = JSON.parse(session.written.find((w) => w.path === '/home/sandbox/.claude/settings.json')!.content)
+    expect(user.model).toBe('keep-me')
+    expect(user.hooks.Stop).toEqual([])
+    expect(user.hooks.PreToolUse.map((h: { matcher: string }) => h.matcher)).toEqual([
+      'Read',
+      'Bash',
+      'Edit',
+      'Write',
+      'MultiEdit',
+      'mcp__.*',
+    ])
+  })
+
+  it('fails the bootstrap loudly when HOME cannot be resolved or user settings are unparseable', async () => {
+    await expect(intuticSandboxBootstrap().onBootstrap({ session: fakeSession({}, ''), workDir: '/w' })).rejects.toThrow(
+      /cannot resolve the sandbox HOME/,
+    )
+    const corrupt = fakeSession({ '/home/sandbox/.claude/settings.json': '{not json' })
+    await expect(intuticSandboxBootstrap().onBootstrap({ session: corrupt, workDir: '/w' })).rejects.toThrow(/not valid JSON/)
   })
 
   describe('driven through the REAL @ai-sdk/harness/agent orchestration', () => {
@@ -654,8 +714,10 @@ describe('intuticSandboxBootstrap', () => {
         run: async ({ command }: { command: string }) => {
           runCalls.push(command)
           if (command === 'pwd') return { exitCode: 0, stdout: '/vercel/sandbox', stderr: '' }
+          if (command.includes('$HOME')) return { exitCode: 0, stdout: '/home/vercel-sandbox', stderr: '' }
           return { exitCode: 0, stdout: '', stderr: '' } // mkdir -p
         },
+        readTextFile: async () => null,
         writeTextFile: async (opts: { path: string; content: string }) => {
           written.push(opts)
         },
@@ -702,6 +764,7 @@ describe('intuticSandboxBootstrap', () => {
       const paths = written.map((w) => w.path).sort()
       expect(paths).toEqual(
         [
+          '/home/vercel-sandbox/.claude/settings.json',
           '/vercel/sandbox/.claude/settings.json',
           '/vercel/sandbox/.intutic/hooks/claude-code-check.js',
           '/vercel/sandbox/.intutic/hooks/policy-snapshot.rules',

@@ -2,7 +2,7 @@
 
 # Intutic — Policy as Code for Continuous Compliance & Continuous Enforcement for AI Agents
 
-**The circuit breaker for AI agents: your policies are files in git, enforced synchronously and in-process on every tool call across 42 agent harnesses.**
+**The circuit breaker for AI agents: your policies are files in git, enforced synchronously and in-process on every tool call across 43 agent harnesses.**
 
 [![GitHub Stars](https://img.shields.io/github/stars/intutic/intutic?style=social)](https://github.com/intutic/intutic)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
@@ -99,7 +99,7 @@ That's it! Your agent is now governed by real-time safety guardrails.
 | 🔐 **Secret DLP & Masking** | Automatically redacts API keys (`[REDACTED_SECRET]`), AWS credentials, and tokens in prompts & tool payloads. |
 | 💰 **Session Spend Ceilings** | Prevents "loop burn" by enforcing token spending ceilings per session (e.g. $5.00 limit). |
 | 🔄 **43 Harness Adapters** | Pre-configured support for Claude Code CLI, Cursor, Windsurf, Aider, Antigravity, OpenCode, DeepSeek dsh, Spotify Xirp, DoorDash Agentic Orchestrator, AWS Bedrock AgentCore Runtime, and more. |
-| 🤖 **Single & Multi-Agent Swarms** | Governs single developer tools as well as multi-agent graph/swarm workflows — LangGraph, LangChain, CrewAI, AutoGen, AG2, Google ADK, OpenAI Agents SDK, Pydantic AI, smolagents, and AWS Strands Agents each have a dedicated SDK-side gate (Python); Mastra, the Vercel AI SDK, and TrueForge (embedded) have the same on the TypeScript side (`@intutic/gate`). |
+| 🤖 **Single & Multi-Agent Swarms** | Governs single developer tools as well as multi-agent graph/swarm workflows — LangGraph, LangChain, CrewAI, AutoGen, AG2, Google ADK, OpenAI Agents SDK, Pydantic AI, smolagents, AWS Strands Agents, and Microsoft Agent Framework each have a dedicated SDK-side gate (Python); Mastra, the Vercel AI SDK, and TrueForge (embedded) have the same on the TypeScript side (`@intutic/gate`). |
 
 ---
 

@@ -27,6 +27,21 @@ import dshPlugin, {
   type DshToolExecution,
 } from '../dsh.js'
 
+// dsh declares its `tools/pre-execute` event on Cordis's `Events` interface
+// from its own package (`@deepseek-ai/dsh-tools`), which this package does
+// not depend on. Declaring the same signature here lets the integration test
+// below dispatch through the REAL typed `ctx.waterfall()` — and lets the real
+// `Context` be checked against dsh.ts's structural `CordisLikeContext` —
+// without casting either side to `never`.
+declare module '@deepseek-ai/cordis' {
+  interface Events {
+    'tools/pre-execute'(
+      exec: DshToolExecution,
+      next: () => Promise<DshPreToolDecision>,
+    ): Promise<DshPreToolDecision>
+  }
+}
+
 // Same pattern wrapTools.test.ts uses: a Gate whose guard() is fully
 // controllable, so these tests exercise the plugin's plumbing rather than
 // the four real tiers (already covered by gate.test.ts).
@@ -117,19 +132,15 @@ describe('apply(): real Cordis Context integration', () => {
     // enforce:false short-circuits Gate.guard() to an immediate allow (see
     // gate.ts's guard()) without touching the filesystem or network — this
     // test is about the Cordis wiring, not the four tiers' own behaviour.
-    apply(ctx as unknown as Parameters<typeof apply>[0], { enforce: false })
+    apply(ctx, { enforce: false })
     expect(active()).not.toBeNull()
 
     let builtinRan = false
     const exec: DshToolExecution = { name: 'read_file', arguments: { path: 'a.txt' } }
-    const decision: DshPreToolDecision = await ctx.waterfall(
-      'tools/pre-execute' as never,
-      exec as never,
-      (async () => {
-        builtinRan = true
-        return { kind: 'allow' }
-      }) as never,
-    )
+    const decision: DshPreToolDecision = await ctx.waterfall('tools/pre-execute', exec, async () => {
+      builtinRan = true
+      return { kind: 'allow' }
+    })
     expect(decision).toEqual({ kind: 'allow' })
     expect(builtinRan).toBe(true)
   })

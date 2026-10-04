@@ -121,6 +121,16 @@
  * reasoning and what a persistent (non-memory) correlation store would take
  * to close that residual gap.
  *
+ * TD-498: a live `eve start` run showed that `approval.candidate`/
+ * `approval.settled` fire ONLY for the `approval: { request, response }`
+ * form. The bare form this adapter documents (`approval: intuticApproval()`)
+ * settles through a fourth hookable event, `input.resolved` (`HookEventMap`,
+ * payload `InputResolvedStreamEvent` in `dist/src/protocol/message.d.ts`:
+ * `resolutions[]` of `{ kind, outcome, requestId, response? }`, no tool name).
+ * {@link intuticAuditHooks} subscribes to it as well, so bare-policy
+ * settlements are audited, with the same cache-or-synthetic tool naming; the
+ * `{ request, response }` form fires both events and is recorded once.
+ *
  * ## LLM egress — documented honestly, not oversold
  *
  * eve routes models through the Vercel AI Gateway by default (a gateway model
@@ -153,6 +163,9 @@ export { intuticProxyUrl, withIntuticProxy } from './vercel.js'
  *  `approval.candidate`/`approval.settled` events do not carry the real tool
  *  name (verified against `dist/src/protocol/message.d.ts`; see module doc). */
 export const EVE_APPROVAL_TOOL_NAME = 'eve:approval'
+
+/** Bound on the settlement-dedup set in {@link intuticAuditHooks}. */
+const MAX_TRACKED_SETTLEMENTS = 1024
 
 /** Structural copy of eve's `ApprovalStatus` — this package does not depend
  *  on `eve` at runtime, so the shape is declared here rather than imported.
@@ -407,6 +420,39 @@ export interface EveInputRequestedEvent {
   }
 }
 
+/**
+ * Structural copy of one element of eve's `InputResolvedStreamEvent.data.
+ * resolutions` (`InputResolution`, `dist/src/protocol/message.d.ts`): the
+ * server-accepted terminal outcome of one human-input request. Like
+ * `approval.settled` it carries no tool name — only `requestId`.
+ */
+export interface EveInputResolution {
+  readonly kind: 'question' | 'session-limit' | 'tool-approval'
+  readonly outcome: 'answered' | 'approved' | 'denied' | 'ignored' | 'invalid'
+  readonly requestId: string
+  readonly response?: {
+    readonly optionId?: string
+    readonly requestId: string
+    readonly text?: string
+  }
+}
+
+/** Structural copy of eve's `InputResolvedStreamEvent` — a hookable
+ *  `HookEventMap` key (`'input.resolved'`), fired once per batch of resolved
+ *  human-input requests. It is how a BARE approval policy
+ *  (`approval: intuticApproval(...)`) settles: eve emits `approval.candidate`/
+ *  `approval.settled` only for the `{ request, response }` form (observed on
+ *  a live `eve start` server, TD-498). */
+export interface EveInputResolvedEvent {
+  readonly type: 'input.resolved'
+  readonly data: {
+    readonly resolutions: readonly EveInputResolution[]
+    readonly sequence: number
+    readonly stepIndex: number
+    readonly turnId: string
+  }
+}
+
 /** Structural slice of eve's `HookContext` this adapter reads. The real
  *  context is wider (extends `SessionContext`, `agent.name` required) — the
  *  real type is assignable to this one. */
@@ -429,6 +475,10 @@ export interface EveAuditHookDefinition {
     ) => Promise<void>
     readonly 'approval.settled': (
       event: EveApprovalSettledEvent,
+      ctx: EveHookContext,
+    ) => Promise<void>
+    readonly 'input.resolved': (
+      event: EveInputResolvedEvent,
       ctx: EveHookContext,
     ) => Promise<void>
   }
@@ -477,6 +527,16 @@ export interface IntuticAuditHooksOptions {
  *   `timed-out`/`stale`) → `tool_flagged` — a responder's attempt to answer
  *   went somewhere worth an operator's attention. `'pending'` (a candidate
  *   simply being created) is routine lifecycle and deliberately NOT emitted.
+ * - `input.resolved`, one `kind: 'tool-approval'` resolution — the
+ *   settlement of a BARE approval policy, for which eve emits no
+ *   `approval.settled` — → `tool_allowed` for `'approved'`, `tool_blocked`
+ *   (a human veto, as above) for `'denied'`, and `tool_flagged` for any
+ *   other outcome (`'ignored'`/`'invalid'`).
+ *
+ * The `{ request, response }` approval form fires BOTH `approval.settled` and
+ * `input.resolved` for the same request (in that order, observed live); each
+ * settlement is recorded once, by whichever of the two arrives first — the
+ * richer `approval.settled`, which also names the responder, in practice.
  *
  * `approval.candidate`/`approval.settled` attribute to the REAL tool name
  * when this instance's in-memory `requestId -> toolName` cache (populated
@@ -504,6 +564,22 @@ export function intuticAuditHooks(opts: IntuticAuditHooksOptions = {}): EveAudit
   // this map empty and falls back to EVE_APPROVAL_TOOL_NAME, exactly this
   // function's behaviour before this cache existed. See TD-411.
   const requestIdToToolName = new Map<string, string>()
+
+  // A `{ request, response }` approval settles through BOTH `approval.settled`
+  // and `input.resolved`; a bare policy only through `input.resolved`. The
+  // first of the two to arrive claims the request id and records it; the
+  // second finds the claim, releases it and records nothing. A bare-policy
+  // claim is never released by a second event, so the set is capped (oldest
+  // first) to stay bounded in a long-lived process.
+  const settled = new Set<string>()
+  function claimSettlement(requestId: string): boolean {
+    if (settled.delete(requestId)) return false
+    settled.add(requestId)
+    if (settled.size > MAX_TRACKED_SETTLEMENTS) {
+      settled.delete(settled.values().next().value as string)
+    }
+    return true
+  }
 
   function clientFor(sessionId: string): GateClient | null {
     if (opts.client !== undefined) return opts.client
@@ -553,9 +629,10 @@ export function intuticAuditHooks(opts: IntuticAuditHooksOptions = {}): EveAudit
         )
       },
       'approval.settled': async (event, ctx) => {
-        const client = clientFor(ctx.session.id)
         const toolName = requestIdToToolName.get(event.data.requestId) ?? EVE_APPROVAL_TOOL_NAME
         requestIdToToolName.delete(event.data.requestId)
+        if (!claimSettlement(event.data.requestId)) return
+        const client = clientFor(ctx.session.id)
         if (client === null) return
         if (event.data.outcome === 'approved') {
           await client.emit(
@@ -575,6 +652,42 @@ export function intuticAuditHooks(opts: IntuticAuditHooksOptions = {}): EveAudit
             `Human veto recorded by the observe-only audit hook, not an Intutic gate refusal.`,
           event.data,
         )
+      },
+      'input.resolved': async (event, ctx) => {
+        // Claim every resolution before the first await, so an
+        // `approval.settled` for the same request handled concurrently sees
+        // the claim.
+        const toRecord: Array<{ resolution: EveInputResolution; toolName: string }> = []
+        for (const resolution of event.data.resolutions) {
+          if (resolution.kind !== 'tool-approval') continue
+          const toolName = requestIdToToolName.get(resolution.requestId) ?? EVE_APPROVAL_TOOL_NAME
+          requestIdToToolName.delete(resolution.requestId)
+          if (claimSettlement(resolution.requestId)) toRecord.push({ resolution, toolName })
+        }
+        if (toRecord.length === 0) return
+        const client = clientFor(ctx.session.id)
+        if (client === null) return
+        for (const { resolution, toolName } of toRecord) {
+          const request = `(request ${resolution.requestId})`
+          if (resolution.outcome === 'approved') {
+            await client.emit('tool_allowed', toolName, `eve approval resolved: approved ${request}`, resolution)
+          } else if (resolution.outcome === 'denied') {
+            await client.emit(
+              'tool_blocked',
+              toolName,
+              `eve approval resolved: denied — the parked tool call never ran ${request}. ` +
+                `Human veto recorded by the observe-only audit hook, not an Intutic gate refusal.`,
+              resolution,
+            )
+          } else {
+            await client.emit(
+              'tool_flagged',
+              toolName,
+              `eve approval resolved with outcome '${resolution.outcome}' ${request}`,
+              resolution,
+            )
+          }
+        }
       },
     },
   }

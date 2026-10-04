@@ -199,7 +199,11 @@ export function intuticProxyUrl(): string {
  * achieve the same effect for this framework.
  */
 export function withIntuticProxy<
-  TOptions extends { baseURL?: string },
+  // `| undefined` so a factory whose options parameter is OPTIONAL (every
+  // `@ai-sdk/*` `create*` export: `createOpenAI(options?: ...)`) infers its
+  // real options type here instead of collapsing to the bare `{ baseURL? }`
+  // constraint — which would reject `apiKey` and every other provider field.
+  TOptions extends { baseURL?: string } | undefined,
   TProvider,
 >(providerFactory: (options: TOptions) => TProvider, baseUrl?: string): (options: TOptions) => TProvider {
   const url = baseUrl ?? intuticProxyUrl()
