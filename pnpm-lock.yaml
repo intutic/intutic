@@ -97,8 +97,8 @@ importers:
         specifier: ^1.0.69
         version: 1.0.69(zod@4.4.3)
       '@anthropic-ai/sdk':
-        specifier: ^0.117.1
-        version: 0.117.1(zod@4.4.3)
+        specifier: ^0.131.0
+        version: 0.131.0(zod@4.4.3)
       '@deepseek-ai/cordis':
         specifier: ^4.0.1
         version: 4.0.1
@@ -108,6 +108,9 @@ importers:
       '@openai/agents':
         specifier: 0.16.1
         version: 0.16.1(@aws-sdk/credential-provider-node@3.972.81)(@smithy/signature-v4@5.7.2)(supports-color@8.1.1)(ws@8.21.1)(zod@4.4.3)
+      '@openai/agents-realtime':
+        specifier: 0.16.1
+        version: 0.16.1(@aws-sdk/credential-provider-node@3.972.81)(@smithy/signature-v4@5.7.2)(zod@4.4.3)
       '@truefoundry/trueforge-core':
         specifier: ^0.1.4
         version: 0.1.4(@aws-sdk/credential-provider-node@3.972.81)(@smithy/signature-v4@5.7.2)(hono@4.13.8)(redis@5.12.1(@opentelemetry/api@1.9.1))(supports-color@8.1.1)
@@ -608,8 +611,8 @@ packages:
     resolution: {integrity: sha512-zyZDJ4WS5TnjZZ5pqywTBFO9olW7QMtY2kf2dbLnu+UTzfc9ri/HGf27jRN2NTbX9FcRPxSqPqzUhF/BZIx0VA==}
     engines: {node: '>= 14.0.0'}
 
-  '@anthropic-ai/sdk@0.117.1':
-    resolution: {integrity: sha512-Yn2QlXfyCiKJ5YGCOOay7ZE78ISvII2XY621WMCiflmG8IYgwx59IBwPExxki3Xk9jKUtnD/Sj6UvplWr0rZxg==}
+  '@anthropic-ai/sdk@0.131.0':
+    resolution: {integrity: sha512-9+PepoU7qVMmM70jSahdnfcMHAvAnzhMOLv2W9WjRLO+OG/MAiBETkwKZqv7KIJ1Cj5h8eZ019bHzZaq+Mbepw==}
     hasBin: true
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
@@ -6902,7 +6905,7 @@ snapshots:
     dependencies:
       '@algolia/client-common': 5.54.0
 
-  '@anthropic-ai/sdk@0.117.1(zod@4.4.3)':
+  '@anthropic-ai/sdk@0.131.0(zod@4.4.3)':
     dependencies:
       json-schema-to-ts: 3.1.1
       standardwebhooks: 1.0.0
@@ -8072,7 +8075,7 @@ snapshots:
       - supports-color
       - ws
 
-  '@openai/agents-realtime@0.16.1(@aws-sdk/credential-provider-node@3.972.81)(@smithy/signature-v4@5.7.2)(supports-color@8.1.1)(zod@4.4.3)':
+  '@openai/agents-realtime@0.16.1(@aws-sdk/credential-provider-node@3.972.81)(@smithy/signature-v4@5.7.2)(zod@4.4.3)':
     dependencies:
       '@openai/agents-core': 0.16.1(@aws-sdk/credential-provider-node@3.972.81)(@smithy/signature-v4@5.7.2)(ws@8.21.3)(zod@4.4.3)
       '@types/ws': 8.18.1
@@ -8091,7 +8094,7 @@ snapshots:
     dependencies:
       '@openai/agents-core': 0.16.1(@aws-sdk/credential-provider-node@3.972.81)(@smithy/signature-v4@5.7.2)(supports-color@8.1.1)(ws@8.21.1)(zod@4.4.3)
       '@openai/agents-openai': 0.16.1(@aws-sdk/credential-provider-node@3.972.81)(@smithy/signature-v4@5.7.2)(supports-color@8.1.1)(ws@8.21.1)(zod@4.4.3)
-      '@openai/agents-realtime': 0.16.1(@aws-sdk/credential-provider-node@3.972.81)(@smithy/signature-v4@5.7.2)(supports-color@8.1.1)(zod@4.4.3)
+      '@openai/agents-realtime': 0.16.1(@aws-sdk/credential-provider-node@3.972.81)(@smithy/signature-v4@5.7.2)(zod@4.4.3)
       debug: 4.4.3(supports-color@8.1.1)
       openai: 7.5.0(@aws-sdk/credential-provider-node@3.972.81)(@smithy/signature-v4@5.7.2)(ws@8.21.1)(zod@4.4.3)
       zod: 4.4.3

@@ -36,14 +36,24 @@
  *    responder on the continuation path and treats `submitToolApproval` as an
  *    optimization when present ({@link intuticSubmitApprovals}).
  * 3. **Built-in sandbox tools are NOT governed by `toolApproval` at all.**
- *    They are governed only by `permissionMode: 'allow-reads' | 'allow-edits'
+ *    They are governed by `permissionMode: 'allow-reads' | 'allow-edits'
  *    | 'allow-all'`, which **defaults to `'allow-all'`** — the shipped doc
  *    comment says so verbatim: "Defaults to `'allow-all'`, preserving the
- *    existing bypass-permissions behavior unless users opt in." A HarnessAgent
- *    with default settings runs read/write/edit/bash/glob/grep in the sandbox
- *    with no approval step this gate could hook.
- *    {@link recommendedHarnessSettings} exists to steer callers off that
- *    default.
+ *    existing bypass-permissions behavior unless users opt in." Under
+ *    `'allow-all'` nothing pauses. Under the stricter modes the mode decides
+ *    WHICH built-ins pause, and each paused call is then a genuine per-call
+ *    approval this gate answers (TD-415, corrected): the
+ *    `@ai-sdk/harness-claude-code` bridge (`dist/bridge/index.mjs`,
+ *    `createPermissionSettings`/`nativeToolRequiresApproval`) adds `ask` rules
+ *    for bash-kind tools (`Bash`, `Monitor`) under `'allow-edits'`, and for
+ *    edit- and bash-kind tools under `'allow-reads'`, emitting a
+ *    `tool-approval-request` and blocking on the host's answer;
+ *    `@ai-sdk/harness/agent` records it as a pending approval with
+ *    `kind: 'builtin'`, pauses the turn, and delivers the continuation's
+ *    decision through the adapter's `submitToolApproval`. What never pauses:
+ *    read-kind built-ins (Read/Glob/Grep/WebFetch/...) in ANY mode, and
+ *    write/edit under `'allow-edits'`. {@link recommendedHarnessSettings}
+ *    exists to steer callers off the `'allow-all'` default.
  * 4. **Execution is server-side, in a sandbox.** The agent's tools run inside
  *    a microVM (`@ai-sdk/sandbox-vercel` and friends), NOT on the machine
  *    where the Intutic proxy runs — the laptop proxy cannot see sandbox
@@ -358,9 +368,10 @@ export interface IntuticStaticApprovalsOptions {
  * Two scope limits, stated plainly:
  *
  *   - This covers CUSTOM host-executed tools only. Built-in sandbox tools
- *     (read/write/edit/bash/...) never consult `toolApproval` — they are
- *     governed solely by `permissionMode`, which defaults to `'allow-all'`.
- *     See {@link recommendedHarnessSettings}.
+ *     (read/write/edit/bash/...) never consult `toolApproval` — which of them
+ *     pause is decided by `permissionMode` (default `'allow-all'`: none), and
+ *     a paused built-in reaches {@link intuticApprovalResponder} the same way
+ *     a custom tool's approval does. See {@link recommendedHarnessSettings}.
  *   - A tool absent from this record has status `undefined` =
  *     "not-applicable" and runs WITHOUT any approval pause. Pass the same
  *     `tools` record you give the agent (or every tool name), not a subset.
@@ -453,11 +464,13 @@ export interface RecommendedHarnessSettings {
    *     honour. So this recommendation is never a silent no-op for any
    *     adapter that accepts it at all.
    *
-   * What this does NOT close: TD-415's original per-call gap. This is a
-   * coarse, all-or-nothing exclusion decided once at session-construction
-   * time — never a `Gate.guard()`-evaluated verdict per call, and a
-   * workspace that genuinely needs `bash` available cannot use this
-   * filtering and is back to the original `permissionMode` gap for it.
+   * This is a coarse, all-or-nothing exclusion decided once at
+   * session-construction time — never a `Gate.guard()`-evaluated verdict per
+   * call. A workspace that genuinely needs `bash` passes `filterBash: false`
+   * and keeps `permissionMode: 'allow-edits'` (or `'allow-reads'`): every
+   * bash call then pauses as a builtin approval request and
+   * {@link intuticApprovalResponder} gives it a per-call verdict (see the
+   * `permissionMode` bullet on {@link recommendedHarnessSettings}).
    */
   inactiveTools?: readonly ['bash']
 }
@@ -469,9 +482,15 @@ export interface RecommendedHarnessSettings {
  *   - `permissionMode: 'allow-edits'` (or `'allow-reads'`) — because the
  *     framework's own default is `'allow-all'`, under which built-in sandbox
  *     tools (including `bash`) run with no approval surface this gate can
- *     reach. There is no per-call gate for built-ins at ANY permissionMode;
- *     the mode itself is the entire control, which is why steering it off
- *     `'allow-all'` matters.
+ *     reach. Under `'allow-edits'` every bash-kind built-in call pauses as a
+ *     `kind: 'builtin'` approval request that {@link intuticApprovalResponder}
+ *     answers per call; `'allow-reads'` adds write/edit to that. Read-kind
+ *     built-ins never pause in any mode — the mode is the only control for
+ *     them.
+ *   - `inactiveTools: ['bash']` (default) — removes bash outright. With the
+ *     default, bash calls never reach the gate because bash is never
+ *     callable; `filterBash: false` is the per-call alternative (bash stays
+ *     available and every call is gated as above).
  *   - a `networkPolicy` for the sandbox — `{ mode: 'deny-all' }` by default,
  *     or a `custom` allow-list (with the cloud-metadata CIDR denied) when
  *     `allowedHosts` is given. This is the honest egress-governance story for

@@ -20,7 +20,8 @@
  * adapter was built) was installed as a devDependency of this package and its
  * shipped `.d.ts` read directly (not inferred from docs alone; the Python
  * twin was checked the same way against `anthropic==0.122.0`, its own
- * latest):
+ * latest). Re-read against `@anthropic-ai/sdk@0.131.0` (TD-429 bump) — see
+ * "0.131 additions" below:
  *
  *   * `resources/beta/sessions/events.d.ts` — every request this module
  *     issues (`.list()`, `.send()`, `.stream()`) carries
@@ -29,7 +30,11 @@
  *     caller building a raw request.
  *   * `BetaManagedAgentsUserToolConfirmationEventParams` — the wire shape
  *     this module builds: `{ type: 'user.tool_confirmation', tool_use_id,
- *     result: 'allow' | 'deny', deny_message?, session_thread_id? }`.
+ *     result: 'allow' | 'deny', deny_message? }`. There is no
+ *     `session_thread_id` param (0.117.1 and 0.131.0 alike); on the
+ *     confirmation EVENT it is server-set, and 0.131's tool-use event doc says
+ *     the server routes the confirmation by `tool_use_id`, "so clients do not
+ *     send it back". Earlier versions of this module echoed it — removed.
  *   * `BetaManagedAgentsAgentToolUseEvent` and
  *     `BetaManagedAgentsAgentMCPToolUseEvent` both carry
  *     `evaluated_permission?: 'allow' | 'ask' | 'deny'`. A call the server
@@ -42,6 +47,21 @@
  *     or accepted); `'allow'` or unset means the call never paused at all.
  *     **This is the real, documented pre-execution veto this module answers
  *     — it is not observe-only.**
+ *   * **0.131 additions.** A third `permission_policy`, `auto`
+ *     (`BetaManagedAgentsAutoPolicy { type: 'auto' }`): the server judges each
+ *     invocation itself. The tool-use events gain an `evaluation` field
+ *     naming the policy that produced `evaluated_permission` (`always_allow`
+ *     | `always_ask` | `auto`, the last carrying the per-invocation
+ *     `BetaManagedAgentsAgentAutoEvaluatedPermission` — an OPEN union, with
+ *     an open `reason_code` registry). Its type "always equals the event's
+ *     top-level evaluated_permission", so this module keeps reading only the
+ *     top-level value: an `auto` judgement of `ask` pauses and is answered
+ *     exactly like an `always_ask` one, `auto` `allow`/`deny` need no answer,
+ *     and unknown `evaluation` variants are never inspected, so they cannot
+ *     change a verdict or crash. Subagent pauses are cross-posted to the
+ *     primary thread's stream with `session_thread_id` set (informational);
+ *     the per-instance `answered` set keeps a pause seen on both the list and
+ *     the stream to one confirmation.
  *   * `lib/tools/SessionToolRunner.d.ts` is Anthropic's OWN reference
  *     dispatcher: it executes `agent.tool_use` / `agent.custom_tool_use`
  *     calls and posts results, but it does **not** decide `allow`/`deny` for
@@ -140,7 +160,9 @@ import { IntuticGateRefusal } from './errors.js'
 // ---------------------------------------------------------------------------
 // Structural copies of the @anthropic-ai/sdk shapes this adapter touches.
 // Confirmed field-for-field against @anthropic-ai/sdk@0.117.1's shipped
-// resources/beta/sessions/events.d.ts (see module doc). This package does
+// resources/beta/sessions/events.d.ts, re-read at 0.131.0 (see module doc).
+// `__tests__/managedAgents.test.ts`'s `_typeCheckOnly` pins assignability in
+// both directions that matter. This package does
 // not depend on the SDK at runtime, so the shapes are declared here rather
 // than imported.
 // ---------------------------------------------------------------------------
@@ -158,6 +180,12 @@ export interface AgentToolUseEventLike {
   name: string
   input: Record<string, unknown>
   evaluated_permission?: 'allow' | 'ask' | 'deny' | null
+  /** 0.131+: which policy produced `evaluated_permission`. Never read by this
+   *  module (the top-level value is authoritative) — typed `unknown` so any
+   *  current or future variant passes through. */
+  evaluation?: unknown
+  /** Set when the pause was cross-posted from a subagent thread.
+   *  Informational only — never echoed into the confirmation. */
   session_thread_id?: string | null
 }
 
@@ -169,6 +197,7 @@ export interface AgentMcpToolUseEventLike {
   mcp_server_name: string
   input: Record<string, unknown>
   evaluated_permission?: 'allow' | 'ask' | 'deny' | null
+  evaluation?: unknown
   session_thread_id?: string | null
 }
 
@@ -184,12 +213,13 @@ export interface AgentCustomToolUseEventLike {
 
 /** Any session event — this module inspects only `.type` (and, for the
  *  confirmable two, the fields above) so a wider real event passes through
- *  this structural type untouched. */
+ *  this structural type untouched. No index signature: the SDK's events are
+ *  interfaces, which TypeScript will not assign to an index-signature type. */
 export type ManagedAgentsSessionEventLike =
   | AgentToolUseEventLike
   | AgentMcpToolUseEventLike
   | AgentCustomToolUseEventLike
-  | { id?: string; type: string; tool_use_id?: string; [key: string]: unknown }
+  | { id?: string; type: string; tool_use_id?: string }
 
 /** Structural copy of `BetaManagedAgentsUserToolConfirmationEventParams` —
  *  exactly what this module sends via `events.send()`. */
@@ -198,8 +228,11 @@ export interface UserToolConfirmationParams {
   tool_use_id: string
   result: 'allow' | 'deny'
   deny_message?: string
-  session_thread_id?: string
 }
+
+/** The event types {@link IntuticSessionConfirmer.poll} filters `list()` to —
+ *  a subset of the SDK's `BetaManagedAgentsSessionEventType`. */
+export type ManagedAgentsListedEventType = 'agent.tool_use' | 'agent.mcp_tool_use' | 'user.tool_confirmation'
 
 /** Structural slice of `client.beta.sessions.events` — only the three
  *  methods this module calls, positional-argument-compatible with the real
@@ -208,7 +241,7 @@ export interface UserToolConfirmationParams {
 export interface ManagedAgentsSessionEventsClientLike {
   list(
     sessionId: string,
-    params?: { limit?: number; types?: string[] },
+    params?: { limit?: number; types?: ManagedAgentsListedEventType[] },
   ): AsyncIterable<ManagedAgentsSessionEventLike>
   send(
     sessionId: string,
@@ -299,13 +332,11 @@ export async function confirmationForEvent(
     }
   }
 
+  // No session_thread_id: the server routes by tool_use_id (module doc).
   const result: UserToolConfirmationParams = {
     type: 'user.tool_confirmation',
     tool_use_id: eventId,
     result: 'allow',
-  }
-  if (typed.session_thread_id) {
-    result.session_thread_id = typed.session_thread_id
   }
 
   let g: Gate
