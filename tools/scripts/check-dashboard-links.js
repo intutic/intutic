@@ -31,9 +31,19 @@
  *
  * Paths are matched against the `path: '…'` routes in the dashboard router.
  * A `${…}` segment becomes `:id`, which only a `$param` route segment accepts
- * (`/incidents/${id}` matches `/incidents/$incidentId`). Query strings are
+ * (`/findings/incidents/${id}` matches `/findings/incidents/$incidentId`). Query strings are
  * stripped first: whether a page honours `?tab=` is the page's business.
  * `/api/…` links are served by the control plane and skipped.
+ *
+ * Resolving is not enough once pages move. The dashboard keeps every old path
+ * alive as a redirect (`LEGACY_REDIRECTS` in apps/dashboard/src/routes/
+ * legacyRedirects.ts) because sent emails, Slack messages and Stripe sessions
+ * carry them — but a link the backend emits *today* must name the canonical
+ * page, not lean on a redirect. So every link is also checked against the
+ * `from: '…'` paths of that file (`$param` segments match any one segment) and
+ * a match fails with the redirect's target. The file is a list of old paths,
+ * never a source of links, and its paths are not routes. When it is absent
+ * (before the redirects exist), this half has nothing to check.
  *
  * Usage: node tools/scripts/check-dashboard-links.js [repo-root]
  *
@@ -45,6 +55,7 @@ import { join, relative, resolve, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const ROUTER = 'apps/dashboard/src/main.tsx'
+const LEGACY_REDIRECTS = 'apps/dashboard/src/routes/legacyRedirects.ts'
 const CONTROL_PLANE_SRC = 'services/control-plane/src'
 
 const URL_KEY = /^(url|href|link)$|(Url|_url|URL)$/
@@ -54,9 +65,24 @@ const APP_URL_NAMES = ['APP_URL', 'appUrl']
 const APP = '\u0000APP\u0000'
 const APP_LINK = new RegExp(`${APP}(\\/(?:[^\\s"'<>\`,)\\\\]|\\$\\{[^}]*\\})*)`, 'g')
 
-/** Registered route paths, e.g. `/incidents`, `/login/magic`, `/sops/$sopId`. */
+/** Registered route paths, e.g. `/findings/incidents`, `/login/magic`, `/policies/guidelines/$sopId`. */
 export function registeredRoutes(routerSource) {
   return new Set([...routerSource.matchAll(/path:\s*'([^']+)'/g)].map((m) => m[1]))
+}
+
+/**
+ * The old paths in legacyRedirects.ts, `from` → `to` (`to` may be null when an
+ * entry computes it). Only `from:` and `to:` string literals are read.
+ */
+export function legacyRedirects(source) {
+  const legacy = new Map()
+  const froms = [...source.matchAll(/\bfrom:\s*(['"`])([^'"`]+)\1/g)]
+  froms.forEach((m, i) => {
+    const rest = source.slice(m.index + m[0].length, froms[i + 1]?.index ?? source.length)
+    const to = rest.match(/\bto:\s*(['"`])([^'"`]+)\1/)
+    legacy.set(linkPath(m[2]), to ? to[2] : null)
+  })
+  return legacy
 }
 
 /**
@@ -191,7 +217,10 @@ function walk(dir, out = []) {
     const full = join(dir, entry.name)
     if (entry.isDirectory()) {
       if (entry.name !== '__tests__' && entry.name !== 'node_modules') walk(full, out)
-    } else if (entry.isFile() && full.endsWith('.ts') && !/\.(test|spec)\.ts$/.test(full) && !full.endsWith('.d.ts')) {
+    } else if (
+      entry.isFile() && full.endsWith('.ts') && !/\.(test|spec)\.ts$/.test(full) && !full.endsWith('.d.ts') &&
+      !full.endsWith(LEGACY_REDIRECTS)
+    ) {
       out.push(full)
     }
   }
@@ -212,14 +241,25 @@ export async function main(argv) {
     return 1
   }
 
+  const legacyFile = join(root, LEGACY_REDIRECTS)
+  const legacy = existsSync(legacyFile) ? legacyRedirects(readFileSync(legacyFile, 'utf8')) : null
+  if (legacy && legacy.size === 0) {
+    console.error(`[FAIL] no \`from:\` paths parsed from ${LEGACY_REDIRECTS} — the legacy-path half would pass vacuously.`)
+    return 1
+  }
+  const legacyPaths = new Set(legacy?.keys() ?? [])
+
   const counts = { 'app-url': 0, relative: 0 }
   const broken = []
+  const stale = []
   for (const file of walk(join(root, CONTROL_PLANE_SRC))) {
     for (const link of extractLinks(ts, readFileSync(file, 'utf8'), file)) {
       const path = linkPath(link.raw)
       if (path === '/api' || path.startsWith('/api/')) continue
       counts[link.kind]++
-      if (!matchesRoute(path, routes)) broken.push({ file: relative(root, file), ...link, path })
+      const old = [...legacyPaths].find((from) => matchesRoute(path, new Set([from])))
+      if (old) stale.push({ file: relative(root, file), ...link, path, from: old, to: legacy.get(old) })
+      else if (!matchesRoute(path, routes)) broken.push({ file: relative(root, file), ...link, path })
     }
   }
   for (const [kind, n] of Object.entries(counts)) {
@@ -227,6 +267,16 @@ export async function main(argv) {
       console.error(`[FAIL] no ${kind} dashboard links found under ${CONTROL_PLANE_SRC} — the Slack adapter and notification router both emit them, so the extractor is broken and this half would pass vacuously.`)
       return 1
     }
+  }
+
+  if (stale.length > 0) {
+    console.error(`\n[FAIL] ${stale.length} dashboard link(s) use a legacy path that only survives as a redirect:\n`)
+    for (const b of stale) {
+      console.error(`  ${b.file}:${b.line}  (${b.kind})`)
+      console.error(`    ${b.raw}`)
+      console.error(`    ${b.path} matches the legacy path ${b.from}${b.to ? `, which redirects to ${b.to}` : ''}\n`)
+    }
+    console.error(`Link to the canonical page instead; ${LEGACY_REDIRECTS} is for URLs already sent.\n`)
   }
 
   if (broken.length > 0) {
@@ -243,12 +293,13 @@ export async function main(argv) {
     console.error('\nRegistered routes:')
     console.error('  ' + [...routes].sort().join('\n  '))
     console.error(`\nEither link to a route that exists, or add the route to ${ROUTER}.\n`)
-    return 1
   }
+  if (stale.length > 0 || broken.length > 0) return 1
 
   console.log(
     `✓ all ${counts['app-url'] + counts.relative} dashboard link(s) under ${CONTROL_PLANE_SRC} ` +
-      `(${counts['app-url']} app-URL, ${counts.relative} relative) resolve to one of ${routes.size} registered route(s).`,
+      `(${counts['app-url']} app-URL, ${counts.relative} relative) resolve to one of ${routes.size} registered route(s)` +
+      (legacy ? ` and none uses one of ${legacy.size} legacy path(s).` : ` (no ${LEGACY_REDIRECTS}, so no legacy-path check).`),
   )
   return 0
 }
