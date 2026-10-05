@@ -3,7 +3,7 @@
  * Dashboard style gate: colours and custom properties come from the design
  * tokens, not from literals scattered through components.
  *
- * Four checks, each over `apps/dashboard/src`:
+ * Six checks, each over `apps/dashboard/src`:
  *
  *   css-raw-color          A hex colour, or an rgb()/rgba()/hsl()/hsla()/oklch()
  *                          call outside any var(…), in a .css file. (The
@@ -22,6 +22,14 @@
  *                          fallback differs from every value --x is given
  *                          (either theme's value is fine). A fallback that
  *                          disagrees with its token is a second, silent theme.
+ *   invalid-var            var(--x.y) or any other first argument that starts
+ *                          with `--` but is not a valid custom-property name.
+ *                          A browser drops the whole declaration, so the
+ *                          style silently never applies (`var(--space-2.5)`
+ *                          resolved to nothing in 95 places before PR 1b).
+ *   no-glass               The retired glass look: a class name containing
+ *                          `glass` (CSS selector or TS literal class list) or a
+ *                          backdrop-filter (CSS property or TS style key).
  *
  * TS literals come from a full parse (`ts.createSourceFile`), not a bare
  * `ts.createScanner` loop: without parser context the scanner reads the
@@ -58,12 +66,14 @@ const CHECKS = {
   'ts-raw-color': 'raw colour in a TS/TSX string literal (use a design token)',
   'undefined-var': 'CSS custom property used but defined nowhere',
   'var-fallback-mismatch': 'var() fallback disagrees with the token it falls back for',
+  'invalid-var': 'var() names something that is not a valid custom property, so the declaration is dropped',
+  'no-glass': 'glass look (glass class or backdrop-filter); use the card and surface tokens',
 };
 
 // Excluded from css-raw-color only: these files define the dashboard palette.
 // They are still scanned for custom-property definitions and var() usage.
 // Deleted in PR 5c.
-const EXCLUDED_FILES = ['globals.css', 'glass.css', 'animations.css'];
+const EXCLUDED_FILES = ['globals.css', 'animations.css'];
 
 // Common standard branding and utility colors allowed globally in CSS.
 // Deleted in PR 5c.
@@ -147,7 +157,7 @@ function findVarCalls(text) {
     const open = m.index + 3;
     const close = closingParen(text, open);
     if (close === -1) {
-      calls.push({ start: m.index, end: text.length, name: null, fallback: null, complete: false });
+      calls.push({ start: m.index, end: text.length, name: null, invalidName: null, fallback: null, complete: false });
       continue;
     }
     const inner = text.slice(open + 1, close);
@@ -160,10 +170,12 @@ function findVarCalls(text) {
       else if (c === ',' && depth === 0) { comma = i; break; }
     }
     const rawName = (comma === -1 ? inner : inner.slice(0, comma)).trim();
+    const valid = CUSTOM_PROPERTY.test(rawName);
     calls.push({
       start: m.index,
       end: close + 1,
-      name: CUSTOM_PROPERTY.test(rawName) ? rawName : null,
+      name: valid ? rawName : null,
+      invalidName: !valid && rawName.startsWith('--') ? rawName : null,
       fallback: comma === -1 ? null : inner.slice(comma + 1).trim(),
       complete: true,
     });
@@ -294,6 +306,40 @@ function tsLiteralColor(text) {
   return fn ? `colour function ${fn.call.replace(/\s+/g, ' ')}` : null;
 }
 
+// "Break glass" (emergency overrides, /break-glass) is a product term, not the look.
+const isGlassClass = (name) => /glass/i.test(name.replace(/break-?glass/gi, ''));
+
+/** no-glass in CSS: glass selectors and backdrop-filter declarations. */
+function cssGlass(css) {
+  const content = blankCssComments(css);
+  const out = [];
+  const selector = /\.([\w-]*glass[\w-]*)/gi;
+  let m;
+  while ((m = selector.exec(content)) !== null) {
+    if (isGlassClass(m[1])) out.push({ line: lineAt(content, m.index), message: `glass class .${m[1]}` });
+  }
+  const backdrop = /(?<![\w-])(?:-webkit-)?backdrop-filter\s*:/gi;
+  while ((m = backdrop.exec(content)) !== null) {
+    out.push({ line: lineAt(content, m.index), message: 'backdrop-filter' });
+  }
+  return out;
+}
+
+/** no-glass in TS: a class-list literal naming a glass class, or a backdropFilter style key. */
+function tsGlass(source, literals) {
+  const out = [];
+  for (const lit of literals) {
+    const cls = lit.text.split(/\s+/).find((token) => /^[\w-]+$/.test(token) && isGlassClass(token));
+    if (cls) out.push({ line: lit.line, message: `glass class ${cls}` });
+  }
+  const key = /(?<![\w$])(?:Webkit|webkit)?[bB]ackdropFilter(?![\w$])/g;
+  let m;
+  while ((m = key.exec(source)) !== null) {
+    out.push({ line: lineAt(source, m.index), message: 'backdropFilter' });
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Whole-tree collection
 // ---------------------------------------------------------------------------
@@ -335,6 +381,7 @@ function collectViolations(root) {
   const usages = [];
   const collectUsages = (file, text, baseLine, lineOf) => {
     for (const c of findVarCalls(text)) {
+      if (c.invalidName) add('invalid-var', file, lineOf ? lineOf(c.start) : baseLine, `var(${c.invalidName}) is not a valid custom property`);
       if (!c.complete || !c.name) continue;
       usages.push({ file, line: lineOf ? lineOf(c.start) : baseLine, name: c.name, fallback: c.fallback });
     }
@@ -349,11 +396,15 @@ function collectViolations(root) {
       if (!EXCLUDED_FILES.includes(path.basename(full))) {
         for (const v of cssRawColors(css, path.basename(full))) add('css-raw-color', file, v.line, v.message);
       }
+      for (const v of cssGlass(css)) add('no-glass', file, v.line, v.message);
       for (const d of cssDefinitions(css)) define(d.name, d.value);
       const content = blankCssComments(css);
       collectUsages(file, content, 0, (i) => lineAt(content, i));
     } else if (isTsSource(full)) {
-      for (const lit of tsLiterals(fs.readFileSync(full, 'utf8'), full)) {
+      const source = fs.readFileSync(full, 'utf8');
+      const literals = tsLiterals(source, full);
+      for (const v of tsGlass(source, literals)) add('no-glass', file, v.line, v.message);
+      for (const lit of literals) {
         const color = tsLiteralColor(lit.text);
         if (color) add('ts-raw-color', file, lit.line, color);
         if (CUSTOM_PROPERTY.test(lit.text.trim())) define(lit.text.trim(), null);
@@ -480,6 +531,8 @@ module.exports = {
   cssDefinitions,
   tsLiterals,
   tsLiteralColor,
+  cssGlass,
+  tsGlass,
   collectViolations,
   loadAllowlist,
   evaluate,
