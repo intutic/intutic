@@ -1,78 +1,61 @@
 @import "@intutic/theme/css";
 
+/* The docs take colour from @intutic/theme (packages/theme/src/tokens.ts), the
+   same tokens as the dashboard. The theme package keys dark values off `.dark`,
+   the class VitePress toggles, so this file only maps them onto VitePress's own
+   variables. */
+
 :root {
-  /* Matches the website (intutic-website/styles.css): hero/body use Inter,
-     code and package pills use JetBrains Mono. Keep the two in sync. */
+  /* Type matches the website (intutic-website/styles.css): body in Inter, which
+     VitePress bundles and self-hosts; code in JetBrains Mono where installed.
+     The dashboard uses Grift; see apps/dashboard/DESIGN.md. */
   --vp-font-family-base: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --vp-font-family-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
-  --vp-c-brand-1: var(--color-accent);
-  --vp-c-brand-2: var(--color-accent-hover);
-  --vp-c-brand-3: var(--color-accent-subtle);
-  --vp-c-brand-soft: var(--color-accent-muted);
+  --vp-c-bg: var(--color-bg-elevated);
+  --vp-c-bg-alt: var(--color-bg-secondary);
+  --vp-c-bg-elv: var(--color-bg-elevated);
+  --vp-c-bg-soft: var(--color-bg-secondary);
 
-  --vp-c-tip-1: var(--color-success);
-  --vp-c-tip-2: var(--color-success);
-  --vp-c-tip-3: var(--color-success);
+  --vp-c-brand-1: var(--color-accent-text);
+  --vp-c-brand-2: var(--color-accent-hover);
+  --vp-c-brand-3: var(--color-accent);
+  --vp-c-brand-soft: var(--color-accent-subtle);
+
+  --vp-c-tip-1: var(--color-success-text);
+  --vp-c-tip-2: var(--color-success-text);
+  --vp-c-tip-3: var(--color-success-fill);
   --vp-c-tip-soft: var(--color-success-bg);
 
-  /* Force brand button background and text colors to prevent light mode grey fallbacks */
-  --vp-button-brand-bg: var(--vp-c-brand-1);
-  --vp-button-brand-border: var(--vp-c-brand-1);
-  --vp-button-brand-text: var(--color-constant-white);
-  --vp-button-brand-hover-bg: var(--vp-c-brand-2);
-  --vp-button-brand-hover-border: var(--vp-c-brand-2);
-  --vp-button-brand-hover-text: var(--color-constant-white);
+  --vp-c-warning-1: var(--color-warning-text);
+  --vp-c-warning-soft: var(--color-warning-bg);
+  --vp-c-danger-1: var(--color-error-text);
+  --vp-c-danger-soft: var(--color-error-bg);
+
+  /* Filled buttons use the accent fill in both themes, with white text. */
+  --vp-button-brand-bg: var(--color-accent);
+  --vp-button-brand-border: var(--color-accent);
+  --vp-button-brand-text: var(--color-text-on-accent);
+  --vp-button-brand-hover-bg: var(--color-accent-hover);
+  --vp-button-brand-hover-border: var(--color-accent-hover);
+  --vp-button-brand-hover-text: var(--color-text-on-accent);
+  --vp-button-brand-active-bg: var(--color-accent-hover);
+  --vp-button-brand-active-border: var(--color-accent-hover);
+  --vp-button-brand-active-text: var(--color-text-on-accent);
 }
 
 .dark {
   --vp-c-bg: var(--color-bg-primary);
-  --vp-c-bg-alt: var(--color-bg-secondary);
-  --vp-c-bg-elv: var(--color-bg-glass-elevated);
-  --vp-c-bg-soft: var(--color-bg-secondary);
 }
 
-/* Hero section */
-.VPHero .VPImage {
-  filter: drop-shadow(0 0 40px rgba(59, 130, 246, 0.3));
-}
-
-/* Feature cards */
+/* Feature cards: a border that strengthens on hover, nothing else. */
 .VPFeature {
-  border: 1px solid rgba(59, 130, 246, 0.15) !important;
-  transition: border-color 0.25s, box-shadow 0.25s;
+  border: 1px solid var(--color-border) !important;
+  transition: border-color var(--duration-fast) var(--ease-out);
 }
 
 .VPFeature:hover {
-  border-color: rgba(59, 130, 246, 0.4) !important;
-  box-shadow: 0 4px 24px rgba(59, 130, 246, 0.08);
-}
-
-/* Code blocks */
-.dark .vp-code-group .tabs label {
-  color: rgba(255, 255, 255, 0.64);
-}
-
-.dark .vp-code-group .tabs label.active {
-  color: var(--vp-c-brand-1);
-}
-
-/* Badge colors */
-.dark .VPBadge.tip {
-  background-color: var(--vp-c-tip-soft);
-  color: var(--vp-c-tip-1);
-}
-
-.dark .VPBadge.warning {
-  background-color: var(--color-warning-bg);
-  color: var(--color-warning);
-  border: 1px solid var(--color-warning-border);
-}
-
-.dark .VPBadge.danger {
-  background-color: var(--color-error-bg);
-  color: var(--color-error);
-  border: 1px solid var(--color-error-border);
+  border-color: var(--color-border-hover) !important;
 }
 
 /* Tables on phones.
