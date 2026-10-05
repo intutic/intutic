@@ -1141,6 +1141,7 @@ describe('real Runner over HTTP against a local Responses API stub (TD-408)', ()
             GEMINI_UPSTREAM_URL: stub.url,
             MISTRAL_UPSTREAM_URL: stub.url,
             OPENROUTER_UPSTREAM_URL: stub.url,
+            DEEPSEEK_UPSTREAM_URL: stub.url,
             RUST_LOG: 'warn',
           },
           stdio: ['ignore', 'pipe', 'pipe'],

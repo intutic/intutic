@@ -31,7 +31,7 @@ describe('buildVerificationProbe', () => {
   })
 
   it('builds an OpenAI-shaped GET /v1/models probe for OpenAI-compatible providers', () => {
-    for (const provider of ['openai', 'mistral', 'openrouter', 'cohere']) {
+    for (const provider of ['openai', 'mistral', 'openrouter', 'deepseek', 'cohere']) {
       const probe = buildVerificationProbe(provider, { apiKey: 'test-key' })
       expect(probe, `expected a probe for ${provider}`).not.toBeNull()
       expect(probe!.method).toBe('GET')

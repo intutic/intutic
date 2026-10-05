@@ -52,7 +52,7 @@ Create and manage virtual API keys (`vk_` prefix) for programmatic access to the
 ### Provider Keys
 
 Provision your workspace's own upstream API key for each model provider — Anthropic, OpenAI,
-Gemini, Mistral, and OpenRouter today, with more providers pre-configurable ahead of their
+Gemini, Mistral, OpenRouter, and DeepSeek today, with more providers pre-configurable ahead of their
 routing support (see below). Configuring your own key means requests bill against your
 provider account directly rather than Intutic's shared operator key.
 

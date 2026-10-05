@@ -199,11 +199,20 @@ class GateClient:
         VALIDATED and active; only one is ever loaded (newest by updatedAt).
 
         Returns {verdict, triggered, personalTriggered, correctionSummary,
-        independent}. `verdict` is 'PASS' | 'TRIGGERED' from the control plane,
-        or 'UNAVAILABLE' — set by the control plane on its own failures (it
-        returns HTTP 503, which raises in _post and lands in the except below)
-        and by this method on transport errors. Branch on `verdict`: anything
-        other than 'PASS'/'TRIGGERED' means NO grading happened.
+        independent}. `verdict` is 'PASS' | 'TRIGGERED' | 'REVIEW' from the
+        control plane, or 'UNAVAILABLE' — set by the control plane on its own
+        failures (it returns HTTP 503, which raises in _post and lands in the
+        except below) and by this method on transport errors. Branch on
+        `verdict`, and treat only 'PASS' as clean:
+
+        - 'TRIGGERED': a violation was found.
+        - 'REVIEW': the response was held for human review. The typed judge
+          was unsure, or did not answer in time (the judge GPU was busy). No
+          org verdict exists yet: `triggered` is False because nothing was
+          decided, not because the response is clean. A fail-closed caller
+          must treat REVIEW as not clean. The control plane records the
+          interim verdict and the reviewer's ruling on its side.
+        - 'UNAVAILABLE' (or any other value): NO grading happened.
 
         **This cannot block.** `lib/monitorModel.ts` is explicit: no LLM
         verdict blocks a request; the KILL sites in the proxy are
