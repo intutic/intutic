@@ -659,10 +659,10 @@ for (const g of GATES) {
       // no-snapshot case must still be exactly that — flagged, not blocked —
       // and only a valid snapshot carrying the `skill_surface.*.tier` rules
       // should turn that into a block.
-      for (const filePath of [
+      await mapLimit([
         '/w/.agents/skills/my-skill/SKILL.md',
         '/w/.claude/skills/my-skill/SKILL.md',
-      ]) {
+      ], GATE_CONCURRENCY, async (filePath) => {
         const withoutSnap = await runGate(g, { file_path: filePath }, { tool: 'Write' })
         assertCleanExit(g, withoutSnap, `a skill-surface write to ${filePath} with no snapshot`)
         expect(
@@ -682,8 +682,8 @@ for (const g of GATES) {
           `${g.name} did not block a skill-surface write to ${filePath} once the ` +
             `snapshot supplied the skill_surface.*.tier block rule`,
         ).toBe(true)
-      }
-    })
+      })
+    }, FAN_OUT_TIMEOUT)
 
     it('refuses a poisoned skill write on its content alone, and nothing else (TD-358)', async () => {
       const skill = '/w/.claude/skills/my-skill/SKILL.md'
@@ -694,16 +694,16 @@ for (const g of GATES) {
       assertCleanExit(g, bad, 'a poisoned skill Write under the content tier')
       expect(wasBlocked(g, bad), `${g.name} allowed a poisoned skill write`).toBe(true)
 
-      for (const [label, input, tool] of [
+      await mapLimit([
         ['a benign skill Write', { file_path: skill, content: '# My skill\nRun the tests before committing.' }, 'Write'],
         ['the poisoned text outside a skill dir', { file_path: '/w/docs/notes.md', content: poisoned }, 'Write'],
         ['an Edit that removes the poisoned text', { file_path: skill, old_string: poisoned, new_string: 'Setup notes.' }, 'Edit'],
-      ] as const) {
+      ] as const, GATE_CONCURRENCY, async ([label, input, tool]) => {
         const r = await runGate(g, input, { tool, snapshot: skillContentSnapshotRules })
         assertCleanExit(g, r, label)
         expect(wasBlocked(g, r), `${g.name} blocked ${label}`).toBe(false)
-      }
-    })
+      })
+    }, FAN_OUT_TIMEOUT)
 
     /**
      * Runs on every gate, as everything else here does.
