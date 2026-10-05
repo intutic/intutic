@@ -15,12 +15,14 @@ import { dirname, join, resolve } from 'node:path'
 
 const SCRIPT = resolve(import.meta.dirname, '../../scripts/check-styles.js')
 const gate = createRequire(import.meta.url)(SCRIPT) as {
-  findVarCalls(text: string): { name: string | null; fallback: string | null; complete: boolean }[]
+  findVarCalls(text: string): { name: string | null; invalidName: string | null; fallback: string | null; complete: boolean }[]
   normalizeValue(value: string): string
   cssRawColors(css: string, basename: string): { line: number; message: string }[]
   cssDefinitions(css: string): { name: string; value: string | null }[]
   tsLiterals(source: string, fileName: string): { text: string; line: number }[]
   tsLiteralColor(text: string): string | null
+  cssGlass(css: string): { line: number; message: string }[]
+  tsGlass(source: string, literals: { text: string; line: number }[]): { line: number; message: string }[]
 }
 
 describe('TS literal scanning', () => {
@@ -79,6 +81,38 @@ describe('CSS scanning', () => {
     expect(gate.findVarCalls('var(--a, rgba(0, 0, 0, .5))')[0]).toMatchObject({ name: '--a', fallback: 'rgba(0, 0, 0, .5)', complete: true })
     expect(gate.findVarCalls('var(--color-')[0]).toMatchObject({ complete: false })
     expect(gate.findVarCalls('var(--a, var(--b, 1px))').map((c) => c.name)).toEqual(['--a', '--b'])
+  })
+
+  it('marks a dotted or otherwise malformed name invalid, since browsers drop the declaration', () => {
+    expect(gate.findVarCalls('var(--space-2.5)')[0]).toMatchObject({ name: null, invalidName: '--space-2.5' })
+    expect(gate.findVarCalls('var(--space-2-5)')[0]).toMatchObject({ name: '--space-2-5', invalidName: null })
+    expect(gate.findVarCalls('var(--color-)')[0]).toMatchObject({ name: '--color-', invalidName: null })
+  })
+
+  it('finds the glass look in CSS but not the break-glass feature', () => {
+    const css = [
+      '/* .glass-panel in a comment */',
+      '.glass-panel { color: red; }',
+      '.card { -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }',
+      '.break-glass-page .breakglass-row { color: red; }',
+    ].join('\n')
+    expect(gate.cssGlass(css)).toEqual([
+      { line: 2, message: 'glass class .glass-panel' },
+      { line: 3, message: 'backdrop-filter' },
+      { line: 3, message: 'backdrop-filter' },
+    ])
+  })
+
+  it('finds glass classes and backdropFilter keys in TS', () => {
+    const src = [
+      'const a = <div className="card glass-panel--elevated" />',
+      "const b = { backdropFilter: 'blur(2px)' }",
+      "const c = <a href=\"/break-glass\" className=\"break-glass-link\">Break glass</a>",
+    ].join('\n')
+    expect(gate.tsGlass(src, gate.tsLiterals(src, 'a.tsx'))).toEqual([
+      { line: 1, message: 'glass class glass-panel--elevated' },
+      { line: 2, message: 'backdropFilter' },
+    ])
   })
 
   it('normalises equivalent values', () => {
@@ -151,6 +185,16 @@ describe('check-styles.js', () => {
     expect(r.out).toContain('ts-raw-color: apps/dashboard/src/A.tsx:1 hex colour #123456')
     expect(r.out).toContain('undefined-var: apps/dashboard/src/a.css:1 --nope is not defined')
     expect(r.out).toContain('var-fallback-mismatch: apps/dashboard/src/a.css:1 var(--space-2, 8px)')
+  })
+
+  it('fails invalid-var and no-glass, which have no allowlist', async () => {
+    await put('apps/dashboard/src/a.css', '.glass-panel { padding: var(--space-2.5); }')
+    await put('apps/dashboard/src/A.tsx', "export const s = { padding: 'var(--space-1.25)' }")
+    const r = await run()
+    expect(r.status).toBe(1)
+    expect(r.out).toContain('invalid-var: apps/dashboard/src/a.css:1 var(--space-2.5) is not a valid custom property')
+    expect(r.out).toContain('invalid-var: apps/dashboard/src/A.tsx:1 var(--space-1.25) is not a valid custom property')
+    expect(r.out).toContain('no-glass: apps/dashboard/src/a.css:1 glass class .glass-panel')
   })
 
   it('tolerates allowlisted files, and fails on a stale or unsorted entry', async () => {
