@@ -243,6 +243,12 @@ fn spawn_reward_update(
 /// Cohere's OpenAI-compatibility endpoint path wasn't confirmed against
 /// live docs during this pass, and shipping a guessed path is worse than
 /// not shipping it).
+///
+/// `DeepSeek` (TD-370) is a distinct target too, but unlike Mistral and
+/// OpenRouter it speaks TWO wire shapes natively: an OpenAI-compatible API
+/// under `https://api.deepseek.com` and an Anthropic-compatible one under
+/// `https://api.deepseek.com/anthropic`. dsh, DeepSeek's own harness, speaks
+/// the second. `serves_natively()` and `native_upstream_url()` carry that.
 #[derive(Debug, Clone, PartialEq)]
 enum Provider {
     Anthropic,
@@ -250,6 +256,7 @@ enum Provider {
     Gemini,
     Mistral,
     OpenRouter,
+    DeepSeek,
 }
 
 impl Provider {
@@ -272,9 +279,19 @@ impl Provider {
     /// run — it must not, for a provider that's already OpenAI-shaped.
     fn wire_shape(&self) -> Provider {
         match self {
-            Provider::Mistral | Provider::OpenRouter => Provider::OpenAI,
+            // DeepSeek's default shape; `serves_natively` adds its second one.
+            Provider::Mistral | Provider::OpenRouter | Provider::DeepSeek => Provider::OpenAI,
             other => other.clone(),
         }
+    }
+
+    /// Whether a request that arrived in `inbound`'s wire shape can be
+    /// forwarded to this target as-is, without cross-provider translation.
+    /// True on a wire-shape match, and for DeepSeek on the Anthropic wire too:
+    /// its Anthropic-compatible API takes a Messages body unchanged.
+    fn serves_natively(&self, inbound: &Provider) -> bool {
+        self.wire_shape() == inbound.wire_shape()
+            || (*self == Provider::DeepSeek && *inbound == Provider::Anthropic)
     }
 
     /// Return the base URL of the upstream provider.
@@ -295,6 +312,10 @@ impl Provider {
             // replacement" has been OpenRouter's core design since inception.
             Provider::OpenRouter => std::env::var("OPENROUTER_UPSTREAM_URL")
                 .unwrap_or_else(|_| "https://openrouter.ai/api".to_string()),
+            // https://api-docs.deepseek.com/ — OpenAI-compatible at this
+            // root (`/chat/completions`, also `/v1/chat/completions`).
+            Provider::DeepSeek => std::env::var("DEEPSEEK_UPSTREAM_URL")
+                .unwrap_or_else(|_| "https://api.deepseek.com".to_string()),
         }
     }
 
@@ -308,7 +329,7 @@ impl Provider {
             // (resolve_harness_type's own doc comment: a client that knows
             // who it is says so via x-intutic-harness; this is only the
             // unset/malformed-header fallback).
-            Provider::Mistral | Provider::OpenRouter => "cursor",
+            Provider::Mistral | Provider::OpenRouter | Provider::DeepSeek => "cursor",
         }
     }
 }
@@ -542,6 +563,29 @@ async fn policy_check(
 }
 
 // ─── Helper: extract virtual key and workspace info ───────────────────
+
+/// The workspace credential field a captured session token is stored under,
+/// or `None` for a token that is not an Anthropic credential.
+///
+/// The capture runs before the body is read, so it cannot tell which provider
+/// a request is for. It used to file every non-`vk_` token as
+/// `anthropic_api_key`, so an OpenAI key, or a DeepSeek key from dsh routed
+/// through this proxy, overwrote the workspace's Anthropic key. Only tokens
+/// that are recognisably Anthropic's are captured now.
+///
+/// Requires the `sk-ant-` prefix. The old `wAA`-suffix test (from the v1.5.0
+/// import, with no recorded source) filed any token ending in `wAA` — an
+/// OpenAI or Gemini key among them — as the OAuth token; nothing in the repo
+/// shows a Claude OAuth token without the `sk-ant-oat` prefix.
+fn session_credential_field(token: &str) -> Option<&'static str> {
+    if token.starts_with("sk-ant-oat") {
+        Some("anthropic_oauth_token")
+    } else if token.starts_with("sk-ant-") {
+        Some("anthropic_api_key")
+    } else {
+        None
+    }
+}
 
 /// The workspace a virtual key names in its own text, when the key uses one of
 /// the layouts the control plane mints.
@@ -965,6 +1009,16 @@ async fn resolve_finalize_judge_note(p: FinalizeJudgeParams<'_>) -> Option<Strin
     }
 }
 
+/// DeepSeek's own API model ids, matched exactly (case-insensitive) — the
+/// only names routed to `Provider::DeepSeek` (TD-370). `deepseek-chat` and
+/// `deepseek-reasoner` are DeepSeek's documented API ids; `deepseek-flash` is
+/// the id dsh 0.2 sends (`uat/evidence/live-verify/dsh-0.2.md`). Not a
+/// prefix: `deepseek-r1`, `deepseek-coder-v2-instruct` and the like are
+/// open-weight names served by Ollama, Groq, Together, ... behind the
+/// OpenAI-compatible upstream, and must keep going there. Mirrored by
+/// `DEEPSEEK_API_MODEL_IDS` in `packages/shared-types/src/providers.ts`.
+const DEEPSEEK_API_MODELS: &[&str] = &["deepseek-chat", "deepseek-reasoner", "deepseek-flash"];
+
 fn get_model_provider(model: &str) -> Provider {
     let m = model.to_lowercase();
     if m.contains("claude") {
@@ -981,6 +1035,8 @@ fn get_model_provider(model: &str) -> Provider {
         // routes to OpenRouter (the actual destination for that string),
         // not Mistral's own direct API.
         Provider::OpenRouter
+    } else if DEEPSEEK_API_MODELS.contains(&m.as_str()) {
+        Provider::DeepSeek
     } else if m.starts_with("mistral")
         || m.starts_with("open-mixtral")
         || m.starts_with("codestral")
@@ -1136,10 +1192,11 @@ async fn fetch_provider_credential(
     // with the blob's own field name and parsing the result is correct, not
     // a special case grafted on.
     match provider {
-        Provider::Mistral | Provider::OpenRouter => {
+        Provider::Mistral | Provider::OpenRouter | Provider::DeepSeek => {
             let config_field = match provider {
                 Provider::Mistral => "mistral_config",
                 Provider::OpenRouter => "openrouter_config",
+                Provider::DeepSeek => "deepseek_config",
                 _ => unreachable!(),
             };
             if let Some(raw) = store
@@ -1160,6 +1217,7 @@ async fn fetch_provider_credential(
             return match provider {
                 Provider::Mistral => std::env::var("MISTRAL_API_KEY").ok(),
                 Provider::OpenRouter => std::env::var("OPENROUTER_API_KEY").ok(),
+                Provider::DeepSeek => std::env::var("DEEPSEEK_API_KEY").ok(),
                 _ => unreachable!(),
             };
         }
@@ -1176,7 +1234,9 @@ async fn fetch_provider_credential(
         ],
         Provider::OpenAI => vec!["openai_api_key", "openai", "openaiKey", "authorization"],
         Provider::Gemini => vec!["gemini_api_key", "gemini", "geminiKey"],
-        Provider::Mistral | Provider::OpenRouter => unreachable!("handled above"),
+        Provider::Mistral | Provider::OpenRouter | Provider::DeepSeek => {
+            unreachable!("handled above")
+        }
     };
     if let Some(val) = store.workspace_credential(workspace_id, &fields).await {
         return Some(val);
@@ -1195,7 +1255,74 @@ async fn fetch_provider_credential(
         Provider::Anthropic => std::env::var("ANTHROPIC_API_KEY").ok(),
         Provider::OpenAI => std::env::var("OPENAI_API_KEY").ok(),
         Provider::Gemini => std::env::var("GEMINI_API_KEY").ok(),
-        Provider::Mistral | Provider::OpenRouter => unreachable!("handled above"),
+        Provider::Mistral | Provider::OpenRouter | Provider::DeepSeek => {
+            unreachable!("handled above")
+        }
+    }
+}
+
+/// The upstream URL for a natively served request (`serves_natively`), or
+/// `None` when the target has no endpoint for this protocol.
+///
+/// DeepSeek's URL is built from the PROTOCOL (TD-370): Messages go to its
+/// Anthropic-compatible API under `/anthropic`
+/// (https://api-docs.deepseek.com/guides/anthropic_api), Chat Completions to
+/// `/v1/chat/completions`, and nothing else has a DeepSeek endpoint. Neither
+/// the inbound path nor a client-named `Host` is used: either would let a
+/// client pick DeepSeek's Anthropic endpoint while the proxy reads the
+/// exchange as another wire (metering, text extraction, the auth header).
+///
+/// Every other provider keeps its pre-existing behaviour: a `Host` naming a
+/// known AI provider (the MITM path) wins over the configured base URL, and
+/// the inbound path is appended. For Mistral/OpenRouter that means a client
+/// naming another provider's host sends the request — and the Mistral or
+/// OpenRouter key — there; recorded, not changed here.
+fn native_upstream_url(
+    target: &Provider,
+    protocol: &crate::protocol::Protocol,
+    host_name: &str,
+    uri_path: &str,
+) -> Option<String> {
+    use crate::protocol::Protocol as P;
+    if *target == Provider::DeepSeek {
+        let path = match protocol {
+            P::Anthropic => "/anthropic/v1/messages",
+            P::OpenAIChatCompletions => "/v1/chat/completions",
+            _ => return None,
+        };
+        return Some(format!(
+            "{}{}",
+            target.upstream_base_url().trim_end_matches('/'),
+            path
+        ));
+    }
+    let base = if !host_name.is_empty() && crate::hostname_filter::is_ai_provider_host(host_name) {
+        format!("https://{}", host_name)
+    } else {
+        // target_provider, not the inbound wire shape: when they differ --
+        // Mistral/OpenRouter reached via the OpenAI wire path -- the actual
+        // destination's own base URL is what must be used.
+        target.upstream_base_url()
+    };
+    Some(format!("{}{}", base, uri_path))
+}
+
+/// Injects a DeepSeek credential in the header the forwarded wire expects:
+/// its Anthropic-compatible API takes the key in `x-api-key` (what dsh itself
+/// sends), its OpenAI-compatible API as a bearer token. The wire is the
+/// request's protocol, the same one `native_upstream_url` built the path from.
+fn insert_deepseek_credential(
+    headers: &mut reqwest::header::HeaderMap,
+    protocol: &crate::protocol::Protocol,
+    cred: &str,
+) {
+    let (name, value) = if *protocol == crate::protocol::Protocol::Anthropic {
+        ("x-api-key", cred.to_string())
+    } else {
+        ("authorization", format!("Bearer {}", cred))
+    };
+    if let Ok(v) = reqwest::header::HeaderValue::from_str(&value) {
+        headers.insert(reqwest::header::HeaderName::from_static(name), v);
     }
 }
 
@@ -1207,6 +1334,19 @@ fn provider_display_name(provider: &Provider) -> &'static str {
         Provider::Gemini => "Gemini",
         Provider::Mistral => "Mistral",
         Provider::OpenRouter => "OpenRouter",
+        Provider::DeepSeek => "DeepSeek",
+    }
+}
+
+/// The operator env var `fetch_provider_credential` falls back to.
+fn provider_key_env(provider: &Provider) -> &'static str {
+    match provider {
+        Provider::Anthropic => "ANTHROPIC_API_KEY",
+        Provider::OpenAI => "OPENAI_API_KEY",
+        Provider::Gemini => "GEMINI_API_KEY",
+        Provider::Mistral => "MISTRAL_API_KEY",
+        Provider::OpenRouter => "OPENROUTER_API_KEY",
+        Provider::DeepSeek => "DEEPSEEK_API_KEY",
     }
 }
 
@@ -1586,17 +1726,14 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         && !raw_token.starts_with("vk_")
         && workspace_id != "unknown"
     {
-        let store = Arc::clone(&state.store);
-        let wid = workspace_id.clone();
-        let tok = raw_token.to_string();
-        spawn(async move {
-            let field = if tok.starts_with("sk-ant-oat") || tok.ends_with("wAA") {
-                "anthropic_oauth_token"
-            } else {
-                "anthropic_api_key"
-            };
-            store.set_workspace_credential(&wid, field, &tok).await;
-        });
+        if let Some(field) = session_credential_field(raw_token) {
+            let store = Arc::clone(&state.store);
+            let wid = workspace_id.clone();
+            let tok = raw_token.to_string();
+            spawn(async move {
+                store.set_workspace_credential(&wid, field, &tok).await;
+            });
+        }
     }
 
     tracing::debug!(workspace_id = %workspace_id, key_prefix = %key_prefix, provider = ?provider, "Request received");
@@ -1931,7 +2068,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                         }
                                     })
                                 }
-                                Provider::OpenAI | Provider::Mistral | Provider::OpenRouter => {
+                                Provider::OpenAI
+                                | Provider::Mistral
+                                | Provider::OpenRouter
+                                | Provider::DeepSeek => {
                                     serde_json::json!({
                                         "id": "chatcmpl-predict",
                                         "object": "chat.completion",
@@ -4140,7 +4280,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // enum equality here would wrongly route them into the cross-provider
     // branch below, which runs response translation built only for
     // Anthropic-shaped bodies -- see `Provider::wire_shape()`'s doc comment.
-    let is_same_provider = target_provider.wire_shape() == provider.wire_shape();
+    //
+    // `serves_natively` is that wire-shape match, plus DeepSeek on the
+    // Anthropic wire (its Anthropic-compatible API, which dsh speaks).
+    let is_same_provider = target_provider.serves_natively(&provider);
 
     let host_header = headers
         .get("host")
@@ -4148,19 +4291,30 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         .unwrap_or("");
     let host_name = host_header.split(':').next().unwrap_or(host_header);
 
+    // DeepSeek has an endpoint for Messages and Chat Completions only, and its
+    // URL is built from the protocol (`native_upstream_url`). Any other route
+    // naming a DeepSeek model is refused here rather than forwarded to a path
+    // the client chose, or translated into a shape DeepSeek was never sent.
+    if target_provider == Provider::DeepSeek
+        && native_upstream_url(&target_provider, &protocol, "", "").is_none()
+    {
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            "unsupported_route",
+            "DeepSeek models are served on /v1/messages and /v1/chat/completions only.",
+        );
+    }
+
     let (upstream_url, request_body) = if is_same_provider {
-        let upstream_base =
-            if !host_name.is_empty() && crate::hostname_filter::is_ai_provider_host(host_name) {
-                format!("https://{}", host_name)
-            } else {
-                // target_provider, not provider (wire shape): when they
-                // differ -- Mistral/OpenRouter reached via the OpenAI wire
-                // path -- the actual destination's own base URL is what
-                // must be used. For the original 3 providers this branch
-                // only runs when they're already equal, so this is a no-op
-                // change for them.
-                target_provider.upstream_base_url()
-            };
+        let Some(url) = native_upstream_url(&target_provider, &protocol, host_name, &uri_path)
+        else {
+            // Unreachable: only DeepSeek can answer None, refused above.
+            return json_error(
+                StatusCode::BAD_REQUEST,
+                "unsupported_route",
+                "This route has no upstream endpoint for the requested model.",
+            );
+        };
         let final_body = if actual_model != model {
             let mut new_body = body_json.clone();
             new_body["model"] = json!(actual_model);
@@ -4168,7 +4322,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         } else {
             body_bytes.to_vec()
         };
-        (format!("{}{}", upstream_base, uri_path), final_body)
+        (url, final_body)
     } else {
         // Cross-provider translation
         let target_base_url = target_provider.upstream_base_url();
@@ -4182,7 +4336,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // exhaustiveness and so a future genuinely-cross-provider path
             // (e.g. an Anthropic-wire request naming a Mistral model) still
             // resolves to a real endpoint instead of a compile error.
-            Provider::OpenAI | Provider::Mistral | Provider::OpenRouter => "/v1/chat/completions",
+            Provider::OpenAI | Provider::Mistral | Provider::OpenRouter | Provider::DeepSeek => {
+                "/v1/chat/completions"
+            }
             Provider::Gemini => "/v1beta/models/gemini-1.5-pro:generateContent",
         };
         let url = format!("{}{}", target_base_url, target_path);
@@ -4313,6 +4469,27 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 ),
             );
         }
+        // A virtual key authenticates the caller to Intutic and never leaves
+        // the proxy. With no upstream credential resolved (BYO-key not
+        // enforced, nothing provisioned, no operator env key), this used to
+        // fall through to the raw-key passthrough below, which copied the
+        // caller's `Authorization`/`x-api-key` — the `vk_` itself — to the
+        // provider. No provider accepts it, so the call failed anyway; the
+        // key had still been handed to a third party (TD-370). Refused for
+        // every provider, with the same status as the enforced case above.
+        if cred_opt.is_none() {
+            return json_error(
+                StatusCode::PAYMENT_REQUIRED,
+                "no_upstream_credential",
+                &format!(
+                    "No {} API key is available for this workspace, and an Intutic virtual key \
+                     is never sent to a provider. Provision one in the dashboard under Settings → \
+                     Provider Keys, or set {} on a self-hosted proxy.",
+                    provider_display_name(&target_provider),
+                    provider_key_env(&target_provider)
+                ),
+            );
+        }
         if let Some(cred) = cred_opt {
             match target_provider {
                 Provider::Anthropic => {
@@ -4347,6 +4524,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                             .insert(reqwest::header::HeaderName::from_static("authorization"), v);
                     }
                 }
+                Provider::DeepSeek => {
+                    insert_deepseek_credential(&mut fwd_headers, &protocol, &cred)
+                }
                 Provider::Gemini => {
                     if let Ok(v) = reqwest::header::HeaderValue::from_str(&cred) {
                         fwd_headers.insert(
@@ -4360,6 +4540,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         }
     }
 
+    // Only a raw (non-`vk_`) caller credential reaches this point uninjected:
+    // the `vk_` branch above either injected a provider key or refused.
     if !creds_injected {
         if !is_same_provider {
             // require_provisioned deliberately hardcoded false here: this
@@ -4406,6 +4588,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                 v,
                             );
                         }
+                    }
+                    Provider::DeepSeek => {
+                        insert_deepseek_credential(&mut fwd_headers, &protocol, &cred)
                     }
                     Provider::Gemini => {
                         if let Ok(v) = reqwest::header::HeaderValue::from_str(&cred) {
@@ -4486,16 +4671,24 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // as-is. A cross-provider unservable pick is penalised and unlocked below
     // but not retried: the retry would need the origin provider's credentials
     // re-resolved, and a wrong retry is worse than a clear error.
-    let fallback_plan: Option<(String, reqwest::header::HeaderMap, Vec<u8>)> =
-        if routed_from_to.is_some() && is_same_provider {
-            Some((
-                upstream_url.clone(),
-                fwd_headers.clone(),
-                body_bytes.to_vec(),
-            ))
-        } else {
-            None
-        };
+    //
+    // "Same provider" is the requested model's provider, not the wire shape:
+    // a Messages request routed from `claude-*` to `deepseek-*` is natively
+    // served (DeepSeek speaks the Anthropic wire), but retrying it would send
+    // the Claude model id to DeepSeek with the DeepSeek key (TD-370).
+    let fallback_plan: Option<(String, reqwest::header::HeaderMap, Vec<u8>)> = if routed_from_to
+        .is_some()
+        && is_same_provider
+        && get_model_provider(&model) == target_provider
+    {
+        Some((
+            upstream_url.clone(),
+            fwd_headers.clone(),
+            body_bytes.to_vec(),
+        ))
+    } else {
+        None
+    };
 
     let fwd_result = state
         .http_client
@@ -6695,7 +6888,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         let usage = match target_provider {
             Provider::Anthropic => TokenUsage::from_anthropic(&upstream_json),
             Provider::Gemini => TokenUsage::from_gemini_metadata(&upstream_json),
-            Provider::OpenAI | Provider::Mistral | Provider::OpenRouter => {
+            Provider::OpenAI | Provider::Mistral | Provider::OpenRouter | Provider::DeepSeek => {
                 TokenUsage::from_openai_chat(&upstream_json)
             }
         };
@@ -7654,7 +7847,7 @@ fn delta_shape(protocol: &crate::protocol::Protocol, provider: &Provider) -> Del
         P::Gemini => DeltaShape::Unparsed,
         P::Unknown => match provider {
             Provider::Anthropic => DeltaShape::AnthropicText,
-            Provider::OpenAI | Provider::Mistral | Provider::OpenRouter => {
+            Provider::OpenAI | Provider::Mistral | Provider::OpenRouter | Provider::DeepSeek => {
                 DeltaShape::OpenAIChatContent
             }
             Provider::Gemini => DeltaShape::Unparsed,
@@ -7683,7 +7876,9 @@ fn wire_for(
         P::Unknown => match provider {
             Provider::Anthropic => W::Anthropic,
             Provider::Gemini => W::Gemini,
-            Provider::OpenAI | Provider::Mistral | Provider::OpenRouter => W::OpenAI,
+            Provider::OpenAI | Provider::Mistral | Provider::OpenRouter | Provider::DeepSeek => {
+                W::OpenAI
+            }
         },
     }
 }
@@ -7771,7 +7966,9 @@ fn postprocessor_protocol(
         P::Unknown => match provider {
             Provider::Anthropic => PP::Anthropic,
             Provider::Gemini => PP::Gemini,
-            Provider::OpenAI | Provider::Mistral | Provider::OpenRouter => PP::OpenAI,
+            Provider::OpenAI | Provider::Mistral | Provider::OpenRouter | Provider::DeepSeek => {
+                PP::OpenAI
+            }
         },
     }
 }
@@ -8251,6 +8448,34 @@ pub fn get_terminal_stream_event(protocol: &crate::protocol::Protocol, model: &s
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn session_credential_capture_files_only_anthropic_tokens() {
+        // Assembled at runtime: no contiguous credential-shaped literal in source.
+        let tail = "x".repeat(24);
+        let api_key = format!("{}{}{}", "sk-ant-", "api03-", tail);
+        let oauth = format!("{}{}{}", "sk-ant-", "oat01-", tail);
+        let openai = format!("{}{}{}", "sk-", "proj-", tail);
+        let deepseek = format!("{}{}", "sk-", "0123456789abcdef".repeat(2));
+        assert_eq!(
+            session_credential_field(&api_key),
+            Some("anthropic_api_key")
+        );
+        assert_eq!(
+            session_credential_field(&oauth),
+            Some("anthropic_oauth_token")
+        );
+        // No `sk-ant-` prefix, no capture — whatever the suffix. The `wAA`
+        // heuristic filed OpenAI/Gemini keys that happen to end in it as the
+        // Anthropic OAuth token.
+        assert_eq!(session_credential_field(&format!("{tail}wAA")), None);
+        assert_eq!(
+            session_credential_field(&format!("{}{}wAA", "sk-", "proj-")),
+            None
+        );
+        assert_eq!(session_credential_field(&openai), None);
+        assert_eq!(session_credential_field(&deepseek), None);
+    }
     mod key_context_byok {
         async fn parse(body: &str) -> Option<bool> {
             let resp = reqwest::Response::from(
@@ -9725,6 +9950,84 @@ mod tests {
         let usage = stream_usage(&anth, DeltaShape::AnthropicText);
         assert_eq!(usage.total_input(), 7);
         assert_eq!(usage.output, Some(8));
+    }
+
+    /// TD-370: only DeepSeek's own API ids route to DeepSeek. Untagged
+    /// self-hosted / Groq / Together names, OpenRouter names and
+    /// Ollama-tagged models keep the destination they had before.
+    #[test]
+    fn deepseek_model_ids_route_to_deepseek_on_both_native_wires() {
+        for m in [
+            "deepseek-chat",
+            "deepseek-reasoner",
+            "deepseek-flash",
+            "DeepSeek-Chat",
+        ] {
+            assert_eq!(get_model_provider(m), Provider::DeepSeek, "{m}");
+        }
+        assert_eq!(
+            get_model_provider("deepseek/deepseek-chat"),
+            Provider::OpenRouter
+        );
+        for m in [
+            "deepseek-r1:7b",
+            "deepseek-r1",
+            "deepseek-coder-v2-instruct",
+            "deepseek-r1-distill-llama-70b",
+            "deepseek-v3.1:671b-cloud",
+            "deepseek-chat-v2",
+        ] {
+            assert_eq!(get_model_provider(m), Provider::OpenAI, "{m}");
+        }
+        assert!(Provider::DeepSeek.serves_natively(&Provider::OpenAI));
+        assert!(Provider::DeepSeek.serves_natively(&Provider::Anthropic));
+        assert!(!Provider::Mistral.serves_natively(&Provider::Anthropic));
+    }
+
+    /// TD-370 (D3, D5a): a DeepSeek upstream URL comes from the protocol —
+    /// never from the inbound path or a client-named `Host` — and only
+    /// Messages and Chat Completions have one.
+    #[test]
+    fn deepseek_upstream_url_follows_the_protocol_not_the_path_or_host() {
+        use crate::protocol::Protocol as P;
+        let base = Provider::DeepSeek.upstream_base_url();
+        let base = base.trim_end_matches('/');
+        assert_eq!(
+            native_upstream_url(
+                &Provider::DeepSeek,
+                &P::Anthropic,
+                "api.openai.com",
+                "/v1/messages"
+            ),
+            Some(format!("{base}/anthropic/v1/messages"))
+        );
+        assert_eq!(
+            native_upstream_url(
+                &Provider::DeepSeek,
+                &P::OpenAIChatCompletions,
+                "api.anthropic.com",
+                "/v1/chat/completions"
+            ),
+            Some(format!("{base}/v1/chat/completions"))
+        );
+        for p in [P::Unknown, P::OpenAIResponses, P::Gemini] {
+            assert_eq!(
+                native_upstream_url(&Provider::DeepSeek, &p, "", "/anthropic/v1/messages"),
+                None,
+                "{p:?}"
+            );
+        }
+        // Pre-existing, unchanged: other providers honour a client-named AI
+        // provider Host and keep the inbound path.
+        assert_eq!(
+            native_upstream_url(
+                &Provider::Mistral,
+                &P::OpenAIChatCompletions,
+                "api.openai.com",
+                "/v1/chat/completions"
+            ),
+            Some("https://api.openai.com/v1/chat/completions".to_string())
+        );
     }
 
     /// The route decides the wire shape, not the vendor.

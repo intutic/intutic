@@ -121,6 +121,9 @@ async fn destructive_sql_against_a_non_allowlisted_database_never_reaches_the_cl
     std::fs::write(sops_dir.join("databases.md"), SOP).unwrap();
 
     std::env::set_var("OPENAI_UPSTREAM_URL", upstream.uri());
+    // A virtual key is never forwarded upstream (TD-370): the request
+    // needs a provider key, so the operator fallback supplies a test one.
+    std::env::set_var("OPENAI_API_KEY", ["test", "-operator-", "key"].concat());
     std::env::set_var("CONTROL_PLANE_URL", cp.uri());
     std::env::set_var("INTUTIC_SOPS_DIR", &sops_dir);
 

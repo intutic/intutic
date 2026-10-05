@@ -1,9 +1,10 @@
 """Tests for GateClient: fail posture, harness label, and the judge contract.
 
-The judge tests pin the CURRENT verdict contract: 'PASS' | 'TRIGGERED' from
-the control plane, 'UNAVAILABLE' when no grading happened — set by the server
-via 503 (which lands in the transport-error branch) or by the client on
-transport errors, and synthesized locally for old servers that omit `verdict`.
+The judge tests pin the CURRENT verdict contract: 'PASS' | 'TRIGGERED' |
+'REVIEW' (held for human review, no org verdict yet) from the control plane,
+'UNAVAILABLE' when no grading happened — set by the server via 503 (which
+lands in the transport-error branch) or by the client on transport errors, and
+synthesized locally for old servers that omit `verdict`.
 """
 
 from __future__ import annotations
@@ -107,6 +108,15 @@ class TestJudgeFinalize:
         c, _ = make_client((200, {"verdict": "TRIGGERED", "triggered": True,
                                   "correctionSummary": "contradicts SOP"}))
         assert c.judge_finalize("text", "gpt-4o")["verdict"] == "TRIGGERED"
+
+    def test_held_for_review_is_review_not_pass(self):
+        # A held response (the typed judge was unsure, or did not answer in
+        # time) carries triggered: false but is NOT a pass: a caller branching
+        # on `verdict` must see REVIEW, and the docstring must say so.
+        c, _ = make_client((200, {"verdict": "REVIEW", "triggered": False, "personalTriggered": False,
+                                  "correctionSummary": "This response was held for human review"}))
+        assert c.judge_finalize("text", "gpt-4o")["verdict"] == "REVIEW"
+        assert "'REVIEW'" in (GateClient.judge_finalize.__doc__ or "")
 
     def test_old_server_verdict_is_synthesized_triggered(self):
         c, _ = make_client((200, {"triggered": True}))

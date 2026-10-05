@@ -121,6 +121,16 @@ export function buildVerificationProbe(
       }
     }
 
+    case 'deepseek': {
+      const apiKey = fields.apiKey
+      if (!apiKey) return null
+      return {
+        url: 'https://api.deepseek.com/v1/models',
+        method: 'GET',
+        headers: { Authorization: `Bearer ${apiKey}` },
+      }
+    }
+
     case 'cohere': {
       const apiKey = fields.apiKey
       if (!apiKey) return null
