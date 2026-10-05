@@ -255,7 +255,7 @@ class GateClient:
     # ----------------------------------------------------------- decisions
 
     def hold_for_review(self, hold_id: str, tool_name: str, reason: str) -> bool:
-        """Add an entry to the Review Queue at /decisions.
+        """Add an entry to the Review Queue at /findings/review.
 
         Observe-only: routes/decisions.ts is explicit that this blocks nothing.
         It is a display surface for a block that already happened elsewhere.
