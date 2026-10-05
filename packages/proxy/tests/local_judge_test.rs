@@ -83,6 +83,9 @@ async fn local_judge_answers_finalize_without_calling_the_control_plane() {
         .await;
 
     std::env::set_var("OPENAI_UPSTREAM_URL", upstream.uri());
+    // A virtual key is never forwarded upstream (TD-370): the request
+    // needs a provider key, so the operator fallback supplies a test one.
+    std::env::set_var("OPENAI_API_KEY", ["test", "-operator-", "key"].concat());
     std::env::set_var("CONTROL_PLANE_URL", cp.uri());
     std::env::set_var("LITELLM_LOCAL_URL", local_litellm.uri());
     std::env::set_var("LITELLM_LOCAL_JUDGE_MODEL", "local-test-model");

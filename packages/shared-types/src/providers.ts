@@ -151,6 +151,15 @@ export const PROVIDER_REGISTRY: ProviderDefinition[] = [
     routingLive: true,
   },
   {
+    // TD-370: the proxy routes DEEPSEEK_API_MODEL_IDS here, reading this blob
+    // (`deepseek_config`) the same way it reads Mistral's and OpenRouter's.
+    id: 'deepseek',
+    displayName: 'DeepSeek',
+    docsUrl: 'https://platform.deepseek.com/api_keys',
+    fields: [{ key: 'apiKey', label: 'API Key', type: 'password', required: true }],
+    routingLive: true,
+  },
+  {
     id: 'ollama',
     displayName: 'Ollama (self-hosted)',
     docsUrl: 'https://github.com/ollama/ollama/blob/main/docs/api.md',
@@ -168,6 +177,16 @@ export function isKnownProviderId(id: string): boolean {
 }
 
 /**
+ * DeepSeek's own API model ids — the only names the proxy routes to DeepSeek
+ * (TD-370), matched exactly and case-insensitively. Mirrors
+ * `DEEPSEEK_API_MODELS` in `packages/proxy/src/proxy.rs`; the parity test
+ * compares the two lists. Not a prefix: `deepseek-r1`,
+ * `deepseek-coder-v2-instruct` and other open-weight names are served by
+ * Ollama, Groq, Together, ... behind the OpenAI-compatible upstream.
+ */
+export const DEEPSEEK_API_MODEL_IDS = ['deepseek-chat', 'deepseek-reasoner', 'deepseek-flash'] as const
+
+/**
  * Which provider the data-plane proxy would route a model name to.
  *
  * A hand-maintained TS mirror of `get_model_provider` in
@@ -180,16 +199,18 @@ export function isKnownProviderId(id: string): boolean {
  *
  * Order matters and matches the Rust exactly: claude → gemini → '/'
  * (OpenRouter's vendor/model namespacing — checked before the mistral
- * prefixes so "mistralai/..." routes to OpenRouter) → mistral prefixes →
- * OpenAI as the default arm.
+ * prefixes so "mistralai/..." routes to OpenRouter) → an exact DeepSeek API
+ * id ({@link DEEPSEEK_API_MODEL_IDS}) → mistral prefixes → OpenAI as the
+ * default arm.
  */
 export function inferProviderForModel(
   model: string,
-): 'anthropic' | 'gemini' | 'openrouter' | 'mistral' | 'openai' {
+): 'anthropic' | 'gemini' | 'openrouter' | 'deepseek' | 'mistral' | 'openai' {
   const m = model.toLowerCase()
   if (m.includes('claude')) return 'anthropic'
   if (m.includes('gemini')) return 'gemini'
   if (m.includes('/')) return 'openrouter'
+  if ((DEEPSEEK_API_MODEL_IDS as readonly string[]).includes(m)) return 'deepseek'
   if (m.startsWith('mistral') || m.startsWith('open-mixtral') || m.startsWith('codestral')) {
     return 'mistral'
   }
