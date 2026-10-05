@@ -310,7 +310,7 @@ async function buildWasmRulesHtml(): Promise<string> {
   }
 
   if (rules.length === 0) {
-    body += `<div class="empty">No WASM rule bundles uploaded yet.<br>Upload one via the Intutic dashboard at /wasm-rules.</div>`
+    body += `<div class="empty">No WASM rule bundles uploaded yet.<br>Upload one via the Intutic dashboard at /policies/filters.</div>`
   } else {
     body += `<table>
 <thead><tr>

@@ -99,10 +99,10 @@ In enterprise environments with multiple developers, Intutic maintains isolated 
 
 ### A. Heartbeat and Telemetry Isolation (Developer Sub-Workspaces)
 * The sync daemon heartbeat is cached in Valkey using the `workspace_id` (`v2:sync:heartbeat:${workspaceId}`).
-* To prevent concurrent developers from overwriting each other's live session states on the **Developer Sessions** (`/agent-top`) page, each developer is provisioned their own personal sandbox or developer-specific sub-workspace ID (e.g., `wk_dev_alice`, `wk_dev_bob`).
+* To prevent concurrent developers from overwriting each other's live session states on the **Developer Sessions** (`/activity/sessions`) page, each developer is provisioned their own personal sandbox or developer-specific sub-workspace ID (e.g., `wk_dev_alice`, `wk_dev_bob`).
 * These sub-workspaces automatically inherit the master standard operating procedures (SOPs), DLP rules, and custom WASM filters published by SREs or platform engineers at the parent organization level (`wk_org_acme`).
 
 ### B. Centralized Audit Aggregation
 * When developers run AI agent sessions (e.g., Cursor, Claude Code, Aider), the Rust proxy gateway intercepts the execution traces.
 * Every trace log and incident record is database-tagged with **both** the developer's unique identity (`user_id` / `developerId`) and the shared organization `workspace_id`.
-* This allows security teams, managers, and SREs to view and search consolidated logs, compliance scores, and compute budgets across the entire team in the **Activity Logs** (`/traces`), **Review Queue** (`/decisions`), and **Governance Coverage** (`/governance-coverage`) views without any conflict.
+* This allows security teams, managers, and SREs to view and search consolidated logs, compliance scores, and compute budgets across the entire team in the **Activity Logs** (`/activity/traces`), **Review Queue** (`/findings/review`), and **Governance Coverage** (`/policies/scope`) views without any conflict.

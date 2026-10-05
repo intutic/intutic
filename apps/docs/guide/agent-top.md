@@ -1,6 +1,6 @@
 # Developer Sessions <Badge type="warning" text="Cloud / Team" />
 
-The **Developer Session Monitor** (accessible via `/agent-top` in the dashboard) provides a real-time console showing currently running AI agent processes, active workspace configurations, and central telemetry from developer workstations.
+The **Developer Session Monitor** (accessible via `/activity/sessions` in the dashboard) provides a real-time console showing currently running AI agent processes, active workspace configurations, and central telemetry from developer workstations.
 
 ## Why Developer Session Monitor?
 

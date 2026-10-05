@@ -19,6 +19,7 @@ const gate = (await import(SCRIPT)) as {
   linkPath(raw: string): string
   matchesRoute(path: string, routes: Set<string>): boolean
   extractLinks(t: typeof ts, source: string, fileName: string): { line: number; kind: string; raw: string }[]
+  legacyRedirects(src: string): Map<string, string | null>
 }
 
 const paths = (src: string) => gate.extractLinks(ts, src, 'x.ts').map((l) => `${l.kind} ${gate.linkPath(l.raw)}`)
@@ -36,6 +37,23 @@ describe('route matching', () => {
     expect(gate.matchesRoute('/sops/:id', routes)).toBe(false)
     expect(gate.matchesRoute('/incidents/:id/edit', routes)).toBe(false)
     expect(gate.matchesRoute('/settings/org', routes)).toBe(false)
+  })
+})
+
+describe('legacy redirects', () => {
+  it('reads each from: path with its to:, collapsing nothing but a trailing slash', () => {
+    const src = [
+      'export const LEGACY_REDIRECTS = [',
+      "  { from: '/traces', to: '/activity/traces' },",
+      "  { from: '/sops/$sopId', to: '/policies/guidelines/$sopId' },",
+      "  { from: \"/intelligence\", search: (s: { tab?: string }) => s },",
+      '] as const',
+    ].join('\n')
+    expect([...gate.legacyRedirects(src)]).toEqual([
+      ['/traces', '/activity/traces'],
+      ['/sops/$sopId', '/policies/guidelines/$sopId'],
+      ['/intelligence', null],
+    ])
   })
 })
 
@@ -143,7 +161,80 @@ describe('check-dashboard-links.js', () => {
     expect(r.out).toContain('no relative dashboard links found')
   })
 
+  describe('legacy paths', () => {
+    // The dashboard after PR 2: canonical routes in main.tsx, old ones only in
+    // legacyRedirects.ts.
+    beforeEach(async () => {
+      await put('apps/dashboard/src/main.tsx', [
+        "createRoute({ path: '/findings/incidents' })",
+        "createRoute({ path: '/findings/incidents/$incidentId' })",
+        "createRoute({ path: '/policies/guidelines/$sopId' })",
+        "createRoute({ path: '/settings' })",
+      ].join('\n'))
+      await put('apps/dashboard/src/routes/legacyRedirects.ts', [
+        'export const LEGACY_REDIRECTS = [',
+        "  { from: '/incidents', to: '/findings/incidents' },",
+        "  { from: '/incidents/$incidentId', to: '/findings/incidents/$incidentId' },",
+        "  { from: '/sops/$sopId', to: '/policies/guidelines/$sopId' },",
+        '] as const',
+      ].join('\n'))
+    })
+
+    it('fails on a link to a legacy path, naming the redirect target', async () => {
+      await put('services/control-plane/src/services/router.ts', [
+        "const APP_URL = process.env.APP_URL ?? ''",
+        "export const a = { action_url: '/findings/incidents' }",
+        'export const b = `${APP_URL}/incidents?tab=alerts`',
+      ].join('\n'))
+      const r = await run()
+      expect(r.status).toBe(1)
+      expect(r.out).toContain('1 dashboard link(s) use a legacy path')
+      expect(r.out).toContain('services/control-plane/src/services/router.ts:3  (app-url)')
+      expect(r.out).toContain('/incidents matches the legacy path /incidents, which redirects to /findings/incidents')
+      // A legacy path is reported as legacy, not as a missing route as well.
+      expect(r.out).not.toContain('point at routes that do not exist')
+    })
+
+    it('passes when every link uses the canonical path', async () => {
+      await put('services/control-plane/src/services/router.ts', [
+        "const APP_URL = process.env.APP_URL ?? ''",
+        'export const a = { action_url: `/findings/incidents/${data.incidentId}` }',
+        'export const b = `${APP_URL}/findings/incidents?tab=alerts`',
+        'export const c = { url: `/policies/guidelines/${sopId}` }',
+      ].join('\n'))
+      const r = await run()
+      expect(r.out).toContain('✓ all 3 dashboard link(s)')
+      expect(r.out).toContain('none uses one of 3 legacy path(s)')
+      expect(r.status).toBe(0)
+    })
+
+    it('matches an interpolated detail id against a $param legacy segment', async () => {
+      await put('services/control-plane/src/services/router.ts', [
+        "const APP_URL = process.env.APP_URL ?? ''",
+        'export const a = { action_url: card.sopId ? `/sops/${card.sopId}` : null }',
+        'export const b = `${APP_URL}/findings/incidents`',
+      ].join('\n'))
+      const r = await run()
+      expect(r.status).toBe(1)
+      expect(r.out).toContain('/sops/:id matches the legacy path /sops/$sopId, which redirects to /policies/guidelines/$sopId')
+    })
+
+    it('fails rather than passing vacuously when legacyRedirects.ts lists no paths', async () => {
+      await put('apps/dashboard/src/routes/legacyRedirects.ts', 'export const LEGACY_REDIRECTS = LIST')
+      const r = await run()
+      expect(r.status).toBe(1)
+      expect(r.out).toContain('no `from:` paths parsed')
+    })
+  })
+
+  it('without legacyRedirects.ts, still resolves links and says the legacy check did not run', async () => {
+    const r = await run()
+    expect(r.status).toBe(0)
+    expect(r.out).toContain('no apps/dashboard/src/routes/legacyRedirects.ts, so no legacy-path check')
+  })
+
   it('skips when the dashboard is absent (the public repo)', async () => {
+    await put('apps/dashboard/src/routes/legacyRedirects.ts', "export const LEGACY_REDIRECTS = [{ from: '/traces', to: '/activity/traces' }]")
     await rm(join(root, 'apps'), { recursive: true, force: true })
     const r = await run()
     expect(r.status).toBe(0)
