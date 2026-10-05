@@ -75,6 +75,9 @@ async fn non_streaming_response_calls_finalize_only_never_chunk() {
         .await;
 
     std::env::set_var("OPENAI_UPSTREAM_URL", upstream.uri());
+    // A virtual key is never forwarded upstream (TD-370): the request
+    // needs a provider key, so the operator fallback supplies a test one.
+    std::env::set_var("OPENAI_API_KEY", ["test", "-operator-", "key"].concat());
     std::env::set_var("CONTROL_PLANE_URL", cp.uri());
     // Deadline disabled: this test is about call COUNTS, not timing — a
     // slow CI box tripping the default 5000ms deadline would turn this

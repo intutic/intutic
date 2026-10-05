@@ -388,7 +388,13 @@ async fn a_refused_streamed_call_still_delivers_the_scrubbed_text_before_it() {
     std::fs::create_dir_all(&sops_dir).unwrap();
     std::fs::write(sops_dir.join("policy.md"), SOP).unwrap();
     std::env::set_var("OPENAI_UPSTREAM_URL", upstream.uri());
+    // A virtual key is never forwarded upstream (TD-370): the request
+    // needs a provider key, so the operator fallback supplies a test one.
+    std::env::set_var("OPENAI_API_KEY", ["test", "-operator-", "key"].concat());
     std::env::set_var("ANTHROPIC_UPSTREAM_URL", upstream.uri());
+    // A virtual key is never forwarded upstream (TD-370): the request
+    // needs a provider key, so the operator fallback supplies a test one.
+    std::env::set_var("ANTHROPIC_API_KEY", ["test", "-operator-", "key"].concat());
     std::env::set_var("CONTROL_PLANE_URL", cp.uri());
     std::env::set_var("INTUTIC_SOPS_DIR", &sops_dir);
 

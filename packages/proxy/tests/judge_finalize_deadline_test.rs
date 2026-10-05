@@ -118,6 +118,9 @@ async fn a_slow_finalize_releases_the_stream_at_the_deadline_but_keeps_running()
         .await;
 
     std::env::set_var("OPENAI_UPSTREAM_URL", upstream.uri());
+    // A virtual key is never forwarded upstream (TD-370): the request
+    // needs a provider key, so the operator fallback supplies a test one.
+    std::env::set_var("OPENAI_API_KEY", ["test", "-operator-", "key"].concat());
     std::env::set_var("CONTROL_PLANE_URL", cp.uri());
     std::env::set_var("JUDGE_FINALIZE_DEADLINE_MS", "500");
 
