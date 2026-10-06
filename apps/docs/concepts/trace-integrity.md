@@ -238,7 +238,7 @@ stops accidents and application bugs — it is not a control against whoever own
 the database.
 
 ::: warning This chain has no scheduled reader
-Nothing runs this walk on a timer, and no dashboard page shows it. It is
+Nothing runs this walk on a timer. **Activity › Traces** shows it, as the **Harness config snapshot chain** block under the sealed roots, but only when someone opens the page. It is
 deliberately **not** folded into the `audit_log_integrity` probe — a linear chain
 and a Merkle tree are different claims, and averaging them into one score is how
 that probe became misleading once already. Until it has a scheduled caller, the

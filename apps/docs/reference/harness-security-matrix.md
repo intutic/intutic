@@ -21,12 +21,12 @@ This document is the canonical reference for what Intutic enforces, how, and the
 Every Vector A gate evaluates the same policy snapshot, and since gate body v8
 that includes the `hold` tier: a `review_before:` token or a
 `REQUIRE_APPROVAL:` SOP refuses the call through the harness's own blocking
-contract, records a hold for **Decisions → Held Changes**, and lets the exact
+contract, records a hold for **Findings › Review Queue › Held Changes**, and lets the exact
 same call through once `intutic decision approve <holdId>` has run (workspace
 opt-in, short TTL). The n8n workflow hook and the Open WebUI prompt filter
 refuse a hold outright — neither runs in a workspace that could record one.
 
-### Vector D — Response Gate
+### Vector D — Response Gate {#vector-d--response-gate}
 
 The response gate (`response_gate.rs`, open-core, default-on) is the product's only harness-agnostic **pre-execution** tool gate: because every response byte passes through the proxy before the client sees it, a denied tool call is refused before it ever reaches the harness's tool runner — no per-harness hook, no harness cooperation. It understands the Anthropic (`tool_use` blocks), OpenAI chat-completions (`tool_calls[]`), and OpenAI Responses (`function_call` output items) wire shapes, on both streaming and non-streaming paths. When a call is withheld, the agent receives an explicit in-band message that the call never ran, so it does not blindly retry.
 

@@ -105,4 +105,4 @@ In enterprise environments with multiple developers, Intutic maintains isolated 
 ### B. Centralized Audit Aggregation
 * When developers run AI agent sessions (e.g., Cursor, Claude Code, Aider), the Rust proxy gateway intercepts the execution traces.
 * Every trace log and incident record is database-tagged with **both** the developer's unique identity (`user_id` / `developerId`) and the shared organization `workspace_id`.
-* This allows security teams, managers, and SREs to view and search consolidated logs, compliance scores, and compute budgets across the entire team in the **Activity Logs** (`/activity/traces`), **Review Queue** (`/findings/review`), and **Governance Coverage** (`/policies/scope`) views without any conflict.
+* This allows security teams, managers, and SREs to view and search consolidated logs, compliance scores, and compute budgets across the entire team in the **Activity Logs** (`/activity/traces`), **Review Queue** (`/findings/review`), and **Compliance Scope** (`/policies/scope`) views without any conflict.

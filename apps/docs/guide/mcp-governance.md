@@ -133,7 +133,7 @@ malicious one — it can only tell you that *something changed* after you
 already trusted it. A server engineered to be poisoned from day one passes
 this control cleanly, every time.
 
-## Remote (HTTP/SSE) MCP servers: the stdio→HTTP bridge
+## Remote (HTTP/SSE) MCP servers: the stdio→HTTP bridge {#remote-http-sse-mcp-servers-the-stdio-http-bridge}
 
 Every control above this section — proxy-wrapping, the allowlist, TOFU
 pinning — was originally a stdio-process mechanism: it worked by fronting

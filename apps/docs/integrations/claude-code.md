@@ -60,7 +60,7 @@ Never commit secrets, API keys, or credentials to version control...
 ```
 
 ::: warning
-Intutic overwrites the entire `CLAUDE.md` file. If you have custom instructions, consider moving them to a separate file or incorporating them as SOPs in the Intutic dashboard.
+Intutic overwrites the entire `CLAUDE.md` file. If you have custom instructions, consider moving them to a separate file or adding them as SOP files in `.intutic/sops/` (see [SOP Front Matter](/reference/sop-front-matter)).
 :::
 
 ## Config details

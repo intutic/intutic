@@ -12,7 +12,7 @@ Agentic coding workflows can trigger thousands of parallel LLM calls, quickly ge
 
 ### Per-Workspace Budgets
 
-Configure spending limits from the dashboard (**Settings &rarr; Billing**) or via environment variables:
+Configure spending limits from the dashboard (**Settings › Billing › Budget Limits**) or via environment variables:
 
 | Variable | Description |
 |----------|-------------|
@@ -91,10 +91,11 @@ When a budget limit is exceeded, Intutic raises one of three anomaly types:
 
 The dashboard surfaces budget utilization in real time:
 
-- **Spend vs. Budget** — Visual gauge showing `spentUsd` against `totalBudgetUsd`
-- **Daily trend** — Spending pattern over the current billing period
-- **Per-model breakdown** — Which LLM models are consuming the most budget
-- **Per-developer breakdown** — Individual spending by team member
+- **Budget used** — on Overview, above every tab: spend against the workspace budget, as a percentage and in dollars.
+- **Budget Limits** — on **Settings › Billing**: meters for **Spent this month** and **Spent today** against their caps (amber from 75%, red from 90%), the caps and alert threshold themselves, and the budget alerts raised so far.
+- **Cost by Virtual Key** — on Overview's **Cost & Token Efficiency** tab: cost per virtual key, today or this month (see below).
+
+The dashboard has no daily spend trend, per-model spend or per-developer spend view. **Token Efficiency by Model** on the same tab shows tokens per model, not cost.
 
 ### Token Utility Classification
 
@@ -153,18 +154,18 @@ Cost-center GL mapping, period-end chargeback re-invoicing and the async PDF/CSV
 ### Splitting cost by traffic class (desktop vs. app, staging vs. prod, …)
 
 There is no dedicated "traffic class" concept — the interim answer is one
-virtual key per class. Mint a separate key under **Settings → API Keys** for
+virtual key per class. Mint a separate key under **Settings › Security › Virtual API Keys** for
 each class (e.g. `desktop`, `ci`, `prod`), point that traffic at its own key,
 and `/api/v1/usage/virtual-keys` reports each key's cost separately from that
 point on. The same split is on the dashboard as the **Cost by Virtual Key**
-card on the Dashboard's **Cost & Token Efficiency** tab, for today or the
+card on Overview's **Cost & Token Efficiency** tab, for today or the
 current month. Traces from before a key existed, and any trace with no
 virtual-key auth context (a standalone/offline trace synced back, for
 instance), report under a `null` key — shown as **unattributed** on the card —
 rather than being folded into whichever key happens to be first.
 
 ### Resolving Budget Alerts
-Security and FinOps administrators can review all active budget breaches on the **Incidents Page**. When resolving a breach, administrators can record:
+Security and FinOps administrators can review all active budget breaches on **Findings › Incidents**. When resolving a breach, administrators can record:
 - **Resolution Status:** `RESOLVED` status marking once action has been taken (e.g., plan tier upgraded, limits adjusted).
 - **Audit Trails:** Record `resolvedBy` and `resolutionNote` to maintain SOC 2 compliance logs for financial audit records.
 

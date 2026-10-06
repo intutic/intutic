@@ -1,75 +1,73 @@
 # Review Queue <Badge type="warning" text="Cloud / Team" />
 
 <!-- ENTERPRISE_ONLY_START -->
-The Review Queue is where you approve or reject enforcement decisions that Intutic made on behalf of your team. It's the human-in-the-loop checkpoint for AI governance.
+**Findings › Review Queue** (`/findings/review`) is where a person reviews what Intutic's guardrails stopped, what runs are waiting on, and what the governance judge could not decide alone. It's the human-in-the-loop checkpoint for AI governance.
 
 ## What you'll learn
 
-- When and why decisions appear in the queue
-- How to review, approve, or reject a decision
-- How to promote a decision into a permanent SOP rule
+- The three tabs: Override Requests, Held Changes and Judge Reviews
+- How each kind of item is approved, rejected or ruled on
 - Filtering and role requirements
 
-## When decisions appear
+## Override Requests
 
-A decision enters the Review Queue whenever PCAS applies a **HIJACK** enforcement action. HIJACK means the proxy rerouted or substantially modified an agent's request — for example, downgrading an expensive model to a cheaper alternative or rewriting a prompt to comply with policy.
+Agent actions a guardrail intercepted. Two kinds of entry land here:
 
-::: info Not all actions require review
-**BYPASS** (pass-through) and **ENHANCE** (minor enrichment) don't require human approval. **KILL** (block) decisions are logged but are immediate — they don't wait in a queue.
+- A **review hold**: a harness's pre-execution hook held the action before it ran. Nothing ran instead.
+- A **substitution**: the proxy rewrote a tool call, for example when output DLP redacted a secret from its arguments. The corrected call is the one that ran, so the entry is a record rather than a request, marked **Auto-enforced**.
+
+::: info Not every action reaches the queue
+**BYPASS** (pass-through) and **ENHANCE** (minor enrichment) never appear here. A **KILL** (block) is logged as it happens and does not wait in a queue.
 :::
 
-## Reviewing a decision
+### Reviewing an override request
 
-Each decision in the queue shows:
+The table lists each entry's **Alert** id, what was **Requested by the agent**, **What ran instead** ("Blocked — no replacement" for a hold), its **Review state** and the time. Click a row to open the drawer, titled **Alert** and the entry id. It shows:
 
 | Field | Description |
 |-------|-------------|
-| **Original request** | The agent's request before modification |
-| **Modification applied** | What the proxy changed (model swap, prompt rewrite, etc.) |
-| **Reason** | Why PCAS chose this action (SOP rule, cost policy, anomaly signal) |
-| **Trace link** | Link to the full execution trace |
-| **Timestamp** | When the decision was made |
-| **Model** | The original and modified model (if changed) |
+| **Session** | The agent session the action came from |
+| **Time** | When the guardrail acted |
+| **Requested action (agent)** | The tool call the agent asked for |
+| **Enforced safe action (hijacked)** or **Action blocked, no replacement** | The call that ran instead, or, for a hold, a note that nothing ran |
+| **Why the guardrail acted** | The rationale recorded with the entry |
 
-Click on any decision to expand the full detail view, where you can compare the original and modified requests side-by-side.
+### Approving or rejecting
 
-## Approving or rejecting
+Override requests are approved or rejected from their **Slack notification**, not from the dashboard; the outcome then shows here. The same review is available through the API:
 
-After reviewing a decision, you have two options:
+```
+POST /api/v1/decisions/:entryId/review
+{ "action": "approve" }   # or "reject", with an optional "reason"
+```
 
-### Approve
-Confirms the decision was correct. The proxy will continue applying this type of enforcement for similar future requests. Approval feeds into the system's confidence scoring.
+The API records the reviewer as the authenticated member. When the workspace setting `reviewHoldBypassEnabled` is on (it is off by default), approving a review hold also writes a short-lived bypass, so the agent's retried command gets through; otherwise an approval only records the decision.
 
-### Reject
-Marks the decision as incorrect. The proxy takes note and adjusts its enforcement thresholds. You can optionally add a reason for the rejection, which helps refine future PCAS behavior.
+### Filtering by review state
 
-::: tip Bulk actions
-You can select multiple decisions and approve or reject them in bulk using the checkboxes and the action bar at the top of the queue.
-:::
+Above the table, the **Review state** tabs pick which entries to show: **Pending Review** (the default), **Approved**, **Rejected** and **Promoted to SOP**. There are no other filters.
 
-## Promoting to an SOP
+### Repeat exceptions
 
-If a HIJACK decision represents a rule you want to enforce permanently, you can **promote** it into an SOP:
+Below the table, **Repeat exceptions** adds up the intercepts so far: the number of **Intercepts**, the share **Approved** and **Rejected**, and a **Recommendation**, for example to relax a threshold that produces too many false positives, or to refine the SOP behind it.
 
-1. Open the decision detail view
-2. Click **Promote to SOP**
-3. Intutic pre-fills a new SOP with the rule derived from the decision
-4. Edit the title, content, and risk tier as needed
-5. Save — the SOP starts in `DRAFT` state for you to review and validate
+## Held Changes
 
-This is a powerful way to build your governance rules organically from real enforcement patterns.
+Runs stopped mid-flight because an SOP declared the action needed a human first, with `review_before:` (for example `review_before: action:deploy`). Nothing is held unless an SOP asks for it. Each card shows why the run was held, when, who started it, and the change manifest: every operation, target and tool it was about to run, riskiest first.
 
-## Filtering the queue
+- **Approve and resume** lets the run continue.
+- **Reject and stop** kills the run where it was held. Nothing it was about to change is applied, and it cannot be resumed. The dashboard asks you to confirm.
 
-Use the filter bar to narrow down the queue:
+See [Session Safety & Budgets](/guide/loops).
 
-| Filter | Options |
-|--------|---------|
-| **Status** | `PENDING`, `APPROVED`, `REJECTED` |
-| **Date range** | Custom start and end dates |
-| **Model** | Filter by the model involved in the decision |
+## Judge Reviews
 
-By default, the queue shows `PENDING` decisions sorted newest-first.
+Agent responses the governance judge could not decide on its own. The judge's interim verdict has already answered the agent; your ruling decides whether an incident stands. Each card shows the SOP it is most likely about, the judge's score, the interim verdict (flagged or passed) and the response excerpt.
+
+- **Violation** opens an incident.
+- **Clean** closes the incident the interim verdict opened.
+
+**How to rule** sets out the rule reviewers apply: rule on what the response itself did, not on what the agent might do next. Above the queue, **Reviews by SOP** counts the reviews waiting and ruled for each SOP, and marks an SOP whose reviews are mostly ruled clean as one to consider rewording.
 
 ## Role requirements
 
@@ -77,19 +75,15 @@ Not everyone on your team can access the Review Queue. Access requires one of th
 
 | Role | Access level |
 |------|-------------|
-| **OWNER** | Full access — approve, reject, promote, bulk actions |
-| **ADMIN** | Full access — approve, reject, promote, bulk actions |
-| **EM** | Full access — approve, reject, promote, bulk actions |
+| **OWNER** | Full access to all three tabs |
+| **ADMIN** | Full access to all three tabs |
+| **EM** | Full access to all three tabs |
 | **DEVELOPER** | No access to the Review Queue |
 | **VIEWER** | No access to the Review Queue |
 
-::: warning Pending decisions don't block agents
-HIJACK decisions are applied immediately. The Review Queue is for after-the-fact review, not a pre-approval gate. If you reject a decision, the system adjusts future behavior — it doesn't undo the original action.
-:::
-
 ## Slack Interactive Reviews (Enterprise)
 
-When Slack OAuth is configured and `FF_NOTIFICATION_HUB=true` is enabled, pending HIJACK decisions are automatically routed to the Slack team workspace as rich Block Kit cards.
+When Slack OAuth is configured and `FF_NOTIFICATION_HUB=true` is enabled, pending override requests are automatically routed to the Slack team workspace as rich Block Kit cards.
 
 * **Interactive Actions**: Workspace owners and admins can click **Approve** or **Reject** directly from the Slack message card without having to open the dashboard UI.
 * **Review Mapping**: Clicking these buttons sends an interactive payload to `/api/v1/adapters/slack/interactions` which updates the control plane's `decision_mining_queue` state.

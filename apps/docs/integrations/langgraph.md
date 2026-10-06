@@ -24,7 +24,7 @@ intutic init
   • langgraph → .env.intutic
 ```
 
-### 2. Route LLM traffic through the proxy
+### 2. Route LLM traffic through the proxy {#2-route-llm-traffic-through-the-proxy}
 
 Either source the generated env file:
 
@@ -86,7 +86,7 @@ const model = new ChatOpenAI({
 });
 ```
 
-### 3. Gate local tool execution (SDK)
+### 3. Gate local tool execution (SDK) {#3-gate-local-tool-execution-sdk}
 
 ```bash
 pip install intutic-clawde

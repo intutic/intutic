@@ -58,7 +58,7 @@ Never commit secrets or API keys...
 ```
 
 ::: warning
-Intutic overwrites the entire `config.toml` file. If you have custom OpenHands settings, keep them in a separate config file or manage them through the Intutic dashboard.
+Intutic overwrites the entire `config.toml` file. If you have custom OpenHands settings, keep them in a separate config file; custom agent instructions belong in SOP files in `.intutic/sops/` (see [SOP Front Matter](/reference/sop-front-matter)).
 :::
 
 ## Config details

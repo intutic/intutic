@@ -131,7 +131,7 @@ workspace is riding its own override, its org's default, or the shared `gateway.
 point at — not traffic proxying: the client still connects directly to the resolved gateway's
 own exposed address, there is no proxy-in-front-of-proxies routing requests between gateways.
 
-## 4. What does NOT run locally (read this before you deploy)
+## 4. What does NOT run locally (read this before you deploy) {#4-what-does-not-run-locally-read-this-before-you-deploy}
 
 A self-hosted gateway routes your organization's LLM provider traffic through your own
 infrastructure. It does **not**, today, keep every part of Intutic's evaluation pipeline local:

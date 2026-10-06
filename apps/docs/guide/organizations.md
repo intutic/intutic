@@ -17,7 +17,8 @@ also auto-provisions a dedicated managed gateway cell for it, so it requires pro
 org's domain first, via a DNS TXT record — the same mechanism Slack and Google Workspace use.
 There's no anonymous signup path for this: sign up personally first (`intutic init` / the
 dashboard's own signup page), then create the org from that authenticated session, either in the
-dashboard (the workspace switcher's "Create Organization") or via the CLI:
+dashboard (click the workspace name in the sidebar to open its menu; under **Workspaces**,
+choose **Create organization**) or via the CLI:
 
 ```bash
 intutic org create

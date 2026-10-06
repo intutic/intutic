@@ -75,7 +75,7 @@ if (budgetBlock) {
 
 The proxy also does a **local budget check** before even calling the control plane — checking `v2:budget:hard_block:{workspace_id}` directly from its own Valkey connection. This means budget blocks take effect with zero network round-trips.
 
-→ Source: [metering.rs](../../../packages/proxy/src/metering.rs) (proxy-side); `routes/evaluate.ts` in the control plane, which is not open source
+→ Source: [metering.rs](https://github.com/intutic/intutic/blob/main/packages/proxy/src/metering.rs) (proxy-side); `routes/evaluate.ts` in the control plane, which is not open source
 
 ---
 
@@ -216,9 +216,9 @@ All circuit breaker state lives in Valkey for fast access:
 
 | Component / File | What it implements | Scope |
 |---|---|---|
-| [metering.rs](../../../packages/proxy/src/metering.rs) | Proxy-side budget gate and virtual key validation | Open-Core / Proxy |
-| [config.rs](../../../packages/proxy/src/config.rs) | `PolicyConfig` — fail-closed, timeout settings | Open-Core / Proxy |
-| [detectors.rs](../../../packages/proxy/src/plugins/anomaly/detectors.rs) | `consecutive_repeat` loop detection and the rest of the detector registry | Open-Core / Proxy |
+| [metering.rs](https://github.com/intutic/intutic/blob/main/packages/proxy/src/metering.rs) | Proxy-side budget gate and virtual key validation | Open-Core / Proxy |
+| [config.rs](https://github.com/intutic/intutic/blob/main/packages/proxy/src/config.rs) | `PolicyConfig` — fail-closed, timeout settings | Open-Core / Proxy |
+| [detectors.rs](https://github.com/intutic/intutic/blob/main/packages/proxy/src/plugins/anomaly/detectors.rs) | `consecutive_repeat` loop detection and the rest of the detector registry | Open-Core / Proxy |
 | `POST /api/v1/hook-gate` (`hookEvents.ts`) | The hot-path policy check endpoint | Enterprise Control Plane |
 | `pcasService.ts` | SSO group privilege resolution cascade | Enterprise Control Plane |
 | `sslEnforcementService.ts` | SSL scheduling, structural and logical layers, plus compliance reporting | Enterprise Control Plane |
@@ -236,7 +236,7 @@ The circuit breaker's own controls are checked, not just trusted:
   benign context every 15 minutes, so a control that stopped firing is
   caught by the platform, not discovered in a postmortem. Results are
   queryable at `GET /intutic/probes`. → Source:
-  [probes.rs](../../../packages/proxy/src/probes.rs)
+  [probes.rs](https://github.com/intutic/intutic/blob/main/packages/proxy/src/probes.rs)
 - **Silent-gate detection** flags a gate that has gone quiet — the *absence*
   of expected activity, not a failed check — as its own finding, run hourly
   alongside the rest of the scheduled governance sweep. A gate that silently

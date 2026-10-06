@@ -96,7 +96,7 @@ Every request passes through these stages before reaching the LLM:
 | SnipCompactor max tool output | `8,192 tokens` |
 | Valkey default | `redis://127.0.0.1:6379` |
 
-→ Source: [packages/proxy/](../../../packages/proxy/)
+→ Source: [packages/proxy/](https://github.com/intutic/intutic/tree/main/packages/proxy)
 
 ---
 
@@ -150,7 +150,7 @@ SOPs are written in each harness's native format:
 | Env | Codex | `.env.intutic` |
 | Native hooks | Cline, Roo Code, Continue, Claude Desktop, Goose | Harness-specific |
 
-→ Source: [services/sync-daemon/](../../../services/sync-daemon/)
+→ Source: [services/sync-daemon/](https://github.com/intutic/intutic/tree/main/services/sync-daemon)
 
 ---
 
@@ -176,7 +176,7 @@ interface IHarnessAdapter {
 | `writeConfig()` | Write SOPs to the harness's native config format (atomic write) |
 | `readCurrentHash()` | SHA-256 of current config file (for drift detection) |
 
-The `createMarkdownAdapter()` factory in [base.ts](../../../tools/cli/src/harness/base.ts) generates adapters for markdown-based harnesses (Cursor, Claude Code, Windsurf). All adapters share the same auto-generated header:
+The `createMarkdownAdapter()` factory in [base.ts](https://github.com/intutic/intutic/blob/main/tools/cli/src/harness/base.ts) generates adapters for markdown-based harnesses (Cursor, Claude Code, Windsurf). All adapters share the same auto-generated header:
 
 ```markdown
 # Intutic Governance Rules (auto-generated)
@@ -184,7 +184,7 @@ The `createMarkdownAdapter()` factory in [base.ts](../../../tools/cli/src/harnes
 # Last sync: 2026-07-04T12:15:00Z
 ```
 
-→ Source: [tools/cli/src/harness/](../../../tools/cli/src/harness/)
+→ Source: [tools/cli/src/harness/](https://github.com/intutic/intutic/tree/main/tools/cli/src/harness)
 
 ---
 

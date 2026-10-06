@@ -28,10 +28,10 @@ An hourly background sweep runs an evaluation cycle for every eligible workspace
 
 ## Accessing the Optimizer
 
-Unlike general SOP listings, the optimizer has a dedicated home. Click the **SOP Optimizer** sidebar link (under Governance & Policies) to access the compiler.
+Unlike general SOP listings, the optimizer has a dedicated home: **Labs › SOP Optimizer** (`/labs/sop-optimizer`; Owners, Admins and Engineering Managers, on a plan that includes it).
 
 ### 1. Manual Trigger
-While the optimizer runs hourly compiles in the background, you can trigger an immediate evaluation cycle by clicking the **Trigger Optimizer Cycle** button.
+While the optimizer runs hourly compiles in the background, you can trigger an immediate evaluation cycle by clicking **Run optimizer**. Owners and Admins also have **Mine incidents**, which drafts amendments from recent incidents.
 - *Rate limits:* Trigger is restricted to once per hour per workspace, independently of the background sweep's own hourly cadence.
 - *Report:* On complete, displays candidates evaluated, proposals created, and runs skipped.
 
@@ -39,11 +39,11 @@ While the optimizer runs hourly compiles in the background, you can trigger an i
 
 ## Dashboards
 
-The SOP Optimizer dashboard is divided into two views:
+The SOP Optimizer page has two tabs. **Pending Proposals** (with the count of proposals waiting) opens first; **Run History** is the second.
 
 ### Run History
 Lists all completed optimization runs:
-- **SOP Title / Clause Index** — The targeted SOP ID and specific markdown instruction section under audit.
+- **Guideline** — The targeted SOP and the clause index of the markdown instruction section under audit.
 - **Simulated Compliance** — Before/after comparison showing the change in compliance score if the proposal is adopted (e.g. `70% → 95%`).
 - **Delta** — The net compliance improvement (runs with a delta < 5% are skipped).
 - **Sample Size** — Number of traces evaluated in the simulation.
@@ -51,11 +51,11 @@ Lists all completed optimization runs:
 - **Status** — Displays whether the outcome was `Accepted` or `Rejected`.
 
 ### Pending Proposals
-Lists all mutations awaiting review:
-- **Proposed Title & Rating** — Description and rating score.
-- **Reasoning & Simulation Results** — Plain-text explanation of why the rule mutation was recommended.
+Lists all mutations awaiting review. **Proposal source** filters them: All, LLM-evolved, Incident-mined or Health scan.
+- **Proposed title and score** — With a badge for its source.
+- **Why, and how it scored** — Plain-text explanation of why the rule mutation was recommended. Incident-mined and health-scan proposals also show their incident count and threat score.
 - **Clause Diff** — A side-by-side comparison of the **Original** clause text vs. the **Optimized** clause text.
-- **Actions** — **Approve & Apply** (promotes the mutated clause directly to your active SOP) or **Reject** (dismisses the proposal).
+- **Actions** — **Approve & Apply** (promotes the mutated clause directly to your active SOP) or **Reject** (dismisses the proposal). Only Owners and Admins can approve or reject.
 
 ---
 

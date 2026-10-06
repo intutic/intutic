@@ -129,12 +129,13 @@ RSYNC_EXCLUDES=(
 #                                  Excluded rather than deleted because rsync
 #                                  --delete would otherwise remove this copy the
 #                                  moment it is absent downstream.
-#   apps/docs/Dockerfile           Enterprise pins INTUTIC_ENTERPRISE_BUILD=false
-#                                  and INTUTIC_REQUIRE_OSS=true because this repo
-#                                  HAS services/control-plane and could otherwise
-#                                  build a docs site full of paid-tier pages.
-#                                  Public cannot: with no control-plane directory
-#                                  IS_OSS is structurally true there.
+#   apps/docs/Dockerfile           Sets INTUTIC_ENTERPRISE_BUILD=true and
+#                                  INTUTIC_REQUIRE_FULL=true: docs.intutic.ai,
+#                                  built from this repo, publishes every page.
+#                                  Identical downstream, where with no
+#                                  control-plane directory IS_OSS is
+#                                  structurally true and the guard does not
+#                                  apply.
 #
 # NOTE: rsync patterns are relative to the transfer root, which is the synced
 # directory itself — not the repo root. `--exclude=packages/proxy/Cargo.lock`

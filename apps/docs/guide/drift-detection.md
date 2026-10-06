@@ -130,7 +130,7 @@ transition plausibility never blocks on its own.
 
 ## Responding
 
-1. **Review the anomaly** in the dashboard anomaly feed
+1. **Review the anomaly** under **Findings › Incidents**, on the **Anomalies** or **Drift Alerts** tab
 2. **Examine recent traces** to see what changed
 3. **Update the SOP** if agents have outgrown its scope — a stale SOP is a scope
    problem more often than a compliance problem

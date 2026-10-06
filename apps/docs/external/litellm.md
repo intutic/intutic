@@ -76,7 +76,7 @@ Prompt text is classified at the gateway using a fast, non-allocating word-bound
 * `coding` — default fallback category
 
 #### Dynamic Custom Keywords & UI Configuration
-Developers and administrators can customize these trigger words via the **Compute Metrics Dashboard**. Custom trigger lists are saved to PostgreSQL settings and propagated to Valkey under the cache key `workspace:bandit_keywords:{workspaceId}`. The Rust proxy fetches this configuration dynamically with a **200ms timeout** failover, falling back to defaults if Valkey is degraded.
+Developers and administrators can customize these trigger words in the dashboard under **Settings › AI Routing & Caching**, in **Configurable Task Trigger Words** on the Smart Model Routing & Response Cache card. Custom trigger lists are saved to PostgreSQL settings and propagated to Valkey under the cache key `workspace:bandit_keywords:{workspaceId}`. The Rust proxy fetches this configuration dynamically with a **200ms timeout** failover, falling back to defaults if Valkey is degraded.
 
 #### Background LLM-as-a-Judge Refinement
 To maintain optimal task classification without hot path overhead:

@@ -4,7 +4,7 @@ SOPs (Standard Operating Procedures) are the governance rules that define what y
 
 ## What you'll learn
 
-- How to create and manage SOPs from the dashboard
+- How SOPs are created, and how to inspect and edit them in the dashboard
 - The 7-state lifecycle and when to use each state
 - Risk tiers, dependencies, and health metrics
 - How SOPs sync to your harnesses automatically
@@ -24,17 +24,12 @@ SOPs aren't set-and-forget. They evolve as you learn how your agents behave. Int
 
 ## Creating an SOP
 
-From the dashboard, navigate to the **SOPs** page and click **New SOP**. You'll fill in:
+SOPs are not created in the dashboard: **Policies › Agent Guidelines** has no create button. Guidelines live in your repository and sync to the workspace. There are two ways in:
 
-| Field | Description |
-|-------|-------------|
-| **Title** | Short, descriptive name (e.g., "No production DB access") |
-| **Content** | Markdown body — the actual policy rules |
-| **Risk tier** | `LOW`, `MEDIUM`, `HIGH`, or `CRITICAL` |
-| **Complexity** | Task complexity level this SOP targets |
-| **Dependencies** | Other SOPs this one requires (optional) |
+- **From files.** Write the SOP as a Markdown file under `.intutic/sops/`, with front matter for its title and risk tier (`LOW`, `MEDIUM`, `HIGH` or `CRITICAL`), and push it with `intutic sops push <name>`. See [GitOps for SOPs](/guide/gitops-sops) and [SOP Front Matter](/reference/sop-front-matter).
+- **From policy documents.** Connect Notion, Confluence, GitHub or uploaded documents under **Policies › Policy Guardrails › Sources**. While the workspace has no guidelines, the Agent Guidelines page links there with **Connect a policy source**. See [Policy Guardrails](/guide/policy-guardrails).
 
-The new SOP starts in `DRAFT` state.
+Once an SOP exists, click it on **Policies › Agent Guidelines** to open its detail drawer, and **Edit SOP** to change its Markdown content. The page also draws the SOP dependency graph.
 
 ### Writing effective content
 
@@ -124,16 +119,17 @@ Invalidating a foundational SOP can cascade across many rules. Check the depende
 
 ## SOP health metrics
 
-The dashboard tracks health metrics for each validated SOP:
+An SOP's detail drawer on **Policies › Agent Guidelines** shows its health:
 
 | Metric | What it measures |
 |--------|-----------------|
-| **Hit rate** | How often this SOP is evaluated against incoming requests |
-| **Violation rate** | Percentage of evaluations that resulted in a violation |
-| **False positive rate** | How often the SOP flagged compliant requests incorrectly |
-| **Last triggered** | Timestamp of the most recent evaluation |
+| **Matches (30d)** | How many times the SOP matched a request in the last 30 days |
+| **Activation rate** | Matches as a share of evaluations over the last 30 days ("No evaluations yet" until it has been evaluated) |
+| **Average compliance** | The average compliance score of the requests it was evaluated against |
+| **Drift events** | How many drift events it has recorded |
+| **Total cost** | The cost recorded against the SOP |
 
-Low hit rates may indicate an SOP that's too narrow or no longer relevant. High false positive rates suggest the SOP needs refinement.
+A low activation rate may indicate an SOP that's too narrow or no longer relevant. Low average compliance suggests either agents are not following it or its wording needs refinement.
 
 ## How SOPs sync to harnesses
 
@@ -229,7 +225,7 @@ Neither question is answered by this repository today.
 :::
 
 <!-- ENTERPRISE_ONLY_START -->
-## SOP Hook Scripts — withdrawn
+## SOP Hook Scripts — withdrawn {#sop-hook-scripts-withdrawn}
 
 This page previously documented **Hook SOPs**: JavaScript policy scripts said to run
 "inside the control plane's secure V8 isolate sandboxes", in a "fully air-gapped sandbox".

@@ -1,4 +1,4 @@
-# Break-Glass Overrides <Badge type="danger" text="Enterprise" />
+# Emergency Overrides <Badge type="danger" text="Enterprise" />
 
 Temporarily bypass safety policies and custom WASM rules in emergency situations.
 
@@ -8,7 +8,7 @@ Temporarily bypass safety policies and custom WASM rules in emergency situations
 
 In production environments, there are times when an agent needs to perform an action blocked by existing Standard Operating Procedures (SOPs) or security policies for urgent debugging, hotfixes, or diagnostics.
 
-The **Break-Glass Override Workflow** provides an audited, time-limited bypass mechanism that maintains high security by requiring peer double-authorization.
+The emergency override workflow (also called break-glass) provides an audited, time-limited bypass mechanism that maintains high security by requiring peer double-authorization.
 
 ---
 
@@ -47,16 +47,16 @@ sequenceDiagram
 ## Requesting and Approving Overrides
 
 ### 1. Submitting a Request
-Navigate to **Break-Glass** in the dashboard:
-1. Enter the **scope** to bypass, or leave it empty for a global bypass. A scope is `wasm:<ruleId>` (one custom WASM rule) or `detector:<detectorId>` (one anomaly detector); nothing else can be named. SOPs and hook rules have no bypass, and DLP, budgets, `deny_tools` and the control plane's pre-check are never skipped by any token.
-2. Choose the **Bypass Duration** (e.g. 15 minutes, 1 hour, or up to 24 hours).
-3. Click **Submit Request**.
-4. **Copy the Token** shown in the warning box. *It is shown only this once — the control plane does not display it again after this step, and it is not at rest anywhere: the request row and the cache key the approval writes hold only its SHA-256.* Treat it as a live credential for the whole bypass duration: anyone holding it can use it until it expires.
+Open **Policies › Emergency Overrides** (`/policies/overrides`; Owners, Admins and Engineering Managers) and use the **Request an override** card:
+1. Enter the **Scope (optional)** to bypass, or leave it empty for a global bypass. A scope is `wasm:<ruleId>` (one custom WASM rule) or `detector:<detectorId>` (one anomaly detector); nothing else can be named. SOPs and hook rules have no bypass, and DLP, budgets, `deny_tools` and the control plane's pre-check are never skipped by any token.
+2. Choose the **Duration**: 15 minutes, 30 minutes, 1 hour, 4 hours, 8 hours or 24 hours.
+3. Click **Request override**.
+4. Under **Copy your bypass token now**, click **Copy** next to the **Bypass token**. *It is shown only this once — the control plane does not display it again after this step, and it is not at rest anywhere: the request row and the cache key the approval writes hold only its SHA-256.* Treat it as a live credential for the whole bypass duration: anyone holding it can use it until it expires.
 
 ### 2. Peer Approval (Double Authorization)
 To prevent security gaps:
 - A developer **cannot approve their own override requests**.
-- Another administrator or manager must navigate to the **Break-Glass Review Queue** and click **Approve** on the request.
+- Another administrator or manager clicks **Approve** on the request in the **Override requests** card on the same page, which lists each request's requester, status, scope, duration, expiry and approver.
 - Once approved, the control plane activates the token and writes it to the high-performance Valkey cache.
 
 ---

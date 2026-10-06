@@ -51,7 +51,7 @@ Verified against QM at commit [`7a0b6d98`](https://github.com/yc-software/qm/tre
 }
 ```
 
-QM sends the token as `x-api-key` on every screening request. Use a **workspace virtual key** (`vk_...`) from `POST /api/v1/keys` in your Intutic dashboard, stored under the secret-store name you mapped above:
+QM sends the token as `x-api-key` on every screening request. Use a **workspace virtual key** (`vk_...`) from Settings › Security › Virtual API Keys in your Intutic dashboard (or `POST /api/v1/keys`), stored under the secret-store name you mapped above:
 
 ```bash
 # QM's gitignored .env; `qm secrets push` uploads it to Fly secrets or AWS Secrets Manager.
@@ -103,7 +103,7 @@ BLOCK:security_screen.* WHERE ignore previous instructions:Prompt-injection phra
 ## Setup & Activation
 
 ### 1. Mint a workspace virtual key
-In the Intutic dashboard, create an API key scoped to the workspace QM should report against (`POST /api/v1/keys`). This is the value for `SECURITY_SCREEN_PROXY_TOKEN`.
+In the Intutic dashboard, create a virtual API key in the workspace QM should report against, from Settings › Security › Virtual API Keys (or `POST /api/v1/keys`). This is the value for `SECURITY_SCREEN_PROXY_TOKEN`.
 
 ### 2. Configure `qm.config.jsonc`
 Add the `securityScreen` block and `secretEnv` entry shown above, and deploy the secret through whatever mechanism your QM hosting target (Fly/AWS/Docker) uses.

@@ -98,7 +98,7 @@ Confirmed against a real install (`@mastra/core@1.59.0`, and unchanged in 1.74.0
 
 ## What the adapter does NOT do
 
-Same structural gaps as every SDK-gated framework — see [LangGraph's "What the adapter does NOT do"](/integrations/langgraph#what-the-adapter-does-not-do"). In short: there is no sync-daemon hook file, argument-level gating requires wiring the SDK into your own agent code, and `x-intutic-harness` attribution is client-supplied, not authorization. On top of that structural family, Mastra adds the per-call-hooks-override bypass above, which is specific to this framework's own hook design.
+Same structural gaps as every SDK-gated framework — see [LangGraph's "What the adapter does NOT do"](/integrations/langgraph#what-the-adapter-does-not-do). In short: there is no sync-daemon hook file, argument-level gating requires wiring the SDK into your own agent code, and `x-intutic-harness` attribution is client-supplied, not authorization. On top of that structural family, Mastra adds the per-call-hooks-override bypass above, which is specific to this framework's own hook design.
 
 ## Config details
 

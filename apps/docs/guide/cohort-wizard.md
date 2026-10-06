@@ -46,7 +46,7 @@ setup` is the interactive counterpart for a human at a keyboard.
 
 ## Guided Setup (dashboard)
 
-Under **Settings → Security**, next to Provider Keys, a **Guided Setup** button opens the same
+Under **Settings → Security**, on the Provider Keys card, a **Guided setup** button opens the same
 flow as a modal: pick a provider → enter its credential → verify → done. Each step calls the
 exact hook the standalone panel next to it already uses (`useProvisionProviderCredential`,
 `useVerifyProviderCredential`), so anything you configure through the wizard shows up

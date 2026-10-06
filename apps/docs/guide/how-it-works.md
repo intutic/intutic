@@ -207,4 +207,4 @@ To detect if a developer has bypassed the proxy gateway (when host enforcement
 is not enabled):
 1. The `sync-daemon` periodically fires background HTTP requests directly to standard provider endpoints (e.g. `https://api.anthropic.com/v1/messages`) bypassing localhost routing.
 2. If this direct connection succeeds, it indicates that the network is uncontained.
-3. The daemon instantly raises a `network_bypass` incident of `CRITICAL` severity to alert administrators via the performance dashboard.
+3. The daemon instantly raises a `network_bypass` incident of `CRITICAL` severity, shown to administrators under **Findings › Incidents**.

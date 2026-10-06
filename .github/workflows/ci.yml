@@ -62,6 +62,12 @@ jobs:
       - name: Verify WASM host imports agree across the proxy and the CLI
         run: pnpm lint:wasm-host-imports
 
+      # The docs build ignores dead links (an open-source build leaves the
+      # paid-tier pages out) and VitePress never checks #anchors, so 17 links to
+      # renamed headings went unnoticed. This checks every link between pages.
+      - name: Verify links between docs pages open a page and heading that exist
+        run: pnpm lint:docs-links
+
   typecheck:
     name: Typecheck (TS Workspaces) - Run TypeScript typecheck
     runs-on: ubuntu-latest
