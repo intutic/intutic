@@ -20,11 +20,26 @@ const gate = createRequire(import.meta.url)(SCRIPT) as {
   normalizeValue(value: string): string
   cssRawColors(css: string, basename: string): { line: number; message: string }[]
   cssDefinitions(css: string): { name: string; value: string | null }[]
-  tsLiterals(source: string, fileName: string): { text: string; line: number }[]
+  tsLiterals(source: string, fileName: string): { text: string; line: number; key?: string }[]
   tsLiteralColor(text: string): string | null
   cssGlass(css: string): { line: number; message: string }[]
   tsGlass(source: string, literals: { text: string; line: number }[]): { line: number; message: string }[]
+  motionProblems(property: string, value: string): string[]
+  cssMotion(css: string, file: string): { line: number; message: string }[]
 }
+
+const GLOBALS = 'apps/dashboard/src/styles/globals.css'
+const RESET = [
+  '@media (prefers-reduced-motion: reduce) {',
+  '  *,',
+  '  *::before,',
+  '  *::after {',
+  '    animation-duration: 0.01ms !important;',
+  '    animation-iteration-count: 1 !important;',
+  '    transition-duration: 0.01ms !important;',
+  '  }',
+  '}',
+].join('\n')
 
 describe('TS literal scanning', () => {
   it('reads string and template literals, not comments or JSX text', () => {
@@ -121,6 +136,99 @@ describe('CSS scanning', () => {
     expect(gate.normalizeValue('rgba(29,106,229,0.15)')).toBe(gate.normalizeValue('rgba(29, 106, 229, .150)'))
     expect(gate.normalizeValue('1.0rem')).toBe('1rem')
     expect(gate.normalizeValue('8px')).not.toBe(gate.normalizeValue('.5rem'))
+  })
+})
+
+describe('motion scanning', () => {
+  it('accepts token timings, zero durations and properties named one by one', () => {
+    for (const [prop, value] of [
+      ['transition', 'opacity var(--duration-fast) var(--ease-out), transform var(--duration-normal) var(--ease-out)'],
+      ['transition', 'overlay var(--duration-fast) allow-discrete'],
+      ['transition', 'none'],
+      ['transition-duration', '0s'],
+      ['transition-duration', '0ms'],
+      ['transition-property', 'opacity, transform'],
+      ['animation', 'spin var(--duration-spin) var(--ease-linear) infinite'],
+      ['animation', 'none'],
+      ['animation-delay', '150ms'],
+      ['transform', 'scale(0.98)'],
+    ] as const) {
+      expect(gate.motionProblems(prop, value), `${prop}: ${value}`).toEqual([])
+    }
+  })
+
+  it('rejects transition: all and transition-property: all', () => {
+    expect(gate.motionProblems('transition', 'all var(--duration-fast) var(--ease-out)')).toEqual(['transition: all (name the properties)'])
+    expect(gate.motionProblems('transition-property', 'all')).toEqual(['transition-property: all (name the properties)'])
+  })
+
+  it('rejects a literal duration or easing in each timed property', () => {
+    for (const prop of ['transition', 'transition-duration', 'animation', 'animation-duration']) {
+      for (const d of ['200ms', '0.2s', '.3s', '2s']) {
+        expect(gate.motionProblems(prop, d), `${prop}: ${d}`).toEqual([`literal duration ${d} in ${prop} (use a --duration-* token)`])
+      }
+    }
+    for (const prop of ['transition', 'transition-timing-function', 'animation', 'animation-timing-function']) {
+      for (const e of ['ease', 'ease-in', 'ease-out', 'ease-in-out', 'linear', 'step-end']) {
+        expect(gate.motionProblems(prop, e), `${prop}: ${e}`).toEqual([`literal easing ${e} in ${prop} (use an --ease-* token)`])
+      }
+      for (const [fn, value] of [['cubic-bezier', 'cubic-bezier(0.16, 1, 0.3, 1)'], ['steps', 'steps(4, end)'], ['linear', 'linear(0, 1)']]) {
+        expect(gate.motionProblems(prop, value), `${prop}: ${value}`).toEqual([`literal easing ${fn}() in ${prop} (use an --ease-* token)`])
+      }
+    }
+    expect(gate.motionProblems('transition', 'all 0.2s ease-in-out')).toHaveLength(3)
+  })
+
+  it('reads CSS declarations with their lines, skipping comments', () => {
+    const css = [
+      '/* transition: all 1s ease */',
+      '.a {',
+      '  color: red;',
+      '  transition: color 0.15s ease;',
+      '}',
+      '.b { animation: fadeIn 200ms var(--ease-out); }',
+    ].join('\n')
+    expect(gate.cssMotion(css, 'apps/dashboard/src/a.css')).toEqual([
+      { line: 4, message: 'literal duration 0.15s in transition (use a --duration-* token)' },
+      { line: 4, message: 'literal easing ease in transition (use an --ease-* token)' },
+      { line: 6, message: 'literal duration 200ms in animation (use a --duration-* token)' },
+    ])
+  })
+
+  it('exempts only the reduced-motion reset in globals.css', () => {
+    expect(gate.cssMotion(RESET, GLOBALS)).toEqual([])
+    // The same block in another file is not the reset.
+    expect(gate.cssMotion(RESET, 'apps/dashboard/src/a.css').map((v) => v.line)).toEqual([5, 7])
+    // Another selector under the same media query is not exempt.
+    expect(gate.cssMotion(RESET.replace('*::after {', '*::after, .x {'), GLOBALS).map((v) => v.line)).toEqual([5, 7])
+    // Nor is the universal rule outside the media query.
+    expect(gate.cssMotion('*, *::before, *::after { transition-duration: 0.01ms !important; }', GLOBALS)).toHaveLength(1)
+    // Nor another value or property inside the reset.
+    expect(gate.cssMotion(RESET.replace('transition-duration: 0.01ms', 'transition-duration: 1s'), GLOBALS).map((v) => v.line)).toEqual([7])
+    expect(gate.cssMotion(RESET.replace('animation-iteration-count: 1', 'transition: all 0.01ms'), GLOBALS).map((v) => v.message)).toEqual([
+      'transition: all (name the properties)',
+      'literal duration 0.01ms in transition (use a --duration-* token)',
+    ])
+  })
+
+  it('finds the style key a TS literal is the value of', () => {
+    const src = [
+      "const a = { transition: 'opacity 0.2s ease' }",
+      "const b = { 'animation-duration': '1s', transitionTimingFunction: reduced ? 'none' : 'ease-in' }",
+      'el.style.transition = `all ${ms}ms`',
+      "const c = { padding: '2s' }",
+      "const d = '200ms'",
+    ].join('\n')
+    const keyed = gate.tsLiterals(src, 'a.tsx').filter((l) => l.key).map((l) => [l.key, l.text])
+    expect(keyed).toEqual([
+      ['transition', 'opacity 0.2s ease'],
+      ['animation-duration', '1s'],
+      ['transition-timing-function', 'none'],
+      ['transition-timing-function', 'ease-in'],
+      ['transition', 'all '],
+      ['transition', 'ms'],
+      ['padding', '2s'],
+    ])
   })
 })
 
@@ -226,6 +334,50 @@ describe('check-styles.js', () => {
 
     await allow({ 'undefined-var': ['z', 'a'] })
     expect((await run()).out).toContain('must be sorted')
+  })
+
+  it('passes token motion and the reduced-motion reset', async () => {
+    await put(GLOBALS, `:root { --gap: var(--space-2); }\n${RESET}`)
+    await put('apps/dashboard/src/a.css', '.a { transition: opacity var(--duration-fast) var(--ease-out); animation: spin var(--duration-spin) var(--ease-linear) infinite; }')
+    await put('apps/dashboard/src/A.tsx', "export const s = { transition: 'opacity var(--duration-fast) var(--ease-out)', transitionDuration: '0ms' }")
+    await theme(':root { --space-2: 0.5rem; --duration-fast: 120ms; --duration-spin: 800ms; --ease-out: cubic-bezier(0.16, 1, 0.3, 1); --ease-linear: linear; }')
+    const r = await run()
+    expect(r.out).toContain('motion: 0 violation(s)')
+    expect(r.status).toBe(0)
+  })
+
+  it('fails motion, which has no allowlist, in CSS and in TS style objects', async () => {
+    await put('apps/dashboard/src/a.css', [
+      '.a { transition: all var(--duration-fast) var(--ease-out); }',
+      '.b { transition-property: all; }',
+      '.c { transition: opacity 0.2s var(--ease-out); }',
+      '.d { animation: spin 1s var(--ease-linear) infinite; }',
+      '.e { transition-timing-function: ease-in-out; }',
+      '.f { animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1); }',
+      '.g { transition-duration: 300ms; animation-duration: 2s; }',
+    ].join('\n'))
+    await put('apps/dashboard/src/A.tsx', [
+      "export const s = { transition: 'transform 150ms ease' }",
+      'export const f = (el: HTMLElement) => { el.style.animation = `pulse 2s linear` }',
+    ].join('\n'))
+    const r = await run()
+    expect(r.status).toBe(1)
+    for (const line of [
+      'motion: apps/dashboard/src/a.css:1 transition: all (name the properties)',
+      'motion: apps/dashboard/src/a.css:2 transition-property: all (name the properties)',
+      'motion: apps/dashboard/src/a.css:3 literal duration 0.2s in transition',
+      'motion: apps/dashboard/src/a.css:4 literal duration 1s in animation',
+      'motion: apps/dashboard/src/a.css:5 literal easing ease-in-out in transition-timing-function',
+      'motion: apps/dashboard/src/a.css:6 literal easing cubic-bezier() in animation-timing-function',
+      'motion: apps/dashboard/src/a.css:7 literal duration 300ms in transition-duration',
+      'motion: apps/dashboard/src/a.css:7 literal duration 2s in animation-duration',
+      'motion: apps/dashboard/src/A.tsx:1 literal duration 150ms in transition',
+      'motion: apps/dashboard/src/A.tsx:1 literal easing ease in transition',
+      'motion: apps/dashboard/src/A.tsx:2 literal duration 2s in animation',
+      'motion: apps/dashboard/src/A.tsx:2 literal easing linear in animation',
+    ]) {
+      expect(r.out).toContain(line)
+    }
   })
 
   it('test files are not scanned', async () => {
