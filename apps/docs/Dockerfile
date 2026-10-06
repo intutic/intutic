@@ -30,17 +30,19 @@ COPY tsconfig.base.json ./tsconfig.base.json
 # docs.intutic.ai publishes every page, open-source and paid-tier alike: the
 # Cloud and Enterprise pages carry their badge, and the dashboard's help links
 # point at them (an open-source-only site answered 14 of its 22 links with a
-# 404). Built from a checkout without services/control-plane (the public repo)
-# the site is open-source-only regardless; see the guard in
-# apps/docs/.vitepress/config.ts.
+# 404). See the guard in apps/docs/.vitepress/config.ts.
 ENV INTUTIC_ENTERPRISE_BUILD=true
-# Fail the build outright if a build that has the paid-tier pages would leave
-# them out: that site would break the dashboard's help links.
+# Fail the build outright if it would leave the paid-tier pages out: that site
+# would break the dashboard's help links.
 ENV INTUTIC_REQUIRE_FULL=true
 
 # Build theme first, so that custom variables and synced assets exist
 RUN pnpm --filter=@intutic/theme run build
 RUN pnpm --filter=@intutic/docs run build
+# The flags above are only intent; check the result. Settings is a Cloud page,
+# and the dashboard links to it more than any other.
+RUN test -f apps/docs/.vitepress/dist/guide/settings.html \
+ || { echo 'docs image is missing the paid-tier pages (guide/settings.html); the dashboard help links would 404' >&2; exit 1; }
 
 # ── Stage 2: nginx ──────────────────────────────────────────
 FROM nginx:1.27-alpine

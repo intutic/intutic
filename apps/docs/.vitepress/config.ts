@@ -2,9 +2,12 @@ import { defineConfig } from 'vitepress'
 import fs from 'fs'
 import path from 'path'
 
-// OSS build mode (open-source pages only) unless INTUTIC_ENTERPRISE_BUILD === 'true' in a checkout that has the paid-tier code; docs.intutic.ai builds the full site (Dockerfile)
-const hasControlPlane = fs.existsSync(path.resolve(__dirname, '../../../services/control-plane'));
-const IS_OSS = process.env.INTUTIC_ENTERPRISE_BUILD !== 'true' || !hasControlPlane;
+// OSS build mode (open-source pages only) unless INTUTIC_ENTERPRISE_BUILD === 'true'.
+// docs.intutic.ai builds the full site (apps/docs/Dockerfile). The flag is the
+// only signal: an earlier version also required services/control-plane to
+// exist, which the Docker build context never contains, so the published image
+// came out open-source-only while the flag said otherwise.
+const IS_OSS = process.env.INTUTIC_ENTERPRISE_BUILD !== 'true';
 
 /**
  * Fail-closed guard for the published site.
@@ -14,11 +17,10 @@ const IS_OSS = process.env.INTUTIC_ENTERPRISE_BUILD !== 'true' || !hasControlPla
  * open-source-only build there breaks those links (it answered 14 of the
  * dashboard's 22 with a 404). The build for that site sets
  * INTUTIC_REQUIRE_FULL=true (apps/docs/Dockerfile, whose flags the deploy
- * script re-checks), and this throws rather than emit a site without them.
- * A checkout without services/control-plane (the public repo) builds the
- * open-source pages only, by design, so the guard does not apply there.
+ * script re-checks), and this throws rather than emit a site without them;
+ * the Dockerfile then checks the output for a paid-tier page as well.
  */
-if (process.env.INTUTIC_REQUIRE_FULL === 'true' && hasControlPlane && IS_OSS) {
+if (process.env.INTUTIC_REQUIRE_FULL === 'true' && IS_OSS) {
   throw new Error(
     'Refusing to build: INTUTIC_REQUIRE_FULL=true but this build leaves out the paid-tier pages ' +
       `(INTUTIC_ENTERPRISE_BUILD=${JSON.stringify(process.env.INTUTIC_ENTERPRISE_BUILD)}). ` +
