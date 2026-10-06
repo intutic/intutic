@@ -45,6 +45,22 @@ export function slugify(text) {
     .toLowerCase()
 }
 
+/**
+ * A heading's text without its inline HTML (a `<Badge … />`), which VitePress
+ * leaves out of the slug. The result only ever becomes an anchor slug, never
+ * markup, so this drops tags rather than sanitising anything.
+ */
+function withoutTags(text) {
+  let out = ''
+  let inTag = false
+  for (const ch of text) {
+    if (ch === '<') inTag = true
+    else if (ch === '>' && inTag) inTag = false
+    else if (!inTag) out += ch
+  }
+  return out
+}
+
 /** The anchors a Markdown page's headings get: an explicit `{#id}`, else the slug of its text. */
 export function headingAnchors(markdown) {
   const anchors = new Set()
@@ -66,8 +82,7 @@ export function headingAnchors(markdown) {
       continue
     }
     // The rendered text: badges and inline HTML dropped, links and code reduced to their text.
-    const text = m[1]
-      .replace(/<[^>]+>/g, '')
+    const text = withoutTags(m[1])
       .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
       .replace(/`([^`]*)`/g, '$1')
       .replace(/[*_]{1,3}([^*_]+)[*_]{1,3}/g, '$1')
