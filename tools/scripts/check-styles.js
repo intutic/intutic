@@ -495,6 +495,21 @@ function evaluate(violations, allowlist) {
   return { errors, summary };
 }
 
+/**
+ * Why the built theme no longer matches its sources, or null. build-tokens.ts
+ * stamps a hash of tokens.ts + build-tokens.ts into variables.css.
+ */
+function themeIsStale(root) {
+  const css = fs.readFileSync(path.join(root, THEME_CSS), 'utf8');
+  const stamped = /source-hash: ([0-9a-f]{64})/.exec(css);
+  if (!stamped) return 'it carries no source hash (built by an older build-tokens.ts)';
+  const sources = ['packages/theme/src/tokens.ts', 'packages/theme/src/build-tokens.ts'];
+  const hash = require('crypto').createHash('sha256')
+    .update(sources.map((f) => fs.readFileSync(path.join(root, f), 'utf8')).join('\0'))
+    .digest('hex');
+  return hash === stamped[1] ? null : 'packages/theme/src changed after it was built';
+}
+
 function main(argv) {
   const root = path.resolve(argv[2] || path.join(__dirname, '..', '..'));
   if (!fs.existsSync(path.join(root, DASHBOARD_SRC))) {
@@ -505,6 +520,12 @@ function main(argv) {
   if (!fs.existsSync(path.join(root, THEME_CSS))) {
     console.error(`[FAIL] ${THEME_CSS} is missing: it is generated, and without it every theme token reads as undefined.`);
     console.error('Build it first: pnpm turbo build --filter=@intutic/theme');
+    return 1;
+  }
+  const stale = themeIsStale(root);
+  if (stale) {
+    console.error(`[FAIL] ${THEME_CSS} is stale: ${stale}. Every token would be checked against an old palette.`);
+    console.error('Rebuild it: pnpm turbo build --filter=@intutic/theme');
     return 1;
   }
   const { errors, summary } = evaluate(collectViolations(root), loadAllowlist(root));
@@ -534,6 +555,7 @@ module.exports = {
   cssGlass,
   tsGlass,
   collectViolations,
+  themeIsStale,
   loadAllowlist,
   evaluate,
   main,
