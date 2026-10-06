@@ -6,11 +6,12 @@
    variables. */
 
 :root {
-  /* Type matches the website (intutic-website/styles.css): body in Inter, which
-     VitePress bundles and self-hosts; code in JetBrains Mono where installed.
-     The dashboard uses Grift; see apps/dashboard/DESIGN.md. */
-  --vp-font-family-base: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --vp-font-family-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  /* One family pair across dashboard, docs and website: Geist for text, Geist
+     Mono for code (SIL OFL). The @font-face rules come from the import above
+     and the files from packages/theme/fonts, which the theme build copies to
+     public/fonts; the theme imports VitePress without its bundled Inter. */
+  --vp-font-family-base: var(--font-sans);
+  --vp-font-family-mono: var(--font-mono);
 
   --vp-c-bg: var(--color-bg-elevated);
   --vp-c-bg-alt: var(--color-bg-secondary);
