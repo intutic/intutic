@@ -1,4 +1,5 @@
-import DefaultTheme from 'vitepress/theme'
+// Without VitePress's bundled Inter: the type comes from @intutic/theme (custom.css).
+import DefaultTheme from 'vitepress/theme-without-fonts'
 import './custom.css'
 import { inBrowser } from 'vitepress'
 
