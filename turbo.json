@@ -9,6 +9,26 @@
         "dist/**"
       ]
     },
+    "@intutic/theme#build": {
+      "dependsOn": [
+        "^build"
+      ],
+      // The theme build also copies its fonts and brand marks into each app's
+      // public/ (src/tools/sync-assets.ts). Declared as outputs so a cache hit
+      // restores them too; with dist/** alone a replayed build left an app
+      // with no fonts.
+      "outputs": [
+        "dist/**",
+        "$TURBO_ROOT$/apps/dashboard/public/fonts/**",
+        "$TURBO_ROOT$/apps/dashboard/public/assets/brand/**",
+        "$TURBO_ROOT$/apps/dashboard/public/favicon.svg",
+        "$TURBO_ROOT$/apps/docs/public/fonts/**",
+        "$TURBO_ROOT$/apps/docs/public/logo.svg",
+        "$TURBO_ROOT$/apps/docs/public/logo-white.svg",
+        "$TURBO_ROOT$/apps/docs/public/logo-black.svg",
+        "$TURBO_ROOT$/apps/docs/public/favicon.svg"
+      ]
+    },
     "test": {
       "dependsOn": [
         "build"
