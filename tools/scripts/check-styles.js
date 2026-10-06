@@ -3,7 +3,7 @@
  * Dashboard style gate: colours and custom properties come from the design
  * tokens, not from literals scattered through components.
  *
- * Six checks, each over `apps/dashboard/src`:
+ * Seven checks, each over `apps/dashboard/src`:
  *
  *   css-raw-color          A hex colour, or an rgb()/rgba()/hsl()/hsla()/oklch()
  *                          call outside any var(…), in a .css file. (The
@@ -30,6 +30,23 @@
  *   no-glass               The retired glass look: a class name containing
  *                          `glass` (CSS selector or TS literal class list) or a
  *                          backdrop-filter (CSS property or TS style key).
+ *   motion                 Motion timing that is not a token: `transition: all`
+ *                          (or `transition-property: all`), or a literal duration
+ *                          (`200ms`, `.3s`) or easing (`ease`, `linear`,
+ *                          `cubic-bezier(…)`, `steps(…)`) in transition,
+ *                          transition-duration, transition-timing-function,
+ *                          animation, animation-duration or
+ *                          animation-timing-function, in CSS or as the string
+ *                          value of that key in a TS style object
+ *                          (`{ transition: '…' }`, `el.style.transition = '…'`).
+ *                          Timings come from `--duration-*` and `--ease-*` in
+ *                          packages/theme. `0s`/`0ms` and anything inside var(…)
+ *                          are fine. The one exemption is the reduced-motion
+ *                          reset in styles/globals.css: inside
+ *                          `@media (prefers-reduced-motion: reduce)`, the rule
+ *                          for `*, *::before, *::after` may set
+ *                          animation-duration and transition-duration to
+ *                          `0.01ms !important`, and nothing else there is exempt.
  *
  * TS literals come from a full parse (`ts.createSourceFile`), not a bare
  * `ts.createScanner` loop: without parser context the scanner reads the
@@ -68,6 +85,7 @@ const CHECKS = {
   'var-fallback-mismatch': 'var() fallback disagrees with the token it falls back for',
   'invalid-var': 'var() names something that is not a valid custom property, so the declaration is dropped',
   'no-glass': 'glass look (glass class or backdrop-filter); use the card and surface tokens',
+  'motion': 'motion timing not from the tokens (use --duration-* and --ease-*), or transition: all (name the properties)',
 };
 
 // Excluded from css-raw-color only: these files define the dashboard palette.
@@ -274,8 +292,35 @@ function typescript() {
 }
 
 /**
- * Every string and template-literal part in a TS/TSX source: [{ text, line }].
- * Comments, JSX text and identifiers never appear.
+ * The style key a literal is the value of, kebab-cased (`transitionDuration` ->
+ * `transition-duration`), or null: `{ transition: '…' }`, `{ 'animation': '…' }`
+ * and `el.style.transition = '…'`, also through a template, parentheses, a
+ * conditional branch or a `??`/`||` default.
+ */
+function styleKeyOf(ts, node) {
+  const K = ts.SyntaxKind;
+  let n = node;
+  for (let p = n.parent; p; n = p, p = p.parent) {
+    if (
+      ts.isTemplateSpan(p) || ts.isTemplateExpression(p) || ts.isParenthesizedExpression(p) || ts.isAsExpression(p)
+      || (ts.isConditionalExpression(p) && p.condition !== n)
+      || (ts.isBinaryExpression(p) && (p.operatorToken.kind === K.QuestionQuestionToken || p.operatorToken.kind === K.BarBarToken))
+    ) continue;
+    let key = null;
+    if (ts.isPropertyAssignment(p) && p.initializer === n && (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name))) {
+      key = p.name.text;
+    } else if (ts.isBinaryExpression(p) && p.operatorToken.kind === K.EqualsToken && p.right === n && ts.isPropertyAccessExpression(p.left)) {
+      key = p.left.name.text;
+    }
+    return key && key.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase());
+  }
+  return null;
+}
+
+/**
+ * Every string and template-literal part in a TS/TSX source:
+ * [{ text, line, key? }], `key` being the style key the literal is the value
+ * of (styleKeyOf). Comments, JSX text and identifiers never appear.
  */
 function tsLiterals(source, fileName) {
   const ts = typescript();
@@ -291,7 +336,10 @@ function tsLiterals(source, fileName) {
   const out = [];
   const visit = (node) => {
     if (literalKinds.has(node.kind)) {
-      out.push({ text: node.text, line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1 });
+      const literal = { text: node.text, line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1 };
+      const key = styleKeyOf(ts, node);
+      if (key) literal.key = key;
+      out.push(literal);
     }
     ts.forEachChild(node, visit);
   };
@@ -336,6 +384,111 @@ function tsGlass(source, literals) {
   let m;
   while ((m = key.exec(source)) !== null) {
     out.push({ line: lineAt(source, m.index), message: 'backdropFilter' });
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Motion
+// ---------------------------------------------------------------------------
+
+const MOTION_PROPERTIES = new Set([
+  'transition', 'transition-property', 'transition-duration', 'transition-timing-function',
+  'animation', 'animation-duration', 'animation-timing-function',
+]);
+const LITERAL_DURATION = /(?<![\w.-])(\d+(?:\.\d+)?|\.\d+)(ms|s)(?![\w-])/gi;
+const NAMED_EASING = /(?<![\w-])(ease-in-out|ease-in|ease-out|ease|linear|step-start|step-end)(?![\w(-])/gi;
+const EASING_FUNCTION = /(?<![\w-])(cubic-bezier|steps|linear)\(/gi;
+
+// The reduced-motion reset in globals.css, and only it: these declarations,
+// in the `*, *::before, *::after` rule directly inside this media query.
+const REDUCED_MOTION_RESET = {
+  file: `${DASHBOARD_SRC}/styles/globals.css`,
+  media: /^@media\s*\(\s*prefers-reduced-motion\s*:\s*reduce\s*\)$/i,
+  selector: '*,*::before,*::after',
+  properties: new Set(['animation-duration', 'transition-duration']),
+  value: /^0?\.01ms\s*!important$/i,
+};
+
+/** Why a motion declaration's value is not from the tokens: string[] (empty when it is). */
+function motionProblems(property, value) {
+  const prop = property.toLowerCase();
+  if (!MOTION_PROPERTIES.has(prop)) return [];
+  const visible = blankVarCalls(value);
+  const out = [];
+  if ((prop === 'transition' || prop === 'transition-property') && /(?<![\w-])all(?![\w-])/i.test(visible)) {
+    out.push(`${prop}: all (name the properties)`);
+  }
+  if (prop === 'transition-property') return out;
+  for (const m of visible.matchAll(LITERAL_DURATION)) {
+    if (Number(m[1]) !== 0) out.push(`literal duration ${m[0]} in ${prop} (use a --duration-* token)`);
+  }
+  for (const m of visible.matchAll(NAMED_EASING)) out.push(`literal easing ${m[1]} in ${prop} (use an --ease-* token)`);
+  for (const m of visible.matchAll(EASING_FUNCTION)) out.push(`literal easing ${m[1]}() in ${prop} (use an --ease-* token)`);
+  return out;
+}
+
+/**
+ * Declarations in CSS whose comments are blanked, each with the preludes of
+ * the blocks around it, outermost first: [{ property, value, index, preludes }].
+ * Parentheses and strings are skipped, so `url(data:…;…)` is one value.
+ */
+function cssDeclarations(content) {
+  const out = [];
+  const stack = [];
+  let start = 0;
+  let depth = 0;
+  let quote = null;
+  for (let i = 0; i < content.length; i++) {
+    const c = content[i];
+    if (quote) {
+      if (c === quote && content[i - 1] !== '\\') quote = null;
+      continue;
+    }
+    if (c === '"' || c === "'") quote = c;
+    else if (c === '(') depth++;
+    else if (c === ')') depth = Math.max(0, depth - 1);
+    else if (depth > 0) continue;
+    else if (c === '{') {
+      stack.push(content.slice(start, i).trim().replace(/\s+/g, ' '));
+      start = i + 1;
+    } else if (c === ';' || c === '}') {
+      const text = content.slice(start, i);
+      const colon = text.indexOf(':');
+      const property = colon === -1 ? '' : text.slice(0, colon).trim();
+      if (stack.length > 0 && /^-{0,2}[a-zA-Z][\w-]*$/.test(property)) {
+        out.push({
+          property,
+          value: text.slice(colon + 1).trim(),
+          index: start + (text.length - text.trimStart().length),
+          preludes: [...stack],
+        });
+      }
+      if (c === '}') stack.pop();
+      start = i + 1;
+    }
+  }
+  return out;
+}
+
+function isReducedMotionReset(file, decl) {
+  const r = REDUCED_MOTION_RESET;
+  return file === r.file
+    && decl.preludes.length === 2
+    && r.media.test(decl.preludes[0])
+    && decl.preludes[1].replace(/\s+/g, '') === r.selector
+    && r.properties.has(decl.property.toLowerCase())
+    && r.value.test(decl.value);
+}
+
+/** motion findings for one CSS file (repo-relative `file`): [{ line, message }]. */
+function cssMotion(css, file) {
+  const content = blankCssComments(css);
+  const out = [];
+  for (const decl of cssDeclarations(content)) {
+    const problems = motionProblems(decl.property, decl.value);
+    if (problems.length === 0 || isReducedMotionReset(file, decl)) continue;
+    for (const message of problems) out.push({ line: lineAt(content, decl.index), message });
   }
   return out;
 }
@@ -397,6 +550,7 @@ function collectViolations(root) {
         for (const v of cssRawColors(css, path.basename(full))) add('css-raw-color', file, v.line, v.message);
       }
       for (const v of cssGlass(css)) add('no-glass', file, v.line, v.message);
+      for (const v of cssMotion(css, file)) add('motion', file, v.line, v.message);
       for (const d of cssDefinitions(css)) define(d.name, d.value);
       const content = blankCssComments(css);
       collectUsages(file, content, 0, (i) => lineAt(content, i));
@@ -407,6 +561,7 @@ function collectViolations(root) {
       for (const lit of literals) {
         const color = tsLiteralColor(lit.text);
         if (color) add('ts-raw-color', file, lit.line, color);
+        if (lit.key) for (const message of motionProblems(lit.key, lit.text)) add('motion', file, lit.line, message);
         if (CUSTOM_PROPERTY.test(lit.text.trim())) define(lit.text.trim(), null);
         collectUsages(file, lit.text, lit.line);
       }
@@ -554,6 +709,9 @@ module.exports = {
   tsLiteralColor,
   cssGlass,
   tsGlass,
+  motionProblems,
+  cssDeclarations,
+  cssMotion,
   collectViolations,
   themeIsStale,
   loadAllowlist,
