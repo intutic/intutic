@@ -48,11 +48,6 @@ const ALLOWED = new Map([
     'a lockfile, and it must be tracked — the proxy image builds with ' +
       'packages/proxy as its Docker context, so COPY needs it present',
   ],
-  [
-    'packages/theme/assets/bg/hero-loop.mp4',
-    'the SOURCE of the hero video, not a build product. `sync-assets.ts` copies ' +
-      'it into apps/dashboard/public at theme build time; that copy is ignored',
-  ],
 ])
 
 function trackedFiles() {

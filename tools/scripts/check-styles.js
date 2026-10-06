@@ -3,12 +3,14 @@
  * Dashboard style gate: colours and custom properties come from the design
  * tokens, not from literals scattered through components.
  *
- * Seven checks, each over `apps/dashboard/src`:
+ * Seven checks, each over every file in `apps/dashboard/src` (test and spec
+ * files aside: they hold fixture data, not styles):
  *
  *   css-raw-color          A hex colour, or an rgb()/rgba()/hsl()/hsla()/oklch()
- *                          call outside any var(…), in a .css file. (The
- *                          colour-function half used to be a warning that
- *                          nothing read; it is an error now.)
+ *                          call outside any var(…), in a .css file, globals.css
+ *                          and animations.css included. A colour built from a
+ *                          token (`rgba(var(--x-rgb), .1)`, `color-mix()` of
+ *                          tokens) is not raw.
  *   ts-raw-color           A string or template literal in a .ts/.tsx file whose
  *                          text is a full hex colour (#rgb, #rgba, #rrggbb,
  *                          #rrggbbaa) or contains one of those colour functions
@@ -54,14 +56,15 @@
  * and swallows the real literals after it, and it cannot tell a regex from a
  * division. The parser drives the same scanner with that context.
  *
- * ## The allowlist
+ * ## Unconditional
  *
- * `check-styles.allowlist.json` lists, per check, the files that failed it when
- * the check was introduced. A listed file may keep failing that check; any
- * other file may not. A listed file that no longer fails is ALSO an error, so
- * the list can only shrink and never goes stale. The lists, GLOBAL_ALLOWED_HEX,
- * ALLOWED_COLOR_FUNCTION_PREFIXES and EXCLUDED_FILES are all deleted by the last
- * PR of the dashboard UI upgrade (5c), after which every check is unconditional.
+ * Every check applies to every file, and every finding fails the gate. There
+ * is no allowlist, no excluded file and no permitted hex or overlay colour:
+ * the per-file allowlist this gate started with (dashboard UI upgrade, PR 1a)
+ * and its global exemptions were emptied by the polish PRs and deleted in
+ * PR 5c. The reduced-motion reset above is a rule of the motion check, not an
+ * exemption list: it names one declaration shape in one file. A new colour
+ * role is a token in packages/theme/src/tokens.ts, never an exception here.
  *
  * The theme must be built first (`pnpm turbo build --filter=@intutic/theme`):
  * its variables.css is generated, and without it every theme token would read
@@ -76,7 +79,6 @@ const path = require('path');
 
 const DASHBOARD_SRC = 'apps/dashboard/src';
 const THEME_CSS = 'packages/theme/dist/variables.css';
-const ALLOWLIST = 'tools/scripts/check-styles.allowlist.json';
 
 const CHECKS = {
   'css-raw-color': 'raw colour in CSS (use a design token)',
@@ -87,46 +89,6 @@ const CHECKS = {
   'no-glass': 'glass look (glass class or backdrop-filter); use the card and surface tokens',
   'motion': 'motion timing not from the tokens (use --duration-* and --ease-*), or transition: all (name the properties)',
 };
-
-// Excluded from css-raw-color only: these files define the dashboard palette.
-// They are still scanned for custom-property definitions and var() usage.
-// Deleted in PR 5c.
-const EXCLUDED_FILES = ['globals.css', 'animations.css'];
-
-// Common standard branding and utility colors allowed globally in CSS.
-// Deleted in PR 5c.
-const GLOBAL_ALLOWED_HEX = [
-  '#fff', '#ffffff', '#000', '#000000',
-  '#6366f1', '#818cf8', '#4f46e5', '#a5b4fc', '#4338ca', '#312e81', '#e0e7ff', '#c7d2fe', // Brand Indigo/Purple shades
-  '#7c3aed', '#6d28d9', '#8b5cf6', '#a78bfa', '#c084fc', // Violet/Purple shades
-  '#10b981', '#34d399', '#059669', '#6ee7b7', '#22c55e', // Success Green shades
-  '#eab308', '#fbbf24', '#f59e0b', '#fde68a', '#fcd34d', // Warning Yellow/Amber shades
-  '#ef4444', '#f87171', '#dc2626', '#fca5a5', '#fee2e2', '#991b1b', // Error Red shades
-  '#3b82f6', '#60a5fa', '#2563eb', '#93c5fd', // Info Blue shades
-  '#94a3b8', '#cbd5e1', '#e2e8f0', '#f1f5f9', '#f8fafc', '#fafafa', // Slate / Zinc / Neutral grays
-  '#475569', '#334155', '#1e293b', '#0f172a', '#111827', '#1f2937', '#374151', '#4b5563', '#6b7280', '#9ca3af', '#d1d5db', '#e5e7eb', '#f3f4f6', '#f9fafb', // Grays / Slate / Zinc
-  '#f0f4ff', '#a78bfa', '#c084fc', '#fb923c', '#8b5cf6', '#a78bfa', '#d1d5db', '#9ca3af', // Badge adapter/medals colors
-  '#111', '#111111', '#222', '#222222', '#333', '#333333', // Dark background / border shades
-  '#451a03', '#fffbeb', '#d97706', '#b45309',
-  '#dcfce7', '#166534', '#0b132b', '#f43f5e', '#fb7185' // diff / flowchart / topbar highlights
-];
-
-// Per-file additions to GLOBAL_ALLOWED_HEX (medal ranking gradients). Deleted in PR 5c.
-const WHITELIST = {
-  'TeamLeaderboard.css': [
-    '#fbbf24', '#f59e0b', '#451a03',
-    '#d1d5db', '#9ca3af', '#1f2937',
-    '#d97706', '#b45309', '#fffbeb'
-  ]
-};
-
-// Black/white overlays and the semantic overlays the old warning exempted,
-// compared with whitespace removed. CSS only. Deleted in PR 5c.
-const ALLOWED_COLOR_FUNCTION_PREFIXES = [
-  'rgba(0,0,0,', 'rgba(255,255,255,',
-  'rgba(99,102,241,', 'rgba(96,165,250,', 'rgba(167,139,250,', 'rgba(52,211,153,', 'rgba(251,146,60,',
-  'rgba(245,158,11,', 'rgba(239,68,68,', 'rgba(16,185,129,', 'rgba(107,114,128,', 'rgba(156,163,175,',
-];
 
 const COLOR_FUNCTION = /(?<![\w-])(rgba?|hsla?|oklch)\(/gi;
 const FULL_HEX = /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
@@ -251,19 +213,17 @@ function normalizeValue(value) {
 // ---------------------------------------------------------------------------
 
 /** css-raw-color findings for one CSS file's text: [{ line, message }]. */
-function cssRawColors(css, basename) {
+function cssRawColors(css) {
   const content = blankCssComments(css);
-  const allowedHex = new Set([...GLOBAL_ALLOWED_HEX, ...(WHITELIST[basename] || [])].map((c) => c.toLowerCase()));
+  // A fallback inside var(…) is var-fallback-mismatch's to judge, not a raw colour.
+  const visible = blankVarCalls(content);
   const out = [];
   const hex = /#([0-9a-fA-F]{3,8})\b/g;
   let m;
-  while ((m = hex.exec(content)) !== null) {
-    const color = m[0].toLowerCase();
-    if (!allowedHex.has(color)) out.push({ line: lineAt(content, m.index), message: `hex colour ${color}` });
+  while ((m = hex.exec(visible)) !== null) {
+    out.push({ line: lineAt(content, m.index), message: `hex colour ${m[0].toLowerCase()}` });
   }
   for (const { index, call } of rawColorFunctions(content)) {
-    const squashed = call.replace(/\s+/g, '').toLowerCase();
-    if (ALLOWED_COLOR_FUNCTION_PREFIXES.some((p) => squashed.startsWith(p))) continue;
     out.push({ line: lineAt(content, index), message: `colour function ${call.replace(/\s+/g, ' ')}` });
   }
   return out;
@@ -509,7 +469,7 @@ function walk(dir, out = []) {
 const isTsSource = (f) => /\.tsx?$/.test(f) && !f.endsWith('.d.ts') && !/\.(test|spec)\.tsx?$/.test(f);
 
 /**
- * All violations under `root`, unfiltered by the allowlist:
+ * All violations under `root`:
  * { [check]: Map<repo-relative file, [{ line, message }]> }.
  */
 function collectViolations(root) {
@@ -546,9 +506,7 @@ function collectViolations(root) {
     const file = rel(full);
     if (full.endsWith('.css')) {
       const css = fs.readFileSync(full, 'utf8');
-      if (!EXCLUDED_FILES.includes(path.basename(full))) {
-        for (const v of cssRawColors(css, path.basename(full))) add('css-raw-color', file, v.line, v.message);
-      }
+      for (const v of cssRawColors(css)) add('css-raw-color', file, v.line, v.message);
       for (const v of cssGlass(css)) add('no-glass', file, v.line, v.message);
       for (const v of cssMotion(css, file)) add('motion', file, v.line, v.message);
       for (const d of cssDefinitions(css)) define(d.name, d.value);
@@ -602,50 +560,23 @@ function collectViolations(root) {
 }
 
 // ---------------------------------------------------------------------------
-// Allowlist and CLI
+// CLI
 // ---------------------------------------------------------------------------
 
-/** Validate the allowlist's shape; returns { lists, errors }. */
-function loadAllowlist(root) {
-  const file = path.join(root, ALLOWLIST);
-  const errors = [];
-  if (!fs.existsSync(file)) return { lists: {}, errors };
-  const data = JSON.parse(fs.readFileSync(file, 'utf8'));
-  const lists = {};
-  for (const [key, value] of Object.entries(data)) {
-    if (key.startsWith('_')) continue;
-    if (!CHECKS[key]) { errors.push(`${ALLOWLIST}: unknown check "${key}"`); continue; }
-    if (!Array.isArray(value)) { errors.push(`${ALLOWLIST}: "${key}" must be an array of file paths`); continue; }
-    const sorted = [...new Set(value)].sort();
-    if (sorted.length !== value.length || sorted.some((v, i) => v !== value[i])) {
-      errors.push(`${ALLOWLIST}: "${key}" must be sorted and free of duplicates`);
-    }
-    lists[key] = new Set(value);
-  }
-  return { lists, errors };
-}
-
 /**
- * Apply the allowlist. Returns { errors: string[], summary: string[] }.
- * An error is a violation in an unlisted file, or a listed file with none.
+ * Every violation is an error. Returns { errors: string[], summary: string[] },
+ * the summary one count per check.
  */
-function evaluate(violations, allowlist) {
-  const errors = [...allowlist.errors];
+function evaluate(violations) {
+  const errors = [];
   const summary = [];
   for (const check of Object.keys(CHECKS)) {
-    const found = violations[check];
-    const listed = allowlist.lists[check] || new Set();
-    let tolerated = 0;
-    for (const [file, list] of found) {
-      if (listed.has(file)) { tolerated += list.length; continue; }
+    let count = 0;
+    for (const [file, list] of violations[check]) {
       for (const v of list) errors.push(`${check}: ${file}:${v.line} ${v.message}`);
+      count += list.length;
     }
-    for (const file of listed) {
-      if (!found.has(file)) {
-        errors.push(`${check}: ${file} is allowlisted but no longer fails this check — remove it from ${ALLOWLIST}`);
-      }
-    }
-    summary.push(`${check}: ${tolerated} violation(s) in ${listed.size} allowlisted file(s)`);
+    summary.push(`${check}: ${count} violation(s)`);
   }
   return { errors, summary };
 }
@@ -683,7 +614,7 @@ function main(argv) {
     console.error('Rebuild it: pnpm turbo build --filter=@intutic/theme');
     return 1;
   }
-  const { errors, summary } = evaluate(collectViolations(root), loadAllowlist(root));
+  const { errors, summary } = evaluate(collectViolations(root));
   for (const line of summary) console.log(`  ${line}`);
   if (errors.length > 0) {
     console.error(`\nStyle Check Failed: ${errors.length} problem(s):\n`);
@@ -714,7 +645,6 @@ module.exports = {
   cssMotion,
   collectViolations,
   themeIsStale,
-  loadAllowlist,
   evaluate,
   main,
 };

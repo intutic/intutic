@@ -1,10 +1,10 @@
 /**
  * The dashboard style gate (tools/scripts/check-styles.js).
  *
- * The scanner functions are tested directly; the allowlist contract (unlisted
- * files fail, listed files are tolerated, a listed file that stopped failing
- * is itself a failure) is tested by running the real script against fixture
- * trees, because the exit code is what CI reads.
+ * The scanner functions are tested directly; that every check is
+ * unconditional (any file, including what the deleted allowlist and global
+ * exemptions used to excuse, fails) is tested by running the real script
+ * against fixture trees, because the exit code is what CI reads.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { spawn } from 'node:child_process'
@@ -18,7 +18,7 @@ const SCRIPT = resolve(import.meta.dirname, '../../scripts/check-styles.js')
 const gate = createRequire(import.meta.url)(SCRIPT) as {
   findVarCalls(text: string): { name: string | null; invalidName: string | null; fallback: string | null; complete: boolean }[]
   normalizeValue(value: string): string
-  cssRawColors(css: string, basename: string): { line: number; message: string }[]
+  cssRawColors(css: string): { line: number; message: string }[]
   cssDefinitions(css: string): { name: string; value: string | null }[]
   tsLiterals(source: string, fileName: string): { text: string; line: number; key?: string }[]
   tsLiteralColor(text: string): string | null
@@ -76,16 +76,29 @@ describe('CSS scanning', () => {
   it('ignores comments, var() fallbacks and token-built colours', () => {
     const css = [
       '/* LLD #40, #135, rgb(1,2,3) */',
-      '.a { color: var(--x, rgb(1, 2, 3)); }',
+      '.a { color: var(--x, rgb(1, 2, 3)); border-color: var(--y, #0f172a); }',
       '.b { background: rgba(var(--color-accent-rgb), 0.1); }',
-      '.c { color: #fff; }',
+      '.c { background: color-mix(in srgb, var(--color-bg-primary) 60%, transparent); }',
     ].join('\n')
-    expect(gate.cssRawColors(css, 'a.css')).toEqual([])
+    expect(gate.cssRawColors(css)).toEqual([])
   })
 
-  it('makes colour functions errors, keeping the old overlay exemptions', () => {
-    const css = '.a {\n  color: rgba(255, 193, 7, 0.06);\n  border-color: rgba(0, 0, 0, 0.2);\n  fill: oklch(0.5 0.1 20);\n  stroke: #123456;\n}'
-    expect(gate.cssRawColors(css, 'a.css').map((v) => v.line)).toEqual([5, 2, 4])
+  it('flags every hex colour and colour function, the old exemptions included', () => {
+    const css = [
+      '.a {',
+      '  color: rgba(255, 193, 7, 0.06);',
+      '  border-color: rgba(0, 0, 0, 0.2);',
+      '  fill: oklch(0.5 0.1 20);',
+      '  stroke: #123456;',
+      '  background: #fff;',
+      '  outline-color: #000000;',
+      '  caret-color: rgba(255, 255, 255, 0.5);',
+      '  text-decoration-color: #6366f1;',
+      '}',
+    ].join('\n')
+    // #fff, #000, the brand indigo and the black/white overlays used to be
+    // allowed everywhere (GLOBAL_ALLOWED_HEX, ALLOWED_COLOR_FUNCTION_PREFIXES).
+    expect(gate.cssRawColors(css).map((v) => v.line)).toEqual([5, 6, 7, 9, 2, 3, 4, 8])
   })
 
   it('reads definitions, including @property', () => {
@@ -259,9 +272,6 @@ describe('check-styles.js', () => {
     await put('packages/theme/dist/variables.css', `/* source-hash: ${hash} */\n${css}`)
   }
 
-  const allow = (lists: Record<string, string[]>) =>
-    put('tools/scripts/check-styles.allowlist.json', JSON.stringify(lists))
-
   beforeEach(async () => {
     root = await mkdtemp(join(tmpdir(), 'check-styles-'))
     await theme(':root { --color-text: #F8FAFC; --space-2: 0.5rem; }\n[data-theme=\'light\'] { --color-text: #0f172a; }')
@@ -301,7 +311,7 @@ describe('check-styles.js', () => {
     expect(r.status).toBe(0)
   })
 
-  it('fails each check in an unlisted file', async () => {
+  it('fails each check in any file', async () => {
     await put('apps/dashboard/src/a.css', '.a { color: hsl(1, 2%, 3%); margin: var(--nope); padding: var(--space-2, 8px); }')
     await put('apps/dashboard/src/A.tsx', "export const c = '#123456'")
     const r = await run()
@@ -312,7 +322,7 @@ describe('check-styles.js', () => {
     expect(r.out).toContain('var-fallback-mismatch: apps/dashboard/src/a.css:1 var(--space-2, 8px)')
   })
 
-  it('fails invalid-var and no-glass, which have no allowlist', async () => {
+  it('fails invalid-var and no-glass', async () => {
     await put('apps/dashboard/src/a.css', '.glass-panel { padding: var(--space-2.5); }')
     await put('apps/dashboard/src/A.tsx', "export const s = { padding: 'var(--space-1.25)' }")
     const r = await run()
@@ -322,18 +332,31 @@ describe('check-styles.js', () => {
     expect(r.out).toContain('no-glass: apps/dashboard/src/a.css:1 glass class .glass-panel')
   })
 
-  it('tolerates allowlisted files, and fails on a stale or unsorted entry', async () => {
+  it('fails raw colours in globals.css and animations.css, which used to be excluded', async () => {
+    await put(GLOBALS, ':root { --gap: var(--space-2); }\n.logo { color: #fff; }')
+    await put('apps/dashboard/src/styles/animations.css', '@keyframes pulse { from { box-shadow: 0 0 0 rgba(0, 0, 0, 0.4); } }')
+    const r = await run()
+    expect(r.status).toBe(1)
+    expect(r.out).toContain('css-raw-color: apps/dashboard/src/styles/globals.css:2 hex colour #fff')
+    expect(r.out).toContain('css-raw-color: apps/dashboard/src/styles/animations.css:1 colour function rgba(0, 0, 0, 0.4)')
+  })
+
+  it('fails a scrim and the medal colours that had per-file and overlay exemptions', async () => {
+    await put('apps/dashboard/src/components/ui/Dialog.css', '.ui-dialog::backdrop { background: rgba(0, 0, 0, 0.6); }')
+    await put('apps/dashboard/src/components/dashboard/TeamLeaderboard.css', '.gold { background: #fbbf24; }')
+    const r = await run()
+    expect(r.status).toBe(1)
+    expect(r.out).toContain('css-raw-color: apps/dashboard/src/components/ui/Dialog.css:1 colour function rgba(0, 0, 0, 0.6)')
+    expect(r.out).toContain('css-raw-color: apps/dashboard/src/components/dashboard/TeamLeaderboard.css:1 hex colour #fbbf24')
+  })
+
+  it('reads no allowlist: a check-styles.allowlist.json left behind excuses nothing', async () => {
     await put('apps/dashboard/src/b.css', '.b { margin: var(--nope); }')
-    await allow({ 'undefined-var': ['apps/dashboard/src/b.css'] })
-    expect((await run()).status).toBe(0)
-
-    await put('apps/dashboard/src/b.css', '.b { margin: 0; }')
-    const stale = await run()
-    expect(stale.status).toBe(1)
-    expect(stale.out).toContain('apps/dashboard/src/b.css is allowlisted but no longer fails this check')
-
-    await allow({ 'undefined-var': ['z', 'a'] })
-    expect((await run()).out).toContain('must be sorted')
+    await put('tools/scripts/check-styles.allowlist.json', JSON.stringify({ 'undefined-var': ['apps/dashboard/src/b.css'] }))
+    const r = await run()
+    expect(r.status).toBe(1)
+    expect(r.out).toContain('undefined-var: apps/dashboard/src/b.css:1 --nope is not defined')
+    expect(r.out).toContain('undefined-var: 1 violation(s)')
   })
 
   it('passes token motion and the reduced-motion reset', async () => {
@@ -346,7 +369,7 @@ describe('check-styles.js', () => {
     expect(r.status).toBe(0)
   })
 
-  it('fails motion, which has no allowlist, in CSS and in TS style objects', async () => {
+  it('fails motion in CSS and in TS style objects', async () => {
     await put('apps/dashboard/src/a.css', [
       '.a { transition: all var(--duration-fast) var(--ease-out); }',
       '.b { transition-property: all; }',
