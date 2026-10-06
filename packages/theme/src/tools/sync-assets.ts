@@ -18,6 +18,15 @@ function copyDir(src: string, dest: string) {
   }
 }
 
+// The fonts destinations hold nothing but this copy, so they are replaced rather
+// than merged: a face dropped from fonts/ (the Grift files, 2026-10) must stop
+// being served from an existing checkout's public/ too, not linger there and
+// ride into the next image.
+function replaceDir(src: string, dest: string) {
+  fs.rmSync(dest, { recursive: true, force: true });
+  copyDir(src, dest);
+}
+
 // Resolve paths relative to this file's compiled location in dist/tools/
 const currentDir = path.dirname(new URL(import.meta.url).pathname);
 const themeDir = path.resolve(currentDir, '../../');
@@ -38,7 +47,7 @@ const dashboardRoot = path.resolve(themeDir, '../../apps/dashboard');
 const dashboardPublic = path.join(dashboardRoot, 'public');
 if (fs.existsSync(dashboardRoot)) {
   fs.mkdirSync(dashboardPublic, { recursive: true });
-  copyDir(fontsSrc, path.join(dashboardPublic, './fonts'));
+  replaceDir(fontsSrc, path.join(dashboardPublic, './fonts'));
   copyDir(brandSrc, path.join(dashboardPublic, './assets/brand'));
 
   const faviconSrc = path.join(brandSrc, 'logo-mark-white.svg');
@@ -53,7 +62,7 @@ const docsPublic = path.resolve(themeDir, '../../apps/docs/public');
 const docsRoot = path.resolve(themeDir, '../../apps/docs');
 if (fs.existsSync(docsRoot)) {
   fs.mkdirSync(docsPublic, { recursive: true });
-  copyDir(fontsSrc, path.join(docsPublic, './fonts'));
+  replaceDir(fontsSrc, path.join(docsPublic, './fonts'));
   
   // Doc portal specifics
   const logoWhiteSrc = path.join(brandSrc, 'logo-white.svg');

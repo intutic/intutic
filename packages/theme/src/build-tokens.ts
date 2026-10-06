@@ -27,11 +27,12 @@ const { typography: type } = tokens;
 const fontFaces = type.faces
   .map(
     (face) => `@font-face {
-  font-family: 'Grift';
+  font-family: '${face.family}';
   font-style: ${face.style};
   font-weight: ${face.weight};
   font-display: swap;
   src: url('/fonts/${face.file}') format('woff2');
+  unicode-range: ${face.unicodeRange};
 }`,
   )
   .join('\n\n');
