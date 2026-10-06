@@ -9,6 +9,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
+import { createHash } from 'node:crypto'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -142,12 +143,20 @@ describe('check-styles.js', () => {
     })
   }
 
+  /** A built theme whose source-hash matches its (fixture) sources, as build-tokens.ts writes it. */
+  async function theme(css: string, sources = ['export const tokens = {}', '// build']) {
+    await put('packages/theme/src/tokens.ts', sources[0]!)
+    await put('packages/theme/src/build-tokens.ts', sources[1]!)
+    const hash = createHash('sha256').update(sources.join('\0')).digest('hex')
+    await put('packages/theme/dist/variables.css', `/* source-hash: ${hash} */\n${css}`)
+  }
+
   const allow = (lists: Record<string, string[]>) =>
     put('tools/scripts/check-styles.allowlist.json', JSON.stringify(lists))
 
   beforeEach(async () => {
     root = await mkdtemp(join(tmpdir(), 'check-styles-'))
-    await put('packages/theme/dist/variables.css', ':root { --color-text: #F8FAFC; --space-2: 0.5rem; }\n[data-theme=\'light\'] { --color-text: #0f172a; }')
+    await theme(':root { --color-text: #F8FAFC; --space-2: 0.5rem; }\n[data-theme=\'light\'] { --color-text: #0f172a; }')
     await put('apps/dashboard/src/styles/globals.css', ':root { --gap: var(--space-2); }')
   })
   afterEach(async () => {
@@ -165,6 +174,14 @@ describe('check-styles.js', () => {
     await rm(join(root, 'packages'), { recursive: true, force: true })
     const r = await run()
     expect(r.status).toBe(1)
+    expect(r.out).toContain('pnpm turbo build --filter=@intutic/theme')
+  })
+
+  it('fails fast when the built theme is older than its sources', async () => {
+    await put('packages/theme/src/tokens.ts', 'export const tokens = { changed: true }')
+    const r = await run()
+    expect(r.status).toBe(1)
+    expect(r.out).toContain('variables.css is stale')
     expect(r.out).toContain('pnpm turbo build --filter=@intutic/theme')
   })
 
