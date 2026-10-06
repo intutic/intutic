@@ -21,7 +21,7 @@ monitor off platform-wide, so the code and this page say `PASSIVE`.
 
 ## Changing the mode
 
-Workspace **Settings → Session Safety**, or the API:
+**Settings › Security › Trajectory Monitoring** (the **Monitor mode** control), or the API:
 
 ```bash
 curl -X PUT "$INTUTIC_CONTROL_PLANE_URL/api/v1/workspace/settings" \

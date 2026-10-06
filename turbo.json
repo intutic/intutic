@@ -87,7 +87,7 @@
       // rather than letting the two configs drift.
       "passThroughEnv": [
         "INTUTIC_ENTERPRISE_BUILD",
-        "INTUTIC_REQUIRE_OSS"
+        "INTUTIC_REQUIRE_FULL"
       ]
     },
     "@intutic/wasm-sdk#build": {

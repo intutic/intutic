@@ -100,9 +100,10 @@ Traces are the foundation for cost tracking, anomaly detection, and compliance a
 
 ## Token Waste Classification
 
-The Intelligence Engine classifies trace data to identify inefficient token consumption. `wastePatternService.ts` computes **two waste patterns**, both derived from columns that exist on `execution_traces`, and each carries a confidence reflecting how it was derived — so the UI never presents an inference as a measurement:
-1. **Context bloat** (measured, confidence 1.0) — raw input tokens minus compressed input tokens: context the compactor had to strip before the request was billed.
-2. **Oversized prompt** (heuristic, confidence 0.6) — traces whose raw input exceeds 3× the workspace median, with the excess over the median attributed as waste. A legitimately large task looks the same, hence the reduced confidence.
+The Intelligence Engine classifies trace data to identify inefficient token consumption. `wastePatternService.ts` computes **one waste pattern**, derived from columns that exist on `execution_traces`, and it carries a confidence reflecting how it was derived — so the UI never presents an inference as a measurement:
+- **Oversized prompt** (heuristic, confidence 0.6) — traces whose raw input exceeds 3× the workspace median, with the excess over the median attributed as waste. A legitimately large task looks the same, hence the reduced confidence.
+
+A second pattern, **context bloat** (raw minus compressed input tokens), has been removed: the proxy writes those two figures equal on every trace path, so it could never fire. The compactor's real saving is reported separately, in bytes, and is not counted as waste.
 
 Traces flagged with high waste metrics trigger automated configuration optimizations via the SkillOpt feedback loop.
 

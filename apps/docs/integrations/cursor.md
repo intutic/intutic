@@ -56,7 +56,7 @@ Never commit secrets or API keys...
 ```
 
 ::: warning
-Intutic overwrites the entire `.cursorrules` file during sync. Move any custom rules into SOPs on the Intutic dashboard.
+Intutic overwrites the entire `.cursorrules` file during sync. Move any custom rules into SOP files in `.intutic/sops/` (see [SOP Front Matter](/reference/sop-front-matter)).
 :::
 
 ## Config details

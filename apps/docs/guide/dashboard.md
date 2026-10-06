@@ -2,56 +2,67 @@
 
 <!-- ENTERPRISE_ONLY_START -->
 The Intutic dashboard is a Vite + React 19 SPA that provides real-time visibility into your AI agent governance.
+The dashboard runs on port `5174` in local development and connects to the control plane API at `/api/v1/`.
 
 ## Overview
 
-The dashboard runs on port `5174` in local development and connects to the control plane API at `/api/v1/`.
+**Overview** is the first area in the sidebar, and the page it opens is headed
+**Dashboard**: what your agents did, what Intutic stopped, and what it cost.
 
-## Widgets
+### Workspace at a glance
 
-### Usage Summary
+A strip of five figures sits above every tab, most urgent first:
 
-Shows aggregated usage metrics for your workspace:
-- **Total tokens** consumed across all models
-- **Total cost** in USD
-- **Period selection** — daily, weekly, or monthly aggregation
-- **Date range picker** — custom start/end dates
+| Figure | What it shows |
+|--------|---------------|
+| **Anomalies** | Anomalies in the last 24 hours |
+| **Budget used** | Spend against the workspace budget, as a percentage and in dollars; amber from 70%, red from 90% |
+| **SOPs enforced** | Guidelines a runtime gate enforces, out of all guidelines. Advisory guidelines (synced into the agent's context, but with no gate that blocks) are counted separately |
+| **Active sessions** | Agent sessions running now |
+| **Sandboxed runs** | Sessions that ran in a sandbox in the last 30 days |
 
-Data comes from `GET /api/v1/usage/summary` with `period`, `start`, and `end` query parameters.
+### Overview & System Success
 
-### Model Breakdown
+- **Agent Success Rate** — the share of agent actions each day that finished without an error or a policy violation.
+- **Share Scorecard** — this period's success, savings and adherence as an image: **Download PNG**, or **Copy to Clipboard** to paste into a message.
 
-A per-model cost breakdown showing which LLMs are consuming your budget:
-- Model name and provider
-- Token count and cost per model
-- Percentage of total spend
+### Cost & Token Efficiency
 
-Data comes from `GET /api/v1/usage/models` with a `period` parameter (`daily` or `monthly`).
+- **Cost Savings** — what prompt caching and model routing saved against the cost of the requests as sent (Raw Cost against Actual Cost). Runaway spend averted by blocked sessions is shown on its own line, marked as extrapolated, and never added to the savings figure.
+- **Token Efficiency by Model** — input and output tokens per model, and the tokens spent on traces scoring below 0.8 SOP compliance.
+- **Token Spend by Compliance** — tokens on traces scoring under 0.8 compliance against the rest of the window. When the compactor has trimmed tool output, a note under the chart gives the bytes trimmed; that saving shows up in the next turn's prompt.
+- **Cost by Virtual Key** — cost, raw cost and calls per virtual key, today or this month. Mint one key per traffic class (desktop, CI, production) under **Settings › Security › Virtual API Keys** to split cost by class.
 
-### Enforcement Actions
+### Governance & Guidelines
 
-Real-time view of PCAS enforcement decisions:
-- **BYPASS** count — requests that passed through cleanly
-- **ENHANCE** count — requests that were enriched
-- **HIJACK** count — requests rerouted to different models
-- **KILL** count — requests that were blocked
+- **SOP Adherence Trend** — the share of agent runs each day that followed every active SOP, against the workspace threshold.
+- **Recurring Failures** — failures and policy exceptions that keep happening, most frequent first, with a count and severity.
+- **Recent Incidents** — the latest governance incidents across the workspace.
+- **Team Leaderboard** — members ranked by SOP adherence and token efficiency over their agent sessions.
 
-### Trace Timeline
+### Spend
 
-A paginated list of execution traces showing:
-- Trace ID
-- Timestamp
-- Model used
-- Input/output token counts
-- Cost in USD
-- Enforcement action applied
-- Token utility classification (USEFUL / WASTED)
+Owners, Admins and Engineering Managers only. One period (24h, 7d or 30d) applies to both sections:
 
-Data comes from `GET /api/v1/usage/events` with `page`, `limit`, and optional `session_id` parameters.
+- **Inefficient Spend** — tokens and money spent on requests that did not need them: wasted cost, wasted tokens, traces analyzed, and a table of waste patterns. The one pattern computed today is the oversized prompt; see [Token Waste Patterns](/guide/intelligence#token-waste-patterns).
+- **Shadow Routing Savings** — what shadow routing would have picked against what was actually routed, and what it would have cost at list price, by model pair.
+
+See [Intelligence Engine](/guide/intelligence) for how these figures are computed.
+
+Below the tabs, a card links to the setup guide for [Kitkat](/integrations/kitkat), the governed agentic developer skill, and offers its `SKILL.md` for download.
+
+## Where the rest lives
+
+The other areas carry what used to sit on the dashboard itself:
+
+- **Traces** — **Activity › Traces** (page heading **Activity Logs**). See [Activity Logs](/guide/traces).
+- **Agent Guidelines** — **Policies › Agent Guidelines**. See [Agent Guidelines](/guide/sops).
+- **Anomalies and incidents** — **Findings › Incidents**, whose tabs include **Anomalies** and **Drift Alerts**. Incidents move through `OPEN`, `RESOLVED` and `AUTO_RESOLVED`.
+- **Trust scores** — **Developer Trust Scores**, per developer, on **Activity › Developer Sessions**. See [Developer Sessions](/guide/agent-top).
 
 ### Trace Integrity
 
-Sits on the Traces page, directly below the trace list, and covers two separate
+Sits on **Activity › Traces**, directly below the trace list, and covers two separate
 records: the sealed Merkle roots over what an agent *did*, and the harness config
 snapshot chain over what it was *told to do*. They are shown together and never
 merged into one verdict — each can be tampered with independently, and the
@@ -103,44 +114,16 @@ control plane says nothing about the chain.
 
 Concepts and the underlying construction: [Trace integrity](/concepts/trace-integrity).
 
-### Agent Guidelines (SOP Registry)
-
-Lists all SOPs in your workspace with:
-- Title and current lifecycle state
-- Risk tier (LOW / MEDIUM / HIGH / CRITICAL)
-- Complexity tier
-- Version history
-- Dependency graph
-
-Filterable by lifecycle state, risk tier, and complexity tier via `GET /api/v1/sops`.
-
-### Anomaly Feed
-
-Real-time anomaly alerts from the Autonomous Reasoning Engine (ARE):
-- Anomaly type (12 categories)
-- Severity level
-- Affected session and trace
-- Recommended action
-
-### Incident Tracker
-
-Governance incidents with lifecycle management:
-- Status: `OPEN` → `ACKNOWLEDGED` → `RESOLVED` or `FALSE_POSITIVE`
-- Linked traces and anomalies
-- Resolution notes
-
-### Trust Scores
-
-Per-session trust scores showing agent reliability over time.
-
 ## Keyboard Shortcuts
 
-| Key | Action |
-|-----|--------|
-| `/` | Focus search |
-| `r` | Refresh current view |
-| `t` | Jump to traces |
-| `s` | Jump to SOPs |
+The dashboard has no global shortcuts. Two lists take single-key shortcuts while no text field has focus:
+
+| Where | Key | Action |
+|-------|-----|--------|
+| **Findings › Findings** | `j` / `k` (or ↓ / ↑) | Move to the next / previous finding |
+| | `t` | Rule the selected finding a true positive |
+| | `f` | Rule the selected finding a false positive |
+| **Policies › Policy Guardrails › Review** | `j` / `k` (or ↓ / ↑) | Move to the next / previous guardrail |
 
 ## Accessing the Dashboard
 
@@ -160,7 +143,7 @@ The dashboard is deployed alongside the control plane and available at your work
 
 ## Member Management & Onboarding
 
-Workspace administrators manage users and team access under the **Settings > Members** panel:
+Workspace administrators manage users and team access under **Settings › Team Members**, in the **Members** card:
 * **Direct Provisioning**: Intutic uses direct user provisioning. Instead of emailing invitation tokens, admins directly input a display name, role, and temporary password.
 * **Temporary Passwords**: The secure temporary password is auto-generated by the UI. Admins copy this password and share it manually with the invitee, maintaining zero external mail server dependencies.
 * **Roles**: Roles are aligned with platform capabilities:

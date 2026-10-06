@@ -24,8 +24,9 @@ Authorization: Bearer <scim_bearer_token>
 ```
 
 ::: tip
-Issue a SCIM token from **Settings → Single Sign-On → Directory provisioning
-(SCIM 2.0)**, or via the API:
+Issue a SCIM token from **Settings › Security › Single Sign-On (SSO) ›
+Directory provisioning (SCIM 2.0)**, which appears once an SSO provider is
+configured, or via the API:
 
 ```
 POST /api/v1/scim/tokens

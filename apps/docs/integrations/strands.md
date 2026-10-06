@@ -19,7 +19,7 @@ The `strands` adapter is detected when `pyproject.toml`, `requirements.txt`, or 
 intutic init
 ```
 
-### 2. Route LLM traffic through the proxy — per-provider honesty
+### 2. Route LLM traffic through the proxy — per-provider honesty {#route-llm-traffic-through-the-proxy-per-provider-honesty}
 
 Strands supports multiple model providers, and whether the Intutic proxy can see the traffic depends entirely on which one you construct:
 

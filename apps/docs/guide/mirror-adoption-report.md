@@ -44,7 +44,7 @@ An earlier design (referred to internally as "C6/C7") called for the proxy to au
 ## Configuration
 
 <!-- ENTERPRISE_ONLY_START -->
-If you're connected to a control plane, you can set a candidate model from the **Settings → Smart Model Routing & Response Cache** tab, or directly in the proxy's own config (below) if you run a self-hosted gateway.
+The dashboard has no control to set a candidate model: the candidate is set in the proxy's own config (below), whether or not you're connected to a control plane. The dashboard only reads the resulting report.
 <!-- ENTERPRISE_ONLY_END -->
 
 Whether you're standalone open-core or connected to a control plane, mirroring itself is configured the same way, directly in the proxy's `config.yaml` — no dashboard or control plane required to turn sampling *on*:
@@ -73,7 +73,7 @@ Both default off (`mirror_sample_rate: 0.0`, `mirror_candidate_model` unset) —
 <!-- ENTERPRISE_ONLY_START -->
 ### Dashboard
 
-Open **Settings → Smart Model Routing & Response Cache**, and scroll to **Mirror-Test Adoption Report**. Enter the candidate model id you configured above and click **Load Report**.
+Open **Settings › AI Routing & Caching**, and scroll to the **Mirror-Test Adoption Report** card. Enter the candidate model id you configured above and click **Load Report**.
 
 - A populated report shows candidate-better / original-better / tie / unjudged counts, the fault-rate delta (negative means the candidate faults *less* than the model it mirrored — the favorable direction), and the cost/latency deltas (shown as "not measured" rather than `$0.00`/`0 ms` when no pair yet has both sides priced — see [Honest Limits](#honest-limits) above).
 - An **insufficient data** state is rendered as its own distinct block, not as a report with zeroed-out numbers — this is deliberate, so a candidate with too few samples never looks like a candidate that has been cleared.

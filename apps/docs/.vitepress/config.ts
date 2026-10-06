@@ -2,30 +2,27 @@ import { defineConfig } from 'vitepress'
 import fs from 'fs'
 import path from 'path'
 
-// Auto-detect if we are in OSS build mode (default is OSS for docs.intutic.ai unless INTUTIC_ENTERPRISE_BUILD === 'true')
+// OSS build mode (open-source pages only) unless INTUTIC_ENTERPRISE_BUILD === 'true' in a checkout that has the paid-tier code; docs.intutic.ai builds the full site (Dockerfile)
 const hasControlPlane = fs.existsSync(path.resolve(__dirname, '../../../services/control-plane'));
 const IS_OSS = process.env.INTUTIC_ENTERPRISE_BUILD !== 'true' || !hasControlPlane;
 
 /**
- * Fail-closed guard for anything that ships.
+ * Fail-closed guard for the published site.
  *
- * In the enterprise repo `hasControlPlane` is true, so IS_OSS collapses to
- * `INTUTIC_ENTERPRISE_BUILD !== 'true'` — a single stray `export` in a shell is
- * all that separates a normal build from one that publishes every paid-tier
- * page. Defaulting to OSS makes that unlikely; it does not make it impossible,
- * and the failure is silent: the build succeeds and the leak only shows up in
- * the rendered output.
- *
- * Any build destined for docs.intutic.ai therefore sets INTUTIC_REQUIRE_OSS=true
- * (see the enterprise repo's apps/docs/Dockerfile, whose flags the deploy script
- * re-checks before building) and this throws rather than emitting the wrong
- * site. Loud and early beats silent and public.
+ * docs.intutic.ai publishes every page: the Cloud and Enterprise pages carry
+ * their badge, and the dashboard's help links point at them, so an
+ * open-source-only build there breaks those links (it answered 14 of the
+ * dashboard's 22 with a 404). The build for that site sets
+ * INTUTIC_REQUIRE_FULL=true (apps/docs/Dockerfile, whose flags the deploy
+ * script re-checks), and this throws rather than emit a site without them.
+ * A checkout without services/control-plane (the public repo) builds the
+ * open-source pages only, by design, so the guard does not apply there.
  */
-if (process.env.INTUTIC_REQUIRE_OSS === 'true' && !IS_OSS) {
+if (process.env.INTUTIC_REQUIRE_FULL === 'true' && hasControlPlane && IS_OSS) {
   throw new Error(
-    'Refusing to build: INTUTIC_REQUIRE_OSS=true but OSS gating is OFF ' +
-      `(INTUTIC_ENTERPRISE_BUILD=${JSON.stringify(process.env.INTUTIC_ENTERPRISE_BUILD)}, ` +
-      `hasControlPlane=${hasControlPlane}). This build would publish paid-tier pages.`,
+    'Refusing to build: INTUTIC_REQUIRE_FULL=true but this build leaves out the paid-tier pages ' +
+      `(INTUTIC_ENTERPRISE_BUILD=${JSON.stringify(process.env.INTUTIC_ENTERPRISE_BUILD)}). ` +
+      "The dashboard's help links point at them.",
   )
 }
 console.log(`[docs] build mode: ${IS_OSS ? 'OSS (paid-tier pages excluded)' : 'ENTERPRISE (all pages)'}`)
@@ -100,7 +97,7 @@ if (!IS_OSS) {
   sidebarGuide.push({
     text: 'Using Intutic',
     items: [
-      { text: 'Dashboard (Cloud)', link: '/guide/dashboard' },
+      { text: 'Overview (Cloud)', link: '/guide/dashboard' },
       { text: 'Developer Sessions (Cloud)', link: '/guide/agent-top' },
       { text: 'Intelligence Engine (Cloud)', link: '/guide/intelligence' },
       { text: 'Activity Logs (Cloud)', link: '/guide/traces' },
@@ -114,19 +111,17 @@ if (!IS_OSS) {
       { text: 'Session Safety & Budgets (Cloud)', link: '/guide/loops' },
       { text: 'Trajectory Monitor (Cloud)', link: '/guide/trajectory-monitor' },
       { text: 'Settings & Config (Cloud)', link: '/guide/settings' },
+      { text: 'Audit Timeline (Cloud)', link: '/guide/audit-timeline' },
       { text: 'Organizations, Teams & Billing (Cloud)', link: '/guide/organizations' },
       { text: 'Intelligent Model Routing (Cloud)', link: '/guide/intelligent-routing' },
       { text: 'Pre-Adoption Report for Model Upgrades (Cloud)', link: '/guide/mirror-adoption-report' },
       { text: 'Runaway-Spend Counterfactual (Cloud)', link: '/guide/averted-spend' },
       { text: 'Signed Provider-Downtime Evidence (Cloud)', link: '/guide/provider-incidents' },
       { text: 'Managed Gateway Cells (Cloud)', link: '/guide/managed-cells' },
-      // Reserved slots — sibling workstream is building the dashboard UI for
-      // these three in parallel; writing docs before the UI exists would
-      // document a page that doesn't do anything yet. Uncomment and point at
-      // a real page once each UI ships.
-      // { text: 'Audit Timeline (Cloud)', link: '/guide/audit-timeline' },
-      // { text: 'Org SOPs (Cloud)', link: '/guide/org-sops' },
-      // { text: 'Evaluator Sandbox (Cloud)', link: '/guide/evaluator-sandbox' },
+      // Audit Timeline (Settings › Audit Timeline) is listed above and
+      // Evaluator Sandbox (Labs › Evaluator Sandbox) under Advanced Features.
+      // Org-wide SOPs have no page of their own: the Org-Wide SOP Floor card
+      // is documented in the Team Members section of the Settings page.
     ],
   });
 }
@@ -157,6 +152,7 @@ sidebarGuide.push({
     ] : []),
     ...(!IS_OSS ? [
       { text: 'SOP Optimizer (Cloud)', link: '/guide/metaclaw' },
+      { text: 'Evaluator Sandbox (Cloud)', link: '/guide/evaluator-sandbox' },
       { text: 'Off-Pattern Detection (Cloud)', link: '/guide/drift-detection' },
       { text: 'Slash Commands (Cloud)', link: '/guide/slash-commands' },
       { text: 'Stream Alerts (Cloud)', link: '/guide/inline-streams' },
@@ -232,6 +228,10 @@ export default defineConfig({
   ],
 
   appearance: 'dark',
+  // Dead links are not the build's job: an open-source build leaves the
+  // paid-tier pages out, so links to them are dead there by design, and
+  // VitePress never checks #anchors. tools/scripts/check-docs-links.js checks
+  // every link between pages, and its anchor, in CI.
   ignoreDeadLinks: true,
 
   // Paid-tier pages are not built at all in OSS mode. Cloud pages cross-link to

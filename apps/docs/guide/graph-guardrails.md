@@ -523,7 +523,7 @@ The run moves to `PENDING_REVIEW`, every subsequent request is refused with
 intutic loop review <loop-run-id> --approve
 ```
 
-Or from **Decisions → Held Changes**, which lists held runs with the change
+Or from **Findings › Review Queue › Held Changes**, which lists held runs with the change
 manifest inline, ranked by risk rather than by when they were held.
 
 Entries can be action tokens (`action:deploy`, `action:publish`,
@@ -546,7 +546,8 @@ gate prints the hold id and how to resolve it:
 
 `intutic decision approve <holdId>` lets that exact call — same tool, same
 command, same target — through once, for a short window, and only when the
-workspace has opted in (**Settings → Review holds**); a different command
+workspace has opted in with the `reviewHoldBypassEnabled` workspace setting
+(`PUT /api/v1/workspace/settings`; there is no dashboard toggle); a different command
 under the same rule is held again. Two hook gates cannot hold: the n8n
 workflow hook and the Open WebUI prompt filter refuse the call outright, since
 neither runs in a workspace where a hold could be recorded. `review_before:`

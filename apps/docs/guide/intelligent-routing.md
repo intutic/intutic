@@ -81,7 +81,7 @@ intutic_settings:
 
 In a cloud-managed workspace, the routing candidate pool is further narrowed to the intersection
 of `candidate_models` and the workspace's approved-models allowlist (see
-[Settings → Approved Models](/guide/settings#approved-models)) — a candidate the allowlist excludes
+[Settings › Security › Approved Models](/guide/settings#approved-models)) — a candidate the allowlist excludes
 is never selected, no matter how strong its arm.
 
 > [!IMPORTANT]
@@ -218,10 +218,10 @@ old number was never real.
 
 <!-- ENTERPRISE_ONLY_START -->
 ### Step 1: Enable Routing in the Dashboard
-1. Open the **Compute Metrics Dashboard** (e.g., your control-plane console, or the local one at `http://localhost:5174`).
-2. Navigate to **Settings** from the sidebar navigation.
-3. Click on the **Smart Model Routing & Response Cache** tab.
-4. Check the **`Enable Intelligent Model Routing`** option.
+1. Open the Intutic dashboard (your control-plane console, or the local one at `http://localhost:5174`).
+2. Open **Settings** from the sidebar.
+3. Click the **AI Routing & Caching** tab, and find the **Smart Model Routing & Response Cache** card.
+4. Turn on **Enable Intelligent Model Routing**.
 
 ---
 

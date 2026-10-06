@@ -165,6 +165,30 @@ See [How It Works](/guide/how-it-works) for the full sync daemon architecture.
 
 ---
 
+## Compliance Scope
+
+**Policies › Compliance Scope** (`/policies/scope`; Owners, Admins and Engineering Managers) shows how much of each connected agent environment Intutic enforces, and the evidence behind it. It refreshes every 30 seconds.
+
+Each environment (a harness the sync daemon reported) gets an **enforcement tier** from the governance layers found active in its config:
+
+| Tier | Shown as | Active layers | Depth score |
+|------|----------|---------------|-------------|
+| **A** | Tier A: full | MCP proxy and a native hook: every tool call enforced in process | 100 |
+| **B** | Tier B: proxy | MCP proxy only | 75 |
+| **C** | Tier C: LLM | LLM proxy only | 50 |
+| **D** | Tier D: rules | A rules file only: guidance the agent reads, checked after the fact | 25 |
+| none | No coverage | Nothing detected | 0 |
+
+Its **score**, out of 100, weights the depth score at 60% and a telemetry score at 40%. The telemetry score reflects whether the environment's gate has been seen reporting recently, and how many tool calls it blocked in the last 24 hours.
+
+The page opens with **Unenforced environments**, **Fully enforced (tier A)**, **Environments monitored** and **Average score**, then a count per tier, then one card per environment, tier A first. Below the cards:
+
+- **Active Compliance Probes** — the workspace's compliance probes, with **Collect & export evidence**. See [Compliance Evidence](/guide/compliance-evidence).
+- **Provider Incidents** — upstream provider outages that affected this workspace's requests, grouped into failure windows. See [Signed Provider-Downtime Evidence](/guide/provider-incidents).
+- **Capability Misses** — sessions that ran tools with no governing guideline matched, most ungoverned first.
+
+---
+
 ## Related
 
 - [Agent Guidelines (SOPs)](/guide/sops) — Managing governance rules

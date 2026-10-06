@@ -134,7 +134,7 @@ Package `dist/` (plus `node_modules` if you add runtime dependencies beyond Node
 | Variable | Required | Meaning |
 |---|---|---|
 | `INTUTIC_CONTROL_PLANE_URL` | Yes | Your Intutic control-plane base URL, e.g. `https://your-intutic-control-plane.example.com` |
-| `INTUTIC_API_KEY` | Yes | A workspace virtual key (`vk_...`) minted via `POST /api/v1/keys` in your Intutic dashboard |
+| `INTUTIC_API_KEY` | Yes | A workspace virtual key (`vk_...`) from Settings › Security › Virtual API Keys in your Intutic dashboard (or `POST /api/v1/keys`) |
 | `INTUTIC_FAIL_OPEN` | No (default `false`) | Set `"true"` to allow tool calls through when the control-plane check itself fails, instead of denying |
 | `INTUTIC_TIMEOUT_MS` | No (default `3000`) | Control-plane call timeout |
 | `AGENTCORE_GATEWAY_ID` | No | Attached to requests for control-plane log correlation only — never affects the verdict |

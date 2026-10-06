@@ -1,28 +1,36 @@
 # Settings & Configuration <Badge type="warning" text="Cloud / Team" />
 
 <!-- ENTERPRISE_ONLY_START -->
-Manage your workspace preferences, security, billing, compliance, and integrations from a single control panel.
+Manage your workspace, its members, security, routing, billing, notifications and integrations from one page.
 
 ## Accessing Settings
 
-Navigate to **Settings** in the dashboard sidebar. The settings page is organized into tabs, each covering a different area of workspace management.
+Open **Settings** in the sidebar. The Settings area has three pages: **Settings** itself, **Upgrade** (plan choice), and, for Owners and Admins, [Audit Timeline](/guide/audit-timeline). The Settings page is organized into tabs, in this order: General, Team Members, Security, AI Routing & Caching, Billing, Sync Status, Notifications and Integrations. Each tab has a guide link in the page header that opens its section below (Security opens [Security & Identity](/guide/security), Billing opens [Budgets & FinOps](/guide/budgets)).
 
 ---
 
-## General
+## General {#general}
 
-The General tab covers your basic workspace identity.
+Your workspace, its plan, and your own profile and password.
 
-### Workspace Info
-
-- **Workspace Name** — The display name for your workspace
-- **Workspace ID** — Your unique workspace identifier (`wk_` prefix), used in API calls and CLI configuration
+- **Workspace** — the **Workspace ID** (used in API calls and CLI configuration) and the **Plan**, marked Trial or Active, with the days left in a trial. Below them, the plan limits: tokens per day, sessions per day and active guidelines.
+- **Workspace Policies** — **Governance card labeling**: ask for adoption labels on corrective cards, to tune the judge. Turning it off stops label collection only; cards are still created and delivered.
+- **Trace Storage** — whether traces mirror to, or live only in, a bucket you own, and a check that the bucket is still reachable. The bucket is set with `PUT /api/v1/workspace/settings` (a `byocStorage` object); its credentials are encrypted at rest and never returned.
+- **Profile** — your email (read-only), display name and avatar URL.
+- **Change Password** — current password, new password and confirmation. Passwords must be 8–128 characters.
+- **Delete Workspace** — deletion is done by Intutic support; **Contact support** opens an email.
 
 ---
 
-## Team Members
+## Team Members {#members}
 
-The Team Members tab lets you invite, remove, and manage team members and assign RBAC roles:
+Who can sign in and with which role, the teams in your organization, and the guidelines every workspace inherits.
+
+### Members
+
+The **Invite a teammate** form takes a display name, an email address and a role, and **Create Account** creates the account directly; no invitation email is sent. The dashboard generates a temporary password and shows it once, in the **Account Created** dialog, for you to copy and share. The new member is asked to change it at first sign-in. A **Seats used** meter shows the workspace against its plan's seat limit; at the limit, deactivate a member or upgrade to add another.
+
+Each member row has a role selector and **Deactivate** (or **Reactivate**). The roles:
 
 | Role | Access Level |
 |------|-------------|
@@ -32,22 +40,47 @@ The Team Members tab lets you invite, remove, and manage team members and assign
 | **Developer** | Use agents, view own traces |
 | **Viewer** | Read-only dashboard access |
 
+The invite form offers Viewer, Developer, Engineering Manager and Admin. Which dashboard pages each role can open is listed in [Security & Identity](/guide/security#feature-access-by-role).
+
+### Teams
+
+Teams group workspaces under your org. A personal org has one team; a second team needs an org on a multi-team plan. See [Organizations, Teams & Billing](/guide/organizations).
+
+### Org-Wide SOP Floor
+
+Mandatory guidelines every workspace under your org is judged and enforced against, in addition to its own SOPs. They are pushed from the CLI with `intutic sops push <name> --org`; the card lists them and can remove one.
+
 ---
 
-## Security
+## Security {#security}
 
-Configure authentication, access control, and API credentials for your workspace.
+Sign-in, keys and credentials, and the network and runtime limits every agent in the workspace runs under. The tab's cards, in order:
 
-### Single Sign-On (SSO)
+| Card | What it does |
+|------|--------------|
+| **Single Sign-On (SSO)** | **Configure SSO** connects a SAML or OIDC identity provider (Okta, Entra ID and others). Once a provider exists, the card also offers **Expire API keys without a recent SSO login** and **Directory provisioning (SCIM 2.0)**. See [Security & Identity](/guide/security) and [SCIM Provisioning](/guide/scim). |
+| **Virtual API Keys** | Keys (`vk_…`) that developers and their agents use to reach the Intutic proxy. See [below](#virtual-api-keys). |
+| **Attenuated API Keys** | Child keys minted from a parent key with fewer capabilities by `intutic attenuate`; open a chain to see each step. |
+| **On-Behalf-Of Tokens** | A short-lived token that lets an agent act for you with only the tools you pick. See [below](#on-behalf-of-obo-tokens). |
+| **Provider Keys** | This workspace's own provider credentials. See [below](#provider-keys). |
+| **Gateways** | Register a [self-hosted gateway](/external/self-hosted-gateway) to run the proxy in your own infrastructure. |
+| **Data Residency** | Pin the workspace's data to a region, and block requests that violate the pin. |
+| **Network Egress Control** | The egress mode and allow list every proxy in the workspace hot-reloads. |
+| **Sandboxed Execution** | Require agents to run in a sandbox; enforced by the CLI on `intutic exec`. See [Sandboxed Execution](/guide/sandboxed-execution). |
+| **Approved Models** | The workspace's model allowlist. See [below](#approved-models). |
+| **Repeat-Finding Enforcement** | Act on a sustained pattern of findings in one session, not only record it. |
+| **Trajectory Monitoring** | Server-side monitoring of running sessions. See [Trajectory Monitor](/guide/trajectory-monitor). |
+| **Devices** | Enforcement posture each developer machine reports: visibility, not attestation. |
 
-Set up SAML 2.0 or OIDC-based SSO providers so team members can log in with Okta, Entra ID (Azure AD), Google, or Ping Identity. Refer to the configuration helper links inside the modal for step-by-step setup guides.
+### Virtual API Keys
 
-### API Keys
+Create keys (`vk_` prefix) for developers and their agents to reach the Intutic proxy:
+- Give each key a **Label / Description** and, optionally, **Expires In (Days)**
+- Optionally limit a key to **Allowed models (optional)**, one model id per line
+- Mark a CI or service key **This key is for automation (CI, scripts, a service)**, so the SSO-recency window does not expire it (see [Security & Identity](/guide/security#automation-keys))
+- **Revoke** a compromised key immediately
 
-Create and manage virtual API keys (`vk_` prefix) for programmatic access to the Intutic API:
-- Generate new keys with descriptive labels
-- Rotate keys on a schedule
-- Revoke compromised keys immediately
+There is no in-place rotation: create a new key, move clients to it, then revoke the old one.
 
 ### Provider Keys
 
@@ -78,7 +111,7 @@ A provider needing more than one field (e.g. Azure OpenAI: endpoint, deployment,
 repeated `--field key=value` flag, one per field — the wizard's dynamic form and the CLI submit
 the same shape.
 
-New: **Guided Setup**, next to Provider Keys, walks through provisioning a provider and verifying
+**Guided setup**, on the Provider Keys card, walks through provisioning a provider and verifying
 it against the provider's own API in one flow. See
 [the cohort wizard](/guide/cohort-wizard) for the full step-by-step (it's also available from
 the CLI as `intutic setup`, for anyone who'd rather not click through it).
@@ -93,38 +126,12 @@ and `PUT /api/v1/workspace/settings` rejects `managedJudgeModel` with `400`.
 
 ### On-Behalf-Of (OBO) Tokens
 
-OBO tokens are short-lived, employee-scoped credentials. OBO Scoping allows you to temporarily grant limited permission clearance to an AI agent acting on your behalf (e.g., executing commands or reading files during a debug task). This token automatically expires in 15 minutes to guarantee security.
-
-### Password Management
-
-Change your account password. Passwords must be 8–128 characters.
+OBO tokens are short-lived, employee-scoped credentials. They let an agent act for you with only the tools you pick (for example, running commands or reading files during a debugging session). A token expires after 15 minutes.
 <!-- ENTERPRISE_ONLY_END -->
-
----
-
-## AI Routing & Proxy
-
-Manage dynamic model routing preferences, governance bypass controls, and saved response caching.
-
-### Smart Routing & Response Cache
-
-Optimize AI model selection dynamically to balance cost and response speed, and manage cached answers to minimize token expenses. You can configure these settings directly:
-
-*   **Exact Query Match Caching** — Serves cached answers for identical queries.
-*   **Semantic Match Caching** — Serves cached answers for conceptually equivalent queries.
-*   **Enable Intelligent Model Routing** — Dynamically optimizes model selection for every task using adaptive reinforcement learning.
-*   **Configurable Task Trigger Words** — Customize the comma-separated keywords used to automatically classify prompt tasks (testing, deployment, review, debugging) at the proxy gateway.
-*   **Reset Router Memory** — Clears the active routing history, restarting the learning process.
-
-Monitoring metrics include:
-- **Optimization Status** — Indicates if the router learning process is actively *LEARNING* or has reached *OPTIMIZED*.
-- **Optimization Progress** — Shows convergence ratio progress.
-- **Routing Decisions** — Counts total observations handled.
-- **Active Routing Configurations** — Simplified table displaying model arm IDs, task types, security levels, and performance scores.
 
 ### Approved Models
 
-An optional allowlist of model names this workspace's requests are permitted to use. Leave it
+The **Approved Models** card holds an optional allowlist of model names this workspace's requests are permitted to use. Leave it
 empty and every model is allowed — the allowlist only starts restricting once you add at least
 one entry.
 
@@ -139,7 +146,7 @@ it can actually pick from are the intersection of your `candidate_models` config
 allowlist, not either list alone.
 
 A single API key can be scoped below the workspace list: the **Allowed models (optional)** field
-under [API Keys](#api-keys) takes one model id per line, and the proxy enforces the *intersection*
+under [Virtual API Keys](#virtual-api-keys) takes one model id per line, and the proxy enforces the *intersection*
 of the key's list and this one. A key can only narrow what the workspace approves — a model
 listed on the key but not here stays refused — and a key with no list of its own inherits this
 list unchanged.
@@ -164,51 +171,103 @@ through the same enforcement path:
 - A rejected request names both sources in its error, so a model refused on a connected proxy
   points you at the workspace allowlist, and on a standalone one at this file.
 
+---
+
+## AI Routing & Caching {#routing-proxy}
+
+What the proxy does when it cannot reach Intutic, which model serves each request, and what it caches.
+
 ### MCP Proxy Enforcement
 
-Controls how the Intutic governance proxy behaves when it can't reach the control plane.
+What the MCP governance proxy does when it cannot reach Intutic, and how firmly it keeps harness config files as Intutic wrote them. It applies to harnesses whose MCP servers run behind the proxy; [MCP Server Governance](/guide/mcp-governance) lists them.
+
+**When Intutic is unreachable**
 
 | Setting | Behavior |
 |---------|----------|
-| **Fail-Open** *(recommended)* | Tool calls pass through when the control plane is unreachable. A warning event is logged to the dashboard |
-| **Fail-Closed** | Tool calls are blocked with an error message when the control plane is unreachable |
+| **Fail open** *(recommended)* | The tool call runs, and a warning event reaches the dashboard |
+| **Fail closed** | The tool call is blocked with "Governance check failed: Intutic control plane unreachable." The dashboard asks you to confirm before switching to it |
 
-### Bypass Enforcement
+**When someone edits a harness config file by hand**
 
-Determines how aggressively the sync daemon protects harness config files from manual edits.
+| Option | Behavior |
+|--------|----------|
+| **Restore** *(default)* | The sync daemon notices the hand edit and puts the managed file back |
+| **Write-protect** *(macOS only)* | The file is locked against edits with the macOS immutable flag (`chflags uchg`) |
+| **Record only** | The edit stays, and an incident records the drift |
 
-| Tier | Behavior |
-|------|----------|
-| **Rewrite** *(default)* | The drift watcher detects edits within ~1 second and immediately rewrites the config |
-| **Immutable** *(macOS only)* | After each write, sets system-level immutable flags on the config file |
-| **Alert Only** | Drift creates a governance incident but does not rewrite the config |
+The card also shows the **Proxy mode**: per session.
 
-::: info
-Bypass enforcement applies to all 43 supported harnesses. The sync daemon monitors protected configuration paths in real time.
-:::
+### Postures
+
+One choice that sets several settings at once, in two groups, **Security** and **Cost**. Changing one of those settings by hand afterwards marks the posture Custom.
+
+### Smart Model Routing & Response Cache
+
+**Saved Response Cache**
+
+*   **Exact Query Match Caching** — serves cached answers for identical queries.
+*   **Semantic Match Caching** — serves cached answers for conceptually equivalent queries.
+
+The cache figures are **Cached answers**, **Cache hit rate** (exact and similar hits) and **Saved (USD)**.
+
+**Intelligent Model Routing**
+
+*   **Enable Intelligent Model Routing** — chooses a model for every task with adaptive reinforcement learning. See [Intelligent Model Routing](/guide/intelligent-routing).
+*   **Configurable Task Trigger Words** — the comma-separated keywords the proxy uses to classify a prompt as testing, deployment, review or debugging; one field per task type, saved with **Save Keywords**.
+
+The router figures are:
+- **Router state** — *Learning* (still exploring models) or *Converged* (choosing from settled scores).
+- **Convergence** — the convergence ratio, as a percentage.
+- **Routing decisions** — the number of routing observations.
+- **Active Intelligent Routing Configurations** — a table of each configuration's ID, model, security level, task type, requests handled and performance score.
+
+### Contracted Model Rates
+
+Your negotiated per-token prices, in USD per 1,000 tokens. The shadow routing savings report prices a listed model at these rates instead of list price, on both sides of the comparison; models not listed stay at list.
+
+### Mirror-Test Adoption Report
+
+Enter a **Candidate model** and **Load Report** to see how a model mirror-tested against live traffic compared with the model it mirrored. See [Pre-Adoption Report for Model Upgrades](/guide/mirror-adoption-report).
 
 ---
 
-## MCP Health
+<!-- ENTERPRISE_ONLY_START -->
+## Billing {#billing}
 
-Monitor the health of the MCP governance proxy daemon.
+Usage against your plan, invoices, and the spend caps that stop a runaway agent.
 
-- **Daemon Status** — View the current state of the MCP proxy daemon across your workspace
-- **Cache Management** — View and invalidate the MCP tool resolution cache
+- **Enterprise trial** — for an Owner on an eligible workspace, a banner offers **Start 14-day enterprise trial**; during a trial it shows the days remaining and **Talk to Sales**.
+- **Token Usage** — tokens metered this billing period: tokens used, plan allowance, overage tokens and estimated overage.
+- **Governed Request Usage** — Governed Requests metered this billing period against the plan limit, any over the limit and the overage charge, with a daily trend.
+- **Billing History & Invoices** — invoices Stripe issued to this workspace, newest first.
+- **Budget Limits** — meters for **Spent this month** and **Spent today** against their caps; the **Daily cap (USD)**, **Monthly cap (USD)** and **Alert at (% of cap)** fields, saved with **Save limits**; and **Budget alerts**, each with **Acknowledge**. See [Budgets & FinOps](/guide/budgets).
+
+To change plan, open **Settings › Upgrade**.
+<!-- ENTERPRISE_ONLY_END -->
+
+---
+
+## Sync Status {#mcp-health}
+
+The sync daemon that keeps guidelines current on each machine, and the MCP servers it watches.
+
+- **Sync Daemon** — the daemon's status (Running, or Stopped or degraded), **Policy cache entries** and **Cache hit rate**. **Clear Policy Cache** empties the policy cache.
+- **MCP Servers** — each monitored server's name, status (healthy, degraded or unreachable), latency, error rate, credential expiry and last check. A server appears once a connected harness starts it behind the proxy.
 
 ::: tip
-If agents are using stale governance rules, try invalidating the MCP cache from this tab.
+If agents are using stale governance rules, clear the policy cache from this tab.
 :::
 
 ---
 
-## Notifications
+## Notifications {#notifications}
 
-Route governance events and alerts to Slack, email, PagerDuty or webhooks.
+Route governance events to Slack, PagerDuty, a webhook or email. Each rule (**New Notification Rule**) names one event type and one channel, and can filter by severity.
 
 ### Channel Routing
 
-- **Slack Integration** — Connect your Slack workspace via OAuth and route alerts to specific Slack channel IDs.
+- **Slack** — **Connect Slack** installs the Slack app through OAuth; a rule then sends to a Slack channel ID. **Link your Slack account** gives you a code to run as `/intutic link <code>` in Slack, so approvals you make from Slack are recorded against you rather than against whoever installed the app.
 - **Email** — Send alerts to up to 20 addresses; each recipient gets their own message.
 - **PagerDuty** — Trigger incidents through an Events API v2 routing key.
 - **Webhooks** — Send JSON payloads to generic HTTPS endpoints. Secure webhooks with an optional HMAC signing secret.
@@ -227,16 +286,48 @@ A listed host may resolve to a private address; every other destination stays gu
 
 ### Rule Filters
 
-Define custom routing rules filtering by event types:
-- `anomaly.detected` — Triggers when an ARE anomaly is flagged
-- `finops.budget.threshold` — Triggers when a workspace/department budget limit is breached
-- `judge.review.queued` — Triggers when the governance judge queues a response for a person to rule on
-- `trajectory.alert` — Triggers on goal drift or looped trace behaviors
-- `decision.pending` — Triggers when a hijacked action requires manual administrator review
+The **Event Type** list offers only the events the control plane sends:
+
+| Event type | Label in the dashboard |
+|------------|------------------------|
+| `incident.created` | Incident Created |
+| `judge.review.queued` | Judge Review Waiting |
+| `anomaly.detected` | Anomaly Detected |
+| `anomaly.finding` | Detector Finding (incl. advisory): every detector finding, allowed or blocked; pair it with a severity filter |
+| `trajectory.alert` | Trajectory Drift Alert |
+| `anomaly.capability_miss` | Capability Miss (ungoverned task) |
+| `sop.integrity.drift` | Guideline Integrity Drift |
+| `sop.stale.detected` | Guideline Went Stale |
+| `sop.cascade.invalidated` | Guideline Cascade Invalidated |
+| `sop.upstream.changed` | Guideline Changed Upstream |
+| `guardrail.ready` | Policy Guardrail Ready to Enforce |
+| `guardrail.stale` | Policy Guardrail Citation Went Stale |
+| `finops.budget.threshold` | Budget Threshold Reached |
+| `finops.budget.exceeded` | Budget Exceeded |
+| `plan.deviation.detected` | Plan Deviation Detected |
+| `trial.expired_downgraded` | Trial Expired |
+| `gateway.stale.detected` | Self-Hosted Gateway Unreachable |
+| `device.enforcement.stale` | Device Enforcement Stale |
+| `device.enforcement.disabled` | Device Firewall Disabled |
+
+Tick one or more severities (LOW, MEDIUM, HIGH, CRITICAL) to narrow a rule; leave them all unticked to receive every severity.
 
 ### Cooldown Throttling
 
 Prevent alert noise by setting a cooldown period (in minutes) for each rule. Consecutive identical alerts inside the cooldown window are suppressed.
+
+**Show Delivery Log** lists each time a rule sent, failed or was filtered, with the event and channel.
+
+---
+
+## Integrations {#integrations}
+
+Task trackers, memory providers, file scanning and SIEM export.
+
+- **Task Management & Alerting** — connect Jira Cloud, PagerDuty, Linear, GitHub Issues or Asana to sync tickets and route governance alerts. **Add Connection** takes the provider, its base URL, an API token or auth secret, and a project key or routing key.
+- **Memory Providers** — connect mem0, Supermemory, AgentMemory or a custom HTTP memory service so the `/fix` command can enhance prompts with what your team already knows. See [Prompt Commands](/guide/agent-commands).
+- **VirusTotal Skill Scanning** — opt in to checking the sha256 hash of skill-bundled scripts against VirusTotal; file content is never uploaded. See [VirusTotal Integration](/guide/virustotal-scanning).
+- **SIEM Export** — stream governance events to Splunk, Datadog, a webhook, syslog/CEF, S3 or GCS; **Add Destination** creates one. See [SIEM Export](/guide/siem-export).
 
 ---
 

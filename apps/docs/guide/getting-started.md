@@ -161,7 +161,7 @@ intutic init --dev
 ```
 :::
 
-## Step 4 — Start the proxy
+## Step 4 — Start the proxy {#step-4-start-the-proxy}
 
 ### Standalone (open core)
 

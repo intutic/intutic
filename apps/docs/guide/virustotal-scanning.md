@@ -22,7 +22,7 @@ Scope, precisely:
 
 ## Enabling it
 
-From **Settings → Integrations → VirusTotal Skill Scanning**:
+From **Settings › Integrations › VirusTotal Skill Scanning**:
 
 1. Add your VirusTotal API key (a free-tier key works — see the budget note below for what that limits). OWNER/ADMIN role required; the key is encrypted at rest (AES-256-GCM, the same house pattern every other stored credential in this product uses) and only ever displayed masked (last 4 characters).
 2. Click **Test connection** to validate the key against the sha256 of the empty file — a real lookup, but against a benign, well-known hash, so you can confirm the key authenticates without needing a real (or malicious) sample.
@@ -57,7 +57,7 @@ An API error, a timeout, a malformed response, or an exhausted daily budget all 
 
 ## Effect on the posture score
 
-A hash that comes back flagged (any AV engine detection) scores that skill **zero** in the [agent posture](/guide/dashboard) ring's `skills` dimension — the identical severity treatment a confirmed finding from the native pattern scanner gets. It also raises a `skill.malware.detected` notification at **HIGH** severity, the same tier as a provider outage or a device dropping its firewall enforcement.
+A hash that comes back flagged (any AV engine detection) scores that skill **zero** in the [agent posture](/guide/agents) ring's `skills` dimension — the identical severity treatment a confirmed finding from the native pattern scanner gets. It also raises a `skill.malware.detected` notification at **HIGH** severity, the same tier as a provider outage or a device dropping its firewall enforcement.
 
 ## Related
 

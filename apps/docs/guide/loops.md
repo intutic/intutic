@@ -33,7 +33,7 @@ Every autonomous agent session can be registered as a **Loop Run** under a works
 - **Budget Limits**: You can configure a maximum token budget (in USD) for the loop run.
 - **Circuit Breaker**: As token costs accumulate, the proxy increments the spend and evaluates if the budget has been exceeded.
 
-### 2. Circuit Breaker Enforcement
+### 2. Circuit Breaker Enforcement {#circuit-breaker-enforcement}
 
 If a budget is breached, or if an administrator manually terminates a loop run from the dashboard, the loop state is set to `KILLED`.
 - Once `KILLED`, the reverse proxy intercepts any subsequent model requests matching the loop run header with an HTTP `403 Forbidden` response and error code `LOOP_RUN_TERMINATED`.
@@ -68,10 +68,11 @@ intutic loop kill lr_abc123
 
 ## Managing Loops in the Dashboard
 
-The **Session Safety & Budgets** page in the Intutic dashboard provides a graphical overview of all loop runs:
-- **Metrics Overview**: View total spend, active loops, and average cost.
-- **Circuit Breaker Controls**: Real-time buttons to **Complete** or **Kill** loop runs.
-- **Telemetry Links**: Drill down into the specific activity logs and trace steps associated with each loop run.
+**Activity › Session Safety & Budgets** (`/activity/budgets`) in the Intutic dashboard provides an overview of all loop runs:
+- **Sessions at a glance**: **Held for review** (runs waiting on a person), **Running**, **Total session cost** across the listed runs, and **Automatic safety guardrail**, which reads Active when the control plane answered and Unverified when it did not.
+- **Sessions** and **Session Details**: select a run to see its name, status, cost so far, budget and session ID.
+- **Circuit Breaker Controls**: **Mark Completed** or **Force Stop** a running session. A session held for review offers **Approve & Resume** or **Reject & Kill** instead; held runs are also listed under **Findings › Review Queue › Held Changes**.
+- **Start New Session** opens a loop run with a session name and a budget in USD.
 
 ## Memory Guardrails & State Scanning
 

@@ -27,17 +27,16 @@ COPY packages/theme/ ./packages/theme/
 COPY apps/docs/ ./apps/docs/
 COPY tsconfig.base.json ./tsconfig.base.json
 
-# Open Source build flags for the public docs.intutic.ai deployment.
-#
-# INTUTIC_OPEN_SOURCE and INTUTIC_MODE used to sit here too. Nothing in either
-# repo ever read them, so they advertised four gates where two existed — and
-# the two decorative ones would have kept passing if the real gating were
-# deleted. Removed, matching the enterprise Dockerfile.
-ENV INTUTIC_ENTERPRISE_BUILD=false
-# Fail the build outright if OSS gating is ever off — see the guard in
-# apps/docs/.vitepress/config.ts. Without this the failure mode is a silently
-# published site full of paid-tier pages.
-ENV INTUTIC_REQUIRE_OSS=true
+# docs.intutic.ai publishes every page, open-source and paid-tier alike: the
+# Cloud and Enterprise pages carry their badge, and the dashboard's help links
+# point at them (an open-source-only site answered 14 of its 22 links with a
+# 404). Built from a checkout without services/control-plane (the public repo)
+# the site is open-source-only regardless; see the guard in
+# apps/docs/.vitepress/config.ts.
+ENV INTUTIC_ENTERPRISE_BUILD=true
+# Fail the build outright if a build that has the paid-tier pages would leave
+# them out: that site would break the dashboard's help links.
+ENV INTUTIC_REQUIRE_FULL=true
 
 # Build theme first, so that custom variables and synced assets exist
 RUN pnpm --filter=@intutic/theme run build

@@ -9,8 +9,8 @@ Intutic supports OpenID Connect (OIDC) Single Sign-On for seamless integration w
 
 ### Setting Up SSO
 
-1. Navigate to **Settings &rarr; Security**
-2. Click **Configure SSO**
+1. Open **Settings › Security**
+2. On the **Single Sign-On (SSO)** card, click **Configure SSO**
 3. Enter your OIDC identity provider's configuration:
    - **Provider Type** &mdash; Select your provider (Okta, Microsoft Entra ID, Google, Ping Identity, or Custom OIDC)
    - **Issuer URL** &mdash; Your identity provider's unique issuer OIDC endpoint URL
@@ -43,13 +43,14 @@ Virtual API keys (`vk_` prefix) provide programmatic access to the Intutic API a
 
 ### Managing Keys
 
-From **Settings → Security → API Keys**:
+From **Settings › Security › Virtual API Keys**:
 
 | Action | Description |
 |--------|-------------|
-| **Create** | Generate a new key with a descriptive label |
-| **Rotate** | Generate a replacement key and invalidate the old one |
+| **Create** | Generate a new key with a **Label / Description**, an optional **Expires In (Days)**, and optionally a list of allowed models |
 | **Revoke** | Immediately invalidate a key |
+
+There is no rotate action. To replace a key, create a new one, move its clients over, then revoke the old one.
 
 ::: warning
 Treat API keys as secrets. Never commit them to version control. Use environment variables (`INTUTIC_API_KEY`) instead.
@@ -111,34 +112,41 @@ Some dashboard features are restricted to specific roles:
 
 | Feature | Required Role |
 |---------|--------------|
-| Review Queue | Owner, Admin, or EM |
-| Compliance Scope | Owner, Admin, or EM |
-| Custom Filters (WASM) | Owner, Admin, or EM |
-| SOP Optimizer | Owner, Admin, or EM |
-| Intelligence Engine | Owner, Admin, or EM |
-| Incidents | Owner, Admin, or EM |
-| Emergency Overrides | Owner, Admin, or EM |
+| Overview › Spend tab | Owner, Admin, or EM |
+| Policies › Enforcement Policies | Owner, Admin, or EM |
+| Policies › Policy Guardrails | Owner, Admin, or EM |
+| Policies › Custom Filters (WASM) | Owner, Admin, or EM |
+| Policies › Emergency Overrides | Owner, Admin, or EM |
+| Policies › Compliance Scope | Owner, Admin, or EM |
+| Findings › Findings | Owner, Admin, or EM |
+| Findings › Incidents | Owner, Admin, or EM |
+| Findings › Review Queue | Owner, Admin, or EM |
+| Labs › SOP Optimizer | Owner, Admin, or EM |
+| Labs › Intelligence | Owner, Admin, or EM |
+| Settings › Audit Timeline | Owner or Admin |
+| Labs › Evaluator Sandbox | Owner or Admin |
+
+Every other page is open to every role. Policy Guardrails, Custom Filters, SOP Optimizer and Evaluator Sandbox also need a plan that includes them; see the [Tier Matrix](/guide/tier-matrix).
 
 ---
 
 ## Member Management
 
-Manage your team from **Settings &rarr; Team Members**.
+Manage your team from **Settings › Team Members**.
 
 ### Inviting Members
 
 Intutic uses **direct provisioning** — there is no invitation email. The admin creates the account and shares credentials out-of-band.
 
-1. Click **Invite Member** in the Team Members panel
-2. Fill in the provisioning form:
-   - **Email** — The new member's email address (used as their login identifier)
-   - **Display Name** — How they appear in the dashboard and audit logs
-   - **Role** — Select an RBAC role (`ADMIN`, `EM`, `DEVELOPER`, or `VIEWER`)
-   - **Temporary Password** — Set an initial password (8–128 characters)
-3. Click **Create** — the system provisions the account immediately
-4. **Copy the temporary password** and share it with the new member through a secure channel (e.g., a password manager, encrypted message, or in person)
-5. The new member logs in with their email and the temporary password
-6. They should change their password immediately from **Settings → Security → Change Password**
+1. Find the **Invite a teammate** form on the Members card
+2. Fill in the form:
+   - **Display name** — How they appear in the dashboard and audit logs
+   - **Email address** — The new member's email address (used as their login identifier)
+   - **Role** — Viewer, Developer, Engineering Manager or Admin
+3. Click **Create Account** — the system provisions the account immediately and generates a temporary password for you
+4. In the **Account Created** dialog, **Copy Password** and share it with the new member through a secure channel (e.g., a password manager, encrypted message, or in person). It is not shown again
+5. The new member logs in with their email and the temporary password, and is prompted to change it
+6. They can change it again at any time from **Settings › General › Change Password**
 <!-- ENTERPRISE_ONLY_END -->
 
 ::: warning
@@ -179,7 +187,7 @@ Deactivate the member in Intutic as well:
 DELETE /api/v1/members/:memberId
 ```
 
-or **Settings &rarr; Team Members &rarr; Deactivate**. This takes effect
+or **Settings › Team Members › Deactivate**. This takes effect
 immediately — every key the member holds stops authenticating at the control plane
 and at the proxy on the next request, not after a cache expiry.
 
@@ -203,14 +211,14 @@ PUT /api/v1/workspace/settings
 ```
 
 Send `null` to turn it off, or adjust the window under
-**Settings &rarr; Single Sign-On**.
+**Settings › Security › Single Sign-On (SSO)**, in **Expire API keys without a recent SSO login** (Off, 7, 30 or 90 days). That control appears once an SSO provider is configured.
 
 Signing in through SSO re-stamps the timestamp and restores the keys; no
 re-issuing is needed.
 
 ### Automation keys
 
-Mark a key as **for automation** when you create it (Settings &rarr; API Keys) and
+Mark a key **This key is for automation (CI, scripts, a service)** when you create it (Settings › Security › Virtual API Keys) and
 the window does not apply to it — no person signs in for a pipeline. Such a key is
 still revocable, and it still stops working the moment its owner is deactivated, so
 it is exempt from the recency policy only, not from offboarding.
@@ -227,11 +235,11 @@ restores access with no re-issuing:
 POST /api/v1/members/:memberId/reactivate
 ```
 
-or **Settings &rarr; Team Members &rarr; Reactivate** on an inactive member.
+or **Settings › Team Members › Reactivate** on an inactive member.
 
 ## Password Management
 
-Change your account password from **Settings → Security → Change Password**.
+Change your account password from **Settings › General › Change Password**.
 
 - Passwords must be 8–128 characters
 - We recommend using a password manager

@@ -34,7 +34,7 @@ Summaries are rendered server-side, deliberately kept to structural facts rather
 
 The Governed Decisions Log is **off by default**. A growing, auto-written context file is token spend your workspace's agents pay on every request that reads it — that's not something Intutic imposes without an explicit opt-in.
 
-Enable it from **Settings → AI Routing & Proxy** (or via the settings API, `decisionsLogEnabled: true`). Once on:
+There is no dashboard toggle for it. Enable it through the settings API, with `decisionsLogEnabled: true` in `PUT /api/v1/workspace/settings`. Once on:
 
 1. The sync-daemon polls a bounded, workspace-scoped projection of the last ~20 decisions on its normal sync cycle.
 2. `.intutic/DECISIONS.md` is written locally — the full bounded record, regenerated each cycle. This file is **not** committed to your repository (it's covered by `.gitignore`, the same as every other daemon-generated governance artifact).

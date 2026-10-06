@@ -360,11 +360,11 @@ The rule lands in `~/.intutic/wasm/` as `50_budget-guard.wasm` (lower priority n
 
 ### 1. Upload via the Dashboard
 
-1. Navigate to **Custom Filters** in the dashboard sidebar
-2. Click **Upload Rule**
-3. Select your compiled `.wasm` file
-4. Add a name and description
-5. Activate the filter
+1. Open **Policies › Custom Filters** (Owners, Admins and Engineering Managers, on a plan that includes custom filters)
+2. Click **Add filter**
+3. In the **Add a custom filter** dialog, enter a **Name** and, optionally, a **Description**
+4. Choose the **Compiled bundle (.wasm, up to 1 MB)**
+5. Click **Upload filter**, then **Enable** the filter in the table if it is not already active
 
 ### 2. Hot-Reload
 
@@ -379,26 +379,22 @@ Filters are hot-reloaded into the proxy without requiring a service restart:
 
 ## Managing Filters
 
-From the Custom Filters dashboard:
+From **Policies › Custom Filters**, each filter row has two actions:
 
 | Action | Description |
 |--------|-------------|
-| **Activate** | Enable the filter on the request path |
-| **Deactivate** | Disable without deleting |
-| **Update** | Upload a new version of the WASM binary |
-| **Delete** | Permanently remove the filter |
-| **Test** | Run the filter against sample inputs to verify behavior |
+| **Enable** / **Disable** | Put the filter on the request path, or take it off without deleting it |
+| **Delete** | Permanently remove the filter, after a confirmation |
+
+To change a filter's code, upload the new bundle as a filter and delete the old one. To test a rule against sample inputs before deploying it, use the CLI dry run described above.
 
 ---
 
 ## Monitoring
 
-The dashboard shows filter execution metrics:
+The Custom Filters page shows how many **Filters** the workspace has, how many are **Active** and how many **Inactive**. The table lists each filter's name, bundle hash, version, priority, mode (**Enforce** or **Shadow**), status and when it was added.
 
-- **Hit count** — How many requests triggered the filter
-- **Block count** — How many requests were blocked
-- **Average execution time** — Latency impact per request
-- **Fuel consumption** — CPU fuel used per execution
+The dashboard does not show per-filter execution metrics such as hit counts or latency.
 
 ---
 
