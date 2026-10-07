@@ -30,11 +30,14 @@ enterprise stack (`docker-compose.enterprise.yml`), which additionally runs its 
 control-plane, Postgres, and dashboard — a self-hosted *gateway* keeps the control plane on
 Intutic's Cloud and self-hosts only the data-plane proxy.
 
+The Compose files are in the `gateway/` directory of each release bundle; Intutic
+sends you the download links ([verifying a release](../guide/self-host#getting-a-release)).
+
 ```bash
-git clone https://github.com/intutic/intutic-enterprise
-cd intutic-enterprise/infra/compose
-cp .env.gateway.example .env.gateway
-# Set INTUTIC_GATEWAY_TOKEN (from `intutic gateway register`) and CONTROL_PLANE_URL
+cd intutic-selfhost-<version>/gateway
+cp .env.gateway.example .env
+# Set INTUTIC_GATEWAY_ID and INTUTIC_GATEWAY_TOKEN (from `intutic gateway register`),
+# CONTROL_PLANE_URL, and INTUTIC_VERSION to the release
 docker compose -f docker-compose.gateway.yml up -d
 ```
 
@@ -43,10 +46,17 @@ docker compose -f docker-compose.gateway.yml up -d
 A dedicated, distributable Helm chart — separate from the chart that deploys Intutic's own
 full SaaS stack, since that one also ships the control plane and dashboard.
 
+The chart is at `oci://ghcr.io/intutic/charts/intutic-gateway` (pull with the token
+Intutic issues you) and in each release bundle's `helm/` directory. The gateway's
+token goes in a Secret, never in values:
+
 ```bash
-helm install my-gateway ./tools/helm/intutic-gateway \
-  --set gateway.token=<gwk_... from register> \
-  --set gateway.controlPlaneUrl=https://api.intutic.ai
+kubectl create secret generic intutic-gateway-token \
+  --from-literal=INTUTIC_GATEWAY_ID=<gw_... from register> \
+  --from-literal=INTUTIC_GATEWAY_TOKEN=<gwk_... from register>
+helm install my-gateway oci://ghcr.io/intutic/charts/intutic-gateway --version <version> \
+  --set controlPlaneUrl=https://app.intutic.ai \
+  --set gatewaySecretName=intutic-gateway-token
 ```
 
 `NOTES.txt` after install shows the proxy's in-cluster address and reminds you the bundled

@@ -91,5 +91,6 @@ A badge next to a page or section title says which plan it needs:
 | <Badge type="warning" text="Self-serve+" /> | Any paid plan |
 | <Badge type="warning" text="Biz Org+" /> | Biz Org, Enterprise or Self-host |
 | <Badge type="danger" text="Enterprise" /> | Enterprise or Self-host |
+| <Badge type="danger" text="Self-host" /> | A Self-host license: runs on your own infrastructure ([Self-host](./self-host)) |
 
 The trials include most paid features; [Trials](#trials) lists them.
