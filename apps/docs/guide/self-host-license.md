@@ -28,7 +28,10 @@ seats, when the term ends and when changes would pause.
 
 ## Renewing
 
-Intutic invoices each term in advance. Once the renewal invoice is paid, you
+A license renews automatically each year. About 35 days before it does,
+Intutic emails your billing contact the renewal date and price; to end the
+license instead, write to support@intutic.ai before that date. Intutic
+invoices each term in advance. Once the renewal invoice is paid, you
 receive a new license file:
 
 - **Compose:** copy it over `/opt/intutic/license.json`, then
