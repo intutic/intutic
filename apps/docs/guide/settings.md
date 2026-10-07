@@ -243,7 +243,15 @@ Usage against your plan, invoices, and the spend caps that stop a runaway agent.
 - **Billing History & Invoices** — invoices Stripe issued to this workspace, newest first.
 - **Budget Limits** — meters for **Spent this month** and **Spent today** against their caps; the **Daily cap (USD)**, **Monthly cap (USD)** and **Alert at (% of cap)** fields, saved with **Save limits**; and **Budget alerts**, each with **Acknowledge**. See [Budgets & FinOps](/guide/budgets).
 
-To change plan, open **Settings › Upgrade**.
+### Changing plan {#changing-plan}
+
+Open **Settings › Upgrade**. A workspace that already pays changes the subscription it has; it never gets a second one.
+
+- **Upgrading** (Biz Org to Enterprise, or monthly to annual billing) takes effect at once. The prorated difference is charged to the card on file; if the card is declined or needs authentication, nothing changes until you pay that invoice.
+- **Downgrading** (Enterprise to Biz Org, or annual to monthly billing) takes effect when the current term ends. Settings › General shows the booked change under **Billing**. To keep your plan instead, choose it again on the Upgrade page (**Keep …**). While a change is booked, **Manage billing** cannot cancel the subscription.
+- **From Self-serve** to Biz Org or Enterprise goes through checkout; the Self-serve subscription then ends, with a final invoice for the usage so far.
+- **To Self-serve** from Biz Org or Enterprise: cancel in **Manage billing**, then subscribe to Self-serve when the term ends.
+- A workspace in an organization that pays for a plan has the organization's plan; change it for the whole organization.
 <!-- ENTERPRISE_ONLY_END -->
 
 ---
