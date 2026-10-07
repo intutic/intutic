@@ -293,14 +293,6 @@ even when it passes.
 Symmetric secrets are disqualified for this. With HS256, every party who can
 verify can also forge, so "signed by Intutic" would carry no information at all.
 
-::: warning Docker Compose does not pass the key through yet
-`docker-compose.enterprise.yml` sets the control-plane environment as an explicit
-list and does not include either signing variable, so setting one in `.env` has
-no effect on a Compose install and roots are sealed unsigned. The Kubernetes base
-passes both. Tracked as TD-246; the two lines that close it are in
-`infra/compose/.env.enterprise.example`.
-:::
-
 ### What "mirrored" is read from
 
 Every mirror **attempt** is appended to a ledger of its own — provider,

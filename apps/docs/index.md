@@ -70,5 +70,5 @@ Every blocked action generates an audit log entry with full context — who, wha
 
 If you are using an agentic coding assistant (such as Claude Code, Cursor, Google Antigravity, or OpenAI Codex), you can download our pre-configured **Kitkat Governance Skill** to load rules directly into your workspace:
 
-- <a href="/downloads/SKILL.md" download="SKILL.md" class="download-button" style="display: inline-block; padding: 4px 10px; background: var(--vp-c-brand); color: white; border-radius: 4px; text-decoration: none; font-weight: 500; font-size: 0.8rem; margin-top: var(--space-2); margin-bottom: var(--space-2);">Download SKILL.md</a> (Save into `.agents/skills/intutic-governance-kitkat/` inside your project root).
+- <a href="downloads/SKILL.md" download="SKILL.md" class="download-button" style="display: inline-block; padding: 4px 10px; background: var(--vp-c-brand); color: white; border-radius: 4px; text-decoration: none; font-weight: 500; font-size: 0.8rem; margin-top: var(--space-2); margin-bottom: var(--space-2);">Download SKILL.md</a> (Save into `.agents/skills/intutic-governance-kitkat/` inside your project root).
 - See the [Kitkat Agent Custom Skill Guide](/integrations/kitkat) for detailed setup.

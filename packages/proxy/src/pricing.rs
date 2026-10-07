@@ -1,8 +1,8 @@
 //! Offline Model Pricing Module — WS-5OP Air-Gapped Support
 //!
 //! Loads model cost data from a compile-time bundled JSON file.
-//! In air-gapped mode (`OFFLINE_MODE=true`) or when the LiteLLM pricing API
-//! is unreachable, this module provides the single source of truth for token cost.
+//! The proxy's single source of token cost, with no network call: the same
+//! table answers on Intutic Cloud and in an air-gapped Self-host deployment.
 //!
 //! ## Resolution order
 //! 1. `OFFLINE_PRICING_PATH` env var → load from that filesystem path at startup.

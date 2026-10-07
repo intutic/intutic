@@ -32,7 +32,7 @@ Create the skill directory and download the skill file into it:
 mkdir -p .agents/skills/intutic-rule-author
 ```
 
-<a href="/downloads/RULE_AUTHOR_SKILL.md" download="SKILL.md" class="download-button" style="display: inline-block; padding: 6px 12px; background: var(--vp-c-brand); color: white; border-radius: 4px; text-decoration: none; font-weight: 500; font-size: 0.85rem; margin-top: 8px; margin-bottom: 12px;">Download SKILL.md</a>
+<a href="../downloads/RULE_AUTHOR_SKILL.md" download="SKILL.md" class="download-button" style="display: inline-block; padding: 6px 12px; background: var(--vp-c-brand); color: white; border-radius: 4px; text-decoration: none; font-weight: 500; font-size: 0.85rem; margin-top: 8px; margin-bottom: 12px;">Download SKILL.md</a>
 
 ---
 
