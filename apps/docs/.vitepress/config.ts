@@ -221,13 +221,22 @@ const sidebarReference = [
   },
 ];
 
+// Where the site is served from. docs.intutic.ai serves it at the root; a
+// Self-host deployment serves its bundled copy under /docs/ on the deployment's
+// own address (infra/compose/nginx.enterprise.conf), so its docs image is built
+// with DOCS_BASE=/docs/.
+const base = process.env.DOCS_BASE ?? '/'
+if (!/^\/([a-z0-9-]+\/)*$/.test(base)) {
+  throw new Error(`DOCS_BASE must start and end with "/" (got "${base}")`)
+}
+
 export default defineConfig({
   title: 'Intutic Docs',
   description: 'Policy as Code for Continuous Compliance and Continuous Enforcement for AI agents',
-  base: '/',
+  base,
 
   head: [
-    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }],
+    ['link', { rel: 'icon', type: 'image/svg+xml', href: `${base}favicon.svg` }],
     ['meta', { name: 'theme-color', content: '#3b82f6' }],
     // No third-party font requests: Geist and Geist Mono are self-hosted from
     // @intutic/theme (see .vitepress/theme/custom.css).

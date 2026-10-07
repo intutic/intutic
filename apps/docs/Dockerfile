@@ -35,6 +35,10 @@ ENV INTUTIC_ENTERPRISE_BUILD=true
 # Fail the build outright if it would leave the paid-tier pages out: that site
 # would break the dashboard's help links.
 ENV INTUTIC_REQUIRE_FULL=true
+# Path the site is served under: `/` for docs.intutic.ai, `/docs/` for the copy
+# bundled with a Self-host deployment (release-selfhost.yml).
+ARG DOCS_BASE=/
+ENV DOCS_BASE=$DOCS_BASE
 
 # Build theme first, so that custom variables and synced assets exist
 RUN pnpm --filter=@intutic/theme run build
@@ -53,12 +57,17 @@ RUN rm /etc/nginx/conf.d/default.conf
 # Copy docs nginx config
 COPY infra/nginx/docs.conf /etc/nginx/conf.d/default.conf
 
-# Copy built static site
-COPY --from=builder /app/apps/docs/.vitepress/dist /usr/share/nginx/html
+# Copy built static site, at the path it was built for: `/docs/` in the
+# Self-host image, so the deployment's front door (nginx or a Kubernetes
+# Ingress) passes /docs/... through unchanged, with no prefix to strip.
+ARG DOCS_BASE=/
+ENV DOCS_BASE=$DOCS_BASE
+COPY --from=builder /app/apps/docs/.vitepress/dist /usr/share/nginx/html${DOCS_BASE}
+RUN sed -i "s#/404.html#${DOCS_BASE}404.html#g" /etc/nginx/conf.d/default.conf
 
 EXPOSE 80
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-  CMD wget -q --spider http://localhost:80/ || exit 1
+  CMD wget -q --spider "http://localhost:80${DOCS_BASE}" || exit 1
 
 CMD ["nginx", "-g", "daemon off;"]

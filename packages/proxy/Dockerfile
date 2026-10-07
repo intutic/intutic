@@ -28,10 +28,14 @@ RUN cargo build --release
 # ─── Stage 2: Runtime ──────────────────────────────────────────────────────────
 FROM debian:bookworm-slim AS runtime
 
-# Install runtime dependencies (OpenSSL, CA certs for HTTPS to upstream LLMs)
-RUN apt-get update && apt-get install -y \
+# Install runtime dependencies (OpenSSL, CA certs for HTTPS to upstream LLMs),
+# and wget for the health checks: this one and the Self-host compose file's.
+# bookworm-slim has neither wget nor curl, so both checks failed and the
+# compose stack's nginx, which waits for a healthy proxy, never started.
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     libssl3 \
+    wget \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user

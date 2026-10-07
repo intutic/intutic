@@ -26,7 +26,7 @@ mkdir -p .agents/skills/intutic-governance-kitkat
 
 Download the pre-configured skill instruction template and save it directly in that directory:
 
-<a href="/downloads/SKILL.md" download="SKILL.md" class="download-button" style="display: inline-block; padding: 6px 12px; background: var(--vp-c-brand); color: white; border-radius: 4px; text-decoration: none; font-weight: 500; font-size: 0.85rem; margin-top: 8px; margin-bottom: 12px;">Download SKILL.md</a>
+<a href="../downloads/SKILL.md" download="SKILL.md" class="download-button" style="display: inline-block; padding: 6px 12px; background: var(--vp-c-brand); color: white; border-radius: 4px; text-decoration: none; font-weight: 500; font-size: 0.85rem; margin-top: 8px; margin-bottom: 12px;">Download SKILL.md</a>
 
 ### 3. Start the proxy
 

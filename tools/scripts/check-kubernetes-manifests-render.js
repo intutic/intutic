@@ -177,6 +177,72 @@ if (existsSync(CELLS_REMOTE_DIR)) {
   }
 }
 
+// ── Helm charts (Self-host) ──────────────────────────────────────────────────
+// tools/helm/intutic is how a Self-host customer installs on Kubernetes, and
+// nothing deploys it here, so a broken template would first fail on their
+// cluster. Until 2026-10-07 it templated only the control plane, probed a
+// /health route the control plane does not serve, and named a ServiceAccount
+// it never created. Render both charts and hold the Self-host chart to the
+// shape the product needs.
+const HELM_DIR = join(ROOT, 'tools', 'helm')
+let helmCharts = 0
+if (existsSync(HELM_DIR)) {
+  try {
+    execFileSync('helm', ['version', '--short'], { stdio: 'ignore' })
+  } catch {
+    failures.push('`helm` is not on PATH — cannot render tools/helm. Install Helm 3.')
+  }
+  const charts = {
+    intutic: ['--set', 'hostname=intutic.example.internal', '--set', 'ingress.tls.secretName=tls', '--set', 'bootstrap.secretName=owner'],
+    'intutic-gateway': [],
+  }
+  for (const [chart, args] of Object.entries(charts)) {
+    const dir = join(HELM_DIR, chart)
+    if (!existsSync(dir)) {
+      failures.push(`chart tools/helm/${chart} is missing`)
+      continue
+    }
+    let rendered
+    try {
+      execFileSync('helm', ['lint', dir, ...args], { encoding: 'utf8', stdio: 'pipe' })
+      rendered = execFileSync('helm', ['template', 't', dir, ...args], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 })
+    } catch (err) {
+      failures.push(`chart ${chart} failed to lint or render:\n${err.stderr || err.stdout || err.message}`)
+      continue
+    }
+    helmCharts++
+    const docs = loadAll(rendered).filter((d) => d != null)
+    const containers = docs.flatMap((d) => d.spec?.template?.spec?.containers ?? [])
+    if (containers.some((c) => (c.env ?? []).some((e) => e.name === 'OFFLINE_MODE'))) {
+      failures.push(`chart ${chart} still sets OFFLINE_MODE, which nothing reads`)
+    }
+    const accounts = new Set(docs.filter((d) => d.kind === 'ServiceAccount').map((d) => d.metadata.name))
+    for (const d of docs) {
+      const sa = d.spec?.template?.spec?.serviceAccountName
+      if (sa && !accounts.has(sa)) failures.push(`chart ${chart}: ${d.kind} ${d.metadata.name} runs as ServiceAccount ${sa}, which the chart does not create`)
+    }
+    if (chart !== 'intutic') continue
+    const deployments = new Map(docs.filter((d) => d.kind === 'Deployment').map((d) => [d.metadata.labels['app.kubernetes.io/component'], d]))
+    for (const c of ['control-plane', 'proxy', 'dashboard', 'docs', 'valkey']) {
+      if (!deployments.has(c)) failures.push(`chart intutic renders no ${c} Deployment`)
+    }
+    const cp = deployments.get('control-plane')?.spec.template.spec.containers[0]
+    if (cp) {
+      const env = Object.fromEntries((cp.env ?? []).map((e) => [e.name, e.value]))
+      if (env.INTUTIC_DEPLOYMENT !== 'self_host') failures.push('chart intutic: the control plane is not INTUTIC_DEPLOYMENT=self_host')
+      if (!env.INTUTIC_LICENSE_FILE) failures.push('chart intutic: the control plane has no INTUTIC_LICENSE_FILE')
+      if (cp.livenessProbe?.httpGet?.path !== '/healthz' || cp.readinessProbe?.httpGet?.path !== '/readyz') {
+        failures.push('chart intutic: the control plane must probe /healthz (liveness) and /readyz (readiness)')
+      }
+    }
+    const ingress = docs.find((d) => d.kind === 'Ingress')
+    const paths = new Set((ingress?.spec.rules[0].http.paths ?? []).map((p) => p.path))
+    for (const p of ['/', '/api', '/scim', '/.well-known', '/v1', '/docs']) {
+      if (!paths.has(p)) failures.push(`chart intutic: the Ingress does not route ${p}`)
+    }
+  }
+}
+
 if (!proxyChecked) {
   failures.push(
     'no overlay rendered a proxy Deployment — the TD-229 regression check never ran. ' +
@@ -197,6 +263,6 @@ if (failures.length > 0) {
 }
 
 console.log(
-  `[PASS] kubernetes manifests: ${overlays.length} overlay(s) and ${cellsRemoteRendered} cells-remote ` +
-    `kustomization(s) render cleanly, SOPS wiring intact.`,
+  `[PASS] kubernetes manifests: ${overlays.length} overlay(s), ${cellsRemoteRendered} cells-remote ` +
+    `kustomization(s) and ${helmCharts} Helm chart(s) render cleanly, SOPS wiring intact.`,
 )
