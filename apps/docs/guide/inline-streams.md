@@ -1,4 +1,4 @@
-# Inline Stream Alerts <Badge type="warning" text="Cloud / Team" />
+# Inline Stream Alerts <Badge type="tip" text="Cloud" />
 
 Intutic features low-latency, real-time post-response stream interception to append governance notifications directly to agent output streams before they complete.
 

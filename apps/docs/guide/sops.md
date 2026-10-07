@@ -1,4 +1,4 @@
-# Agent Guidelines (SOPs) <Badge type="warning" text="Cloud / Team" />
+# Agent Guidelines (SOPs) <Badge type="tip" text="Cloud" />
 
 SOPs (Standard Operating Procedures) are the governance rules that define what your AI agents can and cannot do. They are the core of Intutic's policy enforcement.
 

@@ -1,4 +1,4 @@
-# Policy Guardrails <Badge type="warning" text="Cloud / Team" />
+# Policy Guardrails <Badge type="warning" text="Self-serve+" />
 
 Your policies already exist — in Notion, Confluence, GitHub, Google Docs, or a
 file someone wrote last year. Policy Guardrails turns those sentences into

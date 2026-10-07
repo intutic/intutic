@@ -1,4 +1,4 @@
-# Compliance Evidence <Badge type="danger" text="Enterprise" />
+# Compliance Evidence <Badge type="tip" text="Cloud" />
 
 Probe history and auditor-ready SOC 2 evidence exports, built directly on the compliance probes — so the evidence you hand an auditor can never disagree with the dashboard.
 
@@ -35,7 +35,7 @@ Any authenticated workspace member can read it (it is the same data the probes p
 
 An evidence run maps a **fresh probe run** onto the five SOC 2 trust categories — security, availability, processing integrity, confidentiality, privacy — and seals the result into a downloadable archive:
 
-- `POST /api/v1/compliance/soc2-collect` (OWNER/ADMIN) — collect a run for a period (`periodStart`/`periodEnd` ISO strings, default trailing 90 days). Also runs automatically once a day for enterprise workspaces.
+- `POST /api/v1/compliance/soc2-collect` (OWNER/ADMIN) — collect a run for a period (`periodStart`/`periodEnd` ISO strings, default trailing 90 days). Also runs automatically once a day on the Enterprise and Self-host plans.
 - `GET /api/v1/compliance/soc2-status` (any member) — latest probe results rolled up by trust category.
 - `GET /api/v1/compliance/soc2-export/:runId` (OWNER/ADMIN) — download the stored archive as JSON.
 

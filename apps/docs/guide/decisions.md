@@ -1,4 +1,4 @@
-# Review Queue <Badge type="warning" text="Cloud / Team" />
+# Review Queue <Badge type="tip" text="Cloud" />
 
 <!-- ENTERPRISE_ONLY_START -->
 **Findings › Review Queue** (`/findings/review`) is where a person reviews what Intutic's guardrails stopped, what runs are waiting on, and what the governance judge could not decide alone. It's the human-in-the-loop checkpoint for AI governance.

@@ -1,4 +1,4 @@
-# Intelligence Engine <Badge type="warning" text="Cloud / Team" />
+# Intelligence Engine <Badge type="tip" text="Cloud" />
 
 The Intutic Intelligence Engine is an autonomous analysis layer that monitors agent trajectories in the background to automatically identify token waste patterns, suggest optimal rule modifications for developer configurations, and verify security compliance.
 

@@ -1,4 +1,4 @@
-# Governed Decisions Log <Badge type="warning" text="Cloud / Team" />
+# Governed Decisions Log <Badge type="tip" text="Cloud" />
 
 <!-- ENTERPRISE_ONLY_START -->
 The Governed Decisions Log is a versioned, auto-maintained record of governance decisions — surfaced directly as context your coding agent's harness reads, so agents work with an up-to-date picture of what's already been decided instead of repeating a question a human already answered.

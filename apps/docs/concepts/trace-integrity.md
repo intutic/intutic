@@ -1,6 +1,6 @@
-# Trace Integrity <Badge type="warning" text="Cloud / Team" />
+# Trace Integrity <Badge type="tip" text="Cloud" />
 
-::: warning Commercial / Team Tier Feature
+::: warning Control plane required
 Root sealing, the integrity endpoints and the signing key all live in the
 control plane. The open-core proxy records traces; it does not seal them.
 :::

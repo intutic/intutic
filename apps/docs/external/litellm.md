@@ -1,4 +1,4 @@
-# LiteLLM & Proxy Routing Architecture <Badge type="danger" text="Enterprise" />
+# LiteLLM & Proxy Routing Architecture <Badge type="tip" text="Cloud" />
 
 This page documents how LLM requests are routed from client harnesses (Cursor, Claude Code, etc.), the architectural separation between hot-path gateways and internal helper services, and how the routing behaves in the open-source local sandbox versus the commercial enterprise control plane.
 

@@ -1,4 +1,4 @@
-# Runaway-Spend Counterfactual <Badge type="warning" text="Cloud / Team" />
+# Runaway-Spend Counterfactual <Badge type="tip" text="Cloud" />
 
 When a proxy detector [kills](/guide/loops#circuit-breaker-enforcement) a runaway agent loop,
 the dashboard shows an **averted spend** figure alongside your normal cost-savings numbers — for

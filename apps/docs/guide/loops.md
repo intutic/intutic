@@ -1,4 +1,4 @@
-# Session Safety & Budgets <Badge type="warning" text="Cloud / Team" />
+# Session Safety & Budgets <Badge type="tip" text="Cloud" />
 
 Intutic provides deep, real-time governance for recursive and autonomous agent loops. These loops (e.g. from harnesses like Claude Code, Cursor, Windsurf, or custom script orchestrations) have the potential to run indefinitely, generating high token spend and potential data loss if unconstrained.
 

@@ -287,7 +287,7 @@ No changes to the CLI or local proxy binaries are required to upgrade tiers. The
     ```
     *(Or `intutic connect` if the CLI is installed globally).*
     The Sync Daemon immediately uploads buffered local traces (`traces-YYYY-MM-DD.jsonl`) to `/api/v1/traces/sync-back` and syncs workspace-wide rules. Onboarding users use **Direct Provisioning** — admins create accounts directly by entering a display name and role, and the dashboard UI generates a secure random temporary password (`tempPassword`) that the admin copies and shares manually (avoiding email server delivery failures).
-3.  **Paid SaaS (Pro / Team / Enterprise):** The administrator sets limits and tier access from the central dashboard. During the next Sync Daemon handshake, the updated tier limits and capabilities (like workspace-wide SOP Registry or semantic caching) are dynamically unlocked.
+3.  **A paid plan (Self-serve, Biz Org or Enterprise):** The administrator chooses a plan in **Settings › Upgrade**. During the next Sync Daemon handshake, the updated tier limits and capabilities (like workspace-wide SOP Registry or semantic caching) are dynamically unlocked.
 
 ---
 

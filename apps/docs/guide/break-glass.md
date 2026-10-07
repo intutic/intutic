@@ -1,4 +1,4 @@
-# Emergency Overrides <Badge type="danger" text="Enterprise" />
+# Emergency Overrides <Badge type="tip" text="Cloud" />
 
 Temporarily bypass safety policies and custom WASM rules in emergency situations.
 

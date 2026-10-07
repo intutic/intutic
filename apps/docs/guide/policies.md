@@ -1,4 +1,4 @@
-# Policies & Enforcement <Badge type="warning" text="Cloud / Team" />
+# Policies & Enforcement <Badge type="tip" text="Cloud" />
 
 Configure how Intutic governs your AI coding agents using a two-layer protection architecture.
 

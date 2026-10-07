@@ -71,7 +71,7 @@ Workspaces are the top-level organizational unit. Each workspace has:
 |---------|------|-------------|
 | Workspace ID | `wk_*` | Auto-generated unique identifier |
 | Name | string | Human-readable workspace name |
-| Plan | enum | `free_trial`, `pro`, `team`, `enterprise` |
+| Plan | enum | `free`, `free_trial`, `enterprise_trial`, `self_serve`, `biz_org`, `ent_adv` (Enterprise), `ent_lic` (Self-host) |
 | Budget tiers | object | Per-role budget limits |
 | `allowedModels` | string[] | Approved-models allowlist. Absent or empty means unrestricted. Enforced by the proxy at request time — a request naming a model outside this list is rejected before it reaches a provider. See [Settings → Security → Approved Models](/guide/settings#approved-models) |
 | `allowedModels` (standalone) | string[] | The same allowlist for a proxy with no control plane, read from `~/.intutic/config.json` (`allowed_models` accepted as an alias) on a 60-second cache. Same absent-or-empty-means-unrestricted rule. See [Settings → Standalone allowlist](/guide/settings#standalone-allowedmodels-in-intutic-config-json) |

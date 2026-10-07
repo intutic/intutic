@@ -1,4 +1,4 @@
-# SIEM Export <Badge type="danger" text="Enterprise" />
+# SIEM Export <Badge type="tip" text="Cloud" />
 
 Stream governance events — execution traces, incidents, detector findings, and plan lifecycle decisions — to your own SIEM or warehouse.
 

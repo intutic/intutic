@@ -1,4 +1,4 @@
-# Entity Hierarchy & Workspace Resolution <Badge type="danger" text="Enterprise" />
+# Entity Hierarchy & Workspace Resolution <Badge type="tip" text="Cloud" />
 
 This page documents how the Intutic Proxy resolves the target workspace for incoming requests and the logical model hierarchy connecting organizations, developers, and agent execution logs.
 

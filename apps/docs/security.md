@@ -103,11 +103,11 @@ All network communication is encrypted with TLS 1.2+:
 ---
 
 <!-- ENTERPRISE_ONLY_START -->
-::: warning Enterprise Feature — Commercial / VPC Tier
-The identity, SSO, OIDC, and compliance capabilities below are available in the **Enterprise SaaS & Self-Hosted VPC** editions.
+::: tip Which plan
+The capabilities below come with a connected workspace on Intutic Cloud or Self-host, except where a section names a plan: single sign-on from **Biz Org** up, SCIM provisioning on **Enterprise** and **Self-host**. See [Plans & pricing](/guide/plans).
 :::
 
-## Authentication & Identity <Badge type="danger" text="Enterprise Tier" />
+## Authentication & Identity <Badge type="tip" text="Cloud" />
 
 Intutic provides enterprise-grade identity and access management:
 
@@ -118,7 +118,7 @@ Intutic provides enterprise-grade identity and access management:
 
 ---
 
-## Compliance <Badge type="danger" text="Enterprise Tier" />
+## Compliance <Badge type="tip" text="Cloud" />
 
 Intutic helps your organization meet regulatory requirements for AI governance:
 

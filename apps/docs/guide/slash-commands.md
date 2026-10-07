@@ -1,4 +1,4 @@
-# Slash Commands <Badge type="warning" text="Cloud / Team" />
+# Slash Commands <Badge type="tip" text="Cloud" />
 
 Intutic provides an interactive slash command interface that developers can use directly inside their IDE chat windows (such as Cursor or VS Code) or CLI-based agent sessions.
 

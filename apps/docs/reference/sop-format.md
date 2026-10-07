@@ -1,7 +1,7 @@
-# SOP Format Reference <Badge type="warning" text="Cloud / Team" />
+# SOP Format Reference <Badge type="tip" text="Cloud" />
 
-::: warning Commercial / Team Tier Feature
-Centralized SOP management and dynamic policy syncing require an active **Intutic Control Plane** (local dev stack or Cloud SaaS / Team tier).
+::: warning Control plane required
+Centralized SOP management and dynamic policy syncing require an active **Intutic Control Plane** (local dev stack or Intutic Cloud).
 :::
 
 SOPs (Standard Operating Procedures) are the policy documents that define governance rules in Intutic. This page covers how to write and manage SOPs.

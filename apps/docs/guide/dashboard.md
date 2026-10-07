@@ -1,4 +1,4 @@
-# Dashboard <Badge type="warning" text="Cloud / Team" />
+# Dashboard <Badge type="tip" text="Cloud" />
 
 <!-- ENTERPRISE_ONLY_START -->
 The Intutic dashboard is a Vite + React 19 SPA that provides real-time visibility into your AI agent governance.

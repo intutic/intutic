@@ -1,4 +1,4 @@
-# GitOps for SOPs <Badge type="warning" text="Cloud / Team" />
+# GitOps for SOPs <Badge type="tip" text="Cloud" />
 
 Two planes hold SOPs, and until now they barely connected. `.intutic/sops/*.md`
 is the **file plane** — git-reviewable, enforced directly by the local proxy,
