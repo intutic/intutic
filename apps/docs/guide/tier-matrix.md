@@ -21,8 +21,8 @@ There are three tiers, not two:
 1. **Standalone (Open-Core)** — no account, no control plane, runs entirely
    on your machine.
 2. **Connected, Free** — `intutic connect` to a workspace with no paid plan.
-3. **Connected, Paid** (Pro / Team / Enterprise) — a workspace with a plan
-   attached.
+3. **Connected, Paid** — a workspace on a paid plan: Self-serve, Biz Org or
+   Enterprise, or a Self-host license on your own infrastructure.
 
 ## What runs 100% locally, with no account
 
@@ -74,26 +74,26 @@ and never written to disk in either mode.
 <!-- ENTERPRISE_ONLY_START -->
 ## What a paid plan adds on top of Connected
 
-A free connected workspace gets the full Connected column above. A paid plan
-(Pro / Team / Enterprise) adds workspace-wide governance controls that need
-more than one developer to make sense of:
+A free connected workspace gets the full Connected column above. Each paid
+plan adds to it; [Plans & pricing](/guide/plans) has the prices and the full
+list. In short:
 
-- **RBAC roles** — Owner, Admin, EM, Developer, Viewer, each scoped to a
-  different slice of the dashboard (Review Queue, Compliance Scope, WASM
-  filters, SOP Optimizer, Incidents, Emergency Overrides). See
-  [Security & Identity](/guide/security#rbac-roles) for the full
-  role/capability table.
-- **SSO** — SAML 2.0 or OIDC, so team members authenticate through Okta,
-  Entra ID, Google, or Ping Identity rather than individual passwords.
-- **Policy Guardrails** — the model step that proposes cited clauses from
-  your policy documents, and the review page that shadows and promotes them.
-  Ingestion and citations come with any connected workspace; extraction and
-  the page need a paid plan or an active trial. See
-  [Policy Guardrails](/guide/policy-guardrails).
-- **Semantic response caching** and **workspace-wide SOP Registry** —
-  unlocked dynamically at the next sync-daemon handshake once an
-  administrator raises the tier from the dashboard; no CLI or proxy binary
-  change is needed on any developer's machine.
+| | Self-serve | Biz Org | Enterprise | Self-host |
+|---|:---:|:---:|:---:|:---:|
+| [Policy Guardrails](/guide/policy-guardrails) (extraction and the review page) | ✓ | ✓ | ✓ | ✓ |
+| [Single sign-on](/guide/security#single-sign-on-sso) (SAML 2.0, OIDC) | | ✓ | ✓ | ✓ |
+| [Custom Filters](/guide/wasm-rules) (WASM rules) | | ✓ | ✓ | ✓ |
+| [SOP Optimizer](/guide/metaclaw) | | ✓ | ✓ | ✓ |
+| [Evaluator Sandbox](/guide/evaluator-sandbox) | | ✓ | ✓ | ✓ |
+| [SCIM provisioning](/guide/scim) | | | ✓ | ✓ |
+| Data residency (EU/APAC) | | | ✓ | ✓ |
+| [Self-hosted gateway](/external/self-hosted-gateway) | | | ✓ | ✓ |
+| Runs in your VPC or an air-gapped network | | | | ✓ |
+
+The 14-day personal trial includes Policy Guardrails, single sign-on, SCIM,
+Custom Filters, the SOP Optimizer and data residency; the 14-day Enterprise
+trial adds the Evaluator Sandbox. Plan changes take effect at the next sync-daemon
+handshake; no CLI or proxy binary change is needed on any developer's machine.
 <!-- ENTERPRISE_ONLY_END -->
 
 ## Upgrading

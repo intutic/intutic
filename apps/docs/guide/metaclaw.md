@@ -1,4 +1,4 @@
-# SOP Optimizer <Badge type="warning" text="Cloud / Biz Org+" />
+# SOP Optimizer <Badge type="warning" text="Biz Org+" />
 
 The SOP Optimizer is a self-optimizing prompt compiler that analyzes historical policy violations and trace logs to automatically refine and optimize SOP instructions.
 
@@ -10,7 +10,7 @@ The SOP Optimizer is a self-optimizing prompt compiler that analyzes historical 
 - Feature gating and role requirements
 
 ::: info
-The SOP Optimizer requires the `feature.metaclaw` flag to be enabled for your workspace. This feature is available on Biz Org, Enterprise Advanced and Enterprise License (and during a trial).
+The SOP Optimizer requires the `feature.metaclaw` flag to be enabled for your workspace. This feature is available on Biz Org, Enterprise and Self-host, and during a trial.
 :::
 
 ---

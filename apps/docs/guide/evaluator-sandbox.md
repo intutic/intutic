@@ -1,4 +1,4 @@
-# Evaluator Sandbox <Badge type="warning" text="Cloud / Biz Org+" />
+# Evaluator Sandbox <Badge type="warning" text="Biz Org+" />
 
 **Labs › Evaluator Sandbox** (`/labs/evaluator`) replays a candidate evaluator config against a golden dataset, and blocks a deploy that would weaken enforcement. Owners and Admins only, on a plan that includes it (Biz Org and the Enterprise plans).
 

@@ -54,9 +54,12 @@ function paidTierPages(): string[] {
       if (entry.isDirectory()) {
         walk(full)
       } else if (entry.name.endsWith('.md')) {
-        // The badge lives on the H1, so only the head of the file matters.
+        // The badge lives on the H1, so only the head of the file matters. Any
+        // plan badge (guide/plans.md#badges) marks a page that needs a control
+        // plane; Plans & pricing itself carries prices, which the open-source
+        // site does not publish.
         const head = fs.readFileSync(full, 'utf8').slice(0, 512)
-        if (/<Badge[^>]*text="(Cloud[^"]*|Enterprise[^"]*)"/.test(head)) {
+        if (/<Badge[^>]*text="(Cloud|Self-serve\+|Biz Org\+|Enterprise|Self-host)"/.test(head) || entry.name === 'plans.md') {
           found.push(path.relative(root, full))
         }
       }
@@ -88,6 +91,7 @@ const sidebarGuide = [
     items: [
       { text: 'Getting Started', link: '/guide/getting-started' },
       { text: 'Tier Matrix', link: '/guide/tier-matrix' },
+      ...(!IS_OSS ? [{ text: 'Plans & Pricing', link: '/guide/plans' }] : []),
       { text: 'Core Concepts', link: '/guide/concepts' },
       { text: 'How It Works', link: '/guide/how-it-works' },
       { text: 'FAQs', link: '/guide/faqs' },
@@ -119,7 +123,7 @@ if (!IS_OSS) {
       { text: 'Pre-Adoption Report for Model Upgrades (Cloud)', link: '/guide/mirror-adoption-report' },
       { text: 'Runaway-Spend Counterfactual (Cloud)', link: '/guide/averted-spend' },
       { text: 'Signed Provider-Downtime Evidence (Cloud)', link: '/guide/provider-incidents' },
-      { text: 'Managed Gateway Cells (Cloud)', link: '/guide/managed-cells' },
+      { text: 'Managed Gateway Cells (Self-serve+)', link: '/guide/managed-cells' },
       // Audit Timeline (Settings › Audit Timeline) is listed above and
       // Evaluator Sandbox (Labs › Evaluator Sandbox) under Advanced Features.
       // Org-wide SOPs have no page of their own: the Org-Wide SOP Floor card
@@ -153,12 +157,12 @@ sidebarGuide.push({
       { text: 'Pre-Adoption Report for Model Upgrades (Open-Core)', link: '/guide/mirror-adoption-report' },
     ] : []),
     ...(!IS_OSS ? [
-      { text: 'SOP Optimizer (Cloud)', link: '/guide/metaclaw' },
-      { text: 'Evaluator Sandbox (Cloud)', link: '/guide/evaluator-sandbox' },
+      { text: 'SOP Optimizer (Biz Org+)', link: '/guide/metaclaw' },
+      { text: 'Evaluator Sandbox (Biz Org+)', link: '/guide/evaluator-sandbox' },
       { text: 'Off-Pattern Detection (Cloud)', link: '/guide/drift-detection' },
       { text: 'Slash Commands (Cloud)', link: '/guide/slash-commands' },
       { text: 'Stream Alerts (Cloud)', link: '/guide/inline-streams' },
-      { text: 'Policy Guardrails (Cloud)', link: '/guide/policy-guardrails' },
+      { text: 'Policy Guardrails (Self-serve+)', link: '/guide/policy-guardrails' },
     ] : []),
   ],
 });
@@ -167,12 +171,12 @@ if (!IS_OSS) {
   sidebarGuide.push({
     text: 'Security & Compliance',
     items: [
-      { text: 'Security & Identity (Enterprise)', link: '/guide/security' },
+      { text: 'Security & Identity (Cloud)', link: '/guide/security' },
       { text: 'SCIM Provisioning (Enterprise)', link: '/guide/scim' },
-      { text: 'Emergency Overrides (Enterprise)', link: '/guide/break-glass' },
-      { text: 'SIEM Export (Enterprise)', link: '/guide/siem-export' },
-      { text: 'Compliance Evidence (Enterprise)', link: '/guide/compliance-evidence' },
-      { text: 'VirusTotal Integration (Enterprise)', link: '/guide/virustotal-scanning' },
+      { text: 'Emergency Overrides (Cloud)', link: '/guide/break-glass' },
+      { text: 'SIEM Export (Cloud)', link: '/guide/siem-export' },
+      { text: 'Compliance Evidence (Cloud)', link: '/guide/compliance-evidence' },
+      { text: 'VirusTotal Integration (Cloud)', link: '/guide/virustotal-scanning' },
     ],
   });
 }
@@ -181,13 +185,13 @@ const sidebarExternal = [
   {
     text: 'External Architecture',
     items: [
-      ...(!IS_OSS ? [{ text: 'LiteLLM Routing (Enterprise)', link: '/external/litellm' }] : []),
+      ...(!IS_OSS ? [{ text: 'LiteLLM Routing (Cloud)', link: '/external/litellm' }] : []),
       { text: 'WASM Rules Engine (Open-Core)', link: '/external/wasm-rules' },
       ...(!IS_OSS ? [
-        { text: 'Entity Hierarchy (Enterprise)', link: '/external/hierarchy' },
+        { text: 'Entity Hierarchy (Cloud)', link: '/external/hierarchy' },
         { text: 'Self-Hosted Gateway (Enterprise)', link: '/external/self-hosted-gateway' },
         { text: 'On-Prem Judge Setup (Enterprise)', link: '/external/on-prem-judge' },
-        { text: 'Diagnostics Runbook (Enterprise)', link: '/external/diagnostics' },
+        { text: 'Diagnostics Runbook (Cloud)', link: '/external/diagnostics' },
       ] : []),
     ],
   },
@@ -283,7 +287,7 @@ export default defineConfig({
         // first sweep only banned names, so security.md still published the
         // control plane's TLS paths, its PostgreSQL storage, its dashboard and
         // an RBAC/OBO threat-model row -- while the same page marked RBAC and
-        // OBO as Enterprise Tier fifty lines further down and wrapped them.
+        // OBO as an Enterprise feature fifty lines further down and wrapped them.
         //
         // Saying open core has no control plane is fine and necessary.
         // Documenting how that control plane is built is not.

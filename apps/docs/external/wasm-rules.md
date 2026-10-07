@@ -45,7 +45,7 @@ In pure Open-Core mode, rule binaries run completely offline on your local machi
 Local rules and centrally-synced (Valkey) rules are merged into a single priority-ordered list at evaluation time (ties keep central rules first). `BLOCK` short-circuits the chain and no verdict can override a block, so the union is **most-restrictive-wins**: a local rule can add restrictions but can never neutralize a centrally-synced rule.
 
 <!-- ENTERPRISE_ONLY_START -->
-### Enterprise Cloud / Team Sync Mode
+### Cloud Sync Mode
 In enterprise environments with centralized governance:
 
 ```

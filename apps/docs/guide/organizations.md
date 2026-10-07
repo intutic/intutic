@@ -1,4 +1,4 @@
-# Organizations, Teams & Billing <Badge type="warning" text="Cloud / Team" />
+# Organizations, Teams & Billing <Badge type="tip" text="Cloud" />
 
 Everything a solo signup gets is scoped to one **personal** org with exactly one team and one
 workspace. This page covers the layer above that: real **orgs** that hold multiple teams and
@@ -43,11 +43,10 @@ upgrade changes it. A real org's team limit instead comes from its plan tier:
 
 | Plan | Max teams per org |
 |---|---|
-| Free / Pro / Team / Biz Scale | 1 |
+| Free, Self-serve | 1 |
 | Biz Org | 5 |
-| Enterprise (Sub) | 10 |
-| Enterprise (Advanced) | 25 |
-| Enterprise (Licensed) | Unlimited |
+| Enterprise | 25 |
+| Self-host | Unlimited |
 
 ```bash
 intutic team list --org <org_id>

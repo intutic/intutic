@@ -13,7 +13,7 @@ Intutic introduces a handful of key abstractions you'll encounter throughout the
 A **workspace** is the top-level organizational unit in Intutic. Everything — harnesses, SOPs, traces, budgets, and team members — lives inside a workspace.
 
 - IDs use the `wk_` prefix (e.g., `wk_abc123`)
-- On the **Free** and **Pro** plans you get one workspace; **Team** and **Enterprise** support unlimited workspaces
+- A personal account has one workspace. An organization on **Biz Org**, **Enterprise** or **Self-host** can create more teams, each with its own workspace (5, 25 and unlimited)
 - Each workspace has its own virtual API key (`vk_*`) that the proxy uses for authentication
 
 ::: tip One workspace per repo

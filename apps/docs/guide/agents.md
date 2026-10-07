@@ -1,4 +1,4 @@
-# Agents <Badge type="warning" text="Cloud / Team" />
+# Agents <Badge type="tip" text="Cloud" />
 
 The **Agents** screen on [app.intutic.ai](https://app.intutic.ai) is the
 workspace agent graph: one node per durable agent identity, the connections
@@ -47,8 +47,8 @@ with it. The score is configurational — how much of the guardrail surface that
 scale). It is distinct from the behavioural [trust score](/concepts/enforcement-actions),
 which decays on anomalies and boosts on clean runs.
 
-By default the ring is scored deterministically; on the Team tier and above, an
-LLM-as-judge pass can override per-facet scores with a semantic assessment of
+By default the ring is scored deterministically; when the control plane's judge
+is configured, an LLM-as-judge pass can override per-facet scores with a semantic assessment of
 which SOP rules and primitives apply to each agent, harness and connection.
 
 ## Reopening a session

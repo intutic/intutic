@@ -1,4 +1,4 @@
-# Signed Provider-Downtime Evidence <Badge type="warning" text="Cloud / Team" />
+# Signed Provider-Downtime Evidence <Badge type="tip" text="Cloud" />
 
 When an upstream model provider has an outage, Intutic records it as a **provider incident** and
 lets admins export a signed evidence archive documenting how it affected your workspace. This

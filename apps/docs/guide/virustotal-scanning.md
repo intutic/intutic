@@ -3,7 +3,7 @@ title: VirusTotal Integration
 description: Opt-in, hash-only VirusTotal lookup for skill-bundled scripts — what it checks, the budget/pacing model, and what a flagged hash does to an agent's posture score.
 ---
 
-# VirusTotal Integration <Badge type="danger" text="Enterprise" />
+# VirusTotal Integration <Badge type="tip" text="Cloud" />
 
 Checks the sha256 hash of a skill-bundled **script** against VirusTotal's public database of known file reputations. Opt-in, off by default, and **hash-only — file content is never uploaded.**
 

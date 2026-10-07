@@ -1,4 +1,4 @@
-# Trajectory Monitor <Badge type="warning" text="Cloud / Team" />
+# Trajectory Monitor <Badge type="tip" text="Cloud" />
 
 The trajectory monitor is a parallel reviewer that reads a session's
 trajectory — the sequence of tool calls, model turns and their outcomes — and

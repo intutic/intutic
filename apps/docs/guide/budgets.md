@@ -1,4 +1,4 @@
-# Budgets & FinOps <Badge type="warning" text="Cloud / Team" />
+# Budgets & FinOps <Badge type="tip" text="Cloud" />
 
 Track, allocate, and restrict LLM token costs to prevent runaway agent spend and optimize development budgets.
 

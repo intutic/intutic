@@ -1,7 +1,7 @@
-# Gödel Guardrails Scoring <Badge type="warning" text="Cloud / Team" />
+# Gödel Guardrails Scoring <Badge type="tip" text="Cloud" />
 
-::: warning Commercial / Team Tier Feature
-Automated Gödel scoring and LLMProbe quality evaluation require an active **Intutic Control Plane** (local dev stack or Cloud SaaS / Team tier).
+::: warning Control plane required
+Automated Gödel scoring and LLMProbe quality evaluation require an active **Intutic Control Plane** (local dev stack or Intutic Cloud).
 :::
 
 Automated quality scoring for Standard Operating Procedures (SOPs) using a 13-category rubric that gates SOP lifecycle transitions.

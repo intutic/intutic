@@ -1,4 +1,4 @@
-# Managed Gateway Cells <Badge type="warning" text="Cloud / Team" />
+# Managed Gateway Cells <Badge type="warning" text="Self-serve+" />
 
 A **managed cell** is a dedicated Intutic gateway that the platform deploys and operates on
 behalf of one org — as opposed to the shared platform gateway everyone else rides, or a

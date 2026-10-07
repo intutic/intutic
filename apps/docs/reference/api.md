@@ -1,7 +1,7 @@
-# REST API Reference <Badge type="warning" text="Cloud / Team" />
+# REST API Reference <Badge type="tip" text="Cloud" />
 
-::: warning Commercial / Team Tier Feature
-The REST API endpoints documented below are exposed by the **Intutic Control Plane** (local dev stack on port 3001 or Cloud SaaS / Private VPC).
+::: warning Control plane required
+The REST API endpoints documented below are exposed by the **Intutic Control Plane**: Intutic Cloud, a Self-host deployment, or a local dev stack on port 3001.
 :::
 
 The Intutic control plane exposes a RESTful API under `/api/v1/`. All endpoints use JSON request/response bodies.
@@ -583,7 +583,7 @@ _Generated from `services/control-plane/src/routes/*.ts` by `generate-api-catalo
 | GET | `/api/v1/billing/usage/current` | Authenticated | Current metered usage summary (team+) |
 | POST | `/api/v1/billing/webhook` | Public | Handle Stripe webhook (public) |
 
-### `breakGlass.ts` <Badge type="danger" text="Enterprise" />
+### `breakGlass.ts` <Badge type="tip" text="Cloud" />
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
@@ -952,7 +952,7 @@ _Generated from `services/control-plane/src/routes/*.ts` by `generate-api-catalo
 | GET | `/api/v1/routing/cache/stats` | Authenticated | cache counters |
 | GET | `/api/v1/routing/mirror-adoption-report` | Authenticated | win/loss/ tie, fault-rate delta, cost delta, latency delta for one mirror candidate |
 
-### `saml.ts` <Badge type="danger" text="Enterprise" />
+### `saml.ts` <Badge type="warning" text="Biz Org+" />
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
@@ -1000,7 +1000,7 @@ _Generated from `services/control-plane/src/routes/*.ts` by `generate-api-catalo
 | PATCH | `/api/v1/sessions/:sessionId/attest-sandbox` | Authenticated |  |
 | PATCH | `/api/v1/sessions/:sessionId/end` | Authenticated |  |
 
-### `siem.ts` <Badge type="danger" text="Enterprise" />
+### `siem.ts` <Badge type="tip" text="Cloud" />
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
@@ -1077,7 +1077,7 @@ _Generated from `services/control-plane/src/routes/*.ts` by `generate-api-catalo
 | GET | `/api/v1/sessions/:sessionId/ssl-state` | Authenticated |  |
 | GET | `/api/v1/workspaces/:workspaceId/ssl-compliance` | Authenticated |  |
 
-### `sso.ts` <Badge type="danger" text="Enterprise" />
+### `sso.ts` <Badge type="warning" text="Biz Org+" />
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|

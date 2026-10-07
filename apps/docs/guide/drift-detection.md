@@ -1,4 +1,4 @@
-# Detecting When Agents Go Off-Pattern <Badge type="warning" text="Cloud / Team" />
+# Detecting When Agents Go Off-Pattern <Badge type="tip" text="Cloud" />
 
 Catch agents that stop matching their guidelines, start costing far more than
 their own history, or fall into a runaway tool loop.
@@ -95,7 +95,7 @@ compliance outcomes yourself.
 
 ---
 
-## Developer-Specific Baselines <Badge type="tip" text="Enterprise" />
+## Developer-Specific Baselines
 
 In multi-developer environments, a single global baseline for an SOP can be too broad because developers have distinct usage patterns. Intutic dynamically calculates **Developer-Specific Baselines**:
 
@@ -116,7 +116,7 @@ upward until nothing ever looked anomalous again.
 
 ---
 
-## Real-Time Sequence Anomaly Detection <Badge type="tip" text="Enterprise" />
+## Real-Time Sequence Anomaly Detection
 
 To intercept anomalous behaviors (such as infinite tool execution loops, abnormal command bursts, or forbidden transition paths) before they generate high costs or damage systems, the Rust Proxy evaluates a **sequence classifier** in-process, with no model call:
 

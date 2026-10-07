@@ -1,9 +1,9 @@
-# Security & Identity <Badge type="danger" text="Enterprise" />
+# Security & Identity <Badge type="tip" text="Cloud" />
 
 <!-- ENTERPRISE_ONLY_START -->
 Protect your workspace with enterprise-grade authentication, role-based access control, and scoped agent credentials.
 
-## Single Sign-On (SSO)
+## Single Sign-On (SSO) <Badge type="warning" text="Biz Org+" />
 
 Intutic supports OpenID Connect (OIDC) Single Sign-On for seamless integration with your corporate identity provider.
 
@@ -163,7 +163,7 @@ Adjust a member's role at any time. Changes take effect immediately.
 
 ---
 
-## Offboarding <Badge type="danger" text="Enterprise" />
+## Offboarding <Badge type="tip" text="Cloud" />
 
 The reliable path is **SCIM 2.0 provisioning** — see the
 [SCIM guide](/guide/scim). With it configured, removing a user in your identity

@@ -1,4 +1,4 @@
-# Developer Sessions <Badge type="warning" text="Cloud / Team" />
+# Developer Sessions <Badge type="tip" text="Cloud" />
 
 **Activity › Developer Sessions** (`/activity/sessions`) shows what the sync daemon on your developers' machines reports: whether it is connected, which agent sessions are running, and whether local guidelines are in sync and free of security issues.
 

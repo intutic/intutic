@@ -1,4 +1,4 @@
-# Diagnostics & Verification Runbook <Badge type="danger" text="Enterprise" />
+# Diagnostics & Verification Runbook <Badge type="tip" text="Cloud" />
 
 This runbook documents the standard command-line diagnostics and validation steps to inspect and troubleshoot internal cluster routing, LiteLLM health, and proxy-to-backend communication.
 
