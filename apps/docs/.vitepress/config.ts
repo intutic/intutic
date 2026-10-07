@@ -101,6 +101,15 @@ const sidebarGuide = [
 
 if (!IS_OSS) {
   sidebarGuide.push({
+    text: 'Self-host',
+    items: [
+      { text: 'Overview (Self-host)', link: '/guide/self-host' },
+      { text: 'Docker Compose (Self-host)', link: '/guide/self-host-compose' },
+      { text: 'Kubernetes (Self-host)', link: '/guide/self-host-kubernetes' },
+      { text: 'Your License (Self-host)', link: '/guide/self-host-license' },
+    ],
+  });
+  sidebarGuide.push({
     text: 'Using Intutic',
     items: [
       { text: 'Overview (Cloud)', link: '/guide/dashboard' },

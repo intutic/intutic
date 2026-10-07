@@ -20,7 +20,7 @@ That's true of the LLM-observability tools (LangSmith, W&B Weave, Arize AX) by d
 | **Prove-before-enforce** | Replay any rule against real traffic before it's live; SOP shadow mode with a measured would-act rate | Not applicable | Not found in public docs | Not found in public docs |
 | **Policy source** | Git-committed markdown (`.intutic/sops/*.md`), PR-reviewable, ConfigMap-deliverable | N/A | Dashboard-managed policy objects | Vendor-defined rule packs + custom rules |
 | **Source you can read** | Open-core — the block/allow decision is code in this repo | Closed | Closed | Closed |
-| **On-prem / air-gapped** | Self-host annual license (early access) | Cloud-hosted | Enterprise tier | Varies; several undocumented as of this writing |
+| **On-prem / air-gapped** | Self-host annual license: installs from a signed bundle with no route to the internet | Cloud-hosted | Enterprise tier | Varies; several undocumented as of this writing |
 | **Pricing** | Open core free; paid plans priced publicly | Usage-based, published | Enterprise sales | Sales-quote only (Forge) |
 
 ## The auditability point, stated plainly
