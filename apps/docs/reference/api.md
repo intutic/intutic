@@ -580,7 +580,7 @@ _Generated from `services/control-plane/src/routes/*.ts` by `generate-api-catalo
 | POST | `/api/v1/billing/marketplace/gcp/register` | Authenticated |  |
 | POST | `/api/v1/billing/marketplace/gcp/webhook` | Public |  |
 | POST | `/api/v1/billing/subscription` | Authenticated |  |
-| GET | `/api/v1/billing/usage-rate` | Authenticated |  |
+| GET | `/api/v1/billing/usage-rate` | Authenticated | This workspace's rate per 1,000 Governed Requests |
 | GET | `/api/v1/billing/usage/current` | Authenticated | Current metered usage summary (team+) |
 | POST | `/api/v1/billing/webhook` | Public | Handle Stripe webhook (public) |
 
@@ -1145,7 +1145,7 @@ _Generated from `services/control-plane/src/routes/*.ts` by `generate-api-catalo
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | GET | `/api/v1/trial/status` | Authenticated | Authenticated, returns trial/plan status for workspace |
-| GET | `/api/v1/trial/tiers` | Public | Public, returns static pricing tier definitions |
+| GET | `/api/v1/trial/tiers` | Public | The plans on sale, with prices and features |
 
 ### `trust.ts` <Badge type="tip" text="Cloud" />
 

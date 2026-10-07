@@ -1,0 +1,97 @@
+[
+  {
+    "id": "self_serve",
+    "name": "Self-serve",
+    "tagline": "Pay only for what you govern",
+    "billing": "usage",
+    "purchase": "checkout",
+    "priceMonthlyUsd": 0,
+    "priceAnnualUsd": 0,
+    "ratePer1kUsd": 1.5,
+    "minimumMonthlyUsd": 5000,
+    "includedRequestsPerMonth": 0,
+    "seats": -1,
+    "apiKeys": 5,
+    "dailyCapUsd": 500,
+    "highlighted": false,
+    "features": [
+      "$500/day monitored LLM volume",
+      "5 API keys",
+      "No seats, no annual commitment",
+      "Response caching",
+      "SOP registry, Config Sync & trace query API",
+      "3-year trace retention"
+    ]
+  },
+  {
+    "id": "biz_org",
+    "name": "Biz Org",
+    "tagline": "Up to 500 seats",
+    "billing": "subscription",
+    "purchase": "checkout",
+    "priceMonthlyUsd": 7500,
+    "priceAnnualUsd": 72000,
+    "ratePer1kUsd": 1.5,
+    "minimumMonthlyUsd": 0,
+    "includedRequestsPerMonth": 5000000,
+    "seats": 500,
+    "apiKeys": -1,
+    "dailyCapUsd": 2250,
+    "highlighted": true,
+    "features": [
+      "Includes 5M governed requests/mo, then $1.50 per 1,000",
+      "$2,250/day monitored LLM volume",
+      "Unlimited API keys",
+      "SSO — SAML 2.0 & OIDC (Okta & Entra ID)",
+      "SOP Optimizer",
+      "Custom WASM policy rules",
+      "3-year trace retention"
+    ]
+  },
+  {
+    "id": "ent_adv",
+    "name": "Enterprise",
+    "tagline": "Up to 2,500 seats",
+    "billing": "subscription",
+    "purchase": "checkout",
+    "priceMonthlyUsd": 15500,
+    "priceAnnualUsd": 148800,
+    "ratePer1kUsd": 1.5,
+    "minimumMonthlyUsd": 0,
+    "includedRequestsPerMonth": 10333333,
+    "seats": 2500,
+    "apiKeys": -1,
+    "dailyCapUsd": 12500,
+    "highlighted": false,
+    "features": [
+      "Includes 10.3M governed requests/mo, then $1.50 per 1,000",
+      "$12,500/day monitored LLM volume",
+      "Unlimited API keys",
+      "Everything in Biz Org",
+      "Multi-region deployment (US/EU/APAC)",
+      "3-year trace retention"
+    ]
+  },
+  {
+    "id": "ent_lic",
+    "name": "Self-host",
+    "tagline": "Annual license for your VPC or air-gapped network",
+    "billing": "license",
+    "purchase": "sales",
+    "priceMonthlyUsd": 0,
+    "priceAnnualUsd": 168000,
+    "ratePer1kUsd": 0,
+    "minimumMonthlyUsd": 0,
+    "includedRequestsPerMonth": 0,
+    "seats": -1,
+    "apiKeys": -1,
+    "dailyCapUsd": 17500,
+    "highlighted": false,
+    "features": [
+      "Unlimited seats and requests",
+      "Everything in Enterprise",
+      "Runs in your VPC or air-gapped network",
+      "Signed license file, no phone-home"
+    ]
+  }
+]
