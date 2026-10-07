@@ -28,7 +28,7 @@ Who can sign in and with which role, the teams in your organization, and the gui
 
 ### Members
 
-The **Invite a teammate** form takes a display name, an email address and a role, and **Create Account** creates the account directly; no invitation email is sent. The dashboard generates a temporary password and shows it once, in the **Account Created** dialog, for you to copy and share. The new member is asked to change it at first sign-in. A **Seats used** meter shows the workspace against its plan's seat limit; at the limit, deactivate a member or upgrade to add another.
+The **Invite a teammate** form takes a display name, an email address and a role, and **Create Account** creates the account directly; no invitation email is sent. The dashboard generates a temporary password and shows it once, in the **Account Created** dialog, for you to copy and share. The new member is asked to change it at first sign-in. A **Seats used** meter shows the seats in use against the plan's limit. On an organization's plan the seats are the distinct people active across all its workspaces, so someone in two teams holds one seat. At the limit, deactivate a member or upgrade to add another.
 
 Each member row has a role selector and **Deactivate** (or **Reactivate**). The roles:
 
