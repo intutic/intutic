@@ -62,15 +62,20 @@ their deterministic versions.
 
 Each release is a signed bundle. Intutic sends you time-limited links to three
 files: the bundle (`intutic-selfhost-<version>.tar.gz`), its checksums
-(`SHA256SUMS`) and their signature (`SHA256SUMS.sig`). Verify the bundle before
-you install it, with the cosign public key Intutic gives you:
+(`SHA256SUMS`) and their signature (`SHA256SUMS.sigstore.json`). Verify the
+bundle where you downloaded it, before it goes into your network. You need
+[cosign](https://docs.sigstore.dev/cosign/system_config/installation/) 3.0 or
+later and Intutic's public key, [`intutic-cosign.pub`](../intutic-cosign.pub):
 
 ```bash
-cosign verify-blob --key intutic-cosign.pub --signature SHA256SUMS.sig SHA256SUMS
+cosign verify-blob --key intutic-cosign.pub --bundle SHA256SUMS.sigstore.json SHA256SUMS
 tar -xzf intutic-selfhost-<version>.tar.gz
 cd intutic-selfhost-<version>
-sha256sum -c SHA256SUMS
+sha256sum -c ../SHA256SUMS
 ```
+
+Check against `../SHA256SUMS`, the copy you just verified, not the copy inside
+the bundle.
 
 The bundle holds every image (`images.tar`), the installer, the Compose files and
 the Helm charts. On Kubernetes with registry access, the images and charts are
