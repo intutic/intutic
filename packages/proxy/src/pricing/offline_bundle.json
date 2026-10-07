@@ -1,7 +1,7 @@
 {
   "_meta": {
-    "source": "https://raw.githubusercontent.com/BerriAI/litellm/2c9b0e00acaf2d7cebc962bc9cf6a861796b5c68/model_prices_and_context_window.json",
-    "generated_at": "2026-09-28",
+    "source": "https://raw.githubusercontent.com/BerriAI/litellm/e1bdd42726d1f480d89d9e65d261a0fbea4541b9/model_prices_and_context_window.json",
+    "generated_at": "2026-10-07",
     "refresh_script": "tools/scripts/build-offline-pricing-bundle.ts",
     "note": "Baked into the proxy binary via include_str!(), so editing this file does nothing until the image is rebuilt. Regenerate with tools/scripts/build-offline-pricing-bundle.ts; drift against published rates is reported monthly by .github/workflows/pricing-drift.yml. Override with OFFLINE_PRICING_PATH."
   },
@@ -35,6 +35,13 @@
       "cache_write_cost_per_1k": 0.00375
     },
     "claude-sonnet-5": {
+      "input_cost_per_1k": 0.002,
+      "output_cost_per_1k": 0.01,
+      "max_tokens": 128000,
+      "cache_read_cost_per_1k": 0.0002,
+      "cache_write_cost_per_1k": 0.0025
+    },
+    "claude-sonnet-5-5": {
       "input_cost_per_1k": 0.002,
       "output_cost_per_1k": 0.01,
       "max_tokens": 128000,
@@ -311,6 +318,11 @@
       "output_cost_per_1k": 0.0025,
       "max_tokens": 65536,
       "cache_read_cost_per_1k": 0.00003
+    },
+    "gemini/deep-research-pro-preview-12-2025": {
+      "input_cost_per_1k": 0.002,
+      "output_cost_per_1k": 0.012,
+      "max_tokens": 65536
     },
     "gemini/gemini-2.5-flash-lite": {
       "input_cost_per_1k": 0.0001,
@@ -676,8 +688,8 @@
       "max_tokens": 8191
     },
     "mistral.mistral-large-2407-v1:0": {
-      "input_cost_per_1k": 0.003,
-      "output_cost_per_1k": 0.009,
+      "input_cost_per_1k": 0.002,
+      "output_cost_per_1k": 0.006,
       "max_tokens": 8191
     },
     "mistral.mistral-large-3-675b-instruct": {
@@ -824,6 +836,18 @@
       "output_cost_per_1k": 0.0006,
       "max_tokens": 262144,
       "cache_read_cost_per_1k": 0.000015
+    },
+    "mistral/mistral-large-4": {
+      "input_cost_per_1k": 0.00068,
+      "output_cost_per_1k": 0.00209,
+      "max_tokens": 524288,
+      "cache_read_cost_per_1k": 0.000068
+    },
+    "mistral/mistral-large-4-0": {
+      "input_cost_per_1k": 0.00068,
+      "output_cost_per_1k": 0.00209,
+      "max_tokens": 524288,
+      "cache_read_cost_per_1k": 0.000068
     },
     "mistral/mistral-large-latest": {
       "input_cost_per_1k": 0.0005,
@@ -1084,7 +1108,8 @@
     },
     "gemini/gemini-robotics-er-2-streaming-preview": {
       "input_cost_per_1k": 0.001,
-      "output_cost_per_1k": 0.005
+      "output_cost_per_1k": 0.005,
+      "max_tokens": 65536
     },
     "mistral/mistral-small-2603": {
       "input_cost_per_1k": 0.00015,
