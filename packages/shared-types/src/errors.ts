@@ -60,6 +60,12 @@ export const E_ALREADY_ON_TIER = 'ALREADY_ON_TIER' as const
 /** Stripe API error. */
 export const E_STRIPE_ERROR = 'STRIPE_ERROR' as const
 
+/** A plan change the subscription cannot make in place (e.g. a seat plan to usage-based Self-serve). */
+export const E_PLAN_CHANGE_UNSUPPORTED = 'PLAN_CHANGE_UNSUPPORTED' as const
+
+/** The workspace's plan comes from its organization's subscription; it cannot buy one of its own. */
+export const E_PLAN_FROM_ORG = 'PLAN_FROM_ORG' as const
+
 /** Webhook signature validation failed. */
 export const E_SIGNATURE_INVALID = 'SIGNATURE_INVALID' as const
 
@@ -172,6 +178,8 @@ export type IntuticErrorCode =
   | typeof E_DOMAIN_NOT_VERIFIED
   | typeof E_ALREADY_ON_TIER
   | typeof E_STRIPE_ERROR
+  | typeof E_PLAN_CHANGE_UNSUPPORTED
+  | typeof E_PLAN_FROM_ORG
   | typeof E_SIGNATURE_INVALID
   | typeof E_TRIAL_EXPIRED
   | typeof E_EMAIL_ALREADY_EXISTS
