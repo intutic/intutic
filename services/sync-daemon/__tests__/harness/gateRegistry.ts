@@ -600,6 +600,11 @@ export const NO_GATE: ReadonlyArray<{
     why: 'reads a user-owned JSON config for the writers that merge into one; writes nothing itself',
   },
   {
+    file: 'rulesSection.ts',
+    harness: 'antigravity',
+    why: 'writes the rule sets as a marked section of GEMINI.md (instructions, not a tool-call gate); antigravityHooks.ts and antigravityCliHooks.ts are the gates',
+  },
+  {
     file: 'codexConfigMerger.ts',
     harness: 'codex',
     why: 'sets openai_base_url in the Codex user config (LLM routing); codexHooks.ts is the gate',

@@ -32,7 +32,7 @@ Never print a credential...
 <!-- INTUTIC:RULES:END -->
 ```
 
-- **Gemini CLI** loads `GEMINI.md` from the project directory and every parent up to the git root, and `~/.gemini/GEMINI.md`, and sends them with every prompt; `/memory show` prints what it loaded. If you renamed the context file with `context.fileName` in `settings.json`, keep `GEMINI.md` in the list, or Gemini CLI will not read the rules.
+- **Gemini CLI** loads `GEMINI.md` from the project directory and every parent up to the git root, and `~/.gemini/GEMINI.md`, and sends them with every prompt; `/memory show` prints what it loaded. It reads the project's files only in a folder you have trusted, so trust the project when Gemini CLI asks. If you renamed the context file with `context.fileName` in `settings.json`, keep `GEMINI.md` in the list, or Gemini CLI will not read the rules.
 - **Antigravity** (app, IDE and CLI) loads `GEMINI.md` and `AGENTS.md` from each directory between the file it is working on and the workspace root, and keeps them active on every turn. It truncates any rules file over 24 KB, so keep `GEMINI.md`, rule sets included, under that size.
 
 The first sync appends the section to an existing `GEMINI.md`, or creates the file; later syncs replace the text between the markers, wherever you moved the section, and leave the file alone when nothing changed. An edit inside the section is replaced on the next sync; edits outside it are yours, and are not reported as drift.
