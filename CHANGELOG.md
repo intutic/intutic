@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Deprecated
+
+- **Policy checks authenticated by key prefix alone.** From 2.1.0 the proxy
+  sends its whole virtual key (`Authorization: Bearer vk_…`) with
+  `POST /api/v1/policy/check`; older proxies send only the key prefix. The
+  control plane still answers a prefix-only check whose prefix names a live key
+  of the workspace, and now logs each one (`policy_check_prefix_only`, with the
+  workspace, prefix and outcome) and counts it in the
+  `policy_check_prefix_only` metric. Prefix-only checks will be refused in a
+  later release, once that count stays at zero: upgrade proxies to 2.1.0 or
+  later before then. A refused check blocks every request on a proxy that
+  fails closed.
+
+### Removed
+
+- **`intutic predict-cost --task-type`.** Token baselines are recorded per
+  model and input size only, so the task type selected nothing. Passing the
+  option is now an error; drop it from scripts.
+
 ## [2.0.0] - 2026-09-27
 
 A milestone release: no public API, wire format or configuration value that
