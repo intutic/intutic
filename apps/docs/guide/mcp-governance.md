@@ -61,6 +61,26 @@ these files keeps the server uncopied. Where Claude Code's managed policy may
 come from MDM or the Windows registry, which the sync daemon does not read, no
 project server is copied.
 
+A copy keeps `${VAR}` references exactly as `.mcp.json` writes them and never
+writes a resolved value to disk. That is safe because Claude Code expands them
+the same way at local scope: tested with Claude Code 2.1.233 by running
+`claude mcp list` against stdio and HTTP servers that recorded what they
+received, `${VAR}` and `${VAR:-default}` expanded in `command`, `args`, `env`,
+`url` and `headers` identically at local, project and user scope, and an unset
+variable with no default stayed as the literal `${VAR}` text in every scope.
+
+One kind of server is not copied: a remote (HTTP or SSE) server whose `url` or
+`headers` reference a variable. Its copy has to be a stdio entry that hands the
+URL to the proxy as an argument and the headers through the environment, where
+Claude Code expands every variable — while in a remote server's own `url` and
+`headers` it reads credential variables (its own API keys, cloud and proxy
+credentials) as empty, by a list it does not publish in full. A copy could
+send a credential the original never would. Such a server runs as Claude Code
+starts it, without the proxy; discovery reports it as ungoverned with the
+reason, and the [MCP Servers page](#the-registry) marks it **Not governed**.
+The same goes for every approved project server on a machine whose managed
+policy the daemon cannot read.
+
 Muse Code's `mcp_servers` map (in `~/.config/muse/settings.json`) carries
 both `stdio` and `streamable_http` entries; the latter is assumed (not yet
 confirmed against a real install) to match the same
@@ -663,8 +683,9 @@ environment, and caches in the Valkey at `VALKEY_URL` (or `REDIS_URL`;
   name changes is a new candidate. Pin the server's tools with TOFU, above,
   to notice a server changing under the same name.
 - **Servers outside the proxy are not governed by it.** A server added since
-  the last sync cycle, a project `.mcp.json` server before you approve it,
-  and harnesses this page lists as unwrapped reach the harness directly. The registry may still
+  the last sync cycle, a project `.mcp.json` server before you approve it, a
+  remote project server whose `url` or `headers` use `${VAR}`, and harnesses
+  this page lists as unwrapped reach the harness directly. The registry may still
   list them, from the MCP daemon's report; approving or blocking them changes
   nothing until a proxy fronts them, apart from the hook-gate backstop below.
 - **The OS user, session and server on an event are what the proxy
