@@ -11,8 +11,9 @@
  * This module used to also hold a second, complete loop (`startSyncLoop`)
  * that nothing started; the service has always run `connect`. The behaviours
  * only that loop had and the docs promise (SkillOpt edits, skill findings,
- * config capture, the decisions log, the bundled rule-author skill) are the
- * helpers below and run from `connect` now.
+ * the decisions log, the bundled rule-author skill) are the helpers below and
+ * run from `connect` now. Its config capture, which uploads whole harness
+ * config files, is not wired: the docs say the CLI never uploads them.
  *
  * @module
  */
@@ -23,14 +24,12 @@ import * as fs from 'node:fs'
 import * as os from 'node:os'
 import { newIso } from '@intutic/id'
 import type { HarnessType, SyncConfigPayload, SyncSopEntry } from '@intutic/shared-types'
-import { deriveEnforcementInputs } from '@intutic/shared-types'
 import { applyConfigEdits, loadLocalSopEntries } from './configWriter.js'
 import type { ConfigEditApplyOutcome } from './configWriter.js'
 import { parseSopConstraints } from './harness/claudeCodeHooks.js'
 import { refreshPolicySnapshot } from './lib/policySnapshot.js'
 import { refreshApprovedBypasses } from './lib/approvedBypasses.js'
 import { refreshEgressPolicy } from './lib/egressPolicy.js'
-import type { GovernanceCoverageInputs } from './configReader.js'
 import { collectAgentReport, reportAgent, type AgentReport } from './agentReporter.js'
 import { startHarnessSession } from './sessionReporter.js'
 
@@ -244,8 +243,7 @@ async function reportApplyResult(
 /**
  * Register each harness as an agent with its facets, report one session per
  * harness, and turn this cycle's skill-scan findings into `skill_flagged`
- * events. Returns each harness's governance-coverage inputs, derived from the
- * same facets, for the config capture that follows.
+ * events.
  *
  * One harness failing must not stop the others, so failures are collected
  * and returned rather than thrown.
@@ -259,11 +257,7 @@ export async function reportHarnessAgents(opts: {
   allowLocalVaults?: boolean
   /** The local proxy's instance id: the session context lands on its row. */
   proxyInstanceId?: string | null
-}): Promise<{
-  governanceInputs: Partial<Record<HarnessType, GovernanceCoverageInputs>>
-  failures: Array<{ harness: HarnessType; error: string }>
-}> {
-  const governanceInputs: Partial<Record<HarnessType, GovernanceCoverageInputs>> = {}
+}): Promise<{ failures: Array<{ harness: HarnessType; error: string }> }> {
   const failures: Array<{ harness: HarnessType; error: string }> = []
   // A skill is not harness-specific, and the scan runs once per harness.
   const skillFlaggedThisCycle = new Set<string>()
@@ -278,7 +272,6 @@ export async function reportHarnessAgents(opts: {
         allowLocalVaults: opts.allowLocalVaults,
       })
       await reportAgent(opts.controlPlaneUrl, opts.apiKey, opts.workspaceId, report)
-      governanceInputs[harness] = deriveEnforcementInputs(report.facets)
       emitSkillFlaggedEvents({
         workspaceRoot: opts.workspaceRoot,
         workspaceId: opts.workspaceId,
@@ -298,7 +291,7 @@ export async function reportHarnessAgents(opts: {
       failures.push({ harness, error: errorMessage(err) })
     }
   }
-  return { governanceInputs, failures }
+  return { failures }
 }
 
 export async function syncOfflineTraces(controlPlaneUrl: string, apiKey: string): Promise<void> {

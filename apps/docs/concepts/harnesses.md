@@ -120,7 +120,7 @@ The sync daemon keeps harness config files in sync with SOPs from the control pl
 9. **Update integrity store** — `.intutic/integrity.json` in the workspace
 10. **Health checks** — the local proxy and Valkey are checked and restarted if they stopped
 
-Each poll also registers every recorded harness as an agent with its facets, records a `skill_flagged` event for each skill whose scan found something, and every fifth poll uploads the rules files that changed since the last upload. On startup `connect` writes the bundled `intutic-rule-author` skill if the workspace does not have it.
+Each poll also registers every recorded harness as an agent with its facets and records a `skill_flagged` event for each skill whose scan found something. On startup `connect` writes the bundled `intutic-rule-author` skill if the workspace does not have it.
 
 ### Real-time updates via WebSocket
 

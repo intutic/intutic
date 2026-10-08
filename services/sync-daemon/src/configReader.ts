@@ -213,7 +213,7 @@ export async function reportGovernanceCoverageSnapshot(
  * Groups by harness type for proper capture payloads.
  *
  * @param governanceInputs - This cycle's per-harness enforcement signals
- *   (from `reportHarnessAgents`), used to fire a
+ *   (derived from the agent report facets), used to fire a
  *   governance-coverage snapshot immediately after a harness's rules file is
  *   actually found to have changed — never on every sync tick, only on the
  *   iterations where `uploadConfigCapture`'s content-hash dedup lets a file

@@ -61,8 +61,6 @@ import { SyncWsClient,
   endAllOpenSessions,
   applySkillOptEdits,
   reportHarnessAgents,
-  captureAndUpload,
-  shouldCaptureThisIteration,
   refreshDecisionsDigest,
   writeBundledSkills,
   clearImmutable,
@@ -1347,7 +1345,6 @@ export async function runConnect(opts: {
   })
 
   // 6. Secondary fallback HTTP poll loop
-  let pollIteration = 0
   while (!ac.signal.aborted) {
     try {
       const syncConfig = await client.fetchConfig(safeCreds.workspaceId)
@@ -1369,7 +1366,7 @@ export async function runConnect(opts: {
       // lands on the proxy's own session row, the one its traces are filed
       // under.
       const proxyInstanceId = safeConfig.harnesses.length > 0 ? await fetchLocalProxyInstanceId() : null
-      const { governanceInputs, failures } = await reportHarnessAgents({
+      const { failures } = await reportHarnessAgents({
         controlPlaneUrl,
         apiKey: safeCreds.apiKey,
         workspaceId: safeCreds.workspaceId,
@@ -1381,22 +1378,6 @@ export async function runConnect(opts: {
       for (const { harness, error } of failures) {
         log.dim(`Agent report/session for harness '${harness}' failed: ${error}`)
       }
-      // Every Nth cycle, upload the rules files that changed (config history
-      // and SkillOpt's input) and re-grade governance coverage for them.
-      if (shouldCaptureThisIteration(pollIteration)) {
-        try {
-          await captureAndUpload(
-            controlPlaneUrl,
-            safeCreds.apiKey,
-            safeCreds.workspaceId,
-            safeConfig.workspaceRoot,
-            safeConfig.harnesses as HarnessType[],
-            governanceInputs,
-          )
-        } catch (err) {
-          log.dim(`Config capture failed (will retry): ${err instanceof Error ? err.message : String(err)}`)
-        }
-      }
       // Run compliance probes on each iteration
       await runProbes()
     } catch (err) {
@@ -1405,7 +1386,6 @@ export async function runConnect(opts: {
       )
       log.dim(`Retrying in ${pollInterval / 1000}s...`)
     }
-    pollIteration++
 
     // Sleep until next interval (AbortSignal-aware)
     await new Promise<void>((resolve) => {

@@ -114,11 +114,15 @@ describe('connect runs the per-cycle sync work the docs promise', () => {
     expect(branch.indexOf('return')).toBeLessThan(branch.indexOf('await applySyncConfig(syncConfig, true)'))
   })
 
-  it('reports agents, skill findings and config captures from the poll loop', async () => {
+  it('reports agents and skill findings from the poll loop', async () => {
     const { src, pollBody } = await source()
     expect(pollBody).toMatch(/await reportHarnessAgents\(\{[\s\S]*?workspaceRoot: safeConfig\.workspaceRoot/)
-    expect(pollBody).toMatch(/if \(shouldCaptureThisIteration\(pollIteration\)\)[\s\S]*?await captureAndUpload\(/)
-    expect(pollBody).toMatch(/pollIteration\+\+/)
     expect(src).toMatch(/await writeBundledSkills\(safeConfig\.workspaceRoot\)/)
+  })
+
+  // cli.md: "The CLI never uploads those bodies" (harness config snapshots).
+  it('does not upload harness config bodies', async () => {
+    const { src } = await source()
+    expect(src).not.toMatch(/captureAndUpload|uploadConfigCapture|\/api\/v1\/config\/capture/)
   })
 })

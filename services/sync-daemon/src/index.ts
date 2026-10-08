@@ -26,8 +26,6 @@ export { startHarnessSession, endAllOpenSessions, readGitInfo } from './sessionR
 
 export { loadLocalSopEntries, HARNESS_FILES, clearImmutable, setImmutable } from './configWriter.js'
 
-export { captureAndUpload, shouldCaptureThisIteration } from './configReader.js'
-
 export { writeBundledSkills } from './skillWriter.js'
 
 export { SyncWsClient } from './wsClient.js'
