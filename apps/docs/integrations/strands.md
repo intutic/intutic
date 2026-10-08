@@ -110,8 +110,8 @@ Same shape as LangGraph's `.env.intutic` — proxy URLs plus a pointer at `intut
 
 Same structural gaps as every SDK-gated framework — see [LangGraph's "What the adapter does NOT do"](/integrations/langgraph#what-the-adapter-does-not-do) — plus Strands-specific limits:
 
-- **Bedrock/SageMaker egress is ungoverned by the proxy** (see the table above). Tool calls remain fully gated; prompts/responses to those providers are not inspected. See TD-420.
-- **Hook ordering:** another hook registered to run after this one could mutate `tool_use` post-approval; Strands offers no "always last" guarantee (the adapter registers late, at order 99, to narrow this). See TD-421.
+- **Bedrock/SageMaker egress is ungoverned by the proxy** (see the table above). Tool calls remain fully gated; prompts/responses to those providers are not inspected.
+- **Hook ordering:** another hook registered to run after this one could mutate `tool_use` post-approval; Strands offers no "always last" guarantee (the adapter registers late, at order 99, to narrow this; pass `order=` to `IntuticHookProvider` or `install()` to change it).
 
 ## Config details
 

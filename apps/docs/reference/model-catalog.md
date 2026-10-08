@@ -16,7 +16,7 @@ handles — LiteLLM's `model_prices_and_context_window.json` — via
   cost estimation.
 - `packages/shared-types/src/modelCatalog.generated.ts` — the catalog this page documents.
 
-Both are regenerated together, monthly, so a model's context window and its price can never
+Both are regenerated together, nightly, so a model's context window and its price can never
 drift apart from disagreeing about which upstream snapshot they came from.
 
 ## Shape
