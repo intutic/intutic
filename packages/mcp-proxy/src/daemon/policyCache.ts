@@ -12,6 +12,15 @@ import http from 'node:http'
 import { Redis } from 'ioredis'
 import { describeConnectionError } from '../valkeyErrors.js'
 import { createLogger } from '@intutic/logger'
+import {
+  UNRESTRICTED_REGISTRY,
+  parsePrincipal,
+  parseRegistry,
+  parseSsoGroupPolicy,
+  type McpPrincipal,
+  type McpRegistryPolicy,
+  type SsoGroupPolicy,
+} from '../policy.js'
 
 const logger = createLogger('mcp-proxy.policyCache')
 
@@ -76,6 +85,28 @@ export interface ResolvedPolicy {
    * empty" mean the same thing for an override map.
    */
   mcpAnomalyOverrides: Record<string, 'steer' | 'reask' | 'kill' | 'off'>
+  /**
+   * MCP server registry decisions. `undefined` only on an entry that did not
+   * come from the control plane — the snapshot seed, or a Valkey entry
+   * written before this field existed — and such an entry is treated as
+   * stale (see `isStale`), so the first request refreshes it. A control plane
+   * that sends no registry yields {@link UNRESTRICTED_REGISTRY}, never
+   * `undefined`: it has no registry, which is not the same as not knowing.
+   */
+  mcpRegistry?: McpRegistryPolicy
+  /** The member the daemon's API key resolves to (see `McpPrincipal`). */
+  principal?: McpPrincipal
+  /** The workspace's SSO group policy, when it has one. */
+  ssoGroupPolicy?: SsoGroupPolicy
+  /** The workspace's `mcpProxyFailBehavior`, when it has chosen one. */
+  mcpProxyFailBehavior?: 'open' | 'closed'
+  /**
+   * True on the entry `seedFromSnapshot` built from the sync daemon's local
+   * snapshot, which carries only part of the policy. A proxy that already
+   * loaded a full policy takes only the rules from such an entry (see
+   * `PolicyClient.refresh`), so a daemon restart cannot lift its curation.
+   */
+  fromSnapshot?: boolean
   cachedAt:      number
   /**
    * The workspace's `v2:sync:config_version` at fetch time (TD-474 item 5).
@@ -118,7 +149,9 @@ function evictIfFull(): void {
 }
 
 function isStale(entry: ResolvedPolicy): boolean {
-  return Date.now() - entry.cachedAt > getPolicyTtlMs()
+  // An entry with no registry did not come from the control plane (see the
+  // field); serve it, but refresh it as if it had expired.
+  return entry.mcpRegistry === undefined || Date.now() - entry.cachedAt > getPolicyTtlMs()
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -138,6 +171,10 @@ type PolicyResponseBody = Pick<
   | 'mcpInjectionPatterns'
   | 'mcpAnomalyMode'
   | 'mcpAnomalyOverrides'
+  | 'mcpRegistry'
+  | 'principal'
+  | 'ssoGroupPolicy'
+  | 'mcpProxyFailBehavior'
 >
 
 /**
@@ -213,6 +250,13 @@ function parsePolicyResponse(raw: string): PolicyResponseBody | null {
           ),
         )
       : {},
+    mcpRegistry: parseRegistry(parsed['mcpRegistry']) ?? UNRESTRICTED_REGISTRY,
+    principal: parsePrincipal(parsed['principal']),
+    ssoGroupPolicy: parseSsoGroupPolicy(parsed['ssoGroupPolicy']),
+    mcpProxyFailBehavior:
+      parsed['mcpProxyFailBehavior'] === 'open' || parsed['mcpProxyFailBehavior'] === 'closed'
+        ? parsed['mcpProxyFailBehavior']
+        : undefined,
   }
 }
 
@@ -269,6 +313,10 @@ async function fetchFromControlPlane(workspaceId: string): Promise<ResolvedPolic
             mcpInjectionPatterns: parsed.mcpInjectionPatterns,
             mcpAnomalyMode:   parsed.mcpAnomalyMode,
             mcpAnomalyOverrides: parsed.mcpAnomalyOverrides,
+            mcpRegistry:      parsed.mcpRegistry,
+            principal:        parsed.principal,
+            ssoGroupPolicy:   parsed.ssoGroupPolicy,
+            mcpProxyFailBehavior: parsed.mcpProxyFailBehavior,
             cachedAt:         Date.now(),
             configVersion:    versionAtFetch,
           })
@@ -355,16 +403,24 @@ export async function seedFromSnapshot(snapshotPath?: string): Promise<string | 
       interventionMode:
         typeof parsed['interventionMode'] === 'string' ? parsed['interventionMode'] : 'TRANSPARENT',
       // The sync daemon's snapshot (services/sync-daemon/src/lib/policySnapshot.ts)
-      // does not carry MCP curation today — it predates this field and is a
-      // separate `.rules`-gate mechanism, not this module's HTTP/Valkey path.
-      // Default to unrestricted rather than invent a value; the background
-      // HTTP refresh this seed exists to avoid delaying will fill these in on
-      // the next cycle.
+      // carries the server allowlist but no other MCP curation. The rest
+      // defaults to unrestricted for a proxy with nothing loaded yet; a proxy
+      // that has loaded a policy keeps its own (`fromSnapshot` below). The
+      // background refresh this seed triggers fills them in.
       mcpInjectionPatterns: [],
       allowedTools: [],
       toolDescriptionOverrides: {},
-      allowedServers: [],
+      // The one curation field the snapshot does carry: the gates enforce the
+      // same server allowlist from it.
+      allowedServers: Array.isArray(parsed['mcpAllowedServers'])
+        ? parsed['mcpAllowedServers'].filter((s): s is string => typeof s === 'string')
+        : [],
       mcpAnomalyOverrides: {},
+      // No registry: the snapshot does not carry one, and guessing "allow"
+      // here would let a deny workspace's unapproved servers through after
+      // every daemon restart. Left unknown, the entry is refreshed on first
+      // use (see `isStale`) and the proxy applies its fail setting meanwhile.
+      fromSnapshot: true,
       cachedAt,
     }
 

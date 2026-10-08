@@ -36,3 +36,5 @@ Intutic generates and hardens Goose plugin rules:
 * **Plugin Path:** `~/.agents/plugins/intutic-governance/hooks/hooks.json`
 * **Configuration:** Updates `OPENAI_HOST` and `GOOSE_PROVIDER` in `~/.config/goose/config.yaml`.
 * **Hardening:** Applies file system immutable flags (`chflags uchg` on macOS, `chattr +i` on Linux) to prevent Goose from disabling or deleting the governance hooks.
+
+To undo what `intutic connect` writes here, run `intutic disconnect --harness goose`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. See [`intutic disconnect`](/reference/cli#intutic-disconnect).

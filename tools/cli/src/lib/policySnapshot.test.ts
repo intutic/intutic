@@ -85,6 +85,15 @@ describe('parsePolicySnapshot', () => {
     expect(snap.ruleCount).toBe(0)
   })
 
+  it('counts only the SSO-group refusals on an invalid snapshot, because the gates keep those', () => {
+    const rules = [rule('sso_group.high_risk.Bash', ' (Bash) '), rule('sop.1', ' (Write) ')]
+    const snap = parsePolicySnapshot(snapshotText([...rules, rule('sop.2', ' (Edit) ')], { digest: digestOf(rules) }), {
+      expectedWorkspaceId: 'wk_alpha',
+    })
+    expect(snap.state).toBe('invalid')
+    expect(snap.ruleCount).toBe(1)
+  })
+
   it('does not claim a workspace mismatch when the machine has no workspace id', () => {
     const snap = parsePolicySnapshot(snapshotText([rule('sop.1', ' (Bash) ')], { workspace: 'wk_beta' }))
     expect(snap.state).toBe('ok')
@@ -201,6 +210,27 @@ describe('agreement with the sync daemon', () => {
     expect(snap.digest).toBe(written.digest)
     expect(snap.ruleCount).toBe(written.ruleCount)
     expect(snap.workspaceId).toBe('wk_alpha')
+  })
+
+  it('reads a snapshot carrying an SSO-group record as healthy, and does not count the record as a rule', async () => {
+    const dir = tempDir()
+    const written = await writePolicySnapshot(
+      {
+        workspaceId: 'wk_alpha',
+        interventionMode: 'TRANSPARENT',
+        sopRules: [],
+        mcpAllowedServers: [],
+        sqlDropStrictBlock: false,
+        ssoGroupPolicy: { highRiskTools: ['Bash'], requiredGroups: ['sre'], requireOboFor: [] },
+        principal: { memberId: 'mem_1', ssoGroups: ['eng'] },
+      },
+      dir,
+    )
+    process.env.INTUTIC_SNAPSHOT_RULES = join(dir, SNAPSHOT_RULES_FILE)
+    const snap = readPolicySnapshot({ expectedWorkspaceId: 'wk_alpha' })
+    expect(snap.state).toBe('ok')
+    expect(snap.digest).toBe(written.digest)
+    expect(snap.ruleCount).toBe(written.ruleCount)
   })
 
   it('keeps SNAPSHOT_STALE_AFTER_DAYS equal to the gate the daemon emits', () => {

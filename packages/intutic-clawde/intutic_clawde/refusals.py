@@ -54,3 +54,22 @@ def parse_refusal(status: int, body: str) -> Optional[ProxyRefusal]:
         "code": error["type"],
         "message": message if isinstance(message, str) else error["type"],
     }
+
+
+#: The header the proxy sets on a 200 that is a refusal in the shape of an
+#: answer: the cost-prediction gate replies to a non-streaming request with an
+#: assistant turn explaining the estimate, so a chat client shows the reason.
+#: Its value is the refusal's code.
+REFUSAL_HEADER = "x-intutic-refusal"
+
+
+def header_refusal(code: Optional[str], message: str) -> Optional[ProxyRefusal]:
+    """The refusal a 2xx response names in REFUSAL_HEADER, or None for a real answer."""
+    if not code:
+        return None
+    known = PROXY_REFUSALS.get(code)
+    return {
+        "verdict": known[1] if known else "kill",
+        "code": code,
+        "message": message or code,
+    }

@@ -21,8 +21,8 @@
  * @module
  */
 
-import { join, dirname } from 'node:path'
-import { access, writeFile, rename, mkdir } from 'node:fs/promises'
+import { join } from 'node:path'
+import { access } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { HarnessType } from '@intutic/shared-types'
 import type { SyncSopEntry } from '@intutic/shared-types'
@@ -30,6 +30,7 @@ import type { IHarnessAdapter } from './types.js'
 import { hashFile } from '../lib/hash.js'
 import { buildMarkdownContent } from './base.js'
 import { writeOpenCodeHooks } from '@intutic/sync-daemon/harness/openCodeHooks'
+import { writeOwnedFile } from '@intutic/sync-daemon'
 
 /** Workspace-relative rules file. OpenCode reads this, falling back to CLAUDE.md. */
 const CONFIG_FILE = 'AGENTS.md'
@@ -79,10 +80,7 @@ export const opencodeAdapter: IHarnessAdapter = {
     //    convention every markdown adapter uses.
     if (sops.length > 0) {
       const content = buildMarkdownContent(sops, proxyUrl)
-      await mkdir(dirname(agentsPath), { recursive: true })
-      const tmp = agentsPath + '.intutic-tmp'
-      await writeFile(tmp, content, 'utf-8')
-      await rename(tmp, agentsPath)
+      await writeOwnedFile(agentsPath, workspaceRoot, content)
     }
 
     // 2. The plugin gate. `intutic connect` has no workspace id in scope —

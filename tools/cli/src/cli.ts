@@ -82,6 +82,17 @@ program
   })
 
 program
+  .command('disconnect')
+  .description('Undo intutic connect: restore every harness config it changed, remove its services, and log out')
+  .option('--harness <id>', 'Disconnect one harness only (credentials and services stay)')
+  .option('--dry-run', 'Print exactly what would change, and change nothing')
+  .option('--keep-login', 'Keep the stored credentials')
+  .action(async (opts) => {
+    const { runDisconnect } = await import('./commands/disconnect.js')
+    await runDisconnect({ harness: opts.harness, dryRun: opts.dryRun, keepLogin: opts.keepLogin })
+  })
+
+program
   .command('logout')
   .description('Clear stored credentials')
   .action(async () => {
@@ -139,7 +150,6 @@ program
     'rate table as every other cost figure the control plane reports.'
   )
   .requiredOption('--model <model>', 'Model to estimate against (e.g. claude-sonnet-4-5)')
-  .option('--task-type <type>', 'Task type used to pick the baseline bucket', 'coding')
   .option('--tokens <n>', 'Input token count (mutually exclusive with --file)')
   .option('--file <path>', 'File whose contents size the input (mutually exclusive with --tokens)')
   .option('--json', 'Output as JSON instead of a report')
@@ -1153,7 +1163,7 @@ decisionCmd
 // see commands/gateway.ts's module doc.
 const gatewayCmd = program
   .command('gateway')
-  .description('Manage self-hosted gateway registrations (Docker / Kubernetes / bare-metal)')
+  .description('Manage self-hosted gateway registrations (Docker / Kubernetes / bare metal)')
 
 gatewayCmd
   .command('register')

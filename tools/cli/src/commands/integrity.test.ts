@@ -547,6 +547,13 @@ describe('command exit status', () => {
     expect(await exitCodeOf(() => runIntegrityConfigChain({}))).toBeNull()
   })
 
+  it('says how many snapshots carry no content, without failing on them', async () => {
+    const printed = captureOutput()
+    vi.stubGlobal('fetch', stubFetch([['/integrity/config-chain', 200, configChainBody({ snapshotsWithoutContent: 2 })]]))
+    expect(await exitCodeOf(() => runIntegrityConfigChain({}))).toBeNull()
+    expect(printed.join('\n')).toContain('2 snapshot(s) were captured without content')
+  })
+
   it('exits 1 on a config chain break and names both ends of the gap', async () => {
     const printed = captureOutput()
     vi.stubGlobal(

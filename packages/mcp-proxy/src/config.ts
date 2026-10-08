@@ -25,7 +25,12 @@ export interface ProxyConfig {
   eventsFilePath: string
   /** Policy cache TTL in milliseconds (default: 60_000) */
   policyTtlMs: number
-  /** Whether to fail-open when control plane is unreachable (default: true) */
+  /**
+   * Whether a governance check that cannot complete lets the call through
+   * (default: true), from `INTUTIC_MCP_FAIL_OPEN`. The local fallback only:
+   * once the control plane delivers the workspace's `mcpProxyFailBehavior`,
+   * that wins (interceptor.ts's `failOpen`).
+   */
   failOpen: boolean
   /**
    * MCP proxy deployment model ('per-session' | 'daemon').
@@ -300,7 +305,7 @@ export async function loadConfig(argv: string[] = process.argv.slice(2)): Promis
     DEFAULT_EVENTS_PATH
 
   const failOpen =
-    (runtimeEnv['INTUTIC_MCP_FAIL_OPEN'] ?? 'true').toLowerCase() !== 'false'
+    (process.env['INTUTIC_MCP_FAIL_OPEN'] ?? runtimeEnv['INTUTIC_MCP_FAIL_OPEN'] ?? 'true').toLowerCase() !== 'false'
 
   // 'daemon' is honoured downstream: policy.ts routes policy lookups through
   // the daemon's Unix socket when this is set. No warning here — the mode does

@@ -17,7 +17,7 @@ Intutic decides each agent tool call before it runs, across 43 harnesses: native
 | **Where it enforces** | Native pre-execution hook gates in 19 of the 43 harnesses, plus request and response proxy, MCP governance proxy, egress firewall and sandbox | Model requests and responses; a failing guardrail set to deny rejects the request (HTTP 446) |
 | **Coding agents** | **43** supported harnesses with native gates or in-process SDK gates | Any client that can point its base URL at the gateway |
 | **Decisions** | Allow, warn, require approval (held until approved in Slack or the CLI), block, redact, re-ask, shadow | Allow or deny on guardrail results |
-| **MCP** | MCP governance proxy with DLP, policy rules, anomaly detectors, trust-on-first-use pinning and tool-description poisoning detection | MCP Gateway |
+| **MCP** | MCP governance proxy with a server registry, approvals and optional default-deny, approval holds, per-call identity, DLP, policy rules, anomaly detectors, trust-on-first-use pinning and tool-description poisoning detection | MCP Gateway |
 | **Routing** | Thompson-sampling routing that learns cost and quality per workspace | Fallbacks, load balancing and conditional routing |
 | **Caching** | Exact and semantic cache | Simple cache on every plan; semantic cache on select Enterprise plans |
 | **Budgets** | Daily spend caps enforced before a request leaves | Budget and rate limits on paid plans |

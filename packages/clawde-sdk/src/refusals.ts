@@ -49,3 +49,22 @@ export function parseRefusal(status: number, body: string): ProxyRefusal | null 
     message: typeof error.message === 'string' ? error.message : error.type,
   }
 }
+
+/**
+ * The header the proxy sets on a 200 that is a refusal in the shape of an
+ * answer: the cost-prediction gate replies to a non-streaming request with an
+ * assistant turn explaining the estimate, so a chat client shows the reason.
+ * Its value is the refusal's code.
+ */
+export const REFUSAL_HEADER = 'x-intutic-refusal'
+
+/** The refusal a 2xx response names in `REFUSAL_HEADER`, or `null` for a real answer. */
+export function headerRefusal(code: string | null, message: string): ProxyRefusal | null {
+  if (!code) return null
+  const known = PROXY_REFUSALS[code]
+  return {
+    verdict: known?.verdict ?? 'kill',
+    code,
+    message: message || code,
+  }
+}

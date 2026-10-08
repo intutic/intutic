@@ -19,10 +19,9 @@ import {
   injectBaseUrlEnvVars,
   removeBaseUrlEnvVars,
   PlatformNotSupportedError,
-  ElevationRequiredError,
 } from '../lib/envInjector.js'
 
-/** Persist ANTHROPIC_BASE_URL / OPENAI_BASE_URL so they survive a restart. */
+/** Persist ANTHROPIC_BASE_URL / OPENAI_BASE_URL for new terminals and applications. */
 export async function runEnvPersist(opts: { proxyUrl?: string }): Promise<void> {
   const proxyUrl = opts.proxyUrl ?? 'http://localhost:4000'
 
@@ -42,11 +41,6 @@ export async function runEnvPersist(opts: { proxyUrl?: string }): Promise<void> 
       log.error(`${err.message}`)
       log.info('Set ANTHROPIC_BASE_URL and OPENAI_BASE_URL by hand, or use `intutic exec`,')
       log.info('which sets them for one child process without touching your system.')
-      process.exit(1)
-    }
-    if (err instanceof ElevationRequiredError) {
-      log.error(`${err.message}`)
-      log.info('Re-run with the privileges that path needs, or use `intutic exec` instead.')
       process.exit(1)
     }
     throw err

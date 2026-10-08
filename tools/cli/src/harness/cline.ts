@@ -15,7 +15,7 @@
  * @module
  */
 
-import { access, readdir, writeFile, rename } from 'node:fs/promises'
+import { access, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { HarnessType } from '@intutic/shared-types'
@@ -25,6 +25,7 @@ import { hashFile } from '../lib/hash.js'
 import { loadCredentials } from '../config/store.js'
 import { newIso } from '@intutic/id'
 import { writeClineHooks, ensureClinerulesDirectory } from '@intutic/sync-daemon/harness/clineHooks'
+import { keepOriginal, writeOwnedFile } from '@intutic/sync-daemon'
 
 const CONFIG_FILE = '.clinerules/intutic-governance.md'
 
@@ -54,6 +55,8 @@ export const clineAdapter: IHarnessAdapter = {
   async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
     // 1. Rules, as one file in the .clinerules directory Cline reads.
     let filePath: string | null = null
+    // Kept before `.clinerules` is created, so disconnect knows it made the directory.
+    await keepOriginal(join(workspaceRoot, CONFIG_FILE), workspaceRoot)
     if (await ensureClinerulesDirectory(workspaceRoot)) {
       filePath = join(workspaceRoot, CONFIG_FILE)
       const instructions = sops.length > 0
@@ -69,9 +72,7 @@ export const clineAdapter: IHarnessAdapter = {
         '',
       ].join('\n')
 
-      const tmp = filePath + '.intutic-tmp'
-      await writeFile(tmp, content, 'utf-8')
-      await rename(tmp, filePath)
+      await writeOwnedFile(filePath, workspaceRoot, content)
     }
 
     // 2. The PreToolUse gate in .clinerules/hooks/.

@@ -1,11 +1,9 @@
 /**
  * @intutic/sync-daemon — Barrel export.
  *
- * Re-exports the public API of the sync daemon package:
- * - `startSyncLoop` — core sync loop (syncLoop.ts)
- * - `writeConfigFiles` — SOP→harness config writer (configWriter.ts)
- * - `computeFileHashes` / `hashFile` — integrity hashing (hashReporter.ts)
- * - `loadIntegrity` / `saveIntegrity` — local integrity store (integrityStore.ts)
+ * Re-exports the public API of the sync daemon package. `intutic connect`
+ * (tools/cli) runs the sync loop and calls the per-cycle helpers in
+ * syncCycle.ts; the harness writers live under harness/.
  *
  * HLD §3.14 — Real-Time State Mirroring
  * LLD #8 — Sync Daemon / CLI
@@ -13,20 +11,24 @@
  * @module
  */
 
-export { startSyncLoop, syncOfflineTraces, refreshGateCaches, localHoldTokensFor } from './syncLoop.js'
+export {
+  syncOfflineTraces,
+  refreshGateCaches,
+  localHoldTokensFor,
+  applySkillOptEdits,
+  reportHarnessAgents,
+  emitSkillFlaggedEvents,
+  APPLIED_SUGGESTIONS_RELATIVE_PATH,
+} from './syncCycle.js'
 
 export { collectAgentReport, reportAgent, fetchLocalProxyInstanceId } from './agentReporter.js'
 export { startHarnessSession, endAllOpenSessions, readGitInfo } from './sessionReporter.js'
-export type { SyncLoopOptions, SyncResult } from './syncLoop.js'
 
-export { writeConfigFiles, loadLocalSopEntries } from './configWriter.js'
-export type { WriteResult } from './configWriter.js'
+export { loadLocalSopEntries, HARNESS_FILES, clearImmutable, setImmutable } from './configWriter.js'
 
-export { computeFileHashes, hashFile } from './hashReporter.js'
+export { captureAndUpload, shouldCaptureThisIteration, redactConfigText } from './configReader.js'
 
-export { loadIntegrity, saveIntegrity } from './integrityStore.js'
-
-export { HARNESS_FILES } from './configWriter.js'
+export { writeBundledSkills } from './skillWriter.js'
 
 export { SyncWsClient } from './wsClient.js'
 export type { WsClientOptions } from './wsClient.js'
@@ -45,6 +47,8 @@ export {
 export type { SopHookConstraints } from './harness/claudeCodeHooks.js'
 
 export { injectMcpServer } from './harness/mcpAutoWrite.js'
+export { planDisconnect, DisconnectPlan, HARNESS_REVERSERS, keepOriginal, noteWritten, noteProxyUrl, writeOwnedFile } from './disconnect/index.js'
+export type { DisconnectOptions, PlannedChange, PlanNote } from './disconnect/index.js'
 
 export { guardSettingsFile, warnIfDshCoverageGap } from './watcher/settingsGuard.js'
 

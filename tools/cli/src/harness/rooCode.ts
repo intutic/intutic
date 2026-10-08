@@ -11,14 +11,15 @@
  * @module
  */
 
-import { access, readdir, writeFile, rename, mkdir } from 'node:fs/promises'
-import { join, dirname } from 'node:path'
+import { access, readdir } from 'node:fs/promises'
+import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { HarnessType } from '@intutic/shared-types'
 import type { SyncSopEntry } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
 import { hashFile } from '../lib/hash.js'
 import { newIso } from '@intutic/id'
+import { writeOwnedFile } from '@intutic/sync-daemon'
 
 const CONFIG_FILE = '.roorules'
 
@@ -64,10 +65,7 @@ export const rooCodeAdapter: IHarnessAdapter = {
       '',
     ].join('\n')
 
-    await mkdir(dirname(filePath), { recursive: true })
-    const tmp = filePath + '.intutic-tmp'
-    await writeFile(tmp, content, 'utf-8')
-    await rename(tmp, filePath)
+    await writeOwnedFile(filePath, workspaceRoot, content)
 
     return filePath
   },

@@ -32,6 +32,19 @@ SAML 2.0 providers use the Assertion Consumer Service URL `…/api/v1/auth/saml/
 Once SSO is configured, team members can log in using their corporate SSO ID. You can enforce auto-provisioning of members on their first login.
 :::
 
+### Groups
+
+Each SSO sign-in stores the groups your identity provider sends: the OIDC
+`groups` claim (or `https://claims.intutic.com/groups`), or the SAML `groups`
+attribute (or `http://schemas.xmlsoap.org/claims/Group`). An
+[SSO group policy](/concepts/circuit-breaker#_3-sso-group-clearance) uses them to
+decide who may run high-risk tools, and a change at your identity provider
+applies when the member next signs in.
+
+When [SCIM provisioning](/guide/scim) is on, SCIM group memberships are used
+instead and the groups from sign-ins are ignored; a SCIM change applies without
+a sign-in.
+
 ### Supported Providers
 
 Any OIDC compliant identity provider works with Intutic, including:
@@ -195,7 +208,9 @@ DELETE /api/v1/members/:memberId
 
 or **Settings › Team Members › Deactivate**. This takes effect
 immediately — every key the member holds stops authenticating at the control plane
-and at the proxy on the next request, not after a cache expiry.
+and at the proxy on the next request, not after a cache expiry. The member also
+cannot sign in again by any method: password, magic link, GitHub, Google, OIDC or
+SAML. Each refused attempt is recorded as a failed sign-in.
 
 Deactivation does not revoke the keys, only refuses them, so reactivating the
 member restores their access without reissuing anything.

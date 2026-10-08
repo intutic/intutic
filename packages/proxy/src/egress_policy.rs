@@ -64,14 +64,19 @@ pub enum EgressMode {
 }
 
 impl EgressMode {
-    /// Parse from a free-form string (env var). Unknown values fall back to the
-    /// safe default (`Off`) rather than failing the boot — an operator typo in
-    /// an *enforcement* knob must never silently harden into a deny-all.
-    pub fn parse_lenient(s: &str) -> Self {
+    /// Parse the `INTUTIC_EGRESS_MODE` value (case and surrounding space
+    /// ignored). An unknown value is an error naming the valid ones: it used to
+    /// mean `off`, so a typo in `enforce` turned egress control off without a
+    /// word. The config file's `mode` key gets the same refusal from serde.
+    pub fn parse(s: &str) -> Result<Self, String> {
         match s.trim().to_ascii_lowercase().as_str() {
-            "enforce" => EgressMode::Enforce,
-            "monitor" => EgressMode::Monitor,
-            _ => EgressMode::Off,
+            "off" => Ok(EgressMode::Off),
+            "monitor" => Ok(EgressMode::Monitor),
+            "enforce" => Ok(EgressMode::Enforce),
+            _ => Err(format!(
+                "INTUTIC_EGRESS_MODE={:?} is not an egress mode; use off, monitor or enforce",
+                s.trim()
+            )),
         }
     }
 }
@@ -208,12 +213,11 @@ pub struct EgressPolicy {
 impl EgressPolicy {
     /// Build from a config block plus the `INTUTIC_EGRESS_MODE` /
     /// `INTUTIC_EGRESS_ALLOW` env vars. Env mode overrides config mode; env
-    /// allow entries are added to (not replacing) config ones.
-    pub fn from_config_and_env(cfg: &EgressConfig) -> EgressPolicy {
-        let mode = match std::env::var("INTUTIC_EGRESS_MODE") {
-            Ok(v) if !v.trim().is_empty() => EgressMode::parse_lenient(&v),
-            _ => cfg.mode,
-        };
+    /// allow entries are added to (not replacing) config ones. Fails on an
+    /// `INTUTIC_EGRESS_MODE` that is not a mode.
+    pub fn from_config_and_env(cfg: &EgressConfig) -> anyhow::Result<EgressPolicy> {
+        let env_mode = std::env::var("INTUTIC_EGRESS_MODE").ok();
+        let mode = Self::resolve_mode(cfg.mode, env_mode.as_deref()).map_err(anyhow::Error::msg)?;
 
         let mut entries: BTreeSet<String> = BTreeSet::new();
         for e in &cfg.allow {
@@ -231,7 +235,15 @@ impl EgressPolicy {
             }
         }
 
-        Self::from_entries(mode, entries)
+        Ok(Self::from_entries(mode, entries))
+    }
+
+    /// The env mode when set and non-empty, else the config mode.
+    fn resolve_mode(config: EgressMode, env: Option<&str>) -> Result<EgressMode, String> {
+        match env {
+            Some(v) if !v.trim().is_empty() => EgressMode::parse(v),
+            _ => Ok(config),
+        }
     }
 
     /// Core constructor, split out so tests can build a policy without touching
@@ -595,13 +607,47 @@ mod tests {
     }
 
     #[test]
-    fn mode_parse_is_lenient_and_safe() {
-        assert_eq!(EgressMode::parse_lenient("enforce"), EgressMode::Enforce);
-        assert_eq!(EgressMode::parse_lenient("  Monitor "), EgressMode::Monitor);
-        assert_eq!(EgressMode::parse_lenient("off"), EgressMode::Off);
-        // an unknown value falls back to Off, never to Enforce
-        assert_eq!(EgressMode::parse_lenient("enfroce"), EgressMode::Off);
-        assert_eq!(EgressMode::parse_lenient(""), EgressMode::Off);
+    fn mode_parse_accepts_the_three_modes() {
+        assert_eq!(EgressMode::parse("enforce"), Ok(EgressMode::Enforce));
+        assert_eq!(EgressMode::parse("  Monitor "), Ok(EgressMode::Monitor));
+        assert_eq!(EgressMode::parse("off"), Ok(EgressMode::Off));
+    }
+
+    #[test]
+    fn an_unknown_mode_is_an_error_naming_the_valid_ones() {
+        // A typo used to mean Off: egress control silently disabled.
+        let err = EgressMode::parse("enfroce").unwrap_err();
+        assert!(err.contains("\"enfroce\""), "{err}");
+        assert!(err.contains("off, monitor or enforce"), "{err}");
+        assert!(EgressMode::parse("on").is_err());
+    }
+
+    #[test]
+    fn an_empty_env_mode_defers_to_config_and_a_bad_one_fails() {
+        assert_eq!(
+            EgressPolicy::resolve_mode(EgressMode::Monitor, None),
+            Ok(EgressMode::Monitor)
+        );
+        assert_eq!(
+            EgressPolicy::resolve_mode(EgressMode::Monitor, Some("  ")),
+            Ok(EgressMode::Monitor)
+        );
+        assert_eq!(
+            EgressPolicy::resolve_mode(EgressMode::Off, Some("enforce")),
+            Ok(EgressMode::Enforce)
+        );
+        assert!(EgressPolicy::resolve_mode(EgressMode::Enforce, Some("enforced")).is_err());
+    }
+
+    #[test]
+    fn an_unknown_config_mode_is_refused_with_the_valid_ones() {
+        let err = serde_yaml::from_str::<EgressConfig>("mode: enfroce\n")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("off") && err.contains("monitor") && err.contains("enforce"),
+            "{err}"
+        );
     }
 
     // ── Central policy distribution (LLD #63 §4) ──────────────────────────

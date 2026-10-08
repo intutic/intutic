@@ -1,6 +1,6 @@
 # SIEM Export <Badge type="tip" text="Cloud" />
 
-Stream governance events — execution traces, incidents, detector findings, and plan lifecycle decisions — to your own SIEM or warehouse.
+Stream governance events — execution traces, incidents, detector findings, plan decisions, sign-ins, settings and policy changes, gate and integrity alerts, and optionally every gate decision — to your own SIEM or warehouse.
 
 ---
 
@@ -14,7 +14,7 @@ Six destination types are supported:
 |---|---|
 | Splunk (HEC) | HTTP Event Collector, NDJSON-per-line envelopes |
 | Datadog Logs | Log Intake v2, gzip-compressed batches |
-| Generic Webhook | JSON `POST` to any HTTPS endpoint, optional bearer/auth header |
+| Generic Webhook | JSON `POST` to any HTTPS endpoint, HMAC-signed, optional bearer/auth header |
 | Syslog (CEF) | TCP/TLS, CEF-encoded for legacy SIEM ingestion |
 | Amazon S3 | Buffered NDJSON micro-batches, one object per flush |
 | Google Cloud Storage | Same buffering as S3 |
@@ -29,13 +29,91 @@ Use **Test** to run a synchronous health check against a destination without wai
 
 ## What gets streamed
 
-- `execution_traces` — every completed trace, as it's recorded
-- `governance_incidents` — every raised incident
-- `detector_findings` — every finding from the proxy's anomaly detector pipeline
-- `stored_plans` — plan approve/reject/close decisions
-- `enforcement_devices` — a device's firewall enforcement being disabled, and (emitter path only, see below) a device going stale
+Every event carries a `sourceTable` naming its source:
+
+| Source | What it carries |
+|---|---|
+| `execution_traces` | Every completed trace, as it's recorded |
+| `governance_incidents` | Every raised incident |
+| `detector_findings` | Every finding from the proxy's anomaly detector pipeline, allowed or blocked |
+| `stored_plans` | Plan approve, reject and close decisions |
+| `enforcement_devices` | A device's firewall enforcement being disabled, and (emitter path only, see below) a device going stale |
+| `login_events` | Every sign-in — password, SSO (OIDC or SAML), magic link, GitHub, Google, and the sign-up that signs a new owner in — and every refused sign-in that belongs to a workspace: a wrong password, a deactivated member, an SSO identity the workspace does not admit, an IdP response that fails verification. Each carries the method, `outcome` (`success` or `failure`), `failure_reason`, the member (or, when none was resolved, the email presented), IP address and user agent. An attempt against an email no workspace knows is not recorded |
+| `workspace_settings_changes` | Every workspace settings change: who made it, which keys changed, and the before and after values with secrets redacted. Policy guardrails that set the model allowlist or egress allow list appear here too |
+| `sop_registry` | A guideline moving between lifecycle states (for example draft to validated, or validated to invalidated): which guideline, from and to, and who moved it |
+| `governance_alerts` | The alerts the notification hub sends: a gate that stopped reporting, the same gate reporting again, and a failed trace integrity check. `payload.alert_type` says which |
+| `gate_decisions` | **Opt-in.** Every verdict a hook gate records: allow, block, flag, would-block (shadow mode), hold and approved bypass, with the tool name, reason, rule, harness and session. Also every tool call the proxy's response gate withholds under the SSO group policy, as a block with source `proxy_response_gate`. The tool's input is not included |
 
 Delivery is in-process by default (no Kafka or Debezium dependency by default): the control plane's own domain event emitter drives it directly, so a destination configured today starts receiving events on the very next matching action. An optional Kafka/Debezium CDC ingestion path is also available — see "Delivery guarantees" below.
+
+### Choosing sources
+
+A destination's `sourceTables` list selects what it receives. Leave it empty, as **Add Destination** does by default, to receive every source except `gate_decisions`; new low-volume sources reach such a destination as they are added. A non-empty list is exact: the destination receives those sources and nothing else. An unknown name is refused when you save, and `GET /api/v1/siem/destinations` returns the valid names (`sources.all`) and the default set (`sources.defaults`).
+
+Gate decisions are opt-in because there is one per tool call, allows included. Tick **Also stream gate decisions** when adding a destination, or send a `sourceTables` list that includes `gate_decisions`:
+
+```bash
+curl -X PUT https://<control-plane>/api/v1/siem/destinations/<id> \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"sourceTables": ["governance_incidents", "detector_findings", "login_events", "workspace_settings_changes", "governance_alerts", "gate_decisions"]}'
+```
+
+Hook gates report in batches, and each batch goes to a destination as one delivery: one webhook request, one Splunk or Datadog request, or one batch for a bucket. Decisions from SDK gates that ask the control plane per call (`POST /api/v1/hook-gate`) are delivered one at a time. Decisions made in the proxy, rather than in a hook gate, already stream as `detector_findings` and `governance_incidents`.
+
+### Syslog (CEF) classes
+
+Each source has its own CEF event class, so a SIEM rule can match on it:
+
+| Source | Event class | Severity |
+|---|---|---|
+| `gate_decisions` | `GATE_<VERDICT>`, for example `GATE_BLOCK` | 7 for a block, 6 for an approved bypass, 5 for a hold or would-block, 4 for a flag, 1 for an allow |
+| `login_events` | `AUTH_LOGIN`, or `AUTH_LOGIN_FAILURE` for a refused sign-in | 3, and 5 for a refusal |
+| `workspace_settings_changes` | `SETTINGS_CHANGE` | 5 |
+| `sop_registry` | `POLICY_CHANGE_UPDATE` | 4 |
+| `governance_alerts` | `GATE_SILENT`, `GATE_RECOVERED` or `INTEGRITY_FAILURE` | 7, 1 and 10 |
+
+### Bucket batching
+
+S3 and GCS destinations hold events until the destination's `batchSize` events are waiting or `flushIntervalMs` has passed since the first (defaults 100 and 60 seconds), then write them as one NDJSON object. A batch that cannot be written goes to the dead-letter queue whole. Held events are written when the control plane shuts down cleanly; a crash loses them, like any other in-flight event on the emitter path.
+
+## Verifying webhook signatures
+
+Every webhook destination gets a signing secret when it is created. The create response is the only place it appears in full; copy it then. **New signing secret** on the destination's row (or `POST /api/v1/siem/destinations/:id/signing-secret`) replaces it and shows the new one once; deliveries switch to the new secret straight away. Every delivery is signed; there is no unsigned option.
+
+Each request carries two headers:
+
+- `X-Intutic-Timestamp` — the send time, in Unix seconds
+- `X-Intutic-Signature` — `sha256=` followed by the hex HMAC-SHA256 of `<timestamp>.<raw request body>`, keyed with the signing secret
+
+[Notification webhooks](/guide/settings#verifying-webhook-signatures) are signed exactly the same way, so one function verifies both. The signature covers the timestamp, so a receiver can refuse a delivery that was captured and replayed later. To verify:
+
+1. Read the raw body exactly as received, before any JSON parsing.
+2. Compute the HMAC over the timestamp header, a `.`, and the raw body, and compare it with the signature header in constant time.
+3. Refuse the request if the timestamp is older than five minutes (or more than five minutes ahead of your clock). A retried delivery is signed again when it is sent, so retries carry a fresh timestamp.
+
+```ts
+import { createHmac, timingSafeEqual } from 'node:crypto'
+
+export function verifyIntuticWebhook(rawBody: string, headers: Record<string, string>, secret: string): boolean {
+  const timestamp = headers['x-intutic-timestamp']
+  const signature = headers['x-intutic-signature'] ?? ''
+  if (!timestamp || Math.abs(Date.now() / 1000 - Number(timestamp)) > 300) return false
+  const expected = `sha256=${createHmac('sha256', secret).update(`${timestamp}.${rawBody}`).digest('hex')}`
+  return signature.length === expected.length && timingSafeEqual(Buffer.from(signature), Buffer.from(expected))
+}
+```
+
+```python
+import hashlib, hmac, time
+
+def verify_intutic_webhook(raw_body: bytes, headers: dict, secret: str) -> bool:
+    timestamp = headers.get("x-intutic-timestamp", "")
+    signature = headers.get("x-intutic-signature", "")
+    if not timestamp or abs(time.time() - int(timestamp)) > 300:
+        return False
+    mac = hmac.new(secret.encode(), timestamp.encode() + b"." + raw_body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(signature, "sha256=" + mac)
+```
 
 ## Delivery guarantees
 
@@ -53,6 +131,7 @@ Every event, from either path, is retried up to 5 times per destination with exp
 - **Replayable by consumer offset.** A consumer group can be rewound and replayed from any retained offset — recovering from a bad destination config or a downstream outage doesn't require the source events to still be "live" anywhere else.
 - **Survives control-plane restarts.** Nothing is held in process memory between the WAL and the consumer; a restart just resumes from the last committed offset.
 - **Safe with multiple replicas.** Kafka consumer-group semantics partition work across replicas without duplicate delivery — the multi-replica caveat above does not apply here.
+- **The original five sources only.** CDC carries `execution_traces`, `governance_incidents`, `detector_findings`, `stored_plans` and `enforcement_devices`. Every other source in the table above is delivered by the emitter path whether or not Kafka is on.
 - **Same dedup key family, same DLQ.** Event ids are deterministic from Kafka delivery coordinates (`siemev_cdc_<topic>_<partition>_<offset>`), so redelivery reproduces the same id; failures land in the identical DLQ the emitter path uses.
 
 **Setup:** the Kafka/CDC path is opt-in and requires an operator-run Kafka broker, Kafka Connect, and Debezium connector (this product does not deploy any of those three) — see `infra/kubernetes/cdc/README.md` in the enterprise repo for the full runbook, including the required `REPLICA IDENTITY FULL` change on two tables and every `KAFKA_*` environment variable the control plane reads.

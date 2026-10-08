@@ -13,8 +13,9 @@ stock Intutic before the call runs locally.
 This module is that enforcement point: the missing adapter, written against
 Intutic's own published gate contract.
 
-Four tiers, in order:
+Five tiers, in order:
 
+  A0  SSO group policy  from the policy snapshot       unknown groups refused
   A1  policy snapshot   port of intuticGate()          fails CLOSED
   A3  SOP rules         authored in the product        fails OPEN (A2 covers it)
   A2  image integrity   local check                    fails CLOSED
@@ -42,7 +43,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from ..errors import ClawdeError
-from . import imagecheck, snapshot, soprules
+from . import imagecheck, snapshot, soprules, sso_groups
 from .actions import is_deploy, touches_infra
 from .client import GateClient
 
@@ -182,6 +183,19 @@ class Gate:
         command = tool_input.get("command") or ""
 
         self._report_snapshot_health_once(tool_name)
+
+        # ---- Tier A0: SSO group policy, from the snapshot ------------------
+        # The workspace's group policy decided for the member the snapshot was
+        # issued to — the same evaluator, and so the same answer, as the
+        # control plane's hook gate. Not skippable by INTUTIC_GUARD_DISABLE: it
+        # is the workspace's own policy, not the destructive family.
+        record = self.snapshot().sso_groups
+        if record is not None:
+            d = sso_groups.evaluate(record.policy, tool_name, record.member_groups)
+            if d.clearance != sso_groups.GRANTED:
+                reason = f"{d.reason} [{d.rule_id}]"
+                self._emit("tool_blocked", tool_name, reason, tool_input)
+                raise IntuticGateRefusal(reason, "SSO_GROUP")
 
         # ---- Tier A1: policy snapshot -------------------------------------
         disabled = snapshot.guard_disabled_from_env()

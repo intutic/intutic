@@ -71,6 +71,7 @@ import * as path from 'node:path'
 import * as os from 'node:os'
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml'
 import { createLogger } from '@intutic/logger'
+import { keepOriginal, writeOwnedFile } from '../disconnect/originals.js'
 import { openaiBaseUrl } from '@intutic/shared-types'
 import { newIso } from '@intutic/id'
 import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
@@ -224,13 +225,6 @@ process.stdin.on('end', () => {
 `
 }
 
-async function atomicWriteJson(filePath: string, data: unknown): Promise<void> {
-  const tmp = filePath + '.intutic-tmp'
-  await fs.mkdir(path.dirname(filePath), { recursive: true })
-  await fs.writeFile(tmp, JSON.stringify(data, null, 2) + '\n', 'utf-8')
-  await fs.rename(tmp, filePath)
-}
-
 // ─── config.toml model base_url merge ─────────────────────────────────────
 
 /** Structural TOML shape this writer cares about; anything else round-trips
@@ -293,7 +287,7 @@ async function mergeGrokConfigTomlAppendOnly(
  * table (`GROK_DEFAULT_MODEL_ID` below) — see this module's doc comment for
  * why that id is CONFIRMED against the real open-sourced default, not a guess.
  */
-async function mergeGrokConfigToml(configPath: string, proxyUrl: string): Promise<void> {
+async function mergeGrokConfigToml(configPath: string, proxyUrl: string, workspaceRoot: string): Promise<void> {
   let existing = ''
   try {
     existing = await fs.readFile(configPath, 'utf-8')
@@ -310,6 +304,7 @@ async function mergeGrokConfigToml(configPath: string, proxyUrl: string): Promis
       { action: 'grok_toml_unparseable', path: configPath, err: (err as Error).message },
       'Grok config.toml did not parse as TOML — falling back to append-only text injection',
     )
+    await keepOriginal(configPath, workspaceRoot)
     await mergeGrokConfigTomlAppendOnly(configPath, existing, proxyUrl)
     return
   }
@@ -343,6 +338,7 @@ async function mergeGrokConfigToml(configPath: string, proxyUrl: string): Promis
   }
 
   doc.model = model
+  await keepOriginal(configPath, workspaceRoot)
   await fs.mkdir(path.dirname(configPath), { recursive: true })
   const tmp = configPath + '.intutic-tmp'
   await fs.writeFile(tmp, stringifyToml(doc), 'utf-8')
@@ -375,16 +371,16 @@ export async function writeGrokHooks(
   await fs.rename(tmpScript, hookScriptPath)
   await fs.chmod(hookScriptPath, 0o755)
 
-  const registration = buildHookRegistration(hookScriptPath)
+  const registration = JSON.stringify(buildHookRegistration(hookScriptPath), null, 2) + '\n'
 
   // 1. Project-level: <root>/.grok/hooks/intutic-governance.json
   const projectHooksDir = path.join(workspaceRoot, '.grok', 'hooks')
-  await atomicWriteJson(path.join(projectHooksDir, HOOK_FILENAME), registration)
+  await writeOwnedFile(path.join(projectHooksDir, HOOK_FILENAME), workspaceRoot, registration)
   log.info({ action: 'grok_hooks_written', level: 'project', path: projectHooksDir }, 'Grok project-level hooks written')
 
   // 2. User-level: ~/.grok/hooks/intutic-governance.json
   const userHooksDir = path.join(GROK_USER_DIR, 'hooks')
-  await atomicWriteJson(path.join(userHooksDir, HOOK_FILENAME), registration)
+  await writeOwnedFile(path.join(userHooksDir, HOOK_FILENAME), workspaceRoot, registration)
   log.info({ action: 'grok_hooks_written', level: 'user', path: userHooksDir }, 'Grok user-level hooks written')
 
   // 3. config.toml model base_url — project and user level.
@@ -392,6 +388,6 @@ export async function writeGrokHooks(
   // is https://api.x.ai/v1) and appends /chat/completions, so the proxy URL it
   // needs is the OpenAI-style one, ending in /v1.
   const modelBaseUrl = openaiBaseUrl(proxyUrl)
-  await mergeGrokConfigToml(path.join(workspaceRoot, '.grok', 'config.toml'), modelBaseUrl)
-  await mergeGrokConfigToml(path.join(GROK_USER_DIR, 'config.toml'), modelBaseUrl)
+  await mergeGrokConfigToml(path.join(workspaceRoot, '.grok', 'config.toml'), modelBaseUrl, workspaceRoot)
+  await mergeGrokConfigToml(path.join(GROK_USER_DIR, 'config.toml'), modelBaseUrl, workspaceRoot)
 }

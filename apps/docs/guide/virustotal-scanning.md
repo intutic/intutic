@@ -13,7 +13,7 @@ Checks the sha256 hash of a skill-bundled **script** against VirusTotal's public
 
 This integration calls exactly one VirusTotal endpoint: `GET /api/v3/files/{sha256}`. It never calls `POST /api/v3/files` (upload), and the module that talks to VirusTotal (`services/control-plane/src/services/virusTotalService.ts`) has no code path capable of reading, buffering, or transmitting a file's actual content — only the sha256 hash `auditScriptFile` already computes during [skill scanning](/guide/skill-scanning#bundled-scripts) ever leaves your workspace.
 
-**This is not the same thing as this product's standing decline of a global MCP-server reputation database.** [MCP Governance](/guide/mcp-governance#what-this-phase-deliberately-does-not-cover) states directly that Intutic does not maintain or consume a shared "is this MCP server known bad" list, across tenants, for MCP *servers*. This integration is narrower and different in kind: a workspace-scoped, opt-in hash lookup on a skill-bundled *script file*, disabled until an operator turns it on, never treated as a cross-tenant reputation signal beyond the identical-hash verdict cache described below.
+**This is not the same thing as this product's standing decline of a global MCP-server reputation database.** [MCP Governance](/guide/mcp-governance#limits) states directly that Intutic does not maintain or consume a shared "is this MCP server known bad" list, across tenants, for MCP *servers*. This integration is narrower and different in kind: a workspace-scoped, opt-in hash lookup on a skill-bundled *script file*, disabled until an operator turns it on, never treated as a cross-tenant reputation signal beyond the identical-hash verdict cache described below.
 
 Scope, precisely:
 

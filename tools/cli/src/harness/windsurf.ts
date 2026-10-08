@@ -4,7 +4,7 @@
  * Writes .windsurfrules governance text and injects Cascade hook scripts
  * at user-level (~/.codeium/windsurf/hooks.json) and workspace-level
  * (.windsurf/hooks.json), merged with any hooks already there. Also merges
- * HTTP proxy settings into ~/.codeium/windsurf/settings.json, and switches
+ * HTTP proxy settings into Windsurf's user settings.json, and switches
  * the IDE HTTP proxy of every JetBrains IDE where the Windsurf plugin is set
  * up, so Windsurf's AI traffic goes through the Intutic TLS MITM proxy.
  *
@@ -22,8 +22,7 @@ import { hashFile } from '../lib/hash.js'
 import { buildMarkdownContent } from './base.js'
 import { loadCredentials } from '../config/store.js'
 import { writeWindsurfHooks } from '@intutic/sync-daemon/harness/windsurfHooks'
-import { writeFile, rename, mkdir } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { writeOwnedFile } from '@intutic/sync-daemon'
 
 const CONFIG_FILE = '.windsurfrules'
 const WINDSURF_USER_DIR = join(homedir(), '.codeium', 'windsurf')
@@ -43,10 +42,7 @@ export const windsurfAdapter: IHarnessAdapter = {
     // 1. Write .windsurfrules markdown governance text
     const filePath = join(workspaceRoot, CONFIG_FILE)
     const content = buildMarkdownContent(sops, proxyUrl)
-    await mkdir(dirname(filePath), { recursive: true })
-    const tmp = filePath + '.intutic-tmp'
-    await writeFile(tmp, content, 'utf-8')
-    await rename(tmp, filePath)
+    await writeOwnedFile(filePath, workspaceRoot, content)
 
     // 2. Write Cascade hooks.json at user + workspace level, configure TLS MITM
     //    proxy. The proxy serves HTTP CONNECT on the same listener as its API,

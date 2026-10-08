@@ -20,6 +20,7 @@ import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
+import { keepOriginal } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
 import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
 
@@ -28,7 +29,7 @@ const log = createLogger('sync-claude-desktop-hooks')
 /** Governance-sensitive paths that the hook gate protects (mirrors claudeCodeHooks). */
 
 /** Resolve the OS-specific claude_desktop_config.json path. */
-function resolveClaudeDesktopConfigPath(): string {
+export function resolveClaudeDesktopConfigPath(): string {
   switch (process.platform) {
     case 'darwin':
       return path.join(os.homedir(), 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json')
@@ -218,6 +219,7 @@ export async function writeClaudeDesktopHooks(
   const desktopConfigPath = resolveClaudeDesktopConfigPath()
   const desktopConfigDir = path.dirname(desktopConfigPath)
 
+  await keepOriginal(desktopConfigPath, workspaceRoot)
   await Promise.all([
     fs.mkdir(hookScriptDir, { recursive: true }),
     fs.mkdir(hookEventsDir, { recursive: true }),

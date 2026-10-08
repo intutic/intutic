@@ -29,6 +29,7 @@ import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
+import { keepOriginal } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
 import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
 import { readJsonObjectForMerge } from './jsonMergeTarget.js'
@@ -276,12 +277,14 @@ export async function writeCursorHooks(
 
   // 1. Project-level: .cursor/hooks.json
   const projectCursorDir = path.join(workspaceRoot, '.cursor')
+  await keepOriginal(path.join(projectCursorDir, 'hooks.json'), workspaceRoot)
   await fs.mkdir(projectCursorDir, { recursive: true })
   await mergeHooksJsonFile(path.join(projectCursorDir, 'hooks.json'), hookScriptPath)
   log.info({ action: 'cursor_hooks_written', level: 'project', path: projectCursorDir }, 'Cursor project-level hooks written')
 
   // 2. User-level: ~/.cursor/hooks.json
   const userCursorDir = path.join(os.homedir(), '.cursor')
+  await keepOriginal(path.join(userCursorDir, 'hooks.json'), workspaceRoot)
   await fs.mkdir(userCursorDir, { recursive: true })
   await mergeHooksJsonFile(path.join(userCursorDir, 'hooks.json'), hookScriptPath)
   log.info({ action: 'cursor_hooks_written', level: 'user', path: userCursorDir }, 'Cursor user-level hooks written')

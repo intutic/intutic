@@ -83,7 +83,7 @@ describe('intutic predict-cost', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('posts workspaceId, model, inputTokenCount and taskType (default "coding") when using --tokens', async () => {
+  it('posts workspaceId, model and inputTokenCount when using --tokens', async () => {
     fetchMock.mockResolvedValue({ ok: true, json: async () => prediction })
 
     await runPredictCost({ model: 'claude-sonnet-4-5', tokens: '1200' })
@@ -97,7 +97,6 @@ describe('intutic predict-cost', () => {
       workspaceId: 'ws_test',
       model: 'claude-sonnet-4-5',
       inputTokenCount: 1200,
-      taskType: 'coding',
     })
   })
 
@@ -105,7 +104,7 @@ describe('intutic predict-cost', () => {
     readFileMock.mockResolvedValue('a prompt from disk')
     fetchMock.mockResolvedValue({ ok: true, json: async () => prediction })
 
-    await runPredictCost({ model: 'gpt-4o', file: 'prompt.txt', taskType: 'review' })
+    await runPredictCost({ model: 'gpt-4o', file: 'prompt.txt' })
 
     const [, init] = fetchMock.mock.calls[0]
     const body = JSON.parse(init.body)
@@ -113,7 +112,6 @@ describe('intutic predict-cost', () => {
       workspaceId: 'ws_test',
       model: 'gpt-4o',
       inputText: 'a prompt from disk',
-      taskType: 'review',
     })
   })
 

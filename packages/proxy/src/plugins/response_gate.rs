@@ -70,11 +70,23 @@
 //! integrity scorer, so it is a behaviour change there too rather than an
 //! addition here.
 //!
+//! # SSO-group clearance
+//!
+//! The same name-keyed check carries the workspace's SSO group policy
+//! ([`crate::sso_groups`]): a tool the member's groups do not clear, or one
+//! that is on-behalf-of only, is withheld exactly as a `deny_tools` hit is,
+//! and the refusal names the deciding rule (`[sso_group.high_risk.Bash]`).
+//! Harnesses with no hook system of their own — Roo Code, or aider pointed at
+//! the proxy — have no other gate to apply it. Neither
+//! shadow enforcement nor any intervention mode softens it, matching the hook
+//! gate, the MCP proxy and the harness gates.
+//!
 //! # Fail direction
 //!
 //! Two-level, deliberately.
 //!
-//! 1. **Scope.** The gate is inert unless the role has a non-empty deny list.
+//! 1. **Scope.** The gate is inert unless the role has a non-empty deny list
+//!    (or the workspace has an SSO group policy that names a tool).
 //!    A workspace that has declared no `deny_tools` cannot be broken by any of
 //!    this, whatever the response looks like. That is what keeps a fail-closed
 //!    default from being reckless: the blast radius is the set of operators who
@@ -97,12 +109,19 @@ use crate::commands::WireProvider;
 use crate::config::ResponseGateConfig;
 use crate::plugins::anomaly::AnomalyKind;
 use crate::plugins::sql_guard::{self, SqlGuardPolicy, SqlViolation};
+use crate::sso_groups::{Clearance, SsoGroupDecision, SsoGroupGate};
 
 /// Why the gate refused a response.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DenialReason {
     /// Tool names the role's SOPs forbid, sorted and deduped.
     Tools(Vec<String>),
+    /// A tool the workspace's SSO group policy refuses this member — `DENIED`
+    /// or `REQUIRES_OBO`, which every gate refuses alike.
+    SsoGroup {
+        tool: String,
+        decision: SsoGroupDecision,
+    },
     /// A shell call that would run destructive SQL against a database the
     /// role's `sql_allow_dsns:` does not admit (`plugins::sql_guard`, TD-480).
     DestructiveSql(SqlViolation),
@@ -146,13 +165,18 @@ impl Denial {
                 AnomalyKind::UnauthorizedTool.as_str(),
                 t.join(", ")
             ),
+            DenialReason::SsoGroup { decision, .. } => format!(
+                "Response blocked by SSO group policy [{}]: {}",
+                decision.clearance.as_str(),
+                decision.refusal_reason()
+            ),
             DenialReason::DestructiveSql(v) => format!(
                 "Response blocked by anomaly policy [{}]: {}",
                 AnomalyKind::ToolAbuse.as_str(),
                 v.log_message()
             ),
             DenialReason::Unparseable => format!(
-                "Response blocked by anomaly policy [{}]: response body did not parse, and a tool deny list or SQL guard is in force — cannot show it carries no forbidden call",
+                "Response blocked by anomaly policy [{}]: response body did not parse, and a tool deny list, SSO group policy or SQL guard is in force — cannot show it carries no forbidden call",
                 AnomalyKind::UnauthorizedTool.as_str()
             ),
         }
@@ -171,9 +195,15 @@ impl Denial {
                  Do not retry it — continue without that tool, or ask an operator to change the policy.",
                 t.join(", ")
             ),
+            DenialReason::SsoGroup { tool, decision } => format!(
+                "[Intutic] Blocked tool call: {tool}. {} \
+                 The call was withheld by the proxy and never reached the client, so it did not run. \
+                 Do not retry it — continue without that tool, or ask an operator for the access.",
+                decision.refusal_reason()
+            ),
             DenialReason::DestructiveSql(v) => v.agent_message(),
             DenialReason::Unparseable => {
-                "[Intutic] The model's response could not be parsed, and a tool deny list or SQL guard is in force \
+                "[Intutic] The model's response could not be parsed, and a tool deny list, SSO group policy or SQL guard is in force \
                  for this agent role, so the proxy could not show the response carried no forbidden \
                  tool call. The response was withheld. Retry the request."
                     .to_string()
@@ -235,6 +265,61 @@ pub fn gate_response(
         reason: DenialReason::Tools(hits),
         block_index: 0,
     })
+}
+
+/// The SSO group gate, when there is one that could refuse something and the
+/// response gate is on.
+fn active_sso_gate<'a>(
+    cfg: &ResponseGateConfig,
+    gate: Option<&'a SsoGroupGate>,
+) -> Option<&'a SsoGroupGate> {
+    gate.filter(|g| cfg.enabled && g.can_refuse())
+}
+
+fn sso_group_denial(gate: &SsoGroupGate, tool: &str, block_index: u64) -> Option<Denial> {
+    let decision = gate.decide(tool);
+    (decision.clearance != Clearance::Granted).then(|| Denial {
+        reason: DenialReason::SsoGroup {
+            tool: tool.to_string(),
+            decision,
+        },
+        block_index,
+    })
+}
+
+/// Evaluate a complete, parsed response body against the workspace's SSO
+/// group policy, for the member the request's key belongs to.
+///
+/// Inert without a policy or with the gate off — the same two-level fail
+/// direction as the deny list, `fail_closed` included. The first refused call
+/// decides; the body is replaced whole, so a second one never ships either.
+pub fn gate_response_sso_groups(
+    cfg: &ResponseGateConfig,
+    body: Option<&Value>,
+    gate: Option<&SsoGroupGate>,
+) -> Option<Denial> {
+    let gate = active_sso_gate(cfg, gate)?;
+    let Some(body) = body else {
+        return cfg.fail_closed.then_some(Denial {
+            reason: DenialReason::Unparseable,
+            block_index: 0,
+        });
+    };
+    crate::routing::integrity::response_tool_calls(body)
+        .into_iter()
+        .find_map(|(name, _args, _raw)| sso_group_denial(gate, &name, 0))
+}
+
+/// The SSO group check on one SSE line — name only, like [`gate_stream_line`],
+/// and like it `None` for any line that is not a readable tool-call start.
+pub fn gate_stream_line_sso_groups(
+    cfg: &ResponseGateConfig,
+    line: &str,
+    gate: Option<&SsoGroupGate>,
+) -> Option<Denial> {
+    let gate = active_sso_gate(cfg, gate)?;
+    let event = crate::protocol::tool_use_parser::parse_sse_chunk(line)?;
+    sso_group_denial(gate, &event.tool_name, event.block_index)
 }
 
 /// Evaluate a complete, parsed response body against the SQL guard in force.
@@ -1193,5 +1278,149 @@ mod tests {
         };
         assert!(u.log_message().contains("UNAUTHORIZED_TOOL"));
         assert!(!u.agent_message().is_empty());
+    }
+
+    // ── SSO-group clearance ─────────────────────────────────────────────
+
+    fn sso_gate(member_groups: Option<&[&str]>) -> SsoGroupGate {
+        SsoGroupGate {
+            policy: crate::sso_groups::parse_policy(&serde_json::json!({
+                "highRiskTools": ["Bash"],
+                "requiredGroups": ["sre-oncall"],
+                "requireOboFor": ["deploy_prod"]
+            }))
+            .unwrap(),
+            member_groups: member_groups.map(|g| g.iter().map(|s| s.to_string()).collect()),
+        }
+    }
+
+    #[test]
+    fn sso_group_denies_a_high_risk_tool_the_member_is_not_cleared_for() {
+        let body = openai_response("Bash", r#"{"command":"ls"}"#);
+        let gate = sso_gate(Some(&["eng"]));
+        let d = gate_response_sso_groups(&cfg(), Some(&body), Some(&gate)).expect("must refuse");
+        let DenialReason::SsoGroup { tool, decision } = &d.reason else {
+            panic!("wrong reason: {d:?}")
+        };
+        assert_eq!(tool, "Bash");
+        assert_eq!(decision.clearance, Clearance::Denied);
+        assert_eq!(
+            decision.rule_id.as_deref(),
+            Some("sso_group.high_risk.Bash")
+        );
+        // The rule id closes both messages, where `ruleIdFromReason` reads it.
+        assert!(
+            d.log_message().ends_with("[sso_group.high_risk.Bash]"),
+            "{}",
+            d.log_message()
+        );
+        assert!(d.agent_message().contains("[sso_group.high_risk.Bash]"));
+
+        let out = refusal_body(WireProvider::OpenAI, "gpt-x", &d);
+        assert!(crate::routing::integrity::response_tool_calls(&out).is_empty());
+        assert!(!out.to_string().contains("\"command\""));
+    }
+
+    #[test]
+    fn sso_group_grants_a_cleared_member_and_unlisted_tools() {
+        let gate = sso_gate(Some(&["sre-oncall"]));
+        let bash = openai_response("Bash", "{}");
+        assert!(gate_response_sso_groups(&cfg(), Some(&bash), Some(&gate)).is_none());
+        let uncleared = sso_gate(Some(&["eng"]));
+        let read = anthropic_response("read_file");
+        assert!(gate_response_sso_groups(&cfg(), Some(&read), Some(&uncleared)).is_none());
+    }
+
+    /// Names match exactly, as every other gate matches them — unlike the
+    /// case-insensitive deny list, which would refuse a call the hook gate
+    /// allows.
+    #[test]
+    fn sso_group_matches_tool_names_exactly() {
+        let gate = sso_gate(Some(&["eng"]));
+        let lower = anthropic_response("bash");
+        assert!(gate_response_sso_groups(&cfg(), Some(&lower), Some(&gate)).is_none());
+    }
+
+    #[test]
+    fn sso_group_refuses_on_behalf_of_only_tools_even_for_a_cleared_member() {
+        let gate = sso_gate(Some(&["sre-oncall"]));
+        let body = anthropic_response("deploy_prod");
+        let d = gate_response_sso_groups(&cfg(), Some(&body), Some(&gate)).expect("must refuse");
+        assert!(d.log_message().contains("REQUIRES_OBO"));
+        assert!(d
+            .log_message()
+            .ends_with("[sso_group.require_obo.deploy_prod]"));
+    }
+
+    #[test]
+    fn sso_group_unknown_groups_are_refused_a_high_risk_tool() {
+        let gate = sso_gate(None);
+        let body = openai_response("Bash", "{}");
+        let d = gate_response_sso_groups(&cfg(), Some(&body), Some(&gate)).expect("must refuse");
+        assert!(d
+            .agent_message()
+            .contains("does not know the member's groups"));
+    }
+
+    #[test]
+    fn sso_group_is_inert_without_a_policy_or_with_the_gate_off() {
+        let body = openai_response("Bash", "{}");
+        assert!(gate_response_sso_groups(&cfg(), Some(&body), None).is_none());
+        assert!(gate_response_sso_groups(&cfg(), None, None).is_none());
+        assert!(gate_stream_line_sso_groups(&cfg(), OPENAI_TOOL_LINE, None).is_none());
+        let off = ResponseGateConfig {
+            enabled: false,
+            fail_closed: true,
+        };
+        let gate = sso_gate(Some(&["eng"]));
+        assert!(gate_response_sso_groups(&off, Some(&body), Some(&gate)).is_none());
+        assert!(gate_stream_line_sso_groups(&off, OPENAI_TOOL_LINE, Some(&gate)).is_none());
+        // A policy that names no tool cannot refuse one, so it cannot turn an
+        // unparseable body into a refusal either.
+        let empty = SsoGroupGate {
+            policy: crate::sso_groups::SsoGroupPolicy::default(),
+            member_groups: None,
+        };
+        assert!(gate_response_sso_groups(&cfg(), None, Some(&empty)).is_none());
+    }
+
+    #[test]
+    fn sso_group_unparseable_body_follows_fail_closed() {
+        let gate = sso_gate(Some(&["eng"]));
+        let d = gate_response_sso_groups(&cfg(), None, Some(&gate)).expect("closed by default");
+        assert_eq!(d.reason, DenialReason::Unparseable);
+        let open = ResponseGateConfig {
+            enabled: true,
+            fail_closed: false,
+        };
+        assert!(gate_response_sso_groups(&open, None, Some(&gate)).is_none());
+    }
+
+    #[test]
+    fn sso_group_withholds_the_tool_start_on_every_streamed_wire_shape() {
+        let gate = sso_gate(Some(&["eng"]));
+        for (line, idx) in [(OPENAI_TOOL_LINE, 0), (RESPONSES_TOOL_LINE, 2)] {
+            let d = gate_stream_line_sso_groups(&cfg(), line, Some(&gate)).expect("must refuse");
+            assert_eq!(d.block_index, idx, "{line}");
+            assert!(matches!(d.reason, DenialReason::SsoGroup { .. }));
+        }
+        let anthropic = r#"data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_1","name":"Bash","input":{}}}"#;
+        let d = gate_stream_line_sso_groups(&cfg(), anthropic, Some(&gate)).expect("must refuse");
+        assert_eq!(d.block_index, 1);
+        let tail = refusal_tail(WireProvider::Anthropic, &d);
+        assert!(tail.contains("[sso_group.high_risk.Bash]"));
+        assert!(!tail.contains("\"tool_use\""));
+        assert_payloads_parse(&tail);
+
+        let cleared = sso_gate(Some(&["sre-oncall"]));
+        assert!(gate_stream_line_sso_groups(&cfg(), anthropic, Some(&cleared)).is_none());
+        for line in [
+            "event: content_block_delta",
+            "",
+            "data: [DONE]",
+            "data: {not json",
+        ] {
+            assert!(gate_stream_line_sso_groups(&cfg(), line, Some(&gate)).is_none());
+        }
     }
 }

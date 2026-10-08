@@ -445,6 +445,32 @@ the operator of rewriting history over their own key management.
   it covered and `/recompute` returns `missing_traces` naming them. Had the leaf
   died with the trace, that verdict could never have been reached.
 
+## Alerts
+
+The `audit_log_integrity` probe runs every hour. When it fails, the control plane
+raises `governance.integrity.failed` (CRITICAL) through the notification hub, so a
+Slack, PagerDuty, email or webhook rule on **Trace Integrity Check Failed** hears
+about it without anyone opening the Compliance page. The alert names the kind of
+failure in `kind`, lists up to ten affected roots or guard findings in `affected`,
+and carries the probe's remediation text:
+
+| `kind` | What the probe found |
+| :--- | :--- |
+| `chain_break` | A root names a predecessor that is not the root before it: a root was removed, or the chain forked. |
+| `root_mismatch` | A sealed root no longer re-derives from the stored traces. |
+| `mirror_copy_mismatch` | A sealed root differs from its copy in your bucket. |
+| `signature_invalid` | A root's signature is rejected by the key recorded on it. |
+| `guard_tampered` | An append-only guard is missing, disabled, or its trigger function no longer hashes to the shipped one. |
+
+Each kind alerts once while it keeps failing, not once an hour. There is no
+"resolved" notice: the probe checks the most recent roots, so a mismatched root
+that ages out of that sample stops being reported while the altered record is
+still there, and announcing that as resolved would be wrong. A kind that clears
+and later fails again alerts again. A manual run (`POST /api/v1/compliance/probes/run`)
+alerts the same way and shares the same once-per-failure state.
+
+The same alerts stream to [SIEM export](/guide/siem-export) destinations.
+
 ## Endpoints
 
 | Endpoint | Purpose |

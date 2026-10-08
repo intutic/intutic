@@ -377,6 +377,9 @@ that login.
    SOP folders under `.intutic/sops/`, then refreshes the policy snapshot.
 4. Watches the governed harness files and restores the approved version when one is edited
    locally, keeping the edited copy as `<file>.drift-backup`.
+5. Every fifth poll, records each harness rules file that changed in the workspace's config
+   history: metadata only, unless the workspace turned on content upload (see
+   [Config content upload](#config-content-upload)).
 
 **Credentials:** `--workspace-id` and `--api-key` together replace the stored login for this run; either one alone is ignored. With the pair, `intutic login` is not needed, and if `intutic init` has not run, the current directory is used as the workspace with no harnesses. This is how the service installed by [`intutic daemon install`](#intutic-daemon-install) runs. Without the pair and without a login, the command exits with status `1` and points to `intutic start`.
 
@@ -402,7 +405,10 @@ The daemon runs in the foreground. Use `Ctrl+C` to stop.
 **What `connect` sends to the control plane:**
 
 - A SHA-256 hash of each governed harness config file, and a drift report (harness, file path and
-  hashes) when one changes. File contents are not uploaded.
+  hashes) when one changes.
+- A config history capture of each harness rules file that changed: its path, the SHA-256 of its
+  redacted text, its size, the harness and the time. Its text only when the workspace turned on
+  content upload; see [Config content upload](#config-content-upload).
 - A status heartbeat: config version, detected harnesses, running agent process names, and the
   health of the proxy, Valkey and CA trust.
 - An agent report per harness: the configured guardrails, role SOPs, skills found under
@@ -413,6 +419,101 @@ The daemon runs in the foreground. Use `Ctrl+C` to stop.
 - Hook events and review requests the harness gates logged under `.intutic/events/`.
 - The proxy's local trace files, `~/.intutic/logs/traces-*.jsonl`, which are deleted locally once
   uploaded.
+
+### Config content upload {#config-content-upload}
+
+The config history records the harness rules files below, from the workspace root, for each
+harness `intutic connect` governs. What it uploads depends on one workspace setting,
+**Upload config file content** (`configBodyUpload`, in Settings › Security › Harness Config
+History). It is off by default.
+
+- **Off:** each file's path, the SHA-256 of its redacted text, its size in bytes, the harness and
+  the capture time. Never its text. The history shows when a file changed, and its hash chain can
+  still be verified, but there are no config diffs and no SkillOpt config-edit suggestions.
+- **On:** the same, plus the file's text. Before the text leaves the machine, API keys, tokens,
+  private keys, passwords and other credential-shaped strings in it are replaced with
+  `[redacted]`: the patterns the harness gates and the pre-commit check refuse, and
+  `secret: value` assignments to keys named like a secret. The hash is of the redacted text in
+  both modes.
+
+The control plane refuses a capture that carries text while the setting is off, and stores
+nothing from it. A change to the setting reaches each machine at its next sync and applies from
+the next capture: `connect` captures every fifth poll, about every 2.5 minutes at the default
+interval. Files larger than 512 KB are not captured.
+
+| File | Harnesses |
+|------|-----------|
+| `.agents/plugins/intutic-governance/hooks/hooks.json` | `goose` |
+| `.aider.conf.yml` | `aider` |
+| `.clinerules/intutic-governance.md` | `cline` |
+| `.continue/config.json` | `continue` |
+| `.cursorrules` | `cursor` |
+| `.env.intutic` | `codex`, `langgraph`, `langchain`, `crewai`, `autogen`, `ag2`, `google-adk`, `openai-agents`, `pydantic-ai`, `smolagents`, `strands`, `agent-framework`, `mastra`, `vercel-ai-sdk`, `eve`, `trueforge`, `ai-sdk-harness`, `ai-sdk-workflow` |
+| `.gemini/settings.json` | `antigravity` |
+| `.github/copilot-instructions.md` | `github-copilot` |
+| `.hermes/config.yaml` | `hermes` |
+| `.intutic/n8n/governance-workflow.json` | `n8n` |
+| `.open-webui/intutic-governance-filter.py` | `open-webui` |
+| `.openclaw/openclaw.json` | `openclaw` |
+| `.pi/hooks.json` | `pi` |
+| `.roorules` | `roo-code` |
+| `.windsurfrules` | `windsurf` |
+| `AGENTS.md` | `muse-code`, `grok`, `opencode` |
+| `claude_desktop_config.json` | `claude-desktop` |
+| `CLAUDE.md` | `claude-code` |
+| `config.toml` | `openhands` |
+
+---
+
+## `intutic disconnect`
+
+Undo `intutic connect` on this machine: put every harness config it changed back the way it was, remove the background services, and log out.
+
+```bash
+intutic disconnect [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--harness <id>` | Disconnect one harness only, for example `cursor`. The login, the services and the other harnesses stay. |
+| `--dry-run` | Print exactly what would change, and change nothing |
+| `--keep-login` | Keep the stored credentials |
+
+**What it undoes**, for every harness (one with `--harness`):
+
+- **Rules files connect writes whole** (`CLAUDE.md`, `.cursorrules`, `.windsurfrules`, `AGENTS.md`, `.github/copilot-instructions.md`, `.roorules`, `.clinerules/intutic-governance.md`, `.env.intutic`): the file you had before comes back, or the file is deleted if connect created it.
+- **Hook registrations** in each harness's settings (`.claude/settings.json`, Cursor's and Windsurf's `hooks.json`, and the rest): only the entries that run an Intutic gate are removed. The gate scripts are deleted.
+- **Proxy routing**: base URLs and proxy settings connect pointed at the proxy (Codex `openai_base_url`, Continue `apiBase`, Goose `provider.host`, Grok `base_url`, Pi and OpenHands base URLs, Aider `openai-api-base`, Windsurf `http.proxy`, the JetBrains IDE proxy for the Windsurf plugin, dsh's `llm-deepseek` route) go back to the values they had.
+- **MCP servers**: each server connect wrapped gets its original entry back, every key included; the `intutic` server connect added is removed; and the copies of approved `.mcp.json` servers connect added to `~/.claude.json` are removed.
+- **What connect replaced or removed** comes back: the Claude Code `permissions.deny` rules connect replaced, and Aider's `test-cmd`, `lint-cmd`, `auto-test` and `auto-lint`.
+- **n8n**: the `intutic_proxy_url` and `intutic_governance_rules` variables connect set on your workflows, through the n8n API at `N8N_URL` (default `http://localhost:5678`).
+
+Without `--harness` it also removes the services [`intutic daemon install`](#intutic-daemon-install) set up for your user (a system-wide one is listed with the command that removes it), the Intutic CA certificate connect trusted in the macOS login keychain, the `intutic-valkey` Docker container connect started, the gate caches in `~/.intutic/hooks/`, `~/.intutic/env/runtime.env` (the copy of the API key the gates read) and, unless `--keep-login`, the stored credentials. It resets the synced config version, so a later `intutic connect` writes everything again.
+
+**How it knows what you had:** before connect first writes a file, it keeps a copy of it, in `.intutic/originals/` for files in the workspace and `~/.intutic/originals/` for the rest (owner-only, and ignored by git). A file you have not changed since is restored byte for byte. In one you have changed, only Intutic's entries are taken out and your edits stay. A file connect writes whole that you edited is left as it is, and listed.
+
+**Files from an earlier connect:** versions before this one kept no copies. For their files, disconnect removes what it can recognise as Intutic's: the generated header, entries that run an Intutic gate, wrapped MCP servers (their arguments carry the original command), and URLs on the proxy connect used. A generated file git does not track is deleted; where git has a committed version that is not generated, that version comes back. A setting connect overwrote is removed rather than restored, because its earlier value is unknown, and the output says so. Deny rules connect added to `permissions.deny` cannot be told apart from yours, and are listed for you to review.
+
+**Left in place:** your SOPs in `.intutic/sops/`, Intutic's own state in `~/.intutic/` (configuration, logs, events, the downloaded proxy), `<file>.drift-backup` copies (they hold edits connect reverted), and a `valkey-server` or `redis-server` connect started outside Docker. Git hooks from `intutic init --git-hooks` live in `.git/hooks/`, and variables from [`intutic env persist`](#intutic-env-persist) are removed with [`intutic env clear`](#intutic-env-clear).
+
+**While connect runs:** a running `intutic connect` would write everything straight back. A real run stops the services first, then exits with status `1` before changing any file if an `intutic connect` you started yourself is still running. `--dry-run` only warns.
+
+**One harness:** `--harness` leaves a file another connected harness also writes (`AGENTS.md` is shared by Muse Code, Grok Build and OpenCode; `.env.intutic` by Codex and the SDK frameworks). It removes the harness from `~/.intutic/config.json`, so connect stops writing its config and stops wrapping its MCP servers; run `intutic init` to manage it again.
+
+**Examples:**
+
+```bash
+# See what would change
+intutic disconnect --dry-run
+
+# Disconnect everything, keep the login
+intutic disconnect --keep-login
+
+# Stop governing Cursor only
+intutic disconnect --harness cursor
+```
 
 ---
 
@@ -777,10 +878,11 @@ Walk the harness **config snapshot** chain and re-hash every stored body. Each s
 `harness_config_snapshots` records a `content_hash` of its own body and the `previous_hash` of
 the snapshot before it, per harness type and file path — this is the command that reads them.
 
-A snapshot holds the full text of a harness config file. The CLI never uploads those bodies:
-`intutic connect` reports only each file's hash. A workspace therefore has snapshots only from a
-client that posts them to the control plane's config-capture endpoint itself; otherwise this
-command reports an absent chain.
+`intutic connect` captures the snapshots (see [Config content upload](#config-content-upload)).
+A snapshot holds a file's redacted text only when the workspace turned content upload on;
+otherwise it holds the file's hash and size. The links of a snapshot without text are checked
+like any other, but its content cannot be re-hashed, because it was never uploaded: the report
+says how many such snapshots it walked, and they are not a finding.
 
 ```bash
 intutic integrity config-chain [options]
@@ -880,7 +982,6 @@ intutic predict-cost --model <model> (--tokens <n> | --file <path>) [options]
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--model <model>` | Model to estimate against, e.g. `claude-sonnet-4-5` (required) | — |
-| `--task-type <type>` | Task type used to pick the usage baseline | `coding` |
 | `--tokens <n>` | Input size as a token count | — |
 | `--file <path>` | Size the input from this file's contents | — |
 | `--json` | Output as JSON instead of a report | — |
@@ -2164,11 +2265,11 @@ intutic attenuate --parent-key <keyId> --caps <cap,cap,...> [--ttl <seconds>] [o
 | `--dev` | Use local control plane (`http://localhost:3001`) | — |
 
 **What it does:**
-Asks the control plane to mint the child key, then prints the child key itself (`vk_…`), its key ID, the attenuation chain ID, the granted capabilities and the expiry time. The child key is shown **once** and never stored, so save it when it is printed.
+Asks the control plane to mint the child key, then prints the child key itself (`vk_…`), its key ID, the attenuation chain ID, the granted capabilities and the expiry time. The child key is shown **once** and never stored, so save it when it is printed. A child never outlives its parent: it expires after `--ttl` or when the first key it descends from expires, whichever comes sooner, and the printed expiry is that time.
 
 Capabilities are the parent key's scopes, matched exactly as written. `*` is not expanded, so a key created with the default `*` scope can only grant `*`.
 
-The request is refused when the parent key is revoked or expired, when a requested capability is not one of the parent's (the error names which), or when the chain is already four attenuations deep. A missing `--parent-key`, an empty `--caps` or a `--ttl` outside 60–86400 whole seconds exits `1` before anything is sent.
+The request is refused when the parent key is revoked or expired, or descends from an expired key, when a requested capability is not one of the parent's (the error names which), or when the chain is already four attenuations deep. A missing `--parent-key`, an empty `--caps` or a `--ttl` outside 60–86400 whole seconds exits `1` before anything is sent.
 
 **Example:**
 
@@ -2207,8 +2308,8 @@ Prints each link in the chain: parent key, child key, granted capabilities, expi
 ## `intutic gateway register` <Badge type="danger" text="Enterprise" />
 
 Register a [self-hosted gateway](/external/self-hosted-gateway) — an org's own Docker,
-Kubernetes, or bare-metal deployment of the Intutic proxy — and print its one-time management
-token.
+Kubernetes, or bare-metal (systemd) deployment of the Intutic proxy — and print its one-time
+management token.
 
 ```bash
 intutic gateway register --name <name> --target <docker|kubernetes|bare_metal> [options]
@@ -2264,13 +2365,15 @@ intutic gateway status <gateway_id> [options]
 
 Reports `online`, `degraded`, `unreachable`, or `pending`. A gateway with no heartbeat inside
 the TTL window (~90s) shows `unreachable` — a valid, self-healing status rather than an error.
+`Config version` is the config the gateway reported running in its last heartbeat, against the
+latest one [`gateway config set`](#intutic-gateway-config-set) produced.
 
 ---
 
 ## `intutic gateway rotate <gateway_id>` <Badge type="danger" text="Enterprise" />
 
 Issue a new `gwk_...` token. The old token keeps authenticating for a grace period (24h by
-default) so an unattended daemon has time to pick up the new one on its next restart.
+default) so an unattended gateway has time to pick up the new one on its next restart.
 
 ```bash
 intutic gateway rotate <gateway_id> [options]
@@ -2320,8 +2423,9 @@ intutic gateway config set <gateway_id> [--require-vk <true|false>] [--require-p
 | `--json` | Output as JSON |
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
-A bare-metal daemon-supervised gateway applies a config change on its next poll. Docker and
-Kubernetes deployments need a manual redeploy to pick it up.
+The gateway applies the change on its next heartbeat, without a restart or a redeploy, on every
+deployment target: within `INTUTIC_GATEWAY_HEARTBEAT_INTERVAL_SECS` (30 seconds by default). See
+[Changing a gateway's config](/external/self-hosted-gateway#changing-a-gateway-s-config).
 
 ---
 
@@ -2627,8 +2731,8 @@ Sets exactly two variables, `ANTHROPIC_BASE_URL` and `OPENAI_BASE_URL`, both to 
 
 | OS | Mechanism | Scope |
 |----|-----------|-------|
-| macOS | `launchctl setenv` | Every application launched afterwards, including GUI apps |
-| Linux (as root) | Writes `KEY="<url>"` lines to `/etc/environment` | System |
+| macOS | `launchctl setenv` | Every application launched afterwards, including GUI apps, until you log out or restart |
+| Linux (as root) | Writes `KEY="<url>"` lines to `/etc/environment`, replacing any earlier lines for the two variables | System |
 | Linux (otherwise) | Appends `export KEY="<url>"` lines to `~/.bashrc`, each tagged with an `# intutic-env-<KEY>` marker; a re-run replaces the earlier lines | User |
 | Windows | `setx` | User |
 
@@ -2657,7 +2761,7 @@ No options.
 
 **What it does:**
 
-Removes `ANTHROPIC_BASE_URL` and `OPENAI_BASE_URL`: `launchctl unsetenv` on macOS, deletes the marked lines from `~/.bashrc` on Linux, and deletes the values from `HKCU\Environment` on Windows. Running it when nothing is set is not an error. On Linux it does not edit `/etc/environment`; if `env persist` ran as root, remove those two lines by hand. Already-open terminals keep the old values until restarted.
+Removes `ANTHROPIC_BASE_URL` and `OPENAI_BASE_URL`: `launchctl unsetenv` on macOS, and the values in `HKCU\Environment` on Windows. On Linux it deletes the marked lines from `~/.bashrc`, leaving the rest of the file exactly as it was, and, when run as root, the two variables' lines from `/etc/environment`. Running it when nothing is set is not an error. Already-open terminals keep the old values until restarted.
 
 ---
 

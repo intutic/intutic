@@ -60,6 +60,12 @@ import * as path from 'node:path'
 import * as os from 'node:os'
 import { createHash } from 'node:crypto'
 import { createLogger } from '@intutic/logger'
+import {
+  encodeSsoGroupRecord,
+  evaluateSsoGroupClearance,
+  parseSsoGroupPolicy,
+  type SsoGroupPolicy,
+} from '@intutic/shared-types'
 import { toRulesLine, GATE_VERSION, RULES_COLUMNS } from '../harness/gateBody.js'
 import {
   DESTRUCTIVE_COMMAND_PATTERNS,
@@ -207,6 +213,18 @@ export interface ResolvedPolicy {
    * here degrades in.
    */
   sqlDropStrictBlock: boolean
+  /**
+   * The workspace's `sso_group_policy`, as `GET /api/v1/policy/resolve`
+   * serves it (`ssoGroupPolicy`). Absent or null: the workspace has none, and
+   * the snapshot is byte-identical to one written before group rules existed.
+   */
+  ssoGroupPolicy?: SsoGroupPolicy | null
+  /**
+   * The member the daemon's API key resolves to, with their SSO groups as the
+   * control plane read them for this response (`principal`). Null when the
+   * control plane named no member, which every gate reads as "groups unknown".
+   */
+  principal?: { memberId: string; ssoGroups: string[] } | null
 }
 
 export interface PolicySnapshotOptions {
@@ -420,11 +438,30 @@ function toGuardPattern(
   }
 }
 
+/** The `principal` of a resolve response, or null when it names no member. */
+function parsePrincipal(value: unknown): ResolvedPolicy['principal'] {
+  if (typeof value !== 'object' || value === null) return null
+  const p = value as Record<string, unknown>
+  if (typeof p.memberId !== 'string' || !p.memberId) return null
+  return {
+    memberId: p.memberId,
+    ssoGroups: Array.isArray(p.ssoGroups) ? p.ssoGroups.filter((g): g is string => typeof g === 'string') : [],
+  }
+}
+
 /** Fetches resolved policy for the workspace. Returns null on any failure —
  *  the caller keeps the previous snapshot rather than replacing it with nothing. */
 export async function fetchResolvedPolicy(
   opts: PolicySnapshotOptions,
 ): Promise<ResolvedPolicy | null> {
+  const result = await requestResolvedPolicy(opts)
+  return result === 'refused' ? null : result
+}
+
+/** As {@link fetchResolvedPolicy}, but says when the control plane refused the key (401/403). */
+async function requestResolvedPolicy(
+  opts: PolicySnapshotOptions,
+): Promise<ResolvedPolicy | 'refused' | null> {
   const url =
     `${stripEnd(opts.controlPlaneUrl, '/')}/api/v1/policy/resolve` +
     `?workspaceId=${encodeURIComponent(opts.workspaceId)}`
@@ -435,7 +472,7 @@ export async function fetchResolvedPolicy(
     })
     if (!res.ok) {
       log.warn({ action: 'policy_fetch_failed', status: res.status }, 'Policy resolve returned non-OK')
-      return null
+      return res.status === 401 || res.status === 403 ? 'refused' : null
     }
     const body = (await res.json()) as unknown
     if (typeof body !== 'object' || body === null) return null
@@ -463,6 +500,10 @@ export async function fetchResolvedPolicy(
         ? rec.allowedServers.filter((s): s is string => typeof s === 'string')
         : [],
       sqlDropStrictBlock: rec.sqlDropStrictBlock === true,
+      // Parsed by the server's own parser, so the snapshot compiles exactly
+      // the policy `resolveSsoGroupPrivilege` enforces.
+      ssoGroupPolicy: parseSsoGroupPolicy(rec.ssoGroupPolicy),
+      principal: parsePrincipal(rec.principal),
     }
   } catch (err) {
     log.warn({ action: 'policy_fetch_failed', err }, 'Policy resolve unreachable')
@@ -591,7 +632,63 @@ export function buildSnapshotRules(policy: ResolvedPolicy, localHoldTokens: read
     severity: shadow ? ('shadow' as GuardPattern['severity']) : SKILL_CONTENT_TIER_SEVERITY,
   }))
 
-  return [...sopRules, ...localHolds, ...destructive, ...skillSurface, ...skillContent]
+  // SSO-group refusals first. Every gate stops at the first rule that refuses,
+  // and a `hold` rule earlier in the list could otherwise let an approved
+  // bypass through a call the group policy refuses outright.
+  return [...ssoGroupPatterns(policy), ...sopRules, ...localHolds, ...destructive, ...skillSurface, ...skillContent]
+}
+
+/**
+ * The workspace's SSO-group policy, decided for the member this snapshot is
+ * issued to and compiled into one `block` rule per tool they may not call.
+ *
+ * The decision is `evaluateSsoGroupClearance` — the function the hook gate's
+ * `resolveSsoGroupPrivilege` and the MCP proxy run — so a harness gate refuses
+ * exactly what the server refuses, without any gate carrying an evaluator of
+ * its own. A tool the member is cleared for gets no rule. With no member named
+ * the groups are unknown, and every high-risk tool is refused.
+ *
+ * Not demoted under SILENT_LOG, unlike the rest of the dynamic tier: the hook
+ * gate and the MCP proxy refuse these calls in every intervention mode, and a
+ * local gate that only observed them would be the one place the policy did
+ * not hold.
+ */
+function ssoGroupPatterns(policy: ResolvedPolicy): GuardPattern[] {
+  const groupPolicy = policy.ssoGroupPolicy
+  if (!groupPolicy) return []
+  const groups = policy.principal ? policy.principal.ssoGroups : null
+  const out: GuardPattern[] = []
+  for (const tool of new Set([...groupPolicy.requireOboFor, ...groupPolicy.highRiskTools])) {
+    const decision = evaluateSsoGroupClearance(groupPolicy, tool, groups)
+    if (decision.clearance === 'GRANTED' || !decision.ruleId) continue
+    // The gates match a whitespace-collapsed, space-padded tool name, so the
+    // name is collapsed the same way and escaped to a literal.
+    const name = tool.replace(/\s+/g, ' ').trim()
+    if (!name) continue
+    const source = ` (${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}) `
+    try {
+      assertPortableEre(source, decision.ruleId)
+    } catch (err) {
+      log.warn(
+        { action: 'sso_group_rule_rejected', ruleId: decision.ruleId, tool, err: err instanceof Error ? err.message : String(err) },
+        'SSO group policy names a tool the gates cannot match — not compiled into the snapshot',
+      )
+      continue
+    }
+    out.push({
+      id: decision.ruleId,
+      source,
+      subject: 'tool',
+      severity: 'block',
+      reason: decision.reason,
+      rationale:
+        "Compiled from the workspace's sso_group_policy for the member the snapshot was issued to, " +
+        'by the evaluator the control plane hook gate uses.',
+      matches: [],
+      notMatches: [],
+    })
+  }
+  return out
 }
 
 /**
@@ -637,12 +734,22 @@ export async function writePolicySnapshot(
   localHoldTokens: readonly string[] = [],
 ): Promise<{ digest: string; ruleCount: number }> {
   const rules = buildSnapshotRules(policy, localHoldTokens)
-  const lines = rules.map(toRulesLine)
-  const digest = createHash('sha256').update(lines.join('\n')).digest('hex').slice(0, 32)
   // One timestamp shared by both artifacts. Two `new Date()` calls would put
   // different values in the JSON and the .rules, so a reader comparing them
   // would see drift that is not there.
   const generatedAt = new Date().toISOString()
+  // The SSO-group record — the policy and the member's groups the rules above
+  // were compiled from — rides as the first data line, so the digest every
+  // gate already recomputes covers it: an edited group list fails the check.
+  const ssoGroups = policy.ssoGroupPolicy
+    ? {
+        policy: policy.ssoGroupPolicy,
+        member: policy.principal ? { memberId: policy.principal.memberId, ssoGroups: policy.principal.ssoGroups } : null,
+        issuedAt: generatedAt,
+      }
+    : null
+  const lines = [...(ssoGroups ? [encodeSsoGroupRecord(ssoGroups)] : []), ...rules.map(toRulesLine)]
+  const digest = createHash('sha256').update(lines.join('\n')).digest('hex').slice(0, 32)
 
   // M3: the per-server MCP allowlist, sanitised once and reused for both
   // artifacts so the JSON and the `.rules` header can never disagree about
@@ -684,6 +791,11 @@ export async function writePolicySnapshot(
       // Empty means unrestricted, same convention as `allowedServers` at the
       // control plane (`readMcpCurationSettings`).
       mcpAllowedServers: mcpServers,
+      // The same record as the `.rules` file's `@sso_groups` line, readable.
+      ...(ssoGroups ? { ssoGroups } : {}),
+      // With `sopRules`, `interventionMode` and `mcpAllowedServers`, enough to
+      // rebuild this snapshot without the control plane (`forgetSnapshotMember`).
+      sqlDropStrictBlock: policy.sqlDropStrictBlock,
       /**
        * The resolve response verbatim, alongside the gate projection below.
        *
@@ -770,16 +882,65 @@ async function writeAtomic(target: string, content: string): Promise<void> {
  * failed fetch leaves the previous snapshot in place, which is the correct
  * degradation — stale rules stay enforced. If they expired into permissiveness,
  * "kill the daemon and wait" would be a supported way to disarm governance.
+ * The one thing a failed fetch does change: when the control plane refuses
+ * the key itself, the member's SSO groups are forgotten (`forgetSnapshotMember`).
  */
 export async function refreshPolicySnapshot(
   opts: PolicySnapshotOptions,
 ): Promise<{ digest: string; ruleCount: number } | null> {
-  const policy = await fetchResolvedPolicy(opts)
-  if (!policy) return null
+  const dir = opts.snapshotDir ?? DEFAULT_SNAPSHOT_DIR
+  const result = await requestResolvedPolicy(opts)
+  if (result === 'refused') {
+    await forgetSnapshotMember(dir, opts.localHoldTokens ?? [])
+    return null
+  }
+  if (!result) return null
   try {
-    return await writePolicySnapshot(policy, opts.snapshotDir ?? DEFAULT_SNAPSHOT_DIR, opts.localHoldTokens ?? [])
+    return await writePolicySnapshot(result, dir, opts.localHoldTokens ?? [])
   } catch (err) {
     log.warn({ action: 'policy_snapshot_write_failed', err }, 'Could not write policy snapshot')
     return null
+  }
+}
+
+/**
+ * The control plane refused this machine's key — revoked, its member
+ * deactivated or offboarded, or past the workspace's SSO idle window. Every
+ * other rule in the snapshot stays as it is (see above), but the member's SSO
+ * groups were vouched for by that key, and keeping them would let a removed
+ * member keep every high-risk tool their groups cleared for as long as the
+ * machine stays offline from a working key. So the snapshot is rewritten from
+ * its own JSON with the member unknown, which refuses every high-risk tool.
+ *
+ * A snapshot with no group policy, or no member already, is left untouched.
+ * Never throws.
+ */
+async function forgetSnapshotMember(dir: string, localHoldTokens: readonly string[]): Promise<void> {
+  try {
+    const doc = JSON.parse(await fs.readFile(path.join(dir, SNAPSHOT_JSON), 'utf-8')) as Record<string, unknown>
+    const record = doc.ssoGroups as { policy?: unknown; member?: unknown } | undefined
+    const ssoGroupPolicy = parseSsoGroupPolicy(record?.policy)
+    if (!ssoGroupPolicy || !record?.member || typeof doc.workspaceId !== 'string') return
+    await writePolicySnapshot(
+      {
+        workspaceId: doc.workspaceId,
+        interventionMode: typeof doc.interventionMode === 'string' ? doc.interventionMode : 'TRANSPARENT',
+        sopRules: Array.isArray(doc.sopRules) ? (doc.sopRules as ResolvedPolicy['sopRules']) : [],
+        mcpAllowedServers: Array.isArray(doc.mcpAllowedServers)
+          ? doc.mcpAllowedServers.filter((s): s is string => typeof s === 'string')
+          : [],
+        sqlDropStrictBlock: doc.sqlDropStrictBlock === true,
+        ssoGroupPolicy,
+        principal: null,
+      },
+      dir,
+      localHoldTokens,
+    )
+    log.warn(
+      { action: 'policy_snapshot_member_forgotten', workspaceId: doc.workspaceId },
+      "The control plane refused this machine's key; the snapshot now treats the member's SSO groups as unknown",
+    )
+  } catch (err) {
+    log.debug({ action: 'policy_snapshot_member_forget_skipped', err }, 'No snapshot member to forget')
   }
 }

@@ -44,6 +44,7 @@ import { SyncWsClient,
   startWatcher,
   updatePreToolUseHooks,
   injectMcpServer,
+  noteProxyUrl,
   guardSettingsFile,
   warnIfDshCoverageGap,
   writeRuntimeEnv,
@@ -56,11 +57,16 @@ import { SyncWsClient,
   REVIEW_REQUESTS_LOG,
   syncOfflineTraces,
   TrajectoryMonitor,
-  collectAgentReport,
-  reportAgent,
   fetchLocalProxyInstanceId,
-  startHarnessSession,
   endAllOpenSessions,
+  applySkillOptEdits,
+  reportHarnessAgents,
+  captureAndUpload,
+  shouldCaptureThisIteration,
+  refreshDecisionsDigest,
+  writeBundledSkills,
+  clearImmutable,
+  setImmutable,
 } from '@intutic/sync-daemon'
 import { watch } from 'chokidar'
 // Named, not default: under `module: Node16` TypeScript resolves ioredis's
@@ -522,8 +528,7 @@ export async function runConnect(opts: {
   // when the config version moved: policy changes without the config version
   // changing, and a guardrail promoted, a hold approved or an egress mode
   // flipped mid-session used to reach a connected machine only on restart —
-  // this function was called once, at startup (TD-488). Parity with the
-  // daemon's own loop (`syncLoop.ts`'s Steps 0b–0d). None of these throw.
+  // this function was called once, at startup (TD-488). None of these throw.
   //
   // The snapshot also carries this workspace's `review_before:` tokens as hold
   // rules (synced SOPs, settings and local `.intutic/sops`), so every gate —
@@ -539,13 +544,33 @@ export async function runConnect(opts: {
     if (!landed.snapshot) log.dim('Policy snapshot refresh failed (will retry next sync); built-in protections are unaffected.')
   }
 
+  // The rules files the adapters write, absolute. `configFileName` is
+  // relative to the workspace for most harnesses and absolute for the few
+  // that keep their config in the home directory.
+  const rulesFilePaths = (): string[] =>
+    safeConfig.harnesses
+      .map((h) => getAdapter(h)?.configFileName)
+      .filter((f): f is string => Boolean(f))
+      .map((f) => node_path.resolve(safeConfig.workspaceRoot, f))
+
   // 3. Define configuration applier function
   async function applySyncConfig(syncConfig: SyncConfigPayload, force = false): Promise<number> {
     let sopsWritten = 0
     lastCachedConfig = syncConfig
     await refreshGateCachesForConnect()
 
-    if (syncConfig.configVersion > localConfigVersion || force) {
+    // Write-protect (`bypassEnforcementTier: 'immutable'`, macOS): the rules
+    // files carry the user-immutable flag between cycles, so it comes off
+    // before anything below writes them and goes back on afterwards. It also
+    // comes off whenever the config moved, so a workspace that switched away
+    // from write-protect is not left with files nothing can rewrite.
+    const writeProtect = syncConfig.settings?.bypassEnforcementTier === 'immutable'
+    const configMoved = syncConfig.configVersion > localConfigVersion || force
+    if (writeProtect || configMoved) {
+      for (const file of rulesFilePaths()) await clearImmutable(file)
+    }
+
+    if (configMoved) {
       log.info(`Applying configuration v${syncConfig.configVersion}...`)
 
       // Load and compile local SOP entries
@@ -606,7 +631,10 @@ export async function runConnect(opts: {
 
       const combinedSops = [...syncConfig.sops, ...localSopEntries]
 
-      // a. Write configs for all active harnesses
+      // a. Write configs for all active harnesses. The proxy URL is recorded
+      // first: `intutic disconnect` recognises the base-URL settings it is
+      // written into by it.
+      await noteProxyUrl(syncConfig.proxyUrl)
       for (const harnessType of safeConfig.harnesses) {
         const adapter = getAdapter(harnessType)
         if (!adapter) continue
@@ -639,18 +667,51 @@ export async function runConnect(opts: {
         }
       }
 
-      // c. Inject + proxy-wrap MCP servers across all supported harnesses
-      try {
-        await injectMcpServer(safeConfig.workspaceRoot, safeCreds.workspaceId)
-      } catch (err) {
-        log.warn(`Failed to inject MCP server configs: ${err instanceof Error ? err.message : String(err)}`)
-      }
-
       localConfigVersion = syncConfig.configVersion
       // Mirror workspace settings locally so spawn-time policies (like
       // allowLocalMemoryVaults) apply on the next connect without a fetch.
       safeConfig.settings = syncConfig.settings
       saveConfig({ ...safeConfig, configVersion: localConfigVersion, settings: syncConfig.settings })
+    }
+
+    // c. Inject + proxy-wrap MCP servers across all supported harnesses, on
+    // every cycle rather than only when the config moved: a server a user adds
+    // to a harness config after `connect` started is wrapped on the next cycle.
+    // The writes are write-if-changed, so an unchanged config costs no write.
+    try {
+      await injectMcpServer(safeConfig.workspaceRoot, safeCreds.workspaceId, { skip: safeConfig.disconnectedHarnesses })
+    } catch (err) {
+      log.warn(`Failed to inject MCP server configs: ${err instanceof Error ? err.message : String(err)}`)
+    }
+
+    // d. SkillOpt edits the control plane queued for this workspace, acked
+    // back so a suggestion reaches `applied` only once it is on disk. All of
+    // them again when the rules files were just rewritten, which drops every
+    // overlay. Before the integrity hashes below, so the drift watcher does
+    // not take the edit for tampering.
+    await applySkillOptEdits({
+      workspaceRoot: safeConfig.workspaceRoot,
+      controlPlaneUrl,
+      apiKey: safeCreds.apiKey,
+      appliedEdits: syncConfig.appliedEdits,
+      bypassEnforcementTier: syncConfig.settings?.bypassEnforcementTier,
+      reapplyAll: configMoved,
+    })
+
+    // e. The governed decisions log, opt-in (`decisionsLogEnabled`, off by
+    // default). Also before the hashes: it writes a section into CLAUDE.md.
+    if (syncConfig.settings?.decisionsLogEnabled) {
+      await refreshDecisionsDigest({
+        controlPlaneUrl,
+        apiKey: safeCreds.apiKey,
+        workspaceId: safeCreds.workspaceId,
+        workspaceRoot: safeConfig.workspaceRoot,
+        harnesses: safeConfig.harnesses as HarnessType[],
+      })
+    }
+
+    if (writeProtect) {
+      for (const file of rulesFilePaths()) await setImmutable(file)
     }
 
     // c. Compute file hashes + update integrity store
@@ -927,7 +988,7 @@ export async function runConnect(opts: {
     }
   }
 
-  // Drains BOTH logs, matching `services/sync-daemon/src/syncLoop.ts`.
+  // Drains BOTH logs.
   //
   // This drained hook events only. `intutic connect` runs the daemon in-process,
   // so under the CLI runtime a `review_before` hold still blocked the tool
@@ -1023,6 +1084,14 @@ export async function runConnect(opts: {
     )
   }
   await refreshGateCachesForConnect()
+
+  // The bundled rule-author agent skill, written only when absent so a local
+  // edit is never overwritten.
+  try {
+    await writeBundledSkills(safeConfig.workspaceRoot)
+  } catch (err) {
+    log.dim(`Could not write the bundled agent skill: ${err instanceof Error ? err.message : String(err)}`)
+  }
 
   // Sync offline traces back to PostgreSQL on startup
   try {
@@ -1185,7 +1254,16 @@ export async function runConnect(opts: {
     if (isGovernedConfigPath(changedPath, filename)) {
       try {
         const sops = lastCachedConfig?.sops ?? []
-        const tampered = await guardSettingsFile(changedPath, safeConfig.workspaceRoot, sops)
+        // The proxy URL too: the restored gate scripts carry it, and an empty
+        // one would be written into them.
+        const tampered = await guardSettingsFile(
+          changedPath,
+          safeConfig.workspaceRoot,
+          sops,
+          lastCachedConfig?.proxyUrl ?? '',
+          undefined,
+          new Set(safeConfig.disconnectedHarnesses ?? []),
+        )
         if (tampered) {
           log.warn(`[Security] Governance settings tamper detected and restored: ${changedPath}`)
           wsClient.send({
@@ -1217,6 +1295,21 @@ export async function runConnect(opts: {
     const canonical = integrity.files[adapter.configFileName] ?? ''
 
     if (currentHash !== canonical) {
+      // Record only (`bypassEnforcementTier: 'alert-only'`): the edit stays,
+      // and the drift report below is the record.
+      const tier = (lastCachedConfig?.settings ?? safeConfig.settings)?.bypassEnforcementTier
+      if (tier === 'alert-only') {
+        log.warn(`Governed config file "${filename}" was edited by hand; recording the drift and leaving the edit in place.`)
+        wsClient.send({
+          type: 'drift_report',
+          harnessType: adapter.type,
+          filePath: adapter.configFileName,
+          localHash: currentHash || '',
+          canonicalHash: canonical,
+        })
+        return
+      }
+
       log.warn(
         `Governed config file "${filename}" modification detected! Reverting to approved baseline...`
       )
@@ -1254,6 +1347,7 @@ export async function runConnect(opts: {
   })
 
   // 6. Secondary fallback HTTP poll loop
+  let pollIteration = 0
   while (!ac.signal.aborted) {
     try {
       const syncConfig = await client.fetchConfig(safeCreds.workspaceId)
@@ -1269,39 +1363,40 @@ export async function runConnect(opts: {
         log.dim(`Offline trace sync failed (will retry next poll): ${err instanceof Error ? err.message : String(err)}`)
       }
       // Register agents + report one session per harness (the reporter
-      // dedupes per run and per proxy process). connect's inline loop bypassed
-      // both, leaving the dashboard graph empty for the primary user path.
-      // The local proxy's instance id is read once per iteration: with it the
-      // harness's git/task context lands on the proxy's own session row, the
-      // one its traces are filed under (TD-231, Wave 5.6).
+      // dedupes per run and per proxy process), and turn this cycle's skill
+      // scan findings into `skill_flagged` events. The local proxy's instance
+      // id is read once per iteration: with it the harness's git/task context
+      // lands on the proxy's own session row, the one its traces are filed
+      // under.
       const proxyInstanceId = safeConfig.harnesses.length > 0 ? await fetchLocalProxyInstanceId() : null
-      for (const harnessType of safeConfig.harnesses) {
+      const { governanceInputs, failures } = await reportHarnessAgents({
+        controlPlaneUrl,
+        apiKey: safeCreds.apiKey,
+        workspaceId: safeCreds.workspaceId,
+        workspaceRoot: safeConfig.workspaceRoot,
+        harnesses: safeConfig.harnesses as HarnessType[],
+        allowLocalVaults: syncConfig.settings?.allowLocalMemoryVaults,
+        proxyInstanceId,
+      })
+      for (const { harness, error } of failures) {
+        log.dim(`Agent report/session for harness '${harness}' failed: ${error}`)
+      }
+      // Every Nth poll, capture the rules files that changed for the config
+      // history. Content goes only when this poll's settings have
+      // `configBodyUpload` on; otherwise path, hash, size and time.
+      if (shouldCaptureThisIteration(pollIteration)) {
         try {
-          const report = await collectAgentReport({
-            workspaceRoot: process.cwd(),
-            harnessType,
-            configSynced: true,
-            dlpEnabled: true,
-            policyEnforced: true,
-            allowLocalVaults: syncConfig.settings?.allowLocalMemoryVaults,
-          })
-          await reportAgent(controlPlaneUrl, safeCreds.apiKey, safeCreds.workspaceId, report)
-          await startHarnessSession({
+          await captureAndUpload({
             controlPlaneUrl,
             apiKey: safeCreds.apiKey,
             workspaceId: safeCreds.workspaceId,
-            harnessType,
-            workspaceRoot: process.cwd(),
-            ...(proxyInstanceId ? { proxyInstanceId } : {}),
+            workspaceRoot: safeConfig.workspaceRoot,
+            harnesses: safeConfig.harnesses as HarnessType[],
+            includeContent: syncConfig.settings?.configBodyUpload === true,
+            governanceInputs,
           })
         } catch (err) {
-          // Per-harness isolation is deliberate: one harness failing to register
-          // must not stop the others or abort the poll iteration. Silence was
-          // not deliberate — fetchConfig already succeeded above, so a failure
-          // here means the control plane accepted the config read and rejected
-          // the agent report, which is exactly the "dashboard graph is empty"
-          // symptom this loop was added to fix. Report it so it is diagnosable.
-          log.dim(`Agent report/session for harness '${harnessType}' failed: ${err instanceof Error ? err.message : String(err)}`)
+          log.dim(`Config capture failed (will retry): ${err instanceof Error ? err.message : String(err)}`)
         }
       }
       // Run compliance probes on each iteration
@@ -1312,6 +1407,7 @@ export async function runConnect(opts: {
       )
       log.dim(`Retrying in ${pollInterval / 1000}s...`)
     }
+    pollIteration++
 
     // Sleep until next interval (AbortSignal-aware)
     await new Promise<void>((resolve) => {

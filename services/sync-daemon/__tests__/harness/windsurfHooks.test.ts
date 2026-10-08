@@ -234,14 +234,21 @@ describe('Windsurf hooks writer — merges into the user\'s files', () => {
   let workspaceRoot: string
   let home: string
   const prevHome = process.env.HOME
+  // The settings path follows these; unset, it stays inside the temporary home.
+  const prevXdg = process.env.XDG_CONFIG_HOME
+  const prevAppData = process.env.APPDATA
 
   beforeAll(async () => {
     workspaceRoot = await node_fs.mkdtemp(node_path.join(node_os.tmpdir(), 'intutic-windsurf-merge-ws-'))
     home = await node_fs.mkdtemp(node_path.join(node_os.tmpdir(), 'intutic-windsurf-merge-home-'))
+    delete process.env.XDG_CONFIG_HOME
+    delete process.env.APPDATA
   })
 
   afterAll(async () => {
     process.env.HOME = prevHome
+    if (prevXdg !== undefined) process.env.XDG_CONFIG_HOME = prevXdg
+    if (prevAppData !== undefined) process.env.APPDATA = prevAppData
     await node_fs.rm(workspaceRoot, { recursive: true, force: true })
     await node_fs.rm(home, { recursive: true, force: true })
   })
@@ -249,10 +256,10 @@ describe('Windsurf hooks writer — merges into the user\'s files', () => {
   it('keeps the user\'s settings and hooks, points the proxy at the real proxy port, and does not stack on re-run', async () => {
     const userDir = node_path.join(home, '.codeium', 'windsurf')
     await node_fs.mkdir(userDir, { recursive: true })
-    await node_fs.writeFile(
-      node_path.join(userDir, 'settings.json'),
-      JSON.stringify({ 'editor.fontSize': 15, 'http.proxyAuthorization': null }),
-    )
+    const { windsurfSettingsPath } = await import('../../src/harness/windsurfHooks.js')
+    const settingsPath = windsurfSettingsPath(process.platform, process.env, home)
+    await node_fs.mkdir(node_path.dirname(settingsPath), { recursive: true })
+    await node_fs.writeFile(settingsPath, JSON.stringify({ 'editor.fontSize': 15, 'http.proxyAuthorization': null }))
     await node_fs.writeFile(
       node_path.join(userDir, 'hooks.json'),
       JSON.stringify({ hooks: { pre_run_command: [{ command: 'my-audit.sh' }], post_cascade_response: [{ command: 'notify.sh' }] } }),
@@ -263,7 +270,7 @@ describe('Windsurf hooks writer — merges into the user\'s files', () => {
     await writeWindsurfHooks(workspaceRoot, 'http://127.0.0.1:4000', 4000, 'ws_test')
     await writeWindsurfHooks(workspaceRoot, 'http://127.0.0.1:4000', 4000, 'ws_test')
 
-    const settings = JSON.parse(await node_fs.readFile(node_path.join(userDir, 'settings.json'), 'utf-8'))
+    const settings = JSON.parse(await node_fs.readFile(settingsPath, 'utf-8'))
     expect(settings['editor.fontSize']).toBe(15)
     expect(settings['http.proxy']).toBe('http://127.0.0.1:4000')
     expect(settings['codeium.proxy']).toBe('http://127.0.0.1:4000')
@@ -276,14 +283,41 @@ describe('Windsurf hooks writer — merges into the user\'s files', () => {
   })
 
   it('leaves a settings.json that is not plain JSON untouched', async () => {
-    const userDir = node_path.join(home, '.codeium', 'windsurf')
+    const { writeWindsurfHooks, windsurfSettingsPath } = await import('../../src/harness/windsurfHooks.js')
+    const settingsPath = windsurfSettingsPath(process.platform, process.env, home)
     const jsonc = '{\n  // my proxy\n  "http.proxy": "http://corp-proxy:3128",\n}\n'
-    await node_fs.writeFile(node_path.join(userDir, 'settings.json'), jsonc)
+    await node_fs.writeFile(settingsPath, jsonc)
 
     process.env.HOME = home
-    const { writeWindsurfHooks } = await import('../../src/harness/windsurfHooks.js')
     await writeWindsurfHooks(workspaceRoot, 'http://127.0.0.1:4000', 4000, 'ws_test')
 
-    expect(await node_fs.readFile(node_path.join(userDir, 'settings.json'), 'utf-8')).toBe(jsonc)
+    expect(await node_fs.readFile(settingsPath, 'utf-8')).toBe(jsonc)
+  })
+
+  it('writes the proxy keys into the settings file Windsurf reads, not ~/.codeium/windsurf', async () => {
+    const fresh = await node_fs.mkdtemp(node_path.join(node_os.tmpdir(), 'intutic-windsurf-fresh-home-'))
+    try {
+      process.env.HOME = fresh
+      const { writeWindsurfHooks, windsurfSettingsPath } = await import('../../src/harness/windsurfHooks.js')
+      await writeWindsurfHooks(workspaceRoot, 'http://127.0.0.1:4000', 4000, 'ws_test')
+      const settings = JSON.parse(await node_fs.readFile(windsurfSettingsPath(process.platform, process.env, fresh), 'utf-8'))
+      expect(settings['http.proxy']).toBe('http://127.0.0.1:4000')
+      await expect(node_fs.access(node_path.join(fresh, '.codeium', 'windsurf', 'settings.json'))).rejects.toThrow()
+    } finally {
+      process.env.HOME = home
+      await node_fs.rm(fresh, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('windsurfSettingsPath', () => {
+  it('is VS Code\'s user settings location under the Windsurf product name', async () => {
+    const { windsurfSettingsPath } = await import('../../src/harness/windsurfHooks.js')
+    expect(windsurfSettingsPath('darwin', {}, '/Users/u')).toBe('/Users/u/Library/Application Support/Windsurf/User/settings.json')
+    expect(windsurfSettingsPath('linux', {}, '/home/u')).toBe('/home/u/.config/Windsurf/User/settings.json')
+    expect(windsurfSettingsPath('linux', { XDG_CONFIG_HOME: '/xdg' }, '/home/u')).toBe('/xdg/Windsurf/User/settings.json')
+    expect(windsurfSettingsPath('win32', { APPDATA: '/c/Users/u/AppData/Roaming' }, '/c/Users/u')).toBe(
+      node_path.join('/c/Users/u/AppData/Roaming', 'Windsurf', 'User', 'settings.json'),
+    )
   })
 })

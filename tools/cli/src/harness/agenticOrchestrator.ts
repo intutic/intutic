@@ -10,11 +10,9 @@
  * flag: "Available: claude, codex, opencode"). Each feature runs in its own
  * `git worktree` under `~/.agentic-orchestrator/worktrees/` (confirmed via
  * the project's own README), the same "one workflow, one worktree" shape
- * Xirp uses — so the sync daemon's existing worktree propagation
- * (`services/sync-daemon/src/lib/gitWorktrees.ts`) already covers these
- * worktrees too, with no changes needed: `git worktree list --porcelain`
- * enumerates every worktree of a watched repo regardless of where under the
- * filesystem it lives.
+ * Xirp uses, and covered the same way: by each backend's user-level hook
+ * registration, which applies in every worktree. `intutic connect` writes
+ * project-level files only into the checkout it runs in.
  *
  * Unlike Xirp, this project's facts were LIVE-VERIFIED against the real
  * released artifact, not just its README: the actual `agentico` binary

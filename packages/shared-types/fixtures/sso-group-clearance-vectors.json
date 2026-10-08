@@ -1,0 +1,51 @@
+{
+  "_comment": "SSO-group tool clearance vectors. Every implementation of the rule (the control plane's resolveSsoGroupPrivilege, the MCP proxy, the Rust proxy's response gate, the policy snapshot the sync daemon compiles for the harness gates, @intutic/gate and intutic-clawde) runs these cases and must reach the same clearance and rule id. memberGroups null means the gate does not know the member's groups. Edit the cases, never one implementation's expectations.",
+  "policies": {
+    "standard": {
+      "highRiskTools": ["Bash", "database_write", "mcp__github__create_issue", "db.query"],
+      "requiredGroups": ["sre-oncall", "platform-admins"],
+      "requireOboFor": ["deploy_prod"]
+    },
+    "oboOverlap": {
+      "highRiskTools": ["Bash"],
+      "requiredGroups": ["sre-oncall"],
+      "requireOboFor": ["Bash"]
+    },
+    "noGroupsNamed": {
+      "highRiskTools": ["Bash"],
+      "requiredGroups": [],
+      "requireOboFor": []
+    },
+    "emptyObject": {},
+    "malformed": {
+      "highRiskTools": ["Bash", 7, null],
+      "requiredGroups": "sre-oncall",
+      "requireOboFor": { "deploy_prod": true }
+    },
+    "none": null
+  },
+  "cases": [
+    { "name": "member in a required group runs a high-risk tool", "policy": "standard", "memberGroups": ["sre-oncall"], "toolName": "Bash", "clearance": "GRANTED", "ruleId": null },
+    { "name": "second required group also clears", "policy": "standard", "memberGroups": ["eng", "platform-admins"], "toolName": "database_write", "clearance": "GRANTED", "ruleId": null },
+    { "name": "member outside every required group is denied", "policy": "standard", "memberGroups": ["eng"], "toolName": "Bash", "clearance": "DENIED", "ruleId": "sso_group.high_risk.Bash" },
+    { "name": "member with no groups is denied", "policy": "standard", "memberGroups": [], "toolName": "database_write", "clearance": "DENIED", "ruleId": "sso_group.high_risk.database_write" },
+    { "name": "unknown groups fail closed on a high-risk tool", "policy": "standard", "memberGroups": null, "toolName": "Bash", "clearance": "DENIED", "ruleId": "sso_group.high_risk.Bash" },
+    { "name": "unknown groups do not touch an unlisted tool", "policy": "standard", "memberGroups": null, "toolName": "Read", "clearance": "GRANTED", "ruleId": null },
+    { "name": "group names match exactly, not case-insensitively", "policy": "standard", "memberGroups": ["SRE-oncall"], "toolName": "Bash", "clearance": "DENIED", "ruleId": "sso_group.high_risk.Bash" },
+    { "name": "tool names match exactly, not case-insensitively", "policy": "standard", "memberGroups": ["eng"], "toolName": "bash", "clearance": "GRANTED", "ruleId": null },
+    { "name": "a tool name is not a prefix match", "policy": "standard", "memberGroups": ["eng"], "toolName": "BashHistory", "clearance": "GRANTED", "ruleId": null },
+    { "name": "an unlisted tool is unrestricted", "policy": "standard", "memberGroups": ["eng"], "toolName": "Read", "clearance": "GRANTED", "ruleId": null },
+    { "name": "an MCP tool by its harness name", "policy": "standard", "memberGroups": ["eng"], "toolName": "mcp__github__create_issue", "clearance": "DENIED", "ruleId": "sso_group.high_risk.mcp__github__create_issue" },
+    { "name": "an MCP tool cleared by group", "policy": "standard", "memberGroups": ["sre-oncall"], "toolName": "mcp__github__create_issue", "clearance": "GRANTED", "ruleId": null },
+    { "name": "a dot in a tool name is literal", "policy": "standard", "memberGroups": ["eng"], "toolName": "db.query", "clearance": "DENIED", "ruleId": "sso_group.high_risk.db.query" },
+    { "name": "a dot in a tool name does not match any character", "policy": "standard", "memberGroups": ["eng"], "toolName": "dbXquery", "clearance": "GRANTED", "ruleId": null },
+    { "name": "an on-behalf-of tool is refused to a member in a required group", "policy": "standard", "memberGroups": ["sre-oncall"], "toolName": "deploy_prod", "clearance": "REQUIRES_OBO", "ruleId": "sso_group.require_obo.deploy_prod" },
+    { "name": "an on-behalf-of tool is refused when groups are unknown", "policy": "standard", "memberGroups": null, "toolName": "deploy_prod", "clearance": "REQUIRES_OBO", "ruleId": "sso_group.require_obo.deploy_prod" },
+    { "name": "on-behalf-of outranks group clearance", "policy": "oboOverlap", "memberGroups": ["sre-oncall"], "toolName": "Bash", "clearance": "REQUIRES_OBO", "ruleId": "sso_group.require_obo.Bash" },
+    { "name": "a policy naming no groups denies every high-risk call", "policy": "noGroupsNamed", "memberGroups": ["sre-oncall"], "toolName": "Bash", "clearance": "DENIED", "ruleId": "sso_group.high_risk.Bash" },
+    { "name": "an empty policy object restricts nothing", "policy": "emptyObject", "memberGroups": [], "toolName": "Bash", "clearance": "GRANTED", "ruleId": null },
+    { "name": "a malformed list is read as empty and entries that are not strings are ignored", "policy": "malformed", "memberGroups": ["sre-oncall"], "toolName": "Bash", "clearance": "DENIED", "ruleId": "sso_group.high_risk.Bash" },
+    { "name": "a malformed on-behalf-of list restricts nothing", "policy": "malformed", "memberGroups": ["sre-oncall"], "toolName": "deploy_prod", "clearance": "GRANTED", "ruleId": null },
+    { "name": "no policy restricts nothing", "policy": "none", "memberGroups": null, "toolName": "Bash", "clearance": "GRANTED", "ruleId": null }
+  ]
+}

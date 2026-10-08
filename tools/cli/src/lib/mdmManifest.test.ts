@@ -100,9 +100,7 @@ describe('hooks manifests (Jamf / Intune)', () => {
 describe('firewall deployment manifests (Jamf / Intune)', () => {
   const cliBinaryPath = '/opt/intutic/bin/intutic'
 
-  // Real rule-generator output markers, grepped from packages/proxy/src/firewall.rs
-  // (generate_pf_rules / generate_iptables_rules / generate_nftables_rules /
-  // generate_windows_rules). None of these should ever appear in the MDM
+  // Firewall rule syntax (pf, iptables, nftables, netsh). None of these should ever appear in the MDM
   // manifest — it wraps the `enforce apply` COMMAND, not a rules snapshot,
   // because a snapshot generated here would immediately drift from whatever
   // firewall.rs generates at run time on the actual target platform.

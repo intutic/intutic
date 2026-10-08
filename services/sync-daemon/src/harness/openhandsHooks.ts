@@ -15,7 +15,9 @@
 
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
+import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
+import { keepOriginal, noteWritten } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
 import { emitShellGate, SHELL_EXTRACT, SHELL_FAIL_CLOSED } from './gateBody.js'
 import { parse as parseToml } from 'smol-toml'
@@ -25,7 +27,8 @@ const log = createLogger('sync-openhands-hooks')
 
 /**
  * Write .openhands/hooks.json and the pre-tool-check shell script.
- * Also merges llm.base_url into config.toml if it exists.
+ * Also points `[llm] base_url` in ~/.openhands/config.toml at the proxy when
+ * that file exists.
  *
  * @param workspaceRoot - Absolute workspace root.
  * @param proxyUrl      - Intutic proxy URL.
@@ -37,6 +40,9 @@ export async function writeOpenHandsHooks(
   workspaceId = '',
 ): Promise<void> {
   const openhandsDir = path.join(workspaceRoot, '.openhands')
+  const hooksPath = path.join(openhandsDir, 'hooks.json')
+  // Written whole, over whatever hooks the user had there: kept for disconnect.
+  await keepOriginal(hooksPath, workspaceRoot)
   await fs.mkdir(openhandsDir, { recursive: true })
 
   const hookScriptDir = path.join(workspaceRoot, '.intutic', 'hooks')
@@ -137,61 +143,46 @@ exit 0
     ],
   }
 
-  const hooksPath = path.join(openhandsDir, 'hooks.json')
+  const hooksJson = JSON.stringify(hooksConfig, null, 2) + '\n'
   const tmpHooks = hooksPath + '.intutic-tmp'
-  await fs.writeFile(tmpHooks, JSON.stringify(hooksConfig, null, 2) + '\n', 'utf-8')
+  await fs.writeFile(tmpHooks, hooksJson, 'utf-8')
   await fs.rename(tmpHooks, hooksPath)
+  await noteWritten(hooksPath, workspaceRoot, hooksJson)
 
   log.info({ action: 'openhands_hooks_written', path: hooksPath }, 'OpenHands hooks written')
 
-  // ── config.toml llm.base_url injection ────────────────────────────
-  await mergeOpenHandsConfig(workspaceRoot, proxyUrl)
+  // ── user-level config.toml llm.base_url ───────────────────────────
+  // The workspace config.toml is the adapter's: it merges `[llm] base_url`
+  // and the `[intutic]` table there (`mergeOpenHandsToml`).
+  await mergeUserOpenHandsConfig(proxyUrl)
 }
 
 /**
- * Merge llm.base_url into OpenHands config.toml.
- * Looks for the file in the workspace root and the user config directory.
+ * Point `[llm] base_url` in `~/.openhands/config.toml` at the proxy, when that
+ * file exists. Only that key is set; a file that does not parse is left alone.
+ * An empty `proxyUrl` (the settings guard restoring hooks.json) changes
+ * nothing.
  */
-async function mergeOpenHandsConfig(workspaceRoot: string, proxyUrl: string): Promise<void> {
-  const candidates = [
-    path.join(workspaceRoot, 'config.toml'),
-    path.join(process.env.HOME ?? '', '.openhands', 'config.toml'),
-  ]
-
-  for (const configPath of candidates) {
-    let existing = ''
-    try {
-      existing = await fs.readFile(configPath, 'utf-8')
-    } catch {
-      // File doesn't exist (or is unreadable) — deliberate fail-open: fall
-      // through with `existing` at its '' initialiser so the block below
-      // creates a minimal config instead of aborting the whole sync.
-    }
-
-    // Inject or update [llm] section with base_url
-    if (existing.includes('[llm]')) {
-      // Update existing [llm] section
-      if (existing.includes('base_url')) {
-        existing = existing.replace(
-          /^base_url\s*=\s*.*/m,
-          `base_url = "${proxyUrl}"`,
-        )
-      } else {
-        existing = existing.replace(
-          /\[llm\]/,
-          `[llm]\nbase_url = "${proxyUrl}"`,
-        )
-      }
-    } else {
-      existing += `\n[llm]\nbase_url = "${proxyUrl}"\n`
-    }
-
-    const tmpConfig = configPath + '.intutic-tmp'
-    await fs.mkdir(path.dirname(configPath), { recursive: true })
-    await fs.writeFile(tmpConfig, existing, 'utf-8')
-    await fs.rename(tmpConfig, configPath)
-    log.info({ action: 'openhands_config_written', path: configPath }, 'OpenHands config.toml updated with proxy base_url')
+async function mergeUserOpenHandsConfig(proxyUrl: string): Promise<void> {
+  if (!proxyUrl) return
+  const configPath = path.join(os.homedir(), '.openhands', 'config.toml')
+  let raw: string
+  try {
+    raw = await fs.readFile(configPath, 'utf-8')
+  } catch {
+    return
   }
+  const next = mergeOpenHandsBaseUrl(raw, proxyUrl)
+  if (next === null) {
+    log.warn({ action: 'openhands_config_merge_skipped', path: configPath }, `${configPath} is not valid TOML — left untouched`)
+    return
+  }
+  if (next === raw) return
+  const tmpConfig = configPath + '.intutic-tmp'
+  await keepOriginal(configPath, os.homedir())
+  await fs.writeFile(tmpConfig, next, 'utf-8')
+  await fs.rename(tmpConfig, configPath)
+  log.info({ action: 'openhands_config_written', path: configPath }, 'OpenHands config.toml updated with proxy base_url')
 }
 
 // ─── config.toml merge ───────────────────────────────────────────────────────
@@ -207,6 +198,27 @@ function parsesAsToml(text: string): Record<string, unknown> | null {
   }
 }
 
+/**
+ * Tables only OpenHands' own `config.toml` uses, from its configuration
+ * template (https://github.com/OpenHands/OpenHands/blob/0.59.0/config.template.toml:
+ * `[core]`, `[llm]`, `[agent]`, `[sandbox]`, `[security]`, `[condenser]`,
+ * `[kubernetes]`, `[mcp]`, `[model_routing]`). `[llm]`, `[mcp]` and
+ * `[security]` are left out: other tools use those names too. `[intutic]` is
+ * the table an earlier `intutic connect` wrote.
+ */
+const OPENHANDS_TABLES = ['core', 'agent', 'sandbox', 'condenser', 'intutic']
+
+/**
+ * Whether `config.toml` text is an OpenHands configuration. A file named
+ * `config.toml` is also every Hugo site's and many other tools', so the name
+ * alone is not evidence.
+ */
+export function isOpenHandsConfig(raw: string): boolean {
+  const parsed = parsesAsToml(raw)
+  if (parsed === null) return false
+  return OPENHANDS_TABLES.some((t) => typeof parsed[t] === 'object' && parsed[t] !== null && !Array.isArray(parsed[t]))
+}
+
 /** Index of the line that starts table `name`, or -1. */
 function tableStart(lines: string[], name: string): number {
   return lines.findIndex((l) => l.trim() === `[${name}]`)
@@ -216,6 +228,48 @@ function tableStart(lines: string[], name: string): number {
 function tableEnd(lines: string[], start: number): number {
   const next = lines.findIndex((l, i) => i > start && /^\s*\[/.test(l))
   return next === -1 ? lines.length : next
+}
+
+/** The proxy URL in the form the configured model's SDK expects. */
+function llmBaseUrl(parsed: Record<string, unknown>, proxyUrl: string): string {
+  const llm = (parsed['llm'] ?? {}) as Record<string, unknown>
+  const model = typeof llm['model'] === 'string' ? llm['model'] : ''
+  return /^(anthropic\/|claude)/.test(model) ? anthropicBaseUrl(proxyUrl) : openaiBaseUrl(proxyUrl)
+}
+
+/**
+ * Set `base_url` inside the `[llm]` table only, adding the table when there
+ * is none. A `base_url` in any other table (`[llm.<name>]`, `[mcp]`, …) is
+ * not this key and is left as it is.
+ */
+function setLlmBaseUrl(lines: string[], baseUrl: string): void {
+  const baseLine = `base_url = ${JSON.stringify(baseUrl)}`
+  const llmStart = tableStart(lines, 'llm')
+  if (llmStart === -1) {
+    while (lines.length > 0 && lines[lines.length - 1].trim() === '') lines.pop()
+    lines.push('', '[llm]', baseLine, '')
+    return
+  }
+  const end = tableEnd(lines, llmStart)
+  const existing = lines.findIndex((l, i) => i > llmStart && i < end && /^\s*base_url\s*=/.test(l))
+  if (existing !== -1) lines[existing] = baseLine
+  else lines.splice(llmStart + 1, 0, baseLine)
+}
+
+/**
+ * Point `[llm] base_url` in an OpenHands `config.toml` at the proxy and keep
+ * the rest of the file. Returns `null` when the text is not valid TOML.
+ */
+export function mergeOpenHandsBaseUrl(raw: string, proxyUrl: string): string | null {
+  const parsed = parsesAsToml(raw)
+  if (parsed === null) return null
+  const baseUrl = llmBaseUrl(parsed, proxyUrl)
+  const lines = raw.split('\n')
+  setLlmBaseUrl(lines, baseUrl)
+  const next = (lines[0] === '' ? lines.slice(1) : lines).join('\n')
+  const check = parsesAsToml(next)
+  if (check === null || (check['llm'] as Record<string, unknown> | undefined)?.['base_url'] !== baseUrl) return null
+  return next
 }
 
 /**
@@ -235,26 +289,14 @@ export function mergeOpenHandsToml(raw: string, proxyUrl: string, instructions: 
   const parsed = parsesAsToml(source)
   if (parsed === null) return null
 
-  const llm = (parsed['llm'] ?? {}) as Record<string, unknown>
-  const model = typeof llm['model'] === 'string' ? llm['model'] : ''
-  const baseUrl = /^(anthropic\/|claude)/.test(model) ? anthropicBaseUrl(proxyUrl) : openaiBaseUrl(proxyUrl)
-
+  const baseUrl = llmBaseUrl(parsed, proxyUrl)
   let lines = source.split('\n')
 
   // Drop the previous [intutic] table; it is rewritten whole below.
   const oldIntutic = tableStart(lines, 'intutic')
   if (oldIntutic !== -1) lines.splice(oldIntutic, tableEnd(lines, oldIntutic) - oldIntutic)
 
-  const baseLine = `base_url = ${JSON.stringify(baseUrl)}`
-  const llmStart = tableStart(lines, 'llm')
-  if (llmStart === -1) {
-    lines.push('', '[llm]', baseLine)
-  } else {
-    const end = tableEnd(lines, llmStart)
-    const existing = lines.findIndex((l, i) => i > llmStart && i < end && /^\s*base_url\s*=/.test(l))
-    if (existing !== -1) lines[existing] = baseLine
-    else lines.splice(llmStart + 1, 0, baseLine)
-  }
+  setLlmBaseUrl(lines, baseUrl)
 
   while (lines.length > 0 && lines[lines.length - 1].trim() === '') lines.pop()
   const escaped = instructions.replace(/\\/g, '\\\\').replace(/"""/g, '\\"\\"\\"')

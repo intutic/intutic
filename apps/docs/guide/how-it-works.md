@@ -40,7 +40,7 @@ Every LLM request from your agents flows through the Intutic proxy. The proxy is
 | Aider | `.aider.conf.yml` | `extra-instructions` YAML field |
 | Antigravity | `.gemini/settings.json` | `customInstructions` JSON field |
 | Codex | `.env.intutic` | `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` env vars |
-| OpenHands | `config.toml` | `[intutic]` TOML section with `proxy_url` |
+| OpenHands | `config.toml` | `[llm] base_url` and an `[intutic]` table, merged into the file |
 | n8n | `.intutic/n8n/governance-workflow.json` | Workflow parameters via n8n REST API |
 | Cline | `.cline/hooks/hooks.json` | PreToolUse hooks + apiBase injection |
 | Roo Code | `.roorules` | Markdown rules + cancel hooks |

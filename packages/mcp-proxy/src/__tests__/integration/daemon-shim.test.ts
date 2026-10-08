@@ -319,13 +319,15 @@ describe('Daemon-Shim Integration Tests', () => {
 
     // GovernanceEmitter falls back to its dual path — a direct POST to this
     // same /api/v1/hook-events route, plus a JSONL append — when the daemon
-    // socket call fails. Three things separate "the daemon path works" from
+    // socket call fails. Two things separate "the daemon path works" from
     // "the fallback quietly covered for it": the batch carries the daemon's own
-    // INTUTIC_API_KEY rather than the emitter's key, only the fallback stamps
-    // an incidentId, and only the fallback writes the JSONL file.
+    // INTUTIC_API_KEY rather than the emitter's key, and only the fallback
+    // writes the JSONL file.
     expect(received.batch.authorization).toBe('Bearer daemon-api-key')
-    expect(received.event['incidentId']).toBeUndefined()
     await expect(fs.access(fallbackEventsPath)).rejects.toThrow()
+    // Both paths carry the event's own id: the control plane keys detector
+    // findings on it, so a batch the daemon resends files nothing twice.
+    expect(received.event['incidentId']).toMatch(/^[0-9a-f-]{36}$/)
   })
 
   it('shim client falls back to direct control plane requests if daemon socket is offline', async () => {

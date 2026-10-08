@@ -1,9 +1,12 @@
 /**
- * configReader.ts — Read harness config files and upload to control plane.
+ * configReader.ts — Capture harness config files for the config history.
  *
- * The daemon reads config files (.cursorrules, CLAUDE.md, etc.) from the
- * developer's workspace and POSTs them to the control plane for versioning,
- * diff tracking, and SkillOpt analysis.
+ * `intutic connect` reads each recorded harness's rules file (`HARNESS_FILES`,
+ * the one list of what is captured) and POSTs it to the control plane. By
+ * default a capture is metadata only: path, the SHA-256 of the redacted text,
+ * size, harness and time. With the workspace's `configBodyUpload` on it also
+ * carries the text, credential-shaped strings replaced by `[redacted]` first;
+ * that is what config diffs and SkillOpt need.
  *
  * LLD #51 — Harness Config Capture + SkillOpt Pipeline
  *
@@ -19,7 +22,9 @@ import type {
   BatchConfigCapturePayload,
   GovernanceCoverageInputs,
 } from '@intutic/shared-types'
+import { SECRET_VALUE_PATTERNS } from '@intutic/shared-types'
 import { HARNESS_FILES } from './configWriter.js'
+import { redactSecrets } from './harness/holdRedaction.js'
 
 // ─── Constants ───────────────────────────────────────────────────────
 
@@ -31,8 +36,30 @@ const MAX_FILE_SIZE_BYTES = 512 * 1024  // 512 KB
 
 // ─── Local hash cache ────────────────────────────────────────────────
 
-/** Cache of last-uploaded content hashes per file path. Avoids redundant uploads. */
+/**
+ * Last-uploaded content hash per file and upload mode. The mode is part of
+ * the key so that turning `configBodyUpload` on uploads the content of a file
+ * whose metadata was already sent, at the next capture rather than its next
+ * edit.
+ */
 const lastUploadedHashes = new Map<string, string>()
+
+/** Every credential-value pattern the hook gate and pre-commit scan refuse. */
+const SECRET_VALUES = SECRET_VALUE_PATTERNS.map((p) => new RegExp(p.source, 'g'))
+
+/**
+ * A config file's text as it may leave the machine: the hold-snapshot
+ * redactor (credential shapes, `name: value` assignments to secret-named keys,
+ * PEM blocks) without its length cap, then every pattern in
+ * `SECRET_VALUE_PATTERNS`. Both, because each catches shapes the other does
+ * not (`vk_…` and `sk-or-v1-…` are only in the second, JWTs and Slack tokens
+ * only in the first).
+ */
+export function redactConfigText(text: string): string {
+  let out = redactSecrets(text, 0, Number.POSITIVE_INFINITY) as string
+  for (const re of SECRET_VALUES) out = out.replace(re, '[redacted]')
+  return out
+}
 
 // ─── Public API ──────────────────────────────────────────────────────
 
@@ -41,7 +68,7 @@ const lastUploadedHashes = new Map<string, string>()
  * expects. Re-exported from `@intutic/shared-types` (TD-443) — previously
  * declared locally here as a hand-kept duplicate of
  * `harnessGradeSweep.ts`'s `deriveEnforcementInputs` return shape on the
- * control-plane side, which drifted (this module's `syncLoop.ts` consumer
+ * control-plane side, which drifted (this module's sync-cycle consumer
  * was missing an `Array.isArray` guard the control-plane side had). Both
  * sides now derive from `packages/shared-types/src/governanceCoverage.ts`'s
  * single mapping — safe for this module to depend on since it is a leaf
@@ -62,16 +89,18 @@ export function shouldCaptureThisIteration(iterationCount: number): boolean {
 
 /**
  * Read harness config files from the workspace.
- * For each active harness, reads the config file, computes SHA-256 hash,
- * and returns the content. Skips files that don't exist or are too large.
+ * For each active harness, reads the config file and hashes its redacted
+ * text; the text itself is kept only with `includeContent`. Skips files that
+ * don't exist or are too large.
  *
  * @param workspaceRoot - Absolute path to the workspace root.
  * @param harnesses - Active harness types detected in the workspace.
- * @returns Array of captured config files with content and hashes.
+ * @param opts.includeContent - The workspace's `configBodyUpload`.
  */
 export async function readHarnessConfigs(
   workspaceRoot: string,
   harnesses: HarnessType[],
+  opts: { includeContent: boolean },
 ): Promise<CapturedConfigFile[]> {
   const results: CapturedConfigFile[] = []
 
@@ -87,13 +116,14 @@ export async function readHarnessConfigs(
         continue
       }
 
-      const content = await fs.readFile(filePath, 'utf-8')
-      const contentHash = crypto.createHash('sha256').update(content).digest('hex')
+      const redacted = redactConfigText(await fs.readFile(filePath, 'utf-8'))
+      const contentHash = crypto.createHash('sha256').update(redacted).digest('hex')
 
       results.push({
         path: filename,
-        content,
         contentHash,
+        sizeBytes: stat.size,
+        ...(opts.includeContent ? { content: redacted } : {}),
       })
     } catch (err: unknown) {
       // File doesn't exist or unreadable — skip silently
@@ -125,11 +155,9 @@ export async function uploadConfigCapture(
   harnessType: HarnessType,
   configs: CapturedConfigFile[],
 ): Promise<number> {
+  const cacheKey = (f: CapturedConfigFile) => `${f.content === undefined ? 'meta' : 'body'}:${harnessType}:${f.path}`
   // Filter out files whose hash hasn't changed since last upload
-  const changed = configs.filter(f => {
-    const lastHash = lastUploadedHashes.get(f.path)
-    return lastHash !== f.contentHash
-  })
+  const changed = configs.filter(f => lastUploadedHashes.get(cacheKey(f)) !== f.contentHash)
 
   if (changed.length === 0) return 0
 
@@ -158,7 +186,7 @@ export async function uploadConfigCapture(
 
   // Update local hash cache on success
   for (const f of changed) {
-    lastUploadedHashes.set(f.path, f.contentHash)
+    lastUploadedHashes.set(cacheKey(f), f.contentHash)
   }
 
   return changed.length
@@ -209,54 +237,46 @@ export async function reportGovernanceCoverageSnapshot(
 }
 
 /**
- * Full config capture cycle: read + upload.
- * Groups by harness type for proper capture payloads.
+ * Full config capture cycle: read + upload, one payload per harness.
  *
- * @param governanceInputs - This cycle's per-harness enforcement signals
- *   (from `runSyncIteration`'s agent-facets collection), used to fire a
- *   governance-coverage snapshot immediately after a harness's rules file is
- *   actually found to have changed — never on every sync tick, only on the
- *   iterations where `uploadConfigCapture`'s content-hash dedup lets a file
- *   through. Falls back to `hasRulesFile: true` / everything else `false`
- *   when the caller has no facets for a harness yet (first cycle before the
- *   agent-report step has run) — conservative in the same direction
- *   `harnessGradeSweep.ts`'s own doc comment argues for: "a wrong mapping
- *   overstates enforcement, which is worse than an empty grid."
+ * `includeContent` is the workspace's `configBodyUpload` as the latest synced
+ * settings carry it, so a change reaches the next capture. Off, no request
+ * built here carries a file's content.
+ *
+ * `governanceInputs` are this cycle's per-harness enforcement signals, derived
+ * from the agent report facets. A governance-coverage snapshot fires only for
+ * a harness whose rules file was actually uploaded this time, not on every
+ * tick. Without inputs for a harness it falls back to `hasRulesFile: true` and
+ * everything else `false`: a wrong mapping that overstated enforcement would
+ * be worse than an empty grid.
  */
-export async function captureAndUpload(
-  controlPlaneUrl: string,
-  apiKey: string,
-  workspaceId: string,
-  workspaceRoot: string,
-  harnesses: HarnessType[],
-  governanceInputs?: Partial<Record<HarnessType, GovernanceCoverageInputs>>,
-): Promise<void> {
-  for (const harness of harnesses) {
-    const configs = await readHarnessConfigs(workspaceRoot, [harness])
-    if (configs.length > 0) {
-      const uploaded = await uploadConfigCapture(
-        controlPlaneUrl,
-        apiKey,
-        workspaceId,
-        harness,
-        configs,
-      )
-      if (uploaded > 0) {
-        console.log(`[config-reader] Captured ${uploaded} ${harness} config file(s)`)
-
-        await reportGovernanceCoverageSnapshot(
-          controlPlaneUrl,
-          apiKey,
-          workspaceId,
-          harness,
-          governanceInputs?.[harness] ?? {
-            mcpProxyActive: false,
-            nativeHookActive: false,
-            llmProxyActive: false,
-            hasRulesFile: true,
-          },
-        )
-      }
-    }
+export async function captureAndUpload(opts: {
+  controlPlaneUrl: string
+  apiKey: string
+  workspaceId: string
+  workspaceRoot: string
+  harnesses: HarnessType[]
+  includeContent: boolean
+  governanceInputs?: Partial<Record<HarnessType, GovernanceCoverageInputs>>
+}): Promise<void> {
+  const { controlPlaneUrl, apiKey, workspaceId } = opts
+  for (const harness of opts.harnesses) {
+    const configs = await readHarnessConfigs(opts.workspaceRoot, [harness], { includeContent: opts.includeContent })
+    if (configs.length === 0) continue
+    const uploaded = await uploadConfigCapture(controlPlaneUrl, apiKey, workspaceId, harness, configs)
+    if (uploaded === 0) continue
+    console.log(`[config-reader] Captured ${uploaded} ${harness} config file(s)`)
+    await reportGovernanceCoverageSnapshot(
+      controlPlaneUrl,
+      apiKey,
+      workspaceId,
+      harness,
+      opts.governanceInputs?.[harness] ?? {
+        mcpProxyActive: false,
+        nativeHookActive: false,
+        llmProxyActive: false,
+        hasRulesFile: true,
+      },
+    )
   }
 }

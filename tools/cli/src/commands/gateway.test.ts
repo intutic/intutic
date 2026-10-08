@@ -22,6 +22,7 @@ import {
   runGatewayConfigSet,
   runGatewayAssign,
   runGatewayResolve,
+  describeConfigVersion,
 } from './gateway.js'
 
 describe('intutic gateway', () => {
@@ -73,12 +74,24 @@ describe('intutic gateway', () => {
     expect(printed).toContain('gwk_secret')
   })
 
-  it('register refuses an invalid --target before calling the API', async () => {
+  it('register refuses an unknown --target before calling the API', async () => {
     await expect(
       runGatewayRegister({ name: 'x', target: 'not-a-real-target' }),
     ).rejects.toThrow('process.exit(1)')
     expect(fetchMock).not.toHaveBeenCalled()
     expect(errSpy).toHaveBeenCalled()
+  })
+
+  it.each(['kubernetes', 'bare_metal'])('register sends --target %s as the deployment target', async (target) => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        gatewayId: 'gw_t', name: 'x', deploymentTarget: target, status: 'pending', token: 'gwk_t', instructions: '',
+      }),
+    })
+    await runGatewayRegister({ name: 'x', target })
+    const [, init] = fetchMock.mock.calls[0]
+    expect(JSON.parse(init.body)).toEqual({ name: 'x', deploymentTarget: target })
   })
 
   it('list hits GET /api/v1/gateways', async () => {
@@ -105,6 +118,8 @@ describe('intutic gateway', () => {
         litellmReachable: null,
         lastError: null,
         reportedAt: '2026-08-13T00:00:00Z',
+        appliedConfigVersion: 2,
+        desiredConfigVersion: 3,
       }),
     })
 
@@ -112,6 +127,17 @@ describe('intutic gateway', () => {
 
     const [url] = fetchMock.mock.calls[0]
     expect(url).toBe('https://api.test.invalid/api/v1/gateways/gw_abc/status')
+    const printed = logSpy.mock.calls.map((c: unknown[]) => c.map(String).join(' ')).join('\n')
+    expect(printed).toContain('2 (version 3 applies on the next heartbeat)')
+  })
+
+  it('describes the applied config version against the desired one', () => {
+    expect(describeConfigVersion(3, 3)).toBe('3 (up to date)')
+    expect(describeConfigVersion(0, 0)).toBe('0 (up to date)')
+    expect(describeConfigVersion(2, 3)).toBe('2 (version 3 applies on the next heartbeat)')
+    // A reset counter: lower than what runs, and pulled all the same.
+    expect(describeConfigVersion(5, 1)).toBe('5 (version 1 applies on the next heartbeat)')
+    expect(describeConfigVersion(null, 3)).toBe('— (desired 3; the gateway has not reported one)')
   })
 
   it('rotate hits POST /api/v1/gateways/:id/rotate with an empty body and prints the new token', async () => {
@@ -162,6 +188,10 @@ describe('intutic gateway', () => {
     expect(url).toBe('https://api.test.invalid/api/v1/gateways/gw_abc/config')
     expect(init.method).toBe('PATCH')
     expect(JSON.parse(init.body)).toEqual({ requireProvisionedKey: true })
+    // Every target applies it live now: no redeploy advice.
+    const printed = logSpy.mock.calls.map((c: unknown[]) => c.map(String).join(' ')).join('\n')
+    expect(printed).toContain('applies it on its next heartbeat, without a restart')
+    expect(printed).not.toMatch(/redeploy/i)
   })
 
   it('config set refuses when neither flag is provided', async () => {

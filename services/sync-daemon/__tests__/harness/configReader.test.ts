@@ -18,8 +18,23 @@ import {
   shouldCaptureThisIteration,
   captureAndUpload,
   reportGovernanceCoverageSnapshot,
+  redactConfigText,
 } from '../../src/configReader.js'
 import type { HarnessType } from '@intutic/shared-types'
+
+/** Content included, as with `configBodyUpload` on. */
+const BODY = { includeContent: true }
+
+function target(workspaceRoot: string, harnesses: string[], includeContent = false) {
+  return {
+    controlPlaneUrl: 'http://cp.test',
+    apiKey: 'vk_test',
+    workspaceId: 'wk_test',
+    workspaceRoot,
+    harnesses: harnesses as HarnessType[],
+    includeContent,
+  }
+}
 
 describe('Config Reader', () => {
   let tmpDir: string
@@ -33,7 +48,7 @@ describe('Config Reader', () => {
       const content = '# Governance Rules\n\n## No Destructive Commands\nDo not run rm -rf'
       await node_fs.writeFile(node_path.join(tmpDir, '.cursorrules'), content)
 
-      const result = await readHarnessConfigs(tmpDir, ['cursor'] as HarnessType[])
+      const result = await readHarnessConfigs(tmpDir, ['cursor'] as HarnessType[], BODY)
 
       expect(result).toHaveLength(1)
       expect(result[0].path).toBe('.cursorrules')
@@ -45,7 +60,7 @@ describe('Config Reader', () => {
       const content = '# Claude Code Rules\nBe concise.'
       await node_fs.writeFile(node_path.join(tmpDir, 'CLAUDE.md'), content)
 
-      const result = await readHarnessConfigs(tmpDir, ['claude-code'] as HarnessType[])
+      const result = await readHarnessConfigs(tmpDir, ['claude-code'] as HarnessType[], BODY)
 
       expect(result).toHaveLength(1)
       expect(result[0].path).toBe('CLAUDE.md')
@@ -54,7 +69,7 @@ describe('Config Reader', () => {
 
     it('skips harnesses whose config file does not exist', async () => {
       // Don't create any files
-      const result = await readHarnessConfigs(tmpDir, ['cursor', 'claude-code'] as HarnessType[])
+      const result = await readHarnessConfigs(tmpDir, ['cursor', 'claude-code'] as HarnessType[], BODY)
       expect(result).toHaveLength(0)
     })
 
@@ -62,7 +77,7 @@ describe('Config Reader', () => {
       await node_fs.writeFile(node_path.join(tmpDir, '.cursorrules'), 'cursor rules')
       await node_fs.writeFile(node_path.join(tmpDir, 'CLAUDE.md'), 'claude rules')
 
-      const result = await readHarnessConfigs(tmpDir, ['cursor', 'claude-code'] as HarnessType[])
+      const result = await readHarnessConfigs(tmpDir, ['cursor', 'claude-code'] as HarnessType[], BODY)
 
       expect(result).toHaveLength(2)
       const paths = result.map(r => r.path)
@@ -72,20 +87,20 @@ describe('Config Reader', () => {
 
     it('produces different hashes for different content', async () => {
       await node_fs.writeFile(node_path.join(tmpDir, '.cursorrules'), 'content A')
-      const resultA = await readHarnessConfigs(tmpDir, ['cursor'] as HarnessType[])
+      const resultA = await readHarnessConfigs(tmpDir, ['cursor'] as HarnessType[], BODY)
 
       await node_fs.writeFile(node_path.join(tmpDir, '.cursorrules'), 'content B')
-      const resultB = await readHarnessConfigs(tmpDir, ['cursor'] as HarnessType[])
+      const resultB = await readHarnessConfigs(tmpDir, ['cursor'] as HarnessType[], BODY)
 
       expect(resultA[0].contentHash).not.toBe(resultB[0].contentHash)
     })
 
     it('returns same hash for identical content', async () => {
       await node_fs.writeFile(node_path.join(tmpDir, '.cursorrules'), 'identical')
-      const resultA = await readHarnessConfigs(tmpDir, ['cursor'] as HarnessType[])
+      const resultA = await readHarnessConfigs(tmpDir, ['cursor'] as HarnessType[], BODY)
 
       // Re-read same content
-      const resultB = await readHarnessConfigs(tmpDir, ['cursor'] as HarnessType[])
+      const resultB = await readHarnessConfigs(tmpDir, ['cursor'] as HarnessType[], BODY)
 
       expect(resultA[0].contentHash).toBe(resultB[0].contentHash)
     })
@@ -218,8 +233,9 @@ describe('Config Reader', () => {
       await node_fs.writeFile(node_path.join(tmpDir2, '.aider.conf.yml'), 'v1 rules', 'utf-8')
       const { calls } = stubFetchCapturingCalls()
 
-      await captureAndUpload('http://cp.test', 'vk_test', 'wk_test', tmpDir2, ['aider'] as HarnessType[], {
-        aider: { mcpProxyActive: true, nativeHookActive: true, llmProxyActive: false, hasRulesFile: true },
+      await captureAndUpload({
+        ...target(tmpDir2, ['aider']),
+        governanceInputs: { aider: { mcpProxyActive: true, nativeHookActive: true, llmProxyActive: false, hasRulesFile: true } },
       })
 
       const captureCalls = calls.filter((c) => c.url.includes('/config/capture'))
@@ -239,14 +255,14 @@ describe('Config Reader', () => {
       await node_fs.writeFile(node_path.join(tmpDir2, '.roorules'), 'unchanged content', 'utf-8')
       const { calls } = stubFetchCapturingCalls()
 
-      await captureAndUpload('http://cp.test', 'vk_test', 'wk_test', tmpDir2, ['roo-code'] as HarnessType[])
+      await captureAndUpload(target(tmpDir2, ['roo-code']))
       expect(calls.filter((c) => c.url.includes('/governance-coverage/snapshot'))).toHaveLength(1)
 
       calls.length = 0
       // Second cycle, same content on disk — uploadConfigCapture's
       // content-hash dedup must skip both the config-capture upload AND the
       // governance-coverage snapshot this test exists to pin.
-      await captureAndUpload('http://cp.test', 'vk_test', 'wk_test', tmpDir2, ['roo-code'] as HarnessType[])
+      await captureAndUpload(target(tmpDir2, ['roo-code']))
       expect(calls.filter((c) => c.url.includes('/config/capture'))).toHaveLength(0)
       expect(calls.filter((c) => c.url.includes('/governance-coverage/snapshot'))).toHaveLength(0)
     })
@@ -256,7 +272,7 @@ describe('Config Reader', () => {
       await node_fs.writeFile(node_path.join(tmpDir2, '.hermes', 'config.yaml'), 'rules', 'utf-8')
       const { calls } = stubFetchCapturingCalls()
 
-      await captureAndUpload('http://cp.test', 'vk_test', 'wk_test', tmpDir2, ['hermes'] as HarnessType[])
+      await captureAndUpload(target(tmpDir2, ['hermes']))
 
       const snapshotCalls = calls.filter((c) => c.url.includes('/governance-coverage/snapshot'))
       expect(snapshotCalls).toHaveLength(1)
@@ -268,5 +284,104 @@ describe('Config Reader', () => {
         hasRulesFile: true,
       })
     })
+  })
+
+  describe('content upload (configBodyUpload)', () => {
+    let root: string
+    // Assembled at runtime: no contiguous credential-shaped literal in source.
+    const anthropicKey = ['sk-ant-', 'api03-', 'A'.repeat(32)].join('')
+    const virtualKey = ['vk_', 'a1'.repeat(16)].join('')
+
+    beforeEach(async () => {
+      root = await node_fs.mkdtemp(node_path.join(node_os.tmpdir(), 'intutic-capture-body-'))
+    })
+    afterEach(async () => {
+      vi.unstubAllGlobals()
+      await node_fs.rm(root, { recursive: true, force: true })
+    })
+
+    function stubFetch(): Array<{ url: string; body: any }> {
+      const calls: Array<{ url: string; body: any }> = []
+      vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        calls.push({ url: String(input), body: init?.body ? JSON.parse(init.body as string) : null })
+        return { ok: true, status: 200, json: async () => ({ ok: true }), text: async () => '' } as Response
+      }) as unknown as typeof fetch)
+      return calls
+    }
+    const captures = (calls: Array<{ url: string; body: any }>) => calls.filter((c) => c.url.endsWith('/api/v1/config/capture'))
+
+    it('off: sends path, hash, size and harness, and no content', async () => {
+      const text = `# Rules\nKey: ${anthropicKey}\n`
+      await node_fs.writeFile(node_path.join(root, 'AGENTS.md'), text)
+      const calls = stubFetch()
+
+      await captureAndUpload(target(root, ['opencode'], false))
+
+      const [capture] = captures(calls)
+      expect(capture.body.harnessType).toBe('opencode')
+      expect(capture.body.files).toEqual([
+        { path: 'AGENTS.md', contentHash: expect.stringMatching(/^[0-9a-f]{64}$/), sizeBytes: Buffer.byteLength(text) },
+      ])
+      expect(JSON.stringify(calls)).not.toContain('# Rules')
+    })
+
+    it('on: sends the content with credential-shaped strings redacted', async () => {
+      await node_fs.writeFile(
+        node_path.join(root, '.windsurfrules'),
+        `# Rules\nUse ${anthropicKey} for tests.\nINTUTIC_KEY=${virtualKey}\nKeep this line.\n`,
+      )
+      const calls = stubFetch()
+
+      await captureAndUpload(target(root, ['windsurf'], true))
+
+      const [file] = captures(calls)[0].body.files
+      expect(file.content).toContain('Keep this line.')
+      expect(file.content).toContain('[redacted]')
+      const sent = JSON.stringify(calls)
+      expect(sent).not.toContain(anthropicKey)
+      expect(sent).not.toContain(virtualKey)
+      // The hash is of what was sent, so the server's own hash agrees.
+      const { createHash } = await import('node:crypto')
+      expect(file.contentHash).toBe(createHash('sha256').update(file.content).digest('hex'))
+    })
+
+    it('turning it on uploads the content at the next capture, not the next edit', async () => {
+      await node_fs.writeFile(node_path.join(root, '.roorules'), 'unchanged rules\n')
+      const calls = stubFetch()
+
+      await captureAndUpload(target(root, ['roo-code'], false))
+      await captureAndUpload(target(root, ['roo-code'], false))
+      await captureAndUpload(target(root, ['roo-code'], true))
+      await captureAndUpload(target(root, ['roo-code'], true))
+
+      const sent = captures(calls).map((c) => c.body.files[0])
+      expect(sent).toHaveLength(2)
+      expect(sent[0].content).toBeUndefined()
+      expect(sent[1].content).toBe('unchanged rules\n')
+      expect(sent[1].contentHash).toBe(sent[0].contentHash)
+    })
+
+    it('redactConfigText removes every shape the secret patterns name', () => {
+      const out = redactConfigText(`a ${anthropicKey} b ${virtualKey} c`)
+      expect(out).toBe('a [redacted] b [redacted] c')
+    })
+  })
+
+  // One list of what is captured: HARNESS_FILES. The CLI reference lists the
+  // same files, so a harness added there without the docs fails here.
+  it('the CLI reference lists exactly the files HARNESS_FILES captures', async () => {
+    const { HARNESS_FILES } = await import('../../src/configWriter.js')
+    const doc = await node_fs.readFile(node_path.join(__dirname, '../../../../apps/docs/reference/cli.md'), 'utf-8')
+    const section = doc.slice(doc.indexOf('### Config content upload'))
+    const table = section.slice(section.indexOf('| File | Harnesses |'), section.indexOf('\n---'))
+    const listed = new Map<string, string[]>()
+    for (const m of table.matchAll(/^\| `([^`]+)` \| (.+) \|$/gm)) {
+      listed.set(m[1]!, [...m[2]!.matchAll(/`([^`]+)`/g)].map((h) => h[1]!).sort())
+    }
+    const captured = new Map<string, string[]>()
+    for (const [harness, file] of Object.entries(HARNESS_FILES)) {
+      if (file) captured.set(file, [...(captured.get(file) ?? []), harness].sort())
+    }
+    expect(Object.fromEntries(listed)).toEqual(Object.fromEntries(captured))
   })
 })

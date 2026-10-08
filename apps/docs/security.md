@@ -69,6 +69,8 @@ Developer → AI Agent → Intutic Proxy (:4000) → LLM Provider
 
 In this mode, and only in this mode, verdicts and traces are sent to the control plane. Point it at a control plane you host yourself. Prompts and completions are still never transmitted.
 
+The sync daemon (`intutic connect`) also records each harness rules file in the workspace's config history: its path, a hash, its size and the time. It uploads a file's text only when the workspace turns on **Upload config file content**, and redacts credential-shaped strings in it before it leaves the machine. See [Config content upload](/reference/cli#config-content-upload).
+
 ---
 
 <!-- ENTERPRISE_ONLY_END -->
@@ -122,7 +124,7 @@ Intutic provides enterprise-grade identity and access management:
 
 Intutic helps your organization meet regulatory requirements for AI governance:
 
-- **SOC 2 Probes** — Eight compliance probes (workspace policy completeness, MFA enforcement, data-residency violations, audit-log integrity, API-key rotation, SOP coverage, auto-apply provenance, and SOP git drift), each scored 0–100 with structured findings, run hourly and on demand — with a queryable probe history and a signed, hash-manifested SOC 2 evidence export built on top of them (see [Compliance Evidence](/guide/compliance-evidence))
+- **SOC 2 Probes** — Eleven compliance probes (workspace policy completeness, MFA enforcement, data-residency violations, audit-log integrity, API-key rotation, SOP coverage, auto-apply provenance, SOP git drift, guard liveness, guardrail authority and provider availability), each scored 0–100 with structured findings, run hourly and on demand — with a queryable probe history and a signed, hash-manifested SOC 2 evidence export built on top of them (see [Compliance Evidence](/guide/compliance-evidence)), mapped to the EU AI Act, ISO/IEC 42001 and NIST AI RMF (see [Framework Mapping](/guide/framework-mapping))
 - **GDPR** — Article 17 erasure, consent management, and data processing
   agreements. Erasure is fulfilled by our team on request rather than through a
   self-service endpoint, within the one-month window Article 12(3) allows.

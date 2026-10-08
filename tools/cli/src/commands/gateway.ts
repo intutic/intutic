@@ -79,6 +79,19 @@ interface GatewayStatusResponse {
   litellmReachable: boolean | null
   lastError: string | null
   reportedAt: string | null
+  /** The config version the proxy reported running; null when unreachable or not reported. */
+  appliedConfigVersion: number | null
+  /** The version the dashboard's latest config change produced; 0 before any. */
+  desiredConfigVersion: number
+}
+
+/** Applied against desired, for `gateway status`. */
+export function describeConfigVersion(applied: number | null, desired: number): string {
+  if (applied === null) return `— (desired ${desired}; the gateway has not reported one)`
+  // Any other version, lower included (a reset counter), is pulled on the
+  // next heartbeat.
+  if (applied === desired) return `${applied} (up to date)`
+  return `${applied} (version ${desired} applies on the next heartbeat)`
 }
 
 async function getClient(opts: GatewayCliOpts) {
@@ -208,6 +221,7 @@ export async function runGatewayStatus(gatewayId: string, opts: GatewayCliOpts):
     )
     log.field('Last error', res.lastError ?? '—')
     log.field('Reported at', res.reportedAt ?? '— (no heartbeat received within the TTL window)')
+    log.field('Config version', describeConfigVersion(res.appliedConfigVersion ?? null, res.desiredConfigVersion ?? 0))
   } catch (err) {
     log.error(`Failed to fetch gateway status: ${err instanceof Error ? err.message : String(err)}`)
     process.exit(1)
@@ -301,8 +315,8 @@ export async function runGatewayConfigSet(
 
     log.success(`Gateway config updated (version ${res.configVersion}).`)
     log.dim(
-      '  A daemon-supervised gateway (packages/gateway-daemon) applies this on its next poll. ' +
-        'Docker/Kubernetes deployments require a manual redeploy to pick up config changes.',
+      '  The gateway applies it on its next heartbeat, without a restart (every 30 seconds by default, ' +
+        `INTUTIC_GATEWAY_HEARTBEAT_INTERVAL_SECS). \`intutic gateway status ${gatewayId}\` shows when it has.`,
     )
   } catch (err) {
     log.error(`Failed to update gateway config: ${err instanceof Error ? err.message : String(err)}`)

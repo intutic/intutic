@@ -23,7 +23,8 @@ import { writeAntigravityHooks } from '../../src/harness/antigravityHooks.js'
 import { writeCodexHooks } from '../../src/harness/codexHooks.js'
 import { mergePiModels } from '../../src/harness/piHooks.js'
 import { mergeHermesYaml } from '../../src/harness/hermesHooks.js'
-import { mergeOpenHandsToml } from '../../src/harness/openhandsHooks.js'
+import { mergeOpenHandsToml, mergeOpenHandsBaseUrl } from '../../src/harness/openhandsHooks.js'
+import { mergeGooseConfigYaml } from '../../src/harness/gooseHooks.js'
 
 const URL_V1 = 'http://127.0.0.1:4000/v1'
 
@@ -286,5 +287,65 @@ describe('OpenHands config.toml', () => {
     const legacy = '# Intutic Governance Rules (auto-generated)\n[intutic]\nproxy_url = "x"\n'
     expect(Object.keys(parseToml(mergeOpenHandsToml(legacy, 'http://h:4000', 'x')!))).toEqual(['llm', 'intutic'])
     expect(mergeOpenHandsToml('[llm\n', 'http://h:4000', 'x')).toBeNull()
+  })
+})
+
+describe('OpenHands base_url outside [llm]', () => {
+  // The old text edit replaced the first `base_url =` line in the file,
+  // whichever table held it.
+  const user = '[llm.draft]\nmodel = "gpt-4o-mini"\nbase_url = "https://draft.example/v1"\n\n[llm]\nmodel = "gpt-4o"\n'
+
+  it('sets only [llm] base_url and leaves a named llm table\'s own', () => {
+    for (const merged of [mergeOpenHandsBaseUrl(user, 'http://h:4000')!, mergeOpenHandsToml(user, 'http://h:4000', 'x')!]) {
+      const parsed = parseToml(merged) as Record<string, any>
+      expect(parsed.llm.base_url).toBe('http://h:4000/v1')
+      expect(parsed.llm.draft).toEqual({ model: 'gpt-4o-mini', base_url: 'https://draft.example/v1' })
+    }
+  })
+
+  it('adds an [llm] table rather than editing another table\'s base_url', () => {
+    const merged = mergeOpenHandsBaseUrl('[mcp]\nbase_url = "https://mcp.example"\n', 'http://h:4000')!
+    const parsed = parseToml(merged) as Record<string, any>
+    expect(parsed.mcp.base_url).toBe('https://mcp.example')
+    expect(parsed.llm.base_url).toBe('http://h:4000/v1')
+    expect(mergeOpenHandsBaseUrl(merged, 'http://h:4000')).toBe(merged)
+  })
+
+  it('leaves a file that is not TOML alone', () => {
+    expect(mergeOpenHandsBaseUrl('[llm\n', 'http://h:4000')).toBeNull()
+  })
+})
+
+describe('Goose config.yaml', () => {
+  const script = '/home/u/.agents/plugins/intutic-governance/scripts/intutic-check.sh'
+
+  it('sets provider.host and hooks.pre_tool_use, and no other host or hook key', () => {
+    // The old text edit replaced the first `host:` line and the first
+    // `pre_tool_use:` line in the file, whichever key held them.
+    const user =
+      '# mine\nextensions:\n  search:\n    host: https://search.example\n    pre_tool_use: keep-me\n' +
+      'provider:\n  name: openai\n  host: https://api.openai.com\n'
+    const merged = mergeGooseConfigYaml(user, 'http://127.0.0.1:4000', script)!
+    const parsed = parseYaml(merged)
+    expect(parsed.extensions.search).toEqual({ host: 'https://search.example', pre_tool_use: 'keep-me' })
+    expect(parsed.provider).toEqual({ name: 'openai', host: 'http://127.0.0.1:4000' })
+    expect(parsed.hooks).toEqual({ pre_tool_use: script })
+    expect(merged.startsWith('# mine\n')).toBe(true)
+    expect(mergeGooseConfigYaml(merged, 'http://127.0.0.1:4000', script)).toBe(merged)
+  })
+
+  it('writes both keys into an empty file, and keeps the host when no proxy URL is given', () => {
+    expect(parseYaml(mergeGooseConfigYaml('', 'http://h:4000', script)!)).toEqual({
+      provider: { host: 'http://h:4000' },
+      hooks: { pre_tool_use: script },
+    })
+    const kept = parseYaml(mergeGooseConfigYaml('provider:\n  host: http://h:4000\n', '', script)!)
+    expect(kept.provider.host).toBe('http://h:4000')
+  })
+
+  it('leaves a file it cannot merge into alone', () => {
+    expect(mergeGooseConfigYaml('provider: [unclosed\n', 'http://h:4000', script)).toBeNull()
+    expect(mergeGooseConfigYaml('- a list\n', 'http://h:4000', script)).toBeNull()
+    expect(mergeGooseConfigYaml('provider: openai\n', 'http://h:4000', script)).toBeNull()
   })
 })

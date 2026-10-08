@@ -25,7 +25,6 @@ export type NotificationEventType =
   | 'incident.created'
   | 'incident.escalated'
   | 'sop.status_changed'
-  | 'budget.exceeded'
   | 'session.ended'
   | 'adapter.write_back.failed'
   | 'decision.pending'
@@ -50,13 +49,15 @@ export type NotificationEventType =
   | 'guardrail.ready'
   /** The passage a guardrail cites changed upstream; promotion is refused until re-confirmed. */
   | 'guardrail.stale'
+  // ── MCP server registry ──
+  /** An MCP proxy reported a server this workspace's registry had never seen; it waits as a candidate for an OWNER or ADMIN to approve or block. */
+  | 'mcp.server.candidate'
   // ── Governance judge ──
   /** A judged response is waiting for a person in the judge review queue: the typed judge was unsure, or it is a spot check of one it cleared (LLD #72). */
   | 'judge.review.queued'
   // ── FinOps & budget ──
   | 'finops.budget.exceeded'
   | 'finops.budget.threshold'
-  | 'finops.budget.overrun'
   | 'finops.tokens.classified'
   // ── Enterprise & trial ──
   | 'trial.started'
@@ -140,6 +141,27 @@ export type NotificationEventType =
    * report -- an active bypass just occurred, not merely unreported.
    */
   | 'device.enforcement.disabled'
+  // ── Gate liveness ──
+  /**
+   * A harness installed in the workspace has sent no hook event of any kind,
+   * allows included, for the whole liveness window: its gate may not be
+   * running. Fired once when the gate goes silent, not on every hourly sweep.
+   * Carries `harnessType` and `incidentId`.
+   */
+  | 'governance.gate.silent'
+  /**
+   * A harness with an open `governance.gate.silent` alert is reporting again.
+   * Same `incidentId` as the alert it closes; PagerDuty resolves that incident.
+   */
+  | 'governance.gate.recovered'
+  // ── Trace integrity ──
+  /**
+   * The hourly audit-log integrity check found a failure of one kind
+   * (`kind`: `chain_break`, `mirror_copy_mismatch`, `signature_invalid`,
+   * `root_mismatch` or `guard_tampered`). Fired once per kind while it keeps
+   * failing; a recurrence after it clears fires again.
+   */
+  | 'governance.integrity.failed'
   // ── Provider outage tracking (Phase 8b) ──
   /**
    * A NEW provider_incidents window opened for a provider (Anthropic,
@@ -200,6 +222,12 @@ export interface NotificationRule {
   enabled: boolean
   createdAt: string
   updatedAt: string
+  /**
+   * A webhook rule's signing secret in plaintext. Present only in the
+   * response that generated it (create, a switch to the webhook channel, or a
+   * rotation); copy it then.
+   */
+  signingSecret?: string
 }
 
 export interface ChannelConfig {
@@ -207,7 +235,12 @@ export interface ChannelConfig {
   slackChannelName?: string
   emailRecipients?: string[]
   webhookUrl?: string
-  webhookSecret?: string
+  /**
+   * A webhook rule's signing secret, encrypted at rest. Server-generated on
+   * create and never accepted from a caller; stored only, never returned —
+   * the plaintext appears once, as `NotificationRule.signingSecret`.
+   */
+  webhookSecretEnc?: string
   /** PagerDuty Events API v2 integration/routing key. A credential — see
    *  `notificationHubService.ts`'s `getChannelTarget` for why it is masked
    *  (`pd:${key.slice(0,6)}…`) before ever reaching `notification_log`,

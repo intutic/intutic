@@ -6,6 +6,7 @@ import { ClawdeBlockedError, ClawdeConnectionError, ClawdeVerdictError } from '.
 interface Reply {
   status: number
   body: unknown
+  headers?: Record<string, string>
 }
 
 interface Received {
@@ -37,7 +38,7 @@ describe('ClawdeClient', () => {
           received.push({ path: req.url ?? '', headers: req.headers, body: body ? JSON.parse(body) : undefined })
           // The last reply repeats, so "always 503" is one entry.
           const reply = replies.length > 1 ? replies.shift()! : replies[0]
-          res.writeHead(reply.status, { 'Content-Type': 'application/json' })
+          res.writeHead(reply.status, { 'Content-Type': 'application/json', ...reply.headers })
           res.end(JSON.stringify(reply.body))
         })
       })
@@ -102,6 +103,27 @@ describe('ClawdeClient', () => {
     expect(err).toMatchObject({ verdict, code, status, message: `refused: ${code}` })
     expect(received).toHaveLength(1)
     expect(events).toEqual([{ verdict, code, status, message: `refused: ${code}` }])
+  })
+
+  // The cost-prediction gate answers a non-streaming request with a 200 whose
+  // assistant turn explains the estimate. It used to come back as `allow`.
+  it('treats a 200 the proxy names as a refusal as one, not as an answer', async () => {
+    const explanation = 'This request is estimated to cost $1.2000, which exceeds your workspace threshold of $0.5000.'
+    replies = [{
+      status: 200,
+      headers: { 'x-intutic-refusal': 'COST_GATE_EXCEEDED' },
+      body: { ...completion, choices: [{ index: 0, message: { role: 'assistant', content: explanation }, finish_reason: 'stop' }] },
+    }]
+    const c = client()
+    const events: any[] = []
+    c.on('kill', (event) => { events.push(event) })
+
+    const err = await ask(c).catch((e) => e)
+
+    expect(err).toBeInstanceOf(ClawdeBlockedError)
+    expect(err).toMatchObject({ verdict: 'kill', code: 'COST_GATE_EXCEEDED', status: 200, message: explanation })
+    expect(events).toEqual([{ verdict: 'kill', code: 'COST_GATE_EXCEEDED', status: 200, message: explanation }])
+    expect(received).toHaveLength(1)
   })
 
   it('retries a 5xx and returns the answer that follows', async () => {

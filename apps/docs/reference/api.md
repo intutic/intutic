@@ -297,12 +297,12 @@ Create a new SOP.
 
 | Field | Type | Required | Notes |
 |-------|------|----------|-------|
-| `title` | string | ✅ | 1–500 chars |
+| `title` | string | ✅ | 1–256 chars |
 | `markdown_content` | string | ✅ | 1–100,000 chars |
 | `risk_tier` | enum | ✅ | `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` |
 | `complexity_tier` | enum | ✅ | `TIER_0`, `TIER_1`, `TIER_2` (see below) |
-| `version` | string | ❌ | 1–50 chars |
-| `dependencies` | string[] | ❌ | SOP IDs this depends on |
+| `version` | string | ❌ | 1–16 chars |
+| `dependencies` | string[] | ❌ | SOP IDs this depends on (each up to 64 chars) |
 
 `complexity_tier` is the complexity of the work the SOP governs, from `TIER_0` (simplest) to `TIER_2` (most complex). [Intelligent routing](/guide/intelligent-routing) keeps separate model statistics per tier: the tier of the workspace's most recently created or edited active SOP becomes the tier its requests are routed under, and `TIER_1` applies when there is none.
 
@@ -564,7 +564,7 @@ Classify tokens as USEFUL or WASTED.
 
 ## Route Catalog
 
-Every route the control plane serves: 376 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
+Every route the control plane serves: 384 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
 
 ### `app.ts` <Badge type="tip" text="Cloud" />
 
@@ -612,7 +612,7 @@ Every route the control plane serves: 376 routes, grouped by the source file tha
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/api/v1/audit/timeline` | OWNER/ADMIN | Joined login/enforcement/decision/incident/ settings-change report for a workspace over a date range. |
+| GET | `/api/v1/audit/timeline` | OWNER/ADMIN | Sign-ins, enforcement verdicts, resolved decisions and incidents, settings changes, detector adjudications and MCP server registry decisions for a workspace over a date range. |
 
 ### `auth.ts` <Badge type="tip" text="Cloud" />
 
@@ -667,6 +667,8 @@ Every route the control plane serves: 376 routes, grouped by the source file tha
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
+| GET | `/api/v1/compliance/frameworks/:frameworkId/coverage` | Authenticated | Coverage of one framework (eu_ai_act, iso_42001, nist_ai_rmf) from the latest probe results; ?format=markdown for the readable report |
+| GET | `/api/v1/compliance/human-oversight-export` | OWNER/ADMIN | Signed export of plan decisions, plan deviations and review-hold decisions between from and to (default: the trailing 90 days) |
 | GET | `/api/v1/compliance/probes/history` | Authenticated |  |
 | GET | `/api/v1/compliance/probes/latest` | Authenticated |  |
 | POST | `/api/v1/compliance/probes/run` | OWNER/ADMIN | Run compliance probes now (all, or the `probes` listed) |
@@ -788,12 +790,17 @@ Every route the control plane serves: 376 routes, grouped by the source file tha
 |--------|------|------|-------------|
 | POST | `/api/v1/fix/enhance` | Authenticated |  |
 
+### `gateLiveness.ts` <Badge type="tip" text="Cloud" />
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/v1/governance/gate-liveness` | OWNER/ADMIN/EM | Per-harness gate status (reporting, silent or new) and whether a silent-gate alert is open |
+
 ### `gatewayHeartbeat.ts` <Badge type="tip" text="Cloud" />
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | GET | `/api/v1/gateways/:id/config` | Gateway token (`gwk_…`) |  |
-| POST | `/api/v1/gateways/:id/config-ack` | Gateway token (`gwk_…`) |  |
 | POST | `/api/v1/gateways/:id/heartbeat` | Gateway token (`gwk_…`) |  |
 
 ### `gateways.ts` <Badge type="tip" text="Cloud" />
@@ -925,6 +932,15 @@ Every route the control plane serves: 376 routes, grouped by the source file tha
 | POST | `/api/v1/mcp-daemon/report` | Authenticated | upload one status snapshot from the MCP daemon, with the workspace API key. A daemon that stops reporting reads as running: false after three missed intervals. |
 | GET | `/api/v1/mcp-daemon/status` | Authenticated | the last snapshot; with none, a not-running daemon with empty counters. |
 
+### `mcpServers.ts` <Badge type="tip" text="Cloud" />
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/v1/mcp/servers` | Authenticated | Every MCP server seen, with its status, the tools a proxy last saw it declare and which are disabled, plus the workspace's default policy. |
+| POST | `/api/v1/mcp/servers/:serverId/status` | OWNER/ADMIN | Approve, block, or return a server to the approval queue. |
+| POST | `/api/v1/mcp/servers/:serverId/tools` | OWNER/ADMIN | Switch one tool within a server on or off. |
+| POST | `/api/v1/mcp/servers/observe` | Authenticated | An MCP proxy reports the server it fronts and its tool names; a first sighting creates a candidate and sends mcp.server.candidate. |
+
 ### `members.ts` <Badge type="tip" text="Cloud" />
 
 | Method | Path | Auth | Description |
@@ -954,6 +970,7 @@ Every route the control plane serves: 376 routes, grouped by the source file tha
 | POST | `/api/v1/notifications/rules` | Authenticated | Create rule |
 | DELETE | `/api/v1/notifications/rules/:ruleId` | Authenticated | Delete rule |
 | PUT | `/api/v1/notifications/rules/:ruleId` | Authenticated | Update rule |
+| POST | `/api/v1/notifications/rules/:ruleId/signing-secret` | Authenticated | Replace a webhook rule's signing secret (returned once) |
 
 ### `oauth.ts` <Badge type="tip" text="Cloud" />
 
@@ -1121,11 +1138,12 @@ Every route the control plane serves: 376 routes, grouped by the source file tha
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/api/v1/siem/destinations` | Authenticated | List destinations (masks credentials) |
+| GET | `/api/v1/siem/destinations` | Authenticated | List destinations (masks credentials) and the source names a destination can filter on |
 | POST | `/api/v1/siem/destinations` | OWNER/ADMIN | Create a destination (encrypts credentials) |
 | DELETE | `/api/v1/siem/destinations/:id` | OWNER/ADMIN | Deactivate a destination |
 | GET | `/api/v1/siem/destinations/:id` | Authenticated | Get destination details (masks credentials) |
 | PUT | `/api/v1/siem/destinations/:id` | OWNER/ADMIN | Update destination details |
+| POST | `/api/v1/siem/destinations/:id/signing-secret` | OWNER/ADMIN | Replace a webhook destination's signing secret (returned once) |
 | POST | `/api/v1/siem/destinations/:id/test` | OWNER/ADMIN | Health-check a destination |
 | GET | `/api/v1/siem/dlq` | Authenticated | List DLQ failed events |
 | POST | `/api/v1/siem/dlq/retry` | OWNER/ADMIN | Trigger a manual DLQ retry pass |

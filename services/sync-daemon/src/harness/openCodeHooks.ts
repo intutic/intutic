@@ -78,6 +78,7 @@
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import { createLogger } from '@intutic/logger'
+import { writeOwnedFile } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
 import { emitJsGate, REVIEW_REQUESTS_BASENAME } from './gateBody.js'
 
@@ -337,15 +338,11 @@ export async function writeOpenCodeHooks(
 ): Promise<void> {
   await fs.mkdir(path.join(workspaceRoot, '.intutic', 'events'), { recursive: true })
   const pluginDir = path.join(workspaceRoot, OPENCODE_PLUGIN_DIR)
-  await fs.mkdir(pluginDir, { recursive: true })
 
   const script = buildPluginScript(proxyUrl, workspaceRoot, workspaceId)
   for (const rel of [OPENCODE_PLUGIN_FILE, OPENCODE_PLUGIN_V2_FILE]) {
     const pluginPath = path.join(pluginDir, rel)
-    await fs.mkdir(path.dirname(pluginPath), { recursive: true })
-    const tmp = pluginPath + '.intutic-tmp'
-    await fs.writeFile(tmp, script, 'utf-8')
-    await fs.rename(tmp, pluginPath)
+    await writeOwnedFile(pluginPath, workspaceRoot, script)
     log.info({ action: 'opencode_plugin_written', path: pluginPath }, 'OpenCode governance plugin written')
   }
 }

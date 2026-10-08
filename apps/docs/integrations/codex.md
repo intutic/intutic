@@ -79,6 +79,8 @@ INTUTIC_SOP_COUNT=5
 Add `source .env.intutic 2>/dev/null` to your shell profile or project's `.envrc` to auto-load on every session.
 :::
 
+To undo what `intutic connect` writes here, run `intutic disconnect --harness codex`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. `.env.intutic` stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+
 ## Pre-tool hooks (blocking)
 
 The routing above governs LLM egress only. Tool calls are gated

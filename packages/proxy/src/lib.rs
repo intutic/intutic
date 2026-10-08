@@ -21,6 +21,8 @@ pub mod snip;
 pub mod snip_code;
 pub mod snip_json;
 pub mod sops;
+/// SSO-group tool clearance, applied by the response gate
+pub mod sso_groups;
 pub mod telemetry;
 pub mod tool_pin;
 pub mod tool_poison;

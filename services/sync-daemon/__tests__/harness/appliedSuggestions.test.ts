@@ -4,16 +4,14 @@
  * Verifies that:
  * 1. ADD operations are idempotent and do not duplicate rules.
  * 2. REPLACE/DELETE operations tolerate whitespace/indentation shifts via fuzzy matching.
- * 3. Base file overwrites trigger automated suggestions re-application.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest'
 import * as node_fs from 'node:fs/promises'
 import * as node_path from 'node:path'
 import * as node_os from 'node:os'
-import { applyConfigEdits, writeConfigFiles } from '../../src/configWriter.js'
-import type { ConfigEdit, SyncSopEntry } from '@intutic/shared-types'
-import { HarnessType } from '@intutic/shared-types'
+import { applyConfigEdits } from '../../src/configWriter.js'
+import type { ConfigEdit } from '@intutic/shared-types'
 
 describe('appliedSuggestions', () => {
   let tmpDir: string
@@ -189,66 +187,6 @@ describe('appliedSuggestions', () => {
 
       const content = await node_fs.readFile(targetFile, 'utf-8')
       expect(content).not.toContain('- Outdated rule to delete.')
-    })
-  })
-
-  describe('SOP Base Overwrite Suggestion Re-Application (Gap 1)', () => {
-    it('automatically re-overlays active suggestions when writeConfigFiles rewrites the base', async () => {
-      // 1. Run initial writeConfigFiles to create base
-      const sops: SyncSopEntry[] = [{
-        sopId: 'sop_1',
-        title: 'Security',
-        content: 'Check auth headers.',
-        contentHash: 'hash1',
-        harnessTargets: [HarnessType.CURSOR],
-      }]
-
-      await writeConfigFiles(tmpDir, sops, 'http://proxy:4000', [HarnessType.CURSOR], 'wk_1')
-
-      // 2. Apply a suggestion edit
-      const edits: ConfigEdit[] = [{
-        operation: 'ADD',
-        section: 'Security',
-        content: '- Enforce https.',
-        reason: 'SSL enforcement',
-      }]
-      await applyConfigEdits(tmpDir, [{
-        suggestionId: 'sko_1',
-        harnessType: 'cursor',
-        filePath: '.cursorrules',
-        edits,
-      }])
-
-      const contentAfterSugg = await node_fs.readFile(targetFile, 'utf-8')
-      expect(contentAfterSugg).toContain('Check auth headers.')
-      expect(contentAfterSugg).toContain('- Enforce https.')
-
-      // 3. Re-write base config files (simulating an SOP update config version bump)
-      // This overwrites `.cursorrules` with the clean baseline
-      await writeConfigFiles(tmpDir, sops, 'http://proxy:4000', [HarnessType.CURSOR], 'wk_1')
-
-      const contentOverwritten = await node_fs.readFile(targetFile, 'utf-8')
-      // Suggestion edit is lost due to overwrite
-      expect(contentOverwritten).not.toContain('- Enforce https.')
-
-      // 4. Trigger the auto-recovery (overlay active suggestions) as implemented in syncLoop.ts
-      const forceApply = true // because sopsWritten > 0
-      const activeSuggestions = [{
-        suggestionId: 'sko_1',
-        harnessType: 'cursor',
-        filePath: '.cursorrules',
-        edits,
-      }]
-
-      if (forceApply) {
-        await applyConfigEdits(tmpDir, activeSuggestions)
-      }
-
-      const contentFinal = await node_fs.readFile(targetFile, 'utf-8')
-      // Base content is preserved
-      expect(contentFinal).toContain('Check auth headers.')
-      // Active suggestion was successfully re-applied automatically!
-      expect(contentFinal).toContain('- Enforce https.')
     })
   })
 })

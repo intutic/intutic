@@ -32,15 +32,19 @@ import * as node_readline from 'node:readline'
 import { createStderrLogger as createLogger } from './stderrLog.js'
 import type { ProxyConfig } from './config.js'
 import { PolicyClient } from './policy.js'
-import { GovernanceEmitter } from './emitter.js'
+import { GovernanceEmitter, detectionFinding } from './emitter.js'
 import { ToolCallInterceptor } from './interceptor.js'
 import { redactText as redactMcpText } from './dlp.js'
 import { scanText, injectionSeverity, setDynamicInjectionPatterns, type InjectionSource } from './injection.js'
-import { toolPoisoning, dlpEscalation } from './anomaly/index.js'
+import { toolPoisoning, dlpEscalation, type AnomalyFinding } from './anomaly/index.js'
 import { SessionState } from './session.js'
 import { ValkeySessionStore, type SharedSessionStore } from './sessionStore.js'
 import { WasmRunner } from './wasm/runner.js'
 import { checkTofu, decideTofuAction } from './tofu.js'
+import { RegistryObserver } from './registryObserver.js'
+import { ApprovalHolds } from './approvalHold.js'
+import { callerIdentity } from './identity.js'
+import { PACKAGE_VERSION } from './version.js'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
@@ -82,6 +86,23 @@ function buildBlockResponse(id: string | number | null, reason: string): JsonRpc
 }
 
 /**
+ * The JSON-RPC error for a call held for approval. Same code as a block (the
+ * call did not run), a message that says "held" rather than "blocked", and
+ * the hold id in `data` for a client that reads it programmatically.
+ */
+function buildHoldResponse(id: string | number | null, reason: string, holdId: string): JsonRpcResponse {
+  return {
+    jsonrpc: '2.0',
+    id,
+    error: {
+      code: -32603,
+      message: `[Intutic Governance] Tool call ${reason}`,
+      data: { status: 'pending_approval', holdId },
+    },
+  }
+}
+
+/**
  * Write a JSON-RPC frame to stdout (the ONLY valid place to write in a stdio MCP proxy).
  */
 function writeFrame(frame: unknown): void {
@@ -111,6 +132,8 @@ export interface ServerLineOutcome {
    * other line.
    */
   toolsListTools?: Array<Record<string, unknown>>
+  /** Every tool name the upstream server declared, before curation. Set alongside `toolsListTools`. */
+  toolsListUpstreamNames?: string[]
   /** The JSON-RPC id of the `tools/list` response, needed to build a block
    *  frame in the caller if TOFU refuses it. Set alongside `toolsListTools`. */
   toolsListMsgId?: string | number | null
@@ -142,7 +165,7 @@ export interface ServerLineOutcome {
    * any request-direction finding unconditionally, so escalating an
    * already-redacted RESPONSE protects nothing further.
    */
-  dlpEscalationReason?: string
+  dlpEscalation?: AnomalyFinding
   /**
    * Phase 2's `tool_poisoning` finding (anomaly/detectors.ts), set on a
    * `tools/list` response whose post-curation tool descriptions matched
@@ -150,7 +173,7 @@ export interface ServerLineOutcome {
    * `injectionFindings` on this same response type — never removes or
    * blocks a listing.
    */
-  toolPoisoningReason?: string
+  toolPoisoning?: AnomalyFinding
 }
 
 /**
@@ -174,7 +197,7 @@ export interface ServerLineOutcome {
  *
  * tools/list curation (the Uber-gateway mechanism): when the workspace
  * declares an additive allowlist, tools outside it are removed from the
- * listing — an agent that never sees a tool does not hallucinate calls to
+ * listing, as are tools the registry disables on this server — an agent that never sees a tool does not hallucinate calls to
  * it, and the call-time block in the interceptor stays as the enforcement
  * backstop. Operator description overrides apply to what remains, which is
  * also the counter to a poisoned upstream description — the pin detects the
@@ -187,6 +210,7 @@ export function processServerLine(
   overrides: Readonly<Record<string, string>>,
   injectionAction: 'warn' | 'block' = 'warn',
   injectionPatterns: readonly string[] = [],
+  disabledTools: readonly string[] = [],
 ): ServerLineOutcome {
   // Workspace-supplied injection patterns (TD-436), on top of the floor.
   // Idempotent when the list has not changed, so this is cheap per line.
@@ -290,7 +314,7 @@ export function processServerLine(
       redactedTool,
       redactions,
       injectionFindings,
-      dlpEscalationReason: dlpEscalationFinding?.reason,
+      dlpEscalation: dlpEscalationFinding ?? undefined,
     }
   }
 
@@ -299,10 +323,17 @@ export function processServerLine(
     if (!Array.isArray(tools)) return { line: raw }
     let hidden = 0
     let overridden = 0
+    const upstreamNames = (tools as Array<Record<string, unknown>>)
+      .map((t) => t['name'])
+      .filter((n): n is string => typeof n === 'string')
     let kept = tools as Array<Record<string, unknown>>
-    if (allowedTools.length > 0) {
+    if (allowedTools.length > 0 || disabledTools.length > 0) {
       kept = kept.filter((t) => {
-        const keep = typeof t['name'] === 'string' && allowedTools.includes(t['name'])
+        const name = t['name']
+        const keep =
+          typeof name === 'string' &&
+          (allowedTools.length === 0 || allowedTools.includes(name)) &&
+          !disabledTools.includes(name)
         if (!keep) hidden += 1
         return keep
       })
@@ -351,9 +382,10 @@ export function processServerLine(
       return {
         line: raw,
         toolsListTools: kept,
+        toolsListUpstreamNames: upstreamNames,
         toolsListMsgId: msg.id,
         injectionFindings,
-        toolPoisoningReason: toolPoisoningFinding?.reason,
+        toolPoisoning: toolPoisoningFinding ?? undefined,
       }
     }
     msg.result['tools'] = kept
@@ -361,9 +393,10 @@ export function processServerLine(
       line: JSON.stringify(msg),
       curated: { hidden, overridden },
       toolsListTools: kept,
+      toolsListUpstreamNames: upstreamNames,
       toolsListMsgId: msg.id,
       injectionFindings,
-      toolPoisoningReason: toolPoisoningFinding?.reason,
+      toolPoisoning: toolPoisoningFinding ?? undefined,
     }
   }
 
@@ -428,6 +461,8 @@ export function handleHarnessLine(
           'Tool call blocked by governance proxy'
         )
         writeFrame(buildBlockResponse(msg.id, decision.reason))
+      } else if (decision.action === 'hold') {
+        writeFrame(buildHoldResponse(msg.id, decision.reason, decision.holdId))
       } else {
         // Allow: the response now needs inspecting on the way back —
         // registered BEFORE forwarding, or a fast server could answer
@@ -478,6 +513,8 @@ export class McpGovernanceProxy {
    * runs, not a second one (see `policy.ts`'s `start(onTick)`).
    */
   private readonly wasmRunner: WasmRunner
+  /** Reports this proxy's server to the registry; absent for the standalone `intutic` entry, which fronts none. */
+  private readonly registryObserver: RegistryObserver | undefined
   private realServer: node_child.ChildProcess | null = null
 
   constructor(private readonly config: ProxyConfig) {
@@ -489,12 +526,14 @@ export class McpGovernanceProxy {
       config.mcpProxyMode
     )
 
+    const identity = callerIdentity(config.apiKey, config.serverName, config.sessionScope)
     this.emitter = new GovernanceEmitter(
       config.controlPlaneUrl,
       config.apiKey,
       config.eventsFilePath,
       config.workspaceId,
-      config.mcpProxyMode
+      config.mcpProxyMode,
+      identity,
     )
 
     // The standalone `intutic` entry fronts no real server and records no
@@ -509,6 +548,9 @@ export class McpGovernanceProxy {
         : 'Anomaly session window is per-process',
     )
     this.wasmRunner = new WasmRunner(config.mcpWasmDir)
+    this.registryObserver = config.standalone
+      ? undefined
+      : new RegistryObserver(config.controlPlaneUrl, config.apiKey, config.serverName, config.remoteTransport ?? 'stdio')
 
     this.interceptor = new ToolCallInterceptor(
       this.policy,
@@ -521,6 +563,7 @@ export class McpGovernanceProxy {
       config.mcpAnomalyOverrides,
       this.wasmRunner,
       config.workspaceId,
+      new ApprovalHolds(config.controlPlaneUrl, config.apiKey, config.workspaceId, config.serverName, identity),
     )
   }
 
@@ -556,6 +599,7 @@ export class McpGovernanceProxy {
       this.ensureWasmWatch()
       return this.wasmRunner.rescan()
     })
+    void this.registryObserver?.observe()
   }
 
   private wasmWatch: WasmDirWatcher | null = null
@@ -608,7 +652,7 @@ export class McpGovernanceProxy {
 
     const server = new McpServer({
       name: 'intutic',
-      version: '0.1.0',
+      version: PACKAGE_VERSION,
     })
 
     const cpUrl = this.config.controlPlaneUrl
@@ -742,9 +786,9 @@ export class McpGovernanceProxy {
    * (tofu.ts), which does file I/O — the ONLY case this awaits before
    * writing; every other line is forwarded exactly as fast as before.
    *
-   * On a TOFU mismatch, honors `mcpProxyFailBehavior` via `config.failOpen` —
-   * the SAME field `interceptor.ts` already reads for its own fail-open/
-   * fail-closed branches, not a new mechanism: fail-open logs and forwards
+   * On a TOFU mismatch, honors `mcpProxyFailBehavior` via the interceptor's
+   * `failOpen` — the SAME value its own fail-open/fail-closed branches read,
+   * not a new mechanism: fail-open logs and forwards
    * the (possibly curated) tools/list response as normal; fail-closed
    * replaces it with a JSON-RPC error naming the server and the setting,
    * mirroring `buildBlockResponse`'s existing wording style.
@@ -767,6 +811,7 @@ export class McpGovernanceProxy {
       this.policy.getToolDescriptionOverrides(),
       injectionAction,
       this.policy.getInjectionPatterns(),
+      this.policy.getRegistry()?.disabledTools[this.config.serverName] ?? [],
     )
     if (outcome.injectionFindings) {
       for (const finding of outcome.injectionFindings) {
@@ -783,7 +828,14 @@ export class McpGovernanceProxy {
           },
           'Prompt-injection pattern matched in MCP response traffic',
         )
-        this.emitter.emit('injection_detected', finding.toolName, undefined, reason, severity)
+        const withheld = outcome.injectionBlocked === true && finding.source === 'tool_result'
+        this.emitter.emit('injection_detected', finding.toolName, undefined, reason, {
+          detectorId: `injection:${finding.source}`,
+          kind: 'prompt_injection',
+          disposition: withheld ? 'kill' : 'steer',
+          severity,
+          confidence: 1,
+        })
         // tools/list description findings are report-only in v1 (never
         // blocked by injection alone — curation + TOFU already govern the
         // listing); only a `tool_result` finding can carry
@@ -807,17 +859,30 @@ export class McpGovernanceProxy {
         outcome.redactedTool,
         undefined,
         `Result redacted: ${(outcome.redactions ?? []).join('; ')}`,
-        outcome.dlpEscalationReason ? 'high' : undefined,
+        {
+          detectorId: 'result_redaction',
+          kind: 'data_exfiltration',
+          disposition: 'steer',
+          severity: outcome.dlpEscalation ? 'high' : 'medium',
+          confidence: 1,
+        },
       )
     }
-    if (outcome.dlpEscalationReason) {
+    if (outcome.dlpEscalation) {
       // Phase 2's dlp_escalation: severity escalation only, never a new
-      // block — see `ServerLineOutcome.dlpEscalationReason`'s doc comment.
+      // block — see `ServerLineOutcome.dlpEscalation`'s doc comment. So the
+      // finding records `steer`, what it did, not the detector's declared kill.
       log.warn(
         { action: 'anomaly_detected', detectorId: 'dlp_escalation', toolName: outcome.redactedTool },
-        outcome.dlpEscalationReason,
+        outcome.dlpEscalation.reason,
       )
-      this.emitter.emit('anomaly_detected', outcome.redactedTool ?? 'unknown', undefined, outcome.dlpEscalationReason, 'high')
+      this.emitter.emit(
+        'anomaly_detected',
+        outcome.redactedTool ?? 'unknown',
+        undefined,
+        outcome.dlpEscalation.reason,
+        detectionFinding(outcome.dlpEscalation, 'steer', 'high'),
+      )
     }
     if (outcome.curated) {
       log.info(
@@ -825,14 +890,23 @@ export class McpGovernanceProxy {
         'tools/list curated: allowlist filtering and/or description overrides applied',
       )
     }
-    if (outcome.toolPoisoningReason) {
+    if (outcome.toolPoisoning) {
       // Phase 2's tool_poisoning: report-only (Steer), same as Phase 1's
       // tools/list description injection scan — never blocks the listing.
-      log.warn({ action: 'anomaly_detected', detectorId: 'tool_poisoning' }, outcome.toolPoisoningReason)
-      this.emitter.emit('anomaly_detected', this.config.serverName, undefined, outcome.toolPoisoningReason, 'low')
+      log.warn({ action: 'anomaly_detected', detectorId: 'tool_poisoning' }, outcome.toolPoisoning.reason)
+      this.emitter.emit(
+        'anomaly_detected',
+        this.config.serverName,
+        undefined,
+        outcome.toolPoisoning.reason,
+        detectionFinding(outcome.toolPoisoning, 'steer', 'low'),
+      )
     }
 
     if (outcome.toolsListTools) {
+      // The registry gets the server's own tool names, before curation:
+      // per-tool toggles must be able to re-enable a tool curation hid.
+      void this.registryObserver?.observe(outcome.toolsListUpstreamNames ?? [])
       // Cache the post-curation tools/list for Phase 2's tool_poisoning
       // detector (already applied above, from this same outcome) and for
       // Phase 3's WASM rule context (`tools` field) once that lands.
@@ -854,7 +928,7 @@ export class McpGovernanceProxy {
         // this package — fail-open forwards, fail-closed refuses — never a
         // silent skip either way.
         log.error({ action: 'tofu_check_error', err: (err as Error).message }, 'TOFU check failed')
-        if (!this.config.failOpen) {
+        if (!this.interceptor.failOpen) {
           writeFrame(
             buildBlockResponse(
               outcome.toolsListMsgId ?? null,
@@ -886,7 +960,7 @@ export class McpGovernanceProxy {
           'MCP server tool definitions pinned on first contact',
         )
       } else if (tofu.status === 'mismatch') {
-        const action = decideTofuAction(tofu, serverName, this.config.failOpen)
+        const action = decideTofuAction(tofu, serverName, this.interceptor.failOpen)
         const reason = action.reason ?? 'MCP server tool definitions changed since first pinned.'
         log.warn(
           {

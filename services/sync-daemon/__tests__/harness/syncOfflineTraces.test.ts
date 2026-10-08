@@ -11,7 +11,7 @@ vi.mock('node:os', async (importOriginal) => {
   }
 })
 
-import { syncOfflineTraces } from '../../src/syncLoop.js'
+import { syncOfflineTraces } from '../../src/syncCycle.js'
 
 // Mock HTTP server
 interface CapturedRequest {

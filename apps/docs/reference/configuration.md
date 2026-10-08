@@ -59,7 +59,7 @@ The proxy decides what to do with each `CONNECT` it receives when clients use it
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
-| `INTUTIC_EGRESS_MODE` | `off` (or `intutic_settings.egress.mode`) | `off` tunnels every other host. `monitor` tunnels them but logs and counts the ones `enforce` would refuse. `enforce` refuses any host not on the allow list. Any other value means `off`; the mode in force is logged at startup and shown at `GET /intutic/egress` |
+| `INTUTIC_EGRESS_MODE` | `off` (or `intutic_settings.egress.mode`) | `off` tunnels every other host. `monitor` tunnels them but logs and counts the ones `enforce` would refuse. `enforce` refuses any host not on the allow list. Any other value stops the proxy at startup with an error naming the three; the mode in force is logged at startup and shown at `GET /intutic/egress` |
 | `INTUTIC_EGRESS_ALLOW` | none | Comma-separated hosts (`example.com`), suffixes (`.example.com`) and IP ranges (`10.0.0.0/8`) to allow, added to `intutic_settings.egress.allow` |
 | `INTUTIC_EGRESS_POLICY_FILE` | `~/.intutic/hooks/egress-policy.json` | The central egress policy the sync daemon writes for the workspace. Its mode overrides the local one and its allow list is added to the local list. A missing, corrupt or other-workspace file is ignored |
 | `INTUTIC_EGRESS_RELOAD_SECS` | `30` | How often the central policy file is re-read |
@@ -87,7 +87,6 @@ Settings for a proxy deployed as a shared or self-hosted gateway. See [Self-host
 | `LITELLM_LOCAL_JUDGE_MODEL` | none (required) | The judge model's name on that server |
 | `LITELLM_LOCAL_TYPED_JUDGE_MODEL` | `LITELLM_LOCAL_JUDGE_MODEL` | A separate model for the scored first stage |
 | `INTUTIC_GATEWAY_LOCAL_JUDGE_TYPED_LO`, `INTUTIC_GATEWAY_LOCAL_JUDGE_TYPED_HI` | unset | The first stage's review band, in log-odds: below `LO` is clean, above `HI` a violation. Set both to turn the first stage on |
-| `INTUTIC_PROXY_PORT` | `8080` | The port in firewall rules generated to redirect AI traffic to the proxy |
 
 #### Connected services
 
@@ -105,7 +104,6 @@ Settings for a proxy deployed as a shared or self-hosted gateway. See [Self-host
 | `PORT` | `4000` | The port `intutic start` and `intutic connect` run the proxy on |
 | `VALKEY_URL` | `redis://127.0.0.1:6379` | Passed to the proxy the CLI starts |
 | `INTUTIC_PROXY_URL` | `http://localhost:4000` | The proxy `intutic exec` and `intutic enterprise` point agents at |
-| `INTUTIC_PROXY_PORT` | `8877` | The HTTP proxy port `intutic connect` writes into Windsurf's settings |
 | `INTUTIC_SNAPSHOT_RULES` | `~/.intutic/hooks/policy-snapshot.rules` | Where the CLI writes the policy snapshot the hook gate reads |
 | `INTUTIC_WASM_DIR` | `~/.intutic/wasm` | Where `intutic policy install` puts WASM rules |
 | `N8N_URL` | `http://localhost:5678` | The n8n instance `intutic connect` configures |
@@ -300,7 +298,7 @@ Intutic's options live under `intutic_settings`:
 
 | Setting | Type | Default | Description |
 | :--- | :---: | :---: | :--- |
-| `mode` | string | `off` | `off`, `monitor` or `enforce`; `INTUTIC_EGRESS_MODE` takes precedence. See [Egress control](#egress-control) |
+| `mode` | string | `off` | `off`, `monitor` or `enforce`; any other value stops the proxy at startup. `INTUTIC_EGRESS_MODE` takes precedence. See [Egress control](#egress-control) |
 | `allow` | string[] | none | Hosts, `.suffixes` and IP ranges to allow; `INTUTIC_EGRESS_ALLOW` adds to it |
 
 ### Gateway (`intutic_settings.gateway`)

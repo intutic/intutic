@@ -20,6 +20,7 @@ import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
+import { keepOriginal, noteWritten } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
 import { emitPythonGate } from './gateBody.js'
 
@@ -195,7 +196,9 @@ export async function writeOpenWebuiHooks(
   // The filter's target directory; homedir() read at call time so tests that
   // move HOME before invoking are honoured.
   const openWebuiDir = path.join(os.homedir(), '.open-webui')
+  const filterPath = path.join(openWebuiDir, 'intutic-governance-filter.py')
 
+  await keepOriginal(filterPath, workspaceRoot)
   await Promise.all([
     fs.mkdir(openWebuiDir, { recursive: true }),
     fs.mkdir(envDir, { recursive: true }),
@@ -203,10 +206,11 @@ export async function writeOpenWebuiHooks(
 
   // ── 2. Write Python filter (atomic) ───────────────────────────────────────
 
-  const filterPath = path.join(openWebuiDir, 'intutic-governance-filter.py')
+  const filter = buildOpenWebuiFilter(workspaceId, proxyUrl)
   const tmpFilter = filterPath + '.intutic-tmp'
-  await fs.writeFile(tmpFilter, buildOpenWebuiFilter(workspaceId, proxyUrl), 'utf-8')
+  await fs.writeFile(tmpFilter, filter, 'utf-8')
   await fs.rename(tmpFilter, filterPath)
+  await noteWritten(filterPath, workspaceRoot, filter)
 
   log.info(
     { action: 'open_webui_filter_written', path: filterPath },

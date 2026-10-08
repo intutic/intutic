@@ -26,6 +26,7 @@ import * as os from 'node:os'
 import { exec } from 'node:child_process'
 import { promisify } from 'node:util'
 import { createLogger } from '@intutic/logger'
+import { keepOriginal } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
 import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
 
@@ -167,7 +168,7 @@ process.stdin.on('end', () => {
  * Attempt to parse a JSON5-like string by progressively stripping
  * non-standard syntax. Returns a plain JS object or throws if unparseable.
  */
-function parseJson5Like(raw: string): Record<string, unknown> {
+export function parseJson5Like(raw: string): Record<string, unknown> {
   // Attempt 1: vanilla JSON
   try {
     return JSON.parse(raw) as Record<string, unknown>
@@ -244,6 +245,7 @@ export async function writeOpenclawHooks(
   const envDir = path.join(workspaceRoot, '.intutic', 'env')
   const openclawDir = path.join(os.homedir(), '.openclaw')
 
+  await keepOriginal(OPENCLAW_CONFIG, workspaceRoot)
   await Promise.all([
     fs.mkdir(globalHookDir, { recursive: true }),
     fs.mkdir(hookEventsDir, { recursive: true }),

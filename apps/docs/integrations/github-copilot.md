@@ -34,6 +34,8 @@ Intutic writes rules and configures:
 * **Instructions File:** `.github/copilot-instructions.md` containing formatted markdown of all active rules and the proxy URL reference.
 * **Agent-mode hook (Preview):** `.github/hooks/intutic-governance.json` (workspace) and `~/.copilot/hooks/intutic-governance.json` (user), registering the blocking gate `.intutic/hooks/github-copilot-check.js`.
 
+To undo what `intutic connect` writes here, run `intutic disconnect --harness github-copilot`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+
 ## Pre-tool hooks (Preview)
 
 ::: warning Preview feature

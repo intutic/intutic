@@ -119,8 +119,17 @@ import {
  * unrecognised severity to `flags`, i.e. ALLOWED, which is why the v8 filter
  * maps unknown to block and why the daemon regenerates every gate each cycle —
  * the skew window is one sync interval.
+ *
+ * v9: SSO-group refusals. The snapshot carries the workspace's
+ * `sso_group_policy` and the member it was issued to as an `@sso_groups` data
+ * line (two columns, so every rule parser skips it; inside the digest, so an
+ * edited group list fails the check), and the policy decided for that member
+ * as ordinary `sso_group.*` block rules on the tool subject. The one gate-side
+ * change: an invalid snapshot keeps its `sso_group.*` block rules instead of
+ * dropping them with the rest of the dynamic tier. A v8 gate reading a v9
+ * snapshot enforces the same rules and drops them on an invalid one.
  */
-export const GATE_VERSION = 8
+export const GATE_VERSION = 9
 
 /**
  * The coarse command → action-token classification the hold tier keys on:
@@ -614,8 +623,20 @@ if [ -f "$INTUTIC_SNAPSHOT_RULES" ]; then
   # returns to yesterday's behaviour rather than opening a hole. The MCP
   # allowlist ships through the same file and degrades the same way — an
   # invalid snapshot must not leave a stale allowlist enforcing.
+  # The SSO-group refusals survive it: they only ever refuse, and dropping
+  # them would make editing the member's group list in this file a way to
+  # clear a tool the workspace's group policy refuses.
   if [ "$INTUTIC_SNAPSHOT_STATE" = "invalid" ]; then
+    _intutic_kept=()
+    if [ \${#INTUTIC_DYNAMIC[@]} -gt 0 ]; then
+      for _rec in "\${INTUTIC_DYNAMIC[@]}"; do
+        case "$_rec" in
+          sso_group.*$'\\t'block$'\\t'*) _intutic_kept+=("$_rec") ;;
+        esac
+      done
+    fi
     INTUTIC_DYNAMIC=()
+    if [ \${#_intutic_kept[@]} -gt 0 ]; then INTUTIC_DYNAMIC=("\${_intutic_kept[@]}"); fi
     INTUTIC_MCP_SEVERITY=""
     INTUTIC_MCP_SERVERS=""
   fi
@@ -638,7 +659,7 @@ fi
 
 case "$INTUTIC_SNAPSHOT_STATE" in
   absent)  ${log} "snapshot_absent" "\${TOOL:-}" "No policy snapshot at $INTUTIC_SNAPSHOT_RULES — built-in protections only" || true ;;
-  invalid) ${log} "snapshot_invalid" "\${TOOL:-}" "Policy snapshot failed its digest or workspace check — dynamic rules dropped" || true ;;
+  invalid) ${log} "snapshot_invalid" "\${TOOL:-}" "Policy snapshot failed its digest or workspace check — dynamic rules dropped except SSO-group refusals" || true ;;
   empty)   ${log} "snapshot_empty" "\${TOOL:-}" "Policy snapshot contains no rules — the compile produced nothing" || true ;;
   stale)   ${log} "snapshot_stale" "\${TOOL:-}" "Policy snapshot is \${_intutic_age_days} days old and still enforced" || true ;;
 esac
@@ -985,8 +1006,14 @@ const JS_SNAPSHOT_LOADER = `function intuticLoadSnapshot(INTUTIC_WORKSPACE_ID) {
 
   // Additive tier, so dropping it returns to yesterday's behaviour. The MCP
   // allowlist ships through the same file and degrades the same way — an
-  // invalid snapshot must not leave a stale allowlist enforcing.
-  if (out.state === 'invalid') { out.rules = []; out.mcpServers = []; }
+  // invalid snapshot must not leave a stale allowlist enforcing. The
+  // SSO-group refusals are the exception: they only ever refuse, and dropping
+  // them would make editing the member's group list in this file a way to
+  // clear a tool the workspace's group policy refuses.
+  if (out.state === 'invalid') {
+    out.rules = out.rules.filter(function (r) { return r.id.indexOf('sso_group.') === 0 && r.severity === 'block'; });
+    out.mcpServers = [];
+  }
 
   if (out.state === 'ok' && out.generatedAt) {
     const t = Date.parse(out.generatedAt);
@@ -1130,7 +1157,7 @@ function intuticGate(toolName, target, command, record, workspaceId, toolInput, 
     var _msg = snap.state === 'absent'
       ? 'No policy snapshot — built-in protections only'
       : snap.state === 'invalid'
-        ? 'Policy snapshot failed its digest or workspace check — dynamic rules dropped'
+        ? 'Policy snapshot failed its digest or workspace check — dynamic rules dropped except SSO-group refusals'
         : snap.state === 'empty'
           ? 'Policy snapshot contains no rules — the compile produced nothing'
           : 'Policy snapshot is ' + snap.ageDays + ' days old and still enforced';
@@ -1794,7 +1821,7 @@ function intuticGateWorkflow(workflow, record, workspaceId) {
     var _msg = snap.state === 'absent'
       ? 'No policy snapshot — built-in protections only'
       : snap.state === 'invalid'
-        ? 'Policy snapshot failed its digest or workspace check — dynamic rules dropped'
+        ? 'Policy snapshot failed its digest or workspace check — dynamic rules dropped except SSO-group refusals'
         : snap.state === 'empty'
           ? 'Policy snapshot contains no rules — the compile produced nothing'
           : 'Policy snapshot is ' + snap.ageDays + ' days old and still enforced';

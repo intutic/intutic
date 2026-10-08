@@ -472,7 +472,7 @@ export class TrajectoryMonitor {
     }
   }
 
-  /** Bounded best-effort reachability probe, same shape as syncLoop.ts's. */
+  /** Bounded best-effort reachability probe of the control plane. */
   private async controlPlaneIsReachable(): Promise<boolean> {
     if (!this.config.controlPlaneUrl) return false
     try {

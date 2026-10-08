@@ -12,6 +12,8 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import * as http from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { seedFromSnapshot, invalidatePolicy, resolvePolicy } from '../../daemon/policyCache.js'
@@ -114,5 +116,56 @@ describe('seedFromSnapshot', () => {
 
     const noWs = writeSnapshot(dir, { sopRules: [] })
     expect(await seedFromSnapshot(noWs)).toBeNull()
+  })
+  it('seeds no registry, and refreshes a fresh-looking seed on first use so the registry arrives', async () => {
+    // The snapshot carries no MCP registry. Seeding "allow" would let a deny
+    // workspace's unapproved servers through after every daemon restart, so
+    // the entry carries none — and counts as stale however recent it is.
+    const server = http.createServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        sopRules: [],
+        mcpRegistry: { defaultPolicy: 'deny', approvedServers: ['github'], blockedServers: [], disabledTools: {} },
+      }))
+    })
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()))
+    const previous = process.env['CONTROL_PLANE_URL']
+    process.env['CONTROL_PLANE_URL'] = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+    try {
+      const file = writeSnapshot(dir, {
+        workspaceId: WS,
+        generatedAt: new Date().toISOString(),
+        sopRules: [{ id: 's1', toolPattern: 'Bash', action: 'block', reason: 'x' }],
+      })
+      expect(await seedFromSnapshot(file)).toBe(WS)
+      const seeded = await resolvePolicy(WS)
+      expect(seeded!.mcpRegistry).toBeUndefined()
+
+      // The first resolve served the seed and refreshed behind it.
+      let refreshed = await resolvePolicy(WS)
+      for (let i = 0; i < 50 && refreshed?.mcpRegistry === undefined; i++) {
+        await new Promise((r) => setTimeout(r, 20))
+        refreshed = await resolvePolicy(WS)
+      }
+      expect(refreshed!.mcpRegistry).toEqual({
+        defaultPolicy: 'deny', approvedServers: ['github'], blockedServers: [], disabledTools: {},
+      })
+    } finally {
+      if (previous === undefined) delete process.env['CONTROL_PLANE_URL']
+      else process.env['CONTROL_PLANE_URL'] = previous
+      await new Promise<void>((r) => server.close(() => r()))
+    }
+  })
+  it("seeds the snapshot's server allowlist and marks the entry as a snapshot", async () => {
+    const file = writeSnapshot(dir, {
+      workspaceId: WS,
+      generatedAt: new Date(Date.now() - 1000 * 60 * 60).toISOString(),
+      sopRules: [{ id: 's1', toolPattern: 'Bash', action: 'block', reason: 'x' }],
+      mcpAllowedServers: ['github', 7],
+    })
+    expect(await seedFromSnapshot(file)).toBe(WS)
+    const policy = await resolvePolicy(WS)
+    expect(policy!.allowedServers).toEqual(['github'])
+    expect(policy!.fromSnapshot).toBe(true)
   })
 })

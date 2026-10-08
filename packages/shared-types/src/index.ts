@@ -39,10 +39,12 @@ export {
   DEFAULT_WORKSPACE_SETTINGS,
   resolveWorkspaceSettings,
   resolveSecurityProbeSampleRate,
+  MCP_ANOMALY_DETECTOR_IDS,
 } from './workspaceSettings.js'
 
 export type {
   WorkspaceSettings,
+  McpAnomalyDetectorId,
   McpProxyFailBehavior as McpProxyFailBehaviorType,
   McpProxyMode as McpProxyModeType,
   BypassEnforcementTier as BypassEnforcementTierType,
@@ -416,6 +418,17 @@ export type {
   SsoGroupClearance,
   SsoGroupPolicy,
 } from './attenuation.js'
+
+export {
+  SsoGroupPolicySchema,
+  parseSsoGroupPolicy,
+  evaluateSsoGroupClearance,
+  ssoGroupRuleId,
+  encodeSsoGroupRecord,
+  decodeSsoGroupRecord,
+  SSO_GROUP_RECORD_TAG,
+} from './ssoGroupClearance.js'
+export type { SsoGroupDecision, SsoGroupRecord } from './ssoGroupClearance.js'
 
 // WS4 + WS5 new error codes
 export {

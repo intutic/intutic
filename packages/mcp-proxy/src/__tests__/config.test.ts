@@ -68,6 +68,20 @@ describe('loadConfig', () => {
     expect(config.realServerCommand).toEqual(['node', 'server.js', '--port', '8080'])
   })
 
+  it('reads INTUTIC_MCP_FAIL_OPEN from the environment before runtime.env', async () => {
+    const saved = process.env['INTUTIC_MCP_FAIL_OPEN']
+    process.env['INTUTIC_MCP_FAIL_OPEN'] = 'false'
+    try {
+      await node_fs.writeFile(runtimeEnvPath, 'INTUTIC_MCP_FAIL_OPEN=true\n', 'utf-8')
+      expect((await loadConfig(['--', 'node', 'server.js'])).failOpen).toBe(false)
+      delete process.env['INTUTIC_MCP_FAIL_OPEN']
+      expect((await loadConfig(['--', 'node', 'server.js'])).failOpen).toBe(true)
+    } finally {
+      if (saved === undefined) delete process.env['INTUTIC_MCP_FAIL_OPEN']
+      else process.env['INTUTIC_MCP_FAIL_OPEN'] = saved
+    }
+  })
+
   it('reads INTUTIC_VALKEY_URL from runtime.env, lets the environment win, and has no default (Wave 5.3)', async () => {
     // The test runner itself may carry VALKEY_URL (the docker stack); isolate.
     const saved = { VALKEY_URL: process.env['VALKEY_URL'], INTUTIC_VALKEY_URL: process.env['INTUTIC_VALKEY_URL'] }

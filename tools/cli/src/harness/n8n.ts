@@ -21,7 +21,7 @@ import { HarnessType } from '@intutic/shared-types'
 import type { SyncSopEntry } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
 import { loadCredentials } from '../config/store.js'
-import { writeN8nHooks } from '@intutic/sync-daemon'
+import { writeN8nHooks, type DisconnectPlan } from '@intutic/sync-daemon'
 
 // ─── n8n REST payloads ──────────────────────────────────────────────
 //
@@ -230,4 +230,57 @@ export const n8nAdapter: IHarnessAdapter = {
       return null
     }
   },
+}
+
+/** The workflow variables `writeConfig` sets; `intutic disconnect` takes them out again. */
+const INTUTIC_VARIABLES = ['intutic_proxy_url', 'intutic_governance_rules']
+
+/**
+ * Plans removing the two variables `writeConfig` sets on every workflow in
+ * the local n8n. Read-only until the plan is applied; an n8n that does not
+ * answer gets a note instead.
+ */
+export async function planN8nDisconnect(plan: DisconnectPlan): Promise<void> {
+  const n8nUrl = process.env.N8N_URL || 'http://localhost:5678'
+  let workflows: N8nWorkflowListEntry[]
+  try {
+    const listRes = await fetch(`${n8nUrl}/api/v1/workflows`, { headers: getHeaders(), signal: AbortSignal.timeout(5000) })
+    if (!listRes.ok) throw new Error(`HTTP ${listRes.status}`)
+    workflows = ((await listRes.json()) as N8nWorkflowListResponse).data ?? []
+  } catch (err) {
+    plan.note(
+      n8nUrl,
+      `n8n did not answer (${err instanceof Error ? err.message : String(err)}), so its workflows were not checked for the ${INTUTIC_VARIABLES.join(' and ')} variables`,
+    )
+    return
+  }
+
+  for (const w of workflows) {
+    const detailRes = await fetch(`${n8nUrl}/api/v1/workflows/${w.id}`, { headers: getHeaders(), signal: AbortSignal.timeout(5000) })
+    if (!detailRes.ok) continue
+    const detail = (await detailRes.json()) as N8nWorkflowDetail
+    const variables = detail.settings?.variables
+    if (!variables || !INTUTIC_VARIABLES.some((k) => k in variables)) continue
+
+    plan.change(`${n8nUrl}/api/v1/workflows/${w.id}`, `remove the Intutic variables from workflow "${detail.name ?? w.name ?? w.id}"`, async () => {
+      const kept = Object.fromEntries(Object.entries(variables).filter(([k]) => !INTUTIC_VARIABLES.includes(k)))
+      const settings: N8nWorkflowSettings = { ...detail.settings }
+      if (Object.keys(kept).length > 0) settings.variables = kept
+      else delete settings.variables
+      const body: N8nWorkflowUpdateBody = {
+        name: detail.name ?? w.name ?? 'Untitled',
+        nodes: detail.nodes ?? [],
+        connections: detail.connections ?? {},
+        settings,
+      }
+      if (detail.staticData !== undefined) body.staticData = detail.staticData
+      const res = await fetch(`${n8nUrl}/api/v1/workflows/${w.id}`, {
+        method: 'PUT',
+        headers: getHeaders(),
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(5000),
+      })
+      if (!res.ok) throw new Error(`n8n refused the update to workflow ${w.id}: HTTP ${res.status}`)
+    })
+  }
 }

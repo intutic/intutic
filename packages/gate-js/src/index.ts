@@ -45,6 +45,8 @@ export {
 } from './snapshot.js'
 export type { Decision, Rule, RuleSubject, Severity, SnapshotState } from './snapshot.js'
 
+export type { SsoGroupClearance, SsoGroupPolicy, SsoGroupRecord } from './ssoGroups.js'
+
 export {
   firstMatch,
   parseRules,

@@ -35,3 +35,5 @@ intutic start
 Intutic configures:
 * **JSON Config:** `.openclaw/openclaw.json` (specifying the proxy `baseUrl` and authentication rules).
 * **Hook Script:** `.intutic/hooks/openclaw-check.js` (drained by sync-daemon).
+
+To undo what `intutic connect` writes here, run `intutic disconnect --harness openclaw`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. See [`intutic disconnect`](/reference/cli#intutic-disconnect).

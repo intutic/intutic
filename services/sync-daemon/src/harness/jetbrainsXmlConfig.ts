@@ -157,29 +157,56 @@ export async function mergeXmlComponentOptions(
   readFile: (path: string) => Promise<string | null>,
   writeFileAtomic: (path: string, content: string) => Promise<void>,
 ): Promise<boolean> {
-  const existing = await readFile(filePath)
-  const parsed = parseApplicationXml(existing, componentName)
-  if (!parsed.ok) return false
-
-  const options = parsed.target?.simpleOptions ?? new Map<string, string>()
+  const parsed = parseComponentOptions(await readFile(filePath), componentName)
+  if (parsed === null) return false
   for (const [key, value] of Object.entries(desiredOptions)) {
-    options.set(key, typeof value === 'boolean' ? String(value) : value)
+    parsed.options[key] = typeof value === 'boolean' ? String(value) : value
   }
+  await writeFileAtomic(filePath, serializeComponentOptions(parsed, componentName))
+  return true
+}
 
-  const optionLines = [...options.entries()]
+/** One settings file as {@link parseComponentOptions} reads it. */
+export interface ComponentOptionsFile {
+  /** The named component's simple options. */
+  options: Record<string, string>
+  /** Everything else inside that component, verbatim (normalised whitespace). */
+  extra?: string
+  /** Every other component's block, verbatim, by name. */
+  others: Record<string, string>
+}
+
+/**
+ * Reads `componentName`'s simple options from a settings file's text
+ * (`null` or empty: a file that does not exist yet). Returns null when the
+ * file is not the `<application><component>` shape this module understands.
+ */
+export function parseComponentOptions(raw: string | null, componentName: string): ComponentOptionsFile | null {
+  const parsed = parseApplicationXml(raw, componentName)
+  if (!parsed.ok) return null
+  const out: ComponentOptionsFile = {
+    options: Object.fromEntries(parsed.target?.simpleOptions ?? new Map<string, string>()),
+    others: Object.fromEntries(parsed.otherComponents),
+  }
+  if (parsed.target?.extra) out.extra = parsed.target.extra
+  return out
+}
+
+/**
+ * Writes a settings file back in the layout {@link mergeXmlComponentOptions}
+ * uses. A component left with no options and nothing else is dropped.
+ */
+export function serializeComponentOptions(file: ComponentOptionsFile, componentName: string): string {
+  const optionLines = Object.entries(file.options)
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([key, value]) => `    <option name="${escapeXmlAttr(key)}" value="${escapeXmlAttr(value)}" />`)
-    .join('\n')
-  const extra = parsed.target?.extra
-  const componentBody = extra ? `${optionLines}\n${extra.split('\n').map((l) => `    ${l}`).join('\n')}` : optionLines
-  const componentBlock = `  <component name="${escapeXmlAttr(componentName)}">\n${componentBody}\n  </component>`
-
-  const otherBlocks = [...parsed.otherComponents.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([, block]) => `  ${block}`)
-
-  const body = [componentBlock, ...otherBlocks].join('\n')
-  const serialized = `<application>\n${body}\n</application>\n`
-  await writeFileAtomic(filePath, serialized)
-  return true
+  const extraLines = file.extra ? file.extra.split('\n').map((l) => `    ${l}`) : []
+  const blocks: [string, string][] = Object.entries(file.others).map(([name, block]) => [name, `  ${block}`])
+  if (optionLines.length + extraLines.length > 0) {
+    const componentBody = [...optionLines, ...extraLines].join('\n')
+    blocks.push([componentName, `  <component name="${escapeXmlAttr(componentName)}">\n${componentBody}\n  </component>`])
+  }
+  // The target component first, then the rest by name: the order the merge has always written.
+  blocks.sort(([a], [b]) => (a === componentName ? -1 : b === componentName ? 1 : a.localeCompare(b)))
+  return `<application>\n${blocks.map(([, block]) => block).join('\n')}\n</application>\n`
 }

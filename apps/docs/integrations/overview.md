@@ -12,7 +12,7 @@ Intutic supports 43 AI agent harnesses out of the box. The CLI auto-detects whic
 | [Aider](/integrations/aider) | `.aider.conf.yml` | File presence | ✅ Stable |
 | [Antigravity](/integrations/antigravity) | `.gemini/settings.json` | `.gemini/` directory | ✅ Stable |
 | [Codex](/integrations/codex) | `.env.intutic` | `CODEX_HOME` env or `codex` in PATH | ✅ Stable |
-| [OpenHands](/integrations/openhands) | `config.toml` | File presence | ✅ Stable |
+| [OpenHands](/integrations/openhands) | `config.toml` | `.openhands/`, or an OpenHands `config.toml` | ✅ Stable |
 | [n8n](/integrations/n8n) | `.intutic/n8n/governance-workflow.json` | n8n instance detection | ✅ Stable |
 | [Cline](/integrations/cline) | `.cline/hooks/hooks.json` | File presence | ✅ Stable |
 | [Roo Code](/integrations/roo-code) | `.roorules` | File presence | ✅ Stable |

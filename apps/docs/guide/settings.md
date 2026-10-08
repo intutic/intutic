@@ -59,6 +59,7 @@ Sign-in, keys and credentials, and the network and runtime limits every agent in
 | Card | What it does |
 |------|--------------|
 | **Single Sign-On (SSO)** | **Configure SSO** connects a SAML or OIDC identity provider (Okta, Entra ID and others). Once a provider exists, the card also offers **Expire API keys without a recent SSO login** and **Directory provisioning (SCIM 2.0)**. See [Security & Identity](/guide/security) and [SCIM Provisioning](/guide/scim). |
+| **Group policy for high-risk tools** | Which tools only members of named identity-provider groups may run, and which tools need an on-behalf-of token. See [below](#group-policy-for-high-risk-tools). |
 | **Virtual API Keys** | Keys (`vk_…`) that developers and their agents use to reach the Intutic proxy. See [below](#virtual-api-keys). |
 | **Attenuated API Keys** | Child keys minted from a parent key with fewer capabilities by `intutic attenuate`; open a chain to see each step. |
 | **On-Behalf-Of Tokens** | A short-lived token that lets an agent act for you with only the tools you pick. See [below](#on-behalf-of-obo-tokens). |
@@ -70,7 +71,22 @@ Sign-in, keys and credentials, and the network and runtime limits every agent in
 | **Approved Models** | The workspace's model allowlist. See [below](#approved-models). |
 | **Repeat-Finding Enforcement** | Act on a sustained pattern of findings in one session, not only record it. |
 | **Trajectory Monitoring** | Server-side monitoring of running sessions. See [Trajectory Monitor](/guide/trajectory-monitor). |
+| **Gate health** | Whether each installed harness's gate is reporting. A gate reports every tool call, allowed ones included, so one that has sent nothing for 48 hours is **Silent**: its tool calls may not be governed. **Just installed** means the harness connected less than an hour ago. Owners, Admins and Engineering Managers can see it. |
 | **Devices** | Enforcement posture each developer machine reports: visibility, not attestation. |
+
+### Group policy for high-risk tools
+
+Three lists, one name per line, matched exactly including case: **High-risk tools**, **Groups
+that may run them** and **On-behalf-of only**. A member in one of the groups may run the
+high-risk tools; anyone else is refused, and so is a member whose groups a gate does not know.
+A tool on the on-behalf-of list is always refused, because no tool-call gate has an
+on-behalf-of token to present. Saving all three lists empty removes the policy.
+
+Owners and Admins can edit it; everyone else sees it read-only. It is stored as the
+`sso_group_policy` setting, so it can also be set with `PUT /api/v1/workspace/settings`, and
+every change is recorded in the [Audit Timeline](/guide/audit-timeline). Where a member's groups
+come from, and how fast a change reaches each gate, is in
+[SSO group clearance](/concepts/circuit-breaker#_3-sso-group-clearance).
 
 ### Virtual API Keys
 
@@ -171,6 +187,23 @@ through the same enforcement path:
 - A rejected request names both sources in its error, so a model refused on a connected proxy
   points you at the workspace allowlist, and on a standalone one at this file.
 
+### Harness Config History
+
+`intutic connect` records each harness rules file (`CLAUDE.md`, `.cursorrules`, `AGENTS.md` and
+the others listed under [Config content upload](/reference/cli#config-content-upload)) in the
+workspace's config history. The **Upload config file content** switch decides what that record
+holds. It is off by default.
+
+| Setting | What is uploaded |
+|---------|------------------|
+| **Off** *(default)* | Each file's path, the SHA-256 of its redacted text, its size, the harness and the capture time. Never its text. Version History shows when a file changed, not what changed; there are no diffs and no SkillOpt config-edit suggestions |
+| **On** | The same, plus the file's text, with API keys, tokens, private keys and other credential-shaped strings replaced by `[redacted]` on the developer's machine before it is sent. Diffs and SkillOpt suggestions use the text |
+
+The control plane refuses text sent while the switch is off. A change reaches each machine at its
+next sync and applies from its next capture, within a few minutes. Changing it needs the Owner or
+Admin role, and the change is recorded in the settings history like any other. The API key is
+`configBodyUpload` in `PUT /api/v1/workspace/settings`.
+
 ---
 
 ## AI Routing & Caching {#routing-proxy}
@@ -188,6 +221,8 @@ What the MCP governance proxy does when it cannot reach Intutic, and how firmly 
 | **Fail open** *(recommended)* | The tool call runs, and a warning event reaches the dashboard |
 | **Fail closed** | The tool call is blocked with "Governance check failed: Intutic control plane unreachable." The dashboard asks you to confirm before switching to it |
 
+The choice reaches each proxy with its policy. A proxy that has not been able to load policy since it started uses its local `INTUTIC_MCP_FAIL_OPEN` instead — see [When the registry has not loaded](/guide/mcp-governance#when-the-registry-has-not-loaded). Which MCP servers and tools may run is set on **Policies › MCP Servers** ([the registry](/guide/mcp-governance#the-registry)).
+
 **When someone edits a harness config file by hand**
 
 | Option | Behavior |
@@ -195,6 +230,8 @@ What the MCP governance proxy does when it cannot reach Intutic, and how firmly 
 | **Restore** *(default)* | The sync daemon notices the hand edit and puts the managed file back |
 | **Write-protect** *(macOS only)* | The file is locked against edits with the macOS immutable flag (`chflags uchg`) |
 | **Record only** | The edit stays, and an incident records the drift |
+
+Gate hook files are restored under every option, Record only included: they are the gates, not your config.
 
 The card also shows the **Proxy mode**: per session.
 
@@ -277,7 +314,7 @@ Route governance events to Slack, PagerDuty, a webhook or email. Each rule (**Ne
 - **Slack** — **Connect Slack** installs the Slack app through OAuth; a rule then sends to a Slack channel ID. **Link your Slack account** gives you a code to run as `/intutic link <code>` in Slack, so approvals you make from Slack are recorded against you rather than against whoever installed the app.
 - **Email** — Send alerts to up to 20 addresses; each recipient gets their own message.
 - **PagerDuty** — Trigger incidents through an Events API v2 routing key.
-- **Webhooks** — Send JSON payloads to generic HTTPS endpoints. Secure webhooks with an optional HMAC signing secret.
+- **Webhooks** — Send JSON payloads to generic HTTPS endpoints. Every request is signed; see [below](#verifying-webhook-signatures).
 
 ### Webhook destinations
 
@@ -290,6 +327,45 @@ INTUTIC_WEBHOOK_ALLOWED_HOSTS=servicenow.corp.example,*.hooks.corp.example
 ```
 
 A listed host may resolve to a private address; every other destination stays guarded. Even a listed host still needs `https`, and can never reach loopback or link-local (cloud metadata) addresses. The same list also covers SIEM export destinations: webhook, Splunk HEC and Datadog intake URLs, and syslog hosts. If your internal system uses a private certificate authority, give the control plane that CA through `NODE_EXTRA_CA_CERTS`.
+
+### Verifying webhook signatures {#verifying-webhook-signatures}
+
+Every webhook rule signs every request with a secret Intutic generates for it. The secret is shown once, right after you create the rule; copy it then. **New signing secret** on the rule (or `POST /api/v1/notifications/rules/:ruleId/signing-secret`) replaces it and shows the new one once, and requests switch to it straight away. You cannot choose the secret yourself, and there is no unsigned option.
+
+Each request carries two headers:
+
+- `X-Intutic-Timestamp` — the send time, in Unix seconds
+- `X-Intutic-Signature` — `sha256=` followed by the hex HMAC-SHA256 of `<timestamp>.<raw request body>`, keyed with the rule's secret
+
+[SIEM webhook destinations](/guide/siem-export#verifying-webhook-signatures) are signed exactly the same way, so one function verifies both. To verify:
+
+1. Read the raw body exactly as received, before any JSON parsing.
+2. Compute the HMAC over the timestamp header, a `.`, and the raw body, and compare it with the signature header in constant time.
+3. Refuse the request if the timestamp is older than five minutes (or more than five minutes ahead of your clock), so a captured request cannot be replayed later. A retry is signed again when it is sent, so it carries a fresh timestamp.
+
+```ts
+import { createHmac, timingSafeEqual } from 'node:crypto'
+
+export function verifyIntuticWebhook(rawBody: string, headers: Record<string, string>, secret: string): boolean {
+  const timestamp = headers['x-intutic-timestamp']
+  const signature = headers['x-intutic-signature'] ?? ''
+  if (!timestamp || Math.abs(Date.now() / 1000 - Number(timestamp)) > 300) return false
+  const expected = `sha256=${createHmac('sha256', secret).update(`${timestamp}.${rawBody}`).digest('hex')}`
+  return signature.length === expected.length && timingSafeEqual(Buffer.from(signature), Buffer.from(expected))
+}
+```
+
+```python
+import hashlib, hmac, time
+
+def verify_intutic_webhook(raw_body: bytes, headers: dict, secret: str) -> bool:
+    timestamp = headers.get("x-intutic-timestamp", "")
+    signature = headers.get("x-intutic-signature", "")
+    if not timestamp or abs(time.time() - int(timestamp)) > 300:
+        return False
+    mac = hmac.new(secret.encode(), timestamp.encode() + b"." + raw_body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(signature, "sha256=" + mac)
+```
 
 ### Rule Filters
 
@@ -309,6 +385,7 @@ The **Event Type** list offers only the events the control plane sends:
 | `sop.upstream.changed` | Guideline Changed Upstream |
 | `guardrail.ready` | Policy Guardrail Ready to Enforce |
 | `guardrail.stale` | Policy Guardrail Citation Went Stale |
+| `mcp.server.candidate` | New MCP Server Awaiting Approval |
 | `finops.budget.threshold` | Budget Threshold Reached |
 | `finops.budget.exceeded` | Budget Exceeded |
 | `plan.deviation.detected` | Plan Deviation Detected |
@@ -316,12 +393,17 @@ The **Event Type** list offers only the events the control plane sends:
 | `gateway.stale.detected` | Self-Hosted Gateway Unreachable |
 | `device.enforcement.stale` | Device Enforcement Stale |
 | `device.enforcement.disabled` | Device Firewall Disabled |
+| `governance.gate.silent` | Gate Stopped Reporting: an installed harness's gate has sent no event for 48 hours |
+| `governance.gate.recovered` | Gate Reporting Again |
+| `governance.integrity.failed` | Trace Integrity Check Failed: the hourly integrity check found a broken root chain, a trace changed after sealing, a mismatched bucket copy, a bad signature or an altered append-only guard. See [Trace Integrity](/concepts/trace-integrity#alerts) |
 
 Tick one or more severities (LOW, MEDIUM, HIGH, CRITICAL) to narrow a rule; leave them all unticked to receive every severity.
 
 ### Cooldown Throttling
 
 Prevent alert noise by setting a cooldown period (in minutes) for each rule. Consecutive identical alerts inside the cooldown window are suppressed.
+
+The gate and integrity alerts do not rely on the cooldown. **Gate Stopped Reporting** fires once when a gate goes silent, however long it stays silent, and **Gate Reporting Again** fires once when it comes back; a PagerDuty rule on **Gate Reporting Again** resolves the incident the silent alert opened instead of opening a new one. **Gate Reporting Again** is INFO severity, which none of the severity boxes select, so leave them unticked on its rule. **Trace Integrity Check Failed** fires once for each kind of failure while it keeps failing, and again if it clears and recurs.
 
 **Show Delivery Log** lists each time a rule sent, failed or was filtered, with the event and channel.
 

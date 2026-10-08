@@ -96,6 +96,8 @@ client = OpenAIChatClient(
 
 The same `.env.intutic` shape as LangGraph: proxy URLs plus a pointer at `intutic_clawde.gate.adapters.agent_framework.IntuticFunctionMiddleware`.
 
+To undo what `intutic connect` writes here, run `intutic disconnect --harness agent-framework`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. `.env.intutic` stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+
 ## What the adapter does NOT do
 
 The same structural gaps as every SDK-gated framework apply. See [LangGraph's "What the adapter does NOT do"](/integrations/langgraph#what-the-adapter-does-not-do). Agent Framework adds these limits:

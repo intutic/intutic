@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { CircuitBreaker } from '../src/circuit-breaker'
-import { ClawdeBlockedError, ClawdeVerdictError } from '../src/errors'
+import { ClawdeBlockedError, ClawdeConnectionError, ClawdeVerdictError } from '../src/errors'
 
 describe('circuit-breaker', () => {
   it('allows execution when budget check permits it', async () => {
@@ -34,16 +34,29 @@ describe('circuit-breaker', () => {
     await expect(run(async () => 'hello')).rejects.toThrow(ClawdeVerdictError)
   })
 
-  it('fails open when failOpen is configured true', async () => {
+  // failOpen used to swallow the budget verdict too, so with it set the
+  // breaker ran the function exactly when the budget was gone.
+  it('refuses on an exhausted budget even with failOpen', async () => {
     const dummyClient = {
       checkBudget: async () => ({ allowed: false, remaining_usd: 0.0, reason: 'Budget limit hit' }),
     }
+    let ran = false
 
     const breaker = new CircuitBreaker(dummyClient)
-    const run = breaker.wrap('some_action', { maxCostUsd: 5.0, failOpen: true })
+    const run = breaker.wrap('some_action', { requireBudget: true, failOpen: true })
 
-    const result = await run(async () => 'fallback-allowed')
-    expect(result).toBe('fallback-allowed')
+    await expect(run(async () => { ran = true; return 'ran' })).rejects.toThrow(ClawdeVerdictError)
+    expect(ran).toBe(false)
+  })
+
+  it('fails open on a budget check that cannot be made when failOpen is true', async () => {
+    const dummyClient = {
+      checkBudget: async () => { throw new ClawdeConnectionError('Could not reach control-plane budget endpoint') },
+    }
+
+    const breaker = new CircuitBreaker(dummyClient)
+    expect(await breaker.wrap<string>('some_action', { requireBudget: true, failOpen: true })(async () => 'ran')).toBe('ran')
+    await expect(breaker.wrap<string>('some_action', { requireBudget: true })(async () => 'ran')).rejects.toThrow(ClawdeConnectionError)
   })
 
   it('runs the budget check for requireBudget, and skips it without an option asking', async () => {

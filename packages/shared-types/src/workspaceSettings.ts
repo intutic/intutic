@@ -12,9 +12,28 @@
  */
 
 import type { McpProxyFailBehavior, McpProxyMode, BypassEnforcementTier } from './enums.js'
+import type { SsoGroupPolicy } from './attenuation.js'
 
 // Re-export so callers only need one import
 export type { McpProxyFailBehavior, McpProxyMode, BypassEnforcementTier }
+
+/**
+ * The MCP governance proxy's anomaly detectors, by id. The proxy's own
+ * `DETECTOR_BASE_DISPOSITION` (packages/mcp-proxy/src/anomaly/index.ts) is
+ * typed against this list, so a detector added there without being added
+ * here fails to compile, and `mcpAnomalyOverrides` cannot name one that does
+ * not exist.
+ */
+export const MCP_ANOMALY_DETECTOR_IDS = [
+  'consecutive_repeat',
+  'ping_pong_cycle',
+  'landmark_cycle',
+  'tool_diversity_collapse',
+  'code_as_action',
+  'tool_poisoning',
+  'dlp_escalation',
+] as const
+export type McpAnomalyDetectorId = (typeof MCP_ANOMALY_DETECTOR_IDS)[number]
 
 /**
  * Per-workspace MCP governance settings.
@@ -70,6 +89,16 @@ export interface WorkspaceSettings {
    * recorded SSO login yet. Cleared when the gate is turned off.
    */
   ssoKeyGateEnabledAt: string | null
+
+  /**
+   * Tools only members of named identity-provider groups may run, and tools
+   * only an on-behalf-of token may call (`SsoGroupPolicySchema`). Absent: no
+   * group restriction; `null` in a settings write clears it, and is never
+   * stored. Snake-case because the gates and the policy responses have always
+   * read it under this key. Every gate decides with `evaluateSsoGroupClearance`;
+   * see `ssoGroupClearance.ts`.
+   */
+  sso_group_policy?: SsoGroupPolicy | null
 
   /**
    * Bring-your-own-cloud trace storage. Optional — absent means Intutic-managed
@@ -315,6 +344,43 @@ export interface WorkspaceSettings {
   mcpAllowedServers?: string[]
 
   /**
+   * What the MCP governance proxy does with a server the workspace has not
+   * approved in its MCP server registry. `allow` (the default, and what an
+   * absent value means) lets every server through that is not explicitly
+   * blocked; `deny` refuses every server until an OWNER or ADMIN approves it,
+   * and a server the proxy has not seen before lands in the registry as a
+   * candidate awaiting that decision. A blocked server is refused under both.
+   * Delivered to the proxy with the registry decisions (`mcpRegistry` on
+   * `GET /api/v1/sop/rules` and `GET /api/v1/policy/resolve`).
+   */
+  mcpDefaultPolicy?: 'allow' | 'deny'
+
+  /**
+   * What the MCP governance proxy does when a prompt-injection pattern
+   * matches: `warn` reports it and lets the call (or result) through, `block`
+   * refuses the call or withholds the result. Delivered with the MCP policy
+   * and wins over the proxy's local `INTUTIC_MCP_INJECTION_ACTION`; absent
+   * leaves the local setting (default `warn`) in force.
+   */
+  mcpInjectionAction?: 'warn' | 'block'
+
+  /**
+   * The MCP proxy's anomaly detectors: `enforce` lets each act up to its own
+   * ceiling, `warn` reports without blocking, `off` skips them. Delivered with
+   * the MCP policy and wins over `INTUTIC_MCP_ANOMALY_MODE`; absent leaves the
+   * local setting (default `enforce`) in force.
+   */
+  mcpAnomalyMode?: 'enforce' | 'warn' | 'off'
+
+  /**
+   * Per-detector overrides for the MCP proxy's anomaly detectors, by
+   * detector id. A value can only demote a detector below its own ceiling,
+   * never promote it. Merged per detector over `INTUTIC_MCP_ANOMALY_OVERRIDES`,
+   * this setting winning.
+   */
+  mcpAnomalyOverrides?: Partial<Record<McpAnomalyDetectorId, 'steer' | 'reask' | 'kill' | 'off'>>
+
+  /**
    * Workspace-supplied prompt-injection regex sources for the MCP governance
    * proxy (TD-436), on top of its hardcoded floor. Delivered with the rest of
    * the MCP curation; the proxy compiles them and drops one that does not.
@@ -498,6 +564,23 @@ export interface WorkspaceSettings {
   virusTotalSkillLookupEnabled?: boolean
 
   /**
+   * Upload the content of harness config files, not only their hashes.
+   *
+   * `intutic connect` captures each recorded harness's rules file (the list is
+   * `HARNESS_FILES` in `@intutic/sync-daemon`). Off, it uploads the file's
+   * path, the SHA-256 of its redacted text, its size, the harness and the
+   * time: the config history records what changed and when, and its hash
+   * chain stays verifiable. On, it also uploads the text, with credential-
+   * shaped strings replaced by `[redacted]` before it leaves the machine,
+   * which is what config diffs and SkillOpt's config-edit suggestions need.
+   *
+   * Off by default: file content leaving developer machines is a privacy
+   * choice a workspace makes, not one a default makes for it. The control
+   * plane refuses a body sent while this is off.
+   */
+  configBodyUpload?: boolean
+
+  /**
    * Fraction of ingested traces that receive the two heavier, LLM-adjacent
    * security probes — `traceIngestClassifier.classifyTraceAtIngest`'s
    * baseline/history-derived anomaly checks and `llmProbeService`'s
@@ -620,6 +703,8 @@ export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
   // Off by default — see the field doc for the hash-only doctrine and why
   // this must never turn on for a workspace that never configured it.
   virusTotalSkillLookupEnabled: false,
+  // Off by default — see the field doc: hashes and metadata only.
+  configBodyUpload: false,
   // ON by default — see the field doc. Opting out stops label retention for
   // the judge fine-tuning dataset, never card delivery itself.
   governanceCardLabelingEnabled: true,

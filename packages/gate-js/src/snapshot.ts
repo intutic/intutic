@@ -76,6 +76,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { decodeSsoGroupRecord, SSO_GROUP_RECORD_TAG, type SsoGroupRecord } from './ssoGroups.js'
 
 export const SNAPSHOT_STALE_AFTER_DAYS = 7
 
@@ -105,13 +106,20 @@ export class Snapshot {
   ageDays = 0
   /** Regexes that would not compile. */
   droppedRules = 0
+  /**
+   * The workspace's SSO-group policy and the member this snapshot was issued
+   * to, or null when the workspace has no group policy. On a snapshot that
+   * fails its integrity check the member is null — groups unknown — so an
+   * edited group list in the file clears nothing.
+   */
+  ssoGroups: SsoGroupRecord | null = null
 
   get healthMessage(): string {
     switch (this.state) {
       case 'absent':
         return 'No policy snapshot — built-in protections only'
       case 'invalid':
-        return 'Policy snapshot failed its digest or workspace check — dynamic rules dropped'
+        return 'Policy snapshot failed its digest or workspace check — dynamic rules dropped except SSO-group refusals'
       case 'empty':
         return 'Policy snapshot contains no rules — the compile produced nothing'
       case 'stale':
@@ -177,6 +185,10 @@ export function loadSnapshot(workspaceId = '', path?: string): Snapshot {
       continue
     }
     if (!line || line.startsWith('#')) continue
+    if (line.startsWith(`${SSO_GROUP_RECORD_TAG}\t`)) {
+      snap.ssoGroups = decodeSsoGroupRecord(line)
+      continue
+    }
 
     const f = line.split('\t')
     // Column order: id, severity, flags, subject, reason, source(regex), [argPatternB64].
@@ -218,6 +230,9 @@ export function loadSnapshot(workspaceId = '', path?: string): Snapshot {
 
   if (snap.state === 'invalid') {
     snap.rules = [] // additive tier — dropping it returns to yesterday's behaviour
+    // Except the group policy, which only ever refuses: it still applies, to a
+    // member whose groups this gate can no longer vouch for.
+    if (snap.ssoGroups) snap.ssoGroups = { ...snap.ssoGroups, member: null }
   }
 
   if (snap.state === 'ok' && snap.generatedAt) {

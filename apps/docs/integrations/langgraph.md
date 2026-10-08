@@ -161,6 +161,8 @@ export INTUTIC_SOP_COUNT=5
 #   from intutic_clawde.gate import guard_tools
 ```
 
+To undo what `intutic connect` writes here, run `intutic disconnect --harness langgraph`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. `.env.intutic` stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+
 ## What the adapter does NOT do
 
 Stated plainly, because the gaps are structural:

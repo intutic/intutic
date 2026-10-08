@@ -26,8 +26,8 @@
  * (PATCH /api/v1/sessions/:id/end).
  *
  * Dedupe lives here (module state keyed workspace+harness+instance), so
- * callers — `startSyncLoop`'s iteration as well as the CLI's inline connect
- * loop — can call `startHarnessSession` every iteration and only the first
+ * callers (`reportHarnessAgents`, every `intutic connect` cycle) can call
+ * `startHarnessSession` every iteration and only the first
  * one POSTs. Git context is captured once per key, not on a branch switch.
  * Everything is best-effort: a dead control plane costs a warning, never the
  * sync loop.

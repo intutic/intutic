@@ -9,8 +9,9 @@
  * PreToolUse hook for them. This package is that enforcement point: the
  * missing adapter, written against Intutic's own published gate contract.
  *
- * Four tiers, in order — identical precedence to the Python SDK:
+ * Five tiers, in order — identical precedence to the Python SDK:
  *
+ *   A0  SSO group policy  from the policy snapshot       unknown groups refused
  *   A1  policy snapshot   port of intuticGate()          fails CLOSED
  *   A3  SOP rules         authored in the product        fails OPEN (A2 covers it)
  *   A2  image integrity   local check                    fails CLOSED
@@ -52,6 +53,7 @@ import { GateClient } from './client.js'
 import * as imagecheck from './imagecheck.js'
 import * as snapshot from './snapshot.js'
 import * as soprules from './soprules.js'
+import { evaluateSsoGroupClearance } from './ssoGroups.js'
 
 /** Tools that cannot change anything. They still get the local snapshot check
  *  (Tier A1), but skip the remote gate call (Tier B). */
@@ -223,6 +225,22 @@ export class Gate {
     const command = String(toolInput.command ?? '')
 
     await this.reportSnapshotHealthOnce(toolName)
+
+    // ---- Tier A0: SSO group policy, from the snapshot ------------------
+    //
+    // The workspace's group policy decided for the member the snapshot was
+    // issued to — the same evaluator, and so the same answer, as the control
+    // plane's hook gate. Not skippable by INTUTIC_GUARD_DISABLE: it is the
+    // workspace's own policy, not the destructive family.
+    const sso = this.getSnapshot().ssoGroups
+    if (sso) {
+      const d = evaluateSsoGroupClearance(sso.policy, toolName, sso.member ? sso.member.ssoGroups : null)
+      if (d.clearance !== 'GRANTED') {
+        const reason = `${d.reason} [${d.ruleId}]`
+        await this.emit('tool_blocked', toolName, reason, toolInput)
+        throw new IntuticGateRefusal(reason, 'SSO_GROUP')
+      }
+    }
 
     // ---- Tier A1: policy snapshot -------------------------------------
     const disabled = snapshot.guardDisabledFromEnv()

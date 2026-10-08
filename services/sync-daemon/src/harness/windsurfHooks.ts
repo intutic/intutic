@@ -5,8 +5,9 @@
  * (.windsurf/hooks.json) governance hooks using the Windsurf Cascade
  * hook system (exit code 2 = block).
  *
- * Also writes the proxy settings into ~/.codeium/windsurf/settings.json
- * so that Windsurf routes HTTP traffic through the Intutic TLS MITM proxy,
+ * Also writes the proxy settings into Windsurf's user settings.json (see
+ * `windsurfSettingsPath`) so that Windsurf routes HTTP traffic through the
+ * Intutic TLS MITM proxy,
  * enabling governance of Cascade AI traffic that has no native base URL override.
  *
  * LLD #14 — Phase 3 cross-harness defence
@@ -91,6 +92,7 @@ import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
+import { keepOriginal, noteProxyUrl } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
 import { readJsonObjectForMerge } from './jsonMergeTarget.js'
 import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
@@ -102,6 +104,31 @@ const log = createLogger('sync-windsurf-hooks')
  *  HOME are honoured. */
 function windsurfUserDir(): string {
   return path.join(os.homedir(), '.codeium', 'windsurf')
+}
+
+/**
+ * Windsurf Desktop's user `settings.json`, the file `http.proxy` is read from.
+ * Windsurf is a VS Code fork, so it keeps user settings where VS Code does,
+ * under its own product name (`nameShort: "Windsurf"` in the app's
+ * product.json): `User/settings.json` in the platform's application-data
+ * directory. Checked against a Windsurf 1.9600.41 install on macOS, whose
+ * user settings live in ~/Library/Application Support/Windsurf/User/; the
+ * Linux and
+ * Windows directories are VS Code's
+ * (https://code.visualstudio.com/docs/configure/settings#_settings-file-locations).
+ * `~/.codeium/windsurf/` holds Cascade's hooks.json and mcp_config.json, not
+ * editor settings; earlier versions wrote the proxy keys there, where Windsurf
+ * never read them.
+ */
+export function windsurfSettingsPath(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+  home: string = os.homedir(),
+): string {
+  const user = ['Windsurf', 'User', 'settings.json']
+  if (platform === 'darwin') return path.join(home, 'Library', 'Application Support', ...user)
+  if (platform === 'win32') return path.join(env.APPDATA || path.join(home, 'AppData', 'Roaming'), ...user)
+  return path.join(env.XDG_CONFIG_HOME || path.join(home, '.config'), ...user)
 }
 
 /** The JetBrains plugin's user-level hooks.json lives directly under
@@ -130,7 +157,8 @@ function isRecord(v: unknown): v is Record<string, unknown> {
  * its command, so repeated syncs replace it rather than stacking copies. A
  * file that is not a plain JSON object is left alone (see jsonMergeTarget.ts).
  */
-async function mergeCascadeHooksJson(filePath: string, hookScriptPath: string): Promise<void> {
+async function mergeCascadeHooksJson(filePath: string, hookScriptPath: string, workspaceRoot: string): Promise<void> {
+  await keepOriginal(filePath, workspaceRoot)
   const existing = await readJsonObjectForMerge(filePath)
   if (existing === null) return
   const command = `node "${hookScriptPath}"`
@@ -305,7 +333,7 @@ export async function writeWindsurfHooks(
   await fs.chmod(hookScriptPath, 0o755)
 
   // 1. User-level hooks — Desktop's path.
-  await mergeCascadeHooksJson(path.join(windsurfUserDir(), 'hooks.json'), hookScriptPath)
+  await mergeCascadeHooksJson(path.join(windsurfUserDir(), 'hooks.json'), hookScriptPath, workspaceRoot)
   log.info({ action: 'windsurf_hooks_written', level: 'user' }, 'Windsurf user-level hooks written')
 
   // 1b. User-level hooks — the JetBrains plugin's SEPARATE path. Same entries:
@@ -314,7 +342,7 @@ export async function writeWindsurfHooks(
   // hook it added, which is corroborating evidence (not a guess) that it
   // dispatches the same Cascade hook event/payload system as Desktop, just
   // reads its user-level config from this different file.
-  await mergeCascadeHooksJson(path.join(windsurfJetBrainsUserDir(), 'hooks.json'), hookScriptPath)
+  await mergeCascadeHooksJson(path.join(windsurfJetBrainsUserDir(), 'hooks.json'), hookScriptPath, workspaceRoot)
   log.info(
     { action: 'windsurf_hooks_written', level: 'user-jetbrains' },
     'Windsurf JetBrains plugin user-level hooks written',
@@ -327,18 +355,23 @@ export async function writeWindsurfHooks(
   // for a matching event, in order system → user → workspace (confirmed
   // against docs.devin.ai/desktop/cascade/hooks), so this file being edited
   // by an agent does not disable the user-level registration above.
-  await mergeCascadeHooksJson(path.join(workspaceRoot, '.windsurf', 'hooks.json'), hookScriptPath)
+  await mergeCascadeHooksJson(path.join(workspaceRoot, '.windsurf', 'hooks.json'), hookScriptPath, workspaceRoot)
   log.info({ action: 'windsurf_hooks_written', level: 'workspace' }, 'Windsurf workspace-level hooks written')
 
   // 3. HTTP proxy settings — Desktop's own settings.json. Merged: the keys
   // below are the only ones Intutic owns, and a file that is not a plain JSON
   // object is left alone (see jsonMergeTarget.ts).
-  const settingsPath = path.join(windsurfUserDir(), 'settings.json')
+  const settingsPath = windsurfSettingsPath()
+  await keepOriginal(settingsPath, workspaceRoot)
+  // The local listener, not the configured proxy URL: disconnect recognises
+  // the proxy settings below, and the JetBrains ones, by it.
+  await noteProxyUrl(`http://127.0.0.1:${proxyPort}`)
   const existingSettings = await readJsonObjectForMerge(settingsPath)
   if (existingSettings !== null) {
     // Provenance fields earlier versions stamped when they owned the whole file.
     delete existingSettings._comment
     delete existingSettings._lastSync
+    await fs.mkdir(path.dirname(settingsPath), { recursive: true })
     await atomicWriteJson(settingsPath, {
       ...existingSettings,
       'http.proxy': `http://127.0.0.1:${proxyPort}`,

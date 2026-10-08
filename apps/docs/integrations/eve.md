@@ -161,6 +161,8 @@ The `.env.intutic` this integration writes says the same thing in its pointer co
 
 Same `.env.intutic` shape as every other JS/TS SDK-gated framework — proxy URLs plus a pointer at `@intutic/gate/eve`. Sourcing it does **not** route eve's own LLM egress (see the limitation above) and does not gate tools — the blocking gate is the `approval` policies you attach in `agent/`.
 
+To undo what `intutic connect` writes here, run `intutic disconnect --harness eve`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. `.env.intutic` stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+
 ## What the adapter does NOT do
 
 Same structural gaps as every SDK-gated framework — see [LangGraph's "What the adapter does NOT do"](/integrations/langgraph#what-the-adapter-does-not-do) — plus eve-specific ones, stated plainly:

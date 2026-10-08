@@ -43,6 +43,7 @@ import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
+import { keepOriginal } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
 import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
 
@@ -279,6 +280,7 @@ export async function writeMuseHooks(
 
   // 1. Project-level: <root>/.muse/hooks.json
   const projectMuseDir = path.join(workspaceRoot, '.muse')
+  await keepOriginal(path.join(projectMuseDir, 'hooks.json'), workspaceRoot)
   await fs.mkdir(projectMuseDir, { recursive: true })
   await mergeMuseHooksJson(path.join(projectMuseDir, 'hooks.json'), hookScriptPath)
   log.info({ action: 'muse_hooks_written', level: 'project', path: projectMuseDir }, 'Muse Code project-level hooks written')
@@ -286,11 +288,13 @@ export async function writeMuseHooks(
   // 2. Managed (pre-approved) tier: ~/.config/muse/intutic-managed-hooks.json,
   //    registered via managed_hooks_path in ~/.config/muse/settings.json.
   const museConfigDir = path.join(os.homedir(), '.config', 'muse')
-  await fs.mkdir(museConfigDir, { recursive: true })
   const managedHooksPath = path.join(museConfigDir, 'intutic-managed-hooks.json')
+  const settingsPath = path.join(museConfigDir, 'settings.json')
+  await keepOriginal(managedHooksPath, workspaceRoot)
+  await keepOriginal(settingsPath, workspaceRoot)
+  await fs.mkdir(museConfigDir, { recursive: true })
   await mergeMuseHooksJson(managedHooksPath, hookScriptPath)
 
-  const settingsPath = path.join(museConfigDir, 'settings.json')
   await mergeMuseSettingsJson(settingsPath, managedHooksPath)
   log.info(
     { action: 'muse_hooks_written', level: 'managed', path: managedHooksPath },

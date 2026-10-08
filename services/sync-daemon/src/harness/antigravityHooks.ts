@@ -38,6 +38,7 @@ import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
+import { keepOriginal } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
 import { emitShellGate, SHELL_EXTRACT, SHELL_FAIL_CLOSED } from './gateBody.js'
 import { readJsonObjectForMerge } from './jsonMergeTarget.js'
@@ -143,6 +144,7 @@ export async function writeAntigravityHooks(
   // homedir() read at call time so tests that move HOME are honoured.
   const geminiSettings = path.join(os.homedir(), '.gemini', 'settings.json')
 
+  await keepOriginal(geminiSettings, workspaceRoot)
   await Promise.all([
     fs.mkdir(hookScriptDir, { recursive: true }),
     fs.mkdir(hookEventsDir, { recursive: true }),

@@ -60,7 +60,16 @@ The gate is registered in `~/.codeium/windsurf/hooks.json` (Windsurf), `~/.codei
 
 ### Proxy and certificate
 
-`intutic connect` merges three keys into `~/.codeium/windsurf/settings.json`, keeping everything else in the file:
+`intutic connect` merges three keys into Windsurf's user `settings.json`, keeping everything else in the file. Windsurf keeps it where VS Code keeps its own, under the Windsurf name:
+
+| OS | User settings file |
+|----|--------------------|
+| macOS | `~/Library/Application Support/Windsurf/User/settings.json` |
+| Linux | `~/.config/Windsurf/User/settings.json` (or under `$XDG_CONFIG_HOME`) |
+| Windows | `%APPDATA%\Windsurf\User\settings.json` |
+
+A settings file with comments or trailing commas is not plain JSON; it is left untouched and reported in the `intutic connect` log.
+
 
 ```json
 {
@@ -76,6 +85,8 @@ The port is the one the proxy listens on (`PORT`, 4000 by default) — the proxy
 
 The Windsurf plugin for JetBrains IDEs has no proxy setting of its own; it can only follow the IDE's proxy ("Detect proxy"). So in every installed JetBrains IDE **where the Windsurf plugin has saved its settings**, `intutic connect` turns on the plugin's *Detect proxy* option and sets the IDE's HTTP proxy (**Settings → Appearance & Behavior → System Settings → HTTP Proxy**) to `127.0.0.1:4000`. That IDE proxy applies to all of the IDE's HTTP traffic, not only the plugin's — plugin and update downloads go through the Intutic proxy too. JetBrains IDEs without the Windsurf plugin are not changed. To undo it, switch the IDE back to **No proxy** or **Auto-detect proxy settings**.
 
+To undo what `intutic connect` writes here, run `intutic disconnect --harness windsurf`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+
 ## Config details
 
 | Property | Value |
@@ -83,7 +94,7 @@ The Windsurf plugin for JetBrains IDEs has no proxy setting of its own; it can o
 | Harness type | `windsurf` |
 | Config file | `.windsurfrules` |
 | Hook files | `~/.codeium/windsurf/hooks.json`, `~/.codeium/hooks.json`, `.windsurf/hooks.json`, `.intutic/hooks/windsurf-check.js` |
-| Proxy settings | `~/.codeium/windsurf/settings.json`; JetBrains IDE proxy where the Windsurf plugin is set up |
+| Proxy settings | Windsurf's user `settings.json` (see [Proxy and certificate](#proxy-and-certificate)); JetBrains IDE proxy where the Windsurf plugin is set up |
 | Detection | Checks for `.windsurfrules` in workspace root |
 | Format | Markdown (header + SOP sections) |
 | Write strategy | Atomic (write to `.intutic-tmp`, then rename) |

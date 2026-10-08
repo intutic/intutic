@@ -10,13 +10,13 @@
  *   - `services/control-plane/src/services/harnessGradeSweep.ts`'s
  *     `deriveEnforcementInputs`, run hourly for every workspace, reading
  *     `agents.facets` back out of Postgres.
- *   - `services/sync-daemon/src/syncLoop.ts`'s `runSyncIteration` (step 5b),
+ *   - `services/sync-daemon/src/syncCycle.ts`'s `reportHarnessAgents`,
  *     run every sync cycle, reading the `facets` object `collectAgentReport`
  *     just built in memory for the same cycle's `POST /api/v1/agents/report`
  *     call.
  *
  * Hand-copying this mapping between the two is how it drifted (TD-443):
- * `syncLoop.ts`'s copy read `report.facets.mcp_tools.length > 0` with no
+ * the sync daemon's copy read `report.facets.mcp_tools.length > 0` with no
  * `Array.isArray` guard, while `harnessGradeSweep.ts`'s copy guarded it —
  * the exact two-hand-kept-copies failure `secretPatterns.ts`'s module doc
  * comment describes for credential-value patterns. This module is the fix:

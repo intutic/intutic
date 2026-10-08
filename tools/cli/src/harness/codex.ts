@@ -15,8 +15,7 @@
  * @module
  */
 
-import { join, dirname } from 'node:path'
-import { writeFile, rename, mkdir } from 'node:fs/promises'
+import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { HarnessType, anthropicBaseUrl, openaiBaseUrl, proxyHost } from '@intutic/shared-types'
 import type { SyncSopEntry } from '@intutic/shared-types'
@@ -24,7 +23,7 @@ import type { IHarnessAdapter } from './types.js'
 import { hashFile } from '../lib/hash.js'
 import { loadCredentials } from '../config/store.js'
 import { newIso } from '@intutic/id'
-import { writeCodexHooks, mergeCodexConfig } from '@intutic/sync-daemon'
+import { writeCodexHooks, mergeCodexConfig, writeOwnedFile } from '@intutic/sync-daemon'
 
 const CONFIG_FILE = '.env.intutic'
 
@@ -66,10 +65,7 @@ export const codexAdapter: IHarnessAdapter = {
       '',
     ].join('\n')
 
-    await mkdir(dirname(filePath), { recursive: true })
-    const tmpEnv = filePath + '.intutic-tmp'
-    await writeFile(tmpEnv, envContent, 'utf-8')
-    await rename(tmpEnv, filePath)
+    await writeOwnedFile(filePath, workspaceRoot, envContent)
 
     // 2. Codex user config — persists proxy routing across sessions without
     //    env sourcing. Merged; a config.toml that does not parse is left alone.

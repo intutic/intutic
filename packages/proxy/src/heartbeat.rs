@@ -41,22 +41,16 @@
 //! successful self-rotation also writes the new token to that path
 //! (write-then-rename, so a reader never observes a half-written file).
 //!
-//! TD-341 (Docker/Kubernetes durability): `from_env()` also READS the state
-//! file back, at proxy startup, if it's set — preferring its contents over
+//! Durability across restarts: `from_env()` also READS the state file back,
+//! at proxy startup, if it's set — preferring its contents over
 //! `INTUTIC_GATEWAY_TOKEN` when the two differ, non-empty persisted value
-//! only. This mirrors `packages/gateway-daemon/src/supervisor.ts`'s
-//! `withPersistedToken()` exactly (ENOENT is silent — first boot, nothing
-//! rotated yet; any other read error warns and falls back to the configured
-//! token) but lives in the proxy binary itself rather than an external
-//! supervisor, so it works for ANY deployment target that can give the
-//! process a durable path at the same location across restarts — a Docker
-//! bind mount (`infra/compose/docker-compose.gateway.yml`) or a Kubernetes
-//! `emptyDir` surviving an in-place container restart, not just bare-metal.
-//! `packages/gateway-daemon` keeps its own copy of this preference (it reads
-//! the file before every spawn, then also sets the env var this function
-//! reads) — redundant once this lands, deliberately left in place rather
-//! than simplified, so a tested path doesn't get touched to remove
-//! redundancy alone.
+//! only (ENOENT is silent — first boot, nothing rotated yet; any other read
+//! error warns and falls back to the configured token). It works for any
+//! deployment target that gives the process a durable path at the same
+//! location across restarts: a Docker named volume
+//! (`infra/compose/docker-compose.gateway.yml`), the systemd unit's
+//! `StateDirectory` on bare metal (`infra/systemd/intutic-gateway.service`), or
+//! a Kubernetes `emptyDir` surviving an in-place container restart.
 //!
 //! Kubernetes additionally gets [`crate::k8s_token_writer::K8sSecretWriter`]
 //! — a `emptyDir`/state-file still only survives a restart WITHIN the same
@@ -65,7 +59,22 @@
 //! successful self-rotation additionally PATCHes that Secret via the
 //! in-cluster K8s API — independent of, not a replacement for, the
 //! state-file write; a Kubernetes deployment sets both.
+//!
+//! Live config (LLD #66 phase 9): each heartbeat response also carries
+//! `desiredConfigVersion`, a counter the control plane bumps whenever an
+//! owner or admin changes this gateway's config (`intutic gateway config
+//! set`, i.e. `PATCH /api/v1/gateways/:id/config`). When it differs from the
+//! version this process last applied (or nothing has been applied yet, so a
+//! restarted proxy pulls once), the loop pulls `GET
+//! /api/v1/gateways/:id/config` with the same token and swaps the result into
+//! the running proxy (`gateway::apply_remote_gateway_config`): the next
+//! request is checked against it, nothing restarts. The applied version goes
+//! back in the next heartbeat as `appliedConfigVersion`, which is how the
+//! dashboard shows applied against desired. A failed pull, or a config that
+//! does not parse, leaves the current config in place and is retried on the
+//! next beat.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -224,6 +233,14 @@ struct HeartbeatBody {
     sop_count: Option<u32>,
     #[serde(rename = "sopHash", skip_serializing_if = "Option::is_none")]
     sop_hash: Option<String>,
+    /// The remote config version this process is running, once it has
+    /// pulled one. Omitted before the first pull, which the status route
+    /// reports as "not reported" rather than as version 0.
+    #[serde(
+        rename = "appliedConfigVersion",
+        skip_serializing_if = "Option::is_none"
+    )]
+    applied_config_version: Option<u64>,
 }
 
 /// Pure — no I/O, no global state — so the payload shape is unit-testable
@@ -234,6 +251,7 @@ fn build_heartbeat_body(
     uptime_seconds: u64,
     sop_count: Option<u32>,
     sop_hash: Option<String>,
+    applied_config_version: Option<u64>,
 ) -> HeartbeatBody {
     HeartbeatBody {
         status: "online",
@@ -241,6 +259,7 @@ fn build_heartbeat_body(
         uptime_seconds,
         sop_count,
         sop_hash,
+        applied_config_version,
     }
 }
 
@@ -248,6 +267,144 @@ fn build_heartbeat_body(
 struct HeartbeatResponse {
     #[serde(rename = "keyRotatedAt")]
     key_rotated_at: Option<String>,
+    /// Absent from a control plane that predates config versions: then the
+    /// loop never pulls.
+    #[serde(rename = "desiredConfigVersion")]
+    desired_config_version: Option<u64>,
+}
+
+/// `GET /api/v1/gateways/:id/config`. Both fields are required: a body
+/// missing either is a failed pull, never a partial apply.
+#[derive(Debug, Deserialize)]
+struct GatewayConfigResponse {
+    #[serde(rename = "configVersion")]
+    config_version: u64,
+    config: serde_json::Map<String, serde_json::Value>,
+}
+
+/// Pure: does this beat pull the config? Whenever the desired version differs
+/// from the applied one. `applied` is `None` until the first pull succeeds, so
+/// a booted or restarted proxy pulls once whatever the desired version is.
+/// A desired version LOWER than the applied one is not stale: the control
+/// plane's counter lives in Valkey and starts again from 0 if that key is
+/// lost, while the config itself is in Postgres. Ignoring it would leave the
+/// proxy deaf to every change until the new counter climbed past the old one.
+fn config_pull_due(desired: Option<u64>, applied: Option<u64>) -> bool {
+    match (desired, applied) {
+        (None, _) => false,
+        (Some(_), None) => true,
+        (Some(desired), Some(applied)) => desired != applied,
+    }
+}
+
+/// What the loop knows about the remote config it has applied.
+#[derive(Debug, Default)]
+struct ConfigReconciler {
+    applied_version: Option<u64>,
+    /// Unknown fields already warned about: a newer control plane's field is
+    /// logged once per process, not on every pull.
+    logged_unknown: HashSet<String>,
+    /// Whether a version-counter reset has been warned about (once per
+    /// process).
+    warned_reset: bool,
+}
+
+impl ConfigReconciler {
+    async fn reconcile(
+        &mut self,
+        http_client: &reqwest::Client,
+        config_url: &str,
+        token: &str,
+        gateway_id: &str,
+        desired: Option<u64>,
+    ) {
+        if !config_pull_due(desired, self.applied_version) {
+            return;
+        }
+        let fetched = match fetch_gateway_config(http_client, config_url, token).await {
+            Ok(fetched) => fetched,
+            Err(e) => {
+                tracing::warn!(
+                    gateway_id = %gateway_id,
+                    error = %e,
+                    "gateway config pull failed — keeping the current config, will retry next tick"
+                );
+                return;
+            }
+        };
+        // The version it already runs: nothing to apply.
+        if self.applied_version == Some(fetched.config_version) {
+            return;
+        }
+        let (remote, unknown) =
+            match crate::gateway::RemoteGatewayConfig::from_json(&fetched.config) {
+                Ok(parsed) => parsed,
+                Err(e) => {
+                    tracing::warn!(
+                        gateway_id = %gateway_id,
+                        config_version = fetched.config_version,
+                        error = %e,
+                        "gateway config rejected — keeping the current config, will retry next tick"
+                    );
+                    return;
+                }
+            };
+        for field in unknown {
+            if self.logged_unknown.insert(field.clone()) {
+                tracing::warn!(
+                    gateway_id = %gateway_id,
+                    field = %field,
+                    "gateway config has a field this proxy version does not apply — ignored"
+                );
+            }
+        }
+        // Lower than what it runs: the control plane's counter was reset. The
+        // config it serves is still the current one, so it is applied and its
+        // version adopted, and the proxy follows the new counter from here.
+        if let Some(applied) = self
+            .applied_version
+            .filter(|&applied| fetched.config_version < applied)
+        {
+            if !self.warned_reset {
+                self.warned_reset = true;
+                tracing::warn!(
+                    gateway_id = %gateway_id,
+                    applied_version = applied,
+                    config_version = fetched.config_version,
+                    "gateway config version went backwards — the control plane's counter was reset; applying its config and adopting its version"
+                );
+            }
+        }
+        let live = crate::gateway::apply_remote_gateway_config(&remote);
+        self.applied_version = Some(fetched.config_version);
+        tracing::info!(
+            gateway_id = %gateway_id,
+            config_version = fetched.config_version,
+            require_vk = live.require_vk,
+            require_provisioned_key = live.require_provisioned_key,
+            provisioned_key_paid_only = live.provisioned_key_paid_only,
+            "gateway config applied"
+        );
+    }
+}
+
+async fn fetch_gateway_config(
+    http_client: &reqwest::Client,
+    url: &str,
+    token: &str,
+) -> Result<GatewayConfigResponse, String> {
+    let resp = http_client
+        .get(url)
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|e| format!("request failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("control plane answered {}", resp.status()));
+    }
+    resp.json::<GatewayConfigResponse>()
+        .await
+        .map_err(|e| format!("unparsable body: {e}"))
 }
 
 #[derive(Debug, Deserialize)]
@@ -276,10 +433,11 @@ fn should_self_rotate(key_rotated_at: Option<&str>, rotation_interval: Duration)
 }
 
 /// Writes `token` to `path` via write-then-rename: the temp file is written
-/// fully, then renamed into place, so a concurrent reader (a supervisor
-/// reading this file at its own boot) never observes a partially written
-/// token. The temp path lives beside the target so the rename stays within
-/// one filesystem (a cross-filesystem rename is not atomic on every OS).
+/// fully, then renamed into place, so a concurrent reader (another proxy
+/// process starting up and reading it in `from_env()`) never observes a
+/// partially written token. The temp path lives beside the target so the
+/// rename stays within one filesystem (a cross-filesystem rename is not atomic
+/// on every OS).
 async fn write_token_state_file(path: &std::path::Path, token: &str) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent).await?;
@@ -305,6 +463,11 @@ pub fn spawn_heartbeat_loop(http_client: Arc<reqwest::Client>, cfg: HeartbeatCon
         cfg.control_plane_url.trim_end_matches('/'),
         cfg.gateway_id
     );
+    let config_url = format!(
+        "{}/api/v1/gateways/{}/config",
+        cfg.control_plane_url.trim_end_matches('/'),
+        cfg.gateway_id
+    );
     let gateway_id = cfg.gateway_id.clone();
     let rotation_interval = cfg.rotation_interval;
     let token_state_file = cfg.token_state_file.clone();
@@ -315,10 +478,13 @@ pub fn spawn_heartbeat_loop(http_client: Arc<reqwest::Client>, cfg: HeartbeatCon
     // every tick reads the latest value, and a successful self-rotate
     // writes the new one back before the next tick reads it.
     let current_token = Arc::new(RwLock::new(cfg.gateway_token));
+    let mut reconciler = ConfigReconciler::default();
 
     tokio::spawn(async move {
+        // The first tick fires at once: a starting proxy reports in and pulls
+        // its remote config straight away, rather than serving one full
+        // interval on its boot config alone.
         let mut interval = tokio::time::interval(cfg.interval);
-        interval.tick().await; // don't fire immediately at boot; wait one full interval first
         loop {
             interval.tick().await;
             let sop_status = crate::sops::sop_status_snapshot();
@@ -326,6 +492,7 @@ pub fn spawn_heartbeat_loop(http_client: Arc<reqwest::Client>, cfg: HeartbeatCon
                 started.elapsed().as_secs(),
                 sop_status.as_ref().map(|s| s.sop_count),
                 sop_status.as_ref().map(|s| s.sop_hash.clone()),
+                reconciler.applied_version,
             );
             let token = current_token.read().await.clone();
             match http_client
@@ -337,31 +504,39 @@ pub fn spawn_heartbeat_loop(http_client: Arc<reqwest::Client>, cfg: HeartbeatCon
             {
                 Ok(resp) if resp.status().is_success() => {
                     tracing::debug!(gateway_id = %gateway_id, "gateway heartbeat sent");
+                    let parsed = match resp.json::<HeartbeatResponse>().await {
+                        Ok(parsed) => parsed,
+                        Err(e) => {
+                            tracing::warn!(
+                                gateway_id = %gateway_id,
+                                error = %e,
+                                "heartbeat response body unparsable — skipping this tick's config and rotation-age checks"
+                            );
+                            continue;
+                        }
+                    };
+                    // Before any rotation below, so the pull uses the token
+                    // this heartbeat just authenticated with.
+                    reconciler
+                        .reconcile(
+                            &http_client,
+                            &config_url,
+                            &token,
+                            &gateway_id,
+                            parsed.desired_config_version,
+                        )
+                        .await;
                     if let Some(rotation_interval) = rotation_interval {
-                        match resp.json::<HeartbeatResponse>().await {
-                            Ok(parsed) => {
-                                if should_self_rotate(
-                                    parsed.key_rotated_at.as_deref(),
-                                    rotation_interval,
-                                ) {
-                                    self_rotate(
-                                        &http_client,
-                                        &self_rotate_url,
-                                        &current_token,
-                                        &gateway_id,
-                                        token_state_file.as_deref(),
-                                        k8s_secret_writer.as_ref(),
-                                    )
-                                    .await;
-                                }
-                            }
-                            Err(e) => {
-                                tracing::warn!(
-                                    gateway_id = %gateway_id,
-                                    error = %e,
-                                    "heartbeat response body unparsable — skipping this tick's rotation-age check"
-                                );
-                            }
+                        if should_self_rotate(parsed.key_rotated_at.as_deref(), rotation_interval) {
+                            self_rotate(
+                                &http_client,
+                                &self_rotate_url,
+                                &current_token,
+                                &gateway_id,
+                                token_state_file.as_deref(),
+                                k8s_secret_writer.as_ref(),
+                            )
+                            .await;
                         }
                     }
                 }
@@ -465,7 +640,7 @@ mod tests {
 
     #[test]
     fn heartbeat_body_reports_online_and_real_version() {
-        let body = build_heartbeat_body(42, None, None);
+        let body = build_heartbeat_body(42, None, None, None);
         assert_eq!(body.status, "online");
         assert_eq!(body.proxy_version, env!("CARGO_PKG_VERSION"));
         assert_eq!(body.uptime_seconds, 42);
@@ -476,7 +651,7 @@ mod tests {
         // Matches heartbeatSchema in
         // services/control-plane/src/routes/gatewayHeartbeat.ts —
         // status ∈ {"online","degraded"}, proxyVersion/uptimeSeconds present.
-        let json = serde_json::to_value(build_heartbeat_body(7, None, None)).unwrap();
+        let json = serde_json::to_value(build_heartbeat_body(7, None, None, None)).unwrap();
         assert_eq!(json["status"], "online");
         assert!(json["proxyVersion"].is_string());
         assert_eq!(json["uptimeSeconds"], 7);
@@ -484,7 +659,7 @@ mod tests {
 
     #[test]
     fn heartbeat_body_omits_sop_fields_when_none() {
-        let json = serde_json::to_value(build_heartbeat_body(1, None, None)).unwrap();
+        let json = serde_json::to_value(build_heartbeat_body(1, None, None, None)).unwrap();
         assert!(
             json.get("sopCount").is_none(),
             "None must omit the key, not null it"
@@ -497,10 +672,64 @@ mod tests {
 
     #[test]
     fn heartbeat_body_includes_sop_fields_when_present() {
-        let json =
-            serde_json::to_value(build_heartbeat_body(7, Some(3), Some("abc123".into()))).unwrap();
+        let json = serde_json::to_value(build_heartbeat_body(
+            7,
+            Some(3),
+            Some("abc123".into()),
+            None,
+        ))
+        .unwrap();
         assert_eq!(json["sopCount"], 3);
         assert_eq!(json["sopHash"], "abc123");
+    }
+
+    #[test]
+    fn heartbeat_body_reports_the_applied_config_version_once_there_is_one() {
+        let before = serde_json::to_value(build_heartbeat_body(1, None, None, None)).unwrap();
+        assert!(
+            before.get("appliedConfigVersion").is_none(),
+            "nothing pulled yet must omit the key, not report version 0"
+        );
+        let after = serde_json::to_value(build_heartbeat_body(1, None, None, Some(4))).unwrap();
+        assert_eq!(after["appliedConfigVersion"], 4);
+        let zero = serde_json::to_value(build_heartbeat_body(1, None, None, Some(0))).unwrap();
+        assert_eq!(zero["appliedConfigVersion"], 0);
+    }
+
+    #[test]
+    fn config_pull_is_due_once_at_boot_then_whenever_the_desired_version_differs() {
+        // An older control plane sends no version: never pull.
+        assert!(!config_pull_due(None, None));
+        assert!(!config_pull_due(None, Some(3)));
+        // Nothing applied yet: pull, even at version 0.
+        assert!(config_pull_due(Some(0), None));
+        assert!(config_pull_due(Some(5), None));
+        // Ahead: pull. Behind (a reset counter): pull. Equal: don't.
+        assert!(config_pull_due(Some(4), Some(3)));
+        assert!(config_pull_due(Some(2), Some(3)));
+        assert!(config_pull_due(Some(0), Some(3)));
+        assert!(!config_pull_due(Some(3), Some(3)));
+    }
+
+    #[test]
+    fn config_response_needs_both_the_version_and_the_config_object() {
+        let ok: GatewayConfigResponse = serde_json::from_value(
+            serde_json::json!({ "configVersion": 2, "config": { "requireVk": true } }),
+        )
+        .unwrap();
+        assert_eq!(ok.config_version, 2);
+        assert_eq!(ok.config["requireVk"], true);
+        for partial in [
+            serde_json::json!({ "config": {} }),
+            serde_json::json!({ "configVersion": 2 }),
+            serde_json::json!({ "configVersion": "2", "config": {} }),
+            serde_json::json!({ "configVersion": 2, "config": [] }),
+        ] {
+            assert!(
+                serde_json::from_value::<GatewayConfigResponse>(partial.clone()).is_err(),
+                "{partial}"
+            );
+        }
     }
 
     // Every scenario below touches process-global env vars, so — same
@@ -594,8 +823,7 @@ mod tests {
         std::env::remove_var("INTUTIC_GATEWAY_TOKEN_STATE_FILE");
 
         // 8. TD-341: a state file holding a token that differs from
-        //    INTUTIC_GATEWAY_TOKEN is preferred — mirrors
-        //    packages/gateway-daemon/src/supervisor.ts's withPersistedToken.
+        //    INTUTIC_GATEWAY_TOKEN is preferred.
         //    Same directory-mutation discipline as write_token_state_file's
         //    own tests: a dedicated temp subdir, cleaned before and after.
         let state_dir = std::env::temp_dir().join("intutic-heartbeat-test-from-env-state-file");
@@ -712,11 +940,18 @@ mod tests {
             parsed.key_rotated_at.as_deref(),
             Some("2026-08-13T00:00:00.000Z")
         );
+        assert_eq!(parsed.desired_config_version, Some(0));
 
         let json_null =
             serde_json::json!({ "ok": true, "desiredConfigVersion": 0, "keyRotatedAt": null });
         let parsed_null: HeartbeatResponse = serde_json::from_value(json_null).unwrap();
         assert_eq!(parsed_null.key_rotated_at, None);
+
+        // A control plane that predates config versions omits the field.
+        let older: HeartbeatResponse =
+            serde_json::from_value(serde_json::json!({ "ok": true, "keyRotatedAt": null }))
+                .unwrap();
+        assert_eq!(older.desired_config_version, None);
     }
 
     #[tokio::test]

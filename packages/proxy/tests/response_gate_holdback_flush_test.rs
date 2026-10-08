@@ -377,6 +377,16 @@ async fn a_refused_streamed_call_still_delivers_the_scrubbed_text_before_it() {
             .await;
     }
     let cp = MockServer::start().await;
+    // Every virtual-key request asks for the key's SSO group policy; this
+    // workspace has none.
+    Mock::given(method("GET"))
+        .and(path("/api/v1/auth/key-context"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "workspaceId": "ws_test",
+            "ssoGroups": { "policy": null, "memberGroups": null }
+        })))
+        .mount(&cp)
+        .await;
     Mock::given(method("POST"))
         .and(path("/api/v1/policy/check"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "action": "allow" })))
