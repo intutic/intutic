@@ -21,8 +21,9 @@ Every Vector A gate evaluates the same policy snapshot, and since gate body v8
 that includes the `hold` tier: a `review_before:` token or a
 `REQUIRE_APPROVAL:` SOP refuses the call through the harness's own blocking
 contract, records a hold for **Findings › Review Queue › Held Changes**, and lets the exact
-same call through once `intutic decision approve <holdId>` has run (workspace
-opt-in, short TTL). The n8n workflow hook and the Open WebUI prompt filter
+same call through once it is approved (`intutic decision approve <holdId>` or
+Slack) while the workspace's review-hold bypass is on (short TTL); otherwise the
+approval records the decision. The n8n workflow hook and the Open WebUI prompt filter
 refuse a hold outright — neither runs in a workspace that could record one.
 
 ### Vector D — Response Gate {#vector-d--response-gate}

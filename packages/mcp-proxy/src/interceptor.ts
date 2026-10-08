@@ -33,8 +33,9 @@ export type Decision =
   | { action: 'redact'; reason: string; redactedInput: unknown }
   /**
    * Refused for now, pending a person's approval (`require_approval`). Not a
-   * block: the agent is told the hold id and that an identical retry passes
-   * once approved — see approvalHold.ts.
+   * block: the agent is told the hold id and to retry once it is approved,
+   * which passes only while the workspace's review-hold bypass is on — see
+   * approvalHold.ts.
    */
   | { action: 'hold'; reason: string; holdId: string }
 

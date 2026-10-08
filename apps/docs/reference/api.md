@@ -699,7 +699,7 @@ Every route the control plane serves: 384 routes, grouped by the source file tha
 | GET | `/api/v1/decisions` | Authenticated | List decisions (paginated) |
 | POST | `/api/v1/decisions` | Authenticated | Ingest review holds from the daemon |
 | GET | `/api/v1/decisions/:entryId` | Authenticated | Get decision detail |
-| POST | `/api/v1/decisions/:entryId/review` | Authenticated |  |
+| POST | `/api/v1/decisions/:entryId/review` | OWNER/ADMIN/EM |  |
 | GET | `/api/v1/decisions/analysis` | Authenticated | Aggregated pattern analysis |
 | GET | `/api/v1/decisions/approved-bypasses` | Authenticated |  |
 | POST | `/api/v1/decisions/substitutions` | Authenticated | Ingest tool calls the proxy rewrote |

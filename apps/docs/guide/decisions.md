@@ -34,14 +34,14 @@ The table lists each entry's **Alert** id, what was **Requested by the agent**, 
 
 ### Approving or rejecting
 
-Override requests are approved or rejected from their **Slack notification**, not from the dashboard; the outcome then shows here. The same review is available through the API:
+Override requests are approved or rejected from their **Slack notification**, with [`intutic decision approve|reject`](/reference/cli#intutic-decision-approve-holdid), or through the API, not from the dashboard; the outcome then shows here.
 
 ```
 POST /api/v1/decisions/:entryId/review
 { "action": "approve" }   # or "reject", with an optional "reason"
 ```
 
-The API records the reviewer as the authenticated member. When the workspace setting `reviewHoldBypassEnabled` is on (it is off by default), approving a review hold also writes a short-lived bypass, so the agent's retried command gets through; otherwise an approval only records the decision.
+All three take the same path and need the OWNER, ADMIN or EM role. The reviewer is recorded as the member: the authenticated member for the CLI and the API, the linked member for Slack. Approving a review hold lets the identical retry pass only while the workspace's review-hold bypass (`reviewHoldBypassEnabled`, off by default) is on, for `reviewHoldBypassTtlMinutes` (10 by default); otherwise it records the decision.
 
 ### Filtering by review state
 
@@ -85,9 +85,9 @@ Not everyone on your team can access the Review Queue. Access requires one of th
 
 When Slack OAuth is configured and `FF_NOTIFICATION_HUB=true` is enabled, pending override requests are automatically routed to the Slack team workspace as rich Block Kit cards.
 
-* **Interactive Actions**: Workspace owners and admins can click **Approve** or **Reject** directly from the Slack message card without having to open the dashboard UI.
-* **Review Mapping**: Clicking these buttons sends an interactive payload to `/api/v1/adapters/slack/interactions` which updates the control plane's `decision_mining_queue` state.
-* **Slack User Mapping**: The control plane maps the interacting Slack member's ID to their corresponding Intutic workspace profile using the `slack_user_mappings` database table to record who made the review decision. If no mapping exists, it defaults to the installation manager or prompts the user to map their profile.
+* **Interactive Actions**: Workspace owners, admins and engineering managers can click **Approve** or **Reject** directly from the Slack message card without having to open the dashboard UI. A Slack approval is the same review as `intutic decision approve`: it records the decision, and lets the identical retry pass only while the workspace's review-hold bypass is on.
+* **Linked accounts only**: The click counts only from a Slack account linked to an active member of the workspace (**Settings › Notifications › Link your Slack account**, then `/intutic link <code>` in Slack), and is recorded against that member. An unlinked account, or a member without one of those roles, is refused, and Slack tells the person why.
+* **Review Mapping**: Clicking these buttons sends an interactive payload to `/api/v1/adapters/slack/interactions`, which reviews the decision in the workspace the Slack app is installed for.
 
 ## Related
 

@@ -365,6 +365,8 @@ export interface SlackInteraction {
     type: string
   }>
   message: { ts: string }
+  /** Where a reply to the clicker goes; Slack ignores the HTTP response body. */
+  response_url?: string
 }
 
 export interface SlackSlashCommand {

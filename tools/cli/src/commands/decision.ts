@@ -5,10 +5,10 @@
  * printed remediation for a held call was `intutic loop review <holdId>
  * --approve` — a command that posts to `/api/v1/loops/:loopRunId/review`, a
  * Loop Run id space architecturally separate from review_before holds. It
- * 404s on every holdId a developer was ever told to give it, and Slack was
- * the only working approve/reject surface. `intutic decision approve|reject`
- * calls the route that actually exists for this: `POST
- * /api/v1/decisions/:id/review`.
+ * 404s on every holdId a developer was ever told to give it.
+ * `intutic decision approve|reject` calls the route that actually exists for
+ * this: `POST /api/v1/decisions/:id/review`, which takes the same control-plane
+ * path as the Slack card's buttons and requires the OWNER, ADMIN or EM role.
  *
  * @module
  */
