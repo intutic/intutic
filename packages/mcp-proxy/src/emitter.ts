@@ -122,7 +122,10 @@ export interface GovernanceEvent {
    * Absent only for an emitter constructed without one.
    */
   principal?: CallerIdentity
-  /** Set on the budget events: which budget, its limit, the calls made, when it resets. */
+  /**
+   * Set on the budget events, and on the `tool_blocked` of a call a used-up
+   * budget refused: which budget, its limit, the calls made, when it resets.
+   */
   budget?: BudgetEventDetail
   timestamp: string
 }

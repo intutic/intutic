@@ -588,7 +588,9 @@ export class ToolCallInterceptor {
    * Counts the call against every budget that covers it, or refuses it when
    * one is used up. The threshold and exceeded events go out once per budget
    * per period (the store claims them), each as a `budget_breach` finding; a
-   * refusal also sends `tool_blocked`, as every refusal does.
+   * refusal also sends `tool_blocked`, as every refusal does, carrying the
+   * budget — the control plane files one incident per budget per period from
+   * those and counts the rest on it.
    *
    * When the count cannot be checked, the fail setting decides, as for every
    * other governance check that cannot complete.
@@ -627,7 +629,7 @@ export class ToolCallInterceptor {
           budgetEventDetail(verdict.standing),
         )
       }
-      this.emitter.emit('tool_blocked', toolName, toolInput, reason)
+      this.emitter.emit('tool_blocked', toolName, toolInput, reason, undefined, budgetEventDetail(verdict.standing))
       return { action: 'block', reason }
     }
 

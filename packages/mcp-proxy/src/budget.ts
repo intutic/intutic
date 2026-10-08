@@ -223,6 +223,8 @@ export interface BudgetEventDetail {
   server?: string
   tool?: string
   memberId?: string
+  /** Whose allowance ran out, for a per-member budget: the member, or the fallback caller. */
+  subject?: string
   period: McpBudget['period']
   limit: number
   used: number
@@ -237,6 +239,7 @@ export function budgetEventDetail(s: BudgetStanding): BudgetEventDetail {
     ...(budget.server !== undefined ? { server: budget.server } : {}),
     ...(budget.tool !== undefined ? { tool: budget.tool } : {}),
     ...(budget.memberId !== undefined ? { memberId: budget.memberId } : {}),
+    ...(s.subject ? { subject: s.subject } : {}),
     period: budget.period,
     limit: budget.limit,
     used: s.used,

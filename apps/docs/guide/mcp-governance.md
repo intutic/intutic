@@ -384,7 +384,13 @@ MCP call budget "github-hour" is used up (calls to github: 600 per hour):
 (in 23 min). An owner or admin can change MCP budgets on the MCP Servers page.
 ```
 
-Each refusal is a `tool_blocked` event, like any refused call. Once per
+Each refusal is a `tool_blocked` event, like any refused call: it is in the
+local event file and, when SIEM export of gate decisions is on, in
+`gate_decisions`. Incidents are the exception. A used-up budget files **one**
+incident per period (per member, for a per-member budget), from its first
+refusal; each later refusal in the period adds one to the incident's count of
+refused calls, shown in the incident drawer, and the next period files a new
+one. Every other kind of refusal still files an incident each time. Once per
 budget per period, the first refusal also sends `mcp_budget_exceeded`, and a
 call that takes a budget to its warning percentage (80% unless you set
 `warnAtPct`, the same default as the [LLM budget alerts](/guide/budgets))

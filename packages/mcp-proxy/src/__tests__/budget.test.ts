@@ -242,6 +242,23 @@ describe('MCP call budgets against Valkey', () => {
       used: 2,
       resetAt: '2026-10-09T00:00:00.000Z',
     })
+    // Every refusal names its budget, so the control plane can file one
+    // incident per budget per period and count the rest on it.
+    const refusals = emitter.emitted.filter((e) => e.kind === 'tool_blocked')
+    expect(refusals.map((e) => (e.budget as { budgetId: string }).budgetId)).toEqual(['gh-hourly', 'gh-hourly'])
+  })
+
+  it('names whose allowance ran out on a per-member budget', async ({ skip }) => {
+    if (!available) skip()
+    const { a } = twoProxies(new Clock(T0))
+    const policy = new StubPolicy()
+    policy.budgets = policyOf({ id: 'per-dev', scope: 'member', period: 'day', limit: 1 })
+    policy.principal = { memberId: 'mem_1', email: 'dana@example.test', role: 'DEVELOPER', ssoGroups: [] }
+    const emitter = new CapturingEmitter()
+    const interceptor = interceptorWith(a, policy, emitter)
+    await interceptor.decide('t', {})
+    expect((await interceptor.decide('t', {})).action).toBe('block')
+    expect(emitter.emitted.find((e) => e.kind === 'tool_blocked')!.budget).toMatchObject({ budgetId: 'per-dev', subject: 'mem_1' })
   })
 })
 
