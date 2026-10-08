@@ -86,7 +86,7 @@ list. In short:
 | [SOP Optimizer](/guide/metaclaw) | | ✓ | ✓ | ✓ |
 | [Evaluator Sandbox](/guide/evaluator-sandbox) | | ✓ | ✓ | ✓ |
 | [SCIM provisioning](/guide/scim) | | | ✓ | ✓ |
-| Data residency (EU/APAC) | | | ✓ | ✓ |
+| Data residency (Cloud: US; EU on request) | | | ✓ | ✓ |
 | [Self-hosted gateway](/external/self-hosted-gateway) | | | ✓ | ✓ |
 | Runs in your VPC or an air-gapped network | | | | ✓ |
 

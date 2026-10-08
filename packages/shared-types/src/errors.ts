@@ -44,6 +44,13 @@ export const E_VALIDATION_FAILED = 'E_VALIDATION_FAILED' as const
 
 /** Stripe/billing checkout disabled or unavailable. */
 export const E_CHECKOUT_DISABLED = 'CHECKOUT_DISABLED' as const
+
+/**
+ * Plans are not sold through checkout on this deployment: Stripe is still in
+ * test mode, so a checkout would sell a plan for a test card. Plans are
+ * bought through sales until Stripe is live.
+ */
+export const E_CHECKOUT_UNAVAILABLE = 'CHECKOUT_UNAVAILABLE' as const
 /**
  * Self-serve account provisioning is switched off for this deployment.
  *
@@ -174,6 +181,7 @@ export type IntuticErrorCode =
   | typeof E_APPROVAL_RATIONALE_REQUIRED
   | typeof E_VALIDATION_FAILED
   | typeof E_CHECKOUT_DISABLED
+  | typeof E_CHECKOUT_UNAVAILABLE
   | typeof E_SIGNUP_DISABLED
   | typeof E_DOMAIN_NOT_VERIFIED
   | typeof E_ALREADY_ON_TIER
