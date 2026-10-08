@@ -59,7 +59,7 @@ The proxy decides what to do with each `CONNECT` it receives when clients use it
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
-| `INTUTIC_EGRESS_MODE` | `off` (or `intutic_settings.egress.mode`) | `off` tunnels every other host. `monitor` tunnels them but logs and counts the ones `enforce` would refuse. `enforce` refuses any host not on the allow list. Any other value means `off`; the mode in force is logged at startup and shown at `GET /intutic/egress` |
+| `INTUTIC_EGRESS_MODE` | `off` (or `intutic_settings.egress.mode`) | `off` tunnels every other host. `monitor` tunnels them but logs and counts the ones `enforce` would refuse. `enforce` refuses any host not on the allow list. Any other value stops the proxy at startup with an error naming the three; the mode in force is logged at startup and shown at `GET /intutic/egress` |
 | `INTUTIC_EGRESS_ALLOW` | none | Comma-separated hosts (`example.com`), suffixes (`.example.com`) and IP ranges (`10.0.0.0/8`) to allow, added to `intutic_settings.egress.allow` |
 | `INTUTIC_EGRESS_POLICY_FILE` | `~/.intutic/hooks/egress-policy.json` | The central egress policy the sync daemon writes for the workspace. Its mode overrides the local one and its allow list is added to the local list. A missing, corrupt or other-workspace file is ignored |
 | `INTUTIC_EGRESS_RELOAD_SECS` | `30` | How often the central policy file is re-read |
@@ -300,7 +300,7 @@ Intutic's options live under `intutic_settings`:
 
 | Setting | Type | Default | Description |
 | :--- | :---: | :---: | :--- |
-| `mode` | string | `off` | `off`, `monitor` or `enforce`; `INTUTIC_EGRESS_MODE` takes precedence. See [Egress control](#egress-control) |
+| `mode` | string | `off` | `off`, `monitor` or `enforce`; any other value stops the proxy at startup. `INTUTIC_EGRESS_MODE` takes precedence. See [Egress control](#egress-control) |
 | `allow` | string[] | none | Hosts, `.suffixes` and IP ranges to allow; `INTUTIC_EGRESS_ALLOW` adds to it |
 
 ### Gateway (`intutic_settings.gateway`)

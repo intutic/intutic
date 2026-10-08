@@ -258,7 +258,7 @@ async fn main() -> anyhow::Result<()> {
     // enforcement centrally. The file is re-read on a timer below, so a mid-
     // session policy change reaches this running proxy without a restart.
     let base_egress =
-        egress_policy::EgressPolicy::from_config_and_env(&config.intutic_settings.egress);
+        egress_policy::EgressPolicy::from_config_and_env(&config.intutic_settings.egress)?;
     let egress_file = egress_policy::default_egress_policy_path();
     let expected_ws = std::env::var("INTUTIC_WORKSPACE_ID")
         .ok()
