@@ -528,142 +528,6 @@ Per-model cost breakdown.
 
 ---
 
-### GET /api/v1/usage/members
-
-Usage per developer: cost, tokens, calls, models used and active days for each workspace member. A call belongs to the member who owns the virtual key that authenticated it. Calls with no virtual key, and calls whose key prefix is shared by keys of two different members, are returned as one row with `memberId: null`.
-
-**Auth:** Authenticated. OWNER, ADMIN and EM get every member and the `null` row (`scope: "workspace"`). DEVELOPER and VIEWER get their own row only (`scope: "self"`), or an empty list if they made no calls.
-
-**Query parameters:**
-
-| Param | Type | Required | Description |
-|-------|------|----------|-------------|
-| `period` | enum | ✅ | `daily` (today, UTC) or `monthly` (this month, UTC) |
-
-**Response:** `200 OK`
-
-```json
-{
-  "scope": "workspace",
-  "members": [
-    {
-      "memberId": "mbr_abc123",
-      "displayName": "Priya Natarajan",
-      "email": "priya@example.com",
-      "totalCostUsd": 41.27,
-      "totalRawCostUsd": 52.1,
-      "totalInputTokens": 3120000,
-      "totalOutputTokens": 640000,
-      "traceCount": 1184,
-      "models": ["claude-opus-4-1", "claude-sonnet-4-5"],
-      "activeDays": 6
-    }
-  ]
-}
-```
-
-`activeDays` counts distinct UTC dates with at least one call.
-
----
-
-### GET /api/v1/usage/teams
-
-Usage per team, where a team is a SCIM group. Each group's figures are the sum over its members, including members of groups nested inside it. A member who is in several groups is counted in each one, so team totals can add up to more than the workspace total. Calls with no attributed member are not in any team.
-
-**Auth:** OWNER, ADMIN or EM
-
-**Query parameters:** `period`, as for `/usage/members`.
-
-**Response:** `200 OK`
-
-```json
-{
-  "scimGroups": true,
-  "teams": [
-    {
-      "groupId": "grp_abc123",
-      "displayName": "Platform",
-      "memberCount": 8,
-      "activeMembers": 6,
-      "totalCostUsd": 212.4,
-      "totalRawCostUsd": 260.9,
-      "totalInputTokens": 15400000,
-      "totalOutputTokens": 2900000,
-      "traceCount": 6120
-    }
-  ]
-}
-```
-
-`scimGroups: false` with an empty `teams` list means the workspace has no SCIM groups. Without them, per-member usage is the finest breakdown.
-
----
-
-### GET /api/v1/usage/branches
-
-Usage per repository and branch. When a trace is recorded, it is stamped with the repository, branch and HEAD commit that the sync daemon last reported for its session. Calls recorded without that context are returned as one row with `repo` and `branch` set to `null`.
-
-**Auth:** Authenticated, with the same scoping as `/usage/members`: DEVELOPER and VIEWER see only their own calls.
-
-**Query parameters:** `period`, as for `/usage/members`.
-
-**Response:** `200 OK`
-
-```json
-{
-  "scope": "workspace",
-  "branches": [
-    {
-      "repo": "github.com/acme/widgets",
-      "branch": "feat/checkout",
-      "commitCount": 4,
-      "totalCostUsd": 18.6,
-      "totalRawCostUsd": 22.0,
-      "totalInputTokens": 1410000,
-      "totalOutputTokens": 260000,
-      "traceCount": 512,
-      "lastCallAt": "2026-10-08T21:14:03.000Z"
-    }
-  ]
-}
-```
-
-`repo` is the `origin` remote reduced to host and path. The scheme, user name, password or token, port, query string and `.git` suffix are removed before the daemon sends it, and removed again when the control plane receives it.
-
----
-
-### GET /api/v1/usage/commits
-
-Usage per HEAD commit: the calls made while each commit was checked out. These calls are the work that led to the next commit, not the work that produced this one. Uses the same scoping and the same `null` row as `/usage/branches`.
-
-**Auth:** Authenticated, with the same scoping as `/usage/members`.
-
-**Query parameters:** `period`, as for `/usage/members`.
-
-**Response:** `200 OK`
-
-```json
-{
-  "scope": "workspace",
-  "commits": [
-    {
-      "repo": "github.com/acme/widgets",
-      "branch": "feat/checkout",
-      "commit": "3f9c2e1a7b5d4c8e9f0a1b2c3d4e5f6a7b8c9d0e",
-      "totalCostUsd": 6.2,
-      "totalRawCostUsd": 7.4,
-      "totalInputTokens": 480000,
-      "totalOutputTokens": 91000,
-      "traceCount": 170,
-      "firstCallAt": "2026-10-08T18:02:11.000Z",
-      "lastCallAt": "2026-10-08T19:40:52.000Z"
-    }
-  ]
-}
-```
-
----
-
 ### POST /api/v1/usage/classify
 
 Classify tokens as USEFUL or WASTED.
@@ -700,7 +564,7 @@ Classify tokens as USEFUL or WASTED.
 
 ## Route Catalog
 
-Every route the control plane serves: 388 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
+Every route the control plane serves: 393 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
 
 ### `app.ts` <Badge type="tip" text="Cloud" />
 
@@ -724,7 +588,7 @@ Every route the control plane serves: 388 routes, grouped by the source file tha
 | GET | `/api/v1/agents/:id` | Authenticated | one agent, its facets, posture, live sessions |
 | POST | `/api/v1/agents/:id/judge-score` | Authenticated |  |
 | GET | `/api/v1/agents/graph` | Authenticated | nodes + edges + posture for the viz |
-| POST | `/api/v1/agents/report` | Authenticated | daemon upserts an agent + facets (rescored) |
+| POST | `/api/v1/agents/report` | Authenticated | daemon upserts an agent + facets (rescored), or reports its machine's AI inventory |
 
 ### `anomaly.ts` <Badge type="tip" text="Cloud" />
 
@@ -1022,6 +886,16 @@ Every route the control plane serves: 388 routes, grouped by the source file tha
 | GET | `/api/v1/traces/:traceId/token-breakdown` | Authenticated | Per-tool token breakdown |
 | GET | `/api/v1/workspaces/:workspaceId/optimization-recommendations` | Authenticated |  |
 | GET | `/api/v1/workspaces/:workspaceId/waste-patterns` | Authenticated |  |
+
+### `inventory.ts` <Badge type="tip" text="Cloud" />
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/v1/inventory/devices` | OWNER/ADMIN/EM; DEVELOPER (own machines) | One row per machine with its counts, last report and guard-probe result |
+| GET | `/api/v1/inventory/harnesses` | OWNER/ADMIN/EM; DEVELOPER (own machines) | Harnesses by machine with gate state and status; filter by status, harness, device and q, or download with format=csv |
+| GET | `/api/v1/inventory/mcp-servers` | OWNER/ADMIN/EM; DEVELOPER (own machines) | MCP servers by machine, wrapped by the MCP proxy or not; the same filters and CSV download |
+| GET | `/api/v1/inventory/skills` | OWNER/ADMIN/EM; DEVELOPER (own machines) | Skill bundles by machine, by name, source and hash; filter by device and q |
+| GET | `/api/v1/inventory/summary` | OWNER/ADMIN/EM; DEVELOPER (own machines) | Counts: machines, stale machines, harnesses, governed percentage, ungoverned harnesses and MCP servers, skills |
 
 ### `judge.ts` <Badge type="tip" text="Cloud" />
 

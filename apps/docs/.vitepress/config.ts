@@ -117,6 +117,7 @@ if (!IS_OSS) {
       { text: 'Intelligence Engine (Cloud)', link: '/guide/intelligence' },
       { text: 'Activity Logs (Cloud)', link: '/guide/traces' },
       { text: 'Agents (Cloud)', link: '/guide/agents' },
+      { text: 'AI Inventory (Cloud)', link: '/guide/ai-inventory' },
       { text: 'Agent Guidelines (Cloud)', link: '/guide/sops' },
       { text: 'GitOps for SOPs (Cloud)', link: '/guide/gitops-sops' },
       { text: 'Review Queue (Cloud)', link: '/guide/decisions' },

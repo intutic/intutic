@@ -41,7 +41,7 @@ Every event carries a `sourceTable` naming its source:
 | `login_events` | Every sign-in — password, SSO (OIDC or SAML), magic link, GitHub, Google, and the sign-up that signs a new owner in — and every refused sign-in that belongs to a workspace: a wrong password, a deactivated member, an SSO identity the workspace does not admit, an IdP response that fails verification. Each carries the method, `outcome` (`success` or `failure`), `failure_reason`, the member (or, when none was resolved, the email presented), IP address and user agent. An attempt against an email no workspace knows is not recorded |
 | `workspace_settings_changes` | Every workspace settings change: who made it, which keys changed, and the before and after values with secrets redacted. Policy guardrails that set the model allowlist or egress allow list appear here too |
 | `sop_registry` | A guideline moving between lifecycle states (for example draft to validated, or validated to invalidated): which guideline, from and to, and who moved it |
-| `governance_alerts` | The alerts the notification hub sends: a gate that stopped reporting, the same gate reporting again, and a failed trace integrity check. `payload.alert_type` says which |
+| `governance_alerts` | The alerts the notification hub sends: a gate that stopped reporting, the same gate reporting again, a failed trace integrity check, and an ungoverned harness or MCP server first seen in a machine's [AI inventory](/guide/ai-inventory). `payload.alert_type` says which |
 | `gate_decisions` | **Opt-in.** Every verdict a hook gate records: allow, block, flag, would-block (shadow mode), hold and approved bypass, with the tool name, reason, rule, harness and session. Also every tool call the proxy's response gate withholds under the SSO group policy, as a block with source `proxy_response_gate`. The tool's input is not included |
 
 Delivery is in-process by default (no Kafka or Debezium dependency by default): the control plane's own domain event emitter drives it directly, so a destination configured today starts receiving events on the very next matching action. An optional Kafka/Debezium CDC ingestion path is also available — see "Delivery guarantees" below.
@@ -70,7 +70,7 @@ Each source has its own CEF event class, so a SIEM rule can match on it:
 | `login_events` | `AUTH_LOGIN`, or `AUTH_LOGIN_FAILURE` for a refused sign-in | 3, and 5 for a refusal |
 | `workspace_settings_changes` | `SETTINGS_CHANGE` | 5 |
 | `sop_registry` | `POLICY_CHANGE_UPDATE` | 4 |
-| `governance_alerts` | `GATE_SILENT`, `GATE_RECOVERED` or `INTEGRITY_FAILURE` | 7, 1 and 10 |
+| `governance_alerts` | `GATE_SILENT`, `GATE_RECOVERED`, `INTEGRITY_FAILURE` or `UNGOVERNED_AI_TOOL` | 7, 1, 10 and 5 |
 
 ### Bucket batching
 

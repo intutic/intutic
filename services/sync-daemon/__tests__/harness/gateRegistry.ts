@@ -600,6 +600,16 @@ export const NO_GATE: ReadonlyArray<{
     why: 'reads a user-owned JSON config for the writers that merge into one; writes nothing itself',
   },
   {
+    file: 'gateArtifacts.ts',
+    harness: null,
+    why: 'lists where each writer above puts its gate, so the AI inventory can check the file is there; writes nothing',
+  },
+  {
+    file: 'gateSightings.ts',
+    harness: null,
+    why: 'records when each gate last wrote an event, from the logs the gates write; writes no config or gate',
+  },
+  {
     file: 'codexConfigMerger.ts',
     harness: 'codex',
     why: 'sets openai_base_url in the Codex user config (LLM routing); codexHooks.ts is the gate',

@@ -120,6 +120,13 @@ describe('connect runs the per-cycle sync work the docs promise', () => {
     expect(src).toMatch(/await writeBundledSkills\(safeConfig\.workspaceRoot\)/)
   })
 
+  it('reports the machine\'s AI inventory from the poll loop, every few polls, for the connected workspace', async () => {
+    const { pollBody } = await source()
+    expect(pollBody).toMatch(/if \(shouldReportInventoryThisIteration\(pollIteration\)\) \{\s*const inventory = await reportMachineInventory\(\{/)
+    const call = pollBody.slice(pollBody.indexOf('await reportMachineInventory({'))
+    expect(call).toMatch(/^await reportMachineInventory\(\{[\s\S]*?workspaceRoot: safeConfig\.workspaceRoot,\s*configured: safeConfig\.harnesses,/)
+  })
+
   // Config content leaves the machine only with `configBodyUpload` on, read
   // from this poll's synced settings so a change applies at the next capture.
   it('captures config content only when this poll\'s settings turn it on', async () => {

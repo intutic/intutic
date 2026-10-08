@@ -648,6 +648,21 @@ export {
 } from './governanceCoverage.js'
 
 export {
+  DEVICE_INVENTORY_SCHEMA_VERSION,
+  REDACTED_PATH,
+  REDACTED_SEGMENT,
+  homeRelativePath,
+  sanitizeMcpEndpoint,
+  type DeviceInventory,
+  type InventoryDeviceIdentity,
+  type InventoryGateKind,
+  type InventoryGuardProbes,
+  type InventoryHarness,
+  type InventoryMcpServer,
+  type InventorySkill,
+} from './devInventory.js'
+
+export {
   DEFAULT_PROXY_HOST,
   proxyHost,
   anthropicBaseUrl,

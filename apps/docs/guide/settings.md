@@ -405,6 +405,7 @@ The **Event Type** list offers only the events the control plane sends:
 | `device.enforcement.disabled` | Device Firewall Disabled |
 | `governance.gate.silent` | Gate Stopped Reporting: an installed harness's gate has sent no event for 48 hours |
 | `governance.gate.recovered` | Gate Reporting Again |
+| `inventory.ungoverned.detected` | Ungoverned AI Tool Found: a machine's [AI inventory](/guide/ai-inventory) listed an ungoverned harness or MCP server for the first time; once per machine and item |
 | `governance.integrity.failed` | Trace Integrity Check Failed: the hourly integrity check found a broken root chain, a trace changed after sealing, a mismatched bucket copy, a bad signature or an altered append-only guard. See [Trace Integrity](/concepts/trace-integrity#alerts) |
 
 Tick one or more severities (LOW, MEDIUM, HIGH, CRITICAL) to narrow a rule; leave them all unticked to receive every severity.
