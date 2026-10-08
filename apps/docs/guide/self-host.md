@@ -52,24 +52,27 @@ their deterministic versions.
 
 - **One hostname** users can reach (for example `intutic.example.internal`) and a
   TLS certificate for it. The installer can issue a self-signed one to start.
-- **Docker Compose:** one Linux x86-64 host with 4 vCPUs, 16 GB of memory and
+- **Docker Compose:** one Linux host, x86-64 or arm64, with 4 vCPUs, 16 GB of memory and
   100 GB of disk, Docker Engine 24+ and Docker Compose v2, and `openssl`.
 - **Kubernetes:** a cluster running 1.27 or later, Helm 3, PostgreSQL 15 or later,
   and an Ingress controller.
-- **Images:** linux/amd64.
+- **Images:** linux/amd64 and linux/arm64. Each tag at `ghcr.io/intutic` holds
+  both; the air-gap bundle comes in one per architecture.
 
 ## Getting a release
 
-Each release is a signed bundle. Intutic sends you time-limited links to three
-files: the bundle (`intutic-selfhost-<version>.tar.gz`), its checksums
-(`SHA256SUMS`) and their signature (`SHA256SUMS.sigstore.json`). Verify the
+Each release is a signed bundle per architecture. Tell Intutic which yours is
+(`uname -m`: `x86_64` is `amd64`, `aarch64` is `arm64`), and you get
+time-limited links to three files: the bundle
+(`intutic-selfhost-<version>-<arch>.tar.gz`), its checksums (`SHA256SUMS`) and
+their signature (`SHA256SUMS.sigstore.json`). Verify the
 bundle where you downloaded it, before it goes into your network. You need
 [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) 3.0 or
 later and Intutic's public key, [`intutic-cosign.pub`](../intutic-cosign.pub):
 
 ```bash
 cosign verify-blob --key intutic-cosign.pub --bundle SHA256SUMS.sigstore.json SHA256SUMS
-tar -xzf intutic-selfhost-<version>.tar.gz
+tar -xzf intutic-selfhost-<version>-<arch>.tar.gz
 cd intutic-selfhost-<version>
 sha256sum -c ../SHA256SUMS
 ```
