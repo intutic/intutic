@@ -124,7 +124,7 @@ Because every response byte passes through the proxy before the client sees it, 
   export OPENAI_BASE_URL="http://localhost:4000/v1"      # OpenAI SDKs append /chat/completions
   ```
 - **Zero-Code Proxying**: No SDK modification required inside your agent codebase — Intutic operates transparently at the network/proxy layer.
-- **WASM Policy Rules SDK (`@intutic/wasm-sdk`)**: Compile custom policy rules in AssemblyScript, TypeScript, C, or Rust into hot-path proxy filters. See [Custom Filters (WASM Rules Engine)](/external/wasm-rules).
+- **WASM Rules SDK**: Write custom policy rules in AssemblyScript and compile them into hot-path proxy filters. The SDK is a template, not an npm package: copy it from `packages/wasm-sdk/` in the open-core repository. See [Custom Filters (WASM Rules Engine)](/external/wasm-rules).
 
 ---
 

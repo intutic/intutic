@@ -2,7 +2,7 @@
 
 Teach any AI coding agent to turn natural-language business rules into compiled WASM governance policies enforced by the local Intutic proxy.
 
-Where the [Kitkat skill](/integrations/kitkat) teaches an agent to *operate* Intutic governance, the Rule Author skill teaches it to *extend* it: the agent converts a plain-English rule ("block any agent call that touches the prod database") into an AssemblyScript policy, compiles it with the open-core [`@intutic/wasm-sdk`](/external/wasm-rules), dry-runs it against mock contexts, and installs it into `~/.intutic/wasm/` — where the proxy hot-loads it within ~5 seconds. The full loop runs locally with no control plane.
+Where the [Kitkat skill](/integrations/kitkat) teaches an agent to *operate* Intutic governance, the Rule Author skill teaches it to *extend* it: the agent converts a plain-English rule ("block any agent call that touches the prod database") into an AssemblyScript policy, compiles it with the open-core [AssemblyScript Rules SDK template](/external/wasm-rules) (`packages/wasm-sdk/`, copied into your project — it is not an npm package), dry-runs it against mock contexts, and installs it into `~/.intutic/wasm/` — where the proxy hot-loads it within ~5 seconds. The full loop runs locally with no control plane.
 
 ---
 
