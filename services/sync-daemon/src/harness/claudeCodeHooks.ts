@@ -387,6 +387,9 @@ function logEvent(verdict, toolName, reason, sessionId) {
   try {
     const ts = new Date().toISOString();
     const incidentId = crypto.createHash('sha1').update(ts + toolName + _intuticWsId).digest('hex').slice(0, 16);
+    // The event's id: random, made once here, and resent with the line it is
+    // written into, so the control plane processes the event once.
+    const eventId = crypto.randomBytes(16).toString('hex');
     const entry = JSON.stringify({
       // Passed through, not collapsed to two values: the advisory tier emits
       // 'tool_flagged', and a ternary here silently recorded it as an allow.
@@ -397,6 +400,7 @@ function logEvent(verdict, toolName, reason, sessionId) {
       harnessType: ${JSON.stringify(harnessType)},
       timestamp: ts,
       incidentId,
+      eventId,
       // TD-209: Claude Code's PreToolUse contract puts session_id on stdin;
       // it was parsed and dropped, so trust decay and enforcement logging fell
       // back to the synthetic per-workspace session and could never attribute

@@ -107,6 +107,9 @@ function logEvent(env, verdict, toolName, reason) {
   const incidentId = crypto.createHash('sha1')
     .update(ts + toolName + env.INTUTIC_WORKSPACE_ID)
     .digest('hex').slice(0, 16);
+  // The event's id: random, made once here, and resent with the line it is
+  // written into, so the control plane processes the event once.
+  const eventId = crypto.randomBytes(16).toString('hex');
 
   const entry = {
     // Passed through, not collapsed to two values: the advisory tier emits
@@ -118,6 +121,7 @@ function logEvent(env, verdict, toolName, reason) {
     harnessType: 'claude-desktop',
     timestamp: ts,
     incidentId,
+    eventId,
     ...(_intuticSessionId ? { sessionId: _intuticSessionId } : {}),
   };
 

@@ -22,6 +22,7 @@
  *     telemetry.
  */
 
+import { randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -190,6 +191,9 @@ export class GateClient {
       sessionId: this.sessionId,
       harnessType: this.harness,
       timestamp: new Date().toISOString(),
+      // The event's id, made once: if this post is ever repeated, the control
+      // plane processes the event once.
+      eventId: randomBytes(16).toString('hex'),
     }
     if (toolInput !== undefined) ev.toolInput = toolInput
     if (incidentId) ev.incidentId = incidentId
