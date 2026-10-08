@@ -15,6 +15,7 @@ import * as node_crypto from 'node:crypto'
 import { createStderrLogger as createLogger } from './stderrLog.js'
 import { callDaemonSocket } from './daemonClient.js'
 import { httpRequest } from './httpJson.js'
+import type { CallerIdentity } from './identity.js'
 
 const log = createLogger('mcp-proxy-emitter')
 
@@ -77,6 +78,12 @@ export interface GovernanceEvent {
    * other event kind, matching how `reason` is already optional here.
    */
   severity?: string
+  /**
+   * Who made the call, as this proxy observed it (identity.ts). The control
+   * plane adds the member the API key resolves to when it ingests the event.
+   * Absent only for an emitter constructed without one.
+   */
+  principal?: CallerIdentity
   timestamp: string
 }
 
@@ -86,7 +93,8 @@ export class GovernanceEmitter {
     private readonly apiKey: string,
     private readonly eventsFilePath: string,
     private readonly workspaceId: string,
-    private readonly mcpProxyMode: string = 'per-session'
+    private readonly mcpProxyMode: string = 'per-session',
+    private readonly identity: CallerIdentity | undefined = undefined,
   ) {}
 
   emit(kind: EventKind, toolName: string, toolInput: unknown, reason?: string, severity?: string): void {
@@ -99,6 +107,7 @@ export class GovernanceEmitter {
       harnessType: 'mcp-governance-proxy',
       reason,
       severity,
+      principal: this.identity,
       timestamp: new Date().toISOString(),
     }
 
@@ -115,6 +124,7 @@ export class GovernanceEmitter {
         reason,
         severity,
         toolInput,
+        principal: event.principal,
       }
       callDaemonSocket('telemetry.enqueue', eventPayload).then(() => {
         log.debug({ action: 'telemetry_enqueued' }, 'Telemetry successfully enqueued to daemon')
@@ -153,6 +163,7 @@ export class GovernanceEmitter {
           incidentId: event.incidentId,
           reason: event.reason,
           severity: event.severity,
+          principal: event.principal,
           timestamp: event.timestamp,
         },
       ],

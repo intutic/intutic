@@ -43,6 +43,7 @@ import { WasmRunner } from './wasm/runner.js'
 import { checkTofu, decideTofuAction } from './tofu.js'
 import { RegistryObserver } from './registryObserver.js'
 import { ApprovalHolds } from './approvalHold.js'
+import { callerIdentity } from './identity.js'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
@@ -524,12 +525,14 @@ export class McpGovernanceProxy {
       config.mcpProxyMode
     )
 
+    const identity = callerIdentity(config.apiKey, config.serverName, config.sessionScope)
     this.emitter = new GovernanceEmitter(
       config.controlPlaneUrl,
       config.apiKey,
       config.eventsFilePath,
       config.workspaceId,
-      config.mcpProxyMode
+      config.mcpProxyMode,
+      identity,
     )
 
     // The standalone `intutic` entry fronts no real server and records no
@@ -559,7 +562,7 @@ export class McpGovernanceProxy {
       config.mcpAnomalyOverrides,
       this.wasmRunner,
       config.workspaceId,
-      new ApprovalHolds(config.controlPlaneUrl, config.apiKey, config.workspaceId, config.serverName),
+      new ApprovalHolds(config.controlPlaneUrl, config.apiKey, config.workspaceId, config.serverName, identity),
     )
   }
 

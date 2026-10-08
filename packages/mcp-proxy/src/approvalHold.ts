@@ -36,6 +36,7 @@ import * as node_crypto from 'node:crypto'
 import { createStderrLogger as createLogger } from './stderrLog.js'
 import { getJson, postJson } from './httpJson.js'
 import type { SopRule } from './policy.js'
+import type { CallerIdentity } from './identity.js'
 
 const log = createLogger('mcp-proxy-hold')
 
@@ -85,14 +86,12 @@ export class ApprovalHolds {
     private readonly apiKey: string,
     private readonly workspaceId: string,
     private readonly serverName: string,
+    /** Rides on the hold record so the reviewer sees who asked (identity.ts). */
+    private readonly identity: CallerIdentity | undefined = undefined,
   ) {}
 
-  /**
-   * Lets the call through on an approved bypass, or records a hold and
-   * returns its id. Never throws. `context` rides on the hold record as the
-   * reviewer's view of who asked (see `CallerIdentity`).
-   */
-  async request(rule: SopRule, toolName: string, toolInput: unknown, context: Record<string, unknown>): Promise<HoldOutcome> {
+  /** Lets the call through on an approved bypass, or records a hold and returns its id. Never throws. */
+  async request(rule: SopRule, toolName: string, toolInput: unknown): Promise<HoldOutcome> {
     const { toolNameNormalized, targetHash } = holdKey(this.serverName, toolName, toolInput)
 
     const bypass = await this.findBypass(rule.id, toolNameNormalized, targetHash)
@@ -111,7 +110,13 @@ export class ApprovalHolds {
             at: new Date().toISOString(),
             toolNameNormalized,
             targetHash,
-            context: { source: 'mcp_proxy', server: this.serverName, tool: toolName, rule: rule.reason, ...context },
+            context: {
+              source: 'mcp_proxy',
+              server: this.serverName,
+              tool: toolName,
+              rule: rule.reason,
+              ...(this.identity ? { principal: this.identity } : {}),
+            },
           },
         ],
       })

@@ -146,7 +146,7 @@ export class ToolCallInterceptor {
    */
   private async hold(rule: SopRule, toolName: string, toolInput: unknown): Promise<Decision | null> {
     const outcome = this.holds
-      ? await this.holds.request(rule, toolName, toolInput, {})
+      ? await this.holds.request(rule, toolName, toolInput)
       : { kind: 'held' as const, holdId: '', recorded: false }
 
     if (outcome.kind === 'bypassed') {
