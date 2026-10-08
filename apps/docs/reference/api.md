@@ -564,7 +564,7 @@ Classify tokens as USEFUL or WASTED.
 
 ## Route Catalog
 
-Every route the control plane serves: 376 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
+Every route the control plane serves: 380 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
 
 ### `app.ts` <Badge type="tip" text="Cloud" />
 
@@ -612,7 +612,7 @@ Every route the control plane serves: 376 routes, grouped by the source file tha
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/api/v1/audit/timeline` | OWNER/ADMIN | Joined login/enforcement/decision/incident/ settings-change report for a workspace over a date range. |
+| GET | `/api/v1/audit/timeline` | OWNER/ADMIN | Sign-ins, enforcement verdicts, resolved decisions and incidents, settings changes, detector adjudications and MCP server registry decisions for a workspace over a date range. |
 
 ### `auth.ts` <Badge type="tip" text="Cloud" />
 
@@ -924,6 +924,15 @@ Every route the control plane serves: 376 routes, grouped by the source file tha
 | POST | `/api/v1/mcp-daemon/policy-invalidate` | Authenticated | make every connected daemon re-pull policy now. |
 | POST | `/api/v1/mcp-daemon/report` | Authenticated | upload one status snapshot from the MCP daemon, with the workspace API key. A daemon that stops reporting reads as running: false after three missed intervals. |
 | GET | `/api/v1/mcp-daemon/status` | Authenticated | the last snapshot; with none, a not-running daemon with empty counters. |
+
+### `mcpServers.ts` <Badge type="tip" text="Cloud" />
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/v1/mcp/servers` | Authenticated | Every MCP server seen, with its status, the tools a proxy last saw it declare and which are disabled, plus the workspace's default policy. |
+| POST | `/api/v1/mcp/servers/:serverId/status` | OWNER/ADMIN | Approve, block, or return a server to the approval queue. |
+| POST | `/api/v1/mcp/servers/:serverId/tools` | OWNER/ADMIN | Switch one tool within a server on or off. |
+| POST | `/api/v1/mcp/servers/observe` | Authenticated | An MCP proxy reports the server it fronts and its tool names; a first sighting creates a candidate and sends mcp.server.candidate. |
 
 ### `members.ts` <Badge type="tip" text="Cloud" />
 

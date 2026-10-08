@@ -188,6 +188,8 @@ What the MCP governance proxy does when it cannot reach Intutic, and how firmly 
 | **Fail open** *(recommended)* | The tool call runs, and a warning event reaches the dashboard |
 | **Fail closed** | The tool call is blocked with "Governance check failed: Intutic control plane unreachable." The dashboard asks you to confirm before switching to it |
 
+The choice reaches each proxy with its policy. A proxy that has not been able to load policy since it started uses its local `INTUTIC_MCP_FAIL_OPEN` instead — see [When the registry has not loaded](/guide/mcp-governance#when-the-registry-has-not-loaded). Which MCP servers and tools may run is set on **Policies › MCP Servers** ([the registry](/guide/mcp-governance#the-registry)).
+
 **When someone edits a harness config file by hand**
 
 | Option | Behavior |
@@ -309,6 +311,7 @@ The **Event Type** list offers only the events the control plane sends:
 | `sop.upstream.changed` | Guideline Changed Upstream |
 | `guardrail.ready` | Policy Guardrail Ready to Enforce |
 | `guardrail.stale` | Policy Guardrail Citation Went Stale |
+| `mcp.server.candidate` | New MCP Server Awaiting Approval |
 | `finops.budget.threshold` | Budget Threshold Reached |
 | `finops.budget.exceeded` | Budget Exceeded |
 | `plan.deviation.detected` | Plan Deviation Detected |

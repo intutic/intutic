@@ -1,6 +1,6 @@
 ---
 title: MCP Server Governance
-description: The MCP server registry, per-workspace allowlist, and server-level TOFU pinning that guard against a rogue or rug-pulled MCP server — and what these controls do not cover yet.
+description: The MCP server registry with approvals and a default-deny option, per-tool switches, approval holds, per-call identity, the allowlists and server-level TOFU pinning that guard against a rogue or rug-pulled MCP server — and what these controls do not cover yet.
 ---
 
 # MCP Server Governance <Badge type="tip" text="Open-Core" />
@@ -8,21 +8,39 @@ description: The MCP server registry, per-workspace allowlist, and server-level 
 An MCP server is code a harness spawns and trusts on the agent's behalf —
 every tool it declares becomes something the model can call, and every tool
 *description* becomes text the model reads as instructions. This page covers
-three controls built on top of the MCP proxy-wrapping mechanism described in
-[Graph Guardrails](/guide/graph-guardrails): a **registry** of servers seen
-per workspace, a **per-workspace allowlist** that can refuse an unapproved
-server outright, and **server-level TOFU pinning** that detects a server's
-tool definitions changing after a user has already trusted it.
+the controls built on top of the MCP proxy-wrapping mechanism described in
+[Graph Guardrails](/guide/graph-guardrails):
+
+- a **registry** of the servers each workspace's proxies have seen, where an
+  owner or admin approves or blocks each one and switches single tools off,
+  with a **default policy** that can refuse every server not yet approved;
+- **approval holds**: a `require_approval` rule holds the call until a person
+  approves it, and the identical retry then runs;
+- **per-call identity**: every event and hold says which member's key, OS
+  user and session made the call, and the workspace's SSO group policy
+  applies to it;
+- **per-workspace allowlists** of servers and tools;
+- **server-level TOFU pinning**, which detects a server's tool definitions
+  changing after a user has already trusted it.
 
 ## How a server gets here at all
 
 `intutic connect` and the sync daemon's continuous sync loop rewrite each
-stdio MCP server entry in a harness config (`~/.claude/mcp.json`, Claude
-Desktop, Cursor, Cline, Windsurf, Continue, Goose, OpenHands, Muse Code, Grok
-Build, OpenCode — fourteen config paths across eleven harnesses) so that the
+stdio MCP server entry in a harness config (Claude Code's `~/.claude.json`,
+Claude Desktop, Cursor, Cline, Windsurf, Continue, Goose, OpenHands, Muse
+Code, Grok Build, OpenCode — fourteen config paths across eleven harnesses)
+so that the
 `@intutic/mcp-governance-proxy` binary fronts it: the harness spawns the
 proxy, the proxy spawns the real server, and every `tools/call` and
 `tools/list` passes through governance in between.
+
+For Claude Code that means the user-scope servers in `~/.claude.json` and the
+local-scope servers of the project `intutic connect` ran in
+(`projects[<path>].mcpServers` in the same file). A project's `.mcp.json` —
+Claude Code's project scope, committed and shared with the team — is not
+rewritten, so its servers reach the harness unwrapped. The MCP daemon, when it
+runs, still reports them to the [registry](#the-registry), so they are visible
+there even though the proxy does not govern their calls.
 
 Muse Code's `mcp_servers` map (in `~/.config/muse/settings.json`) carries
 both `stdio` and `streamable_http` entries; the latter is assumed (not yet
@@ -69,17 +87,88 @@ window, on the order of the loop's own interval, where a freshly-added server
 talks to the harness directly. During that window none of the controls on
 this page apply to it.
 
-## The registry: what the control plane knows about a server
+## The registry {#the-registry}
 
-Every proxy-wrapped server reports its identity — server name, harness,
-transport — to the control plane on each daemon heartbeat
-(`POST /api/v1/mcp-daemon/report`), which upserts it into the `mcp_servers`
-table: the first sighting of a `{workspace, server}` pair creates a
-`candidate` row; every later sighting refreshes when it was last seen,
-without touching its status. Promoting a server from `candidate` to
-`approved` or `blocked` is a lifecycle this table supports, but this phase
-does not ship the dashboard/route to *do* the promoting — that is a planned
-follow-up, not a built feature.
+**Policies › MCP Servers** lists every MCP server the workspace's proxies
+have seen. A server gets there two ways:
+
+- **The proxy reports it.** Each proxy reports the server it fronts (its
+  `--server-name`) when it starts, and again with the tool names whenever a
+  `tools/list` response shows a different set
+  (`POST /api/v1/mcp/servers/observe`).
+- **The MCP daemon reports it.** Its heartbeat carries every server it finds
+  in the harness configs on the machine (`POST /api/v1/mcp-daemon/report`).
+
+The first sighting creates the server as **awaiting decision** (a candidate)
+and sends the `mcp.server.candidate` notification, which a
+[notification rule](/guide/settings#notifications) can route to Slack, email,
+PagerDuty or a webhook. Later sightings update when it was last seen, its
+harness, transport and tools; they never change a decision.
+
+An **owner or admin** decides; an engineering manager sees the page
+read-only:
+
+- **Approve** or **Block** a server, or **Reset** it to awaiting decision.
+- **Tools** opens a switch per tool. A switched-off tool is removed from the
+  server's `tools/list` before the agent sees it, and a call to it anyway is
+  refused.
+- **Default policy** says what happens to a server nobody has decided on:
+
+| Default policy | A blocked server | An approved server | Any other server |
+|---|---|---|---|
+| **Allow servers until someone blocks them** (`allow`, the default) | refused | allowed | allowed |
+| **Refuse servers until someone approves them** (`deny`) | refused | allowed | refused, and waiting in the approval queue |
+
+Every workspace starts on `allow`, new ones included: switching an existing
+workspace to `deny` would refuse every server its developers use the moment
+the proxies picked it up, and a new workspace has no approved servers yet.
+Switch to `deny` once the servers you mean to keep are approved; the page
+says how many servers stop working before it saves. The setting is
+`mcpDefaultPolicy` in workspace settings
+(`PUT /api/v1/workspace/settings`), changed like every other setting and
+recorded in its change history.
+
+A refused call tells the agent why and what to do about it:
+
+```
+MCP server "linear" is not approved in this workspace's MCP server registry,
+and the workspace refuses unapproved servers (mcpDefaultPolicy: deny). It is
+waiting in the approval queue on the MCP Servers page for an owner or admin.
+```
+
+Every decision is recorded with the member who made it and appears in
+**Settings › Audit Timeline**. Decisions reach the proxies through the policy
+they already poll — `mcpRegistry` on `GET /api/v1/sop/rules` and
+`GET /api/v1/policy/resolve` — so a per-session proxy applies one within a
+minute. Proxies in `daemon` mode get it from the MCP daemon, which serves its
+cached policy for up to `MCP_DAEMON_POLICY_TTL_MS` (five minutes by default)
+before refetching.
+
+The registry and the [allowlist](#the-allowlist-mcpallowedservers) both
+apply: a call has to pass each. The registry knows a server by its
+`--server-name`; a proxy started without one fronts a server called
+`unknown`, which a `deny` workspace refuses.
+
+### When the registry has not loaded {#when-the-registry-has-not-loaded}
+
+A proxy keeps the last registry it loaded for as long as it runs, and an MCP
+daemon keeps it in Valkey, so a control plane that goes away later changes
+nothing. The open question is a proxy that has never loaded one: it started
+while the control plane was unreachable, or the MCP daemon has only its local
+snapshot so far, which carries no registry. The first tool call waits for the
+proxy's first policy fetch (at most five seconds); after that the proxy asks
+again at most every five seconds while it still has no registry. Until then:
+
+- **Fail open**: the registry is not applied — the call goes on to the
+  remaining checks, as if the workspace had no registry.
+- **Fail closed**: the call is refused, because an `allow` workspace cannot
+  be told apart from a `deny` one without the registry.
+
+Which one applies is the workspace's `mcpProxyFailBehavior`
+(**Settings › AI Routing & Caching › MCP Proxy Enforcement**) once a proxy has loaded it,
+and the local `INTUTIC_MCP_FAIL_OPEN` (`false` for fail closed) before that or
+for a workspace that never chose. The same setting governs every other check
+that cannot complete, such as a failed DLP scan or an unreadable TOFU pin.
 
 ## The allowlist: `mcpAllowedServers`
 
@@ -103,6 +192,71 @@ This is enforced by the same proxy process that already enforces
 `mcpAllowedTools` (per-tool scoping) and DLP/SOP policy — one interception
 point, not a second one that could disagree with the first.
 
+## Approval holds {#approval-holds}
+
+An SOP rule whose action is `require_approval` (a `REQUIRE_APPROVAL:` SOP)
+holds the call instead of blocking it, the same way the harness hook gates
+do, through the same decisions API:
+
+1. The proxy refuses the call and records a hold (`POST /api/v1/decisions`).
+   The hold appears in **Findings › Review Queue** with who asked for it, and
+   sends the `decision.pending` notification — including the Slack card with
+   Approve and Reject buttons.
+2. The agent gets a JSON-RPC error naming the hold, with the id also in
+   `error.data` (`{"status": "pending_approval", "holdId": "…"}`):
+
+   ```
+   [Intutic Governance] Tool call HELD for approval: Deploys need review
+   [sop_deploy]. Hold id: hold_m1x2y3_0a1b2c3d. An approver can run:
+   intutic decision approve hold_m1x2y3_0a1b2c3d (or reject it). Retry this
+   exact call after it is approved.
+   ```
+
+3. Someone approves it: `intutic decision approve <holdId>`, the Review
+   Queue, or Slack.
+4. The agent retries. When the workspace has `reviewHoldBypassEnabled` on,
+   the approval lets **the identical call** through for
+   `reviewHoldBypassTtlMinutes` (10 by default); the proxy finds it in
+   `GET /api/v1/decisions/approved-bypasses` and emits
+   `hold_approved_bypass_used`. With the setting off (the default), an
+   approval records the decision only and the retry is held again — the same
+   as for a hook-gate hold.
+
+"Identical" means the same rule, the same server and tool, and the same
+arguments — compared as a SHA-256 of the arguments with their keys sorted, so
+key order does not matter and any other value does. An approval never covers
+a different call.
+
+A hold needs the control plane both to find an approval and to ask for one.
+While it is unreachable the call stays held, whatever the fail setting, and
+the message says the hold could not be recorded.
+
+## Who made the call {#caller-identity}
+
+Every event the proxy sends and every hold it records carries the caller as
+the proxy sees it:
+
+- the API key's prefix — the first 12 characters of the `vk_` key, which the
+  control plane treats as a published identifier, never the secret part;
+- the OS user the proxy runs as;
+- the harness session it shares with the other proxies of that session;
+- the MCP server it fronts.
+
+The control plane adds the workspace member the API key belongs to — the one
+part the proxy cannot claim for itself — and stores both: incidents filed from
+proxy events show them as **Caller** in the incident drawer, and holds show
+them as **Requested by** in the Review Queue. The OS user, session and server
+are what the proxy reported, recorded as such.
+
+The member also carries into policy. The same policy responses that carry the
+registry carry the member's role and SSO groups and the workspace's SSO group
+policy (`sso_group_policy` in workspace settings, the one the server-side hook
+gate applies), and the proxy applies it to every MCP tool call: a tool on
+`highRiskTools` needs one of the `requiredGroups`, and a tool on
+`requireOboFor` is refused, since the proxy has no on-behalf-of token to
+present. A tool matches by its MCP name (`run_query`) or by the name the
+harness hooks see (`mcp__postgres__run_query`).
+
 ## Server-level TOFU pinning
 
 Ported from `packages/proxy/src/tool_pin.rs`'s per-request tool-array
@@ -117,7 +271,9 @@ response is compared against that stored fingerprint.
 
 On a mismatch, the proxy emits an `mcp_server_definition_changed` event and
 honors the workspace's `mcpProxyFailBehavior` setting exactly the way every
-other governance check in this proxy does: fail-open logs the mismatch and
+other governance check in this proxy does (see
+[When the registry has not loaded](#when-the-registry-has-not-loaded) for how
+the setting reaches the proxy): fail-open logs the mismatch and
 forwards the response as normal; fail-closed refuses the `tools/list` call
 outright, naming the server and the setting an operator would need to
 change.
@@ -205,8 +361,9 @@ harness's `mcp.json` entry (or written by `intutic connect`, once the sync
 daemon discovers it as a `url`-keyed entry):
 
 ```bash
-npx @intutic/mcp-governance-proxy \
+npx -y -p @intutic/mcp-governance-proxy intutic-mcp-proxy \
   --workspace-id wk_your_workspace \
+  --server-name internal-gateway \
   --remote-url https://mcp-gateway.internal.example.com \
   --remote-transport http
 ```
@@ -292,12 +449,14 @@ content. A `block`-mode block additionally emits the existing `tool_blocked`
 event — so a dashboard or alert keyed on `tool_blocked` is not blind to this
 new block reason just because it predates injection scanning.
 
-`mcpInjectionAction` rides the same policy-snapshot channel as
-`mcpAllowedTools`/`mcpAllowedServers` above (`PolicyClient.absorbCuration`),
-with an `INTUTIC_MCP_INJECTION_ACTION` environment-variable fallback for
-standalone/open-core use without a control plane — see the [MCP Proxy
+Set it per machine with `INTUTIC_MCP_INJECTION_ACTION` (see the
+[configuration reference](#configuration-reference)). The proxy also accepts
+`mcpInjectionAction` on the policy channel that carries `mcpAllowedTools` and
+`mcpAllowedServers` (`PolicyClient.absorbCuration`), and lets it win over the
+local value, but the control plane does not send it today, so the local
+setting is the one in force. See the [MCP Proxy
 reference](/integrations/mcp-proxy#prompt-injection-scanning) for the
-package-level configuration details.
+package-level details.
 
 ### What this does not catch
 
@@ -379,10 +538,69 @@ apply to that gate's unit of evaluation at all.
 | Open WebUI | ❌ n/a | This gate evaluates PROMPT TEXT, not a tool call — no tool name of any shape reaches it. |
 | LangGraph | ❌ n/a | No generated gate file — the SDK-side `intutic_clawde.gate` is out of scope for this phase's per-harness matcher work. |
 | Aider | ❌ n/a | No `PreToolUse` hook mechanism exists for this harness at all (see `NO_GATE` in `gateRegistry.ts`). |
-| Xirp | ❌ n/a (delegated) | Not itself an AI agent — no tool calls of its own to match. An `mcp__<server>__<tool>`-shaped call made inside a Xirp-managed session is whatever the WRAPPED harness (Claude Code, Codex, …) sends, and is covered by that harness's own row above — provided the wrapped harness's gate files reach the `git worktree` the call runs in, which is what [Worktree Coverage](/reference/harness-security-matrix#worktree-coverage) now ensures. |
-| Agentic Orchestrator | ❌ n/a (delegated) | Not itself an AI agent — no tool calls of its own to match. An `mcp__<server>__<tool>`-shaped call made inside a session is whatever the WRAPPED backend (Claude Code, Codex, or OpenCode) sends. Claude Code/Codex calls are covered by that backend's own row above under the same worktree-coverage guarantee as Xirp; OpenCode calls are covered by the OpenCode row above (the plugin fires for MCP tools and composes their ids for the allowlist). |
+| Xirp | ❌ n/a (delegated) | Not itself an AI agent — no tool calls of its own to match. An `mcp__<server>__<tool>`-shaped call made inside a Xirp-managed session is whatever the WRAPPED harness (Claude Code, Codex, …) sends, and is covered by that harness's own row above when that harness's hook is registered at user level, which applies in every `git worktree`. Project-level gate files are written only into the checkout `intutic connect` ran in, so a hook registered only at project level is absent from the worktree a Xirp session runs in — see [Worktree Coverage](/reference/harness-security-matrix#worktree-coverage). |
+| Agentic Orchestrator | ❌ n/a (delegated) | Not itself an AI agent — no tool calls of its own to match. An `mcp__<server>__<tool>`-shaped call made inside a session is whatever the WRAPPED backend (Claude Code, Codex, or OpenCode) sends. Claude Code/Codex calls are covered by that backend's own row above on the same terms as Xirp — through user-level hooks, which reach its per-feature worktrees, and not through project-level files, which do not; OpenCode calls are covered by the OpenCode row above (the plugin fires for MCP tools and composes their ids for the allowlist). |
 
-## What this phase deliberately does not cover
+## Configuration reference {#configuration-reference}
+
+The proxy is `intutic-mcp-proxy` from `@intutic/mcp-governance-proxy`. The
+package has two binaries, so `npx` needs the package and the binary named:
+`npx -y -p @intutic/mcp-governance-proxy intutic-mcp-proxy …`.
+`intutic connect` writes all of this for you; the table is for running the
+proxy by hand.
+
+| Flag | What it does |
+|---|---|
+| `--workspace-id <id>` | The workspace to load policy for and report to. Falls back to `INTUTIC_WORKSPACE_ID`. |
+| `--server-name <name>` | The name the registry, the server allowlist and the TOFU pin file (`~/.intutic/mcp-pins/<workspace>__<server>.json`) know this server by. Without it the server is `unknown`. |
+| `-- <command> [args…]` | Wrap a stdio server: the proxy spawns it. |
+| `--remote-url <url>` | Wrap a remote server instead (not together with `--`). |
+| `--remote-transport sse\|http` | The remote transport; `http` by default. |
+
+With neither `--` nor `--remote-url` the proxy is the standalone `intutic` MCP
+server: three tools, `intutic_governance_status`, `intutic_list_sops` and
+`intutic_list_incidents`, the two list tools taking a `limit` from 1 to 50
+(10 by default). The control plane lists incidents only for the OWNER, ADMIN
+or EM role, and the tool says so to anyone else. It needs `INTUTIC_API_KEY`,
+the control plane's address and a workspace id; with no address configured it
+talks to `http://localhost:3001`.
+
+Settings are read from the environment first, then from
+`~/.intutic/env/runtime.env`, which the sync daemon writes:
+
+| Variable | Default | What it does |
+|---|---|---|
+| `INTUTIC_API_KEY` | — | The workspace API key the proxy authenticates with. Its member is the caller of every call. |
+| `INTUTIC_CONTROL_PLANE_URL` | `INTUTIC_HOST` from runtime.env, else `http://localhost:3001` | Where the control plane is. |
+| `INTUTIC_WORKSPACE_ID` | `unknown` | The workspace, when `--workspace-id` is not given. |
+| `INTUTIC_MCP_FAIL_OPEN` | `true` | `false` makes a check that cannot complete refuse the call. The workspace's `mcpProxyFailBehavior` wins once the proxy has loaded it — see [When the registry has not loaded](#when-the-registry-has-not-loaded). |
+| `INTUTIC_MCP_PROXY_MODE` | `per-session` | `daemon` asks the MCP daemon for policy and sends events through it, falling back to the control plane directly when the daemon does not answer. Read from runtime.env only. |
+| `INTUTIC_MCP_INJECTION_ACTION` | `warn` | `block` refuses a call whose arguments match a prompt-injection pattern, and withholds a result that does. |
+| `INTUTIC_MCP_ANOMALY_MODE` | `enforce` | `warn` reports anomaly findings without blocking; `off` skips detection. |
+| `INTUTIC_MCP_ANOMALY_OVERRIDES` | none | A JSON object of detector id → `steer`, `reask`, `kill` or `off`, capped at each detector's own ceiling. Environment only. |
+| `INTUTIC_MCP_SESSION_SCOPE` | derived | Sets the shared session scope explicitly (see [the MCP proxy reference](/integrations/mcp-proxy#anomaly-detection-session-scope)). Environment only. |
+| `INTUTIC_VALKEY_URL` / `VALKEY_URL` | none | The Valkey sibling proxies share their anomaly window through. |
+| `INTUTIC_REMOTE_HEADERS` | none | A JSON object of headers for `--remote-url`, such as `Authorization`. Environment only, never a flag, so it stays out of `ps`. |
+| `INTUTIC_EVENTS_FILE` | `~/.intutic/events/hook-events.jsonl` | The local file every event is also appended to. |
+| `INTUTIC_WASM_LOCAL_DIR` | `~/.intutic/wasm` | Where the proxy loads custom WASM rules from. Read from runtime.env; `INTUTIC_WASM_DIR` in the environment takes precedence. |
+
+The MCP daemon (`intutic-mcp-daemon`) is not an MCP server. It listens on a
+Unix socket, caches policy and batches events for proxies in `daemon` mode:
+
+| Variable | Default | What it does |
+|---|---|---|
+| `MCP_DAEMON_SOCKET` | `~/.intutic/mcp-proxy.sock` | The socket, for the daemon and the proxies that call it. |
+| `MCP_DAEMON_POLICY_TTL_MS` | `300000` | How long a cached policy is served before it is refetched. |
+| `MCP_DAEMON_MAX_CACHE_ENTRIES` | `500` | Workspaces kept in the policy cache. |
+| `MCP_DAEMON_STATUS_REPORT_MS` | `60000` | How often it reports its status and the servers it found. |
+| `CONTROL_PLANE_URL` | `http://localhost:3001` | The control plane, for the daemon itself. |
+| `INTUTIC_POLICY_SNAPSHOT` | `~/.intutic/hooks/policy-snapshot.json` | The sync daemon's snapshot the daemon seeds its cache from at start. It has the SOP rules but no registry, so the registry follows the fail setting until the first fetch. |
+
+The daemon also reads `INTUTIC_API_KEY` and `INTUTIC_WORKSPACE_ID` from its
+environment, and caches in the Valkey at `VALKEY_URL` (or `REDIS_URL`;
+`redis://localhost:6379` by default), working without it when it is down.
+
+## What these controls do not cover {#limits}
 
 - **No cross-workspace or cross-tenant correlation.** A TOFU mismatch, or a
   server report, is stored per workspace. If the same popular MCP server
@@ -402,10 +620,25 @@ apply to that gate's unit of evaluation at all.
   does check the sha256 hash of skill-bundled *scripts*
   against VirusTotal; see [Skill Scanning](/guide/skill-scanning#virustotal-hash-lookup-opt-in-hash-only)
   for that feature and why it does not reverse this decline.
-- **No automated promotion out of `candidate` status.** The registry table
-  supports `approved`/`blocked`, and the ingest route never sets either — but
-  nothing in this phase builds the dashboard or API route an operator would
-  use to actually make that call.
+- **No OAuth brokering and no per-tool budgets.** The proxy passes a remote
+  server's credentials through (`INTUTIC_REMOTE_HEADERS`) and does not obtain,
+  refresh or scope them, and it does not count or cap calls per tool or per
+  server. A remote server configured with OAuth in OpenCode is left unwrapped.
+- **The registry knows servers by name.** Two different servers given the
+  same `--server-name` share one row and one decision, and a server whose
+  name changes is a new candidate. Pin the server's tools with TOFU, above,
+  to notice a server changing under the same name.
+- **Servers outside the proxy are not governed by it.** A project's
+  `.mcp.json`, a server added since the last sync cycle and harnesses this
+  page lists as unwrapped reach the harness directly. The registry may still
+  list them, from the MCP daemon's report; approving or blocking them changes
+  nothing until a proxy fronts them, apart from the hook-gate backstop below.
+- **The OS user, session and server on an event are what the proxy
+  reported.** The member is resolved from the API key; the rest is a claim by
+  the process holding that key.
+- **An approval lets a retry through only with `reviewHoldBypassEnabled`.**
+  Without it, approving records the decision and the call stays held, as for
+  hook-gate holds.
 
 ## Related
 

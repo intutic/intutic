@@ -61,6 +61,7 @@ list is a trial or a degraded preview of a paid feature:
 | Corporate SOP distribution | local files only | centralized, tamper-proof, pushed to every developer |
 | Guardrails from policy documents | hand-written SOP files and rules | Notion, Confluence, GitHub, Google Docs and uploads become cited, shadow-first guardrails a person promotes |
 | LLM-as-judge (L2/L3 semantic checks) | — | requires server compute |
+| MCP server governance | the proxy's local checks: DLP, injection scanning, anomaly detectors, WASM rules, TOFU pinning | plus the [server registry](/guide/mcp-governance#the-registry) with approvals and default-deny, [approval holds](/guide/mcp-governance#approval-holds), allowlists, SSO group policy and the calling member on every event, on every plan |
 
 Arm state carries over rather than resetting when you connect: a workspace
 that learned standalone keeps that learning, and the local loop stands down

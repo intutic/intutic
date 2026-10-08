@@ -206,7 +206,7 @@ budget/pacing model, and what a flagged hash does to the posture score.
 
 This is a narrower, different thing from this product's standing decline of
 a **global MCP-server reputation** database / VirusTotal integration — see
-[MCP Governance](/guide/mcp-governance#what-this-phase-deliberately-does-not-cover)
+[MCP Governance](/guide/mcp-governance#limits)
 for that separate decision, which this hash lookup does not reverse: that
 decline is about judging whether an MCP *server* is known-bad across
 tenants; this is a workspace-scoped, opt-in hash check on a skill-bundled

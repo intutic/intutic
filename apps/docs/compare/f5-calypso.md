@@ -18,7 +18,7 @@ Intutic is the enforcement point inside the coding agent: a pre-execution gate d
 | **Coding agents** | **43** supported harnesses, including Claude Code, Codex, Cursor, GitHub Copilot, Windsurf and Cline | Not named in its documentation |
 | **Decisions** | Allow, warn, require approval (held until approved), block, redact, re-ask, shadow | Guardrail enforcement on prompts, responses and agent actions |
 | **Custom policy** | SOPs in git and WASM rules; policy documents turned into controls with Policy Guardrails | Custom guardrails written as natural-language policies |
-| **MCP** | MCP governance proxy with DLP, policy rules, anomaly detectors, trust-on-first-use pinning and tool-description poisoning detection | Not described on its product page |
+| **MCP** | MCP governance proxy with a server registry, approvals and optional default-deny, approval holds, per-call identity, DLP, policy rules, anomaly detectors, trust-on-first-use pinning and tool-description poisoning detection | Not described on its product page |
 | **Red teaming** | — | Automated red teaming with autonomous attacker agents |
 | **Deployment** | Cloud, or fully self-hosted including air-gapped | Public cloud, private cloud, on-prem, air-gapped |
 | **Source** | Open core (MIT) | Closed |
