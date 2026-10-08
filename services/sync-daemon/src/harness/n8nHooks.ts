@@ -35,8 +35,6 @@ import { emitN8nWorkflowGate } from './gateBody.js'
 
 const log = createLogger('sync-n8n-hooks')
 
-/** Default n8n governance workflow directory. */
-const N8N_DIR = path.join(os.homedir(), '.intutic', 'n8n')
 
 // ─── Static node UUIDs (hardcoded for workflow stability) ─────────────────────
 
@@ -339,12 +337,13 @@ export async function writeN8nHooks(
   // ── 1. Ensure directories ──────────────────────────────────────────────────
 
   const envDir = path.join(workspaceRoot, '.intutic', 'env')
-  // homedir() read at call time (unlike the module-scope N8N_DIR) so tests
-  // that move HOME before invoking are honoured — the gooseHooks lesson.
+  // homedir() read at call time so tests that move HOME before invoking are
+  // honoured — the gooseHooks lesson.
   const hooksDir = path.join(os.homedir(), '.intutic', 'hooks')
+  const n8nDir = path.join(os.homedir(), '.intutic', 'n8n')
 
   await Promise.all([
-    fs.mkdir(N8N_DIR, { recursive: true }),
+    fs.mkdir(n8nDir, { recursive: true }),
     fs.mkdir(envDir, { recursive: true }),
     fs.mkdir(hooksDir, { recursive: true }),
   ])
@@ -363,7 +362,7 @@ export async function writeN8nHooks(
 
   // ── 2. Write governance-workflow.json (atomic) ────────────────────────────
 
-  const workflowPath = path.join(N8N_DIR, 'governance-workflow.json')
+  const workflowPath = path.join(n8nDir, 'governance-workflow.json')
   const workflow = buildN8nWorkflow(proxyUrl, workspaceId)
   const tmpWorkflow = workflowPath + '.intutic-tmp'
   await fs.writeFile(tmpWorkflow, JSON.stringify(workflow, null, 2) + '\n', 'utf-8')
@@ -376,7 +375,7 @@ export async function writeN8nHooks(
 
   // ── 2b. Write INSTALL.md (atomic) ─────────────────────────────────────────
 
-  const installPath = path.join(N8N_DIR, 'INSTALL.md')
+  const installPath = path.join(n8nDir, 'INSTALL.md')
   const tmpInstall = installPath + '.intutic-tmp'
   await fs.writeFile(tmpInstall, buildInstallMd(hookPath, workflowPath), 'utf-8')
   await fs.rename(tmpInstall, installPath)

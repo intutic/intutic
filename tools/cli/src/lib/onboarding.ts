@@ -9,6 +9,7 @@
 
 import pc from 'picocolors'
 import { log } from './logger.js'
+import { anthropicBaseUrl, openaiBaseUrl } from '@intutic/shared-types'
 
 /**
  * Print tailored setup instructions for a list of harnesses.
@@ -20,18 +21,6 @@ import { log } from './logger.js'
 function maskUserToken(tokenVal?: string): string {
   if (!tokenVal) return '<YOUR_INTUTIC_API_KEY>'
   return `${tokenVal.substring(0, 4)}...${tokenVal.substring(tokenVal.length - 4)}`
-}
-
-/**
- * Trims trailing `/` characters without a regex — see the identical helper
- * in `commands/exec.ts` for why: `/\/+$/` is flagged by static analysis as a
- * polynomial-time pattern on external input, and a loop sidesteps the whole
- * category rather than needing an exemption.
- */
-function trimTrailingSlashes(s: string): string {
-  let end = s.length
-  while (end > 0 && s.charCodeAt(end - 1) === 47 /* '/' */) end--
-  return s.slice(0, end)
 }
 
 function writeCliOutput(line: string): void {
@@ -53,8 +42,8 @@ export function printOnboardingGuide(harnesses: string[], userAuthToken?: string
   // send their agent traffic somewhere other than the proxy they had just
   // started. Set INTUTIC_PROXY_URL to override.
   void devMode
-  const proxyHost = trimTrailingSlashes(process.env.INTUTIC_PROXY_URL ?? 'http://localhost:4000')
-  const proxyUrl = `${proxyHost}/v1`
+  const proxyHost = anthropicBaseUrl(process.env.INTUTIC_PROXY_URL)
+  const proxyUrl = openaiBaseUrl(process.env.INTUTIC_PROXY_URL)
 
   writeCliOutput('')
   log.header('Intutic — Setup & Integration Instructions')

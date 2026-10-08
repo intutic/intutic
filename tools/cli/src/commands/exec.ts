@@ -23,6 +23,7 @@ import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import { loadCredentials, loadConfig } from '../config/store.js'
 import type { IntuticCredentials } from '@intutic/shared-types'
+import { proxyHost as normaliseProxyHost } from '@intutic/shared-types'
 import { getIntuticDir } from '../config/paths.js'
 import {
   deriveIdentity,
@@ -116,7 +117,7 @@ export function proxyPortFromEnv(): string {
 /**
  * Trims trailing `/` characters without a regex.
  *
- * `INTUTIC_PROXY_URL` is a local environment variable, not remotely
+ * The control-plane URL comes from local credentials, not remotely
  * attacker-controlled — but CodeQL's static analysis flags `/\/+$/` as a
  * polynomial-time pattern on external input regardless, and a loop is O(n)
  * and cannot be mis-classified as a ReDoS shape by any static analyzer.
@@ -149,9 +150,7 @@ export function buildProxyEnv(
   // Set INTUTIC_PROXY_URL to point at a proxy you run somewhere else. A sandbox
   // launch overrides it with the host-gateway alias, because inside the sandbox
   // `localhost` is the sandbox, not the host the proxy runs on.
-  const rawHost = trimTrailingSlashes(
-    proxyUrlOverride ?? process.env.INTUTIC_PROXY_URL ?? 'http://localhost:4000',
-  )
+  const rawHost = normaliseProxyHost(proxyUrlOverride ?? process.env.INTUTIC_PROXY_URL)
   void devMode
 
   // Graph identity rides in the base URL. Harnesses append their own path to

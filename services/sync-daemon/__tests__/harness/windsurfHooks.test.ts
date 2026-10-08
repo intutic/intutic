@@ -30,6 +30,11 @@ import { toRulesLine } from '../../src/harness/gateBody.js'
 /** Writes a `.rules` fixture the way the daemon does — digest included, so
  *  the gate's own digest check accepts it. Mirrors
  *  generatedGateBehaviour.test.ts's `writeRulesFixture`. */
+/** What the Windsurf plugin saves once it has run in an IDE. */
+const CODEIUM_SETTINGS_XML =
+  '<application>\n  <component name="com.codeium.intellij.settings.AppSettingsState">\n' +
+  '    <option name="detectProxy" value="false" />\n  </component>\n</application>\n'
+
 function writeRulesFixture(target: string): string {
   const lines = DESTRUCTIVE_COMMAND_PATTERNS.map(toRulesLine)
   const digest = createHash('sha256').update(lines.join('\n')).digest('hex').slice(0, 32)
@@ -70,13 +75,11 @@ describe('Windsurf hooks writer — Cascade real payload shape', () => {
   beforeAll(async () => {
     workspaceRoot = await node_fs.mkdtemp(node_path.join(node_os.tmpdir(), 'intutic-windsurf-ws-'))
     home = await node_fs.mkdtemp(node_path.join(node_os.tmpdir(), 'intutic-windsurf-home-'))
-    // windsurfHooks.ts reads os.homedir() at MODULE SCOPE (WINDSURF_USER_DIR),
-    // so HOME must be set before the dynamic import, not merely before the
-    // call — the same pitfall generatedShellIntegrity.test.ts's own comment
-    // documents for gooseHooks/piHooks.
+    // windsurfHooks.ts reads os.homedir() at call time, so setting HOME before
+    // the call is enough.
     process.env.HOME = home
     const { writeWindsurfHooks } = await import('../../src/harness/windsurfHooks.js')
-    await writeWindsurfHooks(workspaceRoot, 'http://127.0.0.1:4000', 8877, 'ws_test')
+    await writeWindsurfHooks(workspaceRoot, 'http://127.0.0.1:4000', 4000, 'ws_test')
     scriptPath = node_path.join(workspaceRoot, '.intutic', 'hooks', 'windsurf-check.js')
     auditLog = node_path.join(workspaceRoot, '.intutic', 'events', 'hook-events.jsonl')
     snapshotPath = writeRulesFixture(node_path.join(home, 'snapshot.rules'))
@@ -208,19 +211,79 @@ describe('Windsurf hooks writer — JetBrains proxy config wiring', () => {
       Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true })
       const optionsDir = node_path.join(home, 'Library', 'Application Support', 'JetBrains', 'GoLand2026.1', 'options')
       await node_fs.mkdir(optionsDir, { recursive: true })
+      // The plugin's own settings file is what marks it as set up in this IDE.
+      await node_fs.writeFile(node_path.join(optionsDir, 'CodeiumSettings.xml'), CODEIUM_SETTINGS_XML, 'utf-8')
 
       const { writeWindsurfHooks } = await import('../../src/harness/windsurfHooks.js')
-      await writeWindsurfHooks(workspaceRoot, 'http://127.0.0.1:4000', 8877, 'ws_test')
+      await writeWindsurfHooks(workspaceRoot, 'http://127.0.0.1:4000', 4000, 'ws_test')
 
       const codeiumXml = await node_fs.readFile(node_path.join(optionsDir, 'CodeiumSettings.xml'), 'utf-8')
       expect(codeiumXml).toContain('<option name="detectProxy" value="true" />')
       const proxyXml = await node_fs.readFile(node_path.join(optionsDir, 'proxy.settings.xml'), 'utf-8')
-      expect(proxyXml).toContain('<option name="PROXY_PORT" value="8877" />')
+      expect(proxyXml).toContain('<option name="PROXY_PORT" value="4000" />')
     } finally {
       process.env.HOME = prevHome
       Object.defineProperty(process, 'platform', { value: prevPlatform, configurable: true })
       await node_fs.rm(workspaceRoot, { recursive: true, force: true })
       await node_fs.rm(home, { recursive: true, force: true })
     }
+  })
+})
+
+describe('Windsurf hooks writer — merges into the user\'s files', () => {
+  let workspaceRoot: string
+  let home: string
+  const prevHome = process.env.HOME
+
+  beforeAll(async () => {
+    workspaceRoot = await node_fs.mkdtemp(node_path.join(node_os.tmpdir(), 'intutic-windsurf-merge-ws-'))
+    home = await node_fs.mkdtemp(node_path.join(node_os.tmpdir(), 'intutic-windsurf-merge-home-'))
+  })
+
+  afterAll(async () => {
+    process.env.HOME = prevHome
+    await node_fs.rm(workspaceRoot, { recursive: true, force: true })
+    await node_fs.rm(home, { recursive: true, force: true })
+  })
+
+  it('keeps the user\'s settings and hooks, points the proxy at the real proxy port, and does not stack on re-run', async () => {
+    const userDir = node_path.join(home, '.codeium', 'windsurf')
+    await node_fs.mkdir(userDir, { recursive: true })
+    await node_fs.writeFile(
+      node_path.join(userDir, 'settings.json'),
+      JSON.stringify({ 'editor.fontSize': 15, 'http.proxyAuthorization': null }),
+    )
+    await node_fs.writeFile(
+      node_path.join(userDir, 'hooks.json'),
+      JSON.stringify({ hooks: { pre_run_command: [{ command: 'my-audit.sh' }], post_cascade_response: [{ command: 'notify.sh' }] } }),
+    )
+
+    process.env.HOME = home
+    const { writeWindsurfHooks } = await import('../../src/harness/windsurfHooks.js')
+    await writeWindsurfHooks(workspaceRoot, 'http://127.0.0.1:4000', 4000, 'ws_test')
+    await writeWindsurfHooks(workspaceRoot, 'http://127.0.0.1:4000', 4000, 'ws_test')
+
+    const settings = JSON.parse(await node_fs.readFile(node_path.join(userDir, 'settings.json'), 'utf-8'))
+    expect(settings['editor.fontSize']).toBe(15)
+    expect(settings['http.proxy']).toBe('http://127.0.0.1:4000')
+    expect(settings['codeium.proxy']).toBe('http://127.0.0.1:4000')
+
+    const hooks = JSON.parse(await node_fs.readFile(node_path.join(userDir, 'hooks.json'), 'utf-8')).hooks
+    expect(hooks.post_cascade_response).toEqual([{ command: 'notify.sh' }])
+    expect(hooks.pre_run_command[0]).toEqual({ command: 'my-audit.sh' })
+    expect(hooks.pre_run_command).toHaveLength(2)
+    expect(hooks.pre_run_command[1].command).toContain('windsurf-check.js')
+  })
+
+  it('leaves a settings.json that is not plain JSON untouched', async () => {
+    const userDir = node_path.join(home, '.codeium', 'windsurf')
+    const jsonc = '{\n  // my proxy\n  "http.proxy": "http://corp-proxy:3128",\n}\n'
+    await node_fs.writeFile(node_path.join(userDir, 'settings.json'), jsonc)
+
+    process.env.HOME = home
+    const { writeWindsurfHooks } = await import('../../src/harness/windsurfHooks.js')
+    await writeWindsurfHooks(workspaceRoot, 'http://127.0.0.1:4000', 4000, 'ws_test')
+
+    expect(await node_fs.readFile(node_path.join(userDir, 'settings.json'), 'utf-8')).toBe(jsonc)
   })
 })

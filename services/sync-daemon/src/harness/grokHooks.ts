@@ -71,6 +71,7 @@ import * as path from 'node:path'
 import * as os from 'node:os'
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml'
 import { createLogger } from '@intutic/logger'
+import { openaiBaseUrl } from '@intutic/shared-types'
 import { newIso } from '@intutic/id'
 import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
 
@@ -387,6 +388,10 @@ export async function writeGrokHooks(
   log.info({ action: 'grok_hooks_written', level: 'user', path: userHooksDir }, 'Grok user-level hooks written')
 
   // 3. config.toml model base_url — project and user level.
-  await mergeGrokConfigToml(path.join(workspaceRoot, '.grok', 'config.toml'), proxyUrl)
-  await mergeGrokConfigToml(path.join(GROK_USER_DIR, 'config.toml'), proxyUrl)
+  // Grok Build talks to xAI's OpenAI-compatible API (its own default base_url
+  // is https://api.x.ai/v1) and appends /chat/completions, so the proxy URL it
+  // needs is the OpenAI-style one, ending in /v1.
+  const modelBaseUrl = openaiBaseUrl(proxyUrl)
+  await mergeGrokConfigToml(path.join(workspaceRoot, '.grok', 'config.toml'), modelBaseUrl)
+  await mergeGrokConfigToml(path.join(GROK_USER_DIR, 'config.toml'), modelBaseUrl)
 }

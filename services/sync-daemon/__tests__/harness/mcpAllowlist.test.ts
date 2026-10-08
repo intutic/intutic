@@ -318,17 +318,22 @@ describe('MCP per-server allowlist — cursor (real beforeMCPExecution envelope)
 
 describe('MCP per-server allowlist — cline (use_mcp_tool normalization)', () => {
   const root = () => roots.get('cline')!
-  const script = () => join(root(), '.cline', 'hooks', 'intutic-check.js')
+  const script = () => join(root(), '.clinerules', 'hooks', 'PreToolUse')
   const snap = () => join(root(), 'snap.rules')
 
-  /** Cline's real tool-call schema: `use_mcp_tool` with `server_name`/
-   *  `tool_name`/`arguments` as separate tool_input fields. */
+  /** The payload the Cline VS Code extension sends its PreToolUse file hook:
+   *  `preToolUse.toolName` plus `parameters` whose values are JSON-encoded
+   *  strings (Cline's source, apps/vscode/src/core/hooks). `use_mcp_tool`
+   *  carries `server_name`/`tool_name`/`arguments` as separate parameters. */
   const run = (serverName: string, toolName: string, snapshotPath: string) =>
     runProcess('node', [script()], {
       input: JSON.stringify({
-        tool_name: 'use_mcp_tool',
-        tool_input: { server_name: serverName, tool_name: toolName, arguments: {} },
-        session_id: 's1',
+        hookName: 'PreToolUse',
+        taskId: 's1',
+        preToolUse: {
+          toolName: 'use_mcp_tool',
+          parameters: { server_name: serverName, tool_name: toolName, arguments: '{}' },
+        },
       }),
       env: { ...process.env, HOME: root(), USERPROFILE: root(), INTUTIC_SNAPSHOT_RULES: snapshotPath },
       timeoutMs: 15_000,
@@ -366,7 +371,7 @@ describe('MCP per-server allowlist — cline (use_mcp_tool normalization)', () =
   it('a non-use_mcp_tool call is unaffected by the normalization', async () => {
     writeMcpRulesFixture(snap(), { mcpservers: { severity: 'block', servers: ['filesystem'] } })
     const r = await runProcess('node', [script()], {
-      input: JSON.stringify({ tool_name: 'read_file', tool_input: { path: 'README.md' }, session_id: 's1' }),
+      input: JSON.stringify({ hookName: 'PreToolUse', preToolUse: { toolName: 'read_file', parameters: { path: 'README.md' } } }),
       env: { ...process.env, HOME: root(), USERPROFILE: root(), INTUTIC_SNAPSHOT_RULES: snap() },
       timeoutMs: 15_000,
     })

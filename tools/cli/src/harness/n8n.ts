@@ -1,8 +1,11 @@
 /**
- * n8n adapter — Real-time REST parameter sync.
+ * n8n adapter — Real-time REST parameter sync plus the workflow-level gate.
  *
  * Interacts with n8n workflow management API (GET/PUT /api/v1/workflows)
- * to inject Intutic proxy URL and SOP governance rules as workflow variables.
+ * to inject Intutic proxy URL and SOP governance rules as workflow variables,
+ * and writes the external-hook gate module (`~/.intutic/hooks/
+ * n8n-governance-hook.js`) with its INSTALL.md — see n8nHooks.ts. The gate
+ * takes effect only once the n8n operator sets EXTERNAL_HOOK_FILES to it.
  *
  * Supports local n8n instances by falling back to unauthenticated requests
  * if N8N_API_TOKEN is not provided.
@@ -17,6 +20,8 @@ import { createHash } from 'node:crypto'
 import { HarnessType } from '@intutic/shared-types'
 import type { SyncSopEntry } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
+import { loadCredentials } from '../config/store.js'
+import { writeN8nHooks } from '@intutic/sync-daemon'
 
 // ─── n8n REST payloads ──────────────────────────────────────────────
 //
@@ -102,7 +107,12 @@ export const n8nAdapter: IHarnessAdapter = {
     }
   },
 
-  async writeConfig(_workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
+  async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
+    // Written first and independently of the REST sync below: the gate file
+    // is local, and an unreachable n8n API must not stop it being refreshed.
+    const creds = await loadCredentials()
+    await writeN8nHooks(workspaceRoot, proxyUrl, creds?.workspaceId || 'local')
+
     const n8nUrl = process.env.N8N_URL || 'http://localhost:5678'
     const sopsMarkdown = buildSopsMarkdown(sops)
 

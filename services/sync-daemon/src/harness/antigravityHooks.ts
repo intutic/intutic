@@ -1,16 +1,21 @@
 /**
  * antigravityHooks.ts — Gemini CLI (Antigravity) governance hook injection.
  *
- * Antigravity (Google DeepMind's Gemini CLI) supports a tool-level governance
- * hook via the `ANTIGRAVITY_PRE_TOOL_HOOK` environment variable and an optional
- * hook configuration file at `~/.gemini/settings.json`. This module:
+ * Gemini CLI runs command hooks registered under `hooks.BeforeTool` in
+ * `~/.gemini/settings.json`. Each entry carries a `matcher` regex over tool
+ * names and a list of `{type: "command", command}` hooks; the command receives
+ * `{tool_name, tool_input, ...}` on stdin and blocks the call with exit code 2
+ * (stderr is the reason). This module:
  *
- * 1. Writes a pre-tool-check.sh script to `.intutic/hooks/antigravity-check.sh`
+ * 1. Writes the gate script to `.intutic/hooks/antigravity-check.sh`
  *    (same pattern as Goose / OpenHands bash hooks).
- * 2. Merges the hook path into `~/.gemini/settings.json` under the
- *    `hooks.preTool` key.
- * 3. Optionally writes an `ANTIGRAVITY_PROXY_URL` env snippet to
- *    `.intutic/env/antigravity.env` for IDE/shell integration.
+ * 2. Merges a catch-all `BeforeTool` entry for it into
+ *    `~/.gemini/settings.json`, keeping every other setting and hook. A
+ *    settings file that is not a plain JSON object is left alone.
+ *
+ * Earlier versions registered the script under `hooks.preTool` and wrote an
+ * `ANTIGRAVITY_PRE_TOOL_HOOK` env snippet. Neither is a Gemini CLI setting, so
+ * that gate never ran; the stale `preTool` key is removed on the next write.
  *
  * Why bash and not Node.js?
  *   The Gemini CLI (antigravity) is a standalone binary; when it invokes
@@ -35,11 +40,10 @@ import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { newIso } from '@intutic/id'
 import { emitShellGate, SHELL_EXTRACT, SHELL_FAIL_CLOSED } from './gateBody.js'
+import { readJsonObjectForMerge } from './jsonMergeTarget.js'
 
 const log = createLogger('sync-antigravity-hooks')
 
-/** Default path to the Gemini CLI global settings file. */
-const GEMINI_SETTINGS = path.join(os.homedir(), '.gemini', 'settings.json')
 
 /** Governance-sensitive paths that the hook gate protects. */
 // ─── Bash hook script template ────────────────────────────────────────────────
@@ -136,13 +140,13 @@ export async function writeAntigravityHooks(
 
   const hookScriptDir = path.join(workspaceRoot, '.intutic', 'hooks')
   const hookEventsDir = path.join(workspaceRoot, '.intutic', 'events')
-  const envDir = path.join(workspaceRoot, '.intutic', 'env')
+  // homedir() read at call time so tests that move HOME are honoured.
+  const geminiSettings = path.join(os.homedir(), '.gemini', 'settings.json')
 
   await Promise.all([
     fs.mkdir(hookScriptDir, { recursive: true }),
     fs.mkdir(hookEventsDir, { recursive: true }),
-    fs.mkdir(envDir, { recursive: true }),
-    fs.mkdir(path.join(os.homedir(), '.gemini'), { recursive: true }),
+    fs.mkdir(path.dirname(geminiSettings), { recursive: true }),
   ])
 
   // ── 2. Write hook script ───────────────────────────────────────────────────
@@ -157,48 +161,52 @@ export async function writeAntigravityHooks(
 
   // ── 3. Merge into ~/.gemini/settings.json ─────────────────────────────────
 
-  let existingSettings: Record<string, unknown> = {}
-  try {
-    const raw = await fs.readFile(GEMINI_SETTINGS, 'utf-8')
-    existingSettings = JSON.parse(raw)
-  } catch {
-    // File doesn't exist yet — start fresh
-  }
+  const existingSettings = await readJsonObjectForMerge(geminiSettings)
+  if (existingSettings === null) return
+
+  const existingHooks = (typeof existingSettings.hooks === 'object' && existingSettings.hooks !== null
+    ? existingSettings.hooks
+    : {}) as Record<string, unknown>
+  // `preTool` is where earlier versions registered the gate; it is not a
+  // Gemini CLI hook event, so it is dropped rather than carried forward.
+  const keptHooks: Record<string, unknown> = { ...existingHooks }
+  delete keptHooks.preTool
+  const existingBeforeTool = Array.isArray(keptHooks.BeforeTool) ? (keptHooks.BeforeTool as unknown[]) : []
+
+  // De-duplicated by command, so repeated syncs replace this entry rather than
+  // stacking copies, and every hook the user registered is kept.
+  const intuticCmd = `bash ${JSON.stringify(hookScriptPath)}`
+  const filtered = existingBeforeTool.filter((entry: unknown) => {
+    if (typeof entry !== 'object' || entry === null) return true
+    const inner = ((entry as Record<string, unknown>).hooks as unknown[]) ?? []
+    return !(
+      inner.length > 0 &&
+      inner.every((h: unknown) => typeof h === 'object' && h !== null && (h as Record<string, unknown>).command === intuticCmd)
+    )
+  })
 
   const mergedSettings = {
     ...existingSettings,
     hooks: {
-      ...(existingSettings.hooks as Record<string, unknown>),
-      // Register the pre-tool hook command
-      preTool: hookScriptPath,
+      ...keptHooks,
+      BeforeTool: [
+        ...filtered,
+        {
+          // Catch-all: the gate decides from the arguments, so a tool name
+          // nobody anticipated is still evaluated.
+          matcher: '.*',
+          hooks: [{ name: 'intutic-governance', type: 'command', command: intuticCmd }],
+        },
+      ],
     },
   }
 
-  const tmpSettings = GEMINI_SETTINGS + '.intutic-tmp'
+  const tmpSettings = geminiSettings + '.intutic-tmp'
   await fs.writeFile(tmpSettings, JSON.stringify(mergedSettings, null, 2) + '\n', 'utf-8')
-  await fs.rename(tmpSettings, GEMINI_SETTINGS)
+  await fs.rename(tmpSettings, geminiSettings)
 
   log.info(
-    { action: 'antigravity_settings_written', path: GEMINI_SETTINGS },
-    'Merged Intutic hook into ~/.gemini/settings.json',
-  )
-
-  // ── 4. Write env snippet (optional — for shell profiles / IDE env) ─────────
-
-  const envSnippet = [
-    `# Intutic Antigravity governance hook — auto-generated ${newIso()}`,
-    `# Source this file in ~/.bashrc or ~/.zshrc to apply governance to Gemini CLI.`,
-    `export ANTIGRAVITY_PRE_TOOL_HOOK=${JSON.stringify(hookScriptPath)}`,
-    proxyUrl ? `export ANTIGRAVITY_PROXY_URL=${JSON.stringify(proxyUrl)}` : '',
-  ].filter(Boolean).join('\n') + '\n'
-
-  const envFilePath = path.join(envDir, 'antigravity.env')
-  const tmpEnv = envFilePath + '.intutic-tmp'
-  await fs.writeFile(tmpEnv, envSnippet, 'utf-8')
-  await fs.rename(tmpEnv, envFilePath)
-
-  log.info(
-    { action: 'antigravity_env_written', path: envFilePath },
-    'Antigravity env snippet written',
+    { action: 'antigravity_settings_written', path: geminiSettings },
+    'Merged Intutic BeforeTool hook into ~/.gemini/settings.json',
   )
 }

@@ -581,3 +581,10 @@ export {
   type EnforcementFacets,
   type GovernanceCoverageInputs,
 } from './governanceCoverage.js'
+
+export {
+  DEFAULT_PROXY_HOST,
+  proxyHost,
+  anthropicBaseUrl,
+  openaiBaseUrl,
+} from './proxyBaseUrls.js'

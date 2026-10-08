@@ -1,9 +1,10 @@
 /**
  * aider.ts — Aider adapter (full implementation with safe YAML merge).
  *
- * Writes SOP content into .aider.conf.yml using the aiderConfigMerger
- * which safely merges proxy keys and strips dangerous auto-exec keys
- * (test-cmd, lint-cmd) that Aider auto-executes on startup.
+ * Merges proxy routing into .aider.conf.yml using the aiderConfigMerger,
+ * which keeps the user's own keys, strips dangerous auto-exec keys
+ * (test-cmd, lint-cmd) that Aider auto-executes on startup, and lists the
+ * SOP text as a read-only context file (.intutic/aider-sops.md).
  *
  * HLD §3.14 — Harness Onboarding Matrix
  * @module
@@ -40,9 +41,9 @@ export const aiderAdapter: IHarnessAdapter = {
       : undefined
 
     // Safe merge: strips test-cmd/lint-cmd, preserves all other user keys,
-    // injects proxy URL as openai-api-base and anthropic-api-base
-    await mergeAiderConfig(filePath, proxyUrl, sopsText)
-    return filePath
+    // routes OpenAI (openai-api-base) and Anthropic (set-env) models through
+    // the proxy and lists the SOPs as a read-only context file.
+    return (await mergeAiderConfig(filePath, proxyUrl, sopsText)) ? filePath : null
   },
 
   async readCurrentHash(workspaceRoot: string): Promise<string | null> {
