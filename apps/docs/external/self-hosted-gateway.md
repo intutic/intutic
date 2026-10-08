@@ -179,8 +179,10 @@ the chart). A value set this way overrides the deployment's own, and `true` for
 The change applies live on every target, Docker, Kubernetes and bare metal alike, within one
 heartbeat interval: `INTUTIC_GATEWAY_HEARTBEAT_INTERVAL_SECS` (`proxy.heartbeatIntervalSeconds` in
 the chart), 30 seconds by default. Each heartbeat tells the proxy the latest config version; when
-it is newer than the one the proxy runs, the proxy fetches the config and applies it to the next
-request, with no restart and no redeploy. A proxy that restarts fetches the config with its first
+it differs from the one the proxy runs, the proxy fetches the config and applies it to the next
+request, with no restart and no redeploy. That includes a version lower than the one it runs,
+which means the control plane's version counter was reset: the proxy applies the config it is
+served, adopts its version and logs a warning. A proxy that restarts fetches the config with its first
 heartbeat, which it sends as it starts.
 
 If that fetch fails, or returns a config the proxy cannot read whole, the proxy keeps the config

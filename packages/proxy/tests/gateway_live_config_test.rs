@@ -1,8 +1,9 @@
 //! A registered gateway applies a remote config change to the running
 //! proxy on its heartbeat, with no restart, against a mock control plane:
-//! a version ahead of the applied one is pulled and enforced on the next
-//! request; a failed or malformed pull leaves the running config alone; an
-//! equal or older version is not pulled at all.
+//! a version that differs from the applied one is pulled and enforced on the
+//! next request, including a lower one (the control plane's counter was
+//! reset); a failed or malformed pull leaves the running config alone; an
+//! equal version is not pulled at all.
 //!
 //! One test in its own file: the live gateway config is process-wide.
 
@@ -233,11 +234,27 @@ async fn remote_config_applies_live_and_fails_safe() {
     })
     .await;
 
-    // 4. A stale desired version (behind what is applied) → no pull.
+    // 4. A lower desired version (behind what is applied): the control
+    //    plane's counter was reset, and the config it serves is the current
+    //    one → pulled, applied, and its version adopted.
+    cp.set_config(
+        200,
+        json!({ "configVersion": 1, "config": { "requireVk": true } }),
+    );
     cp.desired.store(1, Ordering::SeqCst);
+    wait_until("the reset counter's config to go live", async || {
+        requires_vk_only()
+    })
+    .await;
+    assert!(raw_key_refused(&proxy).await);
+    wait_until("the next heartbeat to report version 1", async || {
+        last_reported(&server).await == Some(1)
+    })
+    .await;
+
+    // And from the adopted version on, equal → no pull.
     let pulls = count(&server, "GET", "/config").await;
     wait_for_beats(&server, 5).await;
     assert_eq!(count(&server, "GET", "/config").await, pulls);
-    assert!(!requires_vk_only());
-    assert_eq!(last_reported(&server).await, Some(2));
+    assert!(requires_vk_only());
 }
