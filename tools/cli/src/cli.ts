@@ -1163,13 +1163,13 @@ decisionCmd
 // see commands/gateway.ts's module doc.
 const gatewayCmd = program
   .command('gateway')
-  .description('Manage self-hosted gateway registrations (Docker / Kubernetes / bare-metal)')
+  .description('Manage self-hosted gateway registrations (Docker / Kubernetes)')
 
 gatewayCmd
   .command('register')
   .description('Register a new self-hosted gateway and print its one-time gwk_ token')
   .requiredOption('--name <name>', 'Display name for this gateway')
-  .requiredOption('--target <docker|kubernetes|bare_metal>', 'Deployment target')
+  .requiredOption('--target <docker|kubernetes>', 'Deployment target')
   .option('--json', 'Output as JSON')
   .option('--dev', 'Use local control plane (http://localhost:3001)')
   .action(async (opts) => {

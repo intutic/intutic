@@ -2257,12 +2257,11 @@ Prints each link in the chain: parent key, child key, granted capabilities, expi
 
 ## `intutic gateway register` <Badge type="danger" text="Enterprise" />
 
-Register a [self-hosted gateway](/external/self-hosted-gateway) — an org's own Docker,
-Kubernetes, or bare-metal deployment of the Intutic proxy — and print its one-time management
-token.
+Register a [self-hosted gateway](/external/self-hosted-gateway) — an org's own Docker or
+Kubernetes deployment of the Intutic proxy — and print its one-time management token.
 
 ```bash
-intutic gateway register --name <name> --target <docker|kubernetes|bare_metal> [options]
+intutic gateway register --name <name> --target <docker|kubernetes> [options]
 ```
 
 **Options:**
@@ -2270,7 +2269,7 @@ intutic gateway register --name <name> --target <docker|kubernetes|bare_metal> [
 | Option | Description |
 |--------|-------------|
 | `--name <name>` | Display name for this gateway (required) |
-| `--target <docker\|kubernetes\|bare_metal>` | Deployment target (required) |
+| `--target <docker\|kubernetes>` | Deployment target (required) |
 | `--json` | Output as JSON |
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
@@ -2371,8 +2370,7 @@ intutic gateway config set <gateway_id> [--require-vk <true|false>] [--require-p
 | `--json` | Output as JSON |
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
-A bare-metal daemon-supervised gateway applies a config change on its next poll. Docker and
-Kubernetes deployments need a manual redeploy to pick it up.
+Docker and Kubernetes gateways pick up a config change when they are redeployed.
 
 ---
 
