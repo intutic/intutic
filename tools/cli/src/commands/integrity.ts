@@ -161,6 +161,8 @@ interface ConfigChainResponse {
   unchainedSnapshotIds: string[]
   breaks: ConfigChainBreak[]
   contentMismatches: ConfigContentMismatch[]
+  /** Snapshots captured without content: links checked, content not re-hashable. */
+  snapshotsWithoutContent?: number
   intact: boolean
 }
 
@@ -939,6 +941,15 @@ export async function runIntegrityConfigChain(opts: IntegrityCliOpts): Promise<v
         `No breaks and no content mismatches across ${walked} snapshot(s): every walked snapshot ` +
           'names the snapshot that actually precedes it, and every stored body still hashes to its ' +
           'recorded content_hash.',
+      )
+    }
+    const withoutContent = body.snapshotsWithoutContent ?? 0
+    if (withoutContent > 0) {
+      // Not a finding: the workspace chose not to upload content. Said, so
+      // "every stored body hashes" is not read as covering them.
+      log.dim(
+        `${withoutContent} snapshot(s) were captured without content (configBodyUpload is off): ` +
+          'their links were checked; their content cannot be re-hashed, because it was never uploaded.',
       )
     }
 

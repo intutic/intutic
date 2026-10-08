@@ -92,7 +92,7 @@ Local harness configuration is treated as governed state, not developer preferen
 
 ### Key Capabilities
 
-- **Snapshot & Diff** — Config captures are versioned per workspace, and any two snapshots can be diffed to show exactly what changed in `.cursorrules`, `CLAUDE.md`, or a hooks file.
+- **Snapshot & Diff** — Config captures are versioned per workspace, and each snapshot can be diffed against the one captured just before it, to show what changed in `.cursorrules`, `CLAUDE.md`, or a hooks file. Diffs and SkillOpt need the file text, which `intutic connect` uploads only when the workspace turns on **Upload config file content** (Settings › Security › Harness Config History); with it off the history records when each file changed, not how. See [Config content upload](/reference/cli#config-content-upload).
 - **Local Restore** — The sync daemon watches those files with `chokidar`. If an agent modifies or deletes one, it reports the drift and rewrites the file from the synced SOPs, unless the workspace's hand-edit setting is **Record only**.
 
 ::: info Context gap detection is not part of the product

@@ -564,6 +564,23 @@ export interface WorkspaceSettings {
   virusTotalSkillLookupEnabled?: boolean
 
   /**
+   * Upload the content of harness config files, not only their hashes.
+   *
+   * `intutic connect` captures each recorded harness's rules file (the list is
+   * `HARNESS_FILES` in `@intutic/sync-daemon`). Off, it uploads the file's
+   * path, the SHA-256 of its redacted text, its size, the harness and the
+   * time: the config history records what changed and when, and its hash
+   * chain stays verifiable. On, it also uploads the text, with credential-
+   * shaped strings replaced by `[redacted]` before it leaves the machine,
+   * which is what config diffs and SkillOpt's config-edit suggestions need.
+   *
+   * Off by default: file content leaving developer machines is a privacy
+   * choice a workspace makes, not one a default makes for it. The control
+   * plane refuses a body sent while this is off.
+   */
+  configBodyUpload?: boolean
+
+  /**
    * Fraction of ingested traces that receive the two heavier, LLM-adjacent
    * security probes — `traceIngestClassifier.classifyTraceAtIngest`'s
    * baseline/history-derived anomaly checks and `llmProbeService`'s
@@ -686,6 +703,8 @@ export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
   // Off by default — see the field doc for the hash-only doctrine and why
   // this must never turn on for a workspace that never configured it.
   virusTotalSkillLookupEnabled: false,
+  // Off by default — see the field doc: hashes and metadata only.
+  configBodyUpload: false,
   // ON by default — see the field doc. Opting out stops label retention for
   // the judge fine-tuning dataset, never card delivery itself.
   governanceCardLabelingEnabled: true,

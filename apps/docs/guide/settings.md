@@ -187,6 +187,23 @@ through the same enforcement path:
 - A rejected request names both sources in its error, so a model refused on a connected proxy
   points you at the workspace allowlist, and on a standalone one at this file.
 
+### Harness Config History
+
+`intutic connect` records each harness rules file (`CLAUDE.md`, `.cursorrules`, `AGENTS.md` and
+the others listed under [Config content upload](/reference/cli#config-content-upload)) in the
+workspace's config history. The **Upload config file content** switch decides what that record
+holds. It is off by default.
+
+| Setting | What is uploaded |
+|---------|------------------|
+| **Off** *(default)* | Each file's path, the SHA-256 of its redacted text, its size, the harness and the capture time. Never its text. Version History shows when a file changed, not what changed; there are no diffs and no SkillOpt config-edit suggestions |
+| **On** | The same, plus the file's text, with API keys, tokens, private keys and other credential-shaped strings replaced by `[redacted]` on the developer's machine before it is sent. Diffs and SkillOpt suggestions use the text |
+
+The control plane refuses text sent while the switch is off. A change reaches each machine at its
+next sync and applies from its next capture, within a few minutes. Changing it needs the Owner or
+Admin role, and the change is recorded in the settings history like any other. The API key is
+`configBodyUpload` in `PUT /api/v1/workspace/settings`.
+
 ---
 
 ## AI Routing & Caching {#routing-proxy}
@@ -213,6 +230,8 @@ The choice reaches each proxy with its policy. A proxy that has not been able to
 | **Restore** *(default)* | The sync daemon notices the hand edit and puts the managed file back |
 | **Write-protect** *(macOS only)* | The file is locked against edits with the macOS immutable flag (`chflags uchg`) |
 | **Record only** | The edit stays, and an incident records the drift |
+
+Gate hook files are restored under every option, Record only included: they are the gates, not your config.
 
 The card also shows the **Proxy mode**: per session.
 

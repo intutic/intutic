@@ -69,6 +69,8 @@ Developer → AI Agent → Intutic Proxy (:4000) → LLM Provider
 
 In this mode, and only in this mode, verdicts and traces are sent to the control plane. Point it at a control plane you host yourself. Prompts and completions are still never transmitted.
 
+The sync daemon (`intutic connect`) also records each harness rules file in the workspace's config history: its path, a hash, its size and the time. It uploads a file's text only when the workspace turns on **Upload config file content**, and redacts credential-shaped strings in it before it leaves the machine. See [Config content upload](/reference/cli#config-content-upload).
+
 ---
 
 <!-- ENTERPRISE_ONLY_END -->

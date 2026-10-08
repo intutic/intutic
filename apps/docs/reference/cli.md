@@ -377,6 +377,9 @@ that login.
    SOP folders under `.intutic/sops/`, then refreshes the policy snapshot.
 4. Watches the governed harness files and restores the approved version when one is edited
    locally, keeping the edited copy as `<file>.drift-backup`.
+5. Every fifth poll, records each harness rules file that changed in the workspace's config
+   history: metadata only, unless the workspace turned on content upload (see
+   [Config content upload](#config-content-upload)).
 
 **Credentials:** `--workspace-id` and `--api-key` together replace the stored login for this run; either one alone is ignored. With the pair, `intutic login` is not needed, and if `intutic init` has not run, the current directory is used as the workspace with no harnesses. This is how the service installed by [`intutic daemon install`](#intutic-daemon-install) runs. Without the pair and without a login, the command exits with status `1` and points to `intutic start`.
 
@@ -402,7 +405,10 @@ The daemon runs in the foreground. Use `Ctrl+C` to stop.
 **What `connect` sends to the control plane:**
 
 - A SHA-256 hash of each governed harness config file, and a drift report (harness, file path and
-  hashes) when one changes. File contents are not uploaded.
+  hashes) when one changes.
+- A config history capture of each harness rules file that changed: its path, the SHA-256 of its
+  redacted text, its size, the harness and the time. Its text only when the workspace turned on
+  content upload; see [Config content upload](#config-content-upload).
 - A status heartbeat: config version, detected harnesses, running agent process names, and the
   health of the proxy, Valkey and CA trust.
 - An agent report per harness: the configured guardrails, role SOPs, skills found under
@@ -413,6 +419,49 @@ The daemon runs in the foreground. Use `Ctrl+C` to stop.
 - Hook events and review requests the harness gates logged under `.intutic/events/`.
 - The proxy's local trace files, `~/.intutic/logs/traces-*.jsonl`, which are deleted locally once
   uploaded.
+
+### Config content upload {#config-content-upload}
+
+The config history records the harness rules files below, from the workspace root, for each
+harness `intutic connect` governs. What it uploads depends on one workspace setting,
+**Upload config file content** (`configBodyUpload`, in Settings › Security › Harness Config
+History). It is off by default.
+
+- **Off:** each file's path, the SHA-256 of its redacted text, its size in bytes, the harness and
+  the capture time. Never its text. The history shows when a file changed, and its hash chain can
+  still be verified, but there are no config diffs and no SkillOpt config-edit suggestions.
+- **On:** the same, plus the file's text. Before the text leaves the machine, API keys, tokens,
+  private keys, passwords and other credential-shaped strings in it are replaced with
+  `[redacted]`: the patterns the harness gates and the pre-commit check refuse, and
+  `secret: value` assignments to keys named like a secret. The hash is of the redacted text in
+  both modes.
+
+The control plane refuses a capture that carries text while the setting is off, and stores
+nothing from it. A change to the setting reaches each machine at its next sync and applies from
+the next capture: `connect` captures every fifth poll, about every 2.5 minutes at the default
+interval. Files larger than 512 KB are not captured.
+
+| File | Harnesses |
+|------|-----------|
+| `.agents/plugins/intutic-governance/hooks/hooks.json` | `goose` |
+| `.aider.conf.yml` | `aider` |
+| `.clinerules/intutic-governance.md` | `cline` |
+| `.continue/config.json` | `continue` |
+| `.cursorrules` | `cursor` |
+| `.env.intutic` | `codex`, `langgraph`, `langchain`, `crewai`, `autogen`, `ag2`, `google-adk`, `openai-agents`, `pydantic-ai`, `smolagents`, `strands`, `agent-framework`, `mastra`, `vercel-ai-sdk`, `eve`, `trueforge`, `ai-sdk-harness`, `ai-sdk-workflow` |
+| `.gemini/settings.json` | `antigravity` |
+| `.github/copilot-instructions.md` | `github-copilot` |
+| `.hermes/config.yaml` | `hermes` |
+| `.intutic/n8n/governance-workflow.json` | `n8n` |
+| `.open-webui/intutic-governance-filter.py` | `open-webui` |
+| `.openclaw/openclaw.json` | `openclaw` |
+| `.pi/hooks.json` | `pi` |
+| `.roorules` | `roo-code` |
+| `.windsurfrules` | `windsurf` |
+| `AGENTS.md` | `muse-code`, `grok`, `opencode` |
+| `claude_desktop_config.json` | `claude-desktop` |
+| `CLAUDE.md` | `claude-code` |
+| `config.toml` | `openhands` |
 
 ---
 
@@ -829,10 +878,11 @@ Walk the harness **config snapshot** chain and re-hash every stored body. Each s
 `harness_config_snapshots` records a `content_hash` of its own body and the `previous_hash` of
 the snapshot before it, per harness type and file path — this is the command that reads them.
 
-A snapshot holds the full text of a harness config file. The CLI never uploads those bodies:
-`intutic connect` reports only each file's hash. A workspace therefore has snapshots only from a
-client that posts them to the control plane's config-capture endpoint itself; otherwise this
-command reports an absent chain.
+`intutic connect` captures the snapshots (see [Config content upload](#config-content-upload)).
+A snapshot holds a file's redacted text only when the workspace turned content upload on;
+otherwise it holds the file's hash and size. The links of a snapshot without text are checked
+like any other, but its content cannot be re-hashed, because it was never uploaded: the report
+says how many such snapshots it walked, and they are not a finding.
 
 ```bash
 intutic integrity config-chain [options]

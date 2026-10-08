@@ -190,14 +190,23 @@ export interface IntegrityStore {
 // ─── Config Capture (Daemon → Control Plane) ────────────────────────
 // LLD #51 — Harness Config Capture + SkillOpt Pipeline
 
-/** A single harness config file captured by the daemon. */
+/**
+ * A single harness config file captured by the daemon.
+ *
+ * `content` is present only when the workspace's `configBodyUpload` is on;
+ * without it the capture is metadata only. The hash is of the text after
+ * secret redaction, the text that is (or would be) uploaded, so the chain
+ * does not move when the setting is turned on or off.
+ */
 export interface CapturedConfigFile {
   /** Relative file path (e.g., `.cursorrules`, `CLAUDE.md`). */
   path: string
-  /** Full file content. */
-  content: string
-  /** SHA-256 hash of content. */
+  /** File content with credential-shaped strings redacted, when uploaded. */
+  content?: string
+  /** SHA-256 hex of the redacted content. */
   contentHash: string
+  /** Size of the file on disk, in bytes. */
+  sizeBytes: number
 }
 
 /** Payload sent by daemon to capture harness config snapshots (multi-file). */
@@ -210,7 +219,13 @@ export interface BatchConfigCapturePayload {
   files: CapturedConfigFile[]
 }
 
-/** Structured diff between two config snapshots. */
+/**
+ * Structured diff between a config snapshot and its predecessor.
+ *
+ * `contentUploaded` is false when either snapshot was captured without its
+ * content (`configBodyUpload` off): the history knows the file changed, not
+ * how, so the counts are zero and both contents null.
+ */
 export interface ConfigDiff {
   /** Lines added. */
   addedLines: number
@@ -218,10 +233,12 @@ export interface ConfigDiff {
   removedLines: number
   /** Summary of changes. */
   summary: string
-  /** Previous content (null if first snapshot). */
+  /** Previous content (null for the first snapshot, or when not uploaded). */
   previousContent: string | null
-  /** Current content. */
-  currentContent: string
+  /** Current content (null when not uploaded). */
+  currentContent: string | null
+  /** Whether both snapshots carry content, so the diff is a real one. */
+  contentUploaded: boolean
 }
 
 // ─── Zod Schemas ─────────────────────────────────────────────────────
@@ -265,8 +282,9 @@ export const BatchConfigCapturePayloadSchema = z.object({
   harnessType: z.nativeEnum(HarnessType),
   files: z.array(z.object({
     path: z.string().min(1),
-    content: z.string(),
-    contentHash: z.string().length(64),
+    content: z.string().optional(),
+    contentHash: z.string().regex(/^[0-9a-f]{64}$/),
+    sizeBytes: z.number().int().nonnegative(),
   })),
 })
 

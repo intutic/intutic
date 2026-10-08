@@ -44,11 +44,14 @@ export const MAX_SNAPSHOT_BYTES = 32_768
 /**
  * Returns a redacted, size-capped copy of `value`.
  *
+ * `maxString` caps each string (the middle is dropped); config capture passes
+ * `Infinity`, because a captured file is uploaded whole or not at all.
+ *
  * Self-contained by contract — see the module docstring. Do not add imports or
  * outer-scope references to this function; `emitRedactor()` asserts it stays
  * closed over nothing.
  */
-export function redactSecrets(value: unknown, depth = 0): unknown {
+export function redactSecrets(value: unknown, depth = 0, maxString = MAX_STRING): unknown {
   // Keys whose value is a credential regardless of what it looks like. Matched
   // loosely on purpose: `apiKey`, `api_key`, `X-Api-Key` and `apikey` all occur.
   const SECRET_KEY =
@@ -124,12 +127,12 @@ export function redactSecrets(value: unknown, depth = 0): unknown {
     let out = s
     for (const re of SECRET_VALUE) out = out.replace(re, '[redacted]')
     out = redactAssignments(out)
-    if (out.length > MAX_STRING) {
+    if (out.length > maxString) {
       // Keep both ends. A command's verb is at the front and its target is at
       // the back; truncating the tail throws away the half that identifies what
       // the hold was about.
-      const half = Math.floor(MAX_STRING / 2)
-      out = `${out.slice(0, half)}…[${out.length - MAX_STRING} chars elided]…${out.slice(-half)}`
+      const half = Math.floor(maxString / 2)
+      out = `${out.slice(0, half)}…[${out.length - maxString} chars elided]…${out.slice(-half)}`
     }
     return out
   }
@@ -139,14 +142,14 @@ export function redactSecrets(value: unknown, depth = 0): unknown {
   if (typeof value === 'string') return scrub(value)
   if (typeof value === 'number' || typeof value === 'boolean') return value
   if (Array.isArray(value)) {
-    const kept = value.slice(0, MAX_ARRAY).map((v) => redactSecrets(v, depth + 1))
+    const kept = value.slice(0, MAX_ARRAY).map((v) => redactSecrets(v, depth + 1, maxString))
     if (value.length > MAX_ARRAY) kept.push(`[${value.length - MAX_ARRAY} more elided]`)
     return kept
   }
   if (typeof value === 'object') {
     const out: Record<string, unknown> = {}
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      out[k] = SECRET_KEY.test(k) ? '[redacted]' : redactSecrets(v, depth + 1)
+      out[k] = SECRET_KEY.test(k) ? '[redacted]' : redactSecrets(v, depth + 1, maxString)
     }
     return out
   }

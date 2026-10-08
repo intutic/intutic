@@ -120,9 +120,14 @@ describe('connect runs the per-cycle sync work the docs promise', () => {
     expect(src).toMatch(/await writeBundledSkills\(safeConfig\.workspaceRoot\)/)
   })
 
-  // cli.md: "The CLI never uploads those bodies" (harness config snapshots).
-  it('does not upload harness config bodies', async () => {
-    const { src } = await source()
-    expect(src).not.toMatch(/captureAndUpload|uploadConfigCapture|\/api\/v1\/config\/capture/)
+  // Config content leaves the machine only with `configBodyUpload` on, read
+  // from this poll's synced settings so a change applies at the next capture.
+  it('captures config content only when this poll\'s settings turn it on', async () => {
+    const { pollBody } = await source()
+    const capture = pollBody.slice(pollBody.indexOf('await captureAndUpload({'))
+    expect(capture).toMatch(/^await captureAndUpload\(\{[\s\S]*?includeContent: syncConfig\.settings\?\.configBodyUpload === true,/)
+    expect(pollBody.indexOf('const syncConfig = await client.fetchConfig(')).toBeLessThan(pollBody.indexOf('await captureAndUpload({'))
+    expect(pollBody).toMatch(/if \(shouldCaptureThisIteration\(pollIteration\)\)/)
+    expect(pollBody).toMatch(/pollIteration\+\+/)
   })
 })

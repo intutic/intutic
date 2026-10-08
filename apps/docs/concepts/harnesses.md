@@ -120,7 +120,7 @@ The sync daemon keeps harness config files in sync with SOPs from the control pl
 9. **Update integrity store** — `.intutic/integrity.json` in the workspace
 10. **Health checks** — the local proxy and Valkey are checked and restarted if they stopped
 
-Each poll also registers every recorded harness as an agent with its facets and records a `skill_flagged` event for each skill whose scan found something. On startup `connect` writes the bundled `intutic-rule-author` skill if the workspace does not have it.
+Each poll also registers every recorded harness as an agent with its facets and records a `skill_flagged` event for each skill whose scan found something, and every fifth poll records the rules files that changed in the config history (their text only with [content upload](/reference/cli#config-content-upload) on). On startup `connect` writes the bundled `intutic-rule-author` skill if the workspace does not have it.
 
 ### Real-time updates via WebSocket
 
@@ -136,7 +136,7 @@ Instead of waiting for the 30s poll, the control plane can push updates instantl
 The daemon watches all harness config files using **chokidar**:
 
 - **Stability threshold:** 200ms (waits for write to finish)
-- On `change` or `unlink` → immediately rewrites the config file, unless the workspace's hand-edit setting is **Record only**, which leaves the edit in place
+- On `change` or `unlink` → immediately rewrites the config file, unless the workspace's hand-edit setting is **Record only**, which leaves the edit in place. Gate hook files are restored under Record only too: they are the gates, not your config
 - Reports the drift to the control plane either way
 
 All config writes are **atomic** — write to a temp file, then rename. With the **Write-protect** setting on macOS, the rules files also carry the `uchg` immutable flag between syncs, so a hand edit fails; the daemon clears the flag before it writes and sets it again afterwards.

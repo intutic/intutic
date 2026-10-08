@@ -89,9 +89,14 @@ and reports what it finds as one of four states:
 | State | What it means |
 |-------|---------------|
 | **Intact** | Across the walked snapshots, every one names the snapshot that actually precedes it and every stored body still hashes to its recorded `content_hash`. |
-| **Nothing verified — no snapshots** | The workspace has no config snapshots. Amber, never green: an absent chain is not a clean one. The CLI does not upload harness config bodies, so a chain exists only where another client posts snapshots. |
+| **Nothing verified — no snapshots** | The workspace has no config snapshots. Amber, never green: an absent chain is not a clean one. `intutic connect` captures snapshots of each harness rules file; a connected workspace with none has a daemon that is not reaching the control plane. |
 | **_n_ broken links** | A snapshot names a predecessor that is not the snapshot before it — what deleting a snapshot leaves behind. Both ends are named: the snapshot doing the naming, the hash it named, and the snapshot that actually precedes it. |
 | **_n_ content mismatches** | A stored body no longer hashes to the `content_hash` recorded with it — the body was rewritten in place. |
+
+Snapshots captured with **Upload config file content** off carry no text. Their links are checked
+like any other's; their content cannot be re-hashed, because it was never uploaded, and the panel
+says how many there were without counting them as a finding. See
+[Config content upload](/reference/cli#config-content-upload).
 
 A break and a content mismatch are reported as **separate findings**, with their
 own counts, even when both are present. They have different causes and different
