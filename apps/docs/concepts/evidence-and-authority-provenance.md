@@ -31,7 +31,7 @@ Separately, [Plan Governance](/guide/governance-controls) tracks who is allowed 
 
 - **Role-gated approval** — `POST /plans/:id/approve|reject|close` requires `OWNER`, `ADMIN`, or `EM`, consistently across all three lifecycle transitions.
 - **Named approvers, not flags** — `approvedBy`, `approvalTimestamp`, and `approvalRationale` are written by the approval itself, not inferred after the fact. A rejected plan carries `rejectedBy`/`rejectionRationale`; a closed plan carries `closedBy`/`closureRationale`/`executionOutcome`.
-- **A transition table, not an implicit state machine** — `PENDING_APPROVAL → APPROVED/REJECTED/EXECUTING/COMPLETED`, `APPROVED → EXECUTING/COMPLETED`, `EXECUTING → COMPLETED`. An invalid transition is refused with a reason, not silently accepted.
+- **A transition table, not an implicit state machine** — `PENDING_APPROVAL → APPROVED/REJECTED/COMPLETED`, `APPROVED → EXECUTING/COMPLETED`, `EXECUTING → COMPLETED`. An invalid transition is refused with a reason, not silently accepted.
 - **Auto vs. human, distinguished, not merged** — when SkillOpt auto-applies a config edit because a confidence threshold and a workspace flag both permit it, the record carries `appliedVia: 'auto'`. A human-triggered apply carries `appliedVia: 'human'`. The same code path produces both; the record never pretends one is the other.
 
 The authority chain answers: *who was allowed to let this happen, and is that permission still attributable after the fact?*

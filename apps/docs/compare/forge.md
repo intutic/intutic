@@ -22,7 +22,7 @@ Intutic and Forge start from different places. Intutic is the enforcement point 
 | **SIEM and alerting** | Six destinations (Splunk HEC, Syslog/CEF, Datadog, S3, GCS, webhook) with retries and a dead-letter queue; Slack, PagerDuty, email and HMAC-signed webhook notifications, and Jira issues from governance events | Splunk HEC, S3 and Falcon LogScale exports, plus a signed notification webhook with Tines and Google SecOps templates |
 | **Identity** | SAML and OIDC with group claims, SCIM 2.0 with nested groups, per-agent virtual keys, an agent registry with posture scoring and an agent graph | Agent identities, a non-human-identity inventory, and short-lived credentials issued for AWS, Microsoft Entra, Google Cloud and GitHub |
 | **Devices** | CA trust and Jamf/Intune MDM profiles (`intutic enterprise install`), stale-device detection | Native device agent for Windows (Intune), macOS (Network Extension, Jamf or other MDM) and Linux (systemd) |
-| **Compliance** | Eleven hourly compliance probes against live workspace state, a signed SOC 2 evidence pack, OWASP LLM and Agentic posture mapping | Framework mapping to NIST AI RMF, EU AI Act, ISO 42001, SOC 2, HIPAA, OWASP, MITRE ATLAS and others, exported as PDF, CSV or JSON |
+| **Compliance** | Eleven hourly compliance probes against live workspace state, a signed SOC 2 evidence pack, OWASP LLM and Agentic posture mapping, partial control mapping to the EU AI Act, ISO/IEC 42001 and NIST AI RMF, and a signed EU AI Act Article 14 human-oversight export | Framework mapping to NIST AI RMF, EU AI Act, ISO 42001, SOC 2, HIPAA, OWASP, MITRE ATLAS and others, exported as PDF, CSV or JSON |
 | **Deployment** | Cloud, or fully self-hosted: signed images and an air-gap bundle, Helm charts, an offline license | Hosted service; Resource Gateways run in your environment and connect out to Forge. No self-hosted or air-gapped option is documented |
 | **Source** | Open core (MIT): the proxy, hook gates, MCP proxy, CLI and sync daemon | Closed |
 | **Pricing** | [Published](/guide/plans); the open core is free | Not published |
@@ -34,7 +34,7 @@ On audit integrity, Intutic covers what Forge's ledger does (a hash chain, datab
 - **Organization-wide discovery.** Forge inventories AI agents and non-human identities across the whole organization, beyond the coding-agent surface.
 - **Credential brokering.** It issues short-lived cloud credentials to agents and right-sizes their permissions. Intutic governs what an agent does with access it already has.
 - **MCP gateway controls.** A default-deny server registry with approval grants, per-tool budgets and OAuth brokering. In Intutic, MCP allowlists default to unrestricted and are set through the API, servers have registry statuses but no approval workflow yet, MCP calls do not carry per-user identity, and a require-approval rule becomes a block in the MCP proxy.
-- **Regulatory framework mapping.** Intutic maps to SOC 2 and OWASP; Forge also maps to the EU AI Act, ISO 42001, NIST AI RMF, HIPAA and more.
+- **Regulatory framework mapping.** Intutic maps its own evidence to SOC 2 and OWASP, and to the EU AI Act, ISO/IEC 42001 and the NIST AI RMF where an enforcement layer can evidence a control, mostly as partial coverage. Forge also maps to HIPAA, MITRE ATLAS and more, and exports the mapping as PDF or CSV.
 - **Policy as infrastructure code.** Rego policies with backtests against historical evidence, and a Terraform provider.
 - **Protocol policies.** Connection and command decisions for HTTP, Postgres, MySQL and Redis. Intutic's `sql_guard` covers destructive SQL issued through an agent's tools.
 
@@ -49,7 +49,7 @@ On audit integrity, Intutic covers what Forge's ledger does (a hash chain, datab
 
 - You need to discover and inventory every AI agent and non-human identity across the organization.
 - You want agents to receive short-lived cloud credentials rather than standing keys.
-- Your compliance program reports against the EU AI Act, ISO 42001 or NIST AI RMF.
+- Your compliance program needs mappings beyond the AI frameworks, such as HIPAA or MITRE ATLAS.
 - You manage policy as Rego and Terraform, and a hosted service suits your data posture.
 
 ---

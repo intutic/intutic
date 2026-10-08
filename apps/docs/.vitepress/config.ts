@@ -185,6 +185,7 @@ if (!IS_OSS) {
       { text: 'Emergency Overrides (Cloud)', link: '/guide/break-glass' },
       { text: 'SIEM Export (Cloud)', link: '/guide/siem-export' },
       { text: 'Compliance Evidence (Cloud)', link: '/guide/compliance-evidence' },
+      { text: 'Framework Mapping (Cloud)', link: '/guide/framework-mapping' },
       { text: 'VirusTotal Integration (Cloud)', link: '/guide/virustotal-scanning' },
     ],
   });

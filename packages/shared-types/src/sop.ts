@@ -549,13 +549,22 @@ export interface AntiGamingResult {
 
 // ─── Plans (LLD #6 §4.6 / EU AI Act Art. 14) ────────────────────────
 
-/** Deviation types during plan execution. */
+/**
+ * Deviation types during plan execution, as the gates observe them against the
+ * plan's tool-naming steps (`tool` or `toolName`):
+ *
+ * - `STEP_SKIP`    — a later planned step ran while this one had not.
+ * - `STEP_REORDER` — a step that was skipped ran after all, out of order.
+ * - `EXTRA_STEP`   — a tool the plan never names ran, or was attempted and blocked.
+ *
+ * Substituting one tool for another and changing a tool's parameters are not
+ * types: a substitution is indistinguishable from an extra step plus a skip
+ * until the run ends, and plan steps carry no parameters to compare against.
+ */
 export type DeviationType =
-  | 'TOOL_SUBSTITUTION'
   | 'STEP_SKIP'
   | 'STEP_REORDER'
   | 'EXTRA_STEP'
-  | 'PARAMETER_DRIFT'
 
 /** A single deviation from a stored plan. */
 export interface PlanDeviation {
@@ -581,20 +590,21 @@ export interface PlanAdherenceScore {
  * The valid lifecycle transitions for a stored plan.
  *
  * REJECTED is reachable only from PENDING_APPROVAL — a plan denied before
- * execution ever starts. COMPLETED (via a closure action) is reachable
- * from every non-terminal state, since a plan can be closed with or
- * without ever having been formally approved, and with or without a
- * deviation ever having flipped it to EXECUTING.
+ * execution ever starts. EXECUTING is reachable only from APPROVED, when the
+ * gates observe the first tool call after approval; a plan whose session runs
+ * before approval stays PENDING_APPROVAL, so a reviewer can still decide it.
+ * COMPLETED (via a closure action) is reachable from every non-terminal
+ * state, since a plan can be closed with or without ever having been
+ * formally approved or observed running.
  *
  * @see HLD §3.4.1 — Stored plan compliance trail
  */
 export const VALID_PLAN_TRANSITIONS: ReadonlyArray<{ from: PlanLifecycleState; to: PlanLifecycleState; description: string }> = [
   { from: 'PENDING_APPROVAL', to: 'APPROVED', description: 'Human approves the plan' },
   { from: 'PENDING_APPROVAL', to: 'REJECTED', description: 'Human rejects the plan before execution' },
-  { from: 'PENDING_APPROVAL', to: 'EXECUTING', description: 'A deviation is recorded before formal approval' },
   { from: 'PENDING_APPROVAL', to: 'COMPLETED', description: 'Plan closed directly, no approval step required' },
-  { from: 'APPROVED', to: 'EXECUTING', description: 'First deviation recorded after approval' },
-  { from: 'APPROVED', to: 'COMPLETED', description: 'Plan closed after approval, no deviation ever recorded' },
+  { from: 'APPROVED', to: 'EXECUTING', description: 'The gates observe the first tool call after approval' },
+  { from: 'APPROVED', to: 'COMPLETED', description: 'Plan closed after approval, before any tool call was observed' },
   { from: 'EXECUTING', to: 'COMPLETED', description: 'Execution finishes and the plan is closed' },
 ] as const
 
