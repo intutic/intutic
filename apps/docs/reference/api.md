@@ -668,7 +668,7 @@ Every route the control plane serves: 384 routes, grouped by the source file tha
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | GET | `/api/v1/compliance/frameworks/:frameworkId/coverage` | Authenticated | Coverage of one framework (eu_ai_act, iso_42001, nist_ai_rmf) from the latest probe results; ?format=markdown for the readable report |
-| GET | `/api/v1/compliance/human-oversight-export` | OWNER/ADMIN | Signed export of plan decisions, plan deviations and review-hold decisions between from and to (default: the trailing 90 days) |
+| GET | `/api/v1/compliance/human-oversight-export` | OWNER/ADMIN | Export of plan decisions, plan deviations and review-hold decisions between from and to (default: the trailing 90 days), signed when the deployment has a signing key |
 | GET | `/api/v1/compliance/probes/history` | Authenticated |  |
 | GET | `/api/v1/compliance/probes/latest` | Authenticated |  |
 | POST | `/api/v1/compliance/probes/run` | OWNER/ADMIN | Run compliance probes now (all, or the `probes` listed) |
@@ -699,7 +699,7 @@ Every route the control plane serves: 384 routes, grouped by the source file tha
 | GET | `/api/v1/decisions` | Authenticated | List decisions (paginated) |
 | POST | `/api/v1/decisions` | Authenticated | Ingest review holds from the daemon |
 | GET | `/api/v1/decisions/:entryId` | Authenticated | Get decision detail |
-| POST | `/api/v1/decisions/:entryId/review` | Authenticated |  |
+| POST | `/api/v1/decisions/:entryId/review` | OWNER/ADMIN/EM |  |
 | GET | `/api/v1/decisions/analysis` | Authenticated | Aggregated pattern analysis |
 | GET | `/api/v1/decisions/approved-bypasses` | Authenticated |  |
 | POST | `/api/v1/decisions/substitutions` | Authenticated | Ingest tool calls the proxy rewrote |

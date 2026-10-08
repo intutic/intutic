@@ -131,7 +131,7 @@ if (!IS_OSS) {
       { text: 'Intelligent Model Routing (Cloud)', link: '/guide/intelligent-routing' },
       { text: 'Pre-Adoption Report for Model Upgrades (Cloud)', link: '/guide/mirror-adoption-report' },
       { text: 'Runaway-Spend Counterfactual (Cloud)', link: '/guide/averted-spend' },
-      { text: 'Signed Provider-Downtime Evidence (Cloud)', link: '/guide/provider-incidents' },
+      { text: 'Provider-Downtime Evidence (Cloud)', link: '/guide/provider-incidents' },
       { text: 'Managed Gateway Cells (Self-serve+)', link: '/guide/managed-cells' },
       // Audit Timeline (Settings › Audit Timeline) is listed above and
       // Evaluator Sandbox (Labs › Evaluator Sandbox) under Advanced Features.

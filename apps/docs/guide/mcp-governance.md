@@ -14,8 +14,9 @@ the controls built on top of the MCP proxy-wrapping mechanism described in
 - a **registry** of the servers each workspace's proxies have seen, where an
   owner or admin approves or blocks each one and switches single tools off,
   with a **default policy** that can refuse every server not yet approved;
-- **approval holds**: a `require_approval` rule holds the call until a person
-  approves it, and the identical retry then runs;
+- **approval holds**: a `require_approval` rule holds the call for a person
+  to approve; the identical retry then runs only while the workspace's
+  review-hold bypass is on;
 - **per-call identity**: every event and hold says which member's key, OS
   user and session made the call, and on a plan with single sign-on the
   workspace's SSO group policy applies to it;
@@ -258,8 +259,9 @@ do, through the same decisions API:
    exact call after it is approved.
    ```
 
-3. Someone approves it: `intutic decision approve <holdId>`, the Review
-   Queue, or Slack.
+3. An owner, admin or engineering manager approves it:
+   `intutic decision approve <holdId>`, the review API, or the Slack card's
+   **Approve** button. All three take the same path.
 4. The agent retries. When the workspace has `reviewHoldBypassEnabled` on,
    the approval lets **the identical call** through for
    `reviewHoldBypassTtlMinutes` (10 by default); the proxy finds it in

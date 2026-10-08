@@ -120,6 +120,9 @@ const HTTP_POST_PATTERNS: &[&str] = &[
 ];
 
 /// Commands that write to a database.
+///
+/// Matched with [`SQL_GAP`] standing for each space, not as plain substrings —
+/// see [`matches_sql_any`].
 const DB_WRITE_PATTERNS: &[&str] = &[
     "insert into",
     "update ",
@@ -128,6 +131,46 @@ const DB_WRITE_PATTERNS: &[&str] = &[
     "truncate ",
     "alter table",
 ];
+
+/// What may separate two SQL keywords: whitespace (tabs and newlines
+/// included), a newline, tab or carriage return written as a two-character
+/// escape (`\n` — SQL that was escaped once more, as `printf` and `echo -e`
+/// expand it), a `/* … */` comment, or a `-- …` comment that runs to a newline.
+///
+/// A plain `"drop table"` substring missed `DROP` and `TABLE` separated by a
+/// tab, a newline or `/**/`, all of which the database runs. The gap is matched rather
+/// than stripped out of the text first, because stripping deletes text: `--` is
+/// also how every long shell flag begins, and removing "comments" from
+/// `psql --command "drop table x"` would remove the statement with them.
+/// Matching only between two keywords adds matches and never hides one.
+///
+/// Each alternative is unambiguous — a comment ends at its first terminator —
+/// so a backtracking engine cannot blow up on it. `gate/actions.py` in
+/// intutic-clawde and `actions.ts` in `@intutic/gate` carry this exact string,
+/// and their tests compare it with this one.
+const SQL_GAP: &str =
+    r"(?:\s|\\[ntr]|/\*(?:[^*]|\*+[^*/])*\*+/|--(?:[^\n\\]|\\[^n\n])*(?:\n|\\n))+";
+
+/// A pattern list's phrases as regexes, each space standing for [`SQL_GAP`].
+fn sql_phrases(patterns: &[&str]) -> Vec<regex::Regex> {
+    patterns
+        .iter()
+        .map(|p| {
+            let words: Vec<String> = p.split(' ').map(regex::escape).collect();
+            regex::Regex::new(&words.join(SQL_GAP)).expect("static SQL phrase")
+        })
+        .collect()
+}
+
+/// [`matches_any`] for SQL keyword phrases, tolerant of what may separate the
+/// keywords (see [`SQL_GAP`]).
+fn matches_sql_any(haystack: &str) -> bool {
+    static DB_WRITE: std::sync::OnceLock<Vec<regex::Regex>> = std::sync::OnceLock::new();
+    DB_WRITE
+        .get_or_init(|| sql_phrases(DB_WRITE_PATTERNS))
+        .iter()
+        .any(|r| r.is_match(haystack))
+}
 
 /// Path fragments that indicate credential material.
 pub(crate) const SECRET_PATH_FRAGMENTS: &[&str] = &[
@@ -326,7 +369,7 @@ pub fn classify(tool_name: &str, input: &serde_json::Value) -> Vec<String> {
         if matches_any(&args, HTTP_POST_PATTERNS) {
             actions.push("http_post");
         }
-        if matches_any(&args, DB_WRITE_PATTERNS) {
+        if matches_sql_any(&args) {
             actions.push("db_write");
         }
     } else if tool_is(tool_name, EDITOR_TOOLS) {
@@ -391,6 +434,53 @@ mod tests {
         // rule sees a deploy with no prior test in the very command that ran one.
         let actions = classify("Bash", &json!({"command": "npm test && git push"}));
         assert_eq!(actions, vec!["action:run_tests", "action:deploy"]);
+    }
+
+    #[test]
+    fn a_db_write_is_recognised_whatever_separates_its_keywords() {
+        // Each of these runs as a DROP TABLE; a plain "drop table" substring
+        // classified none of them.
+        for cmd in [
+            "psql -c 'DROP\nTABLE users'",
+            "psql -c 'DROP\tTABLE users'",
+            "psql -c 'DROP  TABLE users'",
+            "psql -c 'DROP/**/TABLE users'",
+            "psql -c 'DROP /* why */ TABLE users'",
+            "psql -c 'DROP -- why\nTABLE users'",
+            "psql -c 'dRoP tAbLe users'",
+            r"printf 'DROP\nTABLE users' | psql",
+            r"printf 'DROP -- why\nTABLE users' | psql",
+            "psql --command 'insert\tinto t values (1)'",
+        ] {
+            assert_eq!(
+                classify("Bash", &json!({ "command": cmd })),
+                vec!["action:db_write"],
+                "{cmd:?}"
+            );
+        }
+        // Arguments arrive JSON-decoded: an escaped newline in the request
+        // body is a real newline by the time it is classified.
+        let decoded: serde_json::Value =
+            serde_json::from_str(r#"{"command":"psql -c 'DROP\nTABLE users'"}"#).unwrap();
+        assert_eq!(classify("Bash", &decoded), vec!["action:db_write"]);
+    }
+
+    #[test]
+    fn a_keyword_alone_is_not_a_db_write() {
+        // The gap joins two keywords; it does not make either one optional,
+        // and a long shell flag is not a comment that ends the phrase.
+        for cmd in [
+            "git stash drop",
+            "psql --table-only",
+            "drop_table_helper.sh",
+            "dropdb --help",
+        ] {
+            assert!(
+                !classify("Bash", &json!({ "command": cmd }))
+                    .contains(&"action:db_write".to_string()),
+                "{cmd:?}"
+            );
+        }
     }
 
     #[test]

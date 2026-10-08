@@ -275,9 +275,10 @@ export interface WorkspaceSettings {
    * Whether an APPROVED `review_before` decision may let the *matching retried
    * call* through the local gate, instead of only recording the decision.
    *
-   * Off (undefined/false) by default. `POST /api/v1/decisions` and its Slack
-   * approve button have always recorded a decision — this flag governs a
-   * separate, additive effect: when true, approving a decision tied to a
+   * Off (undefined/false) by default. Approving a decision — `intutic decision
+   * approve`, `POST /api/v1/decisions/:id/review` or the Slack card, one code
+   * path — always records it; this flag governs a separate, additive effect:
+   * when true, approving a decision tied to a
    * `review_before` hold writes a short-lived, exact-match bypass entry
    * (workspace + SOP rule + normalised tool name + hashed target/command) to
    * Valkey, synced to `.intutic/hooks/approved-bypasses.jsonl` and consulted by

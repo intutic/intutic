@@ -1,9 +1,8 @@
 /**
  * dlp.ts — DLP (Data Loss Prevention) argument scanner.
  *
- * Scans tool arguments (as a JSON string) for patterns that indicate
- * credentials, secrets, PII, or other sensitive data before allowing
- * the tool call to proceed.
+ * Scans tool arguments for patterns that indicate credentials, secrets, PII,
+ * or destructive commands before allowing the tool call to proceed.
  *
  * @module
  */
@@ -17,6 +16,19 @@ export interface DlpScanResult {
   hasFinding: boolean
   findings: DlpFinding[]
 }
+
+/**
+ * What may separate two SQL keywords: whitespace, a two-character escaped
+ * newline, tab or carriage return, a block comment, or a `--` comment that runs
+ * to a newline. `DROP\s+TABLE` let through either kind of comment between the
+ * words, and, matched against the JSON-encoded arguments, a newline too (it is
+ * the two characters `\n` there). Byte-identical to `SQL_GAP` in the proxy's
+ * `actions.rs` (a test compares them), where the comment explains why the gap
+ * is matched rather than stripped from the text.
+ */
+const SQL_GAP = String.raw`(?:\s|\\[ntr]|/\*(?:[^*]|\*+[^*/])*\*+/|--(?:[^\n\\]|\\[^n\n])*(?:\n|\\n))+`
+
+const sqlStatement = (...keywords: string[]): RegExp => new RegExp(keywords.join(SQL_GAP), 'i')
 
 /**
  * Compiled DLP patterns.
@@ -50,11 +62,14 @@ const DLP_PATTERNS: Array<{ regex: RegExp; description: string; redactable: bool
   { regex: /\b\d{3}-\d{2}-\d{4}\b/, description: 'US Social Security Number', redactable: true },
   // High-entropy strings that look like secrets (≥40 chars of hex or base64)
   { regex: /[0-9a-f]{40,}/, description: 'High-entropy hex string (possible secret)', redactable: true },
-  // Destructive shell patterns in Bash/command arguments — input-only.
+  // Destructive commands — input-only, and matched against each decoded
+  // argument string (see scanToolInput). A text rule: it does not parse SQL,
+  // so a quoted mention (`SELECT 'drop table'`) is blocked too, because quoting
+  // is also how a shell command carries the real thing (`psql -c 'DROP TABLE x'`).
   { regex: /rm\s+-rf?\s+\//, description: 'Destructive rm -rf / command', redactable: false },
-  { regex: /DROP\s+TABLE/i, description: 'SQL DROP TABLE statement', redactable: false },
-  { regex: /DROP\s+DATABASE/i, description: 'SQL DROP DATABASE statement', redactable: false },
-  { regex: /TRUNCATE\s+TABLE/i, description: 'SQL TRUNCATE TABLE statement', redactable: false },
+  { regex: sqlStatement('DROP', 'TABLE'), description: 'SQL DROP TABLE statement', redactable: false },
+  { regex: sqlStatement('DROP', 'DATABASE'), description: 'SQL DROP DATABASE statement', redactable: false },
+  { regex: sqlStatement('TRUNCATE', 'TABLE'), description: 'SQL TRUNCATE TABLE statement', redactable: false },
   // Private key material
   { regex: /-----BEGIN\s+(RSA\s+)?PRIVATE KEY-----/, description: 'PEM private key material', redactable: true },
   { regex: /-----BEGIN\s+EC\s+PRIVATE KEY-----/, description: 'EC private key material', redactable: true },
@@ -119,22 +134,48 @@ export function redactText(text: string): { redacted: string; findings: DlpFindi
   return { redacted, findings }
 }
 
+/** Every string in the arguments, object keys included, as the tool receives it. */
+function argumentStrings(value: unknown): string[] {
+  const out: string[] = []
+  const pending: unknown[] = [value]
+  while (pending.length > 0) {
+    const v = pending.pop()
+    if (typeof v === 'string') {
+      out.push(v)
+    } else if (Array.isArray(v)) {
+      for (const item of v) pending.push(item)
+    } else if (v !== null && typeof v === 'object') {
+      for (const [key, item] of Object.entries(v)) {
+        out.push(key)
+        pending.push(item)
+      }
+    }
+  }
+  return out
+}
+
 /**
  * Scan tool arguments for DLP findings.
+ *
+ * Value patterns (credentials, PII, workspace patterns) match the serialized
+ * arguments. Command patterns match each decoded string instead: in the JSON a
+ * newline is the two characters `\n`, so a command split across lines no
+ * longer had whitespace between its words.
  *
  * @param toolInput - The tool_input object from the MCP tools/call request
  * @returns DLP scan result with any findings
  */
 export function scanToolInput(toolInput: unknown): DlpScanResult {
-  // Serialize to string for pattern matching
   const serialized = JSON.stringify(toolInput ?? {})
+  const strings = argumentStrings(toolInput)
   const findings: DlpFinding[] = []
 
   // The full set — floor plus workspace patterns — on the input direction too:
   // a workspace pattern that blocked results but not the input that exfiltrates
   // them would be scanning the wrong side.
-  for (const { regex, description } of allPatterns()) {
-    if (regex.test(serialized)) {
+  for (const { regex, description, redactable } of allPatterns()) {
+    const hit = redactable ? regex.test(serialized) : strings.some((s) => regex.test(s))
+    if (hit) {
       findings.push({ pattern: regex.source, description })
     }
   }

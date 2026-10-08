@@ -183,6 +183,15 @@ describe('ToolCallInterceptor', () => {
       expect(decision.action).toBe('block')
     })
 
+    it('blocks SQL DROP TABLE split across lines in the decoded arguments', async () => {
+      const policy = new StubPolicyClient()
+      const interceptor = new ToolCallInterceptor(policy, emitter, true)
+
+      const args = JSON.parse(String.raw`{"query": "DROP\n/* x */TABLE users"}`)
+      const decision = await interceptor.decide('mcp__database__execute', args)
+      expect(decision.action).toBe('block')
+    })
+
     it('allows benign tool calls with no DLP match', async () => {
       const policy = new StubPolicyClient()
       const interceptor = new ToolCallInterceptor(policy, emitter, true)

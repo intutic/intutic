@@ -544,9 +544,10 @@ gate prints the hold id and how to resolve it:
 [Intutic Guardrail] HELD: Held for human review: action:deploy — declared in review_before: [sop.local.review_before.action:deploy] Approve with: intutic decision approve hold_… (or: intutic decision reject hold_…)
 ```
 
-`intutic decision approve <holdId>` lets that exact call — same tool, same
-command, same target — through once, for a short window, and only when the
-workspace has opted in with the `reviewHoldBypassEnabled` workspace setting
+Approving the hold — `intutic decision approve <holdId>`, the review API or
+the Slack card, which all take the same path — lets that exact call (same
+tool, same command, same target) through once, for a short window, and only
+while the workspace has opted in with the `reviewHoldBypassEnabled` workspace setting
 (`PUT /api/v1/workspace/settings`; there is no dashboard toggle); a different command
 under the same rule is held again. Two hook gates cannot hold: the n8n
 workflow hook and the Open WebUI prompt filter refuse the call outright, since

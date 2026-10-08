@@ -1268,7 +1268,7 @@ intutic decision approve <holdId> [--reason <reason>] [options]
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-Marks the decision `APPROVED`, attributed to you as the logged-in member. Only a decision still awaiting review can be approved.
+Marks the decision `APPROVED`, attributed to you as the logged-in member. You need the OWNER, ADMIN or EM role, and only a decision still awaiting review can be approved. The Slack card's **Approve** button does exactly the same.
 
 When the workspace has opted in with the `reviewHoldBypassEnabled` setting (off by default), approving also lets the exact held call (same tool, same command, same target) through for a short window, 10 minutes by default, and the command tells you to retry it. Otherwise the approval only records the decision. See [Stop and ask me first](/guide/graph-guardrails#stop-and-ask-me-first).
 
@@ -1304,7 +1304,7 @@ intutic decision reject <holdId> [--reason <reason>] [options]
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-Marks the decision `REJECTED`, attributed to you, with the reason in its rationale. The held call stays blocked. Only a decision still awaiting review can be rejected.
+Marks the decision `REJECTED`, attributed to you, with the reason in its rationale. The held call stays blocked. You need the OWNER, ADMIN or EM role, and only a decision still awaiting review can be rejected.
 
 **Example:**
 

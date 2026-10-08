@@ -1,6 +1,6 @@
 ---
 title: Framework Mapping
-description: How Intutic's compliance probes, records and controls map to the EU AI Act, ISO/IEC 42001 and the NIST AI RMF, with live coverage, a signed report in the evidence pack, and an Article 14 human-oversight export.
+description: How Intutic's compliance probes, records and controls map to the EU AI Act, ISO/IEC 42001 and the NIST AI RMF, with live coverage, a report in the evidence pack, and an Article 14 human-oversight export.
 ---
 
 # Framework Mapping <Badge type="tip" text="Cloud" />
@@ -47,7 +47,7 @@ A control is never reported as evidenced on records alone: a record shows there 
 - **Dashboard** — **Policies › Compliance Scope** has a **Framework Coverage** panel under the compliance probes. Pick a framework to see its mapped controls with state, evidence and what each does not cover, and **Download report** for the readable report.
 - **API** — `GET /api/v1/compliance/frameworks/:frameworkId/coverage`, where `frameworkId` is `eu_ai_act`, `iso_42001` or `nist_ai_rmf`. Any workspace member can read it. Add `?format=markdown` for the readable report instead of JSON.
 
-### In the signed evidence pack
+### In the evidence pack
 
 Every [evidence archive](/guide/compliance-evidence#evidence-runs) carries the coverage of all three frameworks, computed from the archive's own fresh probe run, as JSON and as the readable report. Each framework has its own section hash in the archive manifest, and the archive signature covers it.
 
@@ -56,7 +56,7 @@ Every [evidence archive](/guide/compliance-evidence#evidence-runs) carries the c
 
 ## Human-oversight export (EU AI Act Article 14)
 
-`GET /api/v1/compliance/human-oversight-export?from=<ISO>&to=<ISO>` (OWNER/ADMIN; the window defaults to the trailing 90 days) returns a signed record of the people deciding what agents may do:
+`GET /api/v1/compliance/human-oversight-export?from=<ISO>&to=<ISO>` (OWNER/ADMIN; the window defaults to the trailing 90 days) returns a record of the people deciding what agents may do, signed when the deployment has a signing key (`TRACE_SIGNING_PRIVATE_KEY`); the `X-Intutic-Export-Signed` response header says `true` or `false`:
 
 - **Plan events** — each plan captured, approved, rejected or closed in the window, with the member who acted, the time, the rationale they wrote and, for a closure, the outcome; and each deviation the gates recorded while the plan's session ran.
 - **Review-hold decisions** — each tool call held before it ran by a require-approval rule, with the rule, the tool, the member who approved or rejected it and when. A hold still waiting for review is listed as pending.
@@ -115,7 +115,7 @@ Repeating a planned tool after its steps have run is not a deviation. Steps that
 | Control | Evidence | Not covered |
 |---|---|---|
 | GOVERN 1.4 | `sop_coverage` probe; `sop_git_drift` probe; Pre-execution tool-call gate | Setting risk priorities is the organization’s process. |
-| GOVERN 1.5 | Compliance probe history; Signed evidence pack | Planning the periodic review and assigning who performs it is the organization’s process. |
+| GOVERN 1.5 | Compliance probe history; Evidence pack | Planning the periodic review and assigning who performs it is the organization’s process. |
 | GOVERN 1.6 | Agent registry | The inventory covers agents connected to Intutic, not every AI system in the organization. |
 | GOVERN 3.2 | Role-based authority; `auto_apply_provenance` probe; `guardrail_authority` probe | Writing the policies that define human-AI roles is the organization’s process. |
 | GOVERN 4.3 | Governance incidents; SIEM export | AI testing practices are not evidenced. |
@@ -130,6 +130,6 @@ Repeating a planned tool after its steps have run is not a deviation. Steps that
 
 ## Related
 
-- [Compliance Evidence](/guide/compliance-evidence) — the probes, probe history and the signed evidence pack
+- [Compliance Evidence](/guide/compliance-evidence) — the probes, probe history and the evidence pack
 - [Evidence and Authority Provenance](/concepts/evidence-and-authority-provenance) — the plan approval lifecycle
 - [Trace Integrity](/concepts/trace-integrity) — how the trace record is sealed and verified

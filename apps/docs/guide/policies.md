@@ -202,8 +202,8 @@ Its **score**, out of 100, weights the depth score at 60% and a telemetry score 
 The page opens with **Unenforced environments**, **Fully enforced (tier A)**, **Environments monitored** and **Average score**, then a count per tier, then one card per environment, tier A first. Below the cards:
 
 - **Active Compliance Probes** — the workspace's compliance probes, with **Collect & export evidence**. See [Compliance Evidence](/guide/compliance-evidence).
-- **Framework Coverage** — the probes and records mapped to the EU AI Act, ISO/IEC 42001 or NIST AI RMF, with the readable report and the signed human-oversight export. See [Framework Mapping](/guide/framework-mapping).
-- **Provider Incidents** — upstream provider outages that affected this workspace's requests, grouped into failure windows. See [Signed Provider-Downtime Evidence](/guide/provider-incidents).
+- **Framework Coverage** — the probes and records mapped to the EU AI Act, ISO/IEC 42001 or NIST AI RMF, with the readable report and the human-oversight export. See [Framework Mapping](/guide/framework-mapping).
+- **Provider Incidents** — upstream provider outages that affected this workspace's requests, grouped into failure windows. See [Provider-Downtime Evidence](/guide/provider-incidents).
 - **Capability Misses** — sessions that ran tools with no governing guideline matched, most ungoverned first.
 
 ---

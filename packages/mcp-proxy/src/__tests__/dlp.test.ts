@@ -5,6 +5,8 @@
  */
 
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { scanToolInput, formatDlpBlockReason } from '../dlp.js'
 
 describe('scanToolInput', () => {
@@ -95,6 +97,63 @@ describe('scanToolInput', () => {
     const result = scanToolInput({ query: 'DROP TABLE users; SELECT 1' })
     expect(result.hasFinding).toBe(true)
     expect(result.findings.some((f) => f.description.includes('DROP TABLE'))).toBe(true)
+  })
+
+  // `DROP\s+TABLE` against the JSON-encoded arguments let every one of these
+  // through: a newline or tab is a two-character escape in the JSON, and a
+  // comment between the words is not whitespace at all.
+  describe('destructive SQL, whatever separates the keywords', () => {
+    const blocked = (input: unknown) =>
+      scanToolInput(input).findings.some((f) => f.description === 'SQL DROP TABLE statement')
+
+    it.each([
+      ['a newline', 'DROP\nTABLE users'],
+      ['a tab', 'DROP\tTABLE users'],
+      ['a block comment', 'DROP/**/TABLE users'],
+      ['a commented block comment', 'DROP /* why */ TABLE users'],
+      ['a line comment', 'DROP -- why\nTABLE users'],
+      ['mixed case', 'dRoP tAbLe users'],
+      ['an escape that printf expands', String.raw`printf 'DROP\nTABLE users' | psql`],
+    ])('blocks DROP TABLE split by %s', (_, query) => {
+      expect(blocked({ query })).toBe(true)
+    })
+
+    it('blocks an escaped newline in the JSON request body', () => {
+      expect(blocked(JSON.parse(String.raw`{"query": "DROP\nTABLE users"}`))).toBe(true)
+    })
+
+    it('blocks a statement in a nested argument or an object key', () => {
+      expect(blocked({ batch: [{ sql: 'select 1' }, { sql: 'DROP\nTABLE users' }] })).toBe(true)
+      expect(blocked({ 'DROP TABLE users': true })).toBe(true)
+    })
+
+    it('blocks DROP DATABASE and TRUNCATE TABLE the same way', () => {
+      const descriptions = (q: string) => scanToolInput({ q }).findings.map((f) => f.description)
+      expect(descriptions('DROP/**/DATABASE prod')).toContain('SQL DROP DATABASE statement')
+      expect(descriptions('truncate\ttable events')).toContain('SQL TRUNCATE TABLE statement')
+    })
+
+    it('blocks a quoted mention: the rule reads text, not SQL', () => {
+      // Documented intent: a quoted string is also how a shell command carries
+      // the real statement (`psql -c 'DROP TABLE x'`), so this rule does not
+      // skip literals. The proxy's sql_guard, which reads the SQL a client will
+      // run, is the one that tells them apart.
+      expect(blocked({ query: "SELECT 'drop table' AS note" })).toBe(true)
+    })
+
+    it('does not join a keyword to anything but the next keyword', () => {
+      expect(blocked({ command: 'git stash drop && cat table.md' })).toBe(false)
+      expect(blocked({ command: 'psql --command "SELECT 1" --table' })).toBe(false)
+    })
+
+    it('uses the same SQL gap as the proxy', () => {
+      const dlp = readFileSync(join(__dirname, '../dlp.ts'), 'utf-8')
+      const rust = readFileSync(join(__dirname, '../../../proxy/src/plugins/anomaly/actions.rs'), 'utf-8')
+      const ts = dlp.match(/const SQL_GAP = String\.raw`(.*?)`/)
+      const rs = rust.match(/const SQL_GAP: &str =\s*r"(.*?)";/s)
+      expect(ts && rs, 'SQL_GAP not found in dlp.ts or actions.rs').toBeTruthy()
+      expect(ts![1]).toBe(rs![1])
+    })
   })
 
   it('detects SQL DROP DATABASE', () => {
