@@ -386,7 +386,16 @@ export type {
   UsageEvent,
   ModelBreakdown,
   VirtualKeyBreakdown,
+  MemberUsage,
+  MemberUsageResponse,
+  TeamUsage,
+  TeamUsageResponse,
+  BranchUsage,
+  BranchUsageResponse,
+  CommitUsage,
+  CommitUsageResponse,
 } from './usage.js'
+export { normalizeGitRemote } from './gitRemote.js'
 
 // WS2: Advanced Observability
 export {

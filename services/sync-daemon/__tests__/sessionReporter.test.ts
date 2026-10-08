@@ -11,10 +11,11 @@
  * `endAllOpenSessions`, which is also the reset.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { startHarnessSession, endAllOpenSessions } from '../src/sessionReporter.js'
+import { startHarnessSession, endAllOpenSessions, readGitInfo } from '../src/sessionReporter.js'
 
 const CP = 'http://cp.test'
 const KEY = 'k'
@@ -102,5 +103,65 @@ describe('startHarnessSession without a proxy instance id (no local proxy, or a 
     expect(await startHarnessSession({ ...base, workspaceRoot: root, harnessType: 'cursor' })).toBeNull()
     expect((globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1)
     expect(warn).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('git context', () => {
+  // Assembled at runtime: no contiguous credential-shaped literal in source.
+  const token = ['ghp', 'Z9y8X7w6V5u4T3s2R1q0P9o8N7m6L5k4J3i2'].join('_')
+  const git = (...args: string[]) =>
+    execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.test', '-c', 'commit.gpgsign=false', ...args], { cwd: root, encoding: 'utf8' }).trim()
+
+  function initRepo() {
+    git('init', '-q', '-b', 'feat/fleet')
+    git('remote', 'add', 'origin', `https://ci:${token}@github.com/acme/widgets.git`)
+    writeFileSync(join(root, 'a.txt'), 'a')
+    git('add', 'a.txt')
+    git('commit', '-q', '-m', 'first')
+  }
+
+  it('reads the repository from origin with the credentials stripped', async () => {
+    initRepo()
+    const info = await readGitInfo(root)
+    expect(info).toMatchObject({ repoUrl: 'github.com/acme/widgets', branchName: 'feat/fleet', commitHash: git('rev-parse', 'HEAD') })
+    expect(JSON.stringify(info)).not.toContain(token)
+  })
+
+  it('reports again when HEAD moves, and only then, onto the same row', async () => {
+    initRepo()
+    stubControlPlane(proxyRowId)
+    const opts = { ...base, workspaceRoot: root, harnessType: 'claude-code' as const, proxyInstanceId: 'proxy_aaaa' }
+    const first = await startHarnessSession(opts)
+    expect(calls).toHaveLength(1)
+    expect(calls[0].body).toMatchObject({ repoUrl: 'github.com/acme/widgets', branchName: 'feat/fleet', commitHash: git('rev-parse', 'HEAD') })
+    expect(JSON.stringify(calls[0].body)).not.toContain(token)
+
+    await startHarnessSession(opts)
+    expect(calls).toHaveLength(1)
+
+    writeFileSync(join(root, 'b.txt'), 'b')
+    git('add', 'b.txt')
+    git('commit', '-q', '-m', 'second')
+    expect(await startHarnessSession(opts)).toBe(first)
+    expect(calls).toHaveLength(2)
+    expect(calls[1].body).toMatchObject({ proxyInstanceId: 'proxy_aaaa', commitHash: git('rev-parse', 'HEAD'), commitMessage: 'second' })
+
+    git('checkout', '-q', '-b', 'fix/other')
+    await startHarnessSession(opts)
+    expect(calls).toHaveLength(3)
+    expect(calls[2].body).toMatchObject({ branchName: 'fix/other' })
+  })
+
+  it('updates the ses_ row it opened rather than opening another', async () => {
+    initRepo()
+    stubControlPlane(proxyRowId)
+    const opts = { ...base, workspaceRoot: root, harnessType: 'cursor' as const }
+    expect(await startHarnessSession(opts)).toBe('ses_cursor')
+    expect(calls[0].body).not.toHaveProperty('sessionId')
+
+    git('checkout', '-q', '-b', 'fix/other')
+    expect(await startHarnessSession(opts)).toBe('ses_cursor')
+    expect(calls).toHaveLength(2)
+    expect(calls[1].body).toMatchObject({ sessionId: 'ses_cursor', branchName: 'fix/other' })
   })
 })
