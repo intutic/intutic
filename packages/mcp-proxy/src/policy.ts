@@ -489,7 +489,9 @@ export class PolicyClient {
             (p): p is string => typeof p === 'string',
           )
           this.absorbCuration(policy as unknown as Record<string, unknown>)
-          if (policy.mcpRegistry) this.registry = policy.mcpRegistry
+          // Re-parsed, not trusted: a daemon on an older version, or an entry it
+          // cached before a field existed, can carry a registry without one.
+          if (policy.mcpRegistry) this.registry = parseRegistry(policy.mcpRegistry) ?? this.registry
           if (!policy.fromSnapshot) this.loadedFromControlPlane = true
           log.info({ action: 'policy_refreshed_from_daemon', ruleCount: this.rules.length }, 'SOP rules refreshed from daemon')
           return

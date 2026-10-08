@@ -5,7 +5,8 @@
  *
  * The counting cases run against a real Valkey when one answers at
  * `VALKEY_URL` (the docker test stack: `VALKEY_URL=redis://127.0.0.1:6380`);
- * otherwise they are skipped. The fail-open/closed cases need no Valkey.
+ * otherwise they are reported as skipped, never as passed. The
+ * fail-open/closed cases need no Valkey.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { Redis } from 'ioredis'
@@ -93,8 +94,8 @@ describe('MCP call budgets against Valkey', () => {
     }
   })
 
-  afterEach(async () => {
-    if (!available) return
+  afterEach(async ({ skip }) => {
+    if (!available) skip()
     for (const ws of workspaces.splice(0)) {
       const keys = await probe.keys(`v2:mcpbudget:{${ws}}:*`)
       if (keys.length) await probe.del(...keys)
@@ -118,8 +119,8 @@ describe('MCP call budgets against Valkey', () => {
     return { ws, a: make(), b: make() }
   }
 
-  it('shares one counter between two proxies and refuses the call over the limit', async () => {
-    if (!available) return
+  it('shares one counter between two proxies and refuses the call over the limit', async ({ skip }) => {
+    if (!available) skip()
     const clock = new Clock(T0)
     const { a, b } = twoProxies(clock)
     const policy = policyOf(serverBudget)
@@ -138,8 +139,8 @@ describe('MCP call budgets against Valkey', () => {
     )
   })
 
-  it('never lets two racing proxies both take the last call', async () => {
-    if (!available) return
+  it('never lets two racing proxies both take the last call', async ({ skip }) => {
+    if (!available) skip()
     const { a, b } = twoProxies(new Clock(T0))
     const policy = policyOf({ ...serverBudget, limit: 10 })
     const verdicts = await Promise.all(Array.from({ length: 30 }, (_, i) => (i % 2 ? a : b).check(policy, 't', null)))
@@ -147,8 +148,8 @@ describe('MCP call budgets against Valkey', () => {
     expect(verdicts.filter((v) => v.kind === 'exceeded')).toHaveLength(20)
   })
 
-  it('a refused call spends nothing, and the next period starts from zero', async () => {
-    if (!available) return
+  it('a refused call spends nothing, and the next period starts from zero', async ({ skip }) => {
+    if (!available) skip()
     const clock = new Clock(T0)
     const { ws, a } = twoProxies(clock)
     const policy = policyOf({ ...serverBudget, limit: 1 })
@@ -161,8 +162,8 @@ describe('MCP call budgets against Valkey', () => {
     expect((await a.check(policy, 't', null)).kind).toBe('allowed')
   })
 
-  it('expires each counter after its window', async () => {
-    if (!available) return
+  it('expires each counter after its window', async ({ skip }) => {
+    if (!available) skip()
     const { ws, a } = twoProxies(new Clock(T0))
     await a.check(policyOf(serverBudget), 't', null)
     const ttl = await probe.ttl(`${budgetCounterKey(ws, 'gh-hourly', Date.parse('2026-10-08T14:00:00Z'), '')}:count`)
@@ -171,8 +172,8 @@ describe('MCP call budgets against Valkey', () => {
     expect(ttl).toBeLessThanOrEqual(24 * 60 + 48)
   })
 
-  it('warns once and reports the exhaustion once per period, whichever proxy crosses the line', async () => {
-    if (!available) return
+  it('warns once and reports the exhaustion once per period, whichever proxy crosses the line', async ({ skip }) => {
+    if (!available) skip()
     const clock = new Clock(T0)
     const { a, b } = twoProxies(clock)
     const policy = policyOf({ ...serverBudget, limit: 5 }) // warns at 60%: the 3rd call
@@ -196,8 +197,8 @@ describe('MCP call budgets against Valkey', () => {
     expect(next).toEqual([0, 0, 1, 0])
   })
 
-  it('gives each member their own allowance under an each-member budget', async () => {
-    if (!available) return
+  it('gives each member their own allowance under an each-member budget', async ({ skip }) => {
+    if (!available) skip()
     const { a } = twoProxies(new Clock(T0))
     const policy = policyOf({ id: 'per-dev', scope: 'member', period: 'day', limit: 1 })
     expect((await a.check(policy, 't', 'mem_1')).kind).toBe('allowed')
@@ -208,8 +209,8 @@ describe('MCP call budgets against Valkey', () => {
     expect((await a.check(policy, 't', null)).kind).toBe('exceeded')
   })
 
-  it('refuses through the interceptor with tool_blocked, and files the alerts as budget findings', async () => {
-    if (!available) return
+  it('refuses through the interceptor with tool_blocked, and files the alerts as budget findings', async ({ skip }) => {
+    if (!available) skip()
     const { a } = twoProxies(new Clock(T0))
     const policy = new StubPolicy()
     policy.budgets = policyOf({ ...serverBudget, limit: 2, period: 'day' })
