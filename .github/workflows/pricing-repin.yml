@@ -1,0 +1,59 @@
+# ─────────────────────────────────────────────────────────────
+# pricing-repin.yml — the nightly pricing re-pin
+# ─────────────────────────────────────────────────────────────
+#
+# Every night, re-pins the model price list (LiteLLM's
+# model_prices_and_context_window.json) to its last commit before 00:00 UTC
+# and regenerates packages/proxy/src/pricing/offline_bundle.json and
+# packages/shared-types/src/modelCatalog.generated.ts. When a rate or a model
+# changed it opens a pull request, runs CI on it, and merges it once CI passes;
+# a change that looks wrong (a priced model dropped, a rate zeroed, too many
+# rates at once) waits for a person instead. tools/scripts/pricing-repin.sh
+# does the work; tools/scripts/pricing-repin-review.mjs decides.
+#
+# Runs at 03:00 UTC, half an hour before the other repository that carries the
+# same generated files: both pin the same LiteLLM commit, so their branches
+# (pricing-repin-<date>) hold identical files.
+# ─────────────────────────────────────────────────────────────
+
+name: Pricing re-pin
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: pricing-repin
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+env:
+  NODE_VERSION: "22"
+
+jobs:
+  repin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pnpm
+        run: npm install -g pnpm@11.6.0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Re-pin, and merge on green CI
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash tools/scripts/pricing-repin.sh
