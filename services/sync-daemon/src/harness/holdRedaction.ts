@@ -69,7 +69,7 @@ export function redactSecrets(value: unknown, depth = 0, maxString = MAX_STRING)
     /xox[abprs]-[A-Za-z0-9-]{10,}/g, // Slack
     /AIza[0-9A-Za-z_-]{30,}/g, // Google
     /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, // JWT
-    /-----BEGIN[A-Z ]*PRIVATE KEY-----[\s\S]*?-----END[A-Z ]*PRIVATE KEY-----/g,
+    // PEM private keys are handled by redactPem below, not a pattern here.
     // Bare basic-auth in a URL.
     /\/\/[^/\s:@]+:[^/\s:@]+@/g,
   ]
@@ -123,8 +123,29 @@ export function redactSecrets(value: unknown, depth = 0, maxString = MAX_STRING)
     return copied === 0 ? s : out + s.slice(copied)
   }
 
+  // A PEM private key, header to footer. Scanned rather than matched with one
+  // lazy `BEGIN[\s\S]*?END` pattern, which rescans to the end of the text from
+  // every header that has no footer: quadratic, and this runs before any
+  // length cap. A header with no footer is redacted to the end of the text,
+  // because a truncated key is still a key.
+  const redactPem = (s: string): string => {
+    const BEGIN = /-----BEGIN[A-Z ]*PRIVATE KEY-----/g
+    const END = /-----END[A-Z ]*PRIVATE KEY-----/g
+    let out = ''
+    let copied = 0
+    let m: RegExpExecArray | null
+    while ((m = BEGIN.exec(s)) !== null) {
+      out += s.slice(copied, m.index) + '[redacted]'
+      END.lastIndex = BEGIN.lastIndex
+      if (END.exec(s) === null) return out
+      copied = END.lastIndex
+      BEGIN.lastIndex = copied
+    }
+    return copied === 0 ? s : out + s.slice(copied)
+  }
+
   const scrub = (s: string): string => {
-    let out = s
+    let out = redactPem(s)
     for (const re of SECRET_VALUE) out = out.replace(re, '[redacted]')
     out = redactAssignments(out)
     if (out.length > maxString) {

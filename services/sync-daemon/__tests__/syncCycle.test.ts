@@ -39,7 +39,7 @@ beforeEach(() => {
   originalFetch = globalThis.fetch
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString()
-    if (!url.startsWith(CONTROL_PLANE)) throw new Error(`unexpected fetch ${url}`)
+    if (new URL(url).origin !== new URL(CONTROL_PLANE).origin) throw new Error(`unexpected fetch ${url}`)
     posts.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined })
     return new Response(JSON.stringify({}), { status: 200, headers: { 'Content-Type': 'application/json' } })
   }) as typeof fetch

@@ -61,6 +61,25 @@ describe('credential shapes are scrubbed', () => {
     expect(out).not.toContain(body)
   })
 
+  it('scrubs a private key whose END line is missing, to the end of the text', () => {
+    // A truncated key is still a key: the header with no END redacts what follows.
+    const body = 'MIIEvQIBADANBgkqhkiG9w0BAQEFAASC'.repeat(4)
+    const pem = 'cat <<EOF\n-----BEGIN ' + `PRIVATE KEY-----\n${body}`
+    const out = JSON.stringify(redactSecrets({ command: pem }))
+    expect(out).not.toContain(body)
+    expect(out).toContain('cat <<EOF')
+  })
+
+  it('redacts many unterminated key headers in bounded time', () => {
+    // The lazy `BEGIN[\s\S]*?END` pattern rescanned to the end of the text from
+    // every unmatched header: 520 KB of headers took 2.3 s, and the hook and the
+    // config upload both run it before any length cap applies.
+    const hostile = { command: ('-----BEGIN' + 'PRIVATE KEY-----').repeat(40_000) }
+    const started = performance.now()
+    redactSecrets(hostile)
+    expect(performance.now() - started).toBeLessThan(2_000)
+  })
+
   it('scrubs basic-auth credentials in a URL', () => {
     const out = JSON.stringify(redactSecrets({ command: 'git clone https://user:hunter2swordfish@git.test/r.git' }))
     expect(out).not.toContain('hunter2swordfish')
