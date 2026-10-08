@@ -90,10 +90,11 @@ list. In short:
 | [Self-hosted gateway](/external/self-hosted-gateway) | | | ✓ | ✓ |
 | Runs in your VPC or an air-gapped network | | | | ✓ |
 
-The 14-day personal trial includes Policy Guardrails, single sign-on, SCIM,
+The 14-day Free trial includes Policy Guardrails, single sign-on, SCIM,
 Custom Filters, the SOP Optimizer and data residency; the 14-day Enterprise
-trial adds the Evaluator Sandbox. Plan changes take effect at the next sync-daemon
-handshake; no CLI or proxy binary change is needed on any developer's machine.
+trial adds the Evaluator Sandbox and SOP write-back. Plan changes take effect
+at the next sync-daemon handshake; no CLI or proxy binary change is needed on
+any developer's machine.
 <!-- ENTERPRISE_ONLY_END -->
 
 ## Upgrading
