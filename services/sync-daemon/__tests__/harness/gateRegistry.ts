@@ -622,6 +622,11 @@ export const NO_GATE: ReadonlyArray<{
     why: 'redaction serialised into claude-code’s gate; writes no harness config of its own',
   },
   {
+    file: 'claudeProjectApproval.ts',
+    harness: 'claude-code',
+    why: 'decides which project MCP servers Claude Code would start, for mcpAutoWrite.ts; writes nothing itself',
+  },
+  {
     file: null,
     harness: 'langgraph',
     why:

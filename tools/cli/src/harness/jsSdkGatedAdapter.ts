@@ -27,13 +27,14 @@
  * @module
  */
 
-import { join, dirname } from 'node:path'
-import { readFile, writeFile, rename, mkdir } from 'node:fs/promises'
+import { join } from 'node:path'
+import { readFile } from 'node:fs/promises'
 import type { HarnessType, SyncSopEntry } from '@intutic/shared-types'
 import { anthropicBaseUrl, openaiBaseUrl, proxyHost } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
 import { hashFile } from '../lib/hash.js'
 import { newIso } from '@intutic/id'
+import { writeOwnedFile } from '@intutic/sync-daemon'
 
 const CONFIG_FILE = '.env.intutic'
 
@@ -197,10 +198,7 @@ export function makeJsSdkGatedAdapter(spec: JsSdkGatedFrameworkSpec): IHarnessAd
         '',
       ].join('\n')
 
-      await mkdir(dirname(filePath), { recursive: true })
-      const tmpEnv = filePath + '.intutic-tmp'
-      await writeFile(tmpEnv, envContent, 'utf-8')
-      await rename(tmpEnv, filePath)
+      await writeOwnedFile(filePath, workspaceRoot, envContent)
 
       return filePath
     },

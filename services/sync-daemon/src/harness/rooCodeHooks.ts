@@ -20,6 +20,7 @@ import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
+import { keepOriginal, writeOwnedFile } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
 import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
 import { UNIVERSAL_PROTECTED_PATHS } from './protectedPaths.js'
@@ -251,6 +252,7 @@ export async function writeRooCodeHooks(
   const rooRulesDir = path.join(workspaceRoot, '.roorules')
   const rooHooksDir = path.join(rooRulesDir, 'hooks')
 
+  await keepOriginal(path.join(rooHooksDir, 'hooks.json'), workspaceRoot)
   await Promise.all([
     fs.mkdir(hookScriptDir, { recursive: true }),
     fs.mkdir(hookEventsDir, { recursive: true }),
@@ -281,14 +283,9 @@ export async function writeRooCodeHooks(
 
   if (rooRulesIsDir) {
     // Write README.md inside the directory
-    const readmePath = path.join(rooRulesPath, 'README.md')
-    const tmpReadme = readmePath + '.intutic-tmp'
-    await fs.writeFile(tmpReadme, buildRooRulesContent(), 'utf-8')
-    await fs.rename(tmpReadme, readmePath)
+    await writeOwnedFile(path.join(rooRulesPath, 'README.md'), workspaceRoot, buildRooRulesContent())
   } else {
-    const tmpRooRules = rooRulesPath + '.intutic-tmp'
-    await fs.writeFile(tmpRooRules, buildRooRulesContent(), 'utf-8')
-    await fs.rename(tmpRooRules, rooRulesPath)
+    await writeOwnedFile(rooRulesPath, workspaceRoot, buildRooRulesContent())
   }
 
   log.info({ action: 'roo_rules_written' }, 'Roo Code .roorules written')
@@ -306,9 +303,7 @@ export async function writeRooCodeHooks(
     ],
   }
 
-  const tmpHooksJson = hooksJsonPath + '.intutic-tmp'
-  await fs.writeFile(tmpHooksJson, JSON.stringify(hooksConfig, null, 2) + '\n', 'utf-8')
-  await fs.rename(tmpHooksJson, hooksJsonPath)
+  await writeOwnedFile(hooksJsonPath, workspaceRoot, JSON.stringify(hooksConfig, null, 2) + '\n')
 
   log.info(
     { action: 'roo_hooks_json_written', path: hooksJsonPath },

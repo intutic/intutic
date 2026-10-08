@@ -45,6 +45,8 @@ export {
 export type { SopHookConstraints } from './harness/claudeCodeHooks.js'
 
 export { injectMcpServer } from './harness/mcpAutoWrite.js'
+export { planDisconnect, DisconnectPlan, HARNESS_REVERSERS, keepOriginal, noteWritten, noteProxyUrl, writeOwnedFile } from './disconnect/index.js'
+export type { DisconnectOptions, PlannedChange, PlanNote } from './disconnect/index.js'
 
 export { guardSettingsFile, warnIfDshCoverageGap } from './watcher/settingsGuard.js'
 

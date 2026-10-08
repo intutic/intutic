@@ -44,6 +44,7 @@ import { SyncWsClient,
   startWatcher,
   updatePreToolUseHooks,
   injectMcpServer,
+  noteProxyUrl,
   guardSettingsFile,
   warnIfDshCoverageGap,
   writeRuntimeEnv,
@@ -606,7 +607,10 @@ export async function runConnect(opts: {
 
       const combinedSops = [...syncConfig.sops, ...localSopEntries]
 
-      // a. Write configs for all active harnesses
+      // a. Write configs for all active harnesses. The proxy URL is recorded
+      // first: `intutic disconnect` recognises the base-URL settings it is
+      // written into by it.
+      await noteProxyUrl(syncConfig.proxyUrl)
       for (const harnessType of safeConfig.harnesses) {
         const adapter = getAdapter(harnessType)
         if (!adapter) continue
@@ -641,7 +645,7 @@ export async function runConnect(opts: {
 
       // c. Inject + proxy-wrap MCP servers across all supported harnesses
       try {
-        await injectMcpServer(safeConfig.workspaceRoot, safeCreds.workspaceId)
+        await injectMcpServer(safeConfig.workspaceRoot, safeCreds.workspaceId, { skip: safeConfig.disconnectedHarnesses })
       } catch (err) {
         log.warn(`Failed to inject MCP server configs: ${err instanceof Error ? err.message : String(err)}`)
       }
@@ -1185,7 +1189,14 @@ export async function runConnect(opts: {
     if (isGovernedConfigPath(changedPath, filename)) {
       try {
         const sops = lastCachedConfig?.sops ?? []
-        const tampered = await guardSettingsFile(changedPath, safeConfig.workspaceRoot, sops)
+        const tampered = await guardSettingsFile(
+          changedPath,
+          safeConfig.workspaceRoot,
+          sops,
+          undefined,
+          undefined,
+          new Set(safeConfig.disconnectedHarnesses ?? []),
+        )
         if (tampered) {
           log.warn(`[Security] Governance settings tamper detected and restored: ${changedPath}`)
           wsClient.send({

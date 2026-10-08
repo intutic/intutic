@@ -51,6 +51,7 @@ import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
+import { keepOriginal } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
 import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
 import { readJsonObjectForMerge } from './jsonMergeTarget.js'
@@ -254,6 +255,7 @@ export async function writeContinueHooks(
 
   // Project-level: <root>/.continue/settings.json
   const projectContinueDir = path.join(workspaceRoot, '.continue')
+  await keepOriginal(path.join(projectContinueDir, 'settings.json'), workspaceRoot)
   await fs.mkdir(projectContinueDir, { recursive: true })
   await mergeContinueSettings(path.join(projectContinueDir, 'settings.json'), hookScriptPath)
 
@@ -261,6 +263,7 @@ export async function writeContinueHooks(
   // tests that move HOME before invoking are honoured — see the gooseHooks
   // note in generatedShellIntegrity.test.ts.
   const userContinueDir = path.join(os.homedir(), '.continue')
+  await keepOriginal(path.join(userContinueDir, 'settings.json'), workspaceRoot)
   await fs.mkdir(userContinueDir, { recursive: true })
   await mergeContinueSettings(path.join(userContinueDir, 'settings.json'), hookScriptPath)
 

@@ -18,8 +18,8 @@
  * @module
  */
 
-import { join, dirname } from 'node:path'
-import { access, writeFile, rename, mkdir } from 'node:fs/promises'
+import { join } from 'node:path'
+import { access } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { HarnessType } from '@intutic/shared-types'
 import type { SyncSopEntry } from '@intutic/shared-types'
@@ -27,6 +27,7 @@ import type { IHarnessAdapter } from './types.js'
 import { hashFile } from '../lib/hash.js'
 import { buildMarkdownContent } from './base.js'
 import { writeMuseHooks } from '@intutic/sync-daemon/harness/museHooks'
+import { writeOwnedFile } from '@intutic/sync-daemon'
 
 /** Workspace-relative rules file. Muse reads this, falling back to CLAUDE.md. */
 const CONFIG_FILE = 'AGENTS.md'
@@ -71,10 +72,7 @@ export const museAdapter: IHarnessAdapter = {
     //    have a rules file, so sops are not ignored here.
     if (sops.length > 0) {
       const content = buildMarkdownContent(sops, proxyUrl)
-      await mkdir(dirname(agentsPath), { recursive: true })
-      const tmp = agentsPath + '.intutic-tmp'
-      await writeFile(tmp, content, 'utf-8')
-      await rename(tmp, agentsPath)
+      await writeOwnedFile(agentsPath, workspaceRoot, content)
     }
 
     // 2. PreToolUse/PermissionRequest hooks (project .muse/hooks.json +

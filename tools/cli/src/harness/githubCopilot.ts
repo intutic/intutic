@@ -10,8 +10,8 @@
  * @module
  */
 
-import { join, dirname } from 'node:path'
-import { access, mkdir, writeFile, rename } from 'node:fs/promises'
+import { join } from 'node:path'
+import { access } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { HarnessType } from '@intutic/shared-types'
 import type { SyncSopEntry } from '@intutic/shared-types'
@@ -19,7 +19,7 @@ import type { IHarnessAdapter } from './types.js'
 import { hashFile } from '../lib/hash.js'
 import { buildMarkdownContent } from './base.js'
 import { loadCredentials } from '../config/store.js'
-import { writeGithubCopilotHooks } from '@intutic/sync-daemon'
+import { writeGithubCopilotHooks, writeOwnedFile } from '@intutic/sync-daemon'
 
 const CONFIG_FILE = '.github/copilot-instructions.md'
 
@@ -48,11 +48,8 @@ export const githubCopilotAdapter: IHarnessAdapter = {
 
     if (sops.length === 0) return null
     const filePath = join(workspaceRoot, CONFIG_FILE)
-    const tmpPath = filePath + '.intutic-tmp'
     const content = buildMarkdownContent(sops, proxyUrl)
-    await mkdir(dirname(filePath), { recursive: true })
-    await writeFile(tmpPath, content, 'utf-8')
-    await rename(tmpPath, filePath)
+    await writeOwnedFile(filePath, workspaceRoot, content)
     return filePath
   },
 

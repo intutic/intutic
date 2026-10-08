@@ -154,6 +154,9 @@ async function resolveWorkspaceId(workspaceRoot: string): Promise<string> {
  * @param sops          - Current SOP list.
  * @param proxyUrl      - Current proxy URL.
  * @param settings      - Optional passthrough settings.
+ * @param skip          - Harnesses `intutic disconnect --harness` took out:
+ *                        their files are no longer governed, so a change to
+ *                        one is not tampering and is not restored.
  * @returns true if tampering was detected.
  */
 export async function guardSettingsFile(
@@ -162,9 +165,11 @@ export async function guardSettingsFile(
   sops: SyncSopEntry[],
   proxyUrl = '',
   settings?: Record<string, unknown>,
+  skip: ReadonlySet<string> = new Set(),
 ): Promise<boolean> {
   // ── Goose plugin: immutable file tamper → incident, not restore ───
   if (changedPath.includes('intutic-governance')) {
+    if (skip.has('goose')) return false
     if (await isImmutable(changedPath)) {
       log.error(
         { action: 'governance_override_attempt', path: changedPath },
@@ -207,11 +212,13 @@ export async function guardSettingsFile(
 
   // ── Claude Code settings.json ─────────────────────────────────────
   if (changedPath.includes('.claude') && changedPath.endsWith('settings.json')) {
+    if (skip.has('claude-code')) return false
     return guardClaudeCodeSettings(changedPath, workspaceRoot, sops, settings)
   }
 
   // ── Cursor hooks.json ─────────────────────────────────────────────
   if (changedPath.includes('.cursor') && changedPath.endsWith('hooks.json')) {
+    if (skip.has('cursor')) return false
     return guardJsonHookFile(changedPath, 'cursor', async () => {
       await writeCursorHooks(workspaceRoot, proxyUrl, '', changedPath.startsWith('/etc'))
     })
@@ -219,6 +226,7 @@ export async function guardSettingsFile(
 
   // ── Windsurf hooks.json ───────────────────────────────────────────
   if ((changedPath.includes('.codeium') || changedPath.includes('.windsurf')) && changedPath.endsWith('hooks.json')) {
+    if (skip.has('windsurf')) return false
     return guardJsonHookFile(changedPath, 'windsurf', async () => {
       await writeWindsurfHooks(workspaceRoot, proxyUrl)
     })
@@ -226,6 +234,7 @@ export async function guardSettingsFile(
 
   // ── Cline hooks.json ──────────────────────────────────────────────
   if (changedPath.includes('.clinerules') && changedPath.endsWith('hooks.json')) {
+    if (skip.has('cline')) return false
     return guardJsonHookFile(changedPath, 'cline', async () => {
       await writeClineHooks(workspaceRoot, proxyUrl)
     })
@@ -233,6 +242,7 @@ export async function guardSettingsFile(
 
   // ── OpenHands hooks.json ──────────────────────────────────────────
   if (changedPath.includes('.openhands') && changedPath.endsWith('hooks.json')) {
+    if (skip.has('openhands')) return false
     return guardJsonHookFile(changedPath, 'openhands', async () => {
       await writeOpenHandsHooks(workspaceRoot, proxyUrl)
     })
@@ -246,6 +256,7 @@ export async function guardSettingsFile(
     (changedPath.includes(path.join('.config', 'muse')) &&
       (changedPath.endsWith('settings.json') || changedPath.endsWith('intutic-managed-hooks.json')))
   ) {
+    if (skip.has('muse-code')) return false
     return guardJsonHookFile(changedPath, 'muse-code', async () => {
       await writeMuseHooks(workspaceRoot, proxyUrl, await resolveWorkspaceId(workspaceRoot))
     })
@@ -258,6 +269,7 @@ export async function guardSettingsFile(
   // a tamper there falls through to the generic drift-log path below rather
   // than a targeted restore.
   if (changedPath.includes('.grok') && changedPath.endsWith('intutic-governance.json')) {
+    if (skip.has('grok')) return false
     return guardJsonHookFile(changedPath, 'grok', async () => {
       await writeGrokHooks(workspaceRoot, proxyUrl)
     })
@@ -271,6 +283,7 @@ export async function guardSettingsFile(
   // closes itself, rather than waiting for an unrelated file change or the
   // next poll cycle to notice.
   if (isDshProfilesRoot(changedPath)) {
+    if (skip.has('dsh')) return false
     await safeRestore('dsh', () => writeDshHooks(workspaceRoot, proxyUrl, ''))
     return true
   }
@@ -290,6 +303,7 @@ export async function guardSettingsFile(
     changedPath.startsWith(path.join(resolveDshHome(), 'profiles') + path.sep) &&
     changedPath.endsWith('cordis.patch.yml')
   ) {
+    if (skip.has('dsh')) return false
     return guardDshFile(changedPath, ['intutic-governance', proxyUrl], workspaceRoot, proxyUrl)
   }
 
@@ -299,6 +313,7 @@ export async function guardSettingsFile(
     changedPath === path.join(workspaceRoot, OPENCODE_PLUGIN_DIR, OPENCODE_PLUGIN_FILE) ||
     changedPath === path.join(workspaceRoot, OPENCODE_PLUGIN_DIR, OPENCODE_PLUGIN_V2_FILE)
   ) {
+    if (skip.has('opencode')) return false
     return guardMarkedFile(changedPath, 'Intutic gate body', 'opencode', () =>
       writeOpenCodeHooks(workspaceRoot, proxyUrl, ''))
   }

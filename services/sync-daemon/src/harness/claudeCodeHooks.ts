@@ -25,6 +25,7 @@ import { emitJsGate, emitJsFailClosedPrelude,
 } from './gateBody.js'
 import { emitRedactor } from './holdRedaction.js'
 import { readJsonObjectForMerge } from './jsonMergeTarget.js'
+import { keepOriginal, noteWritten, readOriginal } from '../disconnect/originals.js'
 
 const log = createLogger('sync-claude-hooks')
 
@@ -503,8 +504,9 @@ process.stdin.on('end', () => {
 
   // Write local settings config
   const localClaudeDir = node_path.join(workspaceRoot, '.claude')
-  await node_fs.mkdir(localClaudeDir, { recursive: true })
   const localSettingsPath = node_path.join(localClaudeDir, 'settings.json')
+  await keepOriginal(localSettingsPath, workspaceRoot)
+  await node_fs.mkdir(localClaudeDir, { recursive: true })
 
   // A settings file that is not a plain JSON object is left untouched (and
   // reported) rather than replaced with only the Intutic keys.
@@ -522,6 +524,7 @@ process.stdin.on('end', () => {
       },
     }
     await node_fs.writeFile(localSettingsPath, JSON.stringify(mergedLocal, null, 2) + '\n', 'utf-8')
+    await noteDenyRules(localSettingsPath, workspaceRoot, denyRules)
   }
 
   // Write global settings config ~/.claude/settings.json
@@ -542,8 +545,9 @@ process.stdin.on('end', () => {
   }
 
   const globalClaudeDir = node_path.join(node_os.homedir(), '.claude')
-  await node_fs.mkdir(globalClaudeDir, { recursive: true })
   const globalSettingsPath = node_path.join(globalClaudeDir, 'settings.json')
+  await keepOriginal(globalSettingsPath, workspaceRoot)
+  await node_fs.mkdir(globalClaudeDir, { recursive: true })
 
   const existingGlobal = await readJsonObjectForMerge(globalSettingsPath)
   if (existingGlobal === null) return
@@ -568,7 +572,19 @@ process.stdin.on('end', () => {
   }
 
   await node_fs.writeFile(globalSettingsPath, JSON.stringify(mergedGlobal, null, 2) + '\n', 'utf-8')
+  await noteDenyRules(globalSettingsPath, workspaceRoot, denyRules)
   log.info({ action: 'hooks_written' }, 'Successfully updated settings.json hooks globally and locally')
+}
+
+/**
+ * Records, for `intutic disconnect`, every deny rule Intutic has put in a
+ * settings file: the entries carry no marker, and a rule from an earlier
+ * sync stays in the user file's union after the SOP that produced it is gone.
+ */
+async function noteDenyRules(settingsPath: string, workspaceRoot: string, denyRules: string[]): Promise<void> {
+  const earlier = (await readOriginal(settingsPath, workspaceRoot))?.meta?.['intuticDeny']
+  const all = new Set([...(Array.isArray(earlier) ? (earlier as string[]) : []), ...denyRules])
+  await noteWritten(settingsPath, workspaceRoot, null, { intuticDeny: [...all] })
 }
 
 /**

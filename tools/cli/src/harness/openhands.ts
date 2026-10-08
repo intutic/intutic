@@ -16,6 +16,7 @@ import type { SyncSopEntry } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
 import { hashFile } from '../lib/hash.js'
 import { writeOpenHandsHooks, mergeOpenHandsToml } from '@intutic/sync-daemon/harness/openhandsHooks'
+import { keepOriginal } from '@intutic/sync-daemon'
 import { log } from '../lib/logger.js'
 
 const CONFIG_FILE = 'config.toml'
@@ -51,6 +52,7 @@ export const openhandsAdapter: IHarnessAdapter = {
       log.warn(`${filePath} is not valid TOML — left untouched`)
     } else {
       const tmpPath = filePath + '.intutic-tmp'
+      await keepOriginal(filePath, workspaceRoot)
       await mkdir(dirname(filePath), { recursive: true })
       await writeFile(tmpPath, merged, 'utf-8')
       await rename(tmpPath, filePath)

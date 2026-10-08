@@ -36,6 +36,7 @@ import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import { parseDocument, isMap, isSeq, isScalar, YAMLSeq, type Document } from 'yaml'
 import { createLogger } from '@intutic/logger'
+import { keepOriginal } from '../disconnect/originals.js'
 import { anthropicBaseUrl, openaiBaseUrl } from '@intutic/shared-types'
 
 const log = createLogger('sync-aider-merger')
@@ -64,7 +65,7 @@ const HEADER = [
  *  versions wrote), removed before the file is parsed. */
 const OWN_HEADER_LINE = /^# (Intutic: |Intutic Governance Rules \(auto-generated|Last sync: |WARNING: test-cmd and lint-cmd keys are suppressed|\.intutic\/aider-sops\.md read entry|lint-cmd, auto-test and auto-lint are removed)/
 
-function stripOwnHeader(raw: string): string {
+export function stripOwnHeader(raw: string): string {
   const lines = raw.split('\n')
   let i = 0
   while (i < lines.length && OWN_HEADER_LINE.test(lines[i])) i++
@@ -177,6 +178,8 @@ export async function mergeAiderConfig(
   }
 
   const tmpPath = configPath + '.intutic-tmp'
+  // The config sits at the workspace root, so its directory is the workspace.
+  await keepOriginal(configPath, path.dirname(configPath))
   await fs.mkdir(path.dirname(configPath), { recursive: true })
   await fs.writeFile(tmpPath, content, 'utf-8')
   await fs.rename(tmpPath, configPath)

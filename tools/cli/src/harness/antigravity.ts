@@ -19,7 +19,7 @@ import type { IHarnessAdapter } from './types.js'
 import { hashFile } from '../lib/hash.js'
 import { newIso } from '@intutic/id'
 import { loadCredentials } from '../config/store.js'
-import { readJsonObjectForMerge, writeAntigravityHooks } from '@intutic/sync-daemon'
+import { keepOriginal, readJsonObjectForMerge, writeAntigravityHooks } from '@intutic/sync-daemon'
 
 const CONFIG_FILE = '.gemini/settings.json'
 
@@ -46,6 +46,7 @@ export const antigravityAdapter: IHarnessAdapter = {
     const filePath = join(workspaceRoot, CONFIG_FILE)
     const tmpPath = filePath + '.intutic-tmp'
 
+    await keepOriginal(filePath, workspaceRoot)
     const settings = await readJsonObjectForMerge(filePath)
     if (settings === null) return null
 

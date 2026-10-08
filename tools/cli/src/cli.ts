@@ -82,6 +82,17 @@ program
   })
 
 program
+  .command('disconnect')
+  .description('Undo intutic connect: restore every harness config it changed, remove its services, and log out')
+  .option('--harness <id>', 'Disconnect one harness only (credentials and services stay)')
+  .option('--dry-run', 'Print exactly what would change, and change nothing')
+  .option('--keep-login', 'Keep the stored credentials')
+  .action(async (opts) => {
+    const { runDisconnect } = await import('./commands/disconnect.js')
+    await runDisconnect({ harness: opts.harness, dryRun: opts.dryRun, keepLogin: opts.keepLogin })
+  })
+
+program
   .command('logout')
   .description('Clear stored credentials')
   .action(async () => {

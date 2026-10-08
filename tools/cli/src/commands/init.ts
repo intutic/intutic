@@ -116,6 +116,8 @@ export async function runInit(opts: { dev?: boolean; gitHooks?: boolean }): Prom
     harnesses: detected.map((h) => h.type as HarnessType),
     configVersion: 0,
     devMode,
+    // Setting up harnesses again undoes an earlier `disconnect --harness`.
+    disconnectedHarnesses: undefined,
   })
 
   // 5. Git hook onboarding

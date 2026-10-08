@@ -99,6 +99,7 @@ import * as os from 'node:os'
 import { isDeepStrictEqual } from 'node:util'
 import { isSeq, parseDocument } from 'yaml'
 import { createLogger } from '@intutic/logger'
+import { keepOriginal, noteWritten } from '../disconnect/originals.js'
 import { anthropicBaseUrl } from '@intutic/shared-types'
 
 const log = createLogger('sync-dsh-hooks')
@@ -562,10 +563,12 @@ async function writeDshInstallMd(dshHome: string, profileNames: string[]): Promi
   }
   if (existing === content) return
 
+  await keepOriginal(installPath, dshHome)
   await fs.mkdir(dshHome, { recursive: true })
   const tmp = installPath + '.intutic-tmp'
   await fs.writeFile(tmp, content, 'utf-8')
   await fs.rename(tmp, installPath)
+  await noteWritten(installPath, dshHome, content)
   log.info({ action: 'dsh_install_md_written', path: installPath }, 'dsh INSTALL.md updated')
 }
 
@@ -597,6 +600,10 @@ export async function writeDshHooks(workspaceRoot: string, proxyUrl: string, wor
   }
 
   for (const profileDir of profileDirs) {
+    // The profile's own files, kept for disconnect before Intutic first edits
+    // them. Recorded under $DSH_HOME, which need not be inside the home directory.
+    await keepOriginal(path.join(profileDir, PROFILE_PATCH_FILENAME), dshHome)
+    await keepOriginal(path.join(profileDir, 'package.json'), dshHome)
     await mergeProfilePatch(profileDir, workspaceRoot, workspaceId)
     // dsh's llm-deepseek route speaks the Anthropic Messages wire and
     // appends /v1/messages to its baseURL, so it gets the bare proxy host.

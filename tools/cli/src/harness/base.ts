@@ -9,12 +9,12 @@
  */
 
 import { join } from 'node:path'
-import { access, writeFile, rename, mkdir } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { access } from 'node:fs/promises'
 import type { HarnessType, SyncSopEntry } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
 import { hashFile } from '../lib/hash.js'
 import { newIso } from '@intutic/id'
+import { writeOwnedFile } from '@intutic/sync-daemon'
 
 /** Header prepended to all governance config files. */
 function buildHeader(): string {
@@ -62,11 +62,8 @@ export function createMarkdownAdapter(
     async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
       if (sops.length === 0) return null
       const filePath = join(workspaceRoot, configFileName)
-      const tmpPath = filePath + '.intutic-tmp'
       const content = buildMarkdownContent(sops, proxyUrl)
-      await mkdir(dirname(filePath), { recursive: true })
-      await writeFile(tmpPath, content, 'utf-8')
-      await rename(tmpPath, filePath)
+      await writeOwnedFile(filePath, workspaceRoot, content)
       return filePath
     },
 

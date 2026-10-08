@@ -72,11 +72,10 @@
  *   comment used to describe as "left untouched": the entry is rewritten to
  *   spawn the SAME proxy binary in bridge mode (`--remote-url`/
  *   `--remote-transport`, headers riding in `INTUTIC_REMOTE_HEADERS` env, not
- *   argv — `ps` visibility). `__intutic_original` preserves the entry's
- *   pre-wrap `url`/`type`/`headers` so `classifyEntry` can report the TRUE
- *   transport of what got wrapped, and so a wrapped entry could be unwrapped
- *   later. See TECH_DEBT.md TD-354 for the historical decline this phase
- *   supersedes.
+ *   argv — `ps` visibility). `__intutic_original` keeps the whole pre-wrap
+ *   entry, stdio or remote, so `classifyEntry` can report the TRUE transport
+ *   of what got wrapped and `intutic disconnect` can put the entry back
+ *   exactly.
  *
  * Continuous invariant, not one-shot: `injectMcpServer` is called once from
  * `intutic connect` (tools/cli) AND once per sync-loop iteration
@@ -101,6 +100,7 @@ import { isDeepStrictEqual } from 'node:util'
 import { createLogger } from '@intutic/logger'
 import { readJsonObjectForMerge } from './jsonMergeTarget.js'
 import { projectServerApproval, type ProjectApproval } from './claudeProjectApproval.js'
+import { keepOriginal } from '../disconnect/originals.js'
 import { parseDocument, isMap } from 'yaml'
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml'
 
@@ -130,15 +130,16 @@ interface McpServerEntry {
   /** Intutic governance marker — prevents double-wrapping */
   __intutic_wrapped?: boolean
   /**
-   * Preserves a WRAPPED remote entry's pre-wrap `url`/`type`/`headers` — the
-   * wrap rewrites the entry's top-level shape to a stdio one (`command`/
-   * `args`, so the harness can spawn the proxy binary at all), which would
-   * otherwise make the entry indistinguishable from an originally-stdio
-   * server. `classifyEntry` reads this to report the TRUE transport rather
-   * than misreporting every wrapped remote server as stdio. Absent on stdio
-   * entries and on unwrapped entries.
+   * The entry exactly as it was before the wrap, every key included — the
+   * wrap keeps only what the proxy needs, so this is what `intutic
+   * disconnect` puts back. For a remote entry it is also how `classifyEntry`
+   * reports the TRUE transport: the wrap rewrites a remote entry's top-level
+   * shape to a stdio one (`command`/`args`, so the harness can spawn the
+   * proxy binary at all), which would otherwise make it indistinguishable
+   * from an originally-stdio server. Absent on unwrapped entries, and on
+   * stdio entries wrapped by versions that recorded only remote originals.
    */
-  __intutic_original?: { url?: string; type?: string; headers?: Record<string, string> }
+  __intutic_original?: { url?: string; type?: string; headers?: Record<string, string>; [key: string]: unknown }
   /**
    * Set on a local-scope entry in `~/.claude.json` that this module wrote to
    * govern a project-scope server of the same name (see
@@ -220,7 +221,7 @@ function claudeCodeConfigPath(): string {
   return node_path.join(node_os.homedir(), '.claude.json')
 }
 
-function claudeDesktopConfigPath(): string {
+export function claudeDesktopConfigPath(): string {
   const home = node_os.homedir()
   if (process.platform === 'darwin') {
     return node_path.join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json')
@@ -230,7 +231,7 @@ function claudeDesktopConfigPath(): string {
   return node_path.join(home, '.config', 'Claude', 'claude_desktop_config.json')
 }
 
-function cursorGlobalConfigPath(): string {
+export function cursorGlobalConfigPath(): string {
   const home = node_os.homedir()
   if (process.platform === 'darwin') {
     return node_path.join(home, 'Library', 'Application Support', 'Cursor', 'User', 'globalSettings.json')
@@ -248,15 +249,15 @@ function clineConfigPath(workspaceRoot: string): string {
   return node_path.join(workspaceRoot, '.cline', 'mcp.json')
 }
 
-function windsurfConfigPath(): string {
+export function windsurfConfigPath(): string {
   return node_path.join(node_os.homedir(), '.codeium', 'windsurf', 'mcp_config.json')
 }
 
-function continueConfigPath(): string {
+export function continueConfigPath(): string {
   return node_path.join(node_os.homedir(), '.continue', 'config.json')
 }
 
-function gooseConfigPath(): string {
+export function gooseConfigPath(): string {
   return node_path.join(node_os.homedir(), '.config', 'goose', 'config.yaml')
 }
 
@@ -264,11 +265,11 @@ function openHandsConfigPath(workspaceRoot: string): string {
   return node_path.join(workspaceRoot, '.openhands', 'mcp.json')
 }
 
-function museConfigPath(): string {
+export function museConfigPath(): string {
   return node_path.join(node_os.homedir(), '.config', 'muse', 'settings.json')
 }
 
-function grokUserConfigPath(): string {
+export function grokUserConfigPath(): string {
   return node_path.join(node_os.homedir(), '.grok', 'config.toml')
 }
 
@@ -279,7 +280,7 @@ function grokProjectConfigPath(workspaceRoot: string): string {
 /** OpenCode's global config: `$XDG_CONFIG_HOME/opencode/opencode.json`, which
  *  is `~/.config/opencode/opencode.json` unless XDG_CONFIG_HOME is set (OpenCode
  *  resolves it through xdg-basedir). Only the `.json` spelling — see `injectOpenCode`. */
-function openCodeGlobalConfigPath(): string {
+export function openCodeGlobalConfigPath(): string {
   const base = process.env['XDG_CONFIG_HOME'] || node_path.join(node_os.homedir(), '.config')
   return node_path.join(base, 'opencode', 'opencode.json')
 }
@@ -320,6 +321,8 @@ function wrapWithProxy(
 
   const proxyBin = resolveProxyBin(workspaceRoot)
 
+  const original = structuredClone(entry) as NonNullable<McpServerEntry['__intutic_original']>
+
   if (typeof entry.command === 'string') {
     const originalArgs = entry.args ?? []
     return {
@@ -337,16 +340,13 @@ function wrapWithProxy(
         INTUTIC_WORKSPACE_ID: workspaceId,
       },
       __intutic_wrapped: true,
+      __intutic_original: original,
     }
   }
 
   if (typeof entry.url === 'string') {
     const remoteTransport = entry.type?.toLowerCase() === 'sse' ? 'sse' : 'http'
     const hasHeaders = entry.headers !== undefined && Object.keys(entry.headers).length > 0
-
-    const original: NonNullable<McpServerEntry['__intutic_original']> = { url: entry.url }
-    if (entry.type !== undefined) original.type = entry.type
-    if (entry.headers !== undefined) original.headers = entry.headers
 
     const env: Record<string, string> = {
       ...(entry.env ?? {}),
@@ -453,8 +453,12 @@ async function readJsonForWrite<T>(filePath: string): Promise<T> {
  * serialized string — a naive string compare would report a false "changed"
  * on nothing more than JSON.stringify key-ordering differences between two
  * semantically identical objects.
+ *
+ * With `workspaceRoot`, the file's original is kept for `intutic disconnect`
+ * before the first write. `~/.claude.json` goes without: it is Claude Code's
+ * live state, never restored whole.
  */
-async function writeJsonFile(filePath: string, data: unknown): Promise<void> {
+async function writeJsonFile(filePath: string, data: unknown, workspaceRoot?: string): Promise<void> {
   let existing: unknown
   let hasExisting: boolean
   try {
@@ -468,6 +472,7 @@ async function writeJsonFile(filePath: string, data: unknown): Promise<void> {
     return
   }
 
+  if (workspaceRoot !== undefined) await keepOriginal(filePath, workspaceRoot)
   await node_fs.mkdir(node_path.dirname(filePath), { recursive: true })
   await node_fs.writeFile(filePath, JSON.stringify(data, null, 2) + '\n', 'utf-8')
 }
@@ -619,7 +624,7 @@ async function injectClaudeDesktop(workspaceId: string, workspaceRoot: string): 
     workspaceRoot
   )
 
-  await writeJsonFile(configPath, current)
+  await writeJsonFile(configPath, current, workspaceRoot)
   log.info({ action: 'claude_desktop_mcp_injected' }, 'Claude Desktop config updated')
 }
 
@@ -637,7 +642,7 @@ async function injectCursor(workspaceId: string, workspaceRoot: string): Promise
       workspaceId,
       workspaceRoot
     )
-    await writeJsonFile(globalPath, current)
+    await writeJsonFile(globalPath, current, workspaceRoot)
     log.info({ action: 'cursor_global_mcp_injected' }, 'Cursor globalSettings.json updated')
   } catch {
     log.debug({ action: 'cursor_global_skip' }, 'Cursor not installed — skipping global settings')
@@ -652,7 +657,7 @@ async function injectCursor(workspaceId: string, workspaceRoot: string): Promise
       workspaceId,
       workspaceRoot
     )
-    await writeJsonFile(projectPath, current)
+    await writeJsonFile(projectPath, current, workspaceRoot)
     log.info({ action: 'cursor_project_mcp_injected' }, 'Cursor .cursor/mcp.json updated')
   } catch (err) {
     log.warn({ action: 'cursor_project_mcp_failed', err: (err as Error).message }, 'Could not update .cursor/mcp.json')
@@ -670,7 +675,7 @@ async function injectCline(workspaceId: string, workspaceRoot: string): Promise<
       workspaceId,
       workspaceRoot
     )
-    await writeJsonFile(configPath, current)
+    await writeJsonFile(configPath, current, workspaceRoot)
     log.info({ action: 'cline_mcp_injected' }, 'Cline .cline/mcp.json updated')
   } catch (err) {
     log.debug({ action: 'cline_mcp_skip', err: (err as Error).message }, 'Cline config not found — skipping')
@@ -690,7 +695,7 @@ async function injectWindsurf(workspaceId: string, workspaceRoot: string): Promi
       workspaceId,
       workspaceRoot
     )
-    await writeJsonFile(configPath, current)
+    await writeJsonFile(configPath, current, workspaceRoot)
     log.info({ action: 'windsurf_mcp_injected' }, 'Windsurf mcp_config.json updated')
   } catch {
     log.debug({ action: 'windsurf_skip' }, 'Windsurf not installed — skipping')
@@ -732,21 +737,18 @@ async function injectContinue(workspaceId: string, workspaceRoot: string): Promi
     // Wrap existing non-intutic servers — routed through the same
     // wrapWithProxy used by every other harness, so the stdio-only guard and
     // --server-name threading stay in one place instead of two.
+    // The whole entry goes in, so the wrap's `__intutic_original` holds every
+    // key `intutic disconnect` has to put back.
     current.mcpServers = current.mcpServers.map((s) => {
-      const wrapped = wrapWithProxy(
-        { command: s.command, args: s.args, env: s.env, url: s.url, type: s.type, __intutic_wrapped: s.__intutic_wrapped },
-        workspaceId,
-        workspaceRoot,
-        s.name
-      )
-      return { name: s.name, ...wrapped }
+      const { name, ...entry } = s
+      return { name, ...wrapWithProxy(entry, workspaceId, workspaceRoot, name) }
     })
 
     // Add Intutic MCP server
     const entry = buildIntuticMcpEntry(workspaceRoot)
     current.mcpServers.unshift({ name: 'intutic', ...entry })
 
-    await writeJsonFile(configPath, current)
+    await writeJsonFile(configPath, current, workspaceRoot)
     log.info({ action: 'continue_mcp_injected' }, 'Continue ~/.continue/config.json updated')
   } catch {
     log.debug({ action: 'continue_skip' }, 'Continue not installed — skipping')
@@ -786,6 +788,7 @@ async function injectGooseAppendOnly(configPath: string, existingYaml: string, w
     return
   }
 
+  await keepOriginal(configPath, node_os.homedir())
   await node_fs.mkdir(node_path.dirname(configPath), { recursive: true })
   await node_fs.writeFile(configPath, text, 'utf-8')
   log.info({ action: 'goose_mcp_injected', mode: 'append_only_fallback' }, 'Goose config.yaml updated (append-only fallback)')
@@ -888,6 +891,7 @@ async function injectGoose(workspaceId: string, workspaceRoot: string): Promise<
     return
   }
 
+  await keepOriginal(configPath, workspaceRoot)
   await node_fs.mkdir(node_path.dirname(configPath), { recursive: true })
   await node_fs.writeFile(configPath, doc.toString(), 'utf-8')
   log.info({ action: 'goose_mcp_injected', mode: 'yaml' }, 'Goose config.yaml updated (structural YAML edit)')
@@ -904,7 +908,7 @@ async function injectOpenHands(workspaceId: string, workspaceRoot: string): Prom
       workspaceId,
       workspaceRoot
     )
-    await writeJsonFile(configPath, current)
+    await writeJsonFile(configPath, current, workspaceRoot)
     log.info({ action: 'openhands_mcp_injected' }, 'OpenHands .openhands/mcp.json updated')
   } catch (err) {
     log.debug({ action: 'openhands_mcp_skip', err: (err as Error).message }, 'OpenHands config not found — skipping')
@@ -941,7 +945,7 @@ async function injectMuse(workspaceId: string, workspaceRoot: string): Promise<v
   )
   if (current.schema_version === undefined) current.schema_version = 1
 
-  await writeJsonFile(configPath, current)
+  await writeJsonFile(configPath, current, workspaceRoot)
   log.info({ action: 'muse_mcp_injected' }, 'Muse Code ~/.config/muse/settings.json mcp_servers updated')
 }
 
@@ -970,6 +974,7 @@ async function injectGrokConfigAppendOnly(
   existingToml: string,
   workspaceId: string,
   proxyBin: string,
+  workspaceRoot: string,
 ): Promise<void> {
   let text = existingToml
   if (!text.includes('[mcp_servers.intutic]') && !text.includes('[mcp_servers."intutic"]')) {
@@ -982,6 +987,7 @@ async function injectGrokConfigAppendOnly(
   }
   if (text === existingToml) return
 
+  await keepOriginal(configPath, workspaceRoot)
   await node_fs.mkdir(node_path.dirname(configPath), { recursive: true })
   await node_fs.writeFile(configPath, text, 'utf-8')
   log.info({ action: 'grok_mcp_injected', mode: 'append_only_fallback' }, 'Grok config.toml updated (append-only fallback)')
@@ -1028,7 +1034,7 @@ async function injectGrokConfig(configPath: string, workspaceId: string, workspa
       { action: 'grok_toml_unparseable', path: configPath, err: (err as Error).message },
       'Grok config.toml did not parse as TOML — falling back to append-only text injection',
     )
-    await injectGrokConfigAppendOnly(configPath, existingToml, workspaceId, proxyBin)
+    await injectGrokConfigAppendOnly(configPath, existingToml, workspaceId, proxyBin, workspaceRoot)
     return
   }
 
@@ -1057,6 +1063,7 @@ async function injectGrokConfig(configPath: string, workspaceId: string, workspa
   }
 
   doc.mcp_servers = servers
+  await keepOriginal(configPath, workspaceRoot)
   await node_fs.mkdir(node_path.dirname(configPath), { recursive: true })
   const tmp = configPath + '.intutic-tmp'
   await node_fs.writeFile(tmp, stringifyToml(doc), 'utf-8')
@@ -1090,7 +1097,7 @@ interface OpenCodeMcpEntry {
 }
 
 /** The proxy binary path `resolveProxyBin` returns, in either of its two forms. */
-const PROXY_BIN_PATTERN = /(?:^|[\\/])(?:@intutic[\\/]mcp-governance-proxy|packages[\\/]mcp-proxy)[\\/]dist[\\/]index\.js$/
+export const PROXY_BIN_PATTERN = /(?:^|[\\/])(?:@intutic[\\/]mcp-governance-proxy|packages[\\/]mcp-proxy)[\\/]dist[\\/]index\.js$/
 
 /**
  * Whether an OpenCode entry is already fronted by the governance proxy, read
@@ -1215,6 +1222,8 @@ async function injectOpenCodeConfig(configPath: string, workspaceId: string, wor
   config['mcp'] = next
 
   const indent = raw.match(/^([ \t]+)\S/m)?.[1] ?? 2
+  // OpenCode entries cannot carry a marker, so disconnect needs the file as it was.
+  await keepOriginal(configPath, workspaceRoot)
   const tmp = configPath + '.intutic-tmp'
   await node_fs.writeFile(tmp, JSON.stringify(config, null, indent) + '\n', 'utf-8')
   await node_fs.rename(tmp, configPath)
@@ -1539,34 +1548,38 @@ export async function discoverMcpServers(workspaceRoot: string): Promise<Discove
  *
  * @param workspaceId - The workspace ID for policy lookups and event attribution.
  * @param workspaceRoot - Absolute path to the project workspace root.
+ * @param options.skip - Harness ids to leave alone: the ones `intutic
+ *   disconnect --harness` took out.
  */
-export async function injectMcpServer(workspaceRoot: string, workspaceId = 'unknown'): Promise<void> {
+export async function injectMcpServer(
+  workspaceRoot: string,
+  workspaceId = 'unknown',
+  options: { skip?: readonly string[] } = {},
+): Promise<void> {
   log.info({ action: 'mcp_inject_start', workspaceRoot, workspaceId }, 'Starting MCP server injection')
 
-  await Promise.allSettled([
-    injectClaudeCode(workspaceId, workspaceRoot).catch((err) =>
-      log.error({ err: (err as Error).message, target: 'claude-code' }, 'MCP injection failed')),
-    injectClaudeDesktop(workspaceId, workspaceRoot).catch((err) =>
-      log.error({ err: (err as Error).message, target: 'claude-desktop' }, 'MCP injection failed')),
-    injectCursor(workspaceId, workspaceRoot).catch((err) =>
-      log.error({ err: (err as Error).message, target: 'cursor' }, 'MCP injection failed')),
-    injectCline(workspaceId, workspaceRoot).catch((err) =>
-      log.error({ err: (err as Error).message, target: 'cline' }, 'MCP injection failed')),
-    injectWindsurf(workspaceId, workspaceRoot).catch((err) =>
-      log.error({ err: (err as Error).message, target: 'windsurf' }, 'MCP injection failed')),
-    injectContinue(workspaceId, workspaceRoot).catch((err) =>
-      log.error({ err: (err as Error).message, target: 'continue' }, 'MCP injection failed')),
-    injectGoose(workspaceId, workspaceRoot).catch((err) =>
-      log.error({ err: (err as Error).message, target: 'goose' }, 'MCP injection failed')),
-    injectOpenHands(workspaceId, workspaceRoot).catch((err) =>
-      log.error({ err: (err as Error).message, target: 'openhands' }, 'MCP injection failed')),
-    injectMuse(workspaceId, workspaceRoot).catch((err) =>
-      log.error({ err: (err as Error).message, target: 'muse-code' }, 'MCP injection failed')),
-    injectGrok(workspaceId, workspaceRoot).catch((err) =>
-      log.error({ err: (err as Error).message, target: 'grok' }, 'MCP injection failed')),
-    injectOpenCode(workspaceId, workspaceRoot).catch((err) =>
-      log.error({ err: (err as Error).message, target: 'opencode' }, 'MCP injection failed')),
-  ])
+  const targets: [string, (workspaceId: string, workspaceRoot: string) => Promise<void>][] = [
+    ['claude-code', injectClaudeCode],
+    ['claude-desktop', injectClaudeDesktop],
+    ['cursor', injectCursor],
+    ['cline', injectCline],
+    ['windsurf', injectWindsurf],
+    ['continue', injectContinue],
+    ['goose', injectGoose],
+    ['openhands', injectOpenHands],
+    ['muse-code', injectMuse],
+    ['grok', injectGrok],
+    ['opencode', injectOpenCode],
+  ]
+  const skip = new Set(options.skip ?? [])
+  await Promise.allSettled(
+    targets
+      .filter(([target]) => !skip.has(target))
+      .map(([target, inject]) =>
+        inject(workspaceId, workspaceRoot).catch((err) =>
+          log.error({ err: (err as Error).message, target }, 'MCP injection failed')),
+      ),
+  )
 
   log.info({ action: 'mcp_inject_complete', workspaceRoot }, 'MCP server injection complete')
 }

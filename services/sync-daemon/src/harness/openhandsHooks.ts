@@ -16,6 +16,7 @@
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import { createLogger } from '@intutic/logger'
+import { keepOriginal, noteWritten } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
 import { emitShellGate, SHELL_EXTRACT, SHELL_FAIL_CLOSED } from './gateBody.js'
 import { parse as parseToml } from 'smol-toml'
@@ -37,6 +38,9 @@ export async function writeOpenHandsHooks(
   workspaceId = '',
 ): Promise<void> {
   const openhandsDir = path.join(workspaceRoot, '.openhands')
+  const hooksPath = path.join(openhandsDir, 'hooks.json')
+  // Written whole, over whatever hooks the user had there: kept for disconnect.
+  await keepOriginal(hooksPath, workspaceRoot)
   await fs.mkdir(openhandsDir, { recursive: true })
 
   const hookScriptDir = path.join(workspaceRoot, '.intutic', 'hooks')
@@ -137,10 +141,11 @@ exit 0
     ],
   }
 
-  const hooksPath = path.join(openhandsDir, 'hooks.json')
+  const hooksJson = JSON.stringify(hooksConfig, null, 2) + '\n'
   const tmpHooks = hooksPath + '.intutic-tmp'
-  await fs.writeFile(tmpHooks, JSON.stringify(hooksConfig, null, 2) + '\n', 'utf-8')
+  await fs.writeFile(tmpHooks, hooksJson, 'utf-8')
   await fs.rename(tmpHooks, hooksPath)
+  await noteWritten(hooksPath, workspaceRoot, hooksJson)
 
   log.info({ action: 'openhands_hooks_written', path: hooksPath }, 'OpenHands hooks written')
 
@@ -187,6 +192,7 @@ async function mergeOpenHandsConfig(workspaceRoot: string, proxyUrl: string): Pr
     }
 
     const tmpConfig = configPath + '.intutic-tmp'
+    await keepOriginal(configPath, workspaceRoot)
     await fs.mkdir(path.dirname(configPath), { recursive: true })
     await fs.writeFile(tmpConfig, existing, 'utf-8')
     await fs.rename(tmpConfig, configPath)

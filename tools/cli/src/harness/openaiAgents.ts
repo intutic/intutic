@@ -36,7 +36,8 @@
  * @module
  */
 
-import { appendFile } from 'node:fs/promises'
+import { appendFile, readFile } from 'node:fs/promises'
+import { noteWritten } from '@intutic/sync-daemon'
 import { HarnessType } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
 import { makeSdkGatedAdapter } from './sdkGatedAdapter.js'
@@ -111,6 +112,8 @@ export const openaiAgentsAdapter: IHarnessAdapter = {
         ].join('\n'),
         'utf-8',
       )
+      // Still entirely Intutic's: recorded, so disconnect does not mistake the addition for a user edit.
+      await noteWritten(filePath, workspaceRoot, await readFile(filePath, 'utf-8'))
     }
     return filePath
   },
