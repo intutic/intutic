@@ -121,16 +121,14 @@ This classification feeds into the FinOps ledger and helps optimize model routin
 
 ## Budget Alerts
 
-Intutic monitors usage trends and generates alerts:
+An hourly check compares each workspace's spend with its daily and monthly caps, and raises:
 
-- **Threshold warnings** — Alerts when spending approaches budget limits (e.g., 80%, 90%)
-- **Breach notifications** — Immediate alerts when a budget is exceeded
-- **Trend anomalies** — Alerts for unusual spending spikes
-- **Forecast overruns (GA Upgrades)** — Projected spend overruns warning that the 30-day forecasted spend is projected to exceed the monthly budget. Dispatched immediately to corporate Slack channels.
+- **A threshold warning** when spend reaches the alert threshold (**Alert at (% of cap)** under **Budget Limits**, 80% unless you change it).
+- **A cap-exceeded alert** when spend reaches 100% of the cap.
 
-All budget events are logged to the `budget_alerts` table and appear as governance incidents in the dashboard.
+Each is raised at most once per budget period: once for the day's spend and once for the month's. If one check finds spend already past the cap, it raises only the cap-exceeded alert. The periods follow the workspace's spend counters, which start with the first spend after the previous period ends and run 24 hours (daily) or 30 days (monthly).
 
----
+Every alert is listed under **Budget alerts** on **Settings › Billing**, where it can be acknowledged. It also goes out through any notification rule on **Budget Threshold Reached** (`finops.budget.threshold`) or **Budget Exceeded** (`finops.budget.exceeded`), to that rule's Slack channel, email recipients, webhook or PagerDuty service. See [Notifications](/guide/settings#notifications). Without such a rule, alerts appear only on the Billing page.
 
 ## CLI Budget Management
 
@@ -173,8 +171,8 @@ virtual-key auth context (a standalone/offline trace synced back, for
 instance), report under a `null` key — shown as **unattributed** on the card —
 rather than being folded into whichever key happens to be first.
 
-### Resolving Budget Alerts
-Security and FinOps administrators can review all active budget breaches on **Findings › Incidents**. When resolving a breach, administrators can record:
+### Resolving Budget Breaches
+Budget breach anomalies (see [Budget Breach Anomalies](#budget-breach-anomalies)) are incidents: security and FinOps administrators review them on **Findings › Incidents**. When resolving a breach, administrators can record:
 - **Resolution Status:** `RESOLVED` status marking once action has been taken (e.g., plan tier upgraded, limits adjusted).
 - **Audit Trails:** Record `resolvedBy` and `resolutionNote` to maintain SOC 2 compliance logs for financial audit records.
 
