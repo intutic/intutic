@@ -148,7 +148,8 @@ export class ClawdeClient {
         }
         const normalized = normalizeResponse(json, this.provider)
         // A refusal answered as an assistant turn (the cost-prediction gate).
-        const answered = headerRefusal(refusedBy, normalized.choices?.[0]?.message?.content ?? '')
+        const content = normalized.choices?.[0]?.message?.content
+        const answered = headerRefusal(refusedBy, typeof content === 'string' ? content : '')
         if (answered) {
           this.eventEmitter.emit(answered.verdict, { ...answered, status })
           throw new ClawdeBlockedError(answered.verdict, answered.code, status, answered.message)
