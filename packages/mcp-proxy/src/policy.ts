@@ -220,6 +220,12 @@ export class PolicyClient {
    */
   private registry: McpRegistryPolicy | undefined
   private principal: McpPrincipal | undefined
+  /**
+   * The workspace's `mcpProxyFailBehavior` as a fail-open flag, or
+   * `undefined` when the control plane did not send it (the workspace never
+   * chose, or no policy has loaded) — then `INTUTIC_MCP_FAIL_OPEN` decides.
+   */
+  private failOpen: boolean | undefined
   private ssoGroupPolicy: SsoGroupPolicy | undefined
   /** The first refresh `start()` kicks off, so the first tool call can wait for it. */
   private firstRefresh: Promise<void> | null = null
@@ -301,6 +307,11 @@ export class PolicyClient {
   /** The workspace's SSO group policy, when it has one. */
   getSsoGroupPolicy(): SsoGroupPolicy | undefined {
     return this.ssoGroupPolicy
+  }
+
+  /** The workspace's fail-open choice, or `undefined` to fall back to the local setting (see the field). */
+  getFailOpen(): boolean | undefined {
+    return this.failOpen
   }
 
   /** Return the current cached rule set. */
@@ -391,6 +402,8 @@ export class PolicyClient {
     }
     this.principal = parsePrincipal(source['principal'])
     this.ssoGroupPolicy = parseSsoGroupPolicy(source['ssoGroupPolicy'])
+    const failBehavior = source['mcpProxyFailBehavior']
+    this.failOpen = failBehavior === 'open' ? true : failBehavior === 'closed' ? false : undefined
   }
 
   /** Find the first matching rule for a given tool name + serialized args. */

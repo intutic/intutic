@@ -41,7 +41,12 @@ export class ToolCallInterceptor {
   constructor(
     private readonly policy: PolicyClient,
     private readonly emitter: GovernanceEmitter,
-    private readonly failOpen: boolean = true,
+    /**
+     * The local fail setting (`INTUTIC_MCP_FAIL_OPEN`, config.ts). The
+     * workspace's `mcpProxyFailBehavior`, once a policy has delivered it,
+     * takes precedence — see {@link failOpen}.
+     */
+    private readonly localFailOpen: boolean = true,
     /**
      * The real MCP server this proxy process fronts, from `--server-name`
      * (config.ts, threaded since Phase D's `wrapWithProxy` but unconsumed
@@ -109,6 +114,16 @@ export class ToolCallInterceptor {
      */
     private readonly holds: ApprovalHolds | undefined = undefined,
   ) {}
+
+  /**
+   * Whether a governance check that cannot complete lets the call through:
+   * the workspace's `mcpProxyFailBehavior` when the control plane has sent
+   * it, the local `INTUTIC_MCP_FAIL_OPEN` until then (and for a workspace
+   * that never chose).
+   */
+  get failOpen(): boolean {
+    return this.policy.getFailOpen() ?? this.localFailOpen
+  }
 
   /**
    * Applies the shared reask ladder (Phase 2 anomaly detectors AND Phase 3

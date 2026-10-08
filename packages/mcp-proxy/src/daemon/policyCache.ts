@@ -98,6 +98,8 @@ export interface ResolvedPolicy {
   principal?: McpPrincipal
   /** The workspace's SSO group policy, when it has one. */
   ssoGroupPolicy?: SsoGroupPolicy
+  /** The workspace's `mcpProxyFailBehavior`, when it has chosen one. */
+  mcpProxyFailBehavior?: 'open' | 'closed'
   cachedAt:      number
   /**
    * The workspace's `v2:sync:config_version` at fetch time (TD-474 item 5).
@@ -165,6 +167,7 @@ type PolicyResponseBody = Pick<
   | 'mcpRegistry'
   | 'principal'
   | 'ssoGroupPolicy'
+  | 'mcpProxyFailBehavior'
 >
 
 /**
@@ -243,6 +246,10 @@ function parsePolicyResponse(raw: string): PolicyResponseBody | null {
     mcpRegistry: parseRegistry(parsed['mcpRegistry']) ?? UNRESTRICTED_REGISTRY,
     principal: parsePrincipal(parsed['principal']),
     ssoGroupPolicy: parseSsoGroupPolicy(parsed['ssoGroupPolicy']),
+    mcpProxyFailBehavior:
+      parsed['mcpProxyFailBehavior'] === 'open' || parsed['mcpProxyFailBehavior'] === 'closed'
+        ? parsed['mcpProxyFailBehavior']
+        : undefined,
   }
 }
 
@@ -302,6 +309,7 @@ async function fetchFromControlPlane(workspaceId: string): Promise<ResolvedPolic
             mcpRegistry:      parsed.mcpRegistry,
             principal:        parsed.principal,
             ssoGroupPolicy:   parsed.ssoGroupPolicy,
+            mcpProxyFailBehavior: parsed.mcpProxyFailBehavior,
             cachedAt:         Date.now(),
             configVersion:    versionAtFetch,
           })

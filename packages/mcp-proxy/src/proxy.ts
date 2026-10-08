@@ -785,9 +785,9 @@ export class McpGovernanceProxy {
    * (tofu.ts), which does file I/O — the ONLY case this awaits before
    * writing; every other line is forwarded exactly as fast as before.
    *
-   * On a TOFU mismatch, honors `mcpProxyFailBehavior` via `config.failOpen` —
-   * the SAME field `interceptor.ts` already reads for its own fail-open/
-   * fail-closed branches, not a new mechanism: fail-open logs and forwards
+   * On a TOFU mismatch, honors `mcpProxyFailBehavior` via the interceptor's
+   * `failOpen` — the SAME value its own fail-open/fail-closed branches read,
+   * not a new mechanism: fail-open logs and forwards
    * the (possibly curated) tools/list response as normal; fail-closed
    * replaces it with a JSON-RPC error naming the server and the setting,
    * mirroring `buildBlockResponse`'s existing wording style.
@@ -901,7 +901,7 @@ export class McpGovernanceProxy {
         // this package — fail-open forwards, fail-closed refuses — never a
         // silent skip either way.
         log.error({ action: 'tofu_check_error', err: (err as Error).message }, 'TOFU check failed')
-        if (!this.config.failOpen) {
+        if (!this.interceptor.failOpen) {
           writeFrame(
             buildBlockResponse(
               outcome.toolsListMsgId ?? null,
@@ -933,7 +933,7 @@ export class McpGovernanceProxy {
           'MCP server tool definitions pinned on first contact',
         )
       } else if (tofu.status === 'mismatch') {
-        const action = decideTofuAction(tofu, serverName, this.config.failOpen)
+        const action = decideTofuAction(tofu, serverName, this.interceptor.failOpen)
         const reason = action.reason ?? 'MCP server tool definitions changed since first pinned.'
         log.warn(
           {

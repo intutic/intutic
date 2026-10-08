@@ -87,6 +87,15 @@ describe('MCP server registry (proxy side)', () => {
       expect(client.getSsoGroupPolicy()).toEqual({ highRiskTools: ['run_query'], requiredGroups: ['dba'], requireOboFor: [] })
     })
 
+    it("absorbs the workspace's fail behaviour only when the control plane sends it", async () => {
+      const client = new PolicyClient(baseUrl, 'vk_test', 'ws_1')
+      await client.refresh()
+      expect(client.getFailOpen()).toBeUndefined()
+      rulesBody = { rules: [], mcpProxyFailBehavior: 'closed' }
+      await client.refresh()
+      expect(client.getFailOpen()).toBe(false)
+    })
+
     it('reads a control plane that sends no registry as unrestricted, not unknown', async () => {
       const client = new PolicyClient(baseUrl, 'vk_test', 'ws_1')
       await client.refresh()

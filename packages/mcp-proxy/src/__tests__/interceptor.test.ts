@@ -82,6 +82,7 @@ class StubPolicyClient extends PolicyClient {
   registry: McpRegistryPolicy | undefined = UNRESTRICTED_REGISTRY
   principal: McpPrincipal | undefined = undefined
   ssoGroupPolicy: SsoGroupPolicy | undefined = undefined
+  failOpen: boolean | undefined = undefined
 
   override getRegistry(): McpRegistryPolicy | undefined {
     return this.registry
@@ -93,6 +94,10 @@ class StubPolicyClient extends PolicyClient {
 
   override getSsoGroupPolicy(): SsoGroupPolicy | undefined {
     return this.ssoGroupPolicy
+  }
+
+  override getFailOpen(): boolean | undefined {
+    return this.failOpen
   }
 
   override async ready(): Promise<void> { /* no-op */ }
@@ -617,6 +622,18 @@ describe('ToolCallInterceptor', () => {
       expect(decision.action).toBe('block')
       expect((decision as { reason: string }).reason).toContain('has not loaded')
       expect((decision as { reason: string }).reason).toContain('INTUTIC_MCP_FAIL_OPEN=false')
+    })
+
+    it("the workspace's delivered fail behaviour overrides the local setting, both ways", async () => {
+      const closedWorkspace = new StubPolicyClient()
+      closedWorkspace.failOpen = false
+      closedWorkspace.matchRule = () => { throw new Error('Policy engine down') }
+      expect((await new ToolCallInterceptor(closedWorkspace, emitter, true).decide('Read', {})).action).toBe('block')
+
+      const openWorkspace = new StubPolicyClient()
+      openWorkspace.failOpen = true
+      openWorkspace.matchRule = () => { throw new Error('Policy engine down') }
+      expect((await new ToolCallInterceptor(openWorkspace, emitter, false).decide('Read', {})).action).toBe('allow')
     })
 
     it('waits for the policy to be ready before deciding', async () => {
