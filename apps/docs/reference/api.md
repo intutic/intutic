@@ -564,7 +564,7 @@ Classify tokens as USEFUL or WASTED.
 
 ## Route Catalog
 
-Every route the control plane serves: 376 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
+Every route the control plane serves: 378 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
 
 ### `app.ts` <Badge type="tip" text="Cloud" />
 
@@ -787,6 +787,12 @@ Every route the control plane serves: 376 routes, grouped by the source file tha
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | POST | `/api/v1/fix/enhance` | Authenticated |  |
+
+### `gateLiveness.ts` <Badge type="tip" text="Cloud" />
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/v1/governance/gate-liveness` | OWNER/ADMIN/EM | Per-harness gate status (reporting, silent or new) and whether a silent-gate alert is open |
 
 ### `gatewayHeartbeat.ts` <Badge type="tip" text="Cloud" />
 
@@ -1121,11 +1127,12 @@ Every route the control plane serves: 376 routes, grouped by the source file tha
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/api/v1/siem/destinations` | Authenticated | List destinations (masks credentials) |
+| GET | `/api/v1/siem/destinations` | Authenticated | List destinations (masks credentials) and the source names a destination can filter on |
 | POST | `/api/v1/siem/destinations` | OWNER/ADMIN | Create a destination (encrypts credentials) |
 | DELETE | `/api/v1/siem/destinations/:id` | OWNER/ADMIN | Deactivate a destination |
 | GET | `/api/v1/siem/destinations/:id` | Authenticated | Get destination details (masks credentials) |
 | PUT | `/api/v1/siem/destinations/:id` | OWNER/ADMIN | Update destination details |
+| POST | `/api/v1/siem/destinations/:id/signing-secret` | OWNER/ADMIN | Replace a webhook destination's signing secret (returned once) |
 | POST | `/api/v1/siem/destinations/:id/test` | OWNER/ADMIN | Health-check a destination |
 | GET | `/api/v1/siem/dlq` | Authenticated | List DLQ failed events |
 | POST | `/api/v1/siem/dlq/retry` | OWNER/ADMIN | Trigger a manual DLQ retry pass |
