@@ -73,21 +73,19 @@ export const opencodeAdapter: IHarnessAdapter = {
     return false
   },
 
-  async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
-    const agentsPath = join(workspaceRoot, CONFIG_FILE)
-
-    // 1. AGENTS.md rules file — same "skip when there is nothing to write"
-    //    convention every markdown adapter uses.
-    if (sops.length > 0) {
-      const content = buildMarkdownContent(sops, proxyUrl)
-      await writeOwnedFile(agentsPath, workspaceRoot, content)
-    }
-
-    // 2. The plugin gate. `intutic connect` has no workspace id in scope —
-    //    same limitation `museAdapter` has — the sync daemon re-runs this
-    //    with a real one on the next cycle.
+  /** The plugin gate. `intutic connect` has no workspace id in scope — same
+   *  limitation `museAdapter` has — the sync daemon re-runs this with a real
+   *  one on the next cycle. */
+  async installGate(workspaceRoot: string, proxyUrl: string): Promise<void> {
     await writeOpenCodeHooks(workspaceRoot, proxyUrl, '')
+  },
 
+  /** AGENTS.md rules file — same "skip when there is nothing to write"
+   *  convention every markdown adapter uses. */
+  async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
+    if (sops.length === 0) return null
+    const agentsPath = join(workspaceRoot, CONFIG_FILE)
+    await writeOwnedFile(agentsPath, workspaceRoot, buildMarkdownContent(sops, proxyUrl))
     return agentsPath
   },
 

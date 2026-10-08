@@ -6,6 +6,8 @@ import {
   generateIntuneManifest,
   generateJamfFirewallManifest,
   generateIntuneFirewallManifest,
+  generateGeminiManifest,
+  generateAntigravityManifest,
   pemToBase64Der,
 } from './mdmManifest.js'
 
@@ -93,6 +95,38 @@ describe('hooks manifests (Jamf / Intune)', () => {
         const json = generate({ hookScriptPath: '/opt/intutic/hooks/cursor-check.js' })
         expect(() => JSON.parse(json)).not.toThrow()
       })
+    })
+  }
+})
+
+describe('Gemini CLI and Antigravity hook manifests (Jamf / Intune)', () => {
+  for (const flavor of ['jamf', 'intune'] as const) {
+    it(`${flavor}: Gemini CLI's BeforeTool gate in the system settings file, for every tool`, () => {
+      const parsed = JSON.parse(generateGeminiManifest(flavor, { hookScriptPath: '/opt/intutic/hooks/antigravity-check.sh', platform: 'darwin' }))
+      expect(parsed.target_path).toBe('/Library/Application Support/GeminiCli/settings.json')
+      expect(parsed.content.hooks.BeforeTool).toEqual([
+        { matcher: '.*', hooks: [{ name: 'intutic-governance', type: 'command', command: 'bash "/opt/intutic/hooks/antigravity-check.sh"' }] },
+      ])
+      expect(Object.keys(parsed.deployment)).toEqual([flavor])
+    })
+
+    it(`${flavor}: Gemini CLI's system settings path per platform`, () => {
+      const at = (platform: NodeJS.Platform) =>
+        JSON.parse(generateGeminiManifest(flavor, { hookScriptPath: '/x.sh', platform })).target_path
+      expect(at('linux')).toBe('/etc/gemini-cli/settings.json')
+      expect(at('win32')).toBe('C:\\ProgramData\\gemini-cli\\settings.json')
+    })
+
+    it(`${flavor}: Antigravity's PreToolUse gate under Intutic's own key, per user`, () => {
+      const parsed = JSON.parse(generateAntigravityManifest(flavor, { hookScriptPath: '/opt/intutic/hooks/antigravity-cli-check.js' }))
+      expect(parsed.target_path).toBe('~/.gemini/config/hooks.json')
+      expect(parsed.content).toEqual({
+        'intutic-governance': {
+          enabled: true,
+          PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: 'node "/opt/intutic/hooks/antigravity-cli-check.js"' }] }],
+        },
+      })
+      expect(parsed.deployment[flavor]).toContain('each signed-in user')
     })
   }
 })

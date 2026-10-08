@@ -47,17 +47,18 @@ export const grokAdapter: IHarnessAdapter = {
     return false
   },
 
+  /** PreToolUse gate (project + user level) + config.toml model base_url
+   *  merge (project + user level). */
+  async installGate(workspaceRoot: string, proxyUrl: string): Promise<void> {
+    await writeGrokHooks(workspaceRoot, proxyUrl, '')
+  },
+
+  /** AGENTS.md — governance rules text, same markdown formatter every other
+   *  `---`-separated rules file in this codebase shares. */
   async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
-    // 1. AGENTS.md — governance rules text, same markdown formatter every
-    //    other `---`-separated rules file in this codebase shares.
     const filePath = join(workspaceRoot, CONFIG_FILE)
     const content = buildMarkdownContent(sops, proxyUrl)
     await writeOwnedFile(filePath, workspaceRoot, content)
-
-    // 2. PreToolUse gate (project + user level) + config.toml model base_url
-    //    merge (project + user level).
-    await writeGrokHooks(workspaceRoot, proxyUrl, '')
-
     return filePath
   },
 

@@ -107,12 +107,14 @@ export const n8nAdapter: IHarnessAdapter = {
     }
   },
 
-  async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
-    // Written first and independently of the REST sync below: the gate file
-    // is local, and an unreachable n8n API must not stop it being refreshed.
+  /** The local external-hook gate, independent of the REST sync in
+   *  writeConfig: an unreachable n8n API must not stop it being refreshed. */
+  async installGate(workspaceRoot: string, proxyUrl: string): Promise<void> {
     const creds = await loadCredentials()
     await writeN8nHooks(workspaceRoot, proxyUrl, creds?.workspaceId || 'local')
+  },
 
+  async writeConfig(_workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
     const n8nUrl = process.env.N8N_URL || 'http://localhost:5678'
     const sopsMarkdown = buildSopsMarkdown(sops)
 

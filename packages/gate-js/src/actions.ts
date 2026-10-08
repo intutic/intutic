@@ -144,6 +144,8 @@ export const SHELL_TOOLS: readonly string[] = [
   'runcommand',
   // Cline / Roo Code's shell tool (kept in step with the Rust SHELL_TOOLS).
   'execute_command',
+  // Gemini CLI's shell tool.
+  'run_shell_command',
   'terminal',
   'execute',
   'exec',

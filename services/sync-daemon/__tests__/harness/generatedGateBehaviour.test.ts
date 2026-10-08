@@ -275,9 +275,8 @@ async function runGate(
  *
  * Scans for any `.jsonl` under the root rather than naming one file: the writers
  * do not agree on where the log goes — `hook-events.jsonl` for most,
- * `claude-desktop-hook-events.jsonl`, `roo-hook-events.jsonl` and
- * `cline-hook-events.jsonl` for three others, and cline puts it under HOME
- * rather than the workspace.
+ * `cline-hook-events.jsonl` for Cline, which puts it under HOME rather than
+ * the workspace.
  */
 function auditLogText(g: GateEntry): string {
   const root = roots.get(g.name)!
@@ -308,7 +307,7 @@ function wasBlocked(g: GateEntry, r: RunResult): boolean {
         const obj = JSON.parse(line)
         if (obj?.cancel === true) return true
         // Grok Build's confirmed shape — a DIFFERENT field name from
-        // Cline/Roo Code's `cancel`, see gateBody.ts's BlockContract doc.
+        // Cline's `cancel`, see gateBody.ts's BlockContract doc.
         if (obj?.decision === 'deny') return true
       } catch {
         // Not every stdout line is the verdict object.
@@ -800,6 +799,20 @@ for (const g of GATES) {
       const unrelated = await runGate(g, { command: 'make test' }, { snapshot: snap })
       assertCleanExit(g, unrelated, 'make test under a hold rule')
       expect(wasBlocked(g, unrelated), `${g.name} held \`make test\``).toBe(false)
+    })
+
+    it("holds a deploy run through Gemini CLI's shell tool, run_shell_command", async () => {
+      // The classifier only reads the command of a tool on ACTION_TOOL_NAMES,
+      // and Gemini CLI's shell tool was not on it: the deploy classified as no
+      // action, so `review_before: action:deploy` let it run.
+      const snap = writeRulesFixture(join(home, `hold-gemini-${g.name}.rules`), [{
+        id: 'sop.local.review_before.action:deploy', source: ' (action:deploy) ', subject: 'action', ignoreCase: true, severity: 'hold',
+        reason: 'Held for human review: action:deploy — declared in review_before:', rationale: '', matches: [], notMatches: [],
+      }], 'ws_test')
+      const held = await runGate(g, { command: 'git push origin main' }, { tool: 'run_shell_command', snapshot: snap })
+      assertCleanExit(g, held, 'a deploy through run_shell_command under a hold rule')
+      expect(wasBlocked(g, held), `${g.name} let a held deploy run through run_shell_command`).toBe(true)
+      expect(held.stderr).toMatch(/HELD/)
     })
 
     if (g.contract === 'stdout-cancel' || g.contract === 'stdout-decision-deny') {

@@ -389,7 +389,7 @@ export default defineConfig({
             { text: 'Cursor', link: '/integrations/cursor' },
             { text: 'Windsurf', link: '/integrations/windsurf' },
             { text: 'Aider', link: '/integrations/aider' },
-            { text: 'Antigravity', link: '/integrations/antigravity' },
+            { text: 'Antigravity and Gemini CLI', link: '/integrations/antigravity' },
             { text: 'Codex', link: '/integrations/codex' },
             { text: 'OpenHands', link: '/integrations/openhands' },
             { text: 'n8n', link: '/integrations/n8n' },

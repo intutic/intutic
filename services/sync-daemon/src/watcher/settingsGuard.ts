@@ -9,6 +9,8 @@
  *   - Immutable files (Goose plugin): log governance_override_attempt incident instead of restoring.
  *   - Text rules (.roorules, .clinerules): restore from last-written hash.
  *   - Settings files (VS Code, Aider, claude_desktop_config.json): detect drift, restore.
+ *   - Gemini CLI's ~/.gemini/settings.json and Antigravity's
+ *     ~/.gemini/config/hooks.json: restore when the gate registration is gone.
  *
  * LLD #14 — settingsGuard.ts
  * HLD §3.14 — Three-Tier Defense Cascade (Tier 1 Native Gating)
@@ -32,6 +34,8 @@ import { writeMuseHooks } from '../harness/museHooks.js'
 import { writeOpenCodeHooks, OPENCODE_PLUGIN_DIR, OPENCODE_PLUGIN_FILE, OPENCODE_PLUGIN_V2_FILE } from '../harness/openCodeHooks.js'
 import { writeGrokHooks } from '../harness/grokHooks.js'
 import { writeDshHooks, resolveDshHome, detectDshCoverageGap } from '../harness/dshHooks.js'
+import { writeAntigravityHooks } from '../harness/antigravityHooks.js'
+import { writeAntigravityCliHooks, antigravityHooksPath, ANTIGRAVITY_HOOK_NAME, ANTIGRAVITY_CLI_GATE } from '../harness/antigravityCliHooks.js'
 import { isImmutable } from '../harness/gooseHardener.js'
 
 const log = createLogger('sync-settings-guard')
@@ -75,8 +79,13 @@ export function buildProtectedPaths(workspaceRoot: string): string[] {
     // ── Claude Desktop ────────────────────────────────────────────────
     path.join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json'),
     path.join(home, '.config', 'Claude', 'claude_desktop_config.json'),
-    // ── Antigravity ───────────────────────────────────────────────────
+    // ── Antigravity and Gemini CLI ────────────────────────────────────
+    // The gates are registered at user level: Gemini CLI's in
+    // ~/.gemini/settings.json, Antigravity's in ~/.gemini/config/hooks.json.
+    // The workspace file carries the rules.
     path.join(workspaceRoot, '.gemini', 'settings.json'),
+    path.join(home, '.gemini', 'settings.json'),
+    path.join(home, '.gemini', 'config', 'hooks.json'),
     // ── Muse Code ────────────────────────────────────────────────────
     path.join(home, '.config', 'muse', 'settings.json'),
     path.join(home, '.config', 'muse', 'intutic-managed-hooks.json'),
@@ -214,6 +223,22 @@ export async function guardSettingsFile(
   if (changedPath.includes('.claude') && changedPath.endsWith('settings.json')) {
     if (skip.has('claude-code')) return false
     return guardClaudeCodeSettings(changedPath, workspaceRoot, sops, settings)
+  }
+
+  // ── Gemini CLI and Antigravity: the user-level gate registrations ──
+  // Restored whatever the hand-edit setting says, like every gate file:
+  // they are the gates, not the user's config.
+  if (changedPath === path.join(os.homedir(), '.gemini', 'settings.json')) {
+    if (skip.has('antigravity')) return false
+    return guardParsedFile(changedPath, 'antigravity', hasGeminiGate, async () => {
+      await writeAntigravityHooks(workspaceRoot, proxyUrl, await resolveWorkspaceId(workspaceRoot))
+    })
+  }
+  if (changedPath === antigravityHooksPath()) {
+    if (skip.has('antigravity')) return false
+    return guardParsedFile(changedPath, 'antigravity', hasAntigravityGate, async () => {
+      await writeAntigravityCliHooks(workspaceRoot, proxyUrl, await resolveWorkspaceId(workspaceRoot))
+    })
   }
 
   // ── Cursor hooks.json ─────────────────────────────────────────────
@@ -485,6 +510,56 @@ export async function warnIfDshCoverageGap(): Promise<boolean> {
     )
   }
   return result.gap
+}
+
+/**
+ * A file whose integrity is a fact about its parsed content: deleted,
+ * unparseable, or parsed without the gate → restored. A marker-substring
+ * check is not enough here: these are the user's own settings files, and
+ * the MCP writer adds an `intutic` server to the same settings.json. The
+ * writers leave a file that is not a plain JSON object alone, so for one of
+ * those the restore is a logged no-op and the drift report surfaces it.
+ */
+async function guardParsedFile(
+  filePath: string,
+  harness: string,
+  intact: (doc: unknown) => boolean,
+  restore: () => Promise<void>,
+): Promise<boolean> {
+  let doc: unknown
+  try {
+    doc = JSON.parse(await fs.readFile(filePath, 'utf-8'))
+  } catch {
+    log.warn({ action: `${harness}_file_unreadable`, path: filePath }, `${harness} governance file deleted or not JSON — restoring`)
+    await safeRestore(harness, restore)
+    return true
+  }
+  if (intact(doc)) return false
+  log.warn({ action: `${harness}_hook_missing`, path: filePath }, `${harness} governance hook missing — restoring`)
+  await safeRestore(harness, restore)
+  return true
+}
+
+function isObj(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+/** Whether a `{matcher, hooks: [{command}]}` list has an entry running `script`. */
+function runsScript(entries: unknown, script: string): boolean {
+  return Array.isArray(entries) && entries.some((e) =>
+    isObj(e) && Array.isArray(e.hooks) && e.hooks.some((h) => isObj(h) && typeof h.command === 'string' && h.command.includes(script)))
+}
+
+/** Gemini CLI's settings.json still registers the `BeforeTool` gate. */
+function hasGeminiGate(doc: unknown): boolean {
+  return isObj(doc) && isObj(doc.hooks) && runsScript(doc.hooks.BeforeTool, 'antigravity-check.sh')
+}
+
+/** Antigravity's hooks.json still carries Intutic's entry, enabled, running the gate. */
+function hasAntigravityGate(doc: unknown): boolean {
+  if (!isObj(doc)) return false
+  const entry = doc[ANTIGRAVITY_HOOK_NAME]
+  return isObj(entry) && entry.enabled !== false && runsScript(entry.PreToolUse, ANTIGRAVITY_CLI_GATE)
 }
 
 async function safeRestore(harness: string, restore: () => Promise<void>): Promise<void> {

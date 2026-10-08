@@ -49,8 +49,19 @@ export const codexAdapter: IHarnessAdapter = {
     return false
   },
 
+  async installGate(workspaceRoot: string, proxyUrl: string): Promise<void> {
+    // Codex user config — persists proxy routing across sessions without env
+    // sourcing. Merged; a config.toml that does not parse is left alone.
+    await mergeCodexConfig(join(codexHome(), 'config.toml'), openaiBaseUrl(proxyUrl))
+
+    // The PreToolUse gate. The routing above governs LLM egress only; the
+    // gate is what refuses tool calls.
+    const creds = await loadCredentials()
+    await writeCodexHooks(workspaceRoot, proxyUrl, creds?.workspaceId || 'local')
+  },
+
+  /** Workspace .env.intutic. */
   async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
-    // 1. Workspace .env.intutic
     const filePath = join(workspaceRoot, CONFIG_FILE)
     const envContent = [
       '# Intutic Governance Rules (auto-generated)',
@@ -66,16 +77,6 @@ export const codexAdapter: IHarnessAdapter = {
     ].join('\n')
 
     await writeOwnedFile(filePath, workspaceRoot, envContent)
-
-    // 2. Codex user config — persists proxy routing across sessions without
-    //    env sourcing. Merged; a config.toml that does not parse is left alone.
-    await mergeCodexConfig(join(codexHome(), 'config.toml'), openaiBaseUrl(proxyUrl))
-
-    // 3. The PreToolUse gate. The routing above governs LLM egress only; the
-    //    gate is what refuses tool calls.
-    const creds = await loadCredentials()
-    await writeCodexHooks(workspaceRoot, proxyUrl, creds?.workspaceId || 'local')
-
     return filePath
   },
 

@@ -52,8 +52,14 @@ export const clineAdapter: IHarnessAdapter = {
     }
   },
 
-  async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
-    // 1. Rules, as one file in the .clinerules directory Cline reads.
+  /** The PreToolUse gate in .clinerules/hooks/. */
+  async installGate(workspaceRoot: string, proxyUrl: string): Promise<void> {
+    const creds = await loadCredentials()
+    await writeClineHooks(workspaceRoot, proxyUrl, creds?.workspaceId || 'local')
+  },
+
+  /** Rules, as one file in the .clinerules directory Cline reads. */
+  async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], _proxyUrl: string): Promise<string | null> {
     let filePath: string | null = null
     // Kept before `.clinerules` is created, so disconnect knows it made the directory.
     await keepOriginal(join(workspaceRoot, CONFIG_FILE), workspaceRoot)
@@ -74,10 +80,6 @@ export const clineAdapter: IHarnessAdapter = {
 
       await writeOwnedFile(filePath, workspaceRoot, content)
     }
-
-    // 2. The PreToolUse gate in .clinerules/hooks/.
-    const creds = await loadCredentials()
-    await writeClineHooks(workspaceRoot, proxyUrl, creds?.workspaceId || 'local')
 
     return filePath
   },

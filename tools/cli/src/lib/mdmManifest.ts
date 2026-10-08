@@ -1,6 +1,6 @@
 /**
- * MDM rollout artifact generators — CA-trust `.mobileconfig` and the
- * Cursor system-hooks manifests handed to Jamf/Intune.
+ * MDM rollout artifact generators — CA-trust `.mobileconfig`, and the
+ * Cursor, Gemini CLI and Antigravity hook manifests handed to Jamf/Intune.
  *
  * Pure `params -> string` generators, same shape as
  * `apps/dashboard/src/lib/gatewayManifest.ts` — no I/O here. `enterprise.ts`
@@ -20,6 +20,7 @@
 
 import { randomUUID } from 'node:crypto'
 import { buildHooksConfig, systemHooksDirFor } from '@intutic/sync-daemon/harness/cursorHooks'
+import { ANTIGRAVITY_HOOK_NAME, buildAntigravityHookEntry, buildGeminiBeforeToolEntry } from '@intutic/sync-daemon'
 
 function escapeXml(value: string): string {
   return value
@@ -158,6 +159,77 @@ export function generateIntuneManifest(params: HooksManifestParams): string {
       content: buildHooksConfig(params.hookScriptPath),
       deployment: {
         intune: 'Deploy via a Custom Configuration Profile (macOS: Files) or a Win32 app install script, writing `content` to target_path.',
+      },
+    },
+    null,
+    2,
+  ) + '\n'
+}
+
+export type MdmFlavor = 'jamf' | 'intune'
+
+const DEPLOY_VIA: Record<MdmFlavor, string> = {
+  jamf: 'Deploy via Configuration Profile > Files & Processes (custom script)',
+  intune: 'Deploy via a Custom Configuration Profile (macOS: Files) or a Win32 app install script',
+}
+
+/**
+ * Gemini CLI's system settings file (`getSystemSettingsPath` in Gemini CLI's
+ * packages/cli/src/config/settings.ts). Gemini CLI applies it last, over the
+ * user's and the workspace's settings.
+ */
+export function geminiSystemSettingsPathFor(platform: NodeJS.Platform): string {
+  if (platform === 'darwin') return '/Library/Application Support/GeminiCli/settings.json'
+  if (platform === 'win32') return 'C:\\ProgramData\\gemini-cli\\settings.json'
+  return '/etc/gemini-cli/settings.json'
+}
+
+export interface GeminiManifestParams {
+  /** Absolute path to `antigravity-check.sh` on the TARGET machine. */
+  hookScriptPath: string
+  /** Platform the system settings path is resolved for. Defaults to this process's own platform. */
+  platform?: NodeJS.Platform
+}
+
+/**
+ * Gemini CLI's `BeforeTool` gate in the machine-wide system settings file,
+ * built by the same function `intutic connect` uses for the user file.
+ */
+export function generateGeminiManifest(flavor: MdmFlavor, params: GeminiManifestParams): string {
+  return JSON.stringify(
+    {
+      _comment: `Intutic Governance — Gemini CLI system settings hook for ${flavor === 'jamf' ? 'Jamf' : 'Intune'} deployment`,
+      _generated: new Date().toISOString(),
+      target_path: geminiSystemSettingsPathFor(params.platform ?? process.platform),
+      content: { hooks: { BeforeTool: [buildGeminiBeforeToolEntry(params.hookScriptPath)] } },
+      deployment: {
+        [flavor]: `${DEPLOY_VIA[flavor]}, merging \`content\` into the file at target_path (keep any system settings already there). Gemini CLI applies this file over user and workspace settings.`,
+      },
+    },
+    null,
+    2,
+  ) + '\n'
+}
+
+export interface AntigravityManifestParams {
+  /** Absolute path to `antigravity-cli-check.js` on the TARGET machine. */
+  hookScriptPath: string
+}
+
+/**
+ * Antigravity's `PreToolUse` gate. Antigravity documents no machine-wide
+ * hooks file, only the per-user `~/.gemini/config/hooks.json` and a
+ * workspace's `.agents/hooks.json`, so this one is deployed per user.
+ */
+export function generateAntigravityManifest(flavor: MdmFlavor, params: AntigravityManifestParams): string {
+  return JSON.stringify(
+    {
+      _comment: `Intutic Governance — Google Antigravity hooks for ${flavor === 'jamf' ? 'Jamf' : 'Intune'} deployment`,
+      _generated: new Date().toISOString(),
+      target_path: '~/.gemini/config/hooks.json',
+      content: { [ANTIGRAVITY_HOOK_NAME]: buildAntigravityHookEntry(params.hookScriptPath) },
+      deployment: {
+        [flavor]: `${DEPLOY_VIA[flavor]}, run as each signed-in user, setting the \`${ANTIGRAVITY_HOOK_NAME}\` key of the user's target_path to the one in \`content\` and keeping the user's other hooks. Antigravity has no machine-wide hooks file.`,
       },
     },
     null,

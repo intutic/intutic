@@ -1,57 +1,45 @@
-# Antigravity (Gemini)
+# Google Antigravity and Gemini CLI
 
-Integrate Intutic governance with [Google Antigravity](https://cloud.google.com/gemini) — Google's AI coding agent (Gemini CLI / Gemini in IDEs).
+Integrate Intutic governance with Google's coding agents: [Google Antigravity](https://antigravity.google/) — the desktop app, the IDE and Antigravity CLI — and [Gemini CLI](https://geminicli.com/), which Antigravity CLI replaced for individual users in 2026 and which enterprise and API-key users keep. Both keep their configuration under `~/.gemini`, and one harness, `antigravity`, governs both: `intutic connect` installs a blocking gate for each.
 
 ## How it works
 
-Intutic does two things:
+| | Google Antigravity (app, IDE, CLI) | Gemini CLI |
+|---|---|---|
+| Gate | `.intutic/hooks/antigravity-cli-check.js` | `.intutic/hooks/antigravity-check.sh` |
+| Registered in | `~/.gemini/config/hooks.json`, as a `PreToolUse` hook for every tool | `~/.gemini/settings.json`, as a `BeforeTool` hook for every tool |
+| How a call is refused | The gate prints `{"decision":"deny","reason":"..."}` | The gate exits with code 2 |
 
-- **Rules** — merges your SOPs into the `customInstructions` field of the project's `.gemini/settings.json`. Existing settings in the file are preserved — only `customInstructions` is overwritten.
-- **A blocking gate** — registers `.intutic/hooks/antigravity-check.sh` as a Gemini CLI `BeforeTool` hook in `~/.gemini/settings.json`. Gemini CLI runs it before every tool call with the call as JSON on stdin and blocks the call when it exits with code 2. Your other settings and hooks in that file are kept.
+Both gates run before every tool call, with the call as JSON on stdin, and enforce the same policy: the built-in protections, the destructive-command tier, your rule sets, group rules and holds for review. They are installed whether or not any rule set targets the harness.
 
-## Setup
+Rule sets are merged into the `customInstructions` field of the project's `.gemini/settings.json`. Existing settings in the file are preserved — only `customInstructions` is overwritten.
 
-### 1. Ensure .gemini directory exists
+## Google Antigravity
 
-```bash
-mkdir -p .gemini
-```
-
-Antigravity detection checks for the `.gemini/` directory, not the settings file itself.
-
-### 2. Initialize Intutic
-
-```bash
-intutic init
-```
-
-```
-  ✔ antigravity → .gemini/settings.json
-```
-
-`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
-
-### 3. Start the proxy
-
-```bash
-intutic start
-```
-
-> Have an Intutic account or run your own control plane? Use `intutic connect` instead. It starts the same proxy and adds bidirectional config sync.
-
-## What gets written
-
-Intutic reads the existing `.gemini/settings.json`, merges governance instructions into `customInstructions`, and writes the file back:
+Antigravity runs hooks from `~/.gemini/config/hooks.json` (all your projects) and `.agents/hooks.json` (one project). Intutic adds its gate to the user-level file under its own key, `intutic-governance`, and keeps every other hook in the file:
 
 ```json
 {
-  "customInstructions": "# Intutic Governance Rules (auto-generated)\n# DO NOT EDIT — managed by intutic sync daemon\n# Last sync: 2026-06-11T22:24:00Z\n# Proxy URL: http://localhost:4000/v1\n\n## Code Review Requirements\n\nAll code changes must include unit tests...",
-  "existingSetting": "preserved",
-  "anotherSetting": true
+  "my-linter": { "PostToolUse": [ ... ] },
+  "intutic-governance": {
+    "enabled": true,
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [{ "type": "command", "command": "node \"/path/to/project/.intutic/hooks/antigravity-cli-check.js\"" }]
+      }
+    ]
+  }
 }
 ```
 
-The gate registration in `~/.gemini/settings.json`:
+The gate reads Antigravity's tool calls by their own names and arguments: `run_command` with `CommandLine`, `write_to_file` and `replace_file_content` with `TargetFile`. For a call it allows, the gate prints `{}`, a result with no decision in it, so the permission prompts you set in Antigravity still apply. A gate that answered `allow` would approve every call past them.
+
+You can see and toggle the hook in the app under **Settings > Customizations > Hooks**, and in the CLI with `/hooks`. Turning it off counts as a change to the file: see [Tamper protection](#tamper-protection).
+
+## Gemini CLI
+
+Gemini CLI runs command hooks registered under `hooks.BeforeTool` in `~/.gemini/settings.json`. Intutic merges a catch-all entry for its gate and keeps your other settings and hooks:
 
 ```json
 {
@@ -66,9 +54,45 @@ The gate registration in `~/.gemini/settings.json`:
 }
 ```
 
+Gemini CLI's shell tool is `run_shell_command`; a hold such as `review_before: action:deploy` applies to the commands it runs.
+
+## Setup
+
+### 1. Initialize Intutic
+
+```bash
+intutic init
+```
+
+```
+  ✔ antigravity → .gemini/settings.json
+```
+
+The harness is detected from a `.gemini/` directory or an `.agents/hooks.json` file in the project, or from Antigravity's app-data directories (`~/.gemini/antigravity`, `~/.gemini/antigravity-cli`, `~/.gemini/antigravity-ide`). `intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
+
+### 2. Start the proxy
+
+```bash
+intutic start
+```
+
+> Have an Intutic account or run your own control plane? Use `intutic connect` instead. It starts the same proxy and adds bidirectional config sync.
+
+Gemini model traffic is not served by the proxy, so for these agents the gates are the enforcement point.
+
 ::: tip Non-destructive merge
-Both files are read first and merged; all other settings are preserved. A settings file that is not plain JSON (for example one with comments) is left untouched and reported in the `intutic connect` log.
+Every file is read first and merged; all other settings and hooks are preserved. A file that is not plain JSON (for example one with comments) is left untouched and reported in the `intutic connect` log.
 :::
+
+## Tamper protection
+
+`intutic connect` watches `~/.gemini/settings.json` and `~/.gemini/config/hooks.json`. If a gate registration is removed or disabled, or the file is deleted, it is put back and the change is reported to the control plane. Like every gate file, it is restored under every hand-edit setting, Record only included: see [Settings](/guide/settings).
+
+## Fleet deployment
+
+`intutic enterprise install` writes Jamf and Intune manifests for both gates: `gemini-cli-hooks-*.json` places the Gemini CLI hook in Gemini CLI's system settings file, which Gemini CLI applies over user and workspace settings, and `antigravity-hooks-*.json` places the Antigravity hook in each user's `~/.gemini/config/hooks.json` (Antigravity has no machine-wide hooks file). See [`intutic enterprise install`](/reference/cli#intutic-enterprise-install).
+
+## Disconnecting
 
 To undo what `intutic connect` writes here, run `intutic disconnect --harness antigravity`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
 
@@ -77,7 +101,7 @@ To undo what `intutic connect` writes here, run `intutic disconnect --harness an
 | Property | Value |
 |----------|-------|
 | Harness type | `antigravity` |
-| Config file | `.gemini/settings.json` |
-| Detection | Checks for `.gemini/` directory |
-| Format | JSON (merges `customInstructions` field) |
+| Rules file | `.gemini/settings.json` (`customInstructions`) |
+| Gates | `~/.gemini/config/hooks.json` (Antigravity), `~/.gemini/settings.json` (Gemini CLI) |
+| Detection | `.gemini/` or `.agents/hooks.json` in the project, or Antigravity's app-data directories |
 | Write strategy | Atomic (write to `.intutic-tmp`, then rename) |

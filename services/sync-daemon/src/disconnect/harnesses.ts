@@ -33,7 +33,7 @@ import {
 } from '../harness/mcpAutoWrite.js'
 import { jetbrainsConfigRoot } from '../harness/windsurfJetBrainsProxy.js'
 import { windsurfSettingsPath } from '../harness/windsurfHooks.js'
-import { resolveClaudeDesktopConfigPath } from '../harness/claudeDesktopHooks.js'
+import { ANTIGRAVITY_CLI_GATE, ANTIGRAVITY_HOOK_NAME, antigravityHooksPath } from '../harness/antigravityCliHooks.js'
 import { parseComponentOptions, serializeComponentOptions, type ComponentOptionsFile } from '../harness/jetbrainsXmlConfig.js'
 import { resolveDshHome, listDshProfileDirs } from '../harness/dshHooks.js'
 import { stripOwnHeader as stripAiderHeader, AIDER_SOPS_FILE } from '../harness/aiderConfigMerger.js'
@@ -207,17 +207,8 @@ const claudeCode: HarnessReverser = async (plan, ctx) => {
 
 // ─── Claude Desktop ──────────────────────────────────────────────────────────
 
-const claudeDesktop: HarnessReverser = async (plan, ctx) => {
-  await forEachWorkspace(ctx, (root) => gateScripts(plan, root, ['claude-desktop-check.js']))
-  // The MCP writer and the hook writer agree on the path except on Windows.
-  for (const file of new Set([claudeDesktopConfigPath(), resolveClaudeDesktopConfigPath()])) {
-    await json(plan, file, home(), (doc, c) =>
-      allEdits(
-        unwrapServersAt(doc, ['mcpServers'], c.original),
-        removeGateEntries(doc, c, ['PreToolUse'], 'claude-desktop-check.js'),
-      ),
-    )
-  }
+const claudeDesktop: HarnessReverser = async (plan) => {
+  await json(plan, claudeDesktopConfigPath(), home(), (doc, c) => unwrapServersAt(doc, ['mcpServers'], c.original))
 }
 
 // ─── Cursor ──────────────────────────────────────────────────────────────────
@@ -469,22 +460,7 @@ const opencode: HarnessReverser = async (plan, ctx) => {
 // ─── Roo Code, Cline ─────────────────────────────────────────────────────────
 
 const rooCode: HarnessReverser = async (plan, ctx) => {
-  await forEachWorkspace(ctx, async (root) => {
-    const rules = join(root, '.roorules')
-    let isDir = false
-    try {
-      isDir = (await node_fs.stat(rules)).isDirectory()
-    } catch {
-      // Absent.
-    }
-    if (isDir) {
-      await rulesFile(plan, join(rules, 'README.md'), root)
-      await reverseOwnedFile(plan, join(rules, 'hooks', 'hooks.json'), root, contains('roo-check.js'))
-    } else {
-      await rulesFile(plan, rules, root)
-    }
-    await gateScripts(plan, root, ['roo-check.js'])
-  })
+  await forEachWorkspace(ctx, (root) => rulesFile(plan, join(root, '.roorules'), root))
 }
 
 const cline: HarnessReverser = async (plan, ctx) => {
@@ -670,16 +646,23 @@ const openhands: HarnessReverser = async (plan, ctx) => {
   await openHandsConfig(plan, join(home(), '.openhands', 'config.toml'), home(), ctx)
 }
 
-// ─── Antigravity (Gemini CLI) ────────────────────────────────────────────────
+// ─── Antigravity and Gemini CLI ──────────────────────────────────────────────
+
+/** Antigravity's hooks file keys hooks by name; `intutic-governance` is Intutic's when it only runs the gate. */
+function isAntigravityGate(value: unknown): boolean {
+  return isObject(value) && Array.isArray(value.PreToolUse) && value.PreToolUse.length > 0 &&
+    value.PreToolUse.every(isGateEntry(ANTIGRAVITY_CLI_GATE))
+}
 
 const antigravity: HarnessReverser = async (plan, ctx) => {
   await forEachWorkspace(ctx, async (root) => {
-    await gateScripts(plan, root, ['antigravity-check.sh'])
+    await gateScripts(plan, root, ['antigravity-check.sh', ANTIGRAVITY_CLI_GATE])
     await json(plan, join(root, '.gemini', 'settings.json'), root, (doc, c) =>
       restoreKey(doc, ['customInstructions'], c, (v) => typeof v === 'string' && startsWithRulesHeader(v)),
     true)
   })
   await json(plan, join(home(), '.gemini', 'settings.json'), home(), (doc, c) => removeGateEntries(doc, c, ['BeforeTool'], 'antigravity-check.sh'))
+  await json(plan, antigravityHooksPath(), home(), (doc, c) => restoreKey(doc, [ANTIGRAVITY_HOOK_NAME], c, isAntigravityGate), true)
 }
 
 // ─── Continue ────────────────────────────────────────────────────────────────
