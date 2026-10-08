@@ -42,8 +42,8 @@ Every custom filter runs inside a secure WebAssembly sandbox with strict constra
 
 If a filter exceeds any limit, it's immediately terminated and **fails open** — the request proceeds to maintain availability.
 
-::: tip Memory-Safety Protocol
-To prevent memory corruption and guest engine crashes under multi-turn garbage collection within Wasmtime, the host-to-guest interface passes context payloads as raw binary guest buffers (`Uint8Array`) rather than standard guest string pointers. This ensures maximum execution stability and zero runtime garbage collection overhead.
+::: tip How the context arrives
+The host calls your `allocate(len)` export, writes the request context as UTF-8 JSON bytes into the buffer it returns, and calls `evaluate(offset, len)`. Parse those bytes directly. Building a string from them one character at a time allocates once per byte, which can use up the fuel budget on a large context; the rule is then skipped and the request allowed.
 :::
 
 
@@ -138,9 +138,28 @@ link error before assuming the logic is wrong.
 
 ## Creating a Custom Filter
 
-### 1. Initialize with the SDK
+### 1. Get the SDK
 
-Intutic provides an AssemblyScript Rules SDK (`@intutic/wasm-sdk`) that provides standard types and parsing helpers.
+The AssemblyScript Rules SDK is a template, not an npm package: it lives in
+`packages/wasm-sdk/` of the open-core repository and is not published. Copy
+its `assembly/` directory (the context parser, `allocate`/`evaluate`, and the
+starter rules) and, if you want the drop-in rules, its `rules/` directory, then
+install the compiler:
+
+```bash
+npx degit intutic/intutic/packages/wasm-sdk/assembly my-rule/assembly
+npx degit intutic/intutic/packages/wasm-sdk/rules my-rule/rules
+cd my-rule
+npm init -y
+npm install -D assemblyscript assemblyscript-json
+```
+
+Copying the directories from a clone of
+[github.com/intutic/intutic](https://github.com/intutic/intutic) works the same
+way. Do not copy the template's `package.json`: its test dependencies resolve
+only inside that repository.
+
+`assembly/index.ts` parses the request context into a `RequestContext` object.
 
 Every field below is delivered on every request. The excerpt this page used to
 show carried ten of them and pointed at the SDK for "the rest" — which is how a
@@ -171,7 +190,7 @@ rule author ends up not knowing that `forbid_after`, `changes` or
 | `corroborating_detectors` | `i32` | How many *distinct* built-in anomaly detectors fired at Medium+ severity on this request — the same pool the proxy's own corroboration escalation counts, so `ctx.corroborating_detectors >= 2` agrees with the built-in rung by construction, and `>= 3` gives you a stricter bar than the built-in without re-deriving anything. `0` when nothing fired and under break-glass. A rule gating on this stays advisory territory until you have measured what your traffic's agreement rate actually is — replay it first. |
 | `new_tool_calls` | `string[]` | This turn's delta. **Use this, not `tool_sequence`, for a hold** — matching on history re-fires the hold forever. |
 | `tool_contract_changed` | `bool` | A server changed a tool's contract mid-session. |
-| `transition_baseline` | `map` | Observed transition frequencies. Absent early in a session. |
+| `transition_baseline` | `map` \| `null` | Observed tool-transition frequencies; `null` until the workspace has a fitted model. The SDK deliberately does not parse it: the proxy's own detector acts on it, and walking the map would spend the 5 ms budget re-deriving a statistic. |
 
 ### Findings
 
@@ -195,7 +214,7 @@ Declaring these in a SOP makes the proxy's own detectors enforce them. They are
 | `plan_steps` | `string[]` | `plan_steps:` |
 | `scope_paths` | `string[]` | `scope_paths:` |
 | `review_before` | `string[]` | `review_before:` |
-| `requires_before` | `(string, string)[]` | `requires_before: A -> B` |
+| `requires_before` | `(string, string, bool)[]` | `requires_before: A -> B`. The bool is adjacency, as for `forbid_after`. |
 | `forbid_after` | `(string, string, bool)[]` | `forbid_after: A -> B`. The bool is adjacency — `~>` means "immediately after". |
 | `max_calls` | `(string, i32)[]` | `max_calls: Tool <= N` |
 | `forbid_with` | `(string, string)[]` | `forbid_with: secrets(), action:http_post` — **co-occurrence, not flow**, because `dlp_findings` carries no sequence position. |
@@ -282,44 +301,48 @@ exactly that inversion.
 
 ### 2. Write the Rule
 
-Write your rule logic in `assembly/index.ts` using the SDK:
+Add a function per rule to `assembly/index.ts` and call it from `runRules()`.
+The host's entry point is already there: `evaluate(offset, len)` parses the
+context and runs `runRules()`, which returns the first non-zero verdict.
 
 ```typescript
-import { JSON } from "assemblyscript-json/assembly";
-
-let activeBuffer: Uint8Array | null = null;
-
-// Memory allocator helper for the host
-export function allocate(size: i32): i32 {
-  const buf = new Uint8Array(size);
-  activeBuffer = buf;
-  return changetype<i32>(buf.dataStart);
-}
-
-// Evaluation entry point
-export function evaluate(offset: i32, len: i32): i32 {
-  // 1. Read JSON bytes from the heap.
-  //
-  // Read into the Uint8Array the allocator already handed the host, and let
-  // JSON.parse take the bytes. Building the string character by character —
-  // which this example used to do — allocates once per byte, and the tip above
-  // is a warning against exactly that: it is how a rule exhausts its fuel on a
-  // large context and is silently skipped.
-  const buf = activeBuffer;
-  if (buf == null) return 0;
-  const jsonObj = <JSON.Obj>JSON.parse(buf);
-
-  // 2. Read the field you need
-  const budget = jsonObj.getFloat("budget_remaining_usd");
-
-  // 3. Block if budget is exhausted
-  if (budget && budget.valueOf() <= 0.0) {
-    return 1; // Block / Kill request
+// In assembly/index.ts
+export function ruleNoPushToMain(ctx: RequestContext): i32 {
+  for (let i = 0; i < ctx.tool_calls.length; i++) {
+    const tc = ctx.tool_calls[i];
+    if (tc.name == "Bash" && tc.arguments.includes("git push origin main")) {
+      setReason("direct pushes to main are not allowed; open a pull request");
+      return 1; // block
+    }
   }
-
-  return 0; // Bypass / Allow
+  return 0; // allow
 }
+
+// ...and in runRules():
+//   const push = ruleNoPushToMain(ctx);
+//   if (push != 0) return push;
 ```
+
+To ship one rule on its own instead, start from a directory under `rules/`:
+each `rule.ts` imports the parser from `../../assembly/index`, re-exports
+`allocate`, and declares its own `evaluate`.
+
+#### Return a reason
+
+`setReason(text)` sets the message the proxy reports when the rule blocks, in
+the 403 response and in the incident, instead of the generic
+`Blocked by custom WASM governance rule`. The SDK implements this through two
+optional exports the host reads after `evaluate` returns, `reason_ptr()` and
+`reason_len()`, which point at UTF-8 text in the module's memory. The template
+exports them already; a standalone `rule.ts` must re-export them alongside
+`allocate`, as `rules/secret-read-to-egress/rule.ts` does:
+
+```typescript
+export { allocate, reason_ptr, reason_len } from "../../assembly/index";
+```
+
+Keep the reason under 480 bytes, which is all the host reads. A reask (`3`)
+always carries the proxy's own message.
 
 ### 3. Compile to WebAssembly
 
