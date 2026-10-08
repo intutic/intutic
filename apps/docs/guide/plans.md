@@ -70,13 +70,13 @@ Trace retention is 3 years on every plan.
 
 ## Trials
 
-- **Personal trial**: 14 days from sign-up. It includes Policy Guardrails,
+- **Free trial**: 14 days from sign-up. It includes Policy Guardrails,
   single sign-on, SCIM, Custom Filters, the SOP Optimizer and data residency,
   with one seat and a $5 daily spend cap.
 - **Organization trial**: an organization signs up on Biz Org for 30 days.
 - **Enterprise trial**: 14 days, started from **Settings › Billing** by an
-  Owner. It adds the Evaluator Sandbox and SOP write-back to the personal
-  trial's features, for up to 25 seats.
+  Owner. It adds the Evaluator Sandbox and SOP write-back to the Free trial's
+  features, for up to 25 seats.
 
 A trial that ends without a purchase moves the workspace to the free plan.
 

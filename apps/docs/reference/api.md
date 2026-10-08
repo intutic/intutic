@@ -541,9 +541,9 @@ _Generated from `services/control-plane/src/routes/*.ts` by `generate-api-catalo
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/api/v1/attenuate` | Authenticated | Attenuate parent key to child key (team+) |
+| POST | `/api/v1/attenuate` | Authenticated | Attenuate parent key to child key (Biz Org+) |
 | GET | `/api/v1/attenuate/chain/:chainId` | Authenticated | Resolve delegation lineage (ADMIN+) |
-| POST | `/api/v1/auth/obo-token` | Authenticated | Issue OBO ephemeral session token (pro+) |
+| POST | `/api/v1/auth/obo-token` | Authenticated | Issue OBO ephemeral session token (Self-serve+) |
 
 ### `audit.ts` <Badge type="tip" text="Cloud" />
 
@@ -580,7 +580,6 @@ _Generated from `services/control-plane/src/routes/*.ts` by `generate-api-catalo
 | POST | `/api/v1/billing/marketplace/gcp/register` | Authenticated |  |
 | POST | `/api/v1/billing/marketplace/gcp/webhook` | Public |  |
 | GET | `/api/v1/billing/usage-rate` | Authenticated | This workspace's rate per 1,000 Governed Requests |
-| GET | `/api/v1/billing/usage/current` | Authenticated | Current metered usage summary (team+) |
 | POST | `/api/v1/billing/webhook` | Public | Handle Stripe webhook (public) |
 
 ### `breakGlass.ts` <Badge type="tip" text="Cloud" />

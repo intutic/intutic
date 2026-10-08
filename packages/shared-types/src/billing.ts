@@ -59,27 +59,3 @@ export interface ReconcileResult {
   /** Rows still FAILED after this run */
   stillFailed: number
 }
-
-// ─── Billing Usage Summary ───────────────────────────────────────────
-
-/**
- * Current period metered usage summary for a workspace.
- * Returned by GET /api/v1/billing/usage/current.
- */
-export interface BillingUsageSummary {
-  workspaceId: string
-  /** Period start (ISO-8601) */
-  periodStart: string
-  /** Period end (ISO-8601) */
-  periodEnd: string
-  /** Total tokens consumed in the period */
-  tokensUsed: number
-  /** Plan-included token volume */
-  tokensIncluded: number
-  /** Tokens exceeding the included volume (max(0, used - included)) */
-  overageTokens: number
-  /** Estimated overage charge (USD) */
-  estimatedOverageUsd: number
-  /** True when budget:hard_block:{wid} Valkey key is set */
-  hardCapActive: boolean
-}

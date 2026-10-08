@@ -515,7 +515,12 @@ async fn parse_key_context(
 
 /// POST /api/v1/policy/check on the control plane.
 /// Returns Ok(()) if allowed, Err with reason string if denied.
-// Eight request-scoped values forwarded to a single control-plane call, with one
+///
+/// `virtual_key` is the caller's whole `vk_` key, sent as the bearer. The
+/// route answers whether a workspace is over its budget cap or plan limits, so
+/// it must know the asker holds a key of that workspace; the prefix in the body
+/// is not a secret (the dashboard shows it and this file logs it).
+// Nine request-scoped values forwarded to a single control-plane call, with one
 // call site. Grouping them into a struct would add a type whose only purpose is
 // to satisfy the argument-count threshold.
 #[allow(clippy::too_many_arguments)]
@@ -523,6 +528,7 @@ async fn policy_check(
     client: &Client,
     control_plane_url: &str,
     workspace_id: &str,
+    virtual_key: Option<&str>,
     virtual_key_prefix: &str,
     provider: &Provider,
     model: &str,
@@ -540,12 +546,14 @@ async fn policy_check(
         loop_run_id: loop_run_id.map(|s| s.to_string()),
     };
 
-    let result = client
+    let mut request = client
         .post(&url)
         .timeout(std::time::Duration::from_millis(timeout_ms))
-        .json(&body)
-        .send()
-        .await;
+        .json(&body);
+    if let Some(key) = virtual_key {
+        request = request.bearer_auth(key);
+    }
+    let result = request.send().await;
 
     match result {
         Ok(resp) if resp.status().is_success() => {
@@ -3875,6 +3883,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 &state.http_client,
                 cp_url,
                 &workspace_id,
+                raw_token.starts_with("vk_").then_some(raw_token),
                 key_prefix,
                 &provider,
                 &model,
