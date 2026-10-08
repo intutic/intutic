@@ -8,7 +8,7 @@ export interface ClawdeClientOptions {
    */
   controlPlaneUrl?: string
   provider?: 'openai' | 'anthropic' | 'google'  // Schema enforcement
-  autoContext?: boolean             // Default: true — auto-detect Jira/git/PD
+  autoContext?: boolean             // Default: true — resolveContext() reads the sync daemon's config
   timeout?: number                  // Default: 30000ms
   retries?: number                  // Default: 2
   /**
@@ -55,14 +55,48 @@ export interface ChatResponse {
     completion_tokens: number
     total_tokens: number
   }
-  // Intutic header additions exposed at top level on return payload
-  verdict?: 'allow' | 'hijack' | 'enhance' | 'kill' | 'bypass'
+  /** Always `allow`: a response only comes back when the proxy let the request through. */
+  verdict?: Verdict | LegacyVerdict
+  /** @deprecated Never set: the proxy does not report budget on responses. Use `checkBudget()`. */
   budgetRemainingUsd?: number
+  /** @deprecated Never set: the proxy does not report budget on responses. Use `checkBudget()`. */
   budgetPctUsed?: number
 }
 
+/**
+ * A governance refusal the proxy answered with: `kill` blocks the request, `reask`
+ * refuses this attempt and tells the agent to revise it (it escalates to `kill`
+ * after repeated attempts), and `hold` pauses a loop run until a human reviews it.
+ */
+export type RefusalVerdict = 'kill' | 'reask' | 'hold'
+
+/** What `chat()` can know about a request: it was let through, or refused. */
+export type Verdict = 'allow' | RefusalVerdict
+
+/**
+ * @deprecated Never reported. The proxy applies these inside the response and
+ * does not tell the client, so no response carries them and no event fires for
+ * them. Still accepted so code written against 2.0 compiles; they will be
+ * removed in the next major version.
+ */
+export type LegacyVerdict = 'hijack' | 'enhance' | 'bypass'
+
+/** Events `on()` accepts. */
+export type VerdictEvent = RefusalVerdict | LegacyVerdict
+
 export interface CircuitBreakerOptions {
-  maxCostUsd?: number               // Per-invocation cost ceiling
+  /**
+   * Run `checkBudget()` first and refuse to run the function when the workspace
+   * has no budget left. Default: false.
+   */
+  requireBudget?: boolean
+  /**
+   * @deprecated Use `requireBudget: true`. Any value turns the workspace budget
+   * check on; the amount is not compared with anything, because nothing reports
+   * a call's cost before it is made.
+   */
+  maxCostUsd?: number
+  /** @deprecated Ignored: neither the SDK nor the proxy reads a sensitivity tier. */
   sensitivityTier?: 'low' | 'medium' | 'high' | 'critical'
   failOpen?: boolean                // Default: false (fail-closed)
 }
@@ -83,11 +117,18 @@ export interface BudgetCheckResult {
   reason?: string
 }
 
+/** Called with the refusal before `chat()` throws it as a `ClawdeBlockedError`. */
 export type EventCallback = (data: {
-  verdict: 'allow' | 'hijack' | 'enhance' | 'kill' | 'bypass'
+  /** One of the `RefusalVerdict` values; typed wider so listeners written against 2.0 compile. */
+  verdict: Verdict | LegacyVerdict
+  /** The proxy's error code, e.g. `policy_denied` or `OVERAGE_HARD_CAP_EXCEEDED`. */
+  code: string
+  status: number
+  message: string
+  /** @deprecated Never set. */
   budgetRemainingUsd?: number
+  /** @deprecated Never set. */
   budgetPctUsed?: number
-  [key: string]: any
 }) => void | Promise<void>
 
 // ─── Control-plane management types (LLD #69) ───
