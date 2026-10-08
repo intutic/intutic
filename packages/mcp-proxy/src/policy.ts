@@ -7,10 +7,9 @@
  * @module
  */
 
-import * as node_https from 'node:https'
-import * as node_http from 'node:http'
 import { createStderrLogger as createLogger } from './stderrLog.js'
 import { callDaemonSocket } from './daemonClient.js'
+import { httpRequest } from './httpJson.js'
 import type { ResolvedPolicy } from './daemon/policyCache.js'
 
 const log = createLogger('mcp-proxy-policy')
@@ -63,6 +62,102 @@ export function isSopRule(value: unknown): value is SopRule {
 interface SopRulesResponse {
   rules: SopRule[]
 }
+
+/**
+ * The workspace's MCP server registry decisions, as the control plane sends
+ * them (`mcpRegistry`). A blocked server is refused always; under a `deny`
+ * default, so is every server not approved; a disabled tool is hidden from
+ * tools/list and refused within any server.
+ */
+export interface McpRegistryPolicy {
+  defaultPolicy: 'allow' | 'deny'
+  approvedServers: string[]
+  blockedServers: string[]
+  disabledTools: Record<string, string[]>
+}
+
+/**
+ * What an older control plane — one that sends no `mcpRegistry` at all —
+ * means: no registry, so nothing is refused on its account. Distinct from an
+ * UNKNOWN registry (no policy loaded yet), which the interceptor resolves
+ * through the fail-open/fail-closed setting instead.
+ */
+export const UNRESTRICTED_REGISTRY: McpRegistryPolicy = Object.freeze({
+  defaultPolicy: 'allow',
+  approvedServers: [],
+  blockedServers: [],
+  disabledTools: {},
+}) as McpRegistryPolicy
+
+/**
+ * The workspace member this proxy's API key resolves to, as the control
+ * plane resolved it. Never derived locally: the proxy can know the OS user it
+ * runs as, but only the control plane can say which member a key belongs to.
+ */
+export interface McpPrincipal {
+  memberId: string
+  email: string
+  role: string
+  ssoGroups: string[]
+}
+
+/** The workspace's SSO group policy — the one the server-side hook gate applies. */
+export interface SsoGroupPolicy {
+  highRiskTools: string[]
+  requiredGroups: string[]
+  requireOboFor: string[]
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/**
+ * Parses `mcpRegistry`. Returns `undefined` for anything that is not a
+ * registry object, so the caller decides what absence means for its source.
+ */
+export function parseRegistry(value: unknown): McpRegistryPolicy | undefined {
+  if (!isPlainObject(value)) return undefined
+  const disabledTools: Record<string, string[]> = {}
+  if (isPlainObject(value['disabledTools'])) {
+    for (const [server, tools] of Object.entries(value['disabledTools'])) {
+      const list = stringList(tools)
+      if (list.length > 0) disabledTools[server] = list
+    }
+  }
+  return {
+    defaultPolicy: value['defaultPolicy'] === 'deny' ? 'deny' : 'allow',
+    approvedServers: stringList(value['approvedServers']),
+    blockedServers: stringList(value['blockedServers']),
+    disabledTools,
+  }
+}
+
+export function parsePrincipal(value: unknown): McpPrincipal | undefined {
+  if (!isPlainObject(value) || typeof value['memberId'] !== 'string' || !value['memberId']) return undefined
+  return {
+    memberId: value['memberId'],
+    email: typeof value['email'] === 'string' ? value['email'] : '',
+    role: typeof value['role'] === 'string' ? value['role'] : '',
+    ssoGroups: stringList(value['ssoGroups']),
+  }
+}
+
+export function parseSsoGroupPolicy(value: unknown): SsoGroupPolicy | undefined {
+  if (!isPlainObject(value)) return undefined
+  return {
+    highRiskTools: stringList(value['highRiskTools']),
+    requiredGroups: stringList(value['requiredGroups']),
+    requireOboFor: stringList(value['requireOboFor']),
+  }
+}
+
+/** How long a proxy waits between on-demand refreshes while it has no registry. */
+const UNKNOWN_REGISTRY_RETRY_MS = 5_000
 
 export class PolicyClient {
   private rules: SopRule[] = []
@@ -117,7 +212,18 @@ export class PolicyClient {
    * above uses.
    */
   private anomalyOverrides: Record<string, 'steer' | 'reask' | 'kill' | 'off'> = {}
-  private lastFetchAt = 0
+  /**
+   * Registry decisions from the last policy that carried them. `undefined`
+   * until then — no policy has loaded in this process, or the only one so far
+   * was the MCP daemon's snapshot seed, which carries none. The interceptor
+   * resolves that state through the fail-open/fail-closed setting.
+   */
+  private registry: McpRegistryPolicy | undefined
+  private principal: McpPrincipal | undefined
+  private ssoGroupPolicy: SsoGroupPolicy | undefined
+  /** The first refresh `start()` kicks off, so the first tool call can wait for it. */
+  private firstRefresh: Promise<void> | null = null
+  private lastRefreshAttemptAt = 0
   private refreshTimer: NodeJS.Timeout | null = null
 
   constructor(
@@ -149,8 +255,9 @@ export class PolicyClient {
     // Don't block Node.js exit on this timer
     this.refreshTimer.unref()
 
-    // Kick off initial fetch (non-blocking — proxy starts immediately)
-    void this.refresh().catch(() => {})
+    // Kick off initial fetch (non-blocking — proxy starts immediately; the
+    // first tool call waits for it through `ready()`).
+    this.firstRefresh = this.refresh().catch(() => {})
     if (onTick) void Promise.resolve(onTick()).catch(() => {})
   }
 
@@ -160,6 +267,40 @@ export class PolicyClient {
       clearInterval(this.refreshTimer)
       this.refreshTimer = null
     }
+  }
+
+  /**
+   * Resolves once the policy is as loaded as it is going to get for this call.
+   *
+   * The first tool call of a process can arrive before `start()`'s first
+   * fetch has answered; without this wait, a `deny` workspace's very first
+   * call would be decided against no registry at all. After that, while the
+   * registry is still unknown (control plane unreachable, or only the
+   * daemon's snapshot seed so far), a call triggers one more refresh at most
+   * every {@link UNKNOWN_REGISTRY_RETRY_MS} — so a proxy started offline
+   * picks the registry up as soon as it can, not at the next 60-second tick.
+   * Never rejects; every wait is bounded by the 5-second fetch timeout.
+   */
+  async ready(): Promise<void> {
+    if (this.firstRefresh) await this.firstRefresh
+    if (this.registry !== undefined) return
+    if (Date.now() - this.lastRefreshAttemptAt < UNKNOWN_REGISTRY_RETRY_MS) return
+    await this.refresh().catch(() => {})
+  }
+
+  /** Registry decisions, or `undefined` while none has loaded (see the field). */
+  getRegistry(): McpRegistryPolicy | undefined {
+    return this.registry
+  }
+
+  /** The member this proxy's key resolves to, when the control plane said. */
+  getPrincipal(): McpPrincipal | undefined {
+    return this.principal
+  }
+
+  /** The workspace's SSO group policy, when it has one. */
+  getSsoGroupPolicy(): SsoGroupPolicy | undefined {
+    return this.ssoGroupPolicy
   }
 
   /** Return the current cached rule set. */
@@ -248,6 +389,8 @@ export class PolicyClient {
         if (v === 'steer' || v === 'reask' || v === 'kill' || v === 'off') this.anomalyOverrides[k] = v
       }
     }
+    this.principal = parsePrincipal(source['principal'])
+    this.ssoGroupPolicy = parseSsoGroupPolicy(source['ssoGroupPolicy'])
   }
 
   /** Find the first matching rule for a given tool name + serialized args. */
@@ -270,6 +413,7 @@ export class PolicyClient {
 
   /** Fetch fresh rules from the control plane. */
   async refresh(): Promise<void> {
+    this.lastRefreshAttemptAt = Date.now()
     if (this.mcpProxyMode === 'daemon') {
       try {
         // The socket returns whatever the daemon serialised, so the caller
@@ -300,7 +444,9 @@ export class PolicyClient {
             (p): p is string => typeof p === 'string',
           )
           this.absorbCuration(policy as unknown as Record<string, unknown>)
-          this.lastFetchAt = Date.now()
+          // The daemon answers from its cache. A snapshot-seeded entry has no
+          // registry yet; keep the last known one rather than forget it.
+          if (policy.mcpRegistry) this.registry = policy.mcpRegistry
           log.info({ action: 'policy_refreshed_from_daemon', ruleCount: this.rules.length }, 'SOP rules refreshed from daemon')
           return
         }
@@ -318,7 +464,7 @@ export class PolicyClient {
     const url = `${this.controlPlaneUrl}/api/v1/sop/rules?workspaceId=${encodeURIComponent(this.workspaceId)}&active=true`
     log.debug({ action: 'policy_refresh', url }, 'Fetching SOP rules from control plane')
 
-    const body = await httpGet(url, this.apiKey)
+    const body = await httpRequest('GET', url, this.apiKey)
     const parsed = JSON.parse(body) as SopRulesResponse & Record<string, unknown>
     const rules = Array.isArray(parsed.rules) ? parsed.rules : []
     this.rules = rules
@@ -327,42 +473,8 @@ export class PolicyClient {
       ? dlp.filter((p): p is string => typeof p === 'string')
       : []
     this.absorbCuration(parsed)
-    this.lastFetchAt = Date.now()
+    // A control plane that sends no registry has none: unrestricted, not unknown.
+    this.registry = parseRegistry(parsed['mcpRegistry']) ?? UNRESTRICTED_REGISTRY
     log.info({ action: 'policy_refreshed', ruleCount: rules.length }, 'SOP rules refreshed')
   }
-}
-
-/** Minimal HTTP/HTTPS GET helper (avoids fetch / node-fetch dep). */
-function httpGet(url: string, apiKey: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const parsed = new URL(url)
-    const lib = parsed.protocol === 'https:' ? node_https : node_http
-    const req = lib.get(
-      url,
-      {
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          Accept: 'application/json',
-        },
-        timeout: 5000,
-      },
-      (res) => {
-        const chunks: Buffer[] = []
-        res.on('data', (c: Buffer) => chunks.push(c))
-        res.on('end', () => {
-          const body = Buffer.concat(chunks).toString('utf-8')
-          if ((res.statusCode ?? 0) >= 400) {
-            reject(new Error(`HTTP ${res.statusCode ?? 'unknown'}: ${body}`))
-          } else {
-            resolve(body)
-          }
-        })
-      }
-    )
-    req.on('error', reject)
-    req.on('timeout', () => {
-      req.destroy()
-      reject(new Error('Policy fetch timed out'))
-    })
-  })
 }

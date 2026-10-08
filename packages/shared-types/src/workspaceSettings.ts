@@ -315,6 +315,18 @@ export interface WorkspaceSettings {
   mcpAllowedServers?: string[]
 
   /**
+   * What the MCP governance proxy does with a server the workspace has not
+   * approved in its MCP server registry. `allow` (the default, and what an
+   * absent value means) lets every server through that is not explicitly
+   * blocked; `deny` refuses every server until an OWNER or ADMIN approves it,
+   * and a server the proxy has not seen before lands in the registry as a
+   * candidate awaiting that decision. A blocked server is refused under both.
+   * Delivered to the proxy with the registry decisions (`mcpRegistry` on
+   * `GET /api/v1/sop/rules` and `GET /api/v1/policy/resolve`).
+   */
+  mcpDefaultPolicy?: 'allow' | 'deny'
+
+  /**
    * Workspace-supplied prompt-injection regex sources for the MCP governance
    * proxy (TD-436), on top of its hardcoded floor. Delivered with the rest of
    * the MCP curation; the proxy compiles them and drops one that does not.

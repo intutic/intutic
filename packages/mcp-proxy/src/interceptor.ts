@@ -2,6 +2,7 @@
  * interceptor.ts — tools/call decision engine.
  *
  * Given a tool name and arguments, evaluates:
+ * 0. The MCP server registry, server/tool allowlists and SSO group clearance
  * 1. DLP scan (credential / destructive pattern detection)
  * 2. SOP policy rules (fetched from control plane via PolicyClient)
  *
@@ -123,6 +124,89 @@ export class ToolCallInterceptor {
   }
 
   /**
+   * Refuses the call when the registry says this server — or this tool on it —
+   * may not be used. Returns `null` to let the call continue.
+   *
+   * A blocked server is refused under either default; under `deny`, so is any
+   * server not approved (a candidate, or one the registry has never seen);
+   * a disabled tool is refused within any server. All three are definite
+   * operator decisions and do not depend on `failOpen`.
+   *
+   * What does depend on it is a registry this process has never loaded — the
+   * control plane unreachable since start, or only the MCP daemon's snapshot
+   * seed so far. The last-known registry is kept for as long as the process
+   * runs (the daemon also keeps it across its own restarts in Valkey), so this
+   * is only ever the never-loaded case. Fail-open lets the call continue
+   * unchecked against the registry, exactly as a workspace with no registry;
+   * fail-closed refuses it, because a `deny` workspace cannot be told apart
+   * from an `allow` one without the registry.
+   */
+  private async checkRegistry(toolName: string, toolInput: unknown): Promise<Decision | null> {
+    await this.policy.ready()
+    const registry = this.policy.getRegistry()
+    if (!registry) {
+      if (this.failOpen) return null
+      const reason =
+        `MCP server registry for this workspace has not loaded (Intutic control plane unreachable ` +
+        `since this proxy started), so whether "${this.serverName}" is approved is unknown. ` +
+        `Tool call blocked (fail-closed mode: INTUTIC_MCP_FAIL_OPEN=false).`
+      log.warn({ action: 'registry_unknown_block', serverName: this.serverName, toolName }, reason)
+      this.emitter.emit('tool_blocked', toolName, toolInput, reason)
+      return { action: 'block', reason }
+    }
+
+    let reason: string | null = null
+    if (registry.blockedServers.includes(this.serverName)) {
+      reason =
+        `MCP server "${this.serverName}" is blocked in this workspace's MCP server registry. ` +
+        `An owner or admin can change that on the MCP Servers page.`
+    } else if (registry.defaultPolicy === 'deny' && !registry.approvedServers.includes(this.serverName)) {
+      reason =
+        `MCP server "${this.serverName}" is not approved in this workspace's MCP server registry, ` +
+        `and the workspace refuses unapproved servers (mcpDefaultPolicy: deny). It is waiting in ` +
+        `the approval queue on the MCP Servers page for an owner or admin.`
+    } else if ((registry.disabledTools[this.serverName] ?? []).includes(toolName)) {
+      reason =
+        `Tool "${toolName}" is disabled on MCP server "${this.serverName}" in this workspace's ` +
+        `MCP server registry. An owner or admin can re-enable it on the MCP Servers page.`
+    }
+    if (!reason) return null
+    log.warn({ action: 'registry_block', serverName: this.serverName, toolName }, reason)
+    this.emitter.emit('tool_blocked', toolName, toolInput, reason)
+    return { action: 'block', reason }
+  }
+
+  /**
+   * The workspace's SSO group policy, applied to the member this proxy's API
+   * key resolves to — the same algorithm the server-side hook gate runs
+   * (`resolveSsoGroupPrivilege` in the control plane): a tool on the
+   * `requireOboFor` list is refused (a proxy has no on-behalf-of token to
+   * present), a tool on the `highRiskTools` list needs one of the
+   * `requiredGroups`, anything else is unrestricted. A tool matches by its
+   * bare MCP name or as `mcp__<server>__<tool>`, the name the harness hooks
+   * see for the same call. Without a policy, or without a resolved member,
+   * there is nothing to apply — the hook gate skips the same way.
+   */
+  private checkSsoGroupClearance(toolName: string, toolInput: unknown): Decision | null {
+    const policy = this.policy.getSsoGroupPolicy()
+    const principal = this.policy.getPrincipal()
+    if (!policy || !principal) return null
+    const names = [toolName, `mcp__${this.serverName}__${toolName}`]
+    const listed = (list: string[]) => names.some((n) => list.includes(n))
+
+    let reason: string | null = null
+    if (listed(policy.requireOboFor)) {
+      reason = `SSO group policy: ${toolName} is on-behalf-of only and the MCP proxy cannot present an OBO token`
+    } else if (listed(policy.highRiskTools) && !policy.requiredGroups.some((g) => principal.ssoGroups.includes(g))) {
+      reason = `SSO group policy: ${toolName} requires an SSO group ${principal.email || principal.memberId} does not hold`
+    }
+    if (!reason) return null
+    log.warn({ action: 'sso_group_block', toolName, memberId: principal.memberId }, reason)
+    this.emitter.emit('tool_blocked', toolName, toolInput, reason)
+    return { action: 'block', reason }
+  }
+
+  /**
    * Evaluate a tools/call request and return a governance decision.
    *
    * @param toolName - The MCP tool name (e.g. "mcp__filesystem__read_file" or "Bash")
@@ -139,6 +223,11 @@ export class ToolCallInterceptor {
     let injectionFindingsForContext: string[] = []
     let injectionSourcesForContext: string[] = []
     let corroboratingDetectorsForContext = 0
+
+    // -2. The MCP server registry: operator decisions on this server, and the
+    // workspace's default for servers nobody has decided on yet.
+    const registryDecision = await this.checkRegistry(toolName, toolInput)
+    if (registryDecision) return registryDecision
 
     // -1. Additive SERVER scoping. When the workspace declares a server
     // allowlist (mcpAllowedServers), ONLY calls proxied to those servers may
@@ -180,6 +269,10 @@ export class ToolCallInterceptor {
       this.emitter.emit('tool_blocked', toolName, toolInput, reason)
       return { action: 'block', reason }
     }
+
+    // 0.5. SSO group clearance, after the scoping checks and before DLP.
+    const clearance = this.checkSsoGroupClearance(toolName, toolInput)
+    if (clearance) return clearance
 
     // 1. DLP scan — with the workspace's own patterns loaded first, so a
     // control-plane-defined pattern reaches the same scanner as the floor.

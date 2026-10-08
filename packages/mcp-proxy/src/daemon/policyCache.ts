@@ -12,6 +12,15 @@ import http from 'node:http'
 import { Redis } from 'ioredis'
 import { describeConnectionError } from '../valkeyErrors.js'
 import { createLogger } from '@intutic/logger'
+import {
+  UNRESTRICTED_REGISTRY,
+  parsePrincipal,
+  parseRegistry,
+  parseSsoGroupPolicy,
+  type McpPrincipal,
+  type McpRegistryPolicy,
+  type SsoGroupPolicy,
+} from '../policy.js'
 
 const logger = createLogger('mcp-proxy.policyCache')
 
@@ -76,6 +85,19 @@ export interface ResolvedPolicy {
    * empty" mean the same thing for an override map.
    */
   mcpAnomalyOverrides: Record<string, 'steer' | 'reask' | 'kill' | 'off'>
+  /**
+   * MCP server registry decisions. `undefined` only on an entry that did not
+   * come from the control plane — the snapshot seed, or a Valkey entry
+   * written before this field existed — and such an entry is treated as
+   * stale (see `isStale`), so the first request refreshes it. A control plane
+   * that sends no registry yields {@link UNRESTRICTED_REGISTRY}, never
+   * `undefined`: it has no registry, which is not the same as not knowing.
+   */
+  mcpRegistry?: McpRegistryPolicy
+  /** The member the daemon's API key resolves to (see `McpPrincipal`). */
+  principal?: McpPrincipal
+  /** The workspace's SSO group policy, when it has one. */
+  ssoGroupPolicy?: SsoGroupPolicy
   cachedAt:      number
   /**
    * The workspace's `v2:sync:config_version` at fetch time (TD-474 item 5).
@@ -118,7 +140,9 @@ function evictIfFull(): void {
 }
 
 function isStale(entry: ResolvedPolicy): boolean {
-  return Date.now() - entry.cachedAt > getPolicyTtlMs()
+  // An entry with no registry did not come from the control plane (see the
+  // field); serve it, but refresh it as if it had expired.
+  return entry.mcpRegistry === undefined || Date.now() - entry.cachedAt > getPolicyTtlMs()
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -138,6 +162,9 @@ type PolicyResponseBody = Pick<
   | 'mcpInjectionPatterns'
   | 'mcpAnomalyMode'
   | 'mcpAnomalyOverrides'
+  | 'mcpRegistry'
+  | 'principal'
+  | 'ssoGroupPolicy'
 >
 
 /**
@@ -213,6 +240,9 @@ function parsePolicyResponse(raw: string): PolicyResponseBody | null {
           ),
         )
       : {},
+    mcpRegistry: parseRegistry(parsed['mcpRegistry']) ?? UNRESTRICTED_REGISTRY,
+    principal: parsePrincipal(parsed['principal']),
+    ssoGroupPolicy: parseSsoGroupPolicy(parsed['ssoGroupPolicy']),
   }
 }
 
@@ -269,6 +299,9 @@ async function fetchFromControlPlane(workspaceId: string): Promise<ResolvedPolic
             mcpInjectionPatterns: parsed.mcpInjectionPatterns,
             mcpAnomalyMode:   parsed.mcpAnomalyMode,
             mcpAnomalyOverrides: parsed.mcpAnomalyOverrides,
+            mcpRegistry:      parsed.mcpRegistry,
+            principal:        parsed.principal,
+            ssoGroupPolicy:   parsed.ssoGroupPolicy,
             cachedAt:         Date.now(),
             configVersion:    versionAtFetch,
           })
@@ -365,6 +398,10 @@ export async function seedFromSnapshot(snapshotPath?: string): Promise<string | 
       toolDescriptionOverrides: {},
       allowedServers: [],
       mcpAnomalyOverrides: {},
+      // No registry: the snapshot does not carry one, and guessing "allow"
+      // here would let a deny workspace's unapproved servers through after
+      // every daemon restart. Left unknown, the entry is refreshed on first
+      // use (see `isStale`) and the proxy applies its fail setting meanwhile.
       cachedAt,
     }
 

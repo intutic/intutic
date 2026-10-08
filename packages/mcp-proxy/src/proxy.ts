@@ -41,6 +41,7 @@ import { SessionState } from './session.js'
 import { ValkeySessionStore, type SharedSessionStore } from './sessionStore.js'
 import { WasmRunner } from './wasm/runner.js'
 import { checkTofu, decideTofuAction } from './tofu.js'
+import { RegistryObserver } from './registryObserver.js'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
@@ -111,6 +112,8 @@ export interface ServerLineOutcome {
    * other line.
    */
   toolsListTools?: Array<Record<string, unknown>>
+  /** Every tool name the upstream server declared, before curation. Set alongside `toolsListTools`. */
+  toolsListUpstreamNames?: string[]
   /** The JSON-RPC id of the `tools/list` response, needed to build a block
    *  frame in the caller if TOFU refuses it. Set alongside `toolsListTools`. */
   toolsListMsgId?: string | number | null
@@ -174,7 +177,7 @@ export interface ServerLineOutcome {
  *
  * tools/list curation (the Uber-gateway mechanism): when the workspace
  * declares an additive allowlist, tools outside it are removed from the
- * listing — an agent that never sees a tool does not hallucinate calls to
+ * listing, as are tools the registry disables on this server — an agent that never sees a tool does not hallucinate calls to
  * it, and the call-time block in the interceptor stays as the enforcement
  * backstop. Operator description overrides apply to what remains, which is
  * also the counter to a poisoned upstream description — the pin detects the
@@ -187,6 +190,7 @@ export function processServerLine(
   overrides: Readonly<Record<string, string>>,
   injectionAction: 'warn' | 'block' = 'warn',
   injectionPatterns: readonly string[] = [],
+  disabledTools: readonly string[] = [],
 ): ServerLineOutcome {
   // Workspace-supplied injection patterns (TD-436), on top of the floor.
   // Idempotent when the list has not changed, so this is cheap per line.
@@ -299,10 +303,17 @@ export function processServerLine(
     if (!Array.isArray(tools)) return { line: raw }
     let hidden = 0
     let overridden = 0
+    const upstreamNames = (tools as Array<Record<string, unknown>>)
+      .map((t) => t['name'])
+      .filter((n): n is string => typeof n === 'string')
     let kept = tools as Array<Record<string, unknown>>
-    if (allowedTools.length > 0) {
+    if (allowedTools.length > 0 || disabledTools.length > 0) {
       kept = kept.filter((t) => {
-        const keep = typeof t['name'] === 'string' && allowedTools.includes(t['name'])
+        const name = t['name']
+        const keep =
+          typeof name === 'string' &&
+          (allowedTools.length === 0 || allowedTools.includes(name)) &&
+          !disabledTools.includes(name)
         if (!keep) hidden += 1
         return keep
       })
@@ -351,6 +362,7 @@ export function processServerLine(
       return {
         line: raw,
         toolsListTools: kept,
+        toolsListUpstreamNames: upstreamNames,
         toolsListMsgId: msg.id,
         injectionFindings,
         toolPoisoningReason: toolPoisoningFinding?.reason,
@@ -361,6 +373,7 @@ export function processServerLine(
       line: JSON.stringify(msg),
       curated: { hidden, overridden },
       toolsListTools: kept,
+      toolsListUpstreamNames: upstreamNames,
       toolsListMsgId: msg.id,
       injectionFindings,
       toolPoisoningReason: toolPoisoningFinding?.reason,
@@ -478,6 +491,8 @@ export class McpGovernanceProxy {
    * runs, not a second one (see `policy.ts`'s `start(onTick)`).
    */
   private readonly wasmRunner: WasmRunner
+  /** Reports this proxy's server to the registry; absent for the standalone `intutic` entry, which fronts none. */
+  private readonly registryObserver: RegistryObserver | undefined
   private realServer: node_child.ChildProcess | null = null
 
   constructor(private readonly config: ProxyConfig) {
@@ -509,6 +524,9 @@ export class McpGovernanceProxy {
         : 'Anomaly session window is per-process',
     )
     this.wasmRunner = new WasmRunner(config.mcpWasmDir)
+    this.registryObserver = config.standalone
+      ? undefined
+      : new RegistryObserver(config.controlPlaneUrl, config.apiKey, config.serverName, config.remoteTransport ?? 'stdio')
 
     this.interceptor = new ToolCallInterceptor(
       this.policy,
@@ -556,6 +574,7 @@ export class McpGovernanceProxy {
       this.ensureWasmWatch()
       return this.wasmRunner.rescan()
     })
+    void this.registryObserver?.observe()
   }
 
   private wasmWatch: WasmDirWatcher | null = null
@@ -767,6 +786,7 @@ export class McpGovernanceProxy {
       this.policy.getToolDescriptionOverrides(),
       injectionAction,
       this.policy.getInjectionPatterns(),
+      this.policy.getRegistry()?.disabledTools[this.config.serverName] ?? [],
     )
     if (outcome.injectionFindings) {
       for (const finding of outcome.injectionFindings) {
@@ -833,6 +853,9 @@ export class McpGovernanceProxy {
     }
 
     if (outcome.toolsListTools) {
+      // The registry gets the server's own tool names, before curation:
+      // per-tool toggles must be able to re-enable a tool curation hid.
+      void this.registryObserver?.observe(outcome.toolsListUpstreamNames ?? [])
       // Cache the post-curation tools/list for Phase 2's tool_poisoning
       // detector (already applied above, from this same outcome) and for
       // Phase 3's WASM rule context (`tools` field) once that lands.

@@ -8,8 +8,8 @@
 
 import { describe, it, expect, beforeEach } from 'vitest'
 import { ToolCallInterceptor } from '../interceptor.js'
-import { PolicyClient } from '../policy.js'
-import type { SopRule } from '../policy.js'
+import { PolicyClient, UNRESTRICTED_REGISTRY } from '../policy.js'
+import type { McpPrincipal, McpRegistryPolicy, SopRule, SsoGroupPolicy } from '../policy.js'
 import { GovernanceEmitter } from '../emitter.js'
 import { SessionState } from '../session.js'
 import * as node_path from 'node:path'
@@ -77,6 +77,25 @@ class StubPolicyClient extends PolicyClient {
     return null
   }
 
+  // A loaded, unrestricted registry by default, so every test that is not
+  // about the registry sees exactly the behaviour it had before one existed.
+  registry: McpRegistryPolicy | undefined = UNRESTRICTED_REGISTRY
+  principal: McpPrincipal | undefined = undefined
+  ssoGroupPolicy: SsoGroupPolicy | undefined = undefined
+
+  override getRegistry(): McpRegistryPolicy | undefined {
+    return this.registry
+  }
+
+  override getPrincipal(): McpPrincipal | undefined {
+    return this.principal
+  }
+
+  override getSsoGroupPolicy(): SsoGroupPolicy | undefined {
+    return this.ssoGroupPolicy
+  }
+
+  override async ready(): Promise<void> { /* no-op */ }
   override start(): void { /* no-op */ }
   override stop(): void { /* no-op */ }
   override async refresh(): Promise<void> { /* no-op */ }
@@ -519,6 +538,147 @@ describe('ToolCallInterceptor', () => {
       // handleHarnessLine does, and only on allow. This test pins that
       // decide() alone never mutates session state as a side effect.
       expect(session.getSequence()).toEqual([])
+    })
+  })
+  describe('MCP server registry', () => {
+    function registry(overrides: Partial<McpRegistryPolicy>): McpRegistryPolicy {
+      return { ...UNRESTRICTED_REGISTRY, ...overrides }
+    }
+
+    it('allow default: a server nobody has decided on is let through', async () => {
+      const policy = new StubPolicyClient()
+      policy.registry = registry({ defaultPolicy: 'allow' })
+      const interceptor = new ToolCallInterceptor(policy, emitter, true, 'github')
+      expect((await interceptor.decide('list_issues', {})).action).toBe('allow')
+    })
+
+    it('a blocked server is refused even under the allow default', async () => {
+      const policy = new StubPolicyClient()
+      policy.registry = registry({ defaultPolicy: 'allow', blockedServers: ['github'] })
+      const interceptor = new ToolCallInterceptor(policy, emitter, true, 'github')
+      const decision = await interceptor.decide('list_issues', {})
+      expect(decision.action).toBe('block')
+      expect((decision as { reason: string }).reason).toContain('is blocked')
+      expect(emitter.emitted.some((e) => e.kind === 'tool_blocked')).toBe(true)
+    })
+
+    it('deny default: an unapproved server is refused and the reason points at the approval queue', async () => {
+      const policy = new StubPolicyClient()
+      policy.registry = registry({ defaultPolicy: 'deny', approvedServers: ['filesystem'] })
+      const interceptor = new ToolCallInterceptor(policy, emitter, true, 'github')
+      const decision = await interceptor.decide('list_issues', {})
+      expect(decision.action).toBe('block')
+      expect((decision as { reason: string }).reason).toContain('mcpDefaultPolicy: deny')
+      expect((decision as { reason: string }).reason).toContain('approval queue')
+    })
+
+    it('deny default: an approved server is let through', async () => {
+      const policy = new StubPolicyClient()
+      policy.registry = registry({ defaultPolicy: 'deny', approvedServers: ['github'] })
+      const interceptor = new ToolCallInterceptor(policy, emitter, true, 'github')
+      expect((await interceptor.decide('list_issues', {})).action).toBe('allow')
+    })
+
+    it('a tool disabled within an approved server is refused; its sibling tools are not', async () => {
+      const policy = new StubPolicyClient()
+      policy.registry = registry({
+        defaultPolicy: 'deny',
+        approvedServers: ['github'],
+        disabledTools: { github: ['delete_repo'] },
+      })
+      const interceptor = new ToolCallInterceptor(policy, emitter, true, 'github')
+      const refused = await interceptor.decide('delete_repo', {})
+      expect(refused.action).toBe('block')
+      expect((refused as { reason: string }).reason).toContain('"delete_repo" is disabled on MCP server "github"')
+      expect((await interceptor.decide('list_issues', {})).action).toBe('allow')
+    })
+
+    it('a tool disabled on another server does not affect this one', async () => {
+      const policy = new StubPolicyClient()
+      policy.registry = registry({ disabledTools: { gitlab: ['delete_repo'] } })
+      const interceptor = new ToolCallInterceptor(policy, emitter, true, 'github')
+      expect((await interceptor.decide('delete_repo', {})).action).toBe('allow')
+    })
+
+    it('registry never loaded, fail-open: the call continues unchecked against the registry', async () => {
+      const policy = new StubPolicyClient()
+      policy.registry = undefined
+      const interceptor = new ToolCallInterceptor(policy, emitter, true, 'github')
+      expect((await interceptor.decide('list_issues', {})).action).toBe('allow')
+    })
+
+    it('registry never loaded, fail-closed: the call is refused and names the setting', async () => {
+      const policy = new StubPolicyClient()
+      policy.registry = undefined
+      const interceptor = new ToolCallInterceptor(policy, emitter, false, 'github')
+      const decision = await interceptor.decide('list_issues', {})
+      expect(decision.action).toBe('block')
+      expect((decision as { reason: string }).reason).toContain('has not loaded')
+      expect((decision as { reason: string }).reason).toContain('INTUTIC_MCP_FAIL_OPEN=false')
+    })
+
+    it('waits for the policy to be ready before deciding', async () => {
+      const policy = new StubPolicyClient()
+      policy.registry = undefined
+      let readied = false
+      policy.ready = async () => {
+        await new Promise((r) => setTimeout(r, 10))
+        policy.registry = registry({ defaultPolicy: 'deny' })
+        readied = true
+      }
+      const interceptor = new ToolCallInterceptor(policy, emitter, true, 'github')
+      const decision = await interceptor.decide('list_issues', {})
+      expect(readied).toBe(true)
+      // Decided against the loaded deny registry, not the fail-open gap.
+      expect(decision.action).toBe('block')
+    })
+  })
+
+  describe('SSO group clearance', () => {
+    const member: McpPrincipal = { memberId: 'mem_1', email: 'dev@example.com', role: 'DEVELOPER', ssoGroups: ['eng'] }
+
+    it('a high-risk tool without a required group is refused', async () => {
+      const policy = new StubPolicyClient()
+      policy.principal = member
+      policy.ssoGroupPolicy = { highRiskTools: ['run_query'], requiredGroups: ['dba'], requireOboFor: [] }
+      const interceptor = new ToolCallInterceptor(policy, emitter, true, 'postgres')
+      const decision = await interceptor.decide('run_query', { sql: 'select 1' })
+      expect(decision.action).toBe('block')
+      expect((decision as { reason: string }).reason).toContain('requires an SSO group dev@example.com does not hold')
+    })
+
+    it('a member holding a required group is let through', async () => {
+      const policy = new StubPolicyClient()
+      policy.principal = { ...member, ssoGroups: ['eng', 'dba'] }
+      policy.ssoGroupPolicy = { highRiskTools: ['run_query'], requiredGroups: ['dba'], requireOboFor: [] }
+      const interceptor = new ToolCallInterceptor(policy, emitter, true, 'postgres')
+      expect((await interceptor.decide('run_query', { sql: 'select 1' })).action).toBe('allow')
+    })
+
+    it('matches the mcp__<server>__<tool> name the harness hooks use', async () => {
+      const policy = new StubPolicyClient()
+      policy.principal = member
+      policy.ssoGroupPolicy = { highRiskTools: ['mcp__postgres__run_query'], requiredGroups: ['dba'], requireOboFor: [] }
+      const interceptor = new ToolCallInterceptor(policy, emitter, true, 'postgres')
+      expect((await interceptor.decide('run_query', {})).action).toBe('block')
+      expect((await interceptor.decide('list_tables', {})).action).toBe('allow')
+    })
+
+    it('an on-behalf-of-only tool is refused', async () => {
+      const policy = new StubPolicyClient()
+      policy.principal = member
+      policy.ssoGroupPolicy = { highRiskTools: [], requiredGroups: [], requireOboFor: ['transfer_funds'] }
+      const interceptor = new ToolCallInterceptor(policy, emitter, true, 'bank')
+      const decision = await interceptor.decide('transfer_funds', {})
+      expect(decision.action).toBe('block')
+      expect((decision as { reason: string }).reason).toContain('on-behalf-of only')
+    })
+
+    it('without a resolved member there is nothing to apply', async () => {
+      const policy = new StubPolicyClient()
+      policy.ssoGroupPolicy = { highRiskTools: ['run_query'], requiredGroups: ['dba'], requireOboFor: [] }
+      const interceptor = new ToolCallInterceptor(policy, emitter, true, 'postgres')
+      expect((await interceptor.decide('run_query', {})).action).toBe('allow')
     })
   })
 })
