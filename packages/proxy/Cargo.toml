@@ -5,6 +5,9 @@ edition = "2021"
 authors = ["Intutic <eng@intutic.dev>"]
 description = "High-performance AI agent proxy with WebAssembly-based governance policies"
 license = "MIT"
+# Ships as release binaries and the @intutic/proxy npm launcher, never as a
+# crate: nothing outside this repository builds against it.
+publish = false
 
 [lib]
 name = "intutic_proxy"
