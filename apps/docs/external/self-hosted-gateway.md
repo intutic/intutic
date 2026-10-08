@@ -88,7 +88,7 @@ Service. The install's notes print the address.
 | `controlPlaneUrl` | Intutic Cloud | The control plane the gateway reports to: Intutic Cloud, or your Self-host address |
 | `gatewaySecretName` | `intutic-gateway-token` | The Secret with `INTUTIC_GATEWAY_ID` and `INTUTIC_GATEWAY_TOKEN` |
 | `imagePullSecrets` | none | Pull Secrets for `ghcr.io/intutic` |
-| `proxy.image.repository`, `proxy.image.tag` | `ghcr.io/intutic/proxy`, the chart's version | Your mirror of the proxy image |
+| `proxy.image.repository`, `proxy.image.tag` | `ghcr.io/intutic/proxy`, the chart's version | Where the proxy image comes from |
 | `proxy.service.type`, `proxy.service.port` | `ClusterIP`, `8080` | How agents reach the gateway |
 | `proxy.replicaCount`, `proxy.resources` | 1, see `helm show values` | |
 | `proxy.heartbeatIntervalSeconds` | 30 | How often the gateway reports in |
