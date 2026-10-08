@@ -17,11 +17,11 @@ The proxy (`intutic-proxy`) reads these at startup unless a row says otherwise.
 | `CONFIG_PATH` | `config.yaml` in the working directory | The [`config.yaml`](#_4-proxy-config-yaml-intutic-settings) to load. The container image sets `/etc/intutic/proxy-config.yaml` |
 | `PORT` | `4000` | The port the proxy listens on, on every interface |
 | `RUST_LOG` | `intutic_proxy=info,tower_http=info` | Log filter, in `tracing` syntax (`intutic_proxy=debug`, `warn`, …) |
-| `CONTROL_PLANE_URL` | unset | Unset, the proxy runs **standalone**: no control plane, and rules, budgets and allowlists come from local files. Set to the control plane's address (`https://api.intutic.ai`, or your Self-host hostname), it runs **managed**: Valkey becomes required (startup fails if it cannot connect, rather than accepting requests unauthenticated), and every request is checked against the workspace's policy first, failing closed (`403 policy_denied`) when the check fails or times out unless `intutic_settings.policy.fail_closed` is `false` |
+| `CONTROL_PLANE_URL` | unset | Unset, the proxy runs **standalone**: no control plane, and rules, budgets and allowlists come from local files. Set to a control plane's address, it runs **managed**: Valkey becomes required (startup fails if it cannot connect, rather than accepting requests unauthenticated), and every request is checked against the workspace's policy first, failing closed (`403 policy_denied`) when the check fails or times out unless `intutic_settings.policy.fail_closed` is `false` |
 | `VALKEY_URL` | `redis://127.0.0.1:6379` | Valkey for the auth and budget cache, bandit state and the response cache. Standalone, the proxy tries it for 1.5 seconds and runs without it if it does not answer |
 | `INTUTIC_STANDALONE` | unset | `1` or `true`: run standalone without probing for Valkey. Refused together with `CONTROL_PLANE_URL` |
 | `INTUTIC_WORKSPACE_ID` | unset | The workspace for requests that do not name one (no `x-workspace-id` header and no workspace in the key). Also the workspace a centrally distributed egress policy file must name to be loaded |
-| `INTUTIC_REGION` | unset | A region code (`eu`, …). Rewrites the policy-check address to the region's control plane: `api.intutic.ai` becomes `api.<region>.intutic.ai`. Any other address is left alone |
+| `INTUTIC_REGION` | unset | A region code (`eu`, …). Rewrites the hosted control plane's policy-check address to that region's control plane (`api.<region>.…`). Any other address is left alone |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | Export traces and metrics over OTLP/gRPC to this collector. Unset, nothing is exported. See [OpenTelemetry](/guide/opentelemetry) |
 | `OTEL_SERVICE_NAME` | `intutic-proxy` | The service name on exported traces and metrics |
 
@@ -101,7 +101,7 @@ Settings for a proxy deployed as a shared or self-hosted gateway. See [Self-host
 | Variable | Default | Description |
 | :--- | :--- | :--- |
 | `CONTROL_PLANE_URL` | unset | Set when `intutic start` runs, the proxy it starts is managed (see above) |
-| `INTUTIC_DEV` | unset | `1`: talk to a local control plane at `http://localhost:3001` instead of Intutic Cloud |
+| `INTUTIC_DEV` | unset | `1`: talk to a local control plane at `http://localhost:3001` instead of the hosted control plane |
 | `PORT` | `4000` | The port `intutic start` and `intutic connect` run the proxy on |
 | `VALKEY_URL` | `redis://127.0.0.1:6379` | Passed to the proxy the CLI starts |
 | `INTUTIC_PROXY_URL` | `http://localhost:4000` | The proxy `intutic exec` and `intutic enterprise` point agents at |
@@ -129,7 +129,7 @@ Read by `@intutic/gate`. The MCP daemon and the Python `intutic-clawde` gate rea
 | :--- | :--- | :--- |
 | `INTUTIC_API_KEY` | from `intutic login` | The workspace key (`vk_…`) |
 | `INTUTIC_WORKSPACE_ID` | from `intutic login` | The workspace |
-| `INTUTIC_CONTROL_PLANE_URL` | `https://api.intutic.ai` | The control plane |
+| `INTUTIC_CONTROL_PLANE_URL` | the hosted control plane | The control plane |
 | `INTUTIC_PROXY_URL` | `http://localhost:4000` | The proxy the Vercel AI SDK helper points models at |
 | `INTUTIC_SESSION_ID` | generated | The session id reported with each verdict |
 | `INTUTIC_SNAPSHOT_RULES` | `~/.intutic/hooks/policy-snapshot.rules` | The local policy snapshot |
@@ -143,9 +143,10 @@ Read by `@intutic/gate`. The MCP daemon and the Python `intutic-clawde` gate rea
 
 The MCP proxy's other settings are on [MCP Proxy](/integrations/mcp-proxy).
 
+<!-- ENTERPRISE_ONLY_START -->
 ### Control plane
 
-These configure the control plane in Intutic Cloud and Self-host deployments.
+These configure the control plane in hosted and Self-host deployments.
 
 | Variable | Required? | Default | Description |
 | :--- | :---: | :---: | :--- |
@@ -165,6 +166,7 @@ These configure the control plane in Intutic Cloud and Self-host deployments.
 | `LITELLM_PLATFORM_KEY` | ❌ | — | Scoped LiteLLM virtual key for judge/probe/generation calls — NOT LiteLLM's own admin secret, which this service never holds. See the key-rotation runbook for how it's minted. |
 
 ---
+<!-- ENTERPRISE_ONLY_END -->
 
 ## 2. Local Sandbox Development Stack
 
