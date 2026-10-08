@@ -20,14 +20,15 @@ Modern AI coding agents (Claude Code, Cursor, Windsurf, Claude Desktop) interact
                │
                │ (stdio JSON-RPC 2.0 tool frames)
                ▼
-   [ @intutic/mcp-governance-proxy ]  ◄── allowlist → DLP → SOP rules →
-               │                          injection scan → real decision
-      ┌────────┴────────┐
-      ▼                 ▼
-  [ allow ]         [ block ]
-  Forward to      Return a JSON-RPC
-  real MCP        error (-32603)
-  Server          pre-flight
+   [ @intutic/mcp-governance-proxy ]  ◄── registry → allowlists → SSO groups →
+               │                          DLP → SOP rules → injection scan →
+               │                          anomaly detectors → WASM rules
+      ┌────────┼─────────────────┐
+      ▼        ▼                 ▼
+  [ allow ] [ block ]        [ hold ]
+  Forward   JSON-RPC error   JSON-RPC error naming the hold;
+  to the    (-32603),        the identical retry runs once
+  server    nothing runs     a person approves it
 ```
 
 A third outcome, `redact`, applies only to the RESPONSE direction (a tool
@@ -92,22 +93,26 @@ here at all](/guide/mcp-governance#how-a-server-gets-here-at-all).
 ## Decisions and directions
 
 The interceptor (`ToolCallInterceptor.decide`, `src/interceptor.ts`) evaluates
-every `tools/call` REQUEST and returns one of the `Decision` type's three
+every `tools/call` REQUEST and returns one of the `Decision` type's
 variants:
 
 | Decision | Direction | Meaning |
 | :--- | :--- | :--- |
 | `allow` | request | Forward the JSON-RPC frame to the real server. |
 | `block` | request | Refuse the call pre-flight; return a JSON-RPC `-32603` error to the agent. Nothing runs. |
+| `hold` | request | A `require_approval` rule matched: refuse the call for now, record a hold for review, and return a `-32603` error whose message names the hold id (also in `error.data.holdId`). See [Approval holds](/guide/mcp-governance#approval-holds). |
 | `redact` | response | Declared by the `Decision` type but produced structurally, not as a `decide()` return value — see below. |
 
 `decide()` runs this pipeline, in order, over every `tools/call` request:
 
-1. **Server allowlist** (`mcpAllowedServers`) — refuses the whole server if it's not on an explicit, non-empty allowlist.
-2. **Tool allowlist** (`mcpAllowedTools`) — refuses the individual tool the same way.
-3. **DLP scan** — blocks a request whose arguments contain a credential-shaped value or a destructive command pattern (`rm -rf /`, `DROP TABLE`, etc.).
-4. **SOP policy rules** — workspace-defined `block` / `warn` / `require_approval` rules matched against tool name and serialized arguments. `require_approval` is treated as `block` in this headless proxy (there is no interactive approval UI in the loop).
-5. **Prompt-injection scan** (request direction) — see [Prompt-injection scanning](#prompt-injection-scanning) below.
+1. **MCP server registry** — refuses a blocked server, every server not approved when the workspace's default policy is `deny`, and a tool switched off within its server. See [The registry](/guide/mcp-governance#the-registry).
+2. **Server allowlist** (`mcpAllowedServers`) — refuses the whole server if it's not on an explicit, non-empty allowlist.
+3. **Tool allowlist** (`mcpAllowedTools`) — refuses the individual tool the same way.
+4. **SSO group policy** — the workspace's `sso_group_policy`, applied to the member the proxy's API key belongs to. See [Who made the call](/guide/mcp-governance#caller-identity).
+5. **DLP scan** — blocks a request whose arguments contain a credential-shaped value or a destructive command pattern (`rm -rf /`, `DROP TABLE`, etc.).
+6. **SOP policy rules** — workspace-defined `block` / `warn` / `require_approval` rules matched against tool name and serialized arguments. `require_approval` holds the call for a person's approval (`hold` above).
+7. **Prompt-injection scan** (request direction) — see [Prompt-injection scanning](#prompt-injection-scanning) below.
+8. **Anomaly detectors** and **WASM rules** — see the session-scope note below.
 
 ### Anomaly-detection session scope
 
@@ -136,9 +141,13 @@ that both expose a tool called `search` count as one; `session_id` in the WASM
 context stays per process.
 
 An empty allowlist means unrestricted at every allowlist step above — never
-"permit nothing." A control-plane outage triggers **fail-open** behavior by
-default (`mcpProxyFailBehavior`): DLP/SOP/TOFU checks that error out allow the
-call through rather than blocking every request while policy is unreachable.
+"permit nothing." A check that cannot complete fails **open** by default:
+DLP/SOP/TOFU checks that error out, and a registry the proxy has never been
+able to load, let the call through rather than blocking every request while
+policy is unreachable. The workspace's `mcpProxyFailBehavior` chooses, and
+`INTUTIC_MCP_FAIL_OPEN=false` sets it locally until the proxy has loaded the
+workspace's choice — see [When the registry has not
+loaded](/guide/mcp-governance#when-the-registry-has-not-loaded).
 
 **The RESPONSE direction is a separate code path** (`processServerLine`,
 `src/proxy.ts`), because by the time a result comes back the call has already
@@ -148,7 +157,7 @@ in order:
 
 1. **DLP redaction** — strips credential-shaped values out of the result text. If a match spans JSON syntax and the redacted text no longer parses, the whole result is withheld and replaced with an error explaining why (the call ran; only the delivery was refused).
 2. **Prompt-injection scan** (response direction) — runs on the already-redacted text, so a secret can never reach this path unredacted. See below.
-3. **`tools/list` curation** — allowlist filtering and operator description overrides, then a report-only injection scan over the resulting (post-curation) descriptions.
+3. **`tools/list` curation** — allowlist filtering, removal of tools the registry switched off, and operator description overrides, then a report-only injection scan over the resulting (post-curation) descriptions.
 4. **Server-level TOFU pinning** — compares a `tools/list` response's fingerprint against what was first pinned for this `{workspace, server}` pair; see [MCP Server Governance](/guide/mcp-governance#server-level-tofu-pinning) for the full mechanism.
 
 ---

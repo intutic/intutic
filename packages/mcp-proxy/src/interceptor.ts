@@ -2,6 +2,7 @@
  * interceptor.ts — tools/call decision engine.
  *
  * Given a tool name and arguments, evaluates:
+ * 0. The MCP server registry, server/tool allowlists and SSO group clearance
  * 1. DLP scan (credential / destructive pattern detection)
  * 2. SOP policy rules (fetched from control plane via PolicyClient)
  *
@@ -19,8 +20,9 @@ import { evaluateSequenceDetectors, resolveEffectiveDisposition, REASK_MAX_ATTEM
 import type { AnomalyMode, Disposition } from './anomaly/index.js'
 import { SessionState } from './session.js'
 import type { WasmRunner } from './wasm/runner.js'
-import type { PolicyClient } from './policy.js'
+import type { PolicyClient, SopRule } from './policy.js'
 import type { GovernanceEmitter } from './emitter.js'
+import type { ApprovalHolds } from './approvalHold.js'
 
 const log = createLogger('mcp-proxy-interceptor')
 
@@ -28,12 +30,23 @@ export type Decision =
   | { action: 'allow' }
   | { action: 'block'; reason: string }
   | { action: 'redact'; reason: string; redactedInput: unknown }
+  /**
+   * Refused for now, pending a person's approval (`require_approval`). Not a
+   * block: the agent is told the hold id and that an identical retry passes
+   * once approved — see approvalHold.ts.
+   */
+  | { action: 'hold'; reason: string; holdId: string }
 
 export class ToolCallInterceptor {
   constructor(
     private readonly policy: PolicyClient,
     private readonly emitter: GovernanceEmitter,
-    private readonly failOpen: boolean = true,
+    /**
+     * The local fail setting (`INTUTIC_MCP_FAIL_OPEN`, config.ts). The
+     * workspace's `mcpProxyFailBehavior`, once a policy has delivered it,
+     * takes precedence — see {@link failOpen}.
+     */
+    private readonly localFailOpen: boolean = true,
     /**
      * The real MCP server this proxy process fronts, from `--server-name`
      * (config.ts, threaded since Phase D's `wrapWithProxy` but unconsumed
@@ -93,7 +106,24 @@ export class ToolCallInterceptor {
      * belongs to).
      */
     private readonly workspaceId: string = 'unknown',
+    /**
+     * Turns a `require_approval` rule into a hold through the control
+     * plane's decisions API. `undefined` (construction sites that predate
+     * holds) leaves such a call held with nothing recorded, which is still a
+     * refusal — never an allow.
+     */
+    private readonly holds: ApprovalHolds | undefined = undefined,
   ) {}
+
+  /**
+   * Whether a governance check that cannot complete lets the call through:
+   * the workspace's `mcpProxyFailBehavior` when the control plane has sent
+   * it, the local `INTUTIC_MCP_FAIL_OPEN` until then (and for a workspace
+   * that never chose).
+   */
+  get failOpen(): boolean {
+    return this.policy.getFailOpen() ?? this.localFailOpen
+  }
 
   /**
    * Applies the shared reask ladder (Phase 2 anomaly detectors AND Phase 3
@@ -123,6 +153,119 @@ export class ToolCallInterceptor {
   }
 
   /**
+   * A `require_approval` rule matched. Returns the hold decision, or `null`
+   * when an approved bypass for this exact call lets it continue. Every hold
+   * reason names the hold id and the command that approves it, the same
+   * wording the hook gates print, so a person reading the agent's transcript
+   * knows what to run.
+   */
+  private async hold(rule: SopRule, toolName: string, toolInput: unknown): Promise<Decision | null> {
+    const outcome = this.holds
+      ? await this.holds.request(rule, toolName, toolInput)
+      : { kind: 'held' as const, holdId: '', recorded: false }
+
+    if (outcome.kind === 'bypassed') {
+      const reason = `Approved bypass for ${rule.id} — approved by ${outcome.decidedBy || 'an approver'} on hold ${outcome.holdId}`
+      log.warn({ action: 'hold_approved_bypass_used', toolName, ruleId: rule.id, holdId: outcome.holdId }, reason)
+      this.emitter.emit('hold_approved_bypass_used', toolName, toolInput, reason)
+      return null
+    }
+
+    const reason = outcome.recorded
+      ? `HELD for approval: ${rule.reason} [${rule.id}]. Hold id: ${outcome.holdId}. ` +
+        `An approver can run: intutic decision approve ${outcome.holdId} (or reject it). ` +
+        `Retry this exact call after it is approved.`
+      : `HELD for approval: ${rule.reason} [${rule.id}], but the hold could not be recorded ` +
+        `(Intutic control plane unreachable), so there is nothing to approve yet. Retry once the ` +
+        `control plane is reachable to request approval.`
+    log.warn({ action: 'tool_held', toolName, ruleId: rule.id, holdId: outcome.holdId, recorded: outcome.recorded }, reason)
+    this.emitter.emit('tool_held', toolName, toolInput, `${rule.reason} [${rule.id}]`)
+    return { action: 'hold', reason, holdId: outcome.holdId }
+  }
+
+  /**
+   * Refuses the call when the registry says this server — or this tool on it —
+   * may not be used. Returns `null` to let the call continue.
+   *
+   * A blocked server is refused under either default; under `deny`, so is any
+   * server not approved (a candidate, or one the registry has never seen);
+   * a disabled tool is refused within any server. All three are definite
+   * operator decisions and do not depend on `failOpen`.
+   *
+   * What does depend on it is a registry this process has never loaded — the
+   * control plane unreachable since start, or only the MCP daemon's snapshot
+   * seed so far. The last-known registry is kept for as long as the process
+   * runs, so this is only ever the never-loaded case. Fail-open lets the call continue
+   * unchecked against the registry, exactly as a workspace with no registry;
+   * fail-closed refuses it, because a `deny` workspace cannot be told apart
+   * from an `allow` one without the registry.
+   */
+  private async checkRegistry(toolName: string, toolInput: unknown): Promise<Decision | null> {
+    await this.policy.ready()
+    const registry = this.policy.getRegistry()
+    if (!registry) {
+      if (this.failOpen) return null
+      const reason =
+        `MCP server registry for this workspace has not loaded (Intutic control plane unreachable ` +
+        `since this proxy started), so whether "${this.serverName}" is approved is unknown. ` +
+        `Tool call blocked (fail-closed mode: mcpProxyFailBehavior or INTUTIC_MCP_FAIL_OPEN=false).`
+      log.warn({ action: 'registry_unknown_block', serverName: this.serverName, toolName }, reason)
+      this.emitter.emit('tool_blocked', toolName, toolInput, reason)
+      return { action: 'block', reason }
+    }
+
+    let reason: string | null = null
+    if (registry.blockedServers.includes(this.serverName)) {
+      reason =
+        `MCP server "${this.serverName}" is blocked in this workspace's MCP server registry. ` +
+        `An owner or admin can change that on the MCP Servers page.`
+    } else if (registry.defaultPolicy === 'deny' && !registry.approvedServers.includes(this.serverName)) {
+      reason =
+        `MCP server "${this.serverName}" is not approved in this workspace's MCP server registry, ` +
+        `and the workspace refuses unapproved servers (mcpDefaultPolicy: deny). It is waiting in ` +
+        `the approval queue on the MCP Servers page for an owner or admin.`
+    } else if ((registry.disabledTools[this.serverName] ?? []).includes(toolName)) {
+      reason =
+        `Tool "${toolName}" is disabled on MCP server "${this.serverName}" in this workspace's ` +
+        `MCP server registry. An owner or admin can re-enable it on the MCP Servers page.`
+    }
+    if (!reason) return null
+    log.warn({ action: 'registry_block', serverName: this.serverName, toolName }, reason)
+    this.emitter.emit('tool_blocked', toolName, toolInput, reason)
+    return { action: 'block', reason }
+  }
+
+  /**
+   * The workspace's SSO group policy, applied to the member this proxy's API
+   * key resolves to — the same algorithm the server-side hook gate runs
+   * (`resolveSsoGroupPrivilege` in the control plane): a tool on the
+   * `requireOboFor` list is refused (a proxy has no on-behalf-of token to
+   * present), a tool on the `highRiskTools` list needs one of the
+   * `requiredGroups`, anything else is unrestricted. A tool matches by its
+   * bare MCP name or as `mcp__<server>__<tool>`, the name the harness hooks
+   * see for the same call. Without a policy, or without a resolved member,
+   * there is nothing to apply — the hook gate skips the same way.
+   */
+  private checkSsoGroupClearance(toolName: string, toolInput: unknown): Decision | null {
+    const policy = this.policy.getSsoGroupPolicy()
+    const principal = this.policy.getPrincipal()
+    if (!policy || !principal) return null
+    const names = [toolName, `mcp__${this.serverName}__${toolName}`]
+    const listed = (list: string[]) => names.some((n) => list.includes(n))
+
+    let reason: string | null = null
+    if (listed(policy.requireOboFor)) {
+      reason = `SSO group policy: ${toolName} is on-behalf-of only and the MCP proxy cannot present an OBO token`
+    } else if (listed(policy.highRiskTools) && !policy.requiredGroups.some((g) => principal.ssoGroups.includes(g))) {
+      reason = `SSO group policy: ${toolName} requires an SSO group ${principal.email || principal.memberId} does not hold`
+    }
+    if (!reason) return null
+    log.warn({ action: 'sso_group_block', toolName, memberId: principal.memberId }, reason)
+    this.emitter.emit('tool_blocked', toolName, toolInput, reason)
+    return { action: 'block', reason }
+  }
+
+  /**
    * Evaluate a tools/call request and return a governance decision.
    *
    * @param toolName - The MCP tool name (e.g. "mcp__filesystem__read_file" or "Bash")
@@ -139,6 +282,11 @@ export class ToolCallInterceptor {
     let injectionFindingsForContext: string[] = []
     let injectionSourcesForContext: string[] = []
     let corroboratingDetectorsForContext = 0
+
+    // -2. The MCP server registry: operator decisions on this server, and the
+    // workspace's default for servers nobody has decided on yet.
+    const registryDecision = await this.checkRegistry(toolName, toolInput)
+    if (registryDecision) return registryDecision
 
     // -1. Additive SERVER scoping. When the workspace declares a server
     // allowlist (mcpAllowedServers), ONLY calls proxied to those servers may
@@ -180,6 +328,10 @@ export class ToolCallInterceptor {
       this.emitter.emit('tool_blocked', toolName, toolInput, reason)
       return { action: 'block', reason }
     }
+
+    // 0.5. SSO group clearance, after the scoping checks and before DLP.
+    const clearance = this.checkSsoGroupClearance(toolName, toolInput)
+    if (clearance) return clearance
 
     // 1. DLP scan — with the workspace's own patterns loaded first, so a
     // control-plane-defined pattern reaches the same scanner as the floor.
@@ -231,12 +383,10 @@ export class ToolCallInterceptor {
           // SHADOW guardrail's evidence (LLD #71) counts this proxy's traffic.
           this.emitter.emit('tool_flagged', toolName, toolInput, `${rule.reason} [${rule.id}]`)
         }
-        // 'require_approval' treated as block in headless proxy (no interactive UI)
         if (rule.action === 'require_approval') {
-          const reason = `Tool requires human approval per SOP rule ${rule.id}: ${rule.reason}`
-          log.warn({ action: 'policy_approval_required', toolName, ruleId: rule.id }, reason)
-          this.emitter.emit('tool_blocked', toolName, toolInput, reason)
-          return { action: 'block', reason }
+          const held = await this.hold(rule, toolName, toolInput)
+          if (held) return held
+          // An approved bypass: the remaining checks still apply.
         }
       }
     } catch (err) {

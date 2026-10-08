@@ -26,8 +26,8 @@ const PROBE_TIMEOUT = 5_000
 // plane. The only outbound request left in this module is probeServer(), which
 // hits third-party MCP servers named in the user's local harness config —
 // attaching the Intutic workspace credential to those would send it to hosts
-// Intutic does not control. If snapshot upload comes back, the key belongs on
-// the control-plane request, not on the probe.
+// Intutic does not control. The upload lives in statusReporter.ts, which puts
+// the key on the control-plane request only.
 
 export interface McpServerConfig {
   name:     string
@@ -77,42 +77,65 @@ function entryToUrl(entry: unknown): string {
   return ''
 }
 
-function discoverServers(): McpServerConfig[] {
+function readJson(file: string): unknown {
+  return JSON.parse(fs.readFileSync(file, 'utf8'))
+}
+
+/**
+ * The server maps Claude Code reads: `~/.claude.json` holds the user-scope
+ * `mcpServers` and, under `projects[<path>]`, each project's local-scope
+ * `mcpServers`; the project-scope ones live in `<path>/.mcp.json`, which the
+ * daemon finds through the same project paths. (`~/.claude/mcp.json`, read
+ * here before, is not a file Claude Code uses.) The sync daemon wraps the
+ * first two (services/sync-daemon/src/harness/mcpAutoWrite.ts) and leaves a
+ * project's `.mcp.json` alone, since it is shared with the team — which is
+ * exactly why its servers belong in the registry report too.
+ */
+function claudeCodeServerMaps(home: string): Array<Record<string, unknown>> {
+  let state: unknown
+  try {
+    state = readJson(path.join(home, '.claude.json'))
+  } catch {
+    return [] // Claude Code not set up on this machine
+  }
+  if (!isRecord(state)) return []
+  const maps = [readServerMap(state)]
+  const projects = state['projects']
+  if (isRecord(projects)) {
+    for (const [projectPath, project] of Object.entries(projects)) {
+      maps.push(readServerMap(project))
+      try {
+        maps.push(readServerMap(readJson(path.join(projectPath, '.mcp.json'))))
+      } catch {
+        // Most projects have no .mcp.json; an unreadable one costs only its own servers.
+      }
+    }
+  }
+  return maps
+}
+
+/** Exported for tests; `home` defaults to the user's home directory. */
+export function discoverServers(home: string = os.homedir()): McpServerConfig[] {
   const discovered: McpServerConfig[] = []
-  const homedir = os.homedir()
 
   const configPaths = [
-    path.join(homedir, '.claude', 'mcp.json'),
     process.platform === 'darwin'
-      ? path.join(homedir, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json')
+      ? path.join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json')
       : process.platform === 'win32'
       ? path.join(process.env['APPDATA'] ?? '', 'Claude', 'claude_desktop_config.json')
-      : path.join(homedir, '.config', 'Claude', 'claude_desktop_config.json'),
+      : path.join(home, '.config', 'Claude', 'claude_desktop_config.json'),
     process.platform === 'darwin'
-      ? path.join(homedir, 'Library', 'Application Support', 'Cursor', 'User', 'globalSettings.json')
+      ? path.join(home, 'Library', 'Application Support', 'Cursor', 'User', 'globalSettings.json')
       : process.platform === 'win32'
       ? path.join(process.env['APPDATA'] ?? '', 'Cursor', 'User', 'globalSettings.json')
-      : path.join(homedir, '.config', 'Cursor', 'User', 'globalSettings.json'),
+      : path.join(home, '.config', 'Cursor', 'User', 'globalSettings.json'),
   ]
 
+  const maps = [...claudeCodeServerMaps(home)]
   for (const configPath of configPaths) {
     try {
       if (!fs.existsSync(configPath)) continue
-      const raw = fs.readFileSync(configPath, 'utf8')
-      const parsed: unknown = JSON.parse(raw)
-      for (const [name, entry] of Object.entries(readServerMap(parsed))) {
-        if (name === 'intutic') continue // Skip self
-
-        const url = entryToUrl(entry)
-
-        if (url && !discovered.some(s => s.name === name)) {
-          discovered.push({
-            name,
-            url,
-            credentialExpiryAt: undefined
-          })
-        }
-      }
+      maps.push(readServerMap(readJson(configPath)))
     } catch {
       // This config path belongs to a harness the user may not have installed,
       // so an unreadable or malformed file is the expected case, not an error:
@@ -120,6 +143,16 @@ function discoverServers(): McpServerConfig[] {
       // most machines have only one. Skip this path and keep discovering the
       // others — a parse failure on one config must not cost us the servers
       // declared in the rest.
+    }
+  }
+
+  for (const map of maps) {
+    for (const [name, entry] of Object.entries(map)) {
+      if (name === 'intutic') continue // Skip self
+      const url = entryToUrl(entry)
+      if (url && !discovered.some((s) => s.name === name)) {
+        discovered.push({ name, url, credentialExpiryAt: undefined })
+      }
     }
   }
 
@@ -196,11 +229,9 @@ export function startHealthMonitor(): void {
         logger.warn({ serverName: server.name }, 'mcp_daemon.mcp_server_down')
       }
     }
-    // Health stays local: getHealthSnapshot()/latestHealth serve the proxy's
-    // own health_check. The former uploader posted to
-    // /api/v1/mcp-daemon/health-snapshot, a route stripped from the control
-    // plane — every 30s heartbeat silently 404'd and the snapshots were
-    // discarded. Restore an ingest route before re-adding an upload.
+    // statusReporter.ts uploads these through getHealthSnapshot() to
+    // POST /api/v1/mcp-daemon/report, which also records each server in the
+    // workspace's MCP server registry.
   }, HEARTBEAT_MS)
   timer.unref()
 }

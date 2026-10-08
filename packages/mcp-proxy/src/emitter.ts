@@ -10,12 +10,12 @@
  */
 
 import * as node_fs from 'node:fs/promises'
-import * as node_https from 'node:https'
-import * as node_http from 'node:http'
 import * as node_path from 'node:path'
 import * as node_crypto from 'node:crypto'
 import { createStderrLogger as createLogger } from './stderrLog.js'
 import { callDaemonSocket } from './daemonClient.js'
+import { httpRequest } from './httpJson.js'
+import type { CallerIdentity } from './identity.js'
 
 const log = createLogger('mcp-proxy-emitter')
 
@@ -54,6 +54,14 @@ export type EventKind =
    * "existing consumers key on it" rule `injection_detected` follows.
    */
   | 'anomaly_detected'
+  /**
+   * A `require_approval` rule held the call for a person's decision
+   * (approvalHold.ts). `reason` carries the rule id as `[<id>]`, as the hook
+   * gates' hold events do.
+   */
+  | 'tool_held'
+  /** An approved, unexpired, exact-match bypass let a held call through. */
+  | 'hold_approved_bypass_used'
 
 export interface GovernanceEvent {
   incidentId: string
@@ -70,6 +78,12 @@ export interface GovernanceEvent {
    * other event kind, matching how `reason` is already optional here.
    */
   severity?: string
+  /**
+   * Who made the call, as this proxy observed it (identity.ts). The control
+   * plane adds the member the API key resolves to when it ingests the event.
+   * Absent only for an emitter constructed without one.
+   */
+  principal?: CallerIdentity
   timestamp: string
 }
 
@@ -79,7 +93,8 @@ export class GovernanceEmitter {
     private readonly apiKey: string,
     private readonly eventsFilePath: string,
     private readonly workspaceId: string,
-    private readonly mcpProxyMode: string = 'per-session'
+    private readonly mcpProxyMode: string = 'per-session',
+    private readonly identity: CallerIdentity | undefined = undefined,
   ) {}
 
   emit(kind: EventKind, toolName: string, toolInput: unknown, reason?: string, severity?: string): void {
@@ -92,6 +107,7 @@ export class GovernanceEmitter {
       harnessType: 'mcp-governance-proxy',
       reason,
       severity,
+      principal: this.identity,
       timestamp: new Date().toISOString(),
     }
 
@@ -108,6 +124,7 @@ export class GovernanceEmitter {
         reason,
         severity,
         toolInput,
+        principal: event.principal,
       }
       callDaemonSocket('telemetry.enqueue', eventPayload).then(() => {
         log.debug({ action: 'telemetry_enqueued' }, 'Telemetry successfully enqueued to daemon')
@@ -146,6 +163,7 @@ export class GovernanceEmitter {
           incidentId: event.incidentId,
           reason: event.reason,
           severity: event.severity,
+          principal: event.principal,
           timestamp: event.timestamp,
         },
       ],
@@ -154,11 +172,11 @@ export class GovernanceEmitter {
     // POST /api/v1/hook-events — the batch governance-event ingest whose
     // BatchHookEventsSchema this payload already matches exactly. Path A used
     // to post to /api/v1/telemetry/enqueue, an endpoint that never existed in
-    // the control plane; because httpPost resolved on any response, every
-    // tool_allowed/tool_blocked event 404'd silently and the 'Path A failed'
-    // warning never fired.
+    // the control plane; because the old helper resolved on any response,
+    // every tool_allowed/tool_blocked event 404'd silently and the 'Path A
+    // failed' warning never fired. httpRequest rejects on an error status.
     const url = `${this.controlPlaneUrl}/api/v1/hook-events`
-    await httpPost(url, this.apiKey, payload)
+    await httpRequest('POST', url, this.apiKey, payload, 4000)
   }
 
   private async appendToFile(event: GovernanceEvent): Promise<void> {
@@ -167,41 +185,4 @@ export class GovernanceEmitter {
     const line = JSON.stringify(event) + '\n'
     await node_fs.appendFile(this.eventsFilePath, line, 'utf-8')
   }
-}
-
-function httpPost(url: string, apiKey: string, body: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const parsed = new URL(url)
-    const lib = parsed.protocol === 'https:' ? node_https : node_http
-    const req = lib.request(
-      url,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(body),
-          Authorization: `Bearer ${apiKey}`,
-        },
-        timeout: 4000,
-      },
-      (res) => {
-        // Drain response body to free socket
-        res.resume()
-        res.on('end', () => {
-          // Reject on error statuses so a wrong or removed endpoint surfaces as
-          // a caller-visible failure instead of silently succeeding.
-          const status = res.statusCode ?? 0
-          if (status >= 400) {
-            reject(new Error(`HTTP POST ${url} returned ${status}`))
-            return
-          }
-          resolve()
-        })
-      }
-    )
-    req.on('error', reject)
-    req.on('timeout', () => { req.destroy(); reject(new Error('HTTP POST timed out')) })
-    req.write(body)
-    req.end()
-  })
 }
