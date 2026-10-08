@@ -151,9 +151,8 @@ apply: a call has to pass each. The registry knows a server by its
 
 ### When the registry has not loaded {#when-the-registry-has-not-loaded}
 
-A proxy keeps the last registry it loaded for as long as it runs, and an MCP
-daemon keeps it in Valkey, so a control plane that goes away later changes
-nothing. The open question is a proxy that has never loaded one: it started
+A proxy keeps the last registry it loaded for as long as it runs, so a
+control plane that goes away later changes nothing. The open question is a proxy that has never loaded one: it started
 while the control plane was unreachable, or the MCP daemon has only its local
 snapshot so far, which carries no registry. The first tool call waits for the
 proxy's first policy fetch (at most five seconds); after that the proxy asks

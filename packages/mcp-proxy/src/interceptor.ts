@@ -195,8 +195,7 @@ export class ToolCallInterceptor {
    * What does depend on it is a registry this process has never loaded — the
    * control plane unreachable since start, or only the MCP daemon's snapshot
    * seed so far. The last-known registry is kept for as long as the process
-   * runs (the daemon also keeps it across its own restarts in Valkey), so this
-   * is only ever the never-loaded case. Fail-open lets the call continue
+   * runs, so this is only ever the never-loaded case. Fail-open lets the call continue
    * unchecked against the registry, exactly as a workspace with no registry;
    * fail-closed refuses it, because a `deny` workspace cannot be told apart
    * from an `allow` one without the registry.
@@ -209,7 +208,7 @@ export class ToolCallInterceptor {
       const reason =
         `MCP server registry for this workspace has not loaded (Intutic control plane unreachable ` +
         `since this proxy started), so whether "${this.serverName}" is approved is unknown. ` +
-        `Tool call blocked (fail-closed mode: INTUTIC_MCP_FAIL_OPEN=false).`
+        `Tool call blocked (fail-closed mode: mcpProxyFailBehavior or INTUTIC_MCP_FAIL_OPEN=false).`
       log.warn({ action: 'registry_unknown_block', serverName: this.serverName, toolName }, reason)
       this.emitter.emit('tool_blocked', toolName, toolInput, reason)
       return { action: 'block', reason }
