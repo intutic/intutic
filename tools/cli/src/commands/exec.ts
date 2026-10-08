@@ -21,7 +21,7 @@
 import { spawn } from 'node:child_process'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
-import { loadCredentials, loadConfig } from '../config/store.js'
+import { loadCredentials } from '../config/store.js'
 import type { IntuticCredentials } from '@intutic/shared-types'
 import { getIntuticDir } from '../config/paths.js'
 import {
@@ -131,12 +131,10 @@ function trimTrailingSlashes(s: string): string {
  * Build the proxy environment variables for a child process.
  *
  * @param apiKey   - Intutic API key (intk_...)
- * @param devMode  - retained for call-site compatibility; the proxy is always local
  * @returns Record of env vars to inject
  */
 export function buildProxyEnv(
   apiKey: string,
-  devMode: boolean,
   identity?: GraphIdentity,
   proxyUrlOverride?: string,
 ): Record<string, string> {
@@ -152,7 +150,6 @@ export function buildProxyEnv(
   const rawHost = trimTrailingSlashes(
     proxyUrlOverride ?? process.env.INTUTIC_PROXY_URL ?? 'http://localhost:4000',
   )
-  void devMode
 
   // Graph identity rides in the base URL. Harnesses append their own path to
   // whatever host they are given, so a prefix here reaches the proxy from every
@@ -225,16 +222,12 @@ export async function runExec(
     process.exit(1)
   }
 
-  // Load config for dev mode
-  const config = loadConfig()
-  const devMode = config?.devMode ?? process.env.INTUTIC_DEV === '1'
-
   // Build env. A nested `intutic exec` inherits identity from its parent and
   // becomes a child node; a top-level one starts a new graph.
   const identity = deriveIdentity()
 
   if (sandbox) {
-    await runSandboxed(commandAndArgs, creds, devMode, identity, sandbox)
+    await runSandboxed(commandAndArgs, creds, identity, sandbox)
     return
   }
 
@@ -249,7 +242,7 @@ export async function runExec(
     log.warn('This workspace recommends running agents in a sandbox — add --sandbox.')
   }
 
-  const proxyEnv = buildProxyEnv(creds.apiKey, devMode, identity)
+  const proxyEnv = buildProxyEnv(creds.apiKey, identity)
   const childEnv = { ...process.env, ...proxyEnv }
 
   const [exe, ...args] = commandAndArgs
@@ -303,13 +296,12 @@ export async function runExec(
 async function runSandboxed(
   commandAndArgs: string[],
   creds: IntuticCredentials,
-  devMode: boolean,
   identity: GraphIdentity,
   opts: SandboxExecOptions,
 ): Promise<void> {
   const port = proxyPortFromEnv()
   const proxyUrlOverride = `http://${PROXY_HOST_ALIAS}:${port}`
-  const proxyEnv = buildProxyEnv(creds.apiKey, devMode, identity, proxyUrlOverride)
+  const proxyEnv = buildProxyEnv(creds.apiKey, identity, proxyUrlOverride)
 
   // The values the runtime will read for the `--env NAME` references.
   //

@@ -343,7 +343,9 @@ export async function runGatewayAssign(
     if (res.gatewayId) {
       log.success(`${opts.org ? `Org ${opts.org}` : 'This workspace'} now defaults to gateway ${res.gatewayId}.`)
     } else {
-      log.success(`${opts.org ? `Org ${opts.org}'s` : "This workspace's"} gateway override cleared.`)
+      // An org has a default, not an override: clearing it sends every
+      // workspace without its own override back to the shared gateway.
+      log.success(opts.org ? `Org ${opts.org}'s default gateway cleared.` : "This workspace's gateway override cleared.")
     }
   } catch (err) {
     log.error(`Failed to update gateway assignment: ${err instanceof Error ? err.message : String(err)}`)

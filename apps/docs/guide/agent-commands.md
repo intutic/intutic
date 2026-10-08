@@ -1,7 +1,7 @@
 # Prompt Commands: `/fix` & `/draw` <Badge type="tip" text="Open-Core" />
 
 Two blocking slash-commands the proxy answers locally, without forwarding the
-turn to your LLM provider — the same interception the [`/intutic-predict`](/reference/cli)
+turn to your LLM provider — the same interception the [`/intutic-predict`](/guide/slash-commands#intutic-predict)
 cost pre-check uses. Type them as the start of any prompt in any harness routed
 through the Intutic proxy.
 

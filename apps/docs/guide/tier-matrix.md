@@ -36,8 +36,9 @@ list is a trial or a degraded preview of a paid feature:
   request/response, evaluates it against local WASM rules, blocks prohibited
   tool calls, and injects steering warnings into the stream in real time.
 - **Local cost and token ledger** — session traces and daily spend land in
-  local JSONL logs (`~/.intutic/logs/`); `intutic predict-cost` reads that
-  same history for pre-flight estimates.
+  local JSONL logs (`~/.intutic/logs/`), which `intutic traces list` reads
+  with no account. Pre-flight estimates (`intutic predict-cost`) come from a
+  connected workspace's recorded usage, so they need a control plane.
 - **Local spend caps** — a daily budget ceiling (`~/.intutic/config.json`),
   enforced natively inside the proxy on every request.
 - **Intelligent routing and the bandit** — the routing engine and its

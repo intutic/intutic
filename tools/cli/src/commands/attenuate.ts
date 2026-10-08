@@ -73,8 +73,10 @@ export async function runAttenuate(opts: {
   let ttlSeconds: number | undefined
   if (opts.ttl !== undefined) {
     ttlSeconds = Number(opts.ttl)
-    if (!Number.isFinite(ttlSeconds) || ttlSeconds <= 0) {
-      log.error('--ttl must be a positive number of seconds')
+    // The server's own bounds: a whole number of seconds, 60 to 86400. Checked
+    // here so a value it would refuse fails with this message, not a 422.
+    if (!Number.isInteger(ttlSeconds) || ttlSeconds < 60 || ttlSeconds > 86_400) {
+      log.error('--ttl must be a whole number of seconds from 60 to 86400')
       process.exit(1)
     }
   }
