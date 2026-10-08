@@ -7,6 +7,219 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-10-08
+
+Everything that reached `main` since 2.0.0. Check three behaviour changes
+before upgrading: `intutic skill audit` exits 1 on findings, the CLI no longer
+reads `PORT`, and the clawde SDKs raise `ClawdeBlockedError` on a proxy
+refusal instead of retrying it. Judges run only on self-hosted models, which
+removes `judgeModelChoices` and `managedJudgeModel` (see Removed).
+
+### Added
+
+- **Destructive-SQL guard** on the proxy's response gate: destructive SQL run
+  through `psql`, `mysql`, `sqlite3` or `dropdb` against a target that is not
+  allowlisted is withheld. Off unless an SOP declares `sql_guard` (and
+  `sql_allow_dsns`) in its front matter.
+- **DeepSeek route**: `deepseek-chat`, `deepseek-reasoner` and `deepseek-flash`
+  go to DeepSeek's own API on both the OpenAI and the Anthropic wire
+  (`DEEPSEEK_UPSTREAM_URL` overrides it); other `deepseek-*` names keep going
+  to the OpenAI-compatible upstream. `DEEPSEEK_API_MODEL_IDS` in
+  `@intutic/shared-types`.
+- **Typed stage for the self-hosted gateway's local judge**: with
+  `INTUTIC_GATEWAY_LOCAL_JUDGE_TYPED_LO` and `_HI` set, two one-token yes/no
+  questions score the response first. Below the band it is compliant with no
+  free-text call, above it a violation (the free-text judge runs once for the
+  reasoning), and inside it the free-text verdict stands.
+  `LITELLM_LOCAL_TYPED_JUDGE_MODEL` picks the model; there is no default band.
+- **Skill protection**: nine content patterns that hit none of 350 public
+  `SKILL.md` files block writes into a skills directory (`skill_content.*` in
+  the policy snapshot); the daemon reports each bundled skill script's sha256
+  (`SkillScriptsFacet`; hashes only, never content).
+- **Guardrails on workspace settings**: `allowed_models` and `egress_allow`
+  guardrail kinds on a `workspace_setting` target, rendered by
+  `@intutic/shared-types` and shown and promoted by `intutic guardrails`.
+- **Harnesses**: Microsoft Agent Framework (`intutic-clawde[agent-framework]`,
+  `IntuticFunctionMiddleware`), the 43rd governed harness; Strands `BidiAgent`
+  and multi-agent `Graph`/`Swarm` (`install_multiagent()`, requires
+  `strands-agents>=1.57.2`); OpenCode MCP servers wrapped through the MCP
+  governance proxy, so the per-server allowlist applies; the AgentCore
+  interceptor's `composeRequestInterceptor()`, with `checkToolCall` and
+  `readConfig` exported.
+- **`@intutic/gate`**: `intuticApprovalStep()` runs the gate from a Workflow
+  DevKit `"use step"` function; `intuticAuditHooks()` audits eve's
+  `input.resolved`; harness approvals work on `@ai-sdk/harness` 1.0.101+, and
+  the sandbox bootstrap registers the hook for each session.
+- **WASM rules**: `setReason()` in the AssemblyScript rule SDK sets the message
+  a block returns, through the `reason_ptr()`/`reason_len()` exports both
+  proxies already read.
+- **CLI**: `intutic login --control-plane-url` saves the control plane, and
+  every command resolves it the same way (flag, then
+  `INTUTIC_CONTROL_PLANE_URL`/`INTUTIC_DEV`, then the saved URL); `intutic
+  integrity verify <root> --against <file>` compares your own copy with what
+  the control plane serves; `init --git-hooks`/`--no-git-hooks`.
+- `@intutic/shared-types`: `anthropicBaseUrl()`, `openaiBaseUrl()` and
+  `proxyHost()`; the `judge.review.queued` notification event; the
+  `E_PLAN_CHANGE_UNSUPPORTED`, `E_PLAN_FROM_ORG` and `E_CHECKOUT_UNAVAILABLE`
+  error codes.
+
+### Changed
+
+- **`intutic skill audit` exits 1 when it has findings**, once the report, the
+  SARIF document and the upload are done. `--exit-zero` keeps the old
+  behaviour.
+- **One local proxy port**: `start`, `connect`, `daemon install --proxy`,
+  `budget`, `doctor` and `exec` all take it from `INTUTIC_PROXY_URL` (default
+  4000), and `--port` overrides it. The shell's `PORT` is no longer read.
+- **clawde SDKs** (`@intutic/clawde`, `intutic-clawde`): a proxy refusal
+  (`403 policy_denied`, `409 policy_reask`, `429 OVERAGE_HARD_CAP_EXCEEDED`, …)
+  fires the matching event and raises `ClawdeBlockedError` (verdict `kill`,
+  `reask` or `hold`); only transport failures and 5xx are retried. Anthropic
+  requests go to `/v1/messages`. The circuit breaker gains `requireBudget`;
+  `maxCostUsd` (now only switches the budget check on), `sensitivityTier`
+  (ignored), `budgetRemainingUsd`/`budgetPctUsed` (never set) and the
+  `hijack`/`enhance`/`bypass` verdicts are deprecated.
+- `intutic exec` runs without a login: it sets the base-URL variables and
+  leaves your provider keys alone. `exec --sandbox` builds
+  `intutic/sandbox:<CLI version>` from the Dockerfile the npm package now
+  ships; the old `intutic/sandbox:latest` default was never published.
+- `connect` uses the control plane saved by `intutic login` when no flag is
+  given.
+- Workflow DevKit: call the gate from a `"use step"` function.
+  `@intutic/gate/workflow` no longer loads Node, and the old form inside the
+  workflow sandbox refuses with `WORKFLOW_SANDBOX`, naming the fix.
+- **Cline**: rules move to `.clinerules/intutic-governance.md` and the gate to
+  `.clinerules/hooks/PreToolUse`. A flat `.clinerules` an earlier version
+  wrote is converted; one you wrote is left alone. Cline's base URL is set in
+  its own settings panel.
+- Harness configs are merged, never replaced: Claude Code, Cursor (Cursor's
+  `hooks.json` schema, plus `preToolUse` for writes and deletes), Windsurf
+  (the real proxy port), OpenHands `config.toml`, Aider and Hermes YAML, and
+  Pi's per-provider base URLs. Continue routes only OpenAI and Anthropic
+  models. MCP auto-wrap reads Claude Code's servers from `~/.claude.json` and
+  uses the proxy installed next to the CLI.
+- dsh 0.2: the egress override goes on the `llm-deepseek` row of each
+  profile's `cordis.patch.yml`. Until the plugin is installed dsh runs
+  ungoverned and warns; the docs had called this fail-closed.
+- `intutic judge configure` offers only self-hosted models, refuses a hosted
+  custom reference, writes `api_base` for Ollama models, and gives Helm users
+  the `--set-file litellm.config` flag; `intutic setup` no longer asks for a
+  judge model.
+- `intutic integrity verify` reports a root whose traces the three-year
+  retention deleted (exit 0, signature still checked) instead of failing it.
+- `execute_command` (Cline, Roo Code) counts as a shell tool in `@intutic/gate`
+  and `intutic-clawde`, as it does in the proxy.
+- The MCP governance proxy refuses WASM modules that import their memory or
+  use instructions its metering cannot charge.
+- The offline pricing bundle is re-pinned to LiteLLM upstream (2026-09-28,
+  2026-10-07, 2026-10-08), and from now on nightly.
+- The docs site and theme use Geist and Geist Mono (SIL OFL), self-hosted,
+  with no Google Fonts requests.
+
+### Removed
+
+- `judgeModelChoices` from `@intutic/shared-types`, replaced by
+  `selfHostedJudgeModelChoices()` (judge-capable Ollama models, Ollama Cloud
+  excluded), `isHostedModelRef()` and `SELF_HOSTED_MODEL_PROVIDER_IDS`.
+- `managedJudgeModel` from `WorkspaceSettings`; `PUT
+  /api/v1/workspace/settings` rejects it with `400`.
+- `BillingUsageSummary` from `@intutic/shared-types`; the endpoint it
+  described is gone.
+- `mergeSettingsYaml` from `@intutic/sync-daemon/harness/dshHooks`: dsh 0.2
+  has no `settings.yaml`.
+- The `x-intutic-judge-loop-guard` header (see Security).
+- Proxy config keys that were parsed and never read: `general_settings`,
+  `harness_overrides`, `litellm_params.api_key` and `litellm_params.api_base`.
+  A LiteLLM config that still carries them loads.
+- The VS Code `settings.json` injection for Cline and Roo Code, which neither
+  extension reads (see Security).
+- The clawde SDKs' `X-Intutic-Context`, `X-Intutic-Cost-Limit` and
+  `X-Intutic-Sensitivity` request headers and their verdict and budget
+  response-header parsing; the proxy never sent or read any of them.
+
+### Fixed
+
+- `UPSTREAM_URL`, which `intutic start --upstream-url` and the installed
+  service set, was never read by the proxy. It is now the default upstream for
+  every provider unless the provider's own `*_UPSTREAM_URL` is set.
+- The proxy refused (403) every virtual key for a workspace whose id does not
+  start with `ws_`, and invented a workspace for about 40 % of attenuated child
+  keys.
+- When the response gate refused a tool call on an OpenAI Chat or Responses
+  stream, the text before it was lost; it now reaches the client, scrubbed,
+  ahead of the refusal.
+- The proxy's session-credential capture filed any non-virtual-key token as
+  the workspace's Anthropic key, so an OpenAI or DeepSeek key overwrote it.
+  Only `sk-ant-` tokens are captured now.
+- CLI: `policy rollback <id> --version N` printed the CLI version;
+  `install-daemon`/`uninstall-daemon` lacked the `daemon install` options;
+  `doctor` asked a route that does not exist and probed Valkey through the
+  proxy; `enforce --allow` accepted entries that are not IPs or CIDRs; `skill
+  scan-staged` scanned the workspace `init` last recorded; `sync-context --git`
+  ignored Git; `loop review` exited 0 when the review failed; `attenuate`
+  accepted a `--ttl` the server refuses; `init` waited on a prompt without a
+  terminal.
+- `intutic-clawde` treats a judge verdict held for review (`REVIEW`) as not
+  clean.
+- `@intutic/gate`: `withIntuticProxy` accepts `apiKey` for `createOpenAI`; eve's
+  `cancelled` outcome is handled; the harness bootstrap merge is idempotent.
+- dsh profiles were pinned to `@intutic/gate ^0.1.0`, which no published
+  version satisfies; `^2.0.0` is added only when the profile has no entry.
+- The proxy container image installs `wget` for its health check.
+
+### Security
+
+- The proxy authenticates its budget and plan-limit check (`POST
+  /api/v1/policy/check`) with the request's virtual key as the bearer. It sent
+  only the key's 12-character prefix, which is not a secret, so the control
+  plane could not tell the proxy from anyone asking about a workspace ID. A
+  provider credential is never sent.
+- The machine-wide daily cap (`maxDailyBudgetUsd`, $10 by default) applies only
+  to a standalone proxy. On a proxy with a control plane, every workspace's
+  spend accrued to one day file, so the day's combined traffic could refuse
+  every request for every workspace until midnight. With `CONTROL_PLANE_URL`
+  set, the control plane's per-workspace daily limit is the cap.
+- A virtual key with no resolvable provider key now gets `402
+  no_upstream_credential` instead of being forwarded to the provider.
+- Any client could set `x-intutic-judge-loop-guard` to skip judging for its own
+  traffic; the header is gone.
+- `intutic connect` could wipe VS Code's user and workspace `settings.json`:
+  the Cline/Roo Code injection replaced a file it failed to parse with only its
+  own keys.
+- `intutic connect` replaced `~/.codex/config.toml` (or `$CODEX_HOME`'s) with
+  its own; it now merges `openai_base_url` into your file.
+- Hook installation gaps: `connect` never installed the gate for Codex, GitHub
+  Copilot, Continue, Antigravity, Open WebUI or n8n; Cline's gate sat where
+  Cline does not look, Antigravity's under the wrong key, and Cursor's
+  `hooks.json` was not in Cursor's schema; a Claude Code sync dropped the
+  user's own `PreToolUse` hooks.
+- The MCP governance proxy enforces the Rust proxy's WASM limits: 16 MB of
+  memory (growth past it fails) and 1,000,000 instructions per call
+  (exhaustion fails open for that call and counts toward disabling the rule).
+  Memory used to be checked only after the call.
+- Dependency updates for open advisories: `@modelcontextprotocol/sdk`, `vue`,
+  `undici`, `shell-quote` and seven more on npm; `pyjwt`, `oauthlib`,
+  `multidict`, `langgraph-sdk` and `urllib3` (floor `>=2.8.0`) for
+  `intutic-clawde`; `rustls` 0.23.45 for the proxy.
+
+### Documentation
+
+- New reference pages: the Tool Gate SDK (`@intutic/gate` and
+  `intutic_clawde.gate`), every environment variable the proxy, CLI and gate
+  SDK read, every CLI command and option, and the regenerated API route
+  catalog.
+- The clawde SDK, WASM rule (`evaluate(offset, len)`, `risk_tier` values such
+  as `High`), budgets (`maxDailyBudgetUsd`), workflow and Strands pages match
+  the code; the competitor comparisons are rewritten against current code and
+  public docs; native hook gates are in 19 of the 43 harnesses.
+
+### Internal
+
+- New gates: docs links and anchors, every environment variable documented
+  both ways, no internal ids in published pages, the WASM pages' host-guest
+  contract. CI runs the Rust job and each CodeQL language only when their
+  inputs change, and groups Dependabot updates per ecosystem.
+
 ## [2.0.0] - 2026-09-27
 
 A milestone release: no public API, wire format or configuration value that

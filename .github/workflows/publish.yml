@@ -54,7 +54,7 @@ jobs:
           echo "Tag version: $TAG"
           fail=0
           for pkg in packages/anomaly-taxonomy packages/shared-types packages/gate-js packages/id packages/logger \
-                     packages/clawde-sdk services/sync-daemon packages/mcp-proxy \
+                     packages/clawde-sdk packages/mcp-proxy services/sync-daemon \
                      packages/proxy tools/cli; do
             actual="$(node -p "require('./$pkg/package.json').version")"
             if [ "$actual" != "$TAG" ]; then
@@ -131,7 +131,7 @@ jobs:
           set -euo pipefail
           mkdir -p npm-tarballs
           for pkg in packages/anomaly-taxonomy packages/shared-types packages/gate-js packages/id packages/logger packages/clawde-sdk \
-                     services/sync-daemon packages/mcp-proxy packages/proxy tools/cli; do
+                     packages/mcp-proxy services/sync-daemon packages/proxy tools/cli; do
             (cd "$pkg" && pnpm pack --pack-destination ../../npm-tarballs >/dev/null)
           done
 
@@ -209,7 +209,7 @@ jobs:
           # anomaly-taxonomy first — shared-types depends on it, and publishing
           # a package whose dependency is not yet on the registry makes every
           # install of it fail until the second publish lands.
-          for pkg in packages/anomaly-taxonomy packages/shared-types packages/gate-js packages/id packages/logger packages/clawde-sdk services/sync-daemon packages/mcp-proxy packages/proxy tools/cli; do
+          for pkg in packages/anomaly-taxonomy packages/shared-types packages/gate-js packages/id packages/logger packages/clawde-sdk packages/mcp-proxy services/sync-daemon packages/proxy tools/cli; do
             name="$(node -p "require('./$pkg/package.json').name")"
             version="$(node -p "require('./$pkg/package.json').version")"
             # pnpm/npm pack's own naming convention: @scope/name -> scope-name-version.tgz
@@ -368,7 +368,7 @@ jobs:
           # tarballs built with npm shipped `"@intutic/id": "workspace:*"`, which
           # fails any install with EUNSUPPORTEDPROTOCOL (see issue #1).
           for pkg in packages/anomaly-taxonomy packages/shared-types packages/gate-js packages/id packages/logger packages/clawde-sdk \
-                     services/sync-daemon packages/mcp-proxy packages/proxy tools/cli; do
+                     packages/mcp-proxy services/sync-daemon packages/proxy tools/cli; do
             (cd $pkg && pnpm pack --pack-destination ../../release-assets)
           done
 
