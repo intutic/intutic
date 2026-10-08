@@ -790,6 +790,12 @@ Every route the control plane serves: 378 routes, grouped by the source file tha
 |--------|------|------|-------------|
 | POST | `/api/v1/fix/enhance` | Authenticated |  |
 
+### `gateLiveness.ts` <Badge type="tip" text="Cloud" />
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/v1/governance/gate-liveness` | OWNER/ADMIN/EM | Per-harness gate status (reporting, silent or new) and whether a silent-gate alert is open |
+
 ### `gatewayHeartbeat.ts` <Badge type="tip" text="Cloud" />
 
 | Method | Path | Auth | Description |
@@ -1123,11 +1129,12 @@ Every route the control plane serves: 378 routes, grouped by the source file tha
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/api/v1/siem/destinations` | Authenticated | List destinations (masks credentials) |
+| GET | `/api/v1/siem/destinations` | Authenticated | List destinations (masks credentials) and the source names a destination can filter on |
 | POST | `/api/v1/siem/destinations` | OWNER/ADMIN | Create a destination (encrypts credentials) |
 | DELETE | `/api/v1/siem/destinations/:id` | OWNER/ADMIN | Deactivate a destination |
 | GET | `/api/v1/siem/destinations/:id` | Authenticated | Get destination details (masks credentials) |
 | PUT | `/api/v1/siem/destinations/:id` | OWNER/ADMIN | Update destination details |
+| POST | `/api/v1/siem/destinations/:id/signing-secret` | OWNER/ADMIN | Replace a webhook destination's signing secret (returned once) |
 | POST | `/api/v1/siem/destinations/:id/test` | OWNER/ADMIN | Health-check a destination |
 | GET | `/api/v1/siem/dlq` | Authenticated | List DLQ failed events |
 | POST | `/api/v1/siem/dlq/retry` | OWNER/ADMIN | Trigger a manual DLQ retry pass |

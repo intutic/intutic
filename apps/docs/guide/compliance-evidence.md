@@ -13,7 +13,7 @@ Every compliance number in Intutic starts with the same eleven probes (see [Secu
 | `policy_check` | Workspace policy completeness (budget, residency, allowed models) |
 | `mfa_enforcement` | Reports `not_enforced` — MFA is not tracked in the schema, so this control cannot be attested; member-hygiene counts ride along as context |
 | `data_residency` | Residency violations in the last 30 days — `not_enforced` when region locking itself is off |
-| `audit_log_integrity` | Re-derives sealed Merkle roots from the live trace rows and walks the root chain |
+| `audit_log_integrity` | Re-derives sealed Merkle roots from the live trace rows and walks the root chain; a failure raises a [notification](/concepts/trace-integrity#alerts) |
 | `token_rotation` | API keys unused for 90+ days |
 | `sop_coverage` | Count of active SOPs |
 | `auto_apply_provenance` | Every ON auto-apply flag attributable to a human actor |

@@ -70,6 +70,7 @@ Sign-in, keys and credentials, and the network and runtime limits every agent in
 | **Approved Models** | The workspace's model allowlist. See [below](#approved-models). |
 | **Repeat-Finding Enforcement** | Act on a sustained pattern of findings in one session, not only record it. |
 | **Trajectory Monitoring** | Server-side monitoring of running sessions. See [Trajectory Monitor](/guide/trajectory-monitor). |
+| **Gate health** | Whether each installed harness's gate is reporting. A gate reports every tool call, allowed ones included, so one that has sent nothing for 48 hours is **Silent**: its tool calls may not be governed. **Just installed** means the harness connected less than an hour ago. Owners, Admins and Engineering Managers can see it. |
 | **Devices** | Enforcement posture each developer machine reports: visibility, not attestation. |
 
 ### Virtual API Keys
@@ -316,12 +317,17 @@ The **Event Type** list offers only the events the control plane sends:
 | `gateway.stale.detected` | Self-Hosted Gateway Unreachable |
 | `device.enforcement.stale` | Device Enforcement Stale |
 | `device.enforcement.disabled` | Device Firewall Disabled |
+| `governance.gate.silent` | Gate Stopped Reporting: an installed harness's gate has sent no event for 48 hours |
+| `governance.gate.recovered` | Gate Reporting Again |
+| `governance.integrity.failed` | Trace Integrity Check Failed: the hourly integrity check found a broken root chain, a trace changed after sealing, a mismatched bucket copy, a bad signature or an altered append-only guard. See [Trace Integrity](/concepts/trace-integrity#alerts) |
 
 Tick one or more severities (LOW, MEDIUM, HIGH, CRITICAL) to narrow a rule; leave them all unticked to receive every severity.
 
 ### Cooldown Throttling
 
 Prevent alert noise by setting a cooldown period (in minutes) for each rule. Consecutive identical alerts inside the cooldown window are suppressed.
+
+The gate and integrity alerts do not rely on the cooldown. **Gate Stopped Reporting** fires once when a gate goes silent, however long it stays silent, and **Gate Reporting Again** fires once when it comes back; a PagerDuty rule on **Gate Reporting Again** resolves the incident the silent alert opened instead of opening a new one. **Gate Reporting Again** is INFO severity, which none of the severity boxes select, so leave them unticked on its rule. **Trace Integrity Check Failed** fires once for each kind of failure while it keeps failing, and again if it clears and recurs.
 
 **Show Delivery Log** lists each time a rule sent, failed or was filtered, with the event and channel.
 
