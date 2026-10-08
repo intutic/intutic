@@ -27,6 +27,8 @@
  * @module
  */
 
+import { z } from 'zod'
+
 import type { SsoGroupClearance, SsoGroupPolicy } from './attenuation.js'
 
 export interface SsoGroupDecision {
@@ -41,20 +43,42 @@ function stringList(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []
 }
 
+/** One tool or group name: matched exactly, so no trimming happens anywhere. */
+const SsoGroupNameSchema = z.string().min(1).max(256)
+const SsoGroupNameListSchema = z.array(SsoGroupNameSchema).max(500).default([])
+
 /**
- * Reads a stored `sso_group_policy`. Null only when there is no policy object
- * at all; a wrong-typed list reads as empty and non-string entries are
+ * The shape of `sso_group_policy` — the one definition. The settings PUT
+ * validates a write against it (and refuses anything else with a 400 naming
+ * the field), and {@link parseSsoGroupPolicy} reads a stored value through it.
+ * Each list is optional on write and defaults to empty.
+ */
+export const SsoGroupPolicySchema = z
+  .object({
+    highRiskTools: SsoGroupNameListSchema,
+    requiredGroups: SsoGroupNameListSchema,
+    requireOboFor: SsoGroupNameListSchema,
+  })
+  .strict()
+
+/**
+ * Reads a stored `sso_group_policy`. A value the settings route wrote passes
+ * {@link SsoGroupPolicySchema} as it is. One that reached the row some other
+ * way is still read rather than dropped: null only when there is no policy
+ * object at all; a wrong-typed list reads as empty and non-string entries are
  * dropped, so a malformed `requiredGroups` leaves every high-risk tool denied
  * rather than the whole policy silently gone.
  */
 export function parseSsoGroupPolicy(value: unknown): SsoGroupPolicy | null {
+  const valid = SsoGroupPolicySchema.safeParse(value)
+  if (valid.success) return valid.data
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
   const p = value as Record<string, unknown>
-  return {
-    highRiskTools: stringList(p['highRiskTools']),
-    requiredGroups: stringList(p['requiredGroups']),
-    requireOboFor: stringList(p['requireOboFor']),
+  const policy = {} as SsoGroupPolicy
+  for (const key of Object.keys(SsoGroupPolicySchema.shape) as Array<keyof SsoGroupPolicy>) {
+    policy[key] = stringList(p[key])
   }
+  return policy
 }
 
 /** A rule id that survives `ruleIdFromReason` (`[A-Za-z0-9_.:-]`). */

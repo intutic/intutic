@@ -420,6 +420,7 @@ export type {
 } from './attenuation.js'
 
 export {
+  SsoGroupPolicySchema,
   parseSsoGroupPolicy,
   evaluateSsoGroupClearance,
   ssoGroupRuleId,

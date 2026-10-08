@@ -64,7 +64,7 @@ A harness with no hook system, such as Roo Code or aider pointed at the proxy, g
 policy from the proxy's [response gate](/concepts/circuit-breaker#the-proxy-s-response-gate)
 instead: the proxy withholds a refused tool call from the model's response before the harness
 sees it, for the member behind the request's virtual key, with the same decision and rule id.
-A policy change reaches it within 90 seconds and a SCIM group change on the next request.
+A policy change or a SCIM group change reaches it on the next request.
 :::
 
 ---

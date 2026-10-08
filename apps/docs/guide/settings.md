@@ -59,6 +59,7 @@ Sign-in, keys and credentials, and the network and runtime limits every agent in
 | Card | What it does |
 |------|--------------|
 | **Single Sign-On (SSO)** | **Configure SSO** connects a SAML or OIDC identity provider (Okta, Entra ID and others). Once a provider exists, the card also offers **Expire API keys without a recent SSO login** and **Directory provisioning (SCIM 2.0)**. See [Security & Identity](/guide/security) and [SCIM Provisioning](/guide/scim). |
+| **Group policy for high-risk tools** | Which tools only members of named identity-provider groups may run, and which tools need an on-behalf-of token. See [below](#group-policy-for-high-risk-tools). |
 | **Virtual API Keys** | Keys (`vk_…`) that developers and their agents use to reach the Intutic proxy. See [below](#virtual-api-keys). |
 | **Attenuated API Keys** | Child keys minted from a parent key with fewer capabilities by `intutic attenuate`; open a chain to see each step. |
 | **On-Behalf-Of Tokens** | A short-lived token that lets an agent act for you with only the tools you pick. See [below](#on-behalf-of-obo-tokens). |
@@ -72,6 +73,20 @@ Sign-in, keys and credentials, and the network and runtime limits every agent in
 | **Trajectory Monitoring** | Server-side monitoring of running sessions. See [Trajectory Monitor](/guide/trajectory-monitor). |
 | **Gate health** | Whether each installed harness's gate is reporting. A gate reports every tool call, allowed ones included, so one that has sent nothing for 48 hours is **Silent**: its tool calls may not be governed. **Just installed** means the harness connected less than an hour ago. Owners, Admins and Engineering Managers can see it. |
 | **Devices** | Enforcement posture each developer machine reports: visibility, not attestation. |
+
+### Group policy for high-risk tools
+
+Three lists, one name per line, matched exactly including case: **High-risk tools**, **Groups
+that may run them** and **On-behalf-of only**. A member in one of the groups may run the
+high-risk tools; anyone else is refused, and so is a member whose groups a gate does not know.
+A tool on the on-behalf-of list is always refused, because no tool-call gate has an
+on-behalf-of token to present. Saving all three lists empty removes the policy.
+
+Owners and Admins can edit it; everyone else sees it read-only. It is stored as the
+`sso_group_policy` setting, so it can also be set with `PUT /api/v1/workspace/settings`, and
+every change is recorded in the [Audit Timeline](/guide/audit-timeline). Where a member's groups
+come from, and how fast a change reaches each gate, is in
+[SSO group clearance](/concepts/circuit-breaker#_3-sso-group-clearance).
 
 ### Virtual API Keys
 

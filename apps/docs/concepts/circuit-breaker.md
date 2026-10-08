@@ -110,17 +110,25 @@ it has no cache dependency to degrade.
 ## 3. SSO group clearance
 
 A workspace can restrict high-risk tools to members of named identity-provider groups. The
-policy lives in workspace settings as `sso_group_policy`:
+policy is the `sso_group_policy` workspace setting. An owner or admin sets it in
+**Settings › Security › Group policy for high-risk tools**, or with the settings API:
 
-```json
-{
-  "sso_group_policy": {
-    "highRiskTools": ["Bash", "database_write"],
-    "requiredGroups": ["sre-oncall", "platform-admins"],
-    "requireOboFor": ["production_deploy"]
-  }
-}
+```bash
+curl -X PUT "$INTUTIC_URL/api/v1/workspace/settings" \
+  -H "Authorization: Bearer $INTUTIC_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sso_group_policy": {
+      "highRiskTools": ["Bash", "database_write"],
+      "requiredGroups": ["sre-oncall", "platform-admins"],
+      "requireOboFor": ["production_deploy"]
+    }
+  }'
 ```
+
+Each list holds up to 500 names of 1 to 256 characters, and a list left out is empty. Anything
+else is refused with a `400` naming `sso_group_policy`, and nothing is stored. `null` removes
+the policy. Every change is recorded in the workspace's settings history.
 
 **Where a member's groups come from.** One rule, used by every gate:
 
@@ -216,16 +224,17 @@ the only gate. It is the same check that withholds a tool on an SOP's `deny_tool
   not checked.
 
 **Propagation.** A SCIM change needs no sign-in. Every SCIM write (a group created, renamed,
-deleted or re-membered, a user provisioned or deactivated) and every SCIM token issued or
-revoked drops the cached policy the MCP proxies read, moves the workspace's configuration
-version, and pushes a configuration update to connected sync daemons. End to end:
+deleted or re-membered, a user provisioned or deactivated), every SCIM token issued or revoked,
+and every change to `sso_group_policy` drops the cached policy the MCP proxies read, moves the
+workspace's configuration version, and pushes a configuration update to connected sync daemons.
+A policy change also drops the hook gate's own 60-second policy cache. End to end:
 
 | Change | Hook gate | Harness and SDK gates | MCP proxy | Proxy response gate |
 |---|---|---|---|---|
 | SCIM group add or remove, SCIM switched on or off | Next call | Seconds, through the push; at most one sync cycle (30 seconds by default, `intutic connect --interval <ms>`) when the daemon is connected to another control-plane replica or not connected | Next policy refresh, at most 60 seconds | Next request: the configuration version moved, so the key's cached answer is refetched |
 | Member deactivated or deprovisioned | Key refused on the next call | Next refresh: the key is refused and the snapshot forgets the member's groups | Next policy refresh: the key is refused and the proxy forgets the member's groups | Key refused on the next request |
 | Groups changed at the identity provider, SCIM off | When the member next signs in through SSO, then next call | The sync cycle after that sign-in | The policy refresh after that sign-in | Within 30 seconds of that sign-in |
-| `sso_group_policy` edited | Within 60 seconds (cached in Valkey) | Next sync cycle | Next policy refresh | Within 90 seconds: up to 60 in the control plane's cache, then up to 30 in the proxy's |
+| `sso_group_policy` changed through the settings API or the dashboard | Next call | Seconds, through the push; at most one sync cycle otherwise | Next policy refresh, at most 60 seconds | Next request: the configuration version moved, so the key's cached answer is refetched |
 
 A proxy that does not read the control plane's Valkey cannot see the configuration version, so
 the response gate's answer for a key is at most 30 seconds old there for every change.

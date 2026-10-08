@@ -12,6 +12,7 @@
  */
 
 import type { McpProxyFailBehavior, McpProxyMode, BypassEnforcementTier } from './enums.js'
+import type { SsoGroupPolicy } from './attenuation.js'
 
 // Re-export so callers only need one import
 export type { McpProxyFailBehavior, McpProxyMode, BypassEnforcementTier }
@@ -88,6 +89,16 @@ export interface WorkspaceSettings {
    * recorded SSO login yet. Cleared when the gate is turned off.
    */
   ssoKeyGateEnabledAt: string | null
+
+  /**
+   * Tools only members of named identity-provider groups may run, and tools
+   * only an on-behalf-of token may call (`SsoGroupPolicySchema`). Absent: no
+   * group restriction; `null` in a settings write clears it, and is never
+   * stored. Snake-case because the gates and the policy responses have always
+   * read it under this key. Every gate decides with `evaluateSsoGroupClearance`;
+   * see `ssoGroupClearance.ts`.
+   */
+  sso_group_policy?: SsoGroupPolicy | null
 
   /**
    * Bring-your-own-cloud trace storage. Optional — absent means Intutic-managed

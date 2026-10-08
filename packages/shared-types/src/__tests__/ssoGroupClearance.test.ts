@@ -9,6 +9,7 @@ import {
   parseSsoGroupPolicy,
   ssoGroupRuleId,
   SSO_GROUP_RECORD_TAG,
+  SsoGroupPolicySchema,
 } from '../ssoGroupClearance.js'
 
 interface Vectors {
@@ -93,5 +94,33 @@ describe('the snapshot record', () => {
     expect(decodeSsoGroupRecord(encodeSsoGroupRecord({ ...record, member: null }))?.member).toBeNull()
     expect(decodeSsoGroupRecord('@sso_groups\tnot-base64-json')).toBeNull()
     expect(decodeSsoGroupRecord('sop.x\tblock\t-\ttool\tr\t (Bash) ')).toBeNull()
+  })
+})
+
+describe('SsoGroupPolicySchema', () => {
+  it('accepts a policy, filling the lists it leaves out', () => {
+    expect(SsoGroupPolicySchema.parse({ highRiskTools: ['Bash'], requiredGroups: ['sre'] })).toEqual({
+      highRiskTools: ['Bash'],
+      requiredGroups: ['sre'],
+      requireOboFor: [],
+    })
+  })
+
+  it('refuses a wrong-typed list, an empty or overlong name, too many names and an unknown key', () => {
+    for (const bad of [
+      { highRiskTools: 'Bash' },
+      { requiredGroups: [7] },
+      { highRiskTools: [''] },
+      { requiredGroups: ['x'.repeat(257)] },
+      { requireOboFor: Array.from({ length: 501 }, (_, i) => `t${i}`) },
+      { highRiskTools: [], requiredGroup: ['sre'] },
+    ]) {
+      expect(SsoGroupPolicySchema.safeParse(bad).success, JSON.stringify(bad).slice(0, 80)).toBe(false)
+    }
+  })
+
+  it('is what parseSsoGroupPolicy reads a valid stored policy with', () => {
+    const stored = { highRiskTools: ['Bash'], requiredGroups: ['sre'], requireOboFor: ['deploy'] }
+    expect(parseSsoGroupPolicy(stored)).toEqual(SsoGroupPolicySchema.parse(stored))
   })
 })
