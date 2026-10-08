@@ -936,10 +936,10 @@ Every route the control plane serves: 384 routes, grouped by the source file tha
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/api/v1/mcp/servers` | Authenticated | Every MCP server seen, with its status, the tools a proxy last saw it declare and which are disabled, plus the workspace's default policy. |
+| GET | `/api/v1/mcp/servers` | Authenticated | Every MCP server seen, with its status, the tools a proxy last saw it declare and which are disabled, the latest scored change to its tool set, plus the workspace's default policy, its high-risk tool-change setting and its MCP call budgets. |
 | POST | `/api/v1/mcp/servers/:serverId/status` | OWNER/ADMIN | Approve, block, or return a server to the approval queue. |
 | POST | `/api/v1/mcp/servers/:serverId/tools` | OWNER/ADMIN | Switch one tool within a server on or off. |
-| POST | `/api/v1/mcp/servers/observe` | Authenticated | An MCP proxy reports the server it fronts and its tool names; a first sighting creates a candidate and sends mcp.server.candidate. |
+| POST | `/api/v1/mcp/servers/observe` | Authenticated | An MCP proxy reports the server it fronts, its tool names and their definitions; a first sighting creates a candidate and sends mcp.server.candidate, and changed definitions are scored for risk and recorded. |
 
 ### `members.ts` <Badge type="tip" text="Cloud" />
 

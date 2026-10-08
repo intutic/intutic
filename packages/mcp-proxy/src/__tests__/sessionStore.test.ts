@@ -18,6 +18,7 @@ import {
   type SharedSessionStore,
   type SharedWindowSnapshot,
 } from '../sessionStore.js'
+import { GuardedValkey } from '../guardedValkey.js'
 import { ToolCallInterceptor } from '../interceptor.js'
 import { PolicyClient, type SopRule } from '../policy.js'
 import { GovernanceEmitter } from '../emitter.js'
@@ -81,7 +82,8 @@ describe('ValkeySessionStore (shared across sibling processes)', () => {
   const withStores = async (n: number, fn: (stores: ValkeySessionStore[], scope: string) => Promise<void>) => {
     if (!available) return
     const scope = uniqueScope()
-    const stores = Array.from({ length: n }, () => new ValkeySessionStore(VALKEY_URL))
+    const connections = Array.from({ length: n }, () => new GuardedValkey(VALKEY_URL))
+    const stores = connections.map((v) => new ValkeySessionStore(v))
     try {
       await Promise.all(stores.map((s) => waitReady(s)))
       await fn(stores, scope)
@@ -89,7 +91,7 @@ describe('ValkeySessionStore (shared across sibling processes)', () => {
       await probe.del(sessionKeys.tools(scope), sessionKeys.calls(scope)).catch(() => {})
       const reaskKeys = await probe.keys(sessionKeys.reask(scope, '*')).catch(() => [] as string[])
       if (reaskKeys.length) await probe.del(...reaskKeys).catch(() => {})
-      await Promise.all(stores.map((s) => s.close()))
+      await Promise.all(connections.map((v) => v.close()))
     }
   }
 
@@ -160,7 +162,8 @@ describe('ValkeySessionStore (shared across sibling processes)', () => {
   })
 
   it('an unreachable Valkey costs nothing: the per-process window answers at once, with no unhandled rejection', async () => {
-    const store = new ValkeySessionStore('redis://127.0.0.1:1', { timeoutMs: 50 })
+    const valkey = new GuardedValkey('redis://127.0.0.1:1', { timeoutMs: 50 })
+    const store = new ValkeySessionStore(valkey)
     const rejections: unknown[] = []
     const onRejection = (r: unknown) => rejections.push(r)
     process.on('unhandledRejection', onRejection)
@@ -177,7 +180,7 @@ describe('ValkeySessionStore (shared across sibling processes)', () => {
       expect(rejections).toEqual([])
     } finally {
       process.off('unhandledRejection', onRejection)
-      await store.close()
+      await valkey.close()
     }
   })
 })
@@ -188,15 +191,13 @@ describe('SessionState fallback rules (no Valkey needed)', () => {
       readWindow: () => new Promise<SharedWindowSnapshot | undefined>(() => {}),
       recordCall: () => new Promise<boolean>(() => {}),
       incrReaskAttempt: () => new Promise<number | undefined>(() => {}),
-      close: async () => {},
     }
-    // The timeout lives in ValkeySessionStore's guard; a raw hanging store is
+    // The timeout lives in the Valkey connection's guard (guardedValkey.ts); a raw hanging store is
     // wrapped the same way here to pin the contract SessionState relies on.
     const guarded: SharedSessionStore = {
       readWindow: (...args) => Promise.race([hanging.readWindow(...args), new Promise<undefined>((r) => setTimeout(() => r(undefined), 20))]),
       recordCall: (...args) => Promise.race([hanging.recordCall(...args), new Promise<boolean>((r) => setTimeout(() => r(false), 20))]),
       incrReaskAttempt: (...args) => Promise.race([hanging.incrReaskAttempt(...args), new Promise<undefined>((r) => setTimeout(() => r(undefined), 20))]),
-      close: async () => {},
     }
     const s = new SessionState({ scope: 'ws_test:mcp:hang', store: guarded })
     s.recordCall('a')
@@ -218,7 +219,6 @@ describe('SessionState fallback rules (no Valkey needed)', () => {
       readWindow: async () => { called += 1; return { sequence: ['x'], callsLast60s: 9 } },
       recordCall: async () => { called += 1; return true },
       incrReaskAttempt: async () => { called += 1; return 7 },
-      close: async () => {},
     }
     const noScope = new SessionState({ store })
     noScope.recordCall('a')
@@ -233,7 +233,6 @@ describe('SessionState fallback rules (no Valkey needed)', () => {
       readWindow: async () => undefined,
       recordCall: async () => true,
       incrReaskAttempt: async () => (shared += 1),
-      close: async () => {},
     }
     const s = new SessionState({ scope: 'ws_test:mcp:2', store })
     expect(await s.incrReaskAttemptShared('k')).toBe(5)

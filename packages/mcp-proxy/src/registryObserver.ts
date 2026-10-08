@@ -7,9 +7,12 @@
  * the proxy ever sees a server's tools/list. So the proxy reports its own
  * server: once at start (so a server refused under a `deny` default still
  * reaches the approval queue, even if its tools/list never gets through) and
- * again whenever the tool names it sees change (so the registry can offer
- * per-tool toggles). The control plane creates a candidate on first sight and
- * notifies the workspace.
+ * again whenever the tools it sees change — a tool added or removed, or a
+ * description or input schema changed. The report carries the tool names (for
+ * the registry's per-tool toggles) and the definitions as the server declared
+ * them, before curation, which the control plane compares with the last ones
+ * it stored to score the change's risk. The control plane creates a candidate
+ * on first sight and notifies the workspace.
  *
  * Best-effort and quiet: a failed report costs one registry refresh, never a
  * tool call.
@@ -17,6 +20,7 @@
  * @module
  */
 
+import type { McpToolDefinition } from '@intutic/shared-types'
 import { createStderrLogger as createLogger } from './stderrLog.js'
 import { postJson } from './httpJson.js'
 
@@ -33,20 +37,26 @@ export class RegistryObserver {
   ) {}
 
   /**
-   * Reports the server, with `tools` when known. A report identical to the
+   * Reports the server, with its tools when known. A report identical to the
    * last successful one is skipped. Without an API key, or without a
    * `--server-name` to report, there is nothing the registry could record.
    */
-  async observe(tools?: readonly string[]): Promise<void> {
+  async observe(tools?: readonly McpToolDefinition[]): Promise<void> {
     if (!this.apiKey || this.serverName === 'unknown') return
-    const toolNames = tools ? [...new Set(tools)].sort() : undefined
-    const key = JSON.stringify(toolNames ?? null)
-    if (key === this.lastReported || (toolNames === undefined && this.lastReported !== null)) return
+    let definitions: McpToolDefinition[] | undefined
+    if (tools) {
+      // One entry per name, the first declared — the rule the risk score matches by.
+      const byName = new Map<string, McpToolDefinition>()
+      for (const t of tools) if (!byName.has(t.name)) byName.set(t.name, t)
+      definitions = [...byName.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+    }
+    const key = JSON.stringify(definitions ?? null)
+    if (key === this.lastReported || (definitions === undefined && this.lastReported !== null)) return
     try {
       await postJson(`${this.controlPlaneUrl}/api/v1/mcp/servers/observe`, this.apiKey, {
         serverName: this.serverName,
         transport: this.transport,
-        ...(toolNames ? { tools: toolNames } : {}),
+        ...(definitions ? { tools: definitions.map((t) => t.name), toolDefinitions: definitions } : {}),
       })
       this.lastReported = key
     } catch (err) {

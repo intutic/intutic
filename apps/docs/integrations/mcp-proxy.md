@@ -105,7 +105,7 @@ variants:
 
 `decide()` runs this pipeline, in order, over every `tools/call` request:
 
-1. **MCP server registry** — refuses a blocked server, every server not approved when the workspace's default policy is `deny`, and a tool switched off within its server. See [The registry](/guide/mcp-governance#the-registry).
+1. **MCP server registry** — refuses a blocked server, a server held for re-approval after a high-risk tool change, every server not approved when the workspace's default policy is `deny`, and a tool switched off within its server. See [The registry](/guide/mcp-governance#the-registry).
 2. **Server allowlist** (`mcpAllowedServers`) — refuses the whole server if it's not on an explicit, non-empty allowlist.
 3. **Tool allowlist** (`mcpAllowedTools`) — refuses the individual tool the same way.
 4. **SSO group policy** — the workspace's `sso_group_policy`, applied to the member the proxy's API key belongs to. See [Who made the call](/guide/mcp-governance#caller-identity).
@@ -113,6 +113,7 @@ variants:
 6. **SOP policy rules** — workspace-defined `block` / `warn` / `require_approval` rules matched against tool name and serialized arguments. `require_approval` holds the call for a person's approval (`hold` above).
 7. **Prompt-injection scan** (request direction) — see [Prompt-injection scanning](#prompt-injection-scanning) below.
 8. **Anomaly detectors** and **WASM rules** — see the session-scope note below.
+9. **Call budgets** (`mcpBudgets`) — counts the call in Valkey against every budget that covers it, and refuses it when one is used up. Last, so a call another step refuses spends nothing. See [Call budgets](/guide/mcp-governance#call-budgets).
 
 ### Anomaly-detection session scope
 

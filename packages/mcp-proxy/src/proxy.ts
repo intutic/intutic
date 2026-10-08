@@ -39,11 +39,14 @@ import { scanText, injectionSeverity, setDynamicInjectionPatterns, type Injectio
 import { toolPoisoning, dlpEscalation, type AnomalyFinding } from './anomaly/index.js'
 import { SessionState } from './session.js'
 import { ValkeySessionStore, type SharedSessionStore } from './sessionStore.js'
+import { GuardedValkey } from './guardedValkey.js'
+import { McpBudgetEnforcer, ValkeyBudgetStore } from './budget.js'
 import { WasmRunner } from './wasm/runner.js'
 import { checkTofu, decideTofuAction } from './tofu.js'
 import { RegistryObserver } from './registryObserver.js'
 import { ApprovalHolds } from './approvalHold.js'
-import { callerIdentity } from './identity.js'
+import { callerIdentity, type CallerIdentity } from './identity.js'
+import { normalizeToolDefinition, type McpToolDefinition } from '@intutic/shared-types'
 import { PACKAGE_VERSION } from './version.js'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
@@ -103,6 +106,17 @@ function buildHoldResponse(id: string | number | null, reason: string, holdId: s
 }
 
 /**
+ * Who a per-member MCP budget counts when the control plane has not named the
+ * member behind this proxy's key: the key's prefix, else the OS user. Callers
+ * with neither share one allowance.
+ */
+export function fallbackBudgetCaller(identity: CallerIdentity): string {
+  if (identity.apiKeyPrefix) return `key:${identity.apiKeyPrefix}`
+  if (identity.osUser) return `os:${identity.osUser}`
+  return 'unknown'
+}
+
+/**
  * Write a JSON-RPC frame to stdout (the ONLY valid place to write in a stdio MCP proxy).
  */
 function writeFrame(frame: unknown): void {
@@ -132,8 +146,12 @@ export interface ServerLineOutcome {
    * other line.
    */
   toolsListTools?: Array<Record<string, unknown>>
-  /** Every tool name the upstream server declared, before curation. Set alongside `toolsListTools`. */
-  toolsListUpstreamNames?: string[]
+  /**
+   * Every tool the upstream server declared, as it declared them — before
+   * curation hid any or an override rewrote a description. Set alongside
+   * `toolsListTools`; the registry gets these.
+   */
+  toolsListUpstream?: McpToolDefinition[]
   /** The JSON-RPC id of the `tools/list` response, needed to build a block
    *  frame in the caller if TOFU refuses it. Set alongside `toolsListTools`. */
   toolsListMsgId?: string | number | null
@@ -323,9 +341,10 @@ export function processServerLine(
     if (!Array.isArray(tools)) return { line: raw }
     let hidden = 0
     let overridden = 0
-    const upstreamNames = (tools as Array<Record<string, unknown>>)
-      .map((t) => t['name'])
-      .filter((n): n is string => typeof n === 'string')
+    // Copied before the overrides below rewrite descriptions in place.
+    const upstream = tools
+      .map(normalizeToolDefinition)
+      .filter((t): t is McpToolDefinition => t !== null)
     let kept = tools as Array<Record<string, unknown>>
     if (allowedTools.length > 0 || disabledTools.length > 0) {
       kept = kept.filter((t) => {
@@ -382,7 +401,7 @@ export function processServerLine(
       return {
         line: raw,
         toolsListTools: kept,
-        toolsListUpstreamNames: upstreamNames,
+        toolsListUpstream: upstream,
         toolsListMsgId: msg.id,
         injectionFindings,
         toolPoisoning: toolPoisoningFinding ?? undefined,
@@ -393,7 +412,7 @@ export function processServerLine(
       line: JSON.stringify(msg),
       curated: { hidden, overridden },
       toolsListTools: kept,
-      toolsListUpstreamNames: upstreamNames,
+      toolsListUpstream: upstream,
       toolsListMsgId: msg.id,
       injectionFindings,
       toolPoisoning: toolPoisoningFinding ?? undefined,
@@ -504,7 +523,13 @@ export class McpGovernanceProxy {
    * session.ts's module doc.
    */
   private readonly session: SessionState
-  /** The Valkey-backed shared window, when `config.valkeyUrl` is set and this is not the standalone entry. */
+  /**
+   * The process's one Valkey connection, when `config.valkeyUrl` is set and
+   * this is not the standalone entry: the shared session window and the MCP
+   * call budgets both use it.
+   */
+  private readonly valkey: GuardedValkey | undefined
+  /** The Valkey-backed shared window, on {@link valkey}. */
   private readonly sessionStore: SharedSessionStore | undefined
   /**
    * Phase 3's WASM custom-rule runner — owns the one dedicated
@@ -538,8 +563,8 @@ export class McpGovernanceProxy {
 
     // The standalone `intutic` entry fronts no real server and records no
     // calls worth sharing; every wrapped server gets the shared window.
-    this.sessionStore =
-      config.valkeyUrl && !config.standalone ? new ValkeySessionStore(config.valkeyUrl) : undefined
+    this.valkey = config.valkeyUrl && !config.standalone ? new GuardedValkey(config.valkeyUrl) : undefined
+    this.sessionStore = this.valkey ? new ValkeySessionStore(this.valkey) : undefined
     this.session = new SessionState({ scope: config.sessionScope, store: this.sessionStore })
     log.info(
       { action: 'session_scope', scope: config.sessionScope ?? null, shared: Boolean(this.sessionStore && config.sessionScope) },
@@ -564,6 +589,12 @@ export class McpGovernanceProxy {
       this.wasmRunner,
       config.workspaceId,
       new ApprovalHolds(config.controlPlaneUrl, config.apiKey, config.workspaceId, config.serverName, identity),
+      new McpBudgetEnforcer(
+        this.valkey ? new ValkeyBudgetStore(this.valkey) : undefined,
+        config.workspaceId,
+        config.serverName,
+        fallbackBudgetCaller(identity),
+      ),
     )
   }
 
@@ -624,7 +655,7 @@ export class McpGovernanceProxy {
     this.wasmWatch?.close()
     this.wasmWatch = null
     void this.wasmRunner.shutdown()
-    void this.sessionStore?.close()
+    void this.valkey?.close()
   }
 
   /**
@@ -906,7 +937,7 @@ export class McpGovernanceProxy {
     if (outcome.toolsListTools) {
       // The registry gets the server's own tool names, before curation:
       // per-tool toggles must be able to re-enable a tool curation hid.
-      void this.registryObserver?.observe(outcome.toolsListUpstreamNames ?? [])
+      void this.registryObserver?.observe(outcome.toolsListUpstream ?? [])
       // Cache the post-curation tools/list for Phase 2's tool_poisoning
       // detector (already applied above, from this same outcome) and for
       // Phase 3's WASM rule context (`tools` field) once that lands.

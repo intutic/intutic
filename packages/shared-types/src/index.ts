@@ -430,6 +430,49 @@ export {
 } from './ssoGroupClearance.js'
 export type { SsoGroupDecision, SsoGroupRecord } from './ssoGroupClearance.js'
 
+// MCP governance: call budgets, tool-change risk, description poisoning
+export {
+  McpBudgetSettingsSchema,
+  parseMcpBudgetPolicy,
+  budgetsForCall,
+  budgetWindow,
+  budgetWarnAt,
+  describeMcpBudget,
+  MCP_BUDGET_DEFAULT_WARN_PCT,
+  MAX_MCP_BUDGETS,
+  MAX_MCP_BUDGET_LIMIT,
+  MCP_BUDGET_SCOPES,
+  MCP_BUDGET_PERIODS,
+} from './mcpBudgets.js'
+export type {
+  McpBudget,
+  McpBudgetScope,
+  McpBudgetPeriod,
+  McpBudgetPolicy,
+  McpBudgetSettings,
+  McpBudgetCall,
+  McpBudgetCharge,
+} from './mcpBudgets.js'
+export {
+  scoreToolSetChange,
+  normalizeToolDefinition,
+  riskLevelOf,
+  MAX_TOOL_DESCRIPTION_CHARS,
+  MAX_TOOL_SCHEMA_CHARS,
+  MCP_TOOL_RISK_HIGH,
+  MCP_TOOL_RISK_MEDIUM,
+  MCP_TOOL_CAPABILITY_POINTS,
+} from './mcpToolRisk.js'
+export type {
+  McpToolDefinition,
+  McpToolCapability,
+  McpToolRiskRule,
+  McpToolRiskLevel,
+  McpToolRiskReason,
+  McpToolSetChange,
+} from './mcpToolRisk.js'
+export { scanToolDescription } from './toolPoison.js'
+
 // WS4 + WS5 new error codes
 export {
   E_ATTENUATION_CAP_VIOLATION,

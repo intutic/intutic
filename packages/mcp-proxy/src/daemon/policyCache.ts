@@ -21,6 +21,7 @@ import {
   type McpRegistryPolicy,
   type SsoGroupPolicy,
 } from '../policy.js'
+import { parseMcpBudgetPolicy, type McpBudgetPolicy } from '@intutic/shared-types'
 
 const logger = createLogger('mcp-proxy.policyCache')
 
@@ -100,6 +101,8 @@ export interface ResolvedPolicy {
   ssoGroupPolicy?: SsoGroupPolicy
   /** The workspace's `mcpProxyFailBehavior`, when it has chosen one. */
   mcpProxyFailBehavior?: 'open' | 'closed'
+  /** The workspace's MCP call budgets; absent on an entry from before they existed, which reads as none. */
+  mcpBudgets?: McpBudgetPolicy
   /**
    * True on the entry `seedFromSnapshot` built from the sync daemon's local
    * snapshot, which carries only part of the policy. A proxy that already
@@ -175,6 +178,7 @@ type PolicyResponseBody = Pick<
   | 'principal'
   | 'ssoGroupPolicy'
   | 'mcpProxyFailBehavior'
+  | 'mcpBudgets'
 >
 
 /**
@@ -257,6 +261,7 @@ function parsePolicyResponse(raw: string): PolicyResponseBody | null {
       parsed['mcpProxyFailBehavior'] === 'open' || parsed['mcpProxyFailBehavior'] === 'closed'
         ? parsed['mcpProxyFailBehavior']
         : undefined,
+    mcpBudgets: parseMcpBudgetPolicy(parsed['mcpBudgets']),
   }
 }
 
@@ -317,6 +322,7 @@ async function fetchFromControlPlane(workspaceId: string): Promise<ResolvedPolic
             principal:        parsed.principal,
             ssoGroupPolicy:   parsed.ssoGroupPolicy,
             mcpProxyFailBehavior: parsed.mcpProxyFailBehavior,
+            mcpBudgets:       parsed.mcpBudgets,
             cachedAt:         Date.now(),
             configVersion:    versionAtFetch,
           })

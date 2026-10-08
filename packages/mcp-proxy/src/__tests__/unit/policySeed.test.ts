@@ -148,7 +148,7 @@ describe('seedFromSnapshot', () => {
         refreshed = await resolvePolicy(WS)
       }
       expect(refreshed!.mcpRegistry).toEqual({
-        defaultPolicy: 'deny', approvedServers: ['github'], blockedServers: [], disabledTools: {},
+        defaultPolicy: 'deny', approvedServers: ['github'], blockedServers: [], heldServers: [], disabledTools: {},
       })
     } finally {
       if (previous === undefined) delete process.env['CONTROL_PLANE_URL']

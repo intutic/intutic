@@ -226,7 +226,9 @@ What the MCP governance proxy does when it cannot reach Intutic, and how firmly 
 | **Fail open** *(recommended)* | The tool call runs, and a warning event reaches the dashboard |
 | **Fail closed** | The tool call is blocked with "Governance check failed: Intutic control plane unreachable." The dashboard asks you to confirm before switching to it |
 
-The choice reaches each proxy with its policy. A proxy that has not been able to load policy since it started uses its local `INTUTIC_MCP_FAIL_OPEN` instead — see [When the registry has not loaded](/guide/mcp-governance#when-the-registry-has-not-loaded). Which MCP servers and tools may run is set on **Policies › MCP Servers** ([the registry](/guide/mcp-governance#the-registry)).
+The choice reaches each proxy with its policy. A proxy that has not been able to load policy since it started uses its local `INTUTIC_MCP_FAIL_OPEN` instead — see [When the registry has not loaded](/guide/mcp-governance#when-the-registry-has-not-loaded). It also decides what happens to a call an [MCP call budget](/guide/mcp-governance#call-budgets) covers when the proxy cannot reach Valkey to count it: fail open lets the call through uncounted, fail closed refuses it.
+
+Which MCP servers and tools may run, what a high-risk change to a server's tools does, and the MCP call budgets are set on **Policies › MCP Servers** ([the registry](/guide/mcp-governance#the-registry), [tool-change risk](/guide/mcp-governance#tool-change-risk), [call budgets](/guide/mcp-governance#call-budgets)). They are workspace settings too — `mcpDefaultPolicy`, `mcpHighRiskToolChange` and `mcpBudgets` on `PUT /api/v1/workspace/settings` — so only an owner or admin changes them, and each change is in the settings history on **Settings › Audit Timeline**.
 
 **When someone edits a harness config file by hand**
 
@@ -391,6 +393,9 @@ The **Event Type** list offers only the events the control plane sends:
 | `guardrail.ready` | Policy Guardrail Ready to Enforce |
 | `guardrail.stale` | Policy Guardrail Citation Went Stale |
 | `mcp.server.candidate` | New MCP Server Awaiting Approval |
+| `mcp.server.tool_change_risk` | MCP Server Tool Change Scored High Risk |
+| `mcp.budget.threshold` | MCP Call Budget Threshold Reached: once per budget per period |
+| `mcp.budget.exceeded` | MCP Call Budget Exceeded: once per budget per period, on the first refused call |
 | `finops.budget.threshold` | Budget Threshold Reached |
 | `finops.budget.exceeded` | Budget Exceeded |
 | `plan.deviation.detected` | Plan Deviation Detected |
