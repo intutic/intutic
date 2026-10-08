@@ -100,12 +100,10 @@ describe('sync loop propagates project-tier writes into git worktrees', () => {
     const wtMcp = JSON.parse(readFileSync(wtMcpPath, 'utf-8'))
     expect(wtMcp.mcpServers.intutic).toBeDefined()
 
-    // Not a blind copy: each entry embeds ITS OWN workspaceRoot-derived
-    // proxy-binary path, proving these are two independently-computed
-    // writes, not the main checkout's file duplicated verbatim.
-    expect(mainMcp.mcpServers.intutic.args[0]).toContain(mainRoot)
-    expect(wtMcp.mcpServers.intutic.args[0]).toContain(worktreeRoot)
-    expect(wtMcp.mcpServers.intutic.args[0]).not.toBe(mainMcp.mcpServers.intutic.args[0])
+    // Both entries run the proxy installed next to the daemon, not a path
+    // under either checkout — a checkout has no reason to contain it.
+    expect(mainMcp.mcpServers.intutic.args[0]).not.toContain(mainRoot)
+    expect(wtMcp.mcpServers.intutic.args[0]).toBe(mainMcp.mcpServers.intutic.args[0])
   }, 20_000)
 
   it('does not write into a worktree that was removed before the cycle ran', async () => {

@@ -63,3 +63,4 @@ describe('connect refreshes the gate caches on every sync (TD-488)', () => {
     expect(firstAwait, 'the refresh must not sit inside the version-gated block').toBeLessThan(versionGate)
   })
 })
+

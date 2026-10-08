@@ -18,6 +18,7 @@ import { execFile as _execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { newIso } from '@intutic/id'
 import type { HarnessType, SyncSopEntry, ConfigEdit } from '@intutic/shared-types'
+import { proxyHost } from '@intutic/shared-types'
 
 const execFile = promisify(_execFile)
 
@@ -77,7 +78,7 @@ export const HARNESS_FILES: Record<HarnessType, string> = {
   hermes: '.hermes/config.yaml',
   pi: '.pi/hooks.json',
   'github-copilot': '.github/copilot-instructions.md',
-  cline: '.cline/hooks/hooks.json',
+  cline: '.clinerules/intutic-governance.md',
   'roo-code': '.roorules',
   continue: '.continue/config.json',
   'claude-desktop': 'claude_desktop_config.json',
@@ -755,7 +756,7 @@ function formatCodex(sops: SyncSopEntry[], proxyUrl: string): string {
 
   return (
     header +
-    `INTUTIC_PROXY_URL=${proxyUrl}\n` +
+    `INTUTIC_PROXY_URL=${proxyHost(proxyUrl)}\n` +
     `INTUTIC_SOP_IDS=${sopIds}\n` +
     `INTUTIC_LAST_SYNC=${newIso()}\n`
   )
@@ -941,8 +942,8 @@ const JS_SDK_GATED_FRAMEWORKS: Record<
       'Gate.guard() verdict, producing user.tool_approval items for your next ' +
       'session.createTurn() call — TrueForge has no synchronous approval callback to hang a ' +
       "function off (confirmed against a real install); see that module's doc. Covers ONLY " +
-      'the embedded-library deployment mode — TrueForge run as its own standalone/hosted ' +
-      'server is not yet supported.',
+      'the embedded-library deployment mode — TrueForge run as its own server is governed ' +
+      'by the TrueForge bridge service instead (see the server-mode docs).',
     docsSlug: 'trueforge',
   },
   'ai-sdk-harness': {

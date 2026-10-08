@@ -82,7 +82,7 @@ SkillOpt parses agent trajectory failures and config files (like `.cursorrules`,
    shadow-first by design (a single workspace either has an edit applied or
    it doesn't, evaluated before/after in time rather than concurrently across
    a traffic split), and cost-policy A/B is deferred until a customer actually
-   asks for it. See `docs/TECH_DEBT.md`.
+   asks for it.
 
 ---
 

@@ -87,12 +87,4 @@ describe('BudgetChecker', () => {
     const checker = new BudgetChecker('http://127.0.0.1:1', 'vk_test')
     await expect(checker.checkBudget('model-e', 1)).rejects.toThrow(ClawdeConnectionError)
   })
-
-  it('updateCachedBudget still pre-populates the cache without a network call', () => {
-    const checker = new BudgetChecker(baseUrl, 'vk_test')
-    checker.updateCachedBudget('model-f', 1, 99.0, true)
-    // No assertion on a network call here -- this method's whole point is to
-    // avoid one, populated from response headers on a prior chat() call.
-    expect(true).toBe(true)
-  })
 })

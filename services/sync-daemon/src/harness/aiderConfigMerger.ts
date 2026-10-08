@@ -2,8 +2,26 @@
  * aiderConfigMerger.ts — Safe YAML merge for .aider.conf.yml.
  *
  * Reads any existing .aider.conf.yml, STRIPS dangerous auto-exec keys
- * (test-cmd, lint-cmd, auto-test, auto-lint), merges in Intutic governance
- * keys (openai-api-base, anthropic-api-base), and writes back atomically.
+ * (test-cmd, lint-cmd, auto-test, auto-lint), merges in the Intutic proxy
+ * routing, and writes back atomically. Everything else in the file — lists,
+ * nested values, comments — is kept: the file is edited through the `yaml`
+ * library's document model, never re-serialised from a flattened copy.
+ *
+ * Aider rejects any config key that is not one of its command-line options
+ * ("unrecognized arguments"), so only real options are written:
+ *
+ * - `openai-api-base` — the proxy's OpenAI-style base URL (host + `/v1`).
+ * - `set-env: ANTHROPIC_BASE_URL=<host>` — Aider has no Anthropic base-URL
+ *   option; its model layer (LiteLLM) reads this variable, and wants the bare
+ *   host because it appends `/v1/messages` itself. Entries the user set for
+ *   other variables are kept.
+ * - `read: .intutic/aider-sops.md` — the SOP text, as a read-only context
+ *   file (Aider's own mechanism for conventions), written next to the config.
+ *
+ * Earlier versions wrote `anthropic-api-base` and `extra-instructions`, which
+ * are not Aider options and stopped Aider from starting; both are removed.
+ *
+ * A file that does not parse as YAML, or is not a mapping, is left untouched.
  *
  * Each strip emits a governance_config_sanitized log entry visible in
  * the control plane audit feed.
@@ -16,8 +34,9 @@
 
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
+import { parseDocument, isMap, isSeq, isScalar, YAMLSeq, type Document } from 'yaml'
 import { createLogger } from '@intutic/logger'
-import { newIso } from '@intutic/id'
+import { anthropicBaseUrl, openaiBaseUrl } from '@intutic/shared-types'
 
 const log = createLogger('sync-aider-merger')
 
@@ -27,96 +46,117 @@ const log = createLogger('sync-aider-merger')
  */
 const SUPPRESSED_KEYS = ['test-cmd', 'lint-cmd', 'auto-test', 'auto-lint', 'test_cmd', 'lint_cmd']
 
-/**
- * Minimal YAML parser for .aider.conf.yml — handles simple key: value lines
- * and multi-line strings. Does not handle complex YAML. Good enough for the
- * flat structure of .aider.conf.yml.
- */
-function parseAiderYaml(raw: string): Record<string, unknown> {
-  const result: Record<string, unknown> = {}
+/** Keys earlier versions wrote that Aider rejects as unrecognized arguments. */
+const INVALID_LEGACY_KEYS = ['anthropic-api-base', 'extra-instructions']
+
+/** SOP file, relative to the workspace root (where Aider runs). */
+export const AIDER_SOPS_FILE = '.intutic/aider-sops.md'
+
+/** Header written at the top of the file. Kept short: it sits above the
+ *  user's own content, and is replaced, not stacked, on every sync. */
+const HEADER = [
+  '# Intutic: openai-api-base, the ANTHROPIC_BASE_URL set-env entry and the',
+  `# ${AIDER_SOPS_FILE} read entry are managed by intutic connect. test-cmd,`,
+  '# lint-cmd, auto-test and auto-lint are removed on every sync.',
+]
+
+/** Leading lines this product wrote (the header above, or the one earlier
+ *  versions wrote), removed before the file is parsed. */
+const OWN_HEADER_LINE = /^# (Intutic: |Intutic Governance Rules \(auto-generated|Last sync: |WARNING: test-cmd and lint-cmd keys are suppressed|\.intutic\/aider-sops\.md read entry|lint-cmd, auto-test and auto-lint are removed)/
+
+function stripOwnHeader(raw: string): string {
   const lines = raw.split('\n')
   let i = 0
-  while (i < lines.length) {
-    const line = lines[i]
-    // Skip comments and blank lines
-    if (!line || line.trim().startsWith('#')) { i++; continue }
+  while (i < lines.length && OWN_HEADER_LINE.test(lines[i])) i++
+  if (i === 0) return raw
+  while (i < lines.length && lines[i].trim() === '') i++
+  return lines.slice(i).join('\n')
+}
 
-    const colonIdx = line.indexOf(':')
-    if (colonIdx === -1) { i++; continue }
+/** Result of merging the Intutic keys into an Aider config's text. */
+export interface AiderMergeResult {
+  /** New file content, or `null` when the file must be left untouched. */
+  content: string | null
+  /** Suppressed keys that were removed. */
+  stripped: string[]
+}
 
-    const key = line.slice(0, colonIdx).trim()
-    const rest = line.slice(colonIdx + 1).trim()
-
-    if (rest === '|' || rest === '>') {
-      // Multi-line block scalar — collect until next key or EOF
-      const blockLines: string[] = []
-      i++
-      while (i < lines.length && (lines[i].startsWith('  ') || lines[i] === '')) {
-        blockLines.push(lines[i].startsWith('  ') ? lines[i].slice(2) : '')
-        i++
-      }
-      result[key] = blockLines.join('\n').trimEnd()
-    } else {
-      // Strip inline quotes
-      result[key] = rest.replace(/^["']|["']$/g, '')
-      i++
-    }
-  }
-  return result
+/** Turn `key`'s value into a sequence (a scalar becomes a one-item list). */
+function ensureSeq(doc: Document, key: string): YAMLSeq {
+  const current = doc.get(key, true)
+  if (isSeq(current)) return current
+  const seq = new YAMLSeq()
+  if (isScalar(current) && current.value !== null && current.value !== '') seq.add(current.value)
+  doc.set(key, seq)
+  return seq
 }
 
 /**
- * Minimal YAML serializer — writes flat key: value pairs.
- * Multi-line values use the | block scalar style.
+ * Merge the Intutic keys into the text of an `.aider.conf.yml`.
+ *
+ * @param raw      - Current file content ('' when the file does not exist).
+ * @param proxyUrl - The proxy host (a trailing `/v1` is tolerated).
+ * @param hasSops  - Whether the SOP file is to be listed under `read`.
  */
-function serializeAiderYaml(obj: Record<string, unknown>): string {
-  const lines: string[] = []
-  for (const [key, value] of Object.entries(obj)) {
-    if (typeof value === 'string' && value.includes('\n')) {
-      lines.push(`${key}: |`)
-      for (const ln of value.split('\n')) {
-        lines.push(`  ${ln}`)
-      }
-    } else if (typeof value === 'boolean') {
-      lines.push(`${key}: ${value}`)
-    } else {
-      lines.push(`${key}: ${String(value)}`)
-    }
-  }
-  return lines.join('\n')
+export function mergeAiderYaml(raw: string, proxyUrl: string, hasSops: boolean): AiderMergeResult {
+  const doc: Document = parseDocument(stripOwnHeader(raw))
+  if (doc.errors.length > 0) return { content: null, stripped: [] }
+  // A missing, empty or comment-only file starts as an empty mapping (its
+  // comments stay on the document); anything else that is not a mapping (a
+  // list, a bare scalar) is not an Aider config to merge into.
+  if (doc.contents === null) doc.contents = doc.createNode({})
+  if (!isMap(doc.contents)) return { content: null, stripped: [] }
+
+  const stripped = SUPPRESSED_KEYS.filter((key) => doc.has(key))
+  for (const key of [...stripped, ...INVALID_LEGACY_KEYS]) doc.delete(key)
+
+  doc.set('openai-api-base', openaiBaseUrl(proxyUrl))
+
+  const setEnv = ensureSeq(doc, 'set-env')
+  setEnv.items = setEnv.items.filter((item) => {
+    const value = isScalar(item) ? item.value : item
+    return !(typeof value === 'string' && value.startsWith('ANTHROPIC_BASE_URL='))
+  })
+  setEnv.add(`ANTHROPIC_BASE_URL=${anthropicBaseUrl(proxyUrl)}`)
+
+  const read = ensureSeq(doc, 'read')
+  read.items = read.items.filter((item) => (isScalar(item) ? item.value : item) !== AIDER_SOPS_FILE)
+  if (hasSops) read.add(AIDER_SOPS_FILE)
+  if (read.items.length === 0) doc.delete('read')
+
+  return { content: `${HEADER.join('\n')}\n\n${doc.toString()}`, stripped }
 }
 
 /**
  * Merge Intutic governance settings into .aider.conf.yml.
  *
  * Preserves all user keys EXCEPT the suppressed auto-exec keys.
- * Adds/updates openai-api-base and anthropic-api-base.
  *
  * @param configPath - Absolute path to .aider.conf.yml
  * @param proxyUrl   - Intutic proxy URL
- * @param sopsText   - Optional SOP instructions for extra-instructions field
+ * @param sopsText   - Optional SOP instructions, written to the `read` file
+ * @returns `true` when the config was written, `false` when it was left
+ *          untouched because it is not a YAML mapping (a warning is logged).
  */
 export async function mergeAiderConfig(
   configPath: string,
   proxyUrl: string,
   sopsText?: string,
-): Promise<void> {
-  // Read existing config if present
-  let existing: Record<string, unknown> = {}
+): Promise<boolean> {
+  let raw = ''
   try {
-    const raw = await fs.readFile(configPath, 'utf-8')
-    existing = parseAiderYaml(raw)
-  } catch {
-    // No existing file — start fresh
+    raw = await fs.readFile(configPath, 'utf-8')
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
   }
 
-  // Strip dangerous auto-exec keys
-  const stripped: string[] = []
-  for (const key of SUPPRESSED_KEYS) {
-    if (key in existing) {
-      stripped.push(key)
-      delete existing[key]
-    }
+  const { content, stripped } = mergeAiderYaml(raw, proxyUrl, Boolean(sopsText))
+  if (content === null) {
+    log.warn(
+      { action: 'aider_config_merge_skipped', path: configPath },
+      `${configPath} is not a YAML mapping — left untouched; fix it and the next sync will add the Intutic keys`,
+    )
+    return false
   }
   if (stripped.length > 0) {
     log.warn(
@@ -125,22 +165,16 @@ export async function mergeAiderConfig(
     )
   }
 
-  // Merge governance keys
-  existing['openai-api-base'] = proxyUrl
-  existing['anthropic-api-base'] = proxyUrl
-
+  // The SOP file lives next to the config, under the workspace's .intutic/.
+  const sopsPath = path.join(path.dirname(configPath), AIDER_SOPS_FILE)
   if (sopsText) {
-    existing['extra-instructions'] = sopsText
+    await fs.mkdir(path.dirname(sopsPath), { recursive: true })
+    const tmpSops = sopsPath + '.intutic-tmp'
+    await fs.writeFile(tmpSops, sopsText + '\n', 'utf-8')
+    await fs.rename(tmpSops, sopsPath)
+  } else {
+    await fs.rm(sopsPath, { force: true })
   }
-
-  const header = [
-    '# Intutic Governance Rules (auto-generated — do not edit proxy keys)',
-    `# Last sync: ${newIso()}`,
-    `# WARNING: test-cmd and lint-cmd keys are suppressed by Intutic governance`,
-    '',
-  ].join('\n')
-
-  const content = header + serializeAiderYaml(existing) + '\n'
 
   const tmpPath = configPath + '.intutic-tmp'
   await fs.mkdir(path.dirname(configPath), { recursive: true })
@@ -151,4 +185,5 @@ export async function mergeAiderConfig(
     { action: 'aider_config_written', path: configPath, stripped },
     'Aider config merged with proxy URL and dangerous keys stripped',
   )
+  return true
 }

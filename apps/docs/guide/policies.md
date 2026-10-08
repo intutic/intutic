@@ -38,7 +38,25 @@ DLP is configured in `config.yaml` under `intutic_settings.dlp`:
 |---------|---------|--------|
 | `enabled` | `true` | Master switch |
 | `scan_input` | `true` | Scan request bodies and forwarded header values before forwarding |
-| `scan_output` | `true` | Scan response bodies; streaming responses are scrubbed per SSE line before each line reaches the client |
+| `scan_output` | `true` | Scan response bodies; streaming responses are scrubbed before each chunk reaches the client |
+| `stream_holdback_bytes` | derived (1020 with the built-in patterns) | How far a streamed response is held back so a secret split across two chunks is seen whole before any of it is sent. The default is the longest match any installed pattern can produce. It delays the first token by the time the model takes to write that many bytes (a few seconds), not the end of the response. `0` turns the holdback off, and a split secret can then get through; a smaller number leaves secrets longer than it uncovered. Applies only when `enabled` and `scan_output` are on |
+| `patterns` | none | Your own patterns, added to the built-in set (below) |
+
+### Custom patterns
+
+Add patterns for data shaped by your own systems (customer IDs, record numbers, health identifiers) under `dlp.patterns`:
+
+```yaml
+intutic_settings:
+  dlp:
+    patterns:
+      - name: customer_id          # appears in findings; keep names unique
+        category: pii              # SOP taint rules group by it; redactions read [REDACTED_PII]
+        regex: 'CUST-[0-9]{8}'     # Rust regex syntax: no lookaround; (?i: … ) for case-insensitive
+        action: redact             # redact (default) or block
+```
+
+`action` is `redact` or `block`; anything else, or a regex that does not compile, stops the proxy at startup with an error naming the pattern, so a typo never leaves a rule silently unenforced. A pattern with a long bounded repetition (`{50,1000}`) raises the derived `stream_holdback_bytes` for every streamed response.
 
 Headers follow the same doctrine: a block-action match in a forwarded header
 refuses the request with a DLP error, and any other header finding is redacted

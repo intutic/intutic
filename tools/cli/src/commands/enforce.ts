@@ -18,6 +18,7 @@
  */
 
 import { spawn } from 'node:child_process'
+import { isIP } from 'node:net'
 import { log } from '../lib/logger.js'
 import { resolveProxyBinary } from '../lib/proxyBinary.js'
 import { writeEnforcementState } from '../lib/enforcementState.js'
@@ -44,6 +45,31 @@ export function enforceFlagArgs(opts: EnforceOptions): string[] {
   if (opts.dns === false) args.push('--no-dns')
   if (opts.platform) args.push('--platform', opts.platform)
   return args
+}
+
+/**
+ * The `--allow` entries that are not an IP address or CIDR block.
+ *
+ * The proxy binary writes each entry verbatim into the firewall ruleset, so a
+ * hostname (the docs once showed `registry.internal.corp`) either fails the
+ * apply or is resolved once at load time and silently goes stale when the
+ * host's address changes. Rejecting it here names the bad entry before
+ * anything touches the firewall.
+ */
+export function invalidAllowEntries(allow: string): string[] {
+  return allow
+    .split(',')
+    .map((entry) => entry.trim())
+    // Empty entries (a trailing comma) are dropped by the binary too.
+    .filter((entry) => entry !== '')
+    .filter((entry) => {
+      const [address = '', prefix, ...rest] = entry.split('/')
+      const family = isIP(address)
+      if (family === 0 || rest.length > 0) return true
+      if (prefix === undefined) return false
+      if (!/^\d{1,3}$/.test(prefix)) return true
+      return Number(prefix) > (family === 4 ? 32 : 128)
+    })
 }
 
 const VALID_ACTIONS = ['generate', 'apply', 'remove', 'status', 'report'] as const
@@ -129,6 +155,15 @@ export async function runEnforce(action: EnforceAction, opts: EnforceOptions): P
   if (!VALID_ACTIONS.includes(action)) {
     log.error(`Unknown enforce action '${action}'. Use: ${VALID_ACTIONS.join(' | ')}`)
     process.exit(1)
+  }
+
+  if (opts.allow) {
+    const invalid = invalidAllowEntries(opts.allow)
+    if (invalid.length > 0) {
+      log.error(`--allow takes IP addresses or CIDR blocks; not valid: ${invalid.map((e) => `'${e}'`).join(', ')}`)
+      log.info('Resolve a hostname to its address range first, e.g. --allow 10.20.0.0/16')
+      process.exit(1)
+    }
   }
 
   const flags = enforceFlagArgs(opts)

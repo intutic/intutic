@@ -272,7 +272,7 @@ The enforcement action system is defined across these components:
 | `pcasService.ts` | SSO group privilege resolution (Valkey → Postgres cascade) | Enterprise Control Plane |
 | `anomalyEnforcementService.ts` | Promotion of repeat findings to an enforceable verdict | Enterprise Control Plane |
 | `sslEnforcementService.ts` | SSL scheduling, structural and logical layers, plus compliance reporting | Enterprise Control Plane |
-| `sslGateEvaluator.ts` | Calls the SSL layers from the hook gate in **shadow mode** — records, never blocks (`TD-300`) | Enterprise Control Plane |
+| `sslGateEvaluator.ts` | Calls the SSL layers from the hook gate in **shadow mode** — records, never blocks | Enterprise Control Plane |
 | `finopsService.ts` | Budget gate enforcement + cost tracking per action | Enterprise Control Plane |
 
 ---

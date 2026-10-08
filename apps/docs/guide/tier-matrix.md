@@ -36,8 +36,9 @@ list is a trial or a degraded preview of a paid feature:
   request/response, evaluates it against local WASM rules, blocks prohibited
   tool calls, and injects steering warnings into the stream in real time.
 - **Local cost and token ledger** — session traces and daily spend land in
-  local JSONL logs (`~/.intutic/logs/`); `intutic predict-cost` reads that
-  same history for pre-flight estimates.
+  local JSONL logs (`~/.intutic/logs/`), which `intutic traces list` reads
+  with no account. Pre-flight estimates (`intutic predict-cost`) come from a
+  connected workspace's recorded usage, so they need a control plane.
 - **Local spend caps** — a daily budget ceiling (`~/.intutic/config.json`),
   enforced natively inside the proxy on every request.
 - **Intelligent routing and the bandit** — the routing engine and its
@@ -86,14 +87,15 @@ list. In short:
 | [SOP Optimizer](/guide/metaclaw) | | ✓ | ✓ | ✓ |
 | [Evaluator Sandbox](/guide/evaluator-sandbox) | | ✓ | ✓ | ✓ |
 | [SCIM provisioning](/guide/scim) | | | ✓ | ✓ |
-| Data residency (EU/APAC) | | | ✓ | ✓ |
+| Data residency (Cloud: US; EU on request) | | | ✓ | ✓ |
 | [Self-hosted gateway](/external/self-hosted-gateway) | | | ✓ | ✓ |
 | Runs in your VPC or an air-gapped network | | | | ✓ |
 
-The 14-day personal trial includes Policy Guardrails, single sign-on, SCIM,
+The 14-day Free trial includes Policy Guardrails, single sign-on, SCIM,
 Custom Filters, the SOP Optimizer and data residency; the 14-day Enterprise
-trial adds the Evaluator Sandbox. Plan changes take effect at the next sync-daemon
-handshake; no CLI or proxy binary change is needed on any developer's machine.
+trial adds the Evaluator Sandbox and SOP write-back. Plan changes take effect
+at the next sync-daemon handshake; no CLI or proxy binary change is needed on
+any developer's machine.
 <!-- ENTERPRISE_ONLY_END -->
 
 ## Upgrading

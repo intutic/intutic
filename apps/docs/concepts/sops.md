@@ -10,16 +10,19 @@ Every SOP is stored in the database registry and projects the following data str
 
 ```typescript
 interface SopRegistryEntry {
-  sopId: string;               // Unique ID prefixed with 'sop_'
+  sopId: string;               // Unique ID prefixed with 'sp_'
   workspaceId: string;         // Owning workspace reference
   title: string;               // Human-readable title
   version: string;             // SemVer string (default: 1.0.0)
   markdownContent: string;     // The natural language rule body
   contentHash: string;         // SHA-256 integrity hash of content
-  riskTier: 'LOW' | 'MEDIUM' | 'HIGH';
-  complexityTier: 'TIER_1' | 'TIER_2' | 'TIER_3';
-  isActive: boolean;           // Active status toggle
-  lifecycleState: 'DRAFT' | 'UNDER_REVIEW' | 'ACTIVE' | 'ARCHIVED';
+  riskTier: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  complexityTier: 'TIER_0' | 'TIER_1' | 'TIER_2'; // simplest to most complex work;
+                               // routing learns per tier (see the REST API reference)
+  isActive: boolean;           // false for superseded versions and deleted SOPs
+  lifecycleState: 'DRAFT' | 'PENDING_REVIEW' | 'GENERATED' | 'HYPOTHESIZED'
+    | 'REFINED' | 'VALIDATED' | 'INVALIDATED';
+  versionCounter: number;      // bumped on every save; send it back to detect conflicts
   // `sopType` and `hookPhase` are vestigial: the columns exist, nothing sets
   // them, and the executor they fed has been removed (see "SOP Formats" below).
   sopType: 'standard' | 'hook';
@@ -39,7 +42,7 @@ human-in-the-loop validation or in-process local interception:
 | Feature | Local Harness Rules (`CLAUDE.md` / WASM) | LLM-as-a-Judge (LLMProbe) |
 | :--- | :--- | :--- |
 | **Execution Timing** | **Pre-flight (Before execution)** | **Post-flight / Async (During/After execution)** |
-| **Latency** | **<5 milliseconds** (Instant) | **2–5 seconds** (LLM inference delay) |
+| **Latency** | **No model call and no network hop**: checked on the machine before the action runs (WASM rules are stopped at a 5 ms execution timeout) | **A model call**: seconds, while or after the response streams |
 | **Purpose** | **Hard Prevention**: Instantly blocks `rm -rf` and force pushes at the hook gate, blocks a `DROP TABLE` in an MCP tool call (at the hook gate it is flagged, not blocked; at the LLM proxy a SOP's [`sql_guard:`](/reference/sop-front-matter#destructive-sql) refuses one aimed at a database outside its allowlist), and redacts API keys before destruction occurs. | **Semantic Audit**: Evaluates whether the agent followed complex, subjective guidelines (e.g. *"Did the refactored code maintain proper architectural layering?"*). |
 
 *Without local harness rules, an agent would execute destructive commands before an LLM judge even finishes thinking!*

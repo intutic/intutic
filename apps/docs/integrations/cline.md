@@ -4,7 +4,9 @@ Integrate Intutic governance with [Cline](https://github.com/cline/cline) — th
 
 ## How it works
 
-Intutic writes governance rules into `.cline/hooks/hooks.json` inside your project root, which Cline executes prior to executing tools (PreToolUse hooks). If a policy is violated, the hook returns exit code 2 to block the tool execution. Governance text rules are written separately as the `.clinerules` flat file.
+Cline runs *file hooks*: an executable named `PreToolUse` in a hooks directory runs before every tool call, with the call as JSON on stdin. Intutic installs its gate as `.clinerules/hooks/PreToolUse`. It refuses a call by printing `{"cancel": true, "errorMessage": "…"}` on stdout — Cline ignores the hook's exit code. The hook has no tool filter, so it sees every tool call, including MCP calls (`use_mcp_tool`). Governance rules are written next to it as `.clinerules/intutic-governance.md`, which Cline reads as a rules file.
+
+The same file serves the VS Code extension and the Cline CLI, which read different payload shapes; the gate accepts both. In the VS Code extension, turn on **Enable Hooks** in Cline's feature settings — hooks do not run until you do.
 
 ## Setup
 
@@ -17,9 +19,10 @@ intutic init
 The CLI detects Cline and registers it as a harness:
 
 ```
-✓ Detected harnesses:
-  • cline -> .cline/hooks/hooks.json
+  ✔ cline → .clinerules/intutic-governance.md
 ```
+
+`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
 
 ### 2. Start the proxy
 
@@ -31,10 +34,10 @@ intutic start
 
 ## What gets written
 
-Intutic generates the Cline PreToolUse hook configuration and hook scripts:
-* **Config file:** `.cline/hooks/hooks.json`
-* **Rules file:** `.clinerules` (flat file with governance SOP text)
-* **Hook script:** `.cline/hooks/intutic-check.js` (referenced by `hooks.json` to inspect shell commands, file edits, and MCP tool calls)
+* **Gate:** `.clinerules/hooks/PreToolUse` — an executable Node.js script that evaluates shell commands, file edits and MCP tool calls against the built-in protections and your SOPs.
+* **Rules:** `.clinerules/intutic-governance.md` — your SOP text.
+
+`.clinerules` has to be a directory for both to fit. A flat `.clinerules` file that an earlier Intutic version wrote is converted automatically. A flat `.clinerules` file you wrote yourself is left alone, and no gate is installed until you move its content into a file inside a `.clinerules/` directory; the `intutic connect` log says so. A `PreToolUse` hook you wrote yourself is never overwritten.
 
 ## Proxy routing
 
@@ -44,3 +47,5 @@ To route Cline's LLM requests through the local proxy:
 3. Set **API Provider** to `OpenAI Compatible`.
 4. Set **Base URL** to `http://localhost:4000/v1`.
 5. Enter your Intutic API Key.
+
+Cline keeps these in its own settings storage, not in a file Intutic writes, so this step is manual. For the **Anthropic** provider instead, check **Use custom base URL** and enter `http://localhost:4000` — Cline appends `/v1/messages` itself.

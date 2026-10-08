@@ -127,7 +127,7 @@ Every tool call and prompt evaluated by Intutic produces one of five **PCAS Acti
 
 ## 🔌 Supported Harnesses & Frameworks
 
-Intutic ships **43 harness adapters** that are auto-detected and config-synced without modifying your agent's source code, and every one of them is a **supported harness** — no adapter carries an open support gap today (AutoGen's closed with its workbench gate, the Agentic Orchestrator's with OpenCode's own adapter, both in September 2026). Anything else that speaks an OpenAI- or Anthropic-compatible API is governed the same way by pointing its base URL at the proxy:
+Intutic ships **43 harness adapters**: 19 install as native hook gates in the harness's own configuration, with no change to your agent's code; Claude Desktop and Roo Code have no hook system and are governed through the proxy and the MCP governance proxy; 17 SDK-gated frameworks are governed by an in-process gate you add to your agent code (`@intutic/gate` or `intutic-clawde`); Aider is governed through the proxy alone; and four orchestrators and bridges hand off to an already-gated harness or an Intutic-operated bridge. Every one of them is a **supported harness** — no adapter carries an open support gap today (AutoGen's closed with its workbench gate, the Agentic Orchestrator's with OpenCode's own adapter, both in September 2026). Anything else that speaks an OpenAI- or Anthropic-compatible API is governed the same way by pointing its base URL at the proxy:
 
 | Category | Supported Tools & Frameworks |
 | :--- | :--- |

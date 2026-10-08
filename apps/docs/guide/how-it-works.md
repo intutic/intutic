@@ -198,8 +198,7 @@ enforcement, so bypass is not possible rather than merely detected:
   for the full backend-by-backend breakdown, what each does and doesn't cover,
   and the platforms this does and doesn't reach.
 
-Both are off by default (no change to an existing install) and are described in
-LLD #63.
+Both are off by default, so an existing install is unchanged.
 
 ## Active Network Probes
 

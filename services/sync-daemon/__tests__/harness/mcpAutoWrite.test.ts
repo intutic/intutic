@@ -16,7 +16,7 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { parseDocument } from 'yaml'
-import { injectMcpServer, discoverMcpServers } from '../../src/harness/mcpAutoWrite.js'
+import { injectMcpServer, discoverMcpServers, resolveProxyBin } from '../../src/harness/mcpAutoWrite.js'
 
 /** Loosely-typed shape for reading back a wrapped Goose `mcp:` entry in
  *  assertions — this file doesn't need `McpServerEntry`'s full precision. */
@@ -51,7 +51,7 @@ function teardown(ctx: Ctx): void {
   rmSync(ctx.root, { recursive: true, force: true })
 }
 
-const claudeCodePath = (home: string) => join(home, '.claude', 'mcp.json')
+const claudeCodePath = (home: string) => join(home, '.claude.json')
 
 describe('injectMcpServer — write-if-changed', () => {
   let ctx: Ctx
@@ -568,5 +568,62 @@ describe('injectMcpServer — OpenCode opencode.json mcp block (TD-487)', () => 
       { server: 'sso', harness: 'opencode', transport: 'http', wrapped: false },
     ]))
     expect(after.some((s) => s.server === 'intutic')).toBe(false)
+  })
+})
+
+describe('Claude Code target — ~/.claude.json, merged', () => {
+  let ctx: Ctx
+
+  afterEach(() => {
+    if (ctx) teardown(ctx)
+  })
+
+  it('wraps user- and local-scope servers and keeps the rest of Claude Code\'s state', async () => {
+    ctx = setup()
+    writeFileSync(claudeCodePath(ctx.home), JSON.stringify({
+      numStartups: 7,
+      mcpServers: { github: { command: 'npx', args: ['-y', 'gh-mcp'] } },
+      projects: {
+        [ctx.root]: { allowedTools: ['Bash'], mcpServers: { db: { command: 'db-mcp' } } },
+        '/other/project': { mcpServers: { other: { command: 'other-mcp' } } },
+      },
+    }))
+
+    await injectMcpServer(ctx.root, 'ws_test')
+
+    const written = JSON.parse(readFileSync(claudeCodePath(ctx.home), 'utf-8'))
+    expect(written.numStartups).toBe(7)
+    expect(written.mcpServers.github.__intutic_wrapped).toBe(true)
+    expect(written.mcpServers.intutic).toBeDefined()
+    expect(written.projects[ctx.root].allowedTools).toEqual(['Bash'])
+    expect(written.projects[ctx.root].mcpServers.db.__intutic_wrapped).toBe(true)
+    // Another project's local servers are that project's business.
+    expect(written.projects['/other/project'].mcpServers.other).toEqual({ command: 'other-mcp' })
+  })
+
+  it('does not create ~/.claude.json, and leaves one that does not parse untouched', async () => {
+    ctx = setup()
+    await injectMcpServer(ctx.root, 'ws_test')
+    expect(() => statSync(claudeCodePath(ctx.home))).toThrow()
+
+    const broken = '{ "mcpServers": { }, \n'
+    writeFileSync(claudeCodePath(ctx.home), broken)
+    await injectMcpServer(ctx.root, 'ws_test')
+    expect(readFileSync(claudeCodePath(ctx.home), 'utf-8')).toBe(broken)
+  })
+})
+
+describe('resolveProxyBin', () => {
+  it('finds the proxy installed alongside the daemon, not under the user\'s project', () => {
+    // A project with no node_modules and no packages/ — the global-install case.
+    const project = mkdtempSync(join(tmpdir(), 'intutic-proxybin-'))
+    try {
+      const bin = resolveProxyBin(project)
+      expect(bin.startsWith(project)).toBe(false)
+      expect(statSync(bin).isFile()).toBe(true)
+      expect(bin).toMatch(/(?:@intutic[\\/]mcp-governance-proxy|packages[\\/]mcp-proxy)[\\/]dist[\\/]index\.js$/)
+    } finally {
+      rmSync(project, { recursive: true, force: true })
+    }
   })
 })

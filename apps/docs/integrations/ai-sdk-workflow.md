@@ -17,9 +17,10 @@ intutic init
 ```
 
 ```
-✓ Detected harnesses:
-  • ai-sdk-workflow → .env.intutic
+  ✔ ai-sdk-workflow → .env.intutic
 ```
+
+`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
 
 Detection requires `@ai-sdk/workflow` in `package.json`. The unscoped `workflow` package alone is deliberately **not** a trigger: the bare name is too generic to treat as evidence, and the durable runtime without `@ai-sdk/workflow` has no `WorkflowAgent` for this gate to apply to.
 
@@ -107,8 +108,8 @@ Same `.env.intutic` shape as every other SDK-gated framework — proxy URLs plus
 
 Same structural gaps as every SDK-gated framework — see [LangGraph's "What the adapter does NOT do"](/integrations/langgraph#what-the-adapter-does-not-do). Two additions specific to this runtime:
 
-- **Verified live on the local world only.** Everything above was observed on the Workflow DevKit's local world (`nitro dev` with `workflow/nitro`, state in `.workflow-data`) with a scripted model and no account or keys. That covers the approval pause, a SIGKILL and restart followed by an approved resume, refusal versus plain-error retry counts, and the refusal's shape across the step boundary. Not exercised: a hosted world (Vercel Workflow or another production world) with its own queue and retry delivery, a real model provider, and an approval that arrives after hours of wall-clock time rather than after a restart. See `docs/TECH_DEBT.md` TD-418.
-- **The integration point is watched for drift.** `ai` 7 (still in 7.0.127) marks tool-level `needsApproval` as deprecated in favour of `generateText`-level `toolApproval` — but `@ai-sdk/workflow`'s own agent loop (1.0.69 and 2.0.58 alike) reads the tool-level field and exposes no other veto surface, so it is the correct (and only) integration point today. If a future `@ai-sdk/workflow` release moves to the `toolApproval`-shaped surface, this adapter must move with it — see TD-419.
+- **Verified live on the local world only.** Everything above was observed on the Workflow DevKit's local world (`nitro dev` with `workflow/nitro`, state in `.workflow-data`) with a scripted model and no account or keys. That covers the approval pause, a SIGKILL and restart followed by an approved resume, refusal versus plain-error retry counts, and the refusal's shape across the step boundary. Not exercised: a hosted world (Vercel Workflow or another production world) with its own queue and retry delivery, a real model provider, and an approval that arrives after hours of wall-clock time rather than after a restart.
+- **The integration point is watched for drift.** `ai` 7 (still in 7.0.127) marks tool-level `needsApproval` as deprecated in favour of `generateText`-level `toolApproval` — but `@ai-sdk/workflow`'s own agent loop (1.0.69 and 2.0.58 alike) reads the tool-level field and exposes no other veto surface, so it is the correct (and only) integration point today. If a future `@ai-sdk/workflow` release moves to the `toolApproval`-shaped surface, this adapter must move with it.
 
 ## Config details
 

@@ -65,4 +65,4 @@ A hash that comes back flagged (any AV engine detection) scores that skill **zer
 |---|---|
 | [Skill Scanning](/guide/skill-scanning) | The pattern-based `SKILL.md` and bundled-script scanners this lookup complements — read this first for what gets hashed and when |
 | [MCP Governance](/guide/mcp-governance) | The separate, pre-existing decline of a global MCP-server reputation database, distinct from this narrower integration |
-| [Governance Controls Checklist](/guide/governance-controls) | The house style for stating partial coverage honestly |
+| [Governance Controls Checklist](/guide/governance-controls) | The house style for stating partial coverage precisely |

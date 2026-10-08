@@ -132,7 +132,7 @@ process.stdin.on('end', () => {
     // hole. The hand-rolled check that lived here became the shared
     // intuticGuardEnvelope in gateBody.ts (v5), so every JS writer refuses the
     // same envelopes with the same event; if Copilot renames the fields,
-    // re-run intutic sync after upgrading.
+    // restart intutic connect after upgrading so it rewrites this gate.
     intuticGuardEnvelope(ctx, ['tool_name', 'toolName', 'tool_input', 'toolInput'], logEvent);
 
     const input = ctx.tool_input || ctx.toolInput || {};

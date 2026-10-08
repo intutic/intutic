@@ -3,7 +3,7 @@
 Integrate Intutic governance with [DeepSeek's "dsh"](https://github.com/deepseek-ai/deepseek-harness) — a **developer preview** (`@deepseek-ai/dsh`, first published 2026-08-13) plugin-first coding-agent harness built on DeepSeek's own "Cordis" extensibility framework.
 
 ::: warning PREVIEW — breaking changes possible
-dsh is a developer preview with its own stated breaking-changes policy. This integration was last verified — including a live session — against `@deepseek-ai/dsh` **0.2.0-rc.2**, and declares `@intutic/gate` `^2.0.0` in a profile's `package.json` when the profile has no declaration of its own. A preview product can still change its plugin API, its `tools/pre-execute` payload shape, or its configuration layout between releases (0.2 moved live configuration out of `settings.yaml` and into each profile's `cordis.patch.yml`). See [TD-370](https://github.com/intutic/intutic/blob/main/docs/TECH_DEBT.md) for exactly what this integration confirmed against a real install and what remains open.
+dsh is a developer preview with its own stated breaking-changes policy. This integration was last verified — including a live session — against `@deepseek-ai/dsh` **0.2.0-rc.2**, and declares `@intutic/gate` `^2.0.0` in a profile's `package.json` when the profile has no declaration of its own. A preview product can still change its plugin API, its `tools/pre-execute` payload shape, or its configuration layout between releases (0.2 moved live configuration out of `settings.yaml` and into each profile's `cordis.patch.yml`). [Known gaps](#known-gaps) lists what remains open.
 :::
 
 ## How it works
@@ -29,15 +29,18 @@ intutic init
 ```
 
 ```
-✓ Detected harnesses:
-  • dsh → (no rules file — see "What gets written" below)
+  ✔ dsh →
 ```
 
-### 3. Start the proxy
+`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
+
+### 3. Connect
 
 ```bash
-intutic connect --harness dsh
+intutic connect
 ```
+
+`intutic connect` starts the proxy and writes the dsh registration described below (dsh must be in `~/.intutic/config.json`'s `harnesses`, which `intutic init` records when it detects dsh).
 
 ### 4. Run dsh with a profile at least once
 
@@ -70,13 +73,13 @@ intutic-governance (@intutic/gate/dsh): failed to import
 dsh offers no way for a profile row to make startup fail instead, so this step is permanent and manual. `intutic status` shows which profiles are registered but not yet activated.
 :::
 
-The CLI's own onboarding text (shown after `intutic init`/`intutic connect --harness dsh`) prints this same command, per profile, so you don't have to come back to this page to find it.
+The CLI's own onboarding text (shown when `intutic connect` starts with dsh recorded) prints this same command, per profile, so you don't have to come back to this page to find it.
 
 Every sync also (re)writes `$DSH_HOME/INSTALL.md`, listing the exact `dsh plugin --profile <name> add @intutic/gate` command for every profile currently registered — a standing, always-current reference alongside the onboarding text (the same pattern the [n8n integration](/integrations/n8n)'s own auto-generated INSTALL.md follows).
 
 ## Coverage visibility
 
-Two places surface the TD-370 "silent no-profile window" and the pending activation step above, so neither goes unnoticed between syncs:
+Two places surface the "silent no-profile window" (dsh installed but never run, so there is no profile to register into) and the pending activation step above, so neither goes unnoticed between syncs:
 
 - **`intutic status`** prints a dedicated `dsh (DeepSeek harness):` block: a warning when dsh is detected but has zero profiles, or — once profiles exist — a per-profile breakdown of which ones are registered but not yet activated (pointing at `INSTALL.md`), versus fully registered and activated.
 - **`intutic connect`** checks once at startup (not on every poll tick, since the gap only changes state on your first `dsh --profile <name>` run) and logs a warning if dsh is present on the machine with zero profiles yet.
@@ -112,7 +115,7 @@ Every decision is appended to `.intutic/events/hook-events.jsonl` and drained to
 
 ## Known gaps
 
-See [TD-370](https://github.com/intutic/intutic/blob/main/docs/TECH_DEBT.md) for the complete record. In short:
+What remains open:
 
 1. The signed-in DeepSeek account route is not redirected (see "What gets written"). dsh releases that route's token only to DeepSeek's own origin, so this limit is permanent.
 2. A machine where dsh has never been run has no profile to register into until the user's first `dsh --profile <name>` run.

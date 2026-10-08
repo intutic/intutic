@@ -20,7 +20,7 @@
 
 import { join, dirname } from 'node:path'
 import { readFile, writeFile, rename, mkdir } from 'node:fs/promises'
-import { HarnessType } from '@intutic/shared-types'
+import { HarnessType, anthropicBaseUrl, openaiBaseUrl, proxyHost } from '@intutic/shared-types'
 import type { SyncSopEntry } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
 import { hashFile } from '../lib/hash.js'
@@ -54,9 +54,9 @@ export const langgraphAdapter: IHarnessAdapter = {
       `# Last sync: ${newIso()}`,
       '# Source this file: source .env.intutic',
       '',
-      `export ANTHROPIC_BASE_URL="${proxyUrl}"`,
-      `export OPENAI_BASE_URL="${proxyUrl}"`,
-      `export INTUTIC_PROXY_URL="${proxyUrl}"`,
+      `export ANTHROPIC_BASE_URL="${anthropicBaseUrl(proxyUrl)}"`,
+      `export OPENAI_BASE_URL="${openaiBaseUrl(proxyUrl)}"`,
+      `export INTUTIC_PROXY_URL="${proxyHost(proxyUrl)}"`,
       `export INTUTIC_SOP_COUNT=${sops.length}`,
       '',
       '# These env vars govern LLM egress only. LangGraph tools run in your own',

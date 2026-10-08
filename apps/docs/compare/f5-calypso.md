@@ -1,40 +1,50 @@
-# Intutic vs F5 Calypso (CalypsoAI)
-
-F5 Calypso (originally CalypsoAI) is an enterprise AI security gateway and proxy built to scan, redact, and block prompt injections, jailbreaks, PII leakage, and toxic outputs at the LLM inference layer. **Intutic is a local-first agent control plane that synchronously intercepts system-level tool calls and filesystem activities inside the agent loop.**
-
-## The Core Difference
-
-F5 Calypso specializes in **content-level security** for LLM chat inputs and outputs. It acts as an inference gateway proxy to prevent sensitive data leakage and jailbreaks. Intutic specializes in **action-level containment**. It hooks into the local IDE agent harness (Claude Code, Cursor, Aider) to govern actual terminal execution, filesystem writes, git commits, and database mutations in real time.
-
-If your AI coding agent tries to run a bash command that recursively deletes a repository folder, F5 Calypso cannot detect it because the prompt itself is structurally benign. Intutic intercepts the tool execution at the proxy and local daemon layer, evaluates it against active WebAssembly rules, and terminates the run.
-
 ---
+title: Intutic vs F5 AI Guardrails
+description: F5 AI Guardrails (formerly CalypsoAI) secures model traffic and agent actions with red teaming; Intutic is the enforcement point inside 43 coding-agent harnesses.
+---
+
+# Intutic vs F5 AI Guardrails (formerly CalypsoAI)
+
+*Last reviewed: 2026-10-08*
+
+Intutic is the enforcement point inside the coding agent: a pre-execution gate decides each tool call across 43 harnesses, with a policy proxy, an MCP governance proxy, a default-deny egress firewall, sandboxed execution and a signed audit trail behind it. F5 acquired CalypsoAI in September 2025 and sells its products as F5 AI Guardrails and F5 AI Red Team: guardrails on model inputs and outputs, natural-language custom guardrails, a Secure AI Agents capability that enforces on agent actions and tool use, and automated red teaming. F5 secures AI traffic across an enterprise; Intutic governs what coding agents and agent frameworks do on developer machines, in CI and in your services.
 
 ## Comparison
 
-| Capability | Intutic | F5 Calypso (CalypsoAI) |
-|-----------|---------|------------------------|
-| **Enforcement Scope** | Action & Tool-Call containment (bash, files, databases) | Text Content & Prompt safety (PII, injection, jailbreaks) |
-| **Interception Point** | System-level CLI commands, file writes, local workspace | LLM API request/response HTTP payload stream |
-| **Execution Layer** | Local-first gateway proxy + local IDE daemon hooks | Centralized enterprise proxy gateway (Cloud/SaaS) |
-| **WASM Rule Engine** | Yes — compile custom policies into WebAssembly sandboxes | No — JSON policy templates and standard content filters |
-| **Agent Integrations** | 39 AI coding harnesses (Claude Code, Cursor, etc.) out-of-the-box | SDK wrapper and standard chatbot endpoint routing |
-| **Sandbox Isolation** | WASM (wasmtime) policy sandbox — 16 MB, 1,000,000 fuel, 5 ms, explicit host-import allowlist | Not available |
+| | Intutic | F5 AI Guardrails |
+|---|---|---|
+| **Primary job** | Runtime enforcement and audit for AI agents | AI runtime security for models, applications and agents |
+| **Where it enforces** | Native pre-execution hook gates in 19 of the 43 harnesses, plus request and response proxy, MCP governance proxy, egress firewall and sandbox | Model inputs and outputs; agent actions and tool use for OpenAI- and Anthropic-format agents |
+| **Coding agents** | **43** supported harnesses, including Claude Code, Codex, Cursor, GitHub Copilot, Windsurf and Cline | Not named in its documentation |
+| **Decisions** | Allow, warn, require approval (held until approved), block, redact, re-ask, shadow | Guardrail enforcement on prompts, responses and agent actions |
+| **Custom policy** | SOPs in git and WASM rules; policy documents turned into controls with Policy Guardrails | Custom guardrails written as natural-language policies |
+| **MCP** | MCP governance proxy with DLP, policy rules, anomaly detectors, trust-on-first-use pinning and tool-description poisoning detection | Not described on its product page |
+| **Red teaming** | — | Automated red teaming with autonomous attacker agents |
+| **Deployment** | Cloud, or fully self-hosted including air-gapped | Public cloud, private cloud, on-prem, air-gapped |
+| **Source** | Open core (MIT) | Closed |
 
----
+## Where F5 is stronger
 
-## When to Choose Intutic
+- **Red teaming.** F5 AI Red Team attacks models and applications with autonomous agents to find weaknesses before production. Intutic does not red-team.
+- **Content guardrails at enterprise scale.** Guardrails across prompts and responses for every LLM application, with custom guardrails authored in plain language.
+- **One security vendor.** Teams already standardised on F5 can add AI security to the same platform.
 
-- **You are deploying autonomous coding agents** (e.g. Claude Code, Cursor, Cline) that execute terminal commands or write local files.
-- **You need action-level protection** to block destructive operations (like `rm -rf`, raw DB updates) before they occur.
-- **You require local data residency** to process agent activity without sending raw source codebases to an external cloud firewall.
-- **You want bidirectional sync** between CISO-defined guidelines and local developer IDE configurations.
+## When to choose Intutic
 
-## When to Choose F5 Calypso
+- Your risk is coding agents running commands, editing files and calling MCP tools, and you need each call decided before it runs.
+- You need coverage for the specific harnesses and frameworks your developers use.
+- You want approval holds, egress control and sandboxing at the agent.
+- You want to read the enforcement code and verify the audit trail yourself.
 
-- **You are building web chatbots or customer-facing LLM applications** and need to scan inputs for prompt injections or jailbreak attempts.
-- **You want centralized Data Loss Prevention (DLP)** and PII redaction for organization-wide ChatGPT or Claude Enterprise usage.
-- **Your primary concern is conversational text safety** rather than local system/terminal execution.
+## When to choose F5 AI Guardrails
+
+- You need guardrails and red teaming across customer-facing and internal LLM applications.
+- Your main concern is prompt injection, jailbreaks and data leakage in model traffic.
+- You want AI security from the vendor that already runs your application delivery.
+
+## Use them together
+
+F5 can guard model traffic across the enterprise while Intutic gates the coding agents' tool calls and contains their network access. Each sees a different part of the same session.
 
 ---
 

@@ -18,6 +18,8 @@ import * as path from 'node:path'
 import { createLogger } from '@intutic/logger'
 import { newIso } from '@intutic/id'
 import { emitShellGate, SHELL_EXTRACT, SHELL_FAIL_CLOSED } from './gateBody.js'
+import { parse as parseToml } from 'smol-toml'
+import { anthropicBaseUrl, openaiBaseUrl } from '@intutic/shared-types'
 
 const log = createLogger('sync-openhands-hooks')
 
@@ -190,4 +192,76 @@ async function mergeOpenHandsConfig(workspaceRoot: string, proxyUrl: string): Pr
     await fs.rename(tmpConfig, configPath)
     log.info({ action: 'openhands_config_written', path: configPath }, 'OpenHands config.toml updated with proxy base_url')
   }
+}
+
+// ─── config.toml merge ───────────────────────────────────────────────────────
+
+/** First line of the file earlier adapter versions wrote over config.toml. */
+const LEGACY_HEADER = '# Intutic Governance Rules (auto-generated)'
+
+function parsesAsToml(text: string): Record<string, unknown> | null {
+  try {
+    return parseToml(text) as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
+/** Index of the line that starts table `name`, or -1. */
+function tableStart(lines: string[], name: string): number {
+  return lines.findIndex((l) => l.trim() === `[${name}]`)
+}
+
+/** Index just past the last line of the table starting at `start`. */
+function tableEnd(lines: string[], start: number): number {
+  const next = lines.findIndex((l, i) => i > start && /^\s*\[/.test(l))
+  return next === -1 ? lines.length : next
+}
+
+/**
+ * Merge Intutic's keys into an OpenHands `config.toml`:
+ * - `[llm] base_url` — the proxy, in the form the configured model's SDK
+ *   expects (LiteLLM appends `/v1/messages` to an Anthropic base and
+ *   `/chat/completions` to an OpenAI-style one);
+ * - an `[intutic]` table carrying the SOP text, replaced whole each sync.
+ *
+ * Edited line by line so the user's own settings and comments survive; the
+ * result is parsed before it is returned. Earlier versions replaced the whole
+ * file, so a file starting with their header holds nothing of the user's and
+ * is regenerated. Returns `null` when the existing file is not valid TOML.
+ */
+export function mergeOpenHandsToml(raw: string, proxyUrl: string, instructions: string): string | null {
+  const source = raw.startsWith(LEGACY_HEADER) ? '' : raw
+  const parsed = parsesAsToml(source)
+  if (parsed === null) return null
+
+  const llm = (parsed['llm'] ?? {}) as Record<string, unknown>
+  const model = typeof llm['model'] === 'string' ? llm['model'] : ''
+  const baseUrl = /^(anthropic\/|claude)/.test(model) ? anthropicBaseUrl(proxyUrl) : openaiBaseUrl(proxyUrl)
+
+  let lines = source.split('\n')
+
+  // Drop the previous [intutic] table; it is rewritten whole below.
+  const oldIntutic = tableStart(lines, 'intutic')
+  if (oldIntutic !== -1) lines.splice(oldIntutic, tableEnd(lines, oldIntutic) - oldIntutic)
+
+  const baseLine = `base_url = ${JSON.stringify(baseUrl)}`
+  const llmStart = tableStart(lines, 'llm')
+  if (llmStart === -1) {
+    lines.push('', '[llm]', baseLine)
+  } else {
+    const end = tableEnd(lines, llmStart)
+    const existing = lines.findIndex((l, i) => i > llmStart && i < end && /^\s*base_url\s*=/.test(l))
+    if (existing !== -1) lines[existing] = baseLine
+    else lines.splice(llmStart + 1, 0, baseLine)
+  }
+
+  while (lines.length > 0 && lines[lines.length - 1].trim() === '') lines.pop()
+  const escaped = instructions.replace(/\\/g, '\\\\').replace(/"""/g, '\\"\\"\\"')
+  lines = [...lines, '', '[intutic]', `proxy_url = ${JSON.stringify(proxyUrl)}`, `instructions = """\n${escaped}\n"""`, '']
+  const next = (lines[0] === '' ? lines.slice(1) : lines).join('\n')
+
+  const check = parsesAsToml(next)
+  if (check === null || (check['llm'] as Record<string, unknown> | undefined)?.['base_url'] !== baseUrl) return null
+  return next
 }

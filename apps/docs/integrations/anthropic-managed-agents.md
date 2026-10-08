@@ -26,7 +26,7 @@ Every other SDK-gated adapter in this directory (Strands, OpenAI Agents, LangCha
 | `agent.custom_tool_use` (your own tools) | Never — no `permission_policy` concept | `wrapManagedAgentsCustomTool`/`wrapManagedAgentsCustomTools` (TS) or `@guard` applied **before** `@beta_tool` (Python) — see below |
 | A tool configured `auto` | Only the calls the server judges `ask` | Those pauses are answered like `always_ask` ones. Calls the server judges `allow` run without reaching Intutic (same ceiling as `always_allow`); calls it judges `deny` (high-risk) never run. Unknown future `evaluation` variants are ignored — the top-level `evaluated_permission` alone decides. |
 | A subagent's pause, cross-posted to the primary thread's stream | Same as the subagent's own tool | Answered once, by `tool_use_id`. The event's `session_thread_id` is informational and is not sent back in the confirmation. |
-| A tool configured `always_allow` | Never | **Not governed by Intutic at all** — the call never reaches your backend as an event to answer. This is an architectural ceiling, not a bug: see [TD-425](https://github.com/intutic/intutic/blob/main/docs/TECH_DEBT.md). Configure the tools you want gated as `always_ask`. |
+| A tool configured `always_allow` | Never | **Not governed by Intutic at all** — the call never reaches your backend as an event to answer. This is an architectural ceiling, not a bug. Configure the tools you want gated as `always_ask`. |
 | The sandbox tool BODY (self-hosted) | N/A | **Not governed** — once a call is allowed, what the tool implementation does inside your `EnvironmentWorker` is outside this adapter's reach, same posture as every adapter toward a framework's built-in tool bodies. |
 
 ## Setup — TypeScript
@@ -132,7 +132,7 @@ for sent in confirmer.watch(stop=stop, idle_timeout_s=120.0):
 
 ### 3. Gate your custom tools — decorator order matters
 
-`agent.custom_tool_use` never pauses, so gate it at the point your code executes it: apply `@guard` **directly to the underlying function, before** `@beta_tool` wraps it. Applying `guard_tools()`'s generic `.func`-patch AFTER `@beta_tool` has already wrapped the function is a **silent no-op** — verified against `anthropic`'s real source; `BetaFunctionTool.call()` invokes a pydantic-validated copy of the function captured at construction time, not the `.func` attribute `guard_tools()` patches. See [TD-427](https://github.com/intutic/intutic/blob/main/docs/TECH_DEBT.md).
+`agent.custom_tool_use` never pauses, so gate it at the point your code executes it: apply `@guard` **directly to the underlying function, before** `@beta_tool` wraps it. Applying `guard_tools()`'s generic `.func`-patch AFTER `@beta_tool` has already wrapped the function is a **silent no-op** — verified against `anthropic`'s real source; `BetaFunctionTool.call()` invokes a pydantic-validated copy of the function captured at construction time, not the `.func` attribute `guard_tools()` patches.
 
 ```python
 from anthropic.lib.tools import beta_tool
@@ -154,4 +154,7 @@ Routing your OWN calls to the Messages API through the Intutic proxy is unrelate
 
 ## Known gaps
 
-See `docs/TECH_DEBT.md` entries TD-425 through TD-429 for the coverage boundaries (`always_allow` tools are invisible to Intutic; built-in tools' default `permission_policy` is not encoded in the SDK — verify live), the Python custom-tool decorator-order gotcha, and this integration's beta-product churn shield. `watch()` reconnects since TD-428 closed; what it still cannot see is a session serviced by two responders at once (each answers what it sees, and the second answer to one `tool_use_id` is rejected server-side).
+- **Coverage is opt-in per tool.** `always_allow` tools are invisible to Intutic, and built-in tools' default `permission_policy` is not encoded in the SDK — verify it live rather than assuming `always_ask`.
+- **Python decorator order.** `@guard` must go on the function before `@beta_tool` wraps it (see step 3).
+- **Beta product.** Managed Agents is in public beta. Both adapters are tested against fixtures for `@anthropic-ai/sdk` 0.131.0 and Python `anthropic` 1.11.0, not yet against a live session on a real account; an SDK or beta-header change can alter the event shapes.
+- **One responder per session.** `watch()` reconnects when the stream drops; what it cannot see is a session serviced by two responders at once (each answers what it sees, and the second answer to one `tool_use_id` is rejected server-side).

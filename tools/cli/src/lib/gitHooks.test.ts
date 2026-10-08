@@ -232,11 +232,8 @@ const cliBuilt = fs.existsSync(CLI_ENTRY)
 
   beforeEach(async () => {
     repo = fs.mkdtempSync(path.join(os.tmpdir(), 'intutic-precommit-skill-'))
-    // A fresh HOME so `intutic skill scan-staged`'s `loadConfig()` finds no
-    // real `~/.intutic/config.json` on the machine running this test and
-    // falls back to `process.cwd()` — which git sets to `repo` for a hook
-    // invocation. Without this, a developer's real workspaceRoot config
-    // would make the shim scan the wrong directory.
+    // A fresh HOME so the hook's `intutic` calls never read or write the
+    // developer's own `~/.intutic` on the machine running this test.
     home = fs.mkdtempSync(path.join(os.tmpdir(), 'intutic-precommit-skill-home-'))
     git(repo, 'init', '-q')
     git(repo, 'config', 'user.email', 't@t.local')

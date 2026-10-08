@@ -71,13 +71,4 @@ export class BudgetChecker {
       throw new ClawdeConnectionError(`Could not reach control-plane budget endpoint: ${err.message}`)
     }
   }
-
-  // Helper to manually update/pre-populate budget cache from response headers
-  public updateCachedBudget(model: string, estimatedTokens: number, remainingUsd: number, allowed: boolean) {
-    const cacheKey = `${model}:${estimatedTokens}`
-    this.cache.set(cacheKey, {
-      result: { allowed, remaining_usd: remainingUsd },
-      timestamp: Date.now(),
-    })
-  }
 }

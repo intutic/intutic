@@ -44,7 +44,7 @@ describe('sync loop wraps MCP servers every cycle', () => {
 
     mkdirSync(join(home, '.claude'), { recursive: true })
     writeFileSync(
-      join(home, '.claude', 'mcp.json'),
+      join(home, '.claude.json'),
       JSON.stringify({ mcpServers: { github: { command: 'npx', args: ['-y', 'server-github'] } } }, null, 2),
     )
 
@@ -74,7 +74,7 @@ describe('sync loop wraps MCP servers every cycle', () => {
 
     expect(result.configVersion).toBe(1)
 
-    const written = JSON.parse(readFileSync(join(home, '.claude', 'mcp.json'), 'utf-8'))
+    const written = JSON.parse(readFileSync(join(home, '.claude.json'), 'utf-8'))
     expect(written.mcpServers.github.__intutic_wrapped).toBe(true)
     expect(written.mcpServers.github.args).toContain('--server-name')
     expect(written.mcpServers.intutic).toBeDefined()

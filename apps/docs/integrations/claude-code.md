@@ -4,7 +4,11 @@ Integrate Intutic governance with [Claude Code](https://docs.anthropic.com/en/do
 
 ## How it works
 
-Intutic writes governance rules into your project's `CLAUDE.md` file, which Claude Code reads as its system instructions. This means governance rules are automatically applied to every Claude Code session in your workspace.
+Intutic governs Claude Code in three layers:
+
+- **Rules** — governance SOPs written into your project's `CLAUDE.md`, which Claude Code reads as its instructions.
+- **A blocking gate** — a PreToolUse hook registered in `.claude/settings.json` and `~/.claude/settings.json` that runs `.intutic/hooks/claude-code-check.js` before every `Bash`, `Edit`, `Write`, `MultiEdit` and MCP (`mcp__*`) tool call and refuses the call with exit code 2 when it breaks a rule, plus `permissions.deny` entries derived from your SOPs.
+- **Proxy routing** — LLM traffic through the Intutic proxy, and your MCP servers wrapped by the MCP governance proxy.
 
 ## Setup
 
@@ -25,9 +29,10 @@ intutic init
 The CLI detects `CLAUDE.md` and registers Claude Code as a harness:
 
 ```
-✓ Detected harnesses:
-  • claude-code → CLAUDE.md
+  ✔ claude-code → CLAUDE.md
 ```
+
+`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
 
 ### 3. Start the proxy
 
@@ -59,6 +64,30 @@ All code changes must include unit tests with >80% coverage...
 Never commit secrets, API keys, or credentials to version control...
 ```
 
+### Hooks and permissions
+
+`intutic connect` also writes the gate script `.intutic/hooks/claude-code-check.js` and merges two keys into `.claude/settings.json` (project) and `~/.claude/settings.json` (user):
+
+```json
+{
+  "permissions": {
+    "deny": ["Bash(*rm -rf **)", "Bash(*drop database*)"]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [{ "type": "command", "command": "node /path/to/project/.intutic/hooks/claude-code-check.js", "timeout": 10 }]
+      }
+    ]
+  }
+}
+```
+
+There is one PreToolUse entry each for `Bash`, `Edit`, `Write`, `MultiEdit` and `mcp__.*`. Your own PreToolUse hooks and every other setting are kept; only the Intutic entries are replaced on each sync. In the project file `permissions.deny` is the list derived from your SOPs' blocked tools and patterns; in the user file those entries are added to your own. A settings file that is not plain JSON (for example one with comments) is left untouched and reported in the `intutic connect` log.
+
+The gate fails closed: if it cannot read the tool call or crashes, the call is refused. Every decision is appended to `.intutic/events/hook-events.jsonl` and forwarded to the control plane.
+
 ::: warning
 Intutic overwrites the entire `CLAUDE.md` file. If you have custom instructions, consider moving them to a separate file or adding them as SOP files in `.intutic/sops/` (see [SOP Front Matter](/reference/sop-front-matter)).
 :::
@@ -75,11 +104,13 @@ Intutic overwrites the entire `CLAUDE.md` file. If you have custom instructions,
 
 ## Proxy routing
 
-Claude Code uses the `ANTHROPIC_API_KEY` environment variable. To route through the Intutic proxy, set the base URL:
+Claude Code uses the `ANTHROPIC_API_KEY` environment variable. To route through the Intutic proxy, set the base URL to the proxy host — Claude Code appends `/v1/messages` itself:
 
 ```bash
-export ANTHROPIC_BASE_URL=http://localhost:4000/v1
+export ANTHROPIC_BASE_URL=http://localhost:4000
 ```
+
+`intutic exec -- claude` sets this for you.
 
 The proxy URL is included in the `CLAUDE.md` header for reference.
 
@@ -102,7 +133,9 @@ Since Claude Code's CLI natively intercepts prompts starting with `/` at the she
 
 ## MCP Server Integration (`~/.claude.json`)
 
-To enable Intutic governance tools and MCP tool call interception in Claude Code CLI, add your MCP server configurations to `~/.claude.json`:
+`intutic connect` wraps the MCP servers Claude Code already has in `~/.claude.json` — the user-scope `mcpServers` and this project's local-scope servers — with the MCP governance proxy, and adds the `intutic` server below. It only edits `~/.claude.json` once Claude Code has created it, and keeps everything else in the file. Servers in a project's shared `.mcp.json` are not rewritten; their tool calls still pass through the `mcp__.*` PreToolUse gate.
+
+To configure the same entries by hand, add them to `~/.claude.json`:
 
 ### 1. Standalone Governance Server Mode
 Exposes Intutic governance status and SOP tools (`intutic_governance_status`, `intutic_list_sops`, `intutic_list_incidents`) to Claude Code CLI:
@@ -114,7 +147,9 @@ Exposes Intutic governance status and SOP tools (`intutic_governance_status`, `i
       "command": "npx",
       "args": [
         "-y",
-        "@intutic/mcp-governance-proxy"
+        "-p",
+        "@intutic/mcp-governance-proxy",
+        "intutic-mcp-proxy"
       ],
       "env": {
         "NODE_ENV": "production",
@@ -135,7 +170,9 @@ Wraps downstream MCP tools (e.g. Filesystem or Postgres) to intercept and evalua
       "command": "npx",
       "args": [
         "-y",
+        "-p",
         "@intutic/mcp-governance-proxy",
+        "intutic-mcp-proxy",
         "--workspace-id",
         "wk_production",
         "--",

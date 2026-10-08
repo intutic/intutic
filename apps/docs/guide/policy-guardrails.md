@@ -145,7 +145,7 @@ guardrail cites it.
   from search products only in one sense: every generated rule cites its
   source.
 
-## Honest limits
+## Limits
 
 - **PDF and Word documents are not ingested.** Export them to Markdown, or put
   them in a Google Drive folder and let Drive convert them. **Test connection** (an owner or admin) exchanges the stored credential and lists one document in the folder, so a wrong key or an unshared folder is found before the first sync.

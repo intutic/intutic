@@ -1,8 +1,15 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import * as fs from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { describePolicySnapshot, checkCiscoScanner } from './doctor.js'
+import { createServer, type AddressInfo } from 'node:net'
+import { describePolicySnapshot, checkCiscoScanner, checkControlPlane, checkValkey } from './doctor.js'
+import { loadCredentials } from '../config/store.js'
+
+vi.mock('../config/store.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../config/store.js')>()),
+  loadCredentials: vi.fn(),
+}))
 import type { PolicySnapshotHealth, SnapshotState } from '../lib/policySnapshot.js'
 import { CISCO_SCANNER_BINARY } from '../lib/ciscoScanner.js'
 
@@ -121,5 +128,76 @@ process.exit(1)
     expect(result.passed).toBe(true)
     expect(result.detail).toContain('0.3.3-test')
     expect(result.remediation).toBeUndefined()
+  })
+})
+
+describe('checkValkey', () => {
+  // The proxy's /health carries no Valkey field, so the check must stand on
+  // the TCP probe alone and never consult the proxy.
+  it('passes on a listening port without asking the proxy', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    const server = createServer((socket) => socket.end())
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const { port } = server.address() as AddressInfo
+    try {
+      const result = await checkValkey(port)
+      expect(result.passed).toBe(true)
+      expect(result.detail).toContain(`127.0.0.1:${port}`)
+      expect(fetchSpy).not.toHaveBeenCalled()
+    } finally {
+      fetchSpy.mockRestore()
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+
+  it('fails with a remediation when nothing is listening', async () => {
+    const server = createServer()
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const { port } = server.address() as AddressInfo
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+    const result = await checkValkey(port)
+    expect(result.passed).toBe(false)
+    expect(result.detail).toBe(`Not reachable on port ${port}`)
+    expect(result.remediation).toBeTruthy()
+  })
+})
+
+describe('checkControlPlane', () => {
+  const creds = {
+    apiKey: 'vk_test',
+    workspaceId: 'wk_alpha',
+    controlPlaneUrl: 'https://cp.example',
+    email: 'dev@example.com',
+    storedAt: new Date().toISOString(),
+  }
+
+  // The check asks whichever control plane the CLI resolves, as every other
+  // command would; pin it through the environment.
+  const savedUrl = process.env.INTUTIC_CONTROL_PLANE_URL
+  beforeEach(() => {
+    process.env.INTUTIC_CONTROL_PLANE_URL = 'https://cp.example'
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    if (savedUrl === undefined) delete process.env.INTUTIC_CONTROL_PLANE_URL
+    else process.env.INTUTIC_CONTROL_PLANE_URL = savedUrl
+  })
+
+  it('validates the key against /api/v1/auth/me and reports it authenticated', async () => {
+    vi.mocked(loadCredentials).mockResolvedValue(creds)
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 200 }))
+    const result = await checkControlPlane()
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe('https://cp.example/api/v1/auth/me')
+    expect(result.passed).toBe(true)
+    expect(result.detail).toBe('Authenticated at https://cp.example')
+  })
+
+  it('fails on a rejected key', async () => {
+    vi.mocked(loadCredentials).mockResolvedValue(creds)
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 401 }))
+    const result = await checkControlPlane()
+    expect(result.passed).toBe(false)
+    expect(result.remediation).toContain('intutic login')
   })
 })

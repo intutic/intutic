@@ -48,6 +48,8 @@ export { injectMcpServer } from './harness/mcpAutoWrite.js'
 
 export { guardSettingsFile, warnIfDshCoverageGap } from './watcher/settingsGuard.js'
 
+export { readJsonObjectForMerge } from './harness/jsonMergeTarget.js'
+
 // Gap 3 fix — Antigravity (Gemini CLI) hook coverage
 export { writeAntigravityHooks } from './harness/antigravityHooks.js'
 
@@ -55,6 +57,7 @@ export { writeAntigravityHooks } from './harness/antigravityHooks.js'
 export { writeClaudeDesktopHooks } from './harness/claudeDesktopHooks.js'
 export { writeRooCodeHooks } from './harness/rooCodeHooks.js'
 export { writeContinueHooks } from './harness/continueHooks.js'
+export { mergeContinueConfig } from './harness/continueConfigMerger.js'
 export { writeOpenWebuiHooks } from './harness/openWebuiHooks.js'
 export { writeN8nHooks } from './harness/n8nHooks.js'
 
@@ -66,6 +69,7 @@ export { writePiHooks } from './harness/piHooks.js'
 // Formerly ungated harnesses with verified native mechanisms
 // (codex: ~/.codex/hooks.json; github-copilot: VS Code agent hooks, Preview)
 export { writeCodexHooks } from './harness/codexHooks.js'
+export { mergeCodexConfig } from './harness/codexConfigMerger.js'
 export { writeGithubCopilotHooks } from './harness/githubCopilotHooks.js'
 
 // WS-A & WS-F — runtime env writer and compliance probes

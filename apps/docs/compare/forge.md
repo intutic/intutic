@@ -1,52 +1,56 @@
+---
+title: Intutic vs Forge
+description: Intutic is the enforcement point at the agent's tool call, open core and self-hostable; Forge is a hosted platform that assembles control points across an organization's security stack.
+---
+
 # Intutic vs Forge
 
-Forge is an enterprise AI-agent governance platform: discovery and inventory of agents across an org, identity management for AI agents and non-human identities, and policy enforcement wherever it has an in-path surface — endpoint sensors, network/gateway controls, identity providers, and connected security tooling (EDR, SASE, SIEM). **It is the closest direct competitor to Intutic of anything we've evaluated.**
+*Last reviewed: 2026-10-08*
 
-## The Core Difference
-
-Forge's architecture is broad by design: connect existing security infrastructure (CrowdStrike, Okta, Palo Alto, Netskope, LiteLLM, and others), fuse that into an inventory and identity graph, then enforce wherever a connected source gives it a control point. Its own documentation is explicit that it can only block a pending action when the enforcement surface supports it — an *observed* source gives evidence, not control.
-
-Intutic takes the opposite starting point: be the in-path surface itself, purpose-built for developer and infrastructure agents. The Rust proxy and hook gate intercept the actual tool call — filesystem writes, shell commands, MCP tool invocations — locally, synchronously, without depending on a connected EDR or network appliance to have visibility into that specific action.
-
-**Forge assembles enforcement points from your existing security stack. Intutic is a purpose-built enforcement point.**
+Intutic and Forge start from different places. Intutic is the enforcement point itself: a gate inside the coding agent that decides each tool call before it runs, backed by a policy proxy, an MCP governance proxy, a default-deny egress firewall and sandboxed execution, across 43 harnesses. It is open core, runs fully self-hosted including air-gapped, and publishes its prices. Forge (by a37) is a hosted governance platform that works top-down: it discovers AI agents and non-human identities across an organization, brokers their cloud credentials, and enforces policy through its own device agent, MCP gateway and LLM gateway plus the security tools you already run.
 
 ## Comparison
 
-| Capability | Intutic | Forge |
-|-----------|---------|-------|
-| **Enforcement model** | Local proxy + hook gate, in-process, synchronous | Policy engine evaluated at whichever connected surface has the pending action in path (endpoint, network, gateway) |
-| **Policy actions** | BYPASS / ENHANCE / HIJACK / KILL | 7 typed actions: allow, nudge, flag_for_review, redact, filter, require_approval, block |
-| **Fail behavior** | Proxy connectivity to control plane fails closed by config default; individual hook-gate checks fail open internally | Malformed/timing-out/undefined policy fails closed to `block` |
-| **MCP governance** | Dedicated MCP governance proxy package | MCP Gateway with default-deny registry ACLs, pre-tool identity + argument evaluation, per-tool enable/disable |
-| **Coding-agent support** | 43 harnesses out-of-the-box, harness-native adapters | Claude Code and Cursor named, via network interception rather than harness instrumentation |
-| **Audit trail** | Merkle-sealed trace roots with browser-side signature verification, hourly sealing sweep | SHA-256 hash-chain ledger, DB-enforced immutability, scheduled integrity verifier |
-| **SIEM/export** | 6 native destinations — Splunk HEC, Syslog/CEF, Datadog, S3, GCS, generic webhook — with retry/DLQ | Native Splunk (HEC) and S3 export, SOAR webhooks (Tines, Google SecOps) |
-| **Identity model** | SSO-group privilege resolution at the hook gate; sandbox attestation as a gateable signal | Proprietary agent identity records; cloud/IAM non-human-identity inventory across AWS/Azure/GCP/GitHub |
-| **On-prem / air-gapped** | Documented deployment guides | No such terms found anywhere in Forge's public docs as of this writing — treat as unconfirmed until stated otherwise |
-| **Device/endpoint enforcement** | CA trust injection, MDM manifest generation, phone-home staleness reporting | Generic "managed device" coverage via connected EDR; no comparable native detail documented |
-| **Plan/action governance evidence** | Approve/reject/close lifecycle with role gates, deviation logging, EU AI Act Art. 14-oriented evidence | Not found in public documentation |
-| **Compliance probes** | Automated, hourly, SOC2-style checks against live workspace state | Not found in public documentation |
-| **Continuous verification of the enforcement layer itself** | Silent-gate detection — infers a gate has stopped gating from the absence of data; guard-liveness probes queryable via API | Not found in public documentation |
-| **Pricing** | Open core, transparent | No public pricing found — sales-quote only |
+| | Intutic | Forge |
+|---|---|---|
+| **Where enforcement happens** | At the tool call: native pre-execution hook gates in 19 of the 43 harnesses; plus a request and response proxy, an MCP governance proxy, a host egress firewall (`intutic enforce`) and sandboxed execution (`intutic exec --sandbox`) | Its device agent, MCP gateway and LLM gateway, plus control points in connected tools |
+| **Coding agents covered** | **43** supported harnesses, including Claude Code, Codex, Cursor, GitHub Copilot, Windsurf, Cline, Roo Code, OpenCode and Goose, plus agent frameworks such as LangGraph, CrewAI and the OpenAI Agents SDK through an in-process gate | Documented integrations for Claude Code, Claude Cowork, Codex, Cursor, OpenClaw and Rovo Dev, with managed configuration for the first four |
+| **Policy actions** | Allow, warn, require approval (the call is held until approved in Slack or with `intutic decision approve`), block, redact, re-ask, and shadow mode that measures how often a rule would act | Allow, nudge, flag for review, redact, filter, require approval, block |
+| **When the policy layer fails** | Hook gates fail closed on a crash or a malformed payload, and the proxy blocks by default when its policy service is unreachable. A built-in destructive-command tier blocks with no configuration | Rego policies fail closed; built-in conditions that lack data do not match; the Cloudflare transport fails open unless switched to fail closed |
+| **MCP governance** | Pattern DLP, argument-matching policy rules, prompt-injection scanning, seven anomaly detectors, WASM rules, trust-on-first-use pinning that flags a changed tool set, and tool-description poisoning detection; wired automatically into 11 harnesses | MCP Gateway with a default-deny server registry, approvals, per-server, per-user and per-tool budgets, tool-change risk scoring and OAuth 2.1 |
+| **Audit integrity** | Merkle tree with per-trace inclusion proofs; Ed25519-signed roots against a published key set; roots hash-chained to each other and mirrored to your own GCS or S3 bucket; append-only database triggers; an hourly probe that re-derives the roots and walks the chain; verification in the browser or with `intutic integrity verify` | SHA-256 hash-chain ledger, database-enforced immutability, a scheduled verifier, signed checkpoints and proof packages, with external anchor receipts when configured |
+| **SIEM and alerting** | Six destinations (Splunk HEC, Syslog/CEF, Datadog, S3, GCS, webhook) with retries and a dead-letter queue; Slack, PagerDuty, email and HMAC-signed webhook notifications, and Jira issues from governance events | Splunk HEC, S3 and Falcon LogScale exports, plus a signed notification webhook with Tines and Google SecOps templates |
+| **Identity** | SAML and OIDC with group claims, SCIM 2.0 with nested groups, per-agent virtual keys, an agent registry with posture scoring and an agent graph | Agent identities, a non-human-identity inventory, and short-lived credentials issued for AWS, Microsoft Entra, Google Cloud and GitHub |
+| **Devices** | CA trust and Jamf/Intune MDM profiles (`intutic enterprise install`), stale-device detection | Native device agent for Windows (Intune), macOS (Network Extension, Jamf or other MDM) and Linux (systemd) |
+| **Compliance** | Eleven hourly compliance probes against live workspace state, a signed SOC 2 evidence pack, OWASP LLM and Agentic posture mapping | Framework mapping to NIST AI RMF, EU AI Act, ISO 42001, SOC 2, HIPAA, OWASP, MITRE ATLAS and others, exported as PDF, CSV or JSON |
+| **Deployment** | Cloud, or fully self-hosted: signed images and an air-gap bundle, Helm charts, an offline license | Hosted service; Resource Gateways run in your environment and connect out to Forge. No self-hosted or air-gapped option is documented |
+| **Source** | Open core (MIT): the proxy, hook gates, MCP proxy, CLI and sync daemon | Closed |
+| **Pricing** | [Published](/guide/plans); the open core is free | Not published |
 
-## What Forge Does Better Today
+On audit integrity, Intutic covers what Forge's ledger does (a hash chain, database-enforced immutability, scheduled verification and signed checkpoints) and adds two things Forge does not document: a Merkle inclusion proof for every trace, and verification you run yourself, in a browser or with the CLI, against a published key set. See [Trace Integrity](/concepts/trace-integrity).
 
-Be direct about this: Forge's audit ledger and broad identity/inventory story are real and more complete than what Intutic ships today in those specific areas. SIEM export itself is now comparable (both ship native Splunk destinations and object-storage export); Forge's SOAR webhook integrations (Tines, Google SecOps) are named integrations Intutic does not have a direct equivalent to — Intutic's generic webhook destination can reach the same tools, just without a purpose-built connector. If your immediate need is enterprise-wide AI discovery plus routing enforcement through infrastructure you already run (EDR, network, identity), Forge's connector model gets there faster.
+## Where Forge is stronger
 
-## When to Choose Intutic
+- **Organization-wide discovery.** Forge inventories AI agents and non-human identities across the whole organization, beyond the coding-agent surface.
+- **Credential brokering.** It issues short-lived cloud credentials to agents and right-sizes their permissions. Intutic governs what an agent does with access it already has.
+- **MCP gateway controls.** A default-deny server registry with approval grants, per-tool budgets and OAuth brokering. In Intutic, MCP allowlists default to unrestricted and are set through the API, servers have registry statuses but no approval workflow yet, MCP calls do not carry per-user identity, and a require-approval rule becomes a block in the MCP proxy.
+- **Regulatory framework mapping.** Intutic maps to SOC 2 and OWASP; Forge also maps to the EU AI Act, ISO 42001, NIST AI RMF, HIPAA and more.
+- **Policy as infrastructure code.** Rego policies with backtests against historical evidence, and a Terraform provider.
+- **Protocol policies.** Connection and command decisions for HTTP, Postgres, MySQL and Redis. Intutic's `sql_guard` covers destructive SQL issued through an agent's tools.
 
-- Your agents are developer/infrastructure agents (Claude Code, Cursor, CI/CD, internal MCP servers) and you want the enforcement point itself, not an assembly of connectors
-- You need action-level enforcement independent of whether your EDR, network appliance, or identity provider happens to have that specific call in its path
-- You want device-level enforcement (CA trust, MDM) without deploying a full EDR agent
-- You want an open-core enforcement engine you can read and audit, not a closed proprietary policy service
-- You need plan/action-level EU AI Act Art. 14-oriented evidence today, not on a roadmap
+## When to choose Intutic
 
-## When to Choose Forge
+- Your agents are coding agents and agent frameworks, such as Windsurf, Cline, Roo Code, Goose or LangGraph alongside Claude Code and Cursor, and you want each tool call decided before it runs.
+- You need to run the whole product on your own infrastructure, including air-gapped.
+- You want to read the code that blocks a call, and to verify the audit trail yourself.
+- You want an approval hold, a sandbox and an egress firewall that work with or without the rest of your security stack.
 
-- You need enterprise-wide AI agent discovery and shadow-AI detection across an org, not just the developer/infra surface
-- You already run a mature security stack (CrowdStrike, Okta, Palo Alto/Netskope) and want to route AI-agent policy through it
-- You need packaged SIEM/SOAR export today
-- Your buying motion is top-down through IT/security rather than bottom-up through engineering
+## When to choose Forge
+
+- You need to discover and inventory every AI agent and non-human identity across the organization.
+- You want agents to receive short-lived cloud credentials rather than standing keys.
+- Your compliance program reports against the EU AI Act, ISO 42001 or NIST AI RMF.
+- You manage policy as Rego and Terraform, and a hosted service suits your data posture.
 
 ---
 

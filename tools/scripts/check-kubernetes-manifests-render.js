@@ -177,6 +177,85 @@ if (existsSync(CELLS_REMOTE_DIR)) {
   }
 }
 
+/**
+ * A pre-install hook runs before Helm creates the release's ordinary
+ * resources, so anything it uses must either come from outside the chart (a
+ * Secret the operator creates first) or be a pre-install hook itself with a
+ * lower weight. Until 2026-10-08 the Self-host migration Job ran as the chart's
+ * ordinary ServiceAccount: every fresh `helm install` waited on a Job whose
+ * pods the API server refused ("serviceaccount not found") until it timed out.
+ */
+function preInstallHookProblems(chart, docs) {
+  const hookOf = (d) => {
+    const a = d.metadata?.annotations ?? {}
+    const phases = String(a['helm.sh/hook'] ?? '').split(',').map((p) => p.trim())
+    return { preInstall: phases.includes('pre-install'), weight: Number(a['helm.sh/hook-weight'] ?? 0) }
+  }
+  const rendered = new Map(docs.map((d) => [`${d.kind}/${d.metadata?.name}`, d]))
+  const problems = []
+  for (const d of docs) {
+    const hook = hookOf(d)
+    const pod = d.spec?.template?.spec
+    if (!hook.preInstall || !pod) continue
+    const containers = [...(pod.initContainers ?? []), ...(pod.containers ?? [])]
+    const refs = [
+      ['ServiceAccount', pod.serviceAccountName],
+      ...(pod.imagePullSecrets ?? []).map((s) => ['Secret', s.name]),
+      ...(pod.volumes ?? []).flatMap((v) => [['Secret', v.secret?.secretName], ['ConfigMap', v.configMap?.name]]),
+      ...containers.flatMap((c) => [
+        ...(c.envFrom ?? []).flatMap((e) => [['Secret', e.secretRef?.name], ['ConfigMap', e.configMapRef?.name]]),
+        ...(c.env ?? []).flatMap((e) => [
+          ['Secret', e.valueFrom?.secretKeyRef?.name],
+          ['ConfigMap', e.valueFrom?.configMapKeyRef?.name],
+        ]),
+      ]),
+    ]
+    for (const [kind, name] of refs) {
+      const target = name && rendered.get(`${kind}/${name}`)
+      if (!target) continue
+      const dep = hookOf(target)
+      if (!dep.preInstall || dep.weight >= hook.weight) {
+        problems.push(
+          `chart ${chart}: pre-install hook ${d.kind} ${d.metadata.name} uses ${kind} ${name}, which the chart ` +
+            `creates ${dep.preInstall ? 'in the same or a later hook weight' : 'as an ordinary resource'} — ` +
+            'it does not exist yet when the hook runs on a fresh install',
+        )
+      }
+    }
+  }
+  return problems
+}
+
+/**
+ * The gateway chart's local judge, rendered with a real config. Until
+ * 2026-10-08 the LiteLLM container set `command:` (replacing the image's
+ * entrypoint, so it never started) and the chart rendered `model_list: []`
+ * whenever no ConfigMap was named, so every judge call failed.
+ */
+function localJudgeProblems(docs) {
+  const problems = []
+  const byComponent = (c) => docs.find((d) => d.kind === 'Deployment' && d.metadata.labels['app.kubernetes.io/component'] === c)
+  const container = byComponent('litellm')?.spec.template.spec.containers[0]
+  if (!container) return ['chart intutic-gateway renders no LiteLLM Deployment with litellm.enabled=true']
+  if (container.command) problems.push("chart intutic-gateway: LiteLLM sets `command`, replacing the image's entrypoint — pass `args`")
+  const configMap = docs.find((d) => d.kind === 'ConfigMap' && d.metadata.name.endsWith('-litellm-config'))
+  const models = (loadAll(configMap?.data?.['config.yaml'] ?? '')[0]?.model_list ?? []).map((m) => m.model_name)
+  if (!models.includes('intutic-openweight-judge')) {
+    problems.push(`chart intutic-gateway: the rendered LiteLLM config serves [${models.join(', ')}], not the judge model it was given`)
+  }
+  const env = Object.fromEntries((byComponent('proxy')?.spec.template.spec.containers[0].env ?? []).map((e) => [e.name, e.value]))
+  if (env.LITELLM_LOCAL_JUDGE_MODEL !== 'intutic-openweight-judge') problems.push('chart intutic-gateway: the proxy is not told the local judge model')
+  // With LiteLLM on and no config at all, the chart must refuse to render
+  // rather than deploy a LiteLLM that answers nothing.
+  try {
+    execFileSync('helm', ['template', 't', join(HELM_DIR, 'intutic-gateway'), '--set', 'litellm.enabled=true'], { stdio: 'pipe' })
+    problems.push('chart intutic-gateway renders litellm.enabled=true with no LiteLLM config')
+  } catch {
+    // Refused, as it should be.
+  }
+  return problems
+}
+
 // ── Helm charts (Self-host) ──────────────────────────────────────────────────
 // tools/helm/intutic is how a Self-host customer installs on Kubernetes, and
 // nothing deploys it here, so a broken template would first fail on their
@@ -192,11 +271,20 @@ if (existsSync(HELM_DIR)) {
   } catch {
     failures.push('`helm` is not on PATH — cannot render tools/helm. Install Helm 3.')
   }
-  const charts = {
-    intutic: ['--set', 'hostname=intutic.example.internal', '--set', 'ingress.tls.secretName=tls', '--set', 'bootstrap.secretName=owner'],
-    'intutic-gateway': [],
-  }
-  for (const [chart, args] of Object.entries(charts)) {
+  // The gateway chart renders twice: as installed by default, and with the
+  // local judge on, given the compose stack's litellm_config.yaml as its
+  // config (`--set-file`, as `intutic judge configure` tells users to).
+  const localJudge = [
+    '--set', 'litellm.enabled=true', '--set', 'proxy.localJudge=true',
+    '--set', 'litellm.judgeModel=intutic-openweight-judge',
+    '--set-file', `litellm.config=${join(ROOT, 'infra', 'compose', 'litellm_config.yaml')}`,
+  ]
+  const charts = [
+    ['intutic', ['--set', 'hostname=intutic.example.internal', '--set', 'ingress.tls.secretName=tls', '--set', 'bootstrap.secretName=owner']],
+    ['intutic-gateway', []],
+    ['intutic-gateway', localJudge],
+  ]
+  for (const [chart, args] of charts) {
     const dir = join(HELM_DIR, chart)
     if (!existsSync(dir)) {
       failures.push(`chart tools/helm/${chart} is missing`)
@@ -221,6 +309,8 @@ if (existsSync(HELM_DIR)) {
       const sa = d.spec?.template?.spec?.serviceAccountName
       if (sa && !accounts.has(sa)) failures.push(`chart ${chart}: ${d.kind} ${d.metadata.name} runs as ServiceAccount ${sa}, which the chart does not create`)
     }
+    failures.push(...preInstallHookProblems(chart, docs))
+    if (args === localJudge) failures.push(...localJudgeProblems(docs))
     if (chart !== 'intutic') continue
     const deployments = new Map(docs.filter((d) => d.kind === 'Deployment').map((d) => [d.metadata.labels['app.kubernetes.io/component'], d]))
     for (const c of ['control-plane', 'proxy', 'dashboard', 'docs', 'valkey']) {
@@ -264,5 +354,5 @@ if (failures.length > 0) {
 
 console.log(
   `[PASS] kubernetes manifests: ${overlays.length} overlay(s), ${cellsRemoteRendered} cells-remote ` +
-    `kustomization(s) and ${helmCharts} Helm chart(s) render cleanly, SOPS wiring intact.`,
+    `kustomization(s) and ${helmCharts} Helm chart render(s) pass, SOPS wiring intact.`,
 )

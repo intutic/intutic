@@ -3,7 +3,8 @@
  * MCP servers with the @intutic/mcp-governance-proxy.
  *
  * Injects and proxy-wraps MCP server entries in:
- * - Claude Code:      ~/.claude/mcp.json
+ * - Claude Code:      ~/.claude.json (user-scope `mcpServers`, and the
+ *                      local-scope `projects[<workspaceRoot>].mcpServers`)
  * - Claude Desktop:   ~/Library/Application Support/Claude/claude_desktop_config.json
  * - Cursor (global):  ~/Library/Application Support/Cursor/User/globalSettings.json
  * - Cursor (project): <workspaceRoot>/.cursor/mcp.json
@@ -92,8 +93,10 @@ import * as node_fs from 'node:fs/promises'
 import * as node_path from 'node:path'
 import * as node_os from 'node:os'
 import { existsSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { isDeepStrictEqual } from 'node:util'
 import { createLogger } from '@intutic/logger'
+import { readJsonObjectForMerge } from './jsonMergeTarget.js'
 import { parseDocument, isMap } from 'yaml'
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml'
 
@@ -149,27 +152,41 @@ export interface DiscoveredMcpServer {
 
 // ─── Proxy Binary Resolution ─────────────────────────────────────────────────
 
+/** Resolves packages relative to this module — i.e. from wherever the
+ *  daemon itself is installed, not from the user's project. */
+const requireFromDaemon = createRequire(import.meta.url)
+
 /**
- * Resolve the path to the @intutic/mcp-governance-proxy binary.
+ * Resolve the path to the @intutic/mcp-governance-proxy entry point.
  *
  * Resolution order:
- * 1. `<workspaceRoot>/node_modules/@intutic/mcp-governance-proxy/dist/index.js`
- *    — created by pnpm after `pnpm install` (post-install production path)
- * 2. `<workspaceRoot>/packages/mcp-proxy/dist/index.js`
- *    — direct monorepo source path (dev without pnpm install, or if symlink is missing)
+ * 1. The copy installed next to this daemon — a dependency of
+ *    `@intutic/sync-daemon`, so a global `npm install -g @intutic/cli` has it
+ *    in the CLI's own node_modules. This is the normal case: the user's
+ *    project has no reason to depend on the proxy.
+ * 2. `<workspaceRoot>/node_modules/@intutic/mcp-governance-proxy/dist/index.js`
+ *    and `<workspaceRoot>/packages/mcp-proxy/dist/index.js` — for a run from
+ *    a bundled binary, whose bundled modules are not on disk for `node` to
+ *    load (their paths start with `/snapshot/`), and for a source checkout
+ *    that has not built the proxy yet.
  *
- * Using synchronous existsSync is intentional — this runs at daemon init time
- * (not in a hot path), and avoids async complexity in callers.
+ * Synchronous on purpose — this runs while building config entries, not in a
+ * hot path.
  */
-function resolveProxyBin(workspaceRoot: string): string {
+export function resolveProxyBin(workspaceRoot: string): string {
+  try {
+    const installed = requireFromDaemon.resolve('@intutic/mcp-governance-proxy')
+    if (!installed.startsWith('/snapshot/') && existsSync(installed)) return installed
+  } catch {
+    // Not installed alongside the daemon — fall through to the workspace.
+  }
+
   const nmPath = node_path.join(
     workspaceRoot, 'node_modules', '@intutic', 'mcp-governance-proxy', 'dist', 'index.js'
   )
   if (existsSync(nmPath)) return nmPath
 
-  // Fallback: direct monorepo package path for dev environments
-  const pkgPath = node_path.join(workspaceRoot, 'packages', 'mcp-proxy', 'dist', 'index.js')
-  return pkgPath
+  return node_path.join(workspaceRoot, 'packages', 'mcp-proxy', 'dist', 'index.js')
 }
 
 // ─── Config Path Resolution ───────────────────────────────────────────────────
@@ -178,8 +195,11 @@ function resolveProxyBin(workspaceRoot: string): string {
 // only reads), so the two can never independently drift about where a
 // harness keeps its config.
 
+/** Claude Code keeps user- and local-scope MCP servers in `~/.claude.json`
+ *  (project-scope servers live in the repo's `.mcp.json`, which is shared
+ *  with the team and is not rewritten here). */
 function claudeCodeConfigPath(): string {
-  return node_path.join(node_os.homedir(), '.claude', 'mcp.json')
+  return node_path.join(node_os.homedir(), '.claude.json')
 }
 
 function claudeDesktopConfigPath(): string {
@@ -391,6 +411,18 @@ async function readJsonFile<T>(filePath: string, fallback: T): Promise<T> {
 }
 
 /**
+ * Read a harness config this module is about to write back. A missing file is
+ * an empty object; a file that is present but not a plain JSON object throws,
+ * so the caller's error handling skips the write instead of replacing the
+ * user's file with only the MCP entries (see jsonMergeTarget.ts).
+ */
+async function readJsonForWrite<T>(filePath: string): Promise<T> {
+  const current = await readJsonObjectForMerge(filePath)
+  if (current === null) throw new Error(`${filePath} is not a plain JSON object — left untouched`)
+  return current as T
+}
+
+/**
  * Write JSON to disk, but only if the content actually changed.
  *
  * `injectMcpServer` now runs every sync-loop iteration (~every 30s, see
@@ -424,18 +456,38 @@ async function writeJsonFile(filePath: string, data: unknown): Promise<void> {
 
 // ─── Target: Claude Code ─────────────────────────────────────────────────────
 
+/** The parts of `~/.claude.json` this module reads; everything else is kept as is. */
+interface ClaudeCodeConfig {
+  mcpServers?: McpServersMap
+  projects?: Record<string, { mcpServers?: McpServersMap; [key: string]: unknown }>
+  [key: string]: unknown
+}
+
 async function injectClaudeCode(workspaceId: string, workspaceRoot: string): Promise<void> {
   const configPath = claudeCodeConfigPath()
-  const current = await readJsonFile<{ mcpServers?: McpServersMap }>(configPath, {})
+  // ~/.claude.json is Claude Code's own state file; it exists once Claude
+  // Code has run. Never created here, and merged key by key: everything but
+  // the two `mcpServers` maps below is Claude Code's.
+  if (!existsSync(configPath)) {
+    log.debug({ action: 'claude_code_skip' }, 'Claude Code not set up (no ~/.claude.json) — skipping')
+    return
+  }
+  const current = await readJsonForWrite<ClaudeCodeConfig>(configPath)
 
+  // User scope: available in every project.
   current.mcpServers = wrapAllServers(
     { intutic: buildIntuticMcpEntry(workspaceRoot), ...(current.mcpServers ?? {}) },
     workspaceId,
     workspaceRoot
   )
+  // Local scope: servers added with `claude mcp add` in this project.
+  const project = current.projects?.[workspaceRoot]
+  if (project?.mcpServers && Object.keys(project.mcpServers).length > 0) {
+    project.mcpServers = wrapAllServers(project.mcpServers, workspaceId, workspaceRoot)
+  }
 
   await writeJsonFile(configPath, current)
-  log.info({ action: 'claude_code_mcp_injected' }, 'Claude Code ~/.claude/mcp.json updated')
+  log.info({ action: 'claude_code_mcp_injected' }, 'Claude Code ~/.claude.json MCP servers updated')
 }
 
 // ─── Target: Claude Desktop ───────────────────────────────────────────────────
@@ -451,7 +503,7 @@ async function injectClaudeDesktop(workspaceId: string, workspaceRoot: string): 
     return
   }
 
-  const current = await readJsonFile<{ mcpServers?: McpServersMap }>(configPath, {})
+  const current = await readJsonForWrite<{ mcpServers?: McpServersMap }>(configPath)
   current.mcpServers = wrapAllServers(
     { intutic: buildIntuticMcpEntry(workspaceRoot), ...(current.mcpServers ?? {}) },
     workspaceId,
@@ -470,7 +522,7 @@ async function injectCursor(workspaceId: string, workspaceRoot: string): Promise
 
   try {
     await node_fs.access(node_path.dirname(globalPath))
-    const current = await readJsonFile<{ mcpServers?: McpServersMap }>(globalPath, {})
+    const current = await readJsonForWrite<{ mcpServers?: McpServersMap }>(globalPath)
     current.mcpServers = wrapAllServers(
       { intutic: buildIntuticMcpEntry(workspaceRoot), ...(current.mcpServers ?? {}) },
       workspaceId,
@@ -485,7 +537,7 @@ async function injectCursor(workspaceId: string, workspaceRoot: string): Promise
   // Project-level .cursor/mcp.json
   const projectPath = cursorProjectConfigPath(workspaceRoot)
   try {
-    const current = await readJsonFile<{ mcpServers?: McpServersMap }>(projectPath, {})
+    const current = await readJsonForWrite<{ mcpServers?: McpServersMap }>(projectPath)
     current.mcpServers = wrapAllServers(
       { intutic: buildIntuticMcpEntry(workspaceRoot), ...(current.mcpServers ?? {}) },
       workspaceId,
@@ -503,7 +555,7 @@ async function injectCursor(workspaceId: string, workspaceRoot: string): Promise
 async function injectCline(workspaceId: string, workspaceRoot: string): Promise<void> {
   const configPath = clineConfigPath(workspaceRoot)
   try {
-    const current = await readJsonFile<{ mcpServers?: McpServersMap }>(configPath, {})
+    const current = await readJsonForWrite<{ mcpServers?: McpServersMap }>(configPath)
     current.mcpServers = wrapAllServers(
       { intutic: buildIntuticMcpEntry(workspaceRoot), ...(current.mcpServers ?? {}) },
       workspaceId,
@@ -523,7 +575,7 @@ async function injectWindsurf(workspaceId: string, workspaceRoot: string): Promi
 
   try {
     await node_fs.access(node_path.dirname(configPath))
-    const current = await readJsonFile<{ mcpServers?: McpServersMap }>(configPath, {})
+    const current = await readJsonForWrite<{ mcpServers?: McpServersMap }>(configPath)
     current.mcpServers = wrapAllServers(
       { intutic: buildIntuticMcpEntry(workspaceRoot), ...(current.mcpServers ?? {}) },
       workspaceId,
@@ -558,7 +610,7 @@ async function injectContinue(workspaceId: string, workspaceRoot: string): Promi
 
   try {
     await node_fs.access(node_path.dirname(configPath))
-    const current = await readJsonFile<ContinueConfig>(configPath, {})
+    const current = await readJsonForWrite<ContinueConfig>(configPath)
 
     // Continue uses an array format for mcpServers
     if (!Array.isArray(current.mcpServers)) {
@@ -642,7 +694,7 @@ async function injectGooseAppendOnly(configPath: string, existingYaml: string, w
  * stdio entries wrapped with `--`, remote (`url`-keyed) entries wrapped with
  * `--remote-url`/`--remote-transport` — so a remote MCP server declared in
  * Goose's config gets the identical bridge coverage a remote entry in
- * `~/.claude/mcp.json` would get, not a second, divergent convention.
+ * `~/.claude.json` would get, not a second, divergent convention.
  *
  * Falls back to `injectGooseAppendOnly` (append-only text injection, the
  * pre-existing behaviour) when the file does not parse as YAML at all —
@@ -737,7 +789,7 @@ async function injectGoose(workspaceId: string, workspaceRoot: string): Promise<
 async function injectOpenHands(workspaceId: string, workspaceRoot: string): Promise<void> {
   const configPath = openHandsConfigPath(workspaceRoot)
   try {
-    const current = await readJsonFile<{ mcpServers?: McpServersMap }>(configPath, {})
+    const current = await readJsonForWrite<{ mcpServers?: McpServersMap }>(configPath)
     current.mcpServers = wrapAllServers(
       { intutic: buildIntuticMcpEntry(workspaceRoot), ...(current.mcpServers ?? {}) },
       workspaceId,
@@ -772,10 +824,7 @@ async function injectMuse(workspaceId: string, workspaceRoot: string): Promise<v
     return
   }
 
-  const current = await readJsonFile<{ schema_version?: number; mcp_servers?: McpServersMap; [key: string]: unknown }>(
-    configPath,
-    {},
-  )
+  const current = await readJsonForWrite<{ schema_version?: number; mcp_servers?: McpServersMap; [key: string]: unknown }>(configPath)
   current.mcp_servers = wrapAllServers(
     { intutic: buildIntuticMcpEntry(workspaceRoot), ...(current.mcp_servers ?? {}) },
     workspaceId,
@@ -835,7 +884,7 @@ async function injectGrokConfigAppendOnly(
  * SAME `wrapWithProxy` convention every other harness uses (stdio entries
  * wrapped with `--`, remote/`url`-keyed entries wrapped with
  * `--remote-url`/`--remote-transport`) so a remote MCP server declared for
- * Grok Build gets identical bridge coverage to one in `~/.claude/mcp.json`,
+ * Grok Build gets identical bridge coverage to one in `~/.claude.json`,
  * not a second, divergent convention.
  *
  * Unlike `injectGoose`'s `Document#setIn` (which preserves comments/
@@ -1113,6 +1162,16 @@ async function discoverJsonObjectHarness(harness: string, filePath: string): Pro
   return out
 }
 
+/** Claude Code's `~/.claude.json`: the user-scope `mcpServers` map plus this
+ *  project's local-scope one under `projects[<workspaceRoot>]`. */
+async function discoverClaudeCode(workspaceRoot: string): Promise<DiscoveredMcpServer[]> {
+  const filePath = claudeCodeConfigPath()
+  if (!existsSync(filePath)) return []
+  const current = await readJsonFile<ClaudeCodeConfig>(filePath, {})
+  const servers = { ...(current.projects?.[workspaceRoot]?.mcpServers ?? {}), ...(current.mcpServers ?? {}) }
+  return Object.entries(servers).map(([name, entry]) => ({ server: name, harness: 'claude-code', ...classifyEntry(entry) }))
+}
+
 /** Muse Code's `~/.config/muse/settings.json` keeps servers under `mcp_servers`,
  *  not `mcpServers` — otherwise the same JSON-map shape `discoverJsonObjectHarness`
  *  reads, so this is that function with one key renamed rather than a new format. */
@@ -1321,7 +1380,7 @@ async function discoverOpenCode(workspaceRoot: string): Promise<DiscoveredMcpSer
  */
 export async function discoverMcpServers(workspaceRoot: string): Promise<DiscoveredMcpServer[]> {
   const results = await Promise.all([
-    discoverJsonObjectHarness('claude-code', claudeCodeConfigPath()),
+    discoverClaudeCode(workspaceRoot),
     discoverJsonObjectHarness('claude-desktop', claudeDesktopConfigPath()),
     discoverJsonObjectHarness('cursor', cursorGlobalConfigPath()),
     discoverJsonObjectHarness('cursor', cursorProjectConfigPath(workspaceRoot)),

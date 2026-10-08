@@ -157,7 +157,26 @@ function compile(slug: string): Promise<string> {
   return started
 }
 
+/**
+ * The block reason a guest exposes, read the way the proxy reads it
+ * (`read_guest_reason` in runner.rs): both exports present, a positive offset
+ * and length, valid UTF-8. Anything else is no reason.
+ */
+function readReason(ex: Record<string, unknown>, memory: WebAssembly.Memory): string | undefined {
+  const ptrFn = ex.reason_ptr as (() => number) | undefined
+  const lenFn = ex.reason_len as (() => number) | undefined
+  if (typeof ptrFn !== 'function' || typeof lenFn !== 'function') return undefined
+  const ptr = ptrFn()
+  const len = lenFn()
+  if (ptr <= 0 || len <= 0) return undefined
+  return new TextDecoder('utf-8', { fatal: true }).decode(new Uint8Array(memory.buffer, ptr, len))
+}
+
 function evaluate(wasmPath: string, mockPath: string): number {
+  return run(wasmPath, mockPath).verdict
+}
+
+function run(wasmPath: string, mockPath: string): { verdict: number; reason: string | undefined } {
   const mod = new WebAssembly.Module(readFileSync(wasmPath))
   const env: WebAssembly.ModuleImports = {}
   for (const name of WASM_HOST_IMPORTS) {
@@ -181,7 +200,8 @@ function evaluate(wasmPath: string, mockPath: string): number {
   // Re-read the buffer after allocate: it can grow memory, which detaches any
   // view taken before the call.
   new Uint8Array(memory.buffer, offset, bytes.length).set(bytes)
-  return evaluateFn(offset, bytes.length)
+  const verdict = evaluateFn(offset, bytes.length)
+  return { verdict, reason: readReason(ex, memory) }
 }
 
 /** Every allow context a rule ships: `allow.json` plus any `allow-*.json`. */
@@ -335,6 +355,22 @@ describe('drop-in rule library', () => {
         'too far from the block case to isolate what this rule actually reads',
     ).toBeLessThanOrEqual(4)
   })
+
+  it('secret-read-to-egress names why it blocked, and only when it blocks', async () => {
+    // The worked example of `setReason()`. Without the re-exported
+    // `reason_ptr`/`reason_len` the proxy would see no reason and fall back to
+    // its generic block message, so this compiles the rule standalone, exactly
+    // as a user would, and reads the reason the way the proxy does.
+    const wasm = await compile('secret-read-to-egress')
+    const blocked = run(wasm, join(rulesDir, 'secret-read-to-egress', 'block.json'))
+    expect(blocked.verdict).toBe(1)
+    expect(blocked.reason).toBe(
+      'a credential was read earlier in this session, then the session posted to the network',
+    )
+    const allowed = run(wasm, join(rulesDir, 'secret-read-to-egress', 'allow.json'))
+    expect(allowed.verdict).toBe(0)
+    expect(allowed.reason, 'an allowed evaluation must not report a reason').toBeUndefined()
+  }, 120_000)
 
   it.each(slugs)('%s never returns the deprecated code 2', async (slug) => {
     const wasm = await compile(slug)

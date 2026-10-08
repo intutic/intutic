@@ -108,33 +108,40 @@ describe('openSandboxSession / closeSandboxSession — sandbox-usage telemetry',
 })
 
 describe('Subprocess Exec Env Builder', () => {
-  it('correctly maps proxy URLs in dev mode', () => {
+  it('points every SDK convention at the local proxy', () => {
     const apiKey = 'intk_test12345'
-    const env = buildProxyEnv(apiKey, true)
+    const env = buildProxyEnv(apiKey)
 
     expect(env.OPENAI_API_BASE).toBe('http://localhost:4000/v1')
     expect(env.OPENAI_BASE_URL).toBe('http://localhost:4000/v1')
     expect(env.OPENAI_API_BASE_URL).toBe('http://localhost:4000/v1')
     expect(env.OPENAI_HOST).toBe('http://localhost:4000')
     expect(env.ANTHROPIC_BASE_URL).toBe('http://localhost:4000')
-    
+
     expect(env.OPENAI_API_KEY).toBe(apiKey)
     expect(env.ANTHROPIC_API_KEY).toBe(apiKey)
     expect(env.INTUTIC_API_KEY).toBe(apiKey)
   })
 
-  it('correctly maps proxy URLs in production mode', () => {
-    const apiKey = 'intk_prod98765'
-    const env = buildProxyEnv(apiKey, false)
+  it('leaves the key variables alone without a login, so the agent keeps its own', () => {
+    const env = buildProxyEnv(undefined)
 
-    expect(env.OPENAI_API_BASE).toBe('http://localhost:4000/v1')
-    expect(env.OPENAI_BASE_URL).toBe('http://localhost:4000/v1')
-    expect(env.OPENAI_API_BASE_URL).toBe('http://localhost:4000/v1')
-    expect(env.OPENAI_HOST).toBe('http://localhost:4000')
     expect(env.ANTHROPIC_BASE_URL).toBe('http://localhost:4000')
-    
-    expect(env.OPENAI_API_KEY).toBe(apiKey)
-    expect(env.ANTHROPIC_API_KEY).toBe(apiKey)
-    expect(env.INTUTIC_API_KEY).toBe(apiKey)
+    expect(env).not.toHaveProperty('OPENAI_API_KEY')
+    expect(env).not.toHaveProperty('ANTHROPIC_API_KEY')
+    expect(env).not.toHaveProperty('INTUTIC_API_KEY')
+  })
+
+  it('uses INTUTIC_PROXY_URL when set, trailing slashes trimmed', () => {
+    const prev = process.env.INTUTIC_PROXY_URL
+    process.env.INTUTIC_PROXY_URL = 'https://proxy.internal.example:8443/'
+    try {
+      const env = buildProxyEnv('intk_test12345')
+      expect(env.ANTHROPIC_BASE_URL).toBe('https://proxy.internal.example:8443')
+      expect(env.OPENAI_BASE_URL).toBe('https://proxy.internal.example:8443/v1')
+    } finally {
+      if (prev === undefined) delete process.env.INTUTIC_PROXY_URL
+      else process.env.INTUTIC_PROXY_URL = prev
+    }
   })
 })

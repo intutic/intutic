@@ -60,9 +60,9 @@ Every archive is self-verifying:
 1. **Recompute the hash.** Remove the `manifest` and `signature` fields from the archive, serialize the remainder as *canonical JSON* (object keys sorted recursively, arrays in order), and take the sha256. It must equal `manifest.archiveSha256` (and the `archive_sha256` on the run). Per-category hashes in `manifest.sections` are the canonical JSON of each category object.
 2. **Verify the signature** (when present). The signed preimage is the two-line string `intutic-soc2-evidence-v1\n<archiveSha256>`. Verify the Ed25519 signature in `signature.value` (base64) against the public key whose `kid` matches `signature.keyId` in the JWKS published at `/.well-known/intutic-trace-signing.json` — the same key set that signs trace Merkle roots.
 
-A run with `signature: null` was collected on a deployment without `TRACE_SIGNING_PRIVATE_KEY` configured. That is a supported state, reported honestly rather than papered over.
+A run with `signature: null` was collected on a deployment without `TRACE_SIGNING_PRIVATE_KEY` configured. That is a supported state, and the evidence says so rather than papering over it.
 
-## Honest limits
+## Limits
 
 - **Availability is unscored.** No probe governs uptime, so the availability category exports `score: null` with a named gap. Session and incident counts ride along as context — they are not a control, and inventing a number for an ungoverned category is exactly what this export refuses to do.
 - **Consent evidence is not collected.** Consent tracking was removed from the product; the privacy category records `consentEvidence: not_collected` rather than silently narrowing its claim.

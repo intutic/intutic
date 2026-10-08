@@ -20,9 +20,10 @@ intutic init
 ```
 
 ```
-✓ Detected harnesses:
-  • langgraph → .env.intutic
+  ✔ langgraph → .env.intutic
 ```
+
+`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
 
 ### 2. Route LLM traffic through the proxy {#2-route-llm-traffic-through-the-proxy}
 
@@ -148,9 +149,9 @@ A `.env.intutic` file with proxy URLs and a pointer at the SDK gate:
 # Last sync: 2026-08-10T00:00:00Z
 # Source this file: source .env.intutic
 
-export ANTHROPIC_BASE_URL="http://localhost:4000/v1"
+export ANTHROPIC_BASE_URL="http://localhost:4000"
 export OPENAI_BASE_URL="http://localhost:4000/v1"
-export INTUTIC_PROXY_URL="http://localhost:4000/v1"
+export INTUTIC_PROXY_URL="http://localhost:4000"
 export INTUTIC_SOP_COUNT=5
 
 # These env vars govern LLM egress only. LangGraph tools run in your own

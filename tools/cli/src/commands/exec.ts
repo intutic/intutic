@@ -10,9 +10,9 @@
  * - OPENAI_API_BASE_URL (OpenWebUI)
  * - OPENAI_HOST         (Goose)
  * - ANTHROPIC_BASE_URL  (Claude Code, Anthropic SDK — host only)
- * - ANTHROPIC_API_KEY   (Claude Code)
- * - OPENAI_API_KEY      (all OpenAI-compatible tools)
- * - INTUTIC_API_KEY     (Intutic-native tools)
+ * - ANTHROPIC_API_KEY   (Claude Code)                 — only when logged in
+ * - OPENAI_API_KEY      (all OpenAI-compatible tools) — only when logged in
+ * - INTUTIC_API_KEY     (Intutic-native tools)        — only when logged in
  *
  * LLD #8 — Sync Daemon / CLI
  * @module
@@ -21,9 +21,10 @@
 import { spawn } from 'node:child_process'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
-import { loadCredentials, loadConfig } from '../config/store.js'
+import { loadCredentials } from '../config/store.js'
 import type { IntuticCredentials } from '@intutic/shared-types'
-import { getIntuticDir } from '../config/paths.js'
+import { proxyHost as normaliseProxyHost } from '@intutic/shared-types'
+import { getIntuticDir, resolveControlPlaneUrl } from '../config/paths.js'
 import {
   deriveIdentity,
   identityEnv,
@@ -32,9 +33,9 @@ import {
   type GraphIdentity,
 } from '../lib/graphIdentity.js'
 import { log } from '../lib/logger.js'
-import { NOT_AUTHENTICATED } from '../lib/authMessages.js'
 import { selectBackend, type SandboxKind, type SandboxSpec } from '../lib/sandbox/index.js'
 import pc from 'picocolors'
+import { localProxyPort } from '../lib/localProxy.js'
 
 /** Workspace requirement for whether agents must run sandboxed (LLD #63 §6). */
 export type SandboxRequirement = 'off' | 'warn' | 'require'
@@ -58,7 +59,7 @@ export async function resolveSandboxRequirement(
   const coerce = (v: unknown): SandboxRequirement =>
     v === 'warn' || v === 'require' ? v : 'off'
 
-  const base = trimTrailingSlashes(creds.controlPlaneUrl ?? 'https://api.intutic.ai')
+  const base = resolveControlPlaneUrl()
   try {
     const res = await fetch(`${base}/api/v1/workspace/settings`, {
       headers: {
@@ -103,40 +104,16 @@ export interface SandboxExecOptions {
   allow: string[]
 }
 
-/** The proxy port the host listens on, from INTUTIC_PROXY_URL (default 4000). */
-export function proxyPortFromEnv(): string {
-  const raw = process.env.INTUTIC_PROXY_URL ?? 'http://localhost:4000'
-  try {
-    return new URL(raw).port || '4000'
-  } catch {
-    return '4000'
-  }
-}
-
-/**
- * Trims trailing `/` characters without a regex.
- *
- * `INTUTIC_PROXY_URL` is a local environment variable, not remotely
- * attacker-controlled — but CodeQL's static analysis flags `/\/+$/` as a
- * polynomial-time pattern on external input regardless, and a loop is O(n)
- * and cannot be mis-classified as a ReDoS shape by any static analyzer.
- */
-function trimTrailingSlashes(s: string): string {
-  let end = s.length
-  while (end > 0 && s.charCodeAt(end - 1) === 47 /* '/' */) end--
-  return s.slice(0, end)
-}
-
 /**
  * Build the proxy environment variables for a child process.
  *
- * @param apiKey   - Intutic API key (intk_...)
- * @param devMode  - retained for call-site compatibility; the proxy is always local
+ * @param apiKey   - The workspace API key, or undefined when not logged in:
+ *   the key variables are then left out, so the agent keeps its own provider
+ *   keys and the standalone proxy forwards them upstream.
  * @returns Record of env vars to inject
  */
 export function buildProxyEnv(
-  apiKey: string,
-  devMode: boolean,
+  apiKey: string | undefined,
   identity?: GraphIdentity,
   proxyUrlOverride?: string,
 ): Record<string, string> {
@@ -149,10 +126,7 @@ export function buildProxyEnv(
   // Set INTUTIC_PROXY_URL to point at a proxy you run somewhere else. A sandbox
   // launch overrides it with the host-gateway alias, because inside the sandbox
   // `localhost` is the sandbox, not the host the proxy runs on.
-  const rawHost = trimTrailingSlashes(
-    proxyUrlOverride ?? process.env.INTUTIC_PROXY_URL ?? 'http://localhost:4000',
-  )
-  void devMode
+  const rawHost = normaliseProxyHost(proxyUrlOverride ?? process.env.INTUTIC_PROXY_URL)
 
   // Graph identity rides in the base URL. Harnesses append their own path to
   // whatever host they are given, so a prefix here reaches the proxy from every
@@ -170,13 +144,16 @@ export function buildProxyEnv(
     OPENAI_API_BASE_URL: proxyUrl,
     // Goose (uses OPENAI_HOST, not OPENAI_API_BASE)
     OPENAI_HOST: proxyHost,
-    // All OpenAI-compatible API keys
-    OPENAI_API_KEY: apiKey,
     // Anthropic SDK / Claude Code (host only — appends /v1/messages itself)
     ANTHROPIC_BASE_URL: proxyHost,
-    ANTHROPIC_API_KEY: apiKey,
-    // Intutic-native
-    INTUTIC_API_KEY: apiKey,
+  }
+
+  if (apiKey !== undefined) {
+    // All OpenAI-compatible API keys, Claude Code, and Intutic-native tools
+    // authenticate to the proxy with the workspace key.
+    env.OPENAI_API_KEY = apiKey
+    env.ANTHROPIC_API_KEY = apiKey
+    env.INTUTIC_API_KEY = apiKey
   }
 
   if (identity) {
@@ -218,28 +195,25 @@ export async function runExec(
     process.exit(1)
   }
 
-  // Load credentials
+  // A login is optional. With one, the agent authenticates to the proxy with
+  // the workspace key and the workspace's sandbox requirement applies. Without
+  // one — open core, `intutic start` — only the base URLs change: the agent
+  // keeps the provider keys already in its environment, and the standalone
+  // proxy forwards them upstream.
   const creds = await loadCredentials()
-  if (!creds) {
-    log.error(NOT_AUTHENTICATED)
-    process.exit(1)
-  }
-
-  // Load config for dev mode
-  const config = loadConfig()
-  const devMode = config?.devMode ?? process.env.INTUTIC_DEV === '1'
 
   // Build env. A nested `intutic exec` inherits identity from its parent and
   // becomes a child node; a top-level one starts a new graph.
   const identity = deriveIdentity()
 
   if (sandbox) {
-    await runSandboxed(commandAndArgs, creds, devMode, identity, sandbox)
+    await runSandboxed(commandAndArgs, creds, identity, sandbox)
     return
   }
 
   // Not sandboxed — honour the workspace's sandbox requirement (LLD #63 §6).
-  const requirement = await resolveSandboxRequirement(creds)
+  // Without a login there is no workspace to have one.
+  const requirement = creds ? await resolveSandboxRequirement(creds) : 'off'
   if (requirement === 'require') {
     log.error('This workspace requires agents to run inside a sandbox.')
     log.dim(`Re-run with the sandbox:  intutic exec --sandbox -- ${commandAndArgs.join(' ')}`)
@@ -249,7 +223,7 @@ export async function runExec(
     log.warn('This workspace recommends running agents in a sandbox — add --sandbox.')
   }
 
-  const proxyEnv = buildProxyEnv(creds.apiKey, devMode, identity)
+  const proxyEnv = buildProxyEnv(creds?.apiKey, identity)
   const childEnv = { ...process.env, ...proxyEnv }
 
   const [exe, ...args] = commandAndArgs
@@ -257,7 +231,11 @@ export async function runExec(
   // Print info
   log.info(`Launching: ${pc.bold(exe)} ${args.join(' ')}`)
   log.dim(`Proxy: ${proxyEnv.OPENAI_API_BASE}`)
-  log.dim(`API Key: ${creds.apiKey.slice(0, 8)}...${creds.apiKey.slice(-4)}`)
+  log.dim(
+    creds
+      ? `API Key: ${creds.apiKey.slice(0, 8)}...${creds.apiKey.slice(-4)}`
+      : 'Not logged in: the agent uses its own provider keys, which the proxy passes through.',
+  )
   log.dim(
     identity.depth === 0
       ? `Graph: ${identity.graphId} (root)`
@@ -302,14 +280,13 @@ export async function runExec(
  */
 async function runSandboxed(
   commandAndArgs: string[],
-  creds: IntuticCredentials,
-  devMode: boolean,
+  creds: IntuticCredentials | null,
   identity: GraphIdentity,
   opts: SandboxExecOptions,
 ): Promise<void> {
-  const port = proxyPortFromEnv()
+  const port = String(localProxyPort())
   const proxyUrlOverride = `http://${PROXY_HOST_ALIAS}:${port}`
-  const proxyEnv = buildProxyEnv(creds.apiKey, devMode, identity, proxyUrlOverride)
+  const proxyEnv = buildProxyEnv(creds?.apiKey, identity, proxyUrlOverride)
 
   // The values the runtime will read for the `--env NAME` references.
   //
@@ -320,6 +297,9 @@ async function runSandboxed(
   // off an identity-bearing URL in shell, keeps entrypoint.sh simple and
   // correct regardless of whether identity is present.
   const env: Record<string, string> = {
+    // Without a login the agent's own provider keys must reach it: the
+    // container only receives the variables named here.
+    ...(creds ? {} : ownProviderKeys()),
     ...proxyEnv,
     INTUTIC_SANDBOX_PROXY_HOST: PROXY_HOST_ALIAS,
     INTUTIC_SANDBOX_PROXY_PORT: port,
@@ -343,6 +323,13 @@ async function runSandboxed(
     process.exit(1)
   }
 
+  try {
+    await backend.prepare?.(opts.image)
+  } catch (err) {
+    log.error(`Sandbox image unavailable: ${err instanceof Error ? err.message : String(err)}`)
+    process.exit(1)
+  }
+
   log.info(`Sandbox: ${backend.name} · image ${opts.image} · egress locked to the proxy`)
   log.dim(`Proxy (from sandbox): ${proxyUrlOverride}`)
   const [exe, ...rest] = commandAndArgs
@@ -360,7 +347,7 @@ async function runSandboxed(
   // (LLD #63 §6, TD-333) once its own firewall + capability drop are in
   // effect, closing the gap where this executionMode:'SANDBOX' record was
   // the entire, self-reported, host-side claim.
-  const sessionId = await openSandboxSession(creds, identity, backend.name)
+  const sessionId = creds ? await openSandboxSession(creds, identity, backend.name) : null
   if (sessionId) env.INTUTIC_SESSION_ID = sessionId
 
   const spec: SandboxSpec = {
@@ -378,8 +365,18 @@ async function runSandboxed(
 
   const code = await backend.run(spec)
 
-  if (sessionId) await closeSandboxSession(creds, sessionId)
+  if (creds && sessionId) await closeSandboxSession(creds, sessionId)
   process.exit(code)
+}
+
+/** The provider keys a standalone sandboxed agent authenticates upstream with. */
+function ownProviderKeys(): Record<string, string> {
+  const keys: Record<string, string> = {}
+  for (const name of ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY']) {
+    const value = process.env[name]
+    if (value) keys[name] = value
+  }
+  return keys
 }
 
 /** Opens a SANDBOX-mode session for telemetry. Returns null on any failure. */
@@ -389,7 +386,7 @@ export async function openSandboxSession(
   backendName: string,
 ): Promise<string | null> {
   try {
-    const res = await fetch(`${trimTrailingSlashes(creds.controlPlaneUrl)}/api/v1/sessions`, {
+    const res = await fetch(`${resolveControlPlaneUrl()}/api/v1/sessions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${creds.apiKey}` },
       body: JSON.stringify({
@@ -412,7 +409,7 @@ export async function openSandboxSession(
 export async function closeSandboxSession(creds: IntuticCredentials, sessionId: string): Promise<void> {
   try {
     await fetch(
-      `${trimTrailingSlashes(creds.controlPlaneUrl)}/api/v1/sessions/${sessionId}/end`,
+      `${resolveControlPlaneUrl()}/api/v1/sessions/${sessionId}/end`,
       {
         method: 'PATCH',
         headers: { Authorization: `Bearer ${creds.apiKey}` },

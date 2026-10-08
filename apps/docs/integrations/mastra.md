@@ -20,9 +20,10 @@ intutic init
 ```
 
 ```
-✓ Detected harnesses:
-  • mastra → .env.intutic
+  ✔ mastra → .env.intutic
 ```
+
+`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
 
 ### 2. Route LLM traffic through the proxy
 
@@ -94,7 +95,7 @@ await agent.generate(prompt, {
 })
 ```
 
-Confirmed against a real install (`@mastra/core@1.59.0`, and unchanged in 1.74.0): `Agent.getConfiguredToolHooks()`'s own doc comment states "Run-level hooks override these ... callers that need to preserve the configured hooks must read and compose them explicitly." See `docs/TECH_DEBT.md` TD-380 and `@intutic/gate/mastra`'s module doc for the full record.
+Confirmed against a real install (`@mastra/core@1.59.0`, and unchanged in 1.74.0): `Agent.getConfiguredToolHooks()`'s own doc comment states "Run-level hooks override these ... callers that need to preserve the configured hooks must read and compose them explicitly." See `@intutic/gate/mastra`'s module doc for the full record.
 
 ## What the adapter does NOT do
 

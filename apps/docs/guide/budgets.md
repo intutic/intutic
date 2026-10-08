@@ -12,12 +12,21 @@ Agentic coding workflows can trigger thousands of parallel LLM calls, quickly ge
 
 ### Per-Workspace Budgets
 
-Configure spending limits from the dashboard (**Settings › Billing › Budget Limits**) or via environment variables:
+Set the workspace's daily and monthly caps and its alert threshold on **Settings › Billing › Budget Limits**, or with `PUT /api/v1/budget`:
 
-| Variable | Description |
-|----------|-------------|
-| `INTUTIC_BUDGET_DAILY_USD` | Maximum daily spend in USD. Requests are blocked once reached |
-| `INTUTIC_BUDGET_MONTHLY_USD` | Maximum monthly spend in USD |
+```json
+{ "daily_budget_usd": 50, "monthly_budget_usd": 1000, "alert_threshold_pct": 80 }
+```
+
+### Local Daily Cap
+
+A standalone proxy (one with no control plane) also keeps a daily cap of its own, for all the spend that passes through it. Set it as `maxDailyBudgetUsd` in `~/.intutic/config.json`:
+
+```json
+{ "maxDailyBudgetUsd": 25 }
+```
+
+It defaults to `$10.00` when unset, and an edit takes effect within 60 seconds without a restart. `INTUTIC_LOCAL_BUDGET_ENFORCE=0` stops the proxy refusing requests over the cap while it keeps counting the spend. There are no environment variables for the cap itself. A proxy connected to a control plane does not apply it: its spend is capped per workspace by the caps above.
 
 ### Developer Budget Tiers
 
@@ -49,14 +58,14 @@ Each API request flowing through the proxy is checked against budget limits:
 Intutic's budget enforcer operates in two distinct modes depending on connection status:
 
 <!-- ENTERPRISE_ONLY_START -->
-#### 1. Active GKE/SaaS Enforcement (Connected Mode)
+#### 1. Connected Mode
 *   **Centralized Caps:** Daily and monthly budgets are managed centrally.
 *   **Valkey Cache Validation:** The control plane caches billing limits and cumulative workspace usage counters in Valkey. The proxy performs a cache precheck (`check_workspace_hard_block`) — a single Valkey GET — on every incoming request.
 *   **Heartbeat Sync:** Actual query costs update Valkey counters and PostgreSQL in real time upon successful completions.
 <!-- ENTERPRISE_ONLY_END -->
 
-#### 2. Local Fallback Enforcer (Standalone / Offline Mode)
-*   **Local Budget Definition:** The local proxy loads your daily budget cap (`maxDailyBudgetUsd`) directly from your local config (`~/.intutic/config.json`).
+#### 2. Local Daily Cap (Every Proxy)
+*   **Local Budget Definition:** The proxy reads its daily cap (`maxDailyBudgetUsd`, default `$10.00`) from `~/.intutic/config.json`. It is the only cost control in standalone mode; a connected proxy uses the workspace caps instead.
 *   **Offline Spend Ledger:** Day-accumulated spend is saved in sharded daily files (`~/.intutic/logs/local-spend-YYYY-MM-DD.jsonl`).
 *   **Pre-flight Cost Interception:** Before reaching the LLM provider, a native budget gate plugin estimates query cost based on prompt length and static ratios. If this would exceed the remaining budget, the proxy blocks the request with `HTTP 429 Too Many Requests` (`OVERAGE_HARD_CAP_EXCEEDED` error code).
 *   **Offline Telemetry Ingestion:** Successful completion costs are calculated, appended to the daily spend ledger, and queued in sharded files `~/.intutic/logs/traces-YYYY-MM-DD.jsonl` for sync-back.

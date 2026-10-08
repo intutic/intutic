@@ -9,9 +9,11 @@
  * "Enterprise" and "Self-host", and emails told people to "Upgrade to Pro".
  * This fails on any of those coming back:
  *
- * - retired plan names (Pro, Team, Biz Scale, Enterprise Sub) and the old
- *   long names (Enterprise Advanced, Enterprise License) in docs pages, the
- *   docs sidebar, dashboard source and the control plane's customer copy;
+ * - retired plan names (Pro, Team, Biz Scale, Enterprise Sub), alone, in a
+ *   list of plans ("a Pro, Team or Enterprise plan") or as a "(team+)" tier
+ *   note, and the old long names (Enterprise Advanced, Enterprise License) in
+ *   docs pages, the docs sidebar, dashboard source and the control plane's
+ *   customer copy, and the 14-day trial under any name but "Free trial";
  * - a docs badge outside the vocabulary in guide/plans.md#badges, plus the
  *   descriptive badges listed below.
  *
@@ -37,13 +39,24 @@ const SOURCES = [
   { file: 'services/control-plane/src/routes/trial.ts' },
 ]
 
+/** One plan name in a list: a capitalised word, optionally two ("Biz Org"). */
+const NAME = String.raw`[A-Z][\w-]*(?: [A-Z][\w-]*)?`
+/** Between list items: a comma or slash, optionally followed by "or"/"and", or a bare "or"/"and". */
+const SEP = String.raw`(?:\s*[,/]\s*(?:(?:or|and)\s+)?|\s+(?:or|and)\s+)`
+
 const RETIRED = [
   [/\b(Pro|Team|Biz Scale) (plan|tier|Plan|Tier)s?\b/, 'a retired plan'],
+  // A retired name heading a list that ends in "plan": "a Pro, Team or
+  // Enterprise plan" passed the pattern above, which needs the word "plan"
+  // right after the retired name.
+  [new RegExp(String.raw`\b(?:Pro|Team|Biz Scale)${SEP}(?:${NAME}${SEP})*${NAME} (?:plan|tier|Plan|Tier)s?\b`), 'a retired plan in a list of plans'],
+  [/\((?:pro|team|Pro|Team)\+\)/, 'a retired plan (say Self-serve+ or Biz Org+)'],
   [/\bPro\s*\/\s*Team\b/, 'retired plans'],
   [/\bUpgrade to Pro\b/, 'a retired plan'],
   [/\bEnterprise (Advanced|License|Licensed|Sub|Subscription|Tier)\b/, 'an old plan name (say Enterprise or Self-host)'],
   [/\bEnterprise \((Sub|Advanced|Licensed)\)/, 'an old plan name (say Enterprise or Self-host)'],
   [/\bSelf Serve\b/, 'the plan is spelled "Self-serve"'],
+  [/\b[Pp]ersonal trial\b/, 'the 14-day trial is the "Free trial" (planSkuMap.ts displayName)'],
   [/\b(Cloud|Commercial) \/ Team\b/, 'a retired plan badge'],
 ]
 

@@ -31,16 +31,21 @@
  * Verdict codes: 0 allow, 1 block, 3 reask. 2 is deprecated — the proxy maps
  * it to a block, so a rule returning it believing it redacts gets a block.
  */
-import { RequestContext, readContext } from "../../assembly/index";
+import { RequestContext, readContext, setReason } from "../../assembly/index";
 
-export { allocate } from "../../assembly/index";
+// `reason_ptr`/`reason_len` carry the `setReason()` text to the proxy, which
+// reads only this file's exports — so they are re-exported alongside `allocate`.
+export { allocate, reason_ptr, reason_len } from "../../assembly/index";
 
 export function rule(ctx: RequestContext): i32 {
   let sawSecretRead = false;
   for (let i = 0; i < ctx.tool_sequence.length; i++) {
     const t = ctx.tool_sequence[i];
     if (t == "action:secret_read") sawSecretRead = true;
-    else if (t == "action:http_post" && sawSecretRead) return 1;
+    else if (t == "action:http_post" && sawSecretRead) {
+      setReason("a credential was read earlier in this session, then the session posted to the network");
+      return 1;
+    }
   }
   return 0;
 }

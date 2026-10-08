@@ -6,7 +6,7 @@
  * a one-line remediation.
  *
  * Checks (in order):
- * 1. Proxy reachable (http://127.0.0.1:4000/health)
+ * 1. Proxy reachable (http://127.0.0.1:4000/health, or the INTUTIC_PROXY_URL port)
  * 2. Control plane auth (via stored credentials)
  * 3. Sync daemon running (PID file or process grep)
  * 4. Harness config files intact (SHA-256 hash check)
@@ -34,6 +34,13 @@ import { loadCredentials, loadConfig, loadIntegrity } from '../config/store.js'
 import { isSyncDaemonRunning } from '../lib/process.js'
 import { caTrustCommandFor } from '../lib/caTrust.js'
 import { getPaths } from './install-daemon.js'
+import { resolveControlPlaneUrl } from '../config/paths.js'
+import { localProxyProbeBase } from '../lib/localProxy.js'
+
+/** The local proxy's health endpoint, on the port every command uses. */
+function proxyHealthUrl(): string {
+  return `${localProxyProbeBase()}/health`
+}
 import {
   readPolicySnapshot,
   SNAPSHOT_STALE_AFTER_DAYS,
@@ -52,7 +59,6 @@ export interface CheckResult {
 
 // ─── Constants ───────────────────────────────────────────────────────
 
-const PROXY_HEALTH_URL = 'http://127.0.0.1:4000/health'
 const PROXY_TIMEOUT_MS = 3_000
 const CONTROL_PLANE_TIMEOUT_MS = 5_000
 /**
@@ -68,14 +74,14 @@ const VALKEY_PROBE_TIMEOUT_MS = 2_000
 // ─── Individual Checks ──────────────────────────────────────────────
 
 /**
- * Check 1: Proxy reachable at localhost:4000.
+ * Check 1: Proxy reachable on its local port.
  */
 async function checkProxy(): Promise<CheckResult> {
   try {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), PROXY_TIMEOUT_MS)
 
-    const res = await fetch(PROXY_HEALTH_URL, {
+    const res = await fetch(proxyHealthUrl(), {
       signal: controller.signal,
     })
     clearTimeout(timeout)
@@ -84,7 +90,7 @@ async function checkProxy(): Promise<CheckResult> {
       return {
         name: 'Proxy',
         passed: true,
-        detail: `Reachable at ${PROXY_HEALTH_URL} (HTTP ${res.status})`,
+        detail: `Reachable at ${proxyHealthUrl()} (HTTP ${res.status})`,
       }
     }
 
@@ -106,9 +112,14 @@ async function checkProxy(): Promise<CheckResult> {
 }
 
 /**
- * Check 2: Control plane auth — verifies stored credentials can reach the API.
+ * Check 2: Control plane auth — verifies the stored credentials are accepted.
+ *
+ * Asks `/api/v1/auth/me`, the route `intutic login` validates a key against.
+ * This used to request `/api/v1/health`, which the control plane does not
+ * serve: a valid key came back 404 and was reported as "Reachable (HTTP 404)",
+ * so the check never said "Authenticated" for a working login.
  */
-async function checkControlPlane(): Promise<CheckResult> {
+export async function checkControlPlane(): Promise<CheckResult> {
   const creds = await loadCredentials()
 
   if (!creds) {
@@ -120,7 +131,10 @@ async function checkControlPlane(): Promise<CheckResult> {
     }
   }
 
-  const url = `${creds.controlPlaneUrl}/api/v1/health`
+  // The same control plane every other command would use for these
+  // credentials, so this checks what they will actually hit.
+  const controlPlaneUrl = resolveControlPlaneUrl()
+  const url = `${controlPlaneUrl}/api/v1/auth/me`
 
   try {
     const controller = new AbortController()
@@ -138,7 +152,7 @@ async function checkControlPlane(): Promise<CheckResult> {
       return {
         name: 'Control Plane Auth',
         passed: true,
-        detail: `Authenticated at ${creds.controlPlaneUrl}`,
+        detail: `Authenticated at ${controlPlaneUrl}`,
       }
     }
 
@@ -154,7 +168,7 @@ async function checkControlPlane(): Promise<CheckResult> {
     return {
       name: 'Control Plane Auth',
       passed: true,
-      detail: `Reachable at ${creds.controlPlaneUrl} (HTTP ${res.status})`,
+      detail: `Reachable at ${controlPlaneUrl} (HTTP ${res.status})`,
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'
@@ -162,7 +176,7 @@ async function checkControlPlane(): Promise<CheckResult> {
       name: 'Control Plane Auth',
       passed: false,
       detail: `Unreachable — ${message}`,
-      remediation: `Check network connectivity to ${creds.controlPlaneUrl}.`,
+      remediation: `Check network connectivity to ${controlPlaneUrl}.`,
     }
   }
 }
@@ -379,41 +393,18 @@ function checkDaemonLog(): CheckResult {
 }
 
 /**
- * Check 6: Valkey connectivity.
+ * Check 6: Valkey connectivity, by a direct TCP probe.
  *
- * First tries the proxy /health endpoint and looks for a `valkey` field.
- * If the proxy is unreachable or doesn't report Valkey status, falls back
- * to a direct TCP probe on port 6379.
+ * Only the probe. This check used to ask the proxy's /health first and look
+ * for a `valkey` field, but /health reports status, service and version and
+ * nothing about Valkey, so that branch could never pass and cost a second
+ * request on every run.
  */
-async function checkValkey(): Promise<CheckResult> {
-  // Attempt 1: Read valkey status from proxy /health response
-  try {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), VALKEY_PROBE_TIMEOUT_MS)
-
-    const res = await fetch(PROXY_HEALTH_URL, { signal: controller.signal })
-    clearTimeout(timeout)
-
-    if (res.ok) {
-      const body = await res.json().catch(() => ({}))
-      if (body.valkey === 'ok') {
-        return {
-          name: 'Valkey',
-          passed: true,
-          detail: 'Connected (reported by proxy /health)',
-        }
-      }
-      // Proxy responded but doesn't report valkey status — fall through
-    }
-  } catch {
-    // Proxy unreachable — fall through to direct probe
-  }
-
-  // Attempt 2: Direct TCP probe on port 6379
+export async function checkValkey(port = 6379): Promise<CheckResult> {
   try {
     const { createConnection } = await import('node:net')
     const connected = await new Promise<boolean>((resolve) => {
-      const socket = createConnection({ host: '127.0.0.1', port: 6379 }, () => {
+      const socket = createConnection({ host: '127.0.0.1', port }, () => {
         socket.end()
         resolve(true)
       })
@@ -426,7 +417,7 @@ async function checkValkey(): Promise<CheckResult> {
       return {
         name: 'Valkey',
         passed: true,
-        detail: 'Reachable at 127.0.0.1:6379 (direct TCP probe)',
+        detail: `Reachable at 127.0.0.1:${port} (direct TCP probe)`,
       }
     }
   } catch {
@@ -436,7 +427,7 @@ async function checkValkey(): Promise<CheckResult> {
   return {
     name: 'Valkey',
     passed: false,
-    detail: 'Not reachable on port 6379',
+    detail: `Not reachable on port ${port}`,
     remediation: 'Start Valkey: `docker compose up -d valkey` or install locally.',
   }
 }

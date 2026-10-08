@@ -3,6 +3,8 @@ name = "bench-wasm-guest"
 version = "0.1.0"
 edition = "2021"
 description = "Minimal WASM guest for proxy plugin benchmarks"
+# A benchmark fixture compiled by the proxy's benches, not a library.
+publish = false
 
 [lib]
 crate-type = ["cdylib"]

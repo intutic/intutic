@@ -3,6 +3,7 @@
   "displayName": "Intutic Governance Extension",
   "description": "AI Governance Control Plane for VS Code / Cursor workspaces",
   "version": "2.0.0",
+  "private": true,
   "publisher": "intutic",
   "engines": {
     "vscode": "^1.90.0"

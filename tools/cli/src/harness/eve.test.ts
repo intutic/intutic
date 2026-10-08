@@ -77,7 +77,8 @@ describe('eve adapter', () => {
       expect(written).toBe(join(root, '.env.intutic'))
 
       const content = await readFile(join(root, '.env.intutic'), 'utf-8')
-      expect(content).toContain(`export INTUTIC_PROXY_URL="${PROXY_URL}"`)
+      // INTUTIC_PROXY_URL is the bare proxy host; a configured /v1 is dropped.
+      expect(content).toContain('export INTUTIC_PROXY_URL="http://127.0.0.1:4000"')
       expect(content).toContain('npm install @intutic/gate')
       expect(content).toContain("@intutic/gate/eve'")
       expect(content).toContain('intuticApproval')

@@ -62,8 +62,9 @@ Verify:
 
 ```bash
 intutic --version
-# 1.6.3
 ```
+
+It prints the installed version number.
 
 ::: details Alternative package managers & Standalone Binaries
 ```bash
@@ -84,9 +85,10 @@ For environments without Node.js, download single-file precompiled binaries dire
 ## Step 2 — Log in <Badge type="tip" text="Connected mode only" />
 
 ::: tip Running open core standalone? Skip to [Step 4](#step-4-start-the-proxy).
-`login` and `init` register you with a **control plane**, which open core does
-not include. Standalone needs neither — `intutic start` runs the proxy with no
-account at all.
+`login` authenticates you with a **control plane**, which open core does not
+include, and `init` records the workspace for `intutic connect` to sync.
+Standalone needs neither — `intutic start` runs the proxy with no account at
+all.
 :::
 
 ```bash
@@ -114,8 +116,17 @@ intutic login --api-key vk_your_key_here
 ```
 :::
 
+::: tip Self-hosted control plane
+Log in with its URL once; every later command, `intutic connect` included, uses it:
+```bash
+intutic login --control-plane-url https://intutic.internal.example
+```
+`INTUTIC_CONTROL_PLANE_URL` does the same per shell. See
+[Choosing a control plane](/reference/cli#control-plane-url).
+:::
+
 ::: details Local development
-If you are running a control plane of your own, point at it with `--dev`:
+If you are running a control plane on this machine, point at it with `--dev`:
 ```bash
 intutic login --dev
 ```
@@ -132,8 +143,9 @@ From your project root (must contain a `.git/` directory or `package.json`):
 intutic init
 ```
 
-This auto-detects every AI harness in your project and writes a local
-config file at `~/.intutic/config.json`.
+This auto-detects every AI harness in your project and records them in
+`~/.intutic/config.json`. It makes no network call and writes no harness
+files; `intutic connect` (Step 4) writes those.
 
 ```
 ╭─ Intutic — Workspace Initialization ─╮
@@ -150,12 +162,16 @@ Detecting AI harnesses...
 ✔ Detected 2 harnesses
 ✔ Authenticated as you@company.com
 
-Would you like to install Git sync hooks (post-commit, post-checkout)? [Y/n]:
+Install Intutic Git hooks (post-commit, post-checkout, pre-commit secret scan, post-merge)? [Y/n]:
 ✔ Workspace initialized.
 ```
 
+The Git hooks question is only asked at a terminal. In CI or a script, pass
+`--git-hooks` or `--no-git-hooks`; with neither, `init` skips the hooks.
+
 ::: details Local development
-Register against a local control plane:
+Record dev mode, so later commands use a local control plane
+(`http://localhost:3001`):
 ```bash
 intutic init --dev
 ```

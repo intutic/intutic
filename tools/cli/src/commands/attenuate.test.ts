@@ -108,6 +108,13 @@ describe('runAttenuate', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  // The server takes whole seconds from 60 to 86400; anything else used to
+  // pass this check and come back as a 422.
+  it.each(['30', '90.5', '86401'])('exits 1 without calling the API for --ttl %s', async (ttl) => {
+    await expect(runAttenuate({ parentKey: 'vk_parent', caps: 'read', ttl })).rejects.toThrow('process.exit(1)')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('surfaces a cap-violation 403 and exits non-zero rather than swallowing it', async () => {
     fetchMock.mockResolvedValue({
       ok: false,

@@ -5,7 +5,7 @@ Integrate Intutic governance with [TrueForge](https://github.com/truefoundry/tru
 - **Embedded** (`HarnessType.TRUEFORGE`) — another team's Node.js process imports `@truefoundry/trueforge-core` directly. Covered below in [Embedded mode](#embedded-mode).
 - **Standalone/hosted server** (`HarnessType.TRUEFORGE_SERVER`) — TrueForge runs as its own server (`npx @truefoundry/trueforge`, Docker Compose, or the Helm chart). Covered below in [Server mode (standalone/hosted)](#server-mode-standalone-hosted).
 
-Both modes share the same underlying approval mechanism — TrueForge's async `tool.approval_required`/`user.tool_approval` turn contract — but differ in WHERE the gate runs: SDK-side in your own process for embedded mode, or out-of-process in `services/trueforge-bridge` (an Intutic-operated service) for server mode, since nobody embeds a gate library into a third-party OSS server process. See [`harness-security-matrix.md`](/reference/harness-security-matrix) rows 41–42 for how these two trust shapes are scored differently.
+Both modes share the same underlying approval mechanism — TrueForge's async `tool.approval_required`/`user.tool_approval` turn contract — but differ in WHERE the gate runs: SDK-side in your own process for embedded mode, or out-of-process in the TrueForge bridge (a separate service you run) for server mode, since nobody embeds a gate library into a third-party OSS server process. See [`harness-security-matrix.md`](/reference/harness-security-matrix) rows 41–42 for how these two trust shapes are scored differently.
 
 ## Embedded mode
 
@@ -29,9 +29,10 @@ intutic init
 ```
 
 ```
-✓ Detected harnesses:
-  • trueforge → .env.intutic
+  ✔ trueforge → .env.intutic
 ```
+
+`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
 
 #### 2. Route LLM traffic through the proxy
 
@@ -42,7 +43,7 @@ const providerConfig = {
   provider: { type: 'openai', name: 'my-openai' },
   model: { id: 'gpt-4o', name: 'gpt-4o' },
   name: 'gpt-4o',
-  baseUrl: process.env.INTUTIC_PROXY_URL, // or your hosted proxy
+  baseUrl: `${process.env.INTUTIC_PROXY_URL}/v1`, // OpenAI-style providers need the /v1 path
   apiKey: process.env.OPENAI_API_KEY!,
   headers: {},
 }
@@ -57,10 +58,14 @@ npm install @intutic/gate
 ```
 
 ```ts
-import { Gate, install } from '@intutic/gate'
+import { Gate, GateClient, install } from '@intutic/gate'
 import { intuticApprovalResponder } from '@intutic/gate/trueforge'
 
-install(new Gate({ workspaceId: process.env.INTUTIC_WORKSPACE_ID }))
+// The client reads INTUTIC_API_KEY / INTUTIC_WORKSPACE_ID, or the credentials
+// `intutic login` saved. Without it the gate still enforces the local policy
+// snapshot, but skips your SOP rules, the control-plane check and audit events.
+const client = GateClient.fromEnv({ sessionId: runId, harness: 'trueforge' })
+install(new Gate({ workspaceId: client.workspaceId }, client))
 
 const respond = intuticApprovalResponder()
 
@@ -106,9 +111,9 @@ Same shape as every other SDK-gated framework's `.env.intutic` — proxy URLs pl
 # Last sync: 2026-08-29T00:00:00Z
 # Source this file: source .env.intutic
 
-export ANTHROPIC_BASE_URL="http://localhost:4000/v1"
+export ANTHROPIC_BASE_URL="http://localhost:4000"
 export OPENAI_BASE_URL="http://localhost:4000/v1"
-export INTUTIC_PROXY_URL="http://localhost:4000/v1"
+export INTUTIC_PROXY_URL="http://localhost:4000"
 export INTUTIC_SOP_COUNT=5
 
 # These env vars govern LLM egress only. TrueForge (embedded) tools run in
@@ -146,20 +151,20 @@ Stated plainly, because the gaps are structural:
 
 ## Server mode (standalone/hosted)
 
-TrueForge run as its own standalone or hosted server — `npx @truefoundry/trueforge`, its Docker Compose stack, or its Helm chart — is a separate process nobody embeds a gate library into. `HarnessType.TRUEFORGE_SERVER` governs it via a new out-of-process gate service, `services/trueforge-bridge`, on the same two surfaces as embedded mode:
+TrueForge run as its own standalone or hosted server — `npx @truefoundry/trueforge`, its Docker Compose stack, or its Helm chart — is a separate process nobody embeds a gate library into. `HarnessType.TRUEFORGE_SERVER` governs it via an out-of-process gate service, the TrueForge bridge, on the same two surfaces as embedded mode:
 
 1. **LLM egress** — same mechanism as embedded mode, configured once at the server level instead of per embedding host: `PUT /api/v1/settings/model-providers` with `baseUrl` pointed at the Intutic proxy.
 2. **Tool-call approval** — `services/trueforge-bridge` subscribes to each watched session's turn stream, and when a turn pauses with `tool.approval_required`, resolves the pending call, evaluates it, and answers with a real verdict — the same governance decision embedded mode's `Gate.guard()` would produce, reached a different way (see [How it works](#how-it-works-1)).
 
 ### How it works
 
-Unlike every other harness in this catalog, `TRUEFORGE_SERVER` is **not detected by `intutic init`'s repo scan** — there is no `package.json` dependency or config file to find, because this is an operator-configured *deployment*, not a library your repo depends on. There is no `writeConfig` step and no `.env.intutic` for this row. Instead, an operator deploys `services/trueforge-bridge` (its own Docker image; see `infra/kubernetes/base/trueforge-bridge/` and `tools/helm/intutic/values.yaml` for the Kubernetes/Helm shape) and points it at their running TrueForge server via env vars.
+Unlike every other harness in this catalog, `TRUEFORGE_SERVER` is **not detected by `intutic init`'s repo scan** — there is no `package.json` dependency or config file to find, because this is an operator-configured *deployment*, not a library your repo depends on. There is no `writeConfig` step and no `.env.intutic` for this row. Instead, an operator runs the TrueForge bridge (its own Docker image) and points it at their running TrueForge server with environment variables.
 
-**Confirmed against the real TrueForge source** (`packages/trueforge-core/src/core/events/schema.ts`, `packages/trueforge/src/routes/turnRoutes.ts`), not assumed: the standalone server exposes the exact same async turn/event contract the embedded package does — a turn pauses with a `tool.approval_required` event naming each pending call only as `{id, source_event_id}` (all fields **snake_case** on the actual wire JSON; the published `@truefoundry/trueforge-sdk` TS client's camelCase property names, e.g. `sourceEventId`, are a client-side naming convenience its generator applies on top of that same snake_case JSON — a real, worth-stating distinction since `services/trueforge-bridge` speaks plain HTTP directly rather than depending on that SDK package). There is **no webhook** — TrueForge never pushes anything to an external system, so the bridge must actively subscribe to (or poll) the turn stream; it cannot be notified.
+**Confirmed against the real TrueForge source** (`packages/trueforge-core/src/core/events/schema.ts`, `packages/trueforge/src/routes/turnRoutes.ts`), not assumed: the standalone server exposes the exact same async turn/event contract the embedded package does — a turn pauses with a `tool.approval_required` event naming each pending call only as `{id, source_event_id}` (all fields **snake_case** on the actual wire JSON; the published `@truefoundry/trueforge-sdk` TS client's camelCase property names, e.g. `sourceEventId`, are a client-side naming convenience its generator applies on top of that same snake_case JSON — a real, worth-stating distinction since `services/trueforge-bridge` speaks plain HTTP directly rather than depending on that SDK package). There is **no webhook** — TrueForge never pushes anything to an external system, so the bridge must hold a subscription to the turn stream; it cannot be notified.
 
 The bridge:
 
-1. Watches each configured session's current turn over SSE (`GET /{session_id}/turns/{turn_id}/subscribe`), or polls `GET /{session_id}/turns/{turn_id}/events` as a fallback.
+1. Watches each configured session's current turn over SSE (`GET /{session_id}/turns/{turn_id}/subscribe`), reconnecting after `TRUEFORGE_RECONNECT_DELAY_MS` when the stream drops. There is no polling mode.
 2. On `tool.approval_required`, resolves each pending call's `source_event_id` back to the real tool name and arguments via the referenced `model.message` event's `tool_calls[]`.
 3. Evaluates the call through the same `packages/gate-js` machinery embedded mode uses — `soprules.ts`'s SOP argPattern rules, then `POST /api/v1/hook-gate` — fail-closed on any transport/parse error, matching every other gate-js adapter's convention.
 4. Resumes the turn: `POST /{session_id}/turns` with `previous_turn_id` chained to the paused turn and a `user.tool_approval` input item carrying the verdict.
@@ -168,11 +173,13 @@ The bridge:
 
 #### 1. Deploy the bridge
 
+The bridge is not part of the open-core repository. In a full Intutic source checkout it is built from the monorepo root:
+
 ```bash
 docker build -f services/trueforge-bridge/Dockerfile -t intutic-trueforge-bridge .
 ```
 
-or apply the Kubernetes manifests in `infra/kubernetes/base/trueforge-bridge/` (Deployment, Service, ConfigMap), or set the `trueforgeBridge` values block in `tools/helm/intutic/values.yaml` for a Helm-based install. These are enterprise deployment artifacts; see `services/trueforge-bridge/README.md` for the full env var reference.
+There is no Helm value or ready-to-apply Kubernetes manifest for it: run the image yourself (one replica, restart on exit — it is a background worker with no port) with the environment below.
 
 #### 2. Configure the bridge
 
@@ -184,6 +191,7 @@ or apply the Kubernetes manifests in `infra/kubernetes/base/trueforge-bridge/` (
 | `TRUEFORGE_API_KEY` | no | Bearer token for the TrueForge server, if its own OIDC is configured. |
 | `INTUTIC_CONTROL_PLANE_URL` | no | Defaults to Intutic's hosted control plane; set explicitly for a self-hosted deployment. |
 | `TRUEFORGE_SESSION_IDS` | no | Comma-separated session ids to watch. Empty means: discover via `GET /api/v1/sessions` at startup. |
+| `TRUEFORGE_RECONNECT_DELAY_MS` | no | Wait before re-subscribing after a turn stream drops. Default `2000`. |
 
 The bridge refuses to start if `TRUEFORGE_BASE_URL`, `INTUTIC_API_KEY`, or `INTUTIC_WORKSPACE_ID` is missing — an unconfigured bridge that starts anyway and silently governs nothing would be worse than one that fails loudly at boot.
 
@@ -192,7 +200,7 @@ The bridge refuses to start if `TRUEFORGE_BASE_URL`, `INTUTIC_API_KEY`, or `INTU
 ```bash
 curl -X PUT "$TRUEFORGE_BASE_URL/api/v1/settings/model-providers" \
   -H "Content-Type: application/json" \
-  -d '{"baseUrl": "'"$INTUTIC_PROXY_URL"'", ...}'
+  -d '{"baseUrl": "'"$INTUTIC_PROXY_URL/v1"'", ...}'
 ```
 
 Same mechanical routing as embedded mode (step 2 there) — TrueForge's LLM layer reads no env var for this, so the base URL has to be set explicitly, now at the server level rather than per embedding host.
@@ -210,8 +218,8 @@ Nothing, on the TrueForge side — `TRUEFORGE_SERVER` writes no config file (see
 Stated plainly, because the gaps are structural — and some of them are more consequential here than in embedded mode, since there is no embedding host controlling the wiring:
 
 - **Coverage depends entirely on your MCP server's approval-tool-selector.** TrueForge's own per-MCP-server config (`McpServerApprovalToolSelector`: `"@all" | "@write" | "@destructive" | <tool name>`) controls whether a tool call ever emits `tool.approval_required` in the first place. An operator who registers an MCP server without `@all` (or an equivalently broad selector) gets tool calls that never pause and that this bridge never sees at all — not a delayed or degraded check, an invisible one. This is TrueForge's own default-scoped design, not a bridge defect, but it is the load-bearing caveat of this entire integration: **the bridge's real coverage is exactly as broad as the selector each MCP server is configured with.**
-- **This is a weaker trust boundary than every other Hook (A) mark in this catalog.** Every other in-process or SDK-side gate this product ships runs co-resident with, or embedded in, the harness's own process. This gate runs in a wholly SEPARATE process (`services/trueforge-bridge`) reacting to a pull-only event stream over the network — see [`harness-security-matrix.md`](/reference/harness-security-matrix) row 42, which marks this distinction explicitly rather than reusing the existing ✅/⚠️ symbols without comment.
-- **There is no webhook.** TrueForge never pushes anything to the bridge; the bridge must keep its SSE subscription (or poll) alive. A bridge that is down, disconnected, or slow to reconnect misses pauses for that window — same operational risk as any other pull-based watcher, stated here rather than left implicit.
+- **This is a weaker trust boundary than every other Hook (A) mark in this catalog.** Every other in-process or SDK-side gate this product ships runs co-resident with, or embedded in, the harness's own process. This gate runs in a wholly SEPARATE process (the TrueForge bridge) reacting to a pull-only event stream over the network — see [`harness-security-matrix.md`](/reference/harness-security-matrix) row 42, which marks this distinction explicitly rather than reusing the existing ✅/⚠️ symbols without comment.
+- **There is no webhook.** TrueForge never pushes anything to the bridge; the bridge must keep its SSE subscription alive. A bridge that is down, disconnected, or slow to reconnect misses pauses for that window — same operational risk as any other pull-based watcher, stated here rather than left implicit.
 - **Session discovery is intentionally simple.** The bridge watches a configured list of session ids, or discovers sessions via `GET /api/v1/sessions` at startup — it does not dynamically track sessions created after startup unless re-deployed or re-configured to include them.
 - **Attribution is the bridge's own, not the calling agent's.** Verdicts are reported under `harnessType: 'trueforge-server'`; there is no finer per-agent/per-thread attribution beyond what the resolved tool call and thread id already carry.
 
@@ -222,5 +230,5 @@ Stated plainly, because the gaps are structural — and some of them are more co
 | Harness type | `trueforge-server` |
 | Config file | none — not detected by `intutic init`; this is an operator-configured deployment |
 | Detection | none (operator-configured; see `HarnessType.TRUEFORGE_SERVER`'s doc comment in `packages/shared-types/src/enums.ts`) |
-| Tool gate | Out-of-process (`GateKind: 'bridge'`) — `services/trueforge-bridge`, an Intutic-operated service watching TrueForge's `tool.approval_required`/`user.tool_approval` turn contract over HTTP/SSE; reuses `packages/gate-js`'s `soprules.ts` and `POST /api/v1/hook-gate`, fail-closed |
-| Deployment | `services/trueforge-bridge/Dockerfile`; `infra/kubernetes/base/trueforge-bridge/`; `tools/helm/intutic/values.yaml`'s `trueforgeBridge` block |
+| Tool gate | Out-of-process (`GateKind: 'bridge'`) — the TrueForge bridge, a service you run, watching TrueForge's `tool.approval_required`/`user.tool_approval` turn contract over HTTP/SSE; reuses `packages/gate-js`'s `soprules.ts` and `POST /api/v1/hook-gate`, fail-closed |
+| Deployment | Docker image built from `services/trueforge-bridge/Dockerfile` (full source checkout); no Helm value or ready-made manifest |

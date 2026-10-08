@@ -4,7 +4,13 @@ Integrate Intutic governance with [Aider](https://aider.chat) — the AI pair pr
 
 ## How it works
 
-Intutic writes governance rules into the `extra-instructions` field of your `.aider.conf.yml` file. Aider reads this field as additional system instructions for every session.
+Intutic merges three things into your `.aider.conf.yml`, keeping every other setting:
+
+- **Proxy routing** — `openai-api-base` set to the proxy for OpenAI models, and an `ANTHROPIC_BASE_URL` entry in `set-env` for Anthropic models (Aider has no Anthropic base-URL option).
+- **Rules** — your SOPs written to `.intutic/aider-sops.md` and listed under `read`, Aider's way of loading a conventions file into every session.
+- **Hardening** — `test-cmd`, `lint-cmd`, `auto-test` and `auto-lint` are removed, because Aider runs them without asking.
+
+Aider has no hook that runs before it edits a file or runs a command, so there is no blocking gate for Aider: its traffic is governed at the proxy.
 
 ## Setup
 
@@ -21,9 +27,10 @@ intutic init
 ```
 
 ```
-✓ Detected harnesses:
-  • aider → .aider.conf.yml
+  ✔ aider → .aider.conf.yml
 ```
+
+`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
 
 ### 3. Start the proxy
 
@@ -35,30 +42,32 @@ intutic start
 
 ## What gets written
 
-Intutic writes a YAML file with SOPs in the `extra-instructions` multi-line string:
+Given this `.aider.conf.yml`:
 
 ```yaml
-# Intutic Governance Rules (auto-generated)
-# DO NOT EDIT — managed by intutic sync daemon
-# Last sync: 2026-06-11T22:24:00Z
-
-# Proxy URL: http://localhost:4000/v1
-
-extra-instructions: |
-  ## Code Review Requirements
-
-  All code changes must include unit tests...
-
-  ---
-
-  ## Security Policy
-
-  Never commit secrets or API keys...
+model: sonnet
+read:
+  - CONVENTIONS.md
+test-cmd: pytest
 ```
 
-::: warning
-Intutic overwrites the entire `.aider.conf.yml` file. If you have custom Aider settings (model, edit-format, etc.), consider keeping them in a separate config or managing them as SOPs.
-:::
+`intutic connect` leaves:
+
+```yaml
+# Intutic: openai-api-base, the ANTHROPIC_BASE_URL set-env entry and the
+# .intutic/aider-sops.md read entry are managed by intutic connect. test-cmd,
+# lint-cmd, auto-test and auto-lint are removed on every sync.
+
+model: sonnet
+read:
+  - CONVENTIONS.md
+  - .intutic/aider-sops.md
+openai-api-base: http://localhost:4000/v1
+set-env:
+  - ANTHROPIC_BASE_URL=http://localhost:4000
+```
+
+Lists, nested values and comments are preserved; only the keys above are added or replaced. A file that does not parse as YAML is left untouched and reported in the `intutic connect` log. Only options Aider accepts are written — Aider refuses to start on an unknown key.
 
 ## Config details
 
@@ -67,5 +76,6 @@ Intutic overwrites the entire `.aider.conf.yml` file. If you have custom Aider s
 | Harness type | `aider` |
 | Config file | `.aider.conf.yml` |
 | Detection | Checks for `.aider.conf.yml` in workspace root |
-| Format | YAML (`extra-instructions` multi-line string) |
+| Format | YAML (merged: `openai-api-base`, `set-env`, `read`) |
+| Rules file | `.intutic/aider-sops.md` |
 | Write strategy | Atomic (write to `.intutic-tmp`, then rename) |

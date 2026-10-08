@@ -26,9 +26,10 @@ intutic init
 ```
 
 ```
-✓ Detected harnesses:
-  • opencode → AGENTS.md
+  ✔ opencode → AGENTS.md
 ```
+
+`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
 
 ### 3. Start the proxy
 
@@ -40,12 +41,12 @@ intutic start
 
 ### 4. LLM egress
 
-OpenCode has no base-URL environment variable. To route model traffic through the proxy, set your provider's base URL in `opencode.json` (or supply the same JSON in `OPENCODE_CONFIG_CONTENT`):
+OpenCode has no base-URL environment variable. To route model traffic through the proxy, set your provider's base URL in `opencode.json` (or supply the same JSON in `OPENCODE_CONFIG_CONTENT`). OpenCode's providers append the endpoint path (`/messages`, `/chat/completions`) to `baseURL`, so it ends in `/v1`:
 
 ```json
 {
   "provider": {
-    "anthropic": { "options": { "baseURL": "http://127.0.0.1:4000" } }
+    "anthropic": { "options": { "baseURL": "http://127.0.0.1:4000/v1" } }
   }
 }
 ```
@@ -73,7 +74,7 @@ OpenCode's own `permission` map in `opencode.json` (1.x; `permissions` array in 
 
 ## MCP servers
 
-`intutic connect`, and every sync cycle after it, rewrites each server in the `mcp` block of `opencode.json` so that the [MCP governance proxy](/guide/mcp-governance) fronts it. Tool-description poisoning checks, DLP on results and TOFU pinning then apply to OpenCode's MCP traffic as they do for every other harness.
+`intutic connect` rewrites each server in the `mcp` block of `opencode.json` so that the [MCP governance proxy](/guide/mcp-governance) fronts it, each time it applies a new config version — so a server added later is wrapped at the next config change or restart of `intutic connect`. Tool-description poisoning checks, DLP on results and TOFU pinning then apply to OpenCode's MCP traffic as they do for every other harness.
 
 - A `local` server's `command` becomes `["node", <proxy>, "--workspace-id", <ws>, "--server-name", <name>, "--", ...original command]`. `environment`, `cwd`, `enabled` and `timeout` are kept.
 - A `remote` server becomes a `local` entry that runs the proxy in bridge mode (`--remote-url <url> --remote-transport http`). Its `headers` move to the `INTUTIC_REMOTE_HEADERS` environment variable, so they never appear in the process list.

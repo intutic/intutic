@@ -60,10 +60,25 @@ async function prompt(question: string, hidden = false): Promise<string> {
   })
 }
 
-export async function runLogin(opts: { apiKey?: string; dev?: boolean }): Promise<void> {
+function isHttpUrl(value: string): boolean {
+  try {
+    const { protocol } = new URL(value)
+    return protocol === 'http:' || protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+export async function runLogin(opts: { apiKey?: string; dev?: boolean; controlPlaneUrl?: string }): Promise<void> {
   log.header('Intutic — Authentication')
 
-  const controlPlaneUrl = resolveControlPlaneUrl(opts.dev)
+  if (opts.controlPlaneUrl !== undefined && !isHttpUrl(opts.controlPlaneUrl)) {
+    log.error(`--control-plane-url must be an http(s) URL, got "${opts.controlPlaneUrl}"`)
+    process.exit(1)
+  }
+  // Saved with the credentials below, so every later command — and the
+  // daemon `connect` runs — talks to the control plane that issued them.
+  const controlPlaneUrl = resolveControlPlaneUrl(opts.dev, { flagUrl: opts.controlPlaneUrl })
   log.dim(`Control plane: ${controlPlaneUrl}`)
 
   if (opts.apiKey) {

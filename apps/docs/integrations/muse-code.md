@@ -3,7 +3,7 @@
 Integrate Intutic governance with [Muse Code](https://ai.meta.com/) — Meta's beta terminal coding agent (binary `muse`, model Muse Spark, beta since 2026-08-05).
 
 ::: tip Not live-verified — beta, no public release channel
-The `muse` binary could not be installed in the environment this integration was built in (no `npm`/`pip`/Homebrew entry, no PATH-installable artifact, no documented fixture-runner to substitute for one). Everything below the hook block/deny wire contract in particular is stated as an **assumption**, not a confirmed fact — see TD-362 in `docs/TECH_DEBT.md` and the callout further down this page. This is the same honesty posture the Grok Build and Xirp pages already carry for their own unconfirmed pieces.
+The `muse` binary could not be installed in the environment this integration was built in (no `npm`/`pip`/Homebrew entry, no PATH-installable artifact, no documented fixture-runner to substitute for one). Everything below the hook block/deny wire contract in particular is stated as an **assumption**, not a confirmed fact — see the callout further down this page. The Grok Build and Xirp pages mark their own unconfirmed pieces the same way.
 :::
 
 ## How it works
@@ -40,9 +40,10 @@ intutic init
 ```
 
 ```
-✓ Detected harnesses:
-  • muse-code → AGENTS.md
+  ✔ muse-code → AGENTS.md
 ```
+
+`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
 
 ### 3. Start the proxy
 
@@ -50,7 +51,7 @@ intutic init
 intutic start
 ```
 
-> Have an Intutic account or run your own control plane? Use `intutic connect --harness muse-code` instead. It starts the same proxy and adds bidirectional config sync.
+> Have an Intutic account or run your own control plane? Use `intutic connect` instead. It starts the same proxy and adds bidirectional config sync.
 
 ### 4. LLM egress — launcher/env-var only, not a persistent setting
 
@@ -71,13 +72,13 @@ Muse's own documentation confirms that `PreToolUse` and `PermissionRequest` are 
 
 Every decision is appended to `.intutic/events/hook-events.jsonl` and drained to the control plane, same as every other harness — that audit trail itself does not depend on which block contract turns out to be correct.
 
-::: warning Four assumptions, not four facts — see TD-362
+::: warning Four assumptions, not four facts
 1. **The block/deny wire contract** — exit code 2, copied from Codex, not confirmed for Muse.
 2. **The `hooks.json` schema** — the `{ hooks: { <Event>: [...] } }` shape is Codex's, assumed to transfer.
 3. **`managed_hooks_path`'s actual behaviour** — whether it is additive to the project/user tiers or overrides them, and whether it is read once at startup or on every hook-eligible call, is unconfirmed.
 4. **The `mcp_servers` entry shape for `streamable_http`** — assumed `url`/`headers`-keyed, matching every other JSON-map harness's remote-transport convention; if Muse nests it differently, the entry is silently left unwrapped rather than erroring.
 
-Each is a small, isolated edit in `museHooks.ts`/`mcpAutoWrite.ts` once a real install is available to test against. See TD-362 in `docs/TECH_DEBT.md` for the full record and what would close it.
+Each is a small, isolated edit in `museHooks.ts`/`mcpAutoWrite.ts` once a real install is available to test against.
 :::
 
 ## Config details

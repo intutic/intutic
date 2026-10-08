@@ -1,8 +1,10 @@
 /**
  * `intutic init` — Initialize workspace.
  *
- * Detects workspace root, auto-detects harnesses, validates
- * credentials, and writes local config.
+ * Detects workspace root, auto-detects harnesses, checks for stored
+ * credentials, and writes local config. It writes no harness config files and
+ * makes no network call: `intutic connect` writes the harness configs, from
+ * the control plane's SOPs plus the local `.intutic/sops`.
  *
  * LLD #8 — Sync Daemon / CLI
  * @module
@@ -38,7 +40,24 @@ export function findWorkspaceRoot(): string | null {
   return null
 }
 
-export async function runInit(opts: { dev?: boolean }): Promise<void> {
+/**
+ * Whether to install the Git hooks: an explicit `--git-hooks` /
+ * `--no-git-hooks` wins; otherwise ask, but only when someone is at a
+ * terminal to answer. Without a TTY the question would block a CI job or a
+ * provisioning script forever, so the hooks are left alone.
+ */
+async function resolveWantHooks(
+  flag: boolean | undefined,
+  isTTY: boolean,
+  ask: () => Promise<string>,
+): Promise<boolean> {
+  if (flag !== undefined) return flag
+  if (!isTTY) return false
+  const normalized = (await ask()).trim().toLowerCase()
+  return normalized === '' || normalized === 'y' || normalized === 'yes'
+}
+
+export async function runInit(opts: { dev?: boolean; gitHooks?: boolean }): Promise<void> {
   log.header('Intutic — Workspace Initialization')
 
   // 1. Find workspace root
@@ -74,9 +93,10 @@ export async function runInit(opts: { dev?: boolean }): Promise<void> {
   // 3. Check credentials
   const creds = await loadCredentials()
   if (!creds) {
-    log.warn('Not authenticated — harness configs were still written locally.')
-    log.info('Config sync needs a control plane, which open core does not include.')
-    log.info('To just run the proxy locally, no account needed: `intutic start`.')
+    log.info('Not authenticated — fine for local use.')
+    log.info('To run the proxy locally, no account needed: `intutic start`.')
+    log.info('Harness config files are written by `intutic connect`, which syncs with a control plane')
+    log.info('(open core does not include one; `intutic login` first if you run your own).')
   } else {
     log.success(`Authenticated as ${creds.email}`)
   }
@@ -98,28 +118,27 @@ export async function runInit(opts: { dev?: boolean }): Promise<void> {
     devMode,
   })
 
-  // 5. Prompt for Git hook onboarding
-  const readline = await import('node:readline')
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  })
-
-  const wantHooks = await new Promise<boolean>((resolve) => {
-    rl.question('Would you like to install Git sync hooks (post-commit, post-checkout)? [Y/n]: ', (answer) => {
-      rl.close()
-      const normalized = answer.trim().toLowerCase()
-      if (normalized === '' || normalized === 'y' || normalized === 'yes') {
-        resolve(true)
-      } else {
-        resolve(false)
-      }
+  // 5. Git hook onboarding
+  const isTTY = Boolean(process.stdin.isTTY)
+  const wantHooks = await resolveWantHooks(opts.gitHooks, isTTY, async () => {
+    const readline = await import('node:readline')
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
+    return new Promise<string>((resolve) => {
+      rl.question(
+        'Install Intutic Git hooks (post-commit, post-checkout, pre-commit secret scan, post-merge)? [Y/n]: ',
+        (answer) => {
+          rl.close()
+          resolve(answer)
+        },
+      )
     })
   })
 
   if (wantHooks) {
     const { installGitHooks } = await import('../lib/gitHooks.js')
     await installGitHooks(workspaceRoot)
+  } else if (opts.gitHooks === undefined && !isTTY) {
+    log.dim('Git hooks not installed (no terminal to ask). Re-run with --git-hooks to install them.')
   }
 
   log.success('Workspace initialized.')
@@ -130,5 +149,5 @@ export async function runInit(opts: { dev?: boolean }): Promise<void> {
   // Print onboarding setup instructions for detected harnesses
   const detectedHarnessTypes = detected.map((h) => h.type)
   const apiKey = creds?.apiKey
-  printOnboardingGuide(detectedHarnessTypes, apiKey, devMode)
+  printOnboardingGuide(detectedHarnessTypes, apiKey)
 }

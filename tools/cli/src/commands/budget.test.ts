@@ -59,6 +59,19 @@ describe('fetchLocalSpend', () => {
     expect(result).toEqual(localSpend)
   })
 
+  it('asks the proxy on the INTUTIC_PROXY_URL port, the one connect and start use', async () => {
+    const saved = process.env.INTUTIC_PROXY_URL
+    process.env.INTUTIC_PROXY_URL = 'http://localhost:8080'
+    try {
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => localSpend })
+      await fetchLocalSpend(fetchMock)
+      expect(fetchMock.mock.calls[0]?.[0]).toBe('http://127.0.0.1:8080/intutic/spend')
+    } finally {
+      if (saved === undefined) delete process.env.INTUTIC_PROXY_URL
+      else process.env.INTUTIC_PROXY_URL = saved
+    }
+  })
+
   it('returns null when the proxy responds with a non-2xx status', async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: false, json: async () => ({}) })
     expect(await fetchLocalSpend(fetchMock)).toBeNull()

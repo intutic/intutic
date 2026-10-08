@@ -1,6 +1,6 @@
 ---
 title: MCP Server Governance
-description: The MCP server registry, per-workspace allowlist, and server-level TOFU pinning that guard against a rogue or rug-pulled MCP server — and what these controls honestly do not cover yet.
+description: The MCP server registry, per-workspace allowlist, and server-level TOFU pinning that guard against a rogue or rug-pulled MCP server — and what these controls do not cover yet.
 ---
 
 # MCP Server Governance <Badge type="tip" text="Open-Core" />
@@ -26,7 +26,7 @@ proxy, the proxy spawns the real server, and every `tools/call` and
 
 Muse Code's `mcp_servers` map (in `~/.config/muse/settings.json`) carries
 both `stdio` and `streamable_http` entries; the latter is assumed (not yet
-confirmed against a real install — see TD-362) to match the same
+confirmed against a real install) to match the same
 `command`-or-`url` shape every other JSON-map harness here uses, so it rides
 the same remote-bridge path without new code.
 
@@ -60,7 +60,7 @@ tool-call gate (`@intutic/gate/dsh`, see [the dsh integration
 guide](/integrations/dsh)) instead of guessing at an MCP-wrapping mechanism
 nobody had verified. An MCP server a dsh profile declares today reaches the
 real server directly, unmediated by this page's controls, until a future
-phase confirms the real shape and adds a wrapper — tracked alongside TD-370.
+phase confirms the real shape and adds a wrapper.
 
 **This is not instant.** A server a developer adds to their harness config is
 unwrapped and unmediated by this proxy until the *next* sync cycle picks it
@@ -78,8 +78,8 @@ table: the first sighting of a `{workspace, server}` pair creates a
 `candidate` row; every later sighting refreshes when it was last seen,
 without touching its status. Promoting a server from `candidate` to
 `approved` or `blocked` is a lifecycle this table supports, but this phase
-does not ship the dashboard/route to *do* the promoting — that is a tracked
-follow-up (see TECH_DEBT.md), not a built feature.
+does not ship the dashboard/route to *do* the promoting — that is a planned
+follow-up, not a built feature.
 
 ## The allowlist: `mcpAllowedServers`
 
@@ -139,8 +139,8 @@ Every control above this section — proxy-wrapping, the allowlist, TOFU
 pinning — was originally a stdio-process mechanism: it worked by fronting
 the real server's *spawned process*. A `url`-keyed remote MCP server entry
 has no process to front, which is why remote servers were entirely
-uncovered by this page (TD-354 in TECH_DEBT.md recorded that as an accepted
-interim gap, not a decision to leave permanently).
+uncovered by this page (an accepted interim gap, not a decision to leave
+permanently).
 
 That gap is closed by a bridge, not a redesign: the harness still spawns
 `@intutic/mcp-governance-proxy` as an ordinary stdio child process — no new
@@ -152,7 +152,7 @@ filter the protocol rather than let governance see every message). The sync
 daemon wraps a discovered `url`-keyed entry into this bridge mode the same
 way it wraps a stdio entry — `wrapWithProxy` (`harness/mcpAutoWrite.ts`)
 rewrites it to invoke the proxy with `--remote-url`/`--remote-transport`
-instead of `--`, and `discoverMcpServers` now reports these entries honestly
+instead of `--`, and `discoverMcpServers` now reports these entries accurately
 too: `wrapped: true`, with their true `transport` (`http`/`sse`) preserved
 rather than misreported as stdio. Auth headers (a bearer token, an API key)
 ride via the `INTUTIC_REMOTE_HEADERS` environment variable on the wrapped
@@ -302,7 +302,7 @@ package-level configuration details.
 ### What this does not catch
 
 Pattern matching on five known phrasings is a tripwire on the obvious cases,
-not a defense against a determined or rewording attacker — the same honesty
+not a defense against a determined or rewording attacker — the same limit
 `injection.rs`'s own module doc states for the Rust side. It is also
 request/response-content-only: a tool that behaves maliciously without ever
 emitting injection-shaped TEXT (silently exfiltrating data through legitimate-
@@ -369,17 +369,17 @@ apply to that gate's unit of evaluation at all.
 | Cline | ❌ no (unconfirmed dispatch) | `use_mcp_tool` envelope normalization added to the shared gate evaluator (fires if the payload arrives), but no `use_mcp_tool`/`access_mcp_resource` `PreToolUse` matcher was added — whether Cline's hook mechanism actually dispatches for these tool names could not be confirmed during M3. |
 | Roo Code | ⚠️ reachable | Already a `.*` catch-all matcher; a Cline fork, so likely inherits `use_mcp_tool`, but that inheritance is unconfirmed. |
 | Codex CLI, Continue, GitHub Copilot | ⚠️ reachable | Already `.*` catch-all matchers; each harness's own MCP tool-naming convention was not independently verified during M3. |
-| Muse Code | ⚠️ reachable | Already a `.*` catch-all matcher across both `PreToolUse` and `PermissionRequest`. The `muse` binary could not be installed to confirm its own MCP tool-naming convention, or that its `mcp_servers` `streamable_http` entry shape matches the `url`/`headers` convention this repo's wrapper assumes — see TD-362. |
+| Muse Code | ⚠️ reachable | Already a `.*` catch-all matcher across both `PreToolUse` and `PermissionRequest`. The `muse` binary could not be installed to confirm its own MCP tool-naming convention, or that its `mcp_servers` `streamable_http` entry shape matches the `url`/`headers` convention this repo's wrapper assumes. |
 | Goose, OpenHands, Hermes, Antigravity, Pi | ⚠️ reachable | Bash-family: the gate script runs unconditionally for every tool call, matcher or not; each harness's own MCP tool-naming convention was not independently verified during M3. |
 | Openclaw | ⚠️ reachable | No matcher on its `PreToolUse` registration — runs for every tool call; tool-naming convention unconfirmed. |
 | Grok Build | ⚠️ reachable | No matcher on its `PreToolUse` registration — runs for every tool call; tool-naming convention not independently verified (not installable in the environment this integration was built in). |
-| OpenCode | ✅ yes | The plugin hook fires for every tool id, MCP tools included (confirmed from `session/tools.ts`). OpenCode 1.x names MCP tools `sanitize(server)_sanitize(tool)` (its `mcp/catalog.ts`, read from source); the plugin composes that into `mcp__<server>__<tool>` against the server names in the OpenCode config files, longest name first, so the allowlist applies (TD-487). OpenCode 2.x MCP ids are not verified. |
-| dsh | ⚠️ reachable | `tools/pre-execute` fires unconditionally for every tool call (confirmed from `@deepseek-ai/dsh-tools`'s shipped types — it is the registry's own dispatch point, not an opt-in matcher). dsh's own MCP tool-naming convention was not independently verified — MCP composition itself was out of scope for this phase, see the note above and TD-370. |
+| OpenCode | ✅ yes | The plugin hook fires for every tool id, MCP tools included (confirmed from `session/tools.ts`). OpenCode 1.x names MCP tools `sanitize(server)_sanitize(tool)` (its `mcp/catalog.ts`, read from source); the plugin composes that into `mcp__<server>__<tool>` against the server names in the OpenCode config files, longest name first, so the allowlist applies. OpenCode 2.x MCP ids are not verified. |
+| dsh | ⚠️ reachable | `tools/pre-execute` fires unconditionally for every tool call (confirmed from `@deepseek-ai/dsh-tools`'s shipped types — it is the registry's own dispatch point, not an opt-in matcher). dsh's own MCP tool-naming convention was not independently verified — MCP composition itself was out of scope for this phase, see the note above. |
 | n8n | ❌ n/a | This gate's unit of evaluation is a workflow NODE TYPE (n8n's own dot-namespaced convention), never a `mcp__<server>__<tool>` tool-call name — confirmed by reading `emitN8nWorkflowGate`. |
 | Open WebUI | ❌ n/a | This gate evaluates PROMPT TEXT, not a tool call — no tool name of any shape reaches it. |
 | LangGraph | ❌ n/a | No generated gate file — the SDK-side `intutic_clawde.gate` is out of scope for this phase's per-harness matcher work. |
 | Aider | ❌ n/a | No `PreToolUse` hook mechanism exists for this harness at all (see `NO_GATE` in `gateRegistry.ts`). |
-| Xirp | ❌ n/a (delegated) | Not itself an AI agent — no tool calls of its own to match. An `mcp__<server>__<tool>`-shaped call made inside a Xirp-managed session is whatever the WRAPPED harness (Claude Code, Codex, …) sends, and is covered by that harness's own row above — provided the wrapped harness's gate files reach the `git worktree` the call runs in, which is what [Worktree Coverage](/reference/harness-security-matrix#worktree-coverage) (TD-390) now ensures. |
+| Xirp | ❌ n/a (delegated) | Not itself an AI agent — no tool calls of its own to match. An `mcp__<server>__<tool>`-shaped call made inside a Xirp-managed session is whatever the WRAPPED harness (Claude Code, Codex, …) sends, and is covered by that harness's own row above — provided the wrapped harness's gate files reach the `git worktree` the call runs in, which is what [Worktree Coverage](/reference/harness-security-matrix#worktree-coverage) now ensures. |
 | Agentic Orchestrator | ❌ n/a (delegated) | Not itself an AI agent — no tool calls of its own to match. An `mcp__<server>__<tool>`-shaped call made inside a session is whatever the WRAPPED backend (Claude Code, Codex, or OpenCode) sends. Claude Code/Codex calls are covered by that backend's own row above under the same worktree-coverage guarantee as Xirp; OpenCode calls are covered by the OpenCode row above (the plugin fires for MCP tools and composes their ids for the allowlist). |
 
 ## What this phase deliberately does not cover
@@ -389,8 +389,7 @@ apply to that gate's unit of evaluation at all.
   rug-pulls a hundred different Intutic workspaces on the same day, nothing
   in this phase notices the pattern across them — each workspace's own proxy
   independently detects its own mismatch, with no aggregation joining those
-  events together. See TECH_DEBT.md for why this is deliberately deferred,
-  not merely unbuilt.
+  events together. This is deliberately deferred, not merely unbuilt.
 - **No public or global MCP server reputation database, and no VirusTotal
   (or similar third-party scanning) integration.** This product does not
   maintain, consume, or plan to consume a shared "is this MCP server known
@@ -400,7 +399,7 @@ apply to that gate's unit of evaluation at all.
   claim (this server *is* dangerous, independent of your own history with
   it) that nothing here makes or relies on. This decline is about MCP
   *servers* specifically — a separate, narrower, opt-in integration
-  (Phase S4, TD-486) does check the sha256 hash of skill-bundled *scripts*
+  does check the sha256 hash of skill-bundled *scripts*
   against VirusTotal; see [Skill Scanning](/guide/skill-scanning#virustotal-hash-lookup-opt-in-hash-only)
   for that feature and why it does not reverse this decline.
 - **No automated promotion out of `candidate` status.** The registry table
@@ -413,7 +412,7 @@ apply to that gate's unit of evaluation at all.
 | Page | What it covers |
 |---|---|
 | [MCP Proxy reference](/integrations/mcp-proxy) | Package/CLI/config reference for `@intutic/mcp-governance-proxy` — execution modes, the `Decision` type, and per-field configuration for every control this page describes |
-| [Governance Controls Checklist](/guide/governance-controls) | The house style for stating partial coverage honestly, applied across every control this product ships |
+| [Governance Controls Checklist](/guide/governance-controls) | The house style for stating partial coverage precisely, applied across every control this product ships |
 | [Graph Guardrails](/guide/graph-guardrails) | The deterministic detector taxonomy MCP tool-poisoning detection follows, and how the proxy-wrapping mechanism this page builds on works |
 | [Skill Scanning](/guide/skill-scanning) | The nearest sibling control: prose an agent treats as authoritative, published by a party the user never reviewed — applied to skill files instead of MCP tool declarations |
 | [Network Egress Control](/guide/policies#network-egress-control) | The host-level layer the stdio→HTTP bridge sits above, not instead of — `egressAllow`/`egressMode` |

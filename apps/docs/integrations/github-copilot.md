@@ -4,7 +4,7 @@ Integrate Intutic governance with [GitHub Copilot](https://github.com/features/c
 
 ## How it works
 
-Intutic monitors and modifies `.github/copilot-instructions.md` config in your workspace root. It writes active SOP governance rules as repository-specific instructions. GitHub Copilot automatically loads these instructions for chat queries and inline completions, ensuring recommendations align with your guidelines.
+Intutic monitors and modifies `.github/copilot-instructions.md` config in your workspace root. It writes active SOP governance rules as repository-specific instructions. GitHub Copilot automatically loads these instructions for chat queries and inline completions, ensuring recommendations align with your guidelines. In VS Code agent mode it also installs a PreToolUse hook that refuses tool calls breaking a rule — see [Pre-tool hooks](#pre-tool-hooks-preview).
 
 ## Setup
 
@@ -17,9 +17,10 @@ npx @intutic/cli init
 The CLI detects GitHub Copilot presence (via `.git` or `.github` folders) and registers it as a harness:
 
 ```
-✓ Detected harnesses:
-  • github-copilot -> .github/copilot-instructions.md
+  ✔ github-copilot → .github/copilot-instructions.md
 ```
+
+`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
 
 ### 2. Start sync
 
@@ -39,7 +40,7 @@ Intutic writes rules and configures:
 VS Code agent hooks are a **Preview** mechanism and the format may change
 between releases. The generated gate fails **closed**: a stdin payload it does
 not recognise is refused (exit 2) rather than silently allowed, so a format
-shift surfaces as loud blocks — re-run `intutic sync` after upgrading.
+shift surfaces as loud blocks — restart `intutic connect` after upgrading so it rewrites the gate.
 :::
 
 In agent mode, Copilot fires the PreToolUse hook before each tool call with

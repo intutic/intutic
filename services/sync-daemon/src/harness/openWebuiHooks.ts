@@ -25,8 +25,6 @@ import { emitPythonGate } from './gateBody.js'
 
 const log = createLogger('sync-open-webui-hooks')
 
-/** Default target directory for the Open WebUI governance filter. */
-const OPEN_WEBUI_DIR = path.join(os.homedir(), '.open-webui')
 
 // ─── Python filter template ───────────────────────────────────────────────────
 
@@ -194,15 +192,18 @@ export async function writeOpenWebuiHooks(
   // ── 1. Ensure directories ──────────────────────────────────────────────────
 
   const envDir = path.join(workspaceRoot, '.intutic', 'env')
+  // The filter's target directory; homedir() read at call time so tests that
+  // move HOME before invoking are honoured.
+  const openWebuiDir = path.join(os.homedir(), '.open-webui')
 
   await Promise.all([
-    fs.mkdir(OPEN_WEBUI_DIR, { recursive: true }),
+    fs.mkdir(openWebuiDir, { recursive: true }),
     fs.mkdir(envDir, { recursive: true }),
   ])
 
   // ── 2. Write Python filter (atomic) ───────────────────────────────────────
 
-  const filterPath = path.join(OPEN_WEBUI_DIR, 'intutic-governance-filter.py')
+  const filterPath = path.join(openWebuiDir, 'intutic-governance-filter.py')
   const tmpFilter = filterPath + '.intutic-tmp'
   await fs.writeFile(tmpFilter, buildOpenWebuiFilter(workspaceId, proxyUrl), 'utf-8')
   await fs.rename(tmpFilter, filterPath)

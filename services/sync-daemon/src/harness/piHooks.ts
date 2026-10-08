@@ -24,6 +24,8 @@ import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { newIso } from '@intutic/id'
 import { emitShellGate, SHELL_EXTRACT, SHELL_FAIL_CLOSED } from './gateBody.js'
+import { readJsonObjectForMerge } from './jsonMergeTarget.js'
+import { anthropicBaseUrl, openaiBaseUrl } from '@intutic/shared-types'
 
 const log = createLogger('sync-pi-hooks')
 
@@ -184,19 +186,24 @@ function mergePiHooks(existing: PiHooksConfig, hookScriptPath: string): PiHooksC
 // ─── Pi models.json merge ─────────────────────────────────────────────────────
 
 /**
- * Merge Pi models.json — update existing providers' baseUrl and add
- * missing providers. The three canonical providers are anthropic, openai,
- * and google.
+ * Merge Pi models.json — point the anthropic and openai providers at the
+ * proxy, each with the base URL its SDK expects (the Anthropic SDK appends
+ * `/v1/messages`, the OpenAI one `/chat/completions`). Google is left alone:
+ * the proxy does not serve the Gemini API, so routing it there would break it.
+ * Every other provider and key is kept.
  */
-function mergePiModels(existing: PiModelsConfig, proxyUrl: string): PiModelsConfig {
+export function mergePiModels(existing: PiModelsConfig, proxyUrl: string): PiModelsConfig {
   const providers = existing.providers ?? {}
-  const targetProviders = ['anthropic', 'openai', 'google']
+  const targets: Record<string, string> = {
+    anthropic: anthropicBaseUrl(proxyUrl),
+    openai: openaiBaseUrl(proxyUrl),
+  }
 
   const mergedProviders: Record<string, PiProvider> = { ...providers }
-  for (const provider of targetProviders) {
+  for (const [provider, baseUrl] of Object.entries(targets)) {
     mergedProviders[provider] = {
       ...(providers[provider] ?? {}),
-      baseUrl: proxyUrl,
+      baseUrl,
     }
   }
 
@@ -250,19 +257,15 @@ export async function writePiHooks(
 
   // ── 3. Write/merge ~/.pi/hooks.json ───────────────────────────────────────
 
-  let existingHooks: PiHooksConfig = {}
-  try {
-    const raw = await fs.readFile(PI_HOOKS_CONFIG, 'utf-8')
-    existingHooks = JSON.parse(raw) as PiHooksConfig
-  } catch {
-    // File doesn't exist or is unparseable — start fresh
+  // A file that is not a plain JSON object is left untouched (and reported)
+  // rather than replaced with only the Intutic entries.
+  const existingHooks = await readJsonObjectForMerge(PI_HOOKS_CONFIG) as PiHooksConfig | null
+  if (existingHooks !== null) {
+    const mergedHooks = mergePiHooks(existingHooks, hookScriptPath)
+    const tmpHooks = PI_HOOKS_CONFIG + '.intutic-tmp'
+    await fs.writeFile(tmpHooks, JSON.stringify(mergedHooks, null, 2) + '\n', 'utf-8')
+    await fs.rename(tmpHooks, PI_HOOKS_CONFIG)
   }
-
-  const mergedHooks = mergePiHooks(existingHooks, hookScriptPath)
-
-  const tmpHooks = PI_HOOKS_CONFIG + '.intutic-tmp'
-  await fs.writeFile(tmpHooks, JSON.stringify(mergedHooks, null, 2) + '\n', 'utf-8')
-  await fs.rename(tmpHooks, PI_HOOKS_CONFIG)
 
   log.info(
     { action: 'pi_hooks_written', path: PI_HOOKS_CONFIG },
@@ -271,19 +274,13 @@ export async function writePiHooks(
 
   // ── 4. Write/merge ~/.pi/models.json ──────────────────────────────────────
 
-  let existingModels: PiModelsConfig = {}
-  try {
-    const raw = await fs.readFile(PI_MODELS_CONFIG, 'utf-8')
-    existingModels = JSON.parse(raw) as PiModelsConfig
-  } catch {
-    // File doesn't exist or is unparseable — start fresh
+  const existingModels = await readJsonObjectForMerge(PI_MODELS_CONFIG) as PiModelsConfig | null
+  if (existingModels !== null) {
+    const mergedModels = mergePiModels(existingModels, proxyUrl)
+    const tmpModels = PI_MODELS_CONFIG + '.intutic-tmp'
+    await fs.writeFile(tmpModels, JSON.stringify(mergedModels, null, 2) + '\n', 'utf-8')
+    await fs.rename(tmpModels, PI_MODELS_CONFIG)
   }
-
-  const mergedModels = mergePiModels(existingModels, proxyUrl)
-
-  const tmpModels = PI_MODELS_CONFIG + '.intutic-tmp'
-  await fs.writeFile(tmpModels, JSON.stringify(mergedModels, null, 2) + '\n', 'utf-8')
-  await fs.rename(tmpModels, PI_MODELS_CONFIG)
 
   log.info(
     { action: 'pi_models_written', path: PI_MODELS_CONFIG },

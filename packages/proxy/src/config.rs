@@ -36,10 +36,6 @@ pub struct ProxyConfig {
     #[serde(default)]
     pub model_list: Vec<ModelEntry>,
 
-    /// LiteLLM general settings
-    #[serde(default)]
-    pub general_settings: GeneralSettings,
-
     /// Intutic-specific settings (WASM, DLP, SnipCompactor)
     #[serde(default)]
     pub intutic_settings: IntuticSettings,
@@ -51,21 +47,13 @@ pub struct ModelEntry {
     pub litellm_params: LiteLLMParams,
 }
 
+/// The one `litellm_params` field the proxy reads. A LiteLLM config's
+/// `api_key`, `api_base` and `general_settings` are not modelled: upstreams
+/// and keys come from the environment, and serde ignores unknown keys, so a
+/// config copied from LiteLLM still loads without implying they take effect.
 #[derive(Debug, Deserialize, Clone)]
 pub struct LiteLLMParams {
     pub model: String,
-    #[serde(default)]
-    pub api_key: Option<String>,
-    #[serde(default)]
-    pub api_base: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Clone, Default)]
-pub struct GeneralSettings {
-    #[serde(default)]
-    pub master_key: Option<String>,
-    #[serde(default)]
-    pub database_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -74,8 +62,6 @@ pub struct IntuticSettings {
     pub snip_compactor: SnipCompactorConfig,
     #[serde(default)]
     pub dlp: DlpConfig,
-    #[serde(default)]
-    pub harness_overrides: HarnessOverrides,
     #[serde(default)]
     pub policy: PolicyConfig,
     #[serde(default)]
@@ -262,35 +248,6 @@ impl Default for PolicyConfig {
             control_plane_url: std::env::var("CONTROL_PLANE_URL").ok(),
             fail_closed: true,
             timeout_ms: 3_000,
-        }
-    }
-}
-
-/// Known harness base-URL environment variables.
-///
-/// Each AI coding harness uses a different env var to override the LLM endpoint:
-/// - Claude Code:  `ANTHROPIC_BASE_URL`  → POST /v1/messages
-/// - Cursor:       `OPENAI_BASE_URL`     → POST /v1/chat/completions
-/// - Antigravity:  `GEMINI_API_ENDPOINT` → POST /v1beta/models/{model}:generateContent
-/// - Codex CLI:    `OPENAI_BASE_URL`     → POST /v1/responses
-/// - n8n:          Per-node "Base URL" field in credential settings
-///
-/// See ADR-004 Decision 5 and LLD §5 (Harness Compatibility Matrix).
-#[derive(Debug, Deserialize, Clone)]
-pub struct HarnessOverrides {
-    /// Whether to advertise the proxy URL in health check responses
-    #[serde(default = "default_true")]
-    pub advertise_url: bool,
-    /// The external URL of this proxy (used in setup instructions)
-    #[serde(default)]
-    pub proxy_external_url: Option<String>,
-}
-
-impl Default for HarnessOverrides {
-    fn default() -> Self {
-        Self {
-            advertise_url: true,
-            proxy_external_url: None,
         }
     }
 }
@@ -871,6 +828,30 @@ mod tests {
     use std::sync::Mutex;
 
     static ENV_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
+    /// A config copied from LiteLLM loads: the keys the proxy does not act on
+    /// (`api_key`, `api_base`, `general_settings`) are ignored, not refused.
+    #[test]
+    fn a_litellm_config_with_keys_the_proxy_ignores_still_loads() {
+        let config: ProxyConfig = serde_yaml::from_str(
+            r#"
+model_list:
+  - model_name: gpt-4o
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: os.environ/OPENAI_API_KEY
+      api_base: https://llm.example.internal
+general_settings:
+  master_key: not-used
+  database_url: postgresql://not-used
+intutic_settings:
+  harness_overrides:
+    advertise_url: false
+"#,
+        )
+        .expect("a LiteLLM-shaped config parses");
+        assert_eq!(config.model_list[0].litellm_params.model, "openai/gpt-4o");
+    }
 
     /// Absent `routing:` block yields control-plane-deferred defaults.
     #[test]

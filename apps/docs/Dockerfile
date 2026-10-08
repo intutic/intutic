@@ -5,8 +5,6 @@
 #
 # Build context is the monorepo root:
 #   docker build -f apps/docs/Dockerfile -t intutic-docs .
-#
-# TD-106 | Sprint 5A
 # ─────────────────────────────────────────────────────────────
 
 # ── Stage 1: Builder ────────────────────────────────────────

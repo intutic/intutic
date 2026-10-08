@@ -9,29 +9,17 @@
 
 import pc from 'picocolors'
 import { log } from './logger.js'
+import { anthropicBaseUrl, openaiBaseUrl } from '@intutic/shared-types'
 
 /**
  * Print tailored setup instructions for a list of harnesses.
  *
  * @param harnesses - List of harness types (e.g. ['cursor', 'aider'])
  * @param apiKey - Optional API key to display in the instructions
- * @param devMode - retained for call-site compatibility; the proxy is always local
  */
 function maskUserToken(tokenVal?: string): string {
-  if (!tokenVal) return '<YOUR_INTUTIC_API_KEY>'
+  if (!tokenVal) return '<YOUR_PROVIDER_API_KEY>'
   return `${tokenVal.substring(0, 4)}...${tokenVal.substring(tokenVal.length - 4)}`
-}
-
-/**
- * Trims trailing `/` characters without a regex — see the identical helper
- * in `commands/exec.ts` for why: `/\/+$/` is flagged by static analysis as a
- * polynomial-time pattern on external input, and a loop sidesteps the whole
- * category rather than needing an exemption.
- */
-function trimTrailingSlashes(s: string): string {
-  let end = s.length
-  while (end > 0 && s.charCodeAt(end - 1) === 47 /* '/' */) end--
-  return s.slice(0, end)
 }
 
 function writeCliOutput(line: string): void {
@@ -46,15 +34,14 @@ function printYamlKey(keyName: string, keyVal: string, spaces = 5): void {
   writeCliOutput(`${' '.repeat(spaces)}${keyName}: ${keyVal}`)
 }
 
-export function printOnboardingGuide(harnesses: string[], userAuthToken?: string, devMode = false): void {
+export function printOnboardingGuide(harnesses: string[], userAuthToken?: string): void {
   const safeDisplayValue = maskUserToken(userAuthToken)
   // Always the local proxy. This used to branch to a remote host when devMode
   // was false, which meant the onboarding instructions we print told people to
   // send their agent traffic somewhere other than the proxy they had just
   // started. Set INTUTIC_PROXY_URL to override.
-  void devMode
-  const proxyHost = trimTrailingSlashes(process.env.INTUTIC_PROXY_URL ?? 'http://localhost:4000')
-  const proxyUrl = `${proxyHost}/v1`
+  const proxyHost = anthropicBaseUrl(process.env.INTUTIC_PROXY_URL)
+  const proxyUrl = openaiBaseUrl(process.env.INTUTIC_PROXY_URL)
 
   writeCliOutput('')
   log.header('Intutic — Setup & Integration Instructions')
@@ -62,12 +49,16 @@ export function printOnboardingGuide(harnesses: string[], userAuthToken?: string
   writeCliOutput(`Your local gateway endpoint is: ${pc.cyan(proxyUrl)}`)
   if (userAuthToken) {
     writeCliOutput(`Your Intutic API Key is: ${pc.green(safeDisplayValue)}`)
+  } else {
+    // Standalone, the proxy forwards the agent's own provider key upstream;
+    // there is no Intutic key to hand out.
+    writeCliOutput('Not logged in: wherever a key is asked for below, use your own provider API key.')
   }
 
   if (harnesses.length === 0) {
     writeCliOutput('')
     log.info('No harnesses were automatically detected in this workspace.')
-    writeCliOutput(`Please refer to the full integration guide at: ${pc.bold('user.md')}`)
+    writeCliOutput(`See the integration guides at: ${pc.bold('https://docs.intutic.ai/integrations/')}`)
     writeCliOutput('Or use the general subprocess wrapper to launch any CLI agent:')
     writeCliOutput(`  ${pc.bold(`intutic exec -- <your-agent-command>`)}`)
     return
@@ -80,7 +71,7 @@ export function printOnboardingGuide(harnesses: string[], userAuthToken?: string
       case 'cursor':
         writeCliOutput(`  1. Open Cursor Settings (Cmd+, or Ctrl+,).`)
         writeCliOutput(`  2. Navigate to the ${pc.bold('Models')} tab.`)
-        writeCliOutput(`  3. Under ${pc.bold('OpenAI API Key')}, enter your Intutic API Key:`)
+        writeCliOutput(`  3. Under ${pc.bold('OpenAI API Key')}, enter your API key:`)
         writeCliOutput(`     ${pc.green(safeDisplayValue)}`)
         writeCliOutput(`  4. Enable the ${pc.bold('"Override OpenAI Base URL"')} toggle.`)
         writeCliOutput(`  5. Set the override URL to:`)
@@ -126,7 +117,7 @@ export function printOnboardingGuide(harnesses: string[], userAuthToken?: string
         writeCliOutput(`  2. Click the settings gear icon (⚙️).`)
         writeCliOutput(`  3. Set ${pc.bold('API Provider')} to: OpenAI Compatible`)
         writeCliOutput(`  4. Set ${pc.bold('Base URL')} to: ${pc.cyan(proxyUrl)}`)
-        writeCliOutput(`  5. Set ${pc.bold('API Key')} to your Intutic API Key:`)
+        writeCliOutput(`  5. Set ${pc.bold('API Key')} to your API key:`)
         writeCliOutput(`     ${pc.green(safeDisplayValue)}`)
         writeCliOutput(`  6. Enter the target Model ID (e.g. gpt-4o) and save.`)
         break
@@ -196,11 +187,12 @@ export function printOnboardingGuide(harnesses: string[], userAuthToken?: string
         writeCliOutput(`  In your OpenAI Chat Model node inside n8n:`)
         writeCliOutput(`  1. Expand "Parameters" and set ${pc.bold('Base URL')} to:`)
         writeCliOutput(`     ${pc.cyan(proxyUrl)}`)
-        writeCliOutput(`  2. Select/Create a custom credential set and use your Intutic API Key.`)
+        writeCliOutput(`  2. Select/Create a custom credential set and use your API key.`)
         break
 
       case 'windsurf':
-        writeCliOutput(`  Set the custom API base URL and key in the Windsurf settings tab.`)
+        writeCliOutput(`  Windsurf has no base-URL setting. intutic connect routes Cascade through the`)
+        writeCliOutput(`  proxy's TLS interception (http.proxy in ~/.codeium/windsurf/settings.json).`)
         break
 
       case 'dsh':

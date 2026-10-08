@@ -8,6 +8,7 @@
  * @module
  */
 
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 
@@ -78,13 +79,57 @@ export function getIntegrityPath(workspaceRoot: string): string {
   return join(workspaceRoot, '.intutic', 'integrity.json')
 }
 
+const LOCAL_CONTROL_PLANE_URL = 'http://localhost:3001'
+const HOSTED_CONTROL_PLANE_URL = 'https://api.intutic.ai'
+
 /**
- * Resolve the control plane URL.
- * If --dev flag or INTUTIC_DEV=1 env var, use localhost:3001.
+ * The control plane `intutic login` saved with the credentials, or undefined.
+ *
+ * Read straight from the credentials file rather than through
+ * `loadCredentials()`: only the URL is needed, it is never a secret, and this
+ * keeps resolution synchronous and free of keychain access.
  */
-export function resolveControlPlaneUrl(devMode?: boolean): string {
-  const isDev = devMode || process.env.INTUTIC_DEV === '1'
-  return isDev
-    ? 'http://localhost:3001'
-    : 'https://api.intutic.ai'
+export function storedControlPlaneUrl(): string | undefined {
+  try {
+    const creds = JSON.parse(readFileSync(getCredentialsPath(), 'utf-8')) as { controlPlaneUrl?: unknown }
+    return typeof creds.controlPlaneUrl === 'string' && creds.controlPlaneUrl ? creds.controlPlaneUrl : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** Trims trailing `/` without a regex (see `commands/exec.ts` for why). */
+function trimTrailingSlashes(s: string): string {
+  let end = s.length
+  while (end > 0 && s.charCodeAt(end - 1) === 47 /* '/' */) end--
+  return s.slice(0, end)
+}
+
+/**
+ * Resolve the control plane URL, first match wins:
+ *
+ * 1. a flag: `--control-plane-url` (`flagUrl`), or `--dev` (`devMode`, which
+ *    some callers also set from a workspace initialised with `--dev`)
+ * 2. the environment: `INTUTIC_CONTROL_PLANE_URL`, or `INTUTIC_DEV=1`
+ * 3. the URL `intutic login` saved with the credentials (`useStored: false`
+ *    skips it, for credentials supplied on the command line instead)
+ * 4. the hosted control plane
+ *
+ * Every command resolves through here, so a self-hosted control plane named
+ * once — at login, or in the environment — is the one every later command
+ * talks to. Before, only localhost or the hosted URL were reachable, and the
+ * saved URL was ignored.
+ */
+export function resolveControlPlaneUrl(
+  devMode?: boolean,
+  opts: { flagUrl?: string; useStored?: boolean } = {},
+): string {
+  const url =
+    opts.flagUrl ||
+    (devMode ? LOCAL_CONTROL_PLANE_URL : undefined) ||
+    process.env.INTUTIC_CONTROL_PLANE_URL ||
+    (process.env.INTUTIC_DEV === '1' ? LOCAL_CONTROL_PLANE_URL : undefined) ||
+    (opts.useStored === false ? undefined : storedControlPlaneUrl()) ||
+    HOSTED_CONTROL_PLANE_URL
+  return trimTrailingSlashes(url)
 }

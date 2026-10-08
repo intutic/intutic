@@ -128,6 +128,17 @@ const CLAIM_PATTERNS = [
   /(?:across|over)\s+\*{0,2}(\d+)\*{0,2}\s+(?:supported\s+)?harnesses\b/gi,
   /\*{0,2}(\d+)\*{0,2}\s+harnesses\s+out-of-the-box\b/gi,
   /\b(\d+)\s+Harness(?:es)?\b(?=\s*(?:<!--|$))/gm,
+  // Phrasings the audit after the 43rd harness found unwatched: "each of 39
+  // harnesses", "39 harnesses, from …", "39 AI coding agents/harnesses",
+  // "41 agent harnesses", "39 coding-agent harnesses", "39 out-of-the-box,
+  // harness-native adapters" and "supports [39 harnesses](…)".
+  /each\s+of\s+(?:the\s+|its\s+|Intutic's\s+)?\*{0,2}(\d+)\*{0,2}\s+harnesses\b/gi,
+  /\*{0,2}(\d+)\*{0,2}\s+harnesses,/gi,
+  /\*{0,2}(\d+)\*{0,2}\s+AI\s+coding\s+(?:agents|harnesses)\b/gi,
+  /\*{0,2}(\d+)\*{0,2}\s+(?:AI\s+)?agent\s+harnesses\b/gi,
+  /\*{0,2}(\d+)\*{0,2}\s+coding-agent\s+harnesses\b/gi,
+  /\*{0,2}(\d+)\*{0,2}\s+out-of-the-box\b/gi,
+  /supports\s+\[\*{0,2}(\d+)\*{0,2}\s+harnesses\]/gi,
 ]
 const OTHER_PATTERN = /other\s+\*{0,2}(\d+)\*{0,2}\s+harnesses\b/gi
 

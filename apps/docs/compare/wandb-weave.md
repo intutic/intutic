@@ -1,40 +1,49 @@
+---
+title: Intutic vs W&B Weave
+description: W&B Weave traces and evaluates LLM applications, with scorers your code can use as guardrails; Intutic decides agent tool calls before they run, with egress and sandbox containment.
+---
+
 # Intutic vs W&B Weave
 
-Weights & Biases Weave is a developer tool built to trace LLM application graphs, log datasets, and evaluate prompt alignment metrics. **Intutic is an active governance layer with opt-in egress containment (`intutic enforce`) and runtime isolation (`intutic exec --sandbox`) for autonomous agent fleets** (see [LLD #63](https://github.com/intutic/intutic)).
+*Last reviewed: 2026-10-08*
 
-## The Core Difference
-
-W&B Weave is designed for **model tracing**. It monitors call hierarchies, logging prompt inputs and responses to evaluate alignment and quality metrics. Intutic is designed for **active enforcement**. It sits inline on the agent's traffic and applies execution gates in real time, blocking a request before it reaches the model rather than reporting on it afterwards.
-
-If your agent's next step is a tool call an SOP forbids, W&B Weave will log the API trajectory. Intutic sees that tool call in the request, matches it against the SOP in force, and kills the request before the model ever answers.
-
----
+Intutic decides each agent tool call before it runs, across 43 harnesses: native hook gates and in-process SDK gates allow or block the call, hook gates can hold it for human approval, and an opt-in default-deny egress firewall (`intutic enforce`) and sandboxed runs (`intutic exec --sandbox`) make sure the agent cannot route around it. W&B Weave, from Weights & Biases (part of CoreWeave), is a toolkit for tracing and evaluating LLM applications. Its scorers can act as guardrails: your code applies a scorer and decides whether to block or modify the response. Weave also traces MCP clients and servers. Weave helps you understand and improve an application; Intutic enforces what an agent is allowed to do.
 
 ## Comparison
 
-| Capability | Intutic | W&B Weave |
-|-----------|---------|-----------|
-| **Core Value** | Active containment & sandbox security | Trajectory tracing & prompt evaluation |
-| **Isolation Model** | WASM (wasmtime) policy sandbox — 16 MB, 1,000,000 fuel, 5 ms, explicit host-import allowlist | Not available |
-| **Egress Control** | Opt-in default-deny egress (`intutic enforce`) forces all traffic through the governing proxy | N/A |
-| **Enforcement Path** | Real-time inline proxy — requests are blocked before they reach the model | Async telemetry listener |
-| **Rule Engine** | Dynamic WASM modules & custom security scripts | Prompt evaluation workflows |
-| **Target Workload** | Autonomous coding agents (Cursor, Claude Code) | Chat applications, RAG pipelines |
+| | Intutic | W&B Weave |
+|---|---|---|
+| **Primary job** | Runtime enforcement and audit for AI agents | Tracing and evaluation for LLM applications |
+| **Where it enforces** | Native pre-execution hook gates in 19 of the 43 harnesses, plus request and response proxy, MCP governance proxy, egress firewall and sandbox | Scorers your application code applies as guardrails |
+| **Coding agents** | **43** supported harnesses, including Claude Code, Codex, Cursor, GitHub Copilot, Windsurf and Cline | Not a focus; it traces applications instrumented with its SDK |
+| **Decisions** | Allow, warn, require approval (held until approved in Slack or the CLI), block, redact, re-ask, shadow | Whatever your code does with a scorer's result |
+| **MCP** | MCP governance proxy that enforces on tool calls and tool descriptions | Traces MCP clients and servers |
+| **Containment** | Default-deny egress firewall and sandboxed runs on Docker, Podman or Firecracker | Not part of the product |
+| **Deployment** | Cloud, or fully self-hosted including air-gapped | Multi-tenant or dedicated cloud; self-managed in private preview |
+| **Source** | Open core (MIT) | SDK is Apache-2.0 |
 
----
+## Where Weave is stronger
 
-## When to Choose Intutic
+- **Evaluation workflows.** Scorers, datasets and comparisons for measuring application quality as prompts and models change.
+- **Developer tracing.** Lightweight instrumentation of nested LLM calls, including MCP traffic.
+- **The W&B ecosystem.** Teams already using Weights & Biases for training and experiments keep everything in one place.
 
-- **You deploy untrusted autonomous agents** that need to execute code locally but must be walled off from sensitive networks or source code repositories.
-- **You require isolated sandbox runs** (`intutic exec --sandbox`) for per-run workspace isolation whose only egress is the governing proxy.
-- **You need active, real-time protection** against unauthorized files, commands, and network connections.
-- **You want ready-to-use integrations** for 41 agent harnesses.
+## When to choose Intutic
 
-## When to Choose W&B Weave
+- Your agents run commands, edit files and call MCP tools, and you need each call decided before it runs.
+- You need egress control and sandboxing so an agent cannot reach the network except through governance.
+- You want risky calls held for human approval.
+- You want an audit trail you can verify independently.
 
-- **You are optimizing RAG pipelines** and need to visualize nested LLM call graphs and dataset traces.
-- **You are fine-tuning models** and need to log training datasets and prompt evaluations.
-- **You do not require runtime isolation** (`intutic exec --sandbox`) or opt-in firewall containment (`intutic enforce`).
+## When to choose W&B Weave
+
+- You are building and evaluating LLM applications and want tracing and scoring in your code.
+- You already use Weights & Biases for model development.
+- Guardrails written into your own application cover your runtime needs.
+
+## Use them together
+
+Weave can trace and score your application while Intutic gates the agent's tool calls and contains its network access. Neither depends on the other.
 
 ---
 
