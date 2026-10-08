@@ -26,6 +26,7 @@ import { emitJsGate, emitJsFailClosedPrelude,
 import { emitRedactor } from './holdRedaction.js'
 import { readJsonObjectForMerge } from './jsonMergeTarget.js'
 import { keepOriginal, noteWritten, readOriginal } from '../disconnect/originals.js'
+import { recordGateSightings } from './gateSightings.js'
 
 const log = createLogger('sync-claude-hooks')
 
@@ -643,6 +644,8 @@ async function drainJsonlLog(opts: {
   bodyFor: (records: unknown[]) => unknown
   /** Noun used in log lines, e.g. "hook events". */
   label: string
+  /** Sees every parsed batch before delivery, whether or not delivery then succeeds. */
+  onRead?: (records: unknown[]) => Promise<void>
 }): Promise<number> {
   let raw: string
   try {
@@ -667,6 +670,8 @@ async function drainJsonlLog(opts: {
     await node_fs.writeFile(opts.logPath, '', 'utf-8')
     return 0
   }
+
+  await opts.onRead?.(records)
 
   try {
     // Use native fetch (Node 18+ — required minimum for this monorepo)
@@ -764,6 +769,9 @@ export async function drainHookEvents(
     apiKey,
     bodyFor: (events) => ({ events }),
     label: 'hook events',
+    // Recorded before delivery: the events prove the gate ran on this machine
+    // whether or not the control plane is reachable right now.
+    onRead: (events) => recordGateSightings(workspaceRoot, events),
   })
 }
 

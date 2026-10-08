@@ -162,6 +162,13 @@ export type NotificationEventType =
    * failing; a recurrence after it clears fires again.
    */
   | 'governance.integrity.failed'
+  // ── AI inventory of developer machines ──
+  /**
+   * A machine's AI inventory listed an ungoverned harness or MCP server for
+   * the first time: a harness with no gate installed or none possible, or an
+   * MCP server the MCP proxy does not front. Once per machine and item.
+   */
+  | 'inventory.ungoverned.detected'
   // ── Provider outage tracking (Phase 8b) ──
   /**
    * A NEW provider_incidents window opened for a provider (Anthropic,

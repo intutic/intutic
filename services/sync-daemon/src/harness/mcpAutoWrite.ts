@@ -101,6 +101,7 @@ import { readJsonObjectForMerge } from './jsonMergeTarget.js'
 import { projectServerApproval, type ProjectApproval } from './claudeProjectApproval.js'
 import { keepOriginal } from '../disconnect/originals.js'
 import { parseDocument, isMap } from 'yaml'
+import { sanitizeMcpEndpoint } from '@intutic/shared-types'
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml'
 
 const log = createLogger('sync-mcp-autowrite')
@@ -159,6 +160,12 @@ export interface DiscoveredMcpServer {
   harness: string
   transport: 'stdio' | 'http' | 'sse' | 'unknown'
   wrapped: boolean
+  /**
+   * A remote server's URL, without its user name, password, query string or
+   * a token-shaped path segment (`sanitizeMcpEndpoint`). Absent for a local
+   * server: its command line can carry secrets and is never reported.
+   */
+  endpoint?: string
   /**
    * Set on a server the harness will start but the proxy cannot govern, with
    * the reason. Today: an approved Claude Code project server that gets no
@@ -1236,8 +1243,16 @@ async function injectOpenCode(workspaceId: string, workspaceRoot: string): Promi
 
 // ─── Discovery (read-only — writes nothing) ───────────────────────────────────
 
+type EntryClass = Pick<DiscoveredMcpServer, 'transport' | 'wrapped' | 'endpoint'>
+
+/** `endpoint` only when the URL survives sanitising, so the field is never present and empty. */
+function withEndpoint(found: EntryClass, url: string): EntryClass {
+  const endpoint = sanitizeMcpEndpoint(url)
+  return endpoint ? { ...found, endpoint } : found
+}
+
 /** Classify a raw server entry's transport + wrapped status, tolerant of any shape. */
-function classifyEntry(entry: unknown): { transport: DiscoveredMcpServer['transport']; wrapped: boolean } {
+function classifyEntry(entry: unknown): EntryClass {
   if (!entry || typeof entry !== 'object') return { transport: 'unknown', wrapped: false }
   const e = entry as Record<string, unknown>
   const wrapped = e.__intutic_wrapped === true
@@ -1253,14 +1268,14 @@ function classifyEntry(entry: unknown): { transport: DiscoveredMcpServer['transp
     const o = original as Record<string, unknown>
     if (typeof o.url === 'string') {
       const type = typeof o.type === 'string' ? o.type.toLowerCase() : ''
-      return { transport: type === 'sse' ? 'sse' : 'http', wrapped: true }
+      return withEndpoint({ transport: type === 'sse' ? 'sse' : 'http', wrapped: true }, o.url)
     }
   }
 
   if (typeof e.command === 'string') return { transport: 'stdio', wrapped }
   if (typeof e.url === 'string') {
     const type = typeof e.type === 'string' ? e.type.toLowerCase() : ''
-    return { transport: type === 'sse' ? 'sse' : 'http', wrapped }
+    return withEndpoint({ transport: type === 'sse' ? 'sse' : 'http', wrapped }, e.url)
   }
   return { transport: 'unknown', wrapped }
 }
@@ -1273,8 +1288,7 @@ async function discoverJsonObjectHarness(harness: string, filePath: string): Pro
   const current = await readJsonFile<{ mcpServers?: Record<string, unknown> }>(filePath, {})
   const out: DiscoveredMcpServer[] = []
   for (const [name, entry] of Object.entries(current.mcpServers ?? {})) {
-    const { transport, wrapped } = classifyEntry(entry)
-    out.push({ server: name, harness, transport, wrapped })
+    out.push({ server: name, harness, ...classifyEntry(entry) })
   }
   return out
 }
@@ -1315,8 +1329,7 @@ async function discoverMuse(): Promise<DiscoveredMcpServer[]> {
   const current = await readJsonFile<{ mcp_servers?: Record<string, unknown> }>(filePath, {})
   const out: DiscoveredMcpServer[] = []
   for (const [name, entry] of Object.entries(current.mcp_servers ?? {})) {
-    const { transport, wrapped } = classifyEntry(entry)
-    out.push({ server: name, harness: 'muse-code', transport, wrapped })
+    out.push({ server: name, harness: 'muse-code', ...classifyEntry(entry) })
   }
   return out
 }
@@ -1328,8 +1341,7 @@ async function discoverContinue(): Promise<DiscoveredMcpServer[]> {
   const current = await readJsonFile<ContinueConfig>(filePath, {})
   const out: DiscoveredMcpServer[] = []
   for (const s of current.mcpServers ?? []) {
-    const { transport, wrapped } = classifyEntry(s)
-    out.push({ server: s.name, harness: 'continue', transport, wrapped })
+    out.push({ server: s.name, harness: 'continue', ...classifyEntry(s) })
   }
   return out
 }
@@ -1373,8 +1385,7 @@ async function discoverGoose(): Promise<DiscoveredMcpServer[]> {
     const servers = (doc.toJS() as { mcp?: Record<string, unknown> }).mcp ?? {}
     const out: DiscoveredMcpServer[] = []
     for (const [name, entry] of Object.entries(servers)) {
-      const { transport, wrapped } = classifyEntry(entry)
-      out.push({ server: name, harness: 'goose', transport, wrapped })
+      out.push({ server: name, harness: 'goose', ...classifyEntry(entry) })
     }
     return out
   } catch {
@@ -1428,8 +1439,7 @@ async function discoverGrokConfig(configPath: string): Promise<DiscoveredMcpServ
     const servers = doc.mcp_servers && typeof doc.mcp_servers === 'object' ? doc.mcp_servers : {}
     const out: DiscoveredMcpServer[] = []
     for (const [name, entry] of Object.entries(servers)) {
-      const { transport, wrapped } = classifyEntry(entry)
-      out.push({ server: name, harness: 'grok', transport, wrapped })
+      out.push({ server: name, harness: 'grok', ...classifyEntry(entry) })
     }
     return out
   } catch {
@@ -1463,7 +1473,7 @@ async function discoverGrok(workspaceRoot: string): Promise<DiscoveredMcpServer[
  *  argv names the proxy; its true transport is read back from that argv
  *  (`--remote-url` / `--remote-transport`), since OpenCode entries cannot
  *  carry `__intutic_original`. */
-function classifyOpenCodeEntry(entry: unknown): { transport: DiscoveredMcpServer['transport']; wrapped: boolean } {
+function classifyOpenCodeEntry(entry: unknown): EntryClass {
   if (!entry || typeof entry !== 'object') return { transport: 'unknown', wrapped: false }
   const e = entry as OpenCodeMcpEntry
   const wrapped = isOpenCodeWrapped(e)
@@ -1471,10 +1481,12 @@ function classifyOpenCodeEntry(entry: unknown): { transport: DiscoveredMcpServer
     const argv = e.command as string[]
     if (!argv.includes('--remote-url')) return { transport: 'stdio', wrapped }
     const t = argv[argv.indexOf('--remote-transport') + 1]
-    return { transport: t === 'sse' ? 'sse' : 'http', wrapped }
+    const url = argv[argv.indexOf('--remote-url') + 1]
+    const found: EntryClass = { transport: t === 'sse' ? 'sse' : 'http', wrapped }
+    return typeof url === 'string' ? withEndpoint(found, url) : found
   }
   if (e.type === 'local' && Array.isArray(e.command)) return { transport: 'stdio', wrapped }
-  if (e.type === 'remote' && typeof e.url === 'string') return { transport: 'http', wrapped }
+  if (e.type === 'remote' && typeof e.url === 'string') return withEndpoint({ transport: 'http', wrapped }, e.url)
   return { transport: 'unknown', wrapped }
 }
 

@@ -22,6 +22,8 @@ export {
 } from './syncCycle.js'
 
 export { collectAgentReport, reportAgent, fetchLocalProxyInstanceId } from './agentReporter.js'
+export { collectDeviceInventory, reportDeviceInventory } from './inventory.js'
+export type { DetectedHarness } from './inventory.js'
 export { startHarnessSession, endAllOpenSessions, readGitInfo } from './sessionReporter.js'
 
 export { loadLocalSopEntries, HARNESS_FILES, clearImmutable, setImmutable } from './configWriter.js'

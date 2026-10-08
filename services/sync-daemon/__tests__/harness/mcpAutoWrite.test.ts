@@ -260,8 +260,36 @@ describe('discoverMcpServers', () => {
 
     const found = await discoverMcpServers(ctx.root)
 
-    expect(found).toContainEqual({ server: 'remote-sse', harness: 'claude-code', transport: 'sse', wrapped: false })
-    expect(found).toContainEqual({ server: 'remote-http', harness: 'claude-code', transport: 'http', wrapped: false })
+    expect(found).toContainEqual({ server: 'remote-sse', harness: 'claude-code', transport: 'sse', wrapped: false, endpoint: 'https://example.com/mcp' })
+    expect(found).toContainEqual({ server: 'remote-http', harness: 'claude-code', transport: 'http', wrapped: false, endpoint: 'https://example.com/other' })
+  })
+
+  it('reports a remote server\'s endpoint without credentials, query string or token path segment, wrapped or not', async () => {
+    ctx = setup()
+    mkdirSync(join(ctx.home, '.claude'), { recursive: true })
+    // Assembled at run time: no credential-shaped literal in source.
+    const password = ['pa', 'ss', 'word'].join('')
+    const pathToken = ['Zx9', 'Yw8Vu7', 'Ts6Rq5Po4'].join('')
+    writeFileSync(
+      claudeCodePath(ctx.home),
+      JSON.stringify({
+        mcpServers: {
+          keyed: { url: `https://bot:${password}@mcp.example.com/v1/sse?token=abc`, type: 'sse' },
+          'path-key': { url: `https://actions.example.com/mcp/${pathToken}/sse` },
+          local: { command: 'npx', args: ['-y', 'server', `--api-key=${password}`] },
+        },
+      }, null, 2),
+    )
+
+    for (const found of [await discoverMcpServers(ctx.root), (await injectMcpServer(ctx.root, 'ws_test'), await discoverMcpServers(ctx.root))]) {
+      const byName = Object.fromEntries(found.map((s) => [s.server, s]))
+      expect(byName.keyed?.endpoint).toBe('https://mcp.example.com/v1/sse')
+      expect(byName['path-key']?.endpoint).toBe('https://actions.example.com/mcp/[redacted]/sse')
+      expect(byName.local).not.toHaveProperty('endpoint')
+      expect(JSON.stringify(found)).not.toContain(password)
+      expect(JSON.stringify(found)).not.toContain(pathToken)
+      expect(JSON.stringify(found)).not.toContain('token=')
+    }
   })
 
   // M2: `classifyEntry` must read `__intutic_original` FIRST — a wrapped
@@ -284,8 +312,8 @@ describe('discoverMcpServers', () => {
     await injectMcpServer(ctx.root, 'ws_test')
     const found = await discoverMcpServers(ctx.root)
 
-    expect(found).toContainEqual({ server: 'remote-sse', harness: 'claude-code', transport: 'sse', wrapped: true })
-    expect(found).toContainEqual({ server: 'remote-http', harness: 'claude-code', transport: 'http', wrapped: true })
+    expect(found).toContainEqual({ server: 'remote-sse', harness: 'claude-code', transport: 'sse', wrapped: true, endpoint: 'https://example.com/mcp' })
+    expect(found).toContainEqual({ server: 'remote-http', harness: 'claude-code', transport: 'http', wrapped: true, endpoint: 'https://example.com/other' })
     expect(found.find((s) => s.server === 'remote-sse')?.transport).not.toBe('stdio')
   })
 
@@ -556,7 +584,7 @@ describe('injectMcpServer — OpenCode opencode.json mcp block (TD-487)', () => 
     const before = (await discoverMcpServers(ctx.root)).filter((s) => s.harness === 'opencode')
     expect(before).toEqual(expect.arrayContaining([
       { server: 'github', harness: 'opencode', transport: 'stdio', wrapped: false },
-      { server: 'docs', harness: 'opencode', transport: 'http', wrapped: false },
+      { server: 'docs', harness: 'opencode', transport: 'http', wrapped: false, endpoint: 'https://docs.example/mcp' },
     ]))
 
     await injectMcpServer(ctx.root, 'ws_test')
@@ -564,8 +592,8 @@ describe('injectMcpServer — OpenCode opencode.json mcp block (TD-487)', () => 
     const after = (await discoverMcpServers(ctx.root)).filter((s) => s.harness === 'opencode')
     expect(after).toEqual(expect.arrayContaining([
       { server: 'github', harness: 'opencode', transport: 'stdio', wrapped: true },
-      { server: 'docs', harness: 'opencode', transport: 'http', wrapped: true },
-      { server: 'sso', harness: 'opencode', transport: 'http', wrapped: false },
+      { server: 'docs', harness: 'opencode', transport: 'http', wrapped: true, endpoint: 'https://docs.example/mcp' },
+      { server: 'sso', harness: 'opencode', transport: 'http', wrapped: false, endpoint: 'https://sso.example/mcp' },
     ]))
     expect(after.some((s) => s.server === 'intutic')).toBe(false)
   })
