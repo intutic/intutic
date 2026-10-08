@@ -61,7 +61,7 @@ list is a trial or a degraded preview of a paid feature:
 | Corporate SOP distribution | local files only | centralized, tamper-proof, pushed to every developer |
 | Guardrails from policy documents | hand-written SOP files and rules | Notion, Confluence, GitHub, Google Docs and uploads become cited, shadow-first guardrails a person promotes |
 | LLM-as-judge (L2/L3 semantic checks) | — | requires server compute |
-| MCP server governance | the proxy's local checks: DLP, injection scanning, anomaly detectors, WASM rules, TOFU pinning | plus the [server registry](/guide/mcp-governance#the-registry) with approvals and default-deny, [approval holds](/guide/mcp-governance#approval-holds), allowlists, SSO group policy and the calling member on every event, on every plan |
+| MCP server governance | the proxy's local checks: DLP, injection scanning, anomaly detectors, WASM rules, TOFU pinning | plus the [server registry](/guide/mcp-governance#the-registry) with approvals and default-deny, [approval holds](/guide/mcp-governance#approval-holds), allowlists and the calling member on every event, on every plan; the [SSO group policy](/concepts/circuit-breaker#_3-sso-group-clearance) on plans with single sign-on |
 
 Arm state carries over rather than resetting when you connect: a workspace
 that learned standalone keeps that learning, and the local loop stands down
@@ -84,6 +84,7 @@ list. In short:
 |---|:---:|:---:|:---:|:---:|
 | [Policy Guardrails](/guide/policy-guardrails) (extraction and the review page) | ✓ | ✓ | ✓ | ✓ |
 | [Single sign-on](/guide/security#single-sign-on-sso) (SAML 2.0, OIDC) | | ✓ | ✓ | ✓ |
+| [SSO group policy](/concepts/circuit-breaker#_3-sso-group-clearance) for high-risk tools | | ✓ | ✓ | ✓ |
 | [Custom Filters](/guide/wasm-rules) (WASM rules) | | ✓ | ✓ | ✓ |
 | [SOP Optimizer](/guide/metaclaw) | | ✓ | ✓ | ✓ |
 | [Evaluator Sandbox](/guide/evaluator-sandbox) | | ✓ | ✓ | ✓ |

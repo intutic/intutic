@@ -17,8 +17,8 @@ the controls built on top of the MCP proxy-wrapping mechanism described in
 - **approval holds**: a `require_approval` rule holds the call until a person
   approves it, and the identical retry then runs;
 - **per-call identity**: every event and hold says which member's key, OS
-  user and session made the call, and the workspace's SSO group policy
-  applies to it;
+  user and session made the call, and on a plan with single sign-on the
+  workspace's SSO group policy applies to it;
 - **per-workspace allowlists** of servers and tools;
 - **server-level TOFU pinning**, which detects a server's tool definitions
   changing after a user has already trusted it.
