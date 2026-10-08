@@ -1,7 +1,7 @@
 {
   "_meta": {
-    "source": "https://raw.githubusercontent.com/BerriAI/litellm/e1bdd42726d1f480d89d9e65d261a0fbea4541b9/model_prices_and_context_window.json",
-    "generated_at": "2026-10-07",
+    "source": "https://raw.githubusercontent.com/BerriAI/litellm/e638540de943eddb66f2fd543bfc75210d9c4b77/model_prices_and_context_window.json",
+    "generated_at": "2026-10-08",
     "refresh_script": "tools/scripts/build-offline-pricing-bundle.ts",
     "note": "Baked into the proxy binary via include_str!(), so editing this file does nothing until the image is rebuilt. Regenerate with tools/scripts/build-offline-pricing-bundle.ts; drift against published rates is reported monthly by .github/workflows/pricing-drift.yml. Override with OFFLINE_PRICING_PATH."
   },
@@ -45,7 +45,7 @@
       "input_cost_per_1k": 0.002,
       "output_cost_per_1k": 0.01,
       "max_tokens": 128000,
-      "cache_read_cost_per_1k": 0.0002,
+      "cache_read_cost_per_1k": 0.0001,
       "cache_write_cost_per_1k": 0.0025
     },
     "claude-sonnet-4-6": {
@@ -1183,6 +1183,13 @@
       "input_cost_per_1k": 0.002,
       "output_cost_per_1k": 0.006,
       "max_tokens": 16384
+    },
+    "claude-haiku-5-5": {
+      "input_cost_per_1k": 0.0001,
+      "output_cost_per_1k": 0.0005,
+      "max_tokens": 128000,
+      "cache_read_cost_per_1k": 0.00001,
+      "cache_write_cost_per_1k": 0.000125
     },
     "claude-3-7-sonnet-20250219": {
       "input_cost_per_1k": 0.003,
