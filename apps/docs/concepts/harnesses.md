@@ -1,11 +1,11 @@
 ---
 title: Harnesses
-description: How Intutic's proxy and sync daemon work together to govern 39 AI coding agents without changing their source code.
+description: How Intutic's proxy and sync daemon work together to govern 43 AI coding agents without changing their source code.
 ---
 
 # Harnesses <Badge type="tip" text="Open-Core" />
 
-A **harness** is any AI coding agent that Intutic governs. Intutic currently supports [39 harnesses](/integrations/) — from IDE extensions like Cursor and Windsurf to CLI tools like Claude Code and Aider to autonomous agent frameworks like OpenHands and Goose, plus orchestrators like Spotify Xirp, DoorDash Agentic Orchestrator, and AWS Bedrock AgentCore Runtime that delegate to already-gated harnesses underneath them. A separate set of server-side platform integrations (QM, Anthropic Managed Agents, AWS Bedrock AgentCore Gateway) call Intutic directly over HTTP and have no `HarnessType` of their own — see [Integrations Hub](/integrations/#server-side-platform-integrations).
+A **harness** is any AI coding agent that Intutic governs. Intutic currently supports [43 harnesses](/integrations/) — from IDE extensions like Cursor and Windsurf to CLI tools like Claude Code and Aider to autonomous agent frameworks like OpenHands and Goose, plus orchestrators like Spotify Xirp, DoorDash Agentic Orchestrator, and AWS Bedrock AgentCore Runtime that delegate to already-gated harnesses underneath them. A separate set of server-side platform integrations (QM, Anthropic Managed Agents, AWS Bedrock AgentCore Gateway) call Intutic directly over HTTP and have no `HarnessType` of their own — see [Integrations Hub](/integrations/#server-side-platform-integrations).
 
 Governance works through two components that run on the developer's machine:
 
@@ -64,16 +64,17 @@ developer's machine — steps 4 and 5 below apply only once you connect one.
 
 ## Proxy (Rust)
 
-The proxy is a high-performance Rust proxy gateway (`@intutic/proxy`) that transparently intercepts all LLM traffic. Harnesses connect to it by setting their base URL environment variable to `http://localhost:4000`.
+The proxy is a high-performance Rust proxy gateway (`@intutic/proxy`) that transparently intercepts all LLM traffic. Harnesses connect to it by setting their base URL to the proxy: `http://localhost:4000` for Anthropic SDKs (they append `/v1/messages`) and `http://localhost:4000/v1` for OpenAI-style SDKs (they append `/chat/completions` or `/responses`).
 
 ### Protocol routing
 
 | Route | Protocol | Harnesses |
 |---|---|---|
-| `/v1/chat/completions` | OpenAI | Cursor, Windsurf, Continue, Cline, Roo Code |
-| `/v1/messages` | Anthropic | Claude Code, Claude Desktop |
-| `/v1/responses` | Codex | OpenAI Codex |
-| `/v1beta/models/:model` | Gemini | Antigravity |
+| `/v1/chat/completions` | OpenAI | Cursor (own API keys), Windsurf (through TLS interception), Continue, Cline, Roo Code, Aider |
+| `/v1/messages` | Anthropic | Claude Code, Continue, Aider |
+| `/v1/responses` | OpenAI Responses | OpenAI Codex |
+
+`/v1beta/models/:model` (Gemini) is routed but not translated, so Gemini traffic — Antigravity's included — is not supported. Claude Desktop sends its model traffic to Anthropic directly and cannot be routed.
 
 ### Pre-request pipeline
 
@@ -106,16 +107,15 @@ The sync daemon keeps harness config files in sync with SOPs from the control pl
 
 ### Sync loop
 
-Every 30 seconds (configurable via `pollIntervalMs`):
+`intutic connect` polls the control plane every 30 seconds (`--interval` changes it) and also receives pushed updates over the WebSocket below. On each config it applies:
 
-1. **Fetch config** — `POST /api/v1/sync/config` (15s timeout)
-2. **Compare configVersion** — if remote > local → write SOPs to harness files
-3. **Apply SkillOpt edits** — if any `appliedEdits` present from the SOP optimizer
-4. **Compute SHA-256 hashes** — hash each config file
+1. **Fetch config** — `POST /api/v1/sync/config`
+2. **Refresh the gate caches** — the policy snapshot, approved review-hold bypasses and the egress policy every hook reads
+3. **Compare configVersion** — if remote > local, write each recorded harness's files (see [What writes harness files](/integrations/#what-writes-harness-files)), update the Claude Code hooks, and proxy-wrap MCP servers
+4. **Compute SHA-256 hashes** — hash each harness's config file
 5. **Report hashes** — `POST /api/v1/sync/sop-hash` for drift detection
-6. **Update integrity store** — writes to `~/.intutic/integrity.json`
-7. **Config capture** — every 5th iteration (~2.5 min): upload configs to `POST /api/v1/config/capture`
-8. **Compliance probes** — detect proxy bypass attempts
+6. **Update integrity store** — `.intutic/integrity.json` in the workspace
+7. **Health checks** — the local proxy and Valkey are checked and restarted if they stopped
 
 ### Real-time updates via WebSocket
 
@@ -148,7 +148,7 @@ SOPs are written in each harness's native format:
 | YAML | Aider | `.aider.conf.yml` |
 | TOML | OpenHands | `config.toml` |
 | Env | Codex | `.env.intutic` |
-| Native hooks | Cline, Roo Code, Continue, Claude Desktop, Goose | Harness-specific |
+| Native hooks | Claude Code, Cursor, Windsurf, Cline, Codex, GitHub Copilot (agent mode), Continue CLI, Antigravity, Goose, OpenHands, OpenClaw, Hermes, Pi, Muse Code, Grok Build, OpenCode (plugin), dsh (plugin), n8n (workflow hook) | Harness-specific — see the [coverage matrix](/reference/harness-security-matrix#coverage-matrix) |
 
 → Source: [services/sync-daemon/](https://github.com/intutic/intutic/tree/main/services/sync-daemon)
 

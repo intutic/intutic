@@ -942,8 +942,8 @@ const JS_SDK_GATED_FRAMEWORKS: Record<
       'Gate.guard() verdict, producing user.tool_approval items for your next ' +
       'session.createTurn() call — TrueForge has no synchronous approval callback to hang a ' +
       "function off (confirmed against a real install); see that module's doc. Covers ONLY " +
-      'the embedded-library deployment mode — TrueForge run as its own standalone/hosted ' +
-      'server is not yet supported.',
+      'the embedded-library deployment mode — TrueForge run as its own server is governed ' +
+      'by the TrueForge bridge service instead (see the server-mode docs).',
     docsSlug: 'trueforge',
   },
   'ai-sdk-harness': {

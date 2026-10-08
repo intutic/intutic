@@ -4,7 +4,10 @@ Integrate Intutic governance with [Google Antigravity](https://cloud.google.com/
 
 ## How it works
 
-Intutic merges governance rules into the `customInstructions` field of your `.gemini/settings.json` file. Existing settings in the JSON file are preserved — only `customInstructions` is overwritten.
+Intutic does two things:
+
+- **Rules** — merges your SOPs into the `customInstructions` field of the project's `.gemini/settings.json`. Existing settings in the file are preserved — only `customInstructions` is overwritten.
+- **A blocking gate** — registers `.intutic/hooks/antigravity-check.sh` as a Gemini CLI `BeforeTool` hook in `~/.gemini/settings.json`. Gemini CLI runs it before every tool call with the call as JSON on stdin and blocks the call when it exits with code 2. Your other settings and hooks in that file are kept.
 
 ## Setup
 
@@ -23,9 +26,10 @@ intutic init
 ```
 
 ```
-✓ Detected harnesses:
-  • antigravity → .gemini/settings.json
+  ✔ antigravity → .gemini/settings.json
 ```
+
+`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
 
 ### 3. Start the proxy
 
@@ -47,8 +51,23 @@ Intutic reads the existing `.gemini/settings.json`, merges governance instructio
 }
 ```
 
+The gate registration in `~/.gemini/settings.json`:
+
+```json
+{
+  "hooks": {
+    "BeforeTool": [
+      {
+        "matcher": ".*",
+        "hooks": [{ "name": "intutic-governance", "type": "command", "command": "bash \"/path/to/project/.intutic/hooks/antigravity-check.sh\"" }]
+      }
+    ]
+  }
+}
+```
+
 ::: tip Non-destructive merge
-Unlike other harness adapters, the Antigravity adapter reads the existing JSON file first and only updates the `customInstructions` field. All other settings are preserved.
+Both files are read first and merged; all other settings are preserved. A settings file that is not plain JSON (for example one with comments) is left untouched and reported in the `intutic connect` log.
 :::
 
 ## Config details

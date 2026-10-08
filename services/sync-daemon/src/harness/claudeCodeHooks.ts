@@ -24,6 +24,7 @@ import { emitJsGate, emitJsFailClosedPrelude,
   REVIEW_REQUEST_VERSION as GATE_REVIEW_REQUEST_VERSION,
 } from './gateBody.js'
 import { emitRedactor } from './holdRedaction.js'
+import { readJsonObjectForMerge } from './jsonMergeTarget.js'
 
 const log = createLogger('sync-claude-hooks')
 
@@ -505,27 +506,23 @@ process.stdin.on('end', () => {
   await node_fs.mkdir(localClaudeDir, { recursive: true })
   const localSettingsPath = node_path.join(localClaudeDir, 'settings.json')
 
-  let existingLocal: Record<string, unknown> = {}
-  try {
-    const raw = await node_fs.readFile(localSettingsPath, 'utf-8')
-    existingLocal = JSON.parse(raw)
-  } catch {
-    // Ignore
+  // A settings file that is not a plain JSON object is left untouched (and
+  // reported) rather than replaced with only the Intutic keys.
+  const existingLocal = await readJsonObjectForMerge(localSettingsPath)
+  if (existingLocal !== null) {
+    const mergedLocal = {
+      ...existingLocal,
+      permissions: {
+        ...(existingLocal.permissions as Record<string, unknown>),
+        deny: denyRules,
+      },
+      hooks: {
+        ...(existingLocal.hooks as Record<string, unknown>),
+        PreToolUse: mergePreToolUse((existingLocal.hooks as Record<string, unknown> | undefined)?.['PreToolUse'], newSettings.hooks.PreToolUse),
+      },
+    }
+    await node_fs.writeFile(localSettingsPath, JSON.stringify(mergedLocal, null, 2) + '\n', 'utf-8')
   }
-
-  const mergedLocal = {
-    ...existingLocal,
-    permissions: {
-      ...(existingLocal.permissions as Record<string, unknown>),
-      deny: denyRules,
-    },
-    hooks: {
-      ...(existingLocal.hooks as Record<string, unknown>),
-      PreToolUse: newSettings.hooks.PreToolUse,
-    },
-  }
-
-  await node_fs.writeFile(localSettingsPath, JSON.stringify(mergedLocal, null, 2) + '\n', 'utf-8')
 
   // Write global settings config ~/.claude/settings.json
   //
@@ -548,13 +545,8 @@ process.stdin.on('end', () => {
   await node_fs.mkdir(globalClaudeDir, { recursive: true })
   const globalSettingsPath = node_path.join(globalClaudeDir, 'settings.json')
 
-  let existingGlobal: Record<string, unknown> = {}
-  try {
-    const raw = await node_fs.readFile(globalSettingsPath, 'utf-8')
-    existingGlobal = JSON.parse(raw)
-  } catch {
-    // Ignore
-  }
+  const existingGlobal = await readJsonObjectForMerge(globalSettingsPath)
+  if (existingGlobal === null) return
 
   // Merge, prioritizing global user settings but updating permissions/hooks
   const mergedGlobal = {
@@ -571,12 +563,33 @@ process.stdin.on('end', () => {
     },
     hooks: {
       ...(existingGlobal.hooks as Record<string, unknown>),
-      PreToolUse: newSettings.hooks.PreToolUse,
+      PreToolUse: mergePreToolUse((existingGlobal.hooks as Record<string, unknown> | undefined)?.['PreToolUse'], newSettings.hooks.PreToolUse),
     },
   }
 
   await node_fs.writeFile(globalSettingsPath, JSON.stringify(mergedGlobal, null, 2) + '\n', 'utf-8')
   log.info({ action: 'hooks_written' }, 'Successfully updated settings.json hooks globally and locally')
+}
+
+/**
+ * The PreToolUse list to write: the user's own entries, then the Intutic
+ * ones. An entry is Intutic's when every hook in it runs a gate this module
+ * wrote (`claude-code-check.js`, or `pre-tool-check.js` from earlier
+ * versions), so re-running replaces those instead of stacking copies, and a
+ * hook the user registered survives every sync.
+ */
+function mergePreToolUse(existing: unknown, intutic: unknown[]): unknown[] {
+  const isOurs = (entry: unknown): boolean => {
+    if (typeof entry !== 'object' || entry === null) return false
+    const inner = (entry as Record<string, unknown>)['hooks']
+    return Array.isArray(inner) && inner.length > 0 && inner.every((h) => {
+      const command = typeof h === 'object' && h !== null ? (h as Record<string, unknown>)['command'] : undefined
+      return typeof command === 'string' &&
+        (command.includes('.intutic/hooks/claude-code-check.js') || command.includes('.intutic/hooks/pre-tool-check.js'))
+    })
+  }
+  const kept = Array.isArray(existing) ? existing.filter((e) => !isOurs(e)) : []
+  return [...kept, ...intutic]
 }
 
 // ─── Event Drain Helper ──────────────────────────────────────────────────────

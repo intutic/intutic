@@ -21,6 +21,9 @@ import { setContinueApiBase } from '../../src/harness/continueConfigMerger.js'
 import { mergeAiderYaml, mergeAiderConfig, AIDER_SOPS_FILE } from '../../src/harness/aiderConfigMerger.js'
 import { writeAntigravityHooks } from '../../src/harness/antigravityHooks.js'
 import { writeCodexHooks } from '../../src/harness/codexHooks.js'
+import { mergePiModels } from '../../src/harness/piHooks.js'
+import { mergeHermesYaml } from '../../src/harness/hermesHooks.js'
+import { mergeOpenHandsToml } from '../../src/harness/openhandsHooks.js'
 
 const URL_V1 = 'http://127.0.0.1:4000/v1'
 
@@ -228,5 +231,60 @@ describe('Antigravity (Gemini CLI) ~/.gemini/settings.json', () => {
     await fs.writeFile(settingsPath, jsonc)
     await writeAntigravityHooks(root, 'http://127.0.0.1:4000', 'ws_test')
     expect(await fs.readFile(settingsPath, 'utf-8')).toBe(jsonc)
+  })
+})
+
+describe('Pi ~/.pi/models.json', () => {
+  it('gives each provider the base URL its SDK expects, leaves Google and other keys alone', () => {
+    const merged = mergePiModels({
+      providers: {
+        anthropic: { apiKey: 'env:ANTHROPIC_API_KEY' },
+        google: { baseUrl: 'https://generativelanguage.googleapis.com' },
+      },
+      defaultModel: 'claude',
+    }, 'http://127.0.0.1:4000')
+    expect(merged.providers?.anthropic).toEqual({ apiKey: 'env:ANTHROPIC_API_KEY', baseUrl: 'http://127.0.0.1:4000' })
+    expect(merged.providers?.openai).toEqual({ baseUrl: 'http://127.0.0.1:4000/v1' })
+    expect(merged.providers?.google).toEqual({ baseUrl: 'https://generativelanguage.googleapis.com' })
+    expect(merged.defaultModel).toBe('claude')
+  })
+})
+
+describe('Hermes ~/.hermes/config.yaml', () => {
+  it('sets hooks.preToolUse.command without touching other command keys or comments', () => {
+    const config = '# mine\nmcp_servers:\n  fs:\n    command: mcp-fs\nhooks:\n  preToolUse:\n    command: /old/hermes-check.sh\n'
+    const merged = mergeHermesYaml(config, '/home/u/.intutic/hooks/hermes-check.sh')!
+    expect(merged).toContain('# mine')
+    expect(parseYaml(merged)).toEqual({
+      mcp_servers: { fs: { command: 'mcp-fs' } },
+      hooks: { preToolUse: { command: '/home/u/.intutic/hooks/hermes-check.sh' } },
+    })
+    expect(mergeHermesYaml(merged, '/home/u/.intutic/hooks/hermes-check.sh')).toBe(merged)
+  })
+
+  it('leaves a file that does not parse untouched', () => {
+    expect(mergeHermesYaml('hooks: [\n', '/x.sh')).toBeNull()
+  })
+})
+
+describe('OpenHands config.toml', () => {
+  const user = '# my openhands\n[core]\nworkspace_base = "./ws"\n\n[llm]\nmodel = "anthropic/claude-sonnet"\napi_key = "env"\n'
+
+  it('sets [llm] base_url for the model\'s SDK and an [intutic] table, keeping everything else', () => {
+    const merged = mergeOpenHandsToml(user, 'http://127.0.0.1:4000', '## Rule\nNo """secrets"""')!
+    expect(merged.startsWith('# my openhands\n[core]')).toBe(true)
+    const parsed = parseToml(merged) as Record<string, any>
+    expect(parsed.core.workspace_base).toBe('./ws')
+    expect(parsed.llm).toEqual({ base_url: 'http://127.0.0.1:4000', model: 'anthropic/claude-sonnet', api_key: 'env' })
+    expect(parsed.intutic.instructions).toBe('## Rule\nNo """secrets"""\n')
+    expect(mergeOpenHandsToml(merged, 'http://127.0.0.1:4000', '## Rule\nNo """secrets"""')).toBe(merged)
+  })
+
+  it('uses the OpenAI-style base for other models, regenerates the old overwrite, and leaves invalid TOML alone', () => {
+    const openai = parseToml(mergeOpenHandsToml('[llm]\nmodel = "gpt-4o"\n', 'http://h:4000', 'x')!) as Record<string, any>
+    expect(openai.llm.base_url).toBe('http://h:4000/v1')
+    const legacy = '# Intutic Governance Rules (auto-generated)\n[intutic]\nproxy_url = "x"\n'
+    expect(Object.keys(parseToml(mergeOpenHandsToml(legacy, 'http://h:4000', 'x')!))).toEqual(['llm', 'intutic'])
+    expect(mergeOpenHandsToml('[llm\n', 'http://h:4000', 'x')).toBeNull()
   })
 })

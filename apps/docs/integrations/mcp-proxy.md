@@ -44,9 +44,9 @@ The `@intutic/mcp-governance-proxy` package supports three execution modes:
 
 | Mode | Command Syntax | Purpose & Exposed Capabilities |
 | :--- | :--- | :--- |
-| **Standalone Governance Server** | `npx @intutic/mcp-governance-proxy` | Exposes governance status tools directly to the agent (`intutic_governance_status`, `intutic_list_sops`, `intutic_list_incidents`). |
-| **Governed Proxy Wrapper (stdio)** | `npx @intutic/mcp-governance-proxy --workspace-id <wk_id> -- <real-mcp-command>` | Intercepts, evaluates, and logs tool calls for a downstream MCP server spawned as a stdio child process, before forwarding. |
-| **Governed Proxy Wrapper (remote bridge)** | `npx @intutic/mcp-governance-proxy --workspace-id <wk_id> --remote-url <url> [--remote-transport sse\|http]` | Same governance pipeline as the stdio wrapper, applied to a remote MCP server reached over HTTP or Server-Sent Events instead of a spawned child process — see [Remote (HTTP/SSE) MCP servers](/guide/mcp-governance#remote-http-sse-mcp-servers-the-stdio-http-bridge) for the full mechanism. |
+| **Standalone Governance Server** | `npx -y -p @intutic/mcp-governance-proxy intutic-mcp-proxy` | Exposes governance status tools directly to the agent (`intutic_governance_status`, `intutic_list_sops`, `intutic_list_incidents`). |
+| **Governed Proxy Wrapper (stdio)** | `npx -y -p @intutic/mcp-governance-proxy intutic-mcp-proxy --workspace-id <wk_id> -- <real-mcp-command>` | Intercepts, evaluates, and logs tool calls for a downstream MCP server spawned as a stdio child process, before forwarding. |
+| **Governed Proxy Wrapper (remote bridge)** | `npx -y -p @intutic/mcp-governance-proxy intutic-mcp-proxy --workspace-id <wk_id> --remote-url <url> [--remote-transport sse\|http]` | Same governance pipeline as the stdio wrapper, applied to a remote MCP server reached over HTTP or Server-Sent Events instead of a spawned child process — see [Remote (HTTP/SSE) MCP servers](/guide/mcp-governance#remote-http-sse-mcp-servers-the-stdio-http-bridge) for the full mechanism. |
 
 ---
 
@@ -61,14 +61,18 @@ You can configure both modes together in `claude_desktop_config.json` or `~/.cla
       "command": "npx",
       "args": [
         "-y",
-        "@intutic/mcp-governance-proxy"
+        "-p",
+        "@intutic/mcp-governance-proxy",
+        "intutic-mcp-proxy"
       ]
     },
     "intutic_governed_filesystem": {
       "command": "npx",
       "args": [
         "-y",
+        "-p",
         "@intutic/mcp-governance-proxy",
+        "intutic-mcp-proxy",
         "--workspace-id", "wk_production",
         "--",
         "npx", "-y", "@modelcontextprotocol/server-filesystem", "/projects"
@@ -216,7 +220,7 @@ The Intutic MCP proxy guarantees strict `stdio` isolation — all governance log
 ### 1. Error: "Server disconnected" in Claude Desktop or Cursor
 
 * **Symptom**: Claude Desktop or Cursor displays a red `Server disconnected` status badge when opening the application.
-* **Root Cause**: The MCP proxy was configured without a downstream target command (missing `--` followed by the real MCP server), or the file path to `index.js` was invalid. The proxy printed a usage error to `stderr` and exited with status code `1`.
+* **Root Cause**: The entry's command could not start the proxy — usually a path to `dist/index.js` that does not exist on this machine, or `npx @intutic/mcp-governance-proxy` without `-p` (the package has two binaries, `intutic-mcp-proxy` and `intutic-mcp-daemon`, so `npx` cannot pick one and exits). An entry with no command after `--` and no `--remote-url` is not an error: it runs the standalone governance server.
 * **Remedy**:
   1. **Automatic Fix (Recommended)**: Run `intutic connect` in your terminal. The Intutic Sync Daemon automatically detects your installed MCP servers and prepends the proxy wrapper cleanly.
   2. **Manual Fix**: Ensure your `claude_desktop_config.json` passes a valid target MCP server command after `--`:

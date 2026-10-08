@@ -46,10 +46,14 @@ Agent Framework runs every automatic tool call through a function-middleware cha
 
 ```python
 from agent_framework import Agent
-from intutic_clawde.gate import Gate, GateConfig, install as install_gate
+from intutic_clawde.gate import Gate, GateClient, GateConfig, install as install_gate
 from intutic_clawde.gate.adapters.agent_framework import IntuticFunctionMiddleware
 
-install_gate(Gate(GateConfig()))
+# The client reads INTUTIC_API_KEY / INTUTIC_WORKSPACE_ID, or the credentials
+# `intutic login` saved. Without it the gate still enforces the local policy
+# snapshot, but skips your SOP rules, the control-plane check and audit events.
+client = GateClient.from_env(session_id=run_id, harness="agent-framework")
+install_gate(Gate(GateConfig(workspace_id=client.workspace_id), client=client))
 agent = Agent(client=..., tools=[...], middleware=[IntuticFunctionMiddleware()])
 ```
 
@@ -83,7 +87,7 @@ from intutic_clawde.gate import intutic_headers
 from agent_framework.openai import OpenAIChatClient
 
 client = OpenAIChatClient(
-    base_url="http://localhost:4000",
+    base_url="http://localhost:4000/v1",  # the OpenAI client appends /chat/completions
     default_headers=intutic_headers(session_id=run_id, harness="agent-framework"),
 )
 ```

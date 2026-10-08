@@ -118,9 +118,9 @@ Proxy URLs are set as environment variables:
 
 ```bash
 # Source this file: source .env.intutic
-ANTHROPIC_BASE_URL=http://localhost:4000/v1
-OPENAI_BASE_URL=http://localhost:4000/v1
-INTUTIC_PROXY_URL=http://localhost:4000/v1
+export ANTHROPIC_BASE_URL="http://localhost:4000"
+export OPENAI_BASE_URL="http://localhost:4000/v1"
+export INTUTIC_PROXY_URL="http://localhost:4000"
 INTUTIC_SOP_COUNT=5
 ```
 

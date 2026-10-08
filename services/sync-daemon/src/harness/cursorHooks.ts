@@ -1,13 +1,23 @@
 /**
- * cursorHooks.ts — Cursor beforeShellExecution/beforeMCPExecution hook injection.
+ * cursorHooks.ts — Cursor hook injection.
  *
- * Writes hooks.json at THREE levels per enterprise-readiness requirement:
- *   1. Project-level:  <workspaceRoot>/.cursor/hooks.json
- *   2. User-level:     ~/.cursor/hooks.json
- *   3. System-level:   /etc/cursor/hooks.json (Linux) — written only by system administrators
+ * Registers the gate in Cursor's hooks.json (schema per cursor.com/docs/agent/
+ * hooks: `{version: 1, hooks: {<event>: [{command, matcher?, failClosed?}]}}`)
+ * for three events:
+ *   - `beforeShellExecution` — every shell command;
+ *   - `beforeMCPExecution`   — every MCP tool call;
+ *   - `preToolUse` matching `Write|Delete` — file writes and deletions, which
+ *     have no dedicated before-hook (`afterFileEdit` runs too late to refuse).
  *
- * All three levels use failClosed: true so that if the governance script
- * fails or is missing the tool call is blocked, not allowed.
+ * The gate refuses with exit code 2 and allows by printing
+ * `{"permission":"allow"}`: with `failClosed: true` Cursor blocks on a hook
+ * that crashes, times out or prints nothing, so an allow must be explicit.
+ *
+ * Levels: project (`<workspaceRoot>/.cursor/hooks.json`) and user
+ * (`~/.cursor/hooks.json`) on every sync; system level
+ * (`/Library/Application Support/Cursor` on macOS, `/etc/cursor` elsewhere)
+ * only through `intutic enterprise install`, which needs root. The project and
+ * user files are merged — hooks the user registered are kept.
  *
  * LLD #14 — Phase 3 cross-harness defence
  * HLD §3.14 — Three-Tier Defense Cascade
@@ -21,15 +31,16 @@ import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { newIso } from '@intutic/id'
 import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
+import { readJsonObjectForMerge } from './jsonMergeTarget.js'
 
 const log = createLogger('sync-cursor-hooks')
 
-/** Hook events Cursor fires before execution. */
-const HOOK_EVENTS = [
-  'beforeShellExecution',
-  'beforeMCPExecution',
-  'beforeFileEdit',
-] as const
+/** The Cursor events the gate is registered for, with each one's matcher. */
+const HOOK_EVENTS: ReadonlyArray<{ event: string; matcher?: string }> = [
+  { event: 'beforeShellExecution' },
+  { event: 'beforeMCPExecution' },
+  { event: 'preToolUse', matcher: 'Write|Delete' },
+]
 
 /**
  * Where system-level hooks.json lives for a given platform. Exported (not
@@ -54,21 +65,50 @@ export function systemHooksDirFor(platform: NodeJS.Platform): string {
  *
  * @param hookScriptPath - Absolute path to the pre-tool-check script.
  */
-export function buildHooksConfig(hookScriptPath: string) {
+export function buildHooksConfig(hookScriptPath: string): { version: number; hooks: Record<string, CursorHookEntry[]> } {
   return {
-    _comment: 'Intutic governance hooks — auto-generated. DO NOT EDIT.',
-    _lastSync: newIso(),
-    failClosed: true,
+    version: 1,
     hooks: Object.fromEntries(
-      HOOK_EVENTS.map((event) => [
+      HOOK_EVENTS.map(({ event, matcher }) => [
         event,
-        {
-          command: `node "${hookScriptPath}"`,
-          failClosed: true,
-        },
+        [{ command: `node "${hookScriptPath}"`, ...(matcher ? { matcher } : {}), failClosed: true }],
       ]),
     ),
   }
+}
+
+/** One entry in a Cursor hooks.json event list. */
+export interface CursorHookEntry {
+  command: string
+  matcher?: string
+  failClosed?: boolean
+}
+
+/**
+ * Merge the Intutic entries into an existing hooks.json object: the user's
+ * entries for every event are kept, entries running this gate are replaced,
+ * and the shape earlier versions wrote (an object per event, top-level
+ * `failClosed`/`_comment`/`_lastSync`, the nonexistent `beforeFileEdit`
+ * event) is dropped.
+ */
+export function mergeHooksConfig(existing: Record<string, unknown>, hookScriptPath: string): Record<string, unknown> {
+  const ours = buildHooksConfig(hookScriptPath)
+  const command = `node "${hookScriptPath}"`
+  const current = typeof existing.hooks === 'object' && existing.hooks !== null && !Array.isArray(existing.hooks)
+    ? { ...(existing.hooks as Record<string, unknown>) }
+    : {}
+  delete current.beforeFileEdit
+  for (const [event, entries] of Object.entries(ours.hooks)) {
+    const kept = Array.isArray(current[event])
+      ? (current[event] as unknown[]).filter((e) => !(typeof e === 'object' && e !== null && (e as { command?: unknown }).command === command))
+      : []
+    current[event] = [...kept, ...entries]
+  }
+  const rest: Record<string, unknown> = { ...existing }
+  delete rest.failClosed
+  delete rest._comment
+  delete rest._lastSync
+  return { ...rest, version: typeof existing.version === 'number' ? existing.version : 1, hooks: current }
 }
 
 /**
@@ -177,7 +217,7 @@ process.stdin.on('end', () => {
     // hook_event_name: "beforeMCPExecution", ...}\`) — composed in here, once,
     // before anything reads \`toolName\`.
     if (event === 'beforemcpexecution' && ctx.tool_name) {
-      const mcpServer = ctx.command || ctx.url || ctx.server_name || ctx.serverName;
+      const mcpServer = ctx.mcp_server_name || ctx.command || ctx.url || ctx.server_name || ctx.serverName;
       if (mcpServer) toolName = 'mcp__' + mcpServer + '__' + ctx.tool_name;
     }
 
@@ -187,8 +227,10 @@ process.stdin.on('end', () => {
     // command and the target independently.
     intuticGate(toolName, targetPath, command, logEvent, _intuticWsId, input);
 
-    // Allow
+    // Allow — explicitly: with failClosed set, Cursor treats a hook that
+    // prints nothing as a failure and blocks the call.
     logEvent('tool_allowed', toolName, '');
+    process.stdout.write(JSON.stringify({ permission: 'allow' }));
     process.exit(0);
   } catch (err) {
     // Fail CLOSED
@@ -232,18 +274,16 @@ export async function writeCursorHooks(
   await fs.rename(tmpScript, hookScriptPath)
   await fs.chmod(hookScriptPath, 0o755)
 
-  const config = buildHooksConfig(hookScriptPath)
-
   // 1. Project-level: .cursor/hooks.json
   const projectCursorDir = path.join(workspaceRoot, '.cursor')
   await fs.mkdir(projectCursorDir, { recursive: true })
-  await atomicWriteJson(path.join(projectCursorDir, 'hooks.json'), config)
+  await mergeHooksJsonFile(path.join(projectCursorDir, 'hooks.json'), hookScriptPath)
   log.info({ action: 'cursor_hooks_written', level: 'project', path: projectCursorDir }, 'Cursor project-level hooks written')
 
   // 2. User-level: ~/.cursor/hooks.json
   const userCursorDir = path.join(os.homedir(), '.cursor')
   await fs.mkdir(userCursorDir, { recursive: true })
-  await atomicWriteJson(path.join(userCursorDir, 'hooks.json'), config)
+  await mergeHooksJsonFile(path.join(userCursorDir, 'hooks.json'), hookScriptPath)
   log.info({ action: 'cursor_hooks_written', level: 'user', path: userCursorDir }, 'Cursor user-level hooks written')
 
   // 3. System-level (system administrator installation only). macOS has no
@@ -255,12 +295,20 @@ export async function writeCursorHooks(
     const systemCursorDir = systemHooksDirFor(process.platform)
     try {
       await fs.mkdir(systemCursorDir, { recursive: true })
-      await atomicWriteJson(path.join(systemCursorDir, 'hooks.json'), config)
+      await mergeHooksJsonFile(path.join(systemCursorDir, 'hooks.json'), hookScriptPath)
       log.info({ action: 'cursor_hooks_written', level: 'system', path: systemCursorDir }, 'Cursor system-level hooks written')
     } catch (err) {
       log.error({ action: 'cursor_system_hooks_failed', err }, 'System-level Cursor hooks require root — skipping')
     }
   }
+}
+
+/** Merge the gate into one hooks.json; a file that does not parse is left
+ *  untouched (see jsonMergeTarget.ts). */
+async function mergeHooksJsonFile(filePath: string, hookScriptPath: string): Promise<void> {
+  const existing = await readJsonObjectForMerge(filePath)
+  if (existing === null) return
+  await atomicWriteJson(filePath, mergeHooksConfig(existing, hookScriptPath))
 }
 
 async function atomicWriteJson(filePath: string, data: unknown): Promise<void> {

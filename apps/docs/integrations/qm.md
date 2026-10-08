@@ -7,7 +7,7 @@ description: Point QM's securityScreen contract at Intutic to screen untrusted c
 
 Integrate Intutic with [QM](https://github.com/yc-software/qm) (Quartermaster) — the YC-backed, OSS (since 2026-07-29) multiplayer agent harness that runs an org's `pi`/`claude`/`codex`/`opencode` sub-harnesses centrally.
 
-::: warning Not a CLI harness — no `intutic connect --harness` target
+::: warning Not a CLI harness — nothing for `intutic connect` to write
 QM is a server-side org platform, not something installed on a developer's laptop. There is **no `HarnessType` enum entry** for it and `intutic init`/`intutic connect` never detect or configure it — this integration is a deployment step an org admin performs once against QM's own config, not something the sync-daemon writes. Every other integration in this directory is onboarded through the CLI; QM is the first that isn't, deliberately.
 :::
 

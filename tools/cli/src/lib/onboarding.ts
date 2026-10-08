@@ -189,7 +189,8 @@ export function printOnboardingGuide(harnesses: string[], userAuthToken?: string
         break
 
       case 'windsurf':
-        writeCliOutput(`  Set the custom API base URL and key in the Windsurf settings tab.`)
+        writeCliOutput(`  Windsurf has no base-URL setting. intutic connect routes Cascade through the`)
+        writeCliOutput(`  proxy's TLS interception (http.proxy in ~/.codeium/windsurf/settings.json).`)
         break
 
       case 'dsh':

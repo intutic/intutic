@@ -15,7 +15,7 @@ This is the same "wraps other already-gated CLI harnesses" shape as [Xirp](/inte
 ## Why this integration is detection-only
 
 1. **Detection.** `intutic status`/`intutic init` recognise an Agentic-Orchestrator-managed workspace, so it shows up in reporting.
-2. **Worktree propagation.** No new code was needed here — [O1's worktree propagation fix](/integrations/xirp#worktree-coverage-details) (`services/sync-daemon/src/lib/gitWorktrees.ts`) is general, not Xirp-specific: it discovers every worktree of a watched repo each sync cycle via `git worktree list --porcelain`, regardless of where under the filesystem that worktree lives. Agentic Orchestrator's `~/.agentic-orchestrator/worktrees/<feature>/<repo>` worktrees are picked up by the exact same mechanism.
+2. **Worktrees.** Each feature runs in its own `git worktree` under `~/.agentic-orchestrator/worktrees/`. `intutic connect` writes project-tier files only into the checkout it runs in, so a feature worktree is governed by each backend's **user-level** registration: the PreToolUse hooks in `~/.claude/settings.json` (Claude Code) and `~/.codex/hooks.json` (Codex). OpenCode's plugin is project-level (`.opencode/plugins/`), so OpenCode sessions in a feature worktree are not gated unless you copy the plugin there. See [Worktree Coverage](/reference/harness-security-matrix#worktree-coverage).
 
 There is no config format of Agentic Orchestrator's own for Intutic to write. `config.yaml`'s `defaults.models.*` keys select **which model** each workflow phase uses — they are not an LLM base-URL / API-routing surface. Routing is each wrapped backend's own concern, exactly as it already is when that backend runs standalone.
 
@@ -23,8 +23,8 @@ There is no config format of Agentic Orchestrator's own for Intutic to write. `c
 
 Agentic Orchestrator is registered as a `NO_GATE` harness with a `'delegated'` gate kind (see `services/sync-daemon/src/harness/gateKind.ts`) — the same classification Xirp introduced, reused rather than reinvented. A tool call made inside an Agentic-Orchestrator-managed session is governed by whichever wrapped backend's own gate is already running (`claude-code-check.js`, `codex-check.js`) — the same gate this product already lists under that backend's own row, not a second one credited to Agentic Orchestrator.
 
-::: tip OpenCode is gated too (since 2026-09-23)
-All three wrapped backends are Intutic harnesses of their own: Claude Code and Codex through their hook files, and [OpenCode](/integrations/opencode) through the plugin `intutic connect --harness opencode` writes into `.opencode/plugins/`. Worktree coverage regenerates each backend's gate in every worktree, so a feature run against any `--providers` value is governed. (TD-397, closed.)
+::: tip OpenCode is gated too
+All three wrapped backends are Intutic harnesses of their own: Claude Code and Codex through their hook files, and [OpenCode](/integrations/opencode) through the plugin `intutic connect` writes into `.opencode/plugins/`. In feature worktrees, Claude Code and Codex are covered by their user-level hooks; OpenCode's plugin is project-level (see above).
 :::
 
 ## Setup
@@ -40,13 +40,12 @@ No environment-variable override for either the config or state-dir path is docu
 
 ### 2. Initialize Intutic
 
-Run `intutic connect` (or `intutic init` + `intutic start`) as normal, against the **main checkout** of the repository Agentic Orchestrator will manage — worktree propagation extends coverage to every feature worktree it spins up from there. No extra flag or `--harness agentic-orchestrator` step is needed: there is no config for Intutic to write for Agentic Orchestrator itself; connecting Claude Code and/or Codex (the two backends this product can actually gate) is what matters.
+Run `intutic connect` as normal, against the **main checkout** of the repository Agentic Orchestrator will manage, with its backends recorded. No extra step is needed for Agentic Orchestrator: there is no config for Intutic to write for Agentic Orchestrator itself; connecting Claude Code and/or Codex (the two backends this product can actually gate) is what matters.
 
 ### 3. What gets written
 
 - **For Agentic Orchestrator itself:** nothing. `tools/cli/src/harness/agenticOrchestrator.ts`'s `writeConfig` is a no-op by design, matching Xirp's exact pattern.
-- **For each gated wrapped backend, in every discovered worktree:** exactly what that backend's own adapter already writes in the main checkout — no new format, no Agentic-Orchestrator-specific content.
-- **For OpenCode:** exactly what the [OpenCode adapter](/integrations/opencode) writes in the main checkout — `AGENTS.md` and the plugin under `.opencode/plugins/` — regenerated per worktree like the other two.
+- **For each wrapped backend:** what that backend's own adapter writes. User-level hook registrations (Claude Code, Codex) govern every feature worktree; project-level files, including OpenCode's plugin, exist only in the main checkout.
 
 ## Config details
 
@@ -57,7 +56,7 @@ Run `intutic connect` (or `intutic init` + `intutic start`) as normal, against t
 | Gate kind | `delegated` — see `gateKind.ts` |
 | Detection | `~/.agentic-orchestrator`, `agentico` on `PATH`, or (macOS only) `/Applications/Agentico.app` |
 | Wrapped backends | Claude Code, Codex, OpenCode — each gated by its own adapter |
-| Worktree coverage | `services/sync-daemon/src/lib/gitWorktrees.ts` — general, not harness-specific; already covers `~/.agentic-orchestrator/worktrees/*` with no changes |
+| Worktree coverage | through each backend's user-level hooks — see [Worktree Coverage](/reference/harness-security-matrix#worktree-coverage) |
 
 ## Source
 

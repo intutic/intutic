@@ -17,9 +17,10 @@ intutic init
 ```
 
 ```
-✓ Detected harnesses:
-  • ai-sdk-workflow → .env.intutic
+  ✔ ai-sdk-workflow → .env.intutic
 ```
+
+`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
 
 Detection requires `@ai-sdk/workflow` in `package.json`. The unscoped `workflow` package alone is deliberately **not** a trigger: the bare name is too generic to treat as evidence, and the durable runtime without `@ai-sdk/workflow` has no `WorkflowAgent` for this gate to apply to.
 

@@ -29,15 +29,18 @@ intutic init
 ```
 
 ```
-✓ Detected harnesses:
-  • dsh → (no rules file — see "What gets written" below)
+  ✔ dsh →
 ```
 
-### 3. Start the proxy
+`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
+
+### 3. Connect
 
 ```bash
-intutic connect --harness dsh
+intutic connect
 ```
+
+`intutic connect` starts the proxy and writes the dsh registration described below (dsh must be in `~/.intutic/config.json`'s `harnesses`, which `intutic init` records when it detects dsh).
 
 ### 4. Run dsh with a profile at least once
 
@@ -70,7 +73,7 @@ intutic-governance (@intutic/gate/dsh): failed to import
 dsh offers no way for a profile row to make startup fail instead, so this step is permanent and manual. `intutic status` shows which profiles are registered but not yet activated.
 :::
 
-The CLI's own onboarding text (shown after `intutic init`/`intutic connect --harness dsh`) prints this same command, per profile, so you don't have to come back to this page to find it.
+The CLI's own onboarding text (shown when `intutic connect` starts with dsh recorded) prints this same command, per profile, so you don't have to come back to this page to find it.
 
 Every sync also (re)writes `$DSH_HOME/INSTALL.md`, listing the exact `dsh plugin --profile <name> add @intutic/gate` command for every profile currently registered — a standing, always-current reference alongside the onboarding text (the same pattern the [n8n integration](/integrations/n8n)'s own auto-generated INSTALL.md follows).
 
