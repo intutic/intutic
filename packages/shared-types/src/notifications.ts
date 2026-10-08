@@ -153,6 +153,14 @@ export type NotificationEventType =
    * Same `incidentId` as the alert it closes; PagerDuty resolves that incident.
    */
   | 'governance.gate.recovered'
+  // ── Trace integrity ──
+  /**
+   * The hourly audit-log integrity check found a failure of one kind
+   * (`kind`: `chain_break`, `mirror_copy_mismatch`, `signature_invalid`,
+   * `root_mismatch` or `guard_tampered`). Fired once per kind while it keeps
+   * failing; a recurrence after it clears fires again.
+   */
+  | 'governance.integrity.failed'
   // ── Provider outage tracking (Phase 8b) ──
   /**
    * A NEW provider_incidents window opened for a provider (Anthropic,
