@@ -1,82 +1,54 @@
+---
+title: Intutic vs Portkey
+description: Portkey is a model gateway with routing, caching and inline guardrails, now part of Palo Alto Networks; Intutic gates the agent's tool calls across 43 harnesses.
+---
+
 # Intutic vs Portkey
 
-Portkey is an AI gateway built for LLM observability, caching, and routing. It logs requests, tracks costs, and provides dashboards for monitoring model performance. **Intutic is a synchronous enforcement layer that blocks bad actions before they happen.**
+*Last reviewed: 2026-10-08*
 
-> Palo Alto Networks has announced an acquisition of Portkey, expected to fold it into the Prisma AIRS platform. As of this writing the deal has not been confirmed closed. Worth tracking if Portkey's roadmap or independence matters to your evaluation.
-
-## The Core Difference
-
-Portkey **observes** LLM traffic after the fact. Intutic **intercepts** tool calls in real time and decides whether to allow, modify, or block them — before the request leaves the machine.
-
-If your AI agent tries to `rm -rf /`, Portkey will log it. Intutic will kill it.
+Intutic decides each agent tool call before it runs, across 43 harnesses: native hook gates and in-process SDK gates allow or block the call, and hook gates can hold it for human approval. Around the gates, a policy proxy redacts sensitive data in model traffic, an MCP governance proxy governs MCP tools, an egress firewall and sandboxed execution stop the agent routing around governance, and a signed audit trail records every decision. Portkey is an AI gateway between applications and model providers, with routing, fallbacks, caching, budgets and guardrails that can reject a request inline. Palo Alto Networks completed its acquisition of Portkey on 2026-05-29 and makes it the AI gateway of Prisma AIRS. Portkey governs the model call; Intutic governs the action the agent takes with the answer.
 
 ## Comparison
 
-| Capability | Intutic | Portkey |
-|-----------|---------|---------|
-| **Enforcement model** | Synchronous — blocks before execution | Async — logs after execution |
-| **Latency overhead** | Measured per payload size in `packages/proxy/benches`; not a single published figure | N/A (post-hoc) |
-| **Circuit breaker actions** | BYPASS / ENHANCE / HIJACK / KILL | Not available |
-| **Custom policy rules** | WASM sandbox — run your own rules | JSON config guardrails |
-| **Model routing** | Thompson Sampling bandit (cost + quality) | Round-robin, fallback chains |
-| **Harness coverage** | 39 AI coding agents (Claude Code, Cursor, Antigravity, etc.) | SDK-based integration |
-| **Config sync** | Bidirectional daemon — SOPs sync to agents, configs sync to cloud | One-way SDK push |
-| **Data residency** | Local-first — proxy runs on your machine | Cloud-hosted gateway |
-| **DLP / threat detection** | Secrets redaction, SQL injection, prompt injection | Basic content filtering |
-| **FinOps & Budgets** | Local daily spend ceilings, pre-execution cost estimation blocks over-budget requests | Cost tracking and budget caps |
-| **Audit trail** | Full tool-call-level audit with enforcement decisions | Request-level logging |
-| **Semantic Cache & Recall** | Valkey-backed Custom Caching | Basic semantic caching |
-| **Agent Sandboxing** | wasmtime WASM sandbox — 16 MB memory, 1,000,000 fuel, 5ms timeout | Not available |
+| | Intutic | Portkey |
+|---|---|---|
+| **Primary job** | Runtime enforcement and audit for AI agents | Gateway for model traffic |
+| **Where it enforces** | Native pre-execution hooks in 21 harnesses, plus request and response proxy, MCP governance proxy, egress firewall and sandbox | Model requests and responses; a failing guardrail set to deny rejects the request (HTTP 446) |
+| **Coding agents** | **43** supported harnesses with native gates or in-process SDK gates | Any client that can point its base URL at the gateway |
+| **Decisions** | Allow, warn, require approval (held until approved in Slack or the CLI), block, redact, re-ask, shadow | Allow or deny on guardrail results |
+| **MCP** | MCP governance proxy with DLP, policy rules, anomaly detectors, trust-on-first-use pinning and tool-description poisoning detection | MCP Gateway |
+| **Routing** | Thompson-sampling routing that learns cost and quality per workspace | Fallbacks, load balancing and conditional routing |
+| **Caching** | Exact and semantic cache | Simple cache on every plan; semantic cache on select Enterprise plans |
+| **Budgets** | Daily spend caps enforced before a request leaves | Budget and rate limits on paid plans |
+| **Audit trail** | Signed Merkle roots with inclusion proofs, verifiable in the browser or CLI | Request and response logs |
+| **Deployment** | Cloud, or fully self-hosted including air-gapped | Hosted, or self-host the open-source gateway (Docker, Kubernetes, major clouds) |
+| **Source** | Open core (MIT) | Gateway is MIT |
 
-## Integration Comparison
+## Where Portkey is stronger
 
-### Portkey (SDK Integration)
-Portkey requires importing their proprietary SDK and wrapping your LLM client calls. This couples your application logic to Portkey's libraries.
+- **Provider breadth and routing controls.** A mature gateway with fallbacks, load balancing and conditional routing across many providers.
+- **Gateway-level guardrails for any application.** Inline checks on every model call, whether or not the caller is an agent.
+- **Platform backing.** As part of Prisma AIRS, it sits inside Palo Alto Networks' AI security portfolio.
 
-```javascript
-import { Portkey } from 'portkey-ai';
+## When to choose Intutic
 
-// Initialize the Portkey client
-const portkey = new Portkey({
-  apiKey: "YOUR_PORTKEY_API_KEY",
-  virtualKey: "YOUR_PROVIDER_VIRTUAL_KEY"
-});
+- Your agents run commands, edit files and call MCP tools, and you need each call decided before it runs.
+- You want risky calls held for approval rather than only allowed or rejected.
+- You need egress control and sandboxing so an agent cannot route around governance.
+- You want an audit trail you can verify independently.
 
-// Execute wrapped chat completion
-const response = await portkey.chat.completions.create({
-  messages: [{ role: 'user', content: 'Scan repository files' }],
-  model: 'gpt-4o'
-});
-```
+## When to choose Portkey
 
-### Intutic (Local Proxy Integration)
-Intutic requires **zero code changes** or vendor SDK imports. Your agent logic remains standard. You simply point your standard OpenAI/Anthropic client to the locally running Intutic proxy gateway (`localhost:4000`).
+- You need one gateway for model traffic across many applications and providers.
+- Routing, fallbacks, caching and per-key budgets are the main requirements.
+- You are standardising on Palo Alto Networks' Prisma AIRS.
 
-```javascript
-import OpenAI from 'openai';
+## Use them together
 
-// Connect to standard client pointing to local Intutic proxy
-const openai = new OpenAI({
-  apiKey: "YOUR_API_KEY",
-  baseURL: "http://127.0.0.1:4000/v1" // Point to Intutic proxy
-});
+Portkey can keep routing, caching and guarding model calls for your applications while Intutic's hook gates decide the agents' tool calls inside each harness. The gates do not depend on which gateway carries the model traffic.
 
-// Standard completion call, automatically governed and audited
-const response = await openai.chat.completions.create({
-  messages: [{ role: 'user', content: 'Scan repository files' }],
-  model: 'gpt-4o'
-});
-```
-
-## When to Choose Intutic
-
-- You need to **prevent** bad actions, not just log them
-- Your agents write files, run commands, and mutate databases
-- You want policy enforcement that runs **locally** without sending data to a third-party cloud
-- You need coverage across **39 AI coding harnesses** out of the box
-- You want to write **custom WASM rules** for domain-specific enforcement
-
-## Measured false-positive rate
+## Intutic's measured false-positive rate
 
 Enforcement that fires on benign work gets switched off, so the number that matters
 is how often it does.
@@ -93,7 +65,7 @@ firing and another starts. It runs unpiped, so the gate cannot go green on a
 swallowed failure, and it runs on every push through the versioned `pre-push` hook
 rather than only in CI. Source: `packages/proxy/tests/anomaly_corpus_test.rs`.
 
-Three limits, because a rate without them is marketing:
+Three limits apply to this figure:
 
 - **It is a lower bound.** BFCL is API-orchestration traffic filtered to successful
   completion — short (median 6 calls) and clean. Every sequence detector's exposure
@@ -107,16 +79,6 @@ Three limits, because a rate without them is marketing:
   disagree.
 - **It says nothing about recall.** Nothing in the corpus records a missed catch, so
   recall is unmeasurable from this data in principle, not merely unmeasured.
-
-## When to Choose Portkey
-
-- You only need request-level observability and caching for LLM API calls
-- Your use case is pure LLM API routing without tool-call interception
-- You don't need synchronous enforcement
-
-## Summary
-
-Portkey is an LLM gateway. Intutic is an AI agent firewall. They solve different problems at different layers. If your AI agents interact with infrastructure — files, databases, APIs, git — Intutic is the enforcement layer you need.
 
 ---
 

@@ -1,6 +1,6 @@
 ---
 title: MCP Server Governance
-description: The MCP server registry, per-workspace allowlist, and server-level TOFU pinning that guard against a rogue or rug-pulled MCP server — and what these controls honestly do not cover yet.
+description: The MCP server registry, per-workspace allowlist, and server-level TOFU pinning that guard against a rogue or rug-pulled MCP server — and what these controls do not cover yet.
 ---
 
 # MCP Server Governance <Badge type="tip" text="Open-Core" />
@@ -152,7 +152,7 @@ filter the protocol rather than let governance see every message). The sync
 daemon wraps a discovered `url`-keyed entry into this bridge mode the same
 way it wraps a stdio entry — `wrapWithProxy` (`harness/mcpAutoWrite.ts`)
 rewrites it to invoke the proxy with `--remote-url`/`--remote-transport`
-instead of `--`, and `discoverMcpServers` now reports these entries honestly
+instead of `--`, and `discoverMcpServers` now reports these entries accurately
 too: `wrapped: true`, with their true `transport` (`http`/`sse`) preserved
 rather than misreported as stdio. Auth headers (a bearer token, an API key)
 ride via the `INTUTIC_REMOTE_HEADERS` environment variable on the wrapped
@@ -302,7 +302,7 @@ package-level configuration details.
 ### What this does not catch
 
 Pattern matching on five known phrasings is a tripwire on the obvious cases,
-not a defense against a determined or rewording attacker — the same honesty
+not a defense against a determined or rewording attacker — the same limit
 `injection.rs`'s own module doc states for the Rust side. It is also
 request/response-content-only: a tool that behaves maliciously without ever
 emitting injection-shaped TEXT (silently exfiltrating data through legitimate-
@@ -413,7 +413,7 @@ apply to that gate's unit of evaluation at all.
 | Page | What it covers |
 |---|---|
 | [MCP Proxy reference](/integrations/mcp-proxy) | Package/CLI/config reference for `@intutic/mcp-governance-proxy` — execution modes, the `Decision` type, and per-field configuration for every control this page describes |
-| [Governance Controls Checklist](/guide/governance-controls) | The house style for stating partial coverage honestly, applied across every control this product ships |
+| [Governance Controls Checklist](/guide/governance-controls) | The house style for stating partial coverage precisely, applied across every control this product ships |
 | [Graph Guardrails](/guide/graph-guardrails) | The deterministic detector taxonomy MCP tool-poisoning detection follows, and how the proxy-wrapping mechanism this page builds on works |
 | [Skill Scanning](/guide/skill-scanning) | The nearest sibling control: prose an agent treats as authoritative, published by a party the user never reviewed — applied to skill files instead of MCP tool declarations |
 | [Network Egress Control](/guide/policies#network-egress-control) | The host-level layer the stdio→HTTP bridge sits above, not instead of — `egressAllow`/`egressMode` |

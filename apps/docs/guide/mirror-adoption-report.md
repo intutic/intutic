@@ -19,7 +19,7 @@ Steps 1–2 run entirely in the proxy gateway and work the same way whether or n
 5. **Report** — once enough verdicts exist for a candidate model, the report aggregates them into win/loss/tie counts and the three deltas described below. You read it from the dashboard or the CLI.
 <!-- ENTERPRISE_ONLY_END -->
 
-## Honest Limits
+## Limits
 
 ::: warning Standalone: mirroring bills twice and reports nothing
 A standalone open-core proxy (no control plane) still makes the mirrored call — and pays for it — but has nowhere to publish the comparison pair. The proxy logs one warning the first time it discards a pair; after that the discards are silent at the default log level. If you run standalone, leave `mirror_sample_rate` at `0`, or run with a control plane.
@@ -75,7 +75,7 @@ Both default off (`mirror_sample_rate: 0.0`, `mirror_candidate_model` unset) —
 
 Open **Settings › AI Routing & Caching**, and scroll to the **Mirror-Test Adoption Report** card. Enter the candidate model id you configured above and click **Load Report**.
 
-- A populated report shows candidate-better / original-better / tie / unjudged counts, the fault-rate delta (negative means the candidate faults *less* than the model it mirrored — the favorable direction), and the cost/latency deltas (shown as "not measured" rather than `$0.00`/`0 ms` when no pair yet has both sides priced — see [Honest Limits](#honest-limits) above).
+- A populated report shows candidate-better / original-better / tie / unjudged counts, the fault-rate delta (negative means the candidate faults *less* than the model it mirrored — the favorable direction), and the cost/latency deltas (shown as "not measured" rather than `$0.00`/`0 ms` when no pair yet has both sides priced — see [Limits](#limits) above).
 - An **insufficient data** state is rendered as its own distinct block, not as a report with zeroed-out numbers — this is deliberate, so a candidate with too few samples never looks like a candidate that has been cleared.
 <!-- ENTERPRISE_ONLY_END -->
 
@@ -102,4 +102,4 @@ Intutic — Mirror-Test Adoption Report
   This is a reported signal for human review, not an automatic gate — nothing here changes routing.
 ```
 
-Add `--json` for machine-readable output (e.g. to feed into a release checklist script). Like every command that reads from the control plane, this needs a control plane behind it — a standalone open-core proxy with no control plane has nowhere for this command to read a judged report from (see [Honest Limits](#honest-limits)).
+Add `--json` for machine-readable output (e.g. to feed into a release checklist script). Like every command that reads from the control plane, this needs a control plane behind it — a standalone open-core proxy with no control plane has nowhere for this command to read a judged report from (see [Limits](#limits)).

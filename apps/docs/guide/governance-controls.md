@@ -1,6 +1,6 @@
 ---
 title: Governance Controls Checklist
-description: A control-by-control mapping of what Intutic actually enforces today, stated honestly rather than rounded up.
+description: A control-by-control mapping of what Intutic actually enforces today, stated precisely rather than rounded up.
 ---
 
 # Governance Controls Checklist <Badge type="tip" text="Open-Core" />
@@ -46,7 +46,7 @@ today, not aspirational: the same directory ships to a Kubernetes cluster as a
 `proxy-sops` ConfigMap, so a policy PR merge and a production policy rollout
 can be the same event.
 
-**Where this is honestly incomplete:** the control plane's own SOP registry —
+**Where this is incomplete:** the control plane's own SOP registry —
 lifecycle states, the judge/validation pipeline, anti-gaming checks — is a
 separate system from the files on disk, and the two connect over three
 commands (`push`, `pull`, `status`), not a live sync. `intutic sops push` now
