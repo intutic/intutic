@@ -9,7 +9,7 @@
 
 import { createStderrLogger as createLogger } from './stderrLog.js'
 import { callDaemonSocket } from './daemonClient.js'
-import { httpRequest } from './httpJson.js'
+import { HttpStatusError, httpRequest } from './httpJson.js'
 import type { ResolvedPolicy } from './daemon/policyCache.js'
 
 const log = createLogger('mcp-proxy-policy')
@@ -491,7 +491,17 @@ export class PolicyClient {
     const url = `${this.controlPlaneUrl}/api/v1/sop/rules?workspaceId=${encodeURIComponent(this.workspaceId)}&active=true`
     log.debug({ action: 'policy_refresh', url }, 'Fetching SOP rules from control plane')
 
-    const body = await httpRequest('GET', url, this.apiKey)
+    let body: string
+    try {
+      body = await httpRequest('GET', url, this.apiKey)
+    } catch (err) {
+      // The control plane refused this proxy's key: revoked, or its member
+      // deactivated or offboarded. Every other rule stays as loaded, but the
+      // member's SSO groups were vouched for by that key, so the proxy stops
+      // knowing them — a high-risk tool is refused until a key works again.
+      if (err instanceof HttpStatusError && (err.status === 401 || err.status === 403)) this.principal = undefined
+      throw err
+    }
     const parsed = JSON.parse(body) as SopRulesResponse & Record<string, unknown>
     const rules = Array.isArray(parsed.rules) ? parsed.rules : []
     this.rules = rules

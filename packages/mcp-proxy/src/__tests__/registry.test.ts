@@ -87,6 +87,24 @@ describe('MCP server registry (proxy side)', () => {
       expect(client.getSsoGroupPolicy()).toEqual({ highRiskTools: ['run_query'], requiredGroups: ['dba'], requireOboFor: [] })
     })
 
+    it("forgets the member's SSO groups when the control plane refuses the key, and keeps them on any other failure", async () => {
+      const principal = { memberId: 'mem_1', email: 'dev@example.com', role: 'DEVELOPER', ssoGroups: ['dba'] }
+      rulesBody = { rules: [], principal, ssoGroupPolicy: { highRiskTools: ['run_query'], requiredGroups: ['dba'] } }
+      const client = new PolicyClient(baseUrl, 'vk_test', 'ws_1')
+      await client.refresh()
+      expect(client.getPrincipal()).toEqual(principal)
+
+      rulesStatus = 503
+      await expect(client.refresh()).rejects.toThrow(/503/)
+      expect(client.getPrincipal(), 'an outage is not a revocation').toEqual(principal)
+
+      rulesStatus = 401
+      await expect(client.refresh()).rejects.toThrow(/401/)
+      expect(client.getPrincipal()).toBeUndefined()
+      // The policy itself stays loaded, so the group rule now refuses with the groups unknown.
+      expect(client.getSsoGroupPolicy()).toEqual({ highRiskTools: ['run_query'], requiredGroups: ['dba'], requireOboFor: [] })
+    })
+
     it("absorbs the workspace's fail behaviour only when the control plane sends it", async () => {
       const client = new PolicyClient(baseUrl, 'vk_test', 'ws_1')
       await client.refresh()

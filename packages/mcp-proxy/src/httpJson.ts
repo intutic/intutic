@@ -12,6 +12,14 @@
 import * as node_https from 'node:https'
 import * as node_http from 'node:http'
 
+/** A response with an error status, carrying the status for a caller that acts on it. */
+export class HttpStatusError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message)
+    this.name = 'HttpStatusError'
+  }
+}
+
 export function httpRequest(
   method: 'GET' | 'POST',
   url: string,
@@ -35,7 +43,7 @@ export function httpRequest(
       res.on('end', () => {
         const text = Buffer.concat(chunks).toString('utf-8')
         const status = res.statusCode ?? 0
-        if (status >= 400) reject(new Error(`HTTP ${method} ${url} returned ${status}: ${text.slice(0, 200)}`))
+        if (status >= 400) reject(new HttpStatusError(status, `HTTP ${method} ${url} returned ${status}: ${text.slice(0, 200)}`))
         else resolve(text)
       })
     })

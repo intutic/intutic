@@ -122,9 +122,19 @@ policy lives in workspace settings as `sso_group_policy`:
 }
 ```
 
-A member's groups come from the `groups` claim of their OIDC sign-in, or the group attribute of
-their SAML assertion, and are stored on the member at each SSO login. SCIM group pushes map
-groups to roles and do not change the groups this policy reads.
+**Where a member's groups come from.** One rule, used by every gate:
+
+- **SCIM provisioning on:** the member's [SCIM group](/guide/scim#groups-and-nesting)
+  memberships, by group display name, including every group above them through nesting. Groups
+  from SSO sign-ins are ignored while SCIM is on: the directory is authoritative.
+- **SCIM provisioning off:** the `groups` claim of the member's last OIDC sign-in, or the group
+  attribute of their last SAML assertion.
+
+SCIM provisioning is on while the workspace holds a SCIM token the SCIM endpoint would accept:
+not revoked, not expired, on a plan that includes SCIM. Issuing the first such token switches
+every member to their SCIM groups, including members your directory has not put in any group
+yet, who then hold none. Revoking the last one, or letting it expire, switches them back to
+their sign-in groups.
 
 **The decision**, for one member and one tool, in order:
 
@@ -148,8 +158,8 @@ held to the same set of test cases:
 
 | Decision point | Where the member's groups come from | When the decision can fail |
 |---|---|---|
-| The [hook gate](/concepts/enforcement-actions#how-a-verdict-is-decided) (`POST /api/v1/hook-gate`) | The member row, read on every call | An internal error allows the call, like every check on that endpoint |
-| The [MCP governance proxy](/guide/mcp-governance) | The member the proxy's API key resolves to, from its policy refresh | With a policy but no resolved member, high-risk tools are refused |
+| The [hook gate](/concepts/enforcement-actions#how-a-verdict-is-decided) (`POST /api/v1/hook-gate`) | Resolved on every call | An internal error allows the call, like every check on that endpoint |
+| The [MCP governance proxy](/guide/mcp-governance) | The member the proxy's API key resolves to, from its policy refresh | With a policy but no resolved member, or a key the control plane refuses, high-risk tools are refused |
 | The harness hook gates and the `@intutic/gate` and `intutic-clawde` SDK gates | The policy snapshot the sync daemon writes to `~/.intutic/hooks/` | See below |
 
 **Local gates.** Most harness gates decide on the developer's machine without calling the
@@ -172,11 +182,17 @@ snapshot and decide with the same evaluator.
   write.
 - **Unaffected:** a workspace with no group policy. Its snapshots are byte-identical to before.
 
-**Propagation.** On the hook gate, a group change applies to the member's next tool call, and a
-policy change within 60 seconds (the policy is cached in Valkey). Local gates see either change
-at the daemon's next policy refresh: every sync cycle, 30 seconds by default
-(`intutic connect --interval <ms>`), plus each pushed configuration update. A group change reaches
-Intutic only when the member next signs in through SSO.
+**Propagation.** A SCIM change needs no sign-in. Every SCIM write (a group created, renamed,
+deleted or re-membered, a user provisioned or deactivated) and every SCIM token issued or
+revoked drops the cached policy the MCP proxies read, moves the workspace's configuration
+version, and pushes a configuration update to connected sync daemons. End to end:
+
+| Change | Hook gate | Harness and SDK gates | MCP proxy |
+|---|---|---|---|
+| SCIM group add or remove, SCIM switched on or off | Next call | Seconds, through the push; at most one sync cycle (30 seconds by default, `intutic connect --interval <ms>`) when the daemon is connected to another control-plane replica or not connected | Next policy refresh, at most 60 seconds |
+| Member deactivated or deprovisioned | Key refused on the next call | Next refresh: the key is refused and the snapshot forgets the member's groups | Next policy refresh: the key is refused and the proxy forgets the member's groups |
+| Groups changed at the identity provider, SCIM off | When the member next signs in through SSO, then next call | The sync cycle after that sign-in | The policy refresh after that sign-in |
+| `sso_group_policy` edited | Within 60 seconds (cached in Valkey) | Next sync cycle | Next policy refresh |
 
 The group policy is not demoted by the `SILENT_LOG` intervention mode. The hook gate and the
 MCP proxy refuse these calls in every mode, so the local gates do too.
@@ -262,6 +278,7 @@ All circuit breaker state lives in Valkey for fast access:
 | [detectors.rs](https://github.com/intutic/intutic/blob/main/packages/proxy/src/plugins/anomaly/detectors.rs) | `consecutive_repeat` loop detection and the rest of the detector registry | Open-Core / Proxy |
 | `POST /api/v1/hook-gate` (`hookEvents.ts`) | The hot-path policy check endpoint | Enterprise Control Plane |
 | `pcasService.ts` | SSO group clearance at the hook gate (Valkey → Postgres) | Enterprise Control Plane |
+| `memberGroupsService.ts` | A member's effective SSO groups: SCIM while SCIM provisioning is on, else SSO sign-in | Enterprise Control Plane |
 | `sslEnforcementService.ts` | SSL scheduling, structural and logical layers, plus compliance reporting | Enterprise Control Plane |
 | `sslGateEvaluator.ts` | Calls the SSL layers from the hook gate in **shadow mode** — records, never blocks | Enterprise Control Plane |
 

@@ -12,6 +12,7 @@ Intutic implements the **SCIM 2.0** protocol per [RFC 7643](https://datatracker.
 - **Attribute synchronization** — Name, email, and role changes propagate automatically
 - **Automated offboarding** — Deprovisioned users trigger a 7-step security cascade
 - **Group-to-role mapping** — IdP groups map to Intutic RBAC roles
+- **Group-based tool clearance** — the same groups decide who may run the tools an SSO group policy marks high-risk
 
 ---
 
@@ -200,13 +201,30 @@ withdraws a grant, it does not demote someone by hand.
 An `OWNER` is never demoted by group logic, whatever the directory says, so a
 misconfiguration cannot remove your last owner.
 
-::: info SCIM groups grant roles, not tool clearance
-An [SSO group policy](/concepts/circuit-breaker#_3-sso-group-clearance) reads the
-groups from the member's OIDC or SAML sign-in, not SCIM group membership. A group
-change in your directory reaches that policy when the member next signs in through
-SSO. Deprovisioning through SCIM revokes the member's keys, and their machine's
-local gates then refuse every high-risk tool at the next policy refresh.
-:::
+### Groups clear high-risk tools
+
+While SCIM provisioning is on, a member's groups for an
+[SSO group policy](/concepts/circuit-breaker#_3-sso-group-clearance) are their SCIM
+group memberships, by display name, including every group above them through
+nesting. Group claims from SSO sign-ins are ignored: the directory is
+authoritative. In the example above, `jane@corp.com` holds `Platform-Oncall`,
+`Platform` and `Engineering`, so a policy that requires `Platform` clears her.
+
+SCIM provisioning is on while the workspace holds a SCIM token that is not
+revoked and not expired, on a plan that includes SCIM. Issuing the first token
+switches every member to their SCIM groups, so push your groups before you
+rely on a group policy; a member in no group holds none, and is refused every
+high-risk tool. Revoking the last token switches members back to the groups
+from their SSO sign-ins.
+
+A change applies without anyone signing in again. Every SCIM write, and every
+token issued or revoked, reaches the hook gate on the next tool call, connected
+developer machines within seconds (at most one sync cycle, 30 seconds by
+default) and MCP proxies within 60 seconds. Deprovisioning a user revokes their
+keys, and their machine's gates then refuse every high-risk tool.
+
+Name a user in a group's `members` by the `id` that `/scim/v2/Users` returned
+for them, as identity providers do. Group resources list users by that id.
 
 ### PUT /scim/v2/Users/:id — Replace User
 
