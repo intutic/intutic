@@ -278,7 +278,7 @@ Route governance events to Slack, PagerDuty, a webhook or email. Each rule (**Ne
 - **Slack** — **Connect Slack** installs the Slack app through OAuth; a rule then sends to a Slack channel ID. **Link your Slack account** gives you a code to run as `/intutic link <code>` in Slack, so approvals you make from Slack are recorded against you rather than against whoever installed the app.
 - **Email** — Send alerts to up to 20 addresses; each recipient gets their own message.
 - **PagerDuty** — Trigger incidents through an Events API v2 routing key.
-- **Webhooks** — Send JSON payloads to generic HTTPS endpoints. Give the rule a **Webhook Secret** and every request is signed with it; see [below](#verifying-webhook-signatures).
+- **Webhooks** — Send JSON payloads to generic HTTPS endpoints. Every request is signed; see [below](#verifying-webhook-signatures).
 
 ### Webhook destinations
 
@@ -294,7 +294,9 @@ A listed host may resolve to a private address; every other destination stays gu
 
 ### Verifying webhook signatures {#verifying-webhook-signatures}
 
-A webhook rule with a secret signs every request with two headers:
+Every webhook rule signs every request with a secret Intutic generates for it. The secret is shown once, right after you create the rule; copy it then. **New signing secret** on the rule (or `POST /api/v1/notifications/rules/:ruleId/signing-secret`) replaces it and shows the new one once, and requests switch to it straight away. You cannot choose the secret yourself, and there is no unsigned option.
+
+Each request carries two headers:
 
 - `X-Intutic-Timestamp` — the send time, in Unix seconds
 - `X-Intutic-Signature` — `sha256=` followed by the hex HMAC-SHA256 of `<timestamp>.<raw request body>`, keyed with the rule's secret

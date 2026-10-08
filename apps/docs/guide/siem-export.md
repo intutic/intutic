@@ -78,7 +78,7 @@ S3 and GCS destinations hold events until the destination's `batchSize` events a
 
 ## Verifying webhook signatures
 
-Every webhook destination gets a signing secret when it is created. The create response is the only place it appears in full; copy it then. **New signing secret** on the destination's row (or `POST /api/v1/siem/destinations/:id/signing-secret`) replaces it and shows the new one once; deliveries switch to the new secret straight away. A webhook destination created before signing existed sends unsigned requests until you give it a secret this way.
+Every webhook destination gets a signing secret when it is created. The create response is the only place it appears in full; copy it then. **New signing secret** on the destination's row (or `POST /api/v1/siem/destinations/:id/signing-secret`) replaces it and shows the new one once; deliveries switch to the new secret straight away. Every delivery is signed; there is no unsigned option.
 
 Each request carries two headers:
 
