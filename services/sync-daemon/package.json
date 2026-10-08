@@ -109,7 +109,7 @@
     "@intutic/shared-types": "workspace:*",
     "chokidar": "^5.0.0",
     "ioredis": "^5.11.1",
-    "smol-toml": "^1.8.0",
+    "smol-toml": "^1.9.0",
     "ws": "^8.21.0",
     "yaml": "^2.9.0",
     "zod": "^3"
