@@ -1542,6 +1542,24 @@ pub(crate) fn local_budget_enforced() -> bool {
     )
 }
 
+/// Whether this proxy's on-disk daily cap (`maxDailyBudgetUsd`) governs it at all.
+///
+/// The cap is one figure for the whole machine: every request's cost, whichever
+/// workspace sent it, accrues to the same day file. On a developer's standalone
+/// proxy that is exactly right. On a proxy with a control plane it is not: a
+/// hosted proxy pod serves every tenant, so the first $10 of the day's combined
+/// traffic — the default when no config file exists, which in a container it
+/// never does — refused every request on that pod, for every workspace, until
+/// midnight. A managed proxy's spend is capped per workspace by the control
+/// plane's daily limit instead, so the machine cap applies only standalone.
+pub(crate) fn machine_budget_applies() -> bool {
+    machine_budget_applies_with(std::env::var("CONTROL_PLANE_URL").ok().as_deref())
+}
+
+fn machine_budget_applies_with(control_plane_url: Option<&str>) -> bool {
+    control_plane_url.is_none_or(|v| v.trim().is_empty())
+}
+
 /// Accrue one completed request's cost against every ceiling the proxy owns.
 ///
 /// # Why this is a function and not three lines in a branch
@@ -3336,9 +3354,14 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         }
     }
 
-    // Evaluate native budget gate
+    // Evaluate native budget gate: the machine's own cap, standalone only.
     let budget_plugin = crate::plugins::budget_gate::BudgetGatePlugin::new();
-    if let crate::wasm::context::Verdict::Kill { reason, .. } = budget_plugin.evaluate(&wasm_ctx) {
+    let machine_verdict = if machine_budget_applies() {
+        budget_plugin.evaluate(&wasm_ctx)
+    } else {
+        crate::wasm::context::Verdict::Bypass
+    };
+    if let crate::wasm::context::Verdict::Kill { reason, .. } = machine_verdict {
         if local_budget_enforced() {
             tracing::warn!(workspace_id = %workspace_id, reason = %reason, "Offline budget cap exceeded — rejecting request");
             return json_error(
@@ -10824,6 +10847,20 @@ mod tests {
             );
         }
         std::env::remove_var("INTUTIC_LOCAL_BUDGET_ENFORCE");
+    }
+
+    /// A proxy with a control plane is never refused by the machine-wide cap.
+    ///
+    /// A hosted pod accrues every tenant's spend to one day file, so this cap
+    /// used to refuse all of its traffic once the day passed $10 combined.
+    #[test]
+    fn the_machine_budget_applies_only_without_a_control_plane() {
+        assert!(machine_budget_applies_with(None), "standalone keeps its machine cap");
+        assert!(machine_budget_applies_with(Some("  ")), "a blank URL is still standalone");
+        assert!(
+            !machine_budget_applies_with(Some("http://control-plane:3001")),
+            "managed proxies use per-workspace caps"
+        );
     }
 
     /// The context's risk tier must be resolved, not hardcoded.

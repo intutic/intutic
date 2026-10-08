@@ -20,13 +20,13 @@ Set the workspace's daily and monthly caps and its alert threshold on **Settings
 
 ### Local Daily Cap
 
-Each proxy also keeps a daily cap of its own, for the spend that passes through it. Set it as `maxDailyBudgetUsd` in `~/.intutic/config.json`:
+A standalone proxy (one with no control plane) also keeps a daily cap of its own, for all the spend that passes through it. Set it as `maxDailyBudgetUsd` in `~/.intutic/config.json`:
 
 ```json
 { "maxDailyBudgetUsd": 25 }
 ```
 
-It defaults to `$10.00` when unset, and an edit takes effect within 60 seconds without a restart. `INTUTIC_LOCAL_BUDGET_ENFORCE=0` stops the proxy refusing requests over the cap while it keeps counting the spend. There are no environment variables for the cap itself.
+It defaults to `$10.00` when unset, and an edit takes effect within 60 seconds without a restart. `INTUTIC_LOCAL_BUDGET_ENFORCE=0` stops the proxy refusing requests over the cap while it keeps counting the spend. There are no environment variables for the cap itself. A proxy connected to a control plane does not apply it: its spend is capped per workspace by the caps above.
 
 ### Developer Budget Tiers
 
@@ -65,7 +65,7 @@ Intutic's budget enforcer operates in two distinct modes depending on connection
 <!-- ENTERPRISE_ONLY_END -->
 
 #### 2. Local Daily Cap (Every Proxy)
-*   **Local Budget Definition:** The proxy reads its daily cap (`maxDailyBudgetUsd`, default `$10.00`) from `~/.intutic/config.json`. It is the only cost control in standalone mode, and a connected proxy enforces it too, alongside the workspace caps.
+*   **Local Budget Definition:** The proxy reads its daily cap (`maxDailyBudgetUsd`, default `$10.00`) from `~/.intutic/config.json`. It is the only cost control in standalone mode; a connected proxy uses the workspace caps instead.
 *   **Offline Spend Ledger:** Day-accumulated spend is saved in sharded daily files (`~/.intutic/logs/local-spend-YYYY-MM-DD.jsonl`).
 *   **Pre-flight Cost Interception:** Before reaching the LLM provider, a native budget gate plugin estimates query cost based on prompt length and static ratios. If this would exceed the remaining budget, the proxy blocks the request with `HTTP 429 Too Many Requests` (`OVERAGE_HARD_CAP_EXCEEDED` error code).
 *   **Offline Telemetry Ingestion:** Successful completion costs are calculated, appended to the daily spend ledger, and queued in sharded files `~/.intutic/logs/traces-YYYY-MM-DD.jsonl` for sync-back.
