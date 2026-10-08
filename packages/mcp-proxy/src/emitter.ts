@@ -16,6 +16,7 @@ import { createStderrLogger as createLogger } from './stderrLog.js'
 import { callDaemonSocket } from './daemonClient.js'
 import { httpRequest } from './httpJson.js'
 import type { CallerIdentity } from './identity.js'
+import type { AnomalyFinding } from './anomaly/index.js'
 
 const log = createLogger('mcp-proxy-emitter')
 
@@ -63,6 +64,34 @@ export type EventKind =
   /** An approved, unexpired, exact-match bypass let a held call through. */
   | 'hold_approved_bypass_used'
 
+/**
+ * What a detection-style event found, so the control plane can file it as a
+ * detector finding (adjudicable on the Findings page, routed as
+ * `anomaly.finding`). Carried by `injection_detected`, `anomaly_detected` and
+ * `tool_redacted` — the events that report something seen rather than a
+ * verdict on the call, which `tool_allowed`/`tool_blocked` carry.
+ */
+export interface DetectionFinding {
+  /** This proxy's detector id, e.g. `consecutive_repeat` or `injection:tool_result`. */
+  detectorId: string
+  /** A taxonomy label (`anomaly-taxonomy`), lower-cased like the detectors' own. */
+  kind: string
+  /** What the finding did to the call or result. */
+  disposition: 'steer' | 'reask' | 'kill'
+  severity: 'low' | 'medium' | 'high'
+  /** 0.0–1.0. A pattern match is certain about the pattern: 1. */
+  confidence: number
+}
+
+/** An anomaly detector's finding as a {@link DetectionFinding}, with what it actually did. */
+export function detectionFinding(
+  finding: AnomalyFinding,
+  disposition: DetectionFinding['disposition'],
+  severity: DetectionFinding['severity'],
+): DetectionFinding {
+  return { detectorId: finding.detectorId, kind: finding.kind, disposition, severity, confidence: finding.confidence }
+}
+
 export interface GovernanceEvent {
   incidentId: string
   kind: EventKind
@@ -71,13 +100,10 @@ export interface GovernanceEvent {
   workspaceId: string
   harnessType: string
   reason?: string
-  /**
-   * Set only by `injection_detected`/`anomaly_detected` today — the
-   * escalation-rule mirror `injection.ts`'s `injectionSeverity` (Phase 1) and
-   * the per-detector disposition mapping (Phase 2) compute. Absent on every
-   * other event kind, matching how `reason` is already optional here.
-   */
+  /** The finding's severity, for readers of the local event file. */
   severity?: string
+  /** Set on detection events; see {@link DetectionFinding}. */
+  finding?: DetectionFinding
   /**
    * Who made the call, as this proxy observed it (identity.ts). The control
    * plane adds the member the API key resolves to when it ingests the event.
@@ -97,7 +123,7 @@ export class GovernanceEmitter {
     private readonly identity: CallerIdentity | undefined = undefined,
   ) {}
 
-  emit(kind: EventKind, toolName: string, toolInput: unknown, reason?: string, severity?: string): void {
+  emit(kind: EventKind, toolName: string, toolInput: unknown, reason?: string, finding?: DetectionFinding): void {
     const event: GovernanceEvent = {
       incidentId: node_crypto.randomUUID(),
       kind,
@@ -106,7 +132,8 @@ export class GovernanceEmitter {
       workspaceId: this.workspaceId,
       harnessType: 'mcp-governance-proxy',
       reason,
-      severity,
+      severity: finding?.severity,
+      finding,
       principal: this.identity,
       timestamp: new Date().toISOString(),
     }
@@ -120,9 +147,11 @@ export class GovernanceEmitter {
         toolName,
         workspaceId: this.workspaceId,
         harnessType: 'mcp-governance-proxy',
+        incidentId: event.incidentId,
         timestamp: event.timestamp,
         reason,
-        severity,
+        severity: event.severity,
+        finding,
         toolInput,
         principal: event.principal,
       }
@@ -163,6 +192,7 @@ export class GovernanceEmitter {
           incidentId: event.incidentId,
           reason: event.reason,
           severity: event.severity,
+          finding: event.finding,
           principal: event.principal,
           timestamp: event.timestamp,
         },

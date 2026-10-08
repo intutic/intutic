@@ -32,11 +32,11 @@ import * as node_readline from 'node:readline'
 import { createStderrLogger as createLogger } from './stderrLog.js'
 import type { ProxyConfig } from './config.js'
 import { PolicyClient } from './policy.js'
-import { GovernanceEmitter } from './emitter.js'
+import { GovernanceEmitter, detectionFinding } from './emitter.js'
 import { ToolCallInterceptor } from './interceptor.js'
 import { redactText as redactMcpText } from './dlp.js'
 import { scanText, injectionSeverity, setDynamicInjectionPatterns, type InjectionSource } from './injection.js'
-import { toolPoisoning, dlpEscalation } from './anomaly/index.js'
+import { toolPoisoning, dlpEscalation, type AnomalyFinding } from './anomaly/index.js'
 import { SessionState } from './session.js'
 import { ValkeySessionStore, type SharedSessionStore } from './sessionStore.js'
 import { WasmRunner } from './wasm/runner.js'
@@ -165,7 +165,7 @@ export interface ServerLineOutcome {
    * any request-direction finding unconditionally, so escalating an
    * already-redacted RESPONSE protects nothing further.
    */
-  dlpEscalationReason?: string
+  dlpEscalation?: AnomalyFinding
   /**
    * Phase 2's `tool_poisoning` finding (anomaly/detectors.ts), set on a
    * `tools/list` response whose post-curation tool descriptions matched
@@ -173,7 +173,7 @@ export interface ServerLineOutcome {
    * `injectionFindings` on this same response type — never removes or
    * blocks a listing.
    */
-  toolPoisoningReason?: string
+  toolPoisoning?: AnomalyFinding
 }
 
 /**
@@ -314,7 +314,7 @@ export function processServerLine(
       redactedTool,
       redactions,
       injectionFindings,
-      dlpEscalationReason: dlpEscalationFinding?.reason,
+      dlpEscalation: dlpEscalationFinding ?? undefined,
     }
   }
 
@@ -385,7 +385,7 @@ export function processServerLine(
         toolsListUpstreamNames: upstreamNames,
         toolsListMsgId: msg.id,
         injectionFindings,
-        toolPoisoningReason: toolPoisoningFinding?.reason,
+        toolPoisoning: toolPoisoningFinding ?? undefined,
       }
     }
     msg.result['tools'] = kept
@@ -396,7 +396,7 @@ export function processServerLine(
       toolsListUpstreamNames: upstreamNames,
       toolsListMsgId: msg.id,
       injectionFindings,
-      toolPoisoningReason: toolPoisoningFinding?.reason,
+      toolPoisoning: toolPoisoningFinding ?? undefined,
     }
   }
 
@@ -828,7 +828,14 @@ export class McpGovernanceProxy {
           },
           'Prompt-injection pattern matched in MCP response traffic',
         )
-        this.emitter.emit('injection_detected', finding.toolName, undefined, reason, severity)
+        const withheld = outcome.injectionBlocked === true && finding.source === 'tool_result'
+        this.emitter.emit('injection_detected', finding.toolName, undefined, reason, {
+          detectorId: `injection:${finding.source}`,
+          kind: 'prompt_injection',
+          disposition: withheld ? 'kill' : 'steer',
+          severity,
+          confidence: 1,
+        })
         // tools/list description findings are report-only in v1 (never
         // blocked by injection alone — curation + TOFU already govern the
         // listing); only a `tool_result` finding can carry
@@ -852,17 +859,30 @@ export class McpGovernanceProxy {
         outcome.redactedTool,
         undefined,
         `Result redacted: ${(outcome.redactions ?? []).join('; ')}`,
-        outcome.dlpEscalationReason ? 'high' : undefined,
+        {
+          detectorId: 'result_redaction',
+          kind: 'data_exfiltration',
+          disposition: 'steer',
+          severity: outcome.dlpEscalation ? 'high' : 'medium',
+          confidence: 1,
+        },
       )
     }
-    if (outcome.dlpEscalationReason) {
+    if (outcome.dlpEscalation) {
       // Phase 2's dlp_escalation: severity escalation only, never a new
-      // block — see `ServerLineOutcome.dlpEscalationReason`'s doc comment.
+      // block — see `ServerLineOutcome.dlpEscalation`'s doc comment. So the
+      // finding records `steer`, what it did, not the detector's declared kill.
       log.warn(
         { action: 'anomaly_detected', detectorId: 'dlp_escalation', toolName: outcome.redactedTool },
-        outcome.dlpEscalationReason,
+        outcome.dlpEscalation.reason,
       )
-      this.emitter.emit('anomaly_detected', outcome.redactedTool ?? 'unknown', undefined, outcome.dlpEscalationReason, 'high')
+      this.emitter.emit(
+        'anomaly_detected',
+        outcome.redactedTool ?? 'unknown',
+        undefined,
+        outcome.dlpEscalation.reason,
+        detectionFinding(outcome.dlpEscalation, 'steer', 'high'),
+      )
     }
     if (outcome.curated) {
       log.info(
@@ -870,11 +890,17 @@ export class McpGovernanceProxy {
         'tools/list curated: allowlist filtering and/or description overrides applied',
       )
     }
-    if (outcome.toolPoisoningReason) {
+    if (outcome.toolPoisoning) {
       // Phase 2's tool_poisoning: report-only (Steer), same as Phase 1's
       // tools/list description injection scan — never blocks the listing.
-      log.warn({ action: 'anomaly_detected', detectorId: 'tool_poisoning' }, outcome.toolPoisoningReason)
-      this.emitter.emit('anomaly_detected', this.config.serverName, undefined, outcome.toolPoisoningReason, 'low')
+      log.warn({ action: 'anomaly_detected', detectorId: 'tool_poisoning' }, outcome.toolPoisoning.reason)
+      this.emitter.emit(
+        'anomaly_detected',
+        this.config.serverName,
+        undefined,
+        outcome.toolPoisoning.reason,
+        detectionFinding(outcome.toolPoisoning, 'steer', 'low'),
+      )
     }
 
     if (outcome.toolsListTools) {
