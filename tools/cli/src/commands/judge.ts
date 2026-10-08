@@ -87,15 +87,17 @@ function envBlock(modelAlias: string): string {
   ].join('\n')
 }
 
-function helmSnippet(modelAlias: string): string {
+function helmSnippet(modelAlias: string, configPath: string): string {
   return [
-    '# tools/helm/intutic-gateway values (or --set on `helm install`):',
+    '# intutic-gateway chart values. The chart renders LiteLLM\'s config from the file',
+    `# this command wrote: add \`--set-file litellm.config=${configPath}\` to helm install.`,
     'proxy:',
     '  localJudge: true',
     'litellm:',
     '  enabled: true',
     `  judgeModel: "${modelAlias}"`,
-    '  configMapName: ""  # leave empty to let the chart render one from this litellm_config.yaml; set your own for a pre-existing ConfigMap',
+    '  # A Secret with LITELLM_MASTER_KEY and the variables the config reads (e.g. OLLAMA_API_BASE):',
+    '  secretName: litellm-env',
   ].join('\n')
 }
 
@@ -155,7 +157,7 @@ export async function runJudgeConfigure(opts: JudgeConfigureOpts, io: SetupIO = 
 
   const { id: modelAlias } = normalizeModelRef(modelRef)
   io.note(envBlock(modelAlias || modelRef), 'Environment')
-  io.note(helmSnippet(modelAlias || modelRef), 'Helm values')
+  io.note(helmSnippet(modelAlias || modelRef, outPath), 'Helm values')
 
   io.log.warn(
     'If this judge model will also be served by the SHARED (non-local) LiteLLM deployment, adding it to ' +

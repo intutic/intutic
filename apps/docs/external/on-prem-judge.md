@@ -26,13 +26,12 @@ It walks you through:
    catalog at all. Judges run only on self-hosted models: a custom reference that names a hosted
    provider (`anthropic/...`, `openai/...`, `openrouter/...`, an Ollama Cloud model…) is refused,
    even with your own key, and nothing is written.
-2. **`litellm_config.yaml`** is written to the path you gave — the same `model_list` shape
-   `infra/compose/litellm_config.yaml`'s hand-written example uses. Intutic's platform default
+2. **`litellm_config.yaml`** is written to the path you gave — the same `model_list` shape as
+   the `litellm_config.yaml` in the release bundle's `gateway/` directory. Intutic's platform default
    is a cost-optimized open-weight judge behind the stable alias `intutic-openweight-judge`;
    reusing that alias on-prem keeps every env and Helm snippet deployment-shape-independent —
    only the `litellm_params` backing changes per deployment. Whatever name you use, it must be
-   backed by your own Ollama/vLLM server (following `infra/compose/litellm_config.yaml`'s
-   BYO-model section):
+   backed by your own Ollama/vLLM server:
 
    ```yaml
    model_list:
@@ -49,30 +48,43 @@ It walks you through:
    Don't back the alias with a hosted API (Anthropic, OpenAI, OpenRouter, Ollama Cloud…):
    judges run only on self-hosted models.
 
-3. **An env block** is printed for Docker Compose / bare-metal deployments. Note that
-   `LITELLM_LOCAL_JUDGE_MODEL` deliberately has **no default** — an unset value fails loud at
-   startup rather than silently judging on a model you didn't choose:
+3. **An env block** is printed for Docker Compose. Note that `LITELLM_LOCAL_JUDGE_MODEL`
+   deliberately has **no default** — an unset value fails loud at startup rather than silently
+   judging on a model you didn't choose. In the gateway's `.env` (next to
+   `docker-compose.gateway.yml`, where the generated `litellm_config.yaml` replaces the shipped
+   one), the local judge needs:
 
    ```bash
    INTUTIC_GATEWAY_LOCAL_JUDGE=true
-   LITELLM_LOCAL_URL=http://litellm:4000
-   LITELLM_LOCAL_API_KEY=${LITELLM_MASTER_KEY}
    LITELLM_LOCAL_JUDGE_MODEL=intutic-openweight-judge
+   LITELLM_MASTER_KEY=<a long random string>   # LiteLLM's key; the proxy uses it too
+   OLLAMA_API_BASE=http://ollama.example.internal:11434   # what your config reads
    ```
 
-4. **A Helm values snippet** is printed for `tools/helm/intutic-gateway`:
+   Start it with the `litellm` profile:
+   `docker compose -f docker-compose.gateway.yml --profile litellm up -d`.
 
-   ```yaml
-   proxy:
-     localJudge: true
-   litellm:
-     enabled: true
-     judgeModel: "intutic-openweight-judge"
-     configMapName: ""  # empty lets the chart render one from your litellm_config.yaml
+4. **A Helm values snippet** is printed for the `intutic-gateway` chart. The chart renders
+   LiteLLM's config from the file you pass it, and refuses to install without one:
+
+   ```bash
+   kubectl -n intutic-gateway create secret generic litellm-env \
+     --from-literal=LITELLM_MASTER_KEY=<a long random string> \
+     --from-literal=OLLAMA_API_BASE=http://ollama.example.internal:11434
+   helm upgrade my-gateway oci://ghcr.io/intutic/charts/intutic-gateway --version <version> \
+     --namespace intutic-gateway --reuse-values \
+     --set proxy.localJudge=true \
+     --set litellm.enabled=true \
+     --set litellm.judgeModel=intutic-openweight-judge \
+     --set litellm.secretName=litellm-env \
+     --set-file litellm.config=./litellm_config.yaml
    ```
 
-None of these are applied automatically — copy what you need into your actual compose env file
-or `values.yaml`, then restart the gateway.
+   To manage the config yourself, put it in a ConfigMap under the key `config.yaml` and set
+   `litellm.configMapName` instead of `litellm.config`.
+
+None of these are applied automatically — apply what you need to your gateway's `.env` or Helm
+release yourself.
 
 ## Typed stage (optional)
 

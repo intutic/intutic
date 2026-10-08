@@ -103,7 +103,12 @@ describe('runJudgeConfigure', () => {
     expect(String((envNote?.arg as { msg?: string })?.msg)).toContain('LITELLM_LOCAL_JUDGE_MODEL=llama3.1')
 
     const helmNote = io.calls.find((c) => c.method === 'note' && (c.arg as { title?: string }).title === 'Helm values')
-    expect(String((helmNote?.arg as { msg?: string })?.msg)).toContain('localJudge: true')
+    const helmMsg = String((helmNote?.arg as { msg?: string })?.msg)
+    expect(helmMsg).toContain('localJudge: true')
+    // The chart renders LiteLLM's config only from a file passed this way;
+    // an empty configMapName used to promise that and render model_list: [].
+    expect(helmMsg).toContain(`--set-file litellm.config=${outPath}`)
+    expect(helmMsg).not.toContain('configMapName')
   })
 
   it('a custom (non-catalog) model reference is accepted with a warning, not refused', async () => {
