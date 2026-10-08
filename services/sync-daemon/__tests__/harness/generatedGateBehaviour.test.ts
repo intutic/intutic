@@ -802,6 +802,25 @@ for (const g of GATES) {
       expect(wasBlocked(g, unrelated), `${g.name} held \`make test\``).toBe(false)
     })
 
+    it('holds a command whose words are split by a tab, a line continuation or a SQL comment (gate body v10)', async () => {
+      // The classifier matched plain substrings, so each of these ran under a
+      // hold that should have stopped it. The full table, in both dialects, is
+      // holdActionClassifier.test.ts; this proves every real gate carries it.
+      const hold = (token: string): GuardPattern => ({
+        id: `sop.local.review_before.${token}`, source: ` (${token}) `, subject: 'action', ignoreCase: true, severity: 'hold',
+        reason: `Held for human review: ${token} — declared in review_before:`, rationale: '', matches: [], notMatches: [],
+      })
+      const snap = writeRulesFixture(join(home, `hold-gap-${g.name}.rules`), [hold('action:deploy'), hold('action:db_write')], 'ws_test')
+      for (const command of ['git\tpush origin main', 'git \\\npush origin main', 'psql -c "DROP/**/TABLE users"']) {
+        const r = await runGate(g, { command }, { snapshot: snap })
+        assertCleanExit(g, r, `a held ${JSON.stringify(command)}`)
+        expect(wasBlocked(g, r), `${g.name} let ${JSON.stringify(command)} run under a hold`).toBe(true)
+      }
+      const unrelated = await runGate(g, { command: 'apt-get update' }, { snapshot: snap })
+      assertCleanExit(g, unrelated, 'apt-get update under a db_write hold')
+      expect(wasBlocked(g, unrelated), `${g.name} held \`apt-get update\` as a database write`).toBe(false)
+    })
+
     if (g.contract === 'stdout-cancel' || g.contract === 'stdout-decision-deny') {
       it('refuses an MCP server off the allowlist with a verdict that names the rule, not a crash (regression pin)', async () => {
         // The M3 allowlist backstop sits after the rule loop, whose `reason`

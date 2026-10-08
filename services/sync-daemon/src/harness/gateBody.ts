@@ -51,6 +51,8 @@
 import {
   DESTRUCTIVE_COMMAND_PATTERNS,
   NORMALISE_CONTRACT,
+  SQL_GAP_ERE,
+  assertPortableEre,
   staticFloorPatterns,
   type GuardPattern,
 } from './protectedPaths.js'
@@ -128,13 +130,23 @@ import {
  * change: an invalid snapshot keeps its `sso_group.*` block rules instead of
  * dropping them with the rest of the dynamic tier. A v8 gate reading a v9
  * snapshot enforces the same rules and drops them on an invalid one.
+ *
+ * v10: the hold classifier matches each action needle's words with
+ * {@link SQL_GAP_ERE} between them, over the normalised command, instead of
+ * as a plain substring of the raw one. `DROP/**\/TABLE`, `DROP -- why` +
+ * newline + `TABLE`, an escaped `\n`, a line continuation and (in the JS
+ * gates, which read the raw command) a tab or a doubled space all dodged a
+ * `review_before: action:db_write` or `action:deploy` hold. Only the emitted
+ * classifier changed; the `.rules` format did not, so v9 and v10 gates read
+ * each other's snapshots — a v9 gate just holds fewer spellings.
  */
-export const GATE_VERSION = 9
+export const GATE_VERSION = 10
 
 /**
  * The coarse command → action-token classification the hold tier keys on:
- * `review_before: action:deploy` holds a shell command that contains any of
- * the deploy needles. Deliberately minimal — a gate that tries to be clever
+ * `review_before: action:deploy` holds a shell command that contains one of
+ * the deploy needles, whatever separates its words (see
+ * {@link ACTION_CLASSIFIER}). Deliberately minimal — a gate that tries to be clever
  * about shell commands is a gate that blocks real work — and it mirrors the
  * proxy's `actions.rs` in both directions: `hookActionParity.test.ts` reads
  * THIS file as text and fails if either side knows a needle the other does
@@ -159,18 +171,59 @@ export const REVIEW_REQUESTS_LOG = `.intutic/events/${REVIEW_REQUESTS_BASENAME}`
  *  other version at ingest. */
 export const REVIEW_REQUEST_VERSION = 1
 
-/** The bash classifier: echoes a space-padded token string for `$TOOL`/`$COMMAND`. */
-function shellActionClassifier(): string {
-  const cases = ACTION_NEEDLES.map(
-    ([action, needles]) =>
-      `  case "$_c" in ${needles.map((n) => `*"${n}"*`).join('|')}) out="\${out}${action} " ;; esac`,
+/**
+ * {@link ACTION_NEEDLES} as one portable ERE per action token, each space in a
+ * needle standing for {@link SQL_GAP_ERE}.
+ *
+ * Plain substrings were dodged by anything that separates two words without
+ * being one space: `DROP/**\/TABLE`, a `--` comment, an escaped `\n`, a line
+ * continuation, and — in the JS gates, which used to read the raw command — a
+ * tab or `git  push`. It also lets a `--` long option sit between the words,
+ * so `git --no-pager push` and `kubectl --context prod apply` are deploys,
+ * which they are.
+ *
+ * The subject, the same in both dialects: the command normalised
+ * ({@link NORMALISE_CONTRACT}) and lower-cased, so whitespace of any kind is
+ * one space; a backslash before a space read as a space, because it is a line
+ * continuation (`git \` + newline + `push`) or an escaped space once
+ * normalised, and the shell turns both into a word break; and the trailing pad
+ * space dropped, so that a needle ending in a space (`'update '`) needs a real
+ * separator after the word, as in the proxy — `apt-get update` is not a
+ * database write.
+ *
+ * The needle's ends stay unanchored, as in the proxy's `actions.rs`, so the
+ * two sides still classify the same commands.
+ *
+ * Checked by {@link assertPortableEre} at load, like every floor rule: the
+ * bash gates run it through `grep -E`, the JS gates through `RegExp`.
+ */
+export const ACTION_CLASSIFIER: ReadonlyArray<readonly [string, string]> = ACTION_NEEDLES.map(([action, needles]) => {
+  const source = needles
+    .map((needle) => needle.split(' ').map((w) => w.replace(/[.[\]()*+?{}|^$\\]/g, '\\$&')).join(`(${SQL_GAP_ERE})`))
+    .join('|')
+  assertPortableEre(source, `hold classifier ${action}`)
+  return [action, source] as const
+})
+
+/**
+ * The bash classifier: echoes a space-padded token string for `$TOOL`/`$COMMAND`.
+ * Needs `intutic_normalise` in scope. Exported for the classifier's tests.
+ */
+export function emitShellActionClassifier(): string {
+  // A here-string, not `printf | grep -q`: under `pipefail`, grep exiting on
+  // its first match can kill printf with SIGPIPE on a long command, and the
+  // pipeline's failure would read as no match.
+  const tests = ACTION_CLASSIFIER.map(
+    ([action, source]) => `  grep -qE -- ${shq(source)} <<< "$_c" && out="\${out}${action} "`,
   ).join('\n')
   return `intutic_actions() {
   local _t _c out=" "
   _t="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
   case "$_t" in ${[...ACTION_TOOL_NAMES].join('|')}) ;; *) printf ' '; return 0 ;; esac
-  _c="$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')"
-${cases}
+  _c="$(intutic_normalise "$2" | tr '[:upper:]' '[:lower:]')"
+  _c="\${_c//\\\\ / }"
+  _c="\${_c% }"
+${tests}
   printf '%s' "$out"
 }`
 }
@@ -379,6 +432,31 @@ function shellQuote(s: string): string {
 }
 
 /**
+ * The JS classifier, `intuticActions(toolName, command)`. Needs
+ * `intuticNormalise` in scope. Exported for the classifier's tests.
+ */
+export function emitJsActionClassifier(): string {
+  return `const INTUTIC_ACTION_CLASSIFIER = ${JSON.stringify(ACTION_CLASSIFIER)}.map(function (e) { return [e[0], new RegExp(e[1])]; });
+const INTUTIC_ACTION_TOOLS = ${JSON.stringify(ACTION_TOOL_NAMES)};
+
+/**
+ * Space-padded action tokens for a shell command (" action:deploy "), or " ".
+ * The subject is the one the bash classifier builds — normalised, lower-cased,
+ * a backslash before a space read as a space, the trailing pad dropped — so
+ * the two dialects hold the same commands (see ACTION_CLASSIFIER in
+ * gateBody.ts).
+ */
+function intuticActions(toolName, command) {
+  if (INTUTIC_ACTION_TOOLS.indexOf(String(toolName || '').toLowerCase()) === -1) return ' ';
+  var c = intuticNormalise(command).toLowerCase().replace(/\\\\ /g, ' ').slice(0, -1), out = ' ';
+  for (var i = 0; i < INTUTIC_ACTION_CLASSIFIER.length; i++) {
+    if (INTUTIC_ACTION_CLASSIFIER[i][1].test(c)) out += INTUTIC_ACTION_CLASSIFIER[i][0] + ' ';
+  }
+  return out;
+}`
+}
+
+/**
  * The hold tier's JS helpers, emitted once into every JS-family gate.
  *
  * `intuticHold` is the one place a hold happens: bypass lookup, hold record,
@@ -387,22 +465,8 @@ function shellQuote(s: string): string {
  * the caller must refuse. Everything is local — no network on the tool path.
  */
 function jsHoldHelpers(reviewRequestFile: string | undefined): string {
-  return `const INTUTIC_ACTION_NEEDLES = ${JSON.stringify(ACTION_NEEDLES)};
-const INTUTIC_ACTION_TOOLS = ${JSON.stringify(ACTION_TOOL_NAMES)};
+  return `${emitJsActionClassifier()}
 const INTUTIC_REVIEW_REQUEST_FILE = ${JSON.stringify(reviewRequestFile ?? null)};
-
-/** Space-padded action tokens for a shell command (" action:deploy "), or " ". */
-function intuticActions(toolName, command) {
-  if (INTUTIC_ACTION_TOOLS.indexOf(String(toolName || '').toLowerCase()) === -1) return ' ';
-  var c = String(command || '').toLowerCase(), out = ' ';
-  for (var i = 0; i < INTUTIC_ACTION_NEEDLES.length; i++) {
-    var needles = INTUTIC_ACTION_NEEDLES[i][1];
-    for (var j = 0; j < needles.length; j++) {
-      if (c.indexOf(needles[j]) !== -1) { out += INTUTIC_ACTION_NEEDLES[i][0] + ' '; break; }
-    }
-  }
-  return out;
-}
 
 function intuticReviewRequestFile() {
   var path = require('path');
@@ -679,7 +743,7 @@ if [ -z "$INTUTIC_REVIEW_REQUEST_FILE" ]; then
   INTUTIC_REVIEW_REQUEST_FILE=${opts.reviewRequestFile ? shellQuote(opts.reviewRequestFile) : '"$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)/events/review-requests.jsonl"'}
 fi
 INTUTIC_APPROVED_BYPASSES="\${INTUTIC_APPROVED_BYPASSES:-$HOME/.intutic/hooks/approved-bypasses.jsonl}"
-${shellActionClassifier()}
+${emitShellActionClassifier()}
 intutic_sha256() {
   if command -v shasum >/dev/null 2>&1; then shasum -a 256 | cut -c1-64
   elif command -v sha256sum >/dev/null 2>&1; then sha256sum | cut -c1-64
