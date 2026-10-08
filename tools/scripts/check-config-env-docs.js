@@ -53,7 +53,6 @@ const INTERNAL = new Map([
   ['OPENCODE_CONFIG_DIR', "OpenCode's own variable, honoured where OpenCode keeps its config"],
   ['XIRP_HOME', "Xirp's own variable, honoured where Xirp keeps its config"],
   ['ANTHROPIC_CUSTOM_HEADERS', "Claude Code's own variable; `intutic exec` appends identity headers to it"],
-  ['INTUTIC_PROXY_IP', 'read only by the firewall-rule generator, which no command calls'],
 ])
 
 /** `// …` and `/* … *\/` comments, and Rust test modules: code that is not run. */
