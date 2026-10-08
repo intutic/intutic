@@ -75,8 +75,7 @@ exactly the failure mode this distinction exists to avoid.
 
 A skill directory can ship executable files alongside its `SKILL.md` — a
 `setup.sh` the instructions tell the agent to run, a `helper.py` it imports,
-a downloaded binary. Until this phase (TD-356 in
-[TECH_DEBT.md](https://github.com/intutic/intutic/blob/main/docs/TECH_DEBT.md)),
+a downloaded binary. Until bundled-script scanning was added,
 nothing in this codebase even enumerated those files: `intutic skill audit`
 and the sync daemon's `collectSkills` both walked skill directories but only
 ever opened the one `SKILL.md` inside each, so a sibling script was invisible
@@ -154,8 +153,7 @@ always passes `--use-behavioral` — full AST/dataflow analysis, all fully
 offline and requiring no API key. That is a genuinely different, deeper
 analysis path for the same bundled-script surface `scriptScan.ts` covers,
 run as a second engine alongside — never instead of — native scanning.
-(An earlier version of this page pointed at the wrong PyPI package — see
-the correction note in `docs/TECH_DEBT.md`'s TD-361.)
+(An earlier version of this page pointed at the wrong PyPI package.)
 
 **How to enable it.**
 
@@ -192,13 +190,12 @@ into this codebase's own `SkillScanFinding` shape — `patternId` prefixed
 **Trust boundary — advisory, not enforcement.** Exactly like every native
 finding on this page, a Cisco finding is surfaced, never acted on
 automatically: nothing in this codebase blocks, refuses, or auto-deletes a
-skill on the strength of a Cisco `skill-scanner` verdict alone. See
-`docs/TECH_DEBT.md` for the entry tracking this boundary explicitly.
+skill on the strength of a Cisco `skill-scanner` verdict alone.
 
 ## VirusTotal hash lookup (opt-in, hash-only)
 
 **Hash-only, stated up front: this lookup never uploads file content.** A
-separate, later phase (S4, TD-486) added an **opt-in** integration that
+separate, later phase added an **opt-in** integration that
 checks the sha256 hash `auditScriptFile` already computes for every bundled
 script (see [Bundled scripts](#bundled-scripts) above) against VirusTotal's
 public `GET /api/v3/files/{sha256}` endpoint — never `POST /api/v3/files`
@@ -271,9 +268,8 @@ from.** `DESTRUCTIVE_COMMAND_PATTERNS` ships its `block`-eligible patterns at
 patterns are unproven against real developer traffic, and a false positive
 there has a real cost. Skill-directory path matching was never in that
 position: it does not judge content, so there is no false-positive rate to
-measure in the first place — TD-358's own text calls this out directly,
-"path-matching... is not actually an exception to the measurement
-requirement — it never needed one." And the cost of staying at `warn` here is
+measure in the first place. Path matching is not an exception to the
+measurement requirement; it never needed one. And the cost of staying at `warn` here is
 not neutral: a poisoned skill file written under warn-only is not a near-miss
 waiting to be triaged, it is a file on disk that the very next agent session
 loads and treats as instructions. A warn that lets that write proceed *is*
@@ -356,10 +352,10 @@ do not already match.
 
 Everything above this section is deterministic pattern matching —
 `scanSkillContent` and `scanScriptContent` match imperative sentence and
-code shapes against text, with no LLM call anywhere in the hot path. TD-357
-recorded that as a deliberate, accepted gap: a rephrasing that avoids every
+code shapes against text, with no LLM call anywhere in the hot path. That
+was a deliberate, accepted gap: a rephrasing that avoids every
 pattern's literal wording passes clean, and closing that gap needs a
-semantic judgment call a regex table cannot make. Phase S5 closes it — as an
+semantic judgment call a regex table cannot make. Semantic analysis closes it — as an
 **opt-in**, workspace-level setting (`semanticSkillAnalysisEnabled`, default
 `false`), never a hot/live path.
 
@@ -425,8 +421,9 @@ severity for `'malicious'`, MEDIUM for `'suspicious'`).
 **Verdicts are advisory, not enforcement.** Nothing in this codebase blocks,
 refuses, or auto-prunes a skill on the strength of a semantic-judge finding
 — consistent with the report-only stance the
-deterministic scanner takes above. See docs/TECH_DEBT.md's TD-357 entry for
-the corpus-measurement caveat this carries forward.
+deterministic scanner takes above. It carries the same corpus-measurement
+caveat: its false-positive rate stays unmeasured until a benign-skill corpus
+exists.
 
 ## What this cannot catch
 
@@ -489,7 +486,7 @@ Specifically:
   judge invocation. Its own real-world false-positive/negative rate is
   unmeasured for the identical reason the deterministic patterns' rate is —
   no benign-skill corpus exists yet — which is why it stays report-only,
-  opt-in, and never a gate; see TD-357 in TECH_DEBT.md.
+  opt-in, and never a gate.
 - **Bundled-script coverage, specifically, is a first pass, not a general
   scanner.** `SCRIPT_SCAN_PATTERNS` seeds a handful of well-known shapes
   (remote-download-piped-to-shell, decode-then-execute, credential-path

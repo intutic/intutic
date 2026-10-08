@@ -27,7 +27,7 @@ Xirp is macOS-only. Detection checks (in order):
 - `/Applications/Xirp.app`
 
 ::: tip Not live-verified
-Xirp is a macOS-only beta app with no CLI/npm package and no public download available in the environment this integration was built in. None of the three paths above were confirmed against a real install — they follow this codebase's own convention for comparable tools (`~/.grok`, `~/.muse`, `<Name>.app` in `/Applications`), not a confirmed Xirp source. See TD-390.
+Xirp is a macOS-only beta app with no CLI/npm package and no public download available in the environment this integration was built in. None of the three paths above were confirmed against a real install — they follow this codebase's own convention for comparable tools (`~/.grok`, `~/.muse`, `<Name>.app` in `/Applications`), not a confirmed Xirp source.
 :::
 
 There is also a separate, weaker, **probabilistic** signal: `services/sync-daemon/src/lib/processPoller.ts`'s `detectTmuxParentedAgents()` checks whether a `claude`/`codex`/`gemini` process is running as a descendant of a `tmux` server process — the shape Xirp's session management takes. This is corroborating evidence at best, never a standalone confirmation: any hand-rolled tmux-based multi-agent workflow trips the identical signal, and this function cannot and does not distinguish Xirp from one. It is exported separately rather than folded into the main process-signature list precisely so an uncertain signal is never silently blended with a certain one.

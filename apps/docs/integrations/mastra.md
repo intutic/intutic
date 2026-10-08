@@ -95,7 +95,7 @@ await agent.generate(prompt, {
 })
 ```
 
-Confirmed against a real install (`@mastra/core@1.59.0`, and unchanged in 1.74.0): `Agent.getConfiguredToolHooks()`'s own doc comment states "Run-level hooks override these ... callers that need to preserve the configured hooks must read and compose them explicitly." See `docs/TECH_DEBT.md` TD-380 and `@intutic/gate/mastra`'s module doc for the full record.
+Confirmed against a real install (`@mastra/core@1.59.0`, and unchanged in 1.74.0): `Agent.getConfiguredToolHooks()`'s own doc comment states "Run-level hooks override these ... callers that need to preserve the configured hooks must read and compose them explicitly." See `@intutic/gate/mastra`'s module doc for the full record.
 
 ## What the adapter does NOT do
 

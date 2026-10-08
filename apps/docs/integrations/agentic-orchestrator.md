@@ -3,7 +3,7 @@
 Integrate Intutic governance with [DoorDash's Agentic Orchestrator](https://github.com/doordash-oss/agentic-orchestrator) (`agentico`) — a public, open-source (Apache-2.0) desktop app + CLI that turns a feature prompt into a multi-phase AI coding workflow.
 
 ::: tip Live-verified, not just README-read
-Unlike several recent harness integrations (Muse Code, Grok Build, Xirp), this one's core facts were confirmed by actually downloading and running the real released binary (`agentico` v0.152.0, darwin_arm64) during this integration's research — `agentico --version`, `agentico --help`, and `agentico server --help` all matched what's documented below. See TD-397 for the one real gap this research surfaced.
+Unlike several recent harness integrations (Muse Code, Grok Build, Xirp), this one's core facts were confirmed by actually downloading and running the real released binary (`agentico` v0.152.0, darwin_arm64) during this integration's research — `agentico --version`, `agentico --help`, and `agentico server --help` all matched what's documented below. The one real gap this research surfaced — the OpenCode backend had no Intutic gate to delegate to — has since been closed (see below).
 :::
 
 ## What Agentic Orchestrator is (and is not)
