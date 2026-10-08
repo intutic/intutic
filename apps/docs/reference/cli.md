@@ -932,7 +932,6 @@ intutic predict-cost --model <model> (--tokens <n> | --file <path>) [options]
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--model <model>` | Model to estimate against, e.g. `claude-sonnet-4-5` (required) | — |
-| `--task-type <type>` | Task type used to pick the usage baseline | `coding` |
 | `--tokens <n>` | Input size as a token count | — |
 | `--file <path>` | Size the input from this file's contents | — |
 | `--json` | Output as JSON instead of a report | — |
@@ -2216,11 +2215,11 @@ intutic attenuate --parent-key <keyId> --caps <cap,cap,...> [--ttl <seconds>] [o
 | `--dev` | Use local control plane (`http://localhost:3001`) | — |
 
 **What it does:**
-Asks the control plane to mint the child key, then prints the child key itself (`vk_…`), its key ID, the attenuation chain ID, the granted capabilities and the expiry time. The child key is shown **once** and never stored, so save it when it is printed.
+Asks the control plane to mint the child key, then prints the child key itself (`vk_…`), its key ID, the attenuation chain ID, the granted capabilities and the expiry time. The child key is shown **once** and never stored, so save it when it is printed. A child never outlives its parent: it expires after `--ttl` or when the first key it descends from expires, whichever comes sooner, and the printed expiry is that time.
 
 Capabilities are the parent key's scopes, matched exactly as written. `*` is not expanded, so a key created with the default `*` scope can only grant `*`.
 
-The request is refused when the parent key is revoked or expired, when a requested capability is not one of the parent's (the error names which), or when the chain is already four attenuations deep. A missing `--parent-key`, an empty `--caps` or a `--ttl` outside 60–86400 whole seconds exits `1` before anything is sent.
+The request is refused when the parent key is revoked or expired, or descends from an expired key, when a requested capability is not one of the parent's (the error names which), or when the chain is already four attenuations deep. A missing `--parent-key`, an empty `--caps` or a `--ttl` outside 60–86400 whole seconds exits `1` before anything is sent.
 
 **Example:**
 
@@ -2258,12 +2257,11 @@ Prints each link in the chain: parent key, child key, granted capabilities, expi
 
 ## `intutic gateway register` <Badge type="danger" text="Enterprise" />
 
-Register a [self-hosted gateway](/external/self-hosted-gateway) — an org's own Docker,
-Kubernetes, or bare-metal deployment of the Intutic proxy — and print its one-time management
-token.
+Register a [self-hosted gateway](/external/self-hosted-gateway) — an org's own Docker or
+Kubernetes deployment of the Intutic proxy — and print its one-time management token.
 
 ```bash
-intutic gateway register --name <name> --target <docker|kubernetes|bare_metal> [options]
+intutic gateway register --name <name> --target <docker|kubernetes> [options]
 ```
 
 **Options:**
@@ -2271,7 +2269,7 @@ intutic gateway register --name <name> --target <docker|kubernetes|bare_metal> [
 | Option | Description |
 |--------|-------------|
 | `--name <name>` | Display name for this gateway (required) |
-| `--target <docker\|kubernetes\|bare_metal>` | Deployment target (required) |
+| `--target <docker\|kubernetes>` | Deployment target (required) |
 | `--json` | Output as JSON |
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
@@ -2372,8 +2370,7 @@ intutic gateway config set <gateway_id> [--require-vk <true|false>] [--require-p
 | `--json` | Output as JSON |
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
-A bare-metal daemon-supervised gateway applies a config change on its next poll. Docker and
-Kubernetes deployments need a manual redeploy to pick it up.
+Docker and Kubernetes gateways pick up a config change when they are redeployed.
 
 ---
 

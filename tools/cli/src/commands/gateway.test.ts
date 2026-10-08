@@ -73,9 +73,9 @@ describe('intutic gateway', () => {
     expect(printed).toContain('gwk_secret')
   })
 
-  it('register refuses an invalid --target before calling the API', async () => {
+  it.each(['not-a-real-target', 'bare_metal'])('register refuses --target %s before calling the API', async (target) => {
     await expect(
-      runGatewayRegister({ name: 'x', target: 'not-a-real-target' }),
+      runGatewayRegister({ name: 'x', target }),
     ).rejects.toThrow('process.exit(1)')
     expect(fetchMock).not.toHaveBeenCalled()
     expect(errSpy).toHaveBeenCalled()

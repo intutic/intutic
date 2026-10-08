@@ -25,7 +25,6 @@ export type NotificationEventType =
   | 'incident.created'
   | 'incident.escalated'
   | 'sop.status_changed'
-  | 'budget.exceeded'
   | 'session.ended'
   | 'adapter.write_back.failed'
   | 'decision.pending'
@@ -59,7 +58,6 @@ export type NotificationEventType =
   // ── FinOps & budget ──
   | 'finops.budget.exceeded'
   | 'finops.budget.threshold'
-  | 'finops.budget.overrun'
   | 'finops.tokens.classified'
   // ── Enterprise & trial ──
   | 'trial.started'

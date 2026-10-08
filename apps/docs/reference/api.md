@@ -297,12 +297,12 @@ Create a new SOP.
 
 | Field | Type | Required | Notes |
 |-------|------|----------|-------|
-| `title` | string | ✅ | 1–500 chars |
+| `title` | string | ✅ | 1–256 chars |
 | `markdown_content` | string | ✅ | 1–100,000 chars |
 | `risk_tier` | enum | ✅ | `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` |
 | `complexity_tier` | enum | ✅ | `TIER_0`, `TIER_1`, `TIER_2` (see below) |
-| `version` | string | ❌ | 1–50 chars |
-| `dependencies` | string[] | ❌ | SOP IDs this depends on |
+| `version` | string | ❌ | 1–16 chars |
+| `dependencies` | string[] | ❌ | SOP IDs this depends on (each up to 64 chars) |
 
 `complexity_tier` is the complexity of the work the SOP governs, from `TIER_0` (simplest) to `TIER_2` (most complex). [Intelligent routing](/guide/intelligent-routing) keeps separate model statistics per tier: the tier of the workspace's most recently created or edited active SOP becomes the tier its requests are routed under, and `TIER_1` applies when there is none.
 

@@ -3,7 +3,7 @@
  * and routing assignment (LLD #68 §2).
  *
  * Subcommands:
- *   - `intutic gateway register --name <name> --target <docker|kubernetes|bare_metal>`
+ *   - `intutic gateway register --name <name> --target <docker|kubernetes>`
  *   - `intutic gateway list [--json]`
  *   - `intutic gateway status <gateway_id> [--json]`
  *   - `intutic gateway rotate <gateway_id>`
@@ -36,7 +36,7 @@ import pc from 'picocolors'
 const NOT_AUTHENTICATED =
   'Not authenticated. Run `intutic login` first — gateway registration is an org-scoped control plane feature.'
 
-const DEPLOYMENT_TARGETS = ['docker', 'kubernetes', 'bare_metal'] as const
+const DEPLOYMENT_TARGETS = ['docker', 'kubernetes'] as const
 
 interface GatewayCliOpts {
   json?: boolean

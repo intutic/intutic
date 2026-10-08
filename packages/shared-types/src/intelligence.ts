@@ -205,7 +205,6 @@ export interface CostPrediction {
 
 export interface TokenBaseline {
   model: string
-  taskType: string
   inputBucket: InputTokenBucket
   avgOutputTokens: number
   p50OutputTokens: number
