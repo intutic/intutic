@@ -20,8 +20,8 @@
  * policy-snapshot evaluation), and — this is the part that is independently
  * confirmed, unlike Muse Code's — signals a block by writing
  * `{"decision":"deny","reason":"..."}` as JSON on **stdout** and exiting 0.
- * That is a *different* stdout shape from Cline/Roo Code's `{"cancel":true}`
- * — Grok Build does not recognise `cancel`, and Cline/Roo Code do not
+ * That is a *different* stdout shape from Cline's `{"cancel":true}`
+ * — Grok Build does not recognise `cancel`, and Cline does not
  * recognise `decision` — so this writer uses its own `BlockContract` value,
  * `'stdout-decision-deny'` (see gateBody.ts's module doc for why the two
  * stdout shapes are not folded into one contract), rather than reusing

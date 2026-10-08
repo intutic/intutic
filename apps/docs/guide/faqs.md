@@ -324,7 +324,7 @@ Instead of acting as a simple reactive alert or blocking tool, Intutic implement
 
 ---
 
-### 20. How does Intutic integrate with different AI harnesses (e.g. Cursor vs. Gemini Antigravity)?
+### 20. How does Intutic integrate with different AI harnesses (e.g. Cursor vs. Google Antigravity)?
 
 Intutic automatically detects which harnesses are active in your workspace and applies rules using two primary integration paths:
 
@@ -332,8 +332,9 @@ Intutic automatically detects which harnesses are active in your workspace and a
    For tools that read rules from the project workspace (like **Cursor** `.cursorrules`, **Claude Code** `CLAUDE.md`, **Windsurf** `.windsurfrules`, and **Cline / Roo Code** `.clinerules`), the sync-daemon compiles and updates these markdown files in real-time. The agent ingests these rules directly in its context window to steer output generation.
    
 2. **Runtime Interceptors (Hook Scripts & Plugins):**
-   For terminal-based or executing daemons (like **Gemini Antigravity**, **Goose**, **OpenHands**, and **Open WebUI**), Intutic installs pre-tool check scripts and filters directly into their runtime settings. For example:
-   * **Gemini Antigravity:** Registers a `hooks.preTool` bash check in `~/.gemini/settings.json` to audit and block tools pre-flight.
+   For terminal-based or executing daemons (like **Google Antigravity**, **Gemini CLI**, **Goose**, **OpenHands**, and **Open WebUI**), Intutic installs pre-tool check scripts and filters directly into their runtime settings. For example:
+   * **Google Antigravity:** Registers a `PreToolUse` gate in `~/.gemini/config/hooks.json` that blocks tools pre-flight.
+   * **Gemini CLI:** Registers a `BeforeTool` bash gate in `~/.gemini/settings.json`.
    * **Open WebUI:** Injects a Python filter at `.open-webui/intutic-governance-filter.py`.
    * **Goose:** Registers a custom plugin under `.agents/plugins/intutic-governance/`.
 

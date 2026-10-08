@@ -1757,6 +1757,7 @@ mod tests {
             "shell",
             "run_command",
             "execute_command",
+            "run_shell_command",
             "terminal",
         ] {
             assert_eq!(inspect_tool_call(t, &args).len(), 1, "{t}");

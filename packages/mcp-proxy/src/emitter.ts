@@ -17,6 +17,7 @@ import { callDaemonSocket } from './daemonClient.js'
 import { httpRequest } from './httpJson.js'
 import type { CallerIdentity } from './identity.js'
 import type { AnomalyFinding } from './anomaly/index.js'
+import type { BudgetEventDetail } from './budget.js'
 
 const log = createLogger('mcp-proxy-emitter')
 
@@ -63,6 +64,17 @@ export type EventKind =
   | 'tool_held'
   /** An approved, unexpired, exact-match bypass let a held call through. */
   | 'hold_approved_bypass_used'
+  /**
+   * An MCP call budget (budget.ts) reached its warning threshold. Once per
+   * budget per period, across every proxy sharing the Valkey; carries
+   * `budget` and a finding. The call itself was allowed.
+   */
+  | 'mcp_budget_threshold'
+  /**
+   * An MCP call budget is used up. Once per budget per period, on the first
+   * refusal; every refusal also sends its own `tool_blocked`.
+   */
+  | 'mcp_budget_exceeded'
 
 /**
  * What a detection-style event found, so the control plane can file it as a
@@ -117,6 +129,11 @@ export interface GovernanceEvent {
    * Absent only for an emitter constructed without one.
    */
   principal?: CallerIdentity
+  /**
+   * Set on the budget events, and on the `tool_blocked` of a call a used-up
+   * budget refused: which budget, its limit, the calls made, when it resets.
+   */
+  budget?: BudgetEventDetail
   timestamp: string
 }
 
@@ -130,7 +147,14 @@ export class GovernanceEmitter {
     private readonly identity: CallerIdentity | undefined = undefined,
   ) {}
 
-  emit(kind: EventKind, toolName: string, toolInput: unknown, reason?: string, finding?: DetectionFinding): void {
+  emit(
+    kind: EventKind,
+    toolName: string,
+    toolInput: unknown,
+    reason?: string,
+    finding?: DetectionFinding,
+    budget?: BudgetEventDetail,
+  ): void {
     const event: GovernanceEvent = {
       incidentId: node_crypto.randomUUID(),
       eventId: node_crypto.randomUUID(),
@@ -143,6 +167,7 @@ export class GovernanceEmitter {
       severity: finding?.severity,
       finding,
       principal: this.identity,
+      budget,
       timestamp: new Date().toISOString(),
     }
 
@@ -163,6 +188,7 @@ export class GovernanceEmitter {
         finding,
         toolInput,
         principal: event.principal,
+        budget,
       }
       callDaemonSocket('telemetry.enqueue', eventPayload).then(() => {
         log.debug({ action: 'telemetry_enqueued' }, 'Telemetry successfully enqueued to daemon')
@@ -204,6 +230,7 @@ export class GovernanceEmitter {
           severity: event.severity,
           finding: event.finding,
           principal: event.principal,
+          budget: event.budget,
           timestamp: event.timestamp,
         },
       ],

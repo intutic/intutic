@@ -62,8 +62,8 @@ describe('muse adapter', () => {
       await expect(readFile(join(root, 'AGENTS.md'), 'utf-8')).rejects.toThrow()
     })
 
-    it('installs the PreToolUse/PermissionRequest hooks even with zero SOPs — hooks are the governance vehicle, not the rules file', async () => {
-      await museAdapter.writeConfig(root, [], PROXY_URL)
+    it('installGate writes the PreToolUse/PermissionRequest hooks — hooks are the governance vehicle, not the rules file', async () => {
+      await museAdapter.installGate!(root, PROXY_URL)
       const hooksJson = await readFile(join(root, '.muse', 'hooks.json'), 'utf-8')
       expect(hooksJson).toContain('PreToolUse')
       expect(hooksJson).toContain('PermissionRequest')

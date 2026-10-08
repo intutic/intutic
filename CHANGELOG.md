@@ -7,6 +7,146 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-10-08
+
+Everything that reached `main` since 2.1.0. Check these behaviour changes
+before upgrading: a mistyped `INTUTIC_EGRESS_MODE` now stops the proxy at
+startup; a proxy that fails closed refuses a virtual-key request when it cannot
+read the key's SSO group policy; the clawde SDKs raise `ClawdeBlockedError` on
+the cost gate's `200` refusal; `intutic predict-cost --task-type` is an error;
+and `intutic connect` records each harness rules file's hash and size in the
+config history, write-protects rules files under the Write-protect setting on
+macOS, and writes Windsurf's proxy settings to the file Windsurf reads. Hold
+redaction now redacts a private key with no footer to the end of the text.
+`INTUTIC_PROMPT_QUALITY_GATE`, `INTUTIC_PROXY_IP` and `INTUTIC_PROXY_PORT` are
+gone (see Removed).
+
+### Added
+
+- **MCP server registry in the MCP governance proxy**: the proxy reads the
+  workspace's registry decisions with the policy it already polls. It refuses
+  a blocked server and a tool an operator disabled (and hides that tool from
+  `tools/list`), and, when the workspace's `mcpDefaultPolicy` is `deny`, every
+  server not yet approved. It reports the server it fronts and its tool names,
+  so a new server lands in the approval queue (`mcp.server.candidate`). The
+  first call waits for the first policy fetch; a registry that never loads
+  follows the fail setting (open skips the registry checks, closed refuses).
+- **Approval holds in the MCP proxy**: a `require_approval` rule holds the call
+  through the decisions API, as the hook gates' hold tier does, instead of
+  refusing it. The agent gets a held error naming the hold id and the
+  `intutic decision approve` command; once approved, with the workspace's
+  review-hold bypass on, the identical retry passes. An unreachable control
+  plane keeps the call held.
+- **Per-call identity**: every MCP proxy event and hold carries the API key's
+  prefix, the OS user, the harness session and the server the proxy fronts.
+- **SSO-group tool clearance in every gate**: a workspace's `sso_group_policy`
+  (high-risk tools, the identity-provider groups that clear them, and tools
+  only an on-behalf-of token may call) is enforced by the MCP proxy, the
+  generated hook gates (the policy snapshot carries the member's groups in an
+  `@sso_groups` record), `@intutic/gate` and `intutic_clawde.gate` (refusal
+  code `SSO_GROUP`), and the proxy's response gate, which reads the policy and
+  the key's member groups from `GET /api/v1/auth/key-context` (cached 30
+  seconds per key, refetched when the workspace config version moves) and
+  records a finding naming the rule. A member whose groups are unknown,
+  including after the control plane refuses the key, is refused high-risk
+  tools. While SCIM provisioning is on, SCIM groups decide membership.
+  `@intutic/shared-types` exports the one evaluator and schema
+  (`evaluateSsoGroupClearance`, `SsoGroupPolicySchema`, `parseSsoGroupPolicy`,
+  `ssoGroupRuleId`, `encodeSsoGroupRecord`, `decodeSsoGroupRecord`), and a
+  shared vectors file holds every implementation to the same answers.
+- **`intutic disconnect`** restores every file `intutic connect` changed:
+  owned files restored or deleted, Intutic's hook entries and MCP wraps
+  removed, overwritten proxy settings put back. A full run also removes the
+  background services, the CA connect trusted in the login keychain, the
+  Valkey container, the gate caches and the stored credentials. `--dry-run`
+  prints the plan, `--harness <id>` takes out one harness, `--keep-login`
+  keeps the login. Files written by earlier versions are recognised.
+- **Claude Code project MCP servers are governed**: each server in a
+  repository's `.mcp.json` gets a wrapped copy at local scope in
+  `~/.claude.json`, which Claude Code prefers, so the committed file is never
+  rewritten. Only servers Claude Code itself would start are copied: approvals
+  in the project's `.claude/settings.json` and `settings.local.json` count only
+  once the folder's trust dialog was accepted, and a disable anywhere wins. A
+  remote server whose URL or headers use `${VAR}` is not copied and shows as
+  ungoverned, with the reason, in the MCP server registry.
+- **Config history**: `intutic connect` records each harness rules file
+  (`HARNESS_FILES`, listed in the CLI reference) every fifth poll: its path,
+  the SHA-256 of its redacted text, and its size, never the text. The new
+  `configBodyUpload` workspace setting (off by default) uploads the text too,
+  with credential-shaped strings redacted on the machine first.
+  `intutic integrity config-chain` says how many snapshots carry no content.
+- **Live gateway config**: a registered self-hosted gateway pulls its config
+  whenever the heartbeat's desired version differs from the one it runs, and
+  applies `requireVk` and `requireProvisionedKey` without a restart; the first
+  heartbeat goes out at startup. `intutic gateway status` shows the applied
+  config version against the desired one. Bare metal is a deployment target
+  again (`intutic gateway register --target bare_metal`): the release's proxy
+  binary, checked against `checksums.json`, under a systemd unit.
+- **Workspace MCP detection settings**: `mcpInjectionAction`, `mcpAnomalyMode`
+  and `mcpAnomalyOverrides` (keys checked against the new
+  `MCP_ANOMALY_DETECTOR_IDS`) reach the MCP proxy with its policy and win over
+  `INTUTIC_MCP_INJECTION_ACTION`, `INTUTIC_MCP_ANOMALY_MODE` and
+  `INTUTIC_MCP_ANOMALY_OVERRIDES`; unset, the local variables stay in force.
+- `@intutic/shared-types`: the `governance.gate.silent`,
+  `governance.gate.recovered`, `governance.integrity.failed` and
+  `mcp.server.candidate` notification events; `NotificationRule.signingSecret`,
+  a webhook rule's generated signing secret, returned once; `mcpDefaultPolicy`,
+  `sso_group_policy` and `configBodyUpload` on `WorkspaceSettings`.
+- Docs: a framework mapping guide (EU AI Act, ISO/IEC 42001, NIST AI RMF);
+  SIEM sources, gate-silent and integrity alerts, and the one signature scheme
+  notification and SIEM webhooks share, with its replay window; every sign-in
+  method, and refused sign-ins, in the audit trail; the MCP registry, approval
+  holds, caller identity and every MCP proxy flag and variable; SCIM groups as
+  stored resources; how to set an SSO group policy.
+
+### Changed
+
+- **`INTUTIC_EGRESS_MODE`** must be `off`, `monitor` or `enforce` (case and
+  surrounding space ignored). Anything else is an error naming the valid
+  values, and the proxy does not start; it used to mean `off`, so a typo in
+  `enforce` turned egress control off. An empty value still defers to
+  `intutic_settings.egress.mode`.
+- **The proxy reads a virtual key's SSO group policy on each request** (cached
+  30 seconds) when it has a control plane. If the read fails, a proxy whose
+  policy check fails closed refuses the request with `403 policy_denied`; one
+  that fails open proceeds without group rules.
+- **clawde SDKs** (`@intutic/clawde`, `intutic-clawde`): the proxy's
+  cost-prediction gate answers a non-streaming request with a `200` whose
+  assistant turn explains the estimate, and now names the refusal in an
+  `x-intutic-refusal: COST_GATE_EXCEEDED` header. `chat()` fires `kill` and
+  raises `ClawdeBlockedError` (status `200`, the explanation as its message)
+  instead of returning the turn as the model's answer with verdict `allow`.
+- **`intutic connect` runs the sync work the docs describe**, which lived in a
+  second sync loop nothing started: SkillOpt config edits are applied and
+  acknowledged, MCP servers are wrapped every cycle, `skill_flagged` events,
+  the decisions log and the bundled rule-author skill are produced, and
+  Markdown rules files keep their `sop://` pointer comments. The hand-edit
+  setting is honoured: Write-protect sets the macOS immutable flag
+  (`chflags uchg`) on the rules files between cycles, and Record only leaves a
+  hand edit in place (gate hook files are still restored).
+- **Windsurf**: `http.proxy`, `http.proxyStrictSSL` and `codeium.proxy` are
+  merged into Windsurf's user `settings.json`
+  (`~/Library/Application Support/Windsurf/User/` on macOS,
+  `$XDG_CONFIG_HOME/Windsurf/User/` or `~/.config/Windsurf/User/` on Linux,
+  `%APPDATA%\Windsurf\User\` on Windows) instead of
+  `~/.codeium/windsurf/settings.json`, which Windsurf does not read.
+  `intutic disconnect` cleans both.
+- MCP proxy: the workspace's `mcpProxyFailBehavior` (the dashboard's "When
+  Intutic is unreachable" setting) now reaches the proxy and wins over
+  `INTUTIC_MCP_FAIL_OPEN`, which applies until a policy has loaded or when the
+  workspace never chose; `INTUTIC_MCP_FAIL_OPEN` is read from the environment
+  before `runtime.env`. The standalone `intutic` MCP server reports the package
+  version instead of `0.1.0`. The MCP daemon finds Claude Code's servers in
+  `~/.claude.json` and each project's `.mcp.json`, not `~/.claude/mcp.json`.
+- `intutic gateway config set` says the change applies on the next heartbeat
+  (every 30 seconds by default, `INTUTIC_GATEWAY_HEARTBEAT_INTERVAL_SECS`).
+- `intutic attenuate`: a child key expires after `--ttl` or when the first key
+  it descends from expires, whichever is sooner, and the printed expiry is that
+  time. A parent that descends from an expired key is refused.
+- `@intutic/shared-types`: `CapturedConfigFile.content` is optional and
+  `sizeBytes` required; `ConfigDiff.currentContent` can be `null`, and
+  `contentUploaded` says whether both snapshots carry content.
+
 ### Deprecated
 
 - **Policy checks authenticated by key prefix alone.** From 2.1.0 the proxy
@@ -24,7 +164,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`intutic predict-cost --task-type`.** Token baselines are recorded per
   model and input size only, so the task type selected nothing. Passing the
-  option is now an error; drop it from scripts.
+  option is now an error; drop it from scripts. `TokenBaseline.taskType` is
+  removed from `@intutic/shared-types`.
+- **`INTUTIC_PROMPT_QUALITY_GATE`** and the prompt quality gate it switched
+  on, with the `--force` bypass that only skipped it. The gate posted every
+  request to a scoring endpoint the control plane no longer has and failed
+  open. `/intutic` slash commands are unchanged.
+- **`INTUTIC_PROXY_IP` and `INTUTIC_PROXY_PORT`**, read only by the proxy's
+  transparent-redirect firewall generators, which nothing called and which are
+  deleted. `intutic enforce` and `intutic-proxy enforce` are unchanged.
+- From `@intutic/sync-daemon`: `startSyncLoop` (with `SyncLoopOptions` and
+  `SyncResult`), `writeConfigFiles` (`WriteResult`), `computeFileHashes`,
+  `hashFile`, `loadIntegrity` and `saveIntegrity`. `intutic connect` is the
+  sync loop. Git worktree propagation, which only that loop had, went with it.
+- From `@intutic/shared-types`: the `budget.exceeded` and
+  `finops.budget.overrun` notification events, which nothing sent (budget
+  alerts are `finops.budget.threshold` and `finops.budget.exceeded`); the
+  `TOOL_SUBSTITUTION` and `PARAMETER_DRIFT` deviation types and the
+  `PENDING_APPROVAL` to `EXECUTING` plan transition, none of which the gates
+  can observe; and `ChannelConfig.webhookSecret`, since every webhook's signing
+  secret is now generated by the server.
+
+### Fixed
+
+- OpenHands: any workspace with a `config.toml` (every Hugo site, for one) was
+  detected as OpenHands; detection now needs `.openhands/` or a table only
+  OpenHands uses. A second edit replaced the first `base_url` anywhere in
+  `config.toml` (an `[llm.draft_editor]` table's, say) with the bare proxy URL
+  and created `~/.openhands/config.toml` on every machine; the user-level file
+  now gets only `[llm] base_url`, and only when it exists.
+- Goose: `provider.host` and `hooks.pre_tool_use` were set by replacing the
+  first `host:` and `pre_tool_use:` lines in `config.yaml`, which could belong
+  to an extension; they are now set by key, and a file that is not a mapping is
+  left alone.
+- The settings guard blanked Goose's and OpenHands' provider URL when it re-ran
+  their writers; it now gets the synced proxy URL.
+- `intutic env clear` on Linux added a newline to `~/.bashrc` per variable
+  instead of restoring it, and left `/etc/environment` alone when `env
+  persist` had run as root. It now removes exactly the lines persist wrote,
+  from both, and a failed read no longer replaces `~/.bashrc` with the two
+  exports.
+- The control plane dropped every injection, anomaly and redaction event the
+  MCP proxy reported. They are filed as detector findings, each with a
+  structured finding from the proxy, and announced as `anomaly.finding`.
+- The `@intutic/mcp-governance-proxy` README described `intutic-mcp-daemon` as
+  a standalone MCP server; it is the policy and telemetry daemon, and the
+  standalone server is `intutic-mcp-proxy` with no server to wrap.
+- Docs: SOP titles are up to 256 characters and versions up to 16; budget
+  alerts fire at the workspace's alert threshold and at the cap, once per
+  period.
+
+### Security
+
+- **Hook redactor ReDoS.** 2.1.0's hold redactor, which runs in the generated
+  hook gates before any length cap, matched private keys with a lazy
+  `BEGIN…END` pattern that rescanned to the end of the text from every header
+  without a footer: quadratic, so 520 KB of headers took over two seconds. Keys
+  are now found in linear time, and a header with no footer is redacted to the
+  end of the text.
+- An MCP daemon restart disarmed daemon-mode MCP proxies: until its first fetch
+  the daemon answered from the sync daemon's snapshot, which carries only the
+  rules, and a proxy took that answer whole, resetting its tool and server
+  allowlists, description overrides, DLP and injection patterns to
+  unrestricted. A proxy that has loaded a full policy now takes only the rules
+  from a snapshot answer.
+- The MCP proxy ignored the workspace's `mcpProxyFailBehavior`, so a workspace
+  set to fail closed failed open wherever `INTUTIC_MCP_FAIL_OPEN` was unset.
+- Windsurf's Cascade traffic never went through the proxy: its proxy settings
+  were written to a file Windsurf does not read.
+- clawde SDKs: with `failOpen` (`fail_open`) set, the circuit breaker
+  swallowed its own budget verdict along with connection errors, so a wrapped
+  call ran exactly when the budget was gone. It now fails open only when the
+  check could not be made.
 
 ## [2.1.0] - 2026-10-08
 

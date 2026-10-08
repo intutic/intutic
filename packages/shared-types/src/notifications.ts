@@ -52,6 +52,12 @@ export type NotificationEventType =
   // ── MCP server registry ──
   /** An MCP proxy reported a server this workspace's registry had never seen; it waits as a candidate for an OWNER or ADMIN to approve or block. */
   | 'mcp.server.candidate'
+  /** A server the registry knew declared a different tool set, and the change scored high risk (`mcpToolRisk.ts`). */
+  | 'mcp.server.tool_change_risk'
+  /** An MCP call budget reached its warning threshold for the period (sent once per budget per period). */
+  | 'mcp.budget.threshold'
+  /** An MCP call budget ran out and the proxy refused a call (sent once per budget per period). */
+  | 'mcp.budget.exceeded'
   // ── Governance judge ──
   /** A judged response is waiting for a person in the judge review queue: the typed judge was unsure, or it is a spot check of one it cleared (LLD #72). */
   | 'judge.review.queued'
@@ -162,6 +168,13 @@ export type NotificationEventType =
    * failing; a recurrence after it clears fires again.
    */
   | 'governance.integrity.failed'
+  // ── AI inventory of developer machines ──
+  /**
+   * A machine's AI inventory listed an ungoverned harness or MCP server for
+   * the first time: a harness with no gate installed or none possible, or an
+   * MCP server the MCP proxy does not front. Once per machine and item.
+   */
+  | 'inventory.ungoverned.detected'
   // ── Provider outage tracking (Phase 8b) ──
   /**
    * A NEW provider_incidents window opened for a provider (Anthropic,

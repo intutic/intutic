@@ -10,9 +10,9 @@ Intutic supports 43 AI agent harnesses out of the box. The CLI auto-detects whic
 | [Cursor](/integrations/cursor) | `.cursorrules` | File presence | ✅ Stable |
 | [Windsurf](/integrations/windsurf) | `.windsurfrules` | File presence | ✅ Stable |
 | [Aider](/integrations/aider) | `.aider.conf.yml` | File presence | ✅ Stable |
-| [Antigravity](/integrations/antigravity) | `.gemini/settings.json` | `.gemini/` directory | ✅ Stable |
+| [Antigravity and Gemini CLI](/integrations/antigravity) | `GEMINI.md` (a marked section) | `.gemini/` or `.agents/hooks.json`, or Antigravity's app-data directories | ✅ Stable |
 | [Codex](/integrations/codex) | `.env.intutic` | `CODEX_HOME` env or `codex` in PATH | ✅ Stable |
-| [OpenHands](/integrations/openhands) | `config.toml` | `.openhands/`, or an OpenHands `config.toml` | ✅ Stable |
+| [OpenHands](/integrations/openhands) | `.openhands/microagents/intutic-governance.md` + `config.toml` | `.openhands/`, or an OpenHands `config.toml` | ✅ Stable |
 | [n8n](/integrations/n8n) | `.intutic/n8n/governance-workflow.json` | n8n instance detection | ✅ Stable |
 | [Cline](/integrations/cline) | `.cline/hooks/hooks.json` | File presence | ✅ Stable |
 | [Roo Code](/integrations/roo-code) | `.roorules` | File presence | ✅ Stable |
@@ -58,13 +58,15 @@ Intutic supports 43 AI agent harnesses out of the box. The CLI auto-detects whic
 
 ## Config format per harness
 
-Harnesses fall into three categories:
+Harnesses fall into these categories:
 
-### Markdown-based (Cursor, Claude Code, Windsurf, GitHub Copilot, Grok Build)
+### Markdown-based (Cursor, Claude Code, Windsurf, GitHub Copilot, Grok Build, OpenHands)
 
 SOP content is written as markdown with a header. Grok Build's file is
-`AGENTS.md` rather than a harness-specific filename, but the content and
-formatter are identical to every other row in this category:
+`AGENTS.md` rather than a harness-specific filename, and OpenHands' is the
+repository microagent `.openhands/microagents/intutic-governance.md`, which
+OpenHands keeps active in every conversation, but the content and formatter
+are identical to every other row in this category:
 
 ```markdown
 # Intutic Governance Rules (auto-generated)
@@ -101,15 +103,23 @@ extra-instructions: |
   All code changes must include test coverage...
 ```
 
-### JSON-based (Antigravity)
+### A marked section of your own file (Antigravity and Gemini CLI)
 
-SOP content is merged into the `customInstructions` field of the existing settings:
+Both load the project's `GEMINI.md`, which is often yours. SOP content goes between two markers, after your own text, and nothing outside them is changed:
 
-```json
-{
-  "customInstructions": "# Intutic Governance Rules (auto-generated)\n# DO NOT EDIT...",
-  "existingField": "preserved"
-}
+```markdown
+# Your own instructions stay as they are
+
+<!-- INTUTIC:RULES:START -->
+# Intutic Governance Rules (auto-generated)
+# DO NOT EDIT this section — managed by intutic sync daemon; edit outside the INTUTIC:RULES markers
+
+> **Proxy URL:** `http://localhost:4000`
+
+## SOP: Code Review Requirements
+
+All code changes must include test coverage...
+<!-- INTUTIC:RULES:END -->
 ```
 
 ### Env-based (Codex)
@@ -122,23 +132,6 @@ export ANTHROPIC_BASE_URL="http://localhost:4000"
 export OPENAI_BASE_URL="http://localhost:4000/v1"
 export INTUTIC_PROXY_URL="http://localhost:4000"
 INTUTIC_SOP_COUNT=5
-```
-
-### TOML-based (OpenHands)
-
-SOP content goes into an `[intutic]` section:
-
-```toml
-# Intutic Governance Rules (auto-generated)
-# DO NOT EDIT — managed by intutic sync daemon
-
-[intutic]
-proxy_url = "http://localhost:4000/v1"
-instructions = """
-## SOP: Code Review Requirements
-
-All code changes must include test coverage...
-"""
 ```
 
 ## Adding support for new harnesses

@@ -20,7 +20,7 @@
  *  - **stdout-cancel family** — those harnesses ignore exit codes entirely; a
  *    crash that printed no cancel object was an allow. The prelude for this
  *    contract prints the cancel JSON before exiting, and the envelope refusal
- *    CANCELS rather than exiting 2 (which cline and roo would never read).
+ *    CANCELS rather than exiting 2 (which cline would never read).
  *  - **n8n** — already closed: the gate refuses by THROWING inside the n8n
  *    process, and an internal fault throws the same way. Verified here rather
  *    than changed.
@@ -176,7 +176,7 @@ function auditLogText(g: GateEntry): string {
   return out.join('\n')
 }
 
-/** True iff stdout carries a `{"cancel": true}` (Cline/Roo Code) OR a
+/** True iff stdout carries a `{"cancel": true}` (Cline) OR a
  *  `{"decision": "deny"}` (Grok Build — a different, confirmed field name;
  *  see gateBody.ts's BlockContract doc) object on some line. Both are
  *  "the exit code is not the verdict" contracts, so one checker generalises

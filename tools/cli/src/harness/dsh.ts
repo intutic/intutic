@@ -18,9 +18,8 @@
 import { access } from 'node:fs/promises'
 import { join } from 'node:path'
 import { HarnessType } from '@intutic/shared-types'
-import type { SyncSopEntry } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
-import { writeDshHooks, resolveDshHome, listDshProfileDirs } from '@intutic/sync-daemon/harness/dshHooks'
+import { writeDshHooks, resolveDshHome } from '@intutic/sync-daemon/harness/dshHooks'
 
 export const dshAdapter: IHarnessAdapter = {
   type: HarnessType.DEEPSEEK_HARNESS,
@@ -73,21 +72,17 @@ export const dshAdapter: IHarnessAdapter = {
     return false
   },
 
-  async writeConfig(workspaceRoot: string, _sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
-    // No rules/markdown file for dsh — `sops` are not consulted here (same
-    // "no text-rules file" posture as goose.ts's own adapter). The plugin
-    // registration + egress row in each profile patch is the entirety of what this
-    // harness gets, and it happens for every existing profile, not one file.
+  // The plugin registration + egress row in each profile patch is the
+  // entirety of what this harness gets, and it happens for every existing
+  // profile, not one file.
+  async installGate(workspaceRoot: string, proxyUrl: string): Promise<void> {
     await writeDshHooks(workspaceRoot, proxyUrl, '')
+  },
 
-    const dshHome = resolveDshHome()
-    const profiles = await listDshProfileDirs(dshHome)
-    // Representative path for the connect-summary UI, matching the "return
-    // the path written" contract every other adapter follows — the first
-    // profile's patch file when one exists, otherwise the $DSH_HOME root
-    // itself (nothing was written yet; the next sync cycle picks it up once
-    // a profile exists, per dshHooks.ts's own module doc).
-    return profiles.length > 0 ? join(profiles[0]!, 'cordis.patch.yml') : dshHome
+  // No rules/markdown file for dsh — same "no text-rules file" posture as
+  // goose.ts's own adapter.
+  async writeConfig(): Promise<string | null> {
+    return null
   },
 
   async readCurrentHash(_workspaceRoot: string): Promise<string | null> {

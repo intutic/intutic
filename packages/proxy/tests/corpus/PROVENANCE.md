@@ -143,3 +143,48 @@ So on coding-agent traffic the floor is not a gate at all — with three to five
 tool names, every name recurs in any 24-call window — and the false-positive
 rate is set by `CYCLE_MATCH_RATIO` over bare tool names, which fires on the
 large majority of runs that finished successfully.
+
+## PII detectors — coding-agent corpus (self-authored) and OpenHands
+
+- **Consumer:** `tests/pii_corpus_test.rs`, which also runs the PII detectors
+  over the BFCL, NotInject, tool-description and response-echo corpora above.
+  Report: `pii/BASELINE.txt`.
+- **`pii/coding_agent.jsonl`:** 70 rows written by the Intutic team for this
+  test — package manifests, lockfiles (pnpm, npm, yarn, Cargo, Go, Poetry,
+  Bundler, pip hashes), git log/config/diff/blame output, test fixtures and
+  runner output, hashes, UUIDs, trace ids, version strings, timestamps in a
+  dozen formats, big integers, floats, IP addresses, CI logs, Kubernetes and
+  Terraform output, stack traces. SHA-256 in `pii/SHA256SUMS`. Email
+  addresses are written with `{at}` for `@` so the file holds no
+  address-shaped literal; the test puts the `@` back.
+
+It contains no PII, so any firing on it is a false positive, and the test
+fails on one from any detector except email. Email fires on the seven rows
+that carry git authors, manifest contacts and an SSH remote: real address
+shapes that are not worth redacting from a coding agent, which is why the
+email detector ships off. The same caveat as the response-echo corpus
+applies: the authors of the detectors wrote this corpus, so it pins
+regressions and cannot be cited as an independent false-positive rate.
+
+### OpenHands trajectories, measured 2026-10-08
+
+The independent measurement is the SWE-rebench OpenHands extract described
+above (seed-248 sample: 1,000 trajectories, 64,583 tool calls, 31.6 MB of
+tool-call arguments as JSON; string values cut at 2,000 characters; tool
+results are not in the extract). Run with
+`INTUTIC_CODING_CORPUS=<extract> cargo test --release --test pii_corpus_test -- --nocapture`,
+every detector enabled:
+
+| detector | tool calls with a match | trajectories with a match |
+|---|---:|---:|
+| `pii.card` | 0 | 0 |
+| `pii.iban` | 0 | 0 |
+| `pii.ssn` | 0 | 0 |
+| `pii.email` | 215 | 45 |
+| `pii.phone` | 1 | 1 |
+
+The email matches are mostly test addresses (`example.com`, `test.com`), `git
+config user.email` in test setup, SQL fixtures and author credits in licence
+headers — including personal addresses of open-source authors, which is the
+case for leaving the detector off rather than calling every match noise. The phone match is a
+conference dial-in number inside a repository fixture.

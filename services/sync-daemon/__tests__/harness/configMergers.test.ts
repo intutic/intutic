@@ -271,22 +271,27 @@ describe('Hermes ~/.hermes/config.yaml', () => {
 describe('OpenHands config.toml', () => {
   const user = '# my openhands\n[core]\nworkspace_base = "./ws"\n\n[llm]\nmodel = "anthropic/claude-sonnet"\napi_key = "env"\n'
 
-  it('sets [llm] base_url for the model\'s SDK and an [intutic] table, keeping everything else', () => {
-    const merged = mergeOpenHandsToml(user, 'http://127.0.0.1:4000', '## Rule\nNo """secrets"""')!
+  it('sets [llm] base_url for the model\'s SDK, keeping everything else', () => {
+    const merged = mergeOpenHandsToml(user, 'http://127.0.0.1:4000')!
     expect(merged.startsWith('# my openhands\n[core]')).toBe(true)
     const parsed = parseToml(merged) as Record<string, any>
     expect(parsed.core.workspace_base).toBe('./ws')
     expect(parsed.llm).toEqual({ base_url: 'http://127.0.0.1:4000', model: 'anthropic/claude-sonnet', api_key: 'env' })
-    expect(parsed.intutic.instructions).toBe('## Rule\nNo """secrets"""\n')
-    expect(mergeOpenHandsToml(merged, 'http://127.0.0.1:4000', '## Rule\nNo """secrets"""')).toBe(merged)
+    expect(Object.keys(parsed)).toEqual(['core', 'llm'])
+    expect(mergeOpenHandsToml(merged, 'http://127.0.0.1:4000')).toBe(merged)
+  })
+
+  it('drops the [intutic] table earlier versions put the rules in, which OpenHands never reads', () => {
+    const stale = `${user}\n[intutic]\nproxy_url = "http://127.0.0.1:4000"\ninstructions = """\n## Rule\n"""\n`
+    expect(mergeOpenHandsToml(stale, 'http://127.0.0.1:4000')).toBe(mergeOpenHandsToml(user, 'http://127.0.0.1:4000'))
   })
 
   it('uses the OpenAI-style base for other models, regenerates the old overwrite, and leaves invalid TOML alone', () => {
-    const openai = parseToml(mergeOpenHandsToml('[llm]\nmodel = "gpt-4o"\n', 'http://h:4000', 'x')!) as Record<string, any>
+    const openai = parseToml(mergeOpenHandsToml('[llm]\nmodel = "gpt-4o"\n', 'http://h:4000')!) as Record<string, any>
     expect(openai.llm.base_url).toBe('http://h:4000/v1')
     const legacy = '# Intutic Governance Rules (auto-generated)\n[intutic]\nproxy_url = "x"\n'
-    expect(Object.keys(parseToml(mergeOpenHandsToml(legacy, 'http://h:4000', 'x')!))).toEqual(['llm', 'intutic'])
-    expect(mergeOpenHandsToml('[llm\n', 'http://h:4000', 'x')).toBeNull()
+    expect(Object.keys(parseToml(mergeOpenHandsToml(legacy, 'http://h:4000')!))).toEqual(['llm'])
+    expect(mergeOpenHandsToml('[llm\n', 'http://h:4000')).toBeNull()
   })
 })
 
@@ -296,7 +301,7 @@ describe('OpenHands base_url outside [llm]', () => {
   const user = '[llm.draft]\nmodel = "gpt-4o-mini"\nbase_url = "https://draft.example/v1"\n\n[llm]\nmodel = "gpt-4o"\n'
 
   it('sets only [llm] base_url and leaves a named llm table\'s own', () => {
-    for (const merged of [mergeOpenHandsBaseUrl(user, 'http://h:4000')!, mergeOpenHandsToml(user, 'http://h:4000', 'x')!]) {
+    for (const merged of [mergeOpenHandsBaseUrl(user, 'http://h:4000')!, mergeOpenHandsToml(user, 'http://h:4000')!]) {
       const parsed = parseToml(merged) as Record<string, any>
       expect(parsed.llm.base_url).toBe('http://h:4000/v1')
       expect(parsed.llm.draft).toEqual({ model: 'gpt-4o-mini', base_url: 'https://draft.example/v1' })

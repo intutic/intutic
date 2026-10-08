@@ -12,24 +12,19 @@
  *
  * Never a hard dependency. Every operation fails open to `undefined`/`false`
  * and the caller (`SessionState`) falls back to its in-process window: when
- * no URL is configured, when the client is not connected (`status !==
- * 'ready'`, so an absent Valkey adds no latency), when a call takes longer
- * than {@link SHARED_WINDOW_TIMEOUT_MS}, or on any error. The proxy behaves
- * exactly as before Wave 5.3 in every one of those cases.
+ * no URL is configured, when the client is not connected (so an absent
+ * Valkey adds no latency), when a call takes longer than
+ * `VALKEY_COMMAND_TIMEOUT_MS`, or on any error — the guard every command on
+ * the proxy's one Valkey connection goes through (guardedValkey.ts). The
+ * proxy behaves exactly as before Wave 5.3 in every one of those cases.
  *
  * @module
  */
 
 import * as node_crypto from 'node:crypto'
-import { Redis } from 'ioredis'
-import { createStderrLogger } from './stderrLog.js'
-import { describeConnectionError } from './valkeyErrors.js'
+import type { GuardedValkey } from './guardedValkey.js'
 import { TOOL_SEQUENCE_CAP } from './session.js'
 
-const log = createStderrLogger('mcp-proxy.sessionStore')
-
-/** A shared read or write that takes longer than this loses to the local window. */
-export const SHARED_WINDOW_TIMEOUT_MS = 200
 /** Sliding lifetime of the sequence and call-window keys — the Rust `TOOL_SEQUENCE_TTL_SECS`. */
 export const SESSION_WINDOW_TTL_SECS = 86_400
 /** Lifetime of a reask allowance, set when the counter is created and never refreshed —
@@ -56,36 +51,15 @@ export interface SharedSessionStore {
   recordCall(scope: string, toolName: string, nowMs: number): Promise<boolean>
   /** The count including this trip, or `undefined` when unavailable. */
   incrReaskAttempt(scope: string, key: string): Promise<number | undefined>
-  close(): Promise<void>
-}
-
-export interface ValkeySessionStoreOptions {
-  timeoutMs?: number
 }
 
 export class ValkeySessionStore implements SharedSessionStore {
-  private readonly client: Redis
-  private readonly timeoutMs: number
-  private warned = false
-
-  constructor(url: string, opts: ValkeySessionStoreOptions = {}) {
-    this.timeoutMs = opts.timeoutMs ?? SHARED_WINDOW_TIMEOUT_MS
-    this.client = new Redis(url, {
-      lazyConnect: true,
-      // No offline queue: a command issued before the connection is up must
-      // fail now, not wait for a Valkey that may never answer.
-      enableOfflineQueue: false,
-      maxRetriesPerRequest: 1,
-      connectTimeout: 1000,
-      retryStrategy: (times) => Math.min(1000 * 2 ** Math.min(times, 5), 30_000),
-    })
-    this.client.on('error', (err: unknown) => this.warnOnce('Valkey session store unreachable', err))
-    void this.client.connect().catch((err: unknown) => this.warnOnce('Valkey session store connect failed', err))
-  }
+  /** The proxy's one Valkey connection, shared with its call budgets; the proxy closes it. */
+  constructor(private readonly valkey: GuardedValkey) {}
 
   async readWindow(scope: string, nowMs: number, windowMs: number): Promise<SharedWindowSnapshot | undefined> {
-    return this.guarded(async () => {
-      const results = await this.client
+    return this.valkey.run(async (client) => {
+      const results = await client
         .pipeline()
         .lrange(sessionKeys.tools(scope), 0, -1)
         .zcount(sessionKeys.calls(scope), nowMs - windowMs, '+inf')
@@ -98,10 +72,10 @@ export class ValkeySessionStore implements SharedSessionStore {
   }
 
   async recordCall(scope: string, toolName: string, nowMs: number): Promise<boolean> {
-    const done = await this.guarded(async () => {
+    const done = await this.valkey.run(async (client) => {
       const tools = sessionKeys.tools(scope)
       const calls = sessionKeys.calls(scope)
-      await this.client
+      await client
         .pipeline()
         .rpush(tools, toolName)
         .ltrim(tools, -TOOL_SEQUENCE_CAP, -1)
@@ -118,51 +92,11 @@ export class ValkeySessionStore implements SharedSessionStore {
   }
 
   async incrReaskAttempt(scope: string, key: string): Promise<number | undefined> {
-    return this.guarded(async () => {
+    return this.valkey.run(async (client) => {
       const k = sessionKeys.reask(scope, key)
-      const n = await this.client.incr(k)
-      if (n === 1) await this.client.expire(k, REASK_WINDOW_SECS)
+      const n = await client.incr(k)
+      if (n === 1) await client.expire(k, REASK_WINDOW_SECS)
       return n
     })
-  }
-
-  async close(): Promise<void> {
-    try {
-      await this.client.quit()
-    } catch {
-      this.client.disconnect()
-    }
-  }
-
-  /**
-   * The fail-open wrapper every operation goes through: nothing is attempted
-   * unless the client is connected, nothing waits longer than the timeout,
-   * and any failure is `undefined`.
-   */
-  private async guarded<T>(op: () => Promise<T>): Promise<T | undefined> {
-    if (this.client.status !== 'ready') return undefined
-    let timer: NodeJS.Timeout | undefined
-    const timeout = new Promise<undefined>((resolve) => {
-      timer = setTimeout(() => resolve(undefined), this.timeoutMs)
-      timer.unref()
-    })
-    try {
-      return await Promise.race([op(), timeout])
-    } catch (err) {
-      this.warnOnce('Valkey session store operation failed', err)
-      return undefined
-    } finally {
-      if (timer) clearTimeout(timer)
-    }
-  }
-
-  private warnOnce(msg: string, err: unknown): void {
-    const detail = { err: describeConnectionError(err) }
-    if (this.warned) {
-      log.debug(detail, msg)
-      return
-    }
-    this.warned = true
-    log.warn(detail, `${msg} — falling back to the per-process session window`)
   }
 }

@@ -370,6 +370,13 @@ pub struct DlpConfig {
     /// a bad regex is a named startup failure, never a panic at first scan.
     #[serde(default)]
     pub patterns: Vec<CustomDlpPattern>,
+    /// Action per built-in PII detector, by id (`pii.card`, `pii.iban`,
+    /// `pii.ssn`, `pii.email`, `pii.phone`): `off`, `redact` or `block`.
+    /// Unlisted detectors keep their defaults from `dlp/pii_detectors.json`;
+    /// an unknown id or action stops the proxy at boot
+    /// (`dlp::install_pii_actions`).
+    #[serde(default)]
+    pub detectors: std::collections::BTreeMap<String, String>,
     /// How many bytes of decoded response text the streaming forward loop
     /// lags behind the model, so that a secret split across two SSE deltas is
     /// seen whole before its first byte is forwarded.
@@ -425,6 +432,7 @@ impl Default for DlpConfig {
             scan_input: true,
             scan_output: true,
             patterns: Vec::new(),
+            detectors: std::collections::BTreeMap::new(),
             stream_holdback_bytes: None,
         }
     }

@@ -564,7 +564,7 @@ Classify tokens as USEFUL or WASTED.
 
 ## Route Catalog
 
-Every route the control plane serves: 384 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
+Every route the control plane serves: 393 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
 
 ### `app.ts` <Badge type="tip" text="Cloud" />
 
@@ -588,7 +588,7 @@ Every route the control plane serves: 384 routes, grouped by the source file tha
 | GET | `/api/v1/agents/:id` | Authenticated | one agent, its facets, posture, live sessions |
 | POST | `/api/v1/agents/:id/judge-score` | Authenticated |  |
 | GET | `/api/v1/agents/graph` | Authenticated | nodes + edges + posture for the viz |
-| POST | `/api/v1/agents/report` | Authenticated | daemon upserts an agent + facets (rescored) |
+| POST | `/api/v1/agents/report` | Authenticated | daemon upserts an agent + facets (rescored), or reports its machine's AI inventory |
 
 ### `anomaly.ts` <Badge type="tip" text="Cloud" />
 
@@ -667,7 +667,7 @@ Every route the control plane serves: 384 routes, grouped by the source file tha
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/api/v1/compliance/frameworks/:frameworkId/coverage` | Authenticated | Coverage of one framework (eu_ai_act, iso_42001, nist_ai_rmf) from the latest probe results; ?format=markdown for the readable report |
+| GET | `/api/v1/compliance/frameworks/:frameworkId/coverage` | Authenticated | Coverage of one framework (eu_ai_act, iso_42001, nist_ai_rmf, mitre_atlas) from the latest probe results; ?format=markdown, csv or pdf for the report as a file, unsigned (the evidence pack seals the signed copies) |
 | GET | `/api/v1/compliance/human-oversight-export` | OWNER/ADMIN | Export of plan decisions, plan deviations and review-hold decisions between from and to (default: the trailing 90 days), signed when the deployment has a signing key |
 | GET | `/api/v1/compliance/probes/history` | Authenticated |  |
 | GET | `/api/v1/compliance/probes/latest` | Authenticated |  |
@@ -887,6 +887,16 @@ Every route the control plane serves: 384 routes, grouped by the source file tha
 | GET | `/api/v1/workspaces/:workspaceId/optimization-recommendations` | Authenticated |  |
 | GET | `/api/v1/workspaces/:workspaceId/waste-patterns` | Authenticated |  |
 
+### `inventory.ts` <Badge type="tip" text="Cloud" />
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/v1/inventory/devices` | OWNER/ADMIN/EM; DEVELOPER (own machines) | One row per machine with its counts, last report and guard-probe result |
+| GET | `/api/v1/inventory/harnesses` | OWNER/ADMIN/EM; DEVELOPER (own machines) | Harnesses by machine with gate state and status; filter by status, harness, device and q, or download with format=csv |
+| GET | `/api/v1/inventory/mcp-servers` | OWNER/ADMIN/EM; DEVELOPER (own machines) | MCP servers by machine, wrapped by the MCP proxy or not; the same filters and CSV download |
+| GET | `/api/v1/inventory/skills` | OWNER/ADMIN/EM; DEVELOPER (own machines) | Skill bundles by machine, by name, source and hash; filter by device and q |
+| GET | `/api/v1/inventory/summary` | OWNER/ADMIN/EM; DEVELOPER (own machines) | Counts: machines, stale machines, harnesses, governed percentage, ungoverned harnesses and MCP servers, skills |
+
 ### `judge.ts` <Badge type="tip" text="Cloud" />
 
 | Method | Path | Auth | Description |
@@ -936,10 +946,10 @@ Every route the control plane serves: 384 routes, grouped by the source file tha
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/api/v1/mcp/servers` | Authenticated | Every MCP server seen, with its status, the tools a proxy last saw it declare and which are disabled, plus the workspace's default policy. |
+| GET | `/api/v1/mcp/servers` | Authenticated | Every MCP server seen, with its status, the tools a proxy last saw it declare and which are disabled, the latest scored change to its tool set, plus the workspace's default policy, its high-risk tool-change setting and its MCP call budgets. |
 | POST | `/api/v1/mcp/servers/:serverId/status` | OWNER/ADMIN | Approve, block, or return a server to the approval queue. |
 | POST | `/api/v1/mcp/servers/:serverId/tools` | OWNER/ADMIN | Switch one tool within a server on or off. |
-| POST | `/api/v1/mcp/servers/observe` | Authenticated | An MCP proxy reports the server it fronts and its tool names; a first sighting creates a candidate and sends mcp.server.candidate. |
+| POST | `/api/v1/mcp/servers/observe` | Authenticated | An MCP proxy reports the server it fronts, its tool names and their definitions; a first sighting creates a candidate and sends mcp.server.candidate, and changed definitions are scored for risk and recorded. |
 
 ### `members.ts` <Badge type="tip" text="Cloud" />
 
@@ -1292,10 +1302,14 @@ Every route the control plane serves: 384 routes, grouped by the source file tha
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
+| GET | `/api/v1/usage/branches` | Authenticated | Usage per repository and branch |
 | POST | `/api/v1/usage/classify` | Authenticated | Classify tokens as USEFUL or WASTED |
+| GET | `/api/v1/usage/commits` | Authenticated | Usage per HEAD commit |
 | GET | `/api/v1/usage/events` | Authenticated | Paginated raw execution trace events |
+| GET | `/api/v1/usage/members` | Authenticated | Per-developer usage (own row only below EM) |
 | GET | `/api/v1/usage/models` | Authenticated | Per-model cost breakdown |
 | GET | `/api/v1/usage/summary` | Authenticated | Aggregated usage summary by period |
+| GET | `/api/v1/usage/teams` | OWNER/ADMIN/EM | Per-team usage by SCIM group |
 | GET | `/api/v1/usage/virtual-keys` | Authenticated | Per-virtual-key cost breakdown (Wave 9) |
 
 ### `users.ts` <Badge type="tip" text="Cloud" />

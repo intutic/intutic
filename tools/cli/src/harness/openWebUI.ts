@@ -14,10 +14,7 @@
  * @module
  */
 
-import { join } from 'node:path'
-import { homedir } from 'node:os'
 import { HarnessType } from '@intutic/shared-types'
-import type { SyncSopEntry } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
 import { loadCredentials } from '../config/store.js'
 import { writeOpenWebuiHooks } from '@intutic/sync-daemon'
@@ -30,10 +27,14 @@ export const openWebUIAdapter: IHarnessAdapter = {
     return false
   },
 
-  async writeConfig(workspaceRoot: string, _sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
+  async installGate(workspaceRoot: string, proxyUrl: string): Promise<void> {
     const creds = await loadCredentials()
     await writeOpenWebuiHooks(workspaceRoot, proxyUrl, creds?.workspaceId || 'local')
-    return join(homedir(), '.open-webui', 'intutic-governance-filter.py')
+  },
+
+  /** No rules file: the filter an admin installs is this harness's governance. */
+  async writeConfig(): Promise<string | null> {
+    return null
   },
 
   async readCurrentHash(): Promise<string | null> {

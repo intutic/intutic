@@ -123,6 +123,22 @@ exit 0
 `
 }
 
+/**
+ * The `BeforeTool` entry that registers the gate: a catch-all matcher, since
+ * the gate decides from the arguments and a tool name nobody anticipated is
+ * still evaluated. Shared with the MDM manifest, so the two cannot drift.
+ */
+export function buildGeminiBeforeToolEntry(hookScriptPath: string): Record<string, unknown> {
+  return {
+    matcher: '.*',
+    hooks: [{ name: 'intutic-governance', type: 'command', command: geminiGateCommand(hookScriptPath) }],
+  }
+}
+
+function geminiGateCommand(hookScriptPath: string): string {
+  return `bash ${JSON.stringify(hookScriptPath)}`
+}
+
 // ─── Main export ──────────────────────────────────────────────────────────────
 
 /**
@@ -181,7 +197,7 @@ export async function writeAntigravityHooks(
 
   // De-duplicated by command, so repeated syncs replace this entry rather than
   // stacking copies, and every hook the user registered is kept.
-  const intuticCmd = `bash ${JSON.stringify(hookScriptPath)}`
+  const intuticCmd = geminiGateCommand(hookScriptPath)
   const filtered = existingBeforeTool.filter((entry: unknown) => {
     if (typeof entry !== 'object' || entry === null) return true
     const inner = ((entry as Record<string, unknown>).hooks as unknown[]) ?? []
@@ -195,15 +211,7 @@ export async function writeAntigravityHooks(
     ...existingSettings,
     hooks: {
       ...keptHooks,
-      BeforeTool: [
-        ...filtered,
-        {
-          // Catch-all: the gate decides from the arguments, so a tool name
-          // nobody anticipated is still evaluated.
-          matcher: '.*',
-          hooks: [{ name: 'intutic-governance', type: 'command', command: intuticCmd }],
-        },
-      ],
+      BeforeTool: [...filtered, buildGeminiBeforeToolEntry(hookScriptPath)],
     },
   }
 

@@ -35,10 +35,10 @@ import type { SyncSopEntry } from '@intutic/shared-types'
 import {
   DisconnectPlan,
   injectMcpServer,
+  keepOriginal,
   noteProxyUrl,
   planDisconnect,
   updatePreToolUseHooks,
-  writeClaudeDesktopHooks,
 } from '@intutic/sync-daemon'
 import { getAdapter } from '../harness/detector.js'
 import { planN8nDisconnect } from '../harness/n8n.js'
@@ -143,6 +143,7 @@ async function connectHarness(harness: string): Promise<void> {
   await noteProxyUrl(PROXY)
   const adapter = getAdapter(harness)
   if (!adapter) throw new Error(`no adapter for ${harness}`)
+  await adapter.installGate?.(ws, PROXY)
   await adapter.writeConfig(ws, SOPS, PROXY)
   await injectMcpServer(ws, 'ws_test')
 }
@@ -188,10 +189,6 @@ const CASES: Case[] = [
   {
     harness: 'claude-desktop',
     seed: () => put(appSupport('Claude', 'claude_desktop_config.json'), { globalShortcut: 'x', mcpServers: { fs: { command: 'npx', args: ['fs-mcp'] } } }),
-    connect: async () => {
-      await writeClaudeDesktopHooks(ws, PROXY, 'ws_test')
-      await injectMcpServer(ws, 'ws_test')
-    },
     edit: () => editJson(appSupport('Claude', 'claude_desktop_config.json'), (d) => { d.theme = 'dark' }),
   },
   {
@@ -296,6 +293,10 @@ const CASES: Case[] = [
     seed: () =>
       put(join(ws, 'config.toml'), '[llm]\nmodel = "anthropic/claude-sonnet"\nbase_url = "https://my.gateway/v1"\n\n[core]\nworkspace_base = "./"\n'),
     edit: () => editText(join(ws, 'config.toml'), 'workspace_base = "./"', 'workspace_base = "./src"'),
+    connected: async () => {
+      expect(await fs.readFile(join(ws, '.openhands', 'microagents', 'intutic-governance.md'), 'utf-8')).toContain('Never print a secret.')
+      expect(await fs.readFile(join(ws, 'config.toml'), 'utf-8')).not.toContain('[intutic]')
+    },
   },
   {
     // `base_url` is set in `[llm]` only: an earlier text edit rewrote the
@@ -324,6 +325,55 @@ const CASES: Case[] = [
       })
     },
     edit: () => editJson(join(home, '.gemini', 'settings.json'), (d) => { d.theme = 'light' }),
+    connected: async () => {
+      const hooks = JSON.parse(await fs.readFile(join(home, '.gemini', 'config', 'hooks.json'), 'utf-8'))
+      expect(hooks['intutic-governance'].PreToolUse[0].hooks[0].command).toContain('antigravity-cli-check.js')
+    },
+  },
+  {
+    harness: 'antigravity',
+    name: 'antigravity, with a GEMINI.md of the user\'s own',
+    seed: async () => {
+      await put(join(ws, 'GEMINI.md'), '# Project notes\n\nPrefer small diffs.\n')
+      await put(join(ws, '.gemini', 'settings.json'), { theme: 'dark' })
+    },
+    edit: () => editText(join(ws, 'GEMINI.md'), 'Prefer small diffs.', 'Prefer large diffs.'),
+    connected: async () => {
+      const gemini = await fs.readFile(join(ws, 'GEMINI.md'), 'utf-8')
+      expect(gemini).toMatch(/^# Project notes\n\nPrefer small diffs\.\n\n<!-- INTUTIC:RULES:START -->\n[\s\S]*Never print a secret\.[\s\S]*<!-- INTUTIC:RULES:END -->\n$/)
+      expect(JSON.parse(await fs.readFile(join(ws, '.gemini', 'settings.json'), 'utf-8'))).toEqual({ theme: 'dark' })
+    },
+  },
+  {
+    harness: 'antigravity',
+    name: 'antigravity, with a GEMINI.md that has no final line break',
+    seed: () => put(join(ws, 'GEMINI.md'), '# Project notes\n\nPrefer small diffs.'),
+    edit: () => editText(join(ws, 'GEMINI.md'), 'Prefer small diffs.', 'Prefer large diffs.'),
+  },
+  ...[true, false].map((recorded): Case => ({
+    // Earlier versions put the rules in `customInstructions`, which neither
+    // Gemini CLI nor Antigravity reads; disconnect still takes the key out.
+    harness: 'antigravity',
+    name: `antigravity, rules an earlier version left in .gemini/settings.json (${recorded ? 'with' : 'without'} the original kept)`,
+    seed: () => put(join(ws, '.gemini', 'settings.json'), { theme: 'dark' }),
+    connect: async () => {
+      const settings = join(ws, '.gemini', 'settings.json')
+      if (recorded) await keepOriginal(settings, ws)
+      await editJson(settings, (d) => { d.customInstructions = '# Intutic Governance Rules (auto-generated)\n\n## No secrets' })
+      await connectHarness('antigravity')
+    },
+    edit: () => editJson(join(ws, '.gemini', 'settings.json'), (d) => { d.theme = 'light' }),
+  })),
+  {
+    harness: 'antigravity',
+    name: 'antigravity, with hooks of the user\'s own in Antigravity\'s hooks file',
+    seed: () =>
+      put(join(home, '.gemini', 'config', 'hooks.json'), {
+        'my-linter': { PostToolUse: [{ matcher: 'run_command', hooks: [{ type: 'command', command: './lint.sh' }] }] },
+      }),
+    edit: () => editJson(join(home, '.gemini', 'config', 'hooks.json'), (d) => {
+      d.reminder = { PreInvocation: [{ type: 'command', command: './remind.sh' }] }
+    }),
   },
   {
     harness: 'continue',

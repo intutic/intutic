@@ -1,0 +1,1033 @@
+{
+  "$comment": "Conformance vectors for the PII detectors in packages/proxy/src/dlp/pii_detectors.json. Run by packages/proxy/tests/pii_conformance_test.rs and packages/mcp-proxy/src/__tests__/dlpPii.test.ts. Each input is `parts` joined; each expected match is the join of parts[from..=to]. Values are split across parts so that no part is itself card-, IBAN-, SSN-, email- or phone-shaped. Card numbers are the brands' published test PANs and IBANs are the registry's examples. Expected matches are listed in definition order (card, iban, ssn, email, phone), then text order, with every detector enabled.",
+  "cases": [
+    {
+      "name": "Visa test PAN, space-grouped",
+      "parts": [
+        "card ",
+        "4111 1111",
+        " 1111 1111",
+        " exp 12/29"
+      ],
+      "expect": [
+        {
+          "id": "pii.card",
+          "parts": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Visa test PAN, contiguous",
+      "parts": [
+        "pan=",
+        "41111111",
+        "11111111",
+        ";"
+      ],
+      "expect": [
+        {
+          "id": "pii.card",
+          "parts": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Visa test PAN, dash-grouped",
+      "parts": [
+        "",
+        "4111-1111-",
+        "1111-1111",
+        ""
+      ],
+      "expect": [
+        {
+          "id": "pii.card",
+          "parts": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Visa 13-digit test PAN",
+      "parts": [
+        "n ",
+        "422222",
+        "2222222",
+        " ok"
+      ],
+      "expect": [
+        {
+          "id": "pii.card",
+          "parts": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Mastercard test PAN",
+      "parts": [
+        "mc ",
+        "5555 5555 ",
+        "5555 4444"
+      ],
+      "expect": [
+        {
+          "id": "pii.card",
+          "parts": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Mastercard 2-series test PAN",
+      "parts": [
+        "mc2 ",
+        "2223 0031 ",
+        "2200 3222"
+      ],
+      "expect": [
+        {
+          "id": "pii.card",
+          "parts": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Amex test PAN, 4-6-5",
+      "parts": [
+        "amex ",
+        "3782 8224",
+        "63 10005"
+      ],
+      "expect": [
+        {
+          "id": "pii.card",
+          "parts": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Discover test PAN",
+      "parts": [
+        "",
+        "6011 1111 ",
+        "1111 1117"
+      ],
+      "expect": [
+        {
+          "id": "pii.card",
+          "parts": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "JCB test PAN",
+      "parts": [
+        "jcb ",
+        "3530 1113 ",
+        "3330 0000"
+      ],
+      "expect": [
+        {
+          "id": "pii.card",
+          "parts": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Diners test PAN, 4-6-4",
+      "parts": [
+        "diners ",
+        "3056 9309",
+        "02 5904"
+      ],
+      "expect": [
+        {
+          "id": "pii.card",
+          "parts": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "UnionPay test PAN",
+      "parts": [
+        "up ",
+        "6200 0000 ",
+        "0000 0005"
+      ],
+      "expect": [
+        {
+          "id": "pii.card",
+          "parts": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Luhn failure is not a card",
+      "parts": [
+        "card ",
+        "4111 1111 ",
+        "1111 1112"
+      ],
+      "expect": []
+    },
+    {
+      "name": "Luhn-valid with no known IIN is not a card",
+      "parts": [
+        "id ",
+        "1111 1111 ",
+        "1111 1117"
+      ],
+      "expect": []
+    },
+    {
+      "name": "Amex prefix at a length Amex never issues",
+      "parts": [
+        "",
+        "3711 1111 ",
+        "1111 1117"
+      ],
+      "expect": []
+    },
+    {
+      "name": "decimal fraction is not a card",
+      "parts": [
+        "x = 0.",
+        "41111111",
+        "11111111"
+      ],
+      "expect": []
+    },
+    {
+      "name": "integer part of a decimal is not a card",
+      "parts": [
+        "",
+        "41111111",
+        "11111111",
+        ".5"
+      ],
+      "expect": []
+    },
+    {
+      "name": "fifth dash group makes it a serial",
+      "parts": [
+        "key ",
+        "4111-1111-",
+        "1111-1111",
+        "-2222"
+      ],
+      "expect": []
+    },
+    {
+      "name": "inside an identifier",
+      "parts": [
+        "order_",
+        "41111111",
+        "11111111"
+      ],
+      "expect": []
+    },
+    {
+      "name": "longer digit run",
+      "parts": [
+        "",
+        "41111111",
+        "11111111",
+        "1111"
+      ],
+      "expect": []
+    },
+    {
+      "name": "after a JSON-escaped newline",
+      "parts": [
+        "Refund\\n",
+        "4111 1111 ",
+        "1111 1111",
+        "\\nthanks"
+      ],
+      "expect": [
+        {
+          "id": "pii.card",
+          "parts": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "card then CVV",
+      "parts": [
+        "",
+        "4111 1111 ",
+        "1111 1111",
+        " 123"
+      ],
+      "expect": [
+        {
+          "id": "pii.card",
+          "parts": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "number before the card does not hide it",
+      "parts": [
+        "12 ",
+        "4111 1111 ",
+        "1111 1111"
+      ],
+      "expect": [
+        {
+          "id": "pii.card",
+          "parts": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "comma-separated cards",
+      "parts": [
+        "",
+        "41111111",
+        "11111111",
+        ",",
+        "55555555",
+        "55554444"
+      ],
+      "expect": [
+        {
+          "id": "pii.card",
+          "parts": [
+            1,
+            2
+          ]
+        },
+        {
+          "id": "pii.card",
+          "parts": [
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "name": "non-ASCII neighbour is a boundary",
+      "parts": [
+        "卡号",
+        "41111111",
+        "11111111",
+        "。"
+      ],
+      "expect": [
+        {
+          "id": "pii.card",
+          "parts": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "JSON value",
+      "parts": [
+        "{\"pan\":\"",
+        "4012 8888 ",
+        "8888 1881",
+        "\"}"
+      ],
+      "expect": [
+        {
+          "id": "pii.card",
+          "parts": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "GB IBAN, printed",
+      "parts": [
+        "IBAN: ",
+        "GB82 WEST ",
+        "1234 5698 7654 32",
+        "."
+      ],
+      "expect": [
+        {
+          "id": "pii.iban",
+          "parts": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "GB IBAN, electronic",
+      "parts": [
+        "",
+        "GB82WEST",
+        "12345698765432",
+        ""
+      ],
+      "expect": [
+        {
+          "id": "pii.iban",
+          "parts": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "DE IBAN",
+      "parts": [
+        "to ",
+        "DE89 3704 0044 ",
+        "0532 0130 00"
+      ],
+      "expect": [
+        {
+          "id": "pii.iban",
+          "parts": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "FR IBAN with a letter in the BBAN",
+      "parts": [
+        "",
+        "FR14 2004 1010 0505 ",
+        "0001 3M02 606"
+      ],
+      "expect": [
+        {
+          "id": "pii.iban",
+          "parts": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "NO IBAN, the shortest",
+      "parts": [
+        "",
+        "NO93 8601 ",
+        "1117 947"
+      ],
+      "expect": [
+        {
+          "id": "pii.iban",
+          "parts": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "NL IBAN",
+      "parts": [
+        "",
+        "NL91 ABNA ",
+        "0417 1643 00"
+      ],
+      "expect": [
+        {
+          "id": "pii.iban",
+          "parts": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "CH IBAN",
+      "parts": [
+        "",
+        "CH93 0076 2011 ",
+        "6238 5295 7"
+      ],
+      "expect": [
+        {
+          "id": "pii.iban",
+          "parts": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "greedy match truncated to the country length",
+      "parts": [
+        "",
+        "GB82 WEST ",
+        "1234 5698 7654 32",
+        " EUR"
+      ],
+      "expect": [
+        {
+          "id": "pii.iban",
+          "parts": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "wrong check digits",
+      "parts": [
+        "",
+        "GB83 WEST ",
+        "1234 5698 7654 32"
+      ],
+      "expect": []
+    },
+    {
+      "name": "one character short",
+      "parts": [
+        "",
+        "GB82 WEST ",
+        "1234 5698 7654 3"
+      ],
+      "expect": []
+    },
+    {
+      "name": "a character glued on",
+      "parts": [
+        "",
+        "GB82WEST",
+        "12345698765432",
+        "1"
+      ],
+      "expect": []
+    },
+    {
+      "name": "unknown country",
+      "parts": [
+        "",
+        "XX82 WEST ",
+        "1234 5698 7654 32"
+      ],
+      "expect": []
+    },
+    {
+      "name": "lowercase is not matched",
+      "parts": [
+        "",
+        "gb82 west ",
+        "1234 5698 7654 32"
+      ],
+      "expect": []
+    },
+    {
+      "name": "inside an identifier",
+      "parts": [
+        "ref",
+        "GB82WEST",
+        "12345698765432"
+      ],
+      "expect": []
+    },
+    {
+      "name": "SSN",
+      "parts": [
+        "SSN: ",
+        "123-45",
+        "-6789"
+      ],
+      "expect": [
+        {
+          "id": "pii.ssn",
+          "parts": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "SSN after a JSON-escaped newline",
+      "parts": [
+        "SSN:\\n",
+        "123-45",
+        "-6789"
+      ],
+      "expect": [
+        {
+          "id": "pii.ssn",
+          "parts": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "area 000 is never issued",
+      "parts": [
+        "",
+        "000-12",
+        "-3456"
+      ],
+      "expect": []
+    },
+    {
+      "name": "area 666 is never issued",
+      "parts": [
+        "",
+        "666-12",
+        "-3456"
+      ],
+      "expect": []
+    },
+    {
+      "name": "area 9xx is never issued",
+      "parts": [
+        "",
+        "912-34",
+        "-5678"
+      ],
+      "expect": []
+    },
+    {
+      "name": "group 00 is never issued",
+      "parts": [
+        "",
+        "123-00",
+        "-4567"
+      ],
+      "expect": []
+    },
+    {
+      "name": "serial 0000 is never issued",
+      "parts": [
+        "",
+        "123-45",
+        "-0000"
+      ],
+      "expect": []
+    },
+    {
+      "name": "glued to a preceding number",
+      "parts": [
+        "2024-",
+        "123-45",
+        "-6789"
+      ],
+      "expect": []
+    },
+    {
+      "name": "glued to a following number",
+      "parts": [
+        "",
+        "123-45",
+        "-6789",
+        "-01"
+      ],
+      "expect": []
+    },
+    {
+      "name": "email",
+      "parts": [
+        "mail ",
+        "jane.doe",
+        "@example.com",
+        " today"
+      ],
+      "expect": [
+        {
+          "id": "pii.email",
+          "parts": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "email in angle brackets, multi-label domain",
+      "parts": [
+        "Jane <",
+        "jane",
+        "@corp.co.uk",
+        ">"
+      ],
+      "expect": [
+        {
+          "id": "pii.email",
+          "parts": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "email after a JSON-escaped newline",
+      "parts": [
+        "to:\\n",
+        "john",
+        "@example.org"
+      ],
+      "expect": [
+        {
+          "id": "pii.email",
+          "parts": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "leading dot is not part of the address",
+      "parts": [
+        ".",
+        "jane",
+        "@example.com"
+      ],
+      "expect": [
+        {
+          "id": "pii.email",
+          "parts": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "SSH remote matches: the user part is an address shape",
+      "parts": [
+        "",
+        "git",
+        "@github.com",
+        ":org/repo.git"
+      ],
+      "expect": [
+        {
+          "id": "pii.email",
+          "parts": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "npm version spec",
+      "parts": [
+        "",
+        "react",
+        "@18.3.1"
+      ],
+      "expect": []
+    },
+    {
+      "name": "asset scale suffix",
+      "parts": [
+        "",
+        "icon",
+        "@2x.png"
+      ],
+      "expect": []
+    },
+    {
+      "name": "no dot in the domain",
+      "parts": [
+        "",
+        "user",
+        "@localhost"
+      ],
+      "expect": []
+    },
+    {
+      "name": "numeric TLD",
+      "parts": [
+        "",
+        "user",
+        "@10.0.0.1"
+      ],
+      "expect": []
+    },
+    {
+      "name": "E.164 with spaces",
+      "parts": [
+        "call ",
+        "+44 20 ",
+        "7946 0958"
+      ],
+      "expect": [
+        {
+          "id": "pii.phone",
+          "parts": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "E.164 with an area code in parentheses",
+      "parts": [
+        "",
+        "+1 (415) ",
+        "555-0100"
+      ],
+      "expect": [
+        {
+          "id": "pii.phone",
+          "parts": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "E.164 contiguous",
+      "parts": [
+        "tel:",
+        "+1415",
+        "5550100"
+      ],
+      "expect": [
+        {
+          "id": "pii.phone",
+          "parts": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "NANP with parentheses",
+      "parts": [
+        "",
+        "(415) ",
+        "555-0100"
+      ],
+      "expect": [
+        {
+          "id": "pii.phone",
+          "parts": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "NANP with dashes",
+      "parts": [
+        "",
+        "415-555",
+        "-0100"
+      ],
+      "expect": [
+        {
+          "id": "pii.phone",
+          "parts": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "NANP with dots",
+      "parts": [
+        "",
+        "415.555",
+        ".0100"
+      ],
+      "expect": [
+        {
+          "id": "pii.phone",
+          "parts": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "NANP with a leading 1",
+      "parts": [
+        "",
+        "1-415-555",
+        "-0100"
+      ],
+      "expect": [
+        {
+          "id": "pii.phone",
+          "parts": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "no separators and no plus",
+      "parts": [
+        "",
+        "41555",
+        "50100"
+      ],
+      "expect": []
+    },
+    {
+      "name": "too few digits",
+      "parts": [
+        "",
+        "+12",
+        "345"
+      ],
+      "expect": []
+    },
+    {
+      "name": "exchange cannot start with 1",
+      "parts": [
+        "",
+        "415-155",
+        "-0100"
+      ],
+      "expect": []
+    },
+    {
+      "name": "ISO date and time",
+      "parts": [
+        "",
+        "2026-10-08 ",
+        "12:34:56"
+      ],
+      "expect": []
+    },
+    {
+      "name": "IPv4 address",
+      "parts": [
+        "",
+        "192.168.",
+        "100.200"
+      ],
+      "expect": []
+    },
+    {
+      "name": "one of each, reported in definition order",
+      "parts": [
+        "card ",
+        "4111 1111 ",
+        "1111 1111",
+        ", iban ",
+        "GB82 WEST ",
+        "1234 5698 7654 32",
+        ", ssn ",
+        "123-45",
+        "-6789",
+        ", mail ",
+        "jane",
+        "@example.com",
+        ", tel ",
+        "+44 20 ",
+        "7946 0958"
+      ],
+      "expect": [
+        {
+          "id": "pii.card",
+          "parts": [
+            1,
+            2
+          ]
+        },
+        {
+          "id": "pii.iban",
+          "parts": [
+            4,
+            5
+          ]
+        },
+        {
+          "id": "pii.ssn",
+          "parts": [
+            7,
+            8
+          ]
+        },
+        {
+          "id": "pii.email",
+          "parts": [
+            10,
+            11
+          ]
+        },
+        {
+          "id": "pii.phone",
+          "parts": [
+            13,
+            14
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ordinary technical text",
+      "parts": [
+        "commit ",
+        "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b",
+        " uuid 550e8400-e29b-41d4-a716-446655440000 at 2026-10-08T12:34:56.789Z, v1.24.3, port 8080, pid 48213, 1728380000000 ms"
+      ],
+      "expect": []
+    }
+  ]
+}

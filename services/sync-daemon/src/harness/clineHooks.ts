@@ -111,11 +111,12 @@ export async function writeClineHooks(
   workspaceId = '',
 ): Promise<string | null> {
   await removeLegacyRegistration(workspaceRoot)
-  if (!(await ensureClinerulesDirectory(workspaceRoot))) return null
-
   const hooksDir = path.join(workspaceRoot, '.clinerules', 'hooks')
   const checkScriptPath = path.join(hooksDir, 'PreToolUse')
+  // Kept before `.clinerules` is created, so disconnect knows it made the
+  // directory: the gate is installed before any rules file is written.
   await keepOriginal(checkScriptPath, workspaceRoot)
+  if (!(await ensureClinerulesDirectory(workspaceRoot))) return null
   await fs.mkdir(hooksDir, { recursive: true })
 
   try {

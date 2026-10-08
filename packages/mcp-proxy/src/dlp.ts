@@ -4,8 +4,18 @@
  * Scans tool arguments for patterns that indicate credentials, secrets, PII,
  * or destructive commands before allowing the tool call to proceed.
  *
+ * PII is the checksum-validated detectors in `dlpPii.ts`, shared with the
+ * Rust proxy: card numbers, IBANs and SSNs on by default, email addresses and
+ * phone numbers off. `INTUTIC_MCP_DLP_DETECTORS` sets each one's action.
+ * Arguments are never rewritten, so any enabled detector — `redact` or
+ * `block` — blocks the call on the way in; on results both redact.
+ *
  * @module
  */
+
+import { PII_DETECTORS, findPii, resolvePiiActions } from './dlpPii.js'
+import type { PiiDetector } from './dlpPii.js'
+import { createStderrLogger } from './stderrLog.js'
 
 export interface DlpFinding {
   pattern: string
@@ -55,11 +65,6 @@ const DLP_PATTERNS: Array<{ regex: RegExp; description: string; redactable: bool
   { regex: /xoxb-[A-Za-z0-9-]{50,}/, description: 'Slack bot token', redactable: true },
   { regex: /xoxp-[A-Za-z0-9-]{50,}/, description: 'Slack user token', redactable: true },
   { regex: /AKIA[A-Z0-9]{16}/, description: 'AWS Access Key ID', redactable: true },
-  // PII. The Rust proxy's dlp.rs has carried an SSN pattern from the start;
-  // this scanner had none, so a tool result carrying one streamed into the
-  // agent's context unremarked. Same shape dlp.rs uses: grouped digits only —
-  // a bare 9-digit run matches phone numbers and IDs far too often.
-  { regex: /\b\d{3}-\d{2}-\d{4}\b/, description: 'US Social Security Number', redactable: true },
   // High-entropy strings that look like secrets (≥40 chars of hex or base64)
   { regex: /[0-9a-f]{40,}/, description: 'High-entropy hex string (possible secret)', redactable: true },
   // Destructive commands — input-only, and matched against each decoded
@@ -112,6 +117,22 @@ function allPatterns(): Array<{ regex: RegExp; description: string; redactable: 
   return dynamicPatterns.length ? [...DLP_PATTERNS, ...dynamicPatterns] : DLP_PATTERNS
 }
 
+let enabledPii: readonly PiiDetector[] = []
+
+/**
+ * Set the PII detectors' actions from an `INTUTIC_MCP_DLP_DETECTORS` value.
+ * Runs once at load from the environment; exported for tests. Returns the
+ * problems it ignored, which are also logged.
+ */
+export function configurePii(raw: string | undefined): string[] {
+  const { actions, problems } = resolvePiiActions(raw)
+  enabledPii = PII_DETECTORS.filter((d) => actions.get(d.id) !== 'off')
+  if (problems.length) createStderrLogger('mcp-proxy-dlp').warn({ problems }, 'DLP: PII detector settings ignored')
+  return problems
+}
+
+configurePii(process.env['INTUTIC_MCP_DLP_DETECTORS'])
+
 /**
  * Redact every redactable-pattern match in a string.
  *
@@ -129,6 +150,16 @@ export function redactText(text: string): { redacted: string; findings: DlpFindi
     if (global.test(redacted)) {
       findings.push({ pattern: regex.source, description })
       redacted = redacted.replace(global, '[REDACTED_SECRET]')
+    }
+  }
+  // PII after the secret patterns, with the Rust proxy's placeholder for the
+  // category. Spans are replaced back to front so earlier ones stay valid.
+  for (const det of enabledPii) {
+    const spans = findPii(det, redacted)
+    if (!spans.length) continue
+    findings.push({ pattern: det.id, description: det.description })
+    for (const [start, end] of spans.reverse()) {
+      redacted = redacted.slice(0, start) + '[REDACTED_PII]' + redacted.slice(end)
     }
   }
   return { redacted, findings }
@@ -178,6 +209,9 @@ export function scanToolInput(toolInput: unknown): DlpScanResult {
     if (hit) {
       findings.push({ pattern: regex.source, description })
     }
+  }
+  for (const det of enabledPii) {
+    if (findPii(det, serialized).length) findings.push({ pattern: det.id, description: det.description })
   }
 
   return { hasFinding: findings.length > 0, findings }

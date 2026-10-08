@@ -28,17 +28,21 @@ function buildHeader(): string {
 }
 
 /**
- * Build markdown content from SOPs (Cursor, Claude Code, Windsurf). Each SOP
- * the control plane synced ends with its `sop://` pointer comment, which maps
- * the rules in the file back to the SOP that produced them.
+ * One markdown section per SOP. Each SOP the control plane synced ends with
+ * its `sop://` pointer comment, which maps the rules in the file back to the
+ * SOP that produced them.
  */
+export function buildSopSections(sops: SyncSopEntry[]): string {
+  return sops
+    .map((sop) => `## ${sop.title}\n\n${sop.content}${sop.sopRef ? `\n${sop.sopRef}` : ''}`)
+    .join('\n\n---\n\n')
+}
+
+/** Build markdown content from SOPs (Cursor, Claude Code, Windsurf). */
 export function buildMarkdownContent(sops: SyncSopEntry[], proxyUrl: string): string {
   const header = buildHeader()
   const proxySection = `> **Proxy URL:** \`${proxyUrl}\`\n\n`
-  const sopSections = sops
-    .map((sop) => `## ${sop.title}\n\n${sop.content}${sop.sopRef ? `\n${sop.sopRef}` : ''}`)
-    .join('\n\n---\n\n')
-  return header + proxySection + sopSections + '\n'
+  return header + proxySection + buildSopSections(sops) + '\n'
 }
 
 /**

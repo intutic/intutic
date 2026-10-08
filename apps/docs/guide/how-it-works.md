@@ -38,9 +38,9 @@ Every LLM request from your agents flows through the Intutic proxy. The proxy is
 | Claude Code | `CLAUDE.md` | Markdown rules + PreToolUse hooks.json |
 | Windsurf | `.windsurfrules` | Markdown rules + Cascade settings.json HTTP proxy |
 | Aider | `.aider.conf.yml` | `extra-instructions` YAML field |
-| Antigravity | `.gemini/settings.json` | `customInstructions` JSON field |
+| Antigravity | `GEMINI.md` | Marked markdown section + PreToolUse / BeforeTool hooks |
 | Codex | `.env.intutic` | `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` env vars |
-| OpenHands | `config.toml` | `[llm] base_url` and an `[intutic]` table, merged into the file |
+| OpenHands | `.openhands/microagents/intutic-governance.md` | Always-on microagent + `[llm] base_url` merged into `config.toml` |
 | n8n | `.intutic/n8n/governance-workflow.json` | Workflow parameters via n8n REST API |
 | Cline | `.cline/hooks/hooks.json` | PreToolUse hooks + apiBase injection |
 | Roo Code | `.roorules` | Markdown rules + cancel hooks |

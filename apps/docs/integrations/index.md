@@ -11,7 +11,7 @@ Intutic supports **43 AI agent harnesses** out of the box. Run `intutic init` in
 intutic init
 #   ✔ cursor → .cursorrules
 #   ✔ claude-code → CLAUDE.md
-#   ✔ antigravity → .gemini/settings.json
+#   ✔ antigravity → GEMINI.md
 #   ○ windsurf (not detected)
 #   …
 ```
@@ -41,7 +41,7 @@ Terminal-based agents that accept proxy environment variables or config files.
 | [**Claude Code**](/integrations/claude-code) | Anthropic's agentic coding tool | `CLAUDE.md` |
 | [**Aider**](/integrations/aider) | AI pair programming CLI | `.aider.conf.yml` |
 | [**Codex**](/integrations/codex) | OpenAI's autonomous coding agent | `.env.intutic` + `~/.codex/config.toml` + `.codex/hooks.json` |
-| [**Antigravity**](/integrations/antigravity) | Google's Gemini AI coding agent | `.gemini/settings.json` + `~/.gemini/settings.json` (gate) |
+| [**Antigravity and Gemini CLI**](/integrations/antigravity) | Google Antigravity (app, IDE, CLI) and Gemini CLI | `.gemini/settings.json` + `~/.gemini/config/hooks.json` and `~/.gemini/settings.json` (gates) |
 | [**Grok Build**](/integrations/grok) | xAI's terminal coding agent | `AGENTS.md` |
 | [**OpenCode**](/integrations/opencode) | Open-source terminal coding agent (`opencode-ai` 1.x, `@opencode/cli` 2.x); gated by a plugin loaded into its own process | `AGENTS.md` + `.opencode/plugins/intutic-governance.js` |
 | [**Muse Code**](/integrations/muse-code) | Meta's beta terminal coding agent (model Muse Spark) | `AGENTS.md` |
@@ -161,7 +161,7 @@ All harnesses share the same integration flow:
 
 ## What writes harness files
 
-Only `intutic connect` writes harness files. On each config sync it writes, for every harness recorded in `~/.intutic/config.json`, the files that harness's page lists — **if at least one SOP targets that harness**: a synced SOP whose targets include it, or any local SOP under `.intutic/sops/`, which targets every recorded harness. A harness no SOP targets is left alone. Hooks, rules and proxy routing are written together, so a gate is in place as soon as a harness has rules.
+Only `intutic connect` writes harness files. On each config sync, for every harness recorded in `~/.intutic/config.json`, it installs the gate and the proxy routing that harness's page lists, whether or not any SOP targets it: the gate enforces the built-in protections, the destructive-command tier, group rules and holds, none of which needs an SOP. The harness's rules file is written when **at least one SOP targets that harness**: a synced SOP whose targets include it, or any local SOP under `.intutic/sops/`, which targets every recorded harness.
 
 To govern a harness `intutic init` did not detect, add its id (the harness type, e.g. `"codex"`) to the `harnesses` list in `~/.intutic/config.json` and restart `intutic connect`.
 

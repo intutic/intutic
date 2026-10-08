@@ -1,11 +1,11 @@
 ---
 title: Framework Mapping
-description: How Intutic's compliance probes, records and controls map to the EU AI Act, ISO/IEC 42001 and the NIST AI RMF, with live coverage, a report in the evidence pack, and an Article 14 human-oversight export.
+description: How Intutic's compliance probes, records and controls map to the EU AI Act, ISO/IEC 42001, the NIST AI RMF and MITRE ATLAS, with live coverage, Markdown, CSV and PDF reports, copies in the evidence pack, and an Article 14 human-oversight export.
 ---
 
 # Framework Mapping <Badge type="tip" text="Cloud" />
 
-Intutic maps the evidence it already produces to three AI governance frameworks: the **EU AI Act**, **ISO/IEC 42001** and the **NIST AI RMF**. The [compliance probes](/guide/compliance-evidence) are one kind of evidence; the others are records you can export (traces, incidents, plan and hold decisions) and controls the product enforces (the pre-execution gate, plan approval, trace retention).
+Intutic maps the evidence it already produces to three AI governance frameworks, the **EU AI Act**, **ISO/IEC 42001** and the **NIST AI RMF**, and to **MITRE ATLAS**, the catalog of adversary techniques against AI systems and the mitigations for them. The [compliance probes](/guide/compliance-evidence) are one kind of evidence; the others are records you can export (traces, incidents, plan and hold decisions) and controls the product enforces (the pre-execution gate, plan approval, trace retention).
 
 The mapping supports an assessment; it is not a certification. A control is mapped only where Intutic's evidence bears on it, and most mappings are **partial**: each one states what its evidence does not reach.
 
@@ -25,8 +25,11 @@ Controls with no mapped evidence stay in the catalog, so a coverage report shows
 | EU AI Act, Regulation (EU) 2024/1689 | 27 paragraphs of Articles 9, 12, 13, 14, 15, 19 and 26 that apply to providers and deployers of agentic systems | 14, all partial |
 | ISO/IEC 42001:2023 | All 38 Annex A controls | 7, all partial |
 | NIST AI RMF 1.0 (NIST AI 100-1) | All 72 subcategories | 13, all partial |
+| MITRE ATLAS, release 2026.09 | All 40 mitigations, each with the techniques ATLAS says it mitigates | 14, all partial |
 
 The EU AI Act catalog leaves out paragraphs specific to biometric identification and to other sectors. Article 13 is in the catalog and unmapped: its obligations fall on the provider's instructions for use, which Intutic does not write.
+
+ATLAS is mapped by **mitigation** (`AML.M…`), not by technique: a mitigation is something a control does, and each one carries the techniques (`AML.T…`) ATLAS says it mitigates, so a technique's coverage reads from the mitigations that name it. The catalog is generated from MITRE's published ATLAS data, release 2026.09 of 15 September 2026. Mitigations aimed at training data, model files, predictive models or an organization's public footprint are unmapped: Intutic sits between agents, their tools and the model providers, and sees none of those.
 
 ## Coverage state
 
@@ -44,12 +47,22 @@ A control is never reported as evidenced on records alone: a record shows there 
 
 ## Getting coverage
 
-- **Dashboard** — **Policies › Compliance Scope** has a **Framework Coverage** panel under the compliance probes. Pick a framework to see its mapped controls with state, evidence and what each does not cover, and **Download report** for the readable report.
-- **API** — `GET /api/v1/compliance/frameworks/:frameworkId/coverage`, where `frameworkId` is `eu_ai_act`, `iso_42001` or `nist_ai_rmf`. Any workspace member can read it. Add `?format=markdown` for the readable report instead of JSON.
+- **Dashboard** — **Policies › Compliance Scope** has a **Framework Coverage** panel under the compliance probes. Pick a framework to see its mapped controls with state, evidence and what each does not cover, and download it with **Download report** (Markdown), **Download CSV** or **Download PDF**.
+- **API** — `GET /api/v1/compliance/frameworks/:frameworkId/coverage`, where `frameworkId` is `eu_ai_act`, `iso_42001`, `nist_ai_rmf` or `mitre_atlas`. Any workspace member can read it. `?format=` picks the form: `json` (the default), `markdown`, `csv` or `pdf`; any other value is refused with `400`.
+
+These live reports are never signed, and each download says so with `X-Intutic-Export-Signed: false`. The copies sealed in the evidence pack are the ones that are signed, when the deployment has a signing key.
+
+### Export formats
+
+Every format carries the same content: each control's coverage and state, its evidence and what that evidence shows, what it does not cover, and the mapping version and generation time. For ATLAS, each mitigation also lists the techniques it mitigates.
+
+- **Markdown** — the readable report: summary counts, then each mapped control with an evidence table and its gaps, then the ids of the unmapped controls.
+- **CSV** — one row per catalog control, unmapped ones included, with the columns Framework, Control, Title, Coverage, State, Evidence, What it shows, Not covered, Techniques mitigated, Mapping version and Generated. A control's evidence entries are one per line inside the cell (kind, title and the route, source file or probe id, plus a probe's state), with **What it shows** in the same order. Quoting follows RFC 4180, and a cell that begins with `=`, `+`, `-`, `@`, a tab or a carriage return is prefixed with `'` so a spreadsheet reads it as text rather than a formula.
+- **PDF** — for print: a title page naming the workspace, framework, mapping version and generation time; the summary counts; each mapped control with its evidence; the gaps; and the unmapped controls with their titles. It is set in the standard PDF fonts, so rendering fetches nothing and works air-gapped, and the same coverage always renders the same bytes.
 
 ### In the evidence pack
 
-Every [evidence archive](/guide/compliance-evidence#evidence-runs) carries the coverage of all three frameworks, computed from the archive's own fresh probe run, as JSON and as the readable report. Each framework has its own section hash in the archive manifest, and the archive signature covers it.
+Every [evidence archive](/guide/compliance-evidence#evidence-runs) carries the coverage of all four frameworks, computed from the archive's own fresh probe run, as JSON, as the readable report, and (from `formatVersion` 3) as the CSV and the PDF, base64-encoded. Each framework has its own section hash in the archive manifest, `framework:<id>`, and the archive signature covers it when the deployment has a signing key (`TRACE_SIGNING_PRIVATE_KEY`). When it has none, the archive is unsigned and its manifest says so: `signed` is `false` and `unsignedReason` names the key to set. The CSV and PDF are also hashed as files, under `framework:<id>:csv` and `framework:<id>:pdf`: decode the PDF from base64, save either one, and its `sha256sum` matches the manifest. Like the rest of the archive, the sealed PDF identifies the workspace by its id, not its name.
 
 - **Daily collection** <Badge type="danger" text="Enterprise" /> — an archive is collected automatically once a day on the Enterprise and Self-host plans.
 - **On demand** — an owner or admin can collect one at any time with **Collect & export evidence**.
@@ -127,6 +140,27 @@ Repeating a planned tool after its steps have run is not a deviation. Steps that
 | MANAGE 3.1 | `provider_availability` probe; Provider incidents; `policy_check` probe | Third-party risks other than model availability and model choice are not evidenced. |
 | MANAGE 4.1 | Compliance probe history; Review holds; Review-hold decisions; Governance incidents | Capturing input from users, decommissioning and change management are not evidenced. |
 | MANAGE 4.3 | Governance incidents; Incident notifications | Communicating incidents to affected communities is the organization’s process. |
+
+### MITRE ATLAS
+
+| Mitigation | Evidence | Not covered |
+|---|---|---|
+| AML.M0014 Verify AI Artifacts | MCP server pinning | Only MCP tool definitions are verified. Model files, datasets and packages are not checksummed by Intutic. |
+| AML.M0019 Control Access to AI Models and Data in Production | Virtual keys; `policy_check` probe; `token_rotation` probe; Execution traces | Covers access to provider models through Intutic’s proxy. Models the organization serves itself, and their extraction through an inference API (AML.T0024), are outside what Intutic controls. |
+| AML.M0020 Generative AI Guardrails | DLP and prompt-injection scanning; Pre-execution tool-call gate; Review holds; `guard_liveness` probe | Injection and jailbreak detection matches known phrasings; reworded attacks get past it. Harmful-content, groundedness and hallucination checks are not performed. Covers what passes through Intutic’s gates and proxy: model requests, tool calls and their decisions. It does not instrument the model itself or traffic that bypasses the proxy. |
+| AML.M0024 AI Telemetry Logging | Execution traces; Pre-execution tool-call gate; Trace integrity roots; `audit_log_integrity` probe; SIEM export | Covers what passes through Intutic’s gates and proxy: model requests, tool calls and their decisions. It does not instrument the model itself or traffic that bypasses the proxy. |
+| AML.M0026 Privileged AI Agent Permissions Configuration | Pre-execution tool-call gate; MCP server registry; Role-based authority | The credentials and resource permissions an agent holds are configured outside Intutic; Intutic decides whether each tool call may run. Covers what passes through Intutic’s gates and proxy: model requests, tool calls and their decisions. It does not instrument the model itself or traffic that bypasses the proxy. |
+| AML.M0027 Single-User AI Agent Permissions Configuration | SSO-group tool clearance; Pre-execution tool-call gate | Delegating the user’s own access to the agent, and the agent’s identity lifecycle and decommissioning, are not evidenced. Covers what passes through Intutic’s gates and proxy: model requests, tool calls and their decisions. It does not instrument the model itself or traffic that bypasses the proxy. |
+| AML.M0028 AI Agent Tools Permissions Configuration | MCP server registry; Pre-execution tool-call gate | Intutic decides whether a tool may be called. The identity and permissions a tool runs with are configured in the tool or its MCP server. |
+| AML.M0029 Human In-the-Loop for AI Agent Actions | Review holds; Plan approval lifecycle; Review-hold decisions; Human-oversight export | Approval applies to tool calls matching a hold rule and to plans submitted for approval. Which actions need approval is the organization’s policy to write. |
+| AML.M0030 Restrict AI Agent Tool Invocation on Untrusted Data | DLP and prompt-injection scanning; Review holds | Tool invocation is not restricted because untrusted content has entered the context; holds apply to the tools a rule names. Injection detection matches known phrasings; reworded attacks get past it. |
+| AML.M0032 Segmentation of AI Agent Components | Agent sandbox | Applies to agents started in the sandbox; agents run directly on a host are not segmented. Separating agents’ identities, credentials and state from one another is not evidenced. |
+| AML.M0033 Input and Output Validation for AI Agent Components | DLP and prompt-injection scanning; MCP server pinning | Schema and format validation of tool inputs and outputs is not performed. Covers what passes through Intutic’s gates and proxy: model requests, tool calls and their decisions. It does not instrument the model itself or traffic that bypasses the proxy. |
+| AML.M0036 Limit AI Workload Resource Consumption | Spend caps; Loop-run stop; Anomaly detection | Bounds on input size, output tokens, execution time, memory and compute are not evidenced. |
+| AML.M0037 AI Agent Authority Expansion Controls | Pre-execution tool-call gate; MCP server registry; Review holds | Limits on the number, scope and lifetime of the credentials and tokens an agent holds are not evidenced. Covers what passes through Intutic’s gates and proxy: model requests, tool calls and their decisions. It does not instrument the model itself or traffic that bypasses the proxy. |
+| AML.M0038 AI Agent Scope Drift Detection | Plan approval lifecycle; Anomaly detection; Human-oversight export | Drift is measured only against a plan submitted for approval, from the tools its steps name. It raises an anomaly and a corrective prompt; it does not pause or stop the agent. |
+
+The techniques each mitigation mitigates are listed in every report and export.
 
 ## Related
 

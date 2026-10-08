@@ -32,7 +32,7 @@
  *   object: `{"decision":"deny","reason":"..."}`. Grok Build's confirmed
  *   contract — kept distinct from `stdout-cancel` rather than folded into it
  *   because the field names do not overlap: Grok Build does not recognise
- *   `cancel`, and Cline/Roo Code do not recognise `decision`.
+ *   `cancel`, and Cline does not recognise `decision`.
  * - `none` — the gate cannot refuse at all. Recorded rather than omitted, so
  *   "we know it cannot block" is distinguishable from "nobody checked".
  * - `waterfall-reject` — dsh's own contract (CONFIRMED against a real
@@ -184,6 +184,26 @@ export const GATES: readonly GateEntry[] = [
     mcpNote: 'bash-family: runs unconditionally. Antigravity (Gemini CLI)’s own MCP tool-naming convention was not independently verified during M3.',
   },
   {
+    // The antigravity harness's second gate. Google Antigravity (the app, the
+    // IDE and Antigravity CLI) reads ~/.gemini/config/hooks.json; the bash
+    // gate above is Gemini CLI's.
+    name: 'antigravityCli',
+    module: '../../src/harness/antigravityCliHooks.js',
+    invoke: (m, root) => m.writeAntigravityCliHooks(root, PROXY_URL, 'ws_test'),
+    artifact: '.intutic/hooks/antigravity-cli-check.js',
+    runner: 'node',
+    contract: 'stdout-decision-deny',
+    migrated: true,
+    note:
+      'PreToolUse with matcher "*", refusing with {"decision":"deny","reason":"..."} on stdout, per ' +
+      'antigravity.google/docs/hooks. The gate reads Antigravity\'s {toolCall: {name, args}} payload ' +
+      '(driven with it in antigravityCliHooks.test.ts) and the Claude-Code shape this matrix sends. ' +
+      'Not verified against a running Antigravity: how it reads a result with no decision ({}), ' +
+      'which is what the gate prints on an allow.',
+    mcpCalls: 'reachable',
+    mcpNote: 'Matcher "*" runs the gate for every tool call. Antigravity\'s own MCP tool-naming convention is not documented and was not verified.',
+  },
+  {
     name: 'pi',
     module: '../../src/harness/piHooks.js',
     invoke: (m, root) => m.writePiHooks(root, PROXY_URL, 'ws_test'),
@@ -208,17 +228,6 @@ export const GATES: readonly GateEntry[] = [
     note: 'the primary harness; shipped a ReferenceError that disabled it entirely',
     mcpCalls: 'yes',
     mcpNote: "M3 added an `hookEntry('mcp__.*')` PreToolUse matcher. Claude Code's own MCP tool-naming convention IS `mcp__<server>__<tool>` — this is the scheme every other harness's shape is measured against, not an assumption made for this phase.",
-  },
-  {
-    name: 'claudeDesktop',
-    module: '../../src/harness/claudeDesktopHooks.js',
-    invoke: (m, root) => m.writeClaudeDesktopHooks(root, PROXY_URL, 'ws_test'),
-    artifact: '.intutic/hooks/claude-desktop-check.js',
-    runner: 'node',
-    contract: 'exit2',
-    migrated: true,
-    mcpCalls: 'yes',
-    mcpNote: "M3 added `'mcp__.*'` to HOOK_MATCHERS. This harness shares Claude Code's PreToolUse hook format and MCP tool-naming convention verbatim (see this writer's own module doc).",
   },
   {
     name: 'cursor',
@@ -368,22 +377,6 @@ export const GATES: readonly GateEntry[] = [
       'extension\'s preToolUse shape). The SDK\'s MCP tool naming was not verified, hence ' +
       'reachable rather than yes.',
   },
-  {
-    name: 'rooCode',
-    module: '../../src/harness/rooCodeHooks.js',
-    invoke: (m, root) => m.writeRooCodeHooks(root, PROXY_URL, 'ws_test'),
-    artifact: '.intutic/hooks/roo-check.js',
-    runner: 'node',
-    contract: 'stdout-cancel',
-    migrated: true,
-    mcpCalls: 'reachable',
-    mcpNote:
-      "Already a `.*` catch-all matcher. Roo Code is a Cline fork and, to the extent it kept " +
-      "Cline's `use_mcp_tool` tool-call vocabulary, would also benefit from the shared " +
-      "intuticGate normalization above — but that inheritance was not independently verified " +
-      "during M3, so this is 'reachable', not 'yes'.",
-  },
-
   // ── JavaScript, stdout contract (Grok Build's OWN shape) ────────────────
   {
     name: 'grok',
@@ -398,7 +391,7 @@ export const GATES: readonly GateEntry[] = [
       '~/.grok/hooks/intutic-governance.json (user), PreToolUse with no matcher ' +
       '(applies to every tool call). Blocking contract CONFIRMED (not assumed): ' +
       'writes {"decision":"deny","reason":"..."} on stdout and exits 0 — a ' +
-      'DIFFERENT stdout shape from Cline/Roo Code\'s {"cancel":true}, hence its ' +
+      'DIFFERENT stdout shape from Cline\'s {"cancel":true}, hence its ' +
       'own contract value rather than reuse of stdout-cancel. Grok Build ALSO ' +
       'natively reads .claude/settings.json and .cursor/hooks.json if present ' +
       '(a compatibility feature), so a workspace with either of those gates ' +
@@ -607,6 +600,21 @@ export const NO_GATE: ReadonlyArray<{
     why: 'reads a user-owned JSON config for the writers that merge into one; writes nothing itself',
   },
   {
+    file: 'gateArtifacts.ts',
+    harness: null,
+    why: 'lists where each writer above puts its gate, so the AI inventory can check the file is there; writes nothing',
+  },
+  {
+    file: 'gateSightings.ts',
+    harness: null,
+    why: 'records when each gate last wrote an event, from the logs the gates write; writes no config or gate',
+  },
+  {
+    file: 'rulesSection.ts',
+    harness: 'antigravity',
+    why: 'writes the rule sets as a marked section of GEMINI.md (instructions, not a tool-call gate); antigravityHooks.ts and antigravityCliHooks.ts are the gates',
+  },
+  {
     file: 'codexConfigMerger.ts',
     harness: 'codex',
     why: 'sets openai_base_url in the Codex user config (LLM routing); codexHooks.ts is the gate',
@@ -625,6 +633,23 @@ export const NO_GATE: ReadonlyArray<{
     file: 'claudeProjectApproval.ts',
     harness: 'claude-code',
     why: 'decides which project MCP servers Claude Code would start, for mcpAutoWrite.ts; writes nothing itself',
+  },
+  {
+    file: null,
+    harness: 'claude-desktop',
+    why:
+      'no hook system: claude_desktop_config.json holds MCP servers, and the Code tab runs ' +
+      'Claude Code, which reads hooks from ~/.claude/settings.json (code.claude.com/docs/en/desktop) ' +
+      '— the claude-code gate already covers it. The Chat surface is governed by wrapping the ' +
+      'MCP servers in that file with the MCP governance proxy (mcpAutoWrite.ts).',
+  },
+  {
+    file: null,
+    harness: 'roo-code',
+    why:
+      'no hook system: Roo Code\'s final source (RooCodeInc/Roo-Code, archived 2026-05-15) runs no ' +
+      'pre-tool hook and reads no hooks file. Rules go to .roorules; enforcement is the proxy and ' +
+      'the MCP governance proxy.',
   },
   {
     file: null,

@@ -22,6 +22,8 @@ export {
 } from './syncCycle.js'
 
 export { collectAgentReport, reportAgent, fetchLocalProxyInstanceId } from './agentReporter.js'
+export { collectDeviceInventory, reportDeviceInventory } from './inventory.js'
+export type { DetectedHarness } from './inventory.js'
 export { startHarnessSession, endAllOpenSessions, readGitInfo } from './sessionReporter.js'
 
 export { loadLocalSopEntries, HARNESS_FILES, clearImmutable, setImmutable } from './configWriter.js'
@@ -53,13 +55,14 @@ export type { DisconnectOptions, PlannedChange, PlanNote } from './disconnect/in
 export { guardSettingsFile, warnIfDshCoverageGap } from './watcher/settingsGuard.js'
 
 export { readJsonObjectForMerge } from './harness/jsonMergeTarget.js'
+export { writeRulesSection, rulesSectionOf, RULES_SECTION_START, RULES_SECTION_END } from './harness/rulesSection.js'
+export { gateKindForHarness } from './harness/gateKind.js'
 
 // Gap 3 fix — Antigravity (Gemini CLI) hook coverage
-export { writeAntigravityHooks } from './harness/antigravityHooks.js'
+export { writeAntigravityHooks, buildGeminiBeforeToolEntry } from './harness/antigravityHooks.js'
+export { writeAntigravityCliHooks, buildAntigravityHookEntry, ANTIGRAVITY_HOOK_NAME } from './harness/antigravityCliHooks.js'
 
-// WS-B — new harness hook coverage (claude-desktop, roo-code, continue, open-webui, n8n)
-export { writeClaudeDesktopHooks } from './harness/claudeDesktopHooks.js'
-export { writeRooCodeHooks } from './harness/rooCodeHooks.js'
+// WS-B — new harness hook coverage (continue, open-webui, n8n)
 export { writeContinueHooks } from './harness/continueHooks.js'
 export { mergeContinueConfig } from './harness/continueConfigMerger.js'
 export { writeOpenWebuiHooks } from './harness/openWebuiHooks.js'

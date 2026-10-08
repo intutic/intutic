@@ -386,7 +386,16 @@ export type {
   UsageEvent,
   ModelBreakdown,
   VirtualKeyBreakdown,
+  MemberUsage,
+  MemberUsageResponse,
+  TeamUsage,
+  TeamUsageResponse,
+  BranchUsage,
+  BranchUsageResponse,
+  CommitUsage,
+  CommitUsageResponse,
 } from './usage.js'
+export { normalizeGitRemote } from './gitRemote.js'
 
 // WS2: Advanced Observability
 export {
@@ -429,6 +438,49 @@ export {
   SSO_GROUP_RECORD_TAG,
 } from './ssoGroupClearance.js'
 export type { SsoGroupDecision, SsoGroupRecord } from './ssoGroupClearance.js'
+
+// MCP governance: call budgets, tool-change risk, description poisoning
+export {
+  McpBudgetSettingsSchema,
+  parseMcpBudgetPolicy,
+  budgetsForCall,
+  budgetWindow,
+  budgetWarnAt,
+  describeMcpBudget,
+  MCP_BUDGET_DEFAULT_WARN_PCT,
+  MAX_MCP_BUDGETS,
+  MAX_MCP_BUDGET_LIMIT,
+  MCP_BUDGET_SCOPES,
+  MCP_BUDGET_PERIODS,
+} from './mcpBudgets.js'
+export type {
+  McpBudget,
+  McpBudgetScope,
+  McpBudgetPeriod,
+  McpBudgetPolicy,
+  McpBudgetSettings,
+  McpBudgetCall,
+  McpBudgetCharge,
+} from './mcpBudgets.js'
+export {
+  scoreToolSetChange,
+  normalizeToolDefinition,
+  riskLevelOf,
+  MAX_TOOL_DESCRIPTION_CHARS,
+  MAX_TOOL_SCHEMA_CHARS,
+  MCP_TOOL_RISK_HIGH,
+  MCP_TOOL_RISK_MEDIUM,
+  MCP_TOOL_CAPABILITY_POINTS,
+} from './mcpToolRisk.js'
+export type {
+  McpToolDefinition,
+  McpToolCapability,
+  McpToolRiskRule,
+  McpToolRiskLevel,
+  McpToolRiskReason,
+  McpToolSetChange,
+} from './mcpToolRisk.js'
+export { scanToolDescription } from './toolPoison.js'
 
 // WS4 + WS5 new error codes
 export {
@@ -562,6 +614,13 @@ export {
 } from './secretPatterns.js'
 
 export {
+  PII_DEFINITION,
+  type PiiAction,
+  type PiiDefinition,
+  type PiiDetectorDefinition,
+} from './piiDetectors.js'
+
+export {
   SKILL_SCAN_PATTERNS,
   SKILL_CONTENT_BLOCK_PATTERN_IDS,
   scanSkillContent,
@@ -594,6 +653,21 @@ export {
   type EnforcementFacets,
   type GovernanceCoverageInputs,
 } from './governanceCoverage.js'
+
+export {
+  DEVICE_INVENTORY_SCHEMA_VERSION,
+  REDACTED_PATH,
+  REDACTED_SEGMENT,
+  homeRelativePath,
+  sanitizeMcpEndpoint,
+  type DeviceInventory,
+  type InventoryDeviceIdentity,
+  type InventoryGateKind,
+  type InventoryGuardProbes,
+  type InventoryHarness,
+  type InventoryMcpServer,
+  type InventorySkill,
+} from './devInventory.js'
 
 export {
   DEFAULT_PROXY_HOST,

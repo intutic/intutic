@@ -414,8 +414,12 @@ The daemon runs in the foreground. Use `Ctrl+C` to stop.
 - An agent report per harness: the configured guardrails, role SOPs, skills found under
   `.agents/skills` (scan findings and file hashes, not file contents), declared MCP servers and the
   budget tier.
-- Session start and end, with the Git branch and commit from `.intutic/git-context.json`, and the
-  names of your local SOP folders.
+- Session start and end, with the names of your local SOP folders, and the repository, Git branch
+  and HEAD commit of the workspace root, reported again when they change. The repository is the
+  `origin` remote reduced to host and path; any user name, password or token in it is removed
+  before it is sent.
+- The Git branch and commit in `.intutic/git-context.json`, when `intutic sync-context` has
+  written it.
 - Hook events and review requests the harness gates logged under `.intutic/events/`.
 - The proxy's local trace files, `~/.intutic/logs/traces-*.jsonl`, which are deleted locally once
   uploaded.
@@ -449,19 +453,21 @@ interval. Files larger than 512 KB are not captured.
 | `.continue/config.json` | `continue` |
 | `.cursorrules` | `cursor` |
 | `.env.intutic` | `codex`, `langgraph`, `langchain`, `crewai`, `autogen`, `ag2`, `google-adk`, `openai-agents`, `pydantic-ai`, `smolagents`, `strands`, `agent-framework`, `mastra`, `vercel-ai-sdk`, `eve`, `trueforge`, `ai-sdk-harness`, `ai-sdk-workflow` |
-| `.gemini/settings.json` | `antigravity` |
 | `.github/copilot-instructions.md` | `github-copilot` |
 | `.hermes/config.yaml` | `hermes` |
 | `.intutic/n8n/governance-workflow.json` | `n8n` |
 | `.open-webui/intutic-governance-filter.py` | `open-webui` |
 | `.openclaw/openclaw.json` | `openclaw` |
+| `.openhands/microagents/intutic-governance.md` | `openhands` |
 | `.pi/hooks.json` | `pi` |
 | `.roorules` | `roo-code` |
 | `.windsurfrules` | `windsurf` |
 | `AGENTS.md` | `muse-code`, `grok`, `opencode` |
 | `claude_desktop_config.json` | `claude-desktop` |
 | `CLAUDE.md` | `claude-code` |
-| `config.toml` | `openhands` |
+| `GEMINI.md` | `antigravity` |
+
+`GEMINI.md` is often your own file with Intutic's rules in a marked section; it is captured whole, your own text included.
 
 ---
 
@@ -2851,9 +2857,11 @@ intutic enterprise install [options]
 **What it does:**
 
 1. Reads the proxy's CA certificate from `~/.intutic/ca.crt`. The proxy creates it on first run, so run `intutic start` (or `intutic connect`) once first; if the file is missing the command exits with status `1`.
-2. Writes five manifests to `--mdm-output-dir` (no privilege needed):
+2. Writes nine manifests to `--mdm-output-dir` (no privilege needed):
    - `intutic-governance.mobileconfig` — CA trust profile
    - `cursor-hooks-jamf.json` / `cursor-hooks-intune.json` — Cursor system hooks for Jamf / Intune
+   - `gemini-cli-hooks-jamf.json` / `gemini-cli-hooks-intune.json` — the Gemini CLI gate in Gemini CLI's system settings file, which it applies over user and workspace settings
+   - `antigravity-hooks-jamf.json` / `antigravity-hooks-intune.json` — the Google Antigravity gate for each user's `~/.gemini/config/hooks.json` (Antigravity has no machine-wide hooks file)
    - `jamf-firewall-manifest.json` / `intune-firewall-manifest.json` — a recurring managed script that runs `<cli-binary-path> enforce apply` with root/administrator privilege, so the egress firewall is re-applied on every check-in
 
    With `--generate-mdm-only` the command stops here.
