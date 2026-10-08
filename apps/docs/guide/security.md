@@ -17,10 +17,16 @@ Intutic supports OpenID Connect (OIDC) Single Sign-On for seamless integration w
    - **Client ID** &mdash; The application client ID assigned by your provider
    - **Client Secret** &mdash; The secure OIDC client secret key
    - **Scopes** &mdash; Permissions scopes (defaults to `openid,profile,email`)
-4. Save the provider and configure redirection rules on your provider console to send users to:
-   ```
-   http://localhost:5174/api/v1/auth/callback
-   ```
+4. Save the provider, then register this redirect URI (also called the callback or reply URL) in your identity provider's application settings:
+
+   | Deployment | Redirect URI |
+   |---|---|
+   | Intutic Cloud | `https://api.intutic.ai/api/v1/auth/sso/callback` |
+   | Self-host | `https://<your Intutic hostname>/api/v1/auth/sso/callback` |
+
+   The dialog in step 3 shows the same value for your deployment. Your identity provider compares it character for character, so register it exactly. On Self-host it is built from `API_BASE_URL`, which the installer sets from `--hostname`; set `OIDC_CALLBACK_URL` on the control plane only if users reach the API at a different address.
+
+SAML 2.0 providers use the Assertion Consumer Service URL `…/api/v1/auth/saml/acs` on the same address, and each provider's service-provider metadata is at `…/api/v1/auth/saml/metadata/<providerId>`.
 
 ::: tip
 Once SSO is configured, team members can log in using their corporate SSO ID. You can enforce auto-provisioning of members on their first login.

@@ -15,7 +15,7 @@ An SOP consists of:
 | `title` | string | ✅ | 1–500 characters |
 | `markdown_content` | string | ✅ | 1–100,000 characters — the actual policy rules |
 | `risk_tier` | enum | ✅ | `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` |
-| `complexity_tier` | enum | ✅ | `LOW`, `MEDIUM`, `HIGH` |
+| `complexity_tier` | enum | ✅ | `TIER_0`, `TIER_1`, `TIER_2`: simplest to most complex work; [routing](/guide/intelligent-routing) learns per tier |
 | `version` | string | ❌ | Semantic version string (1–50 chars) |
 | `dependencies` | string[] | ❌ | IDs of SOPs this one depends on |
 

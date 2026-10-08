@@ -124,9 +124,11 @@ watching budgets or savings dashboards should expect:
 
 ## Token Utility
 
-`tokenUtility` is a column on `execution_traces` with three values — `USEFUL`,
-`WASTED`, `AMBIGUOUS` — and one writer: a human, through the usage route. It is
-not derived automatically.
+`tokenUtility` is a column on `execution_traces`. Every trace starts as
+`USEFUL`, the column default, and the one writer that changes it is a person,
+through `POST /api/v1/usage/classify`, which sets `USEFUL` or `WASTED`. The
+column's type also allows `AMBIGUOUS`, but nothing sets it. It is not derived
+automatically.
 
 ::: warning This section previously described an automatic classifier
 It documented a five-rule pipeline — kill enforcement, anomaly detection,
@@ -150,7 +152,7 @@ not a documentation one.
 
 | Field | Written by | Meaning |
 |---|---|---|
-| `tokenUtility` | a human, via `POST /api/v1/usage/…` | `USEFUL` / `WASTED` / `AMBIGUOUS` |
+| `tokenUtility` | a human, via `POST /api/v1/usage/classify` | `USEFUL` (the default) or `WASTED` |
 | `tokenUtilityScore` | insert-time default | not derived; carries its default |
 | `anomalyDetected` | `traceIngestClassifier` at ingest | anomaly type, if one fired |
 | `anomalyConfidenceScore` | `traceIngestClassifier` at ingest | 0.0–1.0 |

@@ -92,6 +92,14 @@ describe('the gate catches what it was widened to catch', () => {
     expect(r.status, `not flagged:\n${r.out}`).toBe(1)
   })
 
+  it('flags a "less than" claim with the unit spelled out', async () => {
+    // concepts/sops.md published this for local rules after every "<5ms" had
+    // been retracted; the pattern only knew the abbreviation.
+    await write('a.md', '| **Latency** | **<5 milliseconds** (Instant) |\n')
+    const r = await runGate([root])
+    expect(r.status, `not flagged:\n${r.out}`).toBe(1)
+  })
+
   it('does not let a distant ceiling phrase pardon an unrelated claim', async () => {
     // The exemption is scoped to ±60 chars around the match, not the line.
     const filler = 'x'.repeat(200)
