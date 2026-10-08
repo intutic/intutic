@@ -108,7 +108,7 @@ intutic start [options]
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--port <port>` | Port the proxy listens on | `4000` |
+| `--port <port>` | Port the proxy listens on | The port of `INTUTIC_PROXY_URL`, else `4000` |
 | `--valkey-port <port>` | Local Valkey port to use or start | `6379` |
 | `--upstream-url <url>` | Upstream LLM provider base URL, passed to the proxy as `UPSTREAM_URL` | _(proxy default)_ |
 
@@ -320,7 +320,7 @@ intutic doctor
 
 No options. Runs nine checks in order, each printing ✓ or ✗ plus a one-line remediation on failure:
 
-1. Proxy reachable (`http://127.0.0.1:4000/health`)
+1. Proxy reachable (`http://127.0.0.1:4000/health`, or the port of `INTUTIC_PROXY_URL`)
 2. Control plane auth (the stored credentials against `/api/v1/auth/me`)
 3. Sync daemon running (PID file or process scan)
 4. Harness config files intact (SHA-256 against `<workspaceRoot>/.intutic/integrity.json`)
@@ -359,7 +359,7 @@ that login.
 
 **What it does:**
 1. Starts Valkey if none is running (connected mode needs it), and spawns a managed proxy if
-   nothing is listening on the proxy port (`4000`, or `PORT` when set).
+   nothing is listening on the proxy port (the port of `INTUTIC_PROXY_URL`, else `4000`).
 2. Seeds the policy snapshot (`~/.intutic/hooks/policy-snapshot.rules`) so the harness gates
    enforce workspace policy from the first tool call.
 3. Every `--interval`, and whenever the control plane pushes a change, fetches the workspace
@@ -827,7 +827,7 @@ Without `--watch`:
 
 - When you are logged in, prints the workspace's budget from the control plane: daily and monthly spend against their budgets with percentages, remaining budget, and an alert line when the alert threshold is exceeded.
 - Prints the local spending cap from `~/.intutic/config.json` (`maxDailyBudgetUsd`, or `max_daily_budget_usd`; default `$10.00`).
-- Prints today's machine-local spend from the local proxy at `http://127.0.0.1:4000`, or a dash when the proxy is not running.
+- Prints today's machine-local spend from the local proxy at `http://127.0.0.1:4000` (or the port of `INTUTIC_PROXY_URL`), or a dash when the proxy is not running.
 - When you are logged in, lists every `ACTIVE` loop run with its token spend and budget limit.
 
 Without a login it runs in standalone (offline) mode and prints only the local figures.
@@ -838,7 +838,7 @@ With `--watch`, it prints one line per tick in this shape:
 [10:42:05] machine-local: $0.4210 / $10.00  |  workspace: $3.1200 / $50.00
 ```
 
-- `machine-local` is today's spend and cap as reported by the local proxy at `http://127.0.0.1:4000`. `(enforcement off)` is appended when the proxy is not enforcing the cap; `— (local proxy not running)` is shown when it cannot be reached.
+- `machine-local` is today's spend and cap as reported by the local proxy at `http://127.0.0.1:4000` (or the port of `INTUTIC_PROXY_URL`). `(enforcement off)` is appended when the proxy is not enforcing the cap; `— (local proxy not running)` is shown when it cannot be reached.
 - `workspace` is the workspace's daily spend and daily budget, refreshed on the first tick and every 6th tick after that (every 30 seconds at the default interval). It shows `— (not connected)` when you are not logged in or the request fails.
 
 `--watch` does not list loops. It works without a login; only the workspace figure needs one.
@@ -2791,7 +2791,7 @@ Also available as the top-level shortcut `intutic install-daemon`, with the same
 | `--system` | Install as a system-level service (LaunchDaemon on macOS, systemd system unit on Linux) | — |
 | `--mcp` | Install the MCP proxy daemon instead of the sync-daemon | — |
 | `--proxy` | Install the standalone `intutic-proxy` binary as a service — no workspace or key needed | — |
-| `--port <port>` | With `--proxy`: proxy listen port (`PORT`) | `4000` |
+| `--port <port>` | With `--proxy`: proxy listen port (`PORT`) | The port of `INTUTIC_PROXY_URL`, else `4000` |
 | `--valkey-url <url>` | With `--proxy`: Valkey to attach to (`VALKEY_URL`); omitted, the unit sets `INTUTIC_STANDALONE=1` | — |
 | `--upstream-url <url>` | With `--proxy`: upstream LLM provider base URL (`UPSTREAM_URL`) | — |
 
@@ -2945,7 +2945,7 @@ Environment variables the CLI, and the hook gates and proxy it sets up, read. Co
 |----------|---------|--------|
 | `INTUTIC_CONTROL_PLANE_URL` | Every command that calls a control-plane API | The control plane to use, ahead of the one saved by `intutic login` and behind a `--control-plane-url` or `--dev` flag. See [Choosing a control plane](#control-plane-url). |
 | `INTUTIC_DEV` | Every command that calls a control-plane API | `1` targets the local control plane at `http://localhost:3001`, the same as `--dev`, unless `INTUTIC_CONTROL_PLANE_URL` is set. Any other value is ignored. |
-| `INTUTIC_PROXY_URL` | `intutic exec`, `intutic enterprise install`, `intutic init` and `intutic connect` setup output | Base URL of the proxy. `exec` points the child process's SDK variables at it and takes the sandbox's proxy port from it. `enterprise install` uses it when `--proxy-url` is not given. `init` and `connect` print it as your gateway endpoint (with `/v1` appended). Default `http://localhost:4000`. |
+| `INTUTIC_PROXY_URL` | `intutic exec`, `start`, `connect`, `budget`, `doctor`, `daemon install --proxy`, `enterprise install`, and the setup output of `init` and `connect` | Base URL of the local proxy, default `http://localhost:4000`. Its port is the one every command uses: `start`, `connect` and `daemon install --proxy` run the proxy there unless `--port` says otherwise, and `budget` and `doctor` probe it there. `exec` points the child process's SDK variables at it. `enterprise install` uses it when `--proxy-url` is not given. `init` and `connect` print it as your gateway endpoint (with `/v1` appended). The shell's `PORT` is not read. |
 | `VALKEY_URL` | `intutic start`, `intutic connect` | Valkey/Redis the proxy uses. `start` passes it through only when a Valkey is reachable on `--valkey-port`; otherwise it uses `redis://127.0.0.1:<valkey-port>`. `connect` defaults to `redis://127.0.0.1:6379`. |
 | `CONTROL_PLANE_URL` | `intutic start` | When set and no Valkey is available, `start` does not force standalone mode; the proxy treats the run as a managed deployment and requires Valkey. The CLI does not use it to choose a control plane. |
 | `INTUTIC_SNAPSHOT_RULES` | Hook gates, `intutic policy snapshot`, `intutic doctor` | Path of the policy snapshot file the gates enforce. Default `~/.intutic/hooks/policy-snapshot.rules`. `policy snapshot` writes into this path's directory and always names the file `policy-snapshot.rules` (it warns if your path uses another name); `doctor` checks this path. |

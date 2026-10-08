@@ -34,6 +34,7 @@ import {
 import { log } from '../lib/logger.js'
 import { selectBackend, type SandboxKind, type SandboxSpec } from '../lib/sandbox/index.js'
 import pc from 'picocolors'
+import { localProxyPort } from '../lib/localProxy.js'
 
 /** Workspace requirement for whether agents must run sandboxed (LLD #63 §6). */
 export type SandboxRequirement = 'off' | 'warn' | 'require'
@@ -100,16 +101,6 @@ export interface SandboxExecOptions {
   pidsLimit: number
   /** Extra destination CIDRs the sandbox may reach beyond the proxy + DNS. */
   allow: string[]
-}
-
-/** The proxy port the host listens on, from INTUTIC_PROXY_URL (default 4000). */
-export function proxyPortFromEnv(): string {
-  const raw = process.env.INTUTIC_PROXY_URL ?? 'http://localhost:4000'
-  try {
-    return new URL(raw).port || '4000'
-  } catch {
-    return '4000'
-  }
 }
 
 /**
@@ -309,7 +300,7 @@ async function runSandboxed(
   identity: GraphIdentity,
   opts: SandboxExecOptions,
 ): Promise<void> {
-  const port = proxyPortFromEnv()
+  const port = String(localProxyPort())
   const proxyUrlOverride = `http://${PROXY_HOST_ALIAS}:${port}`
   const proxyEnv = buildProxyEnv(creds?.apiKey, identity, proxyUrlOverride)
 

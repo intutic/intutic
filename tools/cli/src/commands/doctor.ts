@@ -6,7 +6,7 @@
  * a one-line remediation.
  *
  * Checks (in order):
- * 1. Proxy reachable (http://127.0.0.1:4000/health)
+ * 1. Proxy reachable (http://127.0.0.1:4000/health, or the INTUTIC_PROXY_URL port)
  * 2. Control plane auth (via stored credentials)
  * 3. Sync daemon running (PID file or process grep)
  * 4. Harness config files intact (SHA-256 hash check)
@@ -35,6 +35,12 @@ import { isSyncDaemonRunning } from '../lib/process.js'
 import { caTrustCommandFor } from '../lib/caTrust.js'
 import { getPaths } from './install-daemon.js'
 import { resolveControlPlaneUrl } from '../config/paths.js'
+import { localProxyProbeBase } from '../lib/localProxy.js'
+
+/** The local proxy's health endpoint, on the port every command uses. */
+function proxyHealthUrl(): string {
+  return `${localProxyProbeBase()}/health`
+}
 import {
   readPolicySnapshot,
   SNAPSHOT_STALE_AFTER_DAYS,
@@ -53,7 +59,6 @@ export interface CheckResult {
 
 // ─── Constants ───────────────────────────────────────────────────────
 
-const PROXY_HEALTH_URL = 'http://127.0.0.1:4000/health'
 const PROXY_TIMEOUT_MS = 3_000
 const CONTROL_PLANE_TIMEOUT_MS = 5_000
 /**
@@ -69,14 +74,14 @@ const VALKEY_PROBE_TIMEOUT_MS = 2_000
 // ─── Individual Checks ──────────────────────────────────────────────
 
 /**
- * Check 1: Proxy reachable at localhost:4000.
+ * Check 1: Proxy reachable on its local port.
  */
 async function checkProxy(): Promise<CheckResult> {
   try {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), PROXY_TIMEOUT_MS)
 
-    const res = await fetch(PROXY_HEALTH_URL, {
+    const res = await fetch(proxyHealthUrl(), {
       signal: controller.signal,
     })
     clearTimeout(timeout)
@@ -85,7 +90,7 @@ async function checkProxy(): Promise<CheckResult> {
       return {
         name: 'Proxy',
         passed: true,
-        detail: `Reachable at ${PROXY_HEALTH_URL} (HTTP ${res.status})`,
+        detail: `Reachable at ${proxyHealthUrl()} (HTTP ${res.status})`,
       }
     }
 

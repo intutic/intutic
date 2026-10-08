@@ -547,7 +547,7 @@ program
 program
   .command('start')
   .description('Start the proxy standalone — no account or control plane needed')
-  .option('--port <port>', 'Proxy port', '4000')
+  .option('--port <port>', 'Proxy port (default: the port of $INTUTIC_PROXY_URL, else 4000)')
   .option('--valkey-port <port>', 'Valkey port', '6379')
   .option('--upstream-url <url>', 'Upstream LLM provider base URL')
   .action(async (opts) => {
@@ -907,7 +907,7 @@ function defineDaemonInstall(cmd: Command): Command {
     .option('--system', 'Install as a system-level service (LaunchDaemon on macOS, systemd system unit on Linux)')
     .option('--mcp', 'Install the MCP proxy daemon instead of the sync-daemon')
     .option('--proxy', 'Install the standalone intutic-proxy binary as a service')
-    .option('--port <port>', 'With --proxy: proxy listen port', '4000')
+    .option('--port <port>', 'With --proxy: proxy listen port (default: the port of $INTUTIC_PROXY_URL, else 4000)')
     .option('--valkey-url <url>', 'With --proxy: Valkey URL to attach to; omit to run standalone (INTUTIC_STANDALONE=1)')
     .option('--upstream-url <url>', 'With --proxy: upstream LLM provider base URL')
     .action(async (opts, cmd) => {

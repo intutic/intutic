@@ -21,6 +21,7 @@ import { execFileSync } from 'node:child_process'
 import { loadConfig } from '../config/store.js'
 import { resolveControlPlaneUrl } from '../config/paths.js'
 import { localProxyBinary } from '../lib/proxyBinary.js'
+import { localProxyPort } from '../lib/localProxy.js'
 
 // ── Error definitions ──────────────────────────────────────────────────
 
@@ -1121,7 +1122,7 @@ export async function proxyServiceStart(): Promise<void> {
 export async function installProxyService(opts: ProxyServiceOptions = {}): Promise<void> {
   const resolved: ResolvedProxyOptions = {
     binaryPath:  resolveProxyServiceBinary(opts.binaryPath),
-    port:        opts.port ?? '4000',
+    port:        opts.port ?? String(localProxyPort()),
     valkeyUrl:   opts.valkeyUrl,
     upstreamUrl: opts.upstreamUrl,
   }

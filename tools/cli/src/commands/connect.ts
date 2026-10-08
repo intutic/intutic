@@ -73,6 +73,7 @@ import { Redis } from 'ioredis'
 import * as net from 'node:net'
 import { spawn, execSync, ChildProcess } from 'node:child_process'
 import { createWriteStream } from 'node:fs'
+import { localProxyPort } from '../lib/localProxy.js'
 
 const DEFAULT_POLL_INTERVAL = 30_000
 
@@ -365,12 +366,12 @@ export async function runConnect(opts: {
 
 
   // 2.5. Manage LiteLLM-Rust Proxy Gateway Process
-  const proxyPort = parseInt(process.env.PORT || '4000', 10)
-  // The daemon-side probes (`fetchEgressStatus`, `fetchGuardProbes`,
-  // `fetchLocalProxyInstanceId`) read the proxy at `INTUTIC_PROXY_URL`,
-  // defaulting to port 4000; connect knows the port it will spawn on, so an
-  // operator running on another `PORT` still gets probed at the right one.
-  process.env.INTUTIC_PROXY_URL ??= `http://127.0.0.1:${proxyPort}`
+  // The same port `budget`, `doctor`, `exec` and `start` use: INTUTIC_PROXY_URL's,
+  // else 4000. The daemon-side probes (`fetchEgressStatus`, `fetchGuardProbes`,
+  // `fetchLocalProxyInstanceId`) read INTUTIC_PROXY_URL too, so it is set for
+  // them when the operator left it unset.
+  const proxyPort = localProxyPort()
+  if (!process.env.INTUTIC_PROXY_URL) process.env.INTUTIC_PROXY_URL = `http://127.0.0.1:${proxyPort}`
   let exeCmd = 'cargo'
   let exeArgs = ['run', '--manifest-path', node_path.join(safeConfig.workspaceRoot, 'packages', 'proxy', 'Cargo.toml')]
   // Populated only on the branch that actually spawns the proxy; the DR
@@ -433,6 +434,9 @@ export async function runConnect(opts: {
       
       proxyEnv = {
         ...process.env,
+        // Explicit, so a PORT in the operator's shell cannot move the proxy
+        // away from the port everything else probes.
+        PORT: String(proxyPort),
         VALKEY_URL: process.env.VALKEY_URL || 'redis://127.0.0.1:6379',
         ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || '',
         INTUTIC_CONTROL_PLANE_URL: controlPlaneUrl,
