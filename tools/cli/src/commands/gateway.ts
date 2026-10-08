@@ -88,7 +88,9 @@ interface GatewayStatusResponse {
 /** Applied against desired, for `gateway status`. */
 export function describeConfigVersion(applied: number | null, desired: number): string {
   if (applied === null) return `— (desired ${desired}; the gateway has not reported one)`
-  if (applied >= desired) return `${applied} (up to date)`
+  // Any other version, lower included (a reset counter), is pulled on the
+  // next heartbeat.
+  if (applied === desired) return `${applied} (up to date)`
   return `${applied} (version ${desired} applies on the next heartbeat)`
 }
 

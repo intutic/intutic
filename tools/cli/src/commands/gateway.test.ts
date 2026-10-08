@@ -135,6 +135,8 @@ describe('intutic gateway', () => {
     expect(describeConfigVersion(3, 3)).toBe('3 (up to date)')
     expect(describeConfigVersion(0, 0)).toBe('0 (up to date)')
     expect(describeConfigVersion(2, 3)).toBe('2 (version 3 applies on the next heartbeat)')
+    // A reset counter: lower than what runs, and pulled all the same.
+    expect(describeConfigVersion(5, 1)).toBe('5 (version 1 applies on the next heartbeat)')
     expect(describeConfigVersion(null, 3)).toBe('— (desired 3; the gateway has not reported one)')
   })
 

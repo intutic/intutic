@@ -63,7 +63,7 @@
 //! Live config (LLD #66 phase 9): each heartbeat response also carries
 //! `desiredConfigVersion`, a counter the control plane bumps whenever an
 //! owner or admin changes this gateway's config (`intutic gateway config
-//! set`, i.e. `PATCH /api/v1/gateways/:id/config`). When it is ahead of the
+//! set`, i.e. `PATCH /api/v1/gateways/:id/config`). When it differs from the
 //! version this process last applied (or nothing has been applied yet, so a
 //! restarted proxy pulls once), the loop pulls `GET
 //! /api/v1/gateways/:id/config` with the same token and swaps the result into
@@ -282,15 +282,18 @@ struct GatewayConfigResponse {
     config: serde_json::Map<String, serde_json::Value>,
 }
 
-/// Pure: does this beat pull the config? `applied` is `None` until the first
-/// pull succeeds, so a booted or restarted proxy pulls once whatever the
-/// desired version is. That also covers a control plane whose version counter
-/// was reset while the stored config survived.
+/// Pure: does this beat pull the config? Whenever the desired version differs
+/// from the applied one. `applied` is `None` until the first pull succeeds, so
+/// a booted or restarted proxy pulls once whatever the desired version is.
+/// A desired version LOWER than the applied one is not stale: the control
+/// plane's counter lives in Valkey and starts again from 0 if that key is
+/// lost, while the config itself is in Postgres. Ignoring it would leave the
+/// proxy deaf to every change until the new counter climbed past the old one.
 fn config_pull_due(desired: Option<u64>, applied: Option<u64>) -> bool {
     match (desired, applied) {
         (None, _) => false,
         (Some(_), None) => true,
-        (Some(desired), Some(applied)) => desired > applied,
+        (Some(desired), Some(applied)) => desired != applied,
     }
 }
 
@@ -301,6 +304,9 @@ struct ConfigReconciler {
     /// Unknown fields already warned about: a newer control plane's field is
     /// logged once per process, not on every pull.
     logged_unknown: HashSet<String>,
+    /// Whether a version-counter reset has been warned about (once per
+    /// process).
+    warned_reset: bool,
 }
 
 impl ConfigReconciler {
@@ -326,12 +332,8 @@ impl ConfigReconciler {
                 return;
             }
         };
-        // An answer no newer than what is running is neither re-applied nor
-        // allowed to take the proxy backwards.
-        if self
-            .applied_version
-            .is_some_and(|applied| fetched.config_version <= applied)
-        {
+        // The version it already runs: nothing to apply.
+        if self.applied_version == Some(fetched.config_version) {
             return;
         }
         let (remote, unknown) =
@@ -353,6 +355,23 @@ impl ConfigReconciler {
                     gateway_id = %gateway_id,
                     field = %field,
                     "gateway config has a field this proxy version does not apply — ignored"
+                );
+            }
+        }
+        // Lower than what it runs: the control plane's counter was reset. The
+        // config it serves is still the current one, so it is applied and its
+        // version adopted, and the proxy follows the new counter from here.
+        if let Some(applied) = self
+            .applied_version
+            .filter(|&applied| fetched.config_version < applied)
+        {
+            if !self.warned_reset {
+                self.warned_reset = true;
+                tracing::warn!(
+                    gateway_id = %gateway_id,
+                    applied_version = applied,
+                    config_version = fetched.config_version,
+                    "gateway config version went backwards — the control plane's counter was reset; applying its config and adopting its version"
                 );
             }
         }
@@ -678,17 +697,18 @@ mod tests {
     }
 
     #[test]
-    fn config_pull_is_due_once_at_boot_then_only_when_the_desired_version_moves_ahead() {
+    fn config_pull_is_due_once_at_boot_then_whenever_the_desired_version_differs() {
         // An older control plane sends no version: never pull.
         assert!(!config_pull_due(None, None));
         assert!(!config_pull_due(None, Some(3)));
         // Nothing applied yet: pull, even at version 0.
         assert!(config_pull_due(Some(0), None));
         assert!(config_pull_due(Some(5), None));
-        // Ahead: pull. Equal or behind (stale): don't.
+        // Ahead: pull. Behind (a reset counter): pull. Equal: don't.
         assert!(config_pull_due(Some(4), Some(3)));
+        assert!(config_pull_due(Some(2), Some(3)));
+        assert!(config_pull_due(Some(0), Some(3)));
         assert!(!config_pull_due(Some(3), Some(3)));
-        assert!(!config_pull_due(Some(2), Some(3)));
     }
 
     #[test]
