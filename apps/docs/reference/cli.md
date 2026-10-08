@@ -2679,8 +2679,8 @@ Sets exactly two variables, `ANTHROPIC_BASE_URL` and `OPENAI_BASE_URL`, both to 
 
 | OS | Mechanism | Scope |
 |----|-----------|-------|
-| macOS | `launchctl setenv` | Every application launched afterwards, including GUI apps |
-| Linux (as root) | Writes `KEY="<url>"` lines to `/etc/environment` | System |
+| macOS | `launchctl setenv` | Every application launched afterwards, including GUI apps, until you log out or restart |
+| Linux (as root) | Writes `KEY="<url>"` lines to `/etc/environment`, replacing any earlier lines for the two variables | System |
 | Linux (otherwise) | Appends `export KEY="<url>"` lines to `~/.bashrc`, each tagged with an `# intutic-env-<KEY>` marker; a re-run replaces the earlier lines | User |
 | Windows | `setx` | User |
 
@@ -2709,7 +2709,7 @@ No options.
 
 **What it does:**
 
-Removes `ANTHROPIC_BASE_URL` and `OPENAI_BASE_URL`: `launchctl unsetenv` on macOS, deletes the marked lines from `~/.bashrc` on Linux, and deletes the values from `HKCU\Environment` on Windows. Running it when nothing is set is not an error. On Linux it does not edit `/etc/environment`; if `env persist` ran as root, remove those two lines by hand. Already-open terminals keep the old values until restarted.
+Removes `ANTHROPIC_BASE_URL` and `OPENAI_BASE_URL`: `launchctl unsetenv` on macOS, and the values in `HKCU\Environment` on Windows. On Linux it deletes the marked lines from `~/.bashrc`, leaving the rest of the file exactly as it was, and, when run as root, the two variables' lines from `/etc/environment`. Running it when nothing is set is not an error. Already-open terminals keep the old values until restarted.
 
 ---
 
