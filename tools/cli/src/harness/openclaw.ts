@@ -13,7 +13,6 @@ import { access } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { HarnessType } from '@intutic/shared-types'
-import type { SyncSopEntry } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
 import { hashFile } from '../lib/hash.js'
 import { loadCredentials } from '../config/store.js'
@@ -37,12 +36,14 @@ export const openclawAdapter: IHarnessAdapter = {
     }
   },
 
-  async writeConfig(workspaceRoot: string, _sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
-    const filePath = join(workspaceRoot, CONFIG_FILE)
+  async installGate(workspaceRoot: string, proxyUrl: string): Promise<void> {
     const creds = await loadCredentials()
-    const workspaceId = creds?.workspaceId || 'local'
-    await writeOpenclawHooks(workspaceRoot, proxyUrl, workspaceId)
-    return filePath
+    await writeOpenclawHooks(workspaceRoot, proxyUrl, creds?.workspaceId || 'local')
+  },
+
+  /** No rules file: the gate is this harness's governance. */
+  async writeConfig(): Promise<string | null> {
+    return null
   },
 
   async readCurrentHash(workspaceRoot: string): Promise<string | null> {

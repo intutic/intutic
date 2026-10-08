@@ -79,14 +79,15 @@ describe('opencode adapter', () => {
       await expect(readFile(join(root, 'AGENTS.md'), 'utf-8')).rejects.toThrow()
     })
 
-    it('installs the plugin even with zero SOPs — the plugin is the governance vehicle, not the rules file', async () => {
-      await opencodeAdapter.writeConfig(root, [], PROXY_URL)
+    it('installGate writes the plugin — the plugin is the governance vehicle, not the rules file', async () => {
+      await opencodeAdapter.installGate!(root, PROXY_URL)
       const plugin = await readFile(join(root, '.opencode', 'plugins', 'intutic-governance.js'), 'utf-8')
       expect(plugin).toContain("'tool.execute.before'")
       expect(plugin).toContain('Intutic gate body')
     })
 
     it('does not write opencode.json', async () => {
+      await opencodeAdapter.installGate!(root, PROXY_URL)
       await opencodeAdapter.writeConfig(root, [], PROXY_URL)
       await expect(readFile(join(root, 'opencode.json'), 'utf-8')).rejects.toThrow()
     })

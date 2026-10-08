@@ -1,6 +1,6 @@
 ---
 title: Framework Mapping
-description: How Intutic's compliance probes, records and controls map to the EU AI Act, ISO/IEC 42001, the NIST AI RMF and MITRE ATLAS, with live coverage, Markdown, CSV and PDF reports, signed copies in the evidence pack, and an Article 14 human-oversight export.
+description: How Intutic's compliance probes, records and controls map to the EU AI Act, ISO/IEC 42001, the NIST AI RMF and MITRE ATLAS, with live coverage, Markdown, CSV and PDF reports, copies in the evidence pack, and an Article 14 human-oversight export.
 ---
 
 # Framework Mapping <Badge type="tip" text="Cloud" />
@@ -50,6 +50,8 @@ A control is never reported as evidenced on records alone: a record shows there 
 - **Dashboard** — **Policies › Compliance Scope** has a **Framework Coverage** panel under the compliance probes. Pick a framework to see its mapped controls with state, evidence and what each does not cover, and download it with **Download report** (Markdown), **Download CSV** or **Download PDF**.
 - **API** — `GET /api/v1/compliance/frameworks/:frameworkId/coverage`, where `frameworkId` is `eu_ai_act`, `iso_42001`, `nist_ai_rmf` or `mitre_atlas`. Any workspace member can read it. `?format=` picks the form: `json` (the default), `markdown`, `csv` or `pdf`; any other value is refused with `400`.
 
+These live reports are never signed, and each download says so with `X-Intutic-Export-Signed: false`. The copies sealed in the evidence pack are the ones that are signed, when the deployment has a signing key.
+
 ### Export formats
 
 Every format carries the same content: each control's coverage and state, its evidence and what that evidence shows, what it does not cover, and the mapping version and generation time. For ATLAS, each mitigation also lists the techniques it mitigates.
@@ -58,16 +60,16 @@ Every format carries the same content: each control's coverage and state, its ev
 - **CSV** — one row per catalog control, unmapped ones included, with the columns Framework, Control, Title, Coverage, State, Evidence, What it shows, Not covered, Techniques mitigated, Mapping version and Generated. A control's evidence entries are one per line inside the cell (kind, title and the route, source file or probe id, plus a probe's state), with **What it shows** in the same order. Quoting follows RFC 4180, and a cell that begins with `=`, `+`, `-`, `@`, a tab or a carriage return is prefixed with `'` so a spreadsheet reads it as text rather than a formula.
 - **PDF** — for print: a title page naming the workspace, framework, mapping version and generation time; the summary counts; each mapped control with its evidence; the gaps; and the unmapped controls with their titles. It is set in the standard PDF fonts, so rendering fetches nothing and works air-gapped, and the same coverage always renders the same bytes.
 
-### In the signed evidence pack
+### In the evidence pack
 
-Every [evidence archive](/guide/compliance-evidence#evidence-runs) carries the coverage of all four frameworks, computed from the archive's own fresh probe run, as JSON, as the readable report, and (from `formatVersion` 3) as the CSV and the PDF, base64-encoded. Each framework has its own section hash in the archive manifest, `framework:<id>`, and the archive signature covers it. The CSV and PDF are also hashed as files, under `framework:<id>:csv` and `framework:<id>:pdf`: decode the PDF from base64, save either one, and its `sha256sum` matches the manifest. Like the rest of the archive, the sealed PDF identifies the workspace by its id, not its name.
+Every [evidence archive](/guide/compliance-evidence#evidence-runs) carries the coverage of all four frameworks, computed from the archive's own fresh probe run, as JSON, as the readable report, and (from `formatVersion` 3) as the CSV and the PDF, base64-encoded. Each framework has its own section hash in the archive manifest, `framework:<id>`, and the archive signature covers it when the deployment has a signing key (`TRACE_SIGNING_PRIVATE_KEY`). When it has none, the archive is unsigned and its manifest says so: `signed` is `false` and `unsignedReason` names the key to set. The CSV and PDF are also hashed as files, under `framework:<id>:csv` and `framework:<id>:pdf`: decode the PDF from base64, save either one, and its `sha256sum` matches the manifest. Like the rest of the archive, the sealed PDF identifies the workspace by its id, not its name.
 
 - **Daily collection** <Badge type="danger" text="Enterprise" /> — an archive is collected automatically once a day on the Enterprise and Self-host plans.
 - **On demand** — an owner or admin can collect one at any time with **Collect & export evidence**.
 
 ## Human-oversight export (EU AI Act Article 14)
 
-`GET /api/v1/compliance/human-oversight-export?from=<ISO>&to=<ISO>` (OWNER/ADMIN; the window defaults to the trailing 90 days) returns a signed record of the people deciding what agents may do:
+`GET /api/v1/compliance/human-oversight-export?from=<ISO>&to=<ISO>` (OWNER/ADMIN; the window defaults to the trailing 90 days) returns a record of the people deciding what agents may do, signed when the deployment has a signing key (`TRACE_SIGNING_PRIVATE_KEY`); the `X-Intutic-Export-Signed` response header says `true` or `false`:
 
 - **Plan events** — each plan captured, approved, rejected or closed in the window, with the member who acted, the time, the rationale they wrote and, for a closure, the outcome; and each deviation the gates recorded while the plan's session ran.
 - **Review-hold decisions** — each tool call held before it ran by a require-approval rule, with the rule, the tool, the member who approved or rejected it and when. A hold still waiting for review is listed as pending.
@@ -126,7 +128,7 @@ Repeating a planned tool after its steps have run is not a deviation. Steps that
 | Control | Evidence | Not covered |
 |---|---|---|
 | GOVERN 1.4 | `sop_coverage` probe; `sop_git_drift` probe; Pre-execution tool-call gate | Setting risk priorities is the organization’s process. |
-| GOVERN 1.5 | Compliance probe history; Signed evidence pack | Planning the periodic review and assigning who performs it is the organization’s process. |
+| GOVERN 1.5 | Compliance probe history; Evidence pack | Planning the periodic review and assigning who performs it is the organization’s process. |
 | GOVERN 1.6 | Agent registry | The inventory covers agents connected to Intutic, not every AI system in the organization. |
 | GOVERN 3.2 | Role-based authority; `auto_apply_provenance` probe; `guardrail_authority` probe | Writing the policies that define human-AI roles is the organization’s process. |
 | GOVERN 4.3 | Governance incidents; SIEM export | AI testing practices are not evidenced. |
@@ -162,6 +164,6 @@ The techniques each mitigation mitigates are listed in every report and export.
 
 ## Related
 
-- [Compliance Evidence](/guide/compliance-evidence) — the probes, probe history and the signed evidence pack
+- [Compliance Evidence](/guide/compliance-evidence) — the probes, probe history and the evidence pack
 - [Evidence and Authority Provenance](/concepts/evidence-and-authority-provenance) — the plan approval lifecycle
 - [Trace Integrity](/concepts/trace-integrity) — how the trace record is sealed and verified

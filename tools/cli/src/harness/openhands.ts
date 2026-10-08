@@ -43,6 +43,11 @@ export const openhandsAdapter: IHarnessAdapter = {
     }
   },
 
+  /** The .openhands/hooks.json PreToolUse hook. */
+  async installGate(workspaceRoot: string, proxyUrl: string): Promise<void> {
+    await writeOpenHandsHooks(workspaceRoot, proxyUrl)
+  },
+
   async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
     const filePath = join(workspaceRoot, CONFIG_FILE)
 
@@ -67,9 +72,6 @@ export const openhandsAdapter: IHarnessAdapter = {
       await rename(tmpPath, filePath)
       written = filePath
     }
-
-    // Inject .openhands/hooks.json PreToolUse hook
-    await writeOpenHandsHooks(workspaceRoot, proxyUrl)
 
     return written
   },

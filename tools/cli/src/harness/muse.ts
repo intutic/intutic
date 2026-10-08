@@ -64,24 +64,20 @@ export const museAdapter: IHarnessAdapter = {
     return false
   },
 
-  async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
-    const agentsPath = join(workspaceRoot, CONFIG_FILE)
-
-    // 1. AGENTS.md rules file — same "skip when there is nothing to write"
-    //    convention `createMarkdownAdapter` uses; unlike Goose, Muse DOES
-    //    have a rules file, so sops are not ignored here.
-    if (sops.length > 0) {
-      const content = buildMarkdownContent(sops, proxyUrl)
-      await writeOwnedFile(agentsPath, workspaceRoot, content)
-    }
-
-    // 2. PreToolUse/PermissionRequest hooks (project .muse/hooks.json +
-    //    managed_hooks_path merge into ~/.config/muse/settings.json).
-    //    `intutic connect` has no workspace id in scope — same limitation
-    //    `gooseAdapter` has — the sync daemon re-runs this with a real one
-    //    on the next cycle.
+  /** PreToolUse/PermissionRequest hooks (project .muse/hooks.json +
+   *  managed_hooks_path merge into ~/.config/muse/settings.json). `intutic
+   *  connect` has no workspace id in scope — same limitation `gooseAdapter`
+   *  has — the sync daemon re-runs this with a real one on the next cycle. */
+  async installGate(workspaceRoot: string, proxyUrl: string): Promise<void> {
     await writeMuseHooks(workspaceRoot, proxyUrl, '')
+  },
 
+  /** AGENTS.md rules file — same "skip when there is nothing to write"
+   *  convention `createMarkdownAdapter` uses. */
+  async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
+    if (sops.length === 0) return null
+    const agentsPath = join(workspaceRoot, CONFIG_FILE)
+    await writeOwnedFile(agentsPath, workspaceRoot, buildMarkdownContent(sops, proxyUrl))
     return agentsPath
   },
 

@@ -58,8 +58,8 @@ Sign-in, keys and credentials, and the network and runtime limits every agent in
 
 | Card | What it does |
 |------|--------------|
-| **Single Sign-On (SSO)** | **Configure SSO** connects a SAML or OIDC identity provider (Okta, Entra ID and others). Once a provider exists, the card also offers **Expire API keys without a recent SSO login** and **Directory provisioning (SCIM 2.0)**. See [Security & Identity](/guide/security) and [SCIM Provisioning](/guide/scim). |
-| **Group policy for high-risk tools** | Which tools only members of named identity-provider groups may run, and which tools need an on-behalf-of token. See [below](#group-policy-for-high-risk-tools). |
+| **Single Sign-On (SSO)** | **Configure SSO** connects a SAML or OIDC identity provider (Okta, Entra ID and others). Once a provider exists, the card also offers **Expire API keys without a recent SSO login** and **Directory provisioning (SCIM 2.0)**. On a plan without SSO the card says which plans include it. See [Security & Identity](/guide/security) and [SCIM Provisioning](/guide/scim). |
+| **Group policy for high-risk tools** | Which tools only members of named identity-provider groups may run, and which tools need an on-behalf-of token. Needs a plan with SSO. See [below](#group-policy-for-high-risk-tools). |
 | **Virtual API Keys** | Keys (`vk_…`) that developers and their agents use to reach the Intutic proxy. See [below](#virtual-api-keys). |
 | **Attenuated API Keys** | Child keys minted from a parent key with fewer capabilities by `intutic attenuate`; open a chain to see each step. |
 | **On-Behalf-Of Tokens** | A short-lived token that lets an agent act for you with only the tools you pick. See [below](#on-behalf-of-obo-tokens). |
@@ -74,7 +74,7 @@ Sign-in, keys and credentials, and the network and runtime limits every agent in
 | **Gate health** | Whether each installed harness's gate is reporting. A gate reports every tool call, allowed ones included, so one that has sent nothing for 48 hours is **Silent**: its tool calls may not be governed. **Just installed** means the harness connected less than an hour ago. Owners, Admins and Engineering Managers can see it. |
 | **Devices** | Enforcement posture each developer machine reports: visibility, not attestation. |
 
-### Group policy for high-risk tools
+### Group policy for high-risk tools <Badge type="warning" text="Biz Org+" />
 
 Three lists, one name per line, matched exactly including case: **High-risk tools**, **Groups
 that may run them** and **On-behalf-of only**. A member in one of the groups may run the
@@ -87,6 +87,11 @@ Owners and Admins can edit it; everyone else sees it read-only. It is stored as 
 every change is recorded in the [Audit Timeline](/guide/audit-timeline). Where a member's groups
 come from, and how fast a change reaches each gate, is in
 [SSO group clearance](/concepts/circuit-breaker#_3-sso-group-clearance).
+
+The policy needs single sign-on, where members' groups come from, so it is not enforced on Free
+or Self-serve. There the card says which plans include it. A policy saved before a downgrade is
+shown read-only, marked **Not enforced on this plan**; Owners and Admins can remove it with
+**Clear group policy**. Kept, it applies again after an upgrade.
 
 ### Virtual API Keys
 
@@ -221,7 +226,9 @@ What the MCP governance proxy does when it cannot reach Intutic, and how firmly 
 | **Fail open** *(recommended)* | The tool call runs, and a warning event reaches the dashboard |
 | **Fail closed** | The tool call is blocked with "Governance check failed: Intutic control plane unreachable." The dashboard asks you to confirm before switching to it |
 
-The choice reaches each proxy with its policy. A proxy that has not been able to load policy since it started uses its local `INTUTIC_MCP_FAIL_OPEN` instead — see [When the registry has not loaded](/guide/mcp-governance#when-the-registry-has-not-loaded). Which MCP servers and tools may run is set on **Policies › MCP Servers** ([the registry](/guide/mcp-governance#the-registry)).
+The choice reaches each proxy with its policy. A proxy that has not been able to load policy since it started uses its local `INTUTIC_MCP_FAIL_OPEN` instead — see [When the registry has not loaded](/guide/mcp-governance#when-the-registry-has-not-loaded). It also decides what happens to a call an [MCP call budget](/guide/mcp-governance#call-budgets) covers when the proxy cannot reach Valkey to count it: fail open lets the call through uncounted, fail closed refuses it.
+
+Which MCP servers and tools may run, what a high-risk change to a server's tools does, and the MCP call budgets are set on **Policies › MCP Servers** ([the registry](/guide/mcp-governance#the-registry), [tool-change risk](/guide/mcp-governance#tool-change-risk), [call budgets](/guide/mcp-governance#call-budgets)). They are workspace settings too — `mcpDefaultPolicy`, `mcpHighRiskToolChange` and `mcpBudgets` on `PUT /api/v1/workspace/settings` — so only an owner or admin changes them, and each change is in the settings history on **Settings › Audit Timeline**.
 
 **When someone edits a harness config file by hand**
 
@@ -311,7 +318,7 @@ Route governance events to Slack, PagerDuty, a webhook or email. Each rule (**Ne
 
 ### Channel Routing
 
-- **Slack** — **Connect Slack** installs the Slack app through OAuth; a rule then sends to a Slack channel ID. **Link your Slack account** gives you a code to run as `/intutic link <code>` in Slack, so approvals you make from Slack are recorded against you rather than against whoever installed the app.
+- **Slack** — **Connect Slack** installs the Slack app through OAuth; a rule then sends to a Slack channel ID. **Link your Slack account** gives you a code to run as `/intutic link <code>` in Slack. A review card's **Approve** and **Reject** buttons work only from a linked account, and the review is recorded against you.
 - **Email** — Send alerts to up to 20 addresses; each recipient gets their own message.
 - **PagerDuty** — Trigger incidents through an Events API v2 routing key.
 - **Webhooks** — Send JSON payloads to generic HTTPS endpoints. Every request is signed; see [below](#verifying-webhook-signatures).
@@ -386,6 +393,9 @@ The **Event Type** list offers only the events the control plane sends:
 | `guardrail.ready` | Policy Guardrail Ready to Enforce |
 | `guardrail.stale` | Policy Guardrail Citation Went Stale |
 | `mcp.server.candidate` | New MCP Server Awaiting Approval |
+| `mcp.server.tool_change_risk` | MCP Server Tool Change Scored High Risk |
+| `mcp.budget.threshold` | MCP Call Budget Threshold Reached: once per budget per period |
+| `mcp.budget.exceeded` | MCP Call Budget Exceeded: once per budget per period, on the first refused call |
 | `finops.budget.threshold` | Budget Threshold Reached |
 | `finops.budget.exceeded` | Budget Exceeded |
 | `plan.deviation.detected` | Plan Deviation Detected |

@@ -19,6 +19,8 @@ hook at services/sync-daemon/src/harness/claudeCodeHooks.ts:452.
 
 from __future__ import annotations
 
+import re
+
 ACTION_PREFIX = "action:"
 
 # Commands that put code or artefacts somewhere real.
@@ -95,7 +97,8 @@ HTTP_POST_PATTERNS = [
     "http post",
 ]
 
-# Commands that write to a database.
+# Commands that write to a database. Matched with SQL_GAP standing for each
+# space, not as plain substrings — see matches_sql_any.
 DB_WRITE_PATTERNS = [
     "insert into",
     "update ",
@@ -103,6 +106,17 @@ DB_WRITE_PATTERNS = [
     "drop table",
     "truncate ",
     "alter table",
+]
+
+# What may separate two SQL keywords: whitespace, a two-character escaped
+# newline, tab or carriage return, a /* ... */ comment, or a -- comment that
+# runs to a newline. Byte-identical to SQL_GAP in actions.rs (the test
+# compares them); see the comment there for why the gap is matched rather
+# than stripped from the text.
+SQL_GAP = r"(?:\s|\\[ntr]|/\*(?:[^*]|\*+[^*/])*\*+/|--(?:[^\n\\]|\\[^n\n])*(?:\n|\\n))+"
+
+_DB_WRITE_PHRASES = [
+    re.compile(SQL_GAP.join(re.escape(w) for w in p.split(" "))) for p in DB_WRITE_PATTERNS
 ]
 
 # Path fragments that indicate credential material.
@@ -133,7 +147,17 @@ PII_PATH_FRAGMENTS = ["customer", "users.csv", "pii", "personal", "gdpr", "payro
 #
 # An agent's shell tool should carry one of these names (lowercase) so that
 # tool_is() matches and the proxy classifies its arguments at all.
-SHELL_TOOLS = ["bash", "shell", "run_command", "runcommand", "execute_command", "terminal", "execute", "exec"]
+SHELL_TOOLS = [
+    "bash",
+    "shell",
+    "run_command",
+    "runcommand",
+    "execute_command",
+    "run_shell_command",
+    "terminal",
+    "execute",
+    "exec",
+]
 
 # Tool names harnesses use for "read a file".
 READ_TOOLS = ["read", "readfile", "view", "cat", "open_file"]
@@ -180,6 +204,11 @@ def matches_any(haystack: str, patterns: list[str]) -> bool:
     return any(p in haystack for p in patterns)
 
 
+def matches_sql_any(haystack: str) -> bool:
+    """matches_any for DB_WRITE_PATTERNS, tolerant of what separates the keywords."""
+    return any(r.search(haystack) for r in _DB_WRITE_PHRASES)
+
+
 def tool_is(name: str, group: list[str]) -> bool:
     """Match a tool name against a group.
 
@@ -217,7 +246,7 @@ def classify(tool_name: str, tool_input) -> list[str]:
             actions.append("pii_export")
         if matches_any(args, HTTP_POST_PATTERNS):
             actions.append("http_post")
-        if matches_any(args, DB_WRITE_PATTERNS):
+        if matches_sql_any(args):
             actions.append("db_write")
 
     return [ACTION_PREFIX + a for a in actions]

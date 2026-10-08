@@ -13,6 +13,7 @@
 
 import type { McpProxyFailBehavior, McpProxyMode, BypassEnforcementTier } from './enums.js'
 import type { SsoGroupPolicy } from './attenuation.js'
+import type { McpBudgetSettings } from './mcpBudgets.js'
 
 // Re-export so callers only need one import
 export type { McpProxyFailBehavior, McpProxyMode, BypassEnforcementTier }
@@ -275,9 +276,10 @@ export interface WorkspaceSettings {
    * Whether an APPROVED `review_before` decision may let the *matching retried
    * call* through the local gate, instead of only recording the decision.
    *
-   * Off (undefined/false) by default. `POST /api/v1/decisions` and its Slack
-   * approve button have always recorded a decision — this flag governs a
-   * separate, additive effect: when true, approving a decision tied to a
+   * Off (undefined/false) by default. Approving a decision — `intutic decision
+   * approve`, `POST /api/v1/decisions/:id/review` or the Slack card, one code
+   * path — always records it; this flag governs a separate, additive effect:
+   * when true, approving a decision tied to a
    * `review_before` hold writes a short-lived, exact-match bypass entry
    * (workspace + SOP rule + normalised tool name + hashed target/command) to
    * Valkey, synced to `.intutic/hooks/approved-bypasses.jsonl` and consulted by
@@ -387,6 +389,25 @@ export interface WorkspaceSettings {
    * Absent or empty means the floor alone.
    */
   mcpInjectionPatterns?: string[]
+
+  /**
+   * Limits on MCP tool calls per hour or per day — per server, per tool, per
+   * member, or per member on one server (`mcpBudgets.ts`). Delivered with the
+   * MCP policy; the MCP proxy counts calls in Valkey and refuses one that
+   * would go over a limit, naming the budget and when it resets. Absent means
+   * no limits.
+   */
+  mcpBudgets?: McpBudgetSettings
+
+  /**
+   * What happens when a server's tool set changes and the change scores high
+   * risk (`mcpToolRisk.ts`). `notify` (the default, and what an absent value
+   * means) records the change and sends `mcp.server.tool_change_risk`;
+   * `hold` also returns the server to the approval queue, where the MCP proxy
+   * refuses it under either default policy until an owner or admin approves
+   * it again.
+   */
+  mcpHighRiskToolChange?: 'notify' | 'hold'
 
   /**
    * Negotiated per-token rates, by model id, in USD per 1k tokens (TD-434).

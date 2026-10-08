@@ -414,8 +414,12 @@ The daemon runs in the foreground. Use `Ctrl+C` to stop.
 - An agent report per harness: the configured guardrails, role SOPs, skills found under
   `.agents/skills` (scan findings and file hashes, not file contents), declared MCP servers and the
   budget tier.
-- Session start and end, with the Git branch and commit from `.intutic/git-context.json`, and the
-  names of your local SOP folders.
+- Session start and end, with the names of your local SOP folders, and the repository, Git branch
+  and HEAD commit of the workspace root, reported again when they change. The repository is the
+  `origin` remote reduced to host and path; any user name, password or token in it is removed
+  before it is sent.
+- The Git branch and commit in `.intutic/git-context.json`, when `intutic sync-context` has
+  written it.
 - Hook events and review requests the harness gates logged under `.intutic/events/`.
 - The proxy's local trace files, `~/.intutic/logs/traces-*.jsonl`, which are deleted locally once
   uploaded.
@@ -1268,7 +1272,7 @@ intutic decision approve <holdId> [--reason <reason>] [options]
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-Marks the decision `APPROVED`, attributed to you as the logged-in member. Only a decision still awaiting review can be approved.
+Marks the decision `APPROVED`, attributed to you as the logged-in member. You need the OWNER, ADMIN or EM role, and only a decision still awaiting review can be approved. The Slack card's **Approve** button does exactly the same.
 
 When the workspace has opted in with the `reviewHoldBypassEnabled` setting (off by default), approving also lets the exact held call (same tool, same command, same target) through for a short window, 10 minutes by default, and the command tells you to retry it. Otherwise the approval only records the decision. See [Stop and ask me first](/guide/graph-guardrails#stop-and-ask-me-first).
 
@@ -1304,7 +1308,7 @@ intutic decision reject <holdId> [--reason <reason>] [options]
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-Marks the decision `REJECTED`, attributed to you, with the reason in its rationale. The held call stays blocked. Only a decision still awaiting review can be rejected.
+Marks the decision `REJECTED`, attributed to you, with the reason in its rationale. The held call stays blocked. You need the OWNER, ADMIN or EM role, and only a decision still awaiting review can be rejected.
 
 **Example:**
 
@@ -2851,9 +2855,11 @@ intutic enterprise install [options]
 **What it does:**
 
 1. Reads the proxy's CA certificate from `~/.intutic/ca.crt`. The proxy creates it on first run, so run `intutic start` (or `intutic connect`) once first; if the file is missing the command exits with status `1`.
-2. Writes five manifests to `--mdm-output-dir` (no privilege needed):
+2. Writes nine manifests to `--mdm-output-dir` (no privilege needed):
    - `intutic-governance.mobileconfig` — CA trust profile
    - `cursor-hooks-jamf.json` / `cursor-hooks-intune.json` — Cursor system hooks for Jamf / Intune
+   - `gemini-cli-hooks-jamf.json` / `gemini-cli-hooks-intune.json` — the Gemini CLI gate in Gemini CLI's system settings file, which it applies over user and workspace settings
+   - `antigravity-hooks-jamf.json` / `antigravity-hooks-intune.json` — the Google Antigravity gate for each user's `~/.gemini/config/hooks.json` (Antigravity has no machine-wide hooks file)
    - `jamf-firewall-manifest.json` / `intune-firewall-manifest.json` — a recurring managed script that runs `<cli-binary-path> enforce apply` with root/administrator privilege, so the egress firewall is re-applied on every check-in
 
    With `--generate-mdm-only` the command stops here.

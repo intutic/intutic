@@ -22,8 +22,9 @@
 //!   here-string, or text piped in from earlier in the same pipeline — and
 //!   looks for `DROP TABLE|DATABASE|SCHEMA`, `TRUNCATE`, and `DELETE` with no
 //!   `WHERE`. Comments and string literals are stripped first, so
-//!   `SELECT 'drop table'` is not a drop; `dropdb` is a `DROP DATABASE` by
-//!   definition;
+//!   `SELECT 'drop table'` is not a drop, while `DROP/**/TABLE`, keywords split
+//!   by a tab or newline, and a two-character `\n` that `printf` expands are;
+//!   `dropdb` is a `DROP DATABASE` by definition;
 //! * the target — a `postgres://` / `postgresql://` / `mysql://` URI, the
 //!   `-h` / `-p` / `-d` (psql) or `-h` / `-P` / `-D` (mysql) flags, a libpq
 //!   `host=… dbname=…` string, inline `PGHOST=` / `PGPORT=` / `PGDATABASE=`
@@ -1213,6 +1214,13 @@ fn scan_sql(sql: &str) -> SqlScan {
     let use_ =
         USE.get_or_init(|| Regex::new(r"(?i)^use\s+`?([A-Za-z0-9_$-]+)`?$").expect("static regex"));
 
+    // `printf 'DROP\nTABLE x' | psql` and `echo -e` hand the client a real
+    // newline where the command text has the two characters `\n`; read the
+    // text the way they expand it, or the keywords look like one word.
+    let sql = &sql
+        .replace("\\n", "\n")
+        .replace("\\t", "\t")
+        .replace("\\r", "\r");
     let mut scan = SqlScan {
         switches_connection: connect.is_match(sql),
         ..SqlScan::default()
@@ -1677,6 +1685,31 @@ mod tests {
     }
 
     #[test]
+    fn whatever_separates_the_keywords_it_is_still_a_drop() {
+        for cmd in [
+            "psql -h db.prod -d app -c 'DROP\nTABLE users'",
+            "psql -h db.prod -d app -c 'DROP\tTABLE users'",
+            "psql -h db.prod -d app -c 'DROP/**/TABLE users'",
+            "psql -h db.prod -d app -c 'DROP -- why\nTABLE users'",
+            "psql -h db.prod -d app -c 'dRoP tAbLe users'",
+            // `printf` and `echo -e` turn a two-character `\n` into a newline
+            // before psql reads it.
+            r"printf 'DROP\nTABLE users' | psql -h db.prod -d app",
+            r"echo -e 'DROP\tTABLE users' | psql -h db.prod -d app",
+        ] {
+            assert_eq!(one(cmd).statements, vec!["DROP TABLE"], "{cmd:?}");
+        }
+        // The tool call's arguments arrive JSON-encoded; the escaped newline
+        // is a real one once decoded.
+        let args: Value =
+            serde_json::from_str(r#"{"command":"psql -h db.prod -d app -c 'DROP\nTABLE users'"}"#)
+                .unwrap();
+        let hits = inspect_tool_call("Bash", &args);
+        assert_eq!(hits.len(), 1, "{hits:?}");
+        assert_eq!(hits[0].statements, vec!["DROP TABLE"]);
+    }
+
+    #[test]
     fn delete_with_where_and_non_statement_mentions_pass() {
         for cmd in [
             r#"psql -h db.prod -c "DELETE FROM sessions WHERE expires_at < now()""#,
@@ -1724,6 +1757,7 @@ mod tests {
             "shell",
             "run_command",
             "execute_command",
+            "run_shell_command",
             "terminal",
         ] {
             assert_eq!(inspect_tool_call(t, &args).len(), 1, "{t}");

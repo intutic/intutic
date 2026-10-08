@@ -183,6 +183,15 @@ describe('ToolCallInterceptor', () => {
       expect(decision.action).toBe('block')
     })
 
+    it('blocks SQL DROP TABLE split across lines in the decoded arguments', async () => {
+      const policy = new StubPolicyClient()
+      const interceptor = new ToolCallInterceptor(policy, emitter, true)
+
+      const args = JSON.parse(String.raw`{"query": "DROP\n/* x */TABLE users"}`)
+      const decision = await interceptor.decide('mcp__database__execute', args)
+      expect(decision.action).toBe('block')
+    })
+
     it('allows benign tool calls with no DLP match', async () => {
       const policy = new StubPolicyClient()
       const interceptor = new ToolCallInterceptor(policy, emitter, true)
@@ -617,6 +626,20 @@ describe('ToolCallInterceptor', () => {
       expect(refused.action).toBe('block')
       expect((refused as { reason: string }).reason).toContain('"delete_repo" is disabled on MCP server "github"')
       expect((await interceptor.decide('list_issues', {})).action).toBe('allow')
+    })
+
+    it('a server held after a high-risk tool change is refused under either default until approved again', async () => {
+      for (const defaultPolicy of ['allow', 'deny'] as const) {
+        const policy = new StubPolicyClient()
+        policy.registry = registry({ defaultPolicy, heldServers: ['github'] })
+        const interceptor = new ToolCallInterceptor(policy, emitter, true, 'github')
+        const decision = await interceptor.decide('list_issues', {})
+        expect(decision.action).toBe('block')
+        expect((decision as { reason: string }).reason).toContain('scored high risk')
+      }
+      const other = new StubPolicyClient()
+      other.registry = registry({ heldServers: ['gitlab'] })
+      expect((await new ToolCallInterceptor(other, emitter, true, 'github').decide('list_issues', {})).action).toBe('allow')
     })
 
     it('a tool disabled on another server does not affect this one', async () => {

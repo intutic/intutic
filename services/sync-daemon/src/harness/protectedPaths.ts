@@ -351,7 +351,8 @@ export function assertPortableEre(source: string, id: string): void {
     [/\(\?/, 'lookaround or non-capturing group — not in POSIX ERE'],
     [/\\[1-9]/, 'backreference — not in POSIX ERE'],
     [/(^|[^\\])\{/, 'unescaped { — interval syntax differs; escape it as \\{ for a literal brace'],
-    [/(^|[^\\])[$^]/, 'anchor — patterns match a space-padded string, so use a literal space'],
+    // `[^` opens a negated bracket expression, which ERE and JavaScript read alike.
+    [/(^|[^\\[])[$^]/, 'anchor — patterns match a space-padded string, so use a literal space'],
     [/\t/, 'tab — the .rules snapshot projection is tab-separated'],
     [/'/, "single quote — patterns are emitted into single-quoted shell literals"],
   ]
@@ -878,6 +879,22 @@ function assertSkillContentArgSane(
 }
 
 /**
+ * What may separate two SQL keywords in a normalised command, as portable ERE:
+ * a space (normalisation has already turned tabs and newlines into one), a
+ * two-character escaped `\n`, `\t` or `\r` (`printf` and `echo -e` expand it
+ * before the client reads it), a block comment, or a `--` comment.
+ *
+ * Normalisation has also removed the newline that ends a `--` comment, so the
+ * comment is taken to run up to the keyword — but not across `;`, `&` or `|`,
+ * which end the shell command it is in. The gap is matched rather than removed
+ * from the text: `--` also begins every long shell flag, and deleting
+ * "comments" from `psql --command "drop table x"` would delete the statement.
+ * The other gates use the same gap in their own regex dialect (`SQL_GAP` in
+ * the proxy's anomaly/actions.rs).
+ */
+const SQL_GAP_ERE = '( |\\\\[ntr]|/\\*([^*]|\\*+[^*/])*\\*+/)+(--[^;&|]* )?|--[^;&|]* '
+
+/**
  * Commands that destroy the machine or its data irrecoverably.
  *
  * TD-309: none of these were blocked by any harness. They are shipped through
@@ -1022,7 +1039,7 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: readonly GuardPattern[] = assertGuard
   },
   {
     id: 'destructive.sql_drop',
-    source: ' (drop +(table|database|schema)|truncate +table) ',
+    source: `[^a-zA-Z0-9_](drop(${SQL_GAP_ERE})(table|database|schema)|truncate(${SQL_GAP_ERE})table)[^a-zA-Z0-9_.]`,
     ignoreCase: true,
     severity: 'warn',
     reason: 'Destructive SQL statement',
@@ -1032,9 +1049,37 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: readonly GuardPattern[] = assertGuard
       'dev DSN from a production one — the proxy can, and that is where a block ' +
       'belongs: a SOP declaring `sql_guard:` with an `sql_allow_dsns:` allowlist ' +
       'refuses it at the LLM proxy (packages/proxy/src/plugins/sql_guard.rs). ' +
-      'Warn keeps the signal without owning a decision it lacks the context to make.',
-    matches: [' DROP TABLE users ', ' drop database app ', ' TRUNCATE TABLE events '],
-    notMatches: [' SELECT * FROM users ', ' echo drop it ', ' git stash drop '],
+      'Warn keeps the signal without owning a decision it lacks the context to make. ' +
+      'The statement may follow any non-word character, not only a space, so ' +
+      '`psql -c "DROP TABLE x"` (quoted) counts — the space-only version missed ' +
+      'it. The keywords may be split by anything SQL_GAP_ERE allows. A text rule: ' +
+      'a quoted mention (`SELECT \'drop table\'`) also matches, because quoting ' +
+      'is how a shell command carries the real statement.',
+    matches: [
+      ' DROP TABLE users ',
+      ' drop database app ',
+      ' TRUNCATE TABLE events ',
+      ' psql -h db -c "DROP TABLE users" ',
+      ' psql -c "select 1;drop table users" ',
+      ' DROP\nTABLE users ',
+      ' DROP\tTABLE users ',
+      ' DROP/**/TABLE users ',
+      ' DROP /* why */ TABLE users ',
+      ' DROP -- why\nTABLE users ',
+      ' DROP--why\nTABLE users ',
+      ' dRoP tAbLe users ',
+      ' printf "DROP\\nTABLE users" | psql ',
+    ],
+    notMatches: [
+      ' SELECT * FROM users ',
+      ' echo drop it ',
+      ' git stash drop ',
+      ' git stash drop --quiet && cat table.md ',
+      ' ./drop_table.sh ',
+      ' truncate -s 0 app.log ',
+      ' truncate --size 0 table.log ',
+      ' pg_dump --exclude-table=audit app ',
+    ],
   },
   {
     id: 'destructive.git_history_loss',

@@ -148,8 +148,25 @@ export const ACTION_NEEDLES: ReadonlyArray<readonly [string, readonly string[]]>
   ['action:db_write', ['insert into', 'update ', 'delete from', 'drop table', 'truncate ', 'alter table']],
 ]
 
-/** The (lower-cased) tool names whose `command` the classifier reads. */
-export const ACTION_TOOL_NAMES = ['bash', 'shell', 'run_command', 'terminal', 'execute'] as const
+/**
+ * The (lower-cased) tool names whose `command` the classifier reads: every
+ * harness's shell tool. The same list as the proxy's `SHELL_TOOLS` in
+ * `actions.rs` (`hookActionParity.test.ts` holds them equal), so a hold the
+ * proxy would classify is one the gate can hold before the call runs.
+ * `run_shell_command` is Gemini CLI's, `run_command` Antigravity's and
+ * `execute_command` Cline's.
+ */
+export const ACTION_TOOL_NAMES = [
+  'bash',
+  'shell',
+  'run_command',
+  'runcommand',
+  'execute_command',
+  'run_shell_command',
+  'terminal',
+  'execute',
+  'exec',
+] as const
 
 /** Where a gate appends a hold, relative to the workspace root; the daemon's
  *  `drainReviewRequests` reads the same file. */
@@ -190,14 +207,14 @@ export const SNAPSHOT_STALE_AFTER_DAYS = 7
  *
  * The three values are not stylistic. Claude Code, Cursor and the bash
  * harnesses read the **exit code** (2 = deny; 1 is an error and lets the call
- * through). Cline and Roo Code ignore the exit code and read a `{"cancel":
- * true}` object on stdout. Grok Build ALSO ignores the exit code, but its
+ * through). Cline ignores the exit code and reads a `{"cancel": true}`
+ * object on stdout. Grok Build ALSO ignores the exit code, but its
  * confirmed verdict shape is a *different* stdout object —
  * `{"decision":"deny","reason":"..."}` — not `{"cancel":true}`. The two
  * stdout contracts are kept as distinct union members rather than folded into
  * one "stdout-cancel" bucket precisely because a gate that emits the wrong
  * field name looks identical in a code review and enforces nothing: Grok
- * Build does not recognise `cancel`, and Cline/Roo Code do not recognise
+ * Build does not recognise `cancel`, and Cline does not recognise
  * `decision`. A gate that uses the wrong one is silently inert.
  */
 /**
@@ -1468,7 +1485,7 @@ function _intuticCapturePreImage(toolName, input, ruleId) {
  * every emitted gate for real.
  *
  * Refuses through the harness's contract, like everything else: exit 2 means
- * nothing to cline or roo-code, whose harnesses only read stdout — a crashed
+ * nothing to cline, which only reads stdout — a crashed
  * stdout-cancel gate must still print its cancel object.
  */
 export function emitJsFailClosedPrelude(opts: JsGateOptions): string {

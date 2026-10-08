@@ -17,7 +17,6 @@ import { access, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { HarnessType, openaiBaseUrl } from '@intutic/shared-types'
-import type { SyncSopEntry } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
 import { hashFile } from '../lib/hash.js'
 import { loadCredentials } from '../config/store.js'
@@ -45,14 +44,15 @@ export const continueAdapter: IHarnessAdapter = {
     }
   },
 
-  async writeConfig(workspaceRoot: string, _sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
-    const configYaml = continuePath('config.yaml')
-    const routed = await mergeContinueConfig(configYaml, openaiBaseUrl(proxyUrl))
-
+  async installGate(workspaceRoot: string, proxyUrl: string): Promise<void> {
+    await mergeContinueConfig(continuePath('config.yaml'), openaiBaseUrl(proxyUrl))
     const creds = await loadCredentials()
     await writeContinueHooks(workspaceRoot, proxyUrl, creds?.workspaceId || 'local')
+  },
 
-    return routed > 0 ? configYaml : null
+  /** Continue has no rules file Intutic writes. */
+  async writeConfig(): Promise<string | null> {
+    return null
   },
 
   async readCurrentHash(_workspaceRoot: string): Promise<string | null> {

@@ -5,6 +5,8 @@
  * 0. The MCP server registry, server/tool allowlists and SSO group clearance
  * 1. DLP scan (credential / destructive pattern detection)
  * 2. SOP policy rules (fetched from control plane via PolicyClient)
+ * 3–5. Prompt injection, anomaly detectors, WASM rules
+ * 6. MCP call budgets — last, so only a call that would otherwise run is counted
  *
  * Returns an allow / block / redact decision.
  *
@@ -24,6 +26,7 @@ import type { WasmRunner } from './wasm/runner.js'
 import type { PolicyClient, SopRule } from './policy.js'
 import { detectionFinding, type GovernanceEmitter } from './emitter.js'
 import type { ApprovalHolds } from './approvalHold.js'
+import { budgetEventDetail, exceededReason, unavailableReason, warningReason, type McpBudgetEnforcer } from './budget.js'
 
 const log = createLogger('mcp-proxy-interceptor')
 
@@ -33,8 +36,9 @@ export type Decision =
   | { action: 'redact'; reason: string; redactedInput: unknown }
   /**
    * Refused for now, pending a person's approval (`require_approval`). Not a
-   * block: the agent is told the hold id and that an identical retry passes
-   * once approved — see approvalHold.ts.
+   * block: the agent is told the hold id and to retry once it is approved,
+   * which passes only while the workspace's review-hold bypass is on — see
+   * approvalHold.ts.
    */
   | { action: 'hold'; reason: string; holdId: string }
 
@@ -114,7 +118,17 @@ export class ToolCallInterceptor {
      * refusal — never an allow.
      */
     private readonly holds: ApprovalHolds | undefined = undefined,
+    /**
+     * Counts each call against the workspace's MCP call budgets (budget.ts).
+     * `undefined` (construction sites that predate budgets) skips them; the
+     * proxy always passes one, with no store when it has no Valkey, so a
+     * covered call then resolves through the fail setting.
+     */
+    private readonly budgets: McpBudgetEnforcer | undefined = undefined,
   ) {}
+
+  /** Set once this process has said that budgets went unchecked under fail-open, so the log says it once. */
+  private budgetsUncheckedWarned = false
 
   /**
    * Whether a governance check that cannot complete lets the call through:
@@ -220,6 +234,11 @@ export class ToolCallInterceptor {
       reason =
         `MCP server "${this.serverName}" is blocked in this workspace's MCP server registry. ` +
         `An owner or admin can change that on the MCP Servers page.`
+    } else if (registry.heldServers.includes(this.serverName)) {
+      reason =
+        `MCP server "${this.serverName}" changed its tools in a way scored high risk, and this workspace ` +
+        `holds such a server until it is approved again. It is waiting in the approval queue on the MCP ` +
+        `Servers page for an owner or admin.`
     } else if (registry.defaultPolicy === 'deny' && !registry.approvedServers.includes(this.serverName)) {
       reason =
         `MCP server "${this.serverName}" is not approved in this workspace's MCP server registry, ` +
@@ -556,8 +575,80 @@ export class ToolCallInterceptor {
       }
     }
 
-    // 6. Allow — emit telemetry event
+    // 6. MCP call budgets — after every other check, so a call another check
+    // refuses never spends allowance.
+    const budgetDecision = await this.checkBudgets(toolName, toolInput)
+    if (budgetDecision) return budgetDecision
+
+    // 7. Allow — emit telemetry event
     this.emitter.emit('tool_allowed', toolName, toolInput)
     return { action: 'allow' }
+  }
+
+  /**
+   * Counts the call against every budget that covers it, or refuses it when
+   * one is used up. The threshold and exceeded events go out once per budget
+   * per period (the store claims them), each as a `budget_breach` finding; a
+   * refusal also sends `tool_blocked`, as every refusal does, carrying the
+   * budget — the control plane files one incident per budget per period from
+   * those and counts the rest on it.
+   *
+   * When the count cannot be checked, the fail setting decides, as for every
+   * other governance check that cannot complete.
+   */
+  private async checkBudgets(toolName: string, toolInput: unknown): Promise<Decision | null> {
+    if (!this.budgets) return null
+    const policy = this.policy.getMcpBudgets()
+    const verdict = await this.budgets.check(policy, toolName, this.policy.getPrincipal()?.memberId ?? null)
+
+    if (verdict.kind === 'unlimited') return null
+    if (verdict.kind === 'allowed') {
+      for (const standing of verdict.warnings) {
+        const reason = warningReason(standing, policy.warnAtPct)
+        log.warn({ action: 'mcp_budget_threshold', toolName, budgetId: standing.budget.id, used: standing.used }, reason)
+        this.emitter.emit(
+          'mcp_budget_threshold',
+          toolName,
+          undefined,
+          reason,
+          { detectorId: 'budget', kind: 'budget_breach', disposition: 'steer', severity: 'low', confidence: 1 },
+          budgetEventDetail(standing),
+        )
+      }
+      return null
+    }
+    if (verdict.kind === 'exceeded') {
+      const reason = exceededReason(verdict.standing)
+      log.warn({ action: 'mcp_budget_exceeded', toolName, budgetId: verdict.standing.budget.id, notify: verdict.notify }, reason)
+      if (verdict.notify) {
+        this.emitter.emit(
+          'mcp_budget_exceeded',
+          toolName,
+          undefined,
+          reason,
+          { detectorId: 'budget', kind: 'budget_breach', disposition: 'kill', severity: 'medium', confidence: 1 },
+          budgetEventDetail(verdict.standing),
+        )
+      }
+      this.emitter.emit('tool_blocked', toolName, toolInput, reason, undefined, budgetEventDetail(verdict.standing))
+      return { action: 'block', reason }
+    }
+
+    // Unavailable: no Valkey configured, or it did not answer.
+    if (this.failOpen) {
+      if (!this.budgetsUncheckedWarned) {
+        this.budgetsUncheckedWarned = true
+        log.warn(
+          { action: 'mcp_budget_unchecked', budgets: verdict.budgets.map((b) => b.id) },
+          'MCP call budgets cover calls through this proxy but could not be checked (no Valkey, or unreachable); ' +
+            'allowing them uncounted (fail-open)',
+        )
+      }
+      return null
+    }
+    const reason = unavailableReason(verdict.budgets)
+    log.warn({ action: 'mcp_budget_unchecked_block', toolName }, reason)
+    this.emitter.emit('tool_blocked', toolName, toolInput, reason)
+    return { action: 'block', reason }
   }
 }

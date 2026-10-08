@@ -778,8 +778,10 @@ export async function drainHookEvents(
  *
  * This is the writer. Delivering a hold always becomes a row and a review card;
  * whether resolving it can also let the retried call through is conditional,
- * not automatic. Approving through `POST /api/v1/decisions/:id/review` (or the
- * Slack button) writes a short-lived, exact-match bypass ONLY when the
+ * not automatic. Approving — `intutic decision approve`, `POST
+ * /api/v1/decisions/:id/review` or the Slack card, all of which go through the
+ * control plane's `reviewDecision` — writes a short-lived, exact-match bypass
+ * ONLY when the
  * workspace has opted in with `reviewHoldBypassEnabled`, and even then it
  * covers only the identical call, for at most `reviewHoldBypassTtlMinutes`.
  * A workspace that never sets that flag gets the original, unconditional

@@ -2,7 +2,7 @@
 
 # Intutic — Policy as Code for Continuous Compliance & Continuous Enforcement for AI Agents
 
-**The circuit breaker for AI agents: your policies are files in git, enforced synchronously and in-process on every tool call across 43 agent harnesses.**
+**The circuit breaker for AI agents: your policies are files in git, enforced synchronously at the tool call, across 43 agent harnesses.**
 
 [![GitHub Stars](https://img.shields.io/github/stars/intutic/intutic?style=social)](https://github.com/intutic/intutic)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
@@ -22,9 +22,9 @@
 
 ## 💡 Why Intutic?
 
-Existing AI observability tools (like LangSmith or Portkey) are **passive**. They record execution logs *after* an agent leaks a secret, deletes files, or loops into hundreds of dollars of API spend.
+Observability tools and LLM gateways (like LangSmith or Portkey) work on model traffic: they trace each call, and their gateways and guardrails can cap spend, redact or reject a request inline. What they do not see is the agent's tool call — the shell command that deletes files, the write that leaks a secret, the loop that keeps calling an API.
 
-**Intutic is an active circuit breaker.** It sits in the tool-call path between your AI agents and local shell/production APIs. Every tool execution passes through an in-process policy evaluation chain — no model call, no network hop — blocking dangerous commands before they run and steering agentic loops in real time.
+**Intutic is an active circuit breaker at the tool call.** In 36 of the 43 supported harnesses, each tool call passes through a policy gate before it runs — a rule decision, not a model call — that blocks dangerous commands and steers agentic loops in real time. The proxies cover the rest, and the model traffic as well.
 
 ---
 

@@ -379,7 +379,7 @@ INTUTIC_APPROVED_BYPASSES="\${INTUTIC_APPROVED_BYPASSES:-$HOME/.intutic/hooks/ap
 intutic_actions() {
   local _t _c out=" "
   _t="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
-  case "$_t" in bash|shell|run_command|terminal|execute) ;; *) printf ' '; return 0 ;; esac
+  case "$_t" in bash|shell|run_command|runcommand|execute_command|run_shell_command|terminal|execute|exec) ;; *) printf ' '; return 0 ;; esac
   _c="$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')"
   case "$_c" in *"git push"*|*"kubectl apply"*|*"kubectl rollout"*|*"helm upgrade"*|*"helm install"*|*"terraform apply"*|*"docker push"*|*"serverless deploy"*|*"fly deploy"*|*"vercel deploy"*|*"gcloud run deploy"*|*"aws deploy"*|*"aws s3 sync"*|*"eb deploy"*) out="\${out}action:deploy " ;; esac
   case "$_c" in *"npm publish"*|*"pnpm publish"*|*"yarn publish"*|*"cargo publish"*|*"twine upload"*|*"poetry publish"*|*"gem push"*|*"docker manifest push"*) out="\${out}action:publish " ;; esac
@@ -1008,7 +1008,7 @@ INTUTIC_APPROVED_BYPASSES="\${INTUTIC_APPROVED_BYPASSES:-$HOME/.intutic/hooks/ap
 intutic_actions() {
   local _t _c out=" "
   _t="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
-  case "$_t" in bash|shell|run_command|terminal|execute) ;; *) printf ' '; return 0 ;; esac
+  case "$_t" in bash|shell|run_command|runcommand|execute_command|run_shell_command|terminal|execute|exec) ;; *) printf ' '; return 0 ;; esac
   _c="$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')"
   case "$_c" in *"git push"*|*"kubectl apply"*|*"kubectl rollout"*|*"helm upgrade"*|*"helm install"*|*"terraform apply"*|*"docker push"*|*"serverless deploy"*|*"fly deploy"*|*"vercel deploy"*|*"gcloud run deploy"*|*"aws deploy"*|*"aws s3 sync"*|*"eb deploy"*) out="\${out}action:deploy " ;; esac
   case "$_c" in *"npm publish"*|*"pnpm publish"*|*"yarn publish"*|*"cargo publish"*|*"twine upload"*|*"poetry publish"*|*"gem push"*|*"docker manifest push"*) out="\${out}action:publish " ;; esac
@@ -1638,7 +1638,7 @@ INTUTIC_APPROVED_BYPASSES="\${INTUTIC_APPROVED_BYPASSES:-$HOME/.intutic/hooks/ap
 intutic_actions() {
   local _t _c out=" "
   _t="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
-  case "$_t" in bash|shell|run_command|terminal|execute) ;; *) printf ' '; return 0 ;; esac
+  case "$_t" in bash|shell|run_command|runcommand|execute_command|run_shell_command|terminal|execute|exec) ;; *) printf ' '; return 0 ;; esac
   _c="$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')"
   case "$_c" in *"git push"*|*"kubectl apply"*|*"kubectl rollout"*|*"helm upgrade"*|*"helm install"*|*"terraform apply"*|*"docker push"*|*"serverless deploy"*|*"fly deploy"*|*"vercel deploy"*|*"gcloud run deploy"*|*"aws deploy"*|*"aws s3 sync"*|*"eb deploy"*) out="\${out}action:deploy " ;; esac
   case "$_c" in *"npm publish"*|*"pnpm publish"*|*"yarn publish"*|*"cargo publish"*|*"twine upload"*|*"poetry publish"*|*"gem push"*|*"docker manifest push"*) out="\${out}action:publish " ;; esac
@@ -2266,7 +2266,7 @@ INTUTIC_APPROVED_BYPASSES="\${INTUTIC_APPROVED_BYPASSES:-$HOME/.intutic/hooks/ap
 intutic_actions() {
   local _t _c out=" "
   _t="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
-  case "$_t" in bash|shell|run_command|terminal|execute) ;; *) printf ' '; return 0 ;; esac
+  case "$_t" in bash|shell|run_command|runcommand|execute_command|run_shell_command|terminal|execute|exec) ;; *) printf ' '; return 0 ;; esac
   _c="$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')"
   case "$_c" in *"git push"*|*"kubectl apply"*|*"kubectl rollout"*|*"helm upgrade"*|*"helm install"*|*"terraform apply"*|*"docker push"*|*"serverless deploy"*|*"fly deploy"*|*"vercel deploy"*|*"gcloud run deploy"*|*"aws deploy"*|*"aws s3 sync"*|*"eb deploy"*) out="\${out}action:deploy " ;; esac
   case "$_c" in *"npm publish"*|*"pnpm publish"*|*"yarn publish"*|*"cargo publish"*|*"twine upload"*|*"poetry publish"*|*"gem push"*|*"docker manifest push"*) out="\${out}action:publish " ;; esac
@@ -2899,7 +2899,7 @@ INTUTIC_APPROVED_BYPASSES="\${INTUTIC_APPROVED_BYPASSES:-$HOME/.intutic/hooks/ap
 intutic_actions() {
   local _t _c out=" "
   _t="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
-  case "$_t" in bash|shell|run_command|terminal|execute) ;; *) printf ' '; return 0 ;; esac
+  case "$_t" in bash|shell|run_command|runcommand|execute_command|run_shell_command|terminal|execute|exec) ;; *) printf ' '; return 0 ;; esac
   _c="$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')"
   case "$_c" in *"git push"*|*"kubectl apply"*|*"kubectl rollout"*|*"helm upgrade"*|*"helm install"*|*"terraform apply"*|*"docker push"*|*"serverless deploy"*|*"fly deploy"*|*"vercel deploy"*|*"gcloud run deploy"*|*"aws deploy"*|*"aws s3 sync"*|*"eb deploy"*) out="\${out}action:deploy " ;; esac
   case "$_c" in *"npm publish"*|*"pnpm publish"*|*"yarn publish"*|*"cargo publish"*|*"twine upload"*|*"poetry publish"*|*"gem push"*|*"docker manifest push"*) out="\${out}action:publish " ;; esac

@@ -36,16 +36,17 @@ export const cursorAdapter: IHarnessAdapter = {
     try { await access(join(homedir(), '.cursor')); return true } catch { return false }
   },
 
+  /** hooks.json at project + user level; the system level needs
+   *  administrator rights and is `intutic enterprise install`'s job. */
+  async installGate(workspaceRoot: string, proxyUrl: string): Promise<void> {
+    await writeCursorHooks(workspaceRoot, proxyUrl, '', false)
+  },
+
+  /** .cursorrules markdown governance text. */
   async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
-    // 1. Write .cursorrules markdown governance text
     const filePath = join(workspaceRoot, CONFIG_FILE)
     const content = buildMarkdownContent(sops, proxyUrl)
     await writeOwnedFile(filePath, workspaceRoot, content)
-
-    // 2. Inject hooks.json at project + user level (writeSystemLevel=false;
-    //    system level requires sudo execution)
-    await writeCursorHooks(workspaceRoot, proxyUrl, '', false)
-
     return filePath
   },
 

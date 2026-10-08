@@ -2,27 +2,28 @@
  * toolPoison.ts — Tool-description poisoning patterns.
  *
  * Direct TypeScript port of `packages/proxy/src/tool_poison.rs`'s `scan`
- * function and its seven named patterns (confirmed by reading that file
- * directly). This is a SEPARATE pattern set from `injection.ts`, on purpose:
- * `tool_poison.rs`'s own module doc records that it tried reusing
- * `injection::scan` for this and measured that its five patterns match ZERO
- * of the tool-poisoning payloads — they are tuned for conversational
- * jailbreak phrasing ("ignore previous instructions"), while a poisoned tool
- * description reads like documentation, not a jailbreak. `ToolPoisoningDetector`
- * (Phase 2's `anomaly/detectors.ts`) is what consumes this module.
+ * function and its seven named patterns. This is a SEPARATE pattern set from
+ * the MCP proxy's `injection.ts`, on purpose: `tool_poison.rs`'s own module
+ * doc records that it tried reusing `injection::scan` for this and measured
+ * that its five patterns match ZERO of the tool-poisoning payloads — they are
+ * tuned for conversational jailbreak phrasing ("ignore previous
+ * instructions"), while a poisoned tool description reads like documentation,
+ * not a jailbreak.
+ *
+ * Two consumers, which is why it lives here: the MCP proxy's
+ * `tool_poisoning` detector (`packages/mcp-proxy/src/anomaly/detectors.ts`)
+ * and the tool-change risk score (`mcpToolRisk.ts`), which the control plane
+ * computes when a server's tool set changes.
  *
  * The Rust source gates each pattern behind a cheap substring pre-check
- * (`GATES`) before running the regex, measured to be ~1.8× faster than the
- * regex alone on their corpus. That optimization is NOT ported here — it is
+ * (`GATES`) before running the regex. That optimization is not ported — it is
  * a performance detail proven equivalent to the plain regex loop (the Rust
- * module's own `gating_never_changes_a_verdict` test asserts exactly that
- * equivalence), never a correctness one, and the volume of tool descriptions
- * one MCP session evaluates is orders of magnitude below the Rust proxy's
- * request-path corpus. The pattern SOURCE TEXT below is unchanged from the
- * Rust `PATTERNS` array — only the verbatim regex text is what was actually
- * measured, so preserving it exactly (not the gate) is what matters here.
+ * module's own `gating_never_changes_a_verdict` test), and the volume of tool
+ * descriptions scanned here is orders of magnitude below the Rust proxy's
+ * request path. The pattern SOURCE TEXT below is unchanged from the Rust
+ * `PATTERNS` array.
  *
- * @module
+ @module
  */
 
 interface ToolPoisonPattern {
@@ -34,7 +35,7 @@ interface ToolPoisonPattern {
  * Ported verbatim from `tool_poison.rs`'s `PATTERNS` const. All bounded
  * repetitions here are small fixed-width gaps (`{0,40}`, `{0,60}`, `{0,80}`)
  * over a handful of alternations — the same "no wide bounded repetition, no
- * RegexSet performance regression" shape `injection.ts` documents, not the
+ * RegexSet performance regression" shape the MCP proxy's `injection.ts` documents, not the
  * `dlp.rs` shape that regressed.
  */
 const PATTERNS: readonly ToolPoisonPattern[] = [

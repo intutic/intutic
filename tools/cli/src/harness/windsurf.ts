@@ -38,20 +38,20 @@ export const windsurfAdapter: IHarnessAdapter = {
     try { await access(WINDSURF_USER_DIR); return true } catch { return false }
   },
 
-  async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
-    // 1. Write .windsurfrules markdown governance text
-    const filePath = join(workspaceRoot, CONFIG_FILE)
-    const content = buildMarkdownContent(sops, proxyUrl)
-    await writeOwnedFile(filePath, workspaceRoot, content)
-
-    // 2. Write Cascade hooks.json at user + workspace level, configure TLS MITM
-    //    proxy. The proxy serves HTTP CONNECT on the same listener as its API,
-    //    so the port is the one `intutic connect` runs it on (PORT, 4000 by
-    //    default).
+  /** Cascade hooks.json at user + workspace level, and the TLS MITM proxy.
+   *  The proxy serves HTTP CONNECT on the same listener as its API, so the
+   *  port is the one `intutic connect` runs it on (PORT, 4000 by default). */
+  async installGate(workspaceRoot: string, proxyUrl: string): Promise<void> {
     const proxyPort = parseInt(process.env.PORT || '4000', 10)
     const creds = await loadCredentials()
     await writeWindsurfHooks(workspaceRoot, proxyUrl, proxyPort, creds?.workspaceId || 'local')
+  },
 
+  /** .windsurfrules markdown governance text. */
+  async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
+    const filePath = join(workspaceRoot, CONFIG_FILE)
+    const content = buildMarkdownContent(sops, proxyUrl)
+    await writeOwnedFile(filePath, workspaceRoot, content)
     return filePath
   },
 

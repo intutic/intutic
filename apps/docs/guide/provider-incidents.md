@@ -1,7 +1,8 @@
-# Signed Provider-Downtime Evidence <Badge type="tip" text="Cloud" />
+# Provider-Downtime Evidence <Badge type="tip" text="Cloud" />
 
 When an upstream model provider has an outage, Intutic records it as a **provider incident** and
-lets admins export a signed evidence archive documenting how it affected your workspace. This
+lets admins export an evidence archive documenting how it affected your workspace, signed when
+the deployment has a signing key. This
 page covers how incidents are detected, how to read the dashboard panel, how to export evidence,
 and how to present that evidence to a provider.
 
@@ -44,8 +45,10 @@ not a contractual SLA-breach determination.
 
 Workspace **Owners** and **Admins** see an **Export SLA evidence** button. Clicking it calls
 `POST /api/v1/provider-incidents/sla-evidence` (`requireSlaAdmin`-gated — `OWNER`/`ADMIN` only),
-which builds, hashes, signs, and stores a fresh archive, then immediately downloads the signed
-result via `GET /api/v1/provider-incidents/sla-evidence/:runId` (also `requireSlaAdmin`-gated).
+which builds, hashes, signs (when the control plane has `TRACE_SIGNING_PRIVATE_KEY`) and stores a
+fresh archive, then immediately downloads it via `GET /api/v1/provider-incidents/sla-evidence/:runId`
+(also `requireSlaAdmin`-gated). The panel then says whether the download is signed and, if it is
+not, what to configure.
 
 By default the export covers the trailing 90 days; a specific `periodStart`/`periodEnd` and a
 single `provider` filter can be requested via the same route's request body.
@@ -62,7 +65,7 @@ The exported archive (`SlaEvidenceArchive`) contains:
 | `incidents[].workspaceSampleTraceIds` | Sample trace IDs **filtered to your own workspace's traces only**, capped at a fixed sample size |
 | `incidents[].costImpact` | Provider-wide estimated cost impact of the incident |
 | `manifest` | Per-incident SHA-256 section hashes plus a whole-archive SHA-256 |
-| `signature` | A detached signature over the archive hash, minted under a dedicated `intutic-sla-evidence-v1` signing domain — distinct from the SOC 2 evidence signing domain, so a signature for one evidence type can never be presented as covering the other |
+| `signature` | A detached signature over the archive hash, minted under a dedicated `intutic-sla-evidence-v1` signing domain — distinct from the SOC 2 evidence signing domain, so a signature for one evidence type can never be presented as covering the other. `null` when the control plane has no `TRACE_SIGNING_PRIVATE_KEY`; the collect response's `signed` field and the download's `X-Intutic-Export-Signed` header say which |
 
 Two things are true about scope at once, and the archive is careful to keep them separate:
 
@@ -81,7 +84,7 @@ Every archive carries this text verbatim in its `disclaimer` field:
 > estimated cost impact) as recorded by this system. It is NOT a contractual SLA-breach
 > determination — SLA terms vary by contract and this report does not interpret or apply them."
 
-A signed, hashed, cryptographically-attested document about provider failures invites being read
+A hashed, and often signed, document about provider failures invites being read
 as "Intutic confirms your SLA was breached." It does not confirm that. SLA terms are contractual
 and specific to your agreement with the provider; this system has no model of any particular
 contract's terms.
