@@ -55,6 +55,7 @@ export type { DisconnectOptions, PlannedChange, PlanNote } from './disconnect/in
 export { guardSettingsFile, warnIfDshCoverageGap } from './watcher/settingsGuard.js'
 
 export { readJsonObjectForMerge } from './harness/jsonMergeTarget.js'
+export { writeRulesSection, rulesSectionOf, RULES_SECTION_START, RULES_SECTION_END } from './harness/rulesSection.js'
 export { gateKindForHarness } from './harness/gateKind.js'
 
 // Gap 3 fix — Antigravity (Gemini CLI) hook coverage

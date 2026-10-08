@@ -82,8 +82,8 @@ export function buildProtectedPaths(workspaceRoot: string): string[] {
     // ── Antigravity and Gemini CLI ────────────────────────────────────
     // The gates are registered at user level: Gemini CLI's in
     // ~/.gemini/settings.json, Antigravity's in ~/.gemini/config/hooks.json.
-    // The workspace file carries the rules.
-    path.join(workspaceRoot, '.gemini', 'settings.json'),
+    // The rules are in the workspace's GEMINI.md, which the drift watcher
+    // watches as the harness's rules file.
     path.join(home, '.gemini', 'settings.json'),
     path.join(home, '.gemini', 'config', 'hooks.json'),
     // ── Muse Code ────────────────────────────────────────────────────

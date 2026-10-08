@@ -4,7 +4,7 @@ Integrate Intutic governance with [OpenHands](https://github.com/All-Hands-AI/Op
 
 ## How it works
 
-Intutic merges two things into your project's `config.toml`, which OpenHands reads for configuration: `[llm] base_url`, pointing OpenHands' model calls at the Intutic proxy, and an `[intutic]` table with the proxy URL and your SOP text. Everything else in the file, including comments, is kept. It also writes a PreToolUse hook to `.openhands/hooks.json`, which blocks a tool call that breaks a rule before it runs.
+Intutic writes your SOP text to `.openhands/microagents/intutic-governance.md`, a repository microagent. It has no triggers, so OpenHands adds it to every conversation. It also merges `[llm] base_url` into your project's `config.toml`, pointing OpenHands' model calls at the Intutic proxy, and keeps everything else in that file, including comments. A PreToolUse hook in `.openhands/hooks.json` blocks a tool call that breaks a rule before it runs.
 
 ## Setup
 
@@ -19,7 +19,7 @@ intutic init
 ```
 
 ```
-  ✔ openhands → config.toml
+  ✔ openhands → .openhands/microagents/intutic-governance.md
 ```
 
 `intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
@@ -34,21 +34,31 @@ intutic start
 
 ## What gets written
 
-In `config.toml`, `base_url` is set in the `[llm]` table only, in the form the configured model's SDK expects; a `base_url` in another table, such as `[llm.draft_editor]`, is left alone. The `[intutic]` table is replaced whole on each sync:
+The microagent is Intutic's file, rewritten whole on each sync:
+
+```markdown
+# Intutic Governance Rules (auto-generated)
+# DO NOT EDIT — managed by intutic sync daemon
+# Last sync: 2026-10-08T22:24:00Z
+
+> **Proxy URL:** `http://localhost:4000`
+
+## Code Review Requirements
+
+All code changes must include unit tests...
+```
+
+OpenHands loads microagents from `.openhands/microagents/` in both its V0 runtime and the V1 agent SDK, which reads that directory alongside `.agents/skills/`.
+
+In `config.toml`, `base_url` is set in the `[llm]` table only, in the form the configured model's SDK expects; a `base_url` in another table, such as `[llm.draft_editor]`, is left alone:
 
 ```toml
 [llm]
 base_url = "http://localhost:4000/v1"
 model = "gpt-4o"
-
-[intutic]
-proxy_url = "http://localhost:4000"
-instructions = """
-## Code Review Requirements
-
-All code changes must include unit tests...
-"""
 ```
+
+Earlier versions put the SOP text in an `[intutic]` table of `config.toml`, which OpenHands does not read. `intutic connect` removes that table, and so does `intutic disconnect`.
 
 A `config.toml` that is not valid TOML is left untouched and reported in the `intutic connect` log. If `~/.openhands/config.toml` exists, its `[llm] base_url` is pointed at the proxy the same way; Intutic does not create that file.
 
@@ -59,7 +69,8 @@ To undo what `intutic connect` writes here, run `intutic disconnect --harness op
 | Property | Value |
 |----------|-------|
 | Harness type | `openhands` |
+| Rules file | `.openhands/microagents/intutic-governance.md` |
 | Config file | `config.toml` |
 | Detection | `.openhands/` in the workspace root, or a `config.toml` with a `[core]`, `[agent]`, `[sandbox]` or `[condenser]` table |
-| Format | TOML, merged: `[llm] base_url` and an `[intutic]` table with `proxy_url` and `instructions` |
+| Format | Markdown microagent with no triggers; TOML, merged: `[llm] base_url` |
 | Write strategy | Atomic (write to `.intutic-tmp`, then rename) |

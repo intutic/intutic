@@ -24,12 +24,19 @@
  * Build's, so the gate uses the `stdout-decision-deny` contract.
  *
  * On an allowed call the gate prints `{}`: a JSON object, which every hook
- * must print, with no decision in it. `allow` would auto-approve the call
- * past the permission prompts the user configured, and `ask` would prompt
- * for every call the user lets run unprompted, so the gate states no
- * decision and Antigravity's own permission settings decide. The
- * documentation marks `decision` as required and does not say how a result
- * without one is read; that was not verified against a running Antigravity.
+ * must print, with no decision in it, so Antigravity's own permission
+ * settings decide. The documented values all change what the user sees:
+ * `allow` is documented to auto-approve the call past the permission prompts
+ * the user configured, `ask` and `force_ask` to prompt, and
+ * `deny_unless_prior_grant` to refuse what was never granted. The
+ * documentation marks `decision` as required without saying how a result
+ * without one is read, so it was read from Antigravity itself (2.21.1, its
+ * `language_server`): `decision` is an optional string, `{}` parses to an
+ * empty one, and an empty decision is the lowest-ranked result when several
+ * hooks answer (deny > force_ask > deny_unless_prior_grant > ask >
+ * auto_approve > allow > none), so it never overrides another hook, and the
+ * permission check skips it, leaving the call to the user's own permission
+ * settings. A decision Antigravity does not know is reported as an error.
  *
  * HLD §3.14 — Three-Tier Defense Cascade (Tier 1 Native Gating)
  * @module
@@ -149,8 +156,8 @@ process.stdin.on('end', () => {
 
     intuticGate(toolName, targetPath, command, logEvent, _intuticWsId, input);
 
-    // Allow: a result with no decision in it. \`allow\` would auto-approve
-    // the call past the user's own permission prompts.
+    // Allow: a result with no decision in it, so the user's own permission
+    // settings decide (see the module doc).
     logEvent('tool_allowed', toolName, '');
     process.stdout.write('{}\\n');
     process.exit(0);

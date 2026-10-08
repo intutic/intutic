@@ -39,20 +39,32 @@ function run(script: string, payload: unknown, env: NodeJS.ProcessEnv): Promise<
     child.stderr.on('data', (d) => { stderr += d })
     child.on('error', reject)
     child.on('close', (status) => resolve({ status, stdout, stderr }))
-    child.stdin.end(JSON.stringify(payload))
+    // A string goes to stdin as it is, for input that is not JSON.
+    child.stdin.end(typeof payload === 'string' ? payload : JSON.stringify(payload))
   })
 }
 
-function decision(r: RunResult): string | null {
-  for (const line of r.stdout.split('\n')) {
-    try {
-      const obj = JSON.parse(line)
-      if (obj && typeof obj.decision === 'string') return obj.decision
-    } catch {
-      // not the verdict line
-    }
-  }
-  return null
+/** The PreToolUse output fields and decisions https://antigravity.google/docs/hooks/ documents. */
+const DOCUMENTED_FIELDS = ['decision', 'reason', 'permissionOverrides', 'overwrite']
+const DOCUMENTED_DECISIONS = ['allow', 'deny', 'ask', 'force_ask', 'deny_unless_prior_grant']
+
+/**
+ * The one JSON object the gate printed, checked against the documented
+ * output: stdout holds that object and nothing else, every field in it is a
+ * documented one, and a decision is a documented value. `decision` is left
+ * optional, the one departure from the documentation: an allowed call
+ * prints none (see antigravityCliHooks.ts).
+ */
+function documentedResult(r: RunResult): Record<string, unknown> {
+  const lines = r.stdout.split('\n').filter((line) => line.trim() !== '')
+  expect(lines, r.stdout).toHaveLength(1)
+  const obj: unknown = JSON.parse(lines[0]!)
+  expect(typeof obj === 'object' && obj !== null && !Array.isArray(obj)).toBe(true)
+  const result = obj as Record<string, unknown>
+  for (const key of Object.keys(result)) expect(DOCUMENTED_FIELDS).toContain(key)
+  if ('decision' in result) expect(DOCUMENTED_DECISIONS).toContain(result.decision)
+  if ('reason' in result) expect(typeof result.reason).toBe('string')
+  return result
 }
 
 /** Antigravity's documented PreToolUse payload. */
@@ -123,13 +135,13 @@ describe('writeAntigravityCliHooks', () => {
 
     const denied = await run(script(), toolCall('run_command', { CommandLine: 'rm -rf .intutic/hooks', Cwd: '/w' }), gateEnv(rules))
     expect(denied.status).toBe(0)
-    expect(decision(denied)).toBe('deny')
+    expect(documentedResult(denied)).toEqual({ decision: 'deny', reason: expect.stringContaining('.intutic/hooks') })
 
-    // `allow` would auto-approve past the user's own prompts: the gate prints
-    // a result with no decision in it.
+    // No decision: `allow` would auto-approve past the user's own prompts,
+    // `ask` would add prompts.
     const allowed = await run(script(), toolCall('run_command', { CommandLine: 'npm test', Cwd: '/w' }), gateEnv(rules))
     expect(allowed.status).toBe(0)
-    expect(allowed.stdout.trim()).toBe('{}')
+    expect(documentedResult(allowed)).toEqual({})
   })
 
   it('denies a write_to_file to a protected path named by TargetFile', async () => {
@@ -139,7 +151,7 @@ describe('writeAntigravityCliHooks', () => {
       toolCall('write_to_file', { TargetFile: '/w/.claude/settings.json', CodeContent: '{}' }),
       gateEnv(path.join(root, 'no-such.rules')),
     )
-    expect(decision(r)).toBe('deny')
+    expect(documentedResult(r).decision).toBe('deny')
   })
 
   it('holds a deploy run_command under review_before: action:deploy', async () => {
@@ -150,16 +162,23 @@ describe('writeAntigravityCliHooks', () => {
     }])
 
     const held = await run(script(), toolCall('run_command', { CommandLine: 'git push origin main', Cwd: '/w' }), gateEnv(rules))
-    expect(decision(held)).toBe('deny')
+    expect(documentedResult(held).decision).toBe('deny')
     expect(held.stderr).toMatch(/HELD/)
     const records = (await fs.readFile(path.join(root, REVIEW_REQUESTS_LOG), 'utf-8')).trim().split('\n')
     expect(records).toHaveLength(1)
     expect(JSON.parse(records[0]!)).toMatchObject({ v: 1, reason: 'sop.local.review_before.action:deploy', workspaceId: 'ws_test' })
   })
 
+  it('fails closed with a documented result on input that is not JSON', async () => {
+    await writeAntigravityCliHooks(root, PROXY_URL, 'ws_test')
+    const r = await run(script(), 'not json', gateEnv(path.join(root, 'no-such.rules')))
+    expect(r.status).toBe(0)
+    expect(documentedResult(r).decision).toBe('deny')
+  })
+
   it('refuses a payload carrying no tool call', async () => {
     await writeAntigravityCliHooks(root, PROXY_URL, 'ws_test')
     const r = await run(script(), { conversationId: 'conv_test' }, gateEnv(path.join(root, 'no-such.rules')))
-    expect(decision(r)).toBe('deny')
+    expect(documentedResult(r).decision).toBe('deny')
   })
 })

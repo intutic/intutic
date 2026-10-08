@@ -42,10 +42,10 @@ export interface IHarnessAdapter {
 export const HARNESS_CONFIG_FILES: Record<HarnessType, string> = {
   'cursor': '.cursorrules',
   'claude-code': 'CLAUDE.md',
-  'antigravity': '.gemini/settings.json',
+  'antigravity': 'GEMINI.md',
   'windsurf': '.windsurfrules',
   'aider': '.aider.conf.yml',
-  'openhands': 'config.toml',
+  'openhands': '.openhands/microagents/intutic-governance.md',
   'codex': '.env.intutic',
   'n8n': '', // Phase 2 — TD-037: API call, not file write
   'openclaw': '.openclaw/openclaw.json',

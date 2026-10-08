@@ -51,10 +51,10 @@ export async function setImmutable(filePath: string): Promise<void> {
 export const HARNESS_FILES: Record<HarnessType, string> = {
   cursor: '.cursorrules',
   'claude-code': 'CLAUDE.md',
-  antigravity: '.gemini/settings.json',
+  antigravity: 'GEMINI.md',
   windsurf: '.windsurfrules',
   aider: '.aider.conf.yml',
-  openhands: 'config.toml',
+  openhands: '.openhands/microagents/intutic-governance.md',
   codex: '.env.intutic',
   n8n: '.intutic/n8n/governance-workflow.json',
   openclaw: '.openclaw/openclaw.json',
