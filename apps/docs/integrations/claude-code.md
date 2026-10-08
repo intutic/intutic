@@ -133,7 +133,7 @@ Since Claude Code's CLI natively intercepts prompts starting with `/` at the she
 
 ## MCP Server Integration (`~/.claude.json`)
 
-`intutic connect` wraps the MCP servers Claude Code already has in `~/.claude.json` — the user-scope `mcpServers` and this project's local-scope servers — with the MCP governance proxy, and adds the `intutic` server below. It only edits `~/.claude.json` once Claude Code has created it, and keeps everything else in the file. Servers in a project's shared `.mcp.json` are not rewritten; their tool calls still pass through the `mcp__.*` PreToolUse gate.
+`intutic connect` wraps the MCP servers Claude Code already has in `~/.claude.json` — the user-scope `mcpServers` and this project's local-scope servers — with the MCP governance proxy, and adds the `intutic` server below. It only edits `~/.claude.json` once Claude Code has created it, and keeps everything else in the file. A project's shared `.mcp.json` is never rewritten: each of its servers you have approved in Claude Code gets a wrapped copy of the same name at local scope instead, which Claude Code uses in its place (see [How a server gets here at all](/guide/mcp-governance#how-a-server-gets-here-at-all)). Every MCP tool call, wrapped or not, also passes through the `mcp__.*` PreToolUse gate.
 
 To configure the same entries by hand, add them to `~/.claude.json`:
 

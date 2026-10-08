@@ -96,6 +96,24 @@ describe('MCP server registry (proxy side)', () => {
       expect(client.getFailOpen()).toBe(false)
     })
 
+    it("absorbs the workspace's injection and anomaly dispositions, and leaves them unset when not sent", async () => {
+      const client = new PolicyClient(baseUrl, 'vk_test', 'ws_1')
+      await client.refresh()
+      expect(client.getInjectionAction()).toBeUndefined()
+      expect(client.getAnomalyMode()).toBeUndefined()
+      expect(client.getAnomalyOverrides()).toEqual({})
+      rulesBody = {
+        rules: [],
+        mcpInjectionAction: 'block',
+        mcpAnomalyMode: 'off',
+        mcpAnomalyOverrides: { code_as_action: 'steer', bogus: 'explode' },
+      }
+      await client.refresh()
+      expect(client.getInjectionAction()).toBe('block')
+      expect(client.getAnomalyMode()).toBe('off')
+      expect(client.getAnomalyOverrides()).toEqual({ code_as_action: 'steer' })
+    })
+
     it('reads a control plane that sends no registry as unrestricted, not unknown', async () => {
       const client = new PolicyClient(baseUrl, 'vk_test', 'ws_1')
       await client.refresh()

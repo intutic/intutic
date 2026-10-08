@@ -613,6 +613,114 @@ describe('Claude Code target — ~/.claude.json, merged', () => {
   })
 })
 
+describe("Claude Code project scope — the repo's .mcp.json, governed through local-scope shadows", () => {
+  let ctx: Ctx
+
+  afterEach(() => {
+    if (ctx) teardown(ctx)
+  })
+
+  const projectMcp = (root: string) => join(root, '.mcp.json')
+  const read = () => JSON.parse(readFileSync(claudeCodePath(ctx.home), 'utf-8'))
+
+  function withProject(project: Record<string, unknown>, servers: Record<string, unknown>): void {
+    writeFileSync(claudeCodePath(ctx.home), JSON.stringify({ projects: { [ctx.root]: project } }))
+    writeFileSync(projectMcp(ctx.root), JSON.stringify({ mcpServers: servers }, null, 2))
+  }
+
+  it('shadows each approved server at local scope, wrapped, and never writes the shared .mcp.json', async () => {
+    ctx = setup()
+    withProject(
+      { enabledMcpjsonServers: ['linear', 'pg'] },
+      {
+        linear: { type: 'sse', url: 'https://mcp.linear.app/sse' },
+        pg: { command: 'pg-mcp', args: ['--ro'] },
+        unapproved: { command: 'sketchy-mcp' },
+      },
+    )
+    const before = readFileSync(projectMcp(ctx.root), 'utf-8')
+
+    await injectMcpServer(ctx.root, 'ws_test')
+
+    expect(readFileSync(projectMcp(ctx.root), 'utf-8')).toBe(before)
+    const local = read().projects[ctx.root].mcpServers
+    expect(local.pg).toMatchObject({ command: 'node', __intutic_wrapped: true, __intutic_shadow_of: 'project' })
+    expect(local.pg.args.slice(-4)).toEqual(['pg', '--', 'pg-mcp', '--ro'])
+    expect(local.linear).toMatchObject({ __intutic_wrapped: true, __intutic_shadow_of: 'project' })
+    expect(local.linear.args).toContain('--remote-url')
+    // Claude Code never started it without approval, and neither does a shadow.
+    expect(local.unapproved).toBeUndefined()
+  })
+
+  it("leaves a user's own local-scope server of the same name alone", async () => {
+    ctx = setup()
+    withProject(
+      { enableAllProjectMcpServers: true, mcpServers: { pg: { command: 'my-own-pg' } } },
+      { pg: { command: 'team-pg' } },
+    )
+    await injectMcpServer(ctx.root, 'ws_test')
+    const pg = read().projects[ctx.root].mcpServers.pg
+    expect(pg.__intutic_wrapped).toBe(true)
+    expect(pg.__intutic_shadow_of).toBeUndefined()
+    expect(pg.args).toContain('my-own-pg')
+    expect(pg.args).not.toContain('team-pg')
+  })
+
+  it('honours approvals in settings files, and a disable anywhere wins', async () => {
+    ctx = setup()
+    withProject({}, { a: { command: 'a-mcp' }, b: { command: 'b-mcp' } })
+    mkdirSync(join(ctx.root, '.claude'), { recursive: true })
+    writeFileSync(join(ctx.root, '.claude', 'settings.json'), JSON.stringify({ enableAllProjectMcpServers: true }))
+    writeFileSync(join(ctx.root, '.claude', 'settings.local.json'), JSON.stringify({ disabledMcpjsonServers: ['b'] }))
+    await injectMcpServer(ctx.root, 'ws_test')
+    const local = read().projects[ctx.root].mcpServers
+    expect(local.a.__intutic_shadow_of).toBe('project')
+    expect(local.b).toBeUndefined()
+  })
+
+  it('is idempotent, follows the source, and removes a shadow whose server or approval is gone', async () => {
+    ctx = setup()
+    withProject({ enabledMcpjsonServers: ['pg', 'gone'] }, { pg: { command: 'pg-mcp' }, gone: { command: 'gone-mcp' } })
+    await injectMcpServer(ctx.root, 'ws_test')
+    const mtime = statSync(claudeCodePath(ctx.home)).mtimeMs
+    await new Promise((r) => setTimeout(r, 20))
+    await injectMcpServer(ctx.root, 'ws_test')
+    expect(statSync(claudeCodePath(ctx.home)).mtimeMs).toBe(mtime)
+
+    // The team changes pg's command and drops `gone`.
+    writeFileSync(projectMcp(ctx.root), JSON.stringify({ mcpServers: { pg: { command: 'pg-mcp-v2' } } }))
+    await injectMcpServer(ctx.root, 'ws_test')
+    let local = read().projects[ctx.root].mcpServers
+    expect(local.pg.args).toContain('pg-mcp-v2')
+    expect(local.gone).toBeUndefined()
+
+    // The user revokes approval: the shadow goes, and the project is back to what .mcp.json says.
+    const state = read()
+    state.projects[ctx.root].enabledMcpjsonServers = []
+    writeFileSync(claudeCodePath(ctx.home), JSON.stringify(state))
+    await injectMcpServer(ctx.root, 'ws_test')
+    local = read().projects[ctx.root].mcpServers
+    expect(local).toEqual({})
+  })
+
+  it('does nothing for a project Claude Code has never opened', async () => {
+    ctx = setup()
+    writeFileSync(claudeCodePath(ctx.home), JSON.stringify({ projects: {} }))
+    writeFileSync(projectMcp(ctx.root), JSON.stringify({ mcpServers: { pg: { command: 'pg-mcp' } } }))
+    await injectMcpServer(ctx.root, 'ws_test')
+    expect(read().projects[ctx.root]).toBeUndefined()
+  })
+
+  it('reports a shadowed project server as wrapped, and an unapproved one as not', async () => {
+    ctx = setup()
+    withProject({ enabledMcpjsonServers: ['pg'] }, { pg: { command: 'pg-mcp' }, other: { command: 'other-mcp' } })
+    await injectMcpServer(ctx.root, 'ws_test')
+    const found = (await discoverMcpServers(ctx.root)).filter((s) => s.harness === 'claude-code')
+    expect(found.find((s) => s.server === 'pg')).toMatchObject({ wrapped: true, transport: 'stdio' })
+    expect(found.find((s) => s.server === 'other')).toMatchObject({ wrapped: false })
+  })
+})
+
 describe('resolveProxyBin', () => {
   it('finds the proxy installed alongside the daemon, not under the user\'s project', () => {
     // A project with no node_modules and no packages/ — the global-install case.

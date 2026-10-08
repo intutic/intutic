@@ -8,6 +8,7 @@
  */
 
 import type { AnomalyFinding, Disposition } from './detectors.js'
+import type { McpAnomalyDetectorId } from '@intutic/shared-types'
 
 export * from './detectors.js'
 
@@ -27,7 +28,7 @@ export const REASK_MAX_ATTEMPTS = 3
  * even when no finding fired yet (an `'off'` override skips evaluation
  * entirely — see `resolveEffectiveDisposition`).
  */
-export const DETECTOR_BASE_DISPOSITION: Readonly<Record<string, Disposition>> = {
+export const DETECTOR_BASE_DISPOSITION: Readonly<Record<McpAnomalyDetectorId, Disposition>> = {
   consecutive_repeat: 'reask',
   ping_pong_cycle: 'reask',
   landmark_cycle: 'steer',

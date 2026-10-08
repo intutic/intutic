@@ -205,7 +205,10 @@ escalates to `high` when findings reach the 2-technique threshold, or when the
 source is untrusted content (`tool_result` / `tool_description`) — mirroring
 the Rust detector's own escalation rule. A `block`-mode block additionally
 emits the existing `tool_blocked` event, so any consumer already keyed on
-`tool_blocked` sees this new block reason too.
+`tool_blocked` sees this new block reason too. The control plane files every
+`injection_detected`, `anomaly_detected` and `tool_redacted` event as a
+detector finding under an `mcp:` detector id — see [MCP Server
+Governance](/guide/mcp-governance#prompt-injection-scanning).
 
 `mcpInjectionAction` rides the same policy-snapshot channel as every other
 curation field in this package (`PolicyClient.absorbCuration`) — set it via

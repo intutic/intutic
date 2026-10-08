@@ -21,7 +21,7 @@ import type { AnomalyMode, Disposition } from './anomaly/index.js'
 import { SessionState } from './session.js'
 import type { WasmRunner } from './wasm/runner.js'
 import type { PolicyClient, SopRule } from './policy.js'
-import type { GovernanceEmitter } from './emitter.js'
+import { detectionFinding, type GovernanceEmitter } from './emitter.js'
 import type { ApprovalHolds } from './approvalHold.js'
 
 const log = createLogger('mcp-proxy-interceptor')
@@ -423,7 +423,13 @@ export class ToolCallInterceptor {
           'Prompt-injection pattern matched in tool call input',
         )
         const injectionAction = this.policy.getInjectionAction() ?? this.injectionActionDefault
-        this.emitter.emit('injection_detected', toolName, toolInput, reason, severity)
+        this.emitter.emit('injection_detected', toolName, toolInput, reason, {
+          detectorId: 'injection:tool_input',
+          kind: 'prompt_injection',
+          disposition: injectionAction === 'block' ? 'kill' : 'steer',
+          severity,
+          confidence: 1,
+        })
         if (injectionAction === 'block') {
           this.emitter.emit('tool_blocked', toolName, toolInput, reason)
           return { action: 'block', reason }
@@ -477,7 +483,7 @@ export class ToolCallInterceptor {
             },
             'Anomaly detector fired',
           )
-          this.emitter.emit('anomaly_detected', toolName, toolInput, finding.reason, severity)
+          this.emitter.emit('anomaly_detected', toolName, toolInput, finding.reason, detectionFinding(finding, effective, severity))
 
           if (effective === 'kill') {
             this.emitter.emit('tool_blocked', toolName, toolInput, finding.reason)

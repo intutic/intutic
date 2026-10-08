@@ -34,13 +34,19 @@ so that the
 proxy, the proxy spawns the real server, and every `tools/call` and
 `tools/list` passes through governance in between.
 
-For Claude Code that means the user-scope servers in `~/.claude.json` and the
+For Claude Code that means the user-scope servers in `~/.claude.json`, the
 local-scope servers of the project `intutic connect` ran in
-(`projects[<path>].mcpServers` in the same file). A project's `.mcp.json` —
-Claude Code's project scope, committed and shared with the team — is not
-rewritten, so its servers reach the harness unwrapped. The MCP daemon, when it
-runs, still reports them to the [registry](#the-registry), so they are visible
-there even though the proxy does not govern their calls.
+(`projects[<path>].mcpServers` in the same file), and the project-scope servers
+in the repo's `.mcp.json`. That last file is committed and shared with the
+team, so it is never rewritten — that would put one machine's proxy path into
+everyone's checkout. Instead each project server you have approved in Claude
+Code gets a wrapped copy of the same name at local scope, which Claude Code
+uses in its place. The copy is marked `__intutic_shadow_of: "project"`, follows
+the `.mcp.json` entry when the team changes it, and is removed when the entry
+or your approval goes away; deleting the marked entries returns the project to
+exactly what `.mcp.json` says. A server you added at local scope under the
+same name is yours and is never replaced, and a project server you have not
+approved is left alone, since Claude Code does not start it either.
 
 Muse Code's `mcp_servers` map (in `~/.config/muse/settings.json`) carries
 both `stdio` and `streamable_http` entries; the latter is assumed (not yet
@@ -448,12 +454,23 @@ content. A `block`-mode block additionally emits the existing `tool_blocked`
 event — so a dashboard or alert keyed on `tool_blocked` is not blind to this
 new block reason just because it predates injection scanning.
 
-Set it per machine with `INTUTIC_MCP_INJECTION_ACTION` (see the
-[configuration reference](#configuration-reference)). The proxy also accepts
-`mcpInjectionAction` on the policy channel that carries `mcpAllowedTools` and
-`mcpAllowedServers` (`PolicyClient.absorbCuration`), and lets it win over the
-local value, but the control plane does not send it today, so the local
-setting is the one in force. See the [MCP Proxy
+The control plane files each `injection_detected` event — and each
+`anomaly_detected` and `tool_redacted` event the proxy sends — as a detector
+finding on the **Findings** page, under an `mcp:` detector id such as
+`mcp:injection:tool_result` or `mcp:consecutive_repeat`, where a reviewer can
+mark it a true or false positive. It is also sent as `anomaly.finding`, which a
+[notification rule](/guide/settings#notifications) can route and SIEM export
+carries. A finding is not an incident and not a gate decision: the call's own
+`tool_allowed` or `tool_blocked` is.
+
+Set it for the workspace with `mcpInjectionAction` in workspace settings
+(`PUT /api/v1/workspace/settings`, owner or admin). It reaches every proxy with
+the rest of the MCP policy and wins over a machine's local
+`INTUTIC_MCP_INJECTION_ACTION`; a workspace that never set it leaves the local
+setting in force. The anomaly detectors take the same two workspace settings:
+`mcpAnomalyMode` (`enforce`, `warn` or `off`) and `mcpAnomalyOverrides`, a map
+of detector id to `steer`, `reask`, `kill` or `off` that can only lower a
+detector below its own ceiling. See the [MCP Proxy
 reference](/integrations/mcp-proxy#prompt-injection-scanning) for the
 package-level details.
 
@@ -574,9 +591,9 @@ Settings are read from the environment first, then from
 | `INTUTIC_WORKSPACE_ID` | `unknown` | The workspace, when `--workspace-id` is not given. |
 | `INTUTIC_MCP_FAIL_OPEN` | `true` | `false` makes a check that cannot complete refuse the call. The workspace's `mcpProxyFailBehavior` wins once the proxy has loaded it — see [When the registry has not loaded](#when-the-registry-has-not-loaded). |
 | `INTUTIC_MCP_PROXY_MODE` | `per-session` | `daemon` asks the MCP daemon for policy and sends events through it, falling back to the control plane directly when the daemon does not answer. Read from runtime.env only. |
-| `INTUTIC_MCP_INJECTION_ACTION` | `warn` | `block` refuses a call whose arguments match a prompt-injection pattern, and withholds a result that does. |
-| `INTUTIC_MCP_ANOMALY_MODE` | `enforce` | `warn` reports anomaly findings without blocking; `off` skips detection. |
-| `INTUTIC_MCP_ANOMALY_OVERRIDES` | none | A JSON object of detector id → `steer`, `reask`, `kill` or `off`, capped at each detector's own ceiling. Environment only. |
+| `INTUTIC_MCP_INJECTION_ACTION` | `warn` | `block` refuses a call whose arguments match a prompt-injection pattern, and withholds a result that does. The workspace's `mcpInjectionAction` wins once the proxy has loaded it. |
+| `INTUTIC_MCP_ANOMALY_MODE` | `enforce` | `warn` reports anomaly findings without blocking; `off` skips detection. The workspace's `mcpAnomalyMode` wins. |
+| `INTUTIC_MCP_ANOMALY_OVERRIDES` | none | A JSON object of detector id → `steer`, `reask`, `kill` or `off`, capped at each detector's own ceiling. Environment only. The workspace's `mcpAnomalyOverrides` wins, detector by detector. |
 | `INTUTIC_MCP_SESSION_SCOPE` | derived | Sets the shared session scope explicitly (see [the MCP proxy reference](/integrations/mcp-proxy#anomaly-detection-session-scope)). Environment only. |
 | `INTUTIC_VALKEY_URL` / `VALKEY_URL` | none | The Valkey sibling proxies share their anomaly window through. |
 | `INTUTIC_REMOTE_HEADERS` | none | A JSON object of headers for `--remote-url`, such as `Authorization`. Environment only, never a flag, so it stays out of `ps`. |
@@ -593,7 +610,7 @@ Unix socket, caches policy and batches events for proxies in `daemon` mode:
 | `MCP_DAEMON_MAX_CACHE_ENTRIES` | `500` | Workspaces kept in the policy cache. |
 | `MCP_DAEMON_STATUS_REPORT_MS` | `60000` | How often it reports its status and the servers it found. |
 | `CONTROL_PLANE_URL` | `http://localhost:3001` | The control plane, for the daemon itself. |
-| `INTUTIC_POLICY_SNAPSHOT` | `~/.intutic/hooks/policy-snapshot.json` | The sync daemon's snapshot the daemon seeds its cache from at start. It has the SOP rules but no registry, so the registry follows the fail setting until the first fetch. |
+| `INTUTIC_POLICY_SNAPSHOT` | `~/.intutic/hooks/policy-snapshot.json` | The sync daemon's snapshot the daemon seeds its cache from at start. It has the SOP rules and the server allowlist but no registry, so the registry follows the fail setting until the first fetch. A proxy that already loaded a policy keeps its allowlists and other settings through a daemon restart and takes only the snapshot's rules. |
 
 The daemon also reads `INTUTIC_API_KEY` and `INTUTIC_WORKSPACE_ID` from its
 environment, and caches in the Valkey at `VALKEY_URL` (or `REDIS_URL`;
@@ -627,9 +644,9 @@ environment, and caches in the Valkey at `VALKEY_URL` (or `REDIS_URL`;
   same `--server-name` share one row and one decision, and a server whose
   name changes is a new candidate. Pin the server's tools with TOFU, above,
   to notice a server changing under the same name.
-- **Servers outside the proxy are not governed by it.** A project's
-  `.mcp.json`, a server added since the last sync cycle and harnesses this
-  page lists as unwrapped reach the harness directly. The registry may still
+- **Servers outside the proxy are not governed by it.** A server added since
+  the last sync cycle, a project `.mcp.json` server before you approve it,
+  and harnesses this page lists as unwrapped reach the harness directly. The registry may still
   list them, from the MCP daemon's report; approving or blocking them changes
   nothing until a proxy fronts them, apart from the hook-gate backstop below.
 - **The OS user, session and server on an event are what the proxy
