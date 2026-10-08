@@ -206,12 +206,12 @@ intutic judge configure [options]
    reference such as `ollama/llama3.1` or a local alias your LiteLLM serves. Judges run only on
    self-hosted models: a custom reference that names a hosted provider (Anthropic, OpenAI,
    OpenRouter, Ollama Cloud…) is refused and nothing is written
-2. Writes a `litellm_config.yaml` `model_list` entry in the same shape
-   `infra/compose/litellm_config.yaml`'s hand-written example uses
+2. Writes a LiteLLM `litellm_config.yaml` to `--out`, with one `model_list` entry for that model
 3. Prints the env block (`INTUTIC_GATEWAY_LOCAL_JUDGE`, `LITELLM_LOCAL_URL`,
    `LITELLM_LOCAL_API_KEY`, `LITELLM_LOCAL_JUDGE_MODEL`) for Docker/bare-metal deployments
-4. Prints the Helm values snippet (`proxy.localJudge`, `litellm.enabled`, `litellm.judgeModel`)
-   for `tools/helm/intutic-gateway`
+4. Prints the Helm values (`proxy.localJudge`, `litellm.enabled`, `litellm.judgeModel`) for the
+   `intutic-gateway` chart, which is published at `oci://ghcr.io/intutic/charts/intutic-gateway`.
+   The chart renders LiteLLM's config from the file this command wrote, passed with `--set-file`
 
 The optional typed stage's variables (`INTUTIC_GATEWAY_LOCAL_JUDGE_TYPED_LO`,
 `INTUTIC_GATEWAY_LOCAL_JUDGE_TYPED_HI`, `LITELLM_LOCAL_TYPED_JUDGE_MODEL`) are not printed: the
@@ -221,8 +221,18 @@ band must be measured for your model. See
 **Example:**
 
 ```bash
-intutic judge configure --out ./infra/compose/litellm_config.yaml
+intutic judge configure --out ./litellm_config.yaml
+
+# Kubernetes: log Helm in with the pull token Intutic sent you, then install with the local judge
+helm registry login ghcr.io --username <username>
+helm install my-gateway oci://ghcr.io/intutic/charts/intutic-gateway --version <version> \
+  --namespace intutic-gateway \
+  --set-file litellm.config=./litellm_config.yaml \
+  --set proxy.localJudge=true,litellm.enabled=true,litellm.judgeModel=<model alias>
 ```
+
+`<version>` is the release Intutic sent you. The rest of the install (the gateway token Secret,
+the image pull Secret) is in [Self-Hosted Gateway](/external/self-hosted-gateway).
 
 ---
 
