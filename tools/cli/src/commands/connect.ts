@@ -192,6 +192,24 @@ async function downloadProxyBinary(destPath: string): Promise<string> {
   return destPath
 }
 
+/**
+ * Which control plane `connect` talks to: an explicit `--control-plane-url`,
+ * then the URL saved by `intutic login` (the key was issued there and is only
+ * valid there), then the dev/hosted default. Credentials synthesized from
+ * `--workspace-id`/`--api-key` were never saved, so they carry no stored URL.
+ *
+ * The stored URL used to be skipped, so anyone who logged in against a control
+ * plane other than the default had `connect` send their key to the hosted one
+ * unless they repeated the URL on every run.
+ */
+export function resolveConnectControlPlaneUrl(
+  flagUrl: string | undefined,
+  storedUrl: string | undefined,
+  devMode: boolean,
+): string {
+  return flagUrl || storedUrl || resolveControlPlaneUrl(devMode)
+}
+
 export async function runConnect(opts: {
   dev?: boolean
   interval?: string
@@ -201,6 +219,7 @@ export async function runConnect(opts: {
 }): Promise<void> {
   // 1. Load credentials + config
   let creds = await loadCredentials()
+  const credsFromFlags = Boolean(opts.workspaceId && opts.apiKey)
   if (opts.workspaceId && opts.apiKey) {
     creds = {
       workspaceId: opts.workspaceId,
@@ -267,7 +286,11 @@ export async function runConnect(opts: {
   const safeConfig = config
 
   const devMode = opts.dev || process.env.INTUTIC_DEV === '1' || safeConfig.devMode
-  const controlPlaneUrl = opts.controlPlaneUrl || resolveControlPlaneUrl(devMode)
+  const controlPlaneUrl = resolveConnectControlPlaneUrl(
+    opts.controlPlaneUrl,
+    credsFromFlags ? undefined : safeCreds.controlPlaneUrl,
+    Boolean(devMode),
+  )
   const pollInterval = opts.interval ? parseInt(opts.interval, 10) : DEFAULT_POLL_INTERVAL
   const connectedSince = newIso()
 
@@ -280,7 +303,7 @@ export async function runConnect(opts: {
   log.field('Harnesses', safeConfig.harnesses.join(', ') || '(none)')
 
   // Print onboarding setup instructions for active harnesses
-  printOnboardingGuide(safeConfig.harnesses, safeCreds.apiKey, devMode)
+  printOnboardingGuide(safeConfig.harnesses, safeCreds.apiKey)
 
   log.info('Starting sync daemon... (Ctrl+C to stop)')
   console.log('')

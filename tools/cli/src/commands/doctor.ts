@@ -106,9 +106,14 @@ async function checkProxy(): Promise<CheckResult> {
 }
 
 /**
- * Check 2: Control plane auth — verifies stored credentials can reach the API.
+ * Check 2: Control plane auth — verifies the stored credentials are accepted.
+ *
+ * Asks `/api/v1/auth/me`, the route `intutic login` validates a key against.
+ * This used to request `/api/v1/health`, which the control plane does not
+ * serve: a valid key came back 404 and was reported as "Reachable (HTTP 404)",
+ * so the check never said "Authenticated" for a working login.
  */
-async function checkControlPlane(): Promise<CheckResult> {
+export async function checkControlPlane(): Promise<CheckResult> {
   const creds = await loadCredentials()
 
   if (!creds) {
@@ -120,7 +125,7 @@ async function checkControlPlane(): Promise<CheckResult> {
     }
   }
 
-  const url = `${creds.controlPlaneUrl}/api/v1/health`
+  const url = `${creds.controlPlaneUrl}/api/v1/auth/me`
 
   try {
     const controller = new AbortController()
@@ -379,41 +384,18 @@ function checkDaemonLog(): CheckResult {
 }
 
 /**
- * Check 6: Valkey connectivity.
+ * Check 6: Valkey connectivity, by a direct TCP probe.
  *
- * First tries the proxy /health endpoint and looks for a `valkey` field.
- * If the proxy is unreachable or doesn't report Valkey status, falls back
- * to a direct TCP probe on port 6379.
+ * Only the probe. This check used to ask the proxy's /health first and look
+ * for a `valkey` field, but /health reports status, service and version and
+ * nothing about Valkey, so that branch could never pass and cost a second
+ * request on every run.
  */
-async function checkValkey(): Promise<CheckResult> {
-  // Attempt 1: Read valkey status from proxy /health response
-  try {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), VALKEY_PROBE_TIMEOUT_MS)
-
-    const res = await fetch(PROXY_HEALTH_URL, { signal: controller.signal })
-    clearTimeout(timeout)
-
-    if (res.ok) {
-      const body = await res.json().catch(() => ({}))
-      if (body.valkey === 'ok') {
-        return {
-          name: 'Valkey',
-          passed: true,
-          detail: 'Connected (reported by proxy /health)',
-        }
-      }
-      // Proxy responded but doesn't report valkey status — fall through
-    }
-  } catch {
-    // Proxy unreachable — fall through to direct probe
-  }
-
-  // Attempt 2: Direct TCP probe on port 6379
+export async function checkValkey(port = 6379): Promise<CheckResult> {
   try {
     const { createConnection } = await import('node:net')
     const connected = await new Promise<boolean>((resolve) => {
-      const socket = createConnection({ host: '127.0.0.1', port: 6379 }, () => {
+      const socket = createConnection({ host: '127.0.0.1', port }, () => {
         socket.end()
         resolve(true)
       })
@@ -426,7 +408,7 @@ async function checkValkey(): Promise<CheckResult> {
       return {
         name: 'Valkey',
         passed: true,
-        detail: 'Reachable at 127.0.0.1:6379 (direct TCP probe)',
+        detail: `Reachable at 127.0.0.1:${port} (direct TCP probe)`,
       }
     }
   } catch {
@@ -436,7 +418,7 @@ async function checkValkey(): Promise<CheckResult> {
   return {
     name: 'Valkey',
     passed: false,
-    detail: 'Not reachable on port 6379',
+    detail: `Not reachable on port ${port}`,
     remediation: 'Start Valkey: `docker compose up -d valkey` or install locally.',
   }
 }

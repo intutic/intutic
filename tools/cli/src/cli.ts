@@ -24,15 +24,23 @@ const { version } = createRequire(import.meta.url)('../package.json') as { versi
 
 const program = new Command()
 
+// Positional options: `--version` and `--help` belong to the program only when
+// they come before a subcommand. Without this, commander matches program
+// options anywhere on the line, so `intutic policy rollback <id> --version 2`
+// printed the CLI version and exited before `policy rollback` ever saw its own
+// required `--version`.
 program
   .name('intutic')
   .description('Intutic CLI — AI governance control plane for developer workspaces')
   .version(version)
+  .enablePositionalOptions()
 
 program
   .command('init')
-  .description('Initialize workspace — detect harnesses, configure sync')
+  .description('Initialize workspace — detect harnesses and record them in ~/.intutic/config.json')
   .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .option('--git-hooks', 'Install the Intutic Git hooks without asking')
+  .option('--no-git-hooks', 'Skip the Git hooks without asking (the default when stdin is not a terminal)')
   .action(async (opts) => {
     const { runInit } = await import('./commands/init.js')
     await runInit(opts)
@@ -124,9 +132,9 @@ program
 program
   .command('predict-cost')
   .description(
-    'Pre-flight cost estimate for a prompt/task before it runs (POST /api/v1/predict-cost). ' +
-    'Estimates output tokens from the workspace baseline and prices with the same rate table ' +
-    'every other cost figure in the control plane uses.'
+    'Pre-flight cost estimate for a prompt/task before it runs (requires `intutic login`). ' +
+    "Estimates output tokens from the workspace's recorded usage and prices them with the same " +
+    'rate table as every other cost figure the control plane reports.'
   )
   .requiredOption('--model <model>', 'Model to estimate against (e.g. claude-sonnet-4-5)')
   .option('--task-type <type>', 'Task type used to pick the baseline bucket', 'coding')
@@ -147,7 +155,7 @@ sopsCmd
   .command('push <name>')
   .description('Push a local offline SOP folder to the central workspace')
   .option('--dev', 'Use local control plane (http://localhost:3001)')
-  .option('--org', "Push as an org-wide floor (LLD #65 follow-up) instead of a workspace SOP -- applies to every workspace under the caller's org, in addition to that workspace's own SOPs")
+  .option('--org', "Push as an org-wide floor instead of a workspace SOP -- applies to every workspace under the caller's org, in addition to that workspace's own SOPs")
   .action(async (name, opts) => {
     const { runSopsPush } = await import('./commands/sops.js')
     await runSopsPush(name, opts)
@@ -174,7 +182,7 @@ sopsCmd
 
 sopsCmd
   .command('org-list')
-  .description("List org-wide SOP floors for the caller's own org (LLD #65 follow-up)")
+  .description("List org-wide SOP floors for the caller's own org")
   .option('--dev', 'Use local control plane (http://localhost:3001)')
   .action(async (opts) => {
     const { runSopsOrgList } = await import('./commands/sops.js')
@@ -600,7 +608,7 @@ enterpriseCmd
   .option('--mdm-output-dir <dir>', 'Directory to write generated MDM manifests to', './intutic-mdm')
   .option('--skip-ca', 'Skip system-wide CA trust installation')
   .option('--skip-hooks', 'Skip system-level Cursor hooks installation')
-  .option('--dev', 'Use local control plane (http://localhost:3001) when resolving workspace context')
+  .option('--dev', 'Send the device enforcement report to the local control plane (http://localhost:3001)')
   .option('--cli-binary-path <path>', 'Absolute path to the intutic CLI binary on TARGET machines, embedded in the firewall-deployment manifests (default: /usr/local/bin/intutic — override if your fleet installs elsewhere)')
   .action(async (opts) => {
     const { runEnterpriseInstall } = await import('./commands/enterprise.js')
@@ -614,7 +622,7 @@ const envCmd = program
 envCmd
   .command('persist')
   .description(
-    'Write ANTHROPIC_BASE_URL / OPENAI_BASE_URL at the OS level so they survive a restart.\n' +
+    'Write ANTHROPIC_BASE_URL / OPENAI_BASE_URL at the OS level so new shells and apps pick them up.\n' +
     '  macOS: launchctl setenv    Linux: ~/.bashrc    Windows: setx\n' +
     '\n' +
     '  Opt-in on purpose: on macOS this reaches every GUI app you launch afterwards.\n' +
@@ -649,8 +657,8 @@ program
 
 program
   .command('sync-context')
-  .description('Sync Git context metadata to the local daemon')
-  .option('--git', 'Sync Git branch and commit information')
+  .description('Record the Git branch and commit in .intutic/git-context.json, which a running `intutic connect` reports')
+  .option('--git', 'Read the branch and commit from the repository (for any not given below)')
   .option('--branch <name>', 'Current Git branch name')
   .option('--commit <hash>', 'Current Git commit SHA')
   .action(async (opts) => {
@@ -663,7 +671,7 @@ program
   .description(
     'One-shot refresh of the governed decisions log (.intutic/DECISIONS.md + the claude-code ' +
       'harness config section) — no-ops if decisionsLogEnabled is off. Invoked by the optional ' +
-      'post-merge hook (see gitHooks.ts); safe to run manually.',
+      'post-merge Git hook `intutic init` installs; safe to run manually.',
   )
   .action(async () => {
     const { refreshDecisionsLog } = await import('./lib/decisionsLogRefresh.js')
@@ -744,7 +752,7 @@ const findings = program
 findings
   .command('list')
   .description('List detector findings for the workspace')
-  .option('--unadjudicated', "Only show findings nobody has ruled on yet (the route's own default is to show all)")
+  .option('--unadjudicated', 'Only show findings nobody has ruled on yet (default: all findings)')
   .option('--detector <id>', 'Filter by detector_id (e.g. response_injection:override-instructions)')
   .option('--limit <n>', 'Max rows to return (default: 100, max: 500)')
   .option('--json', 'Output as JSON instead of table')
@@ -779,8 +787,8 @@ findings
 findings
   .command('echo-report')
   .description('Response-injection echo measurement report — per-pattern false-positive rate')
-  .option('--since <date>', 'ISO date — window start (route default: trailing 7 days)')
-  .option('--until <date>', 'ISO date — window end (route default: now)')
+  .option('--since <date>', 'ISO date — window start (default: 7 days before --until)')
+  .option('--until <date>', 'ISO date — window end (default: now)')
   .option('--json', 'Output as JSON instead of table')
   .option('--dev', 'Use local control plane (http://localhost:3001)')
   .action(async (opts) => {
@@ -851,7 +859,7 @@ routing
   .command('adoption-report')
   .description(
     'Mirror-test adoption report for one candidate model — win/loss/tie, fault-rate delta, ' +
-    'cost delta, latency delta (Phase 7b: GET /api/v1/routing/mirror-adoption-report). ' +
+    'cost delta, latency delta. ' +
     'A reported signal for human review, not an automatic gate.'
   )
   .requiredOption('--candidate-model <model>', 'The mirror-tested candidate model to report on')
@@ -868,81 +876,96 @@ const daemon = program
   .command('daemon')
   .description('Manage the Intutic sync-daemon, MCP daemon and standalone proxy system services (LaunchAgent / systemd)')
 
-daemon
-  .command('install')
-  .alias('install-daemon')  // top-level alias for discoverability
-  .description(
-    'Install sync-daemon as a system service (auto-starts on login, restarts on any exit).\n' +
-    '  macOS: ~/Library/LaunchAgents/ai.intutic.sync-daemon.plist (KeepAlive: true)\n' +
-    '  Linux: ~/.config/systemd/user/intutic-sync-daemon.service (Restart=always)\n' +
-    '\n' +
-    '  --proxy installs the standalone intutic-proxy binary instead (no workspace or key needed):\n' +
-    '  macOS: ~/Library/LaunchAgents/ai.intutic.proxy.plist\n' +
-    '  Linux: ~/.config/systemd/user/intutic-proxy.service\n' +
-    '\n' +
-    '  NOTE: To stop the daemon you MUST use \'intutic daemon uninstall\' or \'launchctl unload\'.\n' +
-    '  \'intutic disconnect\' alone will NOT stop a daemon-installed service. (TD-154)'
-  )
-  .option('--workspace-id <id>', 'Workspace ID (e.g. wk_xxxx) — required unless --proxy')
-  .option('--api-key <key>', 'Workspace API key (e.g. vk_xxxx) — required unless --proxy')
-  .option('--control-plane-url <url>', 'Control plane URL', 'https://api.intutic.ai')
-  .option('--binary-path <path>', 'Path to intutic CLI binary (defaults to current process); with --proxy, absolute path to intutic-proxy')
-  .option('--dry-run', 'Print what would be done without writing files')
-  .option('--system', 'Install as a system-level service (LaunchDaemon on macOS, systemd system unit on Linux)')
-  .option('--mcp', 'Install the MCP proxy daemon instead of the sync-daemon')
-  .option('--proxy', 'Install the standalone intutic-proxy binary as a service (TD-465)')
-  .option('--port <port>', 'With --proxy: proxy listen port', '4000')
-  .option('--valkey-url <url>', 'With --proxy: Valkey URL to attach to; omit to run standalone (INTUTIC_STANDALONE=1)')
-  .option('--upstream-url <url>', 'With --proxy: upstream LLM provider base URL')
-  .action(async (opts, cmd) => {
-    if (opts.proxy) {
-      // The standalone proxy has no control plane, so no workspace or key.
-      // Its unit carries the same environment `intutic start` sets, fixed at
-      // install time rather than probed at launch (TD-465).
-      const { installProxyService } = await import('./commands/install-daemon.js')
-      await installProxyService({
-        port:        opts.port,
-        valkeyUrl:   opts.valkeyUrl,
-        upstreamUrl: opts.upstreamUrl,
-        binaryPath:  opts.binaryPath,
-        dryRun:      opts.dryRun,
-        system:      opts.system,
+// `install` and `uninstall` are also reachable as the top-level shortcuts
+// `intutic install-daemon` / `intutic uninstall-daemon`. A commander alias only
+// renames a command within its own parent, so each verb is defined once here
+// and registered in both places. The shortcuts used to be separate copies, and
+// they drifted: `install-daemon` had no --mcp, --proxy or proxy options and
+// demanded a workspace and key even for the standalone proxy, while the docs
+// called it a shortcut for `daemon install`.
+function defineDaemonInstall(cmd: Command): Command {
+  return cmd
+    .description(
+      'Install sync-daemon as a system service (auto-starts on login, restarts on any exit).\n' +
+      '  macOS: ~/Library/LaunchAgents/ai.intutic.sync-daemon.plist (KeepAlive: true)\n' +
+      '  Linux: ~/.config/systemd/user/intutic-sync-daemon.service (Restart=always)\n' +
+      '\n' +
+      '  --proxy installs the standalone intutic-proxy binary instead (no workspace or key needed):\n' +
+      '  macOS: ~/Library/LaunchAgents/ai.intutic.proxy.plist\n' +
+      '  Linux: ~/.config/systemd/user/intutic-proxy.service\n' +
+      '\n' +
+      '  The service restarts whenever its process exits, so killing the process does not stop it.\n' +
+      '  Use \'intutic daemon stop\' or \'intutic daemon uninstall\'.'
+    )
+    .option('--workspace-id <id>', 'Workspace ID (e.g. wk_xxxx) — required unless --proxy')
+    .option('--api-key <key>', 'Workspace API key (e.g. vk_xxxx) — required unless --proxy')
+    .option('--control-plane-url <url>', 'Control plane URL', 'https://api.intutic.ai')
+    .option('--binary-path <path>', 'Path to intutic CLI binary (defaults to current process); with --proxy, absolute path to intutic-proxy')
+    .option('--dry-run', 'Print what would be done without writing files')
+    .option('--system', 'Install as a system-level service (LaunchDaemon on macOS, systemd system unit on Linux)')
+    .option('--mcp', 'Install the MCP proxy daemon instead of the sync-daemon')
+    .option('--proxy', 'Install the standalone intutic-proxy binary as a service')
+    .option('--port <port>', 'With --proxy: proxy listen port', '4000')
+    .option('--valkey-url <url>', 'With --proxy: Valkey URL to attach to; omit to run standalone (INTUTIC_STANDALONE=1)')
+    .option('--upstream-url <url>', 'With --proxy: upstream LLM provider base URL')
+    .action(async (opts, cmd) => {
+      if (opts.proxy) {
+        // The standalone proxy has no control plane, so no workspace or key.
+        // Its unit carries the same environment `intutic start` sets, fixed at
+        // install time rather than probed at launch.
+        const { installProxyService } = await import('./commands/install-daemon.js')
+        await installProxyService({
+          port:        opts.port,
+          valkeyUrl:   opts.valkeyUrl,
+          upstreamUrl: opts.upstreamUrl,
+          binaryPath:  opts.binaryPath,
+          dryRun:      opts.dryRun,
+          system:      opts.system,
+        })
+        return
+      }
+      // Required for the two daemons; commander's `requiredOption` cannot express
+      // "unless --proxy", so the check lives here with the same wording.
+      if (!opts.workspaceId) cmd.error("error: required option '--workspace-id <id>' not specified")
+      if (!opts.apiKey) cmd.error("error: required option '--api-key <key>' not specified")
+      // `installMcpDaemon` and `buildMcpPlist` were written, tested and exported,
+      // and then nothing called them: every route into install-daemon.ts landed
+      // on `installDaemon`, so the MCP proxy daemon could not be installed by any
+      // command the CLI offered. This flag is that missing route.
+      const { installDaemon, installMcpDaemon } = await import('./commands/install-daemon.js')
+      const install = opts.mcp ? installMcpDaemon : installDaemon
+      await install({
+        workspaceId:     opts.workspaceId,
+        apiKey:          opts.apiKey,
+        controlPlaneUrl: opts.controlPlaneUrl,
+        binaryPath:      opts.binaryPath,
+        dryRun:          opts.dryRun,
+        system:          opts.system,
       })
-      return
-    }
-    // Required for the two daemons; commander's `requiredOption` cannot express
-    // "unless --proxy", so the check lives here with the same wording.
-    if (!opts.workspaceId) cmd.error("error: required option '--workspace-id <id>' not specified")
-    if (!opts.apiKey) cmd.error("error: required option '--api-key <key>' not specified")
-    // `installMcpDaemon` and `buildMcpPlist` were written, tested and exported,
-    // and then nothing called them: every route into install-daemon.ts landed
-    // on `installDaemon`, so the MCP proxy daemon could not be installed by any
-    // command the CLI offered (TD-153). This flag is that missing route.
-    const { installDaemon, installMcpDaemon } = await import('./commands/install-daemon.js')
-    const install = opts.mcp ? installMcpDaemon : installDaemon
-    await install({
-      workspaceId:     opts.workspaceId,
-      apiKey:          opts.apiKey,
-      controlPlaneUrl: opts.controlPlaneUrl,
-      binaryPath:      opts.binaryPath,
-      dryRun:          opts.dryRun,
-      system:          opts.system,
     })
-  })
+}
 
-daemon
-  .command('uninstall')
-  .alias('uninstall-daemon')
-  .description('Remove the sync-daemon system service and stop it permanently.')
-  .option('--dry-run', 'Print what would be done without writing files')
-  .option('--system', 'Uninstall the system-level service')
-  .option('--mcp', 'Uninstall the MCP proxy daemon instead of the sync-daemon')
-  .option('--proxy', 'Uninstall the standalone intutic-proxy service instead of the sync-daemon')
-  .action(async (opts) => {
-    const { uninstallDaemon, uninstallMcpDaemon, uninstallProxyService } = await import('./commands/install-daemon.js')
-    const uninstall = opts.proxy ? uninstallProxyService : opts.mcp ? uninstallMcpDaemon : uninstallDaemon
-    await uninstall({ dryRun: opts.dryRun, system: opts.system })
-  })
+function defineDaemonUninstall(cmd: Command): Command {
+  return cmd
+    .description('Remove the sync-daemon system service and stop it permanently.')
+    .option('--dry-run', 'Print what would be done without writing files')
+    .option('--system', 'Uninstall the system-level service')
+    .option('--mcp', 'Uninstall the MCP proxy daemon instead of the sync-daemon')
+    .option('--proxy', 'Uninstall the standalone intutic-proxy service instead of the sync-daemon')
+    .action(async (opts) => {
+      const { uninstallDaemon, uninstallMcpDaemon, uninstallProxyService } = await import('./commands/install-daemon.js')
+      const uninstall = opts.proxy ? uninstallProxyService : opts.mcp ? uninstallMcpDaemon : uninstallDaemon
+      await uninstall({ dryRun: opts.dryRun, system: opts.system })
+    })
+}
+
+defineDaemonInstall(daemon.command('install'))
+defineDaemonUninstall(daemon.command('uninstall'))
+
+defineDaemonInstall(program.command('install-daemon'))
+  .summary("Shortcut for 'intutic daemon install'")
+defineDaemonUninstall(program.command('uninstall-daemon'))
+  .summary("Shortcut for 'intutic daemon uninstall'")
 
 daemon
   .command('status')
@@ -981,41 +1004,6 @@ daemon
     // shape, one more time).
     const { daemonStart, proxyServiceStart, mcpDaemonStart } = await import('./commands/install-daemon.js')
     await (opts.proxy ? proxyServiceStart() : opts.mcp ? mcpDaemonStart() : daemonStart())
-  })
-
-// Top-level shortcuts (for discoverability)
-program
-  .command('install-daemon', { hidden: false })
-  .description('Shortcut for \'intutic daemon install\' — install sync-daemon as system service')
-  .requiredOption('--workspace-id <id>', 'Workspace ID')
-  .requiredOption('--api-key <key>', 'Workspace API key')
-  .option('--control-plane-url <url>', 'Control plane URL', 'https://api.intutic.ai')
-  .option('--binary-path <path>', 'Path to intutic CLI binary')
-  .option('--dry-run', 'Print what would be done without writing files')
-  .option('--system', 'Install as a system-level service')
-  .action(async (opts) => {
-    const { installDaemon } = await import('./commands/install-daemon.js')
-    await installDaemon({
-      workspaceId: opts.workspaceId,
-      apiKey: opts.apiKey,
-      controlPlaneUrl: opts.controlPlaneUrl,
-      binaryPath: opts.binaryPath,
-      dryRun: opts.dryRun,
-      system: opts.system,
-    })
-  })
-
-program
-  .command('uninstall-daemon', { hidden: false })
-  .description('Shortcut for \'intutic daemon uninstall\'')
-  .option('--dry-run', 'Print what would be done without writing files')
-  .option('--system', 'Uninstall the system-level service')
-  .option('--mcp', 'Uninstall the MCP proxy daemon instead of the sync-daemon')
-  .option('--proxy', 'Uninstall the standalone intutic-proxy service instead of the sync-daemon')
-  .action(async (opts) => {
-    const { uninstallDaemon, uninstallMcpDaemon, uninstallProxyService } = await import('./commands/install-daemon.js')
-    const uninstall = opts.proxy ? uninstallProxyService : opts.mcp ? uninstallMcpDaemon : uninstallDaemon
-    await uninstall({ dryRun: opts.dryRun, system: opts.system })
   })
 
 // ── Skill commands ─────────────────────────────────────────────────────────
@@ -1096,7 +1084,7 @@ loopCmd
   .option('--approve', 'Release the hold; the run resumes')
   .option('--reject', 'Refuse the hold; the run is killed')
   .option('--note <note>', 'Why, recorded against the run')
-  .option('--dev', 'Target the local control plane')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
   .action(async (loopRunId, opts) => {
     const { runLoopReview } = await import('./commands/skill.js')
     await runLoopReview(loopRunId, opts)
@@ -1302,7 +1290,7 @@ const attenuateCmd = program
   .description('Attenuate an API key to a narrower child key (capability subset + optional TTL)')
   .option('--parent-key <keyId>', 'Parent API key ID to attenuate')
   .option('--caps <caps>', 'Comma-separated capability subset to grant the child key')
-  .option('--ttl <seconds>', 'Child key TTL in seconds (server default 14400, max 86400)')
+  .option('--ttl <seconds>', 'Child key TTL in whole seconds, 60 to 86400 (default 14400)')
   .option('--dev', 'Use local control plane (http://localhost:3001)')
   .action(async (opts) => {
     const { runAttenuate } = await import('./commands/attenuate.js')

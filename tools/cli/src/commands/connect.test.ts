@@ -11,7 +11,7 @@
  * at all despite every real release having shipped one since v1.6.0).
  */
 import { describe, it, expect } from 'vitest'
-import { resolveProxyAssetName } from './connect.js'
+import { resolveConnectControlPlaneUrl, resolveProxyAssetName } from './connect.js'
 
 describe('resolveProxyAssetName', () => {
   const supported: Array<[NodeJS.Platform, string, string]> = [
@@ -61,5 +61,31 @@ describe('connect refreshes the gate caches on every sync (TD-488)', () => {
     expect(firstAwait).toBeGreaterThan(0)
     expect(versionGate).toBeGreaterThan(0)
     expect(firstAwait, 'the refresh must not sit inside the version-gated block').toBeLessThan(versionGate)
+  })
+})
+
+describe('resolveConnectControlPlaneUrl', () => {
+  it('prefers an explicit --control-plane-url over everything else', () => {
+    expect(resolveConnectControlPlaneUrl('https://cp.flag.example', 'https://cp.stored.example', true)).toBe('https://cp.flag.example')
+  })
+
+  it('uses the URL saved by login when no flag is given, even outside dev mode', () => {
+    // The key was issued by that control plane; sending it to the default
+    // one instead is the bug this pins.
+    expect(resolveConnectControlPlaneUrl(undefined, 'https://cp.stored.example', false)).toBe('https://cp.stored.example')
+  })
+
+  it('falls back to the local control plane in dev mode with nothing stored', () => {
+    expect(resolveConnectControlPlaneUrl(undefined, undefined, true)).toBe('http://localhost:3001')
+  })
+
+  it('falls back to the hosted default otherwise', () => {
+    const prev = process.env.INTUTIC_DEV
+    delete process.env.INTUTIC_DEV
+    try {
+      expect(resolveConnectControlPlaneUrl(undefined, undefined, false)).toBe('https://api.intutic.ai')
+    } finally {
+      if (prev !== undefined) process.env.INTUTIC_DEV = prev
+    }
   })
 })

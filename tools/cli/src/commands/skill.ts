@@ -935,8 +935,11 @@ function readStagedBlob(workspaceRoot: string, filePath: string): string | null 
  * authority until it has earned it the same way.
  */
 export async function runSkillScanStaged(): Promise<void> {
-  const config = loadConfig()
-  const workspaceRoot = config?.workspaceRoot ?? process.cwd()
+  // The repository being committed to, which is wherever the pre-commit hook
+  // runs, not the workspace `intutic init` last recorded: with two
+  // repositories on one machine, that one is usually somebody else's index.
+  // Git resolves the paths below from any directory inside the repository.
+  const workspaceRoot = process.cwd()
 
   const staged = listStagedSkillSurfaceFiles(workspaceRoot)
   if (staged.length === 0) return
@@ -959,7 +962,7 @@ export async function runSkillScanStaged(): Promise<void> {
   if (flaggedFiles > 0) {
     log.warn(
       `Skill-content scan flagged ${flaggedFiles} staged file(s) under .agents/skills or ` +
-        '.claude/skills. This is advisory only (TD-358) — the commit proceeds. Run ' +
+        '.claude/skills. This is advisory only — the commit proceeds. Run ' +
         '`intutic skill audit` for the full report.',
     )
   }
@@ -1170,6 +1173,11 @@ export async function runLoopReview(
           ? `Loop run ${loopRunId} approved — it is ACTIVE again.`
           : `Loop run ${loopRunId} rejected — it is KILLED.`,
       )
+    } else {
+      // Without this the command printed nothing and exited 0, which reads
+      // as success to a person and to a script alike.
+      log.error(`Loop run ${loopRunId} was not resolved (status: ${res.status ?? 'unknown'}).`)
+      process.exit(1)
     }
   } catch (err) {
     log.error(`Failed to resolve review: ${err instanceof Error ? err.message : String(err)}`)

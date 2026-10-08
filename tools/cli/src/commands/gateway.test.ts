@@ -226,6 +226,19 @@ describe('intutic gateway', () => {
     expect(JSON.parse(init.body)).toEqual({ gatewayId: null })
   })
 
+  it('assign --clear --org reports the org default cleared, not an override', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ orgId: 'org_1', gatewayId: null }),
+    })
+
+    await runGatewayAssign({ clear: true, org: 'org_1' })
+
+    const printed = logSpy.mock.calls.map((c: unknown[]) => String(c[0])).join('\n')
+    expect(printed).toContain("Org org_1's default gateway cleared.")
+    expect(printed).not.toContain('override')
+  })
+
   it('assign refuses with neither --gateway nor --clear', async () => {
     await expect(runGatewayAssign({})).rejects.toThrow('process.exit(1)')
     expect(fetchMock).not.toHaveBeenCalled()

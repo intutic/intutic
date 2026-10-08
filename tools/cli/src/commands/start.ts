@@ -33,7 +33,9 @@ export async function runStart(opts: {
   valkeyPort?: string
   upstreamUrl?: string
 }): Promise<void> {
-  const proxyPort = opts.port ?? process.env.PORT ?? '4000'
+  // No PORT fallback: a shell's PORT usually belongs to some other dev server,
+  // and the CLI always passes --port (default 4000) anyway.
+  const proxyPort = opts.port ?? '4000'
   const valkeyPort = parseInt(opts.valkeyPort ?? '6379', 10)
 
   // Best-effort. A failure here downgrades what the proxy can do; it does not

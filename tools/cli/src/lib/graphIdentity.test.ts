@@ -76,7 +76,7 @@ describe('graph identity', () => {
 
   it('puts the identity into the base URL every harness will send', () => {
     const identity = { graphId: 'g1', nodeId: 'n2', parentId: 'n1', depth: 2 }
-    const env = buildProxyEnv('intk_test', false, identity)
+    const env = buildProxyEnv('intk_test', identity)
 
     // Each of these is a different harness's way of naming the same thing, and
     // all of them append their own path to it.
@@ -92,7 +92,7 @@ describe('graph identity', () => {
   })
 
   it('leaves the base URL alone when there is no identity', () => {
-    const env = buildProxyEnv('intk_test', false)
+    const env = buildProxyEnv('intk_test')
     expect(env.ANTHROPIC_BASE_URL).toBe('http://localhost:4000')
     expect(env.OPENAI_BASE_URL).toBe('http://localhost:4000/v1')
     expect(env.INTUTIC_GRAPH_ID).toBeUndefined()

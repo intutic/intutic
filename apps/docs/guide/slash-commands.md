@@ -10,13 +10,24 @@ The proxy gateway supports two equivalent prefix styles for all slash commands:
 * **`@intutic`**: Recommended for CLI-based agent environments like **Claude Code** to prevent client-side parsing conflicts (avoiding the need for a hacky leading space).
 :::
 
+::: info Typed in the agent's chat, not in your terminal
+Slash commands are prompts the proxy answers; they are not the `intutic` CLI. Three share a
+name with a CLI command and do something different:
+
+| Slash command (in chat) | CLI command (in a terminal) |
+|---|---|
+| `/intutic start <task>` binds this session's costs to a ticket | [`intutic start`](/reference/cli#intutic-start) runs the proxy |
+| `/intutic status` shows this session's stats | [`intutic status`](/reference/cli#intutic-status) shows local auth, harness and sync state |
+| `/intutic budget` shows the workspace's monitored volume | [`intutic budget`](/reference/cli#intutic-budget) shows spend against the daily and monthly budgets |
+:::
+
 ---
 
 ## 🚀 Available Commands
 
-### 1. `/intutic-predict` (or `/intutic predict`)
+### 1. `/intutic-predict` (or `/intutic predict`) {#intutic-predict}
 Provides an instant pre-flight token count and cost projection based on the current prompt content.
-* **Mechanism**: Intercepts the request in the proxy gateway, counts input prompt tokens, and queries GKE Valkey historical baselines to retrieve typical output/reasoning token counts and project total USD cost.
+* **Mechanism**: Intercepts the request in the proxy gateway, counts input prompt tokens, and queries the workspace's historical baselines in Valkey to retrieve typical output/reasoning token counts and project total USD cost.
 * **Output**:
   ```markdown
   ### 🛡️ Intutic Pre-Flight Cost Prediction
