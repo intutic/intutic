@@ -14,7 +14,7 @@ Intutic enforces policy where agents act: a pre-execution gate decides each tool
 | | Intutic | Credo AI |
 |---|---|---|
 | **Primary job** | Runtime enforcement and audit for AI agents | Governance system of record for AI systems |
-| **Runtime enforcement** | Production: hook gates in 21 harnesses, request and response proxy, MCP governance proxy, egress firewall, sandboxed execution | Agent Governor, Research Preview, Claude Code only |
+| **Runtime enforcement** | Production: hook gates in 19 of the 43 harnesses, request and response proxy, MCP governance proxy, egress firewall, sandboxed execution | Agent Governor, Research Preview, Claude Code only |
 | **Decisions at the tool call** | Allow, warn, require approval (held until approved), block, redact, re-ask, shadow | Allow, block, escalate, advise |
 | **Where policy lives** | Files in your repository (`.intutic/sops/*.md`), reviewed in git; policy documents in Notion, Confluence, GitHub or Google Docs can be turned into enforced controls with [Policy Guardrails](/guide/policy-guardrails) | Authored in the Credo AI platform |
 | **Regulatory mapping** | SOC 2 evidence pack and OWASP LLM and Agentic posture mapping | Policy packs for the EU AI Act, NIST AI RMF, ISO 42001 and SOC 2 |

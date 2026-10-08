@@ -14,7 +14,7 @@ Intutic decides each agent tool call before it runs, across 43 harnesses: native
 | | Intutic | W&B Weave |
 |---|---|---|
 | **Primary job** | Runtime enforcement and audit for AI agents | Tracing and evaluation for LLM applications |
-| **Where it enforces** | Native pre-execution hooks in 21 harnesses, plus request and response proxy, MCP governance proxy, egress firewall and sandbox | Scorers your application code applies as guardrails |
+| **Where it enforces** | Native pre-execution hook gates in 19 of the 43 harnesses, plus request and response proxy, MCP governance proxy, egress firewall and sandbox | Scorers your application code applies as guardrails |
 | **Coding agents** | **43** supported harnesses, including Claude Code, Codex, Cursor, GitHub Copilot, Windsurf and Cline | Not a focus; it traces applications instrumented with its SDK |
 | **Decisions** | Allow, warn, require approval (held until approved in Slack or the CLI), block, redact, re-ask, shadow | Whatever your code does with a scorer's result |
 | **MCP** | MCP governance proxy that enforces on tool calls and tool descriptions | Traces MCP clients and servers |

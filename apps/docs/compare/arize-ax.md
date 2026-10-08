@@ -14,7 +14,7 @@ Intutic decides each agent tool call before it runs, across 43 harnesses: native
 | | Intutic | Arize AX |
 |---|---|---|
 | **Primary job** | Runtime enforcement and audit for AI agents | Observability and evaluation for LLM applications |
-| **Where it enforces** | Native pre-execution hooks in 21 harnesses, plus request and response proxy, MCP governance proxy, egress firewall and sandbox | Guards on model output in your application code |
+| **Where it enforces** | Native pre-execution hook gates in 19 of the 43 harnesses, plus request and response proxy, MCP governance proxy, egress firewall and sandbox | Guards on model output in your application code |
 | **Coding agents** | **43** supported harnesses, including Claude Code, Codex, Cursor, GitHub Copilot, Windsurf and Cline | Not a focus; it traces any application instrumented with OpenInference or OpenTelemetry |
 | **Decisions** | Allow, warn, require approval (held until approved in Slack or the CLI), block, redact, re-ask, shadow | Block, re-ask, or substitute a default response |
 | **Evaluation** | Shadow mode measures how often a rule would act before it enforces; judge findings go to a human review queue | LLM-as-judge and online evaluations, human annotation and labeling queues |

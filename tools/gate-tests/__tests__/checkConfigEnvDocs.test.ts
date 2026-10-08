@@ -26,6 +26,17 @@ describe('readsIn', () => {
     ])
   })
 
+  it('finds Rust names read through a lookup closure handed to a function', () => {
+    const src = [
+      'fn resolve(p: &P, var: impl Fn(&str) -> Option<String>) -> String {',
+      '    let specific = match p { P::A => "A_UPSTREAM_URL" };',
+      '    var(specific).or_else(|| var("UPSTREAM_URL")).unwrap_or_default()',
+      '}',
+      'fn base(p: &P) -> String { resolve(p, |name| std::env::var(name).ok()) }',
+    ].join('\n')
+    expect([...readsIn(src, 'rust')].sort()).toEqual(['A_UPSTREAM_URL', 'UPSTREAM_URL'])
+  })
+
   it('counts TypeScript reads, not assignments or comments', () => {
     const src = [
       "const a = process.env.INTUTIC_PROXY_URL ?? 'http://localhost:4000'",

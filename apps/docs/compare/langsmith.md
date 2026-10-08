@@ -14,7 +14,7 @@ Intutic decides each agent tool call before it runs, across 43 harnesses: native
 | | Intutic | LangSmith |
 |---|---|---|
 | **Primary job** | Runtime enforcement and audit for AI agents | Tracing, evaluation and prompt engineering for LLM applications |
-| **Where it enforces** | Native pre-execution hooks in 21 harnesses, plus request and response proxy, MCP governance proxy, egress firewall and sandbox | LLM Gateway (beta), inline on model traffic |
+| **Where it enforces** | Native pre-execution hook gates in 19 of the 43 harnesses, plus request and response proxy, MCP governance proxy, egress firewall and sandbox | LLM Gateway (beta), inline on model traffic |
 | **Coding agents** | **43** supported harnesses, including Claude Code, Codex, Cursor, GitHub Copilot, Windsurf and Cline | Gateway guides for Claude Code, Codex and Gemini CLI |
 | **Decisions** | Allow, warn, require approval (held until approved in Slack or the CLI), block, redact, re-ask, shadow | Block on a spend cap (HTTP 402); redact PII and secrets |
 | **Sensitive data** | Secrets and credentials in requests redacted or blocked by pattern before they leave | Gateway redaction of PII and provider keys; masking of trace inputs and outputs |

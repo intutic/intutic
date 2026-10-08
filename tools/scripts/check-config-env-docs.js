@@ -81,6 +81,15 @@ export function readsIn(src, lang) {
     for (const m of code.matchAll(/env::var(?:_os)?\(\s*&?[a-z_]+\s*\)/g)) {
       for (const lit of code.slice(Math.max(0, m.index - 300), m.index).matchAll(/"([A-Z][A-Z0-9]*_[A-Z0-9_]+)"/g)) names.add(lit[1])
     }
+    // Names read through a lookup closure handed to a function
+    // (`resolve_upstream_base(p, |name| std::env::var(name).ok())`): every
+    // env-shaped literal in that function's body.
+    for (const m of code.matchAll(/\b([a-z_][a-z0-9_]*)\([^()]*\|\s*[a-z_]+\s*\|\s*(?:std::)?env::var\(/g)) {
+      const start = code.search(new RegExp(`\\bfn\\s+${m[1]}\\b`))
+      if (start === -1) continue
+      const end = code.indexOf('\n}\n', start)
+      for (const lit of code.slice(start, end === -1 ? undefined : end).matchAll(/"([A-Z][A-Z0-9]*_[A-Z0-9_]+)"/g)) names.add(lit[1])
+    }
   } else {
     // `process.env.X`, `process.env['X']` and an `env` parameter defaulting to
     // it, read rather than assigned. `\b` after the name stops a backtrack to

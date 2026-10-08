@@ -29,6 +29,7 @@ The proxy (`intutic-proxy`) reads these at startup unless a row says otherwise.
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
+| `UPSTREAM_URL` | unset | One upstream for every provider, such as a LiteLLM gateway. A provider's own variable below takes precedence. See [Standalone](/integrations/standalone) |
 | `ANTHROPIC_UPSTREAM_URL` | `https://api.anthropic.com` | Where requests for Anthropic models go |
 | `OPENAI_UPSTREAM_URL` | `https://api.openai.com` | Where requests for OpenAI models go |
 | `GEMINI_UPSTREAM_URL` | `https://generativelanguage.googleapis.com` | Where requests for Gemini models go |
