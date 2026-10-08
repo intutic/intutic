@@ -38,7 +38,7 @@ Every event carries a `sourceTable` naming its source:
 | `detector_findings` | Every finding from the proxy's anomaly detector pipeline, allowed or blocked |
 | `stored_plans` | Plan approve, reject and close decisions |
 | `enforcement_devices` | A device's firewall enforcement being disabled, and (emitter path only, see below) a device going stale |
-| `login_events` | Every password and SSO sign-in: member, method, IP address and user agent |
+| `login_events` | Every sign-in — password, SSO (OIDC or SAML), magic link, GitHub, Google, and the sign-up that signs a new owner in — and every refused sign-in that belongs to a workspace: a wrong password, a deactivated member, an SSO identity the workspace does not admit, an IdP response that fails verification. Each carries the method, `outcome` (`success` or `failure`), `failure_reason`, the member (or, when none was resolved, the email presented), IP address and user agent. An attempt against an email no workspace knows is not recorded |
 | `workspace_settings_changes` | Every workspace settings change: who made it, which keys changed, and the before and after values with secrets redacted. Policy guardrails that set the model allowlist or egress allow list appear here too |
 | `sop_registry` | A guideline moving between lifecycle states (for example draft to validated, or validated to invalidated): which guideline, from and to, and who moved it |
 | `governance_alerts` | The alerts the notification hub sends: a gate that stopped reporting, the same gate reporting again, and a failed trace integrity check. `payload.alert_type` says which |
@@ -67,7 +67,7 @@ Each source has its own CEF event class, so a SIEM rule can match on it:
 | Source | Event class | Severity |
 |---|---|---|
 | `gate_decisions` | `GATE_<VERDICT>`, for example `GATE_BLOCK` | 7 for a block, 6 for an approved bypass, 5 for a hold or would-block, 4 for a flag, 1 for an allow |
-| `login_events` | `AUTH_LOGIN` | 3 |
+| `login_events` | `AUTH_LOGIN`, or `AUTH_LOGIN_FAILURE` for a refused sign-in | 3, and 5 for a refusal |
 | `workspace_settings_changes` | `SETTINGS_CHANGE` | 5 |
 | `sop_registry` | `POLICY_CHANGE_UPDATE` | 4 |
 | `governance_alerts` | `GATE_SILENT`, `GATE_RECOVERED` or `INTEGRITY_FAILURE` | 7, 1 and 10 |

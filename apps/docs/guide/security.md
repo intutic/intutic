@@ -195,7 +195,9 @@ DELETE /api/v1/members/:memberId
 
 or **Settings › Team Members › Deactivate**. This takes effect
 immediately — every key the member holds stops authenticating at the control plane
-and at the proxy on the next request, not after a cache expiry.
+and at the proxy on the next request, not after a cache expiry. The member also
+cannot sign in again by any method: password, magic link, GitHub, Google, OIDC or
+SAML. Each refused attempt is recorded as a failed sign-in.
 
 Deactivation does not revoke the keys, only refuses them, so reactivating the
 member restores their access without reissuing anything.
