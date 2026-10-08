@@ -177,6 +177,55 @@ if (existsSync(CELLS_REMOTE_DIR)) {
   }
 }
 
+/**
+ * A pre-install hook runs before Helm creates the release's ordinary
+ * resources, so anything it uses must either come from outside the chart (a
+ * Secret the operator creates first) or be a pre-install hook itself with a
+ * lower weight. Until 2026-10-08 the Self-host migration Job ran as the chart's
+ * ordinary ServiceAccount: every fresh `helm install` waited on a Job whose
+ * pods the API server refused ("serviceaccount not found") until it timed out.
+ */
+function preInstallHookProblems(chart, docs) {
+  const hookOf = (d) => {
+    const a = d.metadata?.annotations ?? {}
+    const phases = String(a['helm.sh/hook'] ?? '').split(',').map((p) => p.trim())
+    return { preInstall: phases.includes('pre-install'), weight: Number(a['helm.sh/hook-weight'] ?? 0) }
+  }
+  const rendered = new Map(docs.map((d) => [`${d.kind}/${d.metadata?.name}`, d]))
+  const problems = []
+  for (const d of docs) {
+    const hook = hookOf(d)
+    const pod = d.spec?.template?.spec
+    if (!hook.preInstall || !pod) continue
+    const containers = [...(pod.initContainers ?? []), ...(pod.containers ?? [])]
+    const refs = [
+      ['ServiceAccount', pod.serviceAccountName],
+      ...(pod.imagePullSecrets ?? []).map((s) => ['Secret', s.name]),
+      ...(pod.volumes ?? []).flatMap((v) => [['Secret', v.secret?.secretName], ['ConfigMap', v.configMap?.name]]),
+      ...containers.flatMap((c) => [
+        ...(c.envFrom ?? []).flatMap((e) => [['Secret', e.secretRef?.name], ['ConfigMap', e.configMapRef?.name]]),
+        ...(c.env ?? []).flatMap((e) => [
+          ['Secret', e.valueFrom?.secretKeyRef?.name],
+          ['ConfigMap', e.valueFrom?.configMapKeyRef?.name],
+        ]),
+      ]),
+    ]
+    for (const [kind, name] of refs) {
+      const target = name && rendered.get(`${kind}/${name}`)
+      if (!target) continue
+      const dep = hookOf(target)
+      if (!dep.preInstall || dep.weight >= hook.weight) {
+        problems.push(
+          `chart ${chart}: pre-install hook ${d.kind} ${d.metadata.name} uses ${kind} ${name}, which the chart ` +
+            `creates ${dep.preInstall ? 'in the same or a later hook weight' : 'as an ordinary resource'} — ` +
+            'it does not exist yet when the hook runs on a fresh install',
+        )
+      }
+    }
+  }
+  return problems
+}
+
 // ── Helm charts (Self-host) ──────────────────────────────────────────────────
 // tools/helm/intutic is how a Self-host customer installs on Kubernetes, and
 // nothing deploys it here, so a broken template would first fail on their
@@ -221,6 +270,7 @@ if (existsSync(HELM_DIR)) {
       const sa = d.spec?.template?.spec?.serviceAccountName
       if (sa && !accounts.has(sa)) failures.push(`chart ${chart}: ${d.kind} ${d.metadata.name} runs as ServiceAccount ${sa}, which the chart does not create`)
     }
+    failures.push(...preInstallHookProblems(chart, docs))
     if (chart !== 'intutic') continue
     const deployments = new Map(docs.filter((d) => d.kind === 'Deployment').map((d) => [d.metadata.labels['app.kubernetes.io/component'], d]))
     for (const c of ['control-plane', 'proxy', 'dashboard', 'docs', 'valkey']) {
