@@ -32,6 +32,25 @@ workspace, free included; <Badge type="warning" text="Self-serve+" />,
 <Badge type="warning" text="Biz Org+" /> and <Badge type="danger" text="Enterprise" /> need that
 plan or higher. Every command ships in the open-core CLI; the badge says what it needs to work.
 
+## Choosing a control plane {#control-plane-url}
+
+Every command that talks to a control plane picks it the same way; the first that is set wins:
+
+1. A flag: `--control-plane-url <url>` (on `login`, `connect` and `daemon install`), or `--dev`
+   for the local one at `http://localhost:3001`. A workspace initialized with `intutic init --dev`
+   counts as `--dev`.
+2. The environment: `INTUTIC_CONTROL_PLANE_URL`, or `INTUTIC_DEV=1` for the local one.
+3. The control plane `intutic login` saved with your credentials.
+4. Intutic's hosted control plane.
+
+For a self-hosted control plane, log in once with its URL and every later command uses it:
+
+```bash
+intutic login --control-plane-url https://intutic.internal.example
+intutic whoami
+intutic connect
+```
+
 ---
 
 ## `intutic init`
@@ -89,7 +108,7 @@ intutic start [options]
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--port <port>` | Port the proxy listens on | `4000` |
+| `--port <port>` | Port the proxy listens on | The port of `INTUTIC_PROXY_URL`, else `4000` |
 | `--valkey-port <port>` | Local Valkey port to use or start | `6379` |
 | `--upstream-url <url>` | Upstream LLM provider base URL, passed to the proxy as `UPSTREAM_URL` | _(proxy default)_ |
 
@@ -187,12 +206,12 @@ intutic judge configure [options]
    reference such as `ollama/llama3.1` or a local alias your LiteLLM serves. Judges run only on
    self-hosted models: a custom reference that names a hosted provider (Anthropic, OpenAI,
    OpenRouter, Ollama Cloud…) is refused and nothing is written
-2. Writes a `litellm_config.yaml` `model_list` entry in the same shape
-   `infra/compose/litellm_config.yaml`'s hand-written example uses
+2. Writes a LiteLLM `litellm_config.yaml` to `--out`, with one `model_list` entry for that model
 3. Prints the env block (`INTUTIC_GATEWAY_LOCAL_JUDGE`, `LITELLM_LOCAL_URL`,
    `LITELLM_LOCAL_API_KEY`, `LITELLM_LOCAL_JUDGE_MODEL`) for Docker/bare-metal deployments
-4. Prints the Helm values snippet (`proxy.localJudge`, `litellm.enabled`, `litellm.judgeModel`)
-   for `tools/helm/intutic-gateway`
+4. Prints the Helm values (`proxy.localJudge`, `litellm.enabled`, `litellm.judgeModel`) for the
+   `intutic-gateway` chart, which is published at `oci://ghcr.io/intutic/charts/intutic-gateway`.
+   The chart renders LiteLLM's config from the file this command wrote, passed with `--set-file`
 
 The optional typed stage's variables (`INTUTIC_GATEWAY_LOCAL_JUDGE_TYPED_LO`,
 `INTUTIC_GATEWAY_LOCAL_JUDGE_TYPED_HI`, `LITELLM_LOCAL_TYPED_JUDGE_MODEL`) are not printed: the
@@ -202,8 +221,18 @@ band must be measured for your model. See
 **Example:**
 
 ```bash
-intutic judge configure --out ./infra/compose/litellm_config.yaml
+intutic judge configure --out ./litellm_config.yaml
+
+# Kubernetes: log Helm in with the pull token Intutic sent you, then install with the local judge
+helm registry login ghcr.io --username <username>
+helm install my-gateway oci://ghcr.io/intutic/charts/intutic-gateway --version <version> \
+  --namespace intutic-gateway \
+  --set-file litellm.config=./litellm_config.yaml \
+  --set proxy.localJudge=true,litellm.enabled=true,litellm.judgeModel=<model alias>
 ```
+
+`<version>` is the release Intutic sent you. The rest of the install (the gateway token Secret,
+the image pull Secret) is in [Self-Hosted Gateway](/external/self-hosted-gateway).
 
 ---
 
@@ -220,12 +249,15 @@ intutic login [options]
 | Option | Description |
 |--------|-------------|
 | `--api-key <key>` | Authenticate with an API key (`vk_*`) |
+| `--control-plane-url <url>` | The control plane to log in to, such as a self-hosted one. Must be an `http(s)` URL. |
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 Without `--api-key` it prompts for your email and password (the password is not echoed). The
 credentials are saved to `~/.intutic/credentials.json`, with the token in the OS keychain when one
-is available, together with the control plane they were issued by: `intutic connect` keeps using
-that control plane.
+is available, together with the control plane they were issued by. Every later command uses that
+control plane unless a flag or `INTUTIC_CONTROL_PLANE_URL` names another; see
+[Choosing a control plane](#control-plane-url). Without `--control-plane-url`, `login` itself
+resolves the control plane the same way.
 
 **Examples:**
 
@@ -235,6 +267,9 @@ intutic login
 
 # API key login
 intutic login --api-key vk_abc123def456
+
+# A self-hosted control plane, saved for every later command
+intutic login --control-plane-url https://intutic.internal.example
 
 # Local dev
 intutic login --dev
@@ -295,7 +330,7 @@ intutic doctor
 
 No options. Runs nine checks in order, each printing ✓ or ✗ plus a one-line remediation on failure:
 
-1. Proxy reachable (`http://127.0.0.1:4000/health`)
+1. Proxy reachable (`http://127.0.0.1:4000/health`, or the port of `INTUTIC_PROXY_URL`)
 2. Control plane auth (the stored credentials against `/api/v1/auth/me`)
 3. Sync daemon running (PID file or process scan)
 4. Harness config files intact (SHA-256 against `<workspaceRoot>/.intutic/integrity.json`)
@@ -321,24 +356,20 @@ intutic connect [options]
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--dev` | Use the local control plane (`http://localhost:3001`) when no URL comes from `--control-plane-url` or `intutic login` | — |
+| `--dev` | Use the local control plane (`http://localhost:3001`) unless `--control-plane-url` is given | — |
 | `--interval <ms>` | Poll interval in milliseconds | `30000` |
 | `--workspace-id <id>` | Workspace ID (e.g. `wk_xxxx`) to connect as, instead of the stored login. Takes effect only together with `--api-key`. | — |
 | `--api-key <key>` | Workspace API key (e.g. `vk_xxxx`) to connect with, instead of the stored login. Takes effect only together with `--workspace-id`. | — |
 | `--control-plane-url <url>` | Control plane to sync with. Overrides every other source. | — |
 
-**Control plane URL:** the first of these that is set wins:
-
-1. `--control-plane-url`
-2. The URL saved by `intutic login` (skipped when `--workspace-id` and `--api-key` are given)
-3. `http://localhost:3001` when `--dev` is passed, `INTUTIC_DEV=1` is set, or the workspace was initialized with `--dev`
-4. Intutic's hosted control plane
-
-No environment variable sets the control plane URL directly.
+**Control plane URL:** resolved as for every command (see
+[Choosing a control plane](#control-plane-url)), except that the URL saved by `intutic login` is
+skipped when `--workspace-id` and `--api-key` are given: those credentials were not issued with
+that login.
 
 **What it does:**
 1. Starts Valkey if none is running (connected mode needs it), and spawns a managed proxy if
-   nothing is listening on the proxy port (`4000`, or `PORT` when set).
+   nothing is listening on the proxy port (the port of `INTUTIC_PROXY_URL`, else `4000`).
 2. Seeds the policy snapshot (`~/.intutic/hooks/policy-snapshot.rules`) so the harness gates
    enforce workspace policy from the first tool call.
 3. Every `--interval`, and whenever the control plane pushes a change, fetches the workspace
@@ -746,6 +777,11 @@ Walk the harness **config snapshot** chain and re-hash every stored body. Each s
 `harness_config_snapshots` records a `content_hash` of its own body and the `previous_hash` of
 the snapshot before it, per harness type and file path — this is the command that reads them.
 
+A snapshot holds the full text of a harness config file. The CLI never uploads those bodies:
+`intutic connect` reports only each file's hash. A workspace therefore has snapshots only from a
+client that posts them to the control plane's config-capture endpoint itself; otherwise this
+command reports an absent chain.
+
 ```bash
 intutic integrity config-chain [options]
 ```
@@ -771,8 +807,7 @@ about the row carrying it. Re-hashing only the bodies leaves a deleted snapshot 
 because every survivor still hashes correctly.
 
 A workspace with **no snapshots** is reported as an absent chain, not a clean one, and exits
-`0` — nothing was verified, so there is nothing to have failed. `intutic connect` reports the
-hashes of harness config files, not their bodies, so it does not create snapshots.
+`0` — nothing was verified, so there is nothing to have failed.
 
 Only the most recent 500 snapshots are walked. When older ones exist the report says so: an
 intact window is not an intact history.
@@ -802,7 +837,7 @@ Without `--watch`:
 
 - When you are logged in, prints the workspace's budget from the control plane: daily and monthly spend against their budgets with percentages, remaining budget, and an alert line when the alert threshold is exceeded.
 - Prints the local spending cap from `~/.intutic/config.json` (`maxDailyBudgetUsd`, or `max_daily_budget_usd`; default `$10.00`).
-- Prints today's machine-local spend from the local proxy at `http://127.0.0.1:4000`, or a dash when the proxy is not running.
+- Prints today's machine-local spend from the local proxy at `http://127.0.0.1:4000` (or the port of `INTUTIC_PROXY_URL`), or a dash when the proxy is not running.
 - When you are logged in, lists every `ACTIVE` loop run with its token spend and budget limit.
 
 Without a login it runs in standalone (offline) mode and prints only the local figures.
@@ -813,7 +848,7 @@ With `--watch`, it prints one line per tick in this shape:
 [10:42:05] machine-local: $0.4210 / $10.00  |  workspace: $3.1200 / $50.00
 ```
 
-- `machine-local` is today's spend and cap as reported by the local proxy at `http://127.0.0.1:4000`. `(enforcement off)` is appended when the proxy is not enforcing the cap; `— (local proxy not running)` is shown when it cannot be reached.
+- `machine-local` is today's spend and cap as reported by the local proxy at `http://127.0.0.1:4000` (or the port of `INTUTIC_PROXY_URL`). `(enforcement off)` is appended when the proxy is not enforcing the cap; `— (local proxy not running)` is shown when it cannot be reached.
 - `workspace` is the workspace's daily spend and daily budget, refreshed on the first tick and every 6th tick after that (every 30 seconds at the default interval). It shows `— (not connected)` when you are not logged in or the request fails.
 
 `--watch` does not list loops. It works without a login; only the workspace figure needs one.
@@ -932,7 +967,7 @@ Prints each file found with its line count. It reads the files but does not scan
 Scan rule files, skill files, and the scripts bundled with skills for leaked credentials and unsafe instructions.
 
 ```bash
-intutic skill audit [--sarif] [--engine <native|cisco>]
+intutic skill audit [--sarif] [--engine <native|cisco>] [--exit-zero]
 ```
 
 **Options:**
@@ -941,6 +976,7 @@ intutic skill audit [--sarif] [--engine <native|cisco>]
 |--------|-------------|---------|
 | `--sarif` | Print the findings as a single SARIF 2.1.0 JSON document on stdout (for GitHub Code Scanning and other CI tools) instead of the readable report | — |
 | `--engine <engine>` | `native` runs the built-in scanner. `cisco` also runs Cisco's `skill-scanner` on each skill directory; the `skill-scanner` binary must be on `PATH` (`pipx install cisco-ai-skill-scanner`). | `native` |
+| `--exit-zero` | Exit `0` even when the audit has findings | — |
 
 **What it does:**
 
@@ -960,15 +996,15 @@ When you are logged in, three workspace settings change the run:
 
 When you are logged in, the results are also reported to the control plane; a failed report is ignored. With `--sarif`, nothing but the JSON document is printed. Cisco's results, when that engine ran, are added as a second run in the same document.
 
-**Exit status:** `0` when the audit completes, even if it found issues; read the report or the SARIF output to decide pass/fail. `1` for an unknown `--engine` value, or for `--engine cisco` when `skill-scanner` is not on `PATH`.
+**Exit status:** `1` when the audit has findings, so a CI step fails on them; `0` when it is clean, or with `--exit-zero`. Also `1` for an unknown `--engine` value, or for `--engine cisco` when `skill-scanner` is not on `PATH`. The report, the SARIF document and the control-plane report are all complete before the command exits.
 
 **Examples:**
 
 ```bash
 intutic skill audit
 
-# Upload to GitHub Code Scanning
-intutic skill audit --sarif > skills.sarif
+# Upload to GitHub Code Scanning, which then decides pass/fail
+intutic skill audit --sarif --exit-zero > skills.sarif
 
 # Also run Cisco's skill-scanner
 intutic skill audit --engine cisco
@@ -2508,7 +2544,7 @@ intutic team create-workspace tm_abc123 --name "payments-service"
 
 ---
 
-## `intutic exec` <Badge type="tip" text="Cloud" />
+## `intutic exec`
 
 Execute a command wrapped with Intutic proxy environment variables.
 
@@ -2528,7 +2564,7 @@ intutic exec --sandbox -- <command> [args...]
 | Option | Description |
 |--------|-------------|
 | `--sandbox [kind]` | Run the agent in an isolated sandbox instead of directly on the host. `kind` is `oci` (default) or `firecracker`. See [Sandboxed Execution](/guide/sandboxed-execution) for what each backend actually isolates and requires. |
-| `--sandbox-image <image>` | Sandbox image — must contain the agent, `nftables`, and `capsh`. Default: `intutic/sandbox:latest`. |
+| `--sandbox-image <image>` | Sandbox image — must contain the agent, `nftables`, and `capsh`. Default: `intutic/sandbox:<CLI version>`, built locally from the Dockerfile shipped with the CLI on first use; it has no agent, so extend it ([Sandboxed Execution](/guide/sandboxed-execution)). |
 | `--sandbox-memory <size>` | Sandbox memory cap, e.g. `2g`. Default: `2g`. |
 | `--sandbox-cpus <n>` | Sandbox CPU cap. Default: `2`. |
 | `--sandbox-pids <n>` | Sandbox max process count. Default: `512`. |
@@ -2548,11 +2584,18 @@ Injects the proxy environment into the child process, then spawns it with inheri
 | `OPENAI_API_BASE_URL` | OpenWebUI |
 | `OPENAI_HOST` | Goose (host only, no `/v1`) |
 | `ANTHROPIC_BASE_URL` | Claude Code, Anthropic SDK (host only) |
-| `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `INTUTIC_API_KEY` | API key for all of the above |
+| `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `INTUTIC_API_KEY` | The workspace API key, when you are logged in |
 
-Requires `intutic login` first. The variables point at the local proxy, `http://localhost:4000`,
-or at `INTUTIC_PROXY_URL` when it is set; inside `--sandbox` they point at the host the proxy runs
-on.
+The base-URL variables point at the local proxy, `http://localhost:4000`, or at
+`INTUTIC_PROXY_URL` when it is set; inside `--sandbox` they point at the host the proxy runs on.
+
+**Without a login** (open core, with [`intutic start`](#intutic-start) running) only the base URLs
+change: the agent keeps the provider keys already in its environment, and the standalone proxy
+passes them through to the provider. With `--sandbox`, `OPENAI_API_KEY` and `ANTHROPIC_API_KEY`
+are handed into the container for the same reason.
+
+**Logged in**, the key variables are set to the workspace key, the workspace's sandbox requirement
+applies, and a sandboxed run is recorded as a session.
 
 **Examples:**
 
@@ -2752,13 +2795,13 @@ Also available as the top-level shortcut `intutic install-daemon`, with the same
 |--------|-------------|---------|
 | `--workspace-id <id>` | Workspace ID, e.g. `wk_xxxx` (required unless `--proxy`) | — |
 | `--api-key <key>` | Workspace API key, e.g. `vk_xxxx` (required unless `--proxy`) | — |
-| `--control-plane-url <url>` | Control plane the sync-daemon or MCP daemon connects to. Pass it for a self-hosted control plane. | Intutic's hosted control plane |
+| `--control-plane-url <url>` | Control plane the sync-daemon or MCP daemon connects to, written into the service | Resolved as in [Choosing a control plane](#control-plane-url): `INTUTIC_CONTROL_PLANE_URL`, then the URL saved by `intutic login`, then Intutic's hosted control plane |
 | `--binary-path <path>` | Path to the `intutic` CLI binary; with `--proxy`, an absolute path to `intutic-proxy` | _(current process; with `--proxy`, the launcher's pinned binary, then `intutic-proxy` on PATH)_ |
 | `--dry-run` | Print what would be done without writing files | — |
 | `--system` | Install as a system-level service (LaunchDaemon on macOS, systemd system unit on Linux) | — |
 | `--mcp` | Install the MCP proxy daemon instead of the sync-daemon | — |
 | `--proxy` | Install the standalone `intutic-proxy` binary as a service — no workspace or key needed | — |
-| `--port <port>` | With `--proxy`: proxy listen port (`PORT`) | `4000` |
+| `--port <port>` | With `--proxy`: proxy listen port (`PORT`) | The port of `INTUTIC_PROXY_URL`, else `4000` |
 | `--valkey-url <url>` | With `--proxy`: Valkey to attach to (`VALKEY_URL`); omitted, the unit sets `INTUTIC_STANDALONE=1` | — |
 | `--upstream-url <url>` | With `--proxy`: upstream LLM provider base URL (`UPSTREAM_URL`) | — |
 
@@ -2910,8 +2953,9 @@ Environment variables the CLI, and the hook gates and proxy it sets up, read. Co
 
 | Variable | Read by | Effect |
 |----------|---------|--------|
-| `INTUTIC_DEV` | Every command that calls a control-plane API | `1` targets the local control plane at `http://localhost:3001`, the same as `--dev`. Any other value is ignored. |
-| `INTUTIC_PROXY_URL` | `intutic exec`, `intutic enterprise install`, `intutic init` and `intutic connect` setup output | Base URL of the proxy. `exec` points the child process's SDK variables at it and takes the sandbox's proxy port from it. `enterprise install` uses it when `--proxy-url` is not given. `init` and `connect` print it as your gateway endpoint (with `/v1` appended). Default `http://localhost:4000`. |
+| `INTUTIC_CONTROL_PLANE_URL` | Every command that calls a control-plane API | The control plane to use, ahead of the one saved by `intutic login` and behind a `--control-plane-url` or `--dev` flag. See [Choosing a control plane](#control-plane-url). |
+| `INTUTIC_DEV` | Every command that calls a control-plane API | `1` targets the local control plane at `http://localhost:3001`, the same as `--dev`, unless `INTUTIC_CONTROL_PLANE_URL` is set. Any other value is ignored. |
+| `INTUTIC_PROXY_URL` | `intutic exec`, `start`, `connect`, `budget`, `doctor`, `daemon install --proxy`, `enterprise install`, and the setup output of `init` and `connect` | Base URL of the local proxy, default `http://localhost:4000`. Its port is the one every command uses: `start`, `connect` and `daemon install --proxy` run the proxy there unless `--port` says otherwise, and `budget` and `doctor` probe it there. `exec` points the child process's SDK variables at it. `enterprise install` uses it when `--proxy-url` is not given. `init` and `connect` print it as your gateway endpoint (with `/v1` appended). The shell's `PORT` is not read. |
 | `VALKEY_URL` | `intutic start`, `intutic connect` | Valkey/Redis the proxy uses. `start` passes it through only when a Valkey is reachable on `--valkey-port`; otherwise it uses `redis://127.0.0.1:<valkey-port>`. `connect` defaults to `redis://127.0.0.1:6379`. |
 | `CONTROL_PLANE_URL` | `intutic start` | When set and no Valkey is available, `start` does not force standalone mode; the proxy treats the run as a managed deployment and requires Valkey. The CLI does not use it to choose a control plane. |
 | `INTUTIC_SNAPSHOT_RULES` | Hook gates, `intutic policy snapshot`, `intutic doctor` | Path of the policy snapshot file the gates enforce. Default `~/.intutic/hooks/policy-snapshot.rules`. `policy snapshot` writes into this path's directory and always names the file `policy-snapshot.rules` (it warns if your path uses another name); `doctor` checks this path. |
@@ -2927,4 +2971,4 @@ Environment variables the CLI, and the hook gates and proxy it sets up, read. Co
 | `INTUTIC_FC_VCPUS` | `intutic exec --sandbox firecracker` | Guest vCPU count. Default `1`. |
 | `INTUTIC_FC_MEM` | `intutic exec --sandbox firecracker` | Guest memory in MiB. Default `512`. |
 
-There is no environment variable that overrides the control-plane URL. Use `--control-plane-url` on `intutic connect` or `intutic daemon install`, or `INTUTIC_DEV=1` for a local one.
+The control plane itself is chosen as described in [Choosing a control plane](#control-plane-url).

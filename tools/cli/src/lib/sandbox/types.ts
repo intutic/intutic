@@ -45,6 +45,11 @@ export interface SandboxBackend {
   readonly name: string
   /** Whether this backend can run here (e.g. docker reachable, KVM present). */
   health(): Promise<SandboxHealth>
+  /**
+   * Get `image` ready to run, before `run` (the OCI backend builds the
+   * default image here). Throws with a message for the user when it cannot.
+   */
+  prepare?(image: string): Promise<void>
   /** Launch the spec; resolves with the process exit code. */
   run(spec: SandboxSpec): Promise<number>
 }

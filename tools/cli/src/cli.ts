@@ -13,6 +13,7 @@
 
 import { Command } from 'commander'
 import { createRequire } from 'node:module'
+import { DEFAULT_SANDBOX_IMAGE } from './lib/sandbox/image.js'
 
 // Read the version from package.json rather than repeating it here. The literal
 // that used to live below said 1.6.0 for three releases running, so
@@ -73,6 +74,7 @@ program
   .command('login')
   .description('Authenticate with the Intutic control plane')
   .option('--api-key <key>', 'Authenticate with an API key (vk_*)')
+  .option('--control-plane-url <url>', 'Control plane to log in to (e.g. a self-hosted one); saved for every later command')
   .option('--dev', 'Use local control plane (http://localhost:3001)')
   .action(async (opts) => {
     const { runLogin } = await import('./commands/login.js')
@@ -545,7 +547,7 @@ program
 program
   .command('start')
   .description('Start the proxy standalone — no account or control plane needed')
-  .option('--port <port>', 'Proxy port', '4000')
+  .option('--port <port>', 'Proxy port (default: the port of $INTUTIC_PROXY_URL, else 4000)')
   .option('--valkey-port <port>', 'Valkey port', '6379')
   .option('--upstream-url <url>', 'Upstream LLM provider base URL')
   .action(async (opts) => {
@@ -690,7 +692,7 @@ program
   // (LLD #63 §6): cap-drop, no-new-privileges, read-only rootfs, resource caps,
   // and a default-deny egress firewall the agent cannot undo.
   .option('--sandbox [kind]', 'Run the agent in an isolated sandbox (kind: oci | firecracker; default oci)')
-  .option('--sandbox-image <image>', 'Sandbox image (must contain the agent + nftables + capsh)', 'intutic/sandbox:latest')
+  .option('--sandbox-image <image>', 'Sandbox image (must contain the agent + nftables + capsh); the default is built locally on first use', DEFAULT_SANDBOX_IMAGE)
   .option('--sandbox-memory <size>', 'Sandbox memory cap (e.g. 2g)', '2g')
   .option('--sandbox-cpus <n>', 'Sandbox CPU cap', '2')
   .option('--sandbox-pids <n>', 'Sandbox max process count', '512')
@@ -899,13 +901,13 @@ function defineDaemonInstall(cmd: Command): Command {
     )
     .option('--workspace-id <id>', 'Workspace ID (e.g. wk_xxxx) — required unless --proxy')
     .option('--api-key <key>', 'Workspace API key (e.g. vk_xxxx) — required unless --proxy')
-    .option('--control-plane-url <url>', 'Control plane URL', 'https://api.intutic.ai')
+    .option('--control-plane-url <url>', 'Control plane the daemon connects to (default: $INTUTIC_CONTROL_PLANE_URL, then the URL saved by `intutic login`, then https://api.intutic.ai)')
     .option('--binary-path <path>', 'Path to intutic CLI binary (defaults to current process); with --proxy, absolute path to intutic-proxy')
     .option('--dry-run', 'Print what would be done without writing files')
     .option('--system', 'Install as a system-level service (LaunchDaemon on macOS, systemd system unit on Linux)')
     .option('--mcp', 'Install the MCP proxy daemon instead of the sync-daemon')
     .option('--proxy', 'Install the standalone intutic-proxy binary as a service')
-    .option('--port <port>', 'With --proxy: proxy listen port', '4000')
+    .option('--port <port>', 'With --proxy: proxy listen port (default: the port of $INTUTIC_PROXY_URL, else 4000)')
     .option('--valkey-url <url>', 'With --proxy: Valkey URL to attach to; omit to run standalone (INTUTIC_STANDALONE=1)')
     .option('--upstream-url <url>', 'With --proxy: upstream LLM provider base URL')
     .action(async (opts, cmd) => {
@@ -1029,9 +1031,10 @@ skillCmd
       "skill-scanner integration (requires the 'skill-scanner' binary on PATH — pipx install cisco-ai-skill-scanner)",
     'native',
   )
+  .option('--exit-zero', 'Exit 0 even when there are findings (by default findings exit 1)')
   .action(async (opts) => {
     const { runSkillAudit } = await import('./commands/skill.js')
-    await runSkillAudit({ sarif: opts.sarif, engine: opts.engine })
+    await runSkillAudit({ sarif: opts.sarif, engine: opts.engine, exitZero: opts.exitZero })
   })
 
 skillCmd

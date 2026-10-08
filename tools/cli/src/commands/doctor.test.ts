@@ -171,8 +171,17 @@ describe('checkControlPlane', () => {
     storedAt: new Date().toISOString(),
   }
 
+  // The check asks whichever control plane the CLI resolves, as every other
+  // command would; pin it through the environment.
+  const savedUrl = process.env.INTUTIC_CONTROL_PLANE_URL
+  beforeEach(() => {
+    process.env.INTUTIC_CONTROL_PLANE_URL = 'https://cp.example'
+  })
+
   afterEach(() => {
     vi.restoreAllMocks()
+    if (savedUrl === undefined) delete process.env.INTUTIC_CONTROL_PLANE_URL
+    else process.env.INTUTIC_CONTROL_PLANE_URL = savedUrl
   })
 
   it('validates the key against /api/v1/auth/me and reports it authenticated', async () => {

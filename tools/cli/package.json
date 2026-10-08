@@ -19,6 +19,7 @@
   },
   "files": [
     "dist/",
+    "resources/sandbox/",
     "README.md"
   ],
   "repository": {

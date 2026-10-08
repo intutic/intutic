@@ -2,9 +2,11 @@
 #
 # A minimal, genuinely-isolating runtime for `intutic exec --sandbox`. It ships
 # only what the entrypoint needs to install the egress firewall and drop
-# privilege: nftables, libcap (capsh), and a resolver. Bring your agent by
-# extending this image (`FROM intutic/sandbox`) and installing your harness, or
-# pass `--sandbox-image` with your own image that includes nftables + capsh.
+# privilege: nftables, libcap (capsh), and a resolver. `intutic exec --sandbox`
+# builds it from this directory on first use, tagged intutic/sandbox:<CLI
+# version>. Bring your agent by extending that tag (`FROM intutic/sandbox:<ver>`)
+# and installing your harness, or pass `--sandbox-image` with your own image
+# that includes nftables + capsh.
 #
 # The image is intentionally not a place to run the agent as root: the
 # entrypoint switches to the unprivileged `sandbox` user after applying the

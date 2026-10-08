@@ -17,7 +17,7 @@ import { log } from './logger.js'
  * @param apiKey - Optional API key to display in the instructions
  */
 function maskUserToken(tokenVal?: string): string {
-  if (!tokenVal) return '<YOUR_INTUTIC_API_KEY>'
+  if (!tokenVal) return '<YOUR_PROVIDER_API_KEY>'
   return `${tokenVal.substring(0, 4)}...${tokenVal.substring(tokenVal.length - 4)}`
 }
 
@@ -60,12 +60,16 @@ export function printOnboardingGuide(harnesses: string[], userAuthToken?: string
   writeCliOutput(`Your local gateway endpoint is: ${pc.cyan(proxyUrl)}`)
   if (userAuthToken) {
     writeCliOutput(`Your Intutic API Key is: ${pc.green(safeDisplayValue)}`)
+  } else {
+    // Standalone, the proxy forwards the agent's own provider key upstream;
+    // there is no Intutic key to hand out.
+    writeCliOutput('Not logged in: wherever a key is asked for below, use your own provider API key.')
   }
 
   if (harnesses.length === 0) {
     writeCliOutput('')
     log.info('No harnesses were automatically detected in this workspace.')
-    writeCliOutput(`Please refer to the full integration guide at: ${pc.bold('user.md')}`)
+    writeCliOutput(`See the integration guides at: ${pc.bold('https://docs.intutic.ai/integrations/')}`)
     writeCliOutput('Or use the general subprocess wrapper to launch any CLI agent:')
     writeCliOutput(`  ${pc.bold(`intutic exec -- <your-agent-command>`)}`)
     return
@@ -78,7 +82,7 @@ export function printOnboardingGuide(harnesses: string[], userAuthToken?: string
       case 'cursor':
         writeCliOutput(`  1. Open Cursor Settings (Cmd+, or Ctrl+,).`)
         writeCliOutput(`  2. Navigate to the ${pc.bold('Models')} tab.`)
-        writeCliOutput(`  3. Under ${pc.bold('OpenAI API Key')}, enter your Intutic API Key:`)
+        writeCliOutput(`  3. Under ${pc.bold('OpenAI API Key')}, enter your API key:`)
         writeCliOutput(`     ${pc.green(safeDisplayValue)}`)
         writeCliOutput(`  4. Enable the ${pc.bold('"Override OpenAI Base URL"')} toggle.`)
         writeCliOutput(`  5. Set the override URL to:`)
@@ -124,7 +128,7 @@ export function printOnboardingGuide(harnesses: string[], userAuthToken?: string
         writeCliOutput(`  2. Click the settings gear icon (⚙️).`)
         writeCliOutput(`  3. Set ${pc.bold('API Provider')} to: OpenAI Compatible`)
         writeCliOutput(`  4. Set ${pc.bold('Base URL')} to: ${pc.cyan(proxyUrl)}`)
-        writeCliOutput(`  5. Set ${pc.bold('API Key')} to your Intutic API Key:`)
+        writeCliOutput(`  5. Set ${pc.bold('API Key')} to your API key:`)
         writeCliOutput(`     ${pc.green(safeDisplayValue)}`)
         writeCliOutput(`  6. Enter the target Model ID (e.g. gpt-4o) and save.`)
         break
@@ -194,7 +198,7 @@ export function printOnboardingGuide(harnesses: string[], userAuthToken?: string
         writeCliOutput(`  In your OpenAI Chat Model node inside n8n:`)
         writeCliOutput(`  1. Expand "Parameters" and set ${pc.bold('Base URL')} to:`)
         writeCliOutput(`     ${pc.cyan(proxyUrl)}`)
-        writeCliOutput(`  2. Select/Create a custom credential set and use your Intutic API Key.`)
+        writeCliOutput(`  2. Select/Create a custom credential set and use your API key.`)
         break
 
       case 'windsurf':

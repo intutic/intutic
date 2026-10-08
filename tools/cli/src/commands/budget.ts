@@ -9,6 +9,7 @@ import { resolveControlPlaneUrl } from '../config/paths.js'
 import { createApiClient } from '../lib/api.js'
 import type { LoopListResponse } from './skill.js'
 import pc from 'picocolors'
+import { localProxyProbeBase } from '../lib/localProxy.js'
 
 /**
  * Response body of `GET /api/v1/budget` — mirrors what the control plane's
@@ -62,7 +63,6 @@ export interface LocalSpendResponse {
   enforced: boolean
 }
 
-const LOCAL_PROXY_SPEND_URL = 'http://127.0.0.1:4000/intutic/spend'
 const LOCAL_PROXY_TIMEOUT_MS = 1_500
 
 /**
@@ -81,7 +81,7 @@ export async function fetchLocalSpend(
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), LOCAL_PROXY_TIMEOUT_MS)
     try {
-      const res = await fetchImpl(LOCAL_PROXY_SPEND_URL, { signal: controller.signal })
+      const res = await fetchImpl(`${localProxyProbeBase()}/intutic/spend`, { signal: controller.signal })
       if (!res.ok) return null
       return (await res.json()) as LocalSpendResponse
     } finally {

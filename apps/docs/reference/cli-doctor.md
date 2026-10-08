@@ -21,7 +21,7 @@ The doctor runs these nine checks in order:
 
 | # | Check | What it verifies | Pass condition |
 |---|---|---|---|
-| 1 | **Proxy** | `GET http://127.0.0.1:4000/health` | HTTP 200 within 3s |
+| 1 | **Proxy** | `GET http://127.0.0.1:4000/health` (the port of `INTUTIC_PROXY_URL` when set) | HTTP 200 within 3s |
 | 2 | **Control Plane Auth** | `GET {controlPlaneUrl}/api/v1/auth/me` with the stored credentials from `intutic login` | Any response other than 401/403 within 5s |
 | 3 | **Sync Daemon** | PID file at `~/.intutic/daemon.pid`, or a process scan | Process is alive |
 | 4 | **Harness Configs** | SHA-256 of each governed harness file against `<workspaceRoot>/.intutic/integrity.json`, which `intutic connect` writes | Every file present and unchanged |

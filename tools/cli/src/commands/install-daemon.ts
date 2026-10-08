@@ -19,7 +19,9 @@ import * as path from 'node:path'
 import * as os from 'node:os'
 import { execFileSync } from 'node:child_process'
 import { loadConfig } from '../config/store.js'
+import { resolveControlPlaneUrl } from '../config/paths.js'
 import { localProxyBinary } from '../lib/proxyBinary.js'
+import { localProxyPort } from '../lib/localProxy.js'
 
 // ── Error definitions ──────────────────────────────────────────────────
 
@@ -37,7 +39,7 @@ export interface InstallDaemonOptions {
   apiKey: string
   /** Override the intutic CLI binary path (defaults to process.execPath) */
   binaryPath?: string
-  /** Control plane URL (defaults to https://api.intutic.ai) */
+  /** Control plane URL (defaults to the one every command resolves: env, saved login, hosted) */
   controlPlaneUrl?: string
   /** If true, just print what would be done without writing files */
   dryRun?: boolean
@@ -581,7 +583,7 @@ export async function installDaemon(opts: InstallDaemonOptions): Promise<void> {
     workspaceId:     opts.workspaceId,
     apiKey:          opts.apiKey,
     binaryPath:      opts.binaryPath ?? process.execPath,
-    controlPlaneUrl: opts.controlPlaneUrl ?? 'https://api.intutic.ai',
+    controlPlaneUrl: opts.controlPlaneUrl ?? resolveControlPlaneUrl(),
   }
   const system = !!opts.system
 
@@ -773,7 +775,7 @@ export async function installMcpDaemon(opts: InstallDaemonOptions): Promise<void
   const resolved = {
     workspaceId:     opts.workspaceId,
     apiKey:          opts.apiKey,
-    controlPlaneUrl: opts.controlPlaneUrl ?? 'https://api.intutic.ai',
+    controlPlaneUrl: opts.controlPlaneUrl ?? resolveControlPlaneUrl(),
   }
   const system = !!opts.system
 
@@ -1120,7 +1122,7 @@ export async function proxyServiceStart(): Promise<void> {
 export async function installProxyService(opts: ProxyServiceOptions = {}): Promise<void> {
   const resolved: ResolvedProxyOptions = {
     binaryPath:  resolveProxyServiceBinary(opts.binaryPath),
-    port:        opts.port ?? '4000',
+    port:        opts.port ?? String(localProxyPort()),
     valkeyUrl:   opts.valkeyUrl,
     upstreamUrl: opts.upstreamUrl,
   }
