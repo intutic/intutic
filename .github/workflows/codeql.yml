@@ -22,18 +22,50 @@ permissions:
   security-events: write
 
 jobs:
+  # A PR is analysed only in the languages it can change. The Rust analysis
+  # takes ~20 minutes and most PRs touch no Rust, so it runs when a Rust input
+  # changed (any .rs file, the proxy crate, Cargo files, the toolchain, this
+  # workflow). The JavaScript/TypeScript analysis runs unless the PR changes
+  # nothing but .md/.txt files. A PR that changes only docs runs neither.
+  # The weekly schedule and manual runs analyse both; when the diff cannot be
+  # computed, both run (fail open to analysing).
+  languages:
+    name: Choose languages
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: pick
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          js='{"language":"javascript-typescript","build-mode":"none"}'
+          rust='{"language":"rust","build-mode":"none"}'
+          langs=()
+          if [ "$EVENT" != "pull_request" ] || ! changed=$(git diff --name-only "$BASE_SHA...$HEAD_SHA"); then
+            langs=("$js" "$rust")
+          else
+            if printf '%s\n' "$changed" | grep -qvE '\.(md|txt)$'; then langs+=("$js"); fi
+            if printf '%s\n' "$changed" | grep -vE '\.(md|txt)$' | grep -qE '\.rs$|^packages/proxy/|(^|/)Cargo\.(toml|lock)$|^\.cargo/|^rust-toolchain|^\.github/workflows/codeql\.yml$'; then langs+=("$rust"); fi
+          fi
+          matrix="{\"include\":[$(IFS=,; echo "${langs[*]}")]}"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "Analysing: $matrix"
+
   analyze:
     name: CodeQL Analysis (${{ matrix.language }})
+    needs: languages
+    if: needs.languages.outputs.matrix != '{"include":[]}'
     runs-on: ubuntu-latest
     timeout-minutes: 360
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - language: javascript-typescript
-            build-mode: none
-          - language: rust
-            build-mode: none
+      matrix: ${{ fromJSON(needs.languages.outputs.matrix) }}
 
     steps:
       - name: Checkout repository
