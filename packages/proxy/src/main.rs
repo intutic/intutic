@@ -376,6 +376,13 @@ async fn main() -> anyhow::Result<()> {
             anyhow::bail!(e);
         }
     }
+    match dlp::install_pii_actions(&config.intutic_settings.dlp.detectors) {
+        Ok(actions) => tracing::info!(?actions, "DLP: PII detector actions"),
+        Err(e) => {
+            tracing::error!(error = %e, "DLP: refusing to start");
+            anyhow::bail!(e);
+        }
+    }
 
     // ── Storage backend ───────────────────────────────────────────────
     //

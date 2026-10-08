@@ -315,11 +315,12 @@ Two outcomes, depending on the pattern:
 | Pattern | Behaviour |
 |---|---|
 | Private keys (RSA, EC, DSA, OpenSSH, PGP, PKCS#8), Anthropic API keys | request **refused** |
-| AWS access keys (incl. temporary `ASIA` creds), GitHub tokens (all five classic prefixes + fine-grained), OpenAI / GitLab / Slack / Google / Stripe / SendGrid / npm / PyPI / Hugging Face keys, Slack webhook URLs, database connection credentials, JWTs, bearer tokens, SSNs | **redacted before forwarding** — replaced with `[REDACTED_*]`, and the redacted body is what reaches your provider |
+| AWS access keys (incl. temporary `ASIA` creds), GitHub tokens (all five classic prefixes + fine-grained), OpenAI / GitLab / Slack / Google / Stripe / SendGrid / npm / PyPI / Hugging Face keys, Slack webhook URLs, database connection credentials, JWTs, bearer tokens; payment card numbers, IBANs and SSNs (each checksum- or range-validated) | **redacted before forwarding** — replaced with `[REDACTED_*]`, and the redacted body is what reaches your provider |
 
-Every pattern is prefix- or magic-substring-anchored — the tier the reference
+Every secret pattern is prefix- or magic-substring-anchored — the tier the reference
 scanners (gitleaks, TruffleHog) treat as high-confidence — so ordinary
-technical text does not trip it. Formats that are ambiguous without context
+technical text does not trip it. PII has no prefix, so each PII match is
+validated instead (see [PII detectors](/guide/policies#pii-detectors)). Formats that are ambiguous without context
 (bare 40-char AWS secrets, unprefixed hex tokens) are deliberately excluded
 rather than matched noisily.
 

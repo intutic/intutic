@@ -292,7 +292,7 @@ Intutic's options live under `intutic_settings`:
 
 ### DLP (`intutic_settings.dlp`)
 
-`enabled`, `scan_input`, `scan_output`, `stream_holdback_bytes` and custom `patterns`: see [Policies › Enforcement](/guide/policies#enforcement).
+`enabled`, `scan_input`, `scan_output`, `stream_holdback_bytes`, custom `patterns` and the PII `detectors`: see [Policies › Enforcement](/guide/policies#enforcement).
 
 ### Egress (`intutic_settings.egress`)
 
