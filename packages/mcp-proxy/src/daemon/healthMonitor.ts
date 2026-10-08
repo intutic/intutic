@@ -86,8 +86,10 @@ function readJson(file: string): unknown {
  * `mcpServers` and, under `projects[<path>]`, each project's local-scope
  * `mcpServers`; the project-scope ones live in `<path>/.mcp.json`, which the
  * daemon finds through the same project paths. (`~/.claude/mcp.json`, read
- * here before, is not a file Claude Code uses.) The same places the sync
- * daemon wraps (services/sync-daemon/src/harness/mcpAutoWrite.ts).
+ * here before, is not a file Claude Code uses.) The sync daemon wraps the
+ * first two (services/sync-daemon/src/harness/mcpAutoWrite.ts) and leaves a
+ * project's `.mcp.json` alone, since it is shared with the team — which is
+ * exactly why its servers belong in the registry report too.
  */
 function claudeCodeServerMaps(home: string): Array<Record<string, unknown>> {
   let state: unknown
