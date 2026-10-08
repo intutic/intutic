@@ -73,10 +73,9 @@ POST /api/v1/orgs/:orgId/billing/checkout
 ```
 
 Requires the same OWNER/ADMIN-on-any-workspace authorization as team management. Returns a
-Stripe Checkout session URL. **No dashboard button calls this today** — it's reachable via the
-API only; don't expect a visible "Upgrade org" flow in Settings yet. Per-workspace upgrade
-(`POST /api/v1/billing/checkout`, documented in [Budgets & FinOps](/guide/budgets)) is unrelated
-and still the only in-dashboard upgrade path.
+Stripe Checkout session URL. The Upgrade page calls it when the workspace belongs to an org, and
+the per-workspace `POST /api/v1/billing/checkout` (see [Budgets & FinOps](/guide/budgets))
+otherwise.
 
 ## Related
 
