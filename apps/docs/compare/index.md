@@ -18,7 +18,7 @@ The products on these pages start from other places: governance platforms that i
 | **Intutic** | Agent enforcement point | The tool call (hook gates in 19 of the 43 harnesses), model requests and responses, MCP calls, network egress, sandboxed runs | **43** supported harnesses | Yes, including air-gapped | Open core (MIT) |
 | [Forge](/compare/forge) | AI-agent governance platform | Its device agent, MCP gateway and LLM gateway, plus connected security tools | Six documented, including Claude Code, Codex and Cursor | Hosted; Resource Gateways run in your environment | Closed |
 | [Credo AI](/compare/credo-ai) | AI governance, risk and compliance | Agent Governor (Research Preview) hooks Claude Code tool calls | Claude Code | Private cloud (Kubernetes or VMs) | Closed |
-| [Fiddler AI](/compare/fiddler) | AI observability and guardrails | Model inputs and outputs; its coding-agent control plane allows, blocks or redacts | Claude Code and Gemini CLI | SaaS, VPC or on-prem | Closed |
+| [Fiddler AI](/compare/fiddler) | AI observability and guardrails | Model requests and responses at a third-party AI gateway, where it redacts or blocks PII and secrets | Any agent behind a supported gateway; telemetry for Claude Code and GitHub Copilot | SaaS, VPC, on-prem or air-gapped (Enterprise) | Closed |
 | [F5 AI Guardrails](/compare/f5-calypso) | AI security (formerly CalypsoAI) | Model inputs and outputs; agent actions and tool use | Not named in its docs | Cloud, private cloud, on-prem, air-gapped | Closed |
 | [Portkey](/compare/portkey) | AI gateway (Palo Alto Networks) | Model requests and responses, with inline guardrails | Any client that can change its base URL | Yes | Gateway is MIT |
 | [LangSmith](/compare/langsmith) | LLM tracing and evaluation | Its LLM Gateway (beta) caps spend and redacts on model traffic | Gateway guides for Claude Code, Codex and Gemini CLI | Self-hosted or BYOC (Enterprise) | Closed |
@@ -40,7 +40,7 @@ Intutic is not the only open-source project that enforces on tool calls: Microso
 |---|---|
 | [Forge](/compare/forge) | Top-down discovery, identity and credential brokering across an organization; Intutic is the enforcement point at the tool call, open core and self-hostable |
 | [Credo AI](/compare/credo-ai) | Regulatory GRC system of record with an early Claude Code enforcement preview; Intutic enforces across 43 harnesses in production |
-| [Fiddler AI](/compare/fiddler) | Model monitoring and guardrails, now with a coding-agent control plane; Intutic adds approval holds, MCP governance, egress and sandbox containment |
+| [Fiddler AI](/compare/fiddler) | Model monitoring, guardrail models and PII and secrets enforcement at the AI gateway; Intutic decides the tool call, with approval holds, MCP governance, egress and sandbox containment |
 | [F5 AI Guardrails](/compare/f5-calypso) | Model-traffic security and red teaming; Intutic governs the coding agent's own tool calls |
 | [Portkey](/compare/portkey) | Model gateway with routing, caching and inline guardrails; Intutic gates what the agent does with the answer |
 | [LangSmith](/compare/langsmith) | Tracing and evaluation with a new inline gateway; Intutic decides tool calls before they run |
