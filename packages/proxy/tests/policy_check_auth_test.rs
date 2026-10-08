@@ -46,17 +46,16 @@ async fn policy_check_sends_the_virtual_key_and_never_a_provider_key() {
 
     // Fixtures are runtime-assembled: the repo convention forbids contiguous
     // credential-shaped literals in source, in every package.
-    let virtual_key = concat!(
-        "vk_",
-        "0123456789abcdef0123456789abcdef",
-        "_ws_policy_auth"
-    );
+    let virtual_key = concat!("vk_", "0123456789abcdef0123456789abcdef", "_ws_policy_auth");
     let provider_key = ["test", "-provider-", "token"].concat();
 
     let cp = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/api/v1/policy/check"))
-        .and(header("authorization", format!("Bearer {virtual_key}").as_str()))
+        .and(header(
+            "authorization",
+            format!("Bearer {virtual_key}").as_str(),
+        ))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(serde_json::json!({ "action": "allow" })),
         )
@@ -116,7 +115,9 @@ async fn policy_check_sends_the_virtual_key_and_never_a_provider_key() {
             .send()
     };
 
-    let res = send(virtual_key.to_string()).await.expect("proxy reachable");
+    let res = send(virtual_key.to_string())
+        .await
+        .expect("proxy reachable");
     let status = res.status();
     let body = res.text().await.expect("body reads");
     assert!(status.is_success(), "proxy returned {status}: {body}");

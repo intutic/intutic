@@ -271,11 +271,17 @@ struct UpstreamBase {
 /// A trailing `/` is dropped, since every caller appends a path that starts
 /// with one. `var` is the environment lookup, passed in so the precedence can
 /// be tested without mutating the process environment other tests read.
-fn resolve_upstream_base(provider: &Provider, var: impl Fn(&str) -> Option<String>) -> UpstreamBase {
+fn resolve_upstream_base(
+    provider: &Provider,
+    var: impl Fn(&str) -> Option<String>,
+) -> UpstreamBase {
     let (specific, public) = match provider {
         Provider::Anthropic => ("ANTHROPIC_UPSTREAM_URL", "https://api.anthropic.com"),
         Provider::OpenAI => ("OPENAI_UPSTREAM_URL", "https://api.openai.com"),
-        Provider::Gemini => ("GEMINI_UPSTREAM_URL", "https://generativelanguage.googleapis.com"),
+        Provider::Gemini => (
+            "GEMINI_UPSTREAM_URL",
+            "https://generativelanguage.googleapis.com",
+        ),
         // https://docs.mistral.ai/api/ — stable, documented OpenAI-
         // compatible endpoint since Mistral's API launch.
         Provider::Mistral => ("MISTRAL_UPSTREAM_URL", "https://api.mistral.ai"),
@@ -1308,7 +1314,10 @@ async fn fetch_provider_credential(
 /// takes Messages under `/anthropic`; a shared `UPSTREAM_URL` gateway serves
 /// each wire at its standard path instead. `None` when DeepSeek has no
 /// endpoint for the protocol.
-fn deepseek_path(protocol: &crate::protocol::Protocol, shared_gateway: bool) -> Option<&'static str> {
+fn deepseek_path(
+    protocol: &crate::protocol::Protocol,
+    shared_gateway: bool,
+) -> Option<&'static str> {
     use crate::protocol::Protocol as P;
     match protocol {
         P::Anthropic if shared_gateway => Some("/v1/messages"),
@@ -10126,7 +10135,10 @@ mod tests {
         ] {
             assert_eq!(
                 resolve_upstream_base(&provider, &gateway),
-                UpstreamBase { url: "http://litellm:4000".to_string(), shared_gateway: true },
+                UpstreamBase {
+                    url: "http://litellm:4000".to_string(),
+                    shared_gateway: true
+                },
                 "{provider:?}"
             );
         }
@@ -10138,17 +10150,29 @@ mod tests {
         ]));
         assert_eq!(
             resolve_upstream_base(&Provider::Anthropic, &both),
-            UpstreamBase { url: "http://anthropic-mirror".to_string(), shared_gateway: false }
+            UpstreamBase {
+                url: "http://anthropic-mirror".to_string(),
+                shared_gateway: false
+            }
         );
         // An empty provider variable counts as unset.
-        assert_eq!(resolve_upstream_base(&Provider::OpenAI, &both).url, "http://litellm:4000");
+        assert_eq!(
+            resolve_upstream_base(&Provider::OpenAI, &both).url,
+            "http://litellm:4000"
+        );
 
         let none = lookup(HashMap::new());
         assert_eq!(
             resolve_upstream_base(&Provider::Anthropic, &none),
-            UpstreamBase { url: "https://api.anthropic.com".to_string(), shared_gateway: false }
+            UpstreamBase {
+                url: "https://api.anthropic.com".to_string(),
+                shared_gateway: false
+            }
         );
-        assert_eq!(resolve_upstream_base(&Provider::OpenRouter, &none).url, "https://openrouter.ai/api");
+        assert_eq!(
+            resolve_upstream_base(&Provider::OpenRouter, &none).url,
+            "https://openrouter.ai/api"
+        );
     }
 
     /// Behind a shared gateway, DeepSeek's Messages traffic goes to the
@@ -10156,9 +10180,15 @@ mod tests {
     #[test]
     fn deepseek_messages_path_follows_the_upstream_kind() {
         use crate::protocol::Protocol as P;
-        assert_eq!(deepseek_path(&P::Anthropic, false), Some("/anthropic/v1/messages"));
+        assert_eq!(
+            deepseek_path(&P::Anthropic, false),
+            Some("/anthropic/v1/messages")
+        );
         assert_eq!(deepseek_path(&P::Anthropic, true), Some("/v1/messages"));
-        assert_eq!(deepseek_path(&P::OpenAIChatCompletions, true), Some("/v1/chat/completions"));
+        assert_eq!(
+            deepseek_path(&P::OpenAIChatCompletions, true),
+            Some("/v1/chat/completions")
+        );
         assert_eq!(deepseek_path(&P::OpenAIResponses, true), None);
     }
 
@@ -10955,8 +10985,14 @@ mod tests {
     /// used to refuse all of its traffic once the day passed $10 combined.
     #[test]
     fn the_machine_budget_applies_only_without_a_control_plane() {
-        assert!(machine_budget_applies_with(None), "standalone keeps its machine cap");
-        assert!(machine_budget_applies_with(Some("  ")), "a blank URL is still standalone");
+        assert!(
+            machine_budget_applies_with(None),
+            "standalone keeps its machine cap"
+        );
+        assert!(
+            machine_budget_applies_with(Some("  ")),
+            "a blank URL is still standalone"
+        );
         assert!(
             !machine_budget_applies_with(Some("http://control-plane:3001")),
             "managed proxies use per-workspace caps"
