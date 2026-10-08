@@ -2307,11 +2307,12 @@ Prints each link in the chain: parent key, child key, granted capabilities, expi
 
 ## `intutic gateway register` <Badge type="danger" text="Enterprise" />
 
-Register a [self-hosted gateway](/external/self-hosted-gateway) — an org's own Docker or
-Kubernetes deployment of the Intutic proxy — and print its one-time management token.
+Register a [self-hosted gateway](/external/self-hosted-gateway) — an org's own Docker,
+Kubernetes, or bare-metal (systemd) deployment of the Intutic proxy — and print its one-time
+management token.
 
 ```bash
-intutic gateway register --name <name> --target <docker|kubernetes> [options]
+intutic gateway register --name <name> --target <docker|kubernetes|bare_metal> [options]
 ```
 
 **Options:**
@@ -2319,7 +2320,7 @@ intutic gateway register --name <name> --target <docker|kubernetes> [options]
 | Option | Description |
 |--------|-------------|
 | `--name <name>` | Display name for this gateway (required) |
-| `--target <docker\|kubernetes>` | Deployment target (required) |
+| `--target <docker\|kubernetes\|bare_metal>` | Deployment target (required) |
 | `--json` | Output as JSON |
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
@@ -2364,13 +2365,15 @@ intutic gateway status <gateway_id> [options]
 
 Reports `online`, `degraded`, `unreachable`, or `pending`. A gateway with no heartbeat inside
 the TTL window (~90s) shows `unreachable` — a valid, self-healing status rather than an error.
+`Config version` is the config the gateway reported running in its last heartbeat, against the
+latest one [`gateway config set`](#intutic-gateway-config-set) produced.
 
 ---
 
 ## `intutic gateway rotate <gateway_id>` <Badge type="danger" text="Enterprise" />
 
 Issue a new `gwk_...` token. The old token keeps authenticating for a grace period (24h by
-default) so an unattended daemon has time to pick up the new one on its next restart.
+default) so an unattended gateway has time to pick up the new one on its next restart.
 
 ```bash
 intutic gateway rotate <gateway_id> [options]
@@ -2420,7 +2423,9 @@ intutic gateway config set <gateway_id> [--require-vk <true|false>] [--require-p
 | `--json` | Output as JSON |
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
-Docker and Kubernetes gateways pick up a config change when they are redeployed.
+The gateway applies the change on its next heartbeat, without a restart or a redeploy, on every
+deployment target: within `INTUTIC_GATEWAY_HEARTBEAT_INTERVAL_SECS` (30 seconds by default). See
+[Changing a gateway's config](/external/self-hosted-gateway#changing-a-gateway-s-config).
 
 ---
 

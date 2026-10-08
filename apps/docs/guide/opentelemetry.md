@@ -6,20 +6,19 @@ Export distributed traces and metrics from Intutic's own components to your Open
 
 ## Overview
 
-Every long-running Intutic process — the Rust proxy, the control plane, the self-hosted gateway daemon, and the MCP daemon — can export OTLP traces. Export is **opt-in**: the proxy and the daemons start it only when `OTEL_EXPORTER_OTLP_ENDPOINT` is set, so a deployment that hasn't configured a collector pays no cost. The control plane also starts it whenever it runs with `NODE_ENV=production`, sending to `http://localhost:4318` unless the variable says otherwise.
+Every long-running Intutic process — the Rust proxy, the control plane, and the MCP daemon — can export OTLP traces. A self-hosted gateway is the Rust proxy, so the proxy row applies to it: it exports when the variable is in its environment (on bare metal, the systemd env file). Export is **opt-in**: the proxy and the daemons start it only when `OTEL_EXPORTER_OTLP_ENDPOINT` is set, so a deployment that hasn't configured a collector pays no cost. The control plane also starts it whenever it runs with `NODE_ENV=production`, sending to `http://localhost:4318` unless the variable says otherwise.
 
 | Component | Protocol | `OTEL_EXPORTER_OTLP_ENDPOINT` | Default `OTEL_SERVICE_NAME` | Scope |
 |---|---|---|---|---|
 | Proxy (`packages/proxy`) | OTLP/gRPC | The collector's gRPC address, e.g. `http://otel-collector:4317` | `intutic-proxy` | Open-Core |
 | Control plane | OTLP/HTTP | The collector's HTTP base, e.g. `http://otel-collector:4318` (a value ending in `/v1/traces` also works) | `control-plane` | Enterprise |
-| Self-hosted gateway daemon | OTLP/HTTP | As the control plane | `gateway-daemon` | Open-Core |
 | MCP daemon (`intutic-mcp-daemon`) | OTLP/HTTP | As the control plane | `mcp-daemon` | Open-Core |
 
 `OTEL_SERVICE_NAME` overrides the reported service name.
 
 ## What's instrumented
 
-The Node-based components (control plane, gateway daemon, MCP daemon) use the standard `@opentelemetry/auto-instrumentations-node` package, which covers HTTP, Postgres, and Valkey/Redis calls automatically — filesystem instrumentation is disabled everywhere, since it's noisy and rarely useful for these workloads.
+The Node-based components (control plane, MCP daemon) use the standard `@opentelemetry/auto-instrumentations-node` package, which covers HTTP, Postgres, and Valkey/Redis calls automatically — filesystem instrumentation is disabled everywhere, since it's noisy and rarely useful for these workloads.
 
 The Rust proxy uses `tracing` + `tracing-opentelemetry`, with `AlwaysOn` sampling and a batch exporter.
 

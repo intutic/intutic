@@ -2,7 +2,7 @@
  * OpenTelemetry trace-context propagation for outbound CLI HTTP calls.
  *
  * Deliberately lighter than the NodeSDK instrumentation used by
- * control-plane/gateway-daemon/mcp-daemon: `intutic connect` is a daemon
+ * control-plane/mcp-daemon: `intutic connect` is a daemon
  * every open-core user installs, and the auto-instrumentations-node
  * meta-package is heavy (dozens of instrumented libraries the CLI doesn't
  * use) for a benefit only the minority who run a collector would see.

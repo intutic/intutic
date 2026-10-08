@@ -1,8 +1,8 @@
 # Self-Hosted Gateway <Badge type="danger" text="Enterprise" />
 
 This page documents deploying and managing your own Intutic gateway inside your organization's
-own infrastructure — with Docker Compose or on Kubernetes — instead of routing every workspace
-through Intutic's shared `gateway.intutic.ai`.
+own infrastructure — with Docker Compose, on Kubernetes, or on bare metal under systemd — instead
+of routing every workspace through Intutic's shared `gateway.intutic.ai`.
 
 ---
 
@@ -17,7 +17,8 @@ process already serves every Cloud workspace multi-tenant today.
 Every deployment target shares one control-plane registration flow (`intutic gateway register`
 — see the [CLI reference](/reference/cli#intutic-gateway-register)) and one heartbeat/config
 protocol, built into the proxy binary itself. What differs between targets is only how the
-proxy process is run.
+proxy process is run. A config change applies live on every target (see
+[Changing a gateway's config](#changing-a-gateway-s-config)).
 
 ## 2. Deployment targets
 
@@ -109,6 +110,47 @@ Service. The install's notes print the address.
 `helm show values oci://ghcr.io/intutic/charts/intutic-gateway --version <version>` prints
 them all with their comments.
 
+### Bare metal
+
+The proxy binary published with each release, run by systemd: no containers and no Node.js on
+the host. The unit, `intutic-gateway.service`, and its env file template,
+`intutic-gateway.env.example`, are in the same `gateway/` directory of the release bundle as
+the Compose files. The host needs a Valkey (or Redis) the proxy can reach, such as the
+`valkey-server` package on the same host.
+
+Register the gateway with the deployment target **Bare metal** (`--target bare_metal`), then, as
+root, from `intutic-selfhost-<version>/gateway`:
+
+```bash
+# The binary for this host from the same release, checked against the release's checksums.json.
+VERSION=$(cat ../VERSION) ARCH=x64   # or arm64
+URL=https://github.com/intutic/intutic/releases/download/v$VERSION
+curl -fL -O "$URL/intutic-proxy-linux-$ARCH" -O "$URL/checksums.json"
+grep -o "\"intutic-proxy-linux-$ARCH\": \"sha256:[0-9a-f]*\"" checksums.json |
+  sed "s/.*sha256:\([0-9a-f]*\)\"/\1  intutic-proxy-linux-$ARCH/" | sha256sum -c -
+install -m 0755 "intutic-proxy-linux-$ARCH" /usr/local/bin/intutic-proxy
+
+# Settings: the gateway ID and token from register, CONTROL_PLANE_URL and VALKEY_URL.
+install -d -m 0755 /etc/intutic
+install -m 0600 intutic-gateway.env.example /etc/intutic/intutic-gateway.env
+"${EDITOR:-vi}" /etc/intutic/intutic-gateway.env
+
+install -m 0644 intutic-gateway.service /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now intutic-gateway
+```
+
+The dashboard's **Setup files** for a bare-metal gateway give the same commands with an env file
+pre-filled for that gateway. A host without internet access gets the two files from the release
+page on a machine that has it.
+
+Agents reach the gateway on the host's `PORT` (default `8080`), at `/v1`. `journalctl -u
+intutic-gateway` shows its log. The unit runs the proxy as a user that exists only while the
+service runs, with no capabilities, no new privileges and a read-only view of the system: it can
+write only its state directory, `/var/lib/intutic-gateway`, which holds the rotated token
+(below). It restarts after a crash, waiting longer after each failure up to a minute (systemd
+254 or later; older systemd restarts every 2 seconds). To upgrade, install the new release's
+binary the same way and run `systemctl restart intutic-gateway`.
+
 ## 3. Registering, monitoring, and rotating a gateway
 
 All lifecycle operations go through the control plane, reachable from the CLI (see the
@@ -126,6 +168,26 @@ intutic gateway config set <gateway_id> --require-provisioned-key true
 A gateway that stops heartbeating is reported `unreachable` once its heartbeat is older than
 the TTL window (~90s) — a self-healing status, not an error state that needs to be cleared.
 
+### Changing a gateway's config
+
+`intutic gateway config set` changes two settings of a running gateway: `--require-vk` and
+`--require-provisioned-key`, the same switches as `INTUTIC_GATEWAY_REQUIRE_VK` and
+`INTUTIC_GATEWAY_REQUIRE_PROVISIONED_KEY` (`proxy.requireVk` and `proxy.requireProvisionedKey` in
+the chart). A value set this way overrides the deployment's own, and `true` for
+`--require-provisioned-key` means every workspace, as the variable's `true` does.
+
+The change applies live on every target, Docker, Kubernetes and bare metal alike, within one
+heartbeat interval: `INTUTIC_GATEWAY_HEARTBEAT_INTERVAL_SECS` (`proxy.heartbeatIntervalSeconds` in
+the chart), 30 seconds by default. Each heartbeat tells the proxy the latest config version; when
+it is newer than the one the proxy runs, the proxy fetches the config and applies it to the next
+request, with no restart and no redeploy. A proxy that restarts fetches the config with its first
+heartbeat, which it sends as it starts.
+
+If that fetch fails, or returns a config the proxy cannot read whole, the proxy keeps the config
+it has and tries again on the next heartbeat. The next heartbeat reports the version the proxy
+runs: **Config** in the dashboard's gateway list, and `Config version` in `intutic gateway
+status`, show it against the latest one set.
+
 ### Automatic token rotation
 
 Independent of the manual `intutic gateway rotate` above, a running proxy rotates its own
@@ -140,6 +202,9 @@ restart doesn't revert to a stale token — the exact mechanism depends on your 
   state file (`INTUTIC_GATEWAY_TOKEN_STATE_FILE`) and reads it back at startup. The compose file
   mounts a named volume at that path, so it survives `docker compose up` recreating the
   container.
+- **Bare metal** (`intutic-gateway.service`): the unit sets the state file to
+  `/var/lib/intutic-gateway/gateway-token`, in the service's own state directory, which survives
+  restarts and reboots.
 - **Kubernetes** (the `intutic-gateway` chart; the interval is `proxy.rotationIntervalDays`): a state file only survives an in-place container
   restart within the same pod, not a reschedule or rolling redeploy (a new pod is a fresh
   filesystem) — so the proxy additionally PATCHes its own gateway Secret via the in-cluster
@@ -150,7 +215,7 @@ restart doesn't revert to a stale token — the exact mechanism depends on your 
   current token fresh via its existing `secretKeyRef`.
 
 None of this replaces `intutic gateway rotate` as your recovery path — if the persisted storage
-itself is lost (the Docker volume deleted, or the Kubernetes flag left off), a restart still reverts to whatever `INTUTIC_GATEWAY_TOKEN` your deployment's
+itself is lost (the Docker volume or the bare-metal state directory deleted, or the Kubernetes flag left off), a restart still reverts to whatever `INTUTIC_GATEWAY_TOKEN` your deployment's
 environment holds, and you're back to running that command and updating the stored token by hand.
 
 ### Pointing a workspace at your gateway

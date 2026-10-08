@@ -564,7 +564,7 @@ Classify tokens as USEFUL or WASTED.
 
 ## Route Catalog
 
-Every route the control plane serves: 385 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
+Every route the control plane serves: 384 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
 
 ### `app.ts` <Badge type="tip" text="Cloud" />
 
@@ -801,7 +801,6 @@ Every route the control plane serves: 385 routes, grouped by the source file tha
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | GET | `/api/v1/gateways/:id/config` | Gateway token (`gwk_…`) |  |
-| POST | `/api/v1/gateways/:id/config-ack` | Gateway token (`gwk_…`) |  |
 | POST | `/api/v1/gateways/:id/heartbeat` | Gateway token (`gwk_…`) |  |
 
 ### `gateways.ts` <Badge type="tip" text="Cloud" />

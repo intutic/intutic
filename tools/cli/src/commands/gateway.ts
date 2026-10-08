@@ -3,7 +3,7 @@
  * and routing assignment (LLD #68 §2).
  *
  * Subcommands:
- *   - `intutic gateway register --name <name> --target <docker|kubernetes>`
+ *   - `intutic gateway register --name <name> --target <docker|kubernetes|bare_metal>`
  *   - `intutic gateway list [--json]`
  *   - `intutic gateway status <gateway_id> [--json]`
  *   - `intutic gateway rotate <gateway_id>`
@@ -36,7 +36,7 @@ import pc from 'picocolors'
 const NOT_AUTHENTICATED =
   'Not authenticated. Run `intutic login` first — gateway registration is an org-scoped control plane feature.'
 
-const DEPLOYMENT_TARGETS = ['docker', 'kubernetes'] as const
+const DEPLOYMENT_TARGETS = ['docker', 'kubernetes', 'bare_metal'] as const
 
 interface GatewayCliOpts {
   json?: boolean
@@ -79,6 +79,17 @@ interface GatewayStatusResponse {
   litellmReachable: boolean | null
   lastError: string | null
   reportedAt: string | null
+  /** The config version the proxy reported running; null when unreachable or not reported. */
+  appliedConfigVersion: number | null
+  /** The version the dashboard's latest config change produced; 0 before any. */
+  desiredConfigVersion: number
+}
+
+/** Applied against desired, for `gateway status`. */
+export function describeConfigVersion(applied: number | null, desired: number): string {
+  if (applied === null) return `— (desired ${desired}; the gateway has not reported one)`
+  if (applied >= desired) return `${applied} (up to date)`
+  return `${applied} (version ${desired} applies on the next heartbeat)`
 }
 
 async function getClient(opts: GatewayCliOpts) {
@@ -208,6 +219,7 @@ export async function runGatewayStatus(gatewayId: string, opts: GatewayCliOpts):
     )
     log.field('Last error', res.lastError ?? '—')
     log.field('Reported at', res.reportedAt ?? '— (no heartbeat received within the TTL window)')
+    log.field('Config version', describeConfigVersion(res.appliedConfigVersion ?? null, res.desiredConfigVersion ?? 0))
   } catch (err) {
     log.error(`Failed to fetch gateway status: ${err instanceof Error ? err.message : String(err)}`)
     process.exit(1)
@@ -301,8 +313,8 @@ export async function runGatewayConfigSet(
 
     log.success(`Gateway config updated (version ${res.configVersion}).`)
     log.dim(
-      '  A daemon-supervised gateway (packages/gateway-daemon) applies this on its next poll. ' +
-        'Docker/Kubernetes deployments require a manual redeploy to pick up config changes.',
+      '  The gateway applies it on its next heartbeat, without a restart (every 30 seconds by default, ' +
+        `INTUTIC_GATEWAY_HEARTBEAT_INTERVAL_SECS). \`intutic gateway status ${gatewayId}\` shows when it has.`,
     )
   } catch (err) {
     log.error(`Failed to update gateway config: ${err instanceof Error ? err.message : String(err)}`)

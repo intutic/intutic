@@ -214,7 +214,7 @@ export interface Workspace {
 
 export interface GatewayRegisterParams {
   name: string
-  deploymentTarget: 'docker' | 'kubernetes'
+  deploymentTarget: 'docker' | 'kubernetes' | 'bare_metal'
 }
 
 export interface GatewayRegisterResult {

@@ -26,10 +26,16 @@
 //! flag rather than piggy-backing on `CONTROL_PLANE_URL`.
 
 use serde::Deserialize;
-use std::sync::OnceLock;
+use std::sync::{OnceLock, PoisonError, RwLock};
 
 /// Gateway front-door configuration: `intutic_settings.gateway`.
-#[derive(Debug, Deserialize, Clone, Default)]
+///
+/// `requireVk` and `requireProvisionedKey` can also be set remotely
+/// (`intutic gateway config set`, i.e. `PATCH /api/v1/gateways/:id/config`):
+/// a registered self-hosted gateway
+/// pulls them on its heartbeat (`heartbeat.rs`) and lays them over this
+/// boot config with [`apply_remote_gateway_config`], without a restart.
+#[derive(Debug, Deserialize, Clone, Copy, Default)]
 pub struct GatewayConfig {
     /// When true, only `vk_` virtual keys are accepted — every other bearer
     /// token is refused with 401 before any workspace resolution or
@@ -116,28 +122,101 @@ impl GatewayConfig {
     }
 }
 
-static GATEWAY_CONFIG: OnceLock<GatewayConfig> = OnceLock::new();
+/// The config this process booted with (config file + env). Kept apart from
+/// the live config so a remote overlay is always laid over the boot values,
+/// never over a previous overlay.
+static BOOT_CONFIG: OnceLock<GatewayConfig> = OnceLock::new();
 
-/// Install the process-wide gateway config. Call once, from `main`, after
-/// config load. A second call is ignored, matching the egress policy's
-/// set-once discipline for a boot-time security posture.
+/// What every request is checked against. Replaced whole under the write
+/// lock, so a reader sees the old config or the new one, never a mix of the
+/// two. `None` until `init_gateway_config` runs.
+static LIVE_CONFIG: RwLock<Option<GatewayConfig>> = RwLock::new(None);
+
+/// Install the process-wide boot config. Call once, from `main`, after config
+/// load. A second call is ignored, matching the egress policy's set-once
+/// discipline for a boot-time security posture; the remotely set fields
+/// change afterwards only through [`apply_remote_gateway_config`].
 pub fn init_gateway_config(cfg: GatewayConfig) -> bool {
-    let require_vk = cfg.require_vk;
-    let _ = GATEWAY_CONFIG.set(cfg);
-    GATEWAY_CONFIG
-        .get()
-        .map(|c| c.require_vk)
-        .unwrap_or(require_vk)
+    if BOOT_CONFIG.set(cfg).is_ok() {
+        *LIVE_CONFIG.write().unwrap_or_else(PoisonError::into_inner) = Some(cfg);
+    }
+    gateway_config().require_vk
 }
 
-/// The installed config, or the safe default (`require_vk: false`) if none
-/// was installed — so an uninitialised gateway module never blocks a request
-/// that today's behaviour would have allowed (unit tests, embedders).
-pub fn gateway_config() -> &'static GatewayConfig {
-    static DEFAULT: OnceLock<GatewayConfig> = OnceLock::new();
-    GATEWAY_CONFIG
-        .get()
-        .unwrap_or_else(|| DEFAULT.get_or_init(GatewayConfig::default))
+/// The live config, or the safe default (`require_vk: false`) if none was
+/// installed — so an uninitialised gateway module never blocks a request that
+/// today's behaviour would have allowed (unit tests, embedders). A copy, so
+/// the caller decides against one consistent snapshot.
+pub fn gateway_config() -> GatewayConfig {
+    LIVE_CONFIG
+        .read()
+        .unwrap_or_else(PoisonError::into_inner)
+        .unwrap_or_default()
+}
+
+/// Swap in the boot config with `remote` laid over it, and return what is now
+/// live. Takes effect for the next request; nothing restarts.
+pub fn apply_remote_gateway_config(remote: &RemoteGatewayConfig) -> GatewayConfig {
+    let next = remote.apply_to(&BOOT_CONFIG.get().copied().unwrap_or_default());
+    *LIVE_CONFIG.write().unwrap_or_else(PoisonError::into_inner) = Some(next);
+    next
+}
+
+/// The remotely set part of [`GatewayConfig`], as `GET
+/// /api/v1/gateways/:id/config` returns it. `None` means nobody set that
+/// field remotely, so the boot value stands. `localJudge` is deliberately not
+/// here: where judged content goes is the operator's decision, never the
+/// control plane's.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RemoteGatewayConfig {
+    pub require_vk: Option<bool>,
+    pub require_provisioned_key: Option<bool>,
+}
+
+impl RemoteGatewayConfig {
+    /// Parse the route's `config` object. All or nothing: a known field with a
+    /// value that is not a boolean rejects the whole object, so a config this
+    /// proxy only half understands is never applied. Unknown fields (written
+    /// by a newer control plane) are returned for the caller to log, and
+    /// otherwise ignored.
+    pub fn from_json(
+        config: &serde_json::Map<String, serde_json::Value>,
+    ) -> Result<(Self, Vec<String>), String> {
+        let mut remote = Self::default();
+        let mut unknown = Vec::new();
+        for (key, value) in config {
+            let field = match key.as_str() {
+                "requireVk" => &mut remote.require_vk,
+                "requireProvisionedKey" => &mut remote.require_provisioned_key,
+                _ => {
+                    unknown.push(key.clone());
+                    continue;
+                }
+            };
+            *field = Some(
+                value
+                    .as_bool()
+                    .ok_or_else(|| format!("{key} must be a boolean, got {value}"))?,
+            );
+        }
+        Ok((remote, unknown))
+    }
+
+    /// `boot` with every remotely set field laid over it. A field means
+    /// what its env var means: `requireProvisionedKey: true` enforces for
+    /// every workspace, as `INTUTIC_GATEWAY_REQUIRE_PROVISIONED_KEY=true`
+    /// does, not only paying ones (`=paid`).
+    pub fn apply_to(&self, boot: &GatewayConfig) -> GatewayConfig {
+        let mut next = *boot;
+        if let Some(require_vk) = self.require_vk {
+            next.require_vk = require_vk;
+        }
+        if let Some(required) = self.require_provisioned_key {
+            next.require_provisioned_key = required;
+            next.provisioned_key_paid_only = false;
+        }
+        next
+    }
 }
 
 /// True if `require_vk` is on. A tiny wrapper so call sites read as intent
@@ -157,7 +236,7 @@ pub fn requires_provisioned_key() -> bool {
 /// installed config and the key record's `byokRequired` (from the control
 /// plane's cached auth entry or `/auth/key-context`).
 pub fn provisioned_key_required_for(byok_required: Option<bool>) -> bool {
-    provisioned_key_required(gateway_config(), byok_required)
+    provisioned_key_required(&gateway_config(), byok_required)
 }
 
 /// The pure decision behind `provisioned_key_required_for`. Under `paid`, only
@@ -446,6 +525,85 @@ mod tests {
     #[test]
     fn uninitialised_global_never_requires_provisioned_key() {
         assert!(!requires_provisioned_key());
+    }
+
+    // ── Remotely set config (pulled on the heartbeat) ───────────────────
+
+    fn remote_json(value: serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
+        value.as_object().expect("an object").clone()
+    }
+
+    #[test]
+    fn remote_config_parses_known_fields_and_reports_unknown_ones() {
+        let (remote, unknown) = RemoteGatewayConfig::from_json(&remote_json(
+            serde_json::json!({ "requireVk": true, "localJudge": true, "futureKnob": 3 }),
+        ))
+        .unwrap();
+        assert_eq!(
+            remote,
+            RemoteGatewayConfig {
+                require_vk: Some(true),
+                require_provisioned_key: None,
+            }
+        );
+        let mut unknown = unknown;
+        unknown.sort();
+        assert_eq!(unknown, ["futureKnob", "localJudge"]);
+
+        let (empty, none) = RemoteGatewayConfig::from_json(&serde_json::Map::new()).unwrap();
+        assert_eq!(empty, RemoteGatewayConfig::default());
+        assert!(none.is_empty());
+    }
+
+    #[test]
+    fn remote_config_with_a_mistyped_known_field_is_rejected_whole() {
+        // requireVk parses fine on its own; the bad sibling must still sink the
+        // whole object rather than apply half of it.
+        let err = RemoteGatewayConfig::from_json(&remote_json(
+            serde_json::json!({ "requireVk": true, "requireProvisionedKey": "yes" }),
+        ))
+        .unwrap_err();
+        assert!(err.contains("requireProvisionedKey"), "{err}");
+        assert!(RemoteGatewayConfig::from_json(&remote_json(
+            serde_json::json!({ "requireVk": null })
+        ))
+        .is_err());
+    }
+
+    #[test]
+    fn remote_config_overlays_only_the_fields_it_sets() {
+        let boot = GatewayConfig {
+            require_vk: true,
+            require_provisioned_key: true,
+            provisioned_key_paid_only: true,
+            local_judge: true,
+        };
+        // Nothing set: the boot config, unchanged.
+        let same = RemoteGatewayConfig::default().apply_to(&boot);
+        assert!(same.require_vk && same.require_provisioned_key && same.provisioned_key_paid_only);
+
+        let vk_off = RemoteGatewayConfig {
+            require_vk: Some(false),
+            require_provisioned_key: None,
+        }
+        .apply_to(&boot);
+        assert!(!vk_off.require_vk);
+        assert!(vk_off.require_provisioned_key && vk_off.provisioned_key_paid_only);
+        assert!(vk_off.local_judge, "local judge is never remotely set");
+
+        // true means every workspace, as the env var's `true` does.
+        let all = RemoteGatewayConfig {
+            require_vk: None,
+            require_provisioned_key: Some(true),
+        }
+        .apply_to(&boot);
+        assert!(all.require_provisioned_key && !all.provisioned_key_paid_only);
+        let off = RemoteGatewayConfig {
+            require_vk: None,
+            require_provisioned_key: Some(false),
+        }
+        .apply_to(&boot);
+        assert!(!off.require_provisioned_key);
     }
 
     // LLD #71 — the pure cell-admission decision, every arm. The Unverified
