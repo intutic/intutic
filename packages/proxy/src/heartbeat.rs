@@ -63,15 +63,16 @@
 //! Live config (LLD #66 phase 9): each heartbeat response also carries
 //! `desiredConfigVersion`, a counter the control plane bumps whenever an
 //! owner or admin changes this gateway's config (`intutic gateway config
-//! set`, i.e. `PATCH /api/v1/gateways/:id/config`). When it is ahead of the version this process
-//! last applied (or nothing has been applied yet, so a restarted proxy pulls
-//! once), the loop pulls `GET /api/v1/gateways/:id/config` with the same token
-//! and swaps the result into the running proxy
-//! (`gateway::apply_remote_gateway_config`): the next request is checked
-//! against it, nothing restarts. The applied version goes back in the next
-//! heartbeat as `appliedConfigVersion`, which is how the dashboard shows
-//! applied against desired. A failed pull, or a config that does not parse,
-//! leaves the current config in place and is retried on the next beat.
+//! set`, i.e. `PATCH /api/v1/gateways/:id/config`). When it is ahead of the
+//! version this process last applied (or nothing has been applied yet, so a
+//! restarted proxy pulls once), the loop pulls `GET
+//! /api/v1/gateways/:id/config` with the same token and swaps the result into
+//! the running proxy (`gateway::apply_remote_gateway_config`): the next
+//! request is checked against it, nothing restarts. The applied version goes
+//! back in the next heartbeat as `appliedConfigVersion`, which is how the
+//! dashboard shows applied against desired. A failed pull, or a config that
+//! does not parse, leaves the current config in place and is retried on the
+//! next beat.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -325,8 +326,8 @@ impl ConfigReconciler {
                 return;
             }
         };
-        // An answer older than what is running (a lagging replica of the
-        // control plane) is not a reason to go backwards.
+        // An answer no newer than what is running is neither re-applied nor
+        // allowed to take the proxy backwards.
         if self
             .applied_version
             .is_some_and(|applied| fetched.config_version <= applied)
@@ -415,8 +416,9 @@ fn should_self_rotate(key_rotated_at: Option<&str>, rotation_interval: Duration)
 /// Writes `token` to `path` via write-then-rename: the temp file is written
 /// fully, then renamed into place, so a concurrent reader (another proxy
 /// process starting up and reading it in `from_env()`) never observes a
-/// partially written token. The temp path lives beside the target so the rename stays within
-/// one filesystem (a cross-filesystem rename is not atomic on every OS).
+/// partially written token. The temp path lives beside the target so the
+/// rename stays within one filesystem (a cross-filesystem rename is not atomic
+/// on every OS).
 async fn write_token_state_file(path: &std::path::Path, token: &str) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent).await?;

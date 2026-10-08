@@ -32,9 +32,9 @@ use std::sync::{OnceLock, PoisonError, RwLock};
 ///
 /// `requireVk` and `requireProvisionedKey` can also be set remotely
 /// (`intutic gateway config set`, i.e. `PATCH /api/v1/gateways/:id/config`):
-/// a registered self-hosted gateway
-/// pulls them on its heartbeat (`heartbeat.rs`) and lays them over this
-/// boot config with [`apply_remote_gateway_config`], without a restart.
+/// a registered self-hosted gateway pulls them on its heartbeat
+/// (`heartbeat.rs`) and lays them over this boot config with
+/// [`apply_remote_gateway_config`], without a restart.
 #[derive(Debug, Deserialize, Clone, Copy, Default)]
 pub struct GatewayConfig {
     /// When true, only `vk_` virtual keys are accepted — every other bearer
