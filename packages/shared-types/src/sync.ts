@@ -168,6 +168,13 @@ export interface IntuticConfig {
    * restart without waiting for the first fetch.
    */
   settings?: WorkspaceSettings
+  /**
+   * Harnesses `intutic disconnect --harness` took out. They are also removed
+   * from `harnesses`; this list is what keeps connect's MCP wrapping and
+   * tamper restore, which cover every installed harness, away from them.
+   * `intutic init` clears it.
+   */
+  disconnectedHarnesses?: HarnessType[]
 }
 
 /** Local integrity store at .intutic/integrity.json (per-workspace). */

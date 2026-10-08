@@ -188,6 +188,8 @@ as default headers on a proxy-pointed client, or set `INTUTIC_SESSION_ID` —
 
 Same shape as LangGraph's `.env.intutic` — proxy URLs plus a pointer at the SDK gate: `intutic_clawde.gate.adapters.openai_agents.intutic_tool_guardrail` for a Python (or mixed) workspace, `@intutic/gate/openai` for a TypeScript-only one.
 
+To undo what `intutic connect` writes here, run `intutic disconnect --harness openai-agents`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. `.env.intutic` stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+
 ## What the adapter does NOT do
 
 Same structural gaps as every SDK-gated framework — see [LangGraph's "What the adapter does NOT do"](/integrations/langgraph#what-the-adapter-does-not-do). In short: there is no sync-daemon hook file, argument-level gating requires attaching the guardrail to your own tools, and `x-intutic-harness` attribution is client-supplied, not authorization.

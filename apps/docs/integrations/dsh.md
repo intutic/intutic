@@ -97,6 +97,8 @@ Two places surface the "silent no-profile window" (dsh installed but never run, 
 - **Protected paths:** agent tool calls that touch `.dsh/profiles`, `.dsh/cordis.patch.yml` (the home-level patch layer, which outranks every profile's) or `.dsh/settings.yaml` are blocked by the generated gates.
 - **No rules file.** dsh has no workspace-relative rules/instructions file this integration writes governance text into — its config lives entirely under `$DSH_HOME`, not the project workspace.
 
+To undo what `intutic connect` writes here, run `intutic disconnect --harness dsh`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+
 ## Pre-tool hooks (blocking)
 
 dsh's veto contract is **confirmed**, not assumed — read from `@deepseek-ai/dsh-tools`'s shipped code (re-read for 0.2.0-rc.2) and observed in a live 0.2.0-rc.2 session:

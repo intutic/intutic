@@ -36,6 +36,7 @@
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import { createLogger } from '@intutic/logger'
+import { keepOriginal, noteWritten } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
 import { emitJsGate, emitJsFailClosedPrelude, REVIEW_REQUESTS_BASENAME } from './gateBody.js'
 
@@ -114,6 +115,7 @@ export async function writeClineHooks(
 
   const hooksDir = path.join(workspaceRoot, '.clinerules', 'hooks')
   const checkScriptPath = path.join(hooksDir, 'PreToolUse')
+  await keepOriginal(checkScriptPath, workspaceRoot)
   await fs.mkdir(hooksDir, { recursive: true })
 
   try {
@@ -267,6 +269,7 @@ process.stdin.on('end', () => {
   // Executable is what enables the hook: Cline creates new hook files 0644,
   // i.e. toggled off.
   await fs.chmod(checkScriptPath, 0o755)
+  await noteWritten(checkScriptPath, workspaceRoot, checkScript)
 
   log.info({ action: 'cline_hooks_written', path: checkScriptPath }, 'Cline PreToolUse governance hook written')
   return checkScriptPath

@@ -18,6 +18,7 @@ import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
+import { keepOriginal, noteWritten } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
 import { hardenGoosePlugin, unharden } from './gooseHardener.js'
 import { emitShellGate, SHELL_EXTRACT, SHELL_FAIL_CLOSED, REVIEW_REQUESTS_BASENAME } from './gateBody.js'
@@ -37,6 +38,8 @@ const GOOSE_CONFIG = path.join(os.homedir(), '.config', 'goose', 'config.yaml')
 export async function writeGooseHooks(proxyUrl: string, workspaceRoot = os.homedir(), workspaceId = ''): Promise<void> {
   const hooksDir = path.join(PLUGIN_DIR, 'hooks')
   const scriptsDir = path.join(PLUGIN_DIR, 'scripts')
+  await keepOriginal(path.join(hooksDir, 'hooks.json'), workspaceRoot)
+  await keepOriginal(path.join(scriptsDir, 'intutic-check.sh'), workspaceRoot)
   await fs.mkdir(hooksDir, { recursive: true })
   await fs.mkdir(scriptsDir, { recursive: true })
 
@@ -63,9 +66,11 @@ export async function writeGooseHooks(proxyUrl: string, workspaceRoot = os.homed
   // Unharden before writing (in case we're refreshing an existing install)
   await unharden(hooksJsonPath)
 
+  const hooksJson = JSON.stringify(hooksConfig, null, 2) + '\n'
   const tmpHooks = hooksJsonPath + '.intutic-tmp'
-  await fs.writeFile(tmpHooks, JSON.stringify(hooksConfig, null, 2) + '\n', 'utf-8')
+  await fs.writeFile(tmpHooks, hooksJson, 'utf-8')
   await fs.rename(tmpHooks, hooksJsonPath)
+  await noteWritten(hooksJsonPath, workspaceRoot, hooksJson)
 
   // ── intutic-check.sh ─────────────────────────────────────────────────
   const checkScriptPath = path.join(scriptsDir, 'intutic-check.sh')
@@ -145,6 +150,7 @@ exit 0
   await fs.writeFile(tmpScript, checkScript, 'utf-8')
   await fs.rename(tmpScript, checkScriptPath)
   await fs.chmod(checkScriptPath, 0o755)
+  await noteWritten(checkScriptPath, workspaceRoot, checkScript)
 
   // Apply immutable flags after writing
   await hardenGoosePlugin(PLUGIN_DIR)
@@ -214,6 +220,7 @@ async function mergeGooseConfig(proxyUrl: string): Promise<void> {
   }
 
   const tmpConfig = GOOSE_CONFIG + '.intutic-tmp'
+  await keepOriginal(GOOSE_CONFIG, os.homedir())
   await fs.mkdir(path.dirname(GOOSE_CONFIG), { recursive: true })
   await fs.writeFile(tmpConfig, existing, 'utf-8')
   await fs.rename(tmpConfig, GOOSE_CONFIG)

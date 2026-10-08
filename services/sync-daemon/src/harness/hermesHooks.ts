@@ -21,6 +21,7 @@ import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
+import { keepOriginal, noteWritten } from '../disconnect/originals.js'
 import { parseDocument, isMap, type Document } from 'yaml'
 import { newIso } from '@intutic/id'
 import { emitShellGate, SHELL_EXTRACT, SHELL_FAIL_CLOSED } from './gateBody.js'
@@ -196,7 +197,10 @@ export async function writeHermesHooks(
   const envDir = path.join(workspaceRoot, '.intutic', 'env')
   const hermesDir = path.join(os.homedir(), '.hermes')
   const skillsDir = path.join(hermesDir, 'skills', 'intutic-governance')
+  const skillPath = path.join(skillsDir, 'SKILL.md')
 
+  await keepOriginal(HERMES_CONFIG, workspaceRoot)
+  await keepOriginal(skillPath, workspaceRoot)
   await Promise.all([
     fs.mkdir(globalHookDir, { recursive: true }),
     fs.mkdir(hookEventsDir, { recursive: true }),
@@ -226,10 +230,11 @@ export async function writeHermesHooks(
 
   // ── 4. Write governance skill ──────────────────────────────────────────────
 
-  const skillPath = path.join(skillsDir, 'SKILL.md')
+  const skill = buildGovernanceSkill(proxyUrl)
   const tmpSkill = skillPath + '.intutic-tmp'
-  await fs.writeFile(tmpSkill, buildGovernanceSkill(proxyUrl), 'utf-8')
+  await fs.writeFile(tmpSkill, skill, 'utf-8')
   await fs.rename(tmpSkill, skillPath)
+  await noteWritten(skillPath, workspaceRoot, skill)
 
   log.info(
     { action: 'hermes_skill_written', path: skillPath },

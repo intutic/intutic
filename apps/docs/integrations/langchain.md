@@ -76,6 +76,8 @@ llm = ChatOpenAI(
 
 Same shape as LangGraph's `.env.intutic` — proxy URLs plus a pointer at `intutic_clawde.gate.adapters.langchain.IntuticMiddleware`.
 
+To undo what `intutic connect` writes here, run `intutic disconnect --harness langchain`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. `.env.intutic` stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+
 ## What the adapter does NOT do
 
 Same structural gaps as every SDK-gated framework — see [LangGraph's "What the adapter does NOT do"](/integrations/langgraph#what-the-adapter-does-not-do). In short: there is no sync-daemon hook file, argument-level gating requires wiring the SDK into your own agent code, and `x-intutic-harness` attribution is client-supplied, not authorization.

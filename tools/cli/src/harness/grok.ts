@@ -12,8 +12,8 @@
  * @module
  */
 
-import { access, writeFile, rename, mkdir } from 'node:fs/promises'
-import { join, dirname } from 'node:path'
+import { access } from 'node:fs/promises'
+import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { HarnessType } from '@intutic/shared-types'
 import type { SyncSopEntry } from '@intutic/shared-types'
@@ -21,6 +21,7 @@ import type { IHarnessAdapter } from './types.js'
 import { hashFile } from '../lib/hash.js'
 import { buildMarkdownContent } from './base.js'
 import { writeGrokHooks } from '@intutic/sync-daemon/harness/grokHooks'
+import { writeOwnedFile } from '@intutic/sync-daemon'
 
 const CONFIG_FILE = 'AGENTS.md'
 
@@ -51,10 +52,7 @@ export const grokAdapter: IHarnessAdapter = {
     //    other `---`-separated rules file in this codebase shares.
     const filePath = join(workspaceRoot, CONFIG_FILE)
     const content = buildMarkdownContent(sops, proxyUrl)
-    await mkdir(dirname(filePath), { recursive: true })
-    const tmp = filePath + '.intutic-tmp'
-    await writeFile(tmp, content, 'utf-8')
-    await rename(tmp, filePath)
+    await writeOwnedFile(filePath, workspaceRoot, content)
 
     // 2. PreToolUse gate (project + user level) + config.toml model base_url
     //    merge (project + user level).

@@ -59,6 +59,7 @@ import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
+import { keepOriginal } from '../disconnect/originals.js'
 import { mergeXmlComponentOptions } from './jetbrainsXmlConfig.js'
 
 const log = createLogger('sync-windsurf-jetbrains-proxy')
@@ -157,6 +158,9 @@ export async function configureJetBrainsWindsurfProxy(proxyPort: number): Promis
       continue
     }
 
+    // Both files are the IDE's own; disconnect puts back what they held.
+    await keepOriginal(path.join(optionsDir, PROXY_SETTINGS_FILE), os.homedir())
+    await keepOriginal(path.join(optionsDir, CODEIUM_SETTINGS_FILE), os.homedir())
     const proxyOk = await mergeXmlComponentOptions(
       path.join(optionsDir, PROXY_SETTINGS_FILE),
       HTTP_CONFIGURABLE_COMPONENT,

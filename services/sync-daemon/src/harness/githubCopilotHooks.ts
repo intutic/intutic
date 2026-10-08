@@ -43,6 +43,7 @@ import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
+import { writeOwnedFile } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
 import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
 
@@ -214,8 +215,8 @@ export async function writeGithubCopilotHooks(
 
   // 1. Workspace-level: .github/hooks/intutic-governance.json
   const projectHooksDir = path.join(workspaceRoot, '.github', 'hooks')
-  await fs.mkdir(projectHooksDir, { recursive: true })
-  await atomicWriteJson(path.join(projectHooksDir, 'intutic-governance.json'), config)
+  const configJson = JSON.stringify(config, null, 2) + '\n'
+  await writeOwnedFile(path.join(projectHooksDir, 'intutic-governance.json'), workspaceRoot, configJson)
   log.info(
     { action: 'github_copilot_hooks_written', level: 'workspace', path: projectHooksDir },
     'GitHub Copilot workspace-level hook written (Preview mechanism)',
@@ -223,16 +224,10 @@ export async function writeGithubCopilotHooks(
 
   // 2. User-level: ~/.copilot/hooks/intutic-governance.json
   const userHooksDir = path.join(os.homedir(), '.copilot', 'hooks')
-  await fs.mkdir(userHooksDir, { recursive: true })
-  await atomicWriteJson(path.join(userHooksDir, 'intutic-governance.json'), config)
+  await writeOwnedFile(path.join(userHooksDir, 'intutic-governance.json'), workspaceRoot, configJson)
   log.info(
     { action: 'github_copilot_hooks_written', level: 'user', path: userHooksDir },
     'GitHub Copilot user-level hook written (Preview mechanism)',
   )
 }
 
-async function atomicWriteJson(filePath: string, data: unknown): Promise<void> {
-  const tmp = filePath + '.intutic-tmp'
-  await fs.writeFile(tmp, JSON.stringify(data, null, 2) + '\n', 'utf-8')
-  await fs.rename(tmp, filePath)
-}

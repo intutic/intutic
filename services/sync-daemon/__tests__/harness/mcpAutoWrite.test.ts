@@ -666,16 +666,86 @@ describe("Claude Code project scope — the repo's .mcp.json, governed through l
     expect(pg.args).not.toContain('team-pg')
   })
 
-  it('honours approvals in settings files, and a disable anywhere wins', async () => {
+  it("ignores approvals committed to the repo's .claude settings in a folder Claude Code has not trusted", async () => {
     ctx = setup()
     withProject({}, { a: { command: 'a-mcp' }, b: { command: 'b-mcp' } })
     mkdirSync(join(ctx.root, '.claude'), { recursive: true })
     writeFileSync(join(ctx.root, '.claude', 'settings.json'), JSON.stringify({ enableAllProjectMcpServers: true }))
-    writeFileSync(join(ctx.root, '.claude', 'settings.local.json'), JSON.stringify({ disabledMcpjsonServers: ['b'] }))
+    writeFileSync(join(ctx.root, '.claude', 'settings.local.json'), JSON.stringify({ enabledMcpjsonServers: ['b'] }))
+    await injectMcpServer(ctx.root, 'ws_test')
+    // A cloned repository cannot approve its own servers, so nothing is copied.
+    expect(read().projects[ctx.root].mcpServers ?? {}).toEqual({})
+  })
+
+  it('applies the same committed approvals once the folder is trusted', async () => {
+    ctx = setup()
+    withProject({ hasTrustDialogAccepted: true }, { a: { command: 'a-mcp' }, b: { command: 'b-mcp' } })
+    mkdirSync(join(ctx.root, '.claude'), { recursive: true })
+    writeFileSync(join(ctx.root, '.claude', 'settings.json'), JSON.stringify({ enabledMcpjsonServers: ['a'] }))
+    writeFileSync(join(ctx.root, '.claude', 'settings.local.json'), JSON.stringify({ enabledMcpjsonServers: ['b'] }))
+    await injectMcpServer(ctx.root, 'ws_test')
+    const local = read().projects[ctx.root].mcpServers
+    expect(local.a.__intutic_shadow_of).toBe('project')
+    expect(local.b.__intutic_shadow_of).toBe('project')
+  })
+
+  it("applies the user's own approvals in an untrusted folder", async () => {
+    ctx = setup()
+    withProject({}, { a: { command: 'a-mcp' }, b: { command: 'b-mcp' } })
+    mkdirSync(join(ctx.home, '.claude'), { recursive: true })
+    writeFileSync(join(ctx.home, '.claude', 'settings.json'), JSON.stringify({ enabledMcpjsonServers: ['a'] }))
     await injectMcpServer(ctx.root, 'ws_test')
     const local = read().projects[ctx.root].mcpServers
     expect(local.a.__intutic_shadow_of).toBe('project')
     expect(local.b).toBeUndefined()
+  })
+
+  it('a disable in any file wins, the committed settings of an untrusted folder included', async () => {
+    ctx = setup()
+    withProject({ enableAllProjectMcpServers: true }, { a: { command: 'a-mcp' }, b: { command: 'b-mcp' } })
+    mkdirSync(join(ctx.root, '.claude'), { recursive: true })
+    writeFileSync(join(ctx.root, '.claude', 'settings.json'), JSON.stringify({ disabledMcpjsonServers: ['b'] }))
+    await injectMcpServer(ctx.root, 'ws_test')
+    const local = read().projects[ctx.root].mcpServers
+    expect(local.a.__intutic_shadow_of).toBe('project')
+    expect(local.b).toBeUndefined()
+  })
+
+  it('leaves a remote server whose url or headers use ${VAR} unshadowed, and reports why', async () => {
+    ctx = setup()
+    withProject(
+      { enabledMcpjsonServers: ['plain', 'templated'] },
+      {
+        plain: { type: 'http', url: 'https://mcp.example.com/mcp', headers: { 'x-team': 'core' } },
+        templated: { type: 'http', url: 'https://mcp.example.com/mcp', headers: { Authorization: 'Bearer ${API_KEY}' } },
+      },
+    )
+    await injectMcpServer(ctx.root, 'ws_test')
+    const local = read().projects[ctx.root].mcpServers
+    expect(local.plain.__intutic_shadow_of).toBe('project')
+    expect(local.templated).toBeUndefined()
+    const found = (await discoverMcpServers(ctx.root)).filter((s) => s.harness === 'claude-code')
+    expect(found.find((s) => s.server === 'plain')?.ungovernedReason).toBeUndefined()
+    expect(found.find((s) => s.server === 'templated')?.ungovernedReason).toMatch(/reference environment variables/)
+  })
+
+  it('copies a stdio server with ${VAR} references verbatim, never resolved', async () => {
+    ctx = setup()
+    process.env.INTUTIC_TEST_SECRET = 'resolved-secret'
+    try {
+      withProject(
+        { enabledMcpjsonServers: ['pg'] },
+        { pg: { command: '${PG_BIN:-pg-mcp}', args: ['--dsn', '${INTUTIC_TEST_SECRET}'], env: { TOKEN: '${INTUTIC_TEST_SECRET}' } } },
+      )
+      await injectMcpServer(ctx.root, 'ws_test')
+      const raw = readFileSync(claudeCodePath(ctx.home), 'utf-8')
+      expect(raw).not.toContain('resolved-secret')
+      const pg = read().projects[ctx.root].mcpServers.pg
+      expect(pg.args.slice(-3)).toEqual(['${PG_BIN:-pg-mcp}', '--dsn', '${INTUTIC_TEST_SECRET}'])
+      expect(pg.env.TOKEN).toBe('${INTUTIC_TEST_SECRET}')
+    } finally {
+      delete process.env.INTUTIC_TEST_SECRET
+    }
   })
 
   it('is idempotent, follows the source, and removes a shadow whose server or approval is gone', async () => {

@@ -85,6 +85,8 @@ A machine-wide copy (`/Library/Application Support/Cursor/hooks.json` on macOS, 
 
 Set Cursor's **OpenAI Base URL** override (Settings → Models) to `http://localhost:4000/v1` to send requests for your own API keys through the proxy. Cursor's built-in models are served from Cursor's backend and do not use this setting.
 
+To undo what `intutic connect` writes here, run `intutic disconnect --harness cursor`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+
 ## Config details
 
 | Property | Value |

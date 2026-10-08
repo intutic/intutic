@@ -22,6 +22,7 @@ import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
+import { keepOriginal } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
 import { emitShellGate, SHELL_EXTRACT, SHELL_FAIL_CLOSED } from './gateBody.js'
 import { readJsonObjectForMerge } from './jsonMergeTarget.js'
@@ -238,6 +239,8 @@ export async function writePiHooks(
   const envDir = path.join(workspaceRoot, '.intutic', 'env')
   const piDir = path.join(os.homedir(), '.pi')
 
+  await keepOriginal(PI_HOOKS_CONFIG, workspaceRoot)
+  await keepOriginal(PI_MODELS_CONFIG, workspaceRoot)
   await Promise.all([
     fs.mkdir(globalHookDir, { recursive: true }),
     fs.mkdir(hookEventsDir, { recursive: true }),

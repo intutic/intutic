@@ -23,8 +23,10 @@
 
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
+import * as os from 'node:os'
 import { parseDocument, isMap, isSeq } from 'yaml'
 import { createLogger } from '@intutic/logger'
+import { keepOriginal } from '../disconnect/originals.js'
 
 const log = createLogger('sync-continue-config')
 
@@ -93,6 +95,8 @@ export async function mergeContinueConfig(configPath: string, apiBase: string): 
     return 0
   }
   if (result.content !== raw) {
+    // A user-level file: its record lives under the home directory.
+    await keepOriginal(configPath, os.homedir())
     await fs.mkdir(path.dirname(configPath), { recursive: true })
     const tmp = configPath + '.intutic-tmp'
     await fs.writeFile(tmp, result.content, 'utf-8')

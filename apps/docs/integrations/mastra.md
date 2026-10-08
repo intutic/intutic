@@ -76,6 +76,8 @@ import { intuticHeaders } from '@intutic/gate'
 
 Same shape as every other SDK-gated framework's `.env.intutic` — proxy URLs plus a pointer at `@intutic/gate/mastra`'s `intuticHooks()`.
 
+To undo what `intutic connect` writes here, run `intutic disconnect --harness mastra`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. `.env.intutic` stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+
 ## Known bypass: per-call `hooks` override, not merge
 
 **This is Mastra's own documented behaviour, not an Intutic defect — but it is a real gap operators need to know about.** `new Agent({ hooks: intuticHooks() })` installs this gate at the agent level. However, if any caller of that agent's `.generate()`/`.stream()` passes its own `hooks` option — even `{}`, or a `hooks` object with no `beforeToolCall` — Mastra **replaces** the agent-level hooks wholesale for that call. There is no merging: the agent-level `intuticHooks()` silently does not run, with no error and no warning.

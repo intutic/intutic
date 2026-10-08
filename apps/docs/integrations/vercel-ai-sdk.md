@@ -88,6 +88,8 @@ const openai = withIntuticProxy(createOpenAI)({
 
 Same `.env.intutic` shape as every other SDK-gated framework — proxy URLs plus a pointer at `@intutic/gate/vercel`. **Unlike** the Python-SDK-gated family (LangChain, LangGraph, ...), sourcing this file does not route this framework's own LLM egress — see the limitation above.
 
+To undo what `intutic connect` writes here, run `intutic disconnect --harness vercel-ai-sdk`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. `.env.intutic` stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+
 ## What the adapter does NOT do
 
 Same structural gaps as every SDK-gated framework — see [LangGraph's "What the adapter does NOT do"](/integrations/langgraph#what-the-adapter-does-not-do). In short: there is no sync-daemon hook file, argument-level gating requires wiring the SDK into your own agent code, and `x-intutic-harness` attribution is client-supplied, not authorization. On top of that structural family, this integration is **not** "zero-code" for LLM-egress routing the way the rest of the catalog is — see the limitation above, stated plainly rather than oversold.

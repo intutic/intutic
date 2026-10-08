@@ -379,6 +379,15 @@ intutic status
   SOPs: 5 active
 ```
 
+## Disconnecting
+
+`intutic disconnect` undoes `intutic connect`: every harness config it changed goes back the way it was, the background services are removed, and you are logged out. Run it with `--dry-run` first to see each change, and `--harness <id>` to disconnect one harness. See [`intutic disconnect`](/reference/cli#intutic-disconnect) for what it restores and what it leaves.
+
+```bash
+intutic disconnect --dry-run
+intutic disconnect
+```
+
 ## What's next?
 
 | Topic | Description |

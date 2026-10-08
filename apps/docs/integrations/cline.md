@@ -39,6 +39,8 @@ intutic start
 
 `.clinerules` has to be a directory for both to fit. A flat `.clinerules` file that an earlier Intutic version wrote is converted automatically. A flat `.clinerules` file you wrote yourself is left alone, and no gate is installed until you move its content into a file inside a `.clinerules/` directory; the `intutic connect` log says so. A `PreToolUse` hook you wrote yourself is never overwritten.
 
+To undo what `intutic connect` writes here, run `intutic disconnect --harness cline`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+
 ## Proxy routing
 
 To route Cline's LLM requests through the local proxy:

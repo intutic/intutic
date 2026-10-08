@@ -104,6 +104,8 @@ The asymmetry is deliberate. A **non-refusal** crash inside the gate, such as a 
 
 Same `.env.intutic` shape as every other SDK-gated framework — proxy URLs plus a pointer at `@intutic/gate/workflow`.
 
+To undo what `intutic connect` writes here, run `intutic disconnect --harness ai-sdk-workflow`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. `.env.intutic` stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+
 ## What the adapter does NOT do
 
 Same structural gaps as every SDK-gated framework — see [LangGraph's "What the adapter does NOT do"](/integrations/langgraph#what-the-adapter-does-not-do). Two additions specific to this runtime:

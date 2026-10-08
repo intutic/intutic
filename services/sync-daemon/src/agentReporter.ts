@@ -77,7 +77,7 @@ interface AgentFacets {
   }
   sops: Array<{ sop_id: string; name: string; enforced: boolean }>
   budgets: { tier?: string }
-  mcp_tools: Array<{ server: string; harness: string; transport: string; wrapped: boolean }>
+  mcp_tools: Array<{ server: string; harness: string; transport: string; wrapped: boolean; ungovernedReason?: string }>
   skills: Array<{
     name: string
     source: string

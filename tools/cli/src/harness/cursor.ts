@@ -19,8 +19,7 @@ import type { IHarnessAdapter } from './types.js'
 import { hashFile } from '../lib/hash.js'
 import { buildMarkdownContent } from './base.js'
 import { writeCursorHooks } from '@intutic/sync-daemon/harness/cursorHooks'
-import { writeFile, rename, mkdir } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { writeOwnedFile } from '@intutic/sync-daemon'
 
 const CONFIG_FILE = '.cursorrules'
 
@@ -41,10 +40,7 @@ export const cursorAdapter: IHarnessAdapter = {
     // 1. Write .cursorrules markdown governance text
     const filePath = join(workspaceRoot, CONFIG_FILE)
     const content = buildMarkdownContent(sops, proxyUrl)
-    await mkdir(dirname(filePath), { recursive: true })
-    const tmp = filePath + '.intutic-tmp'
-    await writeFile(tmp, content, 'utf-8')
-    await rename(tmp, filePath)
+    await writeOwnedFile(filePath, workspaceRoot, content)
 
     // 2. Inject hooks.json at project + user level (writeSystemLevel=false;
     //    system level requires sudo execution)

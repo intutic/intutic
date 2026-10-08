@@ -29,6 +29,7 @@ import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
+import { keepOriginal } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
 import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
 import { readJsonObjectForMerge } from './jsonMergeTarget.js'
@@ -233,6 +234,7 @@ export async function writeCodexHooks(
 
   // 1. Project-level: <root>/.codex/hooks.json
   const projectCodexDir = path.join(workspaceRoot, '.codex')
+  await keepOriginal(path.join(projectCodexDir, 'hooks.json'), workspaceRoot)
   await fs.mkdir(projectCodexDir, { recursive: true })
   await mergeCodexHooksJson(path.join(projectCodexDir, 'hooks.json'), hookScriptPath)
   log.info({ action: 'codex_hooks_written', level: 'project', path: projectCodexDir }, 'Codex project-level hooks written')
@@ -240,6 +242,7 @@ export async function writeCodexHooks(
   // 2. User-level: $CODEX_HOME/hooks.json — Codex keeps its user config in
   // CODEX_HOME when set, ~/.codex otherwise.
   const userCodexDir = process.env.CODEX_HOME || path.join(os.homedir(), '.codex')
+  await keepOriginal(path.join(userCodexDir, 'hooks.json'), workspaceRoot)
   await fs.mkdir(userCodexDir, { recursive: true })
   await mergeCodexHooksJson(path.join(userCodexDir, 'hooks.json'), hookScriptPath)
   log.info({ action: 'codex_hooks_written', level: 'user', path: userCodexDir }, 'Codex user-level hooks written')

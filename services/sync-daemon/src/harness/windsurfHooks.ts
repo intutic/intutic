@@ -91,6 +91,7 @@ import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
+import { keepOriginal, noteProxyUrl } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
 import { readJsonObjectForMerge } from './jsonMergeTarget.js'
 import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
@@ -130,7 +131,8 @@ function isRecord(v: unknown): v is Record<string, unknown> {
  * its command, so repeated syncs replace it rather than stacking copies. A
  * file that is not a plain JSON object is left alone (see jsonMergeTarget.ts).
  */
-async function mergeCascadeHooksJson(filePath: string, hookScriptPath: string): Promise<void> {
+async function mergeCascadeHooksJson(filePath: string, hookScriptPath: string, workspaceRoot: string): Promise<void> {
+  await keepOriginal(filePath, workspaceRoot)
   const existing = await readJsonObjectForMerge(filePath)
   if (existing === null) return
   const command = `node "${hookScriptPath}"`
@@ -305,7 +307,7 @@ export async function writeWindsurfHooks(
   await fs.chmod(hookScriptPath, 0o755)
 
   // 1. User-level hooks — Desktop's path.
-  await mergeCascadeHooksJson(path.join(windsurfUserDir(), 'hooks.json'), hookScriptPath)
+  await mergeCascadeHooksJson(path.join(windsurfUserDir(), 'hooks.json'), hookScriptPath, workspaceRoot)
   log.info({ action: 'windsurf_hooks_written', level: 'user' }, 'Windsurf user-level hooks written')
 
   // 1b. User-level hooks — the JetBrains plugin's SEPARATE path. Same entries:
@@ -314,7 +316,7 @@ export async function writeWindsurfHooks(
   // hook it added, which is corroborating evidence (not a guess) that it
   // dispatches the same Cascade hook event/payload system as Desktop, just
   // reads its user-level config from this different file.
-  await mergeCascadeHooksJson(path.join(windsurfJetBrainsUserDir(), 'hooks.json'), hookScriptPath)
+  await mergeCascadeHooksJson(path.join(windsurfJetBrainsUserDir(), 'hooks.json'), hookScriptPath, workspaceRoot)
   log.info(
     { action: 'windsurf_hooks_written', level: 'user-jetbrains' },
     'Windsurf JetBrains plugin user-level hooks written',
@@ -327,13 +329,17 @@ export async function writeWindsurfHooks(
   // for a matching event, in order system → user → workspace (confirmed
   // against docs.devin.ai/desktop/cascade/hooks), so this file being edited
   // by an agent does not disable the user-level registration above.
-  await mergeCascadeHooksJson(path.join(workspaceRoot, '.windsurf', 'hooks.json'), hookScriptPath)
+  await mergeCascadeHooksJson(path.join(workspaceRoot, '.windsurf', 'hooks.json'), hookScriptPath, workspaceRoot)
   log.info({ action: 'windsurf_hooks_written', level: 'workspace' }, 'Windsurf workspace-level hooks written')
 
   // 3. HTTP proxy settings — Desktop's own settings.json. Merged: the keys
   // below are the only ones Intutic owns, and a file that is not a plain JSON
   // object is left alone (see jsonMergeTarget.ts).
   const settingsPath = path.join(windsurfUserDir(), 'settings.json')
+  await keepOriginal(settingsPath, workspaceRoot)
+  // The local listener, not the configured proxy URL: disconnect recognises
+  // the proxy settings below, and the JetBrains ones, by it.
+  await noteProxyUrl(`http://127.0.0.1:${proxyPort}`)
   const existingSettings = await readJsonObjectForMerge(settingsPath)
   if (existingSettings !== null) {
     // Provenance fields earlier versions stamped when they owned the whole file.
