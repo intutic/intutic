@@ -92,7 +92,9 @@ const FORBIDDEN = [
   // straight past `(< 1ms on hit)` two lines above it in the same file. A
   // pattern narrow enough to miss the neighbouring line is a gate with a hole
   // in the shape of whatever it was written against.
-  /<\s*\d+(\.\d+)?\s?ms\b/i,
+  // The unit can be spelled out: concepts/sops.md published "<5 milliseconds"
+  // for local rules after the `ms` form had been retracted everywhere else.
+  /<\s*\d+(\.\d+)?\s?(ms|milliseconds?|µs|us|microseconds?)\b/i,
   /\b\d+(\.\d+)?\s?ms\s+(latency|overhead|p\d{2})\b/i,
   // A bare speed claim with no comparator at all — "38 WASM rules evaluate in
   // 1.2 ms". Nothing in either repo produces that figure, and none of the

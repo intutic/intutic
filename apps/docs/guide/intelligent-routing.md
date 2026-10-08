@@ -77,7 +77,7 @@ intutic_settings:
       cost_penalty: 0.2
 ```
 
-`candidate_models` must name entries from your `model_list` so provider resolution and cost estimation stay accurate. Requests for models outside the pool bypass the bandit untouched.
+When `config.yaml` has a non-empty `model_list`, a candidate it does not name (as `model_name` or `litellm_params.model`) is dropped at startup with an error in the log, so a typo cannot become a model the bandit routes to. That check is all `model_list` does: the provider is chosen from the model name, its address from `ANTHROPIC_UPSTREAM_URL` and the other [upstream variables](/reference/configuration#provider-upstreams-and-keys), and cost from the bundled price list. Requests for models outside the pool bypass the bandit untouched.
 
 In a cloud-managed workspace, the routing candidate pool is further narrowed to the intersection
 of `candidate_models` and the workspace's approved-models allowlist (see

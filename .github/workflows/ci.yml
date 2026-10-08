@@ -71,6 +71,13 @@ jobs:
       - name: Verify links between docs pages open a page and heading that exist
         run: pnpm lint:docs-links
 
+      # The budgets guide documented two variables nothing reads while the
+      # proxy's real ones appeared on no page. Every variable the proxy, the
+      # CLI or the gate SDK reads must be in the configuration reference, and
+      # every one it documents for them must be read.
+      - name: Verify the configuration reference names every environment variable
+        run: pnpm lint:config-env
+
   typecheck:
     name: Typecheck (TS Workspaces) - Run TypeScript typecheck
     runs-on: ubuntu-latest

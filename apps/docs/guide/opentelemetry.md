@@ -6,16 +6,16 @@ Export distributed traces and metrics from Intutic's own components to your Open
 
 ## Overview
 
-Every long-running Intutic process — the Rust proxy, the control plane, the self-hosted gateway daemon, and the MCP daemon — can export OTLP traces. All of it is **opt-in and off by default**: nothing initializes unless `OTEL_EXPORTER_OTLP_ENDPOINT` is set, so a deployment that hasn't configured a collector pays no cost.
+Every long-running Intutic process — the Rust proxy, the control plane, the self-hosted gateway daemon, and the MCP daemon — can export OTLP traces. Export is **opt-in**: the proxy and the daemons start it only when `OTEL_EXPORTER_OTLP_ENDPOINT` is set, so a deployment that hasn't configured a collector pays no cost. The control plane also starts it whenever it runs with `NODE_ENV=production`, sending to `http://localhost:4318` unless the variable says otherwise.
 
-| Component | Protocol | Default endpoint | Scope |
-|---|---|---|---|
-| Proxy (`packages/proxy`) | OTLP/gRPC | `http://127.0.0.1:4317` | Open-Core |
-| Control plane | OTLP/HTTP | `http://localhost:4318/v1/traces` | Enterprise |
-| Self-hosted gateway daemon | OTLP/HTTP | `http://localhost:4318/v1/traces` | Open-Core |
-| MCP daemon (`intutic-mcp-daemon`) | OTLP/HTTP | `http://localhost:4318/v1/traces` | Open-Core |
+| Component | Protocol | `OTEL_EXPORTER_OTLP_ENDPOINT` | Default `OTEL_SERVICE_NAME` | Scope |
+|---|---|---|---|---|
+| Proxy (`packages/proxy`) | OTLP/gRPC | The collector's gRPC address, e.g. `http://otel-collector:4317` | `intutic-proxy` | Open-Core |
+| Control plane | OTLP/HTTP | The collector's HTTP base, e.g. `http://otel-collector:4318` (a value ending in `/v1/traces` also works) | `control-plane` | Enterprise |
+| Self-hosted gateway daemon | OTLP/HTTP | As the control plane | `gateway-daemon` | Open-Core |
+| MCP daemon (`intutic-mcp-daemon`) | OTLP/HTTP | As the control plane | `mcp-daemon` | Open-Core |
 
-Set `OTEL_EXPORTER_OTLP_ENDPOINT` to your collector's URL and `OTEL_SERVICE_NAME` to override the reported service name (each component defaults to its own name — `control-plane`, `gateway-daemon`, `mcp-daemon`).
+`OTEL_SERVICE_NAME` overrides the reported service name.
 
 ## What's instrumented
 
