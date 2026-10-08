@@ -1059,18 +1059,14 @@ export const NO_GATE: ReadonlyArray<{
       'be a `harness: \'xirp\'` NO_GATE row with a `none`-shaped reason, like aider\'s); it is ' +
       '"the gate exists, credited to the harness that actually owns it" — see gateKind.ts\'s ' +
       '`delegated` kind for why that distinction gets its own value rather than being folded ' +
-      'into `sdk` or `none`. What IS this phase\'s own responsibility, and what makes Xirp ' +
-      'more than a detection-only add: the wrapped harness\'s gate/config files only protect a ' +
-      'tool call if they actually exist in the git worktree that call runs in, and a `git ' +
-      'worktree` checkout does NOT inherit the main checkout\'s untracked files (governance ' +
-      'config files are untracked by convention) — so before this phase, every Xirp-managed ' +
-      'worktree session ran completely ungoverned regardless of what was configured in the ' +
-      'main checkout. `services/sync-daemon/src/lib/gitWorktrees.ts` + its wiring into ' +
-      '`syncLoop.ts`\'s `runSyncIteration` is the fix: it discovers every worktree of the ' +
-      'watched repo each cycle and writes the same project-tier files into each one, which ' +
-      'restores every wrapped harness\'s own already-existing gate inside Xirp\'s sessions — ' +
-      'this row stays a NO_GATE precisely because the gate that ends up protecting a Xirp ' +
-      'session was never Xirp\'s to write. See TD-390.',
+      'into `sdk` or `none`. The wrapped harness\'s project-level gate/config files only protect ' +
+      'a tool call if they exist in the git worktree that call runs in, and a `git worktree` ' +
+      'checkout does NOT inherit the main checkout\'s untracked files. `intutic connect` writes ' +
+      'project-tier files only into the checkout it runs in, so a Xirp worktree session is ' +
+      'governed by the wrapped harness\'s USER-level registration (~/.claude/settings.json, ' +
+      '~/.codex/hooks.json), which applies in every directory — see the docs\' Worktree Coverage ' +
+      'section. This row stays a NO_GATE because the gate that protects a Xirp session was ' +
+      'never Xirp\'s to write.',
   },
 
   // ── O3: second orchestrator of this shape — DoorDash Agentic Orchestrator ─
@@ -1087,9 +1083,8 @@ export const NO_GATE: ReadonlyArray<{
       '(CONFIRMED via `agentico server --help`\'s `--providers` flag, live-verified against the ' +
       'real binary: "Available: claude, codex, opencode"). Each feature runs in its own git ' +
       'worktree under `~/.agentic-orchestrator/worktrees/` (confirmed via the project\'s README), ' +
-      'the same shape Xirp uses — `gitWorktrees.ts`\'s worktree propagation (added in O1, general ' +
-      'and not Xirp-specific) already covers these worktrees too; no new code was needed for that ' +
-      'part. A tool call made inside an Agentic-Orchestrator-managed session is governed by ' +
+      'the same shape Xirp uses, and covered the same way: by each backend\'s user-level hook ' +
+      'registration, which applies in every worktree. A tool call made inside an Agentic-Orchestrator-managed session is governed by ' +
       'whichever wrapped backend\'s own gate is already running (claude-code-check.js, ' +
       'codex-check.js) — the SAME gate this registry already lists under that harness\'s own row, ' +
       'not a second one. This is the same `delegated` reasoning as Xirp\'s row above, not a new ' +

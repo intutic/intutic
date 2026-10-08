@@ -27,12 +27,16 @@ function buildHeader(): string {
   ].join('\n')
 }
 
-/** Build markdown content from SOPs (Cursor, Claude Code, Windsurf). */
+/**
+ * Build markdown content from SOPs (Cursor, Claude Code, Windsurf). Each SOP
+ * the control plane synced ends with its `sop://` pointer comment, which maps
+ * the rules in the file back to the SOP that produced them.
+ */
 export function buildMarkdownContent(sops: SyncSopEntry[], proxyUrl: string): string {
   const header = buildHeader()
   const proxySection = `> **Proxy URL:** \`${proxyUrl}\`\n\n`
   const sopSections = sops
-    .map((sop) => `## ${sop.title}\n\n${sop.content}`)
+    .map((sop) => `## ${sop.title}\n\n${sop.content}${sop.sopRef ? `\n${sop.sopRef}` : ''}`)
     .join('\n\n---\n\n')
   return header + proxySection + sopSections + '\n'
 }

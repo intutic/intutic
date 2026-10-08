@@ -41,7 +41,7 @@ const lastUploadedHashes = new Map<string, string>()
  * expects. Re-exported from `@intutic/shared-types` (TD-443) — previously
  * declared locally here as a hand-kept duplicate of
  * `harnessGradeSweep.ts`'s `deriveEnforcementInputs` return shape on the
- * control-plane side, which drifted (this module's `syncLoop.ts` consumer
+ * control-plane side, which drifted (this module's sync-cycle consumer
  * was missing an `Array.isArray` guard the control-plane side had). Both
  * sides now derive from `packages/shared-types/src/governanceCoverage.ts`'s
  * single mapping — safe for this module to depend on since it is a leaf
@@ -213,7 +213,7 @@ export async function reportGovernanceCoverageSnapshot(
  * Groups by harness type for proper capture payloads.
  *
  * @param governanceInputs - This cycle's per-harness enforcement signals
- *   (from `runSyncIteration`'s agent-facets collection), used to fire a
+ *   (from `reportHarnessAgents`), used to fire a
  *   governance-coverage snapshot immediately after a harness's rules file is
  *   actually found to have changed — never on every sync tick, only on the
  *   iterations where `uploadConfigCapture`'s content-hash dedup lets a file

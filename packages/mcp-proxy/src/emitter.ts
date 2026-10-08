@@ -4,7 +4,7 @@
  * Path A: HTTP POST to /api/v1/hook-events (same endpoint as claudeCodeHooks.ts)
  * Path B: Append JSONL line to ~/.intutic/events/hook-events.jsonl
  *
- * Mirrors the dual-path pattern from claudeCodeHooks.ts / syncLoop.ts.
+ * Mirrors the dual-path pattern from claudeCodeHooks.ts.
  *
  * @module
  */

@@ -53,7 +53,7 @@ export const HARNESS_CONFIG_FILES: Record<HarnessType, string> = {
   'muse-code': 'AGENTS.md',
   // AGENTS.md is Grok Build's native rules file — the same cross-tool
   // convention Codex/Amp read. Delivered via the generic markdown formatter
-  // (`buildMarkdownContent`/`formatMarkdown`) every `---`-separated rules
+  // (`buildMarkdownContent`) every `---`-separated rules
   // file in this codebase already shares (Cursor, Claude Code, Windsurf,
   // GitHub Copilot) — not a bespoke format.
   'grok': 'AGENTS.md',

@@ -57,10 +57,68 @@ describe('connect refreshes the gate caches on every sync (TD-488)', () => {
     expect(src).toMatch(/refreshGateCaches,\s*\n/)
     const body = src.slice(src.indexOf('async function applySyncConfig('))
     const firstAwait = body.indexOf('await refreshGateCachesForConnect()')
-    const versionGate = body.indexOf('if (syncConfig.configVersion > localConfigVersion || force)')
+    const versionGate = body.indexOf('const configMoved = syncConfig.configVersion > localConfigVersion || force')
     expect(firstAwait).toBeGreaterThan(0)
     expect(versionGate).toBeGreaterThan(0)
     expect(firstAwait, 'the refresh must not sit inside the version-gated block').toBeLessThan(versionGate)
   })
 })
 
+
+// The service runs `connect`. Behaviours that used to live only in a second
+// sync loop nothing started now run here; the helpers are tested in the sync
+// daemon (syncCycle.test.ts), and these pin that `connect` calls them where
+// they have to run.
+describe('connect runs the per-cycle sync work the docs promise', () => {
+  async function source(): Promise<{ src: string; applyBody: string; pollBody: string }> {
+    const { readFileSync } = await import('node:fs')
+    const { fileURLToPath } = await import('node:url')
+    const src = readFileSync(fileURLToPath(new URL('./connect.ts', import.meta.url)), 'utf8')
+    const applyStart = src.indexOf('async function applySyncConfig(')
+    const applyBody = src.slice(applyStart, src.indexOf('\n  }\n', applyStart))
+    const pollBody = src.slice(src.indexOf('// 6. Secondary fallback HTTP poll loop'))
+    return { src, applyBody, pollBody }
+  }
+
+  it('wraps MCP servers on every cycle, not only when the config version moved', async () => {
+    const { applyBody } = await source()
+    const gateEnd = applyBody.indexOf('saveConfig({ ...safeConfig, configVersion: localConfigVersion')
+    const inject = applyBody.indexOf('await injectMcpServer(')
+    expect(gateEnd).toBeGreaterThan(0)
+    expect(inject, 'injectMcpServer must sit after the version-gated block').toBeGreaterThan(gateEnd)
+  })
+
+  it('applies SkillOpt edits and the decisions log before hashing the rules files', async () => {
+    const { applyBody } = await source()
+    const hashes = applyBody.indexOf('loadIntegrity(safeConfig.workspaceRoot)')
+    for (const call of ['await applySkillOptEdits(', 'await refreshDecisionsDigest(']) {
+      const at = applyBody.indexOf(call)
+      expect(at, call).toBeGreaterThan(0)
+      expect(at, `${call} must run before the integrity hashes`).toBeLessThan(hashes)
+    }
+    expect(applyBody).toMatch(/reapplyAll: configMoved/)
+    expect(applyBody).toMatch(/if \(syncConfig\.settings\?\.decisionsLogEnabled\)/)
+  })
+
+  it('write-protects the rules files when the workspace asks for it', async () => {
+    const { applyBody } = await source()
+    expect(applyBody).toMatch(/bypassEnforcementTier === 'immutable'/)
+    expect(applyBody.indexOf('await clearImmutable(file)')).toBeLessThan(applyBody.indexOf('const written = await adapter.writeConfig('))
+    expect(applyBody.lastIndexOf('await setImmutable(file)')).toBeGreaterThan(applyBody.indexOf('await refreshDecisionsDigest('))
+  })
+
+  it('leaves a hand edit in place under record-only and still reports it', async () => {
+    const { src } = await source()
+    const branch = src.slice(src.indexOf("if (tier === 'alert-only') {"))
+    expect(branch.indexOf("type: 'drift_report'")).toBeGreaterThan(0)
+    expect(branch.indexOf('return')).toBeLessThan(branch.indexOf('await applySyncConfig(syncConfig, true)'))
+  })
+
+  it('reports agents, skill findings and config captures from the poll loop', async () => {
+    const { src, pollBody } = await source()
+    expect(pollBody).toMatch(/await reportHarnessAgents\(\{[\s\S]*?workspaceRoot: safeConfig\.workspaceRoot/)
+    expect(pollBody).toMatch(/if \(shouldCaptureThisIteration\(pollIteration\)\)[\s\S]*?await captureAndUpload\(/)
+    expect(pollBody).toMatch(/pollIteration\+\+/)
+    expect(src).toMatch(/await writeBundledSkills\(safeConfig\.workspaceRoot\)/)
+  })
+})

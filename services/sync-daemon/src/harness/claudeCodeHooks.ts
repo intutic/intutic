@@ -614,8 +614,7 @@ function mergePreToolUse(existing: unknown, intutic: unknown[]): unknown[] {
  * Drains the local hook-events log file and POSTs all accumulated governance
  * events to the control plane in a single batch request.
  *
- * Called by the sync-daemon's main loop (syncLoop.ts) on every cycle, after
- * the main sync operations. On success, the log file is truncated to prevent
+ * Called by `intutic connect` when the log changes and on a 60-second timer. On success, the log file is truncated to prevent
  * unbounded growth. On network failure, events remain in the log and will be
  * retried on the next cycle.
  *
@@ -750,8 +749,7 @@ async function drainJsonlLog(opts: {
  * Drains the local hook-events log file and POSTs all accumulated governance
  * events to the control plane in a single batch request.
  *
- * Called by the sync-daemon's main loop (syncLoop.ts) on every cycle, after
- * the main sync operations. On success, the log file is truncated to prevent
+ * Called by `intutic connect` when the log changes and on a 60-second timer. On success, the log file is truncated to prevent
  * unbounded growth. On network failure, events remain in the log and will be
  * retried on the next cycle.
  */

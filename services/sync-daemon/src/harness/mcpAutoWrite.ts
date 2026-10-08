@@ -77,9 +77,8 @@
  *   of what got wrapped and `intutic disconnect` can put the entry back
  *   exactly.
  *
- * Continuous invariant, not one-shot: `injectMcpServer` is called once from
- * `intutic connect` (tools/cli) AND once per sync-loop iteration
- * (services/sync-daemon/src/syncLoop.ts), so a server a user adds to a harness
+ * Continuous invariant, not one-shot: `intutic connect` (tools/cli) calls
+ * `injectMcpServer` on every sync cycle, so a server a user adds to a harness
  * config after their first `connect` still gets wrapped on the next sync
  * cycle rather than staying invisible to governance forever. Running this
  * every ~30s only works because `writeJsonFile` below is write-if-changed —
@@ -443,8 +442,8 @@ async function readJsonForWrite<T>(filePath: string): Promise<T> {
 /**
  * Write JSON to disk, but only if the content actually changed.
  *
- * `injectMcpServer` now runs every sync-loop iteration (~every 30s, see
- * syncLoop.ts) instead of only once at `connect` time — re-running the same
+ * `injectMcpServer` runs every sync cycle (~every 30s, from `intutic
+ * connect`) instead of only once at startup — re-running the same
  * wrap against an already-wrapped, unchanged config must not touch the file,
  * or every cycle would churn the file's mtime and fire a spurious inotify /
  * FSEvents event for every harness config on every developer machine.
@@ -1538,10 +1537,8 @@ export async function discoverMcpServers(workspaceRoot: string): Promise<Discove
  *
  * Non-fatal: a failure in one harness does not prevent other harnesses from being updated.
  *
- * Called from two places by design: once from `intutic connect` (tools/cli)
- * for immediate effect, and once per sync-loop iteration
- * (services/sync-daemon/src/syncLoop.ts) so it is a continuous invariant
- * rather than a one-shot — a server a user adds after their first `connect`
+ * Called by `intutic connect` (tools/cli) on every sync cycle, so it is a
+ * continuous invariant rather than a one-shot — a server a user adds after their first `connect`
  * still gets wrapped on the next cycle. Safe to call every cycle because
  * `writeJsonFile` is write-if-changed: an already-wrapped, unchanged config
  * writes zero bytes.

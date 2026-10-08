@@ -1,8 +1,8 @@
 /**
  * mcpAutoWrite.ts — write-if-changed idempotency and discoverMcpServers.
  *
- * Phase D makes `injectMcpServer` a continuous sync-loop invariant instead of
- * a one-shot run only from `intutic connect` (see syncLoop.ts step 3c). That
+ * `injectMcpServer` is a continuous invariant, run by `intutic connect` on
+ * every sync cycle rather than once at startup. That
  * only works if re-running the wrap on an already-wrapped, unchanged config
  * writes zero bytes — otherwise every ~30s sync cycle churns every harness
  * config's mtime and fires a spurious filesystem-watch event. These tests pin

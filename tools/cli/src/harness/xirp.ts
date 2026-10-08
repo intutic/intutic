@@ -13,13 +13,11 @@
  * That means this adapter exists for DETECTION/reporting only. `writeConfig`
  * writes nothing: whatever Intutic already writes for the wrapped harness
  * (`claudeCode.ts` / `codex.ts` / `antigravity.ts`'s own adapters) is what
- * governs a tool call made inside a Xirp-managed session — PROVIDED those
- * files actually reach the git worktree Xirp creates for that session, which
- * they do not by default: a worktree checkout has its own independent
- * working tree, and project-tier governance files are untracked. Part B of
- * the phase that added this adapter (`services/sync-daemon/src/lib/
- * gitWorktrees.ts` + its wiring into `syncLoop.ts`) is what closes that gap;
- * this adapter's only job is recognising that a Xirp-managed workspace is
+ * governs a tool call made inside a Xirp-managed session. Project-level
+ * files do not reach the git worktree Xirp creates for that session (a
+ * worktree has its own working tree, and these files are untracked), so it
+ * is the wrapped harness's user-level registration that applies there. This
+ * adapter's only job is recognising that a Xirp-managed workspace is
  * present at all, so `intutic status`/`intutic init` can report it.
  *
  * See `services/sync-daemon/__tests__/harness/gateRegistry.ts`'s NO_GATE row

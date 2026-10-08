@@ -10,7 +10,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { refreshGateCaches } from '../src/syncLoop.js'
+import { refreshGateCaches } from '../src/syncCycle.js'
 import { DEFAULT_SNAPSHOT_DIR } from '../src/lib/policySnapshot.js'
 
 function controlPlane(rules: Array<{ id: string; toolPattern: string; action: string; reason: string }>) {

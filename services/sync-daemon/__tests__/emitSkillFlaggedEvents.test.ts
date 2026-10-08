@@ -1,9 +1,9 @@
 /**
- * emitSkillFlaggedEvents.test.ts — TD-358: skill-content scan findings
- * surfaced as `skill_flagged` hook events.
+ * emitSkillFlaggedEvents.test.ts — skill-content scan findings surfaced as
+ * `skill_flagged` hook events.
  *
- * `emitSkillFlaggedEvents` is a pure-ish side-effecting function extracted
- * from `syncLoop.ts`'s per-cycle harness loop specifically so this can be
+ * `emitSkillFlaggedEvents` is a pure-ish side-effecting function kept apart
+ * from `reportHarnessAgents`'s per-cycle harness loop so this can be
  * tested without mocking the whole sync cycle (control-plane fetch, config
  * writing, session reporting, …) — it only needs a workspace root and a
  * `facets.skills` array, the same shape `collectAgentReport` already
@@ -17,7 +17,7 @@ import * as fs from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { emitSkillFlaggedEvents } from '../src/syncLoop.js'
+import { emitSkillFlaggedEvents } from '../src/syncCycle.js'
 import type { AgentReport } from '../src/agentReporter.js'
 
 type Skill = AgentReport['facets']['skills'][number]
@@ -116,7 +116,7 @@ describe('emitSkillFlaggedEvents', () => {
   it('dedupes within one cycle via the shared alreadyEmitted set, across repeated calls', async () => {
     const alreadyEmitted = new Set<string>()
     const flagged = [skill({ name: 'dup', clean: false, findingsCount: 1 })]
-    // Simulates the syncLoop caller invoking this once per active harness in
+    // Simulates the per-cycle caller invoking this once per active harness in
     // the workspace — the same skill, scanned identically each time.
     emitSkillFlaggedEvents({ workspaceRoot, workspaceId: 'ws_1', harnessType: 'claude-code' as any, skills: flagged, alreadyEmitted })
     emitSkillFlaggedEvents({ workspaceRoot, workspaceId: 'ws_1', harnessType: 'cursor' as any, skills: flagged, alreadyEmitted })

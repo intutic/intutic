@@ -16,7 +16,7 @@
  *
  * Opt-in via `WorkspaceSettings.decisionsLogEnabled` (default off). The
  * CALLER is responsible for that gate — `refreshDecisionsDigest` always
- * fetches and writes when invoked, so `syncLoop.ts` only calls it when the
+ * fetches and writes when invoked, so `intutic connect` only calls it when the
  * workspace has opted in. When disabled, the caller simply stops calling
  * this module; existing files are left as they were last written rather than
  * being force-deleted (a developer's editor may have that file open) or
