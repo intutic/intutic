@@ -44,6 +44,7 @@ import { checkTofu, decideTofuAction } from './tofu.js'
 import { RegistryObserver } from './registryObserver.js'
 import { ApprovalHolds } from './approvalHold.js'
 import { callerIdentity } from './identity.js'
+import { PACKAGE_VERSION } from './version.js'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
@@ -651,7 +652,7 @@ export class McpGovernanceProxy {
 
     const server = new McpServer({
       name: 'intutic',
-      version: '0.1.0',
+      version: PACKAGE_VERSION,
     })
 
     const cpUrl = this.config.controlPlaneUrl
