@@ -1254,11 +1254,13 @@ export async function runConnect(opts: {
     if (isGovernedConfigPath(changedPath, filename)) {
       try {
         const sops = lastCachedConfig?.sops ?? []
+        // The proxy URL too: the restored gate scripts carry it, and an empty
+        // one would be written into them.
         const tampered = await guardSettingsFile(
           changedPath,
           safeConfig.workspaceRoot,
           sops,
-          undefined,
+          lastCachedConfig?.proxyUrl ?? '',
           undefined,
           new Set(safeConfig.disconnectedHarnesses ?? []),
         )

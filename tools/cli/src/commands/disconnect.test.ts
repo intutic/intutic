@@ -127,12 +127,16 @@ const appSupport = (...p: string[]) => (darwin ? join(home, 'Library', 'Applicat
 
 interface Case {
   harness: string
+  /** Test title, when one harness has more than one case. */
+  name?: string
   /** The user's own config before connect. */
   seed: () => Promise<void>
   /** What connect writes; the harness adapter and the MCP wrapping when omitted. */
   connect?: () => Promise<void>
   /** An edit the user makes while connected. */
   edit: () => Promise<void>
+  /** Assertions about what connect wrote, run while connected. */
+  connected?: () => Promise<void>
 }
 
 async function connectHarness(harness: string): Promise<void> {
@@ -289,6 +293,24 @@ const CASES: Case[] = [
     edit: () => editText(join(ws, 'config.toml'), 'workspace_base = "./"', 'workspace_base = "./src"'),
   },
   {
+    // `base_url` is set in `[llm]` only: an earlier text edit rewrote the
+    // first `base_url` line in the file, whichever table held it.
+    harness: 'openhands',
+    name: 'openhands, base_url in other tables',
+    seed: async () => {
+      await put(join(ws, 'config.toml'), '[llm.draft]\nmodel = "gpt-4o-mini"\nbase_url = "https://draft.example/v1"\n\n[llm]\nmodel = "gpt-4o"\n')
+      await put(join(home, '.openhands', 'config.toml'), '[mcp]\nbase_url = "https://mcp.example"\n')
+    },
+    edit: () => editText(join(ws, 'config.toml'), 'model = "gpt-4o"', 'model = "gpt-4.1"'),
+    connected: async () => {
+      const project = await fs.readFile(join(ws, 'config.toml'), 'utf-8')
+      expect(project).toContain('[llm.draft]\nmodel = "gpt-4o-mini"\nbase_url = "https://draft.example/v1"\n')
+      expect(project).toContain(`[llm]\nbase_url = "${PROXY}/v1"\n`)
+      const user = await fs.readFile(join(home, '.openhands', 'config.toml'), 'utf-8')
+      expect(user).toBe(`[mcp]\nbase_url = "https://mcp.example"\n\n[llm]\nbase_url = "${PROXY}/v1"\n`)
+    },
+  },
+  {
     harness: 'antigravity',
     seed: async () => {
       await put(join(ws, '.gemini', 'settings.json'), { theme: 'dark', customInstructions: 'Be brief.' })
@@ -317,6 +339,24 @@ const CASES: Case[] = [
         '# goose config\nprovider:\n  name: openai\n  host: https://api.openai.com\nmcp:\n  fetch:\n    command: uvx\n    args: [mcp-fetch]\n',
       ),
     edit: () => editText(join(home, '.config', 'goose', 'config.yaml'), 'name: openai', 'name: anthropic'),
+  },
+  {
+    // The proxy host and the gate registration are set by key: an earlier
+    // text edit rewrote the first `host:` and `pre_tool_use:` lines in the
+    // file, here the extension's.
+    harness: 'goose',
+    name: 'goose, other host and pre_tool_use keys',
+    seed: () =>
+      put(
+        join(home, '.config', 'goose', 'config.yaml'),
+        'extensions:\n  search:\n    host: https://search.example\n    pre_tool_use: mine.sh\nprovider:\n  name: openai\n',
+      ),
+    edit: () => editText(join(home, '.config', 'goose', 'config.yaml'), 'name: openai', 'name: anthropic'),
+    connected: async () => {
+      const text = await fs.readFile(join(home, '.config', 'goose', 'config.yaml'), 'utf-8')
+      expect(text).toContain('    host: https://search.example\n    pre_tool_use: mine.sh\n')
+      expect(text).toContain(`  host: ${PROXY}\n`)
+    },
   },
   {
     harness: 'hermes',
@@ -370,12 +410,13 @@ describe('intutic disconnect restores what connect changed', () => {
   for (const c of CASES) {
     const connect = c.connect ?? (() => connectHarness(c.harness))
 
-    it(`${c.harness}: every file back byte for byte, and a second run changes nothing`, async () => {
+    it(`${c.name ?? c.harness}: every file back byte for byte, and a second run changes nothing`, async () => {
       await c.seed()
       const before = await snapshot()
 
       await connect()
       expect(await snapshot()).not.toEqual(before)
+      await c.connected?.()
 
       expect(await disconnect()).toBeGreaterThan(0)
       expect(Object.fromEntries(await snapshot())).toEqual(Object.fromEntries(before))
@@ -384,7 +425,7 @@ describe('intutic disconnect restores what connect changed', () => {
       expect(Object.fromEntries(await snapshot())).toEqual(Object.fromEntries(before))
     })
 
-    it(`${c.harness}: an edit made while connected survives`, async () => {
+    it(`${c.name ?? c.harness}: an edit made while connected survives`, async () => {
       await c.seed()
       await c.edit()
       const expected = await snapshot()

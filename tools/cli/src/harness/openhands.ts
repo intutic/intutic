@@ -15,7 +15,7 @@ import { HarnessType } from '@intutic/shared-types'
 import type { SyncSopEntry } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
 import { hashFile } from '../lib/hash.js'
-import { writeOpenHandsHooks, mergeOpenHandsToml } from '@intutic/sync-daemon/harness/openhandsHooks'
+import { writeOpenHandsHooks, mergeOpenHandsToml, isOpenHandsConfig } from '@intutic/sync-daemon/harness/openhandsHooks'
 import { keepOriginal } from '@intutic/sync-daemon'
 import { log } from '../lib/logger.js'
 
@@ -25,10 +25,19 @@ export const openhandsAdapter: IHarnessAdapter = {
   type: HarnessType.OPENHANDS,
   configFileName: CONFIG_FILE,
 
+  // `.openhands/` is OpenHands' own per-repository directory (`setup.sh`,
+  // microagents). Without it, a `config.toml` counts only when it is an
+  // OpenHands configuration: the file name alone matched every Hugo site and
+  // any other project with a config.toml.
   async detect(workspaceRoot: string): Promise<boolean> {
     try {
-      await access(join(workspaceRoot, CONFIG_FILE))
+      await access(join(workspaceRoot, '.openhands'))
       return true
+    } catch {
+      // No per-repository directory: look at config.toml.
+    }
+    try {
+      return isOpenHandsConfig(await readFile(join(workspaceRoot, CONFIG_FILE), 'utf-8'))
     } catch {
       return false
     }

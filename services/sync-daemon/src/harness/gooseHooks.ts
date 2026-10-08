@@ -22,6 +22,7 @@ import { keepOriginal, noteWritten } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
 import { hardenGoosePlugin, unharden } from './gooseHardener.js'
 import { emitShellGate, SHELL_EXTRACT, SHELL_FAIL_CLOSED, REVIEW_REQUESTS_BASENAME } from './gateBody.js'
+import { parseDocument, isMap, isScalar } from 'yaml'
 
 const log = createLogger('sync-goose-hooks')
 
@@ -165,6 +166,36 @@ exit 0
 }
 
 /**
+ * Set Intutic's two keys in goose's `config.yaml` text: `provider.host` (the
+ * proxy) and `hooks.pre_tool_use` (the gate script). Edited through the
+ * `yaml` document model, so every other key, comment and list is kept. A text
+ * replace of the first `host:` line used to rewrite whichever key of that name
+ * came first, such as an extension's or an MCP server's.
+ *
+ * An empty `proxyUrl` leaves `provider.host` alone: the settings guard
+ * re-runs this writer to restore the plugin without a URL to hand.
+ *
+ * Returns `null`, to leave the file untouched, when the text is not YAML, is
+ * not a mapping, or holds `provider` or `hooks` as something other than a
+ * mapping.
+ */
+export function mergeGooseConfigYaml(raw: string, proxyUrl: string, hookScript: string): string | null {
+  const doc = parseDocument(raw)
+  if (doc.errors.length > 0) return null
+  if (doc.contents !== null && !isMap(doc.contents)) return null
+  for (const key of ['provider', 'hooks']) {
+    const node = doc.get(key, true)
+    if (node === undefined || isMap(node)) continue
+    // `provider:` with no value: replaced by the mapping below.
+    if (isScalar(node) && node.value === null) doc.delete(key)
+    else return null
+  }
+  if (proxyUrl) doc.setIn(['provider', 'host'], proxyUrl)
+  doc.setIn(['hooks', 'pre_tool_use'], hookScript)
+  return doc.toString()
+}
+
+/**
  * Merge the provider host **and** the `hooks.pre_tool_use` registration into
  * `~/.config/goose/config.yaml`.
  *
@@ -172,52 +203,23 @@ exit 0
  * which wrote its own gate script and registered *that* one here — so goose had
  * two co-installed gates with contradictory models: this one, which enforces
  * locally and fails closed, and that one, which POSTed to the control plane and
- * failed open. Which of them actually ran depended on whether goose honours the
- * plugin `hooks.json` or this config key, and nothing in the tree established
- * which.
- *
- * Absorbing the registration here settles it without needing to know: both
- * mechanisms now name the same script. That is why the answer to "which one does
- * goose read" stopped mattering, rather than being looked up.
+ * failed open. Absorbing the registration here settles it: both mechanisms
+ * name the same script.
  */
 async function mergeGooseConfig(proxyUrl: string): Promise<void> {
-  let existing = ''
+  let raw = ''
   try {
-    existing = await fs.readFile(GOOSE_CONFIG, 'utf-8')
+    raw = await fs.readFile(GOOSE_CONFIG, 'utf-8')
   } catch {
-    // Deliberate fail-open: no config.yaml yet (first run) or it is unreadable.
-    // Fall through with `existing` at its '' initialiser so the block below
-    // writes a fresh provider stanza rather than aborting the whole sync.
+    // No config.yaml yet (first run) or unreadable: written fresh below.
   }
 
-  // Inject or update provider.host
-  // Goose config.yaml format: provider.host or OPENAI_HOST env var
-  if (existing.includes('provider:')) {
-    if (existing.includes('  host:')) {
-      existing = existing.replace(/^\s*host:\s*.*/m, `  host: "${proxyUrl}"`)
-    } else {
-      existing = existing.replace(/^provider:/m, `provider:\n  host: "${proxyUrl}"`)
-    }
-  } else {
-    existing += `\nprovider:\n  host: "${proxyUrl}"\n`
+  const existing = mergeGooseConfigYaml(raw, proxyUrl, path.join(PLUGIN_DIR, 'scripts', 'intutic-check.sh'))
+  if (existing === null) {
+    log.warn({ action: 'goose_config_merge_skipped', path: GOOSE_CONFIG }, `${GOOSE_CONFIG} is not a YAML mapping Intutic can merge into — left untouched`)
+    return
   }
-
-  // Register the gate under `hooks.pre_tool_use`, pointing at the script this
-  // module writes.
-  const hookScript = path.join(PLUGIN_DIR, 'scripts', 'intutic-check.sh')
-  const hookLine = `  pre_tool_use: ${hookScript}`
-  if (!(existing.includes('pre_tool_use:') && existing.includes(hookScript))) {
-    // Replace any stale pre_tool_use line rather than adding a second one — an
-    // earlier install pointed this at gooseHooksWriter's script, and two
-    // registrations under one key is how the double gate started.
-    if (/^\s*pre_tool_use:.*$/m.test(existing)) {
-      existing = existing.replace(/^\s*pre_tool_use:.*$/m, hookLine)
-    } else if (/^hooks:/m.test(existing)) {
-      existing = existing.replace(/^hooks:/m, `hooks:\n${hookLine}`)
-    } else {
-      existing = existing.trimEnd() + `\nhooks:\n${hookLine}\n`
-    }
-  }
+  if (existing === raw) return
 
   const tmpConfig = GOOSE_CONFIG + '.intutic-tmp'
   await keepOriginal(GOOSE_CONFIG, os.homedir())
