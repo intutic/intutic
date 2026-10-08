@@ -192,7 +192,7 @@ export function printOnboardingGuide(harnesses: string[], userAuthToken?: string
 
       case 'windsurf':
         writeCliOutput(`  Windsurf has no base-URL setting. intutic connect routes Cascade through the`)
-        writeCliOutput(`  proxy's TLS interception (http.proxy in ~/.codeium/windsurf/settings.json).`)
+        writeCliOutput(`  proxy's TLS interception (http.proxy in Windsurf's user settings.json).`)
         break
 
       case 'dsh':

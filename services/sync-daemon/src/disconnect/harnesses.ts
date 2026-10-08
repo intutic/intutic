@@ -32,6 +32,7 @@ import {
   windsurfConfigPath,
 } from '../harness/mcpAutoWrite.js'
 import { jetbrainsConfigRoot } from '../harness/windsurfJetBrainsProxy.js'
+import { windsurfSettingsPath } from '../harness/windsurfHooks.js'
 import { resolveClaudeDesktopConfigPath } from '../harness/claudeDesktopHooks.js'
 import { parseComponentOptions, serializeComponentOptions, type ComponentOptionsFile } from '../harness/jetbrainsXmlConfig.js'
 import { resolveDshHome, listDshProfileDirs } from '../harness/dshHooks.js'
@@ -273,11 +274,21 @@ function cascadeHooks(plan: DisconnectPlan, file: string, workspaceRoot: string)
  * switched off with them. Both keys naming the same loopback listener with
  * the check off is the writer's signature, recognised even when connect
  * predates the recorded proxy URLs; the listener is then passed on, for the
- * JetBrains settings it also pointed there.
+ * JetBrains settings it also pointed there. Both the settings file Windsurf
+ * reads and `~/.codeium/windsurf/settings.json`, where earlier versions wrote
+ * the keys.
  */
 async function windsurfProxySettings(plan: DisconnectPlan, ctx: DisconnectContext): Promise<string | null> {
   let listener: string | null = null
-  await json(plan, join(home(), '.codeium', 'windsurf', 'settings.json'), home(), (doc, c) => {
+  for (const file of [windsurfSettingsPath(), join(home(), '.codeium', 'windsurf', 'settings.json')]) {
+    listener = (await windsurfProxySettingsFile(plan, ctx, file)) ?? listener
+  }
+  return listener
+}
+
+async function windsurfProxySettingsFile(plan: DisconnectPlan, ctx: DisconnectContext, file: string): Promise<string | null> {
+  let listener: string | null = null
+  await json(plan, file, home(), (doc, c) => {
     const proxy = doc['http.proxy']
     const signature =
       typeof proxy === 'string' && /^http:\/\/127\.0\.0\.1:\d+$/.test(proxy) && doc['codeium.proxy'] === proxy && doc['http.proxyStrictSSL'] === false

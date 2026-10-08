@@ -5,8 +5,9 @@
  * (.windsurf/hooks.json) governance hooks using the Windsurf Cascade
  * hook system (exit code 2 = block).
  *
- * Also writes the proxy settings into ~/.codeium/windsurf/settings.json
- * so that Windsurf routes HTTP traffic through the Intutic TLS MITM proxy,
+ * Also writes the proxy settings into Windsurf's user settings.json (see
+ * `windsurfSettingsPath`) so that Windsurf routes HTTP traffic through the
+ * Intutic TLS MITM proxy,
  * enabling governance of Cascade AI traffic that has no native base URL override.
  *
  * LLD #14 — Phase 3 cross-harness defence
@@ -103,6 +104,31 @@ const log = createLogger('sync-windsurf-hooks')
  *  HOME are honoured. */
 function windsurfUserDir(): string {
   return path.join(os.homedir(), '.codeium', 'windsurf')
+}
+
+/**
+ * Windsurf Desktop's user `settings.json`, the file `http.proxy` is read from.
+ * Windsurf is a VS Code fork, so it keeps user settings where VS Code does,
+ * under its own product name (`nameShort: "Windsurf"` in the app's
+ * product.json): `User/settings.json` in the platform's application-data
+ * directory. Checked against a Windsurf 1.9600.41 install on macOS, whose
+ * user settings live in ~/Library/Application Support/Windsurf/User/; the
+ * Linux and
+ * Windows directories are VS Code's
+ * (https://code.visualstudio.com/docs/configure/settings#_settings-file-locations).
+ * `~/.codeium/windsurf/` holds Cascade's hooks.json and mcp_config.json, not
+ * editor settings; earlier versions wrote the proxy keys there, where Windsurf
+ * never read them.
+ */
+export function windsurfSettingsPath(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+  home: string = os.homedir(),
+): string {
+  const user = ['Windsurf', 'User', 'settings.json']
+  if (platform === 'darwin') return path.join(home, 'Library', 'Application Support', ...user)
+  if (platform === 'win32') return path.join(env.APPDATA || path.join(home, 'AppData', 'Roaming'), ...user)
+  return path.join(env.XDG_CONFIG_HOME || path.join(home, '.config'), ...user)
 }
 
 /** The JetBrains plugin's user-level hooks.json lives directly under
@@ -335,7 +361,7 @@ export async function writeWindsurfHooks(
   // 3. HTTP proxy settings — Desktop's own settings.json. Merged: the keys
   // below are the only ones Intutic owns, and a file that is not a plain JSON
   // object is left alone (see jsonMergeTarget.ts).
-  const settingsPath = path.join(windsurfUserDir(), 'settings.json')
+  const settingsPath = windsurfSettingsPath()
   await keepOriginal(settingsPath, workspaceRoot)
   // The local listener, not the configured proxy URL: disconnect recognises
   // the proxy settings below, and the JetBrains ones, by it.
@@ -345,6 +371,7 @@ export async function writeWindsurfHooks(
     // Provenance fields earlier versions stamped when they owned the whole file.
     delete existingSettings._comment
     delete existingSettings._lastSync
+    await fs.mkdir(path.dirname(settingsPath), { recursive: true })
     await atomicWriteJson(settingsPath, {
       ...existingSettings,
       'http.proxy': `http://127.0.0.1:${proxyPort}`,

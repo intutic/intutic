@@ -4,7 +4,7 @@
  * Writes .windsurfrules governance text and injects Cascade hook scripts
  * at user-level (~/.codeium/windsurf/hooks.json) and workspace-level
  * (.windsurf/hooks.json), merged with any hooks already there. Also merges
- * HTTP proxy settings into ~/.codeium/windsurf/settings.json, and switches
+ * HTTP proxy settings into Windsurf's user settings.json, and switches
  * the IDE HTTP proxy of every JetBrains IDE where the Windsurf plugin is set
  * up, so Windsurf's AI traffic goes through the Intutic TLS MITM proxy.
  *

@@ -5,7 +5,7 @@
  *
  * # What this configures, and why it takes two files per IDE
  *
- * Unlike Desktop (one fixed `~/.codeium/windsurf/settings.json`), the
+ * Unlike Desktop (one user `settings.json`, see `windsurfSettingsPath`), the
  * JetBrains plugin has no config surface of its own for a manual proxy
  * endpoint — confirmed by extracting the plugin's own compiled settings
  * class (`com.codeium.intellij.settings.AppSettingsState`, decompiled from

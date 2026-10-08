@@ -208,14 +208,19 @@ const CASES: Case[] = [
     harness: 'windsurf',
     seed: async () => {
       await put(join(ws, '.windsurfrules'), 'Explain before editing.\n')
-      await put(join(home, '.codeium', 'windsurf', 'settings.json'), { 'editor.fontSize': 13, 'http.proxy': 'http://corp-proxy:3128' })
+      await put(appSupport('Windsurf', 'User', 'settings.json'), { 'editor.fontSize': 13, 'http.proxy': 'http://corp-proxy:3128' })
       await put(join(home, '.codeium', 'windsurf', 'mcp_config.json'), { mcpServers: { fs: { command: 'npx', args: ['fs-mcp'] } } })
       await put(
         join(darwin ? appSupport('JetBrains') : join(home, '.config', 'JetBrains'), 'IntelliJIdea2026.1', 'options', 'CodeiumSettings.xml'),
         '<application>\n  <component name="com.codeium.intellij.settings.AppSettingsState">\n    <option name="indexingMaxFileCount" value="5000" />\n  </component>\n</application>\n',
       )
     },
-    edit: () => editJson(join(home, '.codeium', 'windsurf', 'settings.json'), (d) => { d['editor.tabSize'] = 2 }),
+    edit: () => editJson(appSupport('Windsurf', 'User', 'settings.json'), (d) => { d['editor.tabSize'] = 2 }),
+    connected: async () => {
+      const settings = JSON.parse(await fs.readFile(appSupport('Windsurf', 'User', 'settings.json'), 'utf-8'))
+      expect(settings['http.proxy']).toBe('http://127.0.0.1:4000')
+      expect(existsSync(join(home, '.codeium', 'windsurf', 'settings.json'))).toBe(false)
+    },
   },
   {
     harness: 'github-copilot',

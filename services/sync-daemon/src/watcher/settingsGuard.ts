@@ -27,7 +27,7 @@ import { writeClineHooks } from '../harness/clineHooks.js'
 import { writeCursorHooks } from '../harness/cursorHooks.js'
 import { writeOpenHandsHooks } from '../harness/openhandsHooks.js'
 import { writeGooseHooks } from '../harness/gooseHooks.js'
-import { writeWindsurfHooks } from '../harness/windsurfHooks.js'
+import { writeWindsurfHooks, windsurfSettingsPath } from '../harness/windsurfHooks.js'
 import { writeMuseHooks } from '../harness/museHooks.js'
 import { writeOpenCodeHooks, OPENCODE_PLUGIN_DIR, OPENCODE_PLUGIN_FILE, OPENCODE_PLUGIN_V2_FILE } from '../harness/openCodeHooks.js'
 import { writeGrokHooks } from '../harness/grokHooks.js'
@@ -55,7 +55,7 @@ export function buildProtectedPaths(workspaceRoot: string): string[] {
     path.join(workspaceRoot, '.cursor', 'hooks.json'),
     // ── Windsurf ─────────────────────────────────────────────────────
     path.join(home, '.codeium', 'windsurf', 'hooks.json'),
-    path.join(home, '.codeium', 'windsurf', 'settings.json'),
+    windsurfSettingsPath(),
     // JetBrains plugin's separate user-level path (no `windsurf`
     // subdirectory) — see windsurfHooks.ts's module doc comment.
     path.join(home, '.codeium', 'hooks.json'),

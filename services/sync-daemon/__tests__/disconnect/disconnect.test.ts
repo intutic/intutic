@@ -23,6 +23,9 @@ let base: string
 let home: string
 let ws: string
 const prevHome = process.env.HOME
+// Settings paths that follow these would leave the temporary home.
+const prevXdg = process.env.XDG_CONFIG_HOME
+const prevAppData = process.env.APPDATA
 
 beforeEach(async () => {
   base = await fs.mkdtemp(join(tmpdir(), 'intutic-disconnect-unit-'))
@@ -30,10 +33,15 @@ beforeEach(async () => {
   ws = join(home, 'project')
   await fs.mkdir(ws, { recursive: true })
   process.env.HOME = home
+  delete process.env.XDG_CONFIG_HOME
+  process.env.APPDATA = join(home, 'AppData', 'Roaming')
 })
 
 afterEach(async () => {
   process.env.HOME = prevHome
+  if (prevXdg !== undefined) process.env.XDG_CONFIG_HOME = prevXdg
+  if (prevAppData === undefined) delete process.env.APPDATA
+  else process.env.APPDATA = prevAppData
   await fs.rm(base, { recursive: true, force: true })
 })
 
@@ -220,6 +228,14 @@ describe('files with no record', () => {
     await put(settings, { 'http.proxy': 'http://corp-proxy:3128' })
     await disconnect()
     expect(await readJson(settings)).toEqual({ 'http.proxy': 'http://corp-proxy:3128' })
+  })
+
+  it('removes the proxy settings from the file Windsurf reads as well as the old location', async () => {
+    const { windsurfSettingsPath } = await import('../../src/harness/windsurfHooks.js')
+    const settings = windsurfSettingsPath()
+    await put(settings, { 'http.proxy': 'http://127.0.0.1:4100', 'http.proxyStrictSSL': false, 'codeium.proxy': 'http://127.0.0.1:4100', theme: 'x' })
+    await disconnect()
+    expect(await readJson(settings)).toEqual({ theme: 'x' })
   })
 
   it('recognises the Windsurf proxy settings by the shape connect writes them in', async () => {
