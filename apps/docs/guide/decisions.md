@@ -34,7 +34,7 @@ The table lists each entry's **Alert** id, what was **Requested by the agent**, 
 
 ### Approving or rejecting
 
-Override requests are approved or rejected from their **Slack notification**, with [`intutic decision approve|reject`](/reference/cli#intutic-decision-approve-holdid), or through the API, not from the dashboard; the outcome then shows here.
+Override requests are approved or rejected from their **Slack notification**, with [`intutic decision approve|reject`](/reference/cli#intutic-decision-approve), or through the API, not from the dashboard; the outcome then shows here.
 
 ```
 POST /api/v1/decisions/:entryId/review
