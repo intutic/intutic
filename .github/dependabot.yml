@@ -9,10 +9,16 @@
 # whenever the pinned action publishes a new release, so the pin stays
 # deliberate and reviewed rather than either mutable or stale.
 #
-# Scoped to github-actions only. npm dependencies already have their own
-# deliberate mechanism (pnpm's minimumReleaseAge cooldown) — an additional
-# Dependabot version-bump flow for that ecosystem would duplicate or
-# conflict with it rather than close a real gap.
+# Version bumps are scoped to github-actions only. npm dependencies already
+# have their own deliberate mechanism (pnpm's minimumReleaseAge cooldown) — an
+# additional Dependabot version-bump flow for that ecosystem would duplicate
+# or conflict with it rather than close a real gap.
+#
+# Security updates are the exception: Dependabot opens them for npm, pip and
+# cargo whatever this file says, one pull request per package, each running
+# the full CI. The entries below (open-pull-requests-limit: 0 keeps version
+# updates off; security updates have their own limit) group them: one pull
+# request per ecosystem and directory.
 version: 2
 updates:
   - package-ecosystem: "github-actions"
@@ -28,3 +34,33 @@ updates:
       codeql-action:
         patterns:
           - "github/codeql-action/*"
+
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
+    groups:
+      npm-security:
+        applies-to: security-updates
+        patterns: ["*"]
+
+  - package-ecosystem: "pip"
+    directory: "/packages/intutic-clawde"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
+    groups:
+      pip-security:
+        applies-to: security-updates
+        patterns: ["*"]
+
+  - package-ecosystem: "cargo"
+    directories: ["/", "/packages/proxy"]
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
+    groups:
+      cargo-security:
+        applies-to: security-updates
+        patterns: ["*"]

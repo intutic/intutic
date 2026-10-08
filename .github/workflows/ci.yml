@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # The nightly pricing re-pin (pricing-repin.yml) starts CI on its branch
+  # itself: a pull request opened with GITHUB_TOKEN starts no workflows.
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
