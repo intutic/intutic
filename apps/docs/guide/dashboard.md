@@ -89,7 +89,7 @@ and reports what it finds as one of four states:
 | State | What it means |
 |-------|---------------|
 | **Intact** | Across the walked snapshots, every one names the snapshot that actually precedes it and every stored body still hashes to its recorded `content_hash`. |
-| **Nothing verified — no snapshots** | The workspace has no config snapshots. Amber, never green: an absent chain is not a clean one. If configs should be captured here, the sync daemon is not reaching the control plane. |
+| **Nothing verified — no snapshots** | The workspace has no config snapshots. Amber, never green: an absent chain is not a clean one. The CLI does not upload harness config bodies, so a chain exists only where another client posts snapshots. |
 | **_n_ broken links** | A snapshot names a predecessor that is not the snapshot before it — what deleting a snapshot leaves behind. Both ends are named: the snapshot doing the naming, the hash it named, and the snapshot that actually precedes it. |
 | **_n_ content mismatches** | A stored body no longer hashes to the `content_hash` recorded with it — the body was rewritten in place. |
 
