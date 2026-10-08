@@ -2529,7 +2529,7 @@ intutic team create-workspace tm_abc123 --name "payments-service"
 
 ---
 
-## `intutic exec` <Badge type="tip" text="Cloud" />
+## `intutic exec`
 
 Execute a command wrapped with Intutic proxy environment variables.
 
@@ -2569,11 +2569,18 @@ Injects the proxy environment into the child process, then spawns it with inheri
 | `OPENAI_API_BASE_URL` | OpenWebUI |
 | `OPENAI_HOST` | Goose (host only, no `/v1`) |
 | `ANTHROPIC_BASE_URL` | Claude Code, Anthropic SDK (host only) |
-| `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `INTUTIC_API_KEY` | API key for all of the above |
+| `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `INTUTIC_API_KEY` | The workspace API key, when you are logged in |
 
-Requires `intutic login` first. The variables point at the local proxy, `http://localhost:4000`,
-or at `INTUTIC_PROXY_URL` when it is set; inside `--sandbox` they point at the host the proxy runs
-on.
+The base-URL variables point at the local proxy, `http://localhost:4000`, or at
+`INTUTIC_PROXY_URL` when it is set; inside `--sandbox` they point at the host the proxy runs on.
+
+**Without a login** (open core, with [`intutic start`](#intutic-start) running) only the base URLs
+change: the agent keeps the provider keys already in its environment, and the standalone proxy
+passes them through to the provider. With `--sandbox`, `OPENAI_API_KEY` and `ANTHROPIC_API_KEY`
+are handed into the container for the same reason.
+
+**Logged in**, the key variables are set to the workspace key, the workspace's sandbox requirement
+applies, and a sandboxed run is recorded as a session.
 
 **Examples:**
 

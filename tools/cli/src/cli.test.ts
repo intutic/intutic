@@ -29,12 +29,16 @@ afterAll(async () => {
   await rm(home, { recursive: true, force: true })
 })
 
-function run(args: string[], cwd = here): Promise<{ code: number; stdout: string; stderr: string }> {
+function run(
+  args: string[],
+  cwd = here,
+  extraEnv: Record<string, string> = {},
+): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((done) => {
     const child = execFile(
       process.execPath,
       ['--import', TSX, CLI, ...args],
-      { cwd, env: { ...process.env, HOME: home, INTUTIC_DEV: '', NO_COLOR: '1' }, timeout: 30_000 },
+      { cwd, env: { ...process.env, HOME: home, INTUTIC_DEV: '', NO_COLOR: '1', ...extraEnv }, timeout: 30_000 },
       (err, stdout, stderr) => {
         const code = err ? (typeof err.code === 'number' ? err.code : 1) : 0
         done({ code, stdout, stderr })
@@ -169,5 +173,17 @@ describe('intutic sync-context --git', () => {
     expect((await run(['sync-context', '--git'], repo)).code).toBe(0)
     const saved = JSON.parse(await readFile(join(repo, '.intutic', 'git-context.json'), 'utf8'))
     expect(saved.git).toEqual({ branch: 'feature-x', commit: head })
+  }, 30_000)
+})
+
+describe('intutic exec without a login', () => {
+  it('points the agent at the proxy and leaves its own provider key in place', async () => {
+    const script = 'process.stdout.write("RESULT " + process.env.ANTHROPIC_BASE_URL + " " + process.env.ANTHROPIC_API_KEY)'
+    const res = await run(['exec', '--', process.execPath, '-e', script], here, {
+      ANTHROPIC_API_KEY: 'own-provider-key',
+      INTUTIC_PROXY_URL: '',
+    })
+    expect(res.code).toBe(0)
+    expect(res.stdout).toMatch(/RESULT http:\/\/localhost:4000\S* own-provider-key/)
   }, 30_000)
 })

@@ -10,9 +10,9 @@
  * - OPENAI_API_BASE_URL (OpenWebUI)
  * - OPENAI_HOST         (Goose)
  * - ANTHROPIC_BASE_URL  (Claude Code, Anthropic SDK — host only)
- * - ANTHROPIC_API_KEY   (Claude Code)
- * - OPENAI_API_KEY      (all OpenAI-compatible tools)
- * - INTUTIC_API_KEY     (Intutic-native tools)
+ * - ANTHROPIC_API_KEY   (Claude Code)                 — only when logged in
+ * - OPENAI_API_KEY      (all OpenAI-compatible tools) — only when logged in
+ * - INTUTIC_API_KEY     (Intutic-native tools)        — only when logged in
  *
  * LLD #8 — Sync Daemon / CLI
  * @module
@@ -32,7 +32,6 @@ import {
   type GraphIdentity,
 } from '../lib/graphIdentity.js'
 import { log } from '../lib/logger.js'
-import { NOT_AUTHENTICATED } from '../lib/authMessages.js'
 import { selectBackend, type SandboxKind, type SandboxSpec } from '../lib/sandbox/index.js'
 import pc from 'picocolors'
 
@@ -130,11 +129,13 @@ function trimTrailingSlashes(s: string): string {
 /**
  * Build the proxy environment variables for a child process.
  *
- * @param apiKey   - Intutic API key (intk_...)
+ * @param apiKey   - The workspace API key, or undefined when not logged in:
+ *   the key variables are then left out, so the agent keeps its own provider
+ *   keys and the standalone proxy forwards them upstream.
  * @returns Record of env vars to inject
  */
 export function buildProxyEnv(
-  apiKey: string,
+  apiKey: string | undefined,
   identity?: GraphIdentity,
   proxyUrlOverride?: string,
 ): Record<string, string> {
@@ -148,7 +149,8 @@ export function buildProxyEnv(
   // launch overrides it with the host-gateway alias, because inside the sandbox
   // `localhost` is the sandbox, not the host the proxy runs on.
   const rawHost = trimTrailingSlashes(
-    proxyUrlOverride ?? process.env.INTUTIC_PROXY_URL ?? 'http://localhost:4000',
+    // `||`, not `??`: an exported-but-empty INTUTIC_PROXY_URL means unset.
+    proxyUrlOverride ?? (process.env.INTUTIC_PROXY_URL || 'http://localhost:4000'),
   )
 
   // Graph identity rides in the base URL. Harnesses append their own path to
@@ -167,13 +169,16 @@ export function buildProxyEnv(
     OPENAI_API_BASE_URL: proxyUrl,
     // Goose (uses OPENAI_HOST, not OPENAI_API_BASE)
     OPENAI_HOST: proxyHost,
-    // All OpenAI-compatible API keys
-    OPENAI_API_KEY: apiKey,
     // Anthropic SDK / Claude Code (host only — appends /v1/messages itself)
     ANTHROPIC_BASE_URL: proxyHost,
-    ANTHROPIC_API_KEY: apiKey,
-    // Intutic-native
-    INTUTIC_API_KEY: apiKey,
+  }
+
+  if (apiKey !== undefined) {
+    // All OpenAI-compatible API keys, Claude Code, and Intutic-native tools
+    // authenticate to the proxy with the workspace key.
+    env.OPENAI_API_KEY = apiKey
+    env.ANTHROPIC_API_KEY = apiKey
+    env.INTUTIC_API_KEY = apiKey
   }
 
   if (identity) {
@@ -215,12 +220,12 @@ export async function runExec(
     process.exit(1)
   }
 
-  // Load credentials
+  // A login is optional. With one, the agent authenticates to the proxy with
+  // the workspace key and the workspace's sandbox requirement applies. Without
+  // one — open core, `intutic start` — only the base URLs change: the agent
+  // keeps the provider keys already in its environment, and the standalone
+  // proxy forwards them upstream.
   const creds = await loadCredentials()
-  if (!creds) {
-    log.error(NOT_AUTHENTICATED)
-    process.exit(1)
-  }
 
   // Build env. A nested `intutic exec` inherits identity from its parent and
   // becomes a child node; a top-level one starts a new graph.
@@ -232,7 +237,8 @@ export async function runExec(
   }
 
   // Not sandboxed — honour the workspace's sandbox requirement (LLD #63 §6).
-  const requirement = await resolveSandboxRequirement(creds)
+  // Without a login there is no workspace to have one.
+  const requirement = creds ? await resolveSandboxRequirement(creds) : 'off'
   if (requirement === 'require') {
     log.error('This workspace requires agents to run inside a sandbox.')
     log.dim(`Re-run with the sandbox:  intutic exec --sandbox -- ${commandAndArgs.join(' ')}`)
@@ -242,7 +248,7 @@ export async function runExec(
     log.warn('This workspace recommends running agents in a sandbox — add --sandbox.')
   }
 
-  const proxyEnv = buildProxyEnv(creds.apiKey, identity)
+  const proxyEnv = buildProxyEnv(creds?.apiKey, identity)
   const childEnv = { ...process.env, ...proxyEnv }
 
   const [exe, ...args] = commandAndArgs
@@ -250,7 +256,11 @@ export async function runExec(
   // Print info
   log.info(`Launching: ${pc.bold(exe)} ${args.join(' ')}`)
   log.dim(`Proxy: ${proxyEnv.OPENAI_API_BASE}`)
-  log.dim(`API Key: ${creds.apiKey.slice(0, 8)}...${creds.apiKey.slice(-4)}`)
+  log.dim(
+    creds
+      ? `API Key: ${creds.apiKey.slice(0, 8)}...${creds.apiKey.slice(-4)}`
+      : 'Not logged in: the agent uses its own provider keys, which the proxy passes through.',
+  )
   log.dim(
     identity.depth === 0
       ? `Graph: ${identity.graphId} (root)`
@@ -295,13 +305,13 @@ export async function runExec(
  */
 async function runSandboxed(
   commandAndArgs: string[],
-  creds: IntuticCredentials,
+  creds: IntuticCredentials | null,
   identity: GraphIdentity,
   opts: SandboxExecOptions,
 ): Promise<void> {
   const port = proxyPortFromEnv()
   const proxyUrlOverride = `http://${PROXY_HOST_ALIAS}:${port}`
-  const proxyEnv = buildProxyEnv(creds.apiKey, identity, proxyUrlOverride)
+  const proxyEnv = buildProxyEnv(creds?.apiKey, identity, proxyUrlOverride)
 
   // The values the runtime will read for the `--env NAME` references.
   //
@@ -312,6 +322,9 @@ async function runSandboxed(
   // off an identity-bearing URL in shell, keeps entrypoint.sh simple and
   // correct regardless of whether identity is present.
   const env: Record<string, string> = {
+    // Without a login the agent's own provider keys must reach it: the
+    // container only receives the variables named here.
+    ...(creds ? {} : ownProviderKeys()),
     ...proxyEnv,
     INTUTIC_SANDBOX_PROXY_HOST: PROXY_HOST_ALIAS,
     INTUTIC_SANDBOX_PROXY_PORT: port,
@@ -352,7 +365,7 @@ async function runSandboxed(
   // (LLD #63 §6, TD-333) once its own firewall + capability drop are in
   // effect, closing the gap where this executionMode:'SANDBOX' record was
   // the entire, self-reported, host-side claim.
-  const sessionId = await openSandboxSession(creds, identity, backend.name)
+  const sessionId = creds ? await openSandboxSession(creds, identity, backend.name) : null
   if (sessionId) env.INTUTIC_SESSION_ID = sessionId
 
   const spec: SandboxSpec = {
@@ -370,8 +383,18 @@ async function runSandboxed(
 
   const code = await backend.run(spec)
 
-  if (sessionId) await closeSandboxSession(creds, sessionId)
+  if (creds && sessionId) await closeSandboxSession(creds, sessionId)
   process.exit(code)
+}
+
+/** The provider keys a standalone sandboxed agent authenticates upstream with. */
+function ownProviderKeys(): Record<string, string> {
+  const keys: Record<string, string> = {}
+  for (const name of ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY']) {
+    const value = process.env[name]
+    if (value) keys[name] = value
+  }
+  return keys
 }
 
 /** Opens a SANDBOX-mode session for telemetry. Returns null on any failure. */

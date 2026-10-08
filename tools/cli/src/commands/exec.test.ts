@@ -123,6 +123,15 @@ describe('Subprocess Exec Env Builder', () => {
     expect(env.INTUTIC_API_KEY).toBe(apiKey)
   })
 
+  it('leaves the key variables alone without a login, so the agent keeps its own', () => {
+    const env = buildProxyEnv(undefined)
+
+    expect(env.ANTHROPIC_BASE_URL).toBe('http://localhost:4000')
+    expect(env).not.toHaveProperty('OPENAI_API_KEY')
+    expect(env).not.toHaveProperty('ANTHROPIC_API_KEY')
+    expect(env).not.toHaveProperty('INTUTIC_API_KEY')
+  })
+
   it('uses INTUTIC_PROXY_URL when set, trailing slashes trimmed', () => {
     const prev = process.env.INTUTIC_PROXY_URL
     process.env.INTUTIC_PROXY_URL = 'https://proxy.internal.example:8443/'
