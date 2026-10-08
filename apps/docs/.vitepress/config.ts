@@ -223,6 +223,7 @@ const sidebarReference = [
         { text: 'SOP Format (Cloud)', link: '/reference/sop-format' },
       ] : []),
       { text: 'clawde SDK (Open-Core)', link: '/reference/clawde-sdk' },
+      { text: 'Tool Gate SDK (Open-Core)', link: '/reference/gate-sdk' },
       { text: 'Model Catalog (Open-Core)', link: '/reference/model-catalog' },
       { text: 'Configuration (Open-Core)', link: '/reference/configuration' },
       { text: 'Harness Matrix (Open-Core)', link: '/reference/harness-security-matrix' },

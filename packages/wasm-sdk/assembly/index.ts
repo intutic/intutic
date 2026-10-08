@@ -241,6 +241,41 @@ class ChangeEntry {
 
 let activeBuffer: Uint8Array | null = null;
 
+// ─── Block reason ─────────────────────────────────────────────────────────
+//
+// `evaluate` can only return a number, so without these every custom rule's
+// block reads "Blocked by custom WASM governance rule" and the operator learns
+// nothing about why. After `evaluate` returns, the proxy calls the two optional
+// exports below and, for a block (1), uses the UTF-8 text they point at
+// instead, trimmed and with control characters removed. Only the first 480
+// bytes are read, and text that is not valid UTF-8 there — including a cut
+// through a multi-byte character — is ignored, so keep it short. A reask (3)
+// keeps the proxy's own message.
+//
+// Each request runs in a fresh instance, so a reason never leaks into the next
+// evaluation. A standalone rule file must re-export `reason_ptr` and
+// `reason_len` for the proxy to see them; only the compiled file's own exports
+// reach the host.
+
+let reasonBytes: ArrayBuffer | null = null;
+
+/** Set the text the proxy reports when this evaluation blocks. */
+export function setReason(reason: string): void {
+  reasonBytes = String.UTF8.encode(reason);
+}
+
+/** Offset of the reason's UTF-8 bytes, or 0 when none was set. Read by the proxy. */
+export function reason_ptr(): i32 {
+  const bytes = reasonBytes;
+  return bytes === null ? 0 : changetype<i32>(bytes);
+}
+
+/** Length of the reason in bytes, or 0 when none was set. Read by the proxy. */
+export function reason_len(): i32 {
+  const bytes = reasonBytes;
+  return bytes === null ? 0 : bytes.byteLength;
+}
+
 export function allocate(size: i32): i32 {
   const buf = new Uint8Array(size);
   activeBuffer = buf;

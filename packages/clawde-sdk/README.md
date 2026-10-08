@@ -10,11 +10,11 @@ npm install @intutic/clawde
 
 ## Features
 
-- **Context Resolution:** Automatically detects current Git branch, PR, CI variables, and parses sync-daemon configurations (`~/.intutic/config.json`).
-- **Pre-flight Budget Gating:** Checks remaining session spend limits before calling LLM endpoints.
-- **Circuit Breaker:** Wraps tasks with strict fallback parameters to isolate execution failures.
-- **Schema Normalization:** Intercepts and translates Anthropic payloads to OpenAI structures.
-- **Policy Callbacks:** Simple event subscriptions for policy execution events (e.g. `hijack`, `kill`).
+- **Context Resolution:** Reads the sync daemon's `~/.intutic/config.json` (git branch, Jira ticket, PagerDuty incident, CI pipeline, workspace, session), falling back to environment variables, and sends it with each `chat()` call.
+- **Budget Check:** `checkBudget()` reports whether the workspace has budget left, from the control plane's `GET /api/v1/budget`.
+- **Circuit Breaker:** `client.circuitBreaker(toolName, options)(fn)` runs `fn` behind an optional budget pre-check, failing closed unless `failOpen` is set.
+- **Schema Normalization:** Translates OpenAI-style parameters to an Anthropic Messages body and back.
+- **Verdict Events:** `client.on('hijack' | 'enhance' | 'kill' | 'bypass', ...)` for verdicts reported in response headers. See the [SDK reference](https://docs.intutic.ai/reference/clawde-sdk#_5-verdicts-and-errors) for how the proxy reports refusals today.
 - **Control-Plane Management (`ControlPlaneClient`):** Org signup, team/workspace creation, gateway registration and assignment, and provider-credential provisioning — the CLI's management surface, callable programmatically. See the [SDK reference](https://docs.intutic.ai/reference/clawde-sdk#control-plane-management-controlplaneclient).
 
 ## License

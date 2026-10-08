@@ -270,7 +270,7 @@ this page claimed:
 ### 16. How are the local Rust proxy and CLI binaries packaged and hosted?
 
 To keep the global developer installation lightweight, the local Rust proxy binary is **not** bundled inside the `@intutic/cli` npm package. Instead:
-*   **Pipeline Compilation:** When a version tag (e.g. `v1.6.0`) is pushed, the Github Actions publish workflow (`.github/workflows/publish.yml`) compiles the Rust proxy code (`packages/proxy`) for five target combinations: `aarch64-apple-darwin`, `x86_64-apple-darwin`, `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, and `x86_64-pc-windows-msvc` — that is, macOS arm64/x64, Linux x64/arm64, and Windows x64.
+*   **Pipeline Compilation:** When a version tag (`v<version>`) is pushed, the Github Actions publish workflow (`.github/workflows/publish.yml`) compiles the Rust proxy code (`packages/proxy`) for five target combinations: `aarch64-apple-darwin`, `x86_64-apple-darwin`, `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, and `x86_64-pc-windows-msvc` — that is, macOS arm64/x64, Linux x64/arm64, and Windows x64.
 *   **GitHub Release Hosting:** The `github-release` job collects every compiled artifact together with the `npm pack` tarballs and attaches them to a GitHub Release for the tag (`gh release create <tag> release-assets/*`); the standalone `pkg`-built CLI executables ride along in the same release. In parallel, `packages/proxy` is published to npm as `@intutic/proxy` — the npm package ships the `bin/proxy.js` launcher only, not a compiled binary, so the tarball stays small on every platform.
 *   **Dynamic Download:** `intutic connect` only fetches a binary in non-dev mode, and only after it fails to find one at `packages/proxy/target/release/intutic-proxy`, then `target/debug/intutic-proxy`, then the global cache `~/.intutic/bin/`. It then detects the local OS/architecture and downloads the matching asset from the GitHub Release for the pinned CLI version — `https://github.com/intutic/intutic/releases/download/v<version>/<asset-name>` (e.g. `intutic-proxy-darwin-arm64`) — marks it executable, and saves it in `~/.intutic/bin/` to run as a local managed process. Because the URL is derived from the release tag, the download can never drift from the published assets. If the download fails, the CLI falls back to `cargo run`.
 
@@ -357,11 +357,11 @@ Although both protect the same compliance boundaries, their engines and executio
 ### 22. Can I write custom, fine-grained validation logic in AssemblyScript?
 
 Yes, absolutely. For complex governance checks that go beyond regular expressions, you can build custom sandboxed filters:
-- **AssemblyScript SDK:** Developers use the `@intutic/wasm-sdk` package to author rules in AssemblyScript. The SDK provides helper classes to read and evaluate the `intutic.context` (representing LLM prompts, tool calls, and DLP findings). Context parameters are handed over as raw binary guest buffers (`Uint8Array`) rather than guest string pointers to ensure maximum memory safety and prevent Wasmtime GC pointer corruption.
-- **Isolated WASM Sandbox:** The compiled `.wasm` binary runs inside the proxy's isolated, fuel-limited WebAssembly engine. Rules run under a strict wasmtime fuel and execution-timeout ceiling and cannot access the filesystem or make network calls.
+- **AssemblyScript SDK:** Rules are written in AssemblyScript against the Rules SDK, a template you copy from `packages/wasm-sdk/` in the open-core repository (it is not an npm package). It parses the request context — tool calls and their arguments, the session's tool history, DLP and injection findings, budget, graph position and declared SOP policy, but never the prompt or request body — into a typed `RequestContext`, and ships starter rules. See [Custom Filters](/guide/wasm-rules#_1-get-the-sdk).
+- **Isolated WASM Sandbox:** The compiled `.wasm` binary runs inside the proxy's isolated, fuel-limited WebAssembly engine. Rules run under a strict wasmtime fuel and execution-timeout ceiling and cannot open files or make network calls; the one file import, `read_referenced_file`, only returns manifests the proxy already resolved from the request's own tool calls.
 - **CLI Verification:** You can run local dry-runs to test rules using the CLI tool:
   ```bash
   intutic policy test --wasm /path/to/rule.wasm --mock /path/to/context.json
   ```
-  Once verified, rules can be uploaded and hot-reloaded dynamically into the live proxy without restart.
+  Once verified, `intutic policy install` (or a dashboard upload) puts the rule in place, and the proxy hot-reloads it without a restart.
 

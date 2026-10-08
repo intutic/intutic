@@ -28,23 +28,38 @@ reached end of life in October 2025.
 
 ## Architecture & Primitives
 
-The `clawde` SDK acts as a client-side wrapper around Anthropic's Message API, OpenAI API, or arbitrary agent tasks. It communicates locally with the Intutic proxy to enforce rules in the developer's execution path.
+`ClawdeClient` is a data-plane client for the local Intutic proxy. `chat()` sends an OpenAI-format request to the proxy's `/v1/chat/completions` route, which governs it and forwards it to the provider.
 
 ```
-[Agent Script] ──> [clawde SDK Wrapper] ──> [Local Proxy (Port 4000)] ──> [LLM API]
+[Agent Script] ──> [ClawdeClient] ──> [Local Proxy (port 4000)] ──> [LLM API]
 ```
+
+The proxy address is `baseUrl` (`base_url` in Python), then `INTUTIC_BASE_URL`, then `http://localhost:4000`. Each attempt times out after 30 seconds and a failed attempt is retried twice; `timeout` and `retries` change both.
+
+For pre-execution checks on the tools an agent runs, rather than on its model calls, use the [Tool Gate SDK](/reference/gate-sdk).
 
 ### 1. Context Resolution
-The SDK automatically resolves git branch names, active pull requests, and CI variables. If the Intutic sync-daemon is running, the SDK reads local state at `~/.intutic/config.json` to resolve the current task, Jira ticket, or incident context.
+`resolveContext()` (`resolve_context()`) reads `~/.intutic/config.json`, which the sync daemon keeps current: git branch, Jira ticket, PagerDuty incident, CI pipeline, working directory, workspace and session. Without that file it falls back to `INTUTIC_WORKSPACE_ID`, `INTUTIC_SESSION_ID`, `GIT_BRANCH`, `GITHUB_RUN_ID` / `BUILDKITE_BUILD_ID` / `CIRCLE_BUILD_NUM` and `PD_INCIDENT_ID`. `chat()` sends the result as an `X-Intutic-Context` header. Pass `autoContext: false` (`auto_context=False`) to skip it.
 
-### 2. Warm-Path Budget Gating
-`checkBudget()` checks a local cache (30-second TTL) or queries the control plane's `GET /api/v1/budget` for the workspace's current spend/remaining. This reports workspace-level budget headroom, not a precise per-call afford-ability check for a specific model/token estimate — the control plane has no endpoint for that. The SDK separately piggybacks on response headers (`X-Intutic-Budget-*`) from the proxy on every `chat()` call to continuously refresh remaining budget without an extra request.
+The TypeScript client also sends the agent-graph headers the proxy uses for [graph guardrails](/guide/graph-guardrails) (`X-Intutic-Graph-Id`, `X-Intutic-Node-Id`, `X-Intutic-Parent-Session`, `X-Intutic-Depth`). They are inherited from `INTUTIC_GRAPH_ID`, `INTUTIC_NODE_ID` and `INTUTIC_DEPTH`, so an agent started by another agent is recorded as its child; pass `graphIdentity` to set them yourself.
 
-### 3. Circuit Breaker Wrapper
-Wrap arbitrary tasks or API calls in a circuit breaker. If pre-flight budget checks fail, or if policy violations are detected, the circuit breaker triggers fallback behaviors (such as returning a default safe response instead of executing the action).
+### 2. Budget Check
+`checkBudget(model, estimatedTokens)` (`check_budget(model, estimated_tokens)`) calls the control plane's `GET /api/v1/budget` and returns `{ allowed, remaining_usd, reason? }`. `allowed` is `remaining_usd > 0` for the whole workspace: the control plane has no per-call estimate, so `model` and `estimatedTokens` only key a 30-second cache. The control-plane address is `controlPlaneUrl` (`control_plane_url`), then `INTUTIC_CONTROL_PLANE_URL`, then Intutic's hosted control plane. With no control plane to reach, it throws `ClawdeConnectionError`.
+
+### 3. Circuit Breaker
+`circuitBreaker(toolName, options)` (`circuit_breaker(tool_name, ...)`) returns a runner: call it with a function and that function runs immediately, behind the breaker.
+
+- `maxCostUsd` (`max_cost_usd`): when set, the breaker runs `checkBudget` first and throws `ClawdeVerdictError('kill', ...)` if the workspace has no budget left. The amount itself is not compared with anything.
+- After the function returns, a result whose `verdict` is `kill` throws `ClawdeVerdictError`.
+- `failOpen` (`fail_open`), default `false`: when `true`, a failed budget check is ignored, and an error from the function is swallowed and the runner returns `null` (`None`).
 
 ### 4. Schema Conversion (TypeScript only)
-Transparently normalizes Anthropic's Message API structures (converting tool call layouts, system parameters, and response structures) to and from OpenAI-compatible formats.
+`provider: 'anthropic'` converts the OpenAI-style `chat()` parameters to an Anthropic Messages body and the reply back to the OpenAI shape. `normalizeRequest()` and `normalizeResponse()` are exported for direct use.
+
+### 5. Verdicts and Errors
+`chat()` reads `x-intutic-verdict`, `x-intutic-budget-remaining` and `x-intutic-budget-pct` from the response, copies them onto the result as `verdict`, `budgetRemainingUsd` and `budgetPctUsed` (`verdict`, `budget_remaining_usd`, `budget_pct_used` in Python), fires the matching [event](#events) for any verdict other than `allow`, and throws `ClawdeVerdictError` on `kill`.
+
+The Intutic proxy does not send those headers today, so `verdict` reads `allow` and no event fires from a proxy response. A request the proxy refuses comes back as an HTTP error — 403 for a block, 409 for a reask, with the reason in the JSON body. `chat()` retries it like any failed attempt, then throws `ClawdeConnectionError` whose message carries the status and the proxy's reason. Catch `ClawdeConnectionError` to handle a refusal.
 
 ---
 
@@ -53,52 +68,63 @@ Transparently normalizes Anthropic's Message API structures (converting tool cal
 ### TypeScript Example
 
 ```typescript
-import { ClawdeClient, circuitBreaker } from '@intutic/clawde';
+import { ClawdeClient, ClawdeConnectionError, ClawdeVerdictError } from '@intutic/clawde'
+import type { ChatResponse } from '@intutic/clawde'
 
-// Initialize the client (auto-resolves config.json context)
 const client = new ClawdeClient({
-  apiKey: process.env.INTUTIC_API_KEY,
-  baseUrl: 'http://127.0.0.1:4000'
-});
+  apiKey: process.env.INTUTIC_API_KEY!,
+  baseUrl: 'http://127.0.0.1:4000',
+})
 
-// Wrap an agent action with policy enforcement
-const runAgentTool = circuitBreaker({
-  client,
-  taskType: 'coding',
-  failOpen: false, // block if proxy is unreachable
-  defaultAction: async () => ({ status: 'blocked', reason: 'Safety circuit tripped' })
-}, async (args) => {
-  const response = await client.messages.create({
-    model: 'claude-3-5-sonnet',
-    max_tokens: 1000,
-    messages: [{ role: 'user', content: `Run tool call: ${args.tool}` }]
-  });
-  return response;
-});
+// Workspace-level headroom check (needs a control plane)
+const budget = await client.checkBudget('claude-sonnet-4-5', 1000)
+if (!budget.allowed) throw new Error(`No budget left: $${budget.remaining_usd}`)
+
+// A runner that wraps one action; calling it runs the action now
+const runDeployCheck = client.circuitBreaker<ChatResponse>('deploy_check', {
+  maxCostUsd: 5,
+  failOpen: false,
+})
+
+try {
+  const response = await runDeployCheck(() =>
+    client.chat({
+      model: 'claude-sonnet-4-5',
+      max_tokens: 1000,
+      messages: [{ role: 'user', content: 'Run the deploy checklist' }],
+    }),
+  )
+  console.log(response.choices[0]?.message.content)
+} catch (err) {
+  if (err instanceof ClawdeVerdictError) console.error(`Circuit breaker tripped: ${err.message}`)
+  else if (err instanceof ClawdeConnectionError) console.error(`Request failed or refused: ${err.message}`)
+  else throw err
+}
 ```
 
 ### Python Example
 
 ```python
-from intutic_clawde import ClawdeClient, ClawdeVerdictError
+import os
 
-# Initialize client (auto-resolves config.json context)
-client = ClawdeClient(api_key=os.environ.get("INTUTIC_API_KEY"))
+from intutic_clawde import ClawdeClient, ClawdeConnectionError, ClawdeVerdictError
 
-# Register listeners for policy outcomes
-client.on("hijack", lambda payload: print(f"Hijacked: {payload}"))
-client.on("kill", lambda payload: print("Task terminated due to budget exhaustion!"))
+client = ClawdeClient(api_key=os.environ["INTUTIC_API_KEY"])
 
-# Wrap a tool execution with a circuit breaker
-@client.circuit_breaker("deploy_production_tool", max_cost_usd=5.0, fail_open=False)
 def run_deploy():
-    # executes target tool action
-    return "successfully deployed"
+    return client.chat(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": "compile build"}],
+    )
 
 try:
-    res = client.chat(model="gpt-4o", messages=[{"role": "user", "content": "compile build"}])
+    # Calling the runner runs run_deploy now, behind the breaker
+    res = client.circuit_breaker("deploy_production_tool", max_cost_usd=5.0, fail_open=False)(run_deploy)
+    print(res["choices"][0]["message"]["content"])
 except ClawdeVerdictError as e:
-    print(f"Request blocked by policy: {e.verdict}")
+    print(f"Circuit breaker tripped: {e}")
+except ClawdeConnectionError as e:
+    print(f"Request failed or refused: {e}")
 ```
 
 ---
@@ -130,6 +156,8 @@ const resolution = await cp.resolveGateway(); // which gateway this workspace sh
 ### Python
 
 ```python
+import os
+
 from intutic_clawde import ControlPlaneClient
 
 cp = ControlPlaneClient(api_key=os.environ["INTUTIC_API_KEY"])  # base_url defaults to Intutic's hosted control plane
@@ -145,7 +173,8 @@ resolution = cp.resolve_gateway()
 | Area | Methods |
 |---|---|
 | Identity | `whoami()` |
-| Org signup | `signupOrg()` / `signup_org()` |
+| Org signup | `signupOrg()` / `signup_org()` — unauthenticated; a self-hosted control plane always refuses it, and the hosted one only accepts it with `INTUTIC_PUBLIC_ORG_SIGNUP=true`, so prefer org creation below |
+| Org creation | `startDomainVerification`, `checkDomainVerification`, `createOrg` / `start_domain_verification`, `check_domain_verification`, `create_org` — publish the returned TXT record, poll until `status` is `verified`, then create the org with that `verificationId` |
 | Teams & workspaces | `listTeams`, `createTeam`, `listTeamWorkspaces`, `createWorkspace` |
 | Gateways | `registerGateway`, `listGateways`, `getGatewayStatus`, `rotateGatewayToken`, `revokeGateway`, `setGatewayConfig`, `assignWorkspaceGateway`, `assignOrgGateway`, `resolveGateway` |
 | Provider credentials | `listProviderCredentials`, `setProviderCredential`, `unsetProviderCredential` |
@@ -156,21 +185,21 @@ Not covered, on purpose: session establishment (`intutic login`/`logout` — sup
 
 ## Events
 
-Register callbacks to act upon policy decisions:
+Register callbacks for the verdicts `chat()` reads from the response headers: `hijack`, `enhance`, `kill` and `bypass`. Each callback receives the chat result, carrying `verdict` and the budget fields. As [Verdicts and Errors](#_5-verdicts-and-errors) explains, the proxy does not send these headers today, so these callbacks do not fire on proxy responses.
 
 ### TypeScript
 ```typescript
 client.on('hijack', (event) => {
-  console.warn(`Policy hijack triggered on trace: ${event.traceId}. Reason: ${event.reason}`);
-});
+  console.warn(`Verdict ${event.verdict}; $${event.budgetRemainingUsd ?? '?'} budget left`)
+})
 
-client.on('kill', (event) => {
-  console.error(`Task killed due to budget exhaustion!`);
-});
+client.on('kill', () => {
+  console.error('Request killed by policy')
+})
 ```
 
 ### Python
 ```python
-client.on("hijack", lambda event: print(f"Hijack triggered: {event['reason']}"))
-client.on("kill", lambda event: print("Killed due to budget limits!"))
+client.on("hijack", lambda event: print(f"Verdict {event['verdict']}; ${event.get('budget_remaining_usd', '?')} budget left"))
+client.on("kill", lambda event: print("Request killed by policy"))
 ```

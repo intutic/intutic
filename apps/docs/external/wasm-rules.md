@@ -82,7 +82,7 @@ The Rust host normalizes the intercepted request context (tool calls, arguments,
   "tool_calls": [{ "id": "call_1", "name": "bash", "arguments": "{\"command\":\"rm -rf /\"}" }],
   "estimated_input_tokens": 1200,
   "budget_remaining_usd": 4.25,
-  "risk_tier": "HIGH",
+  "risk_tier": "High",
   "node_id": "ses_7x2k9m",
   "agent_role": "",
   "graph_id": "ses_7x2k9m",
@@ -104,18 +104,43 @@ serialised without a rename, so the AssemblyScript SDK parses `session_id`, not
 which is what makes ordering and cycle rules possible; see
 [Graph Guardrails](/guide/graph-guardrails).
 
+`risk_tier` is one of `Low`, `Medium`, `High` or `Critical`, spelled exactly
+that way: a rule comparing it with `"HIGH"` never matches.
+
 ### B. Memory Allocation & Injection
 Because WASM sandboxes have isolated linear memory, the host must inject the context:
 1. The host calls the exported WASM function `allocate(len)` (falling back to AssemblyScript's `__new(len, 0)`) to allocate buffer memory within the guest instance.
 2. The host writes the serialized JSON string directly to that allocated offset in the guest's memory.
 
 ### C. Execution
-The host calls the guest's main evaluation entrypoint:
+The host calls the guest's main evaluation entrypoint with the offset and byte
+length of the JSON it just wrote:
 ```typescript
-export function evaluate(requestContextJson: ArrayBuffer): i32
+export function evaluate(offset: i32, len: i32): i32
 ```
 
-### D. Host Imports
+A module must export `memory`, `evaluate`, and `allocate` (or AssemblyScript's
+`__new`, which the host falls back to); `intutic policy install` refuses a
+module missing any of them.
+
+### D. Block Reason
+After `evaluate` returns, the host calls two optional exports, read only
+together:
+
+```typescript
+export function reason_ptr(): i32  // offset of UTF-8 text in linear memory
+export function reason_len(): i32  // its length in bytes
+```
+
+When the verdict is `BLOCK`, that text replaces the generic reason in the
+block response and the incident. The host reads at most 480 bytes, trims them
+and strips control characters, and ignores the reason entirely when the offset
+or length is `0` or negative, the range falls outside memory, or the bytes are
+not valid UTF-8. A `REASK` always carries the host's own message. The SDK's
+`setReason()` implements both exports; see
+[Return a reason](/guide/wasm-rules#return-a-reason).
+
+### E. Host Imports
 A rule may import exactly four functions, all from `env`: `log_info(ptr, len)`,
 which is piped into the proxy's structured `tracing::info!` output;
 AssemblyScript's own `trace` and `abort`; and
@@ -149,8 +174,8 @@ The guest function returns an integer verdict that dictates how the proxy gates 
 | Value | Verdict | Action Taken |
 |:---:|---|---|
 | **`0`** | `ALLOW` | The request is marked clean and continues down the pipeline. |
-| **`1`** | `BLOCK` | The request is rejected immediately. The proxy short-circuits the connection and returns a block response: `{ "error": "Blocked by WASM rule policy" }`. |
-| **`3`** | `REASK` | The attempt is refused, the agent is told why, and it may retry. Prefer this over `BLOCK` for any finding that is a pattern match — pattern matches produce false positives, and a block a human has to unpick costs more than a retry. |
+| **`1`** | `BLOCK` | The request is rejected immediately with HTTP 403: `{ "error": { "type": "policy_denied", "message": "Request blocked by custom WASM governance rule: <reason>" } }`, where `<reason>` is the rule's [block reason](#d-block-reason) or, without one, `Blocked by custom WASM governance rule`. |
+| **`3`** | `REASK` | The attempt is refused with HTTP 409 (`policy_reask`), the agent is told why, and it may retry. The third reask from the same rule in a session is returned as a 403 block. Prefer this over `BLOCK` for any finding that is a pattern match — pattern matches produce false positives, and a block a human has to unpick costs more than a retry. |
 | **`2`** | *deprecated* | Was documented as `REDACT`. The guest never receives the request body, so redaction was never expressible; the proxy maps `2` to a block and logs it. `intutic policy install` still accepts it so already-installed rules keep their meaning, but warns. Return `1` or `3`. |
 
 Anything else is **allowed** with a warning in the proxy log. A rule inventing a
