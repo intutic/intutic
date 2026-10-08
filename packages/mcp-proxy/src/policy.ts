@@ -230,6 +230,8 @@ export class PolicyClient {
   /** The first refresh `start()` kicks off, so the first tool call can wait for it. */
   private firstRefresh: Promise<void> | null = null
   private lastRefreshAttemptAt = 0
+  /** Whether a policy that came from the control plane (directly or through the daemon's fetch) has loaded. */
+  private loadedFromControlPlane = false
   private refreshTimer: NodeJS.Timeout | null = null
 
   constructor(
@@ -453,13 +455,25 @@ export class PolicyClient {
               'Dropped malformed SOP rules from the daemon — they cannot be enforced',
             )
           }
+          // A restarted daemon answers from the sync daemon's snapshot until
+          // its first fetch, and the snapshot carries the rules and the server
+          // allowlist but no tool allowlist, description overrides, DLP or
+          // injection patterns, registry or dispositions. Absorbing that over
+          // a policy this process already loaded would lift every restriction
+          // the snapshot lacks — a daemon restart as a way to disarm curation.
+          // So once a control-plane policy has loaded, a snapshot answer
+          // updates the rules and nothing else; before that, it is the best
+          // policy there is.
+          if (policy.fromSnapshot && this.loadedFromControlPlane) {
+            log.info({ action: 'policy_snapshot_rules_only', ruleCount: this.rules.length }, 'Daemon answered from its snapshot; kept the loaded curation')
+            return
+          }
           this.dlpPatterns = (policy.dlpPatterns ?? []).filter(
             (p): p is string => typeof p === 'string',
           )
           this.absorbCuration(policy as unknown as Record<string, unknown>)
-          // The daemon answers from its cache. A snapshot-seeded entry has no
-          // registry yet; keep the last known one rather than forget it.
           if (policy.mcpRegistry) this.registry = policy.mcpRegistry
+          if (!policy.fromSnapshot) this.loadedFromControlPlane = true
           log.info({ action: 'policy_refreshed_from_daemon', ruleCount: this.rules.length }, 'SOP rules refreshed from daemon')
           return
         }
@@ -488,6 +502,7 @@ export class PolicyClient {
     this.absorbCuration(parsed)
     // A control plane that sends no registry has none: unrestricted, not unknown.
     this.registry = parseRegistry(parsed['mcpRegistry']) ?? UNRESTRICTED_REGISTRY
+    this.loadedFromControlPlane = true
     log.info({ action: 'policy_refreshed', ruleCount: rules.length }, 'SOP rules refreshed')
   }
 }

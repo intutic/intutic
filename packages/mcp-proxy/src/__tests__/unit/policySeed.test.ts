@@ -156,4 +156,16 @@ describe('seedFromSnapshot', () => {
       await new Promise<void>((r) => server.close(() => r()))
     }
   })
+  it("seeds the snapshot's server allowlist and marks the entry as a snapshot", async () => {
+    const file = writeSnapshot(dir, {
+      workspaceId: WS,
+      generatedAt: new Date(Date.now() - 1000 * 60 * 60).toISOString(),
+      sopRules: [{ id: 's1', toolPattern: 'Bash', action: 'block', reason: 'x' }],
+      mcpAllowedServers: ['github', 7],
+    })
+    expect(await seedFromSnapshot(file)).toBe(WS)
+    const policy = await resolvePolicy(WS)
+    expect(policy!.allowedServers).toEqual(['github'])
+    expect(policy!.fromSnapshot).toBe(true)
+  })
 })

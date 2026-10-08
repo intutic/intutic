@@ -100,6 +100,13 @@ export interface ResolvedPolicy {
   ssoGroupPolicy?: SsoGroupPolicy
   /** The workspace's `mcpProxyFailBehavior`, when it has chosen one. */
   mcpProxyFailBehavior?: 'open' | 'closed'
+  /**
+   * True on the entry `seedFromSnapshot` built from the sync daemon's local
+   * snapshot, which carries only part of the policy. A proxy that already
+   * loaded a full policy takes only the rules from such an entry (see
+   * `PolicyClient.refresh`), so a daemon restart cannot lift its curation.
+   */
+  fromSnapshot?: boolean
   cachedAt:      number
   /**
    * The workspace's `v2:sync:config_version` at fetch time (TD-474 item 5).
@@ -396,20 +403,24 @@ export async function seedFromSnapshot(snapshotPath?: string): Promise<string | 
       interventionMode:
         typeof parsed['interventionMode'] === 'string' ? parsed['interventionMode'] : 'TRANSPARENT',
       // The sync daemon's snapshot (services/sync-daemon/src/lib/policySnapshot.ts)
-      // does not carry MCP curation today — it predates this field and is a
-      // separate `.rules`-gate mechanism, not this module's HTTP/Valkey path.
-      // Default to unrestricted rather than invent a value; the background
-      // HTTP refresh this seed exists to avoid delaying will fill these in on
-      // the next cycle.
+      // carries the server allowlist but no other MCP curation. The rest
+      // defaults to unrestricted for a proxy with nothing loaded yet; a proxy
+      // that has loaded a policy keeps its own (`fromSnapshot` below). The
+      // background refresh this seed triggers fills them in.
       mcpInjectionPatterns: [],
       allowedTools: [],
       toolDescriptionOverrides: {},
-      allowedServers: [],
+      // The one curation field the snapshot does carry: the gates enforce the
+      // same server allowlist from it.
+      allowedServers: Array.isArray(parsed['mcpAllowedServers'])
+        ? parsed['mcpAllowedServers'].filter((s): s is string => typeof s === 'string')
+        : [],
       mcpAnomalyOverrides: {},
       // No registry: the snapshot does not carry one, and guessing "allow"
       // here would let a deny workspace's unapproved servers through after
       // every daemon restart. Left unknown, the entry is refreshed on first
       // use (see `isStale`) and the proxy applies its fail setting meanwhile.
+      fromSnapshot: true,
       cachedAt,
     }
 

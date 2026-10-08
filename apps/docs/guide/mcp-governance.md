@@ -604,7 +604,7 @@ Unix socket, caches policy and batches events for proxies in `daemon` mode:
 | `MCP_DAEMON_MAX_CACHE_ENTRIES` | `500` | Workspaces kept in the policy cache. |
 | `MCP_DAEMON_STATUS_REPORT_MS` | `60000` | How often it reports its status and the servers it found. |
 | `CONTROL_PLANE_URL` | `http://localhost:3001` | The control plane, for the daemon itself. |
-| `INTUTIC_POLICY_SNAPSHOT` | `~/.intutic/hooks/policy-snapshot.json` | The sync daemon's snapshot the daemon seeds its cache from at start. It has the SOP rules but no registry, so the registry follows the fail setting until the first fetch. |
+| `INTUTIC_POLICY_SNAPSHOT` | `~/.intutic/hooks/policy-snapshot.json` | The sync daemon's snapshot the daemon seeds its cache from at start. It has the SOP rules and the server allowlist but no registry, so the registry follows the fail setting until the first fetch. A proxy that already loaded a policy keeps its allowlists and other settings through a daemon restart and takes only the snapshot's rules. |
 
 The daemon also reads `INTUTIC_API_KEY` and `INTUTIC_WORKSPACE_ID` from its
 environment, and caches in the Valkey at `VALKEY_URL` (or `REDIS_URL`;
