@@ -767,6 +767,11 @@ Walk the harness **config snapshot** chain and re-hash every stored body. Each s
 `harness_config_snapshots` records a `content_hash` of its own body and the `previous_hash` of
 the snapshot before it, per harness type and file path — this is the command that reads them.
 
+A snapshot holds the full text of a harness config file. The CLI never uploads those bodies:
+`intutic connect` reports only each file's hash. A workspace therefore has snapshots only from a
+client that posts them to the control plane's config-capture endpoint itself; otherwise this
+command reports an absent chain.
+
 ```bash
 intutic integrity config-chain [options]
 ```
@@ -792,8 +797,7 @@ about the row carrying it. Re-hashing only the bodies leaves a deleted snapshot 
 because every survivor still hashes correctly.
 
 A workspace with **no snapshots** is reported as an absent chain, not a clean one, and exits
-`0` — nothing was verified, so there is nothing to have failed. `intutic connect` reports the
-hashes of harness config files, not their bodies, so it does not create snapshots.
+`0` — nothing was verified, so there is nothing to have failed.
 
 Only the most recent 500 snapshots are walked. When older ones exist the report says so: an
 intact window is not an intact history.
