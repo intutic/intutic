@@ -35,6 +35,7 @@ import { getAdapter } from '../harness/detector.js'
 import { printOnboardingGuide } from '../lib/onboarding.js'
 import { writeEnforcementState } from '../lib/enforcementState.js'
 import { reportDeviceState } from '../lib/deviceReport.js'
+import { reportMachineInventory, shouldReportInventoryThisIteration } from '../lib/inventory.js'
 import { parseChecksums, verifyChecksum } from '../lib/binaryChecksum.js'
 import { newIso } from '@intutic/id'
 import type { SopFileHash, HarnessType, SyncConfigPayload, SyncSopEntry } from '@intutic/shared-types'
@@ -1380,6 +1381,19 @@ export async function runConnect(opts: {
       })
       for (const { harness, error } of failures) {
         log.dim(`Agent report/session for harness '${harness}' failed: ${error}`)
+      }
+      // Every few minutes, the machine's AI inventory for the org-wide view:
+      // every harness the detection rules find, connected or not, with its
+      // gate state, and the MCP servers and skill bundles on the machine.
+      if (shouldReportInventoryThisIteration(pollIteration)) {
+        const inventory = await reportMachineInventory({
+          controlPlaneUrl,
+          apiKey: safeCreds.apiKey,
+          workspaceRoot: safeConfig.workspaceRoot,
+          configured: safeConfig.harnesses,
+          cliVersion: cliPkgVersion,
+        })
+        if (!inventory.reported) log.dim(`AI inventory report not sent (will retry): ${inventory.reason}`)
       }
       // Every Nth poll, capture the rules files that changed for the config
       // history. Content goes only when this poll's settings have
