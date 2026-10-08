@@ -21,8 +21,14 @@ From the unpacked bundle, as a user that can run Docker:
 ```
 
 `--offline` loads the images from the bundle's `images.tar` and pulls nothing,
-which is what an air-gapped host needs. Leave it out on a host that can reach
-`ghcr.io` with your pull token.
+which is what an air-gapped host needs.
+
+Without `--offline` the installer pulls the images from `ghcr.io/intutic`, which
+is private. Log in first with the username and pull token Intutic sent you:
+
+```bash
+docker login ghcr.io --username <username>   # paste the pull token when asked
+```
 
 The installer asks for the first owner's password (12 characters or more) when
 run in a terminal. Otherwise it reads `INTUTIC_ADMIN_PASSWORD`, or generates
@@ -47,7 +53,8 @@ Then sign in at `https://intutic.example.internal/`.
 |---|---|---|
 | `--hostname` | required | The name users reach Intutic at |
 | `--license` | required | Your license file |
-| `--admin-email`, `--admin-name` | required on a first install | The first owner |
+| `--admin-email` | required on a first install | The first owner's email |
+| `--admin-name` | `Administrator` | The first owner's name |
 | `--offline` | off | Load images from the bundle; pull nothing |
 | `--tls-cert`, `--tls-key` | self-signed | Your certificate and key for the hostname |
 | `--smtp-url` | none | Your mail relay, e.g. `smtp://relay.example.internal:25` |
@@ -55,6 +62,8 @@ Then sign in at `https://intutic.example.internal/`.
 | `--data-dir` | `<install-dir>/data` | Where Postgres keeps its data |
 | `--https-port`, `--http-port` | 443, 80 | Published ports (80 redirects to HTTPS) |
 | `--registry` | `ghcr.io/intutic` | Your mirror of the Intutic images |
+| `--version` | the bundle's `VERSION` | The release to run |
+| `--bundle` | the installer's directory | The unpacked bundle to install from |
 | `--with-turbovec`, `--with-litellm` | off | The optional services |
 | `--dry-run` | off | Print what it would do |
 

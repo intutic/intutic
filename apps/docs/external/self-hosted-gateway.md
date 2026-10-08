@@ -1,8 +1,8 @@
 # Self-Hosted Gateway <Badge type="danger" text="Enterprise" />
 
 This page documents deploying and managing your own Intutic gateway inside your organization's
-own infrastructure — Docker, Kubernetes, or a bare-metal Node.js supervisor daemon — instead of
-routing every workspace through Intutic's shared `gateway.intutic.ai`.
+own infrastructure — with Docker Compose or on Kubernetes — instead of routing every workspace
+through Intutic's shared `gateway.intutic.ai`.
 
 ---
 
@@ -17,7 +17,7 @@ process already serves every Cloud workspace multi-tenant today.
 Every deployment target shares one control-plane registration flow (`intutic gateway register`
 — see the [CLI reference](/reference/cli#intutic-gateway-register)) and one heartbeat/config
 protocol, built into the proxy binary itself. What differs between targets is only how the
-proxy process is supervised.
+proxy process is run.
 
 ## 2. Deployment targets
 
@@ -30,50 +30,84 @@ enterprise stack (`docker-compose.enterprise.yml`), which additionally runs its 
 control-plane, Postgres, and dashboard — a self-hosted *gateway* keeps the control plane on
 Intutic's Cloud and self-hosts only the data-plane proxy.
 
-The Compose files are in the `gateway/` directory of each release bundle; Intutic
-sends you the download links ([verifying a release](../guide/self-host#getting-a-release)).
+The Compose files are in the `gateway/` directory of each release bundle,
+`intutic-selfhost-<version>-<arch>.tar.gz`; Intutic sends you the download links
+([verifying a release](../guide/self-host#getting-a-release)).
 
 ```bash
 cd intutic-selfhost-<version>/gateway
 cp .env.gateway.example .env
 # Set INTUTIC_GATEWAY_ID and INTUTIC_GATEWAY_TOKEN (from `intutic gateway register`),
-# CONTROL_PLANE_URL, and INTUTIC_VERSION to the release
+# CONTROL_PLANE_URL, and INTUTIC_VERSION to the release (cat ../VERSION)
+docker login ghcr.io --username <username>   # the pull token Intutic sent you
 docker compose -f docker-compose.gateway.yml up -d
 ```
 
+The images at `ghcr.io/intutic` are private, hence the login. A host that cannot reach
+`ghcr.io` loads them from the bundle instead (`docker load -i ../images.tar`); one that also
+cannot reach Docker Hub copies the `VALKEY_IMAGE` and `LITELLM_IMAGE` lines from
+`../images.env` into `.env`.
+
+Agents reach the gateway on the host's port `GATEWAY_PORT` (default `8080`), at `/v1`: for
+example `http://gateway.example.internal:8080/v1`. Put your own TLS-terminating proxy or load
+balancer in front of it for traffic that leaves the host.
+
 ### Kubernetes
 
-A dedicated, distributable Helm chart — separate from the chart that deploys Intutic's own
-full SaaS stack, since that one also ships the control plane and dashboard.
+The `intutic-gateway` chart runs the proxy, its own Valkey and, optionally, LiteLLM for the
+local judge. It is separate from the `intutic` chart, which runs the whole product.
 
-The chart is at `oci://ghcr.io/intutic/charts/intutic-gateway` (pull with the token
-Intutic issues you) and in each release bundle's `helm/` directory. The gateway's
-token goes in a Secret, never in values:
+The chart is at `oci://ghcr.io/intutic/charts/intutic-gateway` and in each release bundle's
+`helm/` directory. `<version>` is the release Intutic sent you; each release publishes the
+chart and its images under that one version. `ghcr.io/intutic` is private: log Helm in, and
+give the cluster a pull Secret, with the username and pull token Intutic sent you. The
+gateway's token goes in a Secret, never in values:
 
 ```bash
-kubectl create secret generic intutic-gateway-token \
+kubectl create namespace intutic-gateway
+kubectl -n intutic-gateway create secret generic intutic-gateway-token \
   --from-literal=INTUTIC_GATEWAY_ID=<gw_... from register> \
   --from-literal=INTUTIC_GATEWAY_TOKEN=<gwk_... from register>
+kubectl -n intutic-gateway create secret docker-registry intutic-ghcr \
+  --docker-server=ghcr.io --docker-username=<username> --docker-password=<pull token>
+helm registry login ghcr.io --username <username>   # paste the pull token when asked
+
 helm install my-gateway oci://ghcr.io/intutic/charts/intutic-gateway --version <version> \
+  --namespace intutic-gateway \
   --set controlPlaneUrl=https://app.intutic.ai \
-  --set gatewaySecretName=intutic-gateway-token
+  --set 'imagePullSecrets[0].name=intutic-ghcr'
 ```
 
-`NOTES.txt` after install shows the proxy's in-cluster address and reminds you the bundled
-LiteLLM (if enabled) is only consumed when `proxy.localJudge=true` — see §4.
+The proxy's Service is `ClusterIP` on port `8080`, so agents inside the cluster use
+`http://my-gateway-intutic-gateway-proxy.intutic-gateway.svc.cluster.local:8080/v1`. For
+agents outside it, set `proxy.service.type=LoadBalancer`, or route your own Ingress to that
+Service. The install's notes print the address.
 
-### Bare-metal (Node.js supervisor daemon)
+| Value | Default | |
+|---|---|---|
+| `controlPlaneUrl` | Intutic Cloud | The control plane the gateway reports to: Intutic Cloud, or your Self-host address |
+| `gatewaySecretName` | `intutic-gateway-token` | The Secret with `INTUTIC_GATEWAY_ID` and `INTUTIC_GATEWAY_TOKEN` |
+| `imagePullSecrets` | none | Pull Secrets for `ghcr.io/intutic` |
+| `proxy.image.repository`, `proxy.image.tag` | `ghcr.io/intutic/proxy`, the chart's version | Your mirror of the proxy image |
+| `proxy.service.type`, `proxy.service.port` | `ClusterIP`, `8080` | How agents reach the gateway |
+| `proxy.replicaCount`, `proxy.resources` | 1, see `helm show values` | |
+| `proxy.heartbeatIntervalSeconds` | 30 | How often the gateway reports in |
+| `proxy.rotationIntervalDays` | 30 | How often the proxy rotates its token; `0` turns it off |
+| `proxy.selfRotationPatchesOwnSecret` | `false` | Write each rotated token back to the Secret (below) |
+| `proxy.requireVk` | `true` | Accept only Intutic virtual keys (`vk_`), never a raw provider key |
+| `proxy.requireProvisionedKey` | `false` | Also refuse a virtual key with no provider key provisioned for it |
+| `proxy.judgeFinalizeDeadlineMs` | 5000 | How long judging may hold up the end of a response, in milliseconds |
+| `proxy.localJudge` | `false` | Judge with this chart's LiteLLM (§4) |
+| `valkey.image.repository`, `valkey.image.tag` | `valkey/valkey`, `7-alpine` | |
+| `valkey.persistence.enabled`, `valkey.persistence.size`, `valkey.persistence.storageClassName` | `false`, `1Gi`, the cluster default | Keep Valkey's data across restarts |
+| `litellm.enabled` | `false` | Run LiteLLM for the local judge |
+| `litellm.config` | none | LiteLLM's config: `--set-file litellm.config=./litellm_config.yaml` |
+| `litellm.configMapName` | none | Or a ConfigMap of yours with the key `config.yaml` |
+| `litellm.secretName` | none | A Secret passed to LiteLLM as environment: `LITELLM_MASTER_KEY` and the variables your config reads |
+| `litellm.judgeModel` | none | The `model_name` the local judge calls |
 
-`@intutic/gateway-daemon` is a thin supervisor, not a proxy reimplementation: it downloads and
-verifies a pinned Rust proxy release, writes its config, restarts it on crash, and polls the
-control plane for config changes. It deliberately does **not** self-update — a supervisor that
-swaps its own binary is a materially bigger security-review surface than one running a pinned
-version, so upgrades are a manual, deliberate step.
-
-```bash
-npm install -g @intutic/gateway-daemon
-INTUTIC_GATEWAY_TOKEN=gwk_... intutic-gateway-daemon
-```
+`helm show values oci://ghcr.io/intutic/charts/intutic-gateway --version <version>` prints
+them all with their comments.
 
 ## 3. Registering, monitoring, and rotating a gateway
 
@@ -100,17 +134,13 @@ disables it) by calling the same rotation mechanics the CLI uses, authenticated 
 token it already holds — not a new privilege, just automatic timing.
 
 The rotated value is kept in the proxy process's memory, and the proxy also persists it so a
-restart doesn't revert to a stale token — the exact mechanism depends on your deployment target
-(TD-341):
+restart doesn't revert to a stale token — the exact mechanism depends on your deployment target:
 
-- **Bare-metal** (`@intutic/gateway-daemon`): the proxy writes every self-rotated token to a
-  local state file (`INTUTIC_GATEWAY_TOKEN_STATE_FILE`); the daemon reads it back on every
-  restart it performs (crash or config-reconciliation). Survives as long as the daemon's own
-  working directory does.
-- **Docker** (`docker-compose.gateway.yml`): the proxy itself reads that same state file back at
-  its own startup — no supervisor required. The compose file bind-mounts a named volume at that
-  path by default, so it survives `docker compose up` recreating the container.
-- **Kubernetes** (`tools/helm/intutic-gateway`): a state file only survives an in-place container
+- **Docker** (`docker-compose.gateway.yml`): the proxy writes every self-rotated token to a
+  state file (`INTUTIC_GATEWAY_TOKEN_STATE_FILE`) and reads it back at startup. The compose file
+  mounts a named volume at that path, so it survives `docker compose up` recreating the
+  container.
+- **Kubernetes** (the `intutic-gateway` chart; the interval is `proxy.rotationIntervalDays`): a state file only survives an in-place container
   restart within the same pod, not a reschedule or rolling redeploy (a new pod is a fresh
   filesystem) — so the proxy additionally PATCHes its own gateway Secret via the in-cluster
   Kubernetes API on every successful rotation. Opt-in via the chart's
@@ -120,8 +150,7 @@ restart doesn't revert to a stale token — the exact mechanism depends on your 
   current token fresh via its existing `secretKeyRef`.
 
 None of this replaces `intutic gateway rotate` as your recovery path — if the persisted storage
-itself is lost (the Docker volume deleted, the Kubernetes flag left off, the bare-metal state
-file's disk wiped), a restart still reverts to whatever `INTUTIC_GATEWAY_TOKEN` your deployment's
+itself is lost (the Docker volume deleted, or the Kubernetes flag left off), a restart still reverts to whatever `INTUTIC_GATEWAY_TOKEN` your deployment's
 environment holds, and you're back to running that command and updating the stored token by hand.
 
 ### Pointing a workspace at your gateway
@@ -151,9 +180,9 @@ infrastructure. It does **not**, today, keep every part of Intutic's evaluation 
   (default `https://app.intutic.ai`) unless you opt into the local judge below. There it runs
   on Intutic's own self-hosted open-weight models, never a third-party hosted API.
 - **Local judge (opt-in) keeps finalize-time judging entirely on your infrastructure.** Set
-  `INTUTIC_GATEWAY_LOCAL_JUDGE=true` (Docker/bare-metal) or `proxy.localJudge: true` (Helm),
-  point `LITELLM_LOCAL_URL` / `proxy.localJudge` + `litellm.judgeModel` at a model in your own
-  bundled LiteLLM's `model_list`, and finalize-time content is judged there instead — it never
+  `INTUTIC_GATEWAY_LOCAL_JUDGE=true` and `LITELLM_LOCAL_JUDGE_MODEL` (Docker), or
+  `proxy.localJudge: true` and `litellm.judgeModel` (Helm), naming a model in the bundled
+  LiteLLM's `model_list`, and finalize-time content is judged there instead — it never
   reaches `CONTROL_PLANE_URL`. That model must be self-hosted (Ollama, vLLM, or another server
   you run): judges never call a hosted API such as Anthropic, OpenAI, OpenRouter or Ollama Cloud,
   even with your own key. This is a **smaller capability than the SaaS judge**, not a
