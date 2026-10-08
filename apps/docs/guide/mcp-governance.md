@@ -1,6 +1,6 @@
 ---
 title: MCP Server Governance
-description: The MCP server registry with approvals and a default-deny option, per-tool switches, approval holds, per-call identity, the allowlists and server-level TOFU pinning that guard against a rogue or rug-pulled MCP server — and what these controls do not cover yet.
+description: The MCP server registry with approvals and a default-deny option, per-tool switches, approval holds, per-call identity, call budgets per server, member and tool, the allowlists, server-level TOFU pinning and tool-change risk scoring that guard against a rogue or rug-pulled MCP server — and what these controls do not cover yet.
 ---
 
 # MCP Server Governance <Badge type="tip" text="Open-Core" />
@@ -19,9 +19,13 @@ the controls built on top of the MCP proxy-wrapping mechanism described in
 - **per-call identity**: every event and hold says which member's key, OS
   user and session made the call, and the workspace's SSO group policy
   applies to it;
+- **call budgets**: limits on MCP tool calls per hour or per day, per
+  server, per tool, per member, or per member on one server;
 - **per-workspace allowlists** of servers and tools;
 - **server-level TOFU pinning**, which detects a server's tool definitions
-  changing after a user has already trusted it.
+  changing after a user has already trusted it, and **tool-change risk
+  scoring**, which says how risky each change is and can send a server back
+  to the approval queue.
 
 ## How a server gets here at all
 
@@ -140,7 +144,8 @@ this page apply to it.
 have seen. A server gets there two ways:
 
 - **The proxy reports it.** Each proxy reports the server it fronts (its
-  `--server-name`) when it starts, and again with the tool names whenever a
+  `--server-name`) when it starts, and again with its tools — names,
+  descriptions and input schemas, as the server declared them — whenever a
   `tools/list` response shows a different set
   (`POST /api/v1/mcp/servers/observe`).
 - **The MCP daemon reports it.** Its heartbeat carries every server it finds
@@ -150,7 +155,9 @@ The first sighting creates the server as **awaiting decision** (a candidate)
 and sends the `mcp.server.candidate` notification, which a
 [notification rule](/guide/settings#notifications) can route to Slack, email,
 PagerDuty or a webhook. Later sightings update when it was last seen, its
-harness, transport and tools; they never change a decision.
+harness, transport and tools; they never change a decision, with one opt-in
+exception: a workspace can have a [high-risk tool change](#tool-change-risk)
+return a server to the queue.
 
 An **owner or admin** decides; an engineering manager sees the page
 read-only:
@@ -308,6 +315,104 @@ or its member deactivated), the member's groups are unknown and a high-risk
 tool is refused rather than allowed. The decision is the one the hook gate, the
 proxy's response gate and the local gates make; see [SSO group clearance](/concepts/circuit-breaker#_3-sso-group-clearance).
 
+## Call budgets {#call-budgets}
+
+A budget limits how many MCP tool calls run per **hour** or per **day**.
+Each one counts one of four things:
+
+| Counts | Example | Fields |
+|---|---|---|
+| Calls to a server | 600 calls to `github` per hour | `scope: server`, `server` |
+| Calls to one tool on a server | 40 calls to `github` › `create_pull_request` per day | `scope: tool`, `server`, `tool` |
+| Calls by a member, across servers | 2,000 calls per member per day | `scope: member`, optional `memberId` |
+| Calls by a member to a server | 25 calls to `linear` per member per hour | `scope: member_server`, `server`, optional `memberId` |
+
+A member budget without a `memberId` gives every member their own allowance
+of that size; with one, it applies to that member only. The member is the
+one the proxy's API key belongs to ([Who made the call](#caller-identity));
+a key with no member is counted under its key prefix, then its OS user.
+
+Budgets count calls, not money. An MCP `tools/call` result carries content,
+structured content, an error flag and `_meta`, and nothing that reports a
+cost — the only cost field in the MCP specification, `costPriority`, is a
+client's model preference for sampling. So there is no per-call price to add
+up.
+
+An owner or admin sets them on **Policies › MCP Servers › Call budgets**:
+add budgets to the draft, set the warning percentage, and save. They are the
+`mcpBudgets` workspace setting (`PUT /api/v1/workspace/settings`), so the
+settings route's role check and change history apply:
+
+```json
+{
+  "mcpBudgets": {
+    "warnAtPct": 80,
+    "budgets": [
+      { "id": "github-hour", "scope": "server", "server": "github", "period": "hour", "limit": 600 },
+      { "id": "members-day", "scope": "member", "period": "day", "limit": 2000 }
+    ]
+  }
+}
+```
+
+A budget's `id` (letters, digits, `-` and `_`, unique in the workspace) names
+it in refusals and alerts, and keeps its count when you change its limit.
+Budgets reach every proxy with the rest of its policy — `mcpBudgets` on
+`GET /api/v1/sop/rules` and `GET /api/v1/policy/resolve` — within a minute.
+
+**How a call is counted.** After every other check has passed — the registry,
+the allowlists, DLP, policy rules, injection, anomaly and WASM checks — the
+proxy counts the call against every budget that covers it, so a call another
+check refuses spends nothing. The counters live in Valkey
+(`INTUTIC_VALKEY_URL`), keyed by workspace, budget, period and member, so
+every proxy using the same Valkey shares them: a developer's sibling proxies,
+or a whole team's proxies pointed at one Valkey. Proxies on different Valkeys
+count separately. One Lua script checks every counter the call draws on and,
+only if none is used up, increments them all, so two proxies racing for the
+last call cannot both get it, and a refused call does not count.
+
+Periods are fixed UTC windows: an hour starts on the hour, a day at 00:00
+UTC. A new period starts from zero, and each counter expires a minute after
+its period ends.
+
+**Over the limit**, the call is refused and the agent is told which budget
+and when it resets:
+
+```
+MCP call budget "github-hour" is used up (calls to github: 600 per hour):
+600 of 600 calls made this hour. It resets at 2026-10-08T15:00:00.000Z
+(in 23 min). An owner or admin can change MCP budgets on the MCP Servers page.
+```
+
+Each refusal is a `tool_blocked` event, like any refused call. Once per
+budget per period, the first refusal also sends `mcp_budget_exceeded`, and a
+call that takes a budget to its warning percentage (80% unless you set
+`warnAtPct`, the same default as the [LLM budget alerts](/guide/budgets))
+sends `mcp_budget_threshold`. "Once per period" holds across every proxy on
+the same Valkey: the flag that claims each alert lives next to the counter
+and expires with it. The control plane files each as a detector finding
+(`mcp:budget`, category `BUDGET_BREACH`) — on the Findings page and in SIEM
+export as `anomaly.finding` — and sends `mcp.budget.threshold` or
+`mcp.budget.exceeded` to your [notification rules](/guide/settings#notifications).
+
+**Latency.** A call no budget covers does not touch Valkey. A covered call
+costs one Valkey round trip, however many budgets cover it, bounded by a
+200 ms timeout.
+
+**When Valkey cannot answer.** If a budget covers the call and the proxy has
+no Valkey configured, Valkey is unreachable, or it does not answer within
+the timeout, the count cannot be checked and the workspace's fail setting
+decides (`mcpProxyFailBehavior`, else `INTUTIC_MCP_FAIL_OPEN` — see
+[When the registry has not loaded](#when-the-registry-has-not-loaded)):
+
+- **Fail open**: the call runs, uncounted. The proxy logs this once.
+- **Fail closed**: the call is refused, and the message names the budgets
+  and the setting.
+
+So a budget needs a Valkey on every machine whose proxies it should limit:
+`intutic connect` and the sync daemon write `INTUTIC_VALKEY_URL` to
+`runtime.env` when their local Valkey runs.
+
 ## Server-level TOFU pinning
 
 Ported from `packages/proxy/src/tool_pin.rs`'s per-request tool-array
@@ -339,6 +444,57 @@ whatever arrives first. It cannot tell a benign tool definition from a
 malicious one — it can only tell you that *something changed* after you
 already trusted it. A server engineered to be poisoned from day one passes
 this control cleanly, every time.
+
+## Tool-change risk scoring {#tool-change-risk}
+
+TOFU says a server's tools changed; the registry says how much that change
+matters. Each proxy reports the tools a server declares — names,
+descriptions and input schemas, before any curation or description override
+— and the control plane compares them with the ones it stored last time.
+The first set it sees is the baseline. Every later difference is a **tool
+change**: a tool added or removed, or a description or input schema changed.
+
+Each change gets a risk score from 0 to 100, computed by fixed rules — no
+model is called, so the same two tool sets always give the same score and
+the same reasons:
+
+| Rule | Points | When |
+|---|---|---|
+| Description poisoned | 60 | A new or changed description matches one of the seven [tool-poisoning patterns](/concepts/circuit-breaker) (hidden instruction blocks, concealment from the user, credential side channels, …) it did not match before |
+| New tool with a capability | 20–40 each | A new tool's name or description implies command execution (40), credential access (40), network access (25) or writing data (20) |
+| Capability gained | 20–40 each | A changed tool now implies one of those capabilities and did not before |
+| Confirmation removed | 35 | A changed tool lost an argument such as `confirm` or `dry_run`, stopped requiring it, or it no longer defaults to `true` |
+| Schema widened | 15 | A changed tool accepts more than before: new arguments, fewer required ones, a lifted enum, pattern, length or range limit, or `additionalProperties` no longer `false` |
+| Tool added | 5 | A new tool none of the rules above flag |
+| Description changed | 5 | A changed description none of the rules above flag |
+
+The score is the sum, capped at 100: **high** from 50, **medium** from 20,
+**low** above 0. A removed tool adds nothing — it narrows what an agent can
+do. The rules are deliberately simple: a capability is read from words in the
+tool's name (`run`, `exec`, `delete`, `fetch`, `token`, …) and a few phrases
+in its description, so a score is a prompt to look, with its reasons stated,
+not a verdict.
+
+Each change is stored as a `tools_changed` record in the server's history,
+with the score, the reasons and which tools were added, removed or changed.
+The **Last tool change** column on **Policies › MCP Servers** shows the
+latest one's level and score, with the strongest reasons in its tooltip; the
+server's **Tools** drawer lists every reason. **Settings › Audit Timeline**
+shows each change.
+
+A **high** score sends `mcp.server.tool_change_risk` to your notification
+rules. What else happens is the **High-risk tool changes** setting
+(`mcpHighRiskToolChange`):
+
+| Setting | What a high-risk change does |
+|---|---|
+| **Record it and notify** (`notify`, the default) | The change is recorded and announced. The server keeps its status. |
+| **Return the server to the approval queue** (`hold`) | The server goes back to awaiting decision, marked **Held: risky tool change**, and every proxy refuses calls to it — under either default policy — until an owner or admin approves, blocks or resets it. A blocked server stays blocked. |
+
+A held server reaches the proxies as `heldServers` in `mcpRegistry`, within a
+minute. Scoring happens in the control plane when a proxy reports, so it
+needs the control plane reachable; the local TOFU pin keeps detecting
+changes offline.
 
 ## Remote (HTTP/SSE) MCP servers: the stdio→HTTP bridge {#remote-http-sse-mcp-servers-the-stdio-http-bridge}
 
@@ -641,7 +797,7 @@ Settings are read from the environment first, then from
 | `INTUTIC_MCP_ANOMALY_MODE` | `enforce` | `warn` reports anomaly findings without blocking; `off` skips detection. The workspace's `mcpAnomalyMode` wins. |
 | `INTUTIC_MCP_ANOMALY_OVERRIDES` | none | A JSON object of detector id → `steer`, `reask`, `kill` or `off`, capped at each detector's own ceiling. Environment only. The workspace's `mcpAnomalyOverrides` wins, detector by detector. |
 | `INTUTIC_MCP_SESSION_SCOPE` | derived | Sets the shared session scope explicitly (see [the MCP proxy reference](/integrations/mcp-proxy#anomaly-detection-session-scope)). Environment only. |
-| `INTUTIC_VALKEY_URL` / `VALKEY_URL` | none | The Valkey sibling proxies share their anomaly window through. |
+| `INTUTIC_VALKEY_URL` / `VALKEY_URL` | none | The Valkey sibling proxies share their anomaly window and their [call budget](#call-budgets) counters through. Without it, a call a budget covers follows the fail setting. |
 | `INTUTIC_REMOTE_HEADERS` | none | A JSON object of headers for `--remote-url`, such as `Authorization`. Environment only, never a flag, so it stays out of `ps`. |
 | `INTUTIC_EVENTS_FILE` | `~/.intutic/events/hook-events.jsonl` | The local file every event is also appended to. |
 | `INTUTIC_WASM_LOCAL_DIR` | `~/.intutic/wasm` | Where the proxy loads custom WASM rules from. Read from runtime.env; `INTUTIC_WASM_DIR` in the environment takes precedence. |
@@ -682,10 +838,11 @@ environment, and caches in the Valkey at `VALKEY_URL` (or `REDIS_URL`;
   does check the sha256 hash of skill-bundled *scripts*
   against VirusTotal; see [Skill Scanning](/guide/skill-scanning#virustotal-hash-lookup-opt-in-hash-only)
   for that feature and why it does not reverse this decline.
-- **No OAuth brokering and no per-tool budgets.** The proxy passes a remote
-  server's credentials through (`INTUTIC_REMOTE_HEADERS`) and does not obtain,
-  refresh or scope them, and it does not count or cap calls per tool or per
-  server. A remote server configured with OAuth in OpenCode is left unwrapped.
+- **No OAuth brokering.** The proxy passes a remote server's credentials
+  through (`INTUTIC_REMOTE_HEADERS`) and does not obtain, refresh or scope
+  them. A remote server configured with OAuth in OpenCode is left unwrapped.
+- **Budgets count calls, per Valkey.** They do not price calls (MCP reports
+  no cost), and proxies on different Valkeys keep separate counts.
 - **The registry knows servers by name.** Two different servers given the
   same `--server-name` share one row and one decision, and a server whose
   name changes is a new candidate. Pin the server's tools with TOFU, above,

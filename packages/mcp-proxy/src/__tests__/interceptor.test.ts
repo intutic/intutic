@@ -619,6 +619,20 @@ describe('ToolCallInterceptor', () => {
       expect((await interceptor.decide('list_issues', {})).action).toBe('allow')
     })
 
+    it('a server held after a high-risk tool change is refused under either default until approved again', async () => {
+      for (const defaultPolicy of ['allow', 'deny'] as const) {
+        const policy = new StubPolicyClient()
+        policy.registry = registry({ defaultPolicy, heldServers: ['github'] })
+        const interceptor = new ToolCallInterceptor(policy, emitter, true, 'github')
+        const decision = await interceptor.decide('list_issues', {})
+        expect(decision.action).toBe('block')
+        expect((decision as { reason: string }).reason).toContain('scored high risk')
+      }
+      const other = new StubPolicyClient()
+      other.registry = registry({ heldServers: ['gitlab'] })
+      expect((await new ToolCallInterceptor(other, emitter, true, 'github').decide('list_issues', {})).action).toBe('allow')
+    })
+
     it('a tool disabled on another server does not affect this one', async () => {
       const policy = new StubPolicyClient()
       policy.registry = registry({ disabledTools: { gitlab: ['delete_repo'] } })

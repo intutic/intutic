@@ -11,6 +11,7 @@ import { createStderrLogger as createLogger } from './stderrLog.js'
 import { callDaemonSocket } from './daemonClient.js'
 import { HttpStatusError, httpRequest } from './httpJson.js'
 import type { ResolvedPolicy } from './daemon/policyCache.js'
+import { parseMcpBudgetPolicy, type McpBudgetPolicy } from '@intutic/shared-types'
 
 const log = createLogger('mcp-proxy-policy')
 
@@ -73,6 +74,12 @@ export interface McpRegistryPolicy {
   defaultPolicy: 'allow' | 'deny'
   approvedServers: string[]
   blockedServers: string[]
+  /**
+   * Servers a high-risk tool-set change sent back to the approval queue
+   * (`mcpHighRiskToolChange: hold`). Refused under either default until an
+   * owner or admin decides again.
+   */
+  heldServers: string[]
   disabledTools: Record<string, string[]>
 }
 
@@ -86,6 +93,7 @@ export const UNRESTRICTED_REGISTRY: McpRegistryPolicy = Object.freeze({
   defaultPolicy: 'allow',
   approvedServers: [],
   blockedServers: [],
+  heldServers: [],
   disabledTools: {},
 }) as McpRegistryPolicy
 
@@ -133,6 +141,7 @@ export function parseRegistry(value: unknown): McpRegistryPolicy | undefined {
     defaultPolicy: value['defaultPolicy'] === 'deny' ? 'deny' : 'allow',
     approvedServers: stringList(value['approvedServers']),
     blockedServers: stringList(value['blockedServers']),
+    heldServers: stringList(value['heldServers']),
     disabledTools,
   }
 }
@@ -227,6 +236,8 @@ export class PolicyClient {
    */
   private failOpen: boolean | undefined
   private ssoGroupPolicy: SsoGroupPolicy | undefined
+  /** The workspace's MCP call budgets (`mcpBudgets`); no budgets until a policy says otherwise. */
+  private mcpBudgets: McpBudgetPolicy = parseMcpBudgetPolicy(undefined)
   /** The first refresh `start()` kicks off, so the first tool call can wait for it. */
   private firstRefresh: Promise<void> | null = null
   private lastRefreshAttemptAt = 0
@@ -309,6 +320,11 @@ export class PolicyClient {
   /** The workspace's SSO group policy, when it has one. */
   getSsoGroupPolicy(): SsoGroupPolicy | undefined {
     return this.ssoGroupPolicy
+  }
+
+  /** The workspace's MCP call budgets; an empty list means no limits. */
+  getMcpBudgets(): McpBudgetPolicy {
+    return this.mcpBudgets
   }
 
   /** The workspace's fail-open choice, or `undefined` to fall back to the local setting (see the field). */
@@ -404,6 +420,7 @@ export class PolicyClient {
     }
     this.principal = parsePrincipal(source['principal'])
     this.ssoGroupPolicy = parseSsoGroupPolicy(source['ssoGroupPolicy'])
+    this.mcpBudgets = parseMcpBudgetPolicy(source['mcpBudgets'])
     const failBehavior = source['mcpProxyFailBehavior']
     this.failOpen = failBehavior === 'open' ? true : failBehavior === 'closed' ? false : undefined
   }
