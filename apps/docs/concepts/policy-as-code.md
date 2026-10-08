@@ -21,7 +21,7 @@ The practical consequence: a policy change is a diff. It goes through the same r
 
 ## Continuous Compliance (CC)
 
-**Continuous Compliance** is the evidence side of the same loop. [Compliance Evidence](/guide/compliance-evidence) describes the eight compliance probes that run against live workspace state hourly and on demand, each reporting a 0–100 score with structured findings. The governing principle, stated on that page: a probe whose control is switched off reports `not_enforced`, never `pass` — a control that has not run has not passed. That is what makes the "continuous" claim hold: compliance isn't a report generated once a quarter from memory, it's a score that goes stale the moment a probe stops running, and the system says so rather than rounding up.
+**Continuous Compliance** is the evidence side of the same loop. [Compliance Evidence](/guide/compliance-evidence) describes the eleven compliance probes that run against live workspace state hourly and on demand, each reporting a 0–100 score with structured findings. The governing principle, stated on that page: a probe whose control is switched off reports `not_enforced`, never `pass` — a control that has not run has not passed. That is what makes the "continuous" claim hold: compliance isn't a report generated once a quarter from memory, it's a score that goes stale the moment a probe stops running, and the system says so rather than rounding up.
 
 [Governance Controls Checklist](/guide/governance-controls) applies the same discipline to the broader control set — stating coverage as **Strong**, **Partial**, or **Partial-to-strong** depending on what's actually verified today, not what's aspirational.
 

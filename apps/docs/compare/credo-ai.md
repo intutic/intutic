@@ -17,7 +17,7 @@ Intutic enforces policy where agents act: a pre-execution gate decides each tool
 | **Runtime enforcement** | Production: hook gates in 19 of the 43 harnesses, request and response proxy, MCP governance proxy, egress firewall, sandboxed execution | Agent Governor, Research Preview, Claude Code only |
 | **Decisions at the tool call** | Allow, warn, require approval (held until approved), block, redact, re-ask, shadow | Allow, block, escalate, advise |
 | **Where policy lives** | Files in your repository (`.intutic/sops/*.md`), reviewed in git; policy documents in Notion, Confluence, GitHub or Google Docs can be turned into enforced controls with [Policy Guardrails](/guide/policy-guardrails) | Authored in the Credo AI platform |
-| **Regulatory mapping** | SOC 2 evidence pack and OWASP LLM and Agentic posture mapping | Policy packs for the EU AI Act, NIST AI RMF, ISO 42001 and SOC 2 |
+| **Regulatory mapping** | SOC 2 evidence pack, OWASP LLM and Agentic posture mapping, partial control mapping to the EU AI Act, ISO/IEC 42001 and NIST AI RMF, and a signed Article 14 human-oversight export | Policy packs for the EU AI Act, NIST AI RMF, ISO 42001 and SOC 2 |
 | **Inventory and risk** | Agent registry with posture scoring and an agent graph, for the agents Intutic governs | AI registry with auto-discovery, risk assessments, Agent Cards and audit-ready reports |
 | **Continuous evidence** | Eleven hourly compliance probes against live workspace state | Assessment and reporting workflows |
 | **Audit trail** | Signed Merkle roots with inclusion proofs, hash-chained and mirrored to your own bucket | Governance records and reports |
@@ -26,7 +26,7 @@ Intutic enforces policy where agents act: a pre-execution gate decides each tool
 
 ## Where Credo AI is stronger
 
-- **Regulatory coverage.** Ready-made policy packs for the EU AI Act, NIST AI RMF and ISO 42001. Intutic's framework mapping covers SOC 2 and OWASP.
+- **Regulatory coverage.** Ready-made policy packs for the EU AI Act, NIST AI RMF and ISO 42001. Intutic maps its own evidence to those frameworks, mostly as partial coverage, and leaves the organizational controls (risk assessments, impact assessments, AI policy) to your GRC process.
 - **Breadth of the inventory.** Credo AI governs every AI system in the organization, including models and applications that are not agents, with risk assessments and documentation built for compliance teams.
 
 ## When to choose Intutic
