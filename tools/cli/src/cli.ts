@@ -150,7 +150,6 @@ program
     'rate table as every other cost figure the control plane reports.'
   )
   .requiredOption('--model <model>', 'Model to estimate against (e.g. claude-sonnet-4-5)')
-  .option('--task-type <type>', 'Task type used to pick the baseline bucket', 'coding')
   .option('--tokens <n>', 'Input token count (mutually exclusive with --file)')
   .option('--file <path>', 'File whose contents size the input (mutually exclusive with --tokens)')
   .option('--json', 'Output as JSON instead of a report')

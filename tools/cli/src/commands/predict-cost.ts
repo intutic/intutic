@@ -37,7 +37,6 @@ export interface CostPrediction {
 
 interface PredictCostOpts {
   model?: string
-  taskType?: string
   tokens?: string
   file?: string
   json?: boolean
@@ -72,7 +71,7 @@ function formatConfidence(confidence: CostPrediction['confidence']): string {
 }
 
 /**
- * `intutic predict-cost --model <m> [--task-type t] [--tokens n | --file f]`
+ * `intutic predict-cost --model <m> [--tokens n | --file f]`
  *
  * `--tokens` and `--file` are mutually exclusive input-size sources, and one
  * of them is required client-side before any request is made — an empty
@@ -116,7 +115,6 @@ export async function runPredictCost(opts: PredictCostOpts): Promise<void> {
   }
 
   const model = opts.model.trim()
-  const taskType = opts.taskType?.trim() || 'coding'
 
   const { client, workspaceId } = await getClientAndWorkspace(opts)
 
@@ -126,7 +124,6 @@ export async function runPredictCost(opts: PredictCostOpts): Promise<void> {
       model,
       inputTokenCount,
       inputText,
-      taskType,
     })
 
     if (opts.json) {
@@ -136,7 +133,6 @@ export async function runPredictCost(opts: PredictCostOpts): Promise<void> {
 
     log.header('Intutic — Cost Prediction')
     log.field('Model', model)
-    log.field('Task type', taskType)
     console.log('')
     log.field('Input tokens', prediction.inputTokens.toLocaleString())
     log.field('Estimated output tokens', prediction.estimatedOutputTokens.toLocaleString())

@@ -932,7 +932,6 @@ intutic predict-cost --model <model> (--tokens <n> | --file <path>) [options]
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--model <model>` | Model to estimate against, e.g. `claude-sonnet-4-5` (required) | — |
-| `--task-type <type>` | Task type used to pick the usage baseline | `coding` |
 | `--tokens <n>` | Input size as a token count | — |
 | `--file <path>` | Size the input from this file's contents | — |
 | `--json` | Output as JSON instead of a report | — |
