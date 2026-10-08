@@ -103,7 +103,7 @@ describe('connect runs the per-cycle sync work the docs promise', () => {
   it('write-protects the rules files when the workspace asks for it', async () => {
     const { applyBody } = await source()
     expect(applyBody).toMatch(/bypassEnforcementTier === 'immutable'/)
-    expect(applyBody.indexOf('await clearImmutable(file)')).toBeLessThan(applyBody.indexOf('const written = await adapter.writeConfig('))
+    expect(applyBody.indexOf('await clearImmutable(file)')).toBeLessThan(applyBody.indexOf('await writeHarnessConfigs('))
     expect(applyBody.lastIndexOf('await setImmutable(file)')).toBeGreaterThan(applyBody.indexOf('await refreshDecisionsDigest('))
   })
 

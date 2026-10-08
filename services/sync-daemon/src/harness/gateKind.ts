@@ -37,8 +37,9 @@
  * (LangGraph + the Python frameworks — the gate ships in intutic-clawde),
  * 'delegated' (xirp — the gate is whichever wrapped harness's own gate is
  * running), and 'bridge' (trueforge-server — the gate runs in a separate
- * Intutic-operated service, not in any process this repo's writers touch);
- * the one non-null row (aiderConfigMerger.ts, "no ... exists") is 'none'.
+ * Intutic-operated service, not in any process this repo's writers touch),
+ * and 'none' (roo-code, claude-desktop — no hook system); the one non-null
+ * row (aiderConfigMerger.ts, "no ... exists") is 'none' too.
  *
  * @module
  */
@@ -52,8 +53,9 @@ import { HarnessType, type HarnessType as HarnessTypeT } from '@intutic/shared-t
  *                 the harness's own Python process; no file for the daemon
  *                 to write or verify (LangGraph + the eight Wave/Wave-2
  *                 frameworks).
- * `'none'`      — no enforcement point exists today at all (aider: its only
- *                 native hook is post-edit and /run-blind).
+ * `'none'`      — no tool-call gate exists for this harness (aider: its only
+ *                 native hook is post-edit and /run-blind; Roo Code and
+ *                 Claude Desktop: no hook system).
  * `'delegated'` — this harness has no gate mechanism of its own because it
  *                 does not run tools itself: it wraps OTHER harnesses that
  *                 are already `'hook'`- or `'sdk'`-gated, and a tool call
@@ -150,11 +152,18 @@ export const SDK_GATED_HARNESSES: ReadonlySet<HarnessTypeT> = new Set([
 ])
 
 /**
- * Harnesses with no enforcement point at all today. Mirrors the
- * `aiderConfigMerger.ts` NO_GATE row: aider's only native hook
- * (`--git-commit-verify`) is opt-in, post-edit, and blind to `/run`.
+ * Harnesses with no tool-call gate of their own: the proxy and the MCP
+ * governance proxy are their enforcement. Mirrors the NO_GATE rows in
+ * `gateRegistry.ts`: aider's only native hook (`--git-commit-verify`) is
+ * opt-in, post-edit, and blind to `/run`; Roo Code and Claude Desktop have no
+ * hook system at all (Claude Desktop's Code tab is Claude Code, gated by the
+ * claude-code gate).
  */
-export const NO_GATE_HARNESSES: ReadonlySet<HarnessTypeT> = new Set([HarnessType.AIDER])
+export const NO_GATE_HARNESSES: ReadonlySet<HarnessTypeT> = new Set([
+  HarnessType.AIDER,
+  HarnessType.ROO_CODE,
+  HarnessType.CLAUDE_DESKTOP,
+])
 
 /**
  * Harnesses that wrap OTHER already-gated harnesses instead of running tools

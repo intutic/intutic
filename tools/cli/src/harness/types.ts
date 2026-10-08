@@ -20,8 +20,18 @@ export interface IHarnessAdapter {
   /** Detect whether this harness is present in the workspace. */
   detect(workspaceRoot: string): Promise<boolean>
   /**
-   * Write governance config to the harness's native config file.
-   * Returns the absolute path written, or null if skipped.
+   * Install what governs this harness whatever rule sets the workspace has:
+   * its tool-call gate, and the proxy routing that rides with it. The gate
+   * enforces the built-in protections, the destructive-command tier, group
+   * rules and holds, none of which need a rule set, so `intutic connect` runs
+   * this for every configured harness. Absent when the harness has no gate
+   * Intutic installs.
+   */
+  installGate?(workspaceRoot: string, proxyUrl: string): Promise<void>
+  /**
+   * Write the rule sets into the harness's native rules file. `intutic
+   * connect` calls it only when a rule set targets the harness, or on a forced
+   * sync. Returns the absolute path written, or null if nothing was.
    */
   writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null>
   /** Read SHA-256 hash of current config file content. Returns null if file doesn't exist. */

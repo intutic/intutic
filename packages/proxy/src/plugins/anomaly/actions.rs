@@ -165,6 +165,8 @@ pub(crate) const SHELL_TOOLS: &[&str] = &[
     // Cline / Roo Code's shell tool. `tool_is` matches by suffix, and
     // `execute_command` ends in neither `run_command` nor `execute`.
     "execute_command",
+    // Gemini CLI's shell tool, which ends in no other entry either.
+    "run_shell_command",
     "terminal",
     "execute",
     "exec",
@@ -438,7 +440,15 @@ mod tests {
 
     #[test]
     fn harness_synonyms_for_the_shell_all_work() {
-        for tool in ["Bash", "shell", "run_command", "terminal", "execute"] {
+        for tool in [
+            "Bash",
+            "shell",
+            "run_command",
+            "execute_command",
+            "run_shell_command",
+            "terminal",
+            "execute",
+        ] {
             assert_eq!(
                 classify(tool, &json!({"command": "kubectl apply -f x.yaml"})),
                 vec!["action:deploy"],

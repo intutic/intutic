@@ -38,7 +38,6 @@ import {
   noteProxyUrl,
   planDisconnect,
   updatePreToolUseHooks,
-  writeClaudeDesktopHooks,
 } from '@intutic/sync-daemon'
 import { getAdapter } from '../harness/detector.js'
 import { planN8nDisconnect } from '../harness/n8n.js'
@@ -143,6 +142,7 @@ async function connectHarness(harness: string): Promise<void> {
   await noteProxyUrl(PROXY)
   const adapter = getAdapter(harness)
   if (!adapter) throw new Error(`no adapter for ${harness}`)
+  await adapter.installGate?.(ws, PROXY)
   await adapter.writeConfig(ws, SOPS, PROXY)
   await injectMcpServer(ws, 'ws_test')
 }
@@ -188,10 +188,6 @@ const CASES: Case[] = [
   {
     harness: 'claude-desktop',
     seed: () => put(appSupport('Claude', 'claude_desktop_config.json'), { globalShortcut: 'x', mcpServers: { fs: { command: 'npx', args: ['fs-mcp'] } } }),
-    connect: async () => {
-      await writeClaudeDesktopHooks(ws, PROXY, 'ws_test')
-      await injectMcpServer(ws, 'ws_test')
-    },
     edit: () => editJson(appSupport('Claude', 'claude_desktop_config.json'), (d) => { d.theme = 'dark' }),
   },
   {
@@ -324,6 +320,21 @@ const CASES: Case[] = [
       })
     },
     edit: () => editJson(join(home, '.gemini', 'settings.json'), (d) => { d.theme = 'light' }),
+    connected: async () => {
+      const hooks = JSON.parse(await fs.readFile(join(home, '.gemini', 'config', 'hooks.json'), 'utf-8'))
+      expect(hooks['intutic-governance'].PreToolUse[0].hooks[0].command).toContain('antigravity-cli-check.js')
+    },
+  },
+  {
+    harness: 'antigravity',
+    name: 'antigravity, with hooks of the user\'s own in Antigravity\'s hooks file',
+    seed: () =>
+      put(join(home, '.gemini', 'config', 'hooks.json'), {
+        'my-linter': { PostToolUse: [{ matcher: 'run_command', hooks: [{ type: 'command', command: './lint.sh' }] }] },
+      }),
+    edit: () => editJson(join(home, '.gemini', 'config', 'hooks.json'), (d) => {
+      d.reminder = { PreInvocation: [{ type: 'command', command: './remind.sh' }] }
+    }),
   },
   {
     harness: 'continue',

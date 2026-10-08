@@ -40,7 +40,7 @@ export function runsGate(command: unknown, script: string): boolean {
 /**
  * Whether a `{ matcher, hooks: [{ command }] }` entry is Intutic's: every
  * hook in it runs `script`. The shape Claude Code, Codex, Continue, Muse,
- * Gemini CLI, Pi and Claude Desktop share.
+ * Gemini CLI and Pi share.
  */
 export function isGateEntry(script: string): (entry: unknown) => boolean {
   return (entry) => {
@@ -49,7 +49,7 @@ export function isGateEntry(script: string): (entry: unknown) => boolean {
   }
 }
 
-/** Whether a `{ command }` entry (Cursor, Windsurf, Roo) runs `script`. */
+/** Whether a `{ command }` entry (Cursor, Windsurf) runs `script`. */
 export function isGateCommandEntry(script: string): (entry: unknown) => boolean {
   return (entry) => isObject(entry) && runsGate(entry.command, script)
 }

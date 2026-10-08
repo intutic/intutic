@@ -40,12 +40,12 @@ export const githubCopilotAdapter: IHarnessAdapter = {
     }
   },
 
-  async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
-    // The gate is installed even with zero SOPs: it is what refuses tool
-    // calls, and the built-in protections apply without any SOP.
+  async installGate(workspaceRoot: string, proxyUrl: string): Promise<void> {
     const creds = await loadCredentials()
     await writeGithubCopilotHooks(workspaceRoot, proxyUrl, creds?.workspaceId || 'local')
+  },
 
+  async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
     if (sops.length === 0) return null
     const filePath = join(workspaceRoot, CONFIG_FILE)
     const content = buildMarkdownContent(sops, proxyUrl)

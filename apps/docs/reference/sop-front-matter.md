@@ -198,7 +198,7 @@ sql_allow_dsns: postgres://localhost/*, postgres://localhost:*, postgres://scrat
 
 Off unless a SOP covering the node's role declares it. When on, the proxy reads
 every call to a shell tool (`Bash`, `shell`, `run_command`, `execute_command`,
-`terminal`, …) **in the model's response, before the harness receives it**, and
+`run_shell_command`, `terminal`, …) **in the model's response, before the harness receives it**, and
 looks for a SQL client — `psql`, `mysql` / `mariadb`, `sqlite3`, `dropdb` —
 about to run `DROP TABLE` / `DATABASE` / `SCHEMA`, `TRUNCATE`, or `DELETE`
 with no `WHERE`. It reads the SQL from `-c` / `--command`, `-e` / `--execute`,

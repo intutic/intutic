@@ -1,6 +1,7 @@
 /**
  * `intutic enterprise install` — CA-trust rollout, Cursor system-level
- * hooks, and Jamf/Intune MDM manifest generation for a managed fleet.
+ * hooks, and Jamf/Intune MDM manifest generation (CA trust, Cursor, Gemini
+ * CLI and Antigravity hooks, firewall) for a managed fleet.
  *
  * Replaces the deleted `enterprise-install.ts` (commit `8481b5d9`). Named
  * `enterprise install`, deliberately not the old hyphenated
@@ -31,6 +32,8 @@ import {
   generateIntuneManifest,
   generateJamfFirewallManifest,
   generateIntuneFirewallManifest,
+  generateGeminiManifest,
+  generateAntigravityManifest,
 } from '../lib/mdmManifest.js'
 import { writeEnforcementState } from '../lib/enforcementState.js'
 import { reportDeviceState } from '../lib/deviceReport.js'
@@ -95,6 +98,11 @@ export async function runEnterpriseInstall(opts: EnterpriseInstallOptions): Prom
   await writeFile(join(outputDir, 'intutic-governance.mobileconfig'), generateMobileconfig({ caCertPem }), 'utf-8')
   await writeFile(join(outputDir, 'cursor-hooks-jamf.json'), generateJamfManifest({ hookScriptPath }), 'utf-8')
   await writeFile(join(outputDir, 'cursor-hooks-intune.json'), generateIntuneManifest({ hookScriptPath }), 'utf-8')
+  const hooksDir = join(workspaceRoot, '.intutic', 'hooks')
+  for (const flavor of ['jamf', 'intune'] as const) {
+    await writeFile(join(outputDir, `gemini-cli-hooks-${flavor}.json`), generateGeminiManifest(flavor, { hookScriptPath: join(hooksDir, 'antigravity-check.sh') }), 'utf-8')
+    await writeFile(join(outputDir, `antigravity-hooks-${flavor}.json`), generateAntigravityManifest(flavor, { hookScriptPath: join(hooksDir, 'antigravity-cli-check.js') }), 'utf-8')
+  }
   await writeFile(join(outputDir, 'jamf-firewall-manifest.json'), generateJamfFirewallManifest({ cliBinaryPath }), 'utf-8')
   await writeFile(join(outputDir, 'intune-firewall-manifest.json'), generateIntuneFirewallManifest({ cliBinaryPath }), 'utf-8')
 
@@ -102,6 +110,8 @@ export async function runEnterpriseInstall(opts: EnterpriseInstallOptions): Prom
   log.field('CA trust profile', 'intutic-governance.mobileconfig')
   log.field('Cursor hooks (Jamf)', 'cursor-hooks-jamf.json')
   log.field('Cursor hooks (Intune)', 'cursor-hooks-intune.json')
+  log.field('Gemini CLI hooks (Jamf / Intune)', 'gemini-cli-hooks-jamf.json, gemini-cli-hooks-intune.json')
+  log.field('Antigravity hooks (Jamf / Intune)', 'antigravity-hooks-jamf.json, antigravity-hooks-intune.json')
   log.field('Firewall re-assertion (Jamf)', 'jamf-firewall-manifest.json')
   log.field('Firewall re-assertion (Intune)', 'intune-firewall-manifest.json')
   if (!opts.cliBinaryPath) {

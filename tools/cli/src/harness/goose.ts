@@ -13,7 +13,6 @@ import { access } from 'node:fs/promises'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { HarnessType } from '@intutic/shared-types'
-import type { SyncSopEntry } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
 import { hashFile } from '../lib/hash.js'
 import { writeGooseHooks } from '@intutic/sync-daemon/harness/gooseHooks'
@@ -34,14 +33,17 @@ export const gooseAdapter: IHarnessAdapter = {
     }
   },
 
-  // `_sops` is unused by design, unlike every markdown adapter: Goose has no
-  // text-rules file to write them to — `HARNESS_CONFIG_FILES.goose` is empty,
-  // and its governance is the PreToolUse plugin, whose gate is compiled from
-  // the shared protected-path list rather than from this array.
-  async writeConfig(_workspaceRoot: string, _sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
-    // Write governance plugin + config proxy URL (gooseHooks handles both)
+  /** The governance plugin and the config proxy URL (gooseHooks handles both). */
+  async installGate(_workspaceRoot: string, proxyUrl: string): Promise<void> {
     await writeGooseHooks(proxyUrl)
-    return GOOSE_CONFIG
+  },
+
+  // Unlike every markdown adapter, Goose has no text-rules file to write rule
+  // sets to — `HARNESS_CONFIG_FILES.goose` is empty, and its governance is
+  // the PreToolUse plugin, whose gate is compiled from the shared
+  // protected-path list rather than from the rule sets.
+  async writeConfig(): Promise<string | null> {
+    return null
   },
 
   async readCurrentHash(_workspaceRoot: string): Promise<string | null> {
