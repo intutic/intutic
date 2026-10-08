@@ -2553,7 +2553,7 @@ intutic exec --sandbox -- <command> [args...]
 | Option | Description |
 |--------|-------------|
 | `--sandbox [kind]` | Run the agent in an isolated sandbox instead of directly on the host. `kind` is `oci` (default) or `firecracker`. See [Sandboxed Execution](/guide/sandboxed-execution) for what each backend actually isolates and requires. |
-| `--sandbox-image <image>` | Sandbox image — must contain the agent, `nftables`, and `capsh`. Default: `intutic/sandbox:latest`. |
+| `--sandbox-image <image>` | Sandbox image — must contain the agent, `nftables`, and `capsh`. Default: `intutic/sandbox:<CLI version>`, built locally from the Dockerfile shipped with the CLI on first use; it has no agent, so extend it ([Sandboxed Execution](/guide/sandboxed-execution)). |
 | `--sandbox-memory <size>` | Sandbox memory cap, e.g. `2g`. Default: `2g`. |
 | `--sandbox-cpus <n>` | Sandbox CPU cap. Default: `2`. |
 | `--sandbox-pids <n>` | Sandbox max process count. Default: `512`. |

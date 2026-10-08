@@ -10,12 +10,16 @@ proxy environment injected. `intutic exec --sandbox` runs it inside an
 isolated runtime instead — a dropped capability set, a read-only root
 filesystem, resource caps, and egress locked to the proxy — so the agent
 cannot reach the network except through governance, and cannot alter the
-firewall it runs behind (LLD #63 §6).
+firewall it runs behind.
 
 ```bash
-intutic exec --sandbox -- claude
+intutic exec --sandbox --sandbox-image my-agent-sandbox -- claude
 intutic exec --sandbox=firecracker -- python my_agent.py
 ```
+
+It needs no login: with [`intutic start`](/reference/cli#intutic-start)
+running, the agent's own provider keys are handed into the sandbox and the
+proxy passes them through.
 
 ## The honesty rule
 
@@ -53,10 +57,30 @@ The isolation envelope:
 | `--pids-limit` / `--memory` / `--cpus` | Bounds on fork-bombs and resource exhaustion |
 | A default-deny egress firewall inside the container | Installed by the image's entrypoint before the agent starts; permits only the proxy (reached via `host.docker.internal`) and DNS |
 
-**Requires an image containing the agent, `nftables`, and `capsh`** — the
-default is `intutic/sandbox:latest` (`--sandbox-image` to use your own).
-Building and shipping your own image with your agent's toolchain baked in
-is the normal path for anything beyond the default agent.
+**The image** must contain `nftables` and `capsh`, which the entrypoint uses
+to install the firewall and drop privilege, plus your agent. The default,
+`intutic/sandbox:<CLI version>`, is built on your machine from the
+Dockerfile that ships with the CLI the first time you run `--sandbox`, and
+reused after that; nothing is pulled from a registry. It is a small Alpine
+image with the firewall tooling, `bash` and `curl`, and no agent. To run
+your agent, extend it with your toolchain and pass the result with
+`--sandbox-image`:
+
+```dockerfile
+ARG INTUTIC_VERSION
+FROM intutic/sandbox:${INTUTIC_VERSION}
+RUN apk add --no-cache python3 py3-pip
+```
+
+```bash
+intutic exec --sandbox -- true    # builds intutic/sandbox:<CLI version> once
+docker build --build-arg INTUTIC_VERSION="$(intutic --version)" -t my-agent-sandbox .
+intutic exec --sandbox --sandbox-image my-agent-sandbox -- python3 my_agent.py
+```
+
+Any other image works too, as long as it has `nftables`, `capsh` and the
+entrypoint's behaviour; a name other than the default is pulled by Docker or
+Podman as usual.
 
 ### Firecracker microVMs (`--sandbox=firecracker`)
 

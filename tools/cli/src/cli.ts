@@ -13,6 +13,7 @@
 
 import { Command } from 'commander'
 import { createRequire } from 'node:module'
+import { DEFAULT_SANDBOX_IMAGE } from './lib/sandbox/image.js'
 
 // Read the version from package.json rather than repeating it here. The literal
 // that used to live below said 1.6.0 for three releases running, so
@@ -691,7 +692,7 @@ program
   // (LLD #63 §6): cap-drop, no-new-privileges, read-only rootfs, resource caps,
   // and a default-deny egress firewall the agent cannot undo.
   .option('--sandbox [kind]', 'Run the agent in an isolated sandbox (kind: oci | firecracker; default oci)')
-  .option('--sandbox-image <image>', 'Sandbox image (must contain the agent + nftables + capsh)', 'intutic/sandbox:latest')
+  .option('--sandbox-image <image>', 'Sandbox image (must contain the agent + nftables + capsh); the default is built locally on first use', DEFAULT_SANDBOX_IMAGE)
   .option('--sandbox-memory <size>', 'Sandbox memory cap (e.g. 2g)', '2g')
   .option('--sandbox-cpus <n>', 'Sandbox CPU cap', '2')
   .option('--sandbox-pids <n>', 'Sandbox max process count', '512')

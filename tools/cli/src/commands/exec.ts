@@ -348,6 +348,13 @@ async function runSandboxed(
     process.exit(1)
   }
 
+  try {
+    await backend.prepare?.(opts.image)
+  } catch (err) {
+    log.error(`Sandbox image unavailable: ${err instanceof Error ? err.message : String(err)}`)
+    process.exit(1)
+  }
+
   log.info(`Sandbox: ${backend.name} · image ${opts.image} · egress locked to the proxy`)
   log.dim(`Proxy (from sandbox): ${proxyUrlOverride}`)
   const [exe, ...rest] = commandAndArgs

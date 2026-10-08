@@ -21,6 +21,7 @@
 
 import { spawn } from 'node:child_process'
 import { log } from '../logger.js'
+import { ensureSandboxImage } from './image.js'
 import type { SandboxBackend, SandboxHealth, SandboxSpec } from './types.js'
 
 export type OciRuntime = 'docker' | 'podman'
@@ -94,6 +95,10 @@ export class OciBackend implements SandboxBackend {
           : resolve({ available: false, detail: `${this.runtime} daemon not reachable` }),
       )
     })
+  }
+
+  async prepare(image: string): Promise<void> {
+    await ensureSandboxImage(this.runtime, image)
   }
 
   async run(spec: SandboxSpec): Promise<number> {
