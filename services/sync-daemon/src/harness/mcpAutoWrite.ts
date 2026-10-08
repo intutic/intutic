@@ -100,6 +100,7 @@ import { createRequire } from 'node:module'
 import { isDeepStrictEqual } from 'node:util'
 import { createLogger } from '@intutic/logger'
 import { readJsonObjectForMerge } from './jsonMergeTarget.js'
+import { projectServerApproval, type ProjectApproval } from './claudeProjectApproval.js'
 import { parseDocument, isMap } from 'yaml'
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml'
 
@@ -158,6 +159,12 @@ export interface DiscoveredMcpServer {
   harness: string
   transport: 'stdio' | 'http' | 'sse' | 'unknown'
   wrapped: boolean
+  /**
+   * Set on a server the harness will start but the proxy cannot govern, with
+   * the reason. Today: an approved Claude Code project server that gets no
+   * local-scope copy (see `shadowBlocker` and `projectServerApproval`).
+   */
+  ungovernedReason?: string
 }
 
 // ─── Proxy Binary Resolution ─────────────────────────────────────────────────
@@ -500,7 +507,7 @@ async function injectClaudeCode(workspaceId: string, workspaceRoot: string): Pro
     const withShadows = shadowProjectServers(
       local,
       await readProjectScopeServers(workspaceRoot),
-      await projectServerApproval(workspaceRoot, project),
+      await projectServerApproval(workspaceRoot, current),
       workspaceId,
       workspaceRoot,
     )
@@ -524,41 +531,33 @@ async function readProjectScopeServers(workspaceRoot: string): Promise<McpServer
   return servers !== null && typeof servers === 'object' && !Array.isArray(servers) ? (servers as McpServersMap) : {}
 }
 
-/** The approval keys Claude Code reads for project-scope servers, among whatever else the object holds. */
-interface ProjectServerApproval {
-  enableAllProjectMcpServers?: unknown
-  enabledMcpjsonServers?: unknown
-  disabledMcpjsonServers?: unknown
-  [key: string]: unknown
-}
-
 /**
- * Whether the user approved a project-scope server. Claude Code asks before
- * it starts a server from a repo's `.mcp.json`, and records the answer in the
- * project's entry in `~/.claude.json` or in a settings file
- * (`enableAllProjectMcpServers`, `enabledMcpjsonServers`,
- * `disabledMcpjsonServers`). A local-scope shadow would start the server
- * without that question, so only an approved server is shadowed; a server
- * disabled anywhere is not, whatever enables it elsewhere.
+ * Why an approved project server cannot get a governed local-scope copy, or
+ * null when it can. Exported for discovery's reporting through
+ * {@link discoverMcpServers}.
+ *
+ * Expansion itself is not a reason: Claude Code expands `${VAR}` the same way
+ * at local scope as in `.mcp.json`, in `command`, `args`, `env`, `url` and
+ * `headers` (verified with Claude Code 2.1.233 — see the MCP governance
+ * guide), so a copy keeps references verbatim and writes no resolved value.
+ * A remote server is the exception. Its copy is a stdio entry that hands the
+ * url to the proxy as an argument and the headers through the environment,
+ * where Claude Code expands every variable; in a remote server's own `url`
+ * and `headers` it reads credential variables (its own API keys, cloud and
+ * proxy credentials) as empty, by a list it does not publish in full. A copy
+ * could therefore send a credential the original never would.
  */
-async function projectServerApproval(
-  workspaceRoot: string,
-  project: ProjectServerApproval,
-): Promise<(name: string) => boolean> {
-  const sources: ProjectServerApproval[] = [project]
-  for (const file of [
-    node_path.join(workspaceRoot, '.claude', 'settings.local.json'),
-    node_path.join(workspaceRoot, '.claude', 'settings.json'),
-    node_path.join(node_os.homedir(), '.claude', 'settings.json'),
-  ]) {
-    const parsed = await readJsonFile<unknown>(file, null)
-    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) sources.push(parsed as ProjectServerApproval)
+function shadowBlocker(entry: McpServerEntry): string | null {
+  if (entry === null || typeof entry !== 'object') return 'an entry the proxy cannot front'
+  if (entry.__intutic_wrapped) return 'the entry in .mcp.json is already wrapped'
+  if (typeof entry.command === 'string') return null
+  if (typeof entry.url === 'string') {
+    const refs = [entry.url, ...Object.values(entry.headers ?? {})].some((v) => typeof v === 'string' && v.includes('${'))
+    return refs
+      ? 'its url or headers reference environment variables, which Claude Code expands with a credential filter a wrapped copy cannot keep'
+      : null
   }
-  const names = (v: unknown) => (Array.isArray(v) ? v.filter((n): n is string => typeof n === 'string') : [])
-  const all = sources.some((src) => src.enableAllProjectMcpServers === true)
-  const enabled = new Set(sources.flatMap((src) => names(src.enabledMcpjsonServers)))
-  const disabled = new Set(sources.flatMap((src) => names(src.disabledMcpjsonServers)))
-  return (name) => !disabled.has(name) && (all || enabled.has(name))
+  return 'an entry the proxy cannot front'
 }
 
 /**
@@ -583,7 +582,7 @@ async function projectServerApproval(
 function shadowProjectServers(
   local: McpServersMap,
   projectServers: McpServersMap,
-  isApproved: (name: string) => boolean,
+  approval: ProjectApproval,
   workspaceId: string,
   workspaceRoot: string,
 ): McpServersMap {
@@ -593,11 +592,9 @@ function shadowProjectServers(
     result[name] = entry
   }
   for (const [name, entry] of Object.entries(projectServers)) {
-    if (name === 'intutic' || name in result || !isApproved(name)) continue
-    if (entry === null || typeof entry !== 'object') continue
-    const wrapped = wrapWithProxy(entry, workspaceId, workspaceRoot, name)
-    if (wrapped === entry) continue // already wrapped by someone else, or a shape the proxy cannot front
-    result[name] = { ...wrapped, __intutic_shadow_of: 'project' }
+    if (name === 'intutic' || name in result || !approval.approved(name)) continue
+    if (shadowBlocker(entry) !== null) continue
+    result[name] = { ...wrapWithProxy(entry, workspaceId, workspaceRoot, name), __intutic_shadow_of: 'project' }
   }
   return result
 }
@@ -1282,12 +1279,23 @@ async function discoverJsonObjectHarness(harness: string, filePath: string): Pro
 async function discoverClaudeCode(workspaceRoot: string): Promise<DiscoveredMcpServer[]> {
   const filePath = claudeCodeConfigPath()
   const current = existsSync(filePath) ? await readJsonFile<ClaudeCodeConfig>(filePath, {}) : {}
-  const servers = {
-    ...(current.mcpServers ?? {}),
-    ...(await readProjectScopeServers(workspaceRoot)),
-    ...(current.projects?.[workspaceRoot]?.mcpServers ?? {}),
-  }
-  return Object.entries(servers).map(([name, entry]) => ({ server: name, harness: 'claude-code', ...classifyEntry(entry) }))
+  const projectServers = await readProjectScopeServers(workspaceRoot)
+  const local = current.projects?.[workspaceRoot]?.mcpServers ?? {}
+  const servers = { ...(current.mcpServers ?? {}), ...projectServers, ...local }
+  const approval = Object.keys(projectServers).length > 0 ? await projectServerApproval(workspaceRoot, current) : null
+
+  return Object.entries(servers).map(([name, entry]) => {
+    const found: DiscoveredMcpServer = { server: name, harness: 'claude-code', ...classifyEntry(entry) }
+    // A project server Claude Code will start, with no copy of ours in front of it.
+    if (approval && name in projectServers && !(name in local) && approval.approved(name)) {
+      const reason = shadowBlocker(projectServers[name]!)
+      if (reason) found.ungovernedReason = `Claude Code project server not governed: ${reason}`
+    }
+    if (approval?.blockedReason && name in projectServers && !(name in local)) {
+      found.ungovernedReason = `Claude Code project server not governed: ${approval.blockedReason}`
+    }
+    return found
+  })
 }
 
 /** Muse Code's `~/.config/muse/settings.json` keeps servers under `mcp_servers`,

@@ -48,6 +48,19 @@ exactly what `.mcp.json` says. A server you added at local scope under the
 same name is yours and is never replaced, and a project server you have not
 approved is left alone, since Claude Code does not start it either.
 
+"Approved" follows Claude Code's own rule, because a local-scope copy starts
+without Claude Code's approval prompt. Approvals in your
+`~/.claude/settings.json`, in managed settings and in your own record in
+`~/.claude.json` always count. Approvals committed to the repository's
+`.claude/settings.json` or `.claude/settings.local.json` count only once you
+have trusted the folder in Claude Code
+(`projects["<repository root>"].hasTrustDialogAccepted` in `~/.claude.json`);
+a folder with no trust record counts as untrusted, so a cloned repository
+cannot approve its own servers. A `disabledMcpjsonServers` entry in any of
+these files keeps the server uncopied. Where Claude Code's managed policy may
+come from MDM or the Windows registry, which the sync daemon does not read, no
+project server is copied.
+
 Muse Code's `mcp_servers` map (in `~/.config/muse/settings.json`) carries
 both `stdio` and `streamable_http` entries; the latter is assumed (not yet
 confirmed against a real install) to match the same
