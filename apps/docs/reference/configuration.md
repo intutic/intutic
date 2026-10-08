@@ -87,7 +87,6 @@ Settings for a proxy deployed as a shared or self-hosted gateway. See [Self-host
 | `LITELLM_LOCAL_JUDGE_MODEL` | none (required) | The judge model's name on that server |
 | `LITELLM_LOCAL_TYPED_JUDGE_MODEL` | `LITELLM_LOCAL_JUDGE_MODEL` | A separate model for the scored first stage |
 | `INTUTIC_GATEWAY_LOCAL_JUDGE_TYPED_LO`, `INTUTIC_GATEWAY_LOCAL_JUDGE_TYPED_HI` | unset | The first stage's review band, in log-odds: below `LO` is clean, above `HI` a violation. Set both to turn the first stage on |
-| `INTUTIC_PROXY_PORT` | `8080` | The port in firewall rules generated to redirect AI traffic to the proxy |
 
 #### Connected services
 
@@ -105,7 +104,6 @@ Settings for a proxy deployed as a shared or self-hosted gateway. See [Self-host
 | `PORT` | `4000` | The port `intutic start` and `intutic connect` run the proxy on |
 | `VALKEY_URL` | `redis://127.0.0.1:6379` | Passed to the proxy the CLI starts |
 | `INTUTIC_PROXY_URL` | `http://localhost:4000` | The proxy `intutic exec` and `intutic enterprise` point agents at |
-| `INTUTIC_PROXY_PORT` | `8877` | The HTTP proxy port `intutic connect` writes into Windsurf's settings |
 | `INTUTIC_SNAPSHOT_RULES` | `~/.intutic/hooks/policy-snapshot.rules` | Where the CLI writes the policy snapshot the hook gate reads |
 | `INTUTIC_WASM_DIR` | `~/.intutic/wasm` | Where `intutic policy install` puts WASM rules |
 | `N8N_URL` | `http://localhost:5678` | The n8n instance `intutic connect` configures |
