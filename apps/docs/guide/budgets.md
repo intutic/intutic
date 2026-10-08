@@ -103,8 +103,11 @@ The dashboard surfaces budget utilization in real time:
 - **Budget used** — on Overview, above every tab: spend against the workspace budget, as a percentage and in dollars.
 - **Budget Limits** — on **Settings › Billing**: meters for **Spent this month** and **Spent today** against their caps (amber from 75%, red from 90%), the caps and alert threshold themselves, and the budget alerts raised so far.
 - **Cost by Virtual Key** — on Overview's **Cost & Token Efficiency** tab: cost per virtual key, today or this month (see below).
+- **Cost by Developer** — on the same tab: cost, tokens, calls, active days and models used per member, today or this month. Sort by any column; the top 10 show until you choose **Show all**. A call belongs to the member who owns the virtual key that made it. OWNER, ADMIN and EM see every member, plus an **Unattributed** row for calls with no virtual key. A DEVELOPER or VIEWER sees only their own usage.
+- **Cost by Team** — on the same tab, for OWNER, ADMIN and EM: the same figures per [SCIM group](/guide/scim), including members of nested groups. A member in several groups counts in each one, so team totals can add up to more than the workspace total. Without SCIM groups there are no teams, and cost by developer is the finest breakdown.
+- **Cost by Branch** — on the same tab: cost per repository and branch, or per HEAD commit (see [Cost per branch and commit](#cost-per-branch-and-commit)).
 
-The dashboard has no daily spend trend, per-model spend or per-developer spend view. **Token Efficiency by Model** on the same tab shows tokens per model, not cost.
+The dashboard has no daily spend trend or per-model spend view. **Token Efficiency by Model** on the same tab shows tokens per model, not cost.
 
 ### Token Utility Classification
 
@@ -152,6 +155,9 @@ Intutic keeps an append-only cost ledger — `execution_traces` forbids UPDATE a
 - **Workspace Summary:** Actual cost, raw cost before routing, routing savings, input and output token totals, and call count for a daily, weekly or monthly window (`/api/v1/usage/summary`).
 - **Per-Model Breakdown:** Cost and tokens grouped by requested model (`/api/v1/usage/models`).
 - **Per-Virtual-Key Breakdown:** Cost and tokens grouped by which virtual key authenticated the call (`/api/v1/usage/virtual-keys`).
+- **Per-Developer Breakdown:** Cost, tokens, calls, models and active days per member (`/api/v1/usage/members`). DEVELOPER and VIEWER callers get their own row only.
+- **Per-Team Breakdown:** The same totals per SCIM group (`/api/v1/usage/teams`, OWNER, ADMIN and EM).
+- **Per-Branch and Per-Commit Breakdown:** Cost grouped by repository and branch (`/api/v1/usage/branches`) or by HEAD commit (`/api/v1/usage/commits`).
 - **Event-Level Detail:** The individual billed calls behind those totals (`/api/v1/usage/events`).
 
 ::: info Chargebacks and GL mapping are not part of the product
@@ -170,6 +176,15 @@ current month. Traces from before a key existed, and any trace with no
 virtual-key auth context (a standalone/offline trace synced back, for
 instance), report under a `null` key — shown as **unattributed** on the card —
 rather than being folded into whichever key happens to be first.
+
+### Cost per branch and commit
+
+The sync daemon (`intutic connect`) reports the repository, Git branch and HEAD commit of the directory it runs in. It checks them on every poll (every 30 seconds by default) and reports them again when they change. When the control plane records a trace, it copies the session's current repository, branch and commit onto that trace. A call therefore stays with the commit it was made at, even after the session moves on.
+
+- **Repository** is the `origin` remote reduced to host and path, such as `github.com/acme/widgets`. Any user name, password or token in the remote is removed before the daemon sends it, and removed again when the control plane receives it. No file contents are sent.
+- **Commit** is the commit that was checked out when the call was made. A commit's cost is therefore the work that led to the next commit, not the work that produced this one.
+- **Scope:** the figures cover calls that go through a machine's local proxy while `intutic connect` is running. Every agent on that machine is attributed to the repository the daemon runs in, even when the agent works in a different directory. Calls through a shared gateway, calls made while the daemon is not reporting, and calls from a directory with no Git repository are shown as **No git context**.
+- **Pull requests:** branches are not mapped to pull requests. That needs a GitHub integration, which Intutic does not have.
 
 ### Resolving Budget Breaches
 Budget breach anomalies (see [Budget Breach Anomalies](#budget-breach-anomalies)) are incidents: security and FinOps administrators review them on **Findings › Incidents**. When resolving a breach, administrators can record:

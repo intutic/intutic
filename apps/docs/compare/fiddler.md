@@ -18,7 +18,7 @@ Intutic decides each agent tool call before it runs, across 43 harnesses, and ba
 | **Decisions** | Allow, warn, require approval (held until approved in Slack or the CLI), block, redact, re-ask, shadow | Allow, block, redact |
 | **What it inspects** | The tool call and its arguments, model requests and responses, MCP tool calls and tool descriptions, network egress | Prompts and responses, with PII, PHI and secrets detectors |
 | **Content detection** | Pattern DLP for secrets and credentials, pattern-based prompt-injection detection, tool-description poisoning detection | Trained guardrail models for safety, jailbreaks, prompt injection, 35+ PII types and faithfulness |
-| **Cost** | Daily spend caps enforced before a request leaves; per-model cost ledger | Fleet cost, token and adoption reporting by developer, team and model |
+| **Cost** | Daily spend caps enforced before a request leaves; cost and token reporting by model, virtual key, developer, team, branch and commit | Fleet cost, token and adoption reporting by developer, team and model |
 | **Deployment** | Cloud, or fully self-hosted including air-gapped | SaaS, VPC or on-prem |
 | **Source** | Open core (MIT) | Closed |
 
@@ -27,7 +27,7 @@ Intutic decides each agent tool call before it runs, across 43 harnesses, and ba
 - **Content judgement.** Trained guardrail models for toxicity, jailbreaks, PII and faithfulness go beyond pattern matching. Intutic's prompt-injection detection is pattern-based and steers the agent rather than blocking.
 - **Model monitoring.** Drift, data integrity, performance and bias monitoring for traditional ML models.
 - **Gemini CLI.** Fiddler governs it today; Intutic does not.
-- **Fleet analytics.** Cost per pull request and commit, and adoption by developer and team.
+- **Cost per pull request.** Intutic reports cost per branch and commit but does not map branches to pull requests.
 
 ## When to choose Intutic
 

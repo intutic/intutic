@@ -414,8 +414,12 @@ The daemon runs in the foreground. Use `Ctrl+C` to stop.
 - An agent report per harness: the configured guardrails, role SOPs, skills found under
   `.agents/skills` (scan findings and file hashes, not file contents), declared MCP servers and the
   budget tier.
-- Session start and end, with the Git branch and commit from `.intutic/git-context.json`, and the
-  names of your local SOP folders.
+- Session start and end, with the names of your local SOP folders, and the repository, Git branch
+  and HEAD commit of the workspace root, reported again when they change. The repository is the
+  `origin` remote reduced to host and path; any user name, password or token in it is removed
+  before it is sent.
+- The Git branch and commit in `.intutic/git-context.json`, when `intutic sync-context` has
+  written it.
 - Hook events and review requests the harness gates logged under `.intutic/events/`.
 - The proxy's local trace files, `~/.intutic/logs/traces-*.jsonl`, which are deleted locally once
   uploaded.
