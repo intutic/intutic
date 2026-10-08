@@ -8,7 +8,7 @@ One list per day (UTC), newest first. Each event carries a type badge, a title, 
 
 | Type | Title and detail |
 |------|------------------|
-| **Login** | The member who signed in, the sign-in method and, when recorded, the IP address |
+| **Login** | The member who signed in, the sign-in method (password, SSO, magic link, GitHub or Google; signing up counts as the new owner's first sign-in) and, when recorded, the IP address. Refused sign-ins are not listed here; they stream to [SIEM export](/guide/siem-export) |
 | **Enforcement** | The tool and the verdict, with the reason |
 | **Decision** | A resolved decision's summary, with its outcome and status |
 | **Incident** | A resolved incident's anomaly type and severity, with its description, attributed to whoever resolved it |

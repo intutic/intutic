@@ -224,6 +224,12 @@ export interface NotificationRule {
   enabled: boolean
   createdAt: string
   updatedAt: string
+  /**
+   * A webhook rule's signing secret in plaintext. Present only in the
+   * response that generated it (create, a switch to the webhook channel, or a
+   * rotation); copy it then.
+   */
+  signingSecret?: string
 }
 
 export interface ChannelConfig {
@@ -231,7 +237,12 @@ export interface ChannelConfig {
   slackChannelName?: string
   emailRecipients?: string[]
   webhookUrl?: string
-  webhookSecret?: string
+  /**
+   * A webhook rule's signing secret, encrypted at rest. Server-generated on
+   * create and never accepted from a caller; stored only, never returned —
+   * the plaintext appears once, as `NotificationRule.signingSecret`.
+   */
+  webhookSecretEnc?: string
   /** PagerDuty Events API v2 integration/routing key. A credential — see
    *  `notificationHubService.ts`'s `getChannelTarget` for why it is masked
    *  (`pd:${key.slice(0,6)}…`) before ever reaching `notification_log`,
