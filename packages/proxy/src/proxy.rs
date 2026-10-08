@@ -3989,6 +3989,59 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         }
     }
 
+    // ── Step 5a: SSO group policy for the response gate ─────────────
+    //
+    // The workspace's `sso_group_policy` and the groups of the member this
+    // virtual key belongs to, from the control plane's per-key
+    // `/auth/key-context` (cached per key for `sso_groups::CACHE_TTL`, and
+    // refetched early when the workspace's config version moves). Applied
+    // to the tool calls in the model's response below, in both the streaming
+    // and the non-streaming gate. Nothing to fetch without a control plane or
+    // a virtual key: a standalone proxy has no group policy, and a provider
+    // key names no member.
+    //
+    // A failed fetch follows the policy check's fail mode above. Closed, the
+    // request is refused before any model spend, as an unreachable policy
+    // check is; open, it proceeds without group rules. A global break-glass
+    // skips the refusal exactly as it skips the policy check, but a policy
+    // that was fetched is still applied — like `deny_tools` on the response
+    // side, the group rules are not something break-glass or shadow
+    // enforcement switches off.
+    let sso_group_gate: Option<crate::sso_groups::SsoGroupGate> = {
+        let policy_cfg = &state.config.intutic_settings.policy;
+        match policy_cfg.control_plane_url.as_deref() {
+            Some(cp_url) if raw_token.starts_with("vk_") => {
+                // Read before the fetch, like the SOP cache's, so a change
+                // announced during this request is seen as moved next time.
+                let policy_version = state.control_plane.policy_version(&workspace_id).await;
+                match crate::sso_groups::resolve(
+                    &state.http_client,
+                    cp_url,
+                    raw_token,
+                    std::time::Duration::from_millis(policy_cfg.timeout_ms),
+                    policy_version,
+                )
+                .await
+                {
+                    Ok(gate) => gate,
+                    Err(reason) if policy_cfg.fail_closed && !bypass_everything => {
+                        tracing::warn!(workspace_id = %workspace_id, reason = %reason, "SSO group policy unavailable — blocking (fail-closed)");
+                        return json_error(
+                            StatusCode::FORBIDDEN,
+                            "policy_denied",
+                            &format!("Request blocked by Intutic governance policy: {reason}"),
+                        );
+                    }
+                    Err(reason) => {
+                        tracing::warn!(workspace_id = %workspace_id, reason = %reason, "SSO group policy unavailable — proceeding without group rules (fail-open mode)");
+                        None
+                    }
+                }
+            }
+            _ => None,
+        }
+    };
+
     // ── Step 5b: Phase 7 — Pre-processor (slash commands + quality gate) ──
     if let Ok(control_plane_url) = std::env::var("CONTROL_PLANE_URL") {
         let messages = body_json.get("messages").cloned();
@@ -5278,6 +5331,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         // same policy from the same source.
         let response_gate_cfg = state.config.intutic_settings.response_gate.clone();
         let denied_tools_clone = wasm_ctx.denied_tools.clone();
+        let sso_group_gate_clone = sso_group_gate.clone();
         let sql_guard_policies_clone = sql_guard_policies.clone();
         // Same reason as response_gate_cfg above: the stream task outlives
         // this scope, and the snippet-capture config has to travel with it.
@@ -5319,6 +5373,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // synthesis block, the terminal event — must be suppressed: bytes
             // after a terminal event are not a stream any client can parse.
             let mut gate_tripped = false;
+            // The finding an SSO-group refusal adds to this stream's trace, so
+            // the deciding rule id reaches the control plane.
+            let mut gate_finding: Option<crate::telemetry::FindingWire> = None;
             // ── Output DLP holdback (TD-210 follow-up) ────────────────────
             // Decoded-text continuity across deltas. `None` when output DLP is
             // off or the holdback is configured to 0, so those deployments run
@@ -5549,6 +5606,13 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                     &line,
                                     &denied_tools_clone,
                                 )
+                                .or_else(|| {
+                                    crate::plugins::response_gate::gate_stream_line_sso_groups(
+                                        &response_gate_cfg,
+                                        &line,
+                                        sso_group_gate_clone.as_ref(),
+                                    )
+                                })
                             };
                             // ── Destructive-SQL hold (TD-480) ───────────────
                             // After the name gate, so a denied tool is refused
@@ -5585,6 +5649,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                     "{}",
                                     denial.log_message()
                                 );
+                                gate_finding =
+                                    crate::telemetry::FindingWire::from_sso_group_denial(&denial);
                                 // Cross-provider streams reach the client as
                                 // OpenAI chunks whatever the upstream was, and
                                 // the withheld event's index means something
@@ -6688,7 +6754,11 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 break_glass: has_break_glass,
                 break_glass_request_id: break_glass_request_id_clone,
                 loop_run_id: loop_run_id_clone,
-                findings: advisory_findings.clone(),
+                findings: advisory_findings
+                    .iter()
+                    .cloned()
+                    .chain(gate_finding.take())
+                    .collect(),
                 response_injection_findings,
                 context_snapshot: context_snapshot_for_trace.clone(),
                 // The stream completed (this is the success trace; a mid-stream
@@ -7280,6 +7350,13 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         &wasm_ctx.denied_tools,
     )
     .or_else(|| {
+        crate::plugins::response_gate::gate_response_sso_groups(
+            &state.config.intutic_settings.response_gate,
+            parsed_response.as_ref(),
+            sso_group_gate.as_ref(),
+        )
+    })
+    .or_else(|| {
         // Argument-level: a shell call running destructive SQL against a
         // database the role's `sql_allow_dsns:` does not admit (TD-480).
         let (denial, notes) = crate::plugins::response_gate::gate_response_sql(
@@ -7604,7 +7681,17 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         tool_result_bytes_saved,
         routing_shadow_model: shadow_selection.clone(),
         loop_run_id: loop_run_id_header,
-        findings: advisory_findings.clone(),
+        // Plus the SSO-group refusal, when that is what the response gate
+        // withheld, so the deciding rule id reaches the control plane.
+        findings: advisory_findings
+            .iter()
+            .cloned()
+            .chain(
+                response_denial
+                    .as_ref()
+                    .and_then(crate::telemetry::FindingWire::from_sso_group_denial),
+            )
+            .collect(),
         // Advisory echo scan of the model's own output, plus a bounded
         // DLP-scrubbed snippet per firing pattern — see the field's doc in
         // telemetry.rs and injection.rs's own doc comments for why this

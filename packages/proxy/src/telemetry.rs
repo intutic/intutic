@@ -308,6 +308,17 @@ pub struct FindingWire {
     /// measured: which verdict the detector actually reached.
     #[serde(default)]
     pub shadowed: bool,
+    /// The operator rule that decided, for a finding that is a policy refusal
+    /// rather than a detection — today the response gate's SSO-group refusals
+    /// (`sso_group.high_risk.Bash`). The control plane forwards a finding that
+    /// carries one to the SIEM `gate_decisions` source, the record every other
+    /// gate's refusal of the same rule lands in. `reason` ends with the same id
+    /// in brackets, where `ruleIdFromReason` reads it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rule_id: Option<String>,
+    /// The tool call the rule refused, alongside `rule_id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_name: Option<String>,
 }
 
 impl FindingWire {
@@ -320,7 +331,29 @@ impl FindingWire {
             confidence: f.confidence,
             reason: f.reason.clone(),
             shadowed: false,
+            rule_id: None,
+            tool_name: None,
         }
+    }
+
+    /// The finding for a tool call the response gate withheld under the SSO
+    /// group policy. `None` for any other denial: a `deny_tools` hit or a SQL
+    /// guard refusal is not a group rule and records no rule id.
+    pub fn from_sso_group_denial(denial: &crate::plugins::response_gate::Denial) -> Option<Self> {
+        let crate::plugins::response_gate::DenialReason::SsoGroup { tool, decision } =
+            &denial.reason
+        else {
+            return None;
+        };
+        let mut finding = crate::plugins::anomaly::AnomalyFinding::kill(
+            crate::plugins::anomaly::AnomalyKind::UnauthorizedTool,
+            decision.refusal_reason(),
+        );
+        finding.detector_id = "sso_group";
+        let mut wire = Self::from_finding(&finding);
+        wire.rule_id = decision.rule_id.clone();
+        wire.tool_name = Some(tool.clone());
+        Some(wire)
     }
 
     /// Mark every finding as recorded-but-not-enforced.
@@ -903,6 +936,52 @@ mod tests {
         k.detector_id = "budget_exhaustion";
         assert_eq!(FindingWire::from_finding(&k).disposition, "KILL");
         assert_eq!(Disposition::Ask.as_str(), "ASK");
+
+        // A detection carries no rule id, and the wire omits the field.
+        let v = serde_json::to_value(FindingWire::from_finding(&k)).unwrap();
+        assert!(v.get("rule_id").is_none() && v.get("tool_name").is_none());
+    }
+
+    /// An SSO-group refusal by the response gate reaches the trace with its
+    /// rule id, both as a field and closing the reason, and is never shadowed.
+    #[test]
+    fn an_sso_group_refusal_records_its_rule_id() {
+        use crate::plugins::response_gate::{gate_response_sso_groups, Denial, DenialReason};
+
+        let gate = crate::sso_groups::SsoGroupGate {
+            policy: crate::sso_groups::parse_policy(&serde_json::json!({
+                "highRiskTools": ["Bash"], "requiredGroups": ["sre"]
+            }))
+            .unwrap(),
+            member_groups: Some(vec!["eng".into()]),
+        };
+        let body = serde_json::json!({
+            "content": [{ "type": "tool_use", "id": "t", "name": "Bash", "input": {} }]
+        });
+        let denial = gate_response_sso_groups(
+            &crate::config::ResponseGateConfig::default(),
+            Some(&body),
+            Some(&gate),
+        )
+        .expect("refused");
+        let w = FindingWire::from_sso_group_denial(&denial).expect("a group refusal");
+        assert_eq!(w.detector_id, "sso_group");
+        assert_eq!(w.kind, "UNAUTHORIZED_TOOL");
+        assert_eq!(w.disposition, "KILL");
+        assert!(!w.shadowed);
+        assert_eq!(w.rule_id.as_deref(), Some("sso_group.high_risk.Bash"));
+        assert_eq!(w.tool_name.as_deref(), Some("Bash"));
+        assert!(
+            w.reason.ends_with(" [sso_group.high_risk.Bash]"),
+            "{}",
+            w.reason
+        );
+
+        let deny_list = Denial {
+            reason: DenialReason::Tools(vec!["Bash".into()]),
+            block_index: 0,
+        };
+        assert!(FindingWire::from_sso_group_denial(&deny_list).is_none());
     }
 
     /// Shadow must be OFF unless someone deliberately turned it on.

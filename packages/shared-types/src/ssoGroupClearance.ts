@@ -2,13 +2,14 @@
  * SSO-group tool clearance — the one evaluator.
  *
  * A workspace's `sso_group_policy` names high-risk tools, the IdP groups that
- * clear them, and tools that only an on-behalf-of token may call. Four places
+ * clear them, and tools that only an on-behalf-of token may call. These places
  * decide a tool call against it: the control plane's hook gate
- * (`resolveSsoGroupPrivilege`), the MCP proxy, and — through the policy
- * snapshot the sync daemon compiles with this function — every harness gate.
- * `@intutic/gate` and `intutic-clawde` cannot depend on this package, so they
- * carry ports; `fixtures/sso-group-clearance-vectors.json` holds all of them to
- * the same answers.
+ * (`resolveSsoGroupPrivilege`), the MCP proxy, the Rust proxy's response gate,
+ * and — through the policy snapshot the sync daemon compiles with this
+ * function — every harness gate. `@intutic/gate`, `intutic-clawde` and the Rust
+ * proxy (`packages/proxy/src/sso_groups.rs`) cannot depend on this package, so
+ * they carry ports; `fixtures/sso-group-clearance-vectors.json` holds all of
+ * them to the same answers.
  *
  * The algorithm, in order:
  *   1. no policy                       → GRANTED

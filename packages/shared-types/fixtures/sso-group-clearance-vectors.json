@@ -1,5 +1,5 @@
 {
-  "_comment": "SSO-group tool clearance vectors. Every implementation of the rule (the control plane's resolveSsoGroupPrivilege, the MCP proxy, the policy snapshot the sync daemon compiles for the harness gates, @intutic/gate and intutic-clawde) runs these cases and must reach the same clearance and rule id. memberGroups null means the gate does not know the member's groups. Edit the cases, never one implementation's expectations.",
+  "_comment": "SSO-group tool clearance vectors. Every implementation of the rule (the control plane's resolveSsoGroupPrivilege, the MCP proxy, the Rust proxy's response gate, the policy snapshot the sync daemon compiles for the harness gates, @intutic/gate and intutic-clawde) runs these cases and must reach the same clearance and rule id. memberGroups null means the gate does not know the member's groups. Edit the cases, never one implementation's expectations.",
   "policies": {
     "standard": {
       "highRiskTools": ["Bash", "database_write", "mcp__github__create_issue", "db.query"],

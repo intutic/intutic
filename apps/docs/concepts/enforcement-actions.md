@@ -59,6 +59,12 @@ snapshot the sync daemon refreshes: the workspace's `BLOCK:` and `REQUIRE_APPROV
 its SSO group policy, decided for the member the snapshot was issued to. A local gate refuses a
 high-risk tool when it does not know the member's groups. Promoted findings and the gate's DLP
 scan run only at the gate; the local gates carry their own secret-content patterns.
+
+A harness with no hook system, such as Roo Code or aider pointed at the proxy, gets the SSO group
+policy from the proxy's [response gate](/concepts/circuit-breaker#the-proxy-s-response-gate)
+instead: the proxy withholds a refused tool call from the model's response before the harness
+sees it, for the member behind the request's virtual key, with the same decision and rule id.
+A policy change reaches it within 90 seconds and a SCIM group change on the next request.
 :::
 
 ---

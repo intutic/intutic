@@ -42,7 +42,7 @@ Every event carries a `sourceTable` naming its source:
 | `workspace_settings_changes` | Every workspace settings change: who made it, which keys changed, and the before and after values with secrets redacted. Policy guardrails that set the model allowlist or egress allow list appear here too |
 | `sop_registry` | A guideline moving between lifecycle states (for example draft to validated, or validated to invalidated): which guideline, from and to, and who moved it |
 | `governance_alerts` | The alerts the notification hub sends: a gate that stopped reporting, the same gate reporting again, and a failed trace integrity check. `payload.alert_type` says which |
-| `gate_decisions` | **Opt-in.** Every verdict a hook gate records: allow, block, flag, would-block (shadow mode), hold and approved bypass, with the tool name, reason, rule, harness and session. The tool's input is not included |
+| `gate_decisions` | **Opt-in.** Every verdict a hook gate records: allow, block, flag, would-block (shadow mode), hold and approved bypass, with the tool name, reason, rule, harness and session. Also every tool call the proxy's response gate withholds under the SSO group policy, as a block with source `proxy_response_gate`. The tool's input is not included |
 
 Delivery is in-process by default (no Kafka or Debezium dependency by default): the control plane's own domain event emitter drives it directly, so a destination configured today starts receiving events on the very next matching action. An optional Kafka/Debezium CDC ingestion path is also available — see "Delivery guarantees" below.
 

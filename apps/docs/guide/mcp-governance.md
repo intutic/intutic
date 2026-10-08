@@ -264,8 +264,8 @@ present. A tool matches by its MCP name (`run_query`) or by the name the
 harness hooks see (`mcp__postgres__run_query`). With a group policy but no
 member resolved for the key, or once the control plane refuses the key (revoked,
 or its member deactivated), the member's groups are unknown and a high-risk
-tool is refused rather than allowed. The decision is the one the hook gate and
-the local gates make; see [SSO group clearance](/concepts/circuit-breaker#_3-sso-group-clearance).
+tool is refused rather than allowed. The decision is the one the hook gate, the
+proxy's response gate and the local gates make; see [SSO group clearance](/concepts/circuit-breaker#_3-sso-group-clearance).
 
 ## Server-level TOFU pinning
 

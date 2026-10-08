@@ -160,6 +160,7 @@ held to the same set of test cases:
 |---|---|---|
 | The [hook gate](/concepts/enforcement-actions#how-a-verdict-is-decided) (`POST /api/v1/hook-gate`) | Resolved on every call | An internal error allows the call, like every check on that endpoint |
 | The [MCP governance proxy](/guide/mcp-governance) | The member the proxy's API key resolves to, from its policy refresh | With a policy but no resolved member, or a key the control plane refuses, high-risk tools are refused |
+| The proxy's [response gate](#the-proxy-s-response-gate) | The member the request's virtual key belongs to, from the control plane, cached per key | With a policy but no resolved member, or a key the control plane refuses, high-risk tools are refused. When the policy cannot be fetched, the proxy's [fail mode](#proxy-side-fail-mode) decides |
 | The harness hook gates and the `@intutic/gate` and `intutic-clawde` SDK gates | The policy snapshot the sync daemon writes to `~/.intutic/hooks/` | See below |
 
 **Local gates.** Most harness gates decide on the developer's machine without calling the
@@ -182,20 +183,56 @@ snapshot and decide with the same evaluator.
   write.
 - **Unaffected:** a workspace with no group policy. Its snapshots are byte-identical to before.
 
+### The proxy's response gate
+
+The proxy reads every model response before the harness does, and withholds a tool call the
+group policy refuses, on streamed and whole responses alike. That covers harnesses with no hook
+system of their own, such as Roo Code or aider pointed at the proxy, where the response gate is
+the only gate. It is the same check that withholds a tool on an SOP's `deny_tools` list:
+
+- **Who is checked.** The member the request's virtual key belongs to. The proxy asks the control
+  plane for the workspace's group policy and that member's groups through the per-key
+  `GET /api/v1/auth/key-context` it already uses to validate keys, and keeps the answer for that
+  key for 30 seconds. A key with no active member has its groups unknown, so its high-risk tools
+  are refused. A key the control plane refuses (revoked, or its member deactivated) keeps the
+  policy last seen for it with the groups unknown.
+- **What is matched.** The tool name the model emitted, which is the name a harness hook sees
+  (`Bash`, `mcp__github__create_issue`). Names match exactly, as at the hook gate; the
+  case-insensitive match `deny_tools` uses does not apply. Gemini's native function-call format
+  is not read by the response gate, for group rules or `deny_tools`.
+- **What the client sees.** The tool call never reaches the harness. In its place the model's
+  turn carries a message naming the tool, the reason and the rule, for example
+  `[sso_group.high_risk.Bash]`, and telling the agent not to retry.
+- **What is recorded.** The request's trace is marked killed and carries a finding from detector
+  `sso_group` whose reason ends with the rule id. The control plane forwards it to the
+  `gate_decisions` SIEM source as a `BLOCK` with that `rule_id` and source
+  `proxy_response_gate`, next to the same refusal from every other gate.
+- **When the policy cannot be fetched.** The proxy's [fail mode](#proxy-side-fail-mode) applies:
+  with `fail_closed: true`, the default, the request is refused before it reaches the model, as
+  when the policy check cannot complete; with `fail_closed: false` it proceeds without group
+  rules.
+- **Not here:** a standalone proxy with no control plane has no group policy and skips the
+  check, and a request made with a provider key instead of a virtual key names no member and is
+  not checked.
+
 **Propagation.** A SCIM change needs no sign-in. Every SCIM write (a group created, renamed,
 deleted or re-membered, a user provisioned or deactivated) and every SCIM token issued or
 revoked drops the cached policy the MCP proxies read, moves the workspace's configuration
 version, and pushes a configuration update to connected sync daemons. End to end:
 
-| Change | Hook gate | Harness and SDK gates | MCP proxy |
-|---|---|---|---|
-| SCIM group add or remove, SCIM switched on or off | Next call | Seconds, through the push; at most one sync cycle (30 seconds by default, `intutic connect --interval <ms>`) when the daemon is connected to another control-plane replica or not connected | Next policy refresh, at most 60 seconds |
-| Member deactivated or deprovisioned | Key refused on the next call | Next refresh: the key is refused and the snapshot forgets the member's groups | Next policy refresh: the key is refused and the proxy forgets the member's groups |
-| Groups changed at the identity provider, SCIM off | When the member next signs in through SSO, then next call | The sync cycle after that sign-in | The policy refresh after that sign-in |
-| `sso_group_policy` edited | Within 60 seconds (cached in Valkey) | Next sync cycle | Next policy refresh |
+| Change | Hook gate | Harness and SDK gates | MCP proxy | Proxy response gate |
+|---|---|---|---|---|
+| SCIM group add or remove, SCIM switched on or off | Next call | Seconds, through the push; at most one sync cycle (30 seconds by default, `intutic connect --interval <ms>`) when the daemon is connected to another control-plane replica or not connected | Next policy refresh, at most 60 seconds | Next request: the configuration version moved, so the key's cached answer is refetched |
+| Member deactivated or deprovisioned | Key refused on the next call | Next refresh: the key is refused and the snapshot forgets the member's groups | Next policy refresh: the key is refused and the proxy forgets the member's groups | Key refused on the next request |
+| Groups changed at the identity provider, SCIM off | When the member next signs in through SSO, then next call | The sync cycle after that sign-in | The policy refresh after that sign-in | Within 30 seconds of that sign-in |
+| `sso_group_policy` edited | Within 60 seconds (cached in Valkey) | Next sync cycle | Next policy refresh | Within 90 seconds: up to 60 in the control plane's cache, then up to 30 in the proxy's |
 
-The group policy is not demoted by the `SILENT_LOG` intervention mode. The hook gate and the
-MCP proxy refuse these calls in every mode, so the local gates do too.
+A proxy that does not read the control plane's Valkey cannot see the configuration version, so
+the response gate's answer for a key is at most 30 seconds old there for every change.
+
+The group policy is not demoted by the `SILENT_LOG` intervention mode or by shadow enforcement.
+The hook gate, the MCP proxy and the proxy's response gate refuse these calls in every mode, so
+the local gates do too.
 
 → Source: `evaluateSsoGroupClearance` in `packages/shared-types/src/ssoGroupClearance.ts`; the
 test cases are `packages/shared-types/fixtures/sso-group-clearance-vectors.json`
