@@ -19,17 +19,17 @@ bodies — streaming included — for sensitive data.
 ### What's Detected
 
 - API keys and access tokens
-- AWS credentials and service account keys
-- Social Security Numbers (SSNs)
-- Personally Identifiable Information (PII)
-- Database connection strings
-- Private keys and certificates
+- AWS credentials
+- Database connection credentials, JWTs and bearer tokens
+- Private keys
+- PII: payment card numbers, IBANs and US Social Security Numbers, plus email
+  addresses and phone numbers when you turn them on (see [PII detectors](#pii-detectors))
 
 ### Enforcement
 
-The action is **per pattern, not per mode**, and is fixed by what the pattern
-is: private keys and Anthropic API keys **block** (the request is refused with
-a DLP error); everything else **redacts** — the match is replaced with
+The action is **per pattern, not per mode**. For secrets it is fixed by what
+the pattern is: private keys and Anthropic API keys **block** (the request is
+refused with a DLP error); everything else **redacts** — the match is replaced with
 `[REDACTED_*]` and the redacted body is what reaches your provider.
 
 DLP is configured in `config.yaml` under `intutic_settings.dlp`:
@@ -41,6 +41,52 @@ DLP is configured in `config.yaml` under `intutic_settings.dlp`:
 | `scan_output` | `true` | Scan response bodies; streaming responses are scrubbed before each chunk reaches the client |
 | `stream_holdback_bytes` | derived (1020 with the built-in patterns) | How far a streamed response is held back so a secret split across two chunks is seen whole before any of it is sent. The default is the longest match any installed pattern can produce. It delays the first token by the time the model takes to write that many bytes (a few seconds), not the end of the response. `0` turns the holdback off, and a split secret can then get through; a smaller number leaves secrets longer than it uncovered. Applies only when `enabled` and `scan_output` are on |
 | `patterns` | none | Your own patterns, added to the built-in set (below) |
+| `detectors` | see below | The action for each PII detector: `off`, `redact` or `block` |
+
+### PII detectors
+
+Each detector finds a candidate with a pattern and then validates it, so a
+number that only looks like a card is not redacted as one. These are pattern
+and checksum detectors, not a model: names, postal addresses and free-text
+identifiers are not detected.
+
+| Id | Detects | Validation | Default |
+|---|---|---|---|
+| `pii.card` | Payment card numbers: 13 to 19 digits, plain or in groups split by spaces or dashes (4-4-4-4, 4-6-5, 4-6-4) | A Visa, Mastercard, American Express, Discover, JCB, Diners Club or UnionPay prefix at a length that brand issues, and a valid Luhn checksum | `redact` |
+| `pii.iban` | IBANs in capitals, printed in groups of four or written solid | A country code from the IBAN registry, that country's exact length, and the mod-97 check | `redact` |
+| `pii.ssn` | US Social Security Numbers written `NNN-NN-NNNN` | Rejects numbers never issued: area 000, 666 or 900–999, group 00, serial 0000 | `redact` |
+| `pii.email` | Email addresses | A letters-only top-level domain of two or more characters; well-formed dots and hyphens | `off` |
+| `pii.phone` | Phone numbers starting with `+` (E.164, any country), and North American numbers with separators: `(NNN) NNN-NNNN`, `NNN-NNN-NNNN`, `NNN.NNN.NNNN` | 10 to 15 digits. Numbers with no `+` and no separators are not matched | `off` |
+
+Every detector also requires a boundary: a match inside a longer word or
+number (`order_4111…`, `0.4111…`, a fifth dash-separated group) is not a
+finding. Card numbers that card brands publish for testing pass every check a
+real number does, so they are redacted too.
+
+Email and phone are off because coding-agent traffic is full of them: git
+authors, `git config user.email`, `package.json` contacts, test fixtures. On
+1,000 real coding-agent runs (64,583 tool calls from public OpenHands
+trajectories), the email detector matched in 215 calls — mostly test
+addresses such as `example.com` ones, git configuration and author credits in
+licence headers — and the card, IBAN and SSN detectors matched nothing.
+
+Set a detector's action under `dlp.detectors`. Detectors you leave out keep
+their defaults:
+
+```yaml
+intutic_settings:
+  dlp:
+    detectors:
+      pii.email: redact
+      pii.phone: redact
+      pii.card: block     # refuse the request instead of redacting
+```
+
+An unknown id or action stops the proxy at startup with an error naming it.
+Findings carry the detector id as their pattern name and `pii` as their
+category, so redactions read `[REDACTED_PII]` and SOP `pii()` taint rules see
+them. The [MCP governance proxy](/guide/mcp-governance#configuration-reference) runs the
+same detectors with the same defaults, set by `INTUTIC_MCP_DLP_DETECTORS`.
 
 ### Custom patterns
 

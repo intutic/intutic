@@ -114,6 +114,10 @@ variants:
 7. **Prompt-injection scan** (request direction) — see [Prompt-injection scanning](#prompt-injection-scanning) below.
 8. **Anomaly detectors** and **WASM rules** — see the session-scope note below.
 
+The DLP scan also runs the enabled [PII detectors](/guide/policies#pii-detectors):
+card numbers, IBANs and SSNs by default. Arguments are never rewritten, so a
+match blocks the call even when its detector is set to `redact`.
+
 ### Anomaly-detection session scope
 
 The sequence detectors (`consecutive_repeat`, `ping_pong_cycle`, `landmark_cycle`,
@@ -155,7 +159,7 @@ executed — refusing to deliver the result protects nothing about whether the
 call happened, only what the agent gets to read afterward. That path applies,
 in order:
 
-1. **DLP redaction** — strips credential-shaped values out of the result text. If a match spans JSON syntax and the redacted text no longer parses, the whole result is withheld and replaced with an error explaining why (the call ran; only the delivery was refused).
+1. **DLP redaction** — strips credential-shaped values and enabled PII detector matches (as `[REDACTED_PII]`) out of the result text. If a match spans JSON syntax and the redacted text no longer parses, the whole result is withheld and replaced with an error explaining why (the call ran; only the delivery was refused).
 2. **Prompt-injection scan** (response direction) — runs on the already-redacted text, so a secret can never reach this path unredacted. See below.
 3. **`tools/list` curation** — allowlist filtering, removal of tools the registry switched off, and operator description overrides, then a report-only injection scan over the resulting (post-curation) descriptions.
 4. **Server-level TOFU pinning** — compares a `tools/list` response's fingerprint against what was first pinned for this `{workspace, server}` pair; see [MCP Server Governance](/guide/mcp-governance#server-level-tofu-pinning) for the full mechanism.

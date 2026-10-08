@@ -562,6 +562,13 @@ export {
 } from './secretPatterns.js'
 
 export {
+  PII_DEFINITION,
+  type PiiAction,
+  type PiiDefinition,
+  type PiiDetectorDefinition,
+} from './piiDetectors.js'
+
+export {
   SKILL_SCAN_PATTERNS,
   SKILL_CONTENT_BLOCK_PATTERN_IDS,
   scanSkillContent,

@@ -1,0 +1,71 @@
+{
+  "$comment": "PII detectors for both DLP scanners. The Rust proxy embeds this file (packages/proxy/src/dlp/pii_detectors.json); the MCP proxy reads a byte-identical copy (packages/shared-types/src/piiDetectors.json). Edit one, copy it over the other: a test on each side fails while they differ. Regexes are the subset Rust regex and JavaScript RegExp agree on — ASCII classes, no \\b, no \\d, no lookaround — and each match is then checked by the named validator and boundary rule, implemented identically in packages/proxy/src/dlp/pii.rs and packages/mcp-proxy/src/dlpPii.ts. Conformance vectors: packages/shared-types/fixtures/pii-detector-vectors.json.",
+  "version": 1,
+  "detectors": [
+    {
+      "id": "pii.card",
+      "category": "pii",
+      "description": "Payment card number",
+      "regex": "[0-9]{4}[ -][0-9]{4}[ -][0-9]{4}[ -][0-9]{4}|[0-9]{4}[ -][0-9]{6}[ -][0-9]{4,5}|[0-9]{13,19}",
+      "boundary": "numeric",
+      "validator": "card_luhn",
+      "default_action": "redact"
+    },
+    {
+      "id": "pii.iban",
+      "category": "pii",
+      "description": "IBAN",
+      "regex": "[A-Z]{2}[0-9]{2}(?: ?[A-Z0-9]){11,30}",
+      "boundary": "word",
+      "validator": "iban_mod97",
+      "default_action": "redact"
+    },
+    {
+      "id": "pii.ssn",
+      "category": "pii",
+      "description": "US Social Security Number",
+      "regex": "[0-9]{3}-[0-9]{2}-[0-9]{4}",
+      "boundary": "numeric",
+      "validator": "ssn_ranges",
+      "default_action": "redact"
+    },
+    {
+      "id": "pii.email",
+      "category": "pii",
+      "description": "Email address",
+      "regex": "[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]{1,63}(?:\\.[A-Za-z0-9-]{1,63}){1,8}",
+      "boundary": "word",
+      "validator": "email_shape",
+      "default_action": "off"
+    },
+    {
+      "id": "pii.phone",
+      "category": "pii",
+      "description": "Phone number",
+      "regex": "\\+[1-9][0-9]{0,2}(?:[ .-]?\\([0-9]{1,4}\\)|[ .-]?[0-9]{1,4}){2,7}|(?:1[ .-])?(?:\\([2-9][0-9]{2}\\) ?|[2-9][0-9]{2}[ .-])[2-9][0-9]{2}[ .-][0-9]{4}",
+      "boundary": "numeric",
+      "validator": "phone_digits",
+      "default_action": "off"
+    }
+  ],
+  "card_brands": [
+    { "brand": "visa", "prefixes": [["4", "4"]], "lengths": [13, 16, 19] },
+    { "brand": "mastercard", "prefixes": [["51", "55"], ["2221", "2720"]], "lengths": [16] },
+    { "brand": "amex", "prefixes": [["34", "34"], ["37", "37"]], "lengths": [15] },
+    { "brand": "discover", "prefixes": [["6011", "6011"], ["644", "649"], ["65", "65"], ["622126", "622925"]], "lengths": [16, 17, 18, 19] },
+    { "brand": "jcb", "prefixes": [["3528", "3589"]], "lengths": [16, 17, 18, 19] },
+    { "brand": "diners", "prefixes": [["300", "305"], ["3095", "3095"], ["36", "36"], ["38", "39"]], "lengths": [14, 15, 16, 17, 18, 19] },
+    { "brand": "unionpay", "prefixes": [["62", "62"], ["81", "81"]], "lengths": [16, 17, 18, 19] }
+  ],
+  "iban_lengths": {
+    "AD": 24, "AE": 23, "AL": 28, "AT": 20, "AZ": 28, "BA": 20, "BE": 16, "BG": 22, "BH": 22, "BI": 27,
+    "BR": 29, "BY": 28, "CH": 21, "CR": 22, "CY": 28, "CZ": 24, "DE": 22, "DJ": 27, "DK": 18, "DO": 28,
+    "EE": 20, "EG": 29, "ES": 24, "FI": 18, "FK": 18, "FO": 18, "FR": 27, "GB": 22, "GE": 22, "GI": 23,
+    "GL": 18, "GR": 27, "GT": 28, "HN": 28, "HR": 21, "HU": 28, "IE": 22, "IL": 23, "IQ": 23, "IS": 26,
+    "IT": 27, "JO": 30, "KW": 30, "KZ": 20, "LB": 28, "LC": 32, "LI": 21, "LT": 20, "LU": 20, "LV": 21,
+    "LY": 25, "MC": 27, "MD": 24, "ME": 22, "MK": 19, "MN": 20, "MR": 27, "MT": 31, "MU": 30, "NI": 28,
+    "NL": 18, "NO": 15, "OM": 23, "PK": 24, "PL": 28, "PS": 29, "PT": 25, "QA": 29, "RO": 24, "RS": 22,
+    "RU": 33, "SA": 24, "SC": 31, "SD": 18, "SE": 24, "SI": 19, "SK": 24, "SM": 27, "SO": 23, "ST": 25,
+    "SV": 28, "TL": 23, "TN": 24, "TR": 26, "UA": 29, "VA": 22, "VG": 24, "XK": 20, "YE": 30
+  }
+}
