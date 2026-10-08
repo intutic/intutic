@@ -109,7 +109,7 @@ class StubEmitter extends GovernanceEmitter {
   }
 
   override emit(
-    kind: 'tool_allowed' | 'tool_blocked' | 'tool_redacted' | 'injection_detected' | 'anomaly_detected',
+    kind: 'tool_allowed' | 'tool_blocked' | 'tool_redacted' | 'injection_detected' | 'anomaly_detected' | 'tool_held' | 'hold_approved_bypass_used',
     toolName: string,
     toolInput: unknown,
     reason?: string,
@@ -259,7 +259,7 @@ describe('ToolCallInterceptor', () => {
       expect(decision.action).toBe('allow')
     })
 
-    it('treats require_approval as block (headless proxy)', async () => {
+    it('require_approval with no way to record a hold still refuses — held, never allowed', async () => {
       const rules: SopRule[] = [{
         id: 'rule-3',
         toolPattern: 'Write',
@@ -270,8 +270,10 @@ describe('ToolCallInterceptor', () => {
       const interceptor = new ToolCallInterceptor(policy, emitter, true)
 
       const decision = await interceptor.decide('Write', { path: '/etc/passwd', content: 'test' })
-      expect(decision.action).toBe('block')
-      expect((decision as { action: 'block'; reason: string }).reason).toContain('human approval')
+      expect(decision.action).toBe('hold')
+      expect((decision as { reason: string }).reason).toContain('could not be recorded')
+      expect(emitter.emitted.some((e) => e.kind === 'tool_held')).toBe(true)
+      expect(emitter.emitted.some((e) => e.kind === 'tool_allowed')).toBe(false)
     })
   })
 

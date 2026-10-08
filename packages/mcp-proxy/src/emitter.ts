@@ -53,6 +53,14 @@ export type EventKind =
    * "existing consumers key on it" rule `injection_detected` follows.
    */
   | 'anomaly_detected'
+  /**
+   * A `require_approval` rule held the call for a person's decision
+   * (approvalHold.ts). `reason` carries the rule id as `[<id>]`, as the hook
+   * gates' hold events do.
+   */
+  | 'tool_held'
+  /** An approved, unexpired, exact-match bypass let a held call through. */
+  | 'hold_approved_bypass_used'
 
 export interface GovernanceEvent {
   incidentId: string

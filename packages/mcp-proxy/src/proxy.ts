@@ -42,6 +42,7 @@ import { ValkeySessionStore, type SharedSessionStore } from './sessionStore.js'
 import { WasmRunner } from './wasm/runner.js'
 import { checkTofu, decideTofuAction } from './tofu.js'
 import { RegistryObserver } from './registryObserver.js'
+import { ApprovalHolds } from './approvalHold.js'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
@@ -78,6 +79,23 @@ function buildBlockResponse(id: string | number | null, reason: string): JsonRpc
     error: {
       code: -32603, // Internal error (closest standard code to "blocked")
       message: `[Intutic Governance] Tool call blocked: ${reason}`,
+    },
+  }
+}
+
+/**
+ * The JSON-RPC error for a call held for approval. Same code as a block (the
+ * call did not run), a message that says "held" rather than "blocked", and
+ * the hold id in `data` for a client that reads it programmatically.
+ */
+function buildHoldResponse(id: string | number | null, reason: string, holdId: string): JsonRpcResponse {
+  return {
+    jsonrpc: '2.0',
+    id,
+    error: {
+      code: -32603,
+      message: `[Intutic Governance] Tool call ${reason}`,
+      data: { status: 'pending_approval', holdId },
     },
   }
 }
@@ -441,6 +459,8 @@ export function handleHarnessLine(
           'Tool call blocked by governance proxy'
         )
         writeFrame(buildBlockResponse(msg.id, decision.reason))
+      } else if (decision.action === 'hold') {
+        writeFrame(buildHoldResponse(msg.id, decision.reason, decision.holdId))
       } else {
         // Allow: the response now needs inspecting on the way back —
         // registered BEFORE forwarding, or a fast server could answer
@@ -539,6 +559,7 @@ export class McpGovernanceProxy {
       config.mcpAnomalyOverrides,
       this.wasmRunner,
       config.workspaceId,
+      new ApprovalHolds(config.controlPlaneUrl, config.apiKey, config.workspaceId, config.serverName),
     )
   }
 

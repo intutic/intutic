@@ -20,8 +20,9 @@ import { evaluateSequenceDetectors, resolveEffectiveDisposition, REASK_MAX_ATTEM
 import type { AnomalyMode, Disposition } from './anomaly/index.js'
 import { SessionState } from './session.js'
 import type { WasmRunner } from './wasm/runner.js'
-import type { PolicyClient } from './policy.js'
+import type { PolicyClient, SopRule } from './policy.js'
 import type { GovernanceEmitter } from './emitter.js'
+import type { ApprovalHolds } from './approvalHold.js'
 
 const log = createLogger('mcp-proxy-interceptor')
 
@@ -29,6 +30,12 @@ export type Decision =
   | { action: 'allow' }
   | { action: 'block'; reason: string }
   | { action: 'redact'; reason: string; redactedInput: unknown }
+  /**
+   * Refused for now, pending a person's approval (`require_approval`). Not a
+   * block: the agent is told the hold id and that an identical retry passes
+   * once approved — see approvalHold.ts.
+   */
+  | { action: 'hold'; reason: string; holdId: string }
 
 export class ToolCallInterceptor {
   constructor(
@@ -94,6 +101,13 @@ export class ToolCallInterceptor {
      * belongs to).
      */
     private readonly workspaceId: string = 'unknown',
+    /**
+     * Turns a `require_approval` rule into a hold through the control
+     * plane's decisions API. `undefined` (construction sites that predate
+     * holds) leaves such a call held with nothing recorded, which is still a
+     * refusal — never an allow.
+     */
+    private readonly holds: ApprovalHolds | undefined = undefined,
   ) {}
 
   /**
@@ -121,6 +135,37 @@ export class ToolCallInterceptor {
       `block if this keeps tripping)`
     this.emitter.emit('tool_blocked', toolName, toolInput, reaskReason)
     return { action: 'block', reason: reaskReason }
+  }
+
+  /**
+   * A `require_approval` rule matched. Returns the hold decision, or `null`
+   * when an approved bypass for this exact call lets it continue. Every hold
+   * reason names the hold id and the command that approves it, the same
+   * wording the hook gates print, so a person reading the agent's transcript
+   * knows what to run.
+   */
+  private async hold(rule: SopRule, toolName: string, toolInput: unknown): Promise<Decision | null> {
+    const outcome = this.holds
+      ? await this.holds.request(rule, toolName, toolInput, {})
+      : { kind: 'held' as const, holdId: '', recorded: false }
+
+    if (outcome.kind === 'bypassed') {
+      const reason = `Approved bypass for ${rule.id} — approved by ${outcome.decidedBy || 'an approver'} on hold ${outcome.holdId}`
+      log.warn({ action: 'hold_approved_bypass_used', toolName, ruleId: rule.id, holdId: outcome.holdId }, reason)
+      this.emitter.emit('hold_approved_bypass_used', toolName, toolInput, reason)
+      return null
+    }
+
+    const reason = outcome.recorded
+      ? `HELD for approval: ${rule.reason} [${rule.id}]. Hold id: ${outcome.holdId}. ` +
+        `An approver can run: intutic decision approve ${outcome.holdId} (or reject it). ` +
+        `Retry this exact call after it is approved.`
+      : `HELD for approval: ${rule.reason} [${rule.id}], but the hold could not be recorded ` +
+        `(Intutic control plane unreachable), so there is nothing to approve yet. Retry once the ` +
+        `control plane is reachable to request approval.`
+    log.warn({ action: 'tool_held', toolName, ruleId: rule.id, holdId: outcome.holdId, recorded: outcome.recorded }, reason)
+    this.emitter.emit('tool_held', toolName, toolInput, `${rule.reason} [${rule.id}]`)
+    return { action: 'hold', reason, holdId: outcome.holdId }
   }
 
   /**
@@ -324,12 +369,10 @@ export class ToolCallInterceptor {
           // SHADOW guardrail's evidence (LLD #71) counts this proxy's traffic.
           this.emitter.emit('tool_flagged', toolName, toolInput, `${rule.reason} [${rule.id}]`)
         }
-        // 'require_approval' treated as block in headless proxy (no interactive UI)
         if (rule.action === 'require_approval') {
-          const reason = `Tool requires human approval per SOP rule ${rule.id}: ${rule.reason}`
-          log.warn({ action: 'policy_approval_required', toolName, ruleId: rule.id }, reason)
-          this.emitter.emit('tool_blocked', toolName, toolInput, reason)
-          return { action: 'block', reason }
+          const held = await this.hold(rule, toolName, toolInput)
+          if (held) return held
+          // An approved bypass: the remaining checks still apply.
         }
       }
     } catch (err) {
