@@ -39,7 +39,7 @@ Tool call arrives
 
 1. **DLP Scanner** — 20 patterns matched against the serialised tool arguments. A hit blocks the call and opens an incident.
 2. **BLOCK: SOP match** — `VALIDATED` SOPs whose title begins `BLOCK:` are compiled to a pattern and tested against the tool name. A title beginning `REQUIRE_APPROVAL:` is the same rule at the `hold` tier: the harness hook gates refuse the call and record it for **Findings › Review Queue › Held Changes** (`intutic decision approve <holdId>` lets that exact call through once); the MCP proxy holds it the same way through the same decisions API (see [Approval holds](/guide/mcp-governance#approval-holds)); the proxy, which has no reviewer in the loop, treats it as a block.
-3. **SSO group policy** — resolves the caller's group privilege. `DENIED` or `REQUIRES_OBO` blocks.
+3. **SSO group policy** — decides the caller's [group clearance](/concepts/circuit-breaker#_3-sso-group-clearance) for the tool. `DENIED` or `REQUIRES_OBO` blocks, and the reason names the deciding rule (`[sso_group.high_risk.<tool>]`).
 4. **Promoted findings** — repeat anomaly findings that have been promoted to enforcement. Only a promoted `KILL` blocks; a promoted `HIJACK` is recorded and falls through.
 
 **The first match wins, and the order is deliberate** — this is a short-circuit, not a
@@ -53,8 +53,12 @@ infrastructure fault.
 `POST /api/v1/hook-gate` is called synchronously by the goose and OpenHands hook writers. The
 Claude Code, Cursor, Cline, Claude Desktop, Windsurf, pi and openclaw integrations decide
 locally and report to the control plane asynchronously, which keeps their tool path free of a
-network round-trip. Everything on this page describes the gate; the local path enforces the
-protected-path and shell-bypass guards written into the generated hook script.
+network round-trip. Everything on this page describes the gate. The local path enforces the
+protected-path and shell-bypass guards written into the generated hook script, plus the policy
+snapshot the sync daemon refreshes: the workspace's `BLOCK:` and `REQUIRE_APPROVAL:` rules and
+its SSO group policy, decided for the member the snapshot was issued to. A local gate refuses a
+high-risk tool when it does not know the member's groups. Promoted findings and the gate's DLP
+scan run only at the gate; the local gates carry their own secret-content patterns.
 :::
 
 ---

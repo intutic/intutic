@@ -260,7 +260,10 @@ gate applies), and the proxy applies it to every MCP tool call: a tool on
 `highRiskTools` needs one of the `requiredGroups`, and a tool on
 `requireOboFor` is refused, since the proxy has no on-behalf-of token to
 present. A tool matches by its MCP name (`run_query`) or by the name the
-harness hooks see (`mcp__postgres__run_query`).
+harness hooks see (`mcp__postgres__run_query`). With a group policy but no
+member resolved for the key, the member's groups are unknown and a high-risk
+tool is refused rather than allowed. The decision is the one the hook gate and
+the local gates make; see [SSO group clearance](/concepts/circuit-breaker#_3-sso-group-clearance).
 
 ## Server-level TOFU pinning
 

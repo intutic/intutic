@@ -200,6 +200,14 @@ withdraws a grant, it does not demote someone by hand.
 An `OWNER` is never demoted by group logic, whatever the directory says, so a
 misconfiguration cannot remove your last owner.
 
+::: info SCIM groups grant roles, not tool clearance
+An [SSO group policy](/concepts/circuit-breaker#_3-sso-group-clearance) reads the
+groups from the member's OIDC or SAML sign-in, not SCIM group membership. A group
+change in your directory reaches that policy when the member next signs in through
+SSO. Deprovisioning through SCIM revokes the member's keys, and their machine's
+local gates then refuse every high-risk tool at the next policy refresh.
+:::
+
 ### PUT /scim/v2/Users/:id — Replace User
 
 Some providers are configured to replace rather than patch (RFC 7644 §3.5.1). A

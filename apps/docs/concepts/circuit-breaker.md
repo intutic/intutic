@@ -23,9 +23,10 @@ Two different paths evaluate a request, and it is worth keeping them apart.
 plane (`routes/evaluate.ts`) — the budget and loop-governance gates below.
 
 **Tool calls** are evaluated at the [hook gate](/concepts/enforcement-actions#how-a-verdict-is-decided),
-a separate endpoint with its own order of checks — this is also where PCAS
-SSO-group privilege resolution runs (see [§3](#_3-pcas-policy-resolution)
-below), not the model-request path. Loop *detection* is different again: it
+a separate endpoint with its own order of checks. That is where SSO-group
+clearance runs on the server (see [§3](#_3-sso-group-clearance) below), and the
+local gates apply the same decision from the policy snapshot; neither is part of
+the model-request path. Loop *detection* is different again: it
 is an anomaly detector running in-process in the proxy, not a control-plane
 call.
 
@@ -106,42 +107,82 @@ it has no cache dependency to degrade.
 
 ---
 
-## 3. PCAS policy resolution
+## 3. SSO group clearance
 
-The most complex gate — resolves effective permissions for the user+agent pair by walking the organization policy hierarchy. **This runs at the [hook gate](/concepts/enforcement-actions#how-a-verdict-is-decided) as part of tool-call evaluation** (`hookEvents.ts`'s SSO group policy check calls `pcasService.resolveSsoGroupPrivilege`) — it is not part of the model-request `/policy/check` path described above, which never calls into PCAS.
+A workspace can restrict high-risk tools to members of named identity-provider groups. The
+policy lives in workspace settings as `sso_group_policy`:
 
-**Resolution cascade:**
-
-| Step | Backend | Latency | What happens on failure |
-|---|---|---|---|
-| 1 | Valkey cache | in-memory lookup | Continue to step 2 |
-| 2 | Postgres CTE resolution | single query, on cache miss only | Continue to step 3 |
-| 3 | Synthetic empty set | 0ms | Return `fallbackMode: true` → forces HIJACK |
-
-```typescript
-// services/control-plane/src/services/pcasService.ts
-
-// 1. Valkey cache check
-const cached = await valkey.get(pcasCacheKey(workspaceId, userId))
-if (cached) return { ...JSON.parse(cached), fallbackMode: false }
-
-// 2. Postgres graph CTE resolution
-const permissions = await graphProvider.resolveEffectivePermissions(
-  userId, agentId, '*'
-)
-
-// 3. Cache the result (5 min TTL)
-await valkey.set(pcasCacheKey(workspaceId, userId), ..., 'EX', PCAS_CACHE_TTL)
-
-// 4. If database fails → synthetic empty set
-return { allowedTools: [], deniedTools: [], budgetRemaining: 0, fallbackMode: true }
+```json
+{
+  "sso_group_policy": {
+    "highRiskTools": ["Bash", "database_write"],
+    "requiredGroups": ["sre-oncall", "platform-admins"],
+    "requireOboFor": ["production_deploy"]
+  }
+}
 ```
 
-**Fallback mode:** When Postgres is unavailable, the service returns `fallbackMode: true` with an empty permission set. The circuit breaker can then escalate to `HIJACK` — restricting the agent to safe operations rather than blocking entirely.
+A member's groups come from the `groups` claim of their OIDC sign-in, or the group attribute of
+their SAML assertion, and are stored on the member at each SSO login. SCIM group pushes map
+groups to roles and do not change the groups this policy reads.
 
-**Cache TTL:** 5 minutes (`PCAS_CACHE_TTL`). On a warm cache this gate is a single Valkey GET; on a miss it is one Postgres query.
+**The decision**, for one member and one tool, in order:
 
-→ Source: `pcasService.ts` in the control plane, which is not open source
+| Step | Condition | Clearance |
+|---|---|---|
+| 1 | The workspace has no `sso_group_policy` | `GRANTED` |
+| 2 | The tool is on `requireOboFor` | `REQUIRES_OBO` |
+| 3 | The tool is not on `highRiskTools` | `GRANTED` |
+| 4 | The gate does not know the member's groups | `DENIED` |
+| 5 | The member holds one of `requiredGroups` | `GRANTED` |
+| 6 | Otherwise | `DENIED` |
+
+Tool and group names match exactly, including case. Every gate refuses `DENIED` and
+`REQUIRES_OBO` alike: a tool-call gate acts with the member's own credentials and has no
+on-behalf-of token to present. The refusal names the rule that decided, for example
+`[sso_group.high_risk.Bash]` or `[sso_group.require_obo.production_deploy]`. That id is
+what the `gate_decisions` SIEM source records as `rule_id`.
+
+**Where it runs.** One evaluator makes this decision everywhere, and every implementation is
+held to the same set of test cases:
+
+| Decision point | Where the member's groups come from | When the decision can fail |
+|---|---|---|
+| The [hook gate](/concepts/enforcement-actions#how-a-verdict-is-decided) (`POST /api/v1/hook-gate`) | The member row, read on every call | An internal error allows the call, like every check on that endpoint |
+| The [MCP governance proxy](/guide/mcp-governance) | The member the proxy's API key resolves to, from its policy refresh | With a policy but no resolved member, high-risk tools are refused |
+| The harness hook gates and the `@intutic/gate` and `intutic-clawde` SDK gates | The policy snapshot the sync daemon writes to `~/.intutic/hooks/` | See below |
+
+**Local gates.** Most harness gates decide on the developer's machine without calling the
+control plane, from the policy snapshot the sync daemon refreshes. The snapshot carries the
+workspace's group policy and the member it was issued to, with their groups as the control
+plane resolved them for the daemon's API key. The daemon compiles the policy for that member
+into one block rule per tool they may not call, ahead of every other rule, so a harness gate
+refuses exactly what the hook gate refuses. The SDK gates read the policy and groups from the
+snapshot and decide with the same evaluator.
+
+- **Unknown groups are refused, never granted.** A workspace with a group policy whose
+  snapshot names no member has every high-risk tool refused. When the control plane refuses the
+  daemon's key (revoked, member deactivated or offboarded, or past the
+  [SSO-recency window](/guide/security)), the daemon rewrites the snapshot with the member's
+  groups unknown and keeps every other rule.
+- **Editing the snapshot clears nothing.** The member's groups are inside the snapshot's digest,
+  so an edited group list fails the check. A gate that reads an invalid snapshot drops its
+  dynamic rules except the group refusals; the SDK gates apply the policy with the member's
+  groups unknown. The directory is also a protected path every gate refuses to let an agent
+  write.
+- **Unaffected:** a workspace with no group policy. Its snapshots are byte-identical to before.
+
+**Propagation.** On the hook gate, a group change applies to the member's next tool call, and a
+policy change within 60 seconds (the policy is cached in Valkey). Local gates see either change
+at the daemon's next policy refresh: every sync cycle, 30 seconds by default
+(`intutic connect --interval <ms>`), plus each pushed configuration update. A group change reaches
+Intutic only when the member next signs in through SSO.
+
+The group policy is not demoted by the `SILENT_LOG` intervention mode. The hook gate and the
+MCP proxy refuse these calls in every mode, so the local gates do too.
+
+→ Source: `evaluateSsoGroupClearance` in `packages/shared-types/src/ssoGroupClearance.ts`; the
+test cases are `packages/shared-types/fixtures/sso-group-clearance-vectors.json`
 
 ---
 
@@ -206,7 +247,7 @@ All circuit breaker state lives in Valkey for fast access:
 | `v2:budget:hard_block:{workspace_id}` | Budget cap exceeded flag | Set by billing cron |
 | `v2:budget:{workspace_id}:monthly_limit` | Monthly spend limit | Persistent |
 | `v2:budget:{workspace_id}:daily_limit` | Daily spend limit | Persistent |
-| `v2:pcas:sso_group:{workspace_id}` | Cached SSO group policy, read by the gate | 5 min |
+| `v2:pcas:sso_group:{workspace_id}` | Cached SSO group policy, read by the gate | 60 s |
 | `intutic:loop:{loop_run_id}` | Loop governance state | 7 days |
 
 ---
@@ -220,7 +261,7 @@ All circuit breaker state lives in Valkey for fast access:
 | [config.rs](https://github.com/intutic/intutic/blob/main/packages/proxy/src/config.rs) | `PolicyConfig` — fail-closed, timeout settings | Open-Core / Proxy |
 | [detectors.rs](https://github.com/intutic/intutic/blob/main/packages/proxy/src/plugins/anomaly/detectors.rs) | `consecutive_repeat` loop detection and the rest of the detector registry | Open-Core / Proxy |
 | `POST /api/v1/hook-gate` (`hookEvents.ts`) | The hot-path policy check endpoint | Enterprise Control Plane |
-| `pcasService.ts` | SSO group privilege resolution cascade | Enterprise Control Plane |
+| `pcasService.ts` | SSO group clearance at the hook gate (Valkey → Postgres) | Enterprise Control Plane |
 | `sslEnforcementService.ts` | SSL scheduling, structural and logical layers, plus compliance reporting | Enterprise Control Plane |
 | `sslGateEvaluator.ts` | Calls the SSL layers from the hook gate in **shadow mode** — records, never blocks | Enterprise Control Plane |
 

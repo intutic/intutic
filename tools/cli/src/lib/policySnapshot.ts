@@ -18,7 +18,8 @@
  *              wait" would be a supported way to disarm governance.
  *   empty    — parsed, but no rules. The writer always ships the destructive
  *              tier, so zero rules means the compile produced nothing.
- *   invalid  — digest or workspace mismatch. The gates drop the dynamic tier.
+ *   invalid  — digest or workspace mismatch. The gates drop the dynamic tier,
+ *              keeping only its SSO-group refusals.
  *   absent   — no file. The compiled floor still applies; nothing else does.
  *
  * Kept deliberately faithful rather than improved: a reader that disagrees with
@@ -103,6 +104,9 @@ export function parsePolicySnapshot(
     path: opts.path ?? resolveSnapshotRulesPath(),
   }
 
+  // The SSO-group refusals the gates keep when they drop the rest of an
+  // invalid snapshot's dynamic tier.
+  let ssoGroupRefusals = 0
   const lines = text.split('\n')
   for (const line of lines) {
     if (line.startsWith('#digest ')) {
@@ -135,6 +139,7 @@ export function parsePolicySnapshot(
       continue
     }
     out.ruleCount += 1
+    if (f[0]!.startsWith('sso_group.') && f[1] === 'block') ssoGroupRefusals += 1
   }
 
   // Integrity, cheapest failure first. A digest nobody recomputes is a comment;
@@ -156,9 +161,10 @@ export function parsePolicySnapshot(
   if (out.state === 'ok' && out.ruleCount === 0) out.state = 'empty'
 
   // The dynamic tier is additive, so dropping it returns to yesterday's
-  // behaviour rather than opening a hole. Reported as zero rules because zero is
-  // what the gates will have.
-  if (out.state === 'invalid') out.ruleCount = 0
+  // behaviour rather than opening a hole — except the SSO-group refusals,
+  // which the gates keep because they only ever refuse. Reported as what the
+  // gates will have.
+  if (out.state === 'invalid') out.ruleCount = ssoGroupRefusals
 
   if (out.state === 'ok' && out.generatedAt) {
     const t = Date.parse(out.generatedAt)

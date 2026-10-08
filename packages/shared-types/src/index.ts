@@ -419,6 +419,16 @@ export type {
   SsoGroupPolicy,
 } from './attenuation.js'
 
+export {
+  parseSsoGroupPolicy,
+  evaluateSsoGroupClearance,
+  ssoGroupRuleId,
+  encodeSsoGroupRecord,
+  decodeSsoGroupRecord,
+  SSO_GROUP_RECORD_TAG,
+} from './ssoGroupClearance.js'
+export type { SsoGroupDecision, SsoGroupRecord } from './ssoGroupClearance.js'
+
 // WS4 + WS5 new error codes
 export {
   E_ATTENUATION_CAP_VIOLATION,

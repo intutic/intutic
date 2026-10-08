@@ -13,6 +13,7 @@
 
 import * as node_crypto from 'node:crypto'
 import { createStderrLogger as createLogger } from './stderrLog.js'
+import { evaluateSsoGroupClearance } from '@intutic/shared-types'
 import { scanToolInput, formatDlpBlockReason, setDynamicPatterns } from './dlp.js'
 import type { DlpFinding } from './dlp.js'
 import { scanText, injectionSeverity, setDynamicInjectionPatterns } from './injection.js'
@@ -237,30 +238,31 @@ export class ToolCallInterceptor {
 
   /**
    * The workspace's SSO group policy, applied to the member this proxy's API
-   * key resolves to — the same algorithm the server-side hook gate runs
-   * (`resolveSsoGroupPrivilege` in the control plane): a tool on the
-   * `requireOboFor` list is refused (a proxy has no on-behalf-of token to
-   * present), a tool on the `highRiskTools` list needs one of the
-   * `requiredGroups`, anything else is unrestricted. A tool matches by its
-   * bare MCP name or as `mcp__<server>__<tool>`, the name the harness hooks
-   * see for the same call. Without a policy, or without a resolved member,
-   * there is nothing to apply — the hook gate skips the same way.
+   * key resolves to, by `evaluateSsoGroupClearance` — the function the
+   * server-side hook gate (`resolveSsoGroupPrivilege`) and the policy snapshot
+   * use, so all of them answer alike. A tool matches by its bare MCP name or
+   * as `mcp__<server>__<tool>`, the name the harness hooks see for the same
+   * call. A tool on the `requireOboFor` list is refused: a proxy has no
+   * on-behalf-of token to present.
+   *
+   * With a policy but no resolved member the groups are unknown, and a
+   * high-risk tool is refused rather than allowed — unknown is never granted.
+   * Without a policy there is nothing to apply.
    */
   private checkSsoGroupClearance(toolName: string, toolInput: unknown): Decision | null {
     const policy = this.policy.getSsoGroupPolicy()
+    if (!policy) return null
     const principal = this.policy.getPrincipal()
-    if (!policy || !principal) return null
-    const names = [toolName, `mcp__${this.serverName}__${toolName}`]
-    const listed = (list: string[]) => names.some((n) => list.includes(n))
-
-    let reason: string | null = null
-    if (listed(policy.requireOboFor)) {
-      reason = `SSO group policy: ${toolName} is on-behalf-of only and the MCP proxy cannot present an OBO token`
-    } else if (listed(policy.highRiskTools) && !policy.requiredGroups.some((g) => principal.ssoGroups.includes(g))) {
-      reason = `SSO group policy: ${toolName} requires an SSO group ${principal.email || principal.memberId} does not hold`
-    }
-    if (!reason) return null
-    log.warn({ action: 'sso_group_block', toolName, memberId: principal.memberId }, reason)
+    const decision = evaluateSsoGroupClearance(
+      policy,
+      [toolName, `mcp__${this.serverName}__${toolName}`],
+      principal ? principal.ssoGroups : null,
+    )
+    if (decision.clearance === 'GRANTED') return null
+    // The bracketed rule id is how hook-events and the SIEM export name the
+    // rule that decided — the same id every other gate gives this decision.
+    const reason = `${decision.reason} [${decision.ruleId}]`
+    log.warn({ action: 'sso_group_block', toolName, memberId: principal?.memberId ?? null, ruleId: decision.ruleId }, reason)
     this.emitter.emit('tool_blocked', toolName, toolInput, reason)
     return { action: 'block', reason }
   }

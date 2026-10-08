@@ -8,12 +8,24 @@
 
 import { describe, it, expect, beforeEach } from 'vitest'
 import { ToolCallInterceptor } from '../interceptor.js'
-import { PolicyClient, UNRESTRICTED_REGISTRY } from '../policy.js'
+import { PolicyClient, UNRESTRICTED_REGISTRY, parseSsoGroupPolicy } from '../policy.js'
 import type { McpPrincipal, McpRegistryPolicy, SopRule, SsoGroupPolicy } from '../policy.js'
 import { GovernanceEmitter, type DetectionFinding } from '../emitter.js'
 import { SessionState } from '../session.js'
 import * as node_path from 'node:path'
 import * as node_os from 'node:os'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+
+const SSO_VECTORS = JSON.parse(
+  readFileSync(
+    node_path.join(node_path.dirname(fileURLToPath(import.meta.url)), '../../../shared-types/fixtures/sso-group-clearance-vectors.json'),
+    'utf8',
+  ),
+) as {
+  policies: Record<string, unknown>
+  cases: Array<{ name: string; policy: string; memberGroups: string[] | null; toolName: string; clearance: string; ruleId: string | null }>
+}
 
 // ─── Minimal in-process stub clients ─────────────────────────────────────────
 
@@ -670,7 +682,9 @@ describe('ToolCallInterceptor', () => {
       const interceptor = new ToolCallInterceptor(policy, emitter, true, 'postgres')
       const decision = await interceptor.decide('run_query', { sql: 'select 1' })
       expect(decision.action).toBe('block')
-      expect((decision as { reason: string }).reason).toContain('requires an SSO group dev@example.com does not hold')
+      expect((decision as { reason: string }).reason).toBe(
+        'SSO group policy: run_query requires one of the SSO groups dba, and this member holds none of them [sso_group.high_risk.run_query]',
+      )
     })
 
     it('a member holding a required group is let through', async () => {
@@ -700,11 +714,42 @@ describe('ToolCallInterceptor', () => {
       expect((decision as { reason: string }).reason).toContain('on-behalf-of only')
     })
 
-    it('without a resolved member there is nothing to apply', async () => {
+    it('without a resolved member the groups are unknown, and a high-risk tool is refused', async () => {
       const policy = new StubPolicyClient()
       policy.ssoGroupPolicy = { highRiskTools: ['run_query'], requiredGroups: ['dba'], requireOboFor: [] }
       const interceptor = new ToolCallInterceptor(policy, emitter, true, 'postgres')
+      const decision = await interceptor.decide('run_query', {})
+      expect(decision.action).toBe('block')
+      expect((decision as { reason: string }).reason).toContain("this gate does not know the member's groups")
+      expect((await interceptor.decide('list_tables', {})).action).toBe('allow')
+    })
+
+    it('without a policy there is nothing to apply, member or not', async () => {
+      const interceptor = new ToolCallInterceptor(new StubPolicyClient(), emitter, true, 'postgres')
       expect((await interceptor.decide('run_query', {})).action).toBe('allow')
+    })
+
+    // The shared conformance vectors: the same cases the control plane, the
+    // compiled policy snapshot, @intutic/gate and intutic-clawde run. A tool
+    // named mcp__<server>__<tool> is called as <tool> on <server>, the way
+    // this proxy sees it; any other name is called on an unrelated server.
+    describe('the shared SSO-group vectors', () => {
+      for (const c of SSO_VECTORS.cases) {
+        it(c.name, async () => {
+          const policy = new StubPolicyClient()
+          policy.ssoGroupPolicy = parseSsoGroupPolicy(SSO_VECTORS.policies[c.policy])
+          policy.principal = c.memberGroups === null ? undefined : { ...member, ssoGroups: c.memberGroups }
+          const mcp = /^mcp__(.+?)__(.+)$/.exec(c.toolName)
+          const interceptor = new ToolCallInterceptor(policy, emitter, true, mcp ? mcp[1]! : 'fs')
+          const decision = await interceptor.decide(mcp ? mcp[2]! : c.toolName, {})
+          if (c.clearance === 'GRANTED') {
+            expect(decision.action).toBe('allow')
+          } else {
+            expect(decision.action).toBe('block')
+            expect((decision as { reason: string }).reason.endsWith(`[${c.ruleId}]`)).toBe(true)
+          }
+        })
+      }
     })
   })
 })

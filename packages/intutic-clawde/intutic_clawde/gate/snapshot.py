@@ -41,6 +41,9 @@ import os
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import Optional
+
+from . import sso_groups as sso
 
 SNAPSHOT_STALE_AFTER_DAYS = 7
 
@@ -68,12 +71,17 @@ class Snapshot:
     generated_at: str = ""
     age_days: int = 0
     dropped_rules: int = 0  # regexes that would not compile
+    # The workspace's SSO-group policy and the member the snapshot was issued
+    # to; None when the workspace has no group policy. On a snapshot that fails
+    # its integrity check the member's groups are None (unknown), so an edited
+    # group list in the file clears nothing.
+    sso_groups: Optional[sso.SsoGroupRecord] = None
 
     @property
     def health_message(self) -> str:
         return {
             "absent": "No policy snapshot — built-in protections only",
-            "invalid": "Policy snapshot failed its digest or workspace check — dynamic rules dropped",
+            "invalid": "Policy snapshot failed its digest or workspace check — dynamic rules dropped except SSO-group refusals",
             "empty": "Policy snapshot contains no rules — the compile produced nothing",
             "stale": f"Policy snapshot is {self.age_days} days old and still enforced",
         }.get(self.state, "")
@@ -117,6 +125,9 @@ def load_snapshot(workspace_id: str = "", path: str | None = None) -> Snapshot:
             snap.generated_at = line[11:].strip(); continue
         if not line or line.startswith("#"):
             continue
+        if line.startswith(sso.SSO_GROUP_RECORD_TAG + "\t"):
+            snap.sso_groups = sso.decode_record(line)
+            continue
         f = line.split("\t")
         # Column order: id, severity, flags, subject, reason, source(regex).
         if len(f) < 6 or not f[5]:
@@ -148,6 +159,10 @@ def load_snapshot(workspace_id: str = "", path: str | None = None) -> Snapshot:
 
     if snap.state == "invalid":
         snap.rules = []   # additive tier — dropping it returns to yesterday's behaviour
+        # Except the group policy, which only ever refuses: it still applies,
+        # to a member whose groups this gate can no longer vouch for.
+        if snap.sso_groups is not None:
+            snap.sso_groups = sso.SsoGroupRecord(snap.sso_groups.policy, None, None, snap.sso_groups.issued_at)
 
     if snap.state == "ok" and snap.generated_at:
         try:
