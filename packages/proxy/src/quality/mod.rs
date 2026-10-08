@@ -1,4 +1,4 @@
-//! Request pre-processor — slash command interception and prompt quality gate.
+//! Request pre-processor — slash command interception.
 //!
 //! This module hooks into the proxy's request pipeline BEFORE forwarding
 //! to the LLM provider. It can short-circuit the request by returning
@@ -6,12 +6,11 @@
 //!
 //! LLD #49: Inline Prompt Quality & Slash Commands
 
-pub mod quality_gate;
 pub mod slash_interceptor;
 
-use tracing::{debug, warn};
+use tracing::debug;
 
-/// Request pre-processor that checks for slash commands and quality gate.
+/// Request pre-processor that answers `/intutic` slash commands.
 pub struct RequestPreProcessor {
     control_plane_url: String,
     http_client: reqwest::Client,
@@ -38,7 +37,6 @@ impl RequestPreProcessor {
         session_id: &str,
         workspace_id: &str,
         messages: &serde_json::Value,
-        model: &str,
         protocol: &crate::protocol::Protocol,
         api_key: &str,
     ) -> Option<Vec<u8>> {
@@ -68,47 +66,6 @@ impl RequestPreProcessor {
             }
         }
 
-        // 2. Check for --force bypass
-        if last_message.contains("--force") {
-            debug!(session_id, "Quality gate bypassed via --force");
-            return None;
-        }
-
-        // 3. Prompt quality gate — DISABLED.
-        //
-        // quality_gate::check posts to POST /api/v1/prompt-quality/score, whose
-        // control-plane service was deleted in the non-circuit-breaker strip.
-        // The gate fails open, so nothing was ever blocked — but every proxied
-        // request paid a control-plane round trip (5s-timeout client) to collect
-        // a 404. `/fix` is the surviving prompt-quality surface.
-        //
-        // Kept behind a flag rather than deleted so restoring the endpoint is a
-        // one-line change; quality_gate.rs stays compiled and tested.
-        if std::env::var("INTUTIC_PROMPT_QUALITY_GATE").as_deref() == Ok("true") {
-            match quality_gate::check(
-                &self.http_client,
-                &self.control_plane_url,
-                session_id,
-                workspace_id,
-                &last_message,
-                model,
-                protocol,
-                api_key,
-            )
-            .await
-            {
-                Ok(Some(gate_response)) => {
-                    debug!(session_id, "Prompt gated by quality check");
-                    return Some(gate_response);
-                }
-                Ok(None) => return None, // Quality OK, proceed
-                Err(e) => {
-                    warn!(error = %e, session_id, "Quality gate failed, proceeding");
-                    return None; // Fail-open
-                }
-            }
-        }
-
         None
     }
 }
@@ -123,7 +80,7 @@ impl RequestPreProcessor {
 /// "Command Failed: `/intutic` returned status 400" instead of reaching the
 /// model. Observed twice while building a demo that deploys our own images. Any
 /// customer whose registry, repo path, or docs URL contains `/intutic` hits it
-/// too, and the `--force` bypass below cannot help — it is checked afterwards.
+/// too.
 ///
 /// A slash command is a command because of where it sits, not merely because
 /// the characters appear somewhere. Require the start of the message or the
@@ -182,7 +139,7 @@ fn get_last_user_message(messages: &serde_json::Value) -> Option<String> {
 
 /// Format text as a fake LLM response in OpenAI chat completion format.
 ///
-/// Used by both slash commands and quality gate to return responses
+/// Used by the slash commands to return responses
 /// without making an actual LLM call.
 pub fn format_as_llm_response(text: &str, protocol: &crate::protocol::Protocol) -> Vec<u8> {
     let response = match protocol {

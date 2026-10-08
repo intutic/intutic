@@ -4042,20 +4042,13 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         }
     };
 
-    // ── Step 5b: Phase 7 — Pre-processor (slash commands + quality gate) ──
+    // ── Step 5b: Phase 7 — Pre-processor (slash commands) ──
     if let Ok(control_plane_url) = std::env::var("CONTROL_PLANE_URL") {
         let messages = body_json.get("messages").cloned();
         if let Some(msgs) = &messages {
             let pre_processor = RequestPreProcessor::new(&control_plane_url);
             if let Some(intercepted) = pre_processor
-                .process(
-                    &session_id,
-                    &workspace_id,
-                    msgs,
-                    &model,
-                    &protocol,
-                    raw_token,
-                )
+                .process(&session_id, &workspace_id, msgs, &protocol, raw_token)
                 .await
             {
                 tracing::info!(
