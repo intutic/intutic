@@ -34,6 +34,7 @@ import {
 import { jetbrainsConfigRoot } from '../harness/windsurfJetBrainsProxy.js'
 import { windsurfSettingsPath } from '../harness/windsurfHooks.js'
 import { ANTIGRAVITY_CLI_GATE, ANTIGRAVITY_HOOK_NAME, antigravityHooksPath } from '../harness/antigravityCliHooks.js'
+import { removeRulesSection, RULES_SECTION_END } from '../harness/rulesSection.js'
 import { parseComponentOptions, serializeComponentOptions, type ComponentOptionsFile } from '../harness/jetbrainsXmlConfig.js'
 import { resolveDshHome, listDshProfileDirs } from '../harness/dshHooks.js'
 import { stripOwnHeader as stripAiderHeader, AIDER_SOPS_FILE } from '../harness/aiderConfigMerger.js'
@@ -615,9 +616,10 @@ const aider: HarnessReverser = async (plan, ctx) => {
 // ─── OpenHands ───────────────────────────────────────────────────────────────
 
 /**
- * An OpenHands `config.toml`: the `[intutic]` table the adapter appends, and
- * every `base_url` the two writers pointed at the proxy (one of them replaced
- * the first `base_url` line in the file, whichever table held it).
+ * An OpenHands `config.toml`: the `[intutic]` table earlier versions
+ * appended (it held the rules, which OpenHands never read), and every
+ * `base_url` the two writers pointed at the proxy (one of them replaced the
+ * first `base_url` line in the file, whichever table held it).
  */
 function openHandsConfig(plan: DisconnectPlan, file: string, workspaceRoot: string, ctx: DisconnectContext): Promise<void> {
   return reverseTextFile(plan, file, workspaceRoot, parseToml, (text, c) => {
@@ -638,6 +640,7 @@ function openHandsConfig(plan: DisconnectPlan, file: string, workspaceRoot: stri
 
 const openhands: HarnessReverser = async (plan, ctx) => {
   await forEachWorkspace(ctx, async (root) => {
+    await rulesFile(plan, join(root, '.openhands', 'microagents', 'intutic-governance.md'), root)
     await openHandsConfig(plan, join(root, 'config.toml'), root, ctx)
     await gateScripts(plan, root, ['openhands-check.sh'])
     await reverseOwnedFile(plan, join(root, '.openhands', 'hooks.json'), root, OWN_HOOK_FILE)
@@ -654,9 +657,25 @@ function isAntigravityGate(value: unknown): boolean {
     value.PreToolUse.every(isGateEntry(ANTIGRAVITY_CLI_GATE))
 }
 
+/**
+ * A user's instructions file holding Intutic's marked rules section: the
+ * section goes, and the original bytes come back when nothing else changed.
+ * Trailing line breaks are compared loosely, since the section's removal
+ * cannot tell them apart; a file that had no final line break gets none back.
+ */
+function rulesSection(plan: DisconnectPlan, file: string, workspaceRoot: string): Promise<void> {
+  return reverseTextFile(plan, file, workspaceRoot, (text) => text.trimEnd(), (text, c) => {
+    const next = removeRulesSection(text)
+    if (next === null || c.originalText === null || c.originalText.endsWith('\n')) return next
+    return text.trimEnd().endsWith(RULES_SECTION_END) ? next.replace(/\r?\n$/, '') : next
+  })
+}
+
 const antigravity: HarnessReverser = async (plan, ctx) => {
   await forEachWorkspace(ctx, async (root) => {
     await gateScripts(plan, root, ['antigravity-check.sh', ANTIGRAVITY_CLI_GATE])
+    await rulesSection(plan, join(root, 'GEMINI.md'), root)
+    // Where earlier versions put the rules: a key neither product reads.
     await json(plan, join(root, '.gemini', 'settings.json'), root, (doc, c) =>
       restoreKey(doc, ['customInstructions'], c, (v) => typeof v === 'string' && startsWithRulesHeader(v)),
     true)

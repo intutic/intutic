@@ -147,10 +147,9 @@ SOPs are written in each harness's native format:
 
 | Format | Harnesses | Example file |
 |---|---|---|
-| Markdown | Cursor, Claude Code, Windsurf, GitHub Copilot | `.cursorrules` |
-| JSON | Antigravity | `.gemini/settings.json` |
+| Markdown | Cursor, Claude Code, Windsurf, GitHub Copilot, OpenHands | `.cursorrules` |
+| Markdown section in your own file | Antigravity and Gemini CLI | `GEMINI.md` |
 | YAML | Aider | `.aider.conf.yml` |
-| TOML | OpenHands | `config.toml` |
 | Env | Codex | `.env.intutic` |
 | Native hooks | Claude Code, Cursor, Windsurf, Cline, Codex, GitHub Copilot (agent mode), Continue CLI, Antigravity, Goose, OpenHands, OpenClaw, Hermes, Pi, Muse Code, Grok Build, OpenCode (plugin), dsh (plugin), n8n (workflow hook) | Harness-specific — see the [coverage matrix](/reference/harness-security-matrix#coverage-matrix) |
 

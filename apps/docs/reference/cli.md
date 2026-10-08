@@ -449,19 +449,21 @@ interval. Files larger than 512 KB are not captured.
 | `.continue/config.json` | `continue` |
 | `.cursorrules` | `cursor` |
 | `.env.intutic` | `codex`, `langgraph`, `langchain`, `crewai`, `autogen`, `ag2`, `google-adk`, `openai-agents`, `pydantic-ai`, `smolagents`, `strands`, `agent-framework`, `mastra`, `vercel-ai-sdk`, `eve`, `trueforge`, `ai-sdk-harness`, `ai-sdk-workflow` |
-| `.gemini/settings.json` | `antigravity` |
 | `.github/copilot-instructions.md` | `github-copilot` |
 | `.hermes/config.yaml` | `hermes` |
 | `.intutic/n8n/governance-workflow.json` | `n8n` |
 | `.open-webui/intutic-governance-filter.py` | `open-webui` |
 | `.openclaw/openclaw.json` | `openclaw` |
+| `.openhands/microagents/intutic-governance.md` | `openhands` |
 | `.pi/hooks.json` | `pi` |
 | `.roorules` | `roo-code` |
 | `.windsurfrules` | `windsurf` |
 | `AGENTS.md` | `muse-code`, `grok`, `opencode` |
 | `claude_desktop_config.json` | `claude-desktop` |
 | `CLAUDE.md` | `claude-code` |
-| `config.toml` | `openhands` |
+| `GEMINI.md` | `antigravity` |
+
+`GEMINI.md` is often your own file with Intutic's rules in a marked section; it is captured whole, your own text included.
 
 ---
 

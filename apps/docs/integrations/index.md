@@ -11,7 +11,7 @@ Intutic supports **43 AI agent harnesses** out of the box. Run `intutic init` in
 intutic init
 #   ✔ cursor → .cursorrules
 #   ✔ claude-code → CLAUDE.md
-#   ✔ antigravity → .gemini/settings.json
+#   ✔ antigravity → GEMINI.md
 #   ○ windsurf (not detected)
 #   …
 ```

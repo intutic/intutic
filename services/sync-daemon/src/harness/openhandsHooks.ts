@@ -153,7 +153,7 @@ exit 0
 
   // ── user-level config.toml llm.base_url ───────────────────────────
   // The workspace config.toml is the adapter's: it merges `[llm] base_url`
-  // and the `[intutic]` table there (`mergeOpenHandsToml`).
+  // there (`mergeOpenHandsToml`).
   await mergeUserOpenHandsConfig(proxyUrl)
 }
 
@@ -273,37 +273,29 @@ export function mergeOpenHandsBaseUrl(raw: string, proxyUrl: string): string | n
 }
 
 /**
- * Merge Intutic's keys into an OpenHands `config.toml`:
- * - `[llm] base_url` — the proxy, in the form the configured model's SDK
- *   expects (LiteLLM appends `/v1/messages` to an Anthropic base and
- *   `/chat/completions` to an OpenAI-style one);
- * - an `[intutic]` table carrying the SOP text, replaced whole each sync.
+ * Point `[llm] base_url` in the workspace's OpenHands `config.toml` at the
+ * proxy, in the form the configured model's SDK expects (LiteLLM appends
+ * `/v1/messages` to an Anthropic base and `/chat/completions` to an
+ * OpenAI-style one), and keep the rest of the file.
+ *
+ * Earlier versions also wrote the rule sets into an `[intutic]` table, which
+ * OpenHands never reads (the rules now go into a microagent, see the
+ * adapter); that table is dropped. Earlier still, versions replaced the
+ * whole file, so a file starting with their header holds nothing of the
+ * user's and is regenerated.
  *
  * Edited line by line so the user's own settings and comments survive; the
- * result is parsed before it is returned. Earlier versions replaced the whole
- * file, so a file starting with their header holds nothing of the user's and
- * is regenerated. Returns `null` when the existing file is not valid TOML.
+ * result is parsed before it is returned. Returns `null` when the existing
+ * file is not valid TOML.
  */
-export function mergeOpenHandsToml(raw: string, proxyUrl: string, instructions: string): string | null {
+export function mergeOpenHandsToml(raw: string, proxyUrl: string): string | null {
   const source = raw.startsWith(LEGACY_HEADER) ? '' : raw
-  const parsed = parsesAsToml(source)
-  if (parsed === null) return null
-
-  const baseUrl = llmBaseUrl(parsed, proxyUrl)
-  let lines = source.split('\n')
-
-  // Drop the previous [intutic] table; it is rewritten whole below.
+  if (parsesAsToml(source) === null) return null
+  const lines = source.split('\n')
   const oldIntutic = tableStart(lines, 'intutic')
-  if (oldIntutic !== -1) lines.splice(oldIntutic, tableEnd(lines, oldIntutic) - oldIntutic)
-
-  setLlmBaseUrl(lines, baseUrl)
-
-  while (lines.length > 0 && lines[lines.length - 1].trim() === '') lines.pop()
-  const escaped = instructions.replace(/\\/g, '\\\\').replace(/"""/g, '\\"\\"\\"')
-  lines = [...lines, '', '[intutic]', `proxy_url = ${JSON.stringify(proxyUrl)}`, `instructions = """\n${escaped}\n"""`, '']
-  const next = (lines[0] === '' ? lines.slice(1) : lines).join('\n')
-
-  const check = parsesAsToml(next)
-  if (check === null || (check['llm'] as Record<string, unknown> | undefined)?.['base_url'] !== baseUrl) return null
-  return next
+  if (oldIntutic !== -1) {
+    lines.splice(oldIntutic, tableEnd(lines, oldIntutic) - oldIntutic)
+    while (lines.length > 1 && lines[lines.length - 1].trim() === '' && lines[lines.length - 2].trim() === '') lines.pop()
+  }
+  return mergeOpenHandsBaseUrl(lines.join('\n'), proxyUrl)
 }

@@ -1,9 +1,15 @@
 /**
  * openhands.ts — OpenHands adapter (full implementation with hooks + llm.base_url).
  *
- * Merges SOP content ([intutic]) and llm.base_url ([llm]) into config.toml,
- * keeping the rest of the file, and injects PreToolUse hooks via
- * .openhands/hooks.json.
+ * - rules: `.openhands/microagents/intutic-governance.md`, a repository
+ *   microagent with no triggers, which OpenHands keeps active in every
+ *   conversation (V0's `microagent.py`: "no triggers -> REPO (always
+ *   active)"; the V1 software-agent SDK loads the same directory as legacy
+ *   skills, "no keywords -> always active"). Earlier versions put the rules
+ *   in an `[intutic]` table of `config.toml`, which OpenHands never reads;
+ *   connect drops that table and disconnect removes it;
+ * - `[llm] base_url` merged into `config.toml`, keeping the rest of the file;
+ * - the PreToolUse hook in `.openhands/hooks.json`.
  *
  * HLD §3.14 — Harness Onboarding Matrix
  * @module
@@ -16,14 +22,16 @@ import type { SyncSopEntry } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
 import { hashFile } from '../lib/hash.js'
 import { writeOpenHandsHooks, mergeOpenHandsToml, isOpenHandsConfig } from '@intutic/sync-daemon/harness/openhandsHooks'
-import { keepOriginal } from '@intutic/sync-daemon'
+import { keepOriginal, writeOwnedFile } from '@intutic/sync-daemon'
 import { log } from '../lib/logger.js'
+import { buildMarkdownContent } from './base.js'
 
 const CONFIG_FILE = 'config.toml'
+const RULES_FILE = '.openhands/microagents/intutic-governance.md'
 
 export const openhandsAdapter: IHarnessAdapter = {
   type: HarnessType.OPENHANDS,
-  configFileName: CONFIG_FILE,
+  configFileName: RULES_FILE,
 
   // `.openhands/` is OpenHands' own per-repository directory (`setup.sh`,
   // microagents). Without it, a `config.toml` counts only when it is an
@@ -49,36 +57,33 @@ export const openhandsAdapter: IHarnessAdapter = {
   },
 
   async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
-    const filePath = join(workspaceRoot, CONFIG_FILE)
-
-    const instructions = sops.length > 0
-      ? sops.map((sop) => `## ${sop.title}\n\n${sop.content}`).join('\n\n---\n\n')
-      : '# Intutic governance active — no SOP rules configured yet.'
-
-    // Merged into the user's config.toml: [llm] base_url and an [intutic]
-    // table for the SOP text; everything else is kept. A file that does not
-    // parse is left alone.
+    // Merged into the user's config.toml: [llm] base_url; everything else is
+    // kept. A file that does not parse is left alone.
+    const configPath = join(workspaceRoot, CONFIG_FILE)
     let raw = ''
-    try { raw = await readFile(filePath, 'utf-8') } catch { /* no config.toml yet */ }
-    const merged = mergeOpenHandsToml(raw, proxyUrl, instructions)
+    try { raw = await readFile(configPath, 'utf-8') } catch { /* no config.toml yet */ }
+    const merged = mergeOpenHandsToml(raw, proxyUrl)
     let written: string | null = null
     if (merged === null) {
-      log.warn(`${filePath} is not valid TOML — left untouched`)
-    } else {
-      const tmpPath = filePath + '.intutic-tmp'
-      await keepOriginal(filePath, workspaceRoot)
-      await mkdir(dirname(filePath), { recursive: true })
+      log.warn(`${configPath} is not valid TOML — left untouched`)
+    } else if (merged !== raw) {
+      const tmpPath = configPath + '.intutic-tmp'
+      await keepOriginal(configPath, workspaceRoot)
+      await mkdir(dirname(configPath), { recursive: true })
       await writeFile(tmpPath, merged, 'utf-8')
-      await rename(tmpPath, filePath)
-      written = filePath
+      await rename(tmpPath, configPath)
+      written = configPath
     }
 
-    return written
+    if (sops.length === 0) return written
+    const rulesPath = join(workspaceRoot, RULES_FILE)
+    await writeOwnedFile(rulesPath, workspaceRoot, buildMarkdownContent(sops, proxyUrl))
+    return rulesPath
   },
 
   async readCurrentHash(workspaceRoot: string): Promise<string | null> {
     try {
-      return await hashFile(join(workspaceRoot, CONFIG_FILE))
+      return await hashFile(join(workspaceRoot, RULES_FILE))
     } catch {
       return null
     }
