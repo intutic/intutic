@@ -253,85 +253,100 @@ Fully remove a user from the workspace, triggering the offboarding cascade.
 
 ## Group Endpoints
 
-SCIM Groups map IdP groups to Intutic RBAC role assignments. Each workspace role (`OWNER`, `ADMIN`, `EM`, `DEVELOPER`, `VIEWER`) is represented as a synthetic SCIM Group with ID `role-<rolename>`.
+Groups are stored resources with ids of the form `scg_…`. Each one has a
+`displayName`, an optional `externalId`, its direct `members` (users and nested
+groups) and, in the Intutic extension, an optional `mappedRole`. See
+[Groups and Nesting](#groups-and-nesting) for what membership and `mappedRole` do.
 
-### GET /scim/v2/Groups — List Groups
-
-Returns all active roles as SCIM Group resources.
-
-**Response:** `200 OK`
+A group resource looks like this:
 
 ```json
 {
-  "schemas": ["urn:ietf:params:scim:api:messages:2.0:ListResponse"],
-  "totalResults": 4,
-  "Resources": [
-    {
-      "schemas": ["urn:ietf:params:scim:schemas:core:2.0:Group"],
-      "id": "role-admin",
-      "displayName": "ADMIN",
-      "members": []
-    }
-  ]
+  "schemas": ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+  "id": "scg_engineering",
+  "displayName": "Engineering",
+  "members": [
+    { "value": "scg_platform", "type": "Group", "$ref": "/scim/v2/Groups/scg_platform" },
+    { "value": "usr_abc123", "type": "User", "$ref": "/scim/v2/Users/usr_abc123" }
+  ],
+  "meta": { "resourceType": "Group", "location": "/scim/v2/Groups/scg_engineering" },
+  "urn:ietf:params:scim:schemas:extension:intutic:2.0:Group": {
+    "workspaceId": "ws_…",
+    "mappedRole": "ADMIN"
+  }
 }
 ```
+
+Users are listed by the `id` that `/scim/v2/Users` returned for them. `mappedRole`
+is `null` for a structural group that grants nothing.
+
+### GET /scim/v2/Groups — List Groups
+
+Returns every group in the workspace with its direct members.
+
+**Response:** `200 OK` with a `ListResponse` whose `Resources` are group resources.
 
 ---
 
 ### GET /scim/v2/Groups/:id — Get Group
 
-Retrieve a single group by its synthetic ID (e.g., `role-admin`).
+Returns one group. An unknown id, or another workspace's group, is a `404`.
 
 ---
 
 ### POST /scim/v2/Groups — Create Group
 
-Create a new role-based group. The group ID is derived from the `displayName`.
-
-**Request body:**
+`displayName` is required. `members` may be sent in the same call; a member
+without a `type` is a User.
 
 ```json
 {
   "schemas": ["urn:ietf:params:scim:schemas:core:2.0:Group"],
-  "displayName": "Engineering Leads"
+  "displayName": "Engineering",
+  "externalId": "00g1abcd",
+  "members": [{ "value": "usr_abc123" }],
+  "urn:ietf:params:scim:schemas:extension:intutic:2.0:Group": { "mappedRole": "ADMIN" }
 }
 ```
 
-**Response:** `201 Created`
+**Response:** `201 Created` with the group resource. A missing `displayName` or an
+unknown `mappedRole` is a `400`; a member that does not exist is a `404`.
 
 ---
 
-### PATCH /scim/v2/Groups/:id — Update Group Membership
+### PATCH /scim/v2/Groups/:id — Update Group
 
-Add or remove members from a role group using SCIM PatchOp.
-
-**Request body:**
-
-```json
-{
-  "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
-  "Operations": [
-    {
-      "op": "add",
-      "path": "members",
-      "value": [{ "value": "usr_abc123" }]
-    }
-  ]
-}
-```
+Accepts a SCIM `PatchOp`. A `members` value may be an array or a single object.
 
 | Operation | Effect |
 |-----------|--------|
-| `add` / `replace` | Assigns the user to the target role |
-| `remove` | Demotes the user to `DEVELOPER` role |
+| `add` on `members` | Adds the users or groups |
+| `remove` on `members` with values | Removes those members |
+| `remove` on `members` with no value | Removes every member |
+| `replace` on `members` | Replaces the member list with the values sent |
+| `replace` on `displayName` (or no path) | Renames the group; an object value may also set `mappedRole` |
 
-**Response:** `200 OK` with updated Group resource
+An edge that would make a group contain itself, directly or through nesting, is
+refused with a `400`.
+
+**Response:** `200 OK` with the updated group resource.
+
+---
+
+### PUT /scim/v2/Groups/:id — Replace Group
+
+Replaces the group: `displayName`, `mappedRole` and the member list are set to
+what the request sends.
+
+**Response:** `200 OK` with the group resource.
 
 ---
 
 ### DELETE /scim/v2/Groups/:id — Delete Group
 
-Demotes all members of the target role to `DEVELOPER`.
+Deletes the group and detaches it from any parent group. The roles it granted are
+recomputed from the groups that remain, as described in
+[Grants are reversible](#grants-are-reversible).
 
 **Response:** `204 No Content`
 
