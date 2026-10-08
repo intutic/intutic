@@ -205,7 +205,8 @@ with no `WHERE`. It reads the SQL from `-c` / `--command`, `-e` / `--execute`,
 sqlite3's trailing argument, a heredoc, a here-string, or an `echo … |` pipe,
 and it reads `bash -c "…"` and argv arrays (`["psql", "-c", …]`) as commands.
 Comments and string literals are ignored, so `SELECT 'drop table'` is not a
-drop.
+drop, while `DROP/**/TABLE`, keywords split by a tab, a newline or a `--`
+comment, and a `\n` that `printf` or `echo -e` expands are.
 
 It then works out **which database** the command targets — a
 `postgres://` / `postgresql://` / `mysql://` URI, the `-h` / `-p` / `-d`

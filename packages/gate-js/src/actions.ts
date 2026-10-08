@@ -94,7 +94,10 @@ export const HTTP_POST_PATTERNS: readonly string[] = [
   'http post',
 ]
 
-/** Commands that write to a database. */
+/**
+ * Commands that write to a database. Matched with {@link SQL_GAP} standing for
+ * each space, not as plain substrings — see {@link matchesSqlAny}.
+ */
 export const DB_WRITE_PATTERNS: readonly string[] = [
   'insert into',
   'update ',
@@ -103,6 +106,24 @@ export const DB_WRITE_PATTERNS: readonly string[] = [
   'truncate ',
   'alter table',
 ]
+
+/**
+ * What may separate two SQL keywords: whitespace, a two-character escaped
+ * newline, tab or carriage return, a block comment, or a `--` comment that
+ * runs to a newline. Byte-identical to `SQL_GAP` in actions.rs (the test
+ * compares them); see the comment there for why the gap is matched rather
+ * than stripped from the text.
+ */
+export const SQL_GAP = String.raw`(?:\s|\\[ntr]|/\*(?:[^*]|\*+[^*/])*\*+/|--(?:[^\n\\]|\\[^n\n])*(?:\n|\\n))+`
+
+const DB_WRITE_PHRASES: readonly RegExp[] = DB_WRITE_PATTERNS.map(
+  (p) => new RegExp(p.split(' ').map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join(SQL_GAP)),
+)
+
+/** `matchesAny` for DB_WRITE_PATTERNS, tolerant of what separates the keywords. */
+export function matchesSqlAny(haystack: string): boolean {
+  return DB_WRITE_PHRASES.some((r) => r.test(haystack))
+}
 
 /**
  * Path fragments that indicate credential material.
@@ -231,7 +252,7 @@ export function classify(toolName: string, toolInput: unknown): string[] {
     if (matchesAny(args, SECRET_PATH_FRAGMENTS)) actions.push('secret_read')
     if (matchesAny(args, PII_PATH_FRAGMENTS)) actions.push('pii_export')
     if (matchesAny(args, HTTP_POST_PATTERNS)) actions.push('http_post')
-    if (matchesAny(args, DB_WRITE_PATTERNS)) actions.push('db_write')
+    if (matchesSqlAny(args)) actions.push('db_write')
   }
 
   return actions.map((a) => ACTION_PREFIX + a)

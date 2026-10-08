@@ -49,14 +49,14 @@ Every governance check proxy mode applies to a stdio server — allowlists, `too
 - API keys and tokens: OpenAI, Anthropic, Google, GitHub, Slack, AWS access key IDs
 - PEM and EC private keys, long hex strings that look like secrets
 - US Social Security numbers
-- Destructive commands (`rm -rf /`, `DROP TABLE`, `DROP DATABASE`, `TRUNCATE TABLE`) — arguments only
+- Destructive commands (`rm -rf /`, `DROP TABLE`, `DROP DATABASE`, `TRUNCATE TABLE`) — arguments only, matched against each decoded argument string; whitespace, comments or an escaped `\n` between the SQL keywords do not hide them, and a quoted mention counts
 
 ### Policy Enforcement
 
 - **MCP server registry**: a server an owner or admin blocked is refused; under the workspace's `deny` default, so is any server not yet approved; a tool switched off within a server is hidden and refused
 - **Allowlists**: `mcpAllowedServers` / `mcpAllowedTools`, empty meaning unrestricted
 - **SSO group policy**: the workspace's `sso_group_policy`, applied to the member the API key belongs to
-- **SOP rules** matched on tool name and arguments: `block`, `warn`, or `require_approval` — a hold recorded in the workspace's review queue; the identical call passes once approved
+- **SOP rules** matched on tool name and arguments: `block`, `warn`, or `require_approval` — a hold recorded in the workspace's review queue; once it is approved, the identical call passes only while the workspace's review-hold bypass is on
 - **Audit events** for every decision, carrying the caller: API key prefix, OS user, harness session and server
 
 ## Binaries

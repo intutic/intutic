@@ -70,6 +70,46 @@ def test_pattern_lists_match_rust(rust_name, py_value):
     )
 
 
+@pytestmark_parity
+def test_sql_gap_matches_rust():
+    import re
+    src = open(ACTIONS_RS, encoding="utf-8").read()
+    m = re.search(r'const SQL_GAP: &str =\s*r"(.*?)";', src, re.S)
+    assert m, f"SQL_GAP not found in {ACTIONS_RS}"
+    assert actions.SQL_GAP == m.group(1), "SQL_GAP drifted from actions.rs; copy the Rust string"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "psql -c 'DROP\nTABLE users'",
+        "psql -c 'DROP\tTABLE users'",
+        "psql -c 'DROP/**/TABLE users'",
+        "psql -c 'DROP /* why */ TABLE users'",
+        "psql -c 'DROP -- why\nTABLE users'",
+        "psql -c 'dRoP tAbLe users'",
+        r"printf 'DROP\nTABLE users' | psql",
+        r"printf 'DROP -- why\nTABLE users' | psql",
+    ],
+)
+def test_db_write_whatever_separates_the_keywords(command):
+    """A plain "drop table" substring missed every one of these."""
+    assert actions.classify("shell", {"command": command}) == ["action:db_write"]
+
+
+def test_db_write_from_json_escaped_arguments():
+    import json
+    decoded = json.loads(r'{"command": "psql -c \"DROP\nTABLE users\""}')
+    assert actions.classify("shell", decoded) == ["action:db_write"]
+
+
+@pytest.mark.parametrize(
+    "command", ["git stash drop", "psql --table-only", "drop_table_helper.sh", "dropdb --help"]
+)
+def test_a_keyword_alone_is_not_a_db_write(command):
+    assert "action:db_write" not in actions.classify("shell", {"command": command})
+
+
 def test_trailing_spaces_preserved():
     """`"update "` without its space matches every occurrence of the word."""
     assert "update " in actions.DB_WRITE_PATTERNS
