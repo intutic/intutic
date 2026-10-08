@@ -9,7 +9,7 @@ import {
   VerdictEvent,
 } from './types'
 import { ClawdeBlockedError, ClawdeConnectionError } from './errors'
-import { parseRefusal } from './refusals'
+import { parseRefusal, headerRefusal, REFUSAL_HEADER } from './refusals'
 import { normalizeRequest, normalizeResponse } from './schema-enforcer'
 import { resolveContext } from './context-resolver'
 import { BudgetChecker } from './budget-checker'
@@ -89,7 +89,8 @@ export class ClawdeClient {
    * Send a chat request through the proxy.
    *
    * Resolves with `verdict: 'allow'` when the proxy let the request through. A
-   * governance refusal fires the matching event and rejects with
+   * governance refusal, including one the proxy answers with a 200 and names in
+   * `x-intutic-refusal`, fires the matching event and rejects with
    * `ClawdeBlockedError`, unretried. Transport failures, timeouts and 5xx
    * answers are retried; anything else rejects with `ClawdeConnectionError`.
    */
@@ -125,9 +126,11 @@ export class ClawdeClient {
       const timer = setTimeout(() => controller.abort(), this.timeout)
       let status: number
       let text: string
+      let refusedBy: string | null
       try {
         const response = await fetch(url, { method: 'POST', headers, body, signal: controller.signal })
         status = response.status
+        refusedBy = response.headers.get(REFUSAL_HEADER)
         text = await response.text()
       } catch (err) {
         lastError = err instanceof Error ? err.message : String(err)
@@ -144,6 +147,12 @@ export class ClawdeClient {
           throw new ClawdeConnectionError(`Proxy answered ${status} with a body that is not JSON: ${text}`)
         }
         const normalized = normalizeResponse(json, this.provider)
+        // A refusal answered as an assistant turn (the cost-prediction gate).
+        const answered = headerRefusal(refusedBy, normalized.choices?.[0]?.message?.content ?? '')
+        if (answered) {
+          this.eventEmitter.emit(answered.verdict, { ...answered, status })
+          throw new ClawdeBlockedError(answered.verdict, answered.code, status, answered.message)
+        }
         normalized.verdict = 'allow'
         return normalized
       }

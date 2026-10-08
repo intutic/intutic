@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import { join } from 'path'
-import { PROXY_REFUSALS, parseRefusal } from '../src/refusals'
+import { PROXY_REFUSALS, REFUSAL_HEADER, parseRefusal } from '../src/refusals'
 
 const STATUS: Record<string, number> = {
   BAD_REQUEST: 400,
@@ -71,5 +71,16 @@ describe('proxy refusals', () => {
     expect(parseRefusal(409, body)).toBeNull()
     expect(parseRefusal(403, 'not json')).toBeNull()
     expect(parseRefusal(403, JSON.stringify({ error: 'policy_denied' }))).toBeNull()
+  })
+})
+
+describe('refusals the proxy answers with a 200', () => {
+  const source = readFileSync(join(__dirname, '../../proxy/src/proxy.rs'), 'utf-8')
+
+  it('reads the header the proxy sets, for a code it knows', () => {
+    expect(source).toContain(`REFUSAL_HEADER: &str = "${REFUSAL_HEADER}"`)
+    const named = [...source.matchAll(/\.header\(REFUSAL_HEADER, "([A-Za-z_]+)"\)/g)].map((m) => m[1])
+    expect(named).toEqual(['COST_GATE_EXCEEDED'])
+    for (const code of named) expect(PROXY_REFUSALS[code], code).toBeDefined()
   })
 })

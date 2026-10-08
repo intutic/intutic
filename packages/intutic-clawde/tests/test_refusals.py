@@ -6,7 +6,7 @@ import json
 import re
 from pathlib import Path
 
-from intutic_clawde.refusals import PROXY_REFUSALS, parse_refusal
+from intutic_clawde.refusals import PROXY_REFUSALS, REFUSAL_HEADER, parse_refusal
 
 PROXY_RS = Path(__file__).resolve().parents[2] / "proxy" / "src" / "proxy.rs"
 
@@ -70,3 +70,11 @@ def test_status_and_code_must_agree():
     assert parse_refusal(403, "not json") is None
     assert parse_refusal(403, json.dumps({"error": "policy_denied"})) is None
     assert parse_refusal(403, json.dumps(["policy_denied"])) is None
+
+
+def test_the_header_refusals_are_the_ones_the_proxy_sets():
+    source = PROXY_RS.read_text(encoding="utf-8")
+    assert f'REFUSAL_HEADER: &str = "{REFUSAL_HEADER}"' in source
+    named = re.findall(r'\.header\(REFUSAL_HEADER, "([A-Za-z_]+)"\)', source)
+    assert named == ["COST_GATE_EXCEEDED"]
+    assert all(code in PROXY_REFUSALS for code in named)

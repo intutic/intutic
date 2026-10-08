@@ -4,7 +4,7 @@ import warnings
 import requests
 from typing import List, Dict, Any, Callable, Optional
 from .errors import ClawdeBlockedError, ClawdeConnectionError
-from .refusals import parse_refusal
+from .refusals import REFUSAL_HEADER, header_refusal, parse_refusal
 from .context_resolver import resolve_context
 from .budget_checker import BudgetChecker
 from .circuit_breaker import CircuitBreaker
@@ -93,8 +93,9 @@ class ClawdeClient:
         """Send a chat request through the proxy's /v1/chat/completions route.
 
         Returns the completion with `verdict` set to "allow" when the proxy let
-        the request through. A governance refusal fires the matching event and
-        raises ClawdeBlockedError, unretried. Transport failures, timeouts and
+        the request through. A governance refusal, including one the proxy
+        answers with a 200 and names in `x-intutic-refusal`, fires the matching
+        event and raises ClawdeBlockedError, unretried. Transport failures, timeouts and
         5xx answers are retried; anything else raises ClawdeConnectionError.
         """
         request_payload = {
@@ -130,6 +131,13 @@ class ClawdeClient:
                     raise ClawdeConnectionError(
                         f"Proxy answered {res.status_code} with a body that is not JSON: {res.text}"
                     )
+                # A refusal answered as an assistant turn (the cost-prediction gate).
+                answered = header_refusal(res.headers.get(REFUSAL_HEADER), _first_message_text(result))
+                if answered is not None:
+                    self.emit(answered["verdict"], {**answered, "status": res.status_code})
+                    raise ClawdeBlockedError(
+                        answered["verdict"], answered["code"], res.status_code, answered["message"]
+                    )
                 result["verdict"] = "allow"
                 return result
 
@@ -147,3 +155,12 @@ class ClawdeClient:
                 raise ClawdeConnectionError(last_error)
 
         raise ClawdeConnectionError(f"Request failed after {max_attempts} attempts. Last error: {last_error}")
+
+
+def _first_message_text(completion: Any) -> str:
+    """The first choice's message text of an OpenAI-format completion, or ''."""
+    try:
+        content = completion["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError):
+        return ""
+    return content if isinstance(content, str) else ""

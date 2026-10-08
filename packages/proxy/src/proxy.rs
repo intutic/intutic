@@ -709,6 +709,28 @@ fn json_error(status: StatusCode, error_type: &str, message: &str) -> Response {
     (status, axum::Json(body)).into_response()
 }
 
+/// Names the refusal on a 200 whose body is a synthetic assistant turn
+/// explaining it. A chat client shows that turn; an SDK reads this header, or
+/// it would take the explanation for the model's answer.
+pub(crate) const REFUSAL_HEADER: &str = "x-intutic-refusal";
+
+/// The cost-prediction gate's answer to a non-streaming request: the reason as
+/// an assistant turn, status 200, and `x-intutic-refusal: COST_GATE_EXCEEDED`.
+fn cost_gate_response(body: Vec<u8>) -> Response {
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/json")
+        .header(REFUSAL_HEADER, "COST_GATE_EXCEEDED")
+        .body(Body::from(body))
+        .unwrap_or_else(|_| {
+            json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "cost_gate_error",
+                "Cost gate failed",
+            )
+        })
+}
+
 /// Refusal response for a model that failed the workspace's approved-models
 /// allowlist check. Factored out of the gate in `handle_proxy` so the exact
 /// wire shape (403, `error.type: "model_not_allowed"`) is covered by a unit
@@ -4112,19 +4134,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                 ),
                             );
                         }
-                        let gate_response =
-                            CostPredictionGate::format_gate_response(&estimate, &model, &protocol);
-                        return Response::builder()
-                            .status(StatusCode::OK)
-                            .header("content-type", "application/json")
-                            .body(Body::from(gate_response))
-                            .unwrap_or_else(|_| {
-                                json_error(
-                                    StatusCode::INTERNAL_SERVER_ERROR,
-                                    "cost_gate_error",
-                                    "Cost gate failed",
-                                )
-                            });
+                        return cost_gate_response(CostPredictionGate::format_gate_response(
+                            &estimate, &model, &protocol,
+                        ));
                     }
                 }
             }
@@ -11264,6 +11276,30 @@ mod tests {
     /// feeds `metering::check_model_allowed`, whose invariant tests live in
     /// metering.rs. This covers what that unit doesn't reach — the actual
     /// HTTP shape of the refusal `handle_proxy` returns for it.
+    mod cost_gate {
+        use super::super::*;
+
+        // An SDK cannot tell this 200 from a model's answer without the header:
+        // the clawde SDKs reported a cost-gated request as allowed.
+        #[tokio::test]
+        async fn the_synthetic_200_names_the_refusal_in_a_header() {
+            let resp = cost_gate_response(b"{}".to_vec());
+            assert_eq!(resp.status(), StatusCode::OK);
+            assert_eq!(
+                resp.headers()
+                    .get(REFUSAL_HEADER)
+                    .and_then(|v| v.to_str().ok()),
+                Some("COST_GATE_EXCEEDED")
+            );
+            assert_eq!(
+                resp.headers()
+                    .get("content-type")
+                    .and_then(|v| v.to_str().ok()),
+                Some("application/json")
+            );
+        }
+    }
+
     mod model_allowlist_gate {
         use super::super::*;
 

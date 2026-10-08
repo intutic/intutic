@@ -52,7 +52,7 @@ The TypeScript client sends the agent-graph headers the proxy uses for [graph gu
 `circuitBreaker(toolName, options)` (`circuit_breaker(tool_name, ...)`) returns a runner: call it with a function and that function runs immediately, behind the breaker.
 
 - `requireBudget` (`require_budget`), default `false`: the breaker runs `checkBudget` first and throws `ClawdeVerdictError('kill', ...)` if the workspace has no budget left. This is a workspace-level check, not a per-call cost ceiling: nothing reports what a call will cost before it is made.
-- `failOpen` (`fail_open`), default `false`: when `true`, a failed budget check is ignored, and an error from the function, a governance refusal included, is swallowed and the runner returns `null` (`None`). When `false`, a `ClawdeBlockedError` from `chat()` propagates unchanged.
+- `failOpen` (`fail_open`), default `false`: when `true`, a budget check that cannot be made (the control plane is unreachable) is skipped, and an error from the function, a governance refusal included, is swallowed and the runner returns `null` (`None`). A budget check that answers with no budget left refuses the call either way. When `false`, a `ClawdeBlockedError` from `chat()` propagates unchanged.
 - `maxCostUsd` (`max_cost_usd`) is deprecated: any value turns the budget check on, exactly like `requireBudget`, and the amount is ignored. Python emits a `DeprecationWarning`. `sensitivityTier` (TypeScript only) is deprecated and ignored. Both will be removed in the next major version.
 
 ### 4. Anthropic Requests (TypeScript only)
@@ -70,14 +70,14 @@ A response that comes back carries `verdict: 'allow'`: the proxy let the request
 | 409 | `policy_reask` | `reask` | Revise the approach and try again; repeated attempts escalate to `policy_denied` |
 | 429 | `BUDGET_EXCEEDED` | `kill` | The key's remaining budget does not cover the request |
 | 429 | `OVERAGE_HARD_CAP_EXCEEDED` | `kill` | The daily spend cap is reached |
-| 402 | `COST_GATE_EXCEEDED` | `kill` | A streaming request's estimated cost is over the workspace threshold |
+| 402, or 200 | `COST_GATE_EXCEEDED` | `kill` | The request's estimated cost is over the workspace threshold (see below) |
 | 400 | `dlp_policy_violation` | `kill` | The request contains content the DLP policy blocks |
 
 `ClawdeBlockedError` extends `ClawdeVerdictError` and carries `verdict`, `code` (the proxy's code), `status` and the proxy's reason as its message. The circuit breaker's budget check throws a plain `ClawdeVerdictError`.
 
 Every other failure throws `ClawdeConnectionError` with the status and response body in its message: an unreachable proxy, a timeout, a 5xx after the retries run out, or a 4xx that is not a refusal, such as a key the proxy does not accept.
 
-A non-streaming request over the cost-prediction threshold is answered with HTTP 200 and an assistant message explaining the estimate, which `chat()` returns as a normal reply with `verdict: 'allow'`.
+A non-streaming request over the cost-prediction threshold is answered with HTTP 200 and an assistant message explaining the estimate, so a chat client shows the reason. The response names the refusal in its `x-intutic-refusal: COST_GATE_EXCEEDED` header, and `chat()` treats it as one: it fires `kill` and throws `ClawdeBlockedError` with `status` 200 and the explanation as its message.
 
 `budgetRemainingUsd` and `budgetPctUsed` are deprecated and never set; the proxy does not report budget on responses. Use `checkBudget()` instead.
 

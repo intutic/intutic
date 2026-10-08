@@ -183,12 +183,10 @@ impl CostPredictionGate {
             model,
         );
 
-        // The remediation line that used to close this message told the user to
-        // "add `--force` to your message or adjust the threshold in Settings →
-        // Billing". Neither exists: the only `--force` parser in the crate
-        // bypasses the *quality* gate (`quality/mod.rs`), and no UI or API
-        // writes `tok:predict:gate:*`. Advice pointing at two surfaces that are
-        // not there is worse than no advice — it sends the reader looking.
+        // No remediation line: one used to tell the user to add `--force` or
+        // adjust the threshold in Settings → Billing, and neither exists (no UI
+        // or API writes `tok:predict:gate:*`). Advice pointing at surfaces that
+        // are not there sends the reader looking.
         let cached = crate::store::CachedResponse {
             prompt: String::new(),
             response: text,

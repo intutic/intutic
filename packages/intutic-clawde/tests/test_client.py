@@ -111,17 +111,27 @@ def test_circuit_breaker_max_cost_usd_is_a_deprecated_switch():
         wrapped(lambda: "never runs")
 
 
-def test_circuit_breaker_fail_open():
+def test_circuit_breaker_refuses_an_exhausted_budget_even_with_fail_open():
+    # fail_open used to swallow the budget verdict too, so with it set the
+    # breaker ran the function exactly when the budget was gone.
     client = ClawdeClient(api_key="test-key")
     _no_budget(client)
 
-    # With fail_open=True, it should fail open (log warning and continue execution of mock_tool)
     mock_tool = MagicMock(return_value="success")
     wrapped = client.circuit_breaker("test_tool", require_budget=True, fail_open=True)
 
-    result = wrapped(mock_tool)
-    assert result == "success"
-    assert mock_tool.call_count == 1
+    with pytest.raises(ClawdeVerdictError):
+        wrapped(mock_tool)
+    assert mock_tool.call_count == 0
+
+
+def test_circuit_breaker_fails_open_on_a_budget_check_that_cannot_be_made():
+    client = ClawdeClient(api_key="test-key")
+    client.budget_checker.check_budget = MagicMock(side_effect=ClawdeConnectionError("unreachable"))
+
+    assert client.circuit_breaker("test_tool", require_budget=True, fail_open=True)(lambda: "ran") == "ran"
+    with pytest.raises(ClawdeConnectionError):
+        client.circuit_breaker("test_tool", require_budget=True)(lambda: "ran")
 
 
 def test_circuit_breaker_reraises_a_proxy_refusal():
@@ -134,9 +144,10 @@ def test_circuit_breaker_reraises_a_proxy_refusal():
         client.circuit_breaker("test_tool")(refused)
 
 
-def _reply(status, body):
+def _reply(status, body, headers=None):
     res = MagicMock()
     res.status_code = status
+    res.headers = headers or {}
     res.text = json.dumps(body)
     res.json.return_value = body
     return res
@@ -193,6 +204,29 @@ def test_chat_refusal_is_not_retried_and_fires_its_event(mock_post, status, code
     assert str(exc.value) == f"refused: {code}"
     assert mock_post.call_count == 1
     assert events == [{"verdict": verdict, "code": code, "status": status, "message": f"refused: {code}"}]
+
+
+@patch("requests.post")
+def test_chat_treats_a_200_the_proxy_names_as_a_refusal_as_one(mock_post):
+    # The cost-prediction gate answers a non-streaming request with a 200
+    # whose assistant turn explains the estimate. It used to come back as allow.
+    explanation = "This request is estimated to cost $1.2000, which exceeds your workspace threshold of $0.5000."
+    mock_post.return_value = _reply(
+        200,
+        {"choices": [{"message": {"role": "assistant", "content": explanation}}]},
+        {"x-intutic-refusal": "COST_GATE_EXCEEDED"},
+    )
+    client = ClawdeClient(api_key="test-key")
+    events = []
+    client.on("kill", events.append)
+
+    with pytest.raises(ClawdeBlockedError) as exc:
+        client.chat("gpt-4o", [{"role": "user", "content": "hello"}])
+
+    assert (exc.value.verdict, exc.value.code, exc.value.status) == ("kill", "COST_GATE_EXCEEDED", 200)
+    assert str(exc.value) == explanation
+    assert mock_post.call_count == 1
+    assert events == [{"verdict": "kill", "code": "COST_GATE_EXCEEDED", "status": 200, "message": explanation}]
 
 
 @patch("time.sleep")
