@@ -17,7 +17,7 @@ intutic exec --sandbox -- claude
 intutic exec --sandbox=firecracker -- python my_agent.py
 ```
 
-## The honesty rule
+## No silent fallback
 
 A sandbox backend that isn't actually available is refused, never silently
 swapped for a weaker one or skipped in favor of running on the bare host.

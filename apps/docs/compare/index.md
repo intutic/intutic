@@ -1,46 +1,51 @@
+---
+title: How Intutic Compares
+description: Where Intutic enforces, and how it compares with AI-agent governance platforms, AI security gateways and LLM observability tools.
+---
+
 # How Intutic Compares
 
-Eight detailed, capability-by-capability comparisons, against three kinds of product: LLM observability/tracing platforms that log after the fact, AI governance/GRC platforms that increasingly ship runtime enforcement too, and enterprise AI-security gateways that scan or proxy model traffic. Read the page for whichever you're evaluating against — this one is the map, not the argument.
+*Last reviewed: 2026-10-08*
 
-## The one-line version
+Intutic decides each agent tool call before it runs. A native pre-execution gate inside the coding agent allows, blocks or holds the call for approval, and the same policy runs in a request and response proxy that redacts sensitive data, an MCP governance proxy, a default-deny egress firewall and a sandboxed runtime. It covers **43** supported harnesses, records every decision in an audit trail you can verify yourself, is open core under MIT, runs fully self-hosted including air-gapped, and publishes its [prices](/guide/plans).
 
-**Most of what's on this page watches, scores, or scans. Intutic is the thing in the path of the tool call, deciding allow/block/hold before the action happens — synchronously, not after a log line shows up in a dashboard.**
+The products on these pages start from other places: governance platforms that inventory agents across an organization, security gateways that guard model inputs and outputs, and observability platforms that trace and evaluate LLM applications. Several now enforce at runtime too. Each detail page says where.
 
-That's true of the LLM-observability tools (LangSmith, W&B Weave, Arize AX) by design — they were built to trace and evaluate, not to intervene. It's less true than it used to be of the GRC and AI-security-gateway categories: Credo AI shipped runtime enforcement (Agent Governor) in July 2026, and Forge is the closest thing to a direct competitor we've found. Where a competitor has closed a gap, the individual comparison page says so plainly rather than pretending the old distinction still holds.
+## At a glance
 
-## Capability matrix
+| | Category | Where it enforces | Coding agents | Self-host | Source |
+|---|---|---|---|---|---|
+| **Intutic** | Agent enforcement point | The tool call (hook gates in 21 harnesses), model requests and responses, MCP calls, network egress, sandboxed runs | **43** supported harnesses | Yes, including air-gapped | Open core (MIT) |
+| [Forge](/compare/forge) | AI-agent governance platform | Its device agent, MCP gateway and LLM gateway, plus connected security tools | Six documented, including Claude Code, Codex and Cursor | Hosted; Resource Gateways run in your environment | Closed |
+| [Credo AI](/compare/credo-ai) | AI governance, risk and compliance | Agent Governor (Research Preview) hooks Claude Code tool calls | Claude Code | Private cloud (Kubernetes or VMs) | Closed |
+| [Fiddler AI](/compare/fiddler) | AI observability and guardrails | Model inputs and outputs; its coding-agent control plane allows, blocks or redacts | Claude Code and Gemini CLI | SaaS, VPC or on-prem | Closed |
+| [F5 AI Guardrails](/compare/f5-calypso) | AI security (formerly CalypsoAI) | Model inputs and outputs; agent actions and tool use | Not named in its docs | Cloud, private cloud, on-prem, air-gapped | Closed |
+| [Portkey](/compare/portkey) | AI gateway (Palo Alto Networks) | Model requests and responses, with inline guardrails | Any client that can change its base URL | Yes | Gateway is MIT |
+| [LangSmith](/compare/langsmith) | LLM tracing and evaluation | Its LLM Gateway (beta) caps spend and redacts on model traffic | Gateway guides for Claude Code, Codex and Gemini CLI | Self-hosted or BYOC (Enterprise) | Closed |
+| [Arize AX](/compare/arize-ax) | LLM observability and evaluation (Dynatrace) | Guards that block, re-ask or substitute model output | Not a focus | Yes (Enterprise) | AX closed; Phoenix source-available |
+| [W&B Weave](/compare/wandb-weave) | LLM tracing and evaluation (CoreWeave) | Scorers your code applies as guardrails | Not a focus | Dedicated cloud; self-managed in preview | SDK is Apache-2.0 |
 
-| | Intutic | Observability<br>(LangSmith, Weave, Arize AX) | GRC / Governance<br>(Credo AI) | AI Security Gateway<br>(Forge, F5 Calypso, Fiddler) |
-|---|---|---|---|---|
-| **When it acts** | Synchronous, in the tool-call path | After the fact (trace/log) | Runtime enforcement (Credo AI, since Jul 2026) | Synchronous, at the network/inference layer |
-| **What it sees** | The actual tool call — filesystem writes, shell commands, MCP invocations | Model input/output, spans | Policy state, some runtime hooks | Prompt/response payloads |
-| **Coding-agent harnesses** | 39 out-of-the-box, harness-native adapters | Generic SDK tracing | Not the focus | Network interception, 1-2 named harnesses |
-| **SIEM/export** | 6 native destinations (Splunk, Syslog/CEF, Datadog, S3, GCS, webhook) with retry/DLQ | Varies | Not found in public docs | Forge: Splunk + S3 + SOAR webhooks |
-| **Audit trail** | Merkle-sealed trace roots, browser-verifiable | Trace logs | Policy version history | Forge: SHA-256 hash-chain ledger |
-| **Prove-before-enforce** | Replay any rule against real traffic before it's live; SOP shadow mode with a measured would-act rate | Not applicable | Not found in public docs | Not found in public docs |
-| **Policy source** | Git-committed markdown (`.intutic/sops/*.md`), PR-reviewable, ConfigMap-deliverable | N/A | Dashboard-managed policy objects | Vendor-defined rule packs + custom rules |
-| **Source you can read** | Open-core — the block/allow decision is code in this repo | Closed | Closed | Closed |
-| **On-prem / air-gapped** | Self-host annual license: installs from a signed bundle with no route to the internet | Cloud-hosted | Enterprise tier | Varies; several undocumented as of this writing |
-| **Pricing** | Open core free; paid plans priced publicly | Usage-based, published | Enterprise sales | Sales-quote only (Forge) |
+## What sets Intutic apart
 
-## The auditability point, stated plainly
+- **It sits at the tool call.** The gate runs inside the agent, before the shell command, file write or MCP call executes, and fails closed if it crashes or receives a malformed payload. A built-in destructive-command tier blocks with no configuration.
+- **It covers the agents developers actually run.** Coverage across 43 harnesses, from Claude Code, Cursor, GitHub Copilot, Windsurf and Cline to LangGraph, CrewAI and the OpenAI Agents SDK. See [Integrations](/integrations/).
+- **You can verify it.** The proxy, hook gates, MCP proxy, CLI and sync daemon are open source, and the audit trail is a signed Merkle tree you can check in a browser or with `intutic integrity verify`. See [Trace Integrity](/concepts/trace-integrity).
+- **It runs where you need it.** Cloud, or the whole product on your own infrastructure from a signed, air-gap-ready bundle.
 
-Every closed-source governance product on this page asks you to trust that its policy engine does what its docs say. Intutic is open-core: `packages/proxy` — the code that reads a tool call and returns BYPASS/ENHANCE/HIJACK/KILL — is public. You can read the exact logic that decided your last blocked action, not a vendor's description of it. In the current AI-governance market, the only other products making a comparable open-source claim at the enforcement layer are Daxa and Pebblo — everything else in this matrix, including every product with its own comparison page below, ships a closed engine.
-
-That doesn't make Intutic more *complete* than a mature closed platform — several of the pages below name specific areas where a competitor is ahead today, and say so directly. It makes Intutic *verifiable* in a way a closed product structurally cannot be, at any price tier.
+Intutic is not the only open-source project that enforces on tool calls: Microsoft's Agent Governance Toolkit, agentgateway, Invariant Guardrails, LiteLLM's tool-permission guardrail, and the Docker and Lasso MCP gateways do as well. What Intutic adds is native gates across 43 harnesses, approval holds, egress and sandbox containment, and a verifiable audit trail in one product.
 
 ## Detailed comparisons
 
-| Product | Category | One-line take |
-|---|---|---|
-| [Portkey](/compare/portkey) | AI gateway | Observability, caching, routing — not a synchronous enforcement layer |
-| [Credo AI](/compare/credo-ai) | GRC / governance | Now ships runtime enforcement (Agent Governor); the gap is maturity and breadth, not capability category |
-| [Arize AX](/compare/arize-ax) | Observability | Tracing, evals, dashboards — after-the-fact, not in-path |
-| [Forge](/compare/forge) | AI-agent governance | The closest direct competitor — broad connector-based enforcement vs. Intutic's purpose-built in-path proxy |
-| [F5 Calypso](/compare/f5-calypso) | AI security gateway | Scans/redacts at the inference layer; Intutic intercepts inside the agent loop at the OS/tool-call level |
-| [LangSmith](/compare/langsmith) | Developer tracing | Post-hoc debugging tool, not a policy-enforcement layer |
-| [Fiddler AI](/compare/fiddler) | Model monitoring | Text-level guardrails (toxicity, PII, hallucination) vs. actual tool-execution governance |
-| [W&B Weave](/compare/wandb-weave) | Developer tracing | Trace/log/eval tool; no opt-in egress containment or runtime sandbox isolation |
+| Product | One-line take |
+|---|---|
+| [Forge](/compare/forge) | Top-down discovery, identity and credential brokering across an organization; Intutic is the enforcement point at the tool call, open core and self-hostable |
+| [Credo AI](/compare/credo-ai) | Regulatory GRC system of record with an early Claude Code enforcement preview; Intutic enforces across 43 harnesses in production |
+| [Fiddler AI](/compare/fiddler) | Model monitoring and guardrails, now with a coding-agent control plane; Intutic adds approval holds, MCP governance, egress and sandbox containment |
+| [F5 AI Guardrails](/compare/f5-calypso) | Model-traffic security and red teaming; Intutic governs the coding agent's own tool calls |
+| [Portkey](/compare/portkey) | Model gateway with routing, caching and inline guardrails; Intutic gates what the agent does with the answer |
+| [LangSmith](/compare/langsmith) | Tracing and evaluation with a new inline gateway; Intutic decides tool calls before they run |
+| [Arize AX](/compare/arize-ax) | Observability and evaluation with output guards; Intutic enforces at the tool call |
+| [W&B Weave](/compare/wandb-weave) | Tracing and evaluation for LLM apps; Intutic enforces, contains and audits agent actions |
 
 ---
 

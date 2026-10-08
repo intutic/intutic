@@ -1,51 +1,49 @@
+---
+title: Intutic vs Arize AX
+description: Arize AX observes and evaluates LLM applications and can guard model output; Intutic decides agent tool calls before they run across 43 harnesses.
+---
+
 # Intutic vs Arize AX
 
-Arize AX is an AI observability platform for monitoring, evaluating, and debugging LLM applications. It provides tracing, evaluation metrics, and performance dashboards. **Intutic enforces policies on agent tool calls in real time.**
+*Last reviewed: 2026-10-08*
 
-> Dynatrace has announced an acquisition of Arize (~$915M), expected to close within the year. Arize is likely to be pulled toward deeper APM/infrastructure-observability integration under Dynatrace rather than continuing as an independent agent-observability product — worth factoring in if you're evaluating for the long term. This does not change the comparison below: Arize has no enforcement capability today, independent of ownership.
-
-## Different Layers, Same Stack
-
-Arize AX **observes** what your AI systems do — traces, evaluations, latency, quality scores. Intutic **controls** what your AI agents are allowed to do — blocking destructive actions, redacting secrets, enforcing budgets.
-
-**Intutic enforces. Arize observes.**
+Intutic decides each agent tool call before it runs, across 43 harnesses: native hook gates and in-process SDK gates allow or block the call, and hook gates can hold it for human approval. Around the gates, a policy proxy redacts sensitive data in model traffic, an MCP governance proxy governs MCP tools, an egress firewall and sandboxed execution stop the agent routing around governance, and a signed audit trail records every decision. Arize AX is an observability and evaluation platform for LLM applications and agents, built on OpenTelemetry and OpenInference tracing, with LLM-as-judge evaluations, human review, and guards that can block, re-ask or substitute a model's output at runtime. Dynatrace completed its acquisition of Arize on 2026-10-01. Arize measures and improves how well the application works; Intutic controls what the agent is allowed to do.
 
 ## Comparison
 
-| Capability | Intutic | Arize AX |
-|-----------|---------|----------|
-| **Primary function** | Runtime enforcement (circuit breaker) | Observability and evaluation |
-| **Where it sits** | In the tool-call path — synchronous enforcement | After execution — async tracing and analysis |
-| **Enforcement** | BYPASS / ENHANCE / HIJACK / KILL, synchronous and in-process | No enforcement — observation only |
-| **Tracing** | Tool-call-level audit logs with enforcement decisions | Full LLM trace with spans, evaluations, and annotations |
-| **Scope** | AI coding agents (43 harness integrations) | Any LLM application (RAG, agents, chatbots) |
-| **DLP & threat detection** | Secrets redaction, SQL injection, prompt injection — blocked at proxy | Hallucination detection, toxicity scoring — flagged post-hoc |
-| **Evaluation** | Policy pass/fail per tool call | LLM-as-judge, human annotation, custom evaluators |
-| **Data export** | OTel-compatible trace export | Native OTel ingestion |
+| | Intutic | Arize AX |
+|---|---|---|
+| **Primary job** | Runtime enforcement and audit for AI agents | Observability and evaluation for LLM applications |
+| **Where it enforces** | Native pre-execution hooks in 21 harnesses, plus request and response proxy, MCP governance proxy, egress firewall and sandbox | Guards on model output in your application code |
+| **Coding agents** | **43** supported harnesses, including Claude Code, Codex, Cursor, GitHub Copilot, Windsurf and Cline | Not a focus; it traces any application instrumented with OpenInference or OpenTelemetry |
+| **Decisions** | Allow, warn, require approval (held until approved in Slack or the CLI), block, redact, re-ask, shadow | Block, re-ask, or substitute a default response |
+| **Evaluation** | Shadow mode measures how often a rule would act before it enforces; judge findings go to a human review queue | LLM-as-judge and online evaluations, human annotation and labeling queues |
+| **Tracing** | Enforcement decisions per tool call; OpenTelemetry traces and metrics of Intutic's own components | Full application traces with spans, evaluations and annotations |
+| **Deployment** | Cloud, or fully self-hosted including air-gapped | Cloud; self-hosted on Kubernetes for Enterprise |
+| **Source** | Open core (MIT) | AX is closed; Phoenix is source-available under the Elastic License 2.0 |
 
-## Better Together
+## Where Arize is stronger
 
-Intutic and Arize AX work at **different layers** of the AI stack. Use them together:
+- **Evaluation depth.** LLM-as-judge, online evaluations and human labeling for measuring application quality over time.
+- **Application-wide tracing.** Spans across retrieval, chains and agents in any LLM application, not only coding agents.
+- **Observability platform.** As part of Dynatrace, it connects AI observability with application performance monitoring.
 
-1. **Enforce with Intutic** — block bad actions, redact secrets, enforce budgets on every tool call
-2. **Export traces to Arize** — Intutic emits OTel-compatible traces that Arize can ingest for deep observability
-3. **Analyze with Arize** — use Arize's evaluation and debugging tools to understand agent behavior patterns, quality trends, and failure modes
+## When to choose Intutic
 
-Intutic tells you what was **blocked and why**. Arize tells you what **happened and how well it worked**.
+- Your agents run commands, edit files and call MCP tools, and you need each call decided before it runs.
+- You want risky calls held for human approval.
+- You need egress control and sandboxing so an agent cannot route around governance.
+- You want an audit trail you can verify independently.
 
-## When You Need Intutic
+## When to choose Arize AX
 
-- Your AI agents interact with infrastructure — files, databases, APIs, git
-- You need to **prevent** destructive actions, not just observe them
-- You want policy enforcement that runs **locally**, in-process, with no model call
-- You need coverage across **39 AI coding harnesses**
+- You are measuring and improving the quality of RAG pipelines, chatbots or agents.
+- You want evaluation pipelines and human review of model output.
+- You already run Dynatrace and want AI observability in the same platform.
 
-## When You Need Arize AX
+## Use them together
 
-- You need deep LLM observability with tracing and evaluation
-- You're debugging RAG quality, hallucination rates, or response latency
-- You want LLM-as-judge evaluation pipelines
-- You need observability across all LLM application types, not just coding agents
+Arize can trace and evaluate your application while Intutic gates the agent's tool calls. Intutic's enforcement records reach other systems through [SIEM export](/guide/siem-export) and signed webhooks; they are not emitted as OpenInference spans, so Arize does not show Intutic's decisions inside its traces.
 
 ---
 

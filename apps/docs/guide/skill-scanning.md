@@ -145,7 +145,7 @@ before or after this phase.
 
 **What it adds beyond native scanning.** Everything above this section —
 `scanSkillContent`, `scanScriptContent` — is regex-genre pattern matching:
-fast, dependency-free, and honest about not doing AST parsing, dataflow
+fast and dependency-free, with no AST parsing, dataflow
 analysis, or semantic understanding (see
 [What this cannot catch](#what-this-cannot-catch)). The Cisco integration
 runs static YARA/pattern detection, Python bytecode integrity checks, and
@@ -450,7 +450,7 @@ Specifically:
   shapes are covered, not what fraction of real attacks would be caught.
 - **Regex-genre pattern matching only — for `SKILL.md` prose AND for bundled
   scripts — never AST or dataflow analysis, and no semantic understanding.**
-  This is the single most important limitation to be honest about, and it
+  This is the single most important limitation, and it
   applies identically on both sides of this page: `scanSkillContent` matches
   imperative sentence shapes against markdown text; `scanScriptContent`
   matches source-code shapes (a `curl | sh` pipeline, a `subprocess.run(
@@ -507,7 +507,7 @@ Specifically:
 
 | Page | What it covers |
 |---|---|
-| [Governance Controls Checklist](/guide/governance-controls) | The house style for stating partial coverage honestly, applied across every control this product ships |
+| [Governance Controls Checklist](/guide/governance-controls) | The house style for stating partial coverage precisely, applied across every control this product ships |
 | [Graph Guardrails](/guide/graph-guardrails) | The deterministic detector taxonomy this scanner's discipline follows |
 | [Policies & Enforcement](/guide/policies) | Where enforcement (as opposed to reporting) actually lives in this product |
 | [VirusTotal Integration](/guide/virustotal-scanning) | Opt-in, hash-only known-malware lookup for skill-bundled scripts — setup, budget/pacing, and posture-score effect |

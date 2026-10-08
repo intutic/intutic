@@ -81,7 +81,7 @@ Naming the set separates two signals that must never be conflated:
 - **Integrity** — whether the roots that exist still re-derive. Never benign.
 
 The `audit_log_integrity` compliance probe reports both, plus the count of traces
-that belong to no run at all, which is the honest measure of ungoverned traffic.
+that belong to no run at all, which is the direct measure of ungoverned traffic.
 
 ## What the leaf commits to
 

@@ -3,14 +3,14 @@
 When an upstream model provider has an outage, Intutic records it as a **provider incident** and
 lets admins export a signed evidence archive documenting how it affected your workspace. This
 page covers how incidents are detected, how to read the dashboard panel, how to export evidence,
-and how to use that evidence honestly with a provider.
+and how to present that evidence to a provider.
 
 ---
 
 ## What counts as a provider incident
 
 An incident is not raised from a single failed request. The proxy records a provider 5xx response
-or an unservable-model rejection as an honest `upstream_error` trace; the control plane coalesces
+or an unservable-model rejection as an `upstream_error` trace; the control plane coalesces
 those traces into open/resolved **incident windows** per provider. A `provider_incidents` row
 tracks:
 
@@ -56,7 +56,7 @@ The exported archive (`SlaEvidenceArchive`) contains:
 
 | Field | Contents |
 |---|---|
-| `disclaimer` | The honesty preamble below, shipped verbatim on every archive |
+| `disclaimer` | A fixed statement that the archive records observed failures and is not an SLA-breach determination, shipped verbatim on every archive |
 | `incidents[]` | One entry per incident affecting your workspace, in the requested period |
 | `incidents[].failureCountByKind` / `failureCountByStatus` | Provider-wide failure counters (not re-scoped to you — see below) |
 | `incidents[].workspaceSampleTraceIds` | Sample trace IDs **filtered to your own workspace's traces only**, capped at a fixed sample size |
@@ -98,13 +98,13 @@ evidence, not as a self-contained breach determination:
    as the observed-failure record — then apply your actual contract's SLA terms yourself (or with
    the provider) to determine whether a credit is owed and how much.
 
-## Honesty note: what this evidence actually reflects
+## What this evidence reflects
 
 This evidence is built entirely from traffic observed through **your own gateway** — the requests
 your workspace actually sent and the failures your workspace actually received. It is not, and
 cannot be, the provider's global incident status. A provider may have a wider outage that never
 touched your traffic pattern, or your workspace's specific errors may stem from something other
-than a genuine provider-wide event. Treat this as your honest, first-party record of what you
+than a genuine provider-wide event. Treat this as your first-party record of what you
 observed — the strongest evidence you personally hold — not as an independent confirmation of the
 provider's own status page.
 
