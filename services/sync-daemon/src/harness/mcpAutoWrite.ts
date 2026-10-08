@@ -4,7 +4,10 @@
  *
  * Injects and proxy-wraps MCP server entries in:
  * - Claude Code:      ~/.claude.json (user-scope `mcpServers`, and the
- *                      local-scope `projects[<workspaceRoot>].mcpServers`)
+ *                      local-scope `projects[<workspaceRoot>].mcpServers`,
+ *                      where the approved servers of the project's
+ *                      `.mcp.json` also get wrapped shadows — the shared
+ *                      `.mcp.json` itself is only read)
  * - Claude Desktop:   ~/Library/Application Support/Claude/claude_desktop_config.json
  * - Cursor (global):  ~/Library/Application Support/Cursor/User/globalSettings.json
  * - Cursor (project): <workspaceRoot>/.cursor/mcp.json
@@ -22,8 +25,8 @@
  * That is 14 config paths across 11 `HarnessType` values (Cursor, Grok
  * Build and OpenCode each own two paths — global/project for Cursor and
  * OpenCode, user/project for Grok Build). `discoverMcpServers` below reads
- * all fourteen read-only, for reporting; the injectors above are the only
- * thing that writes.
+ * all fourteen read-only, for reporting, plus Claude Code's project
+ * `.mcp.json`; the injectors above are the only thing that writes.
  *
  * # Grok Build's compat-path overlap — dedup, not a bug
  *
@@ -135,6 +138,13 @@ interface McpServerEntry {
    * entries and on unwrapped entries.
    */
   __intutic_original?: { url?: string; type?: string; headers?: Record<string, string> }
+  /**
+   * Set on a local-scope entry in `~/.claude.json` that this module wrote to
+   * govern a project-scope server of the same name (see
+   * {@link shadowProjectServers}). Distinguishes it from a server the user
+   * added at local scope, which is never replaced or removed.
+   */
+  __intutic_shadow_of?: 'project'
 }
 
 interface McpServersMap {
@@ -195,9 +205,10 @@ export function resolveProxyBin(workspaceRoot: string): string {
 // only reads), so the two can never independently drift about where a
 // harness keeps its config.
 
-/** Claude Code keeps user- and local-scope MCP servers in `~/.claude.json`
- *  (project-scope servers live in the repo's `.mcp.json`, which is shared
- *  with the team and is not rewritten here). */
+/** Claude Code keeps user- and local-scope MCP servers in `~/.claude.json`.
+ *  Project-scope servers live in the repo's `.mcp.json`, which is shared with
+ *  the team and never rewritten here; they are governed through local-scope
+ *  shadows instead (see {@link shadowProjectServers}). */
 function claudeCodeConfigPath(): string {
   return node_path.join(node_os.homedir(), '.claude.json')
 }
@@ -480,14 +491,115 @@ async function injectClaudeCode(workspaceId: string, workspaceRoot: string): Pro
     workspaceId,
     workspaceRoot
   )
-  // Local scope: servers added with `claude mcp add` in this project.
+  // Local scope: servers added with `claude mcp add` in this project, then
+  // the shadows that govern its approved `.mcp.json` servers. A project Claude
+  // Code has never opened has no entry, and nothing approved to shadow.
   const project = current.projects?.[workspaceRoot]
-  if (project?.mcpServers && Object.keys(project.mcpServers).length > 0) {
-    project.mcpServers = wrapAllServers(project.mcpServers, workspaceId, workspaceRoot)
+  if (project) {
+    const local = wrapAllServers(project.mcpServers ?? {}, workspaceId, workspaceRoot)
+    const withShadows = shadowProjectServers(
+      local,
+      await readProjectScopeServers(workspaceRoot),
+      await projectServerApproval(workspaceRoot, project),
+      workspaceId,
+      workspaceRoot,
+    )
+    if (project.mcpServers !== undefined || Object.keys(withShadows).length > 0) project.mcpServers = withShadows
   }
 
   await writeJsonFile(configPath, current)
   log.info({ action: 'claude_code_mcp_injected' }, 'Claude Code ~/.claude.json MCP servers updated')
+}
+
+/** Where Claude Code keeps a project's shared, committed servers. */
+function claudeCodeProjectMcpPath(workspaceRoot: string): string {
+  return node_path.join(workspaceRoot, '.mcp.json')
+}
+
+/** The project's `.mcp.json` servers; empty when the file is missing or not a JSON object. */
+async function readProjectScopeServers(workspaceRoot: string): Promise<McpServersMap> {
+  const parsed = await readJsonFile<unknown>(claudeCodeProjectMcpPath(workspaceRoot), {})
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+  const servers = (parsed as { mcpServers?: unknown }).mcpServers
+  return servers !== null && typeof servers === 'object' && !Array.isArray(servers) ? (servers as McpServersMap) : {}
+}
+
+/** The approval keys Claude Code reads for project-scope servers, among whatever else the object holds. */
+interface ProjectServerApproval {
+  enableAllProjectMcpServers?: unknown
+  enabledMcpjsonServers?: unknown
+  disabledMcpjsonServers?: unknown
+  [key: string]: unknown
+}
+
+/**
+ * Whether the user approved a project-scope server. Claude Code asks before
+ * it starts a server from a repo's `.mcp.json`, and records the answer in the
+ * project's entry in `~/.claude.json` or in a settings file
+ * (`enableAllProjectMcpServers`, `enabledMcpjsonServers`,
+ * `disabledMcpjsonServers`). A local-scope shadow would start the server
+ * without that question, so only an approved server is shadowed; a server
+ * disabled anywhere is not, whatever enables it elsewhere.
+ */
+async function projectServerApproval(
+  workspaceRoot: string,
+  project: ProjectServerApproval,
+): Promise<(name: string) => boolean> {
+  const sources: ProjectServerApproval[] = [project]
+  for (const file of [
+    node_path.join(workspaceRoot, '.claude', 'settings.local.json'),
+    node_path.join(workspaceRoot, '.claude', 'settings.json'),
+    node_path.join(node_os.homedir(), '.claude', 'settings.json'),
+  ]) {
+    const parsed = await readJsonFile<unknown>(file, null)
+    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) sources.push(parsed as ProjectServerApproval)
+  }
+  const names = (v: unknown) => (Array.isArray(v) ? v.filter((n): n is string => typeof n === 'string') : [])
+  const all = sources.some((src) => src.enableAllProjectMcpServers === true)
+  const enabled = new Set(sources.flatMap((src) => names(src.enabledMcpjsonServers)))
+  const disabled = new Set(sources.flatMap((src) => names(src.disabledMcpjsonServers)))
+  return (name) => !disabled.has(name) && (all || enabled.has(name))
+}
+
+/**
+ * Governs a project's `.mcp.json` servers without touching the file.
+ *
+ * `.mcp.json` is committed and shared with the team: wrapping it in place
+ * would write this machine's proxy path and workspace id into everyone's
+ * checkout. Claude Code gives a local-scope server precedence over a
+ * project-scope one of the same name, so each approved project server gets a
+ * wrapped copy at local scope, in this project's `~/.claude.json` entry,
+ * marked `__intutic_shadow_of: 'project'`. The rules:
+ *
+ * - A server the user added at local scope keeps its name; it is wrapped by
+ *   the local-scope pass already and never replaced by a shadow.
+ * - A shadow follows its source: rewritten when the project entry changes,
+ *   removed when the project entry, or its approval, goes away. Deleting the
+ *   marked entries returns the project to exactly what `.mcp.json` says.
+ * - An entry whose shape the proxy cannot wrap is left to Claude Code as is.
+ * - Re-running on unchanged input produces the same map, so the
+ *   write-if-changed in `writeJsonFile` writes nothing.
+ */
+function shadowProjectServers(
+  local: McpServersMap,
+  projectServers: McpServersMap,
+  isApproved: (name: string) => boolean,
+  workspaceId: string,
+  workspaceRoot: string,
+): McpServersMap {
+  const result: McpServersMap = {}
+  for (const [name, entry] of Object.entries(local)) {
+    if (entry.__intutic_shadow_of === 'project') continue // rebuilt below from the current source
+    result[name] = entry
+  }
+  for (const [name, entry] of Object.entries(projectServers)) {
+    if (name === 'intutic' || name in result || !isApproved(name)) continue
+    if (entry === null || typeof entry !== 'object') continue
+    const wrapped = wrapWithProxy(entry, workspaceId, workspaceRoot, name)
+    if (wrapped === entry) continue // already wrapped by someone else, or a shape the proxy cannot front
+    result[name] = { ...wrapped, __intutic_shadow_of: 'project' }
+  }
+  return result
 }
 
 // ─── Target: Claude Desktop ───────────────────────────────────────────────────
@@ -1162,13 +1274,19 @@ async function discoverJsonObjectHarness(harness: string, filePath: string): Pro
   return out
 }
 
-/** Claude Code's `~/.claude.json`: the user-scope `mcpServers` map plus this
- *  project's local-scope one under `projects[<workspaceRoot>]`. */
+/** Claude Code's servers as Claude Code resolves them: user scope
+ *  (`~/.claude.json`), project scope (the repo's `.mcp.json`) and local scope
+ *  (this project's entry in `~/.claude.json`), each narrower scope winning a
+ *  name — so a project server governed by a local-scope shadow reports as
+ *  wrapped. */
 async function discoverClaudeCode(workspaceRoot: string): Promise<DiscoveredMcpServer[]> {
   const filePath = claudeCodeConfigPath()
-  if (!existsSync(filePath)) return []
-  const current = await readJsonFile<ClaudeCodeConfig>(filePath, {})
-  const servers = { ...(current.projects?.[workspaceRoot]?.mcpServers ?? {}), ...(current.mcpServers ?? {}) }
+  const current = existsSync(filePath) ? await readJsonFile<ClaudeCodeConfig>(filePath, {}) : {}
+  const servers = {
+    ...(current.mcpServers ?? {}),
+    ...(await readProjectScopeServers(workspaceRoot)),
+    ...(current.projects?.[workspaceRoot]?.mcpServers ?? {}),
+  }
   return Object.entries(servers).map(([name, entry]) => ({ server: name, harness: 'claude-code', ...classifyEntry(entry) }))
 }
 

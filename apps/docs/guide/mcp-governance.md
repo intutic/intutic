@@ -34,13 +34,19 @@ so that the
 proxy, the proxy spawns the real server, and every `tools/call` and
 `tools/list` passes through governance in between.
 
-For Claude Code that means the user-scope servers in `~/.claude.json` and the
+For Claude Code that means the user-scope servers in `~/.claude.json`, the
 local-scope servers of the project `intutic connect` ran in
-(`projects[<path>].mcpServers` in the same file). A project's `.mcp.json` —
-Claude Code's project scope, committed and shared with the team — is not
-rewritten, so its servers reach the harness unwrapped. The MCP daemon, when it
-runs, still reports them to the [registry](#the-registry), so they are visible
-there even though the proxy does not govern their calls.
+(`projects[<path>].mcpServers` in the same file), and the project-scope servers
+in the repo's `.mcp.json`. That last file is committed and shared with the
+team, so it is never rewritten — that would put one machine's proxy path into
+everyone's checkout. Instead each project server you have approved in Claude
+Code gets a wrapped copy of the same name at local scope, which Claude Code
+uses in its place. The copy is marked `__intutic_shadow_of: "project"`, follows
+the `.mcp.json` entry when the team changes it, and is removed when the entry
+or your approval goes away; deleting the marked entries returns the project to
+exactly what `.mcp.json` says. A server you added at local scope under the
+same name is yours and is never replaced, and a project server you have not
+approved is left alone, since Claude Code does not start it either.
 
 Muse Code's `mcp_servers` map (in `~/.config/muse/settings.json`) carries
 both `stdio` and `streamable_http` entries; the latter is assumed (not yet
@@ -638,9 +644,9 @@ environment, and caches in the Valkey at `VALKEY_URL` (or `REDIS_URL`;
   same `--server-name` share one row and one decision, and a server whose
   name changes is a new candidate. Pin the server's tools with TOFU, above,
   to notice a server changing under the same name.
-- **Servers outside the proxy are not governed by it.** A project's
-  `.mcp.json`, a server added since the last sync cycle and harnesses this
-  page lists as unwrapped reach the harness directly. The registry may still
+- **Servers outside the proxy are not governed by it.** A server added since
+  the last sync cycle, a project `.mcp.json` server before you approve it,
+  and harnesses this page lists as unwrapped reach the harness directly. The registry may still
   list them, from the MCP daemon's report; approving or blocking them changes
   nothing until a proxy fronts them, apart from the hook-gate backstop below.
 - **The OS user, session and server on an event are what the proxy
