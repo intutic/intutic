@@ -16,13 +16,9 @@ class ChatParams(TypedDict, total=False):
     model: str
     messages: List[ChatMessage]
     temperature: Optional[float]
-    max_cost_usd: Optional[float]
-    sensitivity_tier: Optional[str]
 
 class ChatResponse(Dict[str, Any]):
     verdict: Optional[str]
-    budget_remaining_usd: Optional[float]
-    budget_pct_used: Optional[float]
 
 class ResolvedContext(TypedDict, total=False):
     gitBranch: Optional[str]

@@ -6,8 +6,10 @@ import {
   BudgetCheckResult,
   EventCallback,
   CircuitBreakerOptions,
+  VerdictEvent,
 } from './types'
-import { ClawdeConnectionError, ClawdeVerdictError } from './errors'
+import { ClawdeBlockedError, ClawdeConnectionError } from './errors'
+import { parseRefusal } from './refusals'
 import { normalizeRequest, normalizeResponse } from './schema-enforcer'
 import { resolveContext } from './context-resolver'
 import { BudgetChecker } from './budget-checker'
@@ -54,7 +56,7 @@ export class ClawdeClient {
   }
 
   // Event emitter delegates
-  public on(event: 'hijack' | 'enhance' | 'kill' | 'bypass', callback: EventCallback): void {
+  public on(event: VerdictEvent, callback: EventCallback): void {
     this.eventEmitter.on(event, callback)
   }
 
@@ -83,109 +85,81 @@ export class ClawdeClient {
     return this.circuitBreakerWrapper.wrap<T>(toolName, options)
   }
 
-  // Chat completion endpoint wrapper
+  /**
+   * Send a chat request through the proxy.
+   *
+   * Resolves with `verdict: 'allow'` when the proxy let the request through. A
+   * governance refusal fires the matching event and rejects with
+   * `ClawdeBlockedError`, unretried. Transport failures, timeouts and 5xx
+   * answers are retried; anything else rejects with `ClawdeConnectionError`.
+   */
   public async chat(params: ChatParams): Promise<ChatResponse> {
-    // 1. Resolve context
-    const context = await this.resolveContext()
+    const anthropic = this.provider === 'anthropic'
+    // The proxy picks the wire format by route: an Anthropic Messages body
+    // sent to /v1/chat/completions is parsed as an OpenAI one.
+    const url = `${this.baseUrl}${anthropic ? '/v1/messages' : '/v1/chat/completions'}`
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...(anthropic
+        ? { 'x-api-key': this.apiKey, 'anthropic-version': '2023-06-01' }
+        : { 'Authorization': `Bearer ${this.apiKey}` }),
+      // Without these the proxy sees graph_id == session_id, treats every
+      // request as a graph of one, and skips membership, fleet spend and
+      // node counting entirely.
+      ...identityHeaders(this.identity),
+    }
+    const body = JSON.stringify(normalizeRequest(params, this.provider))
 
-    // 2. Normalize payload based on provider
-    const requestPayload = normalizeRequest(params, this.provider)
-
-    // 3. Make the API request with headers
-    let lastError: any = null
+    let lastError = ''
     const maxAttempts = this.retries + 1
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (attempt > 1) {
+        if (process.env.INTUTIC_DEBUG === 'true') {
+          console.warn(`[Clawde SDK] Attempt ${attempt - 1} failed, retrying... Error: ${lastError}`)
+        }
+        await new Promise((resolve) => setTimeout(resolve, (attempt - 1) * 100))
+      }
+
       const controller = new AbortController()
       const timer = setTimeout(() => controller.abort(), this.timeout)
-
+      let status: number
+      let text: string
       try {
-        const headers: Record<string, string> = {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.apiKey}`,
-          'X-Intutic-Context': JSON.stringify(context),
-          // Without these the proxy sees graph_id == session_id, treats every
-          // request as a graph of one, and skips membership, fleet spend and
-          // node counting entirely.
-          ...identityHeaders(this.identity),
-        }
-
-        if (params.max_cost_usd !== undefined) {
-          headers['X-Intutic-Cost-Limit'] = String(params.max_cost_usd)
-        }
-        if (params.sensitivity_tier !== undefined) {
-          headers['X-Intutic-Sensitivity'] = String(params.sensitivity_tier)
-        }
-
-        const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(requestPayload),
-          signal: controller.signal,
-        })
-
+        const response = await fetch(url, { method: 'POST', headers, body, signal: controller.signal })
+        status = response.status
+        text = await response.text()
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : String(err)
+        continue
+      } finally {
         clearTimeout(timer)
-
-        if (!response.ok) {
-          throw new Error(`HTTP error ${response.status}: ${await response.text()}`)
-        }
-
-        const json = await response.json()
-        const normalized = normalizeResponse(json, this.provider)
-
-        // 4. Extract Intutic response headers
-        const verdictHeader = response.headers.get('x-intutic-verdict') || 'allow'
-        const budgetRemainingHeader = response.headers.get('x-intutic-budget-remaining')
-        const budgetPctHeader = response.headers.get('x-intutic-budget-pct')
-
-        normalized.verdict = verdictHeader as any
-        if (budgetRemainingHeader) {
-          normalized.budgetRemainingUsd = parseFloat(budgetRemainingHeader)
-        }
-        if (budgetPctHeader) {
-          normalized.budgetPctUsed = parseFloat(budgetPctHeader)
-        }
-
-        // 5. Update local budget cache
-        if (normalized.budgetRemainingUsd !== undefined) {
-          this.budgetChecker.updateCachedBudget(
-            params.model,
-            params.messages.length, // approximation
-            normalized.budgetRemainingUsd,
-            verdictHeader !== 'kill'
-          )
-        }
-
-        // 6. Trigger event emitters
-        if (normalized.verdict && normalized.verdict !== 'allow') {
-          this.eventEmitter.emit(normalized.verdict, normalized)
-        }
-
-        // 7. Policy enforcement
-        if (normalized.verdict === 'kill') {
-          throw new ClawdeVerdictError('kill', 'Request blocked by policy (Verdict: KILL)')
-        }
-
-        return normalized
-      } catch (err: any) {
-        clearTimeout(timer)
-        lastError = err
-
-        if (err instanceof ClawdeVerdictError) {
-          throw err // Do not retry on explicit policy blocks
-        }
-
-        if (attempt < maxAttempts) {
-          if (process.env.INTUTIC_DEBUG === 'true') {
-            console.warn(`[Clawde SDK] Attempt ${attempt} failed, retrying... Error: ${err.message}`)
-          }
-          // backoff delay
-          await new Promise((resolve) => setTimeout(resolve, attempt * 100))
-          continue
-        }
       }
+
+      if (status >= 200 && status < 300) {
+        let json: unknown
+        try {
+          json = JSON.parse(text)
+        } catch {
+          throw new ClawdeConnectionError(`Proxy answered ${status} with a body that is not JSON: ${text}`)
+        }
+        const normalized = normalizeResponse(json, this.provider)
+        normalized.verdict = 'allow'
+        return normalized
+      }
+
+      const refusal = parseRefusal(status, text)
+      if (refusal) {
+        this.eventEmitter.emit(refusal.verdict, { ...refusal, status })
+        throw new ClawdeBlockedError(refusal.verdict, refusal.code, status, refusal.message)
+      }
+
+      lastError = `HTTP error ${status}: ${text}`
+      // A 4xx that is not a refusal (bad key, malformed body) fails the same
+      // way every time; only a 5xx is worth another attempt.
+      if (status < 500) throw new ClawdeConnectionError(lastError)
     }
 
-    throw new ClawdeConnectionError(`Request failed after ${maxAttempts} attempts. Last error: ${lastError.message}`)
+    throw new ClawdeConnectionError(`Request failed after ${maxAttempts} attempts. Last error: ${lastError}`)
   }
 }

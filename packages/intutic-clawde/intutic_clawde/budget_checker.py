@@ -51,10 +51,3 @@ class BudgetChecker:
             return result
         except Exception as e:
             raise ClawdeConnectionError(f"Could not reach control-plane budget endpoint: {str(e)}")
-
-    def update_cached_budget(self, model: str, estimated_tokens: int, remaining_usd: float, allowed: bool) -> None:
-        cache_key = f"{model}:{estimated_tokens}"
-        self.cache[cache_key] = {
-            "result": {"allowed": allowed, "remaining_usd": remaining_usd},
-            "timestamp": time.time(),
-        }

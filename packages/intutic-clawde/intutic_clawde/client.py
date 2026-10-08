@@ -1,9 +1,10 @@
 import os
 import time
+import warnings
 import requests
-import json
-from typing import List, Dict, Any, Callable, Optional, Union
-from .errors import ClawdeConnectionError, ClawdeVerdictError
+from typing import List, Dict, Any, Callable, Optional
+from .errors import ClawdeBlockedError, ClawdeConnectionError
+from .refusals import parse_refusal
 from .context_resolver import resolve_context
 from .budget_checker import BudgetChecker
 from .circuit_breaker import CircuitBreaker
@@ -37,8 +38,11 @@ class ClawdeClient:
 
         self.budget_checker = BudgetChecker(self.control_plane_url, self.api_key)
         self.circuit_breaker_wrapper = CircuitBreaker(self)
+        # kill/reask/hold fire on a proxy refusal. hijack/enhance/bypass are
+        # deprecated and never fire: the proxy applies them inside the response
+        # without telling the client. Kept so existing registrations still work.
         self.listeners: Dict[str, List[Callable[[Dict[str, Any]], None]]] = {
-            "hijack": [], "enhance": [], "kill": [], "bypass": []
+            "kill": [], "reask": [], "hold": [], "hijack": [], "enhance": [], "bypass": []
         }
 
     def on(self, event: str, callback: Callable[[Dict[str, Any]], None]) -> None:
@@ -65,82 +69,81 @@ class ClawdeClient:
             return {}
         return resolve_context()
 
-    def circuit_breaker(self, tool_name: str, max_cost_usd: Optional[float] = None, fail_open: bool = False) -> Callable[[Callable[[], Any]], Any]:
-        return self.circuit_breaker_wrapper.wrap(tool_name, max_cost_usd, fail_open)
+    def circuit_breaker(
+        self,
+        tool_name: str,
+        max_cost_usd: Optional[float] = None,
+        fail_open: bool = False,
+        require_budget: bool = False,
+    ) -> Callable[[Callable[[], Any]], Any]:
+        """`require_budget=True` runs check_budget() first and refuses to run the
+        function when the workspace has no budget left. `max_cost_usd` is the
+        deprecated spelling of the same switch: the amount is not compared with
+        anything, because nothing reports a call's cost before it is made."""
+        if max_cost_usd is not None:
+            warnings.warn(
+                "max_cost_usd is deprecated and its amount is ignored; pass require_budget=True",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            require_budget = True
+        return self.circuit_breaker_wrapper.wrap(tool_name, require_budget, fail_open)
 
     def chat(self, model: str, messages: List[Dict[str, str]], **kwargs: Any) -> Dict[str, Any]:
-        # 1. Resolve context
-        context = self.resolve_context()
-        
-        # 2. Prepare payload
+        """Send a chat request through the proxy's /v1/chat/completions route.
+
+        Returns the completion with `verdict` set to "allow" when the proxy let
+        the request through. A governance refusal fires the matching event and
+        raises ClawdeBlockedError, unretried. Transport failures, timeouts and
+        5xx answers are retried; anything else raises ClawdeConnectionError.
+        """
         request_payload = {
             "model": model,
             "messages": messages,
             **kwargs
         }
-        
-        # 3. Request logic with retries
+        url = f"{self.base_url}/v1/chat/completions"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+        }
+
         max_attempts = self.retries + 1
-        last_error = None
-        
+        last_error = ""
+
         for attempt in range(1, max_attempts + 1):
+            if attempt > 1:
+                if os.environ.get("INTUTIC_DEBUG") == "true":
+                    print(f"[Clawde SDK] Attempt {attempt - 1} failed, retrying... Error: {last_error}")
+                time.sleep((attempt - 1) * 0.1)
+
             try:
-                headers = {
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {self.api_key}",
-                    "X-Intutic-Context": json.dumps(context),
-                }
-                
-                if "max_cost_usd" in kwargs:
-                    headers["X-Intutic-Cost-Limit"] = str(kwargs["max_cost_usd"])
-                if "sensitivity_tier" in kwargs:
-                    headers["X-Intutic-Sensitivity"] = str(kwargs["sensitivity_tier"])
-                    
-                url = f"{self.base_url}/v1/chat/completions"
                 res = requests.post(url, json=request_payload, headers=headers, timeout=self.timeout)
-                
-                if res.status_code != 200:
-                    raise Exception(f"HTTP error {res.status_code}: {res.text}")
-                    
-                result = res.json()
-                
-                # Extract headers
-                verdict = res.headers.get("x-intutic-verdict", "allow")
-                remaining = res.headers.get("x-intutic-budget-remaining")
-                pct = res.headers.get("x-intutic-budget-pct")
-                
-                result["verdict"] = verdict
-                if remaining:
-                    result["budget_remaining_usd"] = float(remaining)
-                if pct:
-                    result["budget_pct_used"] = float(pct)
-                    
-                # Update budget cache
-                if "budget_remaining_usd" in result:
-                    self.budget_checker.update_cached_budget(
-                        model,
-                        len(messages),
-                        result["budget_remaining_usd"],
-                        verdict != "kill"
+            except requests.RequestException as e:
+                last_error = str(e)
+                continue
+
+            if 200 <= res.status_code < 300:
+                try:
+                    result = res.json()
+                except ValueError:
+                    raise ClawdeConnectionError(
+                        f"Proxy answered {res.status_code} with a body that is not JSON: {res.text}"
                     )
-                    
-                # Emit events
-                if verdict and verdict != "allow":
-                    self.emit(verdict, result)
-                    
-                # Enforcement check
-                if verdict == "kill":
-                    raise ClawdeVerdictError("kill", "Request blocked by policy (Verdict: KILL)")
-                    
+                result["verdict"] = "allow"
                 return result
-            except Exception as e:
-                last_error = e
-                if isinstance(e, ClawdeVerdictError):
-                    raise e
-                if attempt < max_attempts:
-                    if os.environ.get("INTUTIC_DEBUG") == "true":
-                        print(f"[Clawde SDK] Attempt {attempt} failed, retrying... Error: {str(e)}")
-                    time.sleep(attempt * 0.1)
-                    continue
-                    
-        raise ClawdeConnectionError(f"Request failed after {max_attempts} attempts. Last error: {str(last_error)}")
+
+            refusal = parse_refusal(res.status_code, res.text)
+            if refusal is not None:
+                self.emit(refusal["verdict"], {**refusal, "status": res.status_code})
+                raise ClawdeBlockedError(
+                    refusal["verdict"], refusal["code"], res.status_code, refusal["message"]
+                )
+
+            last_error = f"HTTP error {res.status_code}: {res.text}"
+            # A 4xx that is not a refusal (bad key, malformed body) fails the
+            # same way every time; only a 5xx is worth another attempt.
+            if res.status_code < 500:
+                raise ClawdeConnectionError(last_error)
+
+        raise ClawdeConnectionError(f"Request failed after {max_attempts} attempts. Last error: {last_error}")
