@@ -116,8 +116,17 @@ intutic login --api-key vk_your_key_here
 ```
 :::
 
+::: tip Self-hosted control plane
+Log in with its URL once; every later command, `intutic connect` included, uses it:
+```bash
+intutic login --control-plane-url https://intutic.internal.example
+```
+`INTUTIC_CONTROL_PLANE_URL` does the same per shell. See
+[Choosing a control plane](/reference/cli#control-plane-url).
+:::
+
 ::: details Local development
-If you are running a control plane of your own, point at it with `--dev`:
+If you are running a control plane on this machine, point at it with `--dev`:
 ```bash
 intutic login --dev
 ```

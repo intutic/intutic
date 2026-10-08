@@ -34,6 +34,7 @@ import { loadCredentials, loadConfig, loadIntegrity } from '../config/store.js'
 import { isSyncDaemonRunning } from '../lib/process.js'
 import { caTrustCommandFor } from '../lib/caTrust.js'
 import { getPaths } from './install-daemon.js'
+import { resolveControlPlaneUrl } from '../config/paths.js'
 import {
   readPolicySnapshot,
   SNAPSHOT_STALE_AFTER_DAYS,
@@ -125,7 +126,10 @@ export async function checkControlPlane(): Promise<CheckResult> {
     }
   }
 
-  const url = `${creds.controlPlaneUrl}/api/v1/auth/me`
+  // The same control plane every other command would use for these
+  // credentials, so this checks what they will actually hit.
+  const controlPlaneUrl = resolveControlPlaneUrl()
+  const url = `${controlPlaneUrl}/api/v1/auth/me`
 
   try {
     const controller = new AbortController()
@@ -143,7 +147,7 @@ export async function checkControlPlane(): Promise<CheckResult> {
       return {
         name: 'Control Plane Auth',
         passed: true,
-        detail: `Authenticated at ${creds.controlPlaneUrl}`,
+        detail: `Authenticated at ${controlPlaneUrl}`,
       }
     }
 
@@ -159,7 +163,7 @@ export async function checkControlPlane(): Promise<CheckResult> {
     return {
       name: 'Control Plane Auth',
       passed: true,
-      detail: `Reachable at ${creds.controlPlaneUrl} (HTTP ${res.status})`,
+      detail: `Reachable at ${controlPlaneUrl} (HTTP ${res.status})`,
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'
@@ -167,7 +171,7 @@ export async function checkControlPlane(): Promise<CheckResult> {
       name: 'Control Plane Auth',
       passed: false,
       detail: `Unreachable — ${message}`,
-      remediation: `Check network connectivity to ${creds.controlPlaneUrl}.`,
+      remediation: `Check network connectivity to ${controlPlaneUrl}.`,
     }
   }
 }

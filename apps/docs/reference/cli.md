@@ -32,6 +32,25 @@ workspace, free included; <Badge type="warning" text="Self-serve+" />,
 <Badge type="warning" text="Biz Org+" /> and <Badge type="danger" text="Enterprise" /> need that
 plan or higher. Every command ships in the open-core CLI; the badge says what it needs to work.
 
+## Choosing a control plane {#control-plane-url}
+
+Every command that talks to a control plane picks it the same way; the first that is set wins:
+
+1. A flag: `--control-plane-url <url>` (on `login`, `connect` and `daemon install`), or `--dev`
+   for the local one at `http://localhost:3001`. A workspace initialized with `intutic init --dev`
+   counts as `--dev`.
+2. The environment: `INTUTIC_CONTROL_PLANE_URL`, or `INTUTIC_DEV=1` for the local one.
+3. The control plane `intutic login` saved with your credentials.
+4. Intutic's hosted control plane.
+
+For a self-hosted control plane, log in once with its URL and every later command uses it:
+
+```bash
+intutic login --control-plane-url https://intutic.internal.example
+intutic whoami
+intutic connect
+```
+
 ---
 
 ## `intutic init`
@@ -220,12 +239,15 @@ intutic login [options]
 | Option | Description |
 |--------|-------------|
 | `--api-key <key>` | Authenticate with an API key (`vk_*`) |
+| `--control-plane-url <url>` | The control plane to log in to, such as a self-hosted one. Must be an `http(s)` URL. |
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 Without `--api-key` it prompts for your email and password (the password is not echoed). The
 credentials are saved to `~/.intutic/credentials.json`, with the token in the OS keychain when one
-is available, together with the control plane they were issued by: `intutic connect` keeps using
-that control plane.
+is available, together with the control plane they were issued by. Every later command uses that
+control plane unless a flag or `INTUTIC_CONTROL_PLANE_URL` names another; see
+[Choosing a control plane](#control-plane-url). Without `--control-plane-url`, `login` itself
+resolves the control plane the same way.
 
 **Examples:**
 
@@ -235,6 +257,9 @@ intutic login
 
 # API key login
 intutic login --api-key vk_abc123def456
+
+# A self-hosted control plane, saved for every later command
+intutic login --control-plane-url https://intutic.internal.example
 
 # Local dev
 intutic login --dev
@@ -321,20 +346,16 @@ intutic connect [options]
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--dev` | Use the local control plane (`http://localhost:3001`) when no URL comes from `--control-plane-url` or `intutic login` | — |
+| `--dev` | Use the local control plane (`http://localhost:3001`) unless `--control-plane-url` is given | — |
 | `--interval <ms>` | Poll interval in milliseconds | `30000` |
 | `--workspace-id <id>` | Workspace ID (e.g. `wk_xxxx`) to connect as, instead of the stored login. Takes effect only together with `--api-key`. | — |
 | `--api-key <key>` | Workspace API key (e.g. `vk_xxxx`) to connect with, instead of the stored login. Takes effect only together with `--workspace-id`. | — |
 | `--control-plane-url <url>` | Control plane to sync with. Overrides every other source. | — |
 
-**Control plane URL:** the first of these that is set wins:
-
-1. `--control-plane-url`
-2. The URL saved by `intutic login` (skipped when `--workspace-id` and `--api-key` are given)
-3. `http://localhost:3001` when `--dev` is passed, `INTUTIC_DEV=1` is set, or the workspace was initialized with `--dev`
-4. Intutic's hosted control plane
-
-No environment variable sets the control plane URL directly.
+**Control plane URL:** resolved as for every command (see
+[Choosing a control plane](#control-plane-url)), except that the URL saved by `intutic login` is
+skipped when `--workspace-id` and `--api-key` are given: those credentials were not issued with
+that login.
 
 **What it does:**
 1. Starts Valkey if none is running (connected mode needs it), and spawns a managed proxy if
@@ -2752,7 +2773,7 @@ Also available as the top-level shortcut `intutic install-daemon`, with the same
 |--------|-------------|---------|
 | `--workspace-id <id>` | Workspace ID, e.g. `wk_xxxx` (required unless `--proxy`) | — |
 | `--api-key <key>` | Workspace API key, e.g. `vk_xxxx` (required unless `--proxy`) | — |
-| `--control-plane-url <url>` | Control plane the sync-daemon or MCP daemon connects to. Pass it for a self-hosted control plane. | Intutic's hosted control plane |
+| `--control-plane-url <url>` | Control plane the sync-daemon or MCP daemon connects to, written into the service | Resolved as in [Choosing a control plane](#control-plane-url): `INTUTIC_CONTROL_PLANE_URL`, then the URL saved by `intutic login`, then Intutic's hosted control plane |
 | `--binary-path <path>` | Path to the `intutic` CLI binary; with `--proxy`, an absolute path to `intutic-proxy` | _(current process; with `--proxy`, the launcher's pinned binary, then `intutic-proxy` on PATH)_ |
 | `--dry-run` | Print what would be done without writing files | — |
 | `--system` | Install as a system-level service (LaunchDaemon on macOS, systemd system unit on Linux) | — |
@@ -2910,7 +2931,8 @@ Environment variables the CLI, and the hook gates and proxy it sets up, read. Co
 
 | Variable | Read by | Effect |
 |----------|---------|--------|
-| `INTUTIC_DEV` | Every command that calls a control-plane API | `1` targets the local control plane at `http://localhost:3001`, the same as `--dev`. Any other value is ignored. |
+| `INTUTIC_CONTROL_PLANE_URL` | Every command that calls a control-plane API | The control plane to use, ahead of the one saved by `intutic login` and behind a `--control-plane-url` or `--dev` flag. See [Choosing a control plane](#control-plane-url). |
+| `INTUTIC_DEV` | Every command that calls a control-plane API | `1` targets the local control plane at `http://localhost:3001`, the same as `--dev`, unless `INTUTIC_CONTROL_PLANE_URL` is set. Any other value is ignored. |
 | `INTUTIC_PROXY_URL` | `intutic exec`, `intutic enterprise install`, `intutic init` and `intutic connect` setup output | Base URL of the proxy. `exec` points the child process's SDK variables at it and takes the sandbox's proxy port from it. `enterprise install` uses it when `--proxy-url` is not given. `init` and `connect` print it as your gateway endpoint (with `/v1` appended). Default `http://localhost:4000`. |
 | `VALKEY_URL` | `intutic start`, `intutic connect` | Valkey/Redis the proxy uses. `start` passes it through only when a Valkey is reachable on `--valkey-port`; otherwise it uses `redis://127.0.0.1:<valkey-port>`. `connect` defaults to `redis://127.0.0.1:6379`. |
 | `CONTROL_PLANE_URL` | `intutic start` | When set and no Valkey is available, `start` does not force standalone mode; the proxy treats the run as a managed deployment and requires Valkey. The CLI does not use it to choose a control plane. |
@@ -2927,4 +2949,4 @@ Environment variables the CLI, and the hook gates and proxy it sets up, read. Co
 | `INTUTIC_FC_VCPUS` | `intutic exec --sandbox firecracker` | Guest vCPU count. Default `1`. |
 | `INTUTIC_FC_MEM` | `intutic exec --sandbox firecracker` | Guest memory in MiB. Default `512`. |
 
-There is no environment variable that overrides the control-plane URL. Use `--control-plane-url` on `intutic connect` or `intutic daemon install`, or `INTUTIC_DEV=1` for a local one.
+The control plane itself is chosen as described in [Choosing a control plane](#control-plane-url).

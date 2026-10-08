@@ -23,7 +23,7 @@ import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import { loadCredentials } from '../config/store.js'
 import type { IntuticCredentials } from '@intutic/shared-types'
-import { getIntuticDir } from '../config/paths.js'
+import { getIntuticDir, resolveControlPlaneUrl } from '../config/paths.js'
 import {
   deriveIdentity,
   identityEnv,
@@ -58,7 +58,7 @@ export async function resolveSandboxRequirement(
   const coerce = (v: unknown): SandboxRequirement =>
     v === 'warn' || v === 'require' ? v : 'off'
 
-  const base = trimTrailingSlashes(creds.controlPlaneUrl ?? 'https://api.intutic.ai')
+  const base = resolveControlPlaneUrl()
   try {
     const res = await fetch(`${base}/api/v1/workspace/settings`, {
       headers: {
@@ -381,7 +381,7 @@ export async function openSandboxSession(
   backendName: string,
 ): Promise<string | null> {
   try {
-    const res = await fetch(`${trimTrailingSlashes(creds.controlPlaneUrl)}/api/v1/sessions`, {
+    const res = await fetch(`${resolveControlPlaneUrl()}/api/v1/sessions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${creds.apiKey}` },
       body: JSON.stringify({
@@ -404,7 +404,7 @@ export async function openSandboxSession(
 export async function closeSandboxSession(creds: IntuticCredentials, sessionId: string): Promise<void> {
   try {
     await fetch(
-      `${trimTrailingSlashes(creds.controlPlaneUrl)}/api/v1/sessions/${sessionId}/end`,
+      `${resolveControlPlaneUrl()}/api/v1/sessions/${sessionId}/end`,
       {
         method: 'PATCH',
         headers: { Authorization: `Bearer ${creds.apiKey}` },

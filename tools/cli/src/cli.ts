@@ -73,6 +73,7 @@ program
   .command('login')
   .description('Authenticate with the Intutic control plane')
   .option('--api-key <key>', 'Authenticate with an API key (vk_*)')
+  .option('--control-plane-url <url>', 'Control plane to log in to (e.g. a self-hosted one); saved for every later command')
   .option('--dev', 'Use local control plane (http://localhost:3001)')
   .action(async (opts) => {
     const { runLogin } = await import('./commands/login.js')
@@ -899,7 +900,7 @@ function defineDaemonInstall(cmd: Command): Command {
     )
     .option('--workspace-id <id>', 'Workspace ID (e.g. wk_xxxx) — required unless --proxy')
     .option('--api-key <key>', 'Workspace API key (e.g. vk_xxxx) — required unless --proxy')
-    .option('--control-plane-url <url>', 'Control plane URL', 'https://api.intutic.ai')
+    .option('--control-plane-url <url>', 'Control plane the daemon connects to (default: $INTUTIC_CONTROL_PLANE_URL, then the URL saved by `intutic login`, then https://api.intutic.ai)')
     .option('--binary-path <path>', 'Path to intutic CLI binary (defaults to current process); with --proxy, absolute path to intutic-proxy')
     .option('--dry-run', 'Print what would be done without writing files')
     .option('--system', 'Install as a system-level service (LaunchDaemon on macOS, systemd system unit on Linux)')

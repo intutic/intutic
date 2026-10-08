@@ -192,24 +192,6 @@ async function downloadProxyBinary(destPath: string): Promise<string> {
   return destPath
 }
 
-/**
- * Which control plane `connect` talks to: an explicit `--control-plane-url`,
- * then the URL saved by `intutic login` (the key was issued there and is only
- * valid there), then the dev/hosted default. Credentials synthesized from
- * `--workspace-id`/`--api-key` were never saved, so they carry no stored URL.
- *
- * The stored URL used to be skipped, so anyone who logged in against a control
- * plane other than the default had `connect` send their key to the hosted one
- * unless they repeated the URL on every run.
- */
-export function resolveConnectControlPlaneUrl(
-  flagUrl: string | undefined,
-  storedUrl: string | undefined,
-  devMode: boolean,
-): string {
-  return flagUrl || storedUrl || resolveControlPlaneUrl(devMode)
-}
-
 export async function runConnect(opts: {
   dev?: boolean
   interval?: string
@@ -225,7 +207,7 @@ export async function runConnect(opts: {
       workspaceId: opts.workspaceId,
       apiKey: opts.apiKey,
       email: 'daemon@intutic.ai',
-      controlPlaneUrl: opts.controlPlaneUrl ?? 'https://api.intutic.ai',
+      controlPlaneUrl: resolveControlPlaneUrl(opts.dev, { flagUrl: opts.controlPlaneUrl, useStored: false }),
       storedAt: newIso(),
     }
   }
@@ -286,11 +268,12 @@ export async function runConnect(opts: {
   const safeConfig = config
 
   const devMode = opts.dev || process.env.INTUTIC_DEV === '1' || safeConfig.devMode
-  const controlPlaneUrl = resolveConnectControlPlaneUrl(
-    opts.controlPlaneUrl,
-    credsFromFlags ? undefined : safeCreds.controlPlaneUrl,
-    Boolean(devMode),
-  )
+  // Credentials given as flags were never saved, so the URL saved with some
+  // other login does not apply to them.
+  const controlPlaneUrl = resolveControlPlaneUrl(Boolean(devMode), {
+    flagUrl: opts.controlPlaneUrl,
+    useStored: !credsFromFlags,
+  })
   const pollInterval = opts.interval ? parseInt(opts.interval, 10) : DEFAULT_POLL_INTERVAL
   const connectedSince = newIso()
 
