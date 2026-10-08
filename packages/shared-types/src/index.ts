@@ -39,10 +39,12 @@ export {
   DEFAULT_WORKSPACE_SETTINGS,
   resolveWorkspaceSettings,
   resolveSecurityProbeSampleRate,
+  MCP_ANOMALY_DETECTOR_IDS,
 } from './workspaceSettings.js'
 
 export type {
   WorkspaceSettings,
+  McpAnomalyDetectorId,
   McpProxyFailBehavior as McpProxyFailBehaviorType,
   McpProxyMode as McpProxyModeType,
   BypassEnforcementTier as BypassEnforcementTierType,

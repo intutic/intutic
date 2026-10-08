@@ -448,12 +448,23 @@ content. A `block`-mode block additionally emits the existing `tool_blocked`
 event — so a dashboard or alert keyed on `tool_blocked` is not blind to this
 new block reason just because it predates injection scanning.
 
-Set it per machine with `INTUTIC_MCP_INJECTION_ACTION` (see the
-[configuration reference](#configuration-reference)). The proxy also accepts
-`mcpInjectionAction` on the policy channel that carries `mcpAllowedTools` and
-`mcpAllowedServers` (`PolicyClient.absorbCuration`), and lets it win over the
-local value, but the control plane does not send it today, so the local
-setting is the one in force. See the [MCP Proxy
+The control plane files each `injection_detected` event — and each
+`anomaly_detected` and `tool_redacted` event the proxy sends — as a detector
+finding on the **Findings** page, under an `mcp:` detector id such as
+`mcp:injection:tool_result` or `mcp:consecutive_repeat`, where a reviewer can
+mark it a true or false positive. It is also sent as `anomaly.finding`, which a
+[notification rule](/guide/settings#notifications) can route and SIEM export
+carries. A finding is not an incident and not a gate decision: the call's own
+`tool_allowed` or `tool_blocked` is.
+
+Set it for the workspace with `mcpInjectionAction` in workspace settings
+(`PUT /api/v1/workspace/settings`, owner or admin). It reaches every proxy with
+the rest of the MCP policy and wins over a machine's local
+`INTUTIC_MCP_INJECTION_ACTION`; a workspace that never set it leaves the local
+setting in force. The anomaly detectors take the same two workspace settings:
+`mcpAnomalyMode` (`enforce`, `warn` or `off`) and `mcpAnomalyOverrides`, a map
+of detector id to `steer`, `reask`, `kill` or `off` that can only lower a
+detector below its own ceiling. See the [MCP Proxy
 reference](/integrations/mcp-proxy#prompt-injection-scanning) for the
 package-level details.
 
@@ -574,9 +585,9 @@ Settings are read from the environment first, then from
 | `INTUTIC_WORKSPACE_ID` | `unknown` | The workspace, when `--workspace-id` is not given. |
 | `INTUTIC_MCP_FAIL_OPEN` | `true` | `false` makes a check that cannot complete refuse the call. The workspace's `mcpProxyFailBehavior` wins once the proxy has loaded it — see [When the registry has not loaded](#when-the-registry-has-not-loaded). |
 | `INTUTIC_MCP_PROXY_MODE` | `per-session` | `daemon` asks the MCP daemon for policy and sends events through it, falling back to the control plane directly when the daemon does not answer. Read from runtime.env only. |
-| `INTUTIC_MCP_INJECTION_ACTION` | `warn` | `block` refuses a call whose arguments match a prompt-injection pattern, and withholds a result that does. |
-| `INTUTIC_MCP_ANOMALY_MODE` | `enforce` | `warn` reports anomaly findings without blocking; `off` skips detection. |
-| `INTUTIC_MCP_ANOMALY_OVERRIDES` | none | A JSON object of detector id → `steer`, `reask`, `kill` or `off`, capped at each detector's own ceiling. Environment only. |
+| `INTUTIC_MCP_INJECTION_ACTION` | `warn` | `block` refuses a call whose arguments match a prompt-injection pattern, and withholds a result that does. The workspace's `mcpInjectionAction` wins once the proxy has loaded it. |
+| `INTUTIC_MCP_ANOMALY_MODE` | `enforce` | `warn` reports anomaly findings without blocking; `off` skips detection. The workspace's `mcpAnomalyMode` wins. |
+| `INTUTIC_MCP_ANOMALY_OVERRIDES` | none | A JSON object of detector id → `steer`, `reask`, `kill` or `off`, capped at each detector's own ceiling. Environment only. The workspace's `mcpAnomalyOverrides` wins, detector by detector. |
 | `INTUTIC_MCP_SESSION_SCOPE` | derived | Sets the shared session scope explicitly (see [the MCP proxy reference](/integrations/mcp-proxy#anomaly-detection-session-scope)). Environment only. |
 | `INTUTIC_VALKEY_URL` / `VALKEY_URL` | none | The Valkey sibling proxies share their anomaly window through. |
 | `INTUTIC_REMOTE_HEADERS` | none | A JSON object of headers for `--remote-url`, such as `Authorization`. Environment only, never a flag, so it stays out of `ps`. |

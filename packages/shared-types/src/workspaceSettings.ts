@@ -17,6 +17,24 @@ import type { McpProxyFailBehavior, McpProxyMode, BypassEnforcementTier } from '
 export type { McpProxyFailBehavior, McpProxyMode, BypassEnforcementTier }
 
 /**
+ * The MCP governance proxy's anomaly detectors, by id. The proxy's own
+ * `DETECTOR_BASE_DISPOSITION` (packages/mcp-proxy/src/anomaly/index.ts) is
+ * typed against this list, so a detector added there without being added
+ * here fails to compile, and `mcpAnomalyOverrides` cannot name one that does
+ * not exist.
+ */
+export const MCP_ANOMALY_DETECTOR_IDS = [
+  'consecutive_repeat',
+  'ping_pong_cycle',
+  'landmark_cycle',
+  'tool_diversity_collapse',
+  'code_as_action',
+  'tool_poisoning',
+  'dlp_escalation',
+] as const
+export type McpAnomalyDetectorId = (typeof MCP_ANOMALY_DETECTOR_IDS)[number]
+
+/**
  * Per-workspace MCP governance settings.
  *
  * All fields are optional on the wire — missing fields are filled in from
@@ -325,6 +343,31 @@ export interface WorkspaceSettings {
    * `GET /api/v1/sop/rules` and `GET /api/v1/policy/resolve`).
    */
   mcpDefaultPolicy?: 'allow' | 'deny'
+
+  /**
+   * What the MCP governance proxy does when a prompt-injection pattern
+   * matches: `warn` reports it and lets the call (or result) through, `block`
+   * refuses the call or withholds the result. Delivered with the MCP policy
+   * and wins over the proxy's local `INTUTIC_MCP_INJECTION_ACTION`; absent
+   * leaves the local setting (default `warn`) in force.
+   */
+  mcpInjectionAction?: 'warn' | 'block'
+
+  /**
+   * The MCP proxy's anomaly detectors: `enforce` lets each act up to its own
+   * ceiling, `warn` reports without blocking, `off` skips them. Delivered with
+   * the MCP policy and wins over `INTUTIC_MCP_ANOMALY_MODE`; absent leaves the
+   * local setting (default `enforce`) in force.
+   */
+  mcpAnomalyMode?: 'enforce' | 'warn' | 'off'
+
+  /**
+   * Per-detector overrides for the MCP proxy's anomaly detectors, by
+   * detector id. A value can only demote a detector below its own ceiling,
+   * never promote it. Merged per detector over `INTUTIC_MCP_ANOMALY_OVERRIDES`,
+   * this setting winning.
+   */
+  mcpAnomalyOverrides?: Partial<Record<McpAnomalyDetectorId, 'steer' | 'reask' | 'kill' | 'off'>>
 
   /**
    * Workspace-supplied prompt-injection regex sources for the MCP governance
