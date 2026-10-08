@@ -957,7 +957,7 @@ Prints each file found with its line count. It reads the files but does not scan
 Scan rule files, skill files, and the scripts bundled with skills for leaked credentials and unsafe instructions.
 
 ```bash
-intutic skill audit [--sarif] [--engine <native|cisco>]
+intutic skill audit [--sarif] [--engine <native|cisco>] [--exit-zero]
 ```
 
 **Options:**
@@ -966,6 +966,7 @@ intutic skill audit [--sarif] [--engine <native|cisco>]
 |--------|-------------|---------|
 | `--sarif` | Print the findings as a single SARIF 2.1.0 JSON document on stdout (for GitHub Code Scanning and other CI tools) instead of the readable report | — |
 | `--engine <engine>` | `native` runs the built-in scanner. `cisco` also runs Cisco's `skill-scanner` on each skill directory; the `skill-scanner` binary must be on `PATH` (`pipx install cisco-ai-skill-scanner`). | `native` |
+| `--exit-zero` | Exit `0` even when the audit has findings | — |
 
 **What it does:**
 
@@ -985,15 +986,15 @@ When you are logged in, three workspace settings change the run:
 
 When you are logged in, the results are also reported to the control plane; a failed report is ignored. With `--sarif`, nothing but the JSON document is printed. Cisco's results, when that engine ran, are added as a second run in the same document.
 
-**Exit status:** `0` when the audit completes, even if it found issues; read the report or the SARIF output to decide pass/fail. `1` for an unknown `--engine` value, or for `--engine cisco` when `skill-scanner` is not on `PATH`.
+**Exit status:** `1` when the audit has findings, so a CI step fails on them; `0` when it is clean, or with `--exit-zero`. Also `1` for an unknown `--engine` value, or for `--engine cisco` when `skill-scanner` is not on `PATH`. The report, the SARIF document and the control-plane report are all complete before the command exits.
 
 **Examples:**
 
 ```bash
 intutic skill audit
 
-# Upload to GitHub Code Scanning
-intutic skill audit --sarif > skills.sarif
+# Upload to GitHub Code Scanning, which then decides pass/fail
+intutic skill audit --sarif --exit-zero > skills.sarif
 
 # Also run Cisco's skill-scanner
 intutic skill audit --engine cisco

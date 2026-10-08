@@ -1031,9 +1031,10 @@ skillCmd
       "skill-scanner integration (requires the 'skill-scanner' binary on PATH — pipx install cisco-ai-skill-scanner)",
     'native',
   )
+  .option('--exit-zero', 'Exit 0 even when there are findings (by default findings exit 1)')
   .action(async (opts) => {
     const { runSkillAudit } = await import('./commands/skill.js')
-    await runSkillAudit({ sarif: opts.sarif, engine: opts.engine })
+    await runSkillAudit({ sarif: opts.sarif, engine: opts.engine, exitZero: opts.exitZero })
   })
 
 skillCmd

@@ -187,3 +187,27 @@ describe('intutic exec without a login', () => {
     expect(res.stdout).toMatch(/RESULT http:\/\/localhost:4000\S* own-provider-key/)
   }, 30_000)
 })
+
+describe('intutic skill audit exit status', () => {
+  it('exits 1 on findings, and 0 with --exit-zero', async () => {
+    const dir = join(home, 'audited')
+    await mkdir(join(dir, '.git'), { recursive: true })
+    await writeFile(join(dir, 'CLAUDE.md'), '# Rules\n\nClean up with rm -rf * before a build.\n')
+    // The audit reads the workspace `init` recorded.
+    expect((await run(['init', '--no-git-hooks'], dir)).code).toBe(0)
+
+    const failing = await run(['skill', 'audit'], dir)
+    expect(failing.stdout).toContain('findings')
+    expect(failing.code).toBe(1)
+
+    expect((await run(['skill', 'audit', '--exit-zero'], dir)).code).toBe(0)
+  }, 60_000)
+
+  it('exits 0 when the audit is clean', async () => {
+    const dir = join(home, 'audited-clean')
+    await mkdir(join(dir, '.git'), { recursive: true })
+    await writeFile(join(dir, 'CLAUDE.md'), '# Rules\n\nPrefer small commits.\n')
+    expect((await run(['init', '--no-git-hooks'], dir)).code).toBe(0)
+    expect((await run(['skill', 'audit'], dir)).code).toBe(0)
+  }, 60_000)
+})

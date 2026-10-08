@@ -675,7 +675,9 @@ export function mergeCiscoFindings(
   return ciscoResult.findings.length
 }
 
-export async function runSkillAudit(opts: { sarif?: boolean; engine?: 'native' | 'cisco' } = {}): Promise<void> {
+export async function runSkillAudit(
+  opts: { sarif?: boolean; engine?: 'native' | 'cisco'; exitZero?: boolean } = {},
+): Promise<void> {
   const sarif = opts.sarif === true
   // SARIF's contract is a single JSON document on stdout — a CI tool piping
   // this into a code-scanning upload must not see decorated progress text
@@ -877,6 +879,11 @@ export async function runSkillAudit(opts: { sarif?: boolean; engine?: 'native' |
       // Non-blocking
     }
   }
+
+  // Findings fail the command, so a CI step can gate on it; exitCode rather
+  // than exit() so the SARIF document and the report above finish first.
+  // --exit-zero is for pipelines that upload the SARIF and gate elsewhere.
+  if (issues > 0 && !opts.exitZero) process.exitCode = 1
 }
 
 /**
