@@ -11,7 +11,7 @@ packages = [{include = "intutic_clawde"}]
 # urllib3 below both require >=3.10, so supporting 3.9 means shipping known CVEs.
 python = "^3.10"
 requests = "^2.33.0"
-urllib3 = ">=2.7.0"
+urllib3 = ">=2.8.0"
 # The gate's image-integrity tier parses the Kubernetes manifests a deploy
 # command references; see intutic_clawde/gate/imagecheck.py.
 pyyaml = "^6.0"

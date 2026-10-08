@@ -50,7 +50,7 @@ minimumReleaseAgeExclude:
 # cleared the 24h release-age window, taking @hono/node-server to 2.x and
 # closing GHSA-frvp-7c67-39w9 without any guard exclusion.)
 overrides:
-  brace-expansion: '^5.0.9' # CVE-2026-13149, CVE-2026-14257, + the 2026-08 bypass of the 14257 mitigation
+  brace-expansion: '^5.0.12' # CVE-2026-13149, CVE-2026-14257, + the 2026-08 bypass of the 14257 mitigation; GHSA-6j4f-fj2g-mc7p, GHSA-qhr7-859c-m2p7, GHSA-q2hr-2g5m-vwhr
   fast-uri: '^3.1.6' # CVE-2026-16221, CVE-2026-13676, + host confusion via backslash authority introducer; CVE-2026-75899/75931/75975/76172 (SSRF via repeated hostname / malformed IPv6, host confusion via IDN + percent-encoded scheme)
   js-yaml: '^4.3.2' # CVE-2026-59869, CVE-2026-59870 (quadratic !!omap resolution, unfixed in 4.3.0); CVE-2026-84375 (maxTotalMergeKeys did not bound CPU on empty merge sources)
   # Scoped, not a blanket `nanoid` override: @intutic/control-plane and
@@ -60,10 +60,31 @@ overrides:
   # `workflow` devDependency, dev-only, added in A3) pulls a vulnerable v5.1.6.
   '@workflow/core>nanoid': '^5.1.16' # GHSA-28wg-ghj8-5hjv (non-secure generator can loop indefinitely on a negative size)
   protobufjs: '^7.6.5' # CVE-2026-59877
-  undici: '^7.29.0' # 5 GHSAs newly surfaced by @anthropic-ai/sdk's devDep pulling in `workflow`'s undici transitive at scan time: cross-user cache/cookie/response-desync issues + a parse-time crash
+  undici: '^7.29.1' # 5 GHSAs newly surfaced by @anthropic-ai/sdk's devDep pulling in `workflow`'s undici transitive at scan time: cross-user cache/cookie/response-desync issues + a parse-time crash; GHSA-rfgv-xxqx-mfg5, GHSA-w293-vg96-wgc3 + 8 lower-severity (fixed in 7.29.1)
   uuid: '^11.1.1' # CVE-2026-41907
   # @modelcontextprotocol/sdk pins hono ^4.11.4 and resolves it to a version
   # below the fix. 4.12.31 satisfies that range, so this needs no SDK bump.
   hono: '^4.13.5' # CVE-2026-59895/6/7, + ReDoS in CORS middleware via Access-Control-Request-Headers; CVE-2026-84363/84364/84365 (query parser past the fragment, unbounded dot-notation nesting in parseBody, toSSG incomplete fix)
   qs: '^6.16.0' # CVE-2026-82417 (DoS via attacker-controlled isBuffer), CVE-2026-82562 (array-limit bypass via bracket-key comma parsing)
   devalue: '^5.9.2' # CVE-2026-81176 (DoS via malformed input)
+  '@grpc/grpc-js': '^1.14.5' # GHSA-m9gg-hp2v-232j, GHSA-f596-whhp-79r4 — via @opentelemetry/sdk-node's OTLP gRPC exporters and @a2a-js/sdk
+  # Optional dependency of @openai/agents-core (gate-js devDependency, dev-only).
+  '@modelcontextprotocol/client': '^2.2.0' # GHSA-6qxp-vccf-f47h
+  ip-address: '^10.7.1' # GHSA-2vr4-cq9g-pvrc, GHSA-rpw4-54j3-4h4q, GHSA-h3mg-xc3c-68pw, GHSA-j6r3-76f7-8jcv — via express-rate-limit (@modelcontextprotocol/sdk)
+  proxy-addr: '^2.0.8' # GHSA-jqcg-44mw-7w3h — via express 5 (@modelcontextprotocol/sdk, @a2a-js/sdk)
+  shell-quote: '^1.11.0' # GHSA-pqg4-j6r4-53mv — via @daytona/sdk (gate-js devDependency, dev-only)
+  source-map-js: '^1.2.2' # GHSA-68fv-2mgg-jv7q — via postcss and the Vue SFC compiler (build tooling)
+  # Direct dependencies too (packages/mcp-proxy, apps/docs), bumped there. The
+  # overrides catch the copies other packages resolve on their own:
+  # @truefoundry/trueforge-core (gate-js devDependency) keeps the SDK at 1.30.0,
+  # and vitepress keeps its own vue (and so @vue/server-renderer) at 3.5.38.
+  '@modelcontextprotocol/sdk': '^1.31.0' # GHSA-6qxp-vccf-f47h
+  vue: '^3.5.42' # GHSA-g2v6-rqmx-r4w6 (@vue/server-renderer, pinned exactly by vue)
+  # `workflow` (gate-js devDependency, dev-only) depends on @workflow/nest,
+  # which declares @swc/cli as a required peer, so pnpm auto-installs it.
+  # Nothing here uses the NestJS integration (gate-js imports only `workflow`'s
+  # main entry) and @workflow/nest never imports @swc/cli. It is the only path
+  # to piscina (GHSA-67c8-pqhq-4rmx) and, through @xhmikosr/bin-wrapper -> got
+  # -> cacheable-request, to http-cache-semantics (GHSA-ch52-4w7c-c8xp, which
+  # has no patched release). Removing the peer removes both.
+  '@workflow/nest>@swc/cli': '-'
