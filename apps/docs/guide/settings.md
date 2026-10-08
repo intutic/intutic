@@ -278,7 +278,7 @@ Route governance events to Slack, PagerDuty, a webhook or email. Each rule (**Ne
 - **Slack** — **Connect Slack** installs the Slack app through OAuth; a rule then sends to a Slack channel ID. **Link your Slack account** gives you a code to run as `/intutic link <code>` in Slack, so approvals you make from Slack are recorded against you rather than against whoever installed the app.
 - **Email** — Send alerts to up to 20 addresses; each recipient gets their own message.
 - **PagerDuty** — Trigger incidents through an Events API v2 routing key.
-- **Webhooks** — Send JSON payloads to generic HTTPS endpoints. Secure webhooks with an optional HMAC signing secret.
+- **Webhooks** — Send JSON payloads to generic HTTPS endpoints. Give the rule a **Webhook Secret** and every request is signed with it; see [below](#verifying-webhook-signatures).
 
 ### Webhook destinations
 
@@ -291,6 +291,43 @@ INTUTIC_WEBHOOK_ALLOWED_HOSTS=servicenow.corp.example,*.hooks.corp.example
 ```
 
 A listed host may resolve to a private address; every other destination stays guarded. Even a listed host still needs `https`, and can never reach loopback or link-local (cloud metadata) addresses. The same list also covers SIEM export destinations: webhook, Splunk HEC and Datadog intake URLs, and syslog hosts. If your internal system uses a private certificate authority, give the control plane that CA through `NODE_EXTRA_CA_CERTS`.
+
+### Verifying webhook signatures {#verifying-webhook-signatures}
+
+A webhook rule with a secret signs every request with two headers:
+
+- `X-Intutic-Timestamp` — the send time, in Unix seconds
+- `X-Intutic-Signature` — `sha256=` followed by the hex HMAC-SHA256 of `<timestamp>.<raw request body>`, keyed with the rule's secret
+
+[SIEM webhook destinations](/guide/siem-export#verifying-webhook-signatures) are signed exactly the same way, so one function verifies both. To verify:
+
+1. Read the raw body exactly as received, before any JSON parsing.
+2. Compute the HMAC over the timestamp header, a `.`, and the raw body, and compare it with the signature header in constant time.
+3. Refuse the request if the timestamp is older than five minutes (or more than five minutes ahead of your clock), so a captured request cannot be replayed later. A retry is signed again when it is sent, so it carries a fresh timestamp.
+
+```ts
+import { createHmac, timingSafeEqual } from 'node:crypto'
+
+export function verifyIntuticWebhook(rawBody: string, headers: Record<string, string>, secret: string): boolean {
+  const timestamp = headers['x-intutic-timestamp']
+  const signature = headers['x-intutic-signature'] ?? ''
+  if (!timestamp || Math.abs(Date.now() / 1000 - Number(timestamp)) > 300) return false
+  const expected = `sha256=${createHmac('sha256', secret).update(`${timestamp}.${rawBody}`).digest('hex')}`
+  return signature.length === expected.length && timingSafeEqual(Buffer.from(signature), Buffer.from(expected))
+}
+```
+
+```python
+import hashlib, hmac, time
+
+def verify_intutic_webhook(raw_body: bytes, headers: dict, secret: str) -> bool:
+    timestamp = headers.get("x-intutic-timestamp", "")
+    signature = headers.get("x-intutic-signature", "")
+    if not timestamp or abs(time.time() - int(timestamp)) > 300:
+        return False
+    mac = hmac.new(secret.encode(), timestamp.encode() + b"." + raw_body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(signature, "sha256=" + mac)
+```
 
 ### Rule Filters
 

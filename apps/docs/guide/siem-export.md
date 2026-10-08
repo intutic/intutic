@@ -85,16 +85,16 @@ Each request carries two headers:
 - `X-Intutic-Timestamp` — the send time, in Unix seconds
 - `X-Intutic-Signature` — `sha256=` followed by the hex HMAC-SHA256 of `<timestamp>.<raw request body>`, keyed with the signing secret
 
-The header name and `sha256=` format match the notification webhook's. The SIEM signature also covers the timestamp, so a receiver can refuse a delivery that was captured and replayed later. To verify:
+[Notification webhooks](/guide/settings#verifying-webhook-signatures) are signed exactly the same way, so one function verifies both. The signature covers the timestamp, so a receiver can refuse a delivery that was captured and replayed later. To verify:
 
 1. Read the raw body exactly as received, before any JSON parsing.
 2. Compute the HMAC over the timestamp header, a `.`, and the raw body, and compare it with the signature header in constant time.
-3. Refuse the request if the timestamp is more than five minutes from your clock. A retried delivery is signed again when it is sent, so retries carry a fresh timestamp.
+3. Refuse the request if the timestamp is older than five minutes (or more than five minutes ahead of your clock). A retried delivery is signed again when it is sent, so retries carry a fresh timestamp.
 
 ```ts
 import { createHmac, timingSafeEqual } from 'node:crypto'
 
-export function verifyIntuticSiem(rawBody: string, headers: Record<string, string>, secret: string): boolean {
+export function verifyIntuticWebhook(rawBody: string, headers: Record<string, string>, secret: string): boolean {
   const timestamp = headers['x-intutic-timestamp']
   const signature = headers['x-intutic-signature'] ?? ''
   if (!timestamp || Math.abs(Date.now() / 1000 - Number(timestamp)) > 300) return false
@@ -106,7 +106,7 @@ export function verifyIntuticSiem(rawBody: string, headers: Record<string, strin
 ```python
 import hashlib, hmac, time
 
-def verify_intutic_siem(raw_body: bytes, headers: dict, secret: str) -> bool:
+def verify_intutic_webhook(raw_body: bytes, headers: dict, secret: str) -> bool:
     timestamp = headers.get("x-intutic-timestamp", "")
     signature = headers.get("x-intutic-signature", "")
     if not timestamp or abs(time.time() - int(timestamp)) > 300:
