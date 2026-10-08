@@ -1,6 +1,6 @@
 # Compliance Evidence <Badge type="tip" text="Cloud" />
 
-Probe history and auditor-ready SOC 2 evidence exports, built directly on the compliance probes — so the evidence you hand an auditor can never disagree with the dashboard. The same evidence is mapped to the EU AI Act, ISO/IEC 42001 and the NIST AI RMF; see [Framework Mapping](/guide/framework-mapping).
+Probe history and auditor-ready SOC 2 evidence exports, built directly on the compliance probes — so the evidence you hand an auditor can never disagree with the dashboard. The same evidence is mapped to the EU AI Act, ISO/IEC 42001, the NIST AI RMF and MITRE ATLAS; see [Framework Mapping](/guide/framework-mapping).
 
 ---
 
@@ -50,7 +50,7 @@ The **Active Compliance Probes** panel on **Policies › Compliance Scope** has 
 - Per-category row counts from the underlying governance tables, grouped by enum columns — incidents by severity, enforcement decisions by verdict, break-glass requests by status, active SOPs, active API keys, residency violations, sessions
 - Capped id samples: the first 100 ids per table, so an auditor can request specific records
 - A digest of the probe-result history for the period (row counts, first/last timestamps, status tallies per probe)
-- Coverage of the EU AI Act, ISO/IEC 42001 and NIST AI RMF, computed from the same probe run, as JSON and as a readable report (archives with `formatVersion` 2; see [Framework Mapping](/guide/framework-mapping#in-the-signed-evidence-pack))
+- Coverage of the EU AI Act, ISO/IEC 42001, NIST AI RMF and MITRE ATLAS, computed from the same probe run, as JSON and as a readable report (archives with `formatVersion` 2), and as CSV and PDF (`formatVersion` 3; see [Framework Mapping](/guide/framework-mapping#in-the-signed-evidence-pack))
 - A sha256 manifest and, when signing is configured, a detached Ed25519 signature
 
 ### What's deliberately NOT in it
@@ -61,7 +61,7 @@ No free-text row content — no incident descriptions, no enforcement reasons, n
 
 Every archive is self-verifying:
 
-1. **Recompute the hash.** Remove the `manifest` and `signature` fields from the archive, serialize the remainder as *canonical JSON* (object keys sorted recursively, arrays in order), and take the sha256. It must equal `manifest.archiveSha256` (and the `archive_sha256` on the run). Per-category hashes in `manifest.sections` are the canonical JSON of each category object.
+1. **Recompute the hash.** Remove the `manifest` and `signature` fields from the archive, serialize the remainder as *canonical JSON* (object keys sorted recursively, arrays in order), and take the sha256. It must equal `manifest.archiveSha256` (and the `archive_sha256` on the run). Per-category hashes in `manifest.sections` are the canonical JSON of each category object, and `framework:<id>` the canonical JSON of each framework entry. `framework:<id>:csv` and `framework:<id>:pdf` are the sha256 of the export files themselves: the CSV's UTF-8 bytes and the PDF decoded from base64.
 2. **Verify the signature** (when present). The signed preimage is the two-line string `intutic-soc2-evidence-v1\n<archiveSha256>`. Verify the Ed25519 signature in `signature.value` (base64) against the public key whose `kid` matches `signature.keyId` in the JWKS published at `/.well-known/intutic-trace-signing.json` — the same key set that signs trace Merkle roots.
 
 A run with `signature: null` was collected on a deployment without `TRACE_SIGNING_PRIVATE_KEY` configured. That is a supported state, and the evidence says so rather than papering over it.
