@@ -192,7 +192,7 @@ jobs:
           name: npm-tarballs
           path: npm-tarballs/
 
-      - name: Publish All 9 Packages to npm
+      - name: Publish all 10 packages to npm
         # Order matters: @intutic/logger and @intutic/sync-daemon are runtime
         # dependencies of @intutic/cli (and logger of @intutic/mcp-governance-proxy).
         # pnpm rewrites `workspace:*` to the concrete version at publish time, so
