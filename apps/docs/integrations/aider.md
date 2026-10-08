@@ -69,6 +69,8 @@ set-env:
 
 Lists, nested values and comments are preserved; only the keys above are added or replaced. A file that does not parse as YAML is left untouched and reported in the `intutic connect` log. Only options Aider accepts are written — Aider refuses to start on an unknown key.
 
+To undo what `intutic connect` writes here, run `intutic disconnect --harness aider`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+
 ## Config details
 
 | Property | Value |

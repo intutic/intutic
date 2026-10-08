@@ -35,6 +35,8 @@ intutic start
 Intutic generates:
 * **Custom Instructions:** `.roorules`
 
+To undo what `intutic connect` writes here, run `intutic disconnect --harness roo-code`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+
 ## Proxy routing
 
 To route Roo Code's requests through the local proxy:

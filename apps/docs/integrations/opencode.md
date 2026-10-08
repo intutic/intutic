@@ -60,6 +60,8 @@ Intutic does not write your provider settings — `opencode.json` is your file, 
 - **MCP servers:** the `mcp` block of `opencode.json` (project) and `~/.config/opencode/opencode.json` (global) — each server is fronted by the MCP governance proxy. Every other key is left as it was. See [MCP servers](#mcp-servers).
 - **Not written:** the rest of `opencode.json` (egress and the optional static `permission` map are yours).
 
+To undo what `intutic connect` writes here, run `intutic disconnect --harness opencode`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. `AGENTS.md` stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+
 ## Pre-tool hooks (blocking)
 
 The hook receives the tool name and its argument object and refuses by throwing `Error('[Intutic Governance] BLOCKED: <reason> [<rule id>]')`. OpenCode returns that message to the model as the tool's error, so the model sees why and can change approach; the process keeps running. An allow returns normally.

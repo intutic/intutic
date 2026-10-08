@@ -416,6 +416,58 @@ The daemon runs in the foreground. Use `Ctrl+C` to stop.
 
 ---
 
+## `intutic disconnect`
+
+Undo `intutic connect` on this machine: put every harness config it changed back the way it was, remove the background services, and log out.
+
+```bash
+intutic disconnect [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--harness <id>` | Disconnect one harness only, for example `cursor`. The login, the services and the other harnesses stay. |
+| `--dry-run` | Print exactly what would change, and change nothing |
+| `--keep-login` | Keep the stored credentials |
+
+**What it undoes**, for every harness (one with `--harness`):
+
+- **Rules files connect writes whole** (`CLAUDE.md`, `.cursorrules`, `.windsurfrules`, `AGENTS.md`, `.github/copilot-instructions.md`, `.roorules`, `.clinerules/intutic-governance.md`, `.env.intutic`): the file you had before comes back, or the file is deleted if connect created it.
+- **Hook registrations** in each harness's settings (`.claude/settings.json`, Cursor's and Windsurf's `hooks.json`, and the rest): only the entries that run an Intutic gate are removed. The gate scripts are deleted.
+- **Proxy routing**: base URLs and proxy settings connect pointed at the proxy (Codex `openai_base_url`, Continue `apiBase`, Goose `provider.host`, Grok `base_url`, Pi and OpenHands base URLs, Aider `openai-api-base`, Windsurf `http.proxy`, the JetBrains IDE proxy for the Windsurf plugin, dsh's `llm-deepseek` route) go back to the values they had.
+- **MCP servers**: each server connect wrapped gets its original entry back, every key included; the `intutic` server connect added is removed; and the copies of approved `.mcp.json` servers connect added to `~/.claude.json` are removed.
+- **What connect replaced or removed** comes back: the Claude Code `permissions.deny` rules connect replaced, and Aider's `test-cmd`, `lint-cmd`, `auto-test` and `auto-lint`.
+- **n8n**: the `intutic_proxy_url` and `intutic_governance_rules` variables connect set on your workflows, through the n8n API at `N8N_URL` (default `http://localhost:5678`).
+
+Without `--harness` it also removes the services [`intutic daemon install`](#intutic-daemon-install) set up for your user (a system-wide one is listed with the command that removes it), the Intutic CA certificate connect trusted in the macOS login keychain, the `intutic-valkey` Docker container connect started, the gate caches in `~/.intutic/hooks/`, `~/.intutic/env/runtime.env` (the copy of the API key the gates read) and, unless `--keep-login`, the stored credentials. It resets the synced config version, so a later `intutic connect` writes everything again.
+
+**How it knows what you had:** before connect first writes a file, it keeps a copy of it, in `.intutic/originals/` for files in the workspace and `~/.intutic/originals/` for the rest (owner-only, and ignored by git). A file you have not changed since is restored byte for byte. In one you have changed, only Intutic's entries are taken out and your edits stay. A file connect writes whole that you edited is left as it is, and listed.
+
+**Files from an earlier connect:** versions before this one kept no copies. For their files, disconnect removes what it can recognise as Intutic's: the generated header, entries that run an Intutic gate, wrapped MCP servers (their arguments carry the original command), and URLs on the proxy connect used. A generated file git does not track is deleted; where git has a committed version that is not generated, that version comes back. A setting connect overwrote is removed rather than restored, because its earlier value is unknown, and the output says so. Deny rules connect added to `permissions.deny` cannot be told apart from yours, and are listed for you to review.
+
+**Left in place:** your SOPs in `.intutic/sops/`, Intutic's own state in `~/.intutic/` (configuration, logs, events, the downloaded proxy), `<file>.drift-backup` copies (they hold edits connect reverted), and a `valkey-server` or `redis-server` connect started outside Docker. Git hooks from `intutic init --git-hooks` live in `.git/hooks/`, and variables from [`intutic env persist`](#intutic-env-persist) are removed with [`intutic env clear`](#intutic-env-clear).
+
+**While connect runs:** a running `intutic connect` would write everything straight back. A real run stops the services first, then exits with status `1` before changing any file if an `intutic connect` you started yourself is still running. `--dry-run` only warns.
+
+**One harness:** `--harness` leaves a file another connected harness also writes (`AGENTS.md` is shared by Muse Code, Grok Build and OpenCode; `.env.intutic` by Codex and the SDK frameworks). It removes the harness from `~/.intutic/config.json`, so connect stops writing its config and stops wrapping its MCP servers; run `intutic init` to manage it again.
+
+**Examples:**
+
+```bash
+# See what would change
+intutic disconnect --dry-run
+
+# Disconnect everything, keep the login
+intutic disconnect --keep-login
+
+# Stop governing Cursor only
+intutic disconnect --harness cursor
+```
+
+---
+
 ## `intutic sync-context`
 
 Record the current Git branch and commit for the sync daemon to report.

@@ -70,6 +70,8 @@ The gate registration in `~/.gemini/settings.json`:
 Both files are read first and merged; all other settings are preserved. A settings file that is not plain JSON (for example one with comments) is left untouched and reported in the `intutic connect` log.
 :::
 
+To undo what `intutic connect` writes here, run `intutic disconnect --harness antigravity`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+
 ## Config details
 
 | Property | Value |

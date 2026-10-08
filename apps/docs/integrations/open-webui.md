@@ -27,3 +27,5 @@ intutic start
 Intutic generates:
 * **Filter:** `~/.open-webui/intutic-governance-filter.py` — paste it into Open WebUI as a Function (see above).
 * **Notes:** `.intutic/env/open-webui.env` in the workspace, with the same installation steps.
+
+To undo what `intutic connect` writes here, run `intutic disconnect --harness open-webui`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. See [`intutic disconnect`](/reference/cli#intutic-disconnect).

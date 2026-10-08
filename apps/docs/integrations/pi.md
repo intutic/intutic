@@ -38,3 +38,5 @@ Intutic writes rules and configures:
 * **Provider routing:** `~/.pi/models.json` — `baseUrl` for the `anthropic` provider set to `http://localhost:4000` and for `openai` to `http://localhost:4000/v1`. Other providers and keys are kept; Google is not routed, because the proxy does not serve the Gemini API.
 
 Both JSON files are merged; one that does not parse is left untouched and reported in the `intutic connect` log.
+
+To undo what `intutic connect` writes here, run `intutic disconnect --harness pi`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. See [`intutic disconnect`](/reference/cli#intutic-disconnect).

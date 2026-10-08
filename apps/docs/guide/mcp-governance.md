@@ -34,6 +34,13 @@ so that the
 proxy, the proxy spawns the real server, and every `tools/call` and
 `tools/list` passes through governance in between.
 
+A wrapped entry keeps the entry it replaced, whole, under
+`__intutic_original`, so [`intutic disconnect`](/reference/cli#intutic-disconnect)
+puts each server back exactly as it was, keys the proxy does not use (`cwd`,
+`disabled`, `autoApprove` and the like) included. An entry wrapped by an
+earlier version, which kept only a remote server's URL and headers, is read
+back from the wrapped command: the original command follows `--`.
+
 For Claude Code that means the user-scope servers in `~/.claude.json`, the
 local-scope servers of the project `intutic connect` ran in
 (`projects[<path>].mcpServers` in the same file), and the project-scope servers
@@ -105,7 +112,8 @@ shape: a `local` server's `command` is one array and its env map is
 Both are wrapped with the same proxy argv as every other harness; a wrapped
 remote server becomes a `local` entry running the bridge. Already-wrapped
 entries are recognised from the command, since OpenCode's schema has no room
-for the `__intutic_wrapped` marker. A remote server configured with `oauth`
+for the `__intutic_wrapped` marker; `intutic disconnect` rebuilds them from
+that command, or takes them from the copy of the file connect kept. A remote server configured with `oauth`
 is left unwrapped, and JSONC files are skipped rather than rewritten — see
 [the OpenCode page](/integrations/opencode#mcp-servers).
 

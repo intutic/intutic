@@ -35,6 +35,8 @@ intutic start
 * **`~/.continue/config.yaml`:** `apiBase: http://localhost:4000/v1/` on each model whose `provider` is `openai` or `anthropic`. Models from other providers (Ollama, Gemini, …) are left alone — the proxy does not serve their APIs. A config with no such model, or one that does not parse, is left untouched and reported in the `intutic connect` log. Intutic does not set `apiKey`; keep your own.
 * **`~/.continue/settings.json` and `<repo>/.continue/settings.json`:** the CLI gate registration (below).
 
+To undo what `intutic connect` writes here, run `intutic disconnect --harness continue`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+
 ## Pre-tool hooks (Continue CLI only)
 
 The Continue **CLI** (`cn`) executes PreToolUse hooks; the IDE extension does

@@ -45,6 +45,8 @@ intutic start
 - **LLM egress:** `base_url` merged into every existing `[model.*]` table in `config.toml`, at both `<repo>/.grok/config.toml` and `~/.grok/config.toml`. `XAI_API_KEY` remains the auth mechanism — only the endpoint moves.
 - **MCP servers:** any `[mcp_servers.*]` table in either `config.toml` is proxy-wrapped the same way every other harness's `mcpServers` map is (stdio entries wrapped with `--`, remote/`url`-keyed entries bridged with `--remote-url`/`--remote-transport`).
 
+To undo what `intutic connect` writes here, run `intutic disconnect --harness grok`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. `AGENTS.md` stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+
 ## Pre-tool hooks (blocking)
 
 Grok Build's `PreToolUse` hook contract is **confirmed**, not assumed: the hook process writes `{"decision":"deny","reason":"..."}` as JSON on **stdout** and exits 0 to signal a block — a different shape from Cline/Roo Code's `{"cancel":true}`, so Intutic's gate for this harness carries its own dedicated block contract rather than reusing theirs. An allow prints nothing and exits 0. The default hook `timeout` is 5s, ample for a local policy-snapshot evaluation.

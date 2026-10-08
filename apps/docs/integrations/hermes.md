@@ -36,3 +36,5 @@ Intutic generates:
 * **Hook registration:** `hooks.preToolUse.command` in `~/.hermes/config.yaml`. Only that key is set; the rest of the file, comments included, is kept, and a file that does not parse is left untouched.
 * **Hook script:** `~/.intutic/hooks/hermes-check.sh`.
 * **Skill:** `~/.hermes/skills/intutic-governance/SKILL.md` — tells the agent that tool calls are checked and not to work around a block.
+
+To undo what `intutic connect` writes here, run `intutic disconnect --harness hermes`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. See [`intutic disconnect`](/reference/cli#intutic-disconnect).

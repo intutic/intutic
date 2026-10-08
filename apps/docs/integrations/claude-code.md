@@ -92,6 +92,8 @@ The gate fails closed: if it cannot read the tool call or crashes, the call is r
 Intutic overwrites the entire `CLAUDE.md` file. If you have custom instructions, consider moving them to a separate file or adding them as SOP files in `.intutic/sops/` (see [SOP Front Matter](/reference/sop-front-matter)).
 :::
 
+To undo what `intutic connect` writes here, run `intutic disconnect --harness claude-code`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+
 ## Config details
 
 | Property | Value |

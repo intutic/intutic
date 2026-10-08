@@ -62,6 +62,8 @@ Never commit secrets or API keys...
 Intutic overwrites the entire `config.toml` file. If you have custom OpenHands settings, keep them in a separate config file; custom agent instructions belong in SOP files in `.intutic/sops/` (see [SOP Front Matter](/reference/sop-front-matter)).
 :::
 
+To undo what `intutic connect` writes here, run `intutic disconnect --harness openhands`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+
 ## Config details
 
 | Property | Value |

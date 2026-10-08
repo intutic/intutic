@@ -158,6 +158,8 @@ Until those three close, treat the approval flow + `permissionMode` + `inactiveT
 
 Same `.env.intutic` shape as every SDK-gated framework, with the preamble corrected for this execution model: the proxy base-URL vars govern LLM egress **from your own process only** — they do not and cannot route sandbox traffic.
 
+To undo what `intutic connect` writes here, run `intutic disconnect --harness ai-sdk-harness`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. `.env.intutic` stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+
 ## Config details
 
 | Property | Value |
