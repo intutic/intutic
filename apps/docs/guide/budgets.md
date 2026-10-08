@@ -105,7 +105,7 @@ The dashboard surfaces budget utilization in real time:
 - **Cost by Virtual Key** — on Overview's **Cost & Token Efficiency** tab: cost per virtual key, today or this month (see below).
 - **Cost by Developer** — on the same tab: cost, tokens, calls, active days and models used per member, today or this month. Sort by any column; the top 10 show until you choose **Show all**. A call belongs to the member who owns the virtual key that made it. OWNER, ADMIN and EM see every member, plus an **Unattributed** row for calls with no virtual key. A DEVELOPER or VIEWER sees only their own usage.
 - **Cost by Team** — on the same tab, for OWNER, ADMIN and EM: the same figures per [SCIM group](/guide/scim), including members of nested groups. A member in several groups counts in each one, so team totals can add up to more than the workspace total. Without SCIM groups there are no teams, and cost by developer is the finest breakdown.
-- **Cost by Branch** — on the same tab: cost per repository and branch, or per HEAD commit (see [Cost per branch and commit](#cost-per-branch-and-commit)).
+- **Cost by Branch** — on the same tab: cost per repository and branch, or per HEAD commit, with the same role scoping as **Cost by Developer** (see [Cost per branch and commit](#cost-per-branch-and-commit)).
 
 The dashboard has no daily spend trend or per-model spend view. **Token Efficiency by Model** on the same tab shows tokens per model, not cost.
 
