@@ -31,7 +31,7 @@ On audit integrity, Intutic covers what Forge's ledger does (a hash chain, datab
 
 ## Where Forge is stronger
 
-- **Organization-wide discovery.** Forge inventories AI agents and non-human identities across the whole organization, beyond the coding-agent surface.
+- **Organization-wide discovery.** Forge inventories AI agents and non-human identities across the whole organization, through EDR and identity-provider connectors. Intutic's [AI inventory](/guide/ai-inventory) covers developer machines that run `intutic connect`: the harnesses, MCP servers and skill bundles on each, and which run ungoverned.
 - **Credential brokering.** It issues short-lived cloud credentials to agents and right-sizes their permissions. Intutic governs what an agent does with access it already has.
 - **MCP gateway controls.** Per-server, per-user and per-tool budgets, tool-change risk scoring and OAuth 2.1 brokering. Intutic's MCP proxy has a registry with approvals and default-deny, approval holds and per-call identity, but no MCP budgets: it passes a remote server's credentials through rather than brokering them, and flags a changed tool set without scoring its risk. New workspaces start with the registry allowing unapproved servers.
 - **Regulatory framework mapping.** Intutic maps its own evidence to SOC 2 and OWASP, and to the EU AI Act, ISO/IEC 42001 and the NIST AI RMF where an enforcement layer can evidence a control, mostly as partial coverage. Forge also maps to HIPAA, MITRE ATLAS and more, and exports the mapping as PDF or CSV.

@@ -564,7 +564,7 @@ Classify tokens as USEFUL or WASTED.
 
 ## Route Catalog
 
-Every route the control plane serves: 384 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
+Every route the control plane serves: 389 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
 
 ### `app.ts` <Badge type="tip" text="Cloud" />
 
@@ -588,7 +588,7 @@ Every route the control plane serves: 384 routes, grouped by the source file tha
 | GET | `/api/v1/agents/:id` | Authenticated | one agent, its facets, posture, live sessions |
 | POST | `/api/v1/agents/:id/judge-score` | Authenticated |  |
 | GET | `/api/v1/agents/graph` | Authenticated | nodes + edges + posture for the viz |
-| POST | `/api/v1/agents/report` | Authenticated | daemon upserts an agent + facets (rescored) |
+| POST | `/api/v1/agents/report` | Authenticated | daemon upserts an agent + facets (rescored), or reports its machine's AI inventory |
 
 ### `anomaly.ts` <Badge type="tip" text="Cloud" />
 
@@ -886,6 +886,16 @@ Every route the control plane serves: 384 routes, grouped by the source file tha
 | GET | `/api/v1/traces/:traceId/token-breakdown` | Authenticated | Per-tool token breakdown |
 | GET | `/api/v1/workspaces/:workspaceId/optimization-recommendations` | Authenticated |  |
 | GET | `/api/v1/workspaces/:workspaceId/waste-patterns` | Authenticated |  |
+
+### `inventory.ts` <Badge type="tip" text="Cloud" />
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/v1/inventory/devices` | OWNER/ADMIN/EM; DEVELOPER (own machines) | One row per machine with its counts, last report and guard-probe result |
+| GET | `/api/v1/inventory/harnesses` | OWNER/ADMIN/EM; DEVELOPER (own machines) | Harnesses by machine with gate state and status; filter by status, harness, device and q, or download with format=csv |
+| GET | `/api/v1/inventory/mcp-servers` | OWNER/ADMIN/EM; DEVELOPER (own machines) | MCP servers by machine, wrapped by the MCP proxy or not; the same filters and CSV download |
+| GET | `/api/v1/inventory/skills` | OWNER/ADMIN/EM; DEVELOPER (own machines) | Skill bundles by machine, by name, source and hash; filter by device and q |
+| GET | `/api/v1/inventory/summary` | OWNER/ADMIN/EM; DEVELOPER (own machines) | Counts: machines, stale machines, harnesses, governed percentage, ungoverned harnesses and MCP servers, skills |
 
 ### `judge.ts` <Badge type="tip" text="Cloud" />
 
