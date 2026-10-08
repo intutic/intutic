@@ -20,9 +20,10 @@ intutic init
 ```
 
 ```
-✓ Detected harnesses:
-  • mastra → .env.intutic
+  ✔ mastra → .env.intutic
 ```
+
+`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
 
 ### 2. Route LLM traffic through the proxy
 

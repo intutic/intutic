@@ -17,9 +17,10 @@ intutic init
 The CLI detects Goose and registers it as a harness:
 
 ```
-✓ Detected harnesses:
-  • goose -> ~/.config/goose/config.yaml
+  ✔ goose → .config/goose/config.yaml
 ```
+
+`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
 
 ### 2. Start the proxy
 

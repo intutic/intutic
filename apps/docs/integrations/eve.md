@@ -30,9 +30,10 @@ intutic init
 ```
 
 ```
-✓ Detected harnesses:
-  • eve → .env.intutic
+  ✔ eve → .env.intutic
 ```
+
+`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
 
 ### 2. Gate authored tools (SDK)
 

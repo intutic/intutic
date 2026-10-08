@@ -1,9 +1,15 @@
 /**
- * codex.ts — Codex adapter (updated: also writes ~/.codex/config.toml).
+ * codex.ts — Codex adapter.
  *
- * In addition to the workspace .env.intutic file, writes
- * ~/.codex/config.toml with model_providers.litellm.base_url so Codex
- * routes LLM calls through the Intutic proxy even without env var sourcing.
+ * Writes three things:
+ * - `.env.intutic` in the workspace, with the proxy base URLs for shells and
+ *   scripts that source it;
+ * - `openai_base_url` in Codex's user config (`$CODEX_HOME/config.toml`,
+ *   `~/.codex/config.toml` by default), merged into the user's file, so Codex
+ *   routes LLM calls through the proxy without sourcing anything — see
+ *   codexConfigMerger.ts;
+ * - the PreToolUse gate, registered in `~/.codex/hooks.json` and the
+ *   project's `.codex/hooks.json` — see codexHooks.ts.
  *
  * HLD §3.14 — Harness Onboarding Matrix
  * @module
@@ -12,14 +18,21 @@
 import { join, dirname } from 'node:path'
 import { writeFile, rename, mkdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { HarnessType } from '@intutic/shared-types'
+import { HarnessType, anthropicBaseUrl, openaiBaseUrl, proxyHost } from '@intutic/shared-types'
 import type { SyncSopEntry } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
 import { hashFile } from '../lib/hash.js'
+import { loadCredentials } from '../config/store.js'
 import { newIso } from '@intutic/id'
+import { writeCodexHooks, mergeCodexConfig } from '@intutic/sync-daemon'
 
 const CONFIG_FILE = '.env.intutic'
-const CODEX_CONFIG = join(homedir(), '.codex', 'config.toml')
+
+/** Codex's user config directory, resolved at call time so CODEX_HOME and
+ *  HOME changes (and tests that move them) are honoured. */
+function codexHome(): string {
+  return process.env.CODEX_HOME || join(homedir(), '.codex')
+}
 
 export const codexAdapter: IHarnessAdapter = {
   type: HarnessType.CODEX,
@@ -46,9 +59,9 @@ export const codexAdapter: IHarnessAdapter = {
       `# Last sync: ${newIso()}`,
       '# Source this file: source .env.intutic',
       '',
-      `export ANTHROPIC_BASE_URL="${proxyUrl}"`,
-      `export OPENAI_BASE_URL="${proxyUrl}"`,
-      `export INTUTIC_PROXY_URL="${proxyUrl}"`,
+      `export ANTHROPIC_BASE_URL="${anthropicBaseUrl(proxyUrl)}"`,
+      `export OPENAI_BASE_URL="${openaiBaseUrl(proxyUrl)}"`,
+      `export INTUTIC_PROXY_URL="${proxyHost(proxyUrl)}"`,
       `export INTUTIC_SOP_COUNT=${sops.length}`,
       '',
     ].join('\n')
@@ -58,24 +71,14 @@ export const codexAdapter: IHarnessAdapter = {
     await writeFile(tmpEnv, envContent, 'utf-8')
     await rename(tmpEnv, filePath)
 
-    // 2. ~/.codex/config.toml — persists proxy across sessions without env sourcing
-    const codexToml = [
-      '# Intutic proxy config (auto-generated)',
-      '# DO NOT EDIT — managed by intutic sync daemon',
-      `# Last sync: ${newIso()}`,
-      '',
-      '[model_providers.litellm]',
-      `base_url = "${proxyUrl}"`,
-      '',
-      '[model_providers.openai]',
-      `base_url = "${proxyUrl}"`,
-      '',
-    ].join('\n')
+    // 2. Codex user config — persists proxy routing across sessions without
+    //    env sourcing. Merged; a config.toml that does not parse is left alone.
+    await mergeCodexConfig(join(codexHome(), 'config.toml'), openaiBaseUrl(proxyUrl))
 
-    await mkdir(dirname(CODEX_CONFIG), { recursive: true })
-    const tmpToml = CODEX_CONFIG + '.intutic-tmp'
-    await writeFile(tmpToml, codexToml, 'utf-8')
-    await rename(tmpToml, CODEX_CONFIG)
+    // 3. The PreToolUse gate. The routing above governs LLM egress only; the
+    //    gate is what refuses tool calls.
+    const creds = await loadCredentials()
+    await writeCodexHooks(workspaceRoot, proxyUrl, creds?.workspaceId || 'local')
 
     return filePath
   },

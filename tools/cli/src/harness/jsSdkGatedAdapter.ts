@@ -30,6 +30,7 @@
 import { join, dirname } from 'node:path'
 import { readFile, writeFile, rename, mkdir } from 'node:fs/promises'
 import type { HarnessType, SyncSopEntry } from '@intutic/shared-types'
+import { anthropicBaseUrl, openaiBaseUrl, proxyHost } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
 import { hashFile } from '../lib/hash.js'
 import { newIso } from '@intutic/id'
@@ -183,9 +184,9 @@ export function makeJsSdkGatedAdapter(spec: JsSdkGatedFrameworkSpec): IHarnessAd
         `# Last sync: ${newIso()}`,
         '# Source this file: source .env.intutic',
         '',
-        `export ANTHROPIC_BASE_URL="${proxyUrl}"`,
-        `export OPENAI_BASE_URL="${proxyUrl}"`,
-        `export INTUTIC_PROXY_URL="${proxyUrl}"`,
+        `export ANTHROPIC_BASE_URL="${anthropicBaseUrl(proxyUrl)}"`,
+        `export OPENAI_BASE_URL="${openaiBaseUrl(proxyUrl)}"`,
+        `export INTUTIC_PROXY_URL="${proxyHost(proxyUrl)}"`,
         `export INTUTIC_SOP_COUNT=${sops.length}`,
         '',
         ...preamble.map((line) => `# ${line}`),

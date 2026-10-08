@@ -14,9 +14,9 @@ Hello! I am **Kitkat**, your friendly agentic control plane assistant for the In
 Use the `intutic` CLI commands to manage the daemon, inspect execution traces, or manage governed task loops in your workspace:
 
 ### 1. Connection & Session Setup
-- **Authenticate:** `intutic login` (authenticates with your Intutic control plane).
-- **Initialize Workspace:** `intutic init` (scans active developer harnesses like Claude Code or Cursor, and configures synchronization hooks).
-- **Start Connection:** `intutic connect` (spawns the sync daemon to mirror policies and boots the local interceptor proxy).
+- **Authenticate:** `intutic login [--control-plane-url <url>]` (authenticates with your Intutic control plane).
+- **Initialize Workspace:** `intutic init` (detects the developer harnesses in the workspace, like Claude Code or Cursor, and records them for sync).
+- **Start Connection:** `intutic connect` (boots the local interceptor proxy, writes each recorded harness's rules and hooks, and keeps them in sync with the control plane).
 - **Offline Spend Sync:** The sync daemon automatically reconciles offline query consumption logs (`traces-*.jsonl`) and local budgets back to the control plane on reconnect.
 
 ### 2. Traces & Auditing
@@ -75,7 +75,7 @@ When interacting with LLM providers through the local proxy, prepend requests wi
 ## 🛡️ Policy & Hook Verification
 
 1. **Pre-Tool Interception Hooks:**
-   Harness configurations (e.g. `.claude/settings.json`, `.cursorrules`) are automatically updated by the sync daemon. They register execution hooks that block unauthorized tools or unsafe commands before execution.
+   Harness configurations (e.g. `.claude/settings.json`, `.cursor/hooks.json`) are automatically updated by `intutic connect`. They register execution hooks that block unauthorized tools or unsafe commands before execution.
 2. **Local Guidelines & Scoping:**
    Define local, developer-specific rules inside subdirectories of the `.intutic/sops/` directory (e.g. `.intutic/sops/my-rules/rules.md`). Initialize them using `@intutic initialize` and select active local SOPs using `@intutic start <ticket> --sops=<indices_or_names>`. These rules are enforced locally in the developer console to protect developer privacy, while global/corporate rules log incidents back to the control plane.
 3. **Offline Sync & Promotion:**

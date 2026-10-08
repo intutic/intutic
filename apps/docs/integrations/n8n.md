@@ -4,9 +4,9 @@ Integrate Intutic governance with [n8n](https://n8n.io) — the workflow automat
 
 ## How it works
 
-n8n is governed at two levels. The sync-daemon automatically handles detection and config generation:
+n8n is governed at two levels. `intutic connect` writes the files below for a recorded n8n harness:
 
-1. **Detection**: The sync-daemon checks for active `n8n` processes running locally.
+1. **Detection**: `intutic init` checks for an n8n API at `N8N_URL` (default `http://localhost:5678`), or an `N8N_API_TOKEN` in the environment.
 2. **Blocking gate (workflow-level)**: It writes an n8n *external hook* module to `~/.intutic/hooks/n8n-governance-hook.js`. Loaded via `EXTERNAL_HOOK_FILES` (see below), its `workflow.preExecute` hook runs before **every workflow execution**, evaluates each node's type and parameters against the compiled protection floor and your policy snapshot, and **throws** on a block-severity match — aborting the execution with an error naming the offending node and rule.
 3. **Workflow Generation**: It builds and writes a pre-configured, importable n8n 1.x workflow JSON to `~/.intutic/n8n/governance-workflow.json` (event forwarding — telemetry, not enforcement).
 4. **Environment Setup**: It generates a `.intutic/env/n8n.env` file within the workspace, plus `~/.intutic/n8n/INSTALL.md` with the gate's installation steps.
@@ -45,11 +45,12 @@ node's **serialized parameters** are what command/path rules and ` WHERE `
 ## Setup & Activation
 
 ### 1. Detect & Generate
-Run the Intutic init command to detect and configure active harnesses:
+Run the Intutic init command to detect active harnesses, then connect:
 ```bash
 intutic init
+intutic connect
 ```
-If an active n8n instance is running, the sync-daemon will register it and write the importable workflow JSON to `~/.intutic/n8n/governance-workflow.json`.
+If n8n was detected, `intutic connect` writes the gate, `INSTALL.md` and the importable workflow JSON to `~/.intutic/n8n/governance-workflow.json`, and sets the `intutic_proxy_url` and `intutic_governance_rules` variables on your workflows through the n8n API.
 
 ### 2. Import into n8n
 1. Open your local or self-hosted n8n instance.

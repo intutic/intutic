@@ -36,7 +36,7 @@ export const trueforgeAdapter = makeJsSdkGatedAdapter({
     'Gate.guard() verdict, producing user.tool_approval items for your next ' +
     "session.createTurn() call. NOTE: TrueForge has no synchronous approval callback to " +
     'hang a function off — this is a batch responder, not a beforeToolCall/toolApproval ' +
-    'option. Covers embedded-library mode only; the standalone/hosted server is not yet ' +
-    'supported.',
+    'option. Covers embedded-library mode only; TrueForge run as its own server is ' +
+    'governed by the TrueForge bridge service instead (see the server-mode docs).',
   docsSlug: 'trueforge',
 })

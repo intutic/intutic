@@ -78,8 +78,9 @@ describe('hooks manifests (Jamf / Intune)', () => {
       it('populates content from the real buildHooksConfig shape, referencing the real script filename', () => {
         const json = generate({ hookScriptPath: '/opt/intutic/hooks/cursor-check.js' })
         const parsed = JSON.parse(json)
-        expect(parsed.content.hooks.beforeShellExecution.command).toBe('node "/opt/intutic/hooks/cursor-check.js"')
-        expect(parsed.content.failClosed).toBe(true)
+        expect(parsed.content.version).toBe(1)
+        expect(parsed.content.hooks.beforeShellExecution[0].command).toBe('node "/opt/intutic/hooks/cursor-check.js"')
+        expect(parsed.content.hooks.beforeShellExecution[0].failClosed).toBe(true)
       })
 
       it('defaults target_path to the real macOS system hooks location, not /etc/cursor', () => {

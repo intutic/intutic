@@ -2,8 +2,10 @@
  * codexHooks.ts — Codex CLI PreToolUse hook injection.
  *
  * Codex CLI executes PreToolUse hooks registered in `hooks.json`:
- *   - User-level:    ~/.codex/hooks.json
- *   - Project-level: <workspaceRoot>/.codex/hooks.json
+ *   - User-level:    $CODEX_HOME/hooks.json (~/.codex/hooks.json by default)
+ *   - Project-level: <workspaceRoot>/.codex/hooks.json — Codex loads this one
+ *     only once the user has trusted the project's `.codex/` layer, so the
+ *     user-level registration is the one that always applies.
  *
  * Each PreToolUse entry carries a `matcher` regex over tool names; the hook
  * command receives JSON on stdin — {tool_name, tool_use_id, tool_input}, with
@@ -29,6 +31,7 @@ import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { newIso } from '@intutic/id'
 import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
+import { readJsonObjectForMerge } from './jsonMergeTarget.js'
 
 const log = createLogger('sync-codex-hooks')
 
@@ -143,12 +146,8 @@ process.stdin.on('end', () => {
  * uses — so repeated syncs are idempotent and never stack duplicate entries.
  */
 async function mergeCodexHooksJson(configPath: string, hookScriptPath: string): Promise<void> {
-  let existing: Record<string, unknown> = {}
-  try {
-    existing = JSON.parse(await fs.readFile(configPath, 'utf-8'))
-  } catch {
-    // File doesn't exist or is malformed — start fresh
-  }
+  const existing = await readJsonObjectForMerge(configPath)
+  if (existing === null) return
 
   const existingHooks = (existing.hooks as Record<string, unknown>) ?? {}
   const existingPreToolUse = Array.isArray(existingHooks.PreToolUse)
@@ -238,8 +237,9 @@ export async function writeCodexHooks(
   await mergeCodexHooksJson(path.join(projectCodexDir, 'hooks.json'), hookScriptPath)
   log.info({ action: 'codex_hooks_written', level: 'project', path: projectCodexDir }, 'Codex project-level hooks written')
 
-  // 2. User-level: ~/.codex/hooks.json
-  const userCodexDir = path.join(os.homedir(), '.codex')
+  // 2. User-level: $CODEX_HOME/hooks.json — Codex keeps its user config in
+  // CODEX_HOME when set, ~/.codex otherwise.
+  const userCodexDir = process.env.CODEX_HOME || path.join(os.homedir(), '.codex')
   await fs.mkdir(userCodexDir, { recursive: true })
   await mergeCodexHooksJson(path.join(userCodexDir, 'hooks.json'), hookScriptPath)
   log.info({ action: 'codex_hooks_written', level: 'user', path: userCodexDir }, 'Codex user-level hooks written')

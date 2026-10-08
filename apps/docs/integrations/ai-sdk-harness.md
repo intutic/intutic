@@ -24,9 +24,10 @@ intutic init
 ```
 
 ```
-✓ Detected harnesses:
-  • ai-sdk-harness → .env.intutic
+  ✔ ai-sdk-harness → .env.intutic
 ```
+
+`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
 
 Detection triggers on any of: `@ai-sdk/harness` itself, any `@ai-sdk/harness-*` runtime adapter, or any `@ai-sdk/sandbox-*` provider in `package.json`.
 
@@ -138,7 +139,7 @@ const agent = new HarnessAgent({
 
 ## Double-gating note: wrapped runtimes that are themselves Intutic harnesses
 
-`@ai-sdk/harness-claude-code` and `@ai-sdk/harness-grok-build` wrap **Claude Code** and **Grok Build** — both natively-gated Intutic harnesses on a developer machine (see [the coverage matrix](/reference/harness-security-matrix)). Unlike [Grok Build's own double-gating behaviour](/reference/harness-security-matrix#grok-build) — where a workspace's existing `.claude/settings.json`/`.cursor/hooks.json` gates fire *in addition to* the native one — here the situation was, until `intuticSandboxBootstrap()`, the **inverse**: the sync-daemon's hook files are written to your repo and home directory, and *neither exists inside the sandbox microVM* (worktree propagation reaches git worktrees on your machine, not filesystems inside a Vercel Sandbox). Step 5 above closes part of that gap for Claude Code, at Tier A1 only — everything below states precisely what is and is not confirmed about it.
+`@ai-sdk/harness-claude-code` and `@ai-sdk/harness-grok-build` wrap **Claude Code** and **Grok Build** — both natively-gated Intutic harnesses on a developer machine (see [the coverage matrix](/reference/harness-security-matrix)). Unlike [Grok Build's own double-gating behaviour](/integrations/grok) — where a workspace's existing `.claude/settings.json`/`.cursor/hooks.json` gates fire *in addition to* the native one — here the situation was, until `intuticSandboxBootstrap()`, the **inverse**: the sync-daemon's hook files are written to your repo and home directory, and *neither exists inside the sandbox microVM* (user-level hook registrations reach every directory on your machine, not filesystems inside a Vercel Sandbox). Step 5 above closes part of that gap for Claude Code, at Tier A1 only — everything below states precisely what is and is not confirmed about it.
 
 **What has been live-verified, and what has not (TD-417).** The core bootstrap-channel mechanics were confirmed against a real Vercel Sandbox on 2026-08-20: a throwaway sandbox was created, `intuticSandboxBootstrap()`'s `onBootstrap` was called against its real `writeFiles()`, all three generated files were confirmed present *inside* the running sandbox via `ls`/`cat`, and the generated hook script — invoked directly with a synthetic PreToolUse-shaped payload on stdin — was confirmed to exit `2` and block on a matching rule, and exit `0` and allow on a non-matching one. That proves the channel is not a no-op and the hook genuinely enforces when invoked. **Open after that 2026-08-20 pass:** whether the `@ai-sdk/harness` bridge itself wires this hook into a real model-driven PreToolUse dispatch (as opposed to a manually-piped stdin payload) needs a live Anthropic API key this environment did not have; whether the written files survive an actual snapshot/resume cycle needs a deliberate stop→resume test on a `persistent: true` sandbox, which the verification pass specifically skipped to avoid leaving billable snapshot storage behind; and the Grok Build path needs a live xAI key and has not been attempted at all, mechanically or via bridge.
 

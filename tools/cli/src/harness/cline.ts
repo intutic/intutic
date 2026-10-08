@@ -1,35 +1,41 @@
 /**
- * cline.ts — Cline adapter (full implementation).
+ * cline.ts — Cline adapter.
  *
- * Detects the Cline VS Code extension, writes Intutic governance rules
- * as .clinerules (flat file), injects the PreToolUse blocking hook into .cline/hooks/,
- * and configures the proxy base URL via VS Code settings + .env.intutic sidecar.
+ * Detects the Cline VS Code extension, writes Intutic governance rules to
+ * `.clinerules/intutic-governance.md` and installs the PreToolUse gate at
+ * `.clinerules/hooks/PreToolUse` (see clineHooks.ts — `.clinerules` is a
+ * directory so both fit; a flat `.clinerules` an earlier version wrote is
+ * converted, one the user wrote is left alone).
+ *
+ * Cline keeps its API provider and base URL in its own settings panel, not in
+ * any file this adapter can write, so routing Cline through the proxy is a
+ * manual step (see the Cline integration page).
  *
  * HLD §3.14 — Harness Onboarding Matrix
  * @module
  */
 
-import { access, readdir, writeFile, rename, mkdir } from 'node:fs/promises'
-import { join, dirname } from 'node:path'
+import { access, readdir, writeFile, rename } from 'node:fs/promises'
+import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { HarnessType } from '@intutic/shared-types'
 import type { SyncSopEntry } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
 import { hashFile } from '../lib/hash.js'
+import { loadCredentials } from '../config/store.js'
 import { newIso } from '@intutic/id'
-import { writeClineHooks } from '@intutic/sync-daemon/harness/clineHooks'
-import { injectClineProxySettings } from './vscodeSettingsWriter.js'
+import { writeClineHooks, ensureClinerulesDirectory } from '@intutic/sync-daemon/harness/clineHooks'
 
-const CONFIG_FILE = '.clinerules'
+const CONFIG_FILE = '.clinerules/intutic-governance.md'
 
 export const clineAdapter: IHarnessAdapter = {
   type: HarnessType.CLINE,
   configFileName: CONFIG_FILE,
 
   async detect(workspaceRoot: string): Promise<boolean> {
-    // Check for .clinerules in workspace
+    // Check for .clinerules (file or directory) in workspace
     try {
-      await access(join(workspaceRoot, CONFIG_FILE))
+      await access(join(workspaceRoot, '.clinerules'))
       return true
     } catch {
       // fall through
@@ -46,31 +52,31 @@ export const clineAdapter: IHarnessAdapter = {
   },
 
   async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
-    // 1. Write .clinerules text rules
-    const filePath = join(workspaceRoot, CONFIG_FILE)
-    const instructions = sops.length > 0
-      ? sops.map((sop) => `## ${sop.title}\n\n${sop.content}`).join('\n\n---\n\n')
-      : '# Intutic governance active — no SOP rules configured yet.'
+    // 1. Rules, as one file in the .clinerules directory Cline reads.
+    let filePath: string | null = null
+    if (await ensureClinerulesDirectory(workspaceRoot)) {
+      filePath = join(workspaceRoot, CONFIG_FILE)
+      const instructions = sops.length > 0
+        ? sops.map((sop) => `## ${sop.title}\n\n${sop.content}`).join('\n\n---\n\n')
+        : '# Intutic governance active — no SOP rules configured yet.'
 
-    const content = [
-      '# Intutic Governance Rules (auto-generated)',
-      '# DO NOT EDIT — managed by intutic sync daemon',
-      `# Last sync: ${newIso()}`,
-      '',
-      instructions,
-      '',
-    ].join('\n')
+      const content = [
+        '# Intutic Governance Rules (auto-generated)',
+        '# DO NOT EDIT — managed by intutic sync daemon',
+        `# Last sync: ${newIso()}`,
+        '',
+        instructions,
+        '',
+      ].join('\n')
 
-    await mkdir(dirname(filePath), { recursive: true })
-    const tmp = filePath + '.intutic-tmp'
-    await writeFile(tmp, content, 'utf-8')
-    await rename(tmp, filePath)
+      const tmp = filePath + '.intutic-tmp'
+      await writeFile(tmp, content, 'utf-8')
+      await rename(tmp, filePath)
+    }
 
-    // 2. Write PreToolUse blocking hooks into .cline/hooks/
-    await writeClineHooks(workspaceRoot, proxyUrl)
-
-    // 3. Inject proxy URL into VS Code settings + .env.intutic sidecar
-    await injectClineProxySettings(workspaceRoot, proxyUrl)
+    // 2. The PreToolUse gate in .clinerules/hooks/.
+    const creds = await loadCredentials()
+    await writeClineHooks(workspaceRoot, proxyUrl, creds?.workspaceId || 'local')
 
     return filePath
   },

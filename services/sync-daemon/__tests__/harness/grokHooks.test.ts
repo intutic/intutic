@@ -144,8 +144,8 @@ describe('Grok Build hooks writer', () => {
     ) as { model?: Record<string, { base_url?: string }> }
     // "grok-4.6" — CONFIRMED against the real open-sourced
     // xai-grok-models/default_models.json compiled default, not "default".
-    expect(projectToml.model?.['grok-4.6']?.base_url).toBe('http://127.0.0.1:4000')
-    expect(userToml.model?.['grok-4.6']?.base_url).toBe('http://127.0.0.1:4000')
+    expect(projectToml.model?.['grok-4.6']?.base_url).toBe('http://127.0.0.1:4000/v1')
+    expect(userToml.model?.['grok-4.6']?.base_url).toBe('http://127.0.0.1:4000/v1')
   })
 
   it('never invents a model id if one is already configured — only overrides base_url', async () => {
@@ -174,7 +174,7 @@ describe('Grok Build hooks writer', () => {
     }
 
     const merged = parseToml(mergedRaw) as { model?: Record<string, { base_url?: string; temperature?: number }> }
-    expect(merged.model?.['grok-4']?.base_url).toBe('http://127.0.0.1:4000')
+    expect(merged.model?.['grok-4']?.base_url).toBe('http://127.0.0.1:4000/v1')
     expect(merged.model?.['grok-4']?.temperature).toBe(0.2)
     expect(merged.model?.['grok-4.6']).toBeUndefined()
   })

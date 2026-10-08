@@ -249,6 +249,55 @@ fn spawn_reward_update(
 /// under `https://api.deepseek.com` and an Anthropic-compatible one under
 /// `https://api.deepseek.com/anthropic`. dsh, DeepSeek's own harness, speaks
 /// the second. `serves_natively()` and `native_upstream_url()` carry that.
+/// An upstream base URL, and whether it came from the shared `UPSTREAM_URL`
+/// gateway rather than a provider-specific setting or the provider's own API.
+#[derive(Debug, Clone, PartialEq)]
+struct UpstreamBase {
+    url: String,
+    shared_gateway: bool,
+}
+
+/// Resolve a provider's upstream base URL from configuration.
+///
+/// Precedence, first set (non-empty) wins:
+/// 1. the provider's own variable (`ANTHROPIC_UPSTREAM_URL`,
+///    `OPENAI_UPSTREAM_URL`, `GEMINI_UPSTREAM_URL`, `MISTRAL_UPSTREAM_URL`,
+///    `OPENROUTER_UPSTREAM_URL`, `DEEPSEEK_UPSTREAM_URL`);
+/// 2. `UPSTREAM_URL` — one gateway for every provider, e.g. a LiteLLM that
+///    serves both `/v1/messages` and `/v1/chat/completions`. This is what
+///    `intutic start --upstream-url` and the installed service set;
+/// 3. the provider's public API.
+///
+/// A trailing `/` is dropped, since every caller appends a path that starts
+/// with one. `var` is the environment lookup, passed in so the precedence can
+/// be tested without mutating the process environment other tests read.
+fn resolve_upstream_base(provider: &Provider, var: impl Fn(&str) -> Option<String>) -> UpstreamBase {
+    let (specific, public) = match provider {
+        Provider::Anthropic => ("ANTHROPIC_UPSTREAM_URL", "https://api.anthropic.com"),
+        Provider::OpenAI => ("OPENAI_UPSTREAM_URL", "https://api.openai.com"),
+        Provider::Gemini => ("GEMINI_UPSTREAM_URL", "https://generativelanguage.googleapis.com"),
+        // https://docs.mistral.ai/api/ — stable, documented OpenAI-
+        // compatible endpoint since Mistral's API launch.
+        Provider::Mistral => ("MISTRAL_UPSTREAM_URL", "https://api.mistral.ai"),
+        // https://openrouter.ai/docs/quickstart — "drop-in OpenAI
+        // replacement" has been OpenRouter's core design since inception.
+        Provider::OpenRouter => ("OPENROUTER_UPSTREAM_URL", "https://openrouter.ai/api"),
+        // https://api-docs.deepseek.com/ — OpenAI-compatible at this
+        // root (`/chat/completions`, also `/v1/chat/completions`).
+        Provider::DeepSeek => ("DEEPSEEK_UPSTREAM_URL", "https://api.deepseek.com"),
+    };
+    let set = |name: &str| var(name).filter(|v| !v.trim().is_empty());
+    let (url, shared_gateway) = match (set(specific), set("UPSTREAM_URL")) {
+        (Some(url), _) => (url, false),
+        (None, Some(url)) => (url, true),
+        (None, None) => (public.to_string(), false),
+    };
+    UpstreamBase {
+        url: url.trim().trim_end_matches('/').to_string(),
+        shared_gateway,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 enum Provider {
     Anthropic,
@@ -294,29 +343,15 @@ impl Provider {
             || (*self == Provider::DeepSeek && *inbound == Provider::Anthropic)
     }
 
-    /// Return the base URL of the upstream provider.
-    /// Reads env vars at call time so they can be overridden in tests.
+    /// Where this provider's requests go. Reads the environment at call time
+    /// so tests can override it; see `resolve_upstream_base` for precedence.
+    fn upstream_base(&self) -> UpstreamBase {
+        resolve_upstream_base(self, |name| std::env::var(name).ok())
+    }
+
+    /// The base URL of the upstream this provider's requests go to.
     fn upstream_base_url(&self) -> String {
-        match self {
-            Provider::Anthropic => std::env::var("ANTHROPIC_UPSTREAM_URL")
-                .unwrap_or_else(|_| "https://api.anthropic.com".to_string()),
-            Provider::OpenAI => std::env::var("OPENAI_UPSTREAM_URL")
-                .unwrap_or_else(|_| "https://api.openai.com".to_string()),
-            Provider::Gemini => std::env::var("GEMINI_UPSTREAM_URL")
-                .unwrap_or_else(|_| "https://generativelanguage.googleapis.com".to_string()),
-            // https://docs.mistral.ai/api/ — stable, documented OpenAI-
-            // compatible endpoint since Mistral's API launch.
-            Provider::Mistral => std::env::var("MISTRAL_UPSTREAM_URL")
-                .unwrap_or_else(|_| "https://api.mistral.ai".to_string()),
-            // https://openrouter.ai/docs/quickstart — "drop-in OpenAI
-            // replacement" has been OpenRouter's core design since inception.
-            Provider::OpenRouter => std::env::var("OPENROUTER_UPSTREAM_URL")
-                .unwrap_or_else(|_| "https://openrouter.ai/api".to_string()),
-            // https://api-docs.deepseek.com/ — OpenAI-compatible at this
-            // root (`/chat/completions`, also `/v1/chat/completions`).
-            Provider::DeepSeek => std::env::var("DEEPSEEK_UPSTREAM_URL")
-                .unwrap_or_else(|_| "https://api.deepseek.com".to_string()),
-        }
+        self.upstream_base().url
     }
 
     fn harness_name(&self) -> &'static str {
@@ -1269,13 +1304,29 @@ async fn fetch_provider_credential(
     }
 }
 
+/// The path a DeepSeek request is sent to, by protocol. DeepSeek's own API
+/// takes Messages under `/anthropic`; a shared `UPSTREAM_URL` gateway serves
+/// each wire at its standard path instead. `None` when DeepSeek has no
+/// endpoint for the protocol.
+fn deepseek_path(protocol: &crate::protocol::Protocol, shared_gateway: bool) -> Option<&'static str> {
+    use crate::protocol::Protocol as P;
+    match protocol {
+        P::Anthropic if shared_gateway => Some("/v1/messages"),
+        P::Anthropic => Some("/anthropic/v1/messages"),
+        P::OpenAIChatCompletions => Some("/v1/chat/completions"),
+        _ => None,
+    }
+}
+
 /// The upstream URL for a natively served request (`serves_natively`), or
 /// `None` when the target has no endpoint for this protocol.
 ///
 /// DeepSeek's URL is built from the PROTOCOL (TD-370): Messages go to its
 /// Anthropic-compatible API under `/anthropic`
-/// (https://api-docs.deepseek.com/guides/anthropic_api), Chat Completions to
-/// `/v1/chat/completions`, and nothing else has a DeepSeek endpoint. Neither
+/// (https://api-docs.deepseek.com/guides/anthropic_api), or to `/v1/messages`
+/// on a shared `UPSTREAM_URL` gateway, Chat Completions to
+/// `/v1/chat/completions`, and nothing else has a DeepSeek endpoint — see
+/// `deepseek_path`. Neither
 /// the inbound path nor a client-named `Host` is used: either would let a
 /// client pick DeepSeek's Anthropic endpoint while the proxy reads the
 /// exchange as another wire (metering, text extraction, the auth header).
@@ -1291,18 +1342,10 @@ fn native_upstream_url(
     host_name: &str,
     uri_path: &str,
 ) -> Option<String> {
-    use crate::protocol::Protocol as P;
     if *target == Provider::DeepSeek {
-        let path = match protocol {
-            P::Anthropic => "/anthropic/v1/messages",
-            P::OpenAIChatCompletions => "/v1/chat/completions",
-            _ => return None,
-        };
-        return Some(format!(
-            "{}{}",
-            target.upstream_base_url().trim_end_matches('/'),
-            path
-        ));
+        let base = target.upstream_base();
+        let path = deepseek_path(protocol, base.shared_gateway)?;
+        return Some(format!("{}{}", base.url, path));
     }
     let base = if !host_name.is_empty() && crate::hostname_filter::is_ai_provider_host(host_name) {
         format!("https://{}", host_name)
@@ -10060,6 +10103,63 @@ mod tests {
             ),
             Some("https://api.openai.com/v1/chat/completions".to_string())
         );
+    }
+
+    /// `UPSTREAM_URL` (what `intutic start --upstream-url` sets) is the default
+    /// upstream for every provider; a provider's own variable still wins, and
+    /// with neither set the provider's public API is used.
+    #[test]
+    fn upstream_url_is_the_default_for_every_provider_unless_its_own_variable_is_set() {
+        use std::collections::HashMap;
+        let lookup = |vars: HashMap<&'static str, &'static str>| {
+            move |name: &str| vars.get(name).map(|v| v.to_string())
+        };
+
+        let gateway = lookup(HashMap::from([("UPSTREAM_URL", "http://litellm:4000/")]));
+        for provider in [
+            Provider::Anthropic,
+            Provider::OpenAI,
+            Provider::Gemini,
+            Provider::Mistral,
+            Provider::OpenRouter,
+            Provider::DeepSeek,
+        ] {
+            assert_eq!(
+                resolve_upstream_base(&provider, &gateway),
+                UpstreamBase { url: "http://litellm:4000".to_string(), shared_gateway: true },
+                "{provider:?}"
+            );
+        }
+
+        let both = lookup(HashMap::from([
+            ("UPSTREAM_URL", "http://litellm:4000"),
+            ("ANTHROPIC_UPSTREAM_URL", "http://anthropic-mirror"),
+            ("OPENAI_UPSTREAM_URL", ""),
+        ]));
+        assert_eq!(
+            resolve_upstream_base(&Provider::Anthropic, &both),
+            UpstreamBase { url: "http://anthropic-mirror".to_string(), shared_gateway: false }
+        );
+        // An empty provider variable counts as unset.
+        assert_eq!(resolve_upstream_base(&Provider::OpenAI, &both).url, "http://litellm:4000");
+
+        let none = lookup(HashMap::new());
+        assert_eq!(
+            resolve_upstream_base(&Provider::Anthropic, &none),
+            UpstreamBase { url: "https://api.anthropic.com".to_string(), shared_gateway: false }
+        );
+        assert_eq!(resolve_upstream_base(&Provider::OpenRouter, &none).url, "https://openrouter.ai/api");
+    }
+
+    /// Behind a shared gateway, DeepSeek's Messages traffic goes to the
+    /// gateway's standard `/v1/messages`, not DeepSeek's own `/anthropic` path.
+    #[test]
+    fn deepseek_messages_path_follows_the_upstream_kind() {
+        use crate::protocol::Protocol as P;
+        assert_eq!(deepseek_path(&P::Anthropic, false), Some("/anthropic/v1/messages"));
+        assert_eq!(deepseek_path(&P::Anthropic, true), Some("/v1/messages"));
+        assert_eq!(deepseek_path(&P::OpenAIChatCompletions, true), Some("/v1/chat/completions"));
+        assert_eq!(deepseek_path(&P::OpenAIResponses, true), None);
     }
 
     /// The route decides the wire shape, not the vendor.

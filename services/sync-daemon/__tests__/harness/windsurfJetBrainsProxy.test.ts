@@ -9,6 +9,11 @@ import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import * as os from 'node:os'
 
+/** What the Windsurf plugin saves once it has run in an IDE. */
+const CODEIUM_SETTINGS_XML =
+  '<application>\n  <component name="com.codeium.intellij.settings.AppSettingsState">\n' +
+  '    <option name="detectProxy" value="false" />\n  </component>\n</application>\n'
+
 describe('windsurfJetBrainsProxy', () => {
   let home: string
   let jetbrainsRoot: string
@@ -77,6 +82,7 @@ describe('windsurfJetBrainsProxy', () => {
   it('configureJetBrainsWindsurfProxy writes both proxy.settings.xml and CodeiumSettings.xml for a discovered IDE, preserving pre-existing content', async () => {
     const optionsDir = path.join(jetbrainsRoot, 'PyCharm2026.1', 'options')
     await fs.mkdir(optionsDir, { recursive: true })
+    await fs.writeFile(path.join(optionsDir, 'CodeiumSettings.xml'), CODEIUM_SETTINGS_XML, 'utf-8')
     // Pre-existing, user-set proxy exception the merge must not drop.
     await fs.writeFile(
       path.join(optionsDir, 'proxy.settings.xml'),
@@ -105,6 +111,9 @@ describe('windsurfJetBrainsProxy', () => {
     const pycharmOptions = path.join(jetbrainsRoot, 'PyCharm2026.1', 'options')
     await fs.mkdir(ideaOptions, { recursive: true })
     await fs.mkdir(pycharmOptions, { recursive: true })
+    for (const dir of [ideaOptions, pycharmOptions]) {
+      await fs.writeFile(path.join(dir, 'CodeiumSettings.xml'), CODEIUM_SETTINGS_XML, 'utf-8')
+    }
 
     const { configureJetBrainsWindsurfProxy } = await import('../../src/harness/windsurfJetBrainsProxy.js')
     await configureJetBrainsWindsurfProxy(8877)
@@ -113,5 +122,17 @@ describe('windsurfJetBrainsProxy', () => {
       const codeiumXml = await fs.readFile(path.join(dir, 'CodeiumSettings.xml'), 'utf-8')
       expect(codeiumXml).toContain('<option name="detectProxy" value="true" />')
     }
+  })
+
+  it('configureJetBrainsWindsurfProxy leaves an IDE without the Windsurf plugin untouched', async () => {
+    // The platform proxy reroutes ALL of an IDE's HTTP traffic; an IDE whose
+    // options/ has no CodeiumSettings.xml has never run the plugin.
+    const goland = path.join(jetbrainsRoot, 'GoLand2026.2', 'options')
+    await fs.mkdir(goland, { recursive: true })
+
+    const { configureJetBrainsWindsurfProxy } = await import('../../src/harness/windsurfJetBrainsProxy.js')
+    await configureJetBrainsWindsurfProxy(4000)
+
+    expect(await fs.readdir(goland)).toEqual([])
   })
 })

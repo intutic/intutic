@@ -428,6 +428,13 @@ export default defineConfig({
             { text: 'AWS Bedrock AgentCore', link: '/integrations/agentcore' },
           ],
         },
+        {
+          text: 'Server-Side Platforms',
+          items: [
+            { text: 'QM', link: '/integrations/qm' },
+            { text: 'Anthropic Managed Agents', link: '/integrations/anthropic-managed-agents' },
+          ],
+        },
       ],
       '/external/': sidebarExternal,
       '/reference/': sidebarReference,

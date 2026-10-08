@@ -46,10 +46,14 @@ Intutic Proxy supports two primary self-hosted deployment topologies depending o
   ```yaml
   services:
     intutic-proxy:
-      image: intutic/proxy:latest
+      # Built from this repository's packages/proxy/Dockerfile:
+      #   docker build -t intutic-proxy packages/proxy
+      image: intutic-proxy
       ports:
         - "4000:4000"
       environment:
+        # One upstream for every provider: LiteLLM serves both
+        # /v1/messages and /v1/chat/completions.
         - UPSTREAM_URL=http://litellm:4000
         # No CONTROL_PLANE_URL: open core ships no control plane, and pointing
         # this at a host that does not exist makes the policy pre-check fail —
@@ -65,17 +69,28 @@ Intutic Proxy supports two primary self-hosted deployment topologies depending o
   ```
 
 ### Option B: Standalone Intutic Proxy (Direct Provider Connection)
-* **How it works:** Run Intutic Proxy standalone without LiteLLM. Route traffic directly to upstream provider endpoints (`api.anthropic.com` or `api.openai.com`).
+* **How it works:** Run Intutic Proxy standalone without LiteLLM. Each request goes straight to its provider's public API (`api.anthropic.com`, `api.openai.com`, …), picked from the model it names — no upstream setting needed.
 * **Environment Setup:**
   ```bash
-  export ANTHROPIC_BASE_URL="http://localhost:4000/v1"
-  intutic start --upstream-url "https://api.anthropic.com"
+  intutic start
+  export ANTHROPIC_BASE_URL="http://localhost:4000"      # Anthropic SDKs append /v1/messages
+  export OPENAI_BASE_URL="http://localhost:4000/v1"      # OpenAI SDKs append /chat/completions
   ```
 * **Approved models:** With no control plane to publish a workspace allowlist, the standalone proxy reads `allowedModels` from `~/.intutic/config.json` and enforces it the same way. See [Settings → Standalone allowlist](/guide/settings#standalone-allowedmodels-in-intutic-config-json).
 
 ::: warning Standalone has no control plane: leave mirroring off
 `mirror_sample_rate` still mirrors up to 5% of eligible requests to a candidate model standalone — every mirrored request is billed twice — but there is no control plane to judge the pair or build the [adoption report](/guide/mirror-adoption-report), so the result is discarded. The proxy warns once, the first time. Keep the rate at `0` unless a control plane is attached.
 :::
+
+### Upstream URLs
+
+Where the proxy forwards a request is decided per provider, first match wins:
+
+1. The provider's own variable: `ANTHROPIC_UPSTREAM_URL`, `OPENAI_UPSTREAM_URL`, `GEMINI_UPSTREAM_URL`, `MISTRAL_UPSTREAM_URL`, `OPENROUTER_UPSTREAM_URL`, `DEEPSEEK_UPSTREAM_URL`.
+2. `UPSTREAM_URL` — one gateway for every provider. This is what `intutic start --upstream-url` and `intutic daemon install --proxy --upstream-url` set. Use it for a gateway that serves both `/v1/messages` and `/v1/chat/completions`, such as LiteLLM; behind it, DeepSeek's Anthropic-format requests go to `/v1/messages` rather than DeepSeek's own `/anthropic` path.
+3. The provider's public API.
+
+A request the proxy receives as a TLS-intercepted `CONNECT` to a known provider host (the Windsurf path) keeps going to that host.
 
 ### Option C: Native NPM Binary Runner (`npx @intutic/proxy`)
 * **How it works:** Execute the native high-performance Rust proxy binary directly via npm without needing Docker or Kubernetes:
@@ -95,9 +110,11 @@ Intutic Proxy supports two primary self-hosted deployment topologies depending o
   `intutic-proxy` binary, carrying the same `PORT`, `VALKEY_URL` /
   `INTUTIC_STANDALONE=1` and `UPSTREAM_URL` environment `intutic start` sets:
   ```bash
-  intutic daemon install --proxy --upstream-url "https://api.anthropic.com" --dry-run   # preview
-  intutic daemon install --proxy --upstream-url "https://api.anthropic.com"
+  intutic daemon install --proxy --dry-run   # preview
+  intutic daemon install --proxy
   ```
+  Add `--upstream-url http://localhost:4001` to send every provider's traffic to
+  a LiteLLM (or other gateway) instead — see [Upstream URLs](#upstream-urls).
   Option A/B's Docker container above remains the alternative, supervised by
   Docker's own restart policy.
 
@@ -105,7 +122,7 @@ Intutic Proxy supports two primary self-hosted deployment topologies depending o
 
 ### Option D: Intutic behind an existing gateway (Portkey, Kong, LiteLLM)
 
-* **How it works:** If your traffic already goes through an AI gateway, keep it there and put the Intutic proxy **between the gateway and the provider**. The gateway keeps doing routing, retries and virtual keys; Intutic sees every request the gateway forwards and applies DLP, tool interception and budgets on the way through. Point the gateway's provider base URL at the Intutic proxy, and point the Intutic proxy's `--upstream-url` at the real provider.
+* **How it works:** If your traffic already goes through an AI gateway, keep it there and put the Intutic proxy **between the gateway and the provider**. The gateway keeps doing routing, retries and virtual keys; Intutic sees every request the gateway forwards and applies DLP, tool interception and budgets on the way through. Point the gateway's provider base URL at the Intutic proxy. The Intutic proxy then forwards to each provider's public API; to send one provider somewhere else, set that provider's own variable (for example `OPENAI_UPSTREAM_URL`) — see [Upstream URLs](#upstream-urls).
 * **Portkey:** on the provider config (or per request, with the custom-host option Portkey documents for its provider integrations), set the provider's base URL to the Intutic proxy, for example `http://intutic-proxy:4000/v1`. Leave the provider's API key on the Portkey side; the Intutic proxy forwards the `Authorization` header it receives.
 * **Kong (AI Proxy plugin):** create a Service whose `url` is the Intutic proxy and a Route for the model path, and keep the AI Proxy plugin's provider settings as they are; Kong's rate limiting and key auth run first, Intutic's governance runs on the forwarded request.
 * **LiteLLM:** that is Option A above — LiteLLM stays the gateway and Intutic is its upstream.

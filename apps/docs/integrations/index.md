@@ -5,14 +5,15 @@ description: Connect Intutic to 43 AI coding agents — IDE extensions, CLI tool
 
 # Integrations <Badge type="tip" text="Open-Core" />
 
-Intutic supports **43 AI agent harnesses** out of the box. Run `intutic init` in your project and the CLI auto-detects which agents are present, then syncs governance rules to each one.
+Intutic supports **43 AI agent harnesses** out of the box. Run `intutic init` in your project and the CLI detects which agents are present and records them; `intutic connect` then writes each one's governance config and keeps it in sync.
 
 ```bash
 intutic init
-# ✔ Detected harnesses:
-#   ✔ cursor       → .cursorrules
-#   ✔ claude-code  → CLAUDE.md
-#   ✔ antigravity  → .gemini/settings.json
+#   ✔ cursor → .cursorrules
+#   ✔ claude-code → CLAUDE.md
+#   ✔ antigravity → .gemini/settings.json
+#   ○ windsurf (not detected)
+#   …
 ```
 
 Every harness connects through the same governance pipeline — proxy interception, SOP evaluation, and real-time enforcement — regardless of the underlying agent.
@@ -27,9 +28,9 @@ Code editors with built-in AI that read project-level config files.
 |---|---|---|
 | [**Cursor**](/integrations/cursor) | AI-powered code editor by Anysphere | `.cursorrules` |
 | [**Windsurf**](/integrations/windsurf) | AI-native code editor by Codeium | `.windsurfrules` |
-| [**Cline**](/integrations/cline) | VS Code extension for autonomous agentic coding | `.cline/hooks/hooks.json` |
+| [**Cline**](/integrations/cline) | VS Code extension for autonomous agentic coding | `.clinerules/` (rules + `hooks/PreToolUse`) |
 | [**Roo Code**](/integrations/roo-code) | AI-powered VS Code extension (formerly Roo Clinic) | `.roorules` |
-| [**Continue**](/integrations/continue) | Open-source autopilot for VS Code and JetBrains | `.continue/config.json` |
+| [**Continue**](/integrations/continue) | Open-source autopilot for VS Code and JetBrains | `~/.continue/config.yaml` + `.continue/settings.json` (CLI gate) |
 
 ## CLI Tools
 
@@ -39,8 +40,8 @@ Terminal-based agents that accept proxy environment variables or config files.
 |---|---|---|
 | [**Claude Code**](/integrations/claude-code) | Anthropic's agentic coding tool | `CLAUDE.md` |
 | [**Aider**](/integrations/aider) | AI pair programming CLI | `.aider.conf.yml` |
-| [**Codex**](/integrations/codex) | OpenAI's autonomous coding agent | `.env.intutic` |
-| [**Antigravity**](/integrations/antigravity) | Google's Gemini AI coding agent | `.gemini/settings.json` |
+| [**Codex**](/integrations/codex) | OpenAI's autonomous coding agent | `.env.intutic` + `~/.codex/config.toml` + `.codex/hooks.json` |
+| [**Antigravity**](/integrations/antigravity) | Google's Gemini AI coding agent | `.gemini/settings.json` + `~/.gemini/settings.json` (gate) |
 | [**Grok Build**](/integrations/grok) | xAI's terminal coding agent | `AGENTS.md` |
 | [**OpenCode**](/integrations/opencode) | Open-source terminal coding agent (`opencode-ai` 1.x, `@opencode/cli` 2.x); gated by a plugin loaded into its own process | `AGENTS.md` + `.opencode/plugins/intutic-governance.js` |
 | [**Muse Code**](/integrations/muse-code) | Meta's beta terminal coding agent (model Muse Spark) | `AGENTS.md` |
@@ -68,11 +69,13 @@ Autonomous coding agents that run multi-step tasks with tool use.
 | [**eve**](/integrations/eve) <Badge type="warning" text="Preview" /> | Vercel's filesystem-first durable backend agent framework | `.env.intutic` + SDK gate (per-tool/connection `approval`) |
 | [**AI SDK Harness**](/integrations/ai-sdk-harness) | Vercel's `@ai-sdk/harness` — coding-agent harnesses in Vercel Sandbox microVMs | `.env.intutic` + SDK gate (approval flow; see sandbox caveats) |
 | [**AI SDK Workflow**](/integrations/ai-sdk-workflow) | Vercel's `@ai-sdk/workflow` — durable workflow agents on the Workflow DevKit | `.env.intutic` + SDK gate (`needsApproval`) |
+| [**TrueForge** (embedded)](/integrations/trueforge) | TrueForge agent runtime used as a library in your own process | `.env.intutic` + SDK gate (approval responder) |
+| [**TrueForge** (server)](/integrations/trueforge#server-mode-standalone-hosted) | TrueForge run as its own standalone server | none — governed by the TrueForge bridge service |
 | [**AWS Bedrock AgentCore**](/integrations/agentcore) | AWS's managed hosting environment for the Runtime module — runs your own agent code (any framework) unchanged | none — delegates to whichever already-supported framework adapter your code uses |
 | [**OpenHands**](/integrations/openhands) | Open-source AI software developer platform | `config.toml` |
 | [**Goose**](/integrations/goose) | Block's terminal agent and desktop framework | `.agents/plugins/` |
-| [**Hermes**](/integrations/hermes) | NousResearch's skill-based developer agent | `.hermes/config.yaml` |
-| [**Pi**](/integrations/pi) | Inflection AI's developer command-line assistant | `.pi/hooks.json` |
+| [**Hermes**](/integrations/hermes) | NousResearch's skill-based developer agent | `~/.hermes/config.yaml` |
+| [**Pi**](/integrations/pi) | Pi coding agent (earendil-works/pi) | `~/.pi/hooks.json` + `~/.pi/models.json` |
 | [**OpenClaw**](/integrations/openclaw) | Developer terminal agent | `.openclaw/openclaw.json` |
 
 ## Platforms
@@ -81,10 +84,10 @@ Web UIs, desktop apps, and collaboration tools that host AI agents.
 
 | Harness | Description | Config File |
 |---|---|---|
-| [**n8n**](/integrations/n8n) | Workflow automation platform | API-based |
-| [**Open WebUI**](/integrations/open-webui) | Web interface for LLMs | `.open-webui/` filter |
+| [**n8n**](/integrations/n8n) | Workflow automation platform | API-based + `~/.intutic/hooks/n8n-governance-hook.js` |
+| [**Open WebUI**](/integrations/open-webui) | Web interface for LLMs | `~/.open-webui/` filter (installed by an admin) |
 | [**Claude Desktop**](/integrations/claude-desktop) | Anthropic's desktop application | `claude_desktop_config.json` |
-| [**GitHub Copilot**](/integrations/github-copilot) | GitHub's AI pair programmer | `.github/copilot-instructions.md` |
+| [**GitHub Copilot**](/integrations/github-copilot) | GitHub's AI pair programmer | `.github/copilot-instructions.md` + `.github/hooks/` |
 | [**Xirp**](/integrations/xirp) | Spotify's macOS orchestrator for parallel Claude Code/Codex/Gemini CLI sessions, each in its own tmux session + git worktree | none — delegates to the wrapped harness |
 | [**Agentic Orchestrator**](/integrations/agentic-orchestrator) | DoorDash's open-source (Apache-2.0) desktop app + CLI (`agentico`) for multi-phase feature workflows across Claude Code/Codex/OpenCode, each in its own git worktree | none — delegates to the wrapped backend (Claude Code, Codex and OpenCode each have their own gate) |
 
@@ -106,7 +109,7 @@ Backend platforms that call Intutic directly over HTTP as part of their own cont
 
 Intutic provides zero-trust governance regardless of your agent architecture:
 
-- **Single-Agent Assistants**: Governs individual coding tools (*Claude Code, Cursor, Windsurf, Aider, Antigravity*). Tool calls, file writes, and shell execution are intercepted synchronously before execution.
+- **Single-Agent Assistants**: Governs individual coding tools (*Claude Code, Cursor, Windsurf, Antigravity*). Tool calls, file writes, and shell execution are intercepted synchronously before execution by each harness's own hook. Aider has no pre-execution hook, so it is governed at the proxy only.
 - **Multi-Agent Swarms & Graphs**: Governs multi-agent frameworks (**LangGraph, CrewAI, AutoGen, OpenHands, OpenClaw, Hermes**). Every node's traffic crosses the same proxy under one session ID, so rules see the whole graph's tool history rather than a single node's turn — which is what makes ordering constraints, cycle-breaking and a shared budget ceiling enforceable across nodes. The request context also carries per-node identity — `node_id`, `agent_role`, `graph_id`, `parent_session_id`, `depth` — so rules can target one role or node as well as constrain the graph globally. Identity is client-supplied and unverifiable, so it scopes rules and observability only; authorisation stays bound to the virtual key. See [Graph Guardrails](/guide/graph-guardrails).
 
 Because every response byte passes through the proxy before the client sees it, the proxy also enforces the tool deny list on the **response** path (the response gate, open-core, default-on): a model-emitted `tool_calls[]` naming a denied tool is withheld before the harness's tool runner ever sees it — harness-agnostic, no client hook required, on both streaming and non-streaming responses (Anthropic, OpenAI chat-completions, and OpenAI Responses wire shapes). It is fail-closed within its scope: inert unless the active role has a non-empty deny list, and within that scope an unparseable non-streaming body is refused rather than forwarded. Two precise limits: on streams the deny list enforces at the tool **name** level only (arguments arrive as JSON fragments across chunks) — the one argument-level rule, the destructive-SQL guard ([`sql_guard:`](/reference/sop-front-matter#destructive-sql)), holds a shell-tool block until its arguments are complete — and it cannot see locally-originated tool calls that never traverse the proxy.
@@ -117,11 +120,11 @@ Because every response byte passes through the proxy before the client sees it, 
 
 - **Any Custom Harness**: Direct any custom agent or LLM client to the local Intutic proxy port (`:4000`):
   ```bash
-  export ANTHROPIC_BASE_URL="http://localhost:4000/v1"
-  export OPENAI_BASE_URL="http://localhost:4000/v1"
+  export ANTHROPIC_BASE_URL="http://localhost:4000"     # Anthropic SDKs append /v1/messages
+  export OPENAI_BASE_URL="http://localhost:4000/v1"      # OpenAI SDKs append /chat/completions
   ```
 - **Zero-Code Proxying**: No SDK modification required inside your agent codebase — Intutic operates transparently at the network/proxy layer.
-- **WASM Policy Rules SDK (`@intutic/wasm-sdk`)**: Compile custom policy rules in AssemblyScript, TypeScript, C, or Rust into hot-path proxy filters. See [Custom Filters (WASM Rules Engine)](/external/wasm-rules).
+- **WASM Rules SDK**: Write custom policy rules in AssemblyScript and compile them into hot-path proxy filters. The SDK is a template, not an npm package: copy it from `packages/wasm-sdk/` in the open-core repository. See [Custom Filters (WASM Rules Engine)](/external/wasm-rules).
 
 ---
 
@@ -130,7 +133,7 @@ Because every response byte passes through the proxy before the client sees it, 
 | Integration | Description |
 |---|---|
 | [**Standalone Proxy**](/integrations/standalone) | Route any LLM traffic through your own proxy without a harness adapter — works with any OpenAI-compatible client |
-| [**Kitkat Agent Custom Skill**](/integrations/kitkat) | Pre-built governance skill for agents that support custom skill files (`.intutic/SKILL.md`) |
+| [**Kitkat Agent Custom Skill**](/integrations/kitkat) | Pre-built governance skill for agents that support custom skill files (`.agents/skills/intutic-governance-kitkat/SKILL.md`) |
 
 ---
 
@@ -150,11 +153,19 @@ All harnesses share the same integration flow:
 └──────────────┘     └─────────────┘     └──────────────┘
 ```
 
-1. **`intutic init`** scans your workspace and detects all harness config files
-2. Governance rules (SOPs) are written into each harness's native config format
-3. **`intutic connect`** starts the proxy and keeps configs in sync as SOPs change
-   (`intutic connect` needs a control plane. Without one, `intutic start` runs the proxy and every harness config written in step 2 still applies.)
-4. Every tool call flows through the proxy for real-time policy evaluation
+1. **`intutic init`** scans your workspace, detects the harnesses present and records them in `~/.intutic/config.json`. It writes no harness files.
+2. **`intutic connect`** starts the proxy and writes each recorded harness's governance config in its native format — rules, hooks and proxy routing — then keeps them in sync as SOPs change (see [What writes harness files](#what-writes-harness-files)).
+3. Every tool call flows through the proxy, and through the harness's own hook where it has one, for real-time policy evaluation.
+
+`intutic connect` needs a control plane. Without one, `intutic start` runs the same proxy but writes no harness files: point each harness at the proxy as its page describes, or launch it with `intutic exec`.
+
+## What writes harness files
+
+Only `intutic connect` writes harness files. On each config sync it writes, for every harness recorded in `~/.intutic/config.json`, the files that harness's page lists — **if at least one SOP targets that harness**: a synced SOP whose targets include it, or any local SOP under `.intutic/sops/`, which targets every recorded harness. A harness no SOP targets is left alone. Hooks, rules and proxy routing are written together, so a gate is in place as soon as a harness has rules.
+
+To govern a harness `intutic init` did not detect, add its id (the harness type, e.g. `"codex"`) to the `harnesses` list in `~/.intutic/config.json` and restart `intutic connect`.
+
+Files the user also edits — `settings.json`, `hooks.json`, `config.toml`, `config.yaml`, `.aider.conf.yml` — are merged: only the Intutic keys or entries are added or replaced, and a file that does not parse is left untouched and reported in the `intutic connect` log.
 
 Each adapter uses **atomic writes** (write to temp file, then rename) to prevent config corruption during sync.
 

@@ -99,6 +99,7 @@ import * as os from 'node:os'
 import { isDeepStrictEqual } from 'node:util'
 import { isSeq, parseDocument } from 'yaml'
 import { createLogger } from '@intutic/logger'
+import { anthropicBaseUrl } from '@intutic/shared-types'
 
 const log = createLogger('sync-dsh-hooks')
 
@@ -597,7 +598,9 @@ export async function writeDshHooks(workspaceRoot: string, proxyUrl: string, wor
 
   for (const profileDir of profileDirs) {
     await mergeProfilePatch(profileDir, workspaceRoot, workspaceId)
-    await mergeProfileLlmRoute(profileDir, proxyUrl)
+    // dsh's llm-deepseek route speaks the Anthropic Messages wire and
+    // appends /v1/messages to its baseURL, so it gets the bare proxy host.
+    await mergeProfileLlmRoute(profileDir, anthropicBaseUrl(proxyUrl))
     await mergeProfileDependency(profileDir)
     log.info({ action: 'dsh_profile_written', profile: path.basename(profileDir) }, 'dsh profile governance plugin registered')
   }

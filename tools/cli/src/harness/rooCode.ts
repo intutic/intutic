@@ -1,10 +1,11 @@
 /**
- * rooCode.ts — Roo Code adapter (full implementation).
+ * rooCode.ts — Roo Code adapter.
  *
- * Detects the Roo Code VS Code extension, writes Intutic governance rules
- * as .roorules, and configures the proxy base URL via VS Code settings +
- * .env.intutic sidecar. Roo Code's notification hooks are not yet blocking
- * so we rely on proxy (Vector B) and drift guard (Vector C).
+ * Detects the Roo Code VS Code extension and writes Intutic governance rules
+ * as .roorules. Roo Code has no hook system to install a tool-call gate into,
+ * and keeps its API provider and base URL in its own settings panel rather
+ * than in any file this adapter can write, so routing it through the proxy is
+ * a manual step (see the Roo Code integration page).
  *
  * HLD §3.14 — Harness Onboarding Matrix
  * @module
@@ -18,7 +19,6 @@ import type { SyncSopEntry } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
 import { hashFile } from '../lib/hash.js'
 import { newIso } from '@intutic/id'
-import { injectRooCodeProxySettings } from './vscodeSettingsWriter.js'
 
 const CONFIG_FILE = '.roorules'
 
@@ -47,8 +47,7 @@ export const rooCodeAdapter: IHarnessAdapter = {
     }
   },
 
-  async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
-    // 1. Write .roorules governance text
+  async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], _proxyUrl: string): Promise<string | null> {
     const filePath = join(workspaceRoot, CONFIG_FILE)
     const instructions = sops.length > 0
       ? sops.map((sop) => `## ${sop.title}\n\n${sop.content}`).join('\n\n---\n\n')
@@ -58,8 +57,8 @@ export const rooCodeAdapter: IHarnessAdapter = {
       '# Intutic Governance Rules (auto-generated)',
       '# DO NOT EDIT — managed by intutic sync daemon',
       `# Last sync: ${newIso()}`,
-      '# NOTE: Roo Code notification hooks are not blocking.',
-      '# Governance is enforced via proxy (Vector B) and drift guard (Vector C).',
+      '# NOTE: Roo Code has no hook system, so these rules are advisory.',
+      '# Governance is enforced via the proxy and the drift guard.',
       '',
       instructions,
       '',
@@ -69,9 +68,6 @@ export const rooCodeAdapter: IHarnessAdapter = {
     const tmp = filePath + '.intutic-tmp'
     await writeFile(tmp, content, 'utf-8')
     await rename(tmp, filePath)
-
-    // 2. Inject proxy URL into VS Code settings + .env.intutic sidecar
-    await injectRooCodeProxySettings(workspaceRoot, proxyUrl)
 
     return filePath
   },

@@ -49,9 +49,11 @@ describe('langgraph adapter', () => {
       expect(written).toBe(join(root, '.env.intutic'))
 
       const content = await readFile(join(root, '.env.intutic'), 'utf-8')
-      expect(content).toContain(`export ANTHROPIC_BASE_URL="${PROXY_URL}"`)
-      expect(content).toContain(`export OPENAI_BASE_URL="${PROXY_URL}"`)
-      expect(content).toContain(`export INTUTIC_PROXY_URL="${PROXY_URL}"`)
+      // Anthropic SDKs append /v1/messages themselves, OpenAI SDKs only
+      // /chat/completions — so the bare host for one and host + /v1 for the other.
+      expect(content).toContain('export ANTHROPIC_BASE_URL="http://127.0.0.1:4000"')
+      expect(content).toContain('export OPENAI_BASE_URL="http://127.0.0.1:4000/v1"')
+      expect(content).toContain('export INTUTIC_PROXY_URL="http://127.0.0.1:4000"')
       expect(content).toContain('export INTUTIC_SOP_COUNT=0')
     })
 

@@ -28,9 +28,10 @@ intutic init
 ```
 
 ```
-✓ Detected harnesses:
-  • vercel-ai-sdk → .env.intutic
+  ✔ vercel-ai-sdk → .env.intutic
 ```
+
+`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
 
 Detection requires `ai` at major version 6 or above (the `toolApproval` API this integration relies on is a v6+ surface) **and** at least one `@ai-sdk/*` provider package — `ai` alone declares the tool-loop surface but ships no model provider.
 

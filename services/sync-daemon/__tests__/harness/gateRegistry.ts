@@ -242,7 +242,7 @@ export const GATES: readonly GateEntry[] = [
   {
     name: 'windsurf',
     module: '../../src/harness/windsurfHooks.js',
-    invoke: (m, root) => m.writeWindsurfHooks(root, PROXY_URL, 8877, 'ws_test'),
+    invoke: (m, root) => m.writeWindsurfHooks(root, PROXY_URL, 4000, 'ws_test'),
     artifact: '.intutic/hooks/windsurf-check.js',
     runner: 'node',
     contract: 'exit2',
@@ -350,24 +350,23 @@ export const GATES: readonly GateEntry[] = [
     name: 'cline',
     module: '../../src/harness/clineHooks.js',
     invoke: (m, root) => m.writeClineHooks(root, PROXY_URL, 'ws_test'),
-    artifact: '.cline/hooks/intutic-check.js',
+    artifact: '.clinerules/hooks/PreToolUse',
     runner: 'node',
     contract: 'stdout-cancel',
     migrated: true,
-    note: 'hand-rolled PROTECTED_PATH_FRAGMENTS, missing 4 of 12 paths',
-    mcpCalls: 'no',
+    note:
+      'a file hook: Cline runs the executable `.clinerules/hooks/PreToolUse` (extension: with ' +
+      '"Enable Hooks" on; CLI/SDK: always) and refuses on stdout {"cancel":true}, ignoring the ' +
+      'exit code. The gate reads both payload shapes Cline sends — the extension\'s ' +
+      'preToolUse {toolName, parameters} and the SDK\'s tool_call {name, input} — confirmed ' +
+      'against Cline\'s source, not a live session',
+    mcpCalls: 'reachable',
     mcpNote:
-      "M3 added `use_mcp_tool` envelope normalization to the SHARED intuticGate (gateBody.ts), " +
-      "which fires for ANY JS harness whose payload happens to carry `toolName === 'use_mcp_tool'` " +
-      "with `server_name`/`tool_name` — Cline's own well-documented tool-call schema for MCP " +
-      "invocations. Deliberately did NOT add `use_mcp_tool`/`access_mcp_resource` PreToolUse " +
-      "matchers to GOVERNED_TOOLS: this writer's `.cline/hooks/hooks.json` mechanism assumes a " +
-      "file-based matcher/command hook contract, and Cline's own current SDK documentation " +
-      "describes hook lifecycle stages under different terminology (a `tool_call_before` plugin " +
-      "stage, not a `hooks.json` PreToolUse entry) with no confirmed schema published for its " +
-      "PreToolUse `toolName` values. Whether Cline actually dispatches this writer's hook " +
-      "mechanism for `use_mcp_tool` calls at all could not be confirmed during M3 — adding a " +
-      "matcher that would silently never fire was rejected in favor of documenting the gap here.",
+      'The file hook has no matcher, so it runs for every tool call, `use_mcp_tool` included, ' +
+      'and the shared intuticGate (gateBody.ts) composes `use_mcp_tool` {server_name, tool_name} ' +
+      'into mcp__<server>__<tool> for the allowlist (pinned by mcpAllowlist.test.ts with the ' +
+      'extension\'s preToolUse shape). The SDK\'s MCP tool naming was not verified, hence ' +
+      'reachable rather than yes.',
   },
   {
     name: 'rooCode',
@@ -601,6 +600,21 @@ export const NO_GATE: ReadonlyArray<{
       'configures the JetBrains Windsurf plugin\'s HTTP-proxy routing (detectProxy + the ' +
       'IDE platform\'s own proxy.settings.xml) — not a hook/gate surface; windsurfHooks.ts ' +
       'covers this harness\'s actual gate',
+  },
+  {
+    file: 'jsonMergeTarget.ts',
+    harness: null,
+    why: 'reads a user-owned JSON config for the writers that merge into one; writes nothing itself',
+  },
+  {
+    file: 'codexConfigMerger.ts',
+    harness: 'codex',
+    why: 'sets openai_base_url in the Codex user config (LLM routing); codexHooks.ts is the gate',
+  },
+  {
+    file: 'continueConfigMerger.ts',
+    harness: 'continue',
+    why: 'sets apiBase on Continue\'s OpenAI/Anthropic models (LLM routing); continueHooks.ts is the gate',
   },
   {
     file: 'holdRedaction.ts',

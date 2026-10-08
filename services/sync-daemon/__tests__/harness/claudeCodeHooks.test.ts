@@ -95,6 +95,42 @@ describe('Claude Code PreToolUse Hooks Compiler', () => {
     await node_fs.rm(tempRoot, { recursive: true, force: true })
   })
 
+  it('keeps the user\'s own PreToolUse hooks and settings, and does not stack its own on re-run', async () => {
+    const tempRoot = await node_fs.mkdtemp(node_path.join(node_os.tmpdir(), 'intutic-hooks-merge-'))
+    try {
+      const settingsPath = node_path.join(tempRoot, '.claude', 'settings.json')
+      await node_fs.mkdir(node_path.dirname(settingsPath), { recursive: true })
+      const mine = { matcher: 'Bash', hooks: [{ type: 'command', command: 'my-audit.sh' }] }
+      await node_fs.writeFile(settingsPath, JSON.stringify({ model: 'opus', hooks: { PreToolUse: [mine], Stop: [] } }))
+
+      await updatePreToolUseHooks(tempRoot, mockSops)
+      await updatePreToolUseHooks(tempRoot, mockSops)
+
+      const settings = JSON.parse(await node_fs.readFile(settingsPath, 'utf-8'))
+      expect(settings.model).toBe('opus')
+      expect(settings.hooks.Stop).toEqual([])
+      expect(settings.hooks.PreToolUse[0]).toEqual(mine)
+      // Bash, Edit, Write, MultiEdit and mcp__.* — once each.
+      expect(settings.hooks.PreToolUse).toHaveLength(6)
+    } finally {
+      await node_fs.rm(tempRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('leaves a settings.json that is not plain JSON untouched', async () => {
+    const tempRoot = await node_fs.mkdtemp(node_path.join(node_os.tmpdir(), 'intutic-hooks-jsonc-'))
+    try {
+      const settingsPath = node_path.join(tempRoot, '.claude', 'settings.json')
+      await node_fs.mkdir(node_path.dirname(settingsPath), { recursive: true })
+      const broken = '{\n  // comment\n  "model": "opus"\n}\n'
+      await node_fs.writeFile(settingsPath, broken)
+      await updatePreToolUseHooks(tempRoot, mockSops)
+      expect(await node_fs.readFile(settingsPath, 'utf-8')).toBe(broken)
+    } finally {
+      await node_fs.rm(tempRoot, { recursive: true, force: true })
+    }
+  })
+
   it('registers a mcp__.* PreToolUse matcher (M3)', async () => {
     // Without this matcher, an mcp__<server>__<tool> call never reaches the
     // gate script at all — the v6 gate body's #mcpservers allowlist check and

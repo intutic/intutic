@@ -4,7 +4,10 @@ Integrate Intutic governance with [OpenAI Codex](https://openai.com/codex) — O
 
 ## How it works
 
-Codex uses environment variables for configuration. Since Intutic can't inject env vars into a running process, it writes a `.env.intutic` file with proxy URL variables that Codex can source before starting.
+`intutic connect` governs Codex in two ways:
+
+- **Proxy routing** — it sets `openai_base_url` in Codex's user config, `~/.codex/config.toml` (or `$CODEX_HOME/config.toml`), so Codex's built-in OpenAI provider sends its requests through the proxy. It also writes a `.env.intutic` file with the same proxy URLs for shells and scripts that source it.
+- **A blocking gate** — a PreToolUse hook registered in `~/.codex/hooks.json` and the project's `.codex/hooks.json` (see [Pre-tool hooks](#pre-tool-hooks-blocking) below).
 
 ## Setup
 
@@ -23,16 +26,16 @@ intutic init
 ```
 
 ```
-✓ Detected harnesses:
-  • codex → .env.intutic
+  ✔ codex → .env.intutic
 ```
 
-### 3. Source the env file
+`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
 
-Before starting Codex, source the generated environment file:
+### 3. Run Codex
+
+Once `intutic connect` has synced, start Codex as usual — `~/.codex/config.toml` already points it at the proxy:
 
 ```bash
-source .env.intutic
 codex
 ```
 
@@ -46,6 +49,18 @@ intutic start
 
 ## What gets written
 
+`openai_base_url` in Codex's user config. `intutic connect` adds or updates this one top-level line and keeps the rest of the file — MCP servers, profiles, model settings and comments — exactly as it was; a config that does not parse as TOML is left untouched:
+
+```toml
+# Set by Intutic: routes Codex's built-in OpenAI provider through the Intutic proxy.
+openai_base_url = "http://localhost:4000/v1"
+
+[mcp_servers.github]
+command = "npx"
+```
+
+`openai_base_url` applies to Codex's built-in `openai` provider. If you select a custom provider with `model_provider`, set that provider's `base_url` to `http://localhost:4000/v1` yourself.
+
 A `.env.intutic` file with proxy URLs and metadata:
 
 ```bash
@@ -54,9 +69,9 @@ A `.env.intutic` file with proxy URLs and metadata:
 # Last sync: 2026-06-11T22:24:00Z
 # Source this file: source .env.intutic
 
-ANTHROPIC_BASE_URL=http://localhost:4000/v1
-OPENAI_BASE_URL=http://localhost:4000/v1
-INTUTIC_PROXY_URL=http://localhost:4000/v1
+export ANTHROPIC_BASE_URL="http://localhost:4000"
+export OPENAI_BASE_URL="http://localhost:4000/v1"
+export INTUTIC_PROXY_URL="http://localhost:4000"
 INTUTIC_SOP_COUNT=5
 ```
 
@@ -66,11 +81,13 @@ Add `source .env.intutic 2>/dev/null` to your shell profile or project's `.envrc
 
 ## Pre-tool hooks (blocking)
 
-The `.env.intutic` routing above governs LLM egress only. Tool calls are gated
-natively: the sync-daemon writes a governance gate at
+The routing above governs LLM egress only. Tool calls are gated
+natively: `intutic connect` writes a governance gate at
 `.intutic/hooks/codex-check.js` and registers it as a **PreToolUse hook** in
 both `~/.codex/hooks.json` (user) and `<repo>/.codex/hooks.json` (project),
 merging non-destructively so your own hooks are preserved.
+
+Codex loads hooks by default (`[features] hooks = false` turns them off). It loads the project-level file only once you have trusted the project's `.codex/` folder; the user-level registration applies everywhere.
 
 Codex invokes the hook before each tool call with JSON on stdin
 (`{tool_name, tool_use_id, tool_input}`); the gate evaluates the compiled
@@ -84,7 +101,7 @@ with exit code 2, with the reason on stderr. Every decision is appended to
 | Property | Value |
 |----------|-------|
 | Harness type | `codex` |
-| Config file | `.env.intutic` |
+| Config file | `.env.intutic`, `~/.codex/config.toml` (`openai_base_url`) |
 | Hook files | `~/.codex/hooks.json`, `<repo>/.codex/hooks.json`, `.intutic/hooks/codex-check.js` |
 | Detection | `CODEX_HOME` env var or `codex` in `PATH` |
 | Format | Shell environment variables |

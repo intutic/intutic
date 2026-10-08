@@ -1,7 +1,7 @@
 /**
  * windsurfJetBrainsProxy.ts — routes the Windsurf JetBrains plugin's
- * Cascade AI traffic through Intutic's TLS MITM proxy, for every installed
- * JetBrains product.
+ * Cascade AI traffic through Intutic's TLS MITM proxy, in every installed
+ * JetBrains product where the Windsurf plugin is set up.
  *
  * # What this configures, and why it takes two files per IDE
  *
@@ -47,7 +47,10 @@
  * product names; it lists that root's subdirectories and configures ONLY
  * ones that already have an `options/` directory — the signal that this
  * is a real, already-initialized IDE install, not a guess at a product
- * name or version number this codebase should never invent.
+ * name or version number this codebase should never invent. Of those, it
+ * configures only the ones whose `options/` already holds the plugin's
+ * `CodeiumSettings.xml`: the platform proxy reroutes ALL of an IDE's HTTP
+ * traffic, which is only justified where the Windsurf plugin runs.
  *
  * @module
  */
@@ -129,9 +132,9 @@ async function writeFileAtomic(filePath: string, content: string): Promise<void>
 }
 
 /**
- * Configures every installed JetBrains product's HTTP proxy + the
- * Windsurf plugin's `detectProxy` toggle to route through Intutic's local
- * TLS MITM proxy. Never throws: a product whose settings files don't
+ * Configures the HTTP proxy + the Windsurf plugin's `detectProxy` toggle of
+ * every installed JetBrains product where the Windsurf plugin has saved its
+ * settings, to route through Intutic's local TLS MITM proxy. Never throws: a product whose settings files don't
  * match the shape `jetbrainsXmlConfig.ts` understands is skipped and
  * logged, not corrupted; a system with no JetBrains products installed at
  * all is a normal, silent no-op (this integration is opt-in by
@@ -144,6 +147,15 @@ export async function configureJetBrainsWindsurfProxy(proxyPort: number): Promis
 
   for (const optionsDir of optionsDirs) {
     const product = path.basename(path.dirname(optionsDir))
+
+    // The platform proxy applies to ALL of an IDE's HTTP traffic, not just
+    // the plugin's, so it is switched only in IDEs where the Windsurf plugin
+    // has saved its settings (CodeiumSettings.xml exists) — i.e. it is
+    // installed and has run there. Every other JetBrains IDE is left alone.
+    if ((await readFileOrNull(path.join(optionsDir, CODEIUM_SETTINGS_FILE))) === null) {
+      log.debug({ action: 'jetbrains_windsurf_proxy_skipped', product }, 'Windsurf plugin not set up in this IDE — left untouched')
+      continue
+    }
 
     const proxyOk = await mergeXmlComponentOptions(
       path.join(optionsDir, PROXY_SETTINGS_FILE),

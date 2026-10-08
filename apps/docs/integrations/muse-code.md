@@ -40,9 +40,10 @@ intutic init
 ```
 
 ```
-✓ Detected harnesses:
-  • muse-code → AGENTS.md
+  ✔ muse-code → AGENTS.md
 ```
+
+`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
 
 ### 3. Start the proxy
 
@@ -50,7 +51,7 @@ intutic init
 intutic start
 ```
 
-> Have an Intutic account or run your own control plane? Use `intutic connect --harness muse-code` instead. It starts the same proxy and adds bidirectional config sync.
+> Have an Intutic account or run your own control plane? Use `intutic connect` instead. It starts the same proxy and adds bidirectional config sync.
 
 ### 4. LLM egress — launcher/env-var only, not a persistent setting
 

@@ -21,6 +21,7 @@ import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
+import { parseDocument, isMap, type Document } from 'yaml'
 import { newIso } from '@intutic/id'
 import { emitShellGate, SHELL_EXTRACT, SHELL_FAIL_CLOSED } from './gateBody.js'
 
@@ -108,45 +109,39 @@ exit 0
 // ─── YAML merge helpers ───────────────────────────────────────────────────────
 
 /**
- * YAML-safe merge of the Hermes config.
- *
- * Strategy (no YAML library — pure string manipulation):
- * - If file doesn't exist: write fresh with just the hooks block.
- * - If file exists and already contains `preToolUse:`: replace the command line.
- * - If file exists but has no `preToolUse:`: append the hooks block.
- * - If file has `hooks:` but no `preToolUse:`: insert inside existing hooks section.
+ * Merge the hook registration into the Hermes config: `hooks.preToolUse.command`
+ * is set to the gate, and everything else in the file — other hooks, MCP
+ * servers, comments — is kept. Edited through the `yaml` document model; an
+ * earlier line-based version replaced the first `command:` line anywhere in
+ * the file, whichever key it belonged to. A file that does not parse, or is
+ * not a mapping, is left untouched and reported.
  */
-async function mergeHermesConfig(hookScriptPath: string): Promise<void> {
-  const hooksBlock = [
-    'hooks:',
-    '  preToolUse:',
-    `    command: ${hookScriptPath}`,
-  ].join('\n')
+export function mergeHermesYaml(existing: string, hookScriptPath: string): string | null {
+  const doc: Document = parseDocument(existing)
+  if (doc.errors.length > 0) return null
+  if (doc.contents === null) doc.contents = doc.createNode({})
+  if (!isMap(doc.contents)) return null
+  try {
+    doc.setIn(['hooks', 'preToolUse', 'command'], hookScriptPath)
+  } catch {
+    // `hooks` or `hooks.preToolUse` is a scalar or list — not a shape to edit.
+    return null
+  }
+  return doc.toString()
+}
 
-  let existing: string | null = null
+async function mergeHermesConfig(hookScriptPath: string): Promise<void> {
+  let existing = ''
   try {
     existing = await fs.readFile(HERMES_CONFIG, 'utf-8')
-  } catch {
-    // File doesn't exist — write fresh
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
   }
 
-  let merged: string
-
-  if (existing === null) {
-    // Fresh write
-    merged = hooksBlock + '\n'
-  } else if (/^\s*preToolUse:/m.test(existing)) {
-    // Replace the existing command line under preToolUse:
-    merged = existing.replace(/^(\s*command:\s*).*$/m, `$1${hookScriptPath}`)
-  } else if (/^hooks:/m.test(existing)) {
-    // hooks: block exists but no preToolUse: — insert inside hooks section
-    merged = existing.replace(
-      /^(hooks:\s*)$/m,
-      `$1\n  preToolUse:\n    command: ${hookScriptPath}`,
-    )
-  } else {
-    // No hooks: block at all — append
-    merged = existing.trimEnd() + '\n\n' + hooksBlock + '\n'
+  const merged = mergeHermesYaml(existing, hookScriptPath)
+  if (merged === null) {
+    log.warn({ action: 'hermes_config_merge_skipped', path: HERMES_CONFIG }, `${HERMES_CONFIG} could not be merged — left untouched`)
+    return
   }
 
   const tmpPath = HERMES_CONFIG + '.intutic-tmp'
@@ -172,7 +167,7 @@ Before every tool call, you MUST verify compliance with workspace SOPs.
 A pre-tool-use hook (\`~/.intutic/hooks/hermes-check.sh\`) enforces these rules automatically.
 
 If a tool call is blocked, do NOT attempt to circumvent the governance gate.
-To update policy, use the Intutic control plane at \`${proxyUrl}\`.
+Policy is managed in Intutic; this agent's LLM traffic goes through the Intutic proxy at \`${proxyUrl}\`.
 `
 }
 
