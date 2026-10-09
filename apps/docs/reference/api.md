@@ -801,7 +801,7 @@ Every route the control plane serves: 404 routes, grouped by the source file tha
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/api/v1/gateways/:id/config` | Gateway token (`gwk_…`) |  |
+| GET | `/api/v1/gateways/:id/config` | Gateway token (`gwk_…`, its own gateway); Authenticated (a member of its org) | The gateway's config and its version |
 | POST | `/api/v1/gateways/:id/heartbeat` | Gateway token (`gwk_…`) |  |
 
 ### `gateways.ts` <Badge type="tip" text="Cloud" />

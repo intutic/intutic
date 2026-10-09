@@ -45,6 +45,8 @@ provider "intutic" {
 - [intutic_gateway](./resources/gateway)
 - [intutic_notification_rule](./resources/notification_rule)
 - [intutic_mcp_server_decision](./resources/mcp_server_decision)
+- [intutic_siem_destination](./resources/siem_destination)
+- [intutic_wasm_rule](./resources/wasm_rule)
 
 ## Data sources
 

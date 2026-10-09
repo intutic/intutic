@@ -2597,6 +2597,25 @@ intutic gateway revoke <gateway_id> [--reason <text>] [options]
 
 ---
 
+## `intutic gateway config get <gateway_id>` <Badge type="danger" text="Enterprise" />
+
+Show the config values set on a gateway, and their version.
+
+```bash
+intutic gateway config get <gateway_id> [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+Prints `requireVk` and `requireProvisionedKey` as [`gateway config set`](#intutic-gateway-config-set) left them, and the config version, the same values the gateway pulls. A flag that was never set here runs the deployment's own value (`INTUTIC_GATEWAY_REQUIRE_VK`, `INTUTIC_GATEWAY_REQUIRE_PROVISIONED_KEY`), which the control plane does not know. Any member of the gateway's org can read it. `gateway status` shows whether the gateway runs this version.
+
+---
+
 ## `intutic gateway config set <gateway_id>` <Badge type="danger" text="Enterprise" />
 
 Update a gateway's remote config. Only the fields the gateway actually reads are accepted.
@@ -3455,6 +3474,91 @@ intutic compliance coverage eu_ai_act --format pdf --out eu-ai-act.pdf
 
 ---
 
+## `intutic compliance collect` <Badge type="tip" text="Cloud" />
+
+Run a fresh evidence collection and seal it into an archive.
+
+```bash
+intutic compliance collect [--from <date>] [--to <date>] [--out <path>] [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--from <date>` | Start of the evidence period, ISO 8601 (default: 90 days before `--to`) |
+| `--to <date>` | End of the evidence period, ISO 8601 (default: now) |
+| `--out <path>` | Also write the archive to this file |
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Runs the compliance probes, maps them onto the SOC 2 trust categories and the four frameworks, and stores the run, as **Collect & export evidence** on the dashboard does. Prints the run id, the overall score and whether the archive is signed; an unsigned one comes with what to configure. OWNER or ADMIN. See [Compliance Evidence](/guide/compliance-evidence#evidence-runs).
+
+---
+
+## `intutic compliance download <run_id>` <Badge type="tip" text="Cloud" />
+
+Download a stored evidence archive.
+
+```bash
+intutic compliance download <run_id> [--out <path>] [options]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `run_id` | The evidence run (`s2r_…`), as `collect` prints it |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--out <path>` | Write the archive to this file instead of stdout |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Writes the archive as JSON: to stdout, so it can be piped, or to `--out`. OWNER or ADMIN.
+
+---
+
+## `intutic compliance verify <file>` <Badge type="tip" text="Cloud" />
+
+Check an evidence archive's hashes and signature.
+
+```bash
+intutic compliance verify <file> [--jwks <path>] [options]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `file` | An archive from `collect --out`, `download` or the dashboard |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--jwks <path>` | The published signing keys, saved from `/.well-known/intutic-trace-signing.json`, to verify with no network access |
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Recomputes the archive hash and every section hash in the manifest, then checks the Ed25519 signature against the published key its `keyId` names, the steps under [Verifying an archive](/guide/compliance-evidence#verifying-an-archive). Without `--jwks` it fetches the keys from the control plane, without credentials, as an auditor would; an unsigned archive needs no keys. Needs no login.
+
+Exits 0 when the hashes match and a published key accepts the signature. Exits 1 when a hash or the signature does not match: the archive was changed. Exits 2 when the hashes match but the archive is **unsigned** (collected on a deployment without a signing key) or its signature could not be checked (no published key with its id, or the keys could not be fetched); the output says which.
+
+**Example:**
+
+```bash
+curl -s https://<control-plane>/.well-known/intutic-trace-signing.json > keys.json
+intutic compliance verify evidence.json --jwks keys.json
+```
+
+---
+
 ## `intutic usage members` <Badge type="warning" text="Biz Org+" />
 
 LLM usage per member.
@@ -3676,6 +3780,28 @@ intutic inventory mcp-servers [filters] [--csv [--out <path>]] [options]
 
 **What it does:**
 Prints one line per MCP server per machine, with its harness, transport and status. Visibility is as for `intutic inventory summary`.
+
+---
+
+## `intutic inventory skills` <Badge type="tip" text="Cloud" />
+
+Skill bundles by machine, with their content scan result.
+
+```bash
+intutic inventory skills [--device <device_id>] [--search <text>] [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--device <device_id>` | Only rows from this machine |
+| `--search <text>` | Only rows whose skill name or hostname contains this text |
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Prints one line per skill bundle per machine: its name, the folder it was found in, whether the [content scan](/guide/skill-scanning) found anything (or could not read it), and how many files are bundled with it. `--json` adds each bundle's `SKILL.md` SHA-256. Visibility is as for `intutic inventory summary`.
 
 ---
 

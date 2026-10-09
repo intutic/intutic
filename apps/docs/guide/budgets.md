@@ -189,6 +189,7 @@ The sync daemon (`intutic connect`) reports the repository, Git branch and HEAD 
 - **Repository** is the `origin` remote reduced to host and path, such as `github.com/acme/widgets`. Any user name, password or token in the remote is removed before the daemon sends it, and removed again when the control plane receives it. No file contents are sent.
 - **Commit** is the commit that was checked out when the call was made. A commit's cost is therefore the work that led to the next commit, not the work that produced this one.
 - **Scope:** the figures cover calls that go through a machine's local proxy while `intutic connect` is running. Every agent on that machine is attributed to the repository the daemon runs in, even when the agent works in a different directory. Calls through a shared gateway, calls made while the daemon is not reporting, and calls from a directory with no Git repository are shown as **No git context**.
+- **The clawde SDKs** report their own: with a virtual key, `ClawdeClient` registers a session carrying the repository, branch and commit of the directory it runs in, through a gateway or in CI too. See [Git context and cost attribution](/reference/clawde-sdk#_1a-git-context-and-cost-attribution).
 - **Pull requests:** a branch with a GitHub pull request is also reported per pull request. See [Cost per pull request](#cost-per-pull-request).
 
 ### Cost per pull request <Badge type="warning" text="Biz Org+" /> {#cost-per-pull-request}

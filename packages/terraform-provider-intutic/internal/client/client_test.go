@@ -1,8 +1,10 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -107,5 +109,62 @@ func TestDoesNotRetryAServerError(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Fatalf("a 500 may have applied the write; it must not be retried (calls=%d)", calls)
+	}
+}
+
+func TestPostMultipartSendsFieldsAndFileAndRetriesTheSameBody(t *testing.T) {
+	file := []byte("\x00asm\x01\x00\x00\x00")
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if got := r.Header.Get("Authorization"); got != "Bearer k" {
+			t.Errorf("Authorization = %q", got)
+		}
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Fatalf("not multipart: %v (Content-Type %q)", err, r.Header.Get("Content-Type"))
+		}
+		if r.FormValue("name") != "block shell" || r.FormValue("description") != "d" {
+			t.Errorf("fields = %v", r.MultipartForm.Value)
+		}
+		f, hdr, err := r.FormFile("file")
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, _ := io.ReadAll(f)
+		if hdr.Filename != "rule.wasm" || !bytes.Equal(got, file) {
+			t.Errorf("file %q = %x", hdr.Filename, got)
+		}
+		if calls == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"ruleId":"wasm_1"}`))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "k", "test")
+	c.sleep = func(time.Duration) {}
+	var out struct{ RuleID string }
+	err := c.PostMultipart(context.Background(), "/api/v1/wasm-rules",
+		map[string]string{"name": "block shell", "description": "d"}, "file", "rule.wasm", file, &out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 || out.RuleID != "wasm_1" {
+		t.Fatalf("calls=%d out=%+v", calls, out)
+	}
+}
+
+func TestPostMultipartCarriesTheServerError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"File size exceeds 1MB limit"}`))
+	}))
+	defer srv.Close()
+
+	err := New(srv.URL, "k", "test").PostMultipart(context.Background(), "/x", nil, "file", "f", nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "1MB limit") {
+		t.Fatalf("err = %v", err)
 	}
 }

@@ -1,14 +1,17 @@
 /**
- * `intutic inventory` — the AI harnesses and MCP servers on every connected
- * developer machine, and which of them run ungoverned.
+ * `intutic inventory` — the AI harnesses, MCP servers and skill bundles on
+ * every connected developer machine, and which of them run ungoverned.
  *
  * Subcommands:
  *   - `intutic inventory summary [--json]`
  *   - `intutic inventory harnesses|mcp-servers [filters] [--csv] [--out <file>] [--json]`
+ *   - `intutic inventory skills [--device <id>] [--search <text>] [--json]`
  *
- * Server side: `GET /api/v1/inventory/{summary,harnesses,mcp-servers}`
- * (services/control-plane/src/routes/inventory.ts); the two lists filter on
- * the server and serve the same CSV the dashboard downloads (`format=csv`).
+ * Server side: `GET /api/v1/inventory/{summary,harnesses,mcp-servers,skills}`
+ * (services/control-plane/src/routes/inventory.ts); the harness and MCP
+ * server lists filter on the server and serve the same CSV the dashboard
+ * downloads (`format=csv`). The skills list filters by machine and text only
+ * and has no CSV, as on the dashboard.
  * OWNER, ADMIN and EM see every machine, a DEVELOPER only their own.
  *
  * @module
@@ -48,6 +51,18 @@ interface McpServerRow {
   transport: string
   status: string
   reason: string | null
+  deviceStale: boolean
+}
+
+interface SkillRow {
+  hostname: string
+  name: string
+  source: string
+  sha256: string | null
+  scanned: boolean
+  clean: boolean
+  findingsCount: number
+  scriptCount: number
   deviceStale: boolean
 }
 
@@ -142,4 +157,31 @@ export async function runInventoryMcpServers(opts: InventoryListOpts): Promise<v
     console.log(`  ${r.hostname}${r.deviceStale ? pc.dim(' (stale)') : ''}  ${r.server} (${r.harness}, ${r.transport})  ${statusLabel(r.status)}`)
     if (r.reason) log.dim(`    ${r.reason}`)
   })
+}
+
+/** A skill bundle's content scan, as the dashboard's Content scan column says it. */
+export function skillScanLabel(r: Pick<SkillRow, 'scanned' | 'clean' | 'findingsCount'>): string {
+  if (!r.scanned) return pc.yellow('not readable')
+  if (r.clean) return pc.green('clean')
+  return pc.yellow(`${r.findingsCount} finding${r.findingsCount === 1 ? '' : 's'}`)
+}
+
+/** `intutic inventory skills` */
+export async function runInventorySkills(opts: Pick<InventoryListOpts, 'device' | 'search' | 'json' | 'dev'>): Promise<void> {
+  await runApiCommand(
+    opts,
+    'Failed to list skills',
+    (client) => client.get<{ data: SkillRow[] }>(`/api/v1/inventory/skills${inventoryQuery({ device: opts.device, search: opts.search })}`),
+    (res) => {
+      log.header('Intutic — Skills')
+      if (res.data.length === 0) {
+        log.dim('  Nothing reported.')
+        return
+      }
+      for (const r of res.data) {
+        const files = `${r.scriptCount} bundled file${r.scriptCount === 1 ? '' : 's'}`
+        console.log(`  ${r.hostname}${r.deviceStale ? pc.dim(' (stale)') : ''}  ${r.name} (${r.source})  ${skillScanLabel(r)}  ${pc.dim(files)}`)
+      }
+    },
+  )
 }

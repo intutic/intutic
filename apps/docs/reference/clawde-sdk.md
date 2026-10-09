@@ -41,7 +41,15 @@ For pre-execution checks on the tools an agent runs, rather than on its model ca
 ### 1. Context Resolution
 `resolveContext()` (`resolve_context()`) reads `~/.intutic/config.json`, which the sync daemon keeps current: git branch, Jira ticket, PagerDuty incident, CI pipeline, working directory, workspace and session. Without that file it falls back to `INTUTIC_WORKSPACE_ID`, `INTUTIC_SESSION_ID`, `GIT_BRANCH`, `GITHUB_RUN_ID` / `BUILDKITE_BUILD_ID` / `CIRCLE_BUILD_NUM` and `PD_INCIDENT_ID`. Pass `autoContext: false` (`auto_context=False`) to make it return an empty object.
 
-`chat()` does not send this context. The proxy does not read it, and the sync daemon attaches branch and task context to the proxy's session in the control plane itself.
+`chat()` sends no context headers: the proxy does not read them. What it sends is a session, and the control plane attaches git context to the session.
+
+### 1a. Git context and cost attribution
+Cost per branch, per commit and per pull request is attributed through the session a call is filed under: the control plane copies that session's repository, branch and HEAD commit onto each call it records. On the first `chat()`, the client picks the session it sends as `x-session-id` on every call:
+
+- A session id `resolveContext()` returns (`INTUTIC_SESSION_ID`, as `intutic exec` sets it) is the session that started the process, so its calls go under it unchanged.
+- Otherwise, when the working directory is a git repository and the key is an Intutic virtual key (`vk_…`), the client registers a session (`POST /api/v1/sessions`, harness `clawde_sdk`) carrying the `origin` remote as `host/path` (credentials, port and `.git` removed before it is sent), the branch and the HEAD commit. On a detached HEAD, as CI checks out a pull request, the branch comes from `GITHUB_HEAD_REF`, then from the branch `resolveContext()` returns. It first confirms the key with `GET /api/v1/auth/me`, so the repository is sent only to a control plane that accepted the key, and a provider key is never sent there at all.
+
+The control plane is `controlPlaneUrl` (`control_plane_url`), then `INTUTIC_CONTROL_PLANE_URL`, then Intutic's hosted one; a self-hosted deployment sets one of the first two. Registration is best effort: if the control plane cannot be reached or refuses, the call goes ahead without a session and is filed under **No git context**, and the client does not try again. The session holds the repository, branch and commit as they were at the first call. Pass `autoContext: false` (`auto_context=False`) to register nothing and send no session. See [Cost per branch and commit](/guide/budgets#cost-per-branch-and-commit) for how the figures are built.
 
 The TypeScript client sends the agent-graph headers the proxy uses for [graph guardrails](/guide/graph-guardrails) (`X-Intutic-Graph-Id`, `X-Intutic-Node-Id`, `X-Intutic-Parent-Session`, `X-Intutic-Depth`). They are inherited from `INTUTIC_GRAPH_ID`, `INTUTIC_NODE_ID` and `INTUTIC_DEPTH`, so an agent started by another agent is recorded as its child; pass `graphIdentity` to set them yourself.
 
@@ -209,8 +217,13 @@ resolution = cp.resolve_gateway()
 | Org signup | `signupOrg()` / `signup_org()` — unauthenticated; a self-hosted control plane always refuses it, and the hosted one only accepts it with `INTUTIC_PUBLIC_ORG_SIGNUP=true`, so prefer org creation below |
 | Org creation | `startDomainVerification`, `checkDomainVerification`, `createOrg` / `start_domain_verification`, `check_domain_verification`, `create_org` — publish the returned TXT record, poll until `status` is `verified`, then create the org with that `verificationId` |
 | Teams & workspaces | `listTeams`, `createTeam`, `listTeamWorkspaces`, `createWorkspace` |
-| Gateways | `registerGateway`, `listGateways`, `getGatewayStatus`, `rotateGatewayToken`, `revokeGateway`, `setGatewayConfig`, `assignWorkspaceGateway`, `assignOrgGateway`, `resolveGateway` |
+| Gateways | `registerGateway`, `listGateways`, `getGatewayStatus`, `rotateGatewayToken`, `revokeGateway`, `getGatewayConfig`, `setGatewayConfig`, `assignWorkspaceGateway`, `assignOrgGateway`, `resolveGateway` |
+| Workspace settings | `getWorkspaceSettings`, `updateWorkspaceSettings` / `get_workspace_settings`, `update_workspace_settings` |
 | Provider credentials | `listProviderCredentials`, `setProviderCredential`, `unsetProviderCredential` |
+
+`getGatewayStatus` reports `appliedConfigVersion`, the config version the gateway said it runs in its last heartbeat (`null` when it is unreachable or has not reported one), beside `desiredConfigVersion`, the version the latest config change produced. `getGatewayConfig` returns the flags set on the gateway and that version, readable by any member of the gateway's org.
+
+`updateWorkspaceSettings({ key: value })` is the route `intutic settings set` calls: only the keys given change, and the control plane applies the same checks. An unknown key or a bad value is refused with a 400 that names it, a setting the plan does not include (the group policy for high-risk tools below Biz Org) with a 403 `Upgrade required`, and a member below OWNER or ADMIN with a 403. Each refusal throws (raises) `ClawdeConnectionError` with the server's answer in its message. See [Settings](/guide/settings) for the keys.
 
 Not covered, on purpose: session establishment (`intutic login`/`logout` — supply `apiKey` directly instead) and local-environment/terminal-only commands (`init`, `doctor`, `install-daemon`, `integrity`, `rollback`, `connect`, `exec`, `start`, `syncContext`, `skill`) that have no meaning for a library embedded in your own process.
 

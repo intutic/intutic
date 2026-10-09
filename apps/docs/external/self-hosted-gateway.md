@@ -162,6 +162,7 @@ intutic gateway list                                             # every registe
 intutic gateway status <gateway_id>                               # online / degraded / unreachable
 intutic gateway rotate <gateway_id>                                # new token, old one valid for a grace period
 intutic gateway revoke <gateway_id> --reason "decommissioned"      # immediate, no grace period
+intutic gateway config get <gateway_id>                           # the config values set here, and their version
 intutic gateway config set <gateway_id> --require-provisioned-key true
 ```
 
@@ -175,6 +176,8 @@ the TTL window (~90s) — a self-healing status, not an error state that needs t
 `INTUTIC_GATEWAY_REQUIRE_PROVISIONED_KEY` (`proxy.requireVk` and `proxy.requireProvisionedKey` in
 the chart). A value set this way overrides the deployment's own, and `true` for
 `--require-provisioned-key` means every workspace, as the variable's `true` does.
+`intutic gateway config get` prints the values set this way and the config version; a flag it
+shows as not set runs the deployment's own value.
 
 The change applies live on every target, Docker, Kubernetes and bare metal alike, within one
 heartbeat interval: `INTUTIC_GATEWAY_HEARTBEAT_INTERVAL_SECS` (`proxy.heartbeatIntervalSeconds` in

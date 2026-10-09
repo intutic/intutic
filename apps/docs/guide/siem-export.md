@@ -23,7 +23,7 @@ Six destination types are supported:
 
 From **Settings › Integrations › SIEM Export**, click **Add Destination**, choose a type, and provide its connection config as JSON. Each type's placeholder shows the fields it expects (a webhook URL, a Splunk HEC token, an S3 bucket + credentials, etc.).
 
-Credentials are encrypted at rest and are never returned unmasked after creation — only OWNER/ADMIN roles can create, edit, or deactivate a destination. Any workspace member can view the destination list and its health status.
+Credentials are encrypted at rest and are never returned unmasked after creation: a read shows `********` and, for a value longer than eight characters, its last four. When you edit a destination's `config`, a credential you leave out, or send back exactly as it was masked, keeps its stored value; any other value replaces it. Only OWNER/ADMIN roles can create, edit, or deactivate a destination. Any workspace member can view the destination list and its health status.
 
 Use **Test** to run a synchronous health check against a destination without waiting for a real event.
 
