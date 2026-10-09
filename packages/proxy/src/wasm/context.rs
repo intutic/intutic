@@ -109,7 +109,7 @@ pub struct ToolCall {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DlpFinding {
     pub category: String,     // "secret", "pii", "credential"
-    pub pattern_name: String, // "aws_key", "ssn", "github_token"
+    pub pattern_name: String, // "aws_key", "pii.ssn", "github_token"
     pub action: String,       // "redact", "block"
     pub offset: usize,
     pub length: usize,

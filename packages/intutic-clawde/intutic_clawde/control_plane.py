@@ -34,8 +34,9 @@ exactly as they would for the CLI using the same token.
 
 import os
 import requests
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 from .errors import ClawdeConnectionError
+from .types import GatewayStatus
 
 DEFAULT_CONTROL_PLANE_URL = "https://app.intutic.ai"
 
@@ -166,9 +167,9 @@ class ControlPlaneClient:
         res = self._request("GET", "/api/v1/gateways")
         return res.get("data", []) if res else []
 
-    def get_gateway_status(self, gateway_id: str) -> Dict[str, Any]:
+    def get_gateway_status(self, gateway_id: str) -> GatewayStatus:
         """GET /api/v1/gateways/:id/status"""
-        return self._request("GET", f"/api/v1/gateways/{_quote(gateway_id)}/status")
+        return cast(GatewayStatus, self._request("GET", f"/api/v1/gateways/{_quote(gateway_id)}/status"))
 
     def rotate_gateway_token(self, gateway_id: str) -> Dict[str, Any]:
         """POST /api/v1/gateways/:id/rotate"""

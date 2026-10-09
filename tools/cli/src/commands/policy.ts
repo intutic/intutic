@@ -6,14 +6,16 @@ import { spawn } from 'node:child_process'
 import { log } from '../lib/logger.js'
 import { NOT_AUTHENTICATED } from '../lib/authMessages.js'
 import {
+  DEFAULT_FUEL_BUDGET,
+  FUEL_EXPORT,
   WASM_HOST_IMPORTS,
   unsupportedWasmImports,
   explainWasmImport,
   isOpaModule,
-  loadRegoRule,
+  meterFuel,
   type RegoRule,
 } from '@intutic/shared-types'
-import { REGO_HOST, decideCase } from './rules.js'
+import { decideCase, loadMeteredRegoRule } from './rules.js'
 import { loadCredentials, loadConfig } from '../config/store.js'
 import { resolveControlPlaneUrl } from '../config/paths.js'
 import { createApiClient, type ApiClient } from '../lib/api.js'
@@ -404,6 +406,11 @@ export const explainUnsupportedImport = explainWasmImport
  * Instantiates a compiled rule with the proxy's host imports and evaluates it
  * against one mock context, returning the raw verdict code.
  *
+ * The rule is metered as the MCP proxy meters it, against the proxies'
+ * budget (`DEFAULT_FUEL_BUDGET`, the Rust proxy's `limits::NATIVE`): a rule
+ * that runs out of instructions there throws here, saying so. `budget` is
+ * for tests.
+ *
  * The import set here is the proxy's, not a convenient superset: a rule that
  * links in this sandbox must link in the proxy, or install validation passes
  * something the proxy then silently bypasses.
@@ -411,6 +418,7 @@ export const explainUnsupportedImport = explainWasmImport
 export async function instantiateAndEvaluate(
   wasmBuffer: Uint8Array,
   mockStr: string,
+  budget = DEFAULT_FUEL_BUDGET,
 ): Promise<number> {
   let instanceRef: WebAssembly.Instance | null = null
 
@@ -543,7 +551,7 @@ export async function instantiateAndEvaluate(
   // error: function import requires a callable". Same outcome either way — the
   // instantiate below would throw — but a rule author needs to know it was
   // `Math.random()`.
-  const compiled = await WebAssembly.compile(new Uint8Array(wasmBuffer))
+  const compiled = await WebAssembly.compile(meterFuel(new Uint8Array(wasmBuffer), budget))
   const unsupported = unsupportedImports(compiled)
   if (unsupported.length > 0) {
     throw new Error(
@@ -556,16 +564,27 @@ export async function instantiateAndEvaluate(
   const instance = await WebAssembly.instantiate(compiled, imports)
   instanceRef = instance
   const abi = resolveGuestAbi(instance)
+  const fuel = instance.exports[FUEL_EXPORT]
 
-  const jsonBytes = Buffer.from(mockStr)
-  const offset = abi.allocate(jsonBytes.length)
+  try {
+    const jsonBytes = Buffer.from(mockStr)
+    const offset = abi.allocate(jsonBytes.length)
 
-  // Re-read `abi.memory.buffer` here rather than caching a view: `allocate` can
-  // grow the memory, which detaches every ArrayBuffer taken before the call.
-  const memView = new Uint8Array(abi.memory.buffer, offset, jsonBytes.length)
-  memView.set(jsonBytes)
+    // Re-read `abi.memory.buffer` here rather than caching a view: `allocate` can
+    // grow the memory, which detaches every ArrayBuffer taken before the call.
+    const memView = new Uint8Array(abi.memory.buffer, offset, jsonBytes.length)
+    memView.set(jsonBytes)
 
-  return abi.evaluate(offset, jsonBytes.length)
+    return abi.evaluate(offset, jsonBytes.length)
+  } catch (err) {
+    if (fuel instanceof WebAssembly.Global && (fuel.value as number) < 0) {
+      throw new Error(
+        `WASM rule ran out of its ${budget}-instruction budget; a proxy reaches no verdict and refuses the call as GOVERNANCE_UNAVAILABLE`,
+        { cause: err },
+      )
+    }
+    throw err
+  }
 }
 
 export async function runPolicyTest(opts: { wasm: string; mock: string }): Promise<void> {
@@ -878,7 +897,7 @@ export async function runPolicyInstall(opts: {
   // host lacks is refused here, by name) and evaluate an input.
   let rego: RegoRule | null
   try {
-    rego = loadRegoRule(wasmBuffer, undefined, REGO_HOST)
+    rego = loadMeteredRegoRule(wasmBuffer)
     if (rego) decideCase(rego, { tool: null, args: null })
   } catch (err) {
     log.error(`Rego rule failed validation and was NOT installed: ${errMessage(err)}`)

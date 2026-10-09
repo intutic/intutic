@@ -18,6 +18,7 @@
  */
 
 import pc from 'picocolors'
+import { NOTIFICATION_EVENT_TYPES } from '@intutic/shared-types'
 import { log } from '../lib/logger.js'
 import { fail, list, positiveInt, printSigningSecret, runApiCommand, type ApiCommandOpts } from './apiCommand.js'
 
@@ -58,13 +59,32 @@ export interface RuleFlags {
 }
 
 /**
+ * Fails on an event type the API would refuse, suggesting the ones in the
+ * same family (`decision.pend` → `decision.pending`, …), or all of them when
+ * none share its first segment.
+ */
+function checkEventType(event: string): void {
+  if ((NOTIFICATION_EVENT_TYPES as readonly string[]).includes(event)) return
+  const family = event.split('.')[0]
+  const near = NOTIFICATION_EVENT_TYPES.filter((t) => t.split('.')[0] === family)
+  fail(
+    `--event "${event}" is not a notification event type. ` +
+      (near.length > 0 ? `Did you mean ${near.join(', ')}?` : `Valid types: ${NOTIFICATION_EVENT_TYPES.join(', ')}.`) +
+      ' Every type is described at https://docs.intutic.ai/guide/settings#notifications',
+  )
+}
+
+/**
  * The request body for the given flags: only the fields a flag set, so an
  * update leaves everything else as it is. Channel config and filters are each
  * replaced whole when any of their flags is given, as the route stores them.
  */
 export function ruleBody(flags: RuleFlags): Record<string, unknown> {
   const body: Record<string, unknown> = {}
-  if (flags.event !== undefined) body.eventType = flags.event
+  if (flags.event !== undefined) {
+    checkEventType(flags.event)
+    body.eventType = flags.event
+  }
   if (flags.channel !== undefined) {
     if (!(CHANNELS as readonly string[]).includes(flags.channel)) {
       fail(`--channel must be one of ${CHANNELS.join(', ')}, got "${flags.channel}"`)

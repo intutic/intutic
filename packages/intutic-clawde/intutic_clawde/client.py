@@ -1,4 +1,5 @@
 import os
+import threading
 import time
 import warnings
 import requests
@@ -46,8 +47,10 @@ class ClawdeClient:
         self.budget_checker = BudgetChecker(self.control_plane_url, self.api_key)
         self.circuit_breaker_wrapper = CircuitBreaker(self)
         # The session this client's requests are filed under, resolved once,
-        # on the first chat().
+        # on the first chat(). The lock makes concurrent first calls register
+        # one session between them.
         self._session: Any = _UNRESOLVED
+        self._session_lock = threading.Lock()
         # kill/reask/hold fire on a proxy refusal. hijack/enhance/bypass are
         # deprecated and never fire: the proxy applies them inside the response
         # without telling the client. Kept so existing registrations still work.
@@ -114,8 +117,9 @@ class ClawdeClient:
             "messages": messages,
             **kwargs
         }
-        if self._session is _UNRESOLVED:
-            self._session = self._open_session()
+        with self._session_lock:
+            if self._session is _UNRESOLVED:
+                self._session = self._open_session()
         url = f"{self.base_url}/v1/chat/completions"
         headers = {
             "Content-Type": "application/json",
@@ -194,22 +198,27 @@ class ClawdeClient:
         """
         if not self.auto_context:
             return None
-        context = resolve_context()
-        if context.get("sessionId"):
-            return context["sessionId"]
-        if not self.api_key.startswith("vk_"):
-            return None
-        git = resolve_git_context(context.get("workingDirectory") or os.getcwd(), context.get("gitBranch"))
-        if not git:
-            return None
         try:
-            # whoami first: the repository goes only to a control plane that accepted the key.
-            workspace_id = context.get("workspaceId") or self._control_plane("GET", "/api/v1/auth/me")["workspaceId"]
+            context = resolve_context()
+            if context.get("sessionId"):
+                return context["sessionId"]
+            if not self.api_key.startswith("vk_"):
+                return None
+            git = resolve_git_context(context.get("workingDirectory") or os.getcwd(), context.get("gitBranch"))
+            if not git:
+                return None
+            # whoami first, always: the repository goes only to a control plane
+            # that accepted the key. A workspace id from the environment proves
+            # nothing about the key, and the session route only takes the key's own.
+            workspace_id = self._control_plane("GET", "/api/v1/auth/me")["workspaceId"]
             session = self._control_plane(
                 "POST", "/api/v1/sessions", {"workspaceId": workspace_id, "harnessType": SDK_HARNESS, **git}
             )
-            return session.get("sessionId")
-        except (requests.RequestException, ValueError, KeyError, TypeError) as e:
+            session_id = session.get("sessionId")
+            return session_id if isinstance(session_id, str) and session_id else None
+        # Any failure, a reply of the wrong shape included, costs the
+        # attribution and never the call.
+        except Exception as e:
             if os.environ.get("INTUTIC_DEBUG") == "true":
                 print(f"[Clawde SDK] No session registered; calls carry no git context: {e}")
             return None

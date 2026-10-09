@@ -1,5 +1,5 @@
 /**
- * Bound a rule's linear memory before V8 ever compiles it (TD-440).
+ * Bound a rule's linear memory before V8 ever compiles it.
  *
  * V8 has no grow hook, but it enforces the maximum a module DECLARES for its
  * own memory: past it, `memory.grow` returns -1 instead of growing. So the

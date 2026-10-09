@@ -153,8 +153,23 @@ describe('intutic compliance verify', () => {
     expect(out.join('\n')).toMatch(/DOES NOT MATCH/)
   })
 
-  it('refuses a file that is not an evidence archive', async () => {
-    await expect(runComplianceVerify(write('other.json', { keys: [] }), {})).rejects.toThrow('process.exit(1)')
+  // 3, not 1: a wrong path or file is not a changed archive, and a script
+  // that pages on 1 must not page on a typo.
+  it('exits 3 for a file that is not an evidence archive, cannot be read, or is not JSON', async () => {
+    await expect(runComplianceVerify(write('other.json', { keys: [] }), {})).rejects.toThrow('process.exit(3)')
     expect(out.join('\n')).toContain('not an evidence archive')
+    await expect(runComplianceVerify(join(FIXTURES, 'no-such-archive.json'), {})).rejects.toThrow('process.exit(3)')
+    expect(out.join('\n')).toContain('Cannot read')
+    const garbled = write('garbled.json', {})
+    writeFileSync(garbled, '{ not json')
+    await expect(runComplianceVerify(garbled, {})).rejects.toThrow('process.exit(3)')
+    expect(out.join('\n')).toContain('is not valid JSON')
+  })
+
+  it('exits 3 for a --jwks file that is not a key set', async () => {
+    await expect(
+      runComplianceVerify(join(FIXTURES, 'evidence-archive.json'), { jwks: write('not-keys.json', { nope: true }) }),
+    ).rejects.toThrow('process.exit(3)')
+    expect(out.join('\n')).toContain('is not a JWKS')
   })
 })

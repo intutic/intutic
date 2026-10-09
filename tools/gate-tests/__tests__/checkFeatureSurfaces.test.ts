@@ -119,7 +119,7 @@ describe('feature surfaces', () => {
     ['mcpTools', ['intutic_widgets'], 'registers no tool named intutic_widgets'],
     ['terraform', ['intutic_widget'], 'registers no intutic_widget'],
     ['terraform', ['workspace_settings.widgets'], 'workspace_settings_keys.json is missing'],
-    ['events', ['widget.created'], 'NotificationEventType has no widget.created'],
+    ['events', ['widget.created'], 'NOTIFICATION_EVENT_TYPES has no widget.created'],
     ['enforcement', ['mcp:WIDGET_DENIED'], 'refusal-codes.json has no mcp:WIDGET_DENIED'],
   ])('fails missing %s evidence %j', async (iface, evidence, why) => {
     await manifest([feature({ ...present, [iface]: evidence })])
@@ -138,7 +138,7 @@ describe('feature surfaces', () => {
     await put('apps/docs/reference/terraform/resources/widget.md', '# intutic_widget\n')
     await put(
       'packages/shared-types/src/notifications.ts',
-      "export type NotificationEventType =\n  | 'widget.created'\n  | 'widget.deleted'\n\nexport {}\n",
+      "export const NOTIFICATION_EVENT_TYPES = [\n  'widget.created',\n  'widget.deleted',\n] as const\n",
     )
     await put('apps/docs/guide/settings.md', '# Settings\n\n| `widget.created` | A widget was made |\n')
     await put(

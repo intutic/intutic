@@ -376,7 +376,9 @@ pub struct DlpConfig {
     /// an unknown id or action stops the proxy at boot
     /// (`dlp::install_pii_actions`). For a workspace that sets
     /// `piiDetectors`, that setting is the baseline for its requests and
-    /// these may only tighten it (`dlp::workspace_pii_policy`).
+    /// these may only tighten it (`dlp::workspace_pii_policy`); `enabled`,
+    /// `scan_input` and `scan_output` switch off this machine's own patterns,
+    /// never the detectors the workspace names (`dlp::direction_scan`).
     #[serde(default)]
     pub detectors: std::collections::BTreeMap<String, String>,
     /// How many bytes of decoded response text the streaming forward loop
@@ -408,10 +410,11 @@ pub struct DlpConfig {
     /// holdback (2.5–4 s at 250–400 B/s for the built-in set's 1020 bytes).
     /// Three things make it defensible rather than reckless:
     ///
-    /// 1. It is scoped to deployments that already asked for output DLP.
-    ///    `enabled && scan_output` gates it. The deployments whose latency
-    ///    changes are exactly the ones that were being told they had a
-    ///    protection they did not have.
+    /// 1. It is scoped to deployments that already asked for output DLP:
+    ///    `enabled && scan_output`, or a workspace whose `piiDetectors`
+    ///    baseline scans responses whatever those switches say. The
+    ///    deployments whose latency changes are exactly the ones that were
+    ///    being told they had a protection they did not have.
     /// 2. It is not silent. `dlp::resolve_holdback` logs the effective byte
     ///    count, the derived bound, the pattern that set it, and the
     ///    latency consequence, once, on the first streamed response.

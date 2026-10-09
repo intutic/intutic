@@ -1851,6 +1851,16 @@ inventoryCmd
     await runInventorySummary(opts)
   })
 
+inventoryCmd
+  .command('devices')
+  .description('Every machine that reports, with its id (what --device takes), counts and last report')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runInventoryDevices } = await import('./commands/inventory.js')
+    await runInventoryDevices(opts)
+  })
+
 for (const [view, handler, desc] of [
   ['harnesses', 'runInventoryHarnesses', 'Harnesses by machine, with gate state and status'],
   ['mcp-servers', 'runInventoryMcpServers', 'MCP servers by machine, wrapped by the MCP proxy or not'],
@@ -1882,6 +1892,17 @@ inventoryCmd
   .action(async (opts) => {
     const { runInventorySkills } = await import('./commands/inventory.js')
     await runInventorySkills(opts)
+  })
+
+inventoryCmd
+  .command('disconnects')
+  .description('Machines that ran `intutic disconnect`, newest first: what they disconnected, who and when')
+  .option('--limit <n>', 'At most this many (default 100, at most 500)')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runInventoryDisconnects } = await import('./commands/inventory.js')
+    await runInventoryDisconnects(opts)
   })
 
 program

@@ -229,10 +229,13 @@ async fn a_member_outside_the_required_groups_never_receives_the_tool_call() {
 
     // The policy cannot be fetched: fail-closed, the default, refuses the
     // request before it reaches the model, as an unreachable policy check does.
+    // The same key-context answer carries the workspace's PII detector
+    // actions, which are read first, so the refusal is theirs: a check that
+    // could not complete.
     let before = upstream.received_requests().await.expect("recording").len();
     let (status, body, _) = send(UNREACHABLE, "case-json", false).await;
     assert_eq!(status, reqwest::StatusCode::FORBIDDEN, "{body}");
-    assert!(body.contains("policy_denied"), "{body}");
+    assert!(body.contains("GOVERNANCE_UNAVAILABLE"), "{body}");
     assert_eq!(
         upstream.received_requests().await.expect("recording").len(),
         before,

@@ -1,6 +1,8 @@
 /**
- * Instruction budget for WASM rules (TD-440): the MCP proxy's stand-in for
- * Wasmtime fuel, which `runner.rs` sets to 1,000,000 per evaluation.
+ * Instruction budget for WASM rules: the stand-in for Wasmtime fuel, which
+ * the Rust proxy sets to 1,000,000 per evaluation (`limits.rs`), wherever a
+ * rule runs on V8 — the MCP proxy, and `intutic rules test`, `policy test`
+ * and `policy install`, so a rule that runs out in a proxy runs out there.
  *
  * V8 has no metering hook, so the rule's own code is rewritten at load to
  * count. A new mutable i32 global starts at the budget, and a charge is
@@ -263,8 +265,8 @@ export function meterFuel(bytes: Uint8Array<ArrayBuffer>, budget: number): Uint8
   const code = find(SECTION.code)
   if (!code) return bytes
 
-  const exports = find(SECTION.export)
-  if (exportNames(exports).includes(FUEL_EXPORT)) {
+  const exportSection = find(SECTION.export)
+  if (exportNames(exportSection).includes(FUEL_EXPORT)) {
     throw new Error(`WASM rule already exports "${FUEL_EXPORT}", which the instruction budget reserves`)
   }
   const globals = find(SECTION.global)
@@ -285,7 +287,7 @@ export function meterFuel(bytes: Uint8Array<ArrayBuffer>, budget: number): Uint8
 
   putSection(sections, SECTION.global, appendToVector(globals, [0x7f, 0x01, 0x41, ...writeS32(budget), 0x0b]))
   const name = [...new TextEncoder().encode(FUEL_EXPORT)]
-  putSection(sections, SECTION.export, appendToVector(exports, [...writeU32(name.length), ...name, EXPORT_KIND_GLOBAL, ...writeU32(fuelGlobal)]))
+  putSection(sections, SECTION.export, appendToVector(exportSection, [...writeU32(name.length), ...name, EXPORT_KIND_GLOBAL, ...writeU32(fuelGlobal)]))
   putSection(sections, SECTION.code, concat(bodies))
   return assembleModule(bytes, sections)
 }

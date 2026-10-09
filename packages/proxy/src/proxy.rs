@@ -524,10 +524,9 @@ async fn parse_key_context(
         return Err(());
     };
 
-    // Budget fields are intentionally left unset: this path establishes identity
-    // only. The hard-cap gate immediately below in `handle_proxy` reads spend and
-    // limits from the cache itself, so budgets stay enforced by their own gate
-    // rather than by a value guessed here.
+    // Spend is left at zero: this path establishes identity, and the caller
+    // reads spend and the cap from the cache. The cap the route states is kept
+    // for when the cache has none.
     Ok(Some(VirtualKeyRecord {
         token: token.to_string(),
         key_name: None,
@@ -536,7 +535,7 @@ async fn parse_key_context(
             .get("memberId")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string()),
-        max_budget: None,
+        max_budget: key_context_daily_cap(&body),
         spend: 0.0,
         // The key's own allowlist (migration 181), same field name and same
         // shape as the cached entry; empty when the key set none.
@@ -701,6 +700,40 @@ fn extract_model(body: &serde_json::Value) -> String {
         .and_then(|v| v.as_str())
         .unwrap_or("unknown")
         .to_string()
+}
+
+/// The workspace's daily cap as `/api/v1/auth/key-context` states it
+/// (`budget.dailyUsd`), or `None` when the answer carries none.
+fn key_context_daily_cap(body: &serde_json::Value) -> Option<f64> {
+    body.get("budget")?
+        .get("dailyUsd")?
+        .as_f64()
+        .filter(|cap| cap.is_finite() && *cap >= 0.0)
+}
+
+/// A managed key's daily cap from `/auth/key-context`, for when the cached
+/// copy is missing; `None` when there is no control plane to ask or it could
+/// not answer.
+async fn daily_cap(
+    state: &AppState,
+    virtual_key: Option<&crate::credential::VirtualKey>,
+    workspace_id: &str,
+) -> Option<f64> {
+    let policy = &state.config.intutic_settings.policy;
+    let (cp_url, virtual_key) = policy.control_plane_url.as_deref().zip(virtual_key)?;
+    let version = state.control_plane.policy_version(workspace_id).await;
+    match crate::key_context::fetch(
+        &state.http_client,
+        cp_url,
+        virtual_key,
+        std::time::Duration::from_millis(policy.timeout_ms),
+        version,
+    )
+    .await
+    {
+        Ok(crate::key_context::Answer::Body(body)) => key_context_daily_cap(&body),
+        _ => None,
+    }
 }
 
 // ─── Error response helpers ──────────────────────────────────────────
@@ -2565,7 +2598,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                     state.control_plane.daily_budget(ws).await
                                 {
                                     record.spend = spend;
-                                    record.max_budget = limit.or(Some(100.0));
+                                    record.max_budget = limit.or(record.max_budget);
                                 }
                             }
                             tracing::debug!(
@@ -2781,6 +2814,26 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         }
     }
 
+    // A managed key's daily cap comes from the cache the control plane writes.
+    // When that copy is missing (a Valkey flush, or a workspace whose caps were
+    // never published), it is read from `/auth/key-context`; a cap that cannot
+    // be read is not invented, so the request is refused as unverifiable, as
+    // the hard-cap gate refuses it.
+    let mut key_record = key_record;
+    if let Some(key) = key_record.as_mut().filter(|k| k.max_budget.is_none()) {
+        match daily_cap(&state, credential.virtual_key(), &workspace_id).await {
+            Some(cap) => key.max_budget = Some(cap),
+            None => {
+                tracing::error!(workspace_id = %workspace_id, "The workspace's daily cap could not be read — rejecting request");
+                return json_error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "BUDGET_UNVERIFIABLE",
+                    "The workspace's daily spend cap could not be read from the control plane, so this request was not admitted. Retry shortly.",
+                );
+            }
+        }
+    }
+
     if let Some(ref key) = key_record {
         let prompt_tokens = (body_str.len() as f64 / 4.0).max(1.0) as u32;
         let max_tokens = body_json
@@ -2975,20 +3028,22 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // response below uses it. Without a control plane or a virtual key there
     // is no workspace setting, and the machine's config applies alone.
     //
+    // Local config may only tighten, so the setting is read whatever this
+    // machine's DLP switches say: a direction they leave off is still scanned
+    // with the detectors the workspace names (`dlp::direction_scan`).
+    //
     // A failed read follows the policy check's fail mode: closed refuses the
-    // request before any model spend; open scans with the machine's config.
-    // A global break-glass skips the refusal, as it skips the policy check,
-    // and the request is then scanned with the machine's config: break-glass
-    // never switches DLP itself off.
+    // request before any model spend, as GOVERNANCE_UNAVAILABLE (a check that
+    // could not complete, not a rule that decided against the request); open
+    // scans with the machine's config. A global break-glass skips the
+    // refusal, as it skips the policy check, and the request is then scanned
+    // with the machine's config: break-glass never switches DLP itself off.
     let pii_policy: Option<Arc<dlp::PiiPolicy>> = {
-        let dlp_cfg = &state.config.intutic_settings.dlp;
         let policy_cfg = &state.config.intutic_settings.policy;
-        let scans = dlp_cfg.enabled && (dlp_cfg.scan_input || dlp_cfg.scan_output);
         match policy_cfg
             .control_plane_url
             .as_deref()
             .zip(credential.virtual_key())
-            .filter(|_| scans)
         {
             Some((cp_url, virtual_key)) => {
                 let policy_version = state.control_plane.policy_version(&workspace_id).await;
@@ -3006,8 +3061,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                         tracing::warn!(workspace_id = %workspace_id, reason = %reason, "Workspace PII detector actions unavailable — blocking (fail-closed)");
                         return json_error(
                             StatusCode::FORBIDDEN,
-                            "policy_denied",
-                            &format!("Request blocked by Intutic governance policy: {reason}"),
+                            "GOVERNANCE_UNAVAILABLE",
+                            &format!("Request blocked: the workspace's PII detector actions could not be checked: {reason}"),
                         );
                     }
                     Err(reason) => {
@@ -3019,11 +3074,13 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             None => None,
         }
     };
+    let dlp_cfg = &state.config.intutic_settings.dlp;
+    let input_dlp = dlp::direction_scan(dlp_cfg.enabled && dlp_cfg.scan_input, pii_policy.as_ref());
+    let output_dlp =
+        dlp::direction_scan(dlp_cfg.enabled && dlp_cfg.scan_output, pii_policy.as_ref());
 
-    let dlp_findings = if state.config.intutic_settings.dlp.enabled
-        && state.config.intutic_settings.dlp.scan_input
-    {
-        let findings = dlp::scan_with(&body_str, pii_policy.as_deref());
+    let dlp_findings = if let Some(input_pii) = &input_dlp {
+        let findings = dlp::scan_with(&body_str, input_pii.as_deref());
         let has_block = findings.iter().any(|f| f.action == "block");
         if has_block {
             // Pattern names included — previously this logged only
@@ -4784,10 +4841,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         // the request, everything else is redacted in place. Values are tiny,
         // so this is noise-level cost next to the body scan.
         let value_str = String::from_utf8_lossy(value.as_bytes());
-        let header_findings = if state.config.intutic_settings.dlp.enabled
-            && state.config.intutic_settings.dlp.scan_input
-        {
-            dlp::scan_with(&value_str, pii_policy.as_deref())
+        let header_findings = if let Some(input_pii) = &input_dlp {
+            dlp::scan_with(&value_str, input_pii.as_deref())
         } else {
             Vec::new()
         };
@@ -5550,8 +5605,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         let prompt_text_clone = prompt_text.clone();
         let provider_clone = provider.clone();
         let harness_type_clone = harness_type.clone();
-        let dlp_scan_output = state.config.intutic_settings.dlp.enabled
-            && state.config.intutic_settings.dlp.scan_output;
+        let dlp_scan_output = output_dlp.is_some();
         // Resolved here rather than inside the stream task so the one-shot
         // "holdback is N bytes and here is what that costs you" log names a
         // configuration, not a request.
@@ -5560,7 +5614,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         } else {
             0
         };
-        let pii_policy_clone = pii_policy.clone();
+        let output_pii_clone = output_dlp.clone().flatten();
         let loop_run_id_clone = loop_run_id_header.clone();
         let break_glass_request_id_clone = break_glass_request_id.clone();
         let tool_scope_id_clone = tool_scope_id.clone();
@@ -5638,7 +5692,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             let mut dlp_holdback = if dlp_holdback_bytes > 0 {
                 Some(
                     crate::dlp::StreamScrubber::new(dlp_holdback_bytes)
-                        .with_pii(pii_policy_clone.clone()),
+                        .with_pii(output_pii_clone.clone()),
                 )
             } else {
                 None
@@ -5650,7 +5704,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // are covered whenever output scanning is on at all, because the
             // split-secret case this closes needs no holdback-size tuning.
             let mut arg_holdback = if dlp_scan_output {
-                Some(ArgHoldback::new(pii_policy_clone.clone()))
+                Some(ArgHoldback::new(output_pii_clone.clone()))
             } else {
                 None
             };
@@ -5806,7 +5860,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                             if dlp_scan_output && !replayed {
                                 if let Some((scrubbed, names)) = crate::dlp::scrub_stream_text(
                                     &line,
-                                    pii_policy_clone.as_deref(),
+                                    output_pii_clone.as_deref(),
                                 ) {
                                     line = scrubbed;
                                     for n in names {
@@ -7457,11 +7511,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     let mut output_dlp_withheld: Option<crate::refusal::Refusal> = None;
     // Set when output DLP changed the body at all — redacted or withheld it.
     let mut output_dlp_redacted = false;
-    let final_body = if state.config.intutic_settings.dlp.enabled
-        && state.config.intutic_settings.dlp.scan_output
-    {
+    let final_body = if let Some(output_pii) = &output_dlp {
         let resp_str = String::from_utf8_lossy(&final_body_bytes);
-        let findings = dlp::scan_with(&resp_str, pii_policy.as_deref());
+        let findings = dlp::scan_with(&resp_str, output_pii.as_deref());
         if !findings.is_empty() {
             output_dlp_redacted = true;
             tracing::info!(workspace_id = %workspace_id, findings = findings.len(), "DLP findings in response — redacting");

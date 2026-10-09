@@ -1,6 +1,7 @@
 from .client import ClawdeClient
 from .control_plane import ControlPlaneClient
 from .errors import ClawdeError, ClawdeConnectionError, ClawdeVerdictError, ClawdeBlockedError
+from .types import GatewayStatus
 from .refusals import (
     PROXY_REFUSALS,
     REFUSAL_HEADER,
@@ -23,7 +24,7 @@ from .gate import (
 
 __all__ = [
     "ClawdeClient", "ControlPlaneClient", "ClawdeError", "ClawdeConnectionError", "ClawdeVerdictError",
-    "ClawdeBlockedError",
+    "ClawdeBlockedError", "GatewayStatus",
     "PROXY_REFUSALS", "REFUSAL_HEADER", "REFUSAL_RULE_HEADER", "STREAM_REFUSAL_MARKER", "ProxyRefusal",
     "stream_refusal",
     "Gate", "GateClient", "GateConfig", "GateResponse", "IntuticGateHold", "IntuticGateRefusal",

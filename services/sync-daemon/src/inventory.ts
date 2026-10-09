@@ -25,6 +25,7 @@ import { homedir } from 'node:os'
 import {
   DEVICE_INVENTORY_SCHEMA_VERSION,
   gateIdentitiesOf,
+  gateKindForHarness,
   homeRelativePath,
   type DeviceInventory,
   type HarnessType,
@@ -35,7 +36,6 @@ import {
 import { newIso } from '@intutic/id'
 import { collectSkillsIn, fetchGuardProbes } from './agentReporter.js'
 import { discoverMcpServers } from './harness/mcpAutoWrite.js'
-import { gateKindForHarness } from './harness/gateKind.js'
 import { findGateFile, findIdentityGateFile } from './harness/gateArtifacts.js'
 import { mergeSightings, readGateSightings, sideLogSightings } from './harness/gateSightings.js'
 import { antigravityGateIdentities } from './harness/antigravityProducts.js'

@@ -26,6 +26,8 @@ import {
   runGuardrailsCreate,
   runGuardrailsUpdate,
   runGuardrailsDelete,
+  runGuardrailsDocsShow,
+  runGuardrailsSourcesSync,
 } from './guardrails.js'
 
 // Real credential files in a throwaway home, read by the real config store —
@@ -211,6 +213,48 @@ describe('intutic guardrails promote', () => {
     fetchMock.mockResolvedValue(ok({ error: 'a guardrail transition needs a signed-in member; service tokens cannot move enforcement', code: 'not_a_member' }, 403))
     await swallowExit(runGuardrailsPromote('pgr_1', {}))
     expect(errors()).toContain('service tokens cannot move enforcement')
+  })
+})
+
+describe('intutic guardrails sources sync', () => {
+  // What POST /api/v1/connectors/:connectorId/sync answers (routes/connectors.ts).
+  const SYNCED = { success: true, processed_docs: 7, updated_sops: ['sop_a', 'sop_b'], successor_sops: ['sop_c'] }
+
+  it('prints what the route returns', async () => {
+    fetchMock.mockResolvedValue(ok(SYNCED))
+    await runGuardrailsSourcesSync('conn_1', {})
+    expect(String(fetchMock.mock.calls[0]![0])).toContain('/api/v1/connectors/conn_1/sync')
+    expect(printed()).toMatch(/Documents processed.*7/)
+    expect(printed()).toMatch(/SOPs written.*2/)
+    expect(printed()).toMatch(/Upstream successors.*1 draft\(s\) for review: sop_c/)
+  })
+
+  it('--json prints the response as is', async () => {
+    fetchMock.mockResolvedValue(ok(SYNCED))
+    await runGuardrailsSourcesSync('conn_1', { json: true })
+    expect(JSON.parse(printed())).toEqual(SYNCED)
+  })
+})
+
+describe('intutic guardrails role refusals', () => {
+  // What requireRole answers: `error` says only "Forbidden"; `detail` names
+  // the roles that may make the call.
+  const FORBIDDEN = { error: 'Forbidden', code: 'E_FORBIDDEN', detail: 'Requires the OWNER or ADMIN role' }
+
+  it.each([
+    ['create', () => runGuardrailsCreate({ kind: 'tool_deny', tool: 'Bash', name: 'No shell' } as never)],
+    ['update', () => runGuardrailsUpdate('pgr_1', { name: 'Renamed' } as never)],
+    ['delete', () => runGuardrailsDelete('pgr_1', {})],
+    ['promote', () => runGuardrailsPromote('pgr_1', {})],
+    ['docs extract', () => runGuardrailsDocsExtract('pdoc_1', {})],
+    ['show', () => runGuardrailsShow('pgr_1', {})],
+    ['docs show', () => runGuardrailsDocsShow('pdoc_1', {})],
+  ])('%s prints the roles that may, not just "Forbidden"', async (_name, run) => {
+    fetchMock.mockResolvedValue(ok(FORBIDDEN, 403))
+    await swallowExit(run())
+    expect(exitSpy).toHaveBeenCalledWith(1)
+    expect(fetchMock).toHaveBeenCalled()
+    expect(errors()).toContain('Requires the OWNER or ADMIN role')
   })
 })
 

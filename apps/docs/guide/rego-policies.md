@@ -242,7 +242,7 @@ A case file holds one input document, or an array of cases:
 ]
 ```
 
-Each case runs through the same Rego host the MCP proxy uses, which decides as the LLM proxy does: both hosts' builtins are tested against `opa eval` on the same inputs. The test does not meter instructions or time, so a policy that passes here can still exceed the proxies' [limits](#limits) on a large input; check the largest inputs you expect against them. The command prints each decision, and exits 1 when a case gets a decision other than its `expect`, or reaches none. `opa test` also works on the policy source unchanged.
+Each case runs through the same Rego host the MCP proxy uses, which decides as the LLM proxy does: both hosts' builtins are tested against `opa eval` on the same inputs. The test counts instructions against the proxies' budget ([limits](#limits)), so a policy that runs out there runs out here and reaches no decision; it does not time an evaluation, so check the largest inputs you expect. The command prints each decision, and exits 1 when a case gets a decision other than its `expect`, or reaches none. `opa test` also works on the policy source unchanged.
 
 ## Deploying
 

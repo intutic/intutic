@@ -4,7 +4,7 @@
  * Scans tool arguments for patterns that indicate credentials, secrets, PII,
  * or destructive commands before allowing the tool call to proceed.
  *
- * PII is the checksum-validated detectors in `dlpPii.ts`, shared with the
+ * PII is the validated detectors in `dlpPii.ts`, shared with the
  * Rust proxy: card numbers, IBANs and SSNs on by default, email addresses and
  * phone numbers off. The workspace's `piiDetectors` setting sets the actions
  * it names, and `INTUTIC_MCP_DLP_DETECTORS` sets this machine's, which may

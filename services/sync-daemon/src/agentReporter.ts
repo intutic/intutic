@@ -27,11 +27,12 @@ import {
   MAX_FILES_PER_SKILL,
   MAX_SCRIPT_SCAN_BYTES,
   MAX_SCRIPT_HASH_BYTES,
+  gateKindForHarness,
+  type GateKind,
   type HarnessType,
   type SkillScriptsFacet,
 } from '@intutic/shared-types'
 import { discoverMcpServers } from './harness/mcpAutoWrite.js'
-import { gateKindForHarness } from './harness/gateKind.js'
 
 /** Live egress-enforcement status read from the proxy's own diagnostic endpoint. */
 export interface EgressFacet {
@@ -65,12 +66,12 @@ interface AgentFacets {
      * file the daemon writes and verified existence of) — kept for older
      * control-plane deployments that read this boolean directly. `false` for
      * `gateKind: 'sdk'` is NOT "this harness is unprotected"; see
-     * `gate_kind` below and `harness/gateKind.ts`'s module doc. Previously
+     * `gate_kind` below and `shared-types/src/gateKind.ts`'s module doc. Previously
      * hardcoded `true` for every harness regardless of mechanism.
      */
     hook_gate: boolean
-    /** How this harness's tool calls get gated — see `harness/gateKind.ts`. */
-    gate_kind: import('./harness/gateKind.js').GateKind
+    /** How this harness's tool calls get gated — see `shared-types/src/gateKind.ts`. */
+    gate_kind: GateKind
     pcas: boolean
     /** Present when the local proxy answered GET /intutic/egress (LLD #63 §4). */
     egress?: EgressFacet

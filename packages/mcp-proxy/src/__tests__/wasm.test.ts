@@ -154,7 +154,7 @@ describe('WasmLoader.rescan', () => {
 
     // Force the next compile of this ruleId to fail, then change the file
     // so a rescan actually attempts a recompile.
-    bridge.outcomes.set(ruleId, { ok: false, error: 'corrupt' })
+    bridge.outcomes.set(ruleId, { ok: false, reason: 'compile_error', error: 'corrupt' })
     await fs.writeFile(file, Buffer.from('v2-corrupt'))
     await loader.rescan(bridge)
 

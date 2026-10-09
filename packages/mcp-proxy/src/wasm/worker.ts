@@ -10,7 +10,7 @@
  * happen to share a rule.
  *
  * Protocol (see `runner.ts` for the main-thread side):
- *   compile  { type:'compile',  id, ruleId, bytes }  -> { type:'compile-result',  id, ruleId, ok, unsupportedImports?, readsReferencedFiles?, rego?, error? }
+ *   compile  { type:'compile',  id, ruleId, bytes }  -> { type:'compile-result',  id, ruleId, ok, reason?, unsupportedImports?, readsReferencedFiles?, rego?, error? }
  *   remove   { type:'remove', ruleId }                  (no reply)
  *   evaluate { type:'evaluate', id, ruleId, bytes, files? } -> { type:'evaluate-result', id, ruleId, ok, code?, decision?, reason?, riskTier?, error?, fuelExhausted?, notADecision? }
  *
@@ -33,8 +33,14 @@
 import { parentPort } from 'node:worker_threads'
 import { createHash } from 'node:crypto'
 import {
+  DEFAULT_FUEL_BUDGET,
+  FUEL_EXPORT,
   REGO_DISABLE_ENV,
+  REGO_FUEL_BUDGET,
+  WASM_PAGE_BYTES,
+  capDeclaredMemory,
   evaluateRegoRule,
+  meterFuel,
   isOpaModule,
   loadRegoRule,
   regoDecision,
@@ -46,8 +52,6 @@ import {
 } from '@intutic/shared-types'
 import { createHostImports, newHostImportState } from './hostImports.js'
 import { ReferencedFiles, type ReferencedFilesTable } from './referencedFiles.js'
-import { capDeclaredMemory, WASM_PAGE_BYTES } from './memoryCap.js'
-import { DEFAULT_FUEL_BUDGET, FUEL_EXPORT, REGO_FUEL_BUDGET, meterFuel } from './fuel.js'
 
 /**
  * Guest memory ceiling, `runner.rs`'s 16MB `StoreLimits` (TD-440). Enforced at
@@ -154,6 +158,7 @@ function handleCompile(msg: CompileMessage): void {
         id: msg.id,
         ruleId: msg.ruleId,
         ok: false,
+        reason: 'unsupported_import',
         unsupportedImports: unsupported,
       })
       return
@@ -174,6 +179,10 @@ function handleCompile(msg: CompileMessage): void {
       id: msg.id,
       ruleId: msg.ruleId,
       ok: false,
+      // Bytes V8 will not compile, as Wasmtime would not; anything else (a
+      // Rego build the host cannot run, an instruction the meter refuses, an
+      // imported memory) compiles but cannot run here.
+      reason: err instanceof WebAssembly.CompileError ? 'compile_error' : 'load_error',
       error: err instanceof Error ? err.message : String(err),
     })
   }

@@ -444,6 +444,9 @@ resource "intutic_siem_destination" "splunk" {
 	rotated := func(v string) string {
 		return webhook(fmt.Sprintf("secret_rotation_triggers = { rotated = %q }", v)) + splunk
 	}
+	withoutAuth := func(config string) string {
+		return strings.Replace(config, "  secret_config = { authHeaderValue = \"Bearer tf-acc-0123456789\" }\n", "", 1)
+	}
 	var hookID, splunkID, secret string
 	rotation := func(v string) resource.TestStep {
 		return resource.TestStep{
@@ -504,9 +507,30 @@ resource "intutic_siem_destination" "splunk" {
 				resource.TestCheckResourceAttrWith(spl, "id", same(&splunkID, "id")),
 			),
 		},
+		// Removing an optional credential clears it: the apply is consistent,
+		// the next plan is empty, and the API holds none.
+		resource.TestStep{
+			Config: withoutAuth(rotated("2")),
+			Check:  resource.TestCheckNoResourceAttr(hook, "secret_config.authHeaderValue"),
+		},
+		clean(withoutAuth(rotated("2"))),
+		resource.TestStep{
+			Config: withoutAuth(rotated("2")),
+			Check: func(*terraform.State) error {
+				var dest apiSiemDestination
+				c := client.New(os.Getenv("INTUTIC_CONTROL_PLANE_URL"), os.Getenv("INTUTIC_API_KEY"), "acceptance-test")
+				if err := c.Get(context.Background(), siemPath+"/"+hookID, &dest); err != nil {
+					return err
+				}
+				if v := string(dest.Config["authHeaderValue"]); v != "" && v != `""` {
+					return fmt.Errorf("authHeaderValue still stored: %s", v)
+				}
+				return nil
+			},
+		},
 		// The plan checks source names against the API's list.
 		resource.TestStep{
-			Config:      strings.Replace(rotated("2"), `"gate_decisions"`, `"gate_decision"`, 1),
+			Config:      strings.Replace(withoutAuth(rotated("2")), `"gate_decisions"`, `"gate_decision"`, 1),
 			PlanOnly:    true,
 			ExpectError: regexp.MustCompile(`"gate_decision" is not a source`),
 		},

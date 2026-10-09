@@ -223,7 +223,7 @@ export const HarnessType = {
   // Same family as LANGGRAPH: the blocking gate ships in intutic-clawde
   // (intutic_clawde.gate, python-raise contract), evaluated in-process before
   // the tool body runs. This adapter writes .env.intutic (proxy base-URL vars
-  // only) — see gateRegistry.ts NO_GATE rows and harness/gateKind.ts.
+  // only) — see gateRegistry.ts NO_GATE rows and shared-types/src/gateKind.ts.
   /** LangChain — covers BOTH the Python (`langchain`/`langchain-core`) and
    *  JS/TS (`langchain` npm package) ecosystems for detection purposes, since
    *  the framework itself ships in both. This env-adapter (`langchain.ts`) is

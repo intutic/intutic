@@ -103,11 +103,11 @@ describe('ClawdeClient session', () => {
     expect(proxyCalls().map((r) => r.headers['x-session-id'])).toEqual(['ses_sdk', 'ses_sdk'])
   })
 
-  it('uses the workspace the context names instead of asking', async () => {
+  it('confirms the key even when the context names a workspace, and registers in the key\'s workspace', async () => {
     context = { workingDirectory: repoDir, workspaceId: 'ws_ctx' }
     await ask(client())
-    expect(received.some((r) => r.path === '/api/v1/auth/me')).toBe(false)
-    expect(received.find((r) => r.path === '/api/v1/sessions')?.body.workspaceId).toBe('ws_ctx')
+    expect(received.filter((r) => r.path.startsWith('/api/')).map((r) => r.path)).toEqual(['/api/v1/auth/me', '/api/v1/sessions'])
+    expect(received.find((r) => r.path === '/api/v1/sessions')?.body.workspaceId).toBe('ws_1')
   })
 
   it('sends the session it was started in as is, and registers nothing', async () => {
