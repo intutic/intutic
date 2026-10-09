@@ -52,6 +52,7 @@ from . import imagecheck, snapshot, soprules, sso_groups
 from .actions import is_deploy, touches_infra
 from .client import GateClient
 from .hold import hold_message, request_hold
+from .limits import too_large_reason
 
 
 # Tools that cannot change anything. They still get the local snapshot check
@@ -69,6 +70,8 @@ GATE_REFUSAL_CODES = (
     "HELD",
     "SOP_RULE",
     "HOOK_GATE",
+    # The call is too large to evaluate (limits.py), before any tier runs.
+    "COMMAND_TOO_LARGE",
     imagecheck.E_UNPINNED_LATEST,
     imagecheck.E_UNPINNED_TAG,
     imagecheck.E_UNKNOWN_REGISTRY,
@@ -225,6 +228,15 @@ class Gate:
 
         target = tool_input.get("path") or tool_input.get("file_path") or ""
         command = tool_input.get("command") or ""
+
+        # ---- Size: refused before any tier reads the call ------------------
+        # Every built-in rule is linear, but a workspace's own WHERE patterns
+        # need not be, and the bound keeps a crafted call from holding the
+        # agent. See limits.py.
+        too_large = too_large_reason(str(command), tool_input)
+        if too_large is not None:
+            self._emit("tool_blocked", tool_name, too_large)
+            raise IntuticGateRefusal(too_large, "COMMAND_TOO_LARGE")
 
         self._report_snapshot_health_once(tool_name)
 

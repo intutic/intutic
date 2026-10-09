@@ -64,7 +64,6 @@ export { writeAntigravityHooks, buildGeminiBeforeToolEntry } from './harness/ant
 export { writeAntigravityCliHooks, buildAntigravityHookEntry, ANTIGRAVITY_HOOK_NAME } from './harness/antigravityCliHooks.js'
 
 // WS-B — new harness hook coverage (continue, open-webui, n8n)
-export { writeContinueHooks } from './harness/continueHooks.js'
 export { mergeContinueConfig } from './harness/continueConfigMerger.js'
 export { writeOpenWebuiHooks } from './harness/openWebuiHooks.js'
 export { writeN8nHooks } from './harness/n8nHooks.js'

@@ -119,7 +119,7 @@ describe('writeAntigravityCliHooks', () => {
     expect(doc[ANTIGRAVITY_HOOK_NAME].enabled).toBe(true)
     const [entry] = doc[ANTIGRAVITY_HOOK_NAME].PreToolUse
     expect(entry.matcher).toBe('*')
-    expect(entry.hooks).toEqual([{ type: 'command', command: `node ${JSON.stringify(script())}` }])
+    expect(entry.hooks).toEqual([{ type: 'command', command: `node ${JSON.stringify(script())}`, timeout: 10 }])
   })
 
   it('leaves a hooks file that is not plain JSON untouched', async () => {

@@ -157,12 +157,14 @@ export const SDK_GATED_HARNESSES: ReadonlySet<HarnessTypeT> = new Set([
  * `gateRegistry.ts`: aider's only native hook (`--git-commit-verify`) is
  * opt-in, post-edit, and blind to `/run`; Roo Code and Claude Desktop have no
  * hook system at all (Claude Desktop's Code tab is Claude Code, gated by the
- * claude-code gate).
+ * claude-code gate); Continue's CLI loads PreToolUse hooks but never fires
+ * them, and its IDE extension has none (see the continueConfigMerger.ts row).
  */
 export const NO_GATE_HARNESSES: ReadonlySet<HarnessTypeT> = new Set([
   HarnessType.AIDER,
   HarnessType.ROO_CODE,
   HarnessType.CLAUDE_DESKTOP,
+  HarnessType.CONTINUE,
 ])
 
 /**

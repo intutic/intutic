@@ -34,8 +34,8 @@
  * (`buildSnapshotRules` in `services/sync-daemon/src/lib/policySnapshot.ts`
  * only ships SOP-authored rules, the destructive tier, and the tier-promoted
  * skill-surface rules — never the floor's secret-content patterns). Copied
- * as of 2026-08-19, against the version of `protectedPaths.ts` this worktree
- * branched from. `UNIVERSAL_PROTECTED_PATHS` is held equal to the source by
+ * as of 2026-10-08, when the sequence rules (`sequence: true`) arrived.
+ * `UNIVERSAL_PROTECTED_PATHS` is held equal to the source by
  * `services/sync-daemon/__tests__/harness/protectedPathCopies.test.ts`.
  */
 
@@ -46,6 +46,8 @@ export interface FixturePattern {
   id: string
   source: string
   ignoreCase?: boolean
+  /** A sequence rule: flags column `s` (see sequence.ts). */
+  sequence?: boolean
   subject?: Subject
   severity: Severity
   reason: string
@@ -58,6 +60,7 @@ export const GOVERNANCE_BYPASS_PATTERNS: readonly FixturePattern[] = [
   {
     id: 'bypass.chflags_nouchg',
     source: ' chflags .*nouchg',
+    sequence: true,
     severity: 'block',
     reason: 'Governance bypass pattern: clearing the macOS immutable flag on a governance file',
     matches: [' chflags nouchg .intutic/hooks ', ' sudo chflags -R nouchg /x ', ' chflags nouchg a b '],
@@ -66,6 +69,7 @@ export const GOVERNANCE_BYPASS_PATTERNS: readonly FixturePattern[] = [
   {
     id: 'bypass.chattr_immutable',
     source: ' chattr .*-[a-zA-Z]*i',
+    sequence: true,
     severity: 'block',
     reason: 'Governance bypass pattern: clearing the Linux immutable attribute on a governance file',
     matches: [' chattr -i /x ', ' chattr -R -i /x ', ' sudo chattr -Ri /x '],
@@ -74,6 +78,7 @@ export const GOVERNANCE_BYPASS_PATTERNS: readonly FixturePattern[] = [
   {
     id: 'bypass.chmod_governance',
     source: ' chmod .*(hooks|\\.intutic|\\.claude|\\.cursor)',
+    sequence: true,
     severity: 'block',
     reason: 'Governance bypass pattern: changing permissions on a governance file',
     matches: [' chmod 777 .intutic/hooks/x ', ' chmod -R 000 .claude ', ' chmod +x .cursor/hooks.json '],
@@ -141,13 +146,7 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: readonly FixturePattern[] = [
     subject: 'command',
     severity: 'block',
     reason: 'Recursive delete of the filesystem root',
-    matches: [
-      ' rm -rf / ',
-      ' rm -rf / --no-preserve-root ',
-      ' sudo rm -rf / ',
-      ' rm -rf /* ',
-      ' cd /tmp && rm -fr / ',
-    ],
+    matches: [' rm -rf / ', ' rm -rf / --no-preserve-root ', ' sudo rm -rf / ', ' rm -rf /* ', ' cd /tmp && rm -fr / '],
     notMatches: [
       ' rm -rf /home/me/project/build ',
       ' rm -rf ./dist ',
@@ -160,6 +159,7 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: readonly FixturePattern[] = [
   {
     id: 'destructive.mkfs_device',
     source: ' mkfs[a-z0-9.]* .*/dev/',
+    sequence: true,
     subject: 'command',
     severity: 'block',
     reason: 'Formatting a block device',
@@ -169,6 +169,7 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: readonly FixturePattern[] = [
   {
     id: 'destructive.dd_raw_device',
     source: ' dd .*of=/dev/',
+    sequence: true,
     subject: 'command',
     severity: 'block',
     reason: 'Writing a raw image over a block device',
@@ -178,6 +179,7 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: readonly FixturePattern[] = [
   {
     id: 'destructive.block_device_wipe',
     source: ' (shred|wipefs|blkdiscard) .*/dev/',
+    sequence: true,
     subject: 'command',
     severity: 'block',
     reason: 'Wiping a block device',
@@ -186,7 +188,7 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: readonly FixturePattern[] = [
   },
   {
     id: 'destructive.chmod_recursive_root',
-    source: ' chmod +-[a-zA-Z]*R[a-zA-Z]* +[0-7]+ +/( |\\*)',
+    source: ' chmod +-[a-zA-QS-Z]*R[a-zA-Z]* +[0-7]+ +/( |\\*)',
     subject: 'command',
     severity: 'block',
     reason: 'Recursive permission change across the filesystem root',
@@ -195,7 +197,7 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: readonly FixturePattern[] = [
   },
   {
     id: 'destructive.chown_recursive_root',
-    source: ' chown +-[a-zA-Z]*R[a-zA-Z]* +[a-zA-Z0-9_.:-]+ +/( |\\*)',
+    source: ' chown +-[a-zA-QS-Z]*R[a-zA-Z]* +[a-zA-Z0-9_.:-]+ +/( |\\*)',
     subject: 'command',
     severity: 'block',
     reason: 'Recursive ownership change across the filesystem root',
@@ -214,6 +216,7 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: readonly FixturePattern[] = [
   {
     id: 'destructive.curl_pipe_shell',
     source: ' (curl|wget) .*\\| *(sudo )?(ba|z|k|d)?sh',
+    sequence: true,
     subject: 'command',
     severity: 'warn',
     reason: 'Piping a downloaded script straight into a shell',
@@ -257,7 +260,8 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: readonly FixturePattern[] = [
   },
   {
     id: 'destructive.git_history_loss',
-    source: ' git .*(reset +--hard|clean +-[a-zA-Z]*f|push +.*--force)',
+    source: ' git .*reset +--hard| git .*clean +-[a-zA-Z]*f| git .*push +.*--force',
+    sequence: true,
     subject: 'command',
     severity: 'warn',
     reason: 'Git command that discards uncommitted or remote work',

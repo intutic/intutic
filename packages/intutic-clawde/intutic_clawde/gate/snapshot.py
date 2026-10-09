@@ -46,6 +46,7 @@ from typing import Optional
 from . import sso_groups as sso
 from . import actions
 from .phrases import has_phrase, phrase_text
+from .sequence import compile_sequence, sequence_match
 
 SNAPSHOT_STALE_AFTER_DAYS = 7
 
@@ -65,6 +66,10 @@ class Rule:
     subject: str          # tool | command | target | phrase | action | any
     reason: str
     pattern: re.Pattern
+    # A sequence rule's compiled steps (flags "s", sequence.py), or None. Its
+    # steps are searched for in order, in linear time, instead of `pattern`,
+    # which re runs in time growing with the square of crafted text.
+    steps: Optional[list] = None
 
 
 @dataclass
@@ -147,12 +152,15 @@ def load_snapshot(workspace_id: str = "", path: str | None = None) -> Snapshot:
             continue
         f = line.split("\t")
         # Column order: id, severity, flags, subject, reason, source(regex).
+        # Flags: i = case-insensitive, s = a sequence rule.
         if len(f) < 6 or not f[5]:
             continue
+        flags = re.IGNORECASE if "i" in f[2] else 0
         try:
             snap.rules.append(Rule(
                 id=f[0], severity=f[1], subject=f[3] or "any", reason=f[4],
-                pattern=re.compile(f[5], re.IGNORECASE if f[2] == "i" else 0),
+                pattern=re.compile(f[5], flags),
+                steps=compile_sequence(f[5], flags) if "s" in f[2] else None,
             ))
         except re.error:
             snap.dropped_rules += 1
@@ -234,7 +242,9 @@ def evaluate(tool_name: str, target: str, command: str, snap: Snapshot,
             subjects = [n_command, n_target]
 
         for subject in subjects:
-            if rule.subject != "phrase" and not rule.pattern.search(subject):
+            if rule.subject != "phrase" and not (
+                sequence_match(rule.steps, subject) if rule.steps is not None else rule.pattern.search(subject)
+            ):
                 continue
             if rule.severity == SEV_SHADOW:
                 return Decision(SEV_SHADOW, f"{rule.reason} [{rule.id}]", rule.id)

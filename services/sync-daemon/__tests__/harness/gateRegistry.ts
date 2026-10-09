@@ -334,25 +334,6 @@ export const GATES: readonly GateEntry[] = [
     mcpCalls: 'reachable',
     mcpNote: "Already a `.*` catch-all matcher. GitHub Copilot's own MCP tool-naming convention was not independently verified during M3.",
   },
-  {
-    name: 'continue',
-    module: '../../src/harness/continueHooks.js',
-    invoke: (m, root) => m.writeContinueHooks(root, PROXY_URL, 'ws_test'),
-    artifact: '.intutic/hooks/continue-check.js',
-    runner: 'node',
-    contract: 'exit2',
-    migrated: true,
-    note:
-      'Continue CLI (cn) only — the IDE extension has no hook system. The CLI also ' +
-      'reads .claude/settings.json, so claude-code users may already run that gate; ' +
-      'the dedicated registration in .continue/settings.json covers users without it. ' +
-      'LIVE-VERIFIED LIMITS (cn 1.5.47): headless -p mode does not execute PreToolUse ' +
-      'hooks at all (marker-hook probe: tool ran, hook never fired) — interactive TUI ' +
-      'sessions are what this gate covers, headless runs are proxy-governed only; and ' +
-      "cn's dispatcher fails OPEN on hook errors ({blocked:false}) by its own design",
-    mcpCalls: 'reachable',
-    mcpNote: "Already a `.*` catch-all matcher (when the hook fires at all — see the headless-mode limit above). Continue's own MCP tool-naming convention was not independently verified during M3.",
-  },
 
   // ── JavaScript, stdout contract ─────────────────────────────────────────
   {
@@ -627,7 +608,12 @@ export const NO_GATE: ReadonlyArray<{
   {
     file: 'continueConfigMerger.ts',
     harness: 'continue',
-    why: 'sets apiBase on Continue\'s OpenAI/Anthropic models (LLM routing); continueHooks.ts is the gate',
+    why:
+      'sets apiBase on Continue\'s OpenAI/Anthropic models, so the proxy governs its LLM traffic; ' +
+      'Continue has no tool-call gate. Its CLI (cn) loads PreToolUse hooks from settings.json but ' +
+      'never fires them: firePreToolUse has no caller outside tests at continuedev/continue main ' +
+      '5522c6f, and PR #11043, which would have wired it, was closed unmerged on 2026-03-24. The ' +
+      'IDE extension has no hook system. The gate Intutic used to register there never ran.',
   },
   {
     file: 'holdRedaction.ts',

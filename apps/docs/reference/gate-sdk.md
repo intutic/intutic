@@ -135,6 +135,7 @@ A refused call throws `IntuticGateRefusal`. Its message starts with `[Intutic Go
 | `HELD` | A hold rule matched: the call is held for a person's approval, and `holdId` names the hold |
 | `SOP_RULE` | A block rule in the SOP register matched |
 | `HOOK_GATE` | The control plane's hook gate refused the call, or could not be reached while `failClosed` is on |
+| `COMMAND_TOO_LARGE` | The command is over 256 KiB, or the tool arguments over 1 MiB, the most a gate evaluates; split the work into smaller calls |
 | `E_UNPINNED_LATEST` | A deploy uses an image tagged `latest` |
 | `E_UNPINNED_TAG` | A deploy uses an image by tag where the allowlist requires a digest |
 | `E_UNKNOWN_REGISTRY` | A deploy uses an image from a registry the allowlist does not name |
@@ -143,6 +144,8 @@ A refused call throws `IntuticGateRefusal`. Its message starts with `[Intutic Go
 | `E_MANIFEST_UNPARSEABLE` | The image allowlist, or a manifest the deploy names, is missing or unreadable |
 | `WORKFLOW_SANDBOX` | TypeScript only: the Workflow DevKit adapter was called inside the workflow sandbox, where the gate cannot run; run it in a step |
 | `NO_GATE` | TypeScript only: the Workflow DevKit adapter has no gate to call, because none was passed and none was installed |
+
+`COMMAND_TOO_LARGE` is checked before every tier: a `command` over 256 KiB, or arguments whose compact JSON is over 1 MiB (UTF-8 bytes; `COMMAND_SIZE_LIMIT` and `ARGUMENTS_SIZE_LIMIT`, exported by both packages), is refused without being evaluated. The limits sit far above real agent traffic and bound how long any rule can take; see [Hook timeouts](/reference/harness-security-matrix#hook-timeouts).
 
 ## Wrapping tools
 

@@ -11,6 +11,7 @@
  * classifier on the shared vectors.
  */
 import { describe, it, expect, beforeAll } from 'vitest'
+import { expectLinearTime, expectLinearTimes } from './linearTime.js'
 import { spawn } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -42,8 +43,8 @@ const NOT_HELD: readonly string[] = [...VECTORS.notHeld, ...VECTORS.held.filter(
 
 /**
  * Runs `GATE_PY_LIB` the way the extractor does and returns, per input, the
- * action string and the milliseconds the classifier took — the best of three
- * runs, measured inside Python, so neither interpreter start-up nor a busy
+ * action string and the CPU milliseconds the classifier took — the best of
+ * three runs, measured inside Python, so neither interpreter start-up nor a busy
  * machine is counted against it.
  */
 function pythonActions(inputs: ReadonlyArray<readonly [string, string]>): Promise<Array<[string, number]>> {
@@ -55,9 +56,9 @@ function pythonActions(inputs: ReadonlyArray<readonly [string, string]>): Promis
     'for tool, command in json.load(sys.stdin):',
     '    best = None',
     '    for _ in range(3):',
-    '        t0 = time.perf_counter()',
+    '        t0 = time.process_time()',
     '        a = lib["intutic_actions"](tool, command)',
-    '        took = (time.perf_counter() - t0) * 1000',
+    '        took = (time.process_time() - t0) * 1000',
     '        best = took if best is None else min(best, took)',
     '    out.append([a, best])',
     'print(json.dumps(out))',
@@ -90,19 +91,23 @@ const jsActions = new Function(`${emitJsActionClassifier()}\nreturn intuticActio
 const tokens = (s: string) => s.trim().split(/\s+/).filter(Boolean).join(' ')
 
 const ALL = [...HELD.map(([c]) => c), ...NOT_HELD]
-const ADVERSARIAL = VECTORS.adversarial.map(([unit, times]) => unit.repeat(times))
+/** Each adversarial vector at a quarter of its size and at its size: the linear-time check's n and 4n. */
+const ADVERSARIAL = VECTORS.adversarial.map(([unit, times]) => {
+  const base = Math.ceil(times / 4)
+  return { 1: unit.repeat(base), 4: unit.repeat(base * 4) }
+})
 let python: Map<string, string>
-let pythonAdversarialMs: number[]
+let pythonAdversarialMs: Array<{ 1: number; 4: number }>
 let pythonWrite: string
 
 beforeAll(async () => {
   const out = await pythonActions([
     ...ALL.map((c) => ['Bash', c] as const),
-    ...ADVERSARIAL.map((c) => ['Bash', c] as const),
+    ...ADVERSARIAL.flatMap((c) => [['Bash', c[1]] as const, ['Bash', c[4]] as const]),
     ['Write', 'git push'] as const,
   ])
   python = new Map(ALL.map((c, i) => [c, out[i]![0]]))
-  pythonAdversarialMs = ADVERSARIAL.map((_, i) => out[ALL.length + i]![1])
+  pythonAdversarialMs = ADVERSARIAL.map((_, i) => ({ 1: out[ALL.length + 2 * i]![1], 4: out[ALL.length + 2 * i + 1]![1] }))
   pythonWrite = out[out.length - 1]![0]
 })
 
@@ -124,17 +129,10 @@ describe('the hold classifier', () => {
   })
 
   it.each(VECTORS.adversarial.map(([unit, times], i) => [unit, times, i] as const))(
-    'classifies %j repeated %i times in under 200 ms in both dialects',
-    (_unit, _times, i) => {
-      let best = Infinity
-      for (let run = 0; run < 3; run++) {
-        const t0 = performance.now()
-        jsActions('Bash', ADVERSARIAL[i]!)
-        best = Math.min(best, performance.now() - t0)
-      }
-      // The best of three runs: the bound is on the matcher, not on a busy machine.
-      expect(best, 'JS gate').toBeLessThan(200)
-      expect(pythonAdversarialMs[i], 'bash gate (Python)').toBeLessThan(200)
+    'classifies %j repeated up to %i times in linear time in both dialects',
+    (unit, _times, i) => {
+      expectLinearTime(`JS gate, ${JSON.stringify(unit)}`, (scale) => jsActions('Bash', ADVERSARIAL[i]![scale]))
+      expectLinearTimes(`bash gate (Python), ${JSON.stringify(unit)}`, pythonAdversarialMs[i]![1], pythonAdversarialMs[i]![4])
     },
   )
 

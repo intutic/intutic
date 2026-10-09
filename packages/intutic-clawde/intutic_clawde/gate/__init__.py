@@ -34,6 +34,7 @@ from .framework import guard, guard_tools, intutic_headers
 from .gate import GATE_REFUSAL_CODES, Gate, GateConfig, IntuticGateHold, IntuticGateRefusal, active, install
 from .hold import canonical_json, hold_key, hold_message
 from .imagecheck import Verdict as ImageVerdict
+from .limits import ARGUMENTS_SIZE_LIMIT, COMMAND_SIZE_LIMIT
 from .snapshot import Snapshot, load_snapshot
 from .soprules import SopRule, first_match, parse_rules, supports_arg_patterns
 
@@ -43,6 +44,7 @@ __all__ = [
     "guard", "guard_tools", "intutic_headers",
     "Gate", "GateConfig", "GATE_REFUSAL_CODES", "IntuticGateHold", "IntuticGateRefusal", "active", "install",
     "canonical_json", "hold_key", "hold_message",
+    "ARGUMENTS_SIZE_LIMIT", "COMMAND_SIZE_LIMIT",
     "ImageVerdict", "Snapshot", "load_snapshot",
     "SopRule", "first_match", "parse_rules", "supports_arg_patterns",
 ]

@@ -51,7 +51,13 @@ export interface PhraseText {
   /** A separator follows the last word. */
   tail: boolean
   /** Per-word match arrays already computed, by mode and word. */
-  memo: Record<string, boolean[]>
+  memo: Record<string, Uint8Array>
+  /**
+   * Per word x: the first word at or after x containing `;&|`, with a real
+   * newline before it, and with any newline before it (the word count when
+   * none). Built by the first {@link hasPhrase} call that needs them.
+   */
+  next: { bar: Int32Array; nl: Int32Array; eol: Int32Array } | null
 }
 
 /**
@@ -66,7 +72,7 @@ export function phraseText(input: unknown): PhraseText {
     c === ' ' || c === '\t' || c === '\n' || c === '\r' || c === '\v' || c === '\f' ||
     c === '\u00a0' || c === '\u1680' || (c >= '\u2000' && c <= '\u200a') ||
     c === '\u2028' || c === '\u2029' || c === '\u202f' || c === '\u205f' || c === '\u3000' || c === '\ufeff'
-  const t: PhraseText = { raw: s, joined: '', toks: [], sep: [], nl: [], eol: [], dash: [], bar: [], tail: false, memo: {} }
+  const t: PhraseText = { raw: s, joined: '', toks: [], sep: [], nl: [], eol: [], dash: [], bar: [], tail: false, memo: {}, next: null }
   let start = -1
   let tokBar = false
   let pendSep = false
@@ -143,14 +149,16 @@ export function hasPhrase(t: PhraseText, needle: string, bounded?: boolean): boo
   const k = words.length
   const isWord = (c: string): boolean => (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c === '_'
   // Whether word `i` of the phrase can be the word at `q`, by its position.
-  const matches = (i: number): boolean[] => {
+  // Typed arrays throughout: every array here has one entry per word of the
+  // text, and a classifier asks dozens of phrases of the same text.
+  const matches = (i: number): Uint8Array => {
     const w = words[i]!
     const first = i === 0
     const last = i === k - 1 && !trailingGap
     const key = (first ? 'f' : '') + (last ? 'l' : '') + (bounded ? 'b' : '') + ':' + w
     const hit = t.memo[key]
     if (hit) return hit
-    const out: boolean[] = new Array(T)
+    const out = new Uint8Array(T)
     for (let q = 0; q < T; q++) {
       const tok = t.toks[q]!
       let ok: boolean
@@ -160,66 +168,69 @@ export function hasPhrase(t: PhraseText, needle: string, bounded?: boolean): boo
       else ok = tok === w
       if (ok && bounded && first) ok = tok.length === w.length || !isWord(tok.charAt(tok.length - w.length - 1))
       if (ok && bounded && last) ok = tok.length === w.length || !(isWord(tok.charAt(w.length)) || tok.charAt(w.length) === '.')
-      out[q] = ok
+      out[q] = ok ? 1 : 0
     }
     t.memo[key] = out
     return out
   }
   // nextBar[x]: first word at or after x containing `;&|`; nextNl[x]: first
   // word at or after x with a real newline before it; nextEol likewise for any
-  // newline. T when there is none.
-  const nextBar: number[] = new Array(T + 1)
-  const nextNl: number[] = new Array(T + 1)
-  const nextEol: number[] = new Array(T + 1)
-  nextBar[T] = T
-  nextNl[T] = T
-  nextEol[T] = T
-  for (let x = T - 1; x >= 0; x--) {
-    nextBar[x] = t.bar[x] ? x : nextBar[x + 1]!
-    nextNl[x] = t.nl[x] ? x : nextNl[x + 1]!
-    nextEol[x] = t.eol[x] ? x : nextEol[x + 1]!
+  // newline. T when there is none. Once per text, not once per phrase.
+  if (t.next === null) {
+    const bar = new Int32Array(T + 1)
+    const nl = new Int32Array(T + 1)
+    const eol = new Int32Array(T + 1)
+    bar[T] = T
+    nl[T] = T
+    eol[T] = T
+    for (let x = T - 1; x >= 0; x--) {
+      bar[x] = t.bar[x] ? x : bar[x + 1]!
+      nl[x] = t.nl[x] ? x : nl[x + 1]!
+      eol[x] = t.eol[x] ? x : eol[x + 1]!
+    }
+    t.next = { bar, nl, eol }
   }
+  const nextBar = t.next.bar
+  const nextNl = t.next.nl
+  const nextEol = t.next.eol
   // ok[q]: the rest of the phrase, from the current word on, matches with
   // that word at q. Start with the last word and walk back.
-  let ok: boolean[] = new Array(T + 1)
+  let ok = new Uint8Array(T + 1)
   const lastHits = matches(k - 1)
   for (let q = 0; q < T; q++) {
-    let v = lastHits[q]!
+    let v = lastHits[q] === 1
     if (v && trailingGap) {
       const r = q + 1
       v = r < T ? t.sep[r]! || (t.dash[r]! && !t.bar[r]! && (r + 1 < T || t.tail)) : t.tail
     }
-    ok[q] = v
+    ok[q] = v ? 1 : 0
   }
-  ok[T] = false
   for (let i = k - 2; i >= 0; i--) {
     // nextOk[x]: first word at or after x where the rest matches after a separator.
-    const nextOk: number[] = new Array(T + 2)
+    const nextOk = new Int32Array(T + 2)
     nextOk[T] = T
     nextOk[T + 1] = T
-    for (let x = T - 1; x >= 0; x--) nextOk[x] = ok[x] && t.sep[x] ? x : nextOk[x + 1]!
+    for (let x = T - 1; x >= 0; x--) nextOk[x] = ok[x] === 1 && t.sep[x] ? x : nextOk[x + 1]!
     // reach[r]: the gap that starts at word r leads into the rest of the phrase.
-    const reach: boolean[] = new Array(T + 1)
-    reach[T] = false
+    const reach = new Uint8Array(T + 1)
     for (let r = T - 1; r >= 0; r--) {
-      let v = t.sep[r]! && ok[r]!
+      let v = t.sep[r]! && ok[r] === 1
       if (!v && t.dash[r]) {
         // A `--` comment runs to the next newline; more gap may follow it.
         const after = nextEol[r + 1]!
-        if (after < T && reach[after]) v = true
+        if (after < T && reach[after] === 1) v = true
         // An option run reaches any word before a `;&|` word or a real newline.
         const limit = Math.min(nextBar[r]!, nextNl[r + 1]!, T - 1)
         if (!v && nextOk[r + 1]! <= limit) v = true
       }
-      reach[r] = v
+      reach[r] = v ? 1 : 0
     }
     const hits = matches(i)
-    const prev: boolean[] = new Array(T + 1)
-    for (let p = 0; p < T; p++) prev[p] = hits[p]! && reach[p + 1]!
-    prev[T] = false
+    const prev = new Uint8Array(T + 1)
+    for (let p = 0; p < T; p++) prev[p] = hits[p]! & reach[p + 1]!
     ok = prev
   }
-  for (let p = 0; p < T; p++) if (ok[p]) return true
+  for (let p = 0; p < T; p++) if (ok[p] === 1) return true
   return false
 }
 

@@ -46,6 +46,8 @@ export const GATE_REFUSAL_CODES = [
   'HELD',
   'SOP_RULE',
   'HOOK_GATE',
+  // The call is too large to evaluate (limits.ts), before any tier runs.
+  'COMMAND_TOO_LARGE',
   'E_UNPINNED_LATEST',
   'E_UNPINNED_TAG',
   'E_UNKNOWN_REGISTRY',

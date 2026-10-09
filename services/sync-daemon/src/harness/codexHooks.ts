@@ -31,7 +31,7 @@ import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { keepOriginal } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
-import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
+import { emitJsGate, emitJsFailClosedPrelude, HOOK_TIMEOUT_SECONDS } from './gateBody.js'
 import { readJsonObjectForMerge } from './jsonMergeTarget.js'
 
 const log = createLogger('sync-codex-hooks')
@@ -198,7 +198,7 @@ async function mergeCodexHooksJson(configPath: string, hookScriptPath: string): 
           // decides from the arguments, so a tool name nobody anticipated is
           // still evaluated rather than silently unmatched.
           matcher: '.*',
-          hooks: [{ type: 'command', command: intuticCmd }],
+          hooks: [{ type: 'command', command: intuticCmd, timeout: HOOK_TIMEOUT_SECONDS }],
         },
       ],
     },

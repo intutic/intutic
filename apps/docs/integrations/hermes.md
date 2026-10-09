@@ -4,7 +4,7 @@ Integrate Intutic governance with [NousResearch Hermes](https://github.com/NousR
 
 ## How it works
 
-Intutic registers a pre-tool hook in Hermes' user config, `~/.hermes/config.yaml` (`hooks.preToolUse.command`), pointing at `~/.intutic/hooks/hermes-check.sh`, which filters shell commands and tool calls and blocks with exit code 2. It also installs a governance skill that tells the agent the hook exists, and writes your SOPs into a marked section of the workspace's `AGENTS.md`, which Hermes reads as instructions. It does not change Hermes' model provider settings — point Hermes at the proxy yourself.
+Intutic registers a pre-tool shell hook in Hermes' user config, `~/.hermes/config.yaml` (`hooks.pre_tool_call`), pointing at `~/.intutic/hooks/hermes-check.sh`, which filters shell commands and tool calls and blocks with exit code 2. It also installs a governance skill that tells the agent the hook exists, and writes your SOPs into a marked section of the workspace's `AGENTS.md`, which Hermes reads as instructions. It does not change Hermes' model provider settings — point Hermes at the proxy yourself.
 
 ## Setup
 
@@ -34,7 +34,7 @@ intutic start
 
 Intutic generates:
 * **Rules:** the section between `<!-- INTUTIC:RULES:START -->` and `<!-- INTUTIC:RULES:END -->` in the workspace's `AGENTS.md`, written when at least one SOP targets Hermes or another `AGENTS.md` reader in the workspace. Your own text in the file is kept, and the section is shared with every other harness that reads `AGENTS.md` (see [Where rule sets go](/guide/how-it-works#where-rule-sets-go)). A `.hermes.md` or `HERMES.md` between the working directory and the git root takes the place of `AGENTS.md` for Hermes, so keep your Hermes instructions in `AGENTS.md`. Once connect creates `AGENTS.md` in a workspace that only had a `CLAUDE.md`, Hermes reads `AGENTS.md` in its place.
-* **Hook registration:** `hooks.preToolUse.command` in `~/.hermes/config.yaml`. Only that key is set; the rest of the file, comments included, is kept, and a file that does not parse is left untouched.
+* **Hook registration:** an entry in the `hooks.pre_tool_call` list in `~/.hermes/config.yaml`, with `fail_closed: true` (Hermes refuses the call if the gate times out, crashes or prints something it cannot read; its default is to run it) and `timeout: 10`. Your own entries in the list, and the rest of the file, comments included, are kept; a file that does not parse is left untouched. Earlier versions wrote `hooks.preToolUse`, which Hermes skips as an unknown event; connect replaces it. Hermes asks you to approve a shell hook the first time it sees it.
 * **Hook script:** `~/.intutic/hooks/hermes-check.sh`.
 * **Skill:** `~/.hermes/skills/intutic-governance/SKILL.md` — tells the agent that tool calls are checked and not to work around a block.
 

@@ -10,7 +10,7 @@ exports[`generated hook scripts > antigravity > matches the recorded output byte
 # Workspace: ws_test
 set -euo pipefail
 
-# ── Intutic fail-closed prelude v12 ─────────────────────────────
+# ── Intutic fail-closed prelude v13 ─────────────────────────────
 # Any exit status other than the two deliberate verdicts (0 = allow, 2 = block)
 # means this gate crashed rather than decided. The harness would read exit 1 as
 # "hook errored" and run the tool anyway, so a crash is converted into a block.
@@ -22,6 +22,7 @@ intutic_fail_closed() {
   # that would replace the exit status it exists to correct.
   set +eu
   trap - EXIT
+  [ -n "\${INTUTIC_WATCHDOG_PID:-}" ] && kill "$INTUTIC_WATCHDOG_PID" 2>/dev/null
   if [ "$_intutic_exit_rc" = "0" ] || [ "$_intutic_exit_rc" = "2" ]; then
     exit "$_intutic_exit_rc"
   fi
@@ -32,6 +33,26 @@ intutic_fail_closed() {
   exit 2
 }
 trap intutic_fail_closed EXIT
+
+# ── Internal deadline ────────────────────────────────────────────────────────
+# Grok Build, the Copilot CLI, VS Code, Goose, OpenHands and Hermes run a call
+# whose hook outlives their timeout as if the hook had allowed it, Grok after
+# 5 s. So this gate refuses at 4 s, from its own start: a
+# watchdog, detached so it holds none of the harness's pipes, stops the gate's
+# children (a grep or python3 still matching) and signals it; the trap below
+# refuses. Every built-in rule is linear; a workspace's own WHERE pattern need
+# not be.
+intutic_deadline() {
+  trap - USR1
+  echo "[Intutic Governance] BLOCKED: GATE_DEADLINE — the gate did not finish evaluating this call within 4 s, and refuses it rather than let the hook timeout allow it." >&2
+  if command -v log_event >/dev/null 2>&1; then
+    log_event "tool_blocked" "\${TOOL:-unknown}" "GATE_DEADLINE — the gate did not finish within 4 s" || true
+  fi
+  exit 2
+}
+trap intutic_deadline USR1
+INTUTIC_GATE_PID=$$
+INTUTIC_WATCHDOG_PID="$( { ( sleep 4; pkill -P "$INTUTIC_GATE_PID" 2>/dev/null; kill -USR1 "$INTUTIC_GATE_PID" 2>/dev/null ) </dev/null >/dev/null 2>&1 & } ; echo $! )"
 
 INPUT="$(cat)"
 
@@ -447,21 +468,35 @@ def raw_first(*keys):
             return v
     return ""
 raw_command = raw_first("command", "cmd", "script", "shell_command")
+tool_input_json = json.dumps(i, separators=(",", ":"), ensure_ascii=False)
+# Too large to evaluate inside the hook timeout (gateLimits.ts): the gate body
+# refuses on this line, and the command and arguments are not passed on.
+command_bytes = len(raw_command.encode("utf-8", "surrogatepass"))
+argument_bytes = len(tool_input_json.encode("utf-8", "surrogatepass"))
+too_large = ""
+if command_bytes > 262144:
+    too_large = "the command is %d bytes, over the 262144-byte limit a gate evaluates; split it into smaller commands" % command_bytes
+elif argument_bytes > 1048576:
+    too_large = "the tool arguments are %d bytes, over the 1048576-byte limit a gate evaluates; write the content in smaller parts" % argument_bytes
+if too_large:
+    raw_command = ""
+    tool_input_json = "{}"
 # The hold classifier reads the raw command: a line continuation or a comment
 # is still in it. The library is the shared phrase matcher, not a regex.
 lib = {}
 try:
     exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
-    actions = lib["intutic_actions"](d.get("tool_name", ""), raw_command)
+    actions = lib["intutic_actions"](d.get("tool_name", ""), raw_command) if not too_large else " "
 except Exception:
     actions = " "
 # The state line comes FIRST: the lines after it may legitimately be empty,
 # and command substitution strips trailing newlines, so the last line is the
 # only position an empty value cannot survive in.
 print(state)
+print(too_large)
 print(clean(d.get("tool_name", "")))
 print(first("path", "file_path", "notebook_path", "filePath"))
-print(first("command", "cmd", "script", "shell_command"))
+print("" if too_large else first("command", "cmd", "script", "shell_command"))
 print(clean(d.get("session_id", d.get("sessionId", ""))))
 print(actions)
 # The raw command as one JSON line, for phrase-subject rules.
@@ -472,8 +507,8 @@ print(json.dumps(raw_command, ensure_ascii=False))
 # collapsed for token matching; this one must NOT be, or a WHERE clause that
 # spans a key/value boundary matches here and not in the JS gates. json.dumps
 # escapes every newline, so it is still exactly one line to read back.
-print(json.dumps(i, separators=(",", ":"), ensure_ascii=False))
-' 2>/dev/null || printf '\\n\\n\\n\\n\\n\\n\\n\\n')"
+print(tool_input_json)
+' 2>/dev/null || printf '\\n\\n\\n\\n\\n\\n\\n\\n\\n')"
 
 # Each read is \`|| true\` because command substitution strips trailing newlines:
 # a tool call with no command argument yields fewer lines than reads, so a late
@@ -481,12 +516,14 @@ print(json.dumps(i, separators=(",", ":"), ensure_ascii=False))
 # **exit 1** — which every harness reads as a hook error and lets the call
 # through. A guard that fails open on the most ordinary input there is (a Write
 # with no shell command) is worse than no guard, because it looks present.
-{ IFS= read -r INTUTIC_EXTRACT_STATE || true; IFS= read -r TOOL || true; IFS= read -r TARGET || true; IFS= read -r COMMAND || true; IFS= read -r SESSION_ID || true; IFS= read -r INTUTIC_ACTIONS || true; IFS= read -r INTUTIC_RAW_COMMAND_JSON || true; IFS= read -r TOOL_INPUT_JSON || true; } <<EOF_INTUTIC_FIELDS
+{ IFS= read -r INTUTIC_EXTRACT_STATE || true; IFS= read -r INTUTIC_TOO_LARGE || true; IFS= read -r TOOL || true; IFS= read -r TARGET || true; IFS= read -r COMMAND || true; IFS= read -r SESSION_ID || true; IFS= read -r INTUTIC_ACTIONS || true; IFS= read -r INTUTIC_RAW_COMMAND_JSON || true; IFS= read -r TOOL_INPUT_JSON || true; } <<EOF_INTUTIC_FIELDS
 $INTUTIC_FIELDS
 EOF_INTUTIC_FIELDS
 TOOL="\${TOOL:-}"; TARGET="\${TARGET:-}"; COMMAND="\${COMMAND:-}"; SESSION_ID="\${SESSION_ID:-}"
 # Space-padded action tokens the extractor's classifier found, or " ".
 INTUTIC_ACTIONS="\${INTUTIC_ACTIONS:- }"
+# Why the call is too large to evaluate, or empty (gateLimits.ts).
+INTUTIC_TOO_LARGE="\${INTUTIC_TOO_LARGE:-}"
 INTUTIC_RAW_COMMAND_JSON="\${INTUTIC_RAW_COMMAND_JSON:-""}"
 # Empty means the extractor itself died (the fallback printf above): treat it
 # exactly like a payload the parser rejected. The gate body refuses on any
@@ -555,7 +592,7 @@ log_event() {
 }
 
 
-# ── Intutic gate body v12 — harness: antigravity ────────────
+# ── Intutic gate body v13 — harness: antigravity ────────────
 # Generated by harness/gateBody.ts. Do not edit here; every harness regenerates.
 #
 # The harness name and version are stamped so this file identifies itself. Both
@@ -584,6 +621,15 @@ if [ -z "\${1:-}" ] && [ "\${INTUTIC_EXTRACT_STATE:-malformed}" != "ok" ]; then
   exit 2
 fi
 
+# Refuse a call too large to evaluate inside the hook timeout, before any rule
+# reads it (the extractor measured it; see gateLimits.ts). Scoped like the
+# envelope refusal above: the post/stop invocations carry no call to gate.
+if [ -z "\${1:-}" ] && [ -n "\${INTUTIC_TOO_LARGE:-}" ]; then
+  echo "[Intutic Governance] BLOCKED: COMMAND_TOO_LARGE — \${INTUTIC_TOO_LARGE}" >&2
+  log_event "tool_blocked" "\${TOOL:-unknown}" "COMMAND_TOO_LARGE — \${INTUTIC_TOO_LARGE}" || true
+  exit 2
+fi
+
 intutic_normalise() {
   local s="$1"
   s="\${s//[$'\\t\\n\\r\\v\\f']/ }"
@@ -595,9 +641,9 @@ intutic_normalise() {
 # These are the families with years of evidence behind them, so they block from
 # the first run — before any sync has happened.
 INTUTIC_FLOOR=(
-  'bypass.chflags_nouchg	block	-	any	Governance bypass pattern: clearing the macOS immutable flag on a governance file	 chflags .*nouchg'
-  'bypass.chattr_immutable	block	-	any	Governance bypass pattern: clearing the Linux immutable attribute on a governance file	 chattr .*-[a-zA-Z]*i'
-  'bypass.chmod_governance	block	-	any	Governance bypass pattern: changing permissions on a governance file	 chmod .*(hooks|\\.intutic|\\.claude|\\.cursor)'
+  'bypass.chflags_nouchg	block	s	any	Governance bypass pattern: clearing the macOS immutable flag on a governance file	 chflags .*nouchg'
+  'bypass.chattr_immutable	block	s	any	Governance bypass pattern: clearing the Linux immutable attribute on a governance file	 chattr .*-[a-zA-Z]*i'
+  'bypass.chmod_governance	block	s	any	Governance bypass pattern: changing permissions on a governance file	 chmod .*(hooks|\\.intutic|\\.claude|\\.cursor)'
   'bypass.env_kill_switch	block	-	any	Governance bypass pattern: setting a harness environment variable that disables its hooks	 [A-Z][A-Z0-9_]*_HOOKS?='
   'secrets.aws_access_key	block	-	content	AWS access key ID detected in the content this call would write. Writing a live credential into a file is one commit away from shipping it; reference it from the environment instead.	(A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7]'
   'secrets.anthropic_api_key	block	-	content	Anthropic API key detected in the content this call would write. Writing a live credential into a file is one commit away from shipping it; reference it from the environment instead.	sk-ant-[A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-]*'
@@ -906,11 +952,13 @@ sys.exit(0 if lib["intutic_phrase_rule"](sys.argv[1], json.load(sys.stdin)) else
   [ "$rsubj" = "phrase" ] && hit=1
   for s in "\${_subs[@]}"; do
     [ "$rsubj" = "phrase" ] && break
-    if [ "$rflags" = "i" ]; then
-      printf '%s' "$s" | grep -qiE -- "$rsrc" && hit=1
-    else
-      printf '%s' "$s" | grep -qE -- "$rsrc" && hit=1
-    fi
+    # Flags: i = case-insensitive; s (a sequence rule) changes nothing here —
+    # grep matches with an automaton, linear in the text, so the regex runs
+    # as written.
+    case "$rflags" in
+      *i*) printf '%s' "$s" | grep -qiE -- "$rsrc" && hit=1 ;;
+      *)   printf '%s' "$s" | grep -qE -- "$rsrc" && hit=1 ;;
+    esac
   done
   [ "$hit" = "1" ] || return 0
   # The argument condition of a WHERE rule. The tool-name half has matched; the
@@ -1040,7 +1088,7 @@ exports[`generated hook scripts > goose > matches the recorded output byte for b
 # Generated: <TIMESTAMP>
 set -euo pipefail
 
-# ── Intutic fail-closed prelude v12 ─────────────────────────────
+# ── Intutic fail-closed prelude v13 ─────────────────────────────
 # Any exit status other than the two deliberate verdicts (0 = allow, 2 = block)
 # means this gate crashed rather than decided. The harness would read exit 1 as
 # "hook errored" and run the tool anyway, so a crash is converted into a block.
@@ -1052,6 +1100,7 @@ intutic_fail_closed() {
   # that would replace the exit status it exists to correct.
   set +eu
   trap - EXIT
+  [ -n "\${INTUTIC_WATCHDOG_PID:-}" ] && kill "$INTUTIC_WATCHDOG_PID" 2>/dev/null
   if [ "$_intutic_exit_rc" = "0" ] || [ "$_intutic_exit_rc" = "2" ]; then
     exit "$_intutic_exit_rc"
   fi
@@ -1062,6 +1111,26 @@ intutic_fail_closed() {
   exit 2
 }
 trap intutic_fail_closed EXIT
+
+# ── Internal deadline ────────────────────────────────────────────────────────
+# Grok Build, the Copilot CLI, VS Code, Goose, OpenHands and Hermes run a call
+# whose hook outlives their timeout as if the hook had allowed it, Grok after
+# 5 s. So this gate refuses at 4 s, from its own start: a
+# watchdog, detached so it holds none of the harness's pipes, stops the gate's
+# children (a grep or python3 still matching) and signals it; the trap below
+# refuses. Every built-in rule is linear; a workspace's own WHERE pattern need
+# not be.
+intutic_deadline() {
+  trap - USR1
+  echo "[Intutic Governance] BLOCKED: GATE_DEADLINE — the gate did not finish evaluating this call within 4 s, and refuses it rather than let the hook timeout allow it." >&2
+  if command -v log_event >/dev/null 2>&1; then
+    log_event "tool_blocked" "\${TOOL:-unknown}" "GATE_DEADLINE — the gate did not finish within 4 s" || true
+  fi
+  exit 2
+}
+trap intutic_deadline USR1
+INTUTIC_GATE_PID=$$
+INTUTIC_WATCHDOG_PID="$( { ( sleep 4; pkill -P "$INTUTIC_GATE_PID" 2>/dev/null; kill -USR1 "$INTUTIC_GATE_PID" 2>/dev/null ) </dev/null >/dev/null 2>&1 & } ; echo $! )"
 
 EVENT="\${1:-pre}"
 INPUT="$(cat)"
@@ -1478,21 +1547,35 @@ def raw_first(*keys):
             return v
     return ""
 raw_command = raw_first("command", "cmd", "script", "shell_command")
+tool_input_json = json.dumps(i, separators=(",", ":"), ensure_ascii=False)
+# Too large to evaluate inside the hook timeout (gateLimits.ts): the gate body
+# refuses on this line, and the command and arguments are not passed on.
+command_bytes = len(raw_command.encode("utf-8", "surrogatepass"))
+argument_bytes = len(tool_input_json.encode("utf-8", "surrogatepass"))
+too_large = ""
+if command_bytes > 262144:
+    too_large = "the command is %d bytes, over the 262144-byte limit a gate evaluates; split it into smaller commands" % command_bytes
+elif argument_bytes > 1048576:
+    too_large = "the tool arguments are %d bytes, over the 1048576-byte limit a gate evaluates; write the content in smaller parts" % argument_bytes
+if too_large:
+    raw_command = ""
+    tool_input_json = "{}"
 # The hold classifier reads the raw command: a line continuation or a comment
 # is still in it. The library is the shared phrase matcher, not a regex.
 lib = {}
 try:
     exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
-    actions = lib["intutic_actions"](d.get("tool_name", ""), raw_command)
+    actions = lib["intutic_actions"](d.get("tool_name", ""), raw_command) if not too_large else " "
 except Exception:
     actions = " "
 # The state line comes FIRST: the lines after it may legitimately be empty,
 # and command substitution strips trailing newlines, so the last line is the
 # only position an empty value cannot survive in.
 print(state)
+print(too_large)
 print(clean(d.get("tool_name", "")))
 print(first("path", "file_path", "notebook_path", "filePath"))
-print(first("command", "cmd", "script", "shell_command"))
+print("" if too_large else first("command", "cmd", "script", "shell_command"))
 print(clean(d.get("session_id", d.get("sessionId", ""))))
 print(actions)
 # The raw command as one JSON line, for phrase-subject rules.
@@ -1503,8 +1586,8 @@ print(json.dumps(raw_command, ensure_ascii=False))
 # collapsed for token matching; this one must NOT be, or a WHERE clause that
 # spans a key/value boundary matches here and not in the JS gates. json.dumps
 # escapes every newline, so it is still exactly one line to read back.
-print(json.dumps(i, separators=(",", ":"), ensure_ascii=False))
-' 2>/dev/null || printf '\\n\\n\\n\\n\\n\\n\\n\\n')"
+print(tool_input_json)
+' 2>/dev/null || printf '\\n\\n\\n\\n\\n\\n\\n\\n\\n')"
 
 # Each read is \`|| true\` because command substitution strips trailing newlines:
 # a tool call with no command argument yields fewer lines than reads, so a late
@@ -1512,12 +1595,14 @@ print(json.dumps(i, separators=(",", ":"), ensure_ascii=False))
 # **exit 1** — which every harness reads as a hook error and lets the call
 # through. A guard that fails open on the most ordinary input there is (a Write
 # with no shell command) is worse than no guard, because it looks present.
-{ IFS= read -r INTUTIC_EXTRACT_STATE || true; IFS= read -r TOOL || true; IFS= read -r TARGET || true; IFS= read -r COMMAND || true; IFS= read -r SESSION_ID || true; IFS= read -r INTUTIC_ACTIONS || true; IFS= read -r INTUTIC_RAW_COMMAND_JSON || true; IFS= read -r TOOL_INPUT_JSON || true; } <<EOF_INTUTIC_FIELDS
+{ IFS= read -r INTUTIC_EXTRACT_STATE || true; IFS= read -r INTUTIC_TOO_LARGE || true; IFS= read -r TOOL || true; IFS= read -r TARGET || true; IFS= read -r COMMAND || true; IFS= read -r SESSION_ID || true; IFS= read -r INTUTIC_ACTIONS || true; IFS= read -r INTUTIC_RAW_COMMAND_JSON || true; IFS= read -r TOOL_INPUT_JSON || true; } <<EOF_INTUTIC_FIELDS
 $INTUTIC_FIELDS
 EOF_INTUTIC_FIELDS
 TOOL="\${TOOL:-}"; TARGET="\${TARGET:-}"; COMMAND="\${COMMAND:-}"; SESSION_ID="\${SESSION_ID:-}"
 # Space-padded action tokens the extractor's classifier found, or " ".
 INTUTIC_ACTIONS="\${INTUTIC_ACTIONS:- }"
+# Why the call is too large to evaluate, or empty (gateLimits.ts).
+INTUTIC_TOO_LARGE="\${INTUTIC_TOO_LARGE:-}"
 INTUTIC_RAW_COMMAND_JSON="\${INTUTIC_RAW_COMMAND_JSON:-""}"
 # Empty means the extractor itself died (the fallback printf above): treat it
 # exactly like a payload the parser rejected. The gate body refuses on any
@@ -1588,7 +1673,7 @@ log_event() {
 }
 
 
-# ── Intutic gate body v12 — harness: goose ────────────
+# ── Intutic gate body v13 — harness: goose ────────────
 # Generated by harness/gateBody.ts. Do not edit here; every harness regenerates.
 #
 # The harness name and version are stamped so this file identifies itself. Both
@@ -1617,6 +1702,15 @@ if [ -z "\${1:-}" ] && [ "\${INTUTIC_EXTRACT_STATE:-malformed}" != "ok" ]; then
   exit 2
 fi
 
+# Refuse a call too large to evaluate inside the hook timeout, before any rule
+# reads it (the extractor measured it; see gateLimits.ts). Scoped like the
+# envelope refusal above: the post/stop invocations carry no call to gate.
+if [ -z "\${1:-}" ] && [ -n "\${INTUTIC_TOO_LARGE:-}" ]; then
+  echo "[Intutic Governance] BLOCKED: COMMAND_TOO_LARGE — \${INTUTIC_TOO_LARGE}" >&2
+  log_event "tool_blocked" "\${TOOL:-unknown}" "COMMAND_TOO_LARGE — \${INTUTIC_TOO_LARGE}" || true
+  exit 2
+fi
+
 intutic_normalise() {
   local s="$1"
   s="\${s//[$'\\t\\n\\r\\v\\f']/ }"
@@ -1628,9 +1722,9 @@ intutic_normalise() {
 # These are the families with years of evidence behind them, so they block from
 # the first run — before any sync has happened.
 INTUTIC_FLOOR=(
-  'bypass.chflags_nouchg	block	-	any	Governance bypass pattern: clearing the macOS immutable flag on a governance file	 chflags .*nouchg'
-  'bypass.chattr_immutable	block	-	any	Governance bypass pattern: clearing the Linux immutable attribute on a governance file	 chattr .*-[a-zA-Z]*i'
-  'bypass.chmod_governance	block	-	any	Governance bypass pattern: changing permissions on a governance file	 chmod .*(hooks|\\.intutic|\\.claude|\\.cursor)'
+  'bypass.chflags_nouchg	block	s	any	Governance bypass pattern: clearing the macOS immutable flag on a governance file	 chflags .*nouchg'
+  'bypass.chattr_immutable	block	s	any	Governance bypass pattern: clearing the Linux immutable attribute on a governance file	 chattr .*-[a-zA-Z]*i'
+  'bypass.chmod_governance	block	s	any	Governance bypass pattern: changing permissions on a governance file	 chmod .*(hooks|\\.intutic|\\.claude|\\.cursor)'
   'bypass.env_kill_switch	block	-	any	Governance bypass pattern: setting a harness environment variable that disables its hooks	 [A-Z][A-Z0-9_]*_HOOKS?='
   'secrets.aws_access_key	block	-	content	AWS access key ID detected in the content this call would write. Writing a live credential into a file is one commit away from shipping it; reference it from the environment instead.	(A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7]'
   'secrets.anthropic_api_key	block	-	content	Anthropic API key detected in the content this call would write. Writing a live credential into a file is one commit away from shipping it; reference it from the environment instead.	sk-ant-[A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-]*'
@@ -1939,11 +2033,13 @@ sys.exit(0 if lib["intutic_phrase_rule"](sys.argv[1], json.load(sys.stdin)) else
   [ "$rsubj" = "phrase" ] && hit=1
   for s in "\${_subs[@]}"; do
     [ "$rsubj" = "phrase" ] && break
-    if [ "$rflags" = "i" ]; then
-      printf '%s' "$s" | grep -qiE -- "$rsrc" && hit=1
-    else
-      printf '%s' "$s" | grep -qE -- "$rsrc" && hit=1
-    fi
+    # Flags: i = case-insensitive; s (a sequence rule) changes nothing here —
+    # grep matches with an automaton, linear in the text, so the regex runs
+    # as written.
+    case "$rflags" in
+      *i*) printf '%s' "$s" | grep -qiE -- "$rsrc" && hit=1 ;;
+      *)   printf '%s' "$s" | grep -qE -- "$rsrc" && hit=1 ;;
+    esac
   done
   [ "$hit" = "1" ] || return 0
   # The argument condition of a WHERE rule. The tool-name half has matched; the
@@ -2075,7 +2171,7 @@ exports[`generated hook scripts > hermes > matches the recorded output byte for 
 # Workspace: ws_test
 set -euo pipefail
 
-# ── Intutic fail-closed prelude v12 ─────────────────────────────
+# ── Intutic fail-closed prelude v13 ─────────────────────────────
 # Any exit status other than the two deliberate verdicts (0 = allow, 2 = block)
 # means this gate crashed rather than decided. The harness would read exit 1 as
 # "hook errored" and run the tool anyway, so a crash is converted into a block.
@@ -2087,6 +2183,7 @@ intutic_fail_closed() {
   # that would replace the exit status it exists to correct.
   set +eu
   trap - EXIT
+  [ -n "\${INTUTIC_WATCHDOG_PID:-}" ] && kill "$INTUTIC_WATCHDOG_PID" 2>/dev/null
   if [ "$_intutic_exit_rc" = "0" ] || [ "$_intutic_exit_rc" = "2" ]; then
     exit "$_intutic_exit_rc"
   fi
@@ -2097,6 +2194,26 @@ intutic_fail_closed() {
   exit 2
 }
 trap intutic_fail_closed EXIT
+
+# ── Internal deadline ────────────────────────────────────────────────────────
+# Grok Build, the Copilot CLI, VS Code, Goose, OpenHands and Hermes run a call
+# whose hook outlives their timeout as if the hook had allowed it, Grok after
+# 5 s. So this gate refuses at 4 s, from its own start: a
+# watchdog, detached so it holds none of the harness's pipes, stops the gate's
+# children (a grep or python3 still matching) and signals it; the trap below
+# refuses. Every built-in rule is linear; a workspace's own WHERE pattern need
+# not be.
+intutic_deadline() {
+  trap - USR1
+  echo "[Intutic Governance] BLOCKED: GATE_DEADLINE — the gate did not finish evaluating this call within 4 s, and refuses it rather than let the hook timeout allow it." >&2
+  if command -v log_event >/dev/null 2>&1; then
+    log_event "tool_blocked" "\${TOOL:-unknown}" "GATE_DEADLINE — the gate did not finish within 4 s" || true
+  fi
+  exit 2
+}
+trap intutic_deadline USR1
+INTUTIC_GATE_PID=$$
+INTUTIC_WATCHDOG_PID="$( { ( sleep 4; pkill -P "$INTUTIC_GATE_PID" 2>/dev/null; kill -USR1 "$INTUTIC_GATE_PID" 2>/dev/null ) </dev/null >/dev/null 2>&1 & } ; echo $! )"
 
 # Source runtime credentials (never embedded in this file)
 if [ -f "<ROOT>/.intutic/env/runtime.env" ]; then
@@ -2522,21 +2639,35 @@ def raw_first(*keys):
             return v
     return ""
 raw_command = raw_first("command", "cmd", "script", "shell_command")
+tool_input_json = json.dumps(i, separators=(",", ":"), ensure_ascii=False)
+# Too large to evaluate inside the hook timeout (gateLimits.ts): the gate body
+# refuses on this line, and the command and arguments are not passed on.
+command_bytes = len(raw_command.encode("utf-8", "surrogatepass"))
+argument_bytes = len(tool_input_json.encode("utf-8", "surrogatepass"))
+too_large = ""
+if command_bytes > 262144:
+    too_large = "the command is %d bytes, over the 262144-byte limit a gate evaluates; split it into smaller commands" % command_bytes
+elif argument_bytes > 1048576:
+    too_large = "the tool arguments are %d bytes, over the 1048576-byte limit a gate evaluates; write the content in smaller parts" % argument_bytes
+if too_large:
+    raw_command = ""
+    tool_input_json = "{}"
 # The hold classifier reads the raw command: a line continuation or a comment
 # is still in it. The library is the shared phrase matcher, not a regex.
 lib = {}
 try:
     exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
-    actions = lib["intutic_actions"](d.get("tool_name", ""), raw_command)
+    actions = lib["intutic_actions"](d.get("tool_name", ""), raw_command) if not too_large else " "
 except Exception:
     actions = " "
 # The state line comes FIRST: the lines after it may legitimately be empty,
 # and command substitution strips trailing newlines, so the last line is the
 # only position an empty value cannot survive in.
 print(state)
+print(too_large)
 print(clean(d.get("tool_name", "")))
 print(first("path", "file_path", "notebook_path", "filePath"))
-print(first("command", "cmd", "script", "shell_command"))
+print("" if too_large else first("command", "cmd", "script", "shell_command"))
 print(clean(d.get("session_id", d.get("sessionId", ""))))
 print(actions)
 # The raw command as one JSON line, for phrase-subject rules.
@@ -2547,8 +2678,8 @@ print(json.dumps(raw_command, ensure_ascii=False))
 # collapsed for token matching; this one must NOT be, or a WHERE clause that
 # spans a key/value boundary matches here and not in the JS gates. json.dumps
 # escapes every newline, so it is still exactly one line to read back.
-print(json.dumps(i, separators=(",", ":"), ensure_ascii=False))
-' 2>/dev/null || printf '\\n\\n\\n\\n\\n\\n\\n\\n')"
+print(tool_input_json)
+' 2>/dev/null || printf '\\n\\n\\n\\n\\n\\n\\n\\n\\n')"
 
 # Each read is \`|| true\` because command substitution strips trailing newlines:
 # a tool call with no command argument yields fewer lines than reads, so a late
@@ -2556,12 +2687,14 @@ print(json.dumps(i, separators=(",", ":"), ensure_ascii=False))
 # **exit 1** — which every harness reads as a hook error and lets the call
 # through. A guard that fails open on the most ordinary input there is (a Write
 # with no shell command) is worse than no guard, because it looks present.
-{ IFS= read -r INTUTIC_EXTRACT_STATE || true; IFS= read -r TOOL || true; IFS= read -r TARGET || true; IFS= read -r COMMAND || true; IFS= read -r SESSION_ID || true; IFS= read -r INTUTIC_ACTIONS || true; IFS= read -r INTUTIC_RAW_COMMAND_JSON || true; IFS= read -r TOOL_INPUT_JSON || true; } <<EOF_INTUTIC_FIELDS
+{ IFS= read -r INTUTIC_EXTRACT_STATE || true; IFS= read -r INTUTIC_TOO_LARGE || true; IFS= read -r TOOL || true; IFS= read -r TARGET || true; IFS= read -r COMMAND || true; IFS= read -r SESSION_ID || true; IFS= read -r INTUTIC_ACTIONS || true; IFS= read -r INTUTIC_RAW_COMMAND_JSON || true; IFS= read -r TOOL_INPUT_JSON || true; } <<EOF_INTUTIC_FIELDS
 $INTUTIC_FIELDS
 EOF_INTUTIC_FIELDS
 TOOL="\${TOOL:-}"; TARGET="\${TARGET:-}"; COMMAND="\${COMMAND:-}"; SESSION_ID="\${SESSION_ID:-}"
 # Space-padded action tokens the extractor's classifier found, or " ".
 INTUTIC_ACTIONS="\${INTUTIC_ACTIONS:- }"
+# Why the call is too large to evaluate, or empty (gateLimits.ts).
+INTUTIC_TOO_LARGE="\${INTUTIC_TOO_LARGE:-}"
 INTUTIC_RAW_COMMAND_JSON="\${INTUTIC_RAW_COMMAND_JSON:-""}"
 # Empty means the extractor itself died (the fallback printf above): treat it
 # exactly like a payload the parser rejected. The gate body refuses on any
@@ -2622,7 +2755,7 @@ log_event() {
 }
 
 
-# ── Intutic gate body v12 — harness: hermes ────────────
+# ── Intutic gate body v13 — harness: hermes ────────────
 # Generated by harness/gateBody.ts. Do not edit here; every harness regenerates.
 #
 # The harness name and version are stamped so this file identifies itself. Both
@@ -2651,6 +2784,15 @@ if [ -z "\${1:-}" ] && [ "\${INTUTIC_EXTRACT_STATE:-malformed}" != "ok" ]; then
   exit 2
 fi
 
+# Refuse a call too large to evaluate inside the hook timeout, before any rule
+# reads it (the extractor measured it; see gateLimits.ts). Scoped like the
+# envelope refusal above: the post/stop invocations carry no call to gate.
+if [ -z "\${1:-}" ] && [ -n "\${INTUTIC_TOO_LARGE:-}" ]; then
+  echo "[Intutic Governance] BLOCKED: COMMAND_TOO_LARGE — \${INTUTIC_TOO_LARGE}" >&2
+  log_event "tool_blocked" "\${TOOL:-unknown}" "COMMAND_TOO_LARGE — \${INTUTIC_TOO_LARGE}" || true
+  exit 2
+fi
+
 intutic_normalise() {
   local s="$1"
   s="\${s//[$'\\t\\n\\r\\v\\f']/ }"
@@ -2662,9 +2804,9 @@ intutic_normalise() {
 # These are the families with years of evidence behind them, so they block from
 # the first run — before any sync has happened.
 INTUTIC_FLOOR=(
-  'bypass.chflags_nouchg	block	-	any	Governance bypass pattern: clearing the macOS immutable flag on a governance file	 chflags .*nouchg'
-  'bypass.chattr_immutable	block	-	any	Governance bypass pattern: clearing the Linux immutable attribute on a governance file	 chattr .*-[a-zA-Z]*i'
-  'bypass.chmod_governance	block	-	any	Governance bypass pattern: changing permissions on a governance file	 chmod .*(hooks|\\.intutic|\\.claude|\\.cursor)'
+  'bypass.chflags_nouchg	block	s	any	Governance bypass pattern: clearing the macOS immutable flag on a governance file	 chflags .*nouchg'
+  'bypass.chattr_immutable	block	s	any	Governance bypass pattern: clearing the Linux immutable attribute on a governance file	 chattr .*-[a-zA-Z]*i'
+  'bypass.chmod_governance	block	s	any	Governance bypass pattern: changing permissions on a governance file	 chmod .*(hooks|\\.intutic|\\.claude|\\.cursor)'
   'bypass.env_kill_switch	block	-	any	Governance bypass pattern: setting a harness environment variable that disables its hooks	 [A-Z][A-Z0-9_]*_HOOKS?='
   'secrets.aws_access_key	block	-	content	AWS access key ID detected in the content this call would write. Writing a live credential into a file is one commit away from shipping it; reference it from the environment instead.	(A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7]'
   'secrets.anthropic_api_key	block	-	content	Anthropic API key detected in the content this call would write. Writing a live credential into a file is one commit away from shipping it; reference it from the environment instead.	sk-ant-[A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-]*'
@@ -2973,11 +3115,13 @@ sys.exit(0 if lib["intutic_phrase_rule"](sys.argv[1], json.load(sys.stdin)) else
   [ "$rsubj" = "phrase" ] && hit=1
   for s in "\${_subs[@]}"; do
     [ "$rsubj" = "phrase" ] && break
-    if [ "$rflags" = "i" ]; then
-      printf '%s' "$s" | grep -qiE -- "$rsrc" && hit=1
-    else
-      printf '%s' "$s" | grep -qE -- "$rsrc" && hit=1
-    fi
+    # Flags: i = case-insensitive; s (a sequence rule) changes nothing here —
+    # grep matches with an automaton, linear in the text, so the regex runs
+    # as written.
+    case "$rflags" in
+      *i*) printf '%s' "$s" | grep -qiE -- "$rsrc" && hit=1 ;;
+      *)   printf '%s' "$s" | grep -qE -- "$rsrc" && hit=1 ;;
+    esac
   done
   [ "$hit" = "1" ] || return 0
   # The argument condition of a WHERE rule. The tool-name half has matched; the
@@ -3107,7 +3251,7 @@ exports[`generated hook scripts > openhands > matches the recorded output byte f
 # Generated: <TIMESTAMP>
 set -euo pipefail
 
-# ── Intutic fail-closed prelude v12 ─────────────────────────────
+# ── Intutic fail-closed prelude v13 ─────────────────────────────
 # Any exit status other than the two deliberate verdicts (0 = allow, 2 = block)
 # means this gate crashed rather than decided. The harness would read exit 1 as
 # "hook errored" and run the tool anyway, so a crash is converted into a block.
@@ -3119,6 +3263,7 @@ intutic_fail_closed() {
   # that would replace the exit status it exists to correct.
   set +eu
   trap - EXIT
+  [ -n "\${INTUTIC_WATCHDOG_PID:-}" ] && kill "$INTUTIC_WATCHDOG_PID" 2>/dev/null
   if [ "$_intutic_exit_rc" = "0" ] || [ "$_intutic_exit_rc" = "2" ]; then
     exit "$_intutic_exit_rc"
   fi
@@ -3129,6 +3274,26 @@ intutic_fail_closed() {
   exit 2
 }
 trap intutic_fail_closed EXIT
+
+# ── Internal deadline ────────────────────────────────────────────────────────
+# Grok Build, the Copilot CLI, VS Code, Goose, OpenHands and Hermes run a call
+# whose hook outlives their timeout as if the hook had allowed it, Grok after
+# 5 s. So this gate refuses at 4 s, from its own start: a
+# watchdog, detached so it holds none of the harness's pipes, stops the gate's
+# children (a grep or python3 still matching) and signals it; the trap below
+# refuses. Every built-in rule is linear; a workspace's own WHERE pattern need
+# not be.
+intutic_deadline() {
+  trap - USR1
+  echo "[Intutic Governance] BLOCKED: GATE_DEADLINE — the gate did not finish evaluating this call within 4 s, and refuses it rather than let the hook timeout allow it." >&2
+  if command -v log_event >/dev/null 2>&1; then
+    log_event "tool_blocked" "\${TOOL:-unknown}" "GATE_DEADLINE — the gate did not finish within 4 s" || true
+  fi
+  exit 2
+}
+trap intutic_deadline USR1
+INTUTIC_GATE_PID=$$
+INTUTIC_WATCHDOG_PID="$( { ( sleep 4; pkill -P "$INTUTIC_GATE_PID" 2>/dev/null; kill -USR1 "$INTUTIC_GATE_PID" 2>/dev/null ) </dev/null >/dev/null 2>&1 & } ; echo $! )"
 
 INPUT="$(cat)"
 
@@ -3544,21 +3709,35 @@ def raw_first(*keys):
             return v
     return ""
 raw_command = raw_first("command", "cmd", "script", "shell_command")
+tool_input_json = json.dumps(i, separators=(",", ":"), ensure_ascii=False)
+# Too large to evaluate inside the hook timeout (gateLimits.ts): the gate body
+# refuses on this line, and the command and arguments are not passed on.
+command_bytes = len(raw_command.encode("utf-8", "surrogatepass"))
+argument_bytes = len(tool_input_json.encode("utf-8", "surrogatepass"))
+too_large = ""
+if command_bytes > 262144:
+    too_large = "the command is %d bytes, over the 262144-byte limit a gate evaluates; split it into smaller commands" % command_bytes
+elif argument_bytes > 1048576:
+    too_large = "the tool arguments are %d bytes, over the 1048576-byte limit a gate evaluates; write the content in smaller parts" % argument_bytes
+if too_large:
+    raw_command = ""
+    tool_input_json = "{}"
 # The hold classifier reads the raw command: a line continuation or a comment
 # is still in it. The library is the shared phrase matcher, not a regex.
 lib = {}
 try:
     exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
-    actions = lib["intutic_actions"](d.get("tool_name", ""), raw_command)
+    actions = lib["intutic_actions"](d.get("tool_name", ""), raw_command) if not too_large else " "
 except Exception:
     actions = " "
 # The state line comes FIRST: the lines after it may legitimately be empty,
 # and command substitution strips trailing newlines, so the last line is the
 # only position an empty value cannot survive in.
 print(state)
+print(too_large)
 print(clean(d.get("tool_name", "")))
 print(first("path", "file_path", "notebook_path", "filePath"))
-print(first("command", "cmd", "script", "shell_command"))
+print("" if too_large else first("command", "cmd", "script", "shell_command"))
 print(clean(d.get("session_id", d.get("sessionId", ""))))
 print(actions)
 # The raw command as one JSON line, for phrase-subject rules.
@@ -3569,8 +3748,8 @@ print(json.dumps(raw_command, ensure_ascii=False))
 # collapsed for token matching; this one must NOT be, or a WHERE clause that
 # spans a key/value boundary matches here and not in the JS gates. json.dumps
 # escapes every newline, so it is still exactly one line to read back.
-print(json.dumps(i, separators=(",", ":"), ensure_ascii=False))
-' 2>/dev/null || printf '\\n\\n\\n\\n\\n\\n\\n\\n')"
+print(tool_input_json)
+' 2>/dev/null || printf '\\n\\n\\n\\n\\n\\n\\n\\n\\n')"
 
 # Each read is \`|| true\` because command substitution strips trailing newlines:
 # a tool call with no command argument yields fewer lines than reads, so a late
@@ -3578,12 +3757,14 @@ print(json.dumps(i, separators=(",", ":"), ensure_ascii=False))
 # **exit 1** — which every harness reads as a hook error and lets the call
 # through. A guard that fails open on the most ordinary input there is (a Write
 # with no shell command) is worse than no guard, because it looks present.
-{ IFS= read -r INTUTIC_EXTRACT_STATE || true; IFS= read -r TOOL || true; IFS= read -r TARGET || true; IFS= read -r COMMAND || true; IFS= read -r SESSION_ID || true; IFS= read -r INTUTIC_ACTIONS || true; IFS= read -r INTUTIC_RAW_COMMAND_JSON || true; IFS= read -r TOOL_INPUT_JSON || true; } <<EOF_INTUTIC_FIELDS
+{ IFS= read -r INTUTIC_EXTRACT_STATE || true; IFS= read -r INTUTIC_TOO_LARGE || true; IFS= read -r TOOL || true; IFS= read -r TARGET || true; IFS= read -r COMMAND || true; IFS= read -r SESSION_ID || true; IFS= read -r INTUTIC_ACTIONS || true; IFS= read -r INTUTIC_RAW_COMMAND_JSON || true; IFS= read -r TOOL_INPUT_JSON || true; } <<EOF_INTUTIC_FIELDS
 $INTUTIC_FIELDS
 EOF_INTUTIC_FIELDS
 TOOL="\${TOOL:-}"; TARGET="\${TARGET:-}"; COMMAND="\${COMMAND:-}"; SESSION_ID="\${SESSION_ID:-}"
 # Space-padded action tokens the extractor's classifier found, or " ".
 INTUTIC_ACTIONS="\${INTUTIC_ACTIONS:- }"
+# Why the call is too large to evaluate, or empty (gateLimits.ts).
+INTUTIC_TOO_LARGE="\${INTUTIC_TOO_LARGE:-}"
 INTUTIC_RAW_COMMAND_JSON="\${INTUTIC_RAW_COMMAND_JSON:-""}"
 # Empty means the extractor itself died (the fallback printf above): treat it
 # exactly like a payload the parser rejected. The gate body refuses on any
@@ -3654,7 +3835,7 @@ log_event() {
 }
 
 
-# ── Intutic gate body v12 — harness: openhands ────────────
+# ── Intutic gate body v13 — harness: openhands ────────────
 # Generated by harness/gateBody.ts. Do not edit here; every harness regenerates.
 #
 # The harness name and version are stamped so this file identifies itself. Both
@@ -3683,6 +3864,15 @@ if [ -z "\${1:-}" ] && [ "\${INTUTIC_EXTRACT_STATE:-malformed}" != "ok" ]; then
   exit 2
 fi
 
+# Refuse a call too large to evaluate inside the hook timeout, before any rule
+# reads it (the extractor measured it; see gateLimits.ts). Scoped like the
+# envelope refusal above: the post/stop invocations carry no call to gate.
+if [ -z "\${1:-}" ] && [ -n "\${INTUTIC_TOO_LARGE:-}" ]; then
+  echo "[Intutic Governance] BLOCKED: COMMAND_TOO_LARGE — \${INTUTIC_TOO_LARGE}" >&2
+  log_event "tool_blocked" "\${TOOL:-unknown}" "COMMAND_TOO_LARGE — \${INTUTIC_TOO_LARGE}" || true
+  exit 2
+fi
+
 intutic_normalise() {
   local s="$1"
   s="\${s//[$'\\t\\n\\r\\v\\f']/ }"
@@ -3694,9 +3884,9 @@ intutic_normalise() {
 # These are the families with years of evidence behind them, so they block from
 # the first run — before any sync has happened.
 INTUTIC_FLOOR=(
-  'bypass.chflags_nouchg	block	-	any	Governance bypass pattern: clearing the macOS immutable flag on a governance file	 chflags .*nouchg'
-  'bypass.chattr_immutable	block	-	any	Governance bypass pattern: clearing the Linux immutable attribute on a governance file	 chattr .*-[a-zA-Z]*i'
-  'bypass.chmod_governance	block	-	any	Governance bypass pattern: changing permissions on a governance file	 chmod .*(hooks|\\.intutic|\\.claude|\\.cursor)'
+  'bypass.chflags_nouchg	block	s	any	Governance bypass pattern: clearing the macOS immutable flag on a governance file	 chflags .*nouchg'
+  'bypass.chattr_immutable	block	s	any	Governance bypass pattern: clearing the Linux immutable attribute on a governance file	 chattr .*-[a-zA-Z]*i'
+  'bypass.chmod_governance	block	s	any	Governance bypass pattern: changing permissions on a governance file	 chmod .*(hooks|\\.intutic|\\.claude|\\.cursor)'
   'bypass.env_kill_switch	block	-	any	Governance bypass pattern: setting a harness environment variable that disables its hooks	 [A-Z][A-Z0-9_]*_HOOKS?='
   'secrets.aws_access_key	block	-	content	AWS access key ID detected in the content this call would write. Writing a live credential into a file is one commit away from shipping it; reference it from the environment instead.	(A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7]'
   'secrets.anthropic_api_key	block	-	content	Anthropic API key detected in the content this call would write. Writing a live credential into a file is one commit away from shipping it; reference it from the environment instead.	sk-ant-[A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-]*'
@@ -4005,11 +4195,13 @@ sys.exit(0 if lib["intutic_phrase_rule"](sys.argv[1], json.load(sys.stdin)) else
   [ "$rsubj" = "phrase" ] && hit=1
   for s in "\${_subs[@]}"; do
     [ "$rsubj" = "phrase" ] && break
-    if [ "$rflags" = "i" ]; then
-      printf '%s' "$s" | grep -qiE -- "$rsrc" && hit=1
-    else
-      printf '%s' "$s" | grep -qE -- "$rsrc" && hit=1
-    fi
+    # Flags: i = case-insensitive; s (a sequence rule) changes nothing here —
+    # grep matches with an automaton, linear in the text, so the regex runs
+    # as written.
+    case "$rflags" in
+      *i*) printf '%s' "$s" | grep -qiE -- "$rsrc" && hit=1 ;;
+      *)   printf '%s' "$s" | grep -qE -- "$rsrc" && hit=1 ;;
+    esac
   done
   [ "$hit" = "1" ] || return 0
   # The argument condition of a WHERE rule. The tool-name half has matched; the
@@ -4140,7 +4332,7 @@ exports[`generated hook scripts > pi > matches the recorded output byte for byte
 # Workspace: ws_test
 set -euo pipefail
 
-# ── Intutic fail-closed prelude v12 ─────────────────────────────
+# ── Intutic fail-closed prelude v13 ─────────────────────────────
 # Any exit status other than the two deliberate verdicts (0 = allow, 2 = block)
 # means this gate crashed rather than decided. The harness would read exit 1 as
 # "hook errored" and run the tool anyway, so a crash is converted into a block.
@@ -4152,6 +4344,7 @@ intutic_fail_closed() {
   # that would replace the exit status it exists to correct.
   set +eu
   trap - EXIT
+  [ -n "\${INTUTIC_WATCHDOG_PID:-}" ] && kill "$INTUTIC_WATCHDOG_PID" 2>/dev/null
   if [ "$_intutic_exit_rc" = "0" ] || [ "$_intutic_exit_rc" = "2" ]; then
     exit "$_intutic_exit_rc"
   fi
@@ -4162,6 +4355,26 @@ intutic_fail_closed() {
   exit 2
 }
 trap intutic_fail_closed EXIT
+
+# ── Internal deadline ────────────────────────────────────────────────────────
+# Grok Build, the Copilot CLI, VS Code, Goose, OpenHands and Hermes run a call
+# whose hook outlives their timeout as if the hook had allowed it, Grok after
+# 5 s. So this gate refuses at 4 s, from its own start: a
+# watchdog, detached so it holds none of the harness's pipes, stops the gate's
+# children (a grep or python3 still matching) and signals it; the trap below
+# refuses. Every built-in rule is linear; a workspace's own WHERE pattern need
+# not be.
+intutic_deadline() {
+  trap - USR1
+  echo "[Intutic Governance] BLOCKED: GATE_DEADLINE — the gate did not finish evaluating this call within 4 s, and refuses it rather than let the hook timeout allow it." >&2
+  if command -v log_event >/dev/null 2>&1; then
+    log_event "tool_blocked" "\${TOOL:-unknown}" "GATE_DEADLINE — the gate did not finish within 4 s" || true
+  fi
+  exit 2
+}
+trap intutic_deadline USR1
+INTUTIC_GATE_PID=$$
+INTUTIC_WATCHDOG_PID="$( { ( sleep 4; pkill -P "$INTUTIC_GATE_PID" 2>/dev/null; kill -USR1 "$INTUTIC_GATE_PID" 2>/dev/null ) </dev/null >/dev/null 2>&1 & } ; echo $! )"
 
 # Source runtime credentials (never embedded in this file)
 if [ -f "<ROOT>/.intutic/env/runtime.env" ]; then
@@ -4587,21 +4800,35 @@ def raw_first(*keys):
             return v
     return ""
 raw_command = raw_first("command", "cmd", "script", "shell_command")
+tool_input_json = json.dumps(i, separators=(",", ":"), ensure_ascii=False)
+# Too large to evaluate inside the hook timeout (gateLimits.ts): the gate body
+# refuses on this line, and the command and arguments are not passed on.
+command_bytes = len(raw_command.encode("utf-8", "surrogatepass"))
+argument_bytes = len(tool_input_json.encode("utf-8", "surrogatepass"))
+too_large = ""
+if command_bytes > 262144:
+    too_large = "the command is %d bytes, over the 262144-byte limit a gate evaluates; split it into smaller commands" % command_bytes
+elif argument_bytes > 1048576:
+    too_large = "the tool arguments are %d bytes, over the 1048576-byte limit a gate evaluates; write the content in smaller parts" % argument_bytes
+if too_large:
+    raw_command = ""
+    tool_input_json = "{}"
 # The hold classifier reads the raw command: a line continuation or a comment
 # is still in it. The library is the shared phrase matcher, not a regex.
 lib = {}
 try:
     exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
-    actions = lib["intutic_actions"](d.get("tool_name", ""), raw_command)
+    actions = lib["intutic_actions"](d.get("tool_name", ""), raw_command) if not too_large else " "
 except Exception:
     actions = " "
 # The state line comes FIRST: the lines after it may legitimately be empty,
 # and command substitution strips trailing newlines, so the last line is the
 # only position an empty value cannot survive in.
 print(state)
+print(too_large)
 print(clean(d.get("tool_name", "")))
 print(first("path", "file_path", "notebook_path", "filePath"))
-print(first("command", "cmd", "script", "shell_command"))
+print("" if too_large else first("command", "cmd", "script", "shell_command"))
 print(clean(d.get("session_id", d.get("sessionId", ""))))
 print(actions)
 # The raw command as one JSON line, for phrase-subject rules.
@@ -4612,8 +4839,8 @@ print(json.dumps(raw_command, ensure_ascii=False))
 # collapsed for token matching; this one must NOT be, or a WHERE clause that
 # spans a key/value boundary matches here and not in the JS gates. json.dumps
 # escapes every newline, so it is still exactly one line to read back.
-print(json.dumps(i, separators=(",", ":"), ensure_ascii=False))
-' 2>/dev/null || printf '\\n\\n\\n\\n\\n\\n\\n\\n')"
+print(tool_input_json)
+' 2>/dev/null || printf '\\n\\n\\n\\n\\n\\n\\n\\n\\n')"
 
 # Each read is \`|| true\` because command substitution strips trailing newlines:
 # a tool call with no command argument yields fewer lines than reads, so a late
@@ -4621,12 +4848,14 @@ print(json.dumps(i, separators=(",", ":"), ensure_ascii=False))
 # **exit 1** — which every harness reads as a hook error and lets the call
 # through. A guard that fails open on the most ordinary input there is (a Write
 # with no shell command) is worse than no guard, because it looks present.
-{ IFS= read -r INTUTIC_EXTRACT_STATE || true; IFS= read -r TOOL || true; IFS= read -r TARGET || true; IFS= read -r COMMAND || true; IFS= read -r SESSION_ID || true; IFS= read -r INTUTIC_ACTIONS || true; IFS= read -r INTUTIC_RAW_COMMAND_JSON || true; IFS= read -r TOOL_INPUT_JSON || true; } <<EOF_INTUTIC_FIELDS
+{ IFS= read -r INTUTIC_EXTRACT_STATE || true; IFS= read -r INTUTIC_TOO_LARGE || true; IFS= read -r TOOL || true; IFS= read -r TARGET || true; IFS= read -r COMMAND || true; IFS= read -r SESSION_ID || true; IFS= read -r INTUTIC_ACTIONS || true; IFS= read -r INTUTIC_RAW_COMMAND_JSON || true; IFS= read -r TOOL_INPUT_JSON || true; } <<EOF_INTUTIC_FIELDS
 $INTUTIC_FIELDS
 EOF_INTUTIC_FIELDS
 TOOL="\${TOOL:-}"; TARGET="\${TARGET:-}"; COMMAND="\${COMMAND:-}"; SESSION_ID="\${SESSION_ID:-}"
 # Space-padded action tokens the extractor's classifier found, or " ".
 INTUTIC_ACTIONS="\${INTUTIC_ACTIONS:- }"
+# Why the call is too large to evaluate, or empty (gateLimits.ts).
+INTUTIC_TOO_LARGE="\${INTUTIC_TOO_LARGE:-}"
 INTUTIC_RAW_COMMAND_JSON="\${INTUTIC_RAW_COMMAND_JSON:-""}"
 # Empty means the extractor itself died (the fallback printf above): treat it
 # exactly like a payload the parser rejected. The gate body refuses on any
@@ -4691,7 +4920,7 @@ log_event() {
 }
 
 
-# ── Intutic gate body v12 — harness: pi ────────────
+# ── Intutic gate body v13 — harness: pi ────────────
 # Generated by harness/gateBody.ts. Do not edit here; every harness regenerates.
 #
 # The harness name and version are stamped so this file identifies itself. Both
@@ -4720,6 +4949,15 @@ if [ -z "\${1:-}" ] && [ "\${INTUTIC_EXTRACT_STATE:-malformed}" != "ok" ]; then
   exit 2
 fi
 
+# Refuse a call too large to evaluate inside the hook timeout, before any rule
+# reads it (the extractor measured it; see gateLimits.ts). Scoped like the
+# envelope refusal above: the post/stop invocations carry no call to gate.
+if [ -z "\${1:-}" ] && [ -n "\${INTUTIC_TOO_LARGE:-}" ]; then
+  echo "[Intutic Governance] BLOCKED: COMMAND_TOO_LARGE — \${INTUTIC_TOO_LARGE}" >&2
+  log_event "tool_blocked" "\${TOOL:-unknown}" "COMMAND_TOO_LARGE — \${INTUTIC_TOO_LARGE}" || true
+  exit 2
+fi
+
 intutic_normalise() {
   local s="$1"
   s="\${s//[$'\\t\\n\\r\\v\\f']/ }"
@@ -4731,9 +4969,9 @@ intutic_normalise() {
 # These are the families with years of evidence behind them, so they block from
 # the first run — before any sync has happened.
 INTUTIC_FLOOR=(
-  'bypass.chflags_nouchg	block	-	any	Governance bypass pattern: clearing the macOS immutable flag on a governance file	 chflags .*nouchg'
-  'bypass.chattr_immutable	block	-	any	Governance bypass pattern: clearing the Linux immutable attribute on a governance file	 chattr .*-[a-zA-Z]*i'
-  'bypass.chmod_governance	block	-	any	Governance bypass pattern: changing permissions on a governance file	 chmod .*(hooks|\\.intutic|\\.claude|\\.cursor)'
+  'bypass.chflags_nouchg	block	s	any	Governance bypass pattern: clearing the macOS immutable flag on a governance file	 chflags .*nouchg'
+  'bypass.chattr_immutable	block	s	any	Governance bypass pattern: clearing the Linux immutable attribute on a governance file	 chattr .*-[a-zA-Z]*i'
+  'bypass.chmod_governance	block	s	any	Governance bypass pattern: changing permissions on a governance file	 chmod .*(hooks|\\.intutic|\\.claude|\\.cursor)'
   'bypass.env_kill_switch	block	-	any	Governance bypass pattern: setting a harness environment variable that disables its hooks	 [A-Z][A-Z0-9_]*_HOOKS?='
   'secrets.aws_access_key	block	-	content	AWS access key ID detected in the content this call would write. Writing a live credential into a file is one commit away from shipping it; reference it from the environment instead.	(A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7]'
   'secrets.anthropic_api_key	block	-	content	Anthropic API key detected in the content this call would write. Writing a live credential into a file is one commit away from shipping it; reference it from the environment instead.	sk-ant-[A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-]*'
@@ -5042,11 +5280,13 @@ sys.exit(0 if lib["intutic_phrase_rule"](sys.argv[1], json.load(sys.stdin)) else
   [ "$rsubj" = "phrase" ] && hit=1
   for s in "\${_subs[@]}"; do
     [ "$rsubj" = "phrase" ] && break
-    if [ "$rflags" = "i" ]; then
-      printf '%s' "$s" | grep -qiE -- "$rsrc" && hit=1
-    else
-      printf '%s' "$s" | grep -qE -- "$rsrc" && hit=1
-    fi
+    # Flags: i = case-insensitive; s (a sequence rule) changes nothing here —
+    # grep matches with an automaton, linear in the text, so the regex runs
+    # as written.
+    case "$rflags" in
+      *i*) printf '%s' "$s" | grep -qiE -- "$rsrc" && hit=1 ;;
+      *)   printf '%s' "$s" | grep -qE -- "$rsrc" && hit=1 ;;
+    esac
   done
   [ "$hit" = "1" ] || return 0
   # The argument condition of a WHERE rule. The tool-name half has matched; the

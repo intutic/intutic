@@ -2,7 +2,7 @@
  * hermesHooks.ts — Hermes AI agent governance hook injection.
  *
  * Hermes is a skills-based AI agent that reads `~/.hermes/config.yaml`
- * for configuration. Hook commands are registered under `hooks.preToolUse`.
+ * for configuration. The gate is a shell hook under `hooks.pre_tool_call`.
  * This module:
  *
  * 1. YAML-safe-merges `~/.hermes/config.yaml` to register the hook command.
@@ -22,9 +22,9 @@ import * as path from 'node:path'
 import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { keepOriginal, noteWritten } from '../disconnect/originals.js'
-import { parseDocument, isMap, type Document } from 'yaml'
+import { parseDocument, isMap, isSeq, type Document } from 'yaml'
 import { newIso } from '@intutic/id'
-import { emitShellGate, SHELL_EXTRACT, SHELL_FAIL_CLOSED } from './gateBody.js'
+import { emitShellGate, HOOK_TIMEOUT_SECONDS, SHELL_EXTRACT, SHELL_FAIL_CLOSED } from './gateBody.js'
 
 const log = createLogger('sync-hermes-hooks')
 
@@ -114,23 +114,48 @@ exit 0
 // ─── YAML merge helpers ───────────────────────────────────────────────────────
 
 /**
- * Merge the hook registration into the Hermes config: `hooks.preToolUse.command`
- * is set to the gate, and everything else in the file — other hooks, MCP
- * servers, comments — is kept. Edited through the `yaml` document model; an
- * earlier line-based version replaced the first `command:` line anywhere in
- * the file, whichever key it belonged to. A file that does not parse, or is
- * not a mapping, is left untouched and reported.
+ * The gate's shell-hook entry: \`fail_closed\` makes Hermes refuse the call
+ * when the gate times out, crashes or prints something it cannot read, where
+ * its default runs it; \`timeout\` replaces Hermes's 60 s default, and the
+ * gate refuses at its own deadline inside it. Hermes splits \`command\` with
+ * shlex, so a path with a space or a quote in it is quoted.
+ */
+export function hermesHookEntry(hookScriptPath: string): Record<string, unknown> {
+  const command = /[\s'"\\]/.test(hookScriptPath) ? `'${hookScriptPath.replace(/'/g, `'"'"'`)}'` : hookScriptPath
+  return { command, timeout: HOOK_TIMEOUT_SECONDS, fail_closed: true }
+}
+
+/**
+ * Merge the hook registration into the Hermes config: the gate's entry is put
+ * in the \`hooks.pre_tool_call\` list, replacing an earlier one of ours, and
+ * everything else in the file — other hooks, MCP servers, comments — is kept.
+ * Edited through the \`yaml\` document model. A file that does not parse, or
+ * is not a mapping, or holds \`hooks\` or \`pre_tool_call\` in a shape Hermes
+ * would not read, is left untouched and reported.
+ *
+ * Earlier versions wrote \`hooks.preToolUse.command\`, which Hermes skips as an
+ * unknown event: that registration is removed.
  */
 export function mergeHermesYaml(existing: string, hookScriptPath: string): string | null {
   const doc: Document = parseDocument(existing)
   if (doc.errors.length > 0) return null
   if (doc.contents === null) doc.contents = doc.createNode({})
   if (!isMap(doc.contents)) return null
-  try {
-    doc.setIn(['hooks', 'preToolUse', 'command'], hookScriptPath)
-  } catch {
-    // `hooks` or `hooks.preToolUse` is a scalar or list — not a shape to edit.
-    return null
+  const hooks = doc.get('hooks')
+  if (hooks !== undefined && hooks !== null && !isMap(hooks)) return null
+  const legacy = doc.getIn(['hooks', 'preToolUse', 'command'])
+  if (typeof legacy === 'string' && legacy.endsWith('hermes-check.sh')) doc.deleteIn(['hooks', 'preToolUse'])
+  const list = doc.getIn(['hooks', 'pre_tool_call'])
+  if (list !== undefined && list !== null && !isSeq(list)) return null
+  const entry = doc.createNode(hermesHookEntry(hookScriptPath))
+  if (isSeq(list)) {
+    list.items = list.items.filter((item) => {
+      const command = isMap(item) ? item.get('command') : undefined
+      return !(typeof command === 'string' && /hermes-check\.sh'?$/.test(command))
+    })
+    list.items.push(entry)
+  } else {
+    doc.setIn(['hooks', 'pre_tool_call'], doc.createNode([hermesHookEntry(hookScriptPath)]))
   }
   return doc.toString()
 }

@@ -35,6 +35,7 @@ const execFileAsync = promisify(execFile)
  */
 export async function hardenGoosePlugin(pluginDir: string): Promise<void> {
   const targets = [
+    path.join(pluginDir, 'plugin.json'),
     path.join(pluginDir, 'hooks', 'hooks.json'),
     path.join(pluginDir, 'scripts', 'intutic-check.sh'),
   ]

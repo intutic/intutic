@@ -40,7 +40,7 @@ import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { keepOriginal } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
-import { emitShellGate, SHELL_EXTRACT, SHELL_FAIL_CLOSED } from './gateBody.js'
+import { emitShellGate, HOOK_TIMEOUT_SECONDS, SHELL_EXTRACT, SHELL_FAIL_CLOSED } from './gateBody.js'
 import { readJsonObjectForMerge } from './jsonMergeTarget.js'
 
 const log = createLogger('sync-antigravity-hooks')
@@ -127,11 +127,18 @@ exit 0
  * The `BeforeTool` entry that registers the gate: a catch-all matcher, since
  * the gate decides from the arguments and a tool name nobody anticipated is
  * still evaluated. Shared with the MDM manifest, so the two cannot drift.
+ * Gemini CLI's \`timeout\` is in milliseconds (default 60 000), and it runs a
+ * call whose hook times out; the gate refuses at its own deadline inside it.
  */
 export function buildGeminiBeforeToolEntry(hookScriptPath: string): Record<string, unknown> {
   return {
     matcher: '.*',
-    hooks: [{ name: 'intutic-governance', type: 'command', command: geminiGateCommand(hookScriptPath) }],
+    hooks: [{
+      name: 'intutic-governance',
+      type: 'command',
+      command: geminiGateCommand(hookScriptPath),
+      timeout: HOOK_TIMEOUT_SECONDS * 1000,
+    }],
   }
 }
 

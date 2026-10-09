@@ -18,6 +18,8 @@ export type { GateRefusalCode } from './errors.js'
 
 export { canonicalJson, holdKey, holdMessage } from './hold.js'
 
+export { COMMAND_SIZE_LIMIT, ARGUMENTS_SIZE_LIMIT, GATE_DEADLINE_MS } from './limits.js'
+
 export { Gate, READ_ONLY_TOOLS, install, active } from './gate.js'
 export type { GateConfig, ToolInput } from './gate.js'
 

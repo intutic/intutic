@@ -4,10 +4,10 @@
  * Detects the Continue AI coding assistant and:
  * - sets `apiBase` on each OpenAI/Anthropic model in `~/.continue/config.yaml`
  *   so its LLM calls reach the proxy (merged; see continueConfigMerger.ts);
- * - installs the Continue CLI (`cn`) PreToolUse gate in
- *   `~/.continue/settings.json` and `<repo>/.continue/settings.json` (see
- *   continueHooks.ts). The IDE extension has no hook system, so for it proxy
- *   routing is the only mechanism;
+ * - installs no tool-call gate: the CLI (`cn`) loads PreToolUse hooks from
+ *   its settings but never fires them (`firePreToolUse` has no caller at
+ *   continuedev/continue main 5522c6f), and the IDE extension has no hook
+ *   system. The proxy and the rules below are what govern it;
  * - writes the rule sets to `.continue/rules/intutic-governance.md` with
  *   `alwaysApply: true`. The IDE extension reads the workspace root's
  *   `.continue/rules/`, and the CLI the one in the directory it runs in,
@@ -25,8 +25,7 @@ import { homedir } from 'node:os'
 import { HarnessType, rulesFrontMatterOf, openaiBaseUrl } from '@intutic/shared-types'
 import type { SyncSopEntry } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
-import { loadCredentials } from '../config/store.js'
-import { mergeContinueConfig, writeContinueHooks } from '@intutic/sync-daemon'
+import { mergeContinueConfig } from '@intutic/sync-daemon'
 import { ownRulesFileHash, writeOwnRulesFile } from './rulesFiles.js'
 
 const RULES_FILE = '.continue/rules/intutic-governance.md'
@@ -55,8 +54,6 @@ export const continueAdapter: IHarnessAdapter = {
 
   async installGate(workspaceRoot: string, proxyUrl: string): Promise<void> {
     await mergeContinueConfig(continuePath('config.yaml'), openaiBaseUrl(proxyUrl))
-    const creds = await loadCredentials()
-    await writeContinueHooks(workspaceRoot, proxyUrl, creds?.workspaceId || 'local')
   },
 
   writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {

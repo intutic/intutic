@@ -78,7 +78,7 @@ When interacting with LLM providers through the local proxy, prepend requests wi
 Intutic names every refusal with a code: an SDK raises it (`ClawdeBlockedError.code`, `IntuticGateRefusal.code`), the MCP proxy puts it in `error.data.code`, and the proxy names a withheld answer in its `x-intutic-refusal` header. A refusal you read as text, starting `[Intutic]` or `[Intutic Governance]`, is the same refusal: the call it names did not run (unless it says the result was withheld). Find the code below and act on it.
 
 ### Held: tell the user, then wait
-A hold rule wants a person to see this call before it runs. Codes: `HELD` (with a hold id, `hold_…`), a hook gate's `[Intutic Governance] HELD:` message, and `LOOP_RUN_PENDING_REVIEW` (the loop run is paused for review). `SERVER_HELD` is the MCP registry's version: the server changed its tools in a risky way and waits for an owner or admin on the MCP Servers page.
+A hold rule wants a person to see this call before it runs. Codes: `HELD` (with a hold id, `hold_…`), a hook gate's `[Intutic Governance] HELD:` message, `LOOP_RUN_PENDING_REVIEW` (the loop run is paused for review), and the proxy's `policy_held` (a Rego or WASM rule held the request; the error names the hold id). `SERVER_HELD` is the MCP registry's version: the server changed its tools in a risky way and waits for an owner or admin on the MCP Servers page.
 - Tell the user what was held and quote the hold id.
 - Only an **Owner, Admin or Engineering Manager** can decide it: `intutic decision approve <holdId>` or `intutic decision reject <holdId>`, or the Slack card. A developer cannot approve their own hold.
 - Do not retry while it is pending. After approval, the identical call (same tool, same arguments) passes only if the workspace's review-hold bypass (`reviewHoldBypassEnabled`) is on, and only for a short window (10 minutes by default); otherwise approval records the decision and a retry is held again. The `intutic_hold_status` MCP tool says which.
@@ -96,6 +96,7 @@ Continue without it, or tell the user what would have to change and who can chan
 - **Spend:** `BUDGET_EXCEEDED`, `OVERAGE_HARD_CAP_EXCEEDED`, `COST_GATE_EXCEEDED` (a smaller request may pass). An MCP `BUDGET_EXCEEDED` lasts until its `resetAt`; `intutic_mcp_budget_remaining` shows what is left.
 - **Images:** `E_UNPINNED_LATEST`, `E_UNPINNED_TAG`, `E_UNKNOWN_REGISTRY`, `E_UNKNOWN_IMAGE`, `E_DIGEST_MISMATCH`, `E_MANIFEST_UNPARSEABLE`: deploy an image pinned to a digest the image allowlist approves.
 - **Gate setup:** `WORKFLOW_SANDBOX`, `NO_GATE`: the gate is wired wrongly in the agent's code; fix the code, not the call.
+- **Size:** `COMMAND_TOO_LARGE`: the command is over 256 KiB, or the tool's arguments over 1 MiB, more than any gate evaluates. Split the work: smaller commands, or a file written in parts. A hook gate that could not finish deciding in time says `GATE_DEADLINE` in its reason; the call did not run, and the same call will be refused again, so tell the user.
 
 ### Not checked: retry once, later
 `GOVERNANCE_UNAVAILABLE`, `REGISTRY_UNAVAILABLE`, `BUDGET_UNAVAILABLE`, `TOFU_UNAVAILABLE`, `RESPONSE_UNPARSEABLE`, and `HOOK_GATE` when its reason says the control plane was unreachable: governance could not check the call, so it did not run. One later retry is fine; if it fails again, tell the user.

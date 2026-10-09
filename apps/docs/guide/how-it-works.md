@@ -44,7 +44,7 @@ Every LLM request from your agents flows through the Intutic proxy. The proxy is
 | n8n | `~/.intutic/hooks/n8n-governance-hook.js` | External hook the n8n server loads through `EXTERNAL_HOOK_FILES` |
 | Cline | `.clinerules/hooks/PreToolUse` | PreToolUse hook; the base URL is set by hand in Cline's settings panel |
 | Roo Code | none | Base URL set by hand in Roo Code's settings panel; no hook system |
-| Continue | `~/.continue/config.yaml` | `apiBase` on each OpenAI and Anthropic model, plus a PreToolUse gate for the `cn` CLI |
+| Continue | `~/.continue/config.yaml` | `apiBase` on each OpenAI and Anthropic model (no gate: `cn` never fires its PreToolUse hooks) |
 | Claude Desktop | `claude_desktop_config.json` | Dev override + MCP wrapping |
 | Goose | `.agents/plugins/intutic-governance/hooks/hooks.json` | JSON plugin hook structure |
 | Open WebUI | `.open-webui/intutic-governance-filter.py` | Python inlet() filter hook |

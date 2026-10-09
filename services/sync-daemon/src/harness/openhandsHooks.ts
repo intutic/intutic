@@ -19,11 +19,31 @@ import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { keepOriginal, noteWritten } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
-import { emitShellGate, SHELL_EXTRACT, SHELL_FAIL_CLOSED } from './gateBody.js'
+import { emitShellGate, HOOK_TIMEOUT_SECONDS, SHELL_EXTRACT, SHELL_FAIL_CLOSED } from './gateBody.js'
 import { parse as parseToml } from 'smol-toml'
 import { anthropicBaseUrl, openaiBaseUrl } from '@intutic/shared-types'
 
 const log = createLogger('sync-openhands-hooks')
+
+/**
+ * `.openhands/hooks.json` in the OpenHands SDK's schema (\`HookConfig\`): each
+ * event a list of matchers, each with its hook definitions. Earlier versions
+ * wrote a flat list of \`{type: 'PreToolUse', command, failClosed}\`, which the
+ * SDK cannot load, and had extra top-level keys beside \`hooks\`, which it
+ * drops with a warning; the marker that tells disconnect the file is ours is
+ * now each hook's \`name\`. OpenHands runs a call whose hook times out, and
+ * has no setting to refuse instead, so the gate refuses at its own deadline,
+ * inside the \`timeout\` set here (default 60 s).
+ */
+export function openHandsHooksConfig(hookScriptPath: string): Record<string, unknown> {
+  const hook = (command: string) => ({ type: 'command', name: 'Intutic governance hook', command, timeout: HOOK_TIMEOUT_SECONDS })
+  return {
+    hooks: {
+      PreToolUse: [{ matcher: '*', hooks: [hook(hookScriptPath)] }],
+      Stop: [{ matcher: '*', hooks: [hook(`${hookScriptPath} --event stop`)] }],
+    },
+  }
+}
 
 /**
  * Write .openhands/hooks.json and the pre-tool-check shell script.
@@ -130,24 +150,7 @@ exit 0
   await fs.chmod(hookScriptPath, 0o755)
 
   // ── .openhands/hooks.json ──────────────────────────────────────────
-  const hooksConfig = {
-    _comment: 'Intutic governance hooks — auto-generated. DO NOT EDIT.',
-    _lastSync: newIso(),
-    hooks: [
-      {
-        type: 'PreToolUse',
-        command: hookScriptPath,
-        failClosed: true,
-      },
-      {
-        type: 'Stop',
-        command: `${hookScriptPath} --event stop`,
-        failClosed: false,
-      },
-    ],
-  }
-
-  const hooksJson = JSON.stringify(hooksConfig, null, 2) + '\n'
+  const hooksJson = JSON.stringify(openHandsHooksConfig(hookScriptPath), null, 2) + '\n'
   const tmpHooks = hooksPath + '.intutic-tmp'
   await fs.writeFile(tmpHooks, hooksJson, 'utf-8')
   await fs.rename(tmpHooks, hooksPath)

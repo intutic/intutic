@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { evaluate, loadSnapshot, SEV_BLOCK, SEV_SHADOW, SEV_WARN } from '../snapshot.js'
+import { expectLinearTime } from './linearTime.js'
 
 // Port of packages/intutic-clawde/tests/test_gate_snapshot.py.
 
@@ -128,9 +129,7 @@ describe('evaluation', () => {
         // strips a SOP toolPattern's `^`/`$` and re-wraps it as `' (name) '`
         // specifically because the reader tests against a padded string —
         // see snapshot.ts's module doc comment for why. This fixture mirrors
-        // the real wire shape rather than the anchor-only form the ported
-        // Python test used (which only worked there because the Python
-        // reader does not pad).
+        // the real wire shape, as the Python reader's test now does too.
         line('tool.fetch', 'block', '-', 'tool', 'Tool not permitted', ' (webfetch) '),
       ]),
     )
@@ -212,16 +211,9 @@ describe('phrase rules', () => {
     ['drop -- ', 25000],
     ['drop /* ', 25000],
     ['\\ ', 100000],
-  ] as const)('stays linear on %j repeated %i times', (unit, times) => {
+  ] as const)('stays linear on %j repeated up to %i times', (unit, times) => {
     const s = load()
-    const command = unit.repeat(times)
-    let best = Infinity
-    for (let run = 0; run < 3; run++) {
-      const t0 = performance.now()
-      evaluate('shell', '', command, s)
-      best = Math.min(best, performance.now() - t0)
-    }
-    // The best of three runs: the bound is on the matcher, not on a busy machine.
-    expect(best).toBeLessThan(200)
+    const commands = { 1: unit.repeat(times / 4), 4: unit.repeat(times) }
+    expectLinearTime(JSON.stringify(unit), (scale) => evaluate('shell', '', commands[scale], s))
   })
 })

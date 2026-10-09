@@ -124,7 +124,8 @@ function buildHookRegistration(hookScriptPath: string) {
               // Grok Build's documented default; stated explicitly rather than
               // left to fall back, since a local policy-snapshot evaluation is
               // cheap but a future default change upstream should not silently
-              // starve this hook.
+              // starve this hook. The gate refuses at GATE_DEADLINE_MS (4 s),
+              // inside it, because Grok Build runs the call when it expires.
               timeout: 5,
             },
           ],

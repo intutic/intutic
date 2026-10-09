@@ -105,7 +105,7 @@ describe('Gemini CLI and Antigravity hook manifests (Jamf / Intune)', () => {
       const parsed = JSON.parse(generateGeminiManifest(flavor, { hookScriptPath: '/opt/intutic/hooks/antigravity-check.sh', platform: 'darwin' }))
       expect(parsed.target_path).toBe('/Library/Application Support/GeminiCli/settings.json')
       expect(parsed.content.hooks.BeforeTool).toEqual([
-        { matcher: '.*', hooks: [{ name: 'intutic-governance', type: 'command', command: 'bash "/opt/intutic/hooks/antigravity-check.sh"' }] },
+        { matcher: '.*', hooks: [{ name: 'intutic-governance', type: 'command', command: 'bash "/opt/intutic/hooks/antigravity-check.sh"', timeout: 10_000 }] },
       ])
       expect(Object.keys(parsed.deployment)).toEqual([flavor])
     })
@@ -123,7 +123,7 @@ describe('Gemini CLI and Antigravity hook manifests (Jamf / Intune)', () => {
       expect(parsed.content).toEqual({
         'intutic-governance': {
           enabled: true,
-          PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: 'node "/opt/intutic/hooks/antigravity-cli-check.js"' }] }],
+          PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: 'node "/opt/intutic/hooks/antigravity-cli-check.js"', timeout: 10 }] }],
         },
       })
       expect(parsed.deployment[flavor]).toContain('each signed-in user')
