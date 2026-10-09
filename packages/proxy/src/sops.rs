@@ -1258,7 +1258,7 @@ fn workspace_cache() -> &'static Mutex<HashMap<String, WorkspaceCached>> {
 /// the same discipline as the process-global `all_sops()` cache, keyed by
 /// workspace instead.
 ///
-/// `token` is the SAME `vk_` virtual key that authenticated the inbound
+/// `virtual_key` is the SAME `vk_` virtual key that authenticated the inbound
 /// request, reused rather than inventing a separate service credential —
 /// exactly how `validate_key_via_control_plane` (`proxy.rs`) already reuses it
 /// for auth. The control plane's own auth middleware resolves the workspace
@@ -1278,7 +1278,7 @@ async fn fetch_workspace_sops(
     http_client: &reqwest::Client,
     control_plane_url: &str,
     workspace_id: &str,
-    token: &str,
+    virtual_key: &crate::credential::VirtualKey,
     policy_version: Option<u64>,
 ) -> Vec<Sop> {
     {
@@ -1298,9 +1298,8 @@ async fn fetch_workspace_sops(
 
     let url = format!("{control_plane_url}/api/v1/workspace/sops-policy");
     let fetched: Option<Vec<Sop>> = async {
-        let resp = http_client
-            .get(&url)
-            .header("authorization", format!("Bearer {token}"))
+        let resp = virtual_key
+            .authorize(http_client.get(&url))
             .timeout(std::time::Duration::from_millis(2000))
             .send()
             .await
@@ -1364,21 +1363,21 @@ pub async fn all_sops_for_workspace(
     http_client: &reqwest::Client,
     control_plane_url: Option<&str>,
     workspace_id: Option<&str>,
-    token: Option<&str>,
+    virtual_key: Option<&crate::credential::VirtualKey>,
     control_plane: Option<&dyn crate::store::ControlPlaneCache>,
 ) -> Vec<Sop> {
     if !crate::gateway::requires_vk_only() {
         return all_sops();
     }
-    match (control_plane_url, workspace_id, token) {
-        (Some(cp), Some(ws), Some(tok)) if ws != "unknown" && !ws.is_empty() => {
+    match (control_plane_url, workspace_id, virtual_key) {
+        (Some(cp), Some(ws), Some(key)) if ws != "unknown" && !ws.is_empty() => {
             // Read BEFORE the fetch: a bump that lands during the request is
             // seen as "moved" on the next request, never missed.
             let version = match control_plane {
                 Some(store) => store.policy_version(ws).await,
                 None => None,
             };
-            fetch_workspace_sops(http_client, cp, ws, tok, version).await
+            fetch_workspace_sops(http_client, cp, ws, key, version).await
         }
         _ => Vec::new(),
     }
@@ -2444,25 +2443,23 @@ mod tests {
         );
 
         let client = reqwest::Client::new();
+        let credential = crate::credential::RequestCredential::classify("vk_x");
+        let vk = credential.virtual_key();
         // No control-plane URL, no workspace, no token — every combination of
         // "cannot resolve" must return empty, never the process-global set.
         assert!(all_sops_for_workspace(&client, None, None, None, None)
             .await
             .is_empty());
-        assert!(all_sops_for_workspace(
-            &client,
-            Some("http://127.0.0.1:1"),
-            None,
-            Some("vk_x"),
-            None
-        )
-        .await
-        .is_empty());
+        assert!(
+            all_sops_for_workspace(&client, Some("http://127.0.0.1:1"), None, vk, None)
+                .await
+                .is_empty()
+        );
         assert!(all_sops_for_workspace(
             &client,
             Some("http://127.0.0.1:1"),
             Some("unknown"),
-            Some("vk_x"),
+            vk,
             None
         )
         .await
@@ -4319,27 +4316,34 @@ mod workspace_cache_version_tests {
         );
     }
 
+    fn vk_x() -> crate::credential::VirtualKey {
+        crate::credential::RequestCredential::classify("vk_x")
+            .virtual_key()
+            .cloned()
+            .expect("a virtual key")
+    }
+
     #[tokio::test]
     async fn a_moved_policy_version_bypasses_a_fresh_cache_entry() {
         const WS: &str = "__test_version_moved_ws__";
         let client = reqwest::Client::new();
         seeded(WS, Some(1));
         // Same version: served from the cache, no fetch attempted.
-        let same = fetch_workspace_sops(&client, "http://127.0.0.1:1", WS, "vk_x", Some(1)).await;
+        let same = fetch_workspace_sops(&client, "http://127.0.0.1:1", WS, &vk_x(), Some(1)).await;
         assert_eq!(
             same.len(),
             1,
             "an unmoved version must serve the cached set"
         );
         // No version readable on this request: the TTL alone governs — still served.
-        let unknown = fetch_workspace_sops(&client, "http://127.0.0.1:1", WS, "vk_x", None).await;
+        let unknown = fetch_workspace_sops(&client, "http://127.0.0.1:1", WS, &vk_x(), None).await;
         assert_eq!(
             unknown.len(),
             1,
             "an unreadable version must not force a refetch"
         );
         // Moved version: refetched now; the unreachable control plane fails closed to empty.
-        let moved = fetch_workspace_sops(&client, "http://127.0.0.1:1", WS, "vk_x", Some(2)).await;
+        let moved = fetch_workspace_sops(&client, "http://127.0.0.1:1", WS, &vk_x(), Some(2)).await;
         assert!(
             moved.is_empty(),
             "a moved version must bypass the fresh cache entry"
@@ -4351,7 +4355,8 @@ mod workspace_cache_version_tests {
         const WS: &str = "__test_version_absent_ws__";
         let client = reqwest::Client::new();
         seeded(WS, None);
-        let served = fetch_workspace_sops(&client, "http://127.0.0.1:1", WS, "vk_x", Some(7)).await;
+        let served =
+            fetch_workspace_sops(&client, "http://127.0.0.1:1", WS, &vk_x(), Some(7)).await;
         assert_eq!(
             served.len(),
             1,

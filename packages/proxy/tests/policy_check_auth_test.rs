@@ -11,7 +11,9 @@
 //!
 //! The other half is pinned too: a token that is not a virtual key is the
 //! caller's own provider credential, and it must never be sent to the control
-//! plane.
+//! plane, not even its first 12 characters. The route refuses anything but a
+//! virtual key, so the proxy answers that request's check itself, as the
+//! route's refusal would have been answered: fail-closed here, so refused.
 //!
 //! ONE `#[tokio::test]` in this file, matching this crate's convention for
 //! process-global env vars (`OPENAI_UPSTREAM_URL`, `CONTROL_PLANE_URL`).
@@ -72,9 +74,8 @@ async fn policy_check_sends_the_virtual_key_and_never_a_provider_key() {
         .expect(1)
         .mount(&cp)
         .await;
-    // Anything else reaching the route (no header, or the provider key) still
-    // gets an answer, so the second request below is not blocked; the
-    // assertion on the recorded requests is what checks it.
+    // Anything else reaching the route would be allowed, so a provider-key
+    // request refused below was refused by the proxy, not by this mock.
     Mock::given(method("POST"))
         .and(path("/api/v1/policy/check"))
         .respond_with(
@@ -135,20 +136,28 @@ async fn policy_check_sends_the_virtual_key_and_never_a_provider_key() {
     let res = send(provider_key.clone()).await.expect("proxy reachable");
     let status = res.status();
     let body = res.text().await.expect("body reads");
-    assert!(status.is_success(), "proxy returned {status}: {body}");
+    assert_eq!(status, reqwest::StatusCode::FORBIDDEN, "{body}");
+    assert!(body.contains("policy_denied"), "{body}");
 
-    let checks: Vec<_> = cp
+    let received = cp
         .received_requests()
         .await
-        .expect("request recording is on")
-        .into_iter()
+        .expect("request recording is on");
+    let checks: Vec<_> = received
+        .iter()
         .filter(|r| r.url.path() == "/api/v1/policy/check")
         .collect();
-    assert_eq!(checks.len(), 2, "one pre-check per proxied request");
-    assert!(
-        checks[1].headers.get("authorization").is_none(),
-        "a provider key was sent to the control plane: {:?}",
-        checks[1].headers.get("authorization")
+    assert_eq!(
+        checks.len(),
+        1,
+        "only the virtual-key request was checked remotely"
     );
+    for r in &received {
+        let body = String::from_utf8_lossy(&r.body);
+        assert!(
+            !body.contains(&provider_key[..12]),
+            "part of a provider key was sent to the control plane: {body}"
+        );
+    }
     // `.expect(1)` on the first mock is verified when `cp` drops.
 }
