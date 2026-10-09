@@ -104,11 +104,11 @@ export interface WorkspaceSettings {
 
   /**
    * The action (`off`, `redact`, `block`) of each PII detector this workspace
-   * governs centrally (`PiiDetectorSettingsSchema`). The LLM proxy applies it
-   * to the workspace's requests as the baseline; a machine's own
-   * `dlp.detectors` config may only tighten it. Absent, or a detector left
-   * out: each machine's own config applies. `null` in a settings write clears
-   * it, and is never stored.
+   * governs centrally (`PiiDetectorSettingsSchema`). The LLM proxy and the
+   * MCP proxy apply it to the workspace's traffic as the baseline; a
+   * machine's own detector config may only tighten it (`effectivePiiActions`).
+   * Absent, or a detector left out: each machine's own config applies. `null`
+   * in a settings write clears it, and is never stored.
    */
   piiDetectors?: PiiDetectorSettings | null
 

@@ -126,6 +126,32 @@ describe('MCP server registry (proxy side)', () => {
       expect(client.getFailOpen()).toBe(false)
     })
 
+    it("reads the workspace's PII detector actions as the LLM proxy reads them from key-context", async () => {
+      const client = new PolicyClient(baseUrl, 'vk_test', 'ws_1')
+      await client.refresh()
+      expect(client.getPiiDetectors(), 'an older control plane sends none').toEqual({ kind: 'none' })
+
+      rulesBody = { rules: [], piiDetectors: { 'pii.card': 'block', 'pii.passport': 'redact' } }
+      await client.refresh()
+      expect(client.getPiiDetectors()).toEqual({ kind: 'set', actions: { 'pii.card': 'block' } })
+
+      rulesStatus = 503
+      await expect(client.refresh()).rejects.toThrow('503')
+      expect(client.getPiiDetectors(), 'kept through an outage, like the rest of the policy').toEqual({
+        kind: 'set',
+        actions: { 'pii.card': 'block' },
+      })
+
+      rulesStatus = 200
+      rulesBody = { rules: [], piiDetectors: null }
+      await client.refresh()
+      expect(client.getPiiDetectors().kind).toBe('unreadable')
+
+      rulesBody = { rules: [], piiDetectors: {} }
+      await client.refresh()
+      expect(client.getPiiDetectors()).toEqual({ kind: 'none' })
+    })
+
     it("absorbs the workspace's injection and anomaly dispositions, and leaves them unset when not sent", async () => {
       const client = new PolicyClient(baseUrl, 'vk_test', 'ws_1')
       await client.refresh()

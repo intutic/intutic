@@ -37,7 +37,7 @@ import { GovernanceEmitter, detectionFinding } from './emitter.js'
 import { ToolCallInterceptor, type Block } from './interceptor.js'
 import { budgetRemaining, describeFailure, holdStatus, readControlPlane, registryStatus } from './agentTools.js'
 import type { RefusalData } from './refusals.js'
-import { redactText as redactMcpText } from './dlp.js'
+import { redactText as redactMcpText, setWorkspacePii } from './dlp.js'
 import { scanText, injectionSeverity, setDynamicInjectionPatterns, type InjectionSource } from './injection.js'
 import { toolPoisoning, dlpEscalation, type AnomalyFinding } from './anomaly/index.js'
 import { SessionState } from './session.js'
@@ -886,6 +886,9 @@ export class McpGovernanceProxy {
     pending: Map<string | number, PendingRequest>,
   ): Promise<void> {
     const injectionAction = this.policy.getInjectionAction() ?? this.config.mcpInjectionAction
+    // Results are redacted with the workspace's PII detector actions too —
+    // a resources/read answer can arrive before any tools/call set them.
+    setWorkspacePii(this.policy.getPiiDetectors())
     const outcome = processServerLine(
       rawLine,
       pending,

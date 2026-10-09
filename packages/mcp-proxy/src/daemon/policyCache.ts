@@ -104,6 +104,14 @@ export interface ResolvedPolicy {
   /** The workspace's MCP call budgets; absent on an entry from before they existed, which reads as none. */
   mcpBudgets?: McpBudgetPolicy
   /**
+   * The control plane's `piiDetectors` field, carried as it was sent: absent
+   * from an older control plane and from the snapshot seed, `null` when the
+   * control plane could not read the setting. `PolicyClient` reads it with
+   * `parseWorkspacePiiDetectors`, the reader the per-session mode uses too,
+   * so the two modes cannot read one value differently.
+   */
+  piiDetectors?: unknown
+  /**
    * True on the entry `seedFromSnapshot` built from the sync daemon's local
    * snapshot, which carries only part of the policy. A proxy that already
    * loaded a full policy takes only the rules from such an entry (see
@@ -179,6 +187,7 @@ type PolicyResponseBody = Pick<
   | 'ssoGroupPolicy'
   | 'mcpProxyFailBehavior'
   | 'mcpBudgets'
+  | 'piiDetectors'
 >
 
 /**
@@ -262,6 +271,7 @@ function parsePolicyResponse(raw: string): PolicyResponseBody | null {
         ? parsed['mcpProxyFailBehavior']
         : undefined,
     mcpBudgets: parseMcpBudgetPolicy(parsed['mcpBudgets']),
+    piiDetectors: parsed['piiDetectors'],
   }
 }
 
@@ -323,6 +333,7 @@ async function fetchFromControlPlane(workspaceId: string): Promise<ResolvedPolic
             ssoGroupPolicy:   parsed.ssoGroupPolicy,
             mcpProxyFailBehavior: parsed.mcpProxyFailBehavior,
             mcpBudgets:       parsed.mcpBudgets,
+            piiDetectors:     parsed.piiDetectors,
             cachedAt:         Date.now(),
             configVersion:    versionAtFetch,
           })

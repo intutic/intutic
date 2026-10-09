@@ -6,8 +6,10 @@
  * @module
  */
 
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import type { WorkspacePiiDetectors } from '@intutic/shared-types'
 import { ToolCallInterceptor } from '../interceptor.js'
+import { configurePii } from '../dlp.js'
 import { PolicyClient, UNRESTRICTED_REGISTRY, parseSsoGroupPolicy } from '../policy.js'
 import type { McpPrincipal, McpRegistryPolicy, SopRule, SsoGroupPolicy } from '../policy.js'
 import { GovernanceEmitter, type DetectionFinding } from '../emitter.js'
@@ -95,6 +97,11 @@ class StubPolicyClient extends PolicyClient {
   principal: McpPrincipal | undefined = undefined
   ssoGroupPolicy: SsoGroupPolicy | undefined = undefined
   failOpen: boolean | undefined = undefined
+  piiDetectors: WorkspacePiiDetectors = { kind: 'none' }
+
+  override getPiiDetectors(): WorkspacePiiDetectors {
+    return this.piiDetectors
+  }
 
   override getRegistry(): McpRegistryPolicy | undefined {
     return this.registry
@@ -199,6 +206,58 @@ describe('ToolCallInterceptor', () => {
       const decision = await interceptor.decide('Read', { path: '/tmp/hello.txt' })
       expect(decision.action).toBe('allow')
       expect(emitter.emitted[0]?.kind).toBe('tool_allowed')
+    })
+  })
+
+  describe("the workspace's PII detector actions", () => {
+    const card = (): string => ['4111', '1111', '1111', '1111'].join(' ')
+    const email = (): string => ['jane.doe', 'corp.io'].join('@')
+    const withWorkspace = (piiDetectors: WorkspacePiiDetectors): StubPolicyClient => {
+      const policy = new StubPolicyClient()
+      policy.piiDetectors = piiDetectors
+      return policy
+    }
+
+    afterEach(() => {
+      configurePii(undefined)
+    })
+
+    it('turns on a detector that is off by default, and off one that is on', async () => {
+      const policy = withWorkspace({ kind: 'set', actions: { 'pii.email': 'redact', 'pii.card': 'off' } })
+      const interceptor = new ToolCallInterceptor(policy, emitter, true)
+      const mail = await interceptor.decide('send', { to: email() })
+      expect(mail).toMatchObject({ action: 'block', code: 'DLP', ruleId: 'dlp.pii.email' })
+      expect((await interceptor.decide('note', { text: `refund ${card()}` })).action).toBe('allow')
+    })
+
+    it('a local INTUTIC_MCP_DLP_DETECTORS tightens the workspace but cannot loosen it', async () => {
+      configurePii('{"pii.card":"off","pii.email":"block"}')
+      const policy = withWorkspace({ kind: 'set', actions: { 'pii.card': 'redact', 'pii.email': 'off' } })
+      const interceptor = new ToolCallInterceptor(policy, emitter, true)
+      expect((await interceptor.decide('note', { text: `refund ${card()}` })).action).toBe('block')
+      expect((await interceptor.decide('send', { to: email() })).action).toBe('block')
+    })
+
+    it('unreadable under fail-closed: the call is refused and names the setting', async () => {
+      const policy = withWorkspace({ kind: 'unreadable', reason: 'the control plane could not read it' })
+      const decision = await new ToolCallInterceptor(policy, emitter, false).decide('Read', { path: '/tmp/ok.txt' })
+      expect(decision).toMatchObject({ action: 'block', code: 'GOVERNANCE_UNAVAILABLE', ruleId: 'piiDetectors' })
+      expect((decision as { reason: string }).reason).toContain('PII detector actions could not be read')
+      expect(emitter.emitted[0]?.kind).toBe('tool_blocked')
+    })
+
+    it('unreadable under fail-open: the local config alone applies', async () => {
+      const policy = withWorkspace({ kind: 'unreadable', reason: 'the control plane could not read it' })
+      const interceptor = new ToolCallInterceptor(policy, emitter, true)
+      expect((await interceptor.decide('Read', { path: '/tmp/ok.txt' })).action).toBe('allow')
+      expect((await interceptor.decide('note', { text: `refund ${card()}` })).action).toBe('block')
+      expect((await interceptor.decide('send', { to: email() })).action).toBe('allow')
+    })
+
+    it('the workspace’s fail behaviour decides an unreadable setting over the local one', async () => {
+      const policy = withWorkspace({ kind: 'unreadable', reason: 'the control plane could not read it' })
+      policy.failOpen = false
+      expect((await new ToolCallInterceptor(policy, emitter, true).decide('Read', {})).action).toBe('block')
     })
   })
 

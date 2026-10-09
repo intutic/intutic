@@ -371,7 +371,9 @@ fn action_table(patterns: &[DlpPattern]) -> Vec<(String, String)> {
 /// loosen it, so a developer cannot switch off on their own machine what
 /// their workspace turned on. A detector the workspace does not name keeps
 /// the machine's action, or its default. Errors name an unknown id or action
-/// in the workspace's setting.
+/// in the workspace's setting. The MCP proxy applies the same rule
+/// (`effectivePiiActions` in shared-types), and both run
+/// `packages/shared-types/fixtures/pii-precedence-vectors.json`.
 fn effective_pii_actions(
     local: &std::collections::BTreeMap<String, String>,
     workspace: &std::collections::BTreeMap<String, String>,
