@@ -85,6 +85,7 @@
 import { createHash } from 'node:crypto'
 import { active as activeGate, type Gate, type ToolInput } from './gate.js'
 import { IntuticGateRefusal } from './errors.js'
+import { PHRASES_JS_SOURCE } from './phrases.js'
 
 /** Structural copy of `ai`'s `ToolApprovalResponse` prompt part (re-exported
  *  from `@ai-sdk/provider-utils` — confirmed field-for-field on 5.0.27 and
@@ -786,11 +787,22 @@ function loadRules() {
   return rules;
 }
 
+// The phrase matcher snapshot.ts uses, emitted from phrases.ts: a \`phrase\`
+// rule's source is |-separated phrases matched as words, not a regex.
+${PHRASES_JS_SOURCE}
+
 function evaluate(toolName, target, command, rules) {
   const nTool = normalise(toolName);
   const nCommand = normalise(command);
   const nTarget = normalise(target);
+  let words = null;
   for (const rule of rules) {
+    if (rule.subject === 'phrase') {
+      if (words === null) words = phraseText(command);
+      const w = words;
+      if (!rule.pattern.source.split('|').some(function (p) { return hasPhrase(w, p, true); })) continue;
+      return { severity: rule.severity, reason: rule.reason + ' [' + rule.id + ']' };
+    }
     const subjects =
       rule.subject === 'tool' ? [nTool] :
       rule.subject === 'command' ? [nCommand] :

@@ -1,24 +1,21 @@
 /**
  * The hold classifier: which shell commands a `review_before: action:*` hold
- * catches, in both emitted dialects.
+ * catches, in both emitted dialects — the JavaScript the JS gates run and the
+ * Python the bash gates' extractor runs (`GATE_PY_LIB`).
  *
  * It matched each needle as a plain substring, so anything that separated two
- * words without being exactly one space dodged the hold — `DROP/**\/TABLE`, a
- * `--` comment, an escaped `\n`, a line continuation, and in the JS gates
- * (which read the raw command) a tab or a doubled space. Each row below runs
- * through the emitted bash AND the emitted JS classifier, and the two must
- * agree, since every harness runs one or the other.
+ * words without being exactly one space dodged the hold. A gap regex fixed
+ * that and then took seconds in the JS gates, and a minute in bash, on a few
+ * hundred kilobytes of crafted command; both dialects now run the linear
+ * phrase matcher, and must agree with each other and with every other
+ * classifier on the shared vectors.
  */
 import { describe, it, expect, beforeAll } from 'vitest'
 import { spawn } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import {
-  ACTION_CLASSIFIER,
-  emitJsActionClassifier,
-  emitShellActionClassifier,
-} from '../../src/harness/gateBody.js'
-import { NORMALISE_CONTRACT, assertPortableEre } from '../../src/harness/protectedPaths.js'
+import { ACTION_NEEDLES, GATE_PY_LIB, emitJsActionClassifier } from '../../src/harness/gateBody.js'
+import { PHRASES_PY_SOURCE } from '../../src/lib/phrasesPy.js'
 
 /**
  * The vectors every command classifier shares — the proxy's actions.rs,
@@ -35,24 +32,36 @@ import { NORMALISE_CONTRACT, assertPortableEre } from '../../src/harness/protect
  */
 const VECTORS = JSON.parse(
   readFileSync(join(__dirname, '../../../../packages/proxy/src/plugins/anomaly/action_vectors.json'), 'utf-8'),
-) as { held: Array<[string, string[]]>; notHeld: string[] }
-const HOLD_TOKENS = new Set(ACTION_CLASSIFIER.map(([a]) => a))
+) as { held: Array<[string, string[]]>; notHeld: string[]; adversarial: Array<[string, number]> }
+const HOLD_TOKENS = new Set(ACTION_NEEDLES.map(([a]) => a))
 const forHold = (tokens: string[]) => tokens.filter((t) => HOLD_TOKENS.has(t)).join(' ')
 const HELD: ReadonlyArray<readonly [string, string]> = VECTORS.held
   .map(([c, t]) => [c, forHold(t)] as const)
   .filter(([, t]) => t !== '')
 const NOT_HELD: readonly string[] = [...VECTORS.notHeld, ...VECTORS.held.filter(([, t]) => forHold(t) === '').map(([c]) => c)]
 
-/** Runs every command through the emitted bash classifier in one process. */
-function bashActions(commands: readonly string[]): Promise<string[]> {
-  const script = [
-    'set -euo pipefail',
-    NORMALISE_CONTRACT.shell,
-    emitShellActionClassifier(),
-    'for c in "$@"; do intutic_actions Bash "$c"; printf "\\0"; done',
+/**
+ * Runs `GATE_PY_LIB` the way the extractor does and returns, per input, the
+ * action string and the milliseconds the classifier took (measured inside
+ * Python, so interpreter start-up is not counted against it).
+ */
+function pythonActions(inputs: ReadonlyArray<readonly [string, string]>): Promise<Array<[string, number]>> {
+  const program = [
+    'import json, os, sys, time',
+    'lib = {}',
+    'exec(os.environ["INTUTIC_PY_LIB"], lib)',
+    'out = []',
+    'for tool, command in json.load(sys.stdin):',
+    '    t0 = time.perf_counter()',
+    '    a = lib["intutic_actions"](tool, command)',
+    '    out.append([a, (time.perf_counter() - t0) * 1000])',
+    'print(json.dumps(out))',
   ].join('\n')
   return new Promise((resolve, reject) => {
-    const child = spawn('bash', ['-c', script, 'classifier', ...commands], { stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = spawn('python3', ['-c', program], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, INTUTIC_PY_LIB: GATE_PY_LIB },
+    })
     let out = ''
     let err = ''
     child.stdout.setEncoding('utf8')
@@ -61,60 +70,71 @@ function bashActions(commands: readonly string[]): Promise<string[]> {
     child.stderr.on('data', (d: string) => (err += d))
     child.on('error', reject)
     child.on('close', (code) => {
-      if (code !== 0) return reject(new Error(`bash classifier exited ${code}: ${err}`))
-      resolve(out.split('\0').slice(0, commands.length))
+      if (code !== 0) return reject(new Error(`python classifier exited ${code}: ${err}`))
+      resolve(JSON.parse(out) as Array<[string, number]>)
     })
+    child.stdin.end(JSON.stringify(inputs))
   })
 }
 
-const jsActions = new Function(
-  `${NORMALISE_CONTRACT.jsSource}\n${emitJsActionClassifier()}\nreturn intuticActions;`,
-)() as (tool: string, command: string) => string
+const jsActions = new Function(`${emitJsActionClassifier()}\nreturn intuticActions;`)() as (
+  tool: string,
+  command: string,
+) => string
 
 const tokens = (s: string) => s.trim().split(/\s+/).filter(Boolean).join(' ')
 
 const ALL = [...HELD.map(([c]) => c), ...NOT_HELD]
-let bash: Map<string, string>
+const ADVERSARIAL = VECTORS.adversarial.map(([unit, times]) => unit.repeat(times))
+let python: Map<string, string>
+let pythonAdversarialMs: number[]
+let pythonWrite: string
 
 beforeAll(async () => {
-  const out = await bashActions(ALL)
-  bash = new Map(ALL.map((c, i) => [c, out[i]!]))
+  const out = await pythonActions([
+    ...ALL.map((c) => ['Bash', c] as const),
+    ...ADVERSARIAL.map((c) => ['Bash', c] as const),
+    ['Write', 'git push'] as const,
+  ])
+  python = new Map(ALL.map((c, i) => [c, out[i]![0]]))
+  pythonAdversarialMs = ADVERSARIAL.map((_, i) => out[ALL.length + i]![1])
+  pythonWrite = out[out.length - 1]![0]
 })
 
 describe('the hold classifier', () => {
   it('reads the shared vectors', () => {
     expect(HELD.length).toBeGreaterThan(20)
     expect(NOT_HELD.length).toBeGreaterThan(10)
-  })
-
-  it('ships patterns every gate dialect reads alike', () => {
-    expect(ACTION_CLASSIFIER.map(([a]) => a)).toEqual(['action:deploy', 'action:publish', 'action:release', 'action:db_write'])
-    for (const [action, source] of ACTION_CLASSIFIER) {
-      expect(() => assertPortableEre(source, action)).not.toThrow()
-    }
+    expect(ADVERSARIAL.length).toBeGreaterThan(5)
   })
 
   it.each(HELD)('holds %j as %s', (command, expected) => {
-    expect(tokens(bash.get(command)!), 'bash gate').toBe(expected)
+    expect(tokens(python.get(command)!), 'bash gate (Python)').toBe(expected)
     expect(tokens(jsActions('Bash', command)), 'JS gate').toBe(expected)
   })
 
   it.each(NOT_HELD)('does not hold %j', (command) => {
-    expect(tokens(bash.get(command)!), 'bash gate').toBe('')
+    expect(tokens(python.get(command)!), 'bash gate (Python)').toBe('')
     expect(tokens(jsActions('Bash', command)), 'JS gate').toBe('')
   })
 
-  it('classifies shell tools only', async () => {
+  it.each(VECTORS.adversarial.map(([unit, times], i) => [unit, times, i] as const))(
+    'classifies %j repeated %i times in under 200 ms in both dialects',
+    (_unit, _times, i) => {
+      const t0 = performance.now()
+      jsActions('Bash', ADVERSARIAL[i]!)
+      expect(performance.now() - t0, 'JS gate').toBeLessThan(200)
+      expect(pythonAdversarialMs[i], 'bash gate (Python)').toBeLessThan(200)
+    },
+  )
+
+  it('classifies shell tools only', () => {
     expect(jsActions('Write', 'git push')).toBe(' ')
-    const out = await new Promise<string>((resolve, reject) => {
-      const script = `${NORMALISE_CONTRACT.shell}\n${emitShellActionClassifier()}\nintutic_actions Write 'git push'`
-      const child = spawn('bash', ['-c', script], { stdio: ['ignore', 'pipe', 'inherit'] })
-      let o = ''
-      child.stdout.setEncoding('utf8')
-      child.stdout.on('data', (d: string) => (o += d))
-      child.on('error', reject)
-      child.on('close', () => resolve(o))
-    })
-    expect(out).toBe(' ')
+    expect(pythonWrite).toBe(' ')
+  })
+
+  it('emits a byte-identical copy of intutic-clawde’s phrases.py', () => {
+    const clawde = readFileSync(join(__dirname, '../../../../packages/intutic-clawde/intutic_clawde/gate/phrases.py'), 'utf-8')
+    expect(PHRASES_PY_SOURCE).toBe(clawde)
   })
 })

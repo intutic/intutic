@@ -77,6 +77,7 @@ import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { decodeSsoGroupRecord, SSO_GROUP_RECORD_TAG, type SsoGroupRecord } from './ssoGroups.js'
+import { hasPhrase, phraseText, type PhraseText } from './phrases.js'
 
 export const SNAPSHOT_STALE_AFTER_DAYS = 7
 
@@ -86,7 +87,8 @@ export const SEV_WARN = 'warn' as const
 export const SEV_BLOCK = 'block' as const
 
 export type Severity = typeof SEV_SHADOW | typeof SEV_WARN | typeof SEV_BLOCK
-export type RuleSubject = 'tool' | 'command' | 'target' | 'any'
+/** `phrase`: the source is `|`-separated phrases matched as words (phrases.ts), not a regex. */
+export type RuleSubject = 'tool' | 'command' | 'target' | 'phrase' | 'any'
 export type SnapshotState = 'ok' | 'absent' | 'invalid' | 'empty' | 'stale'
 
 export interface Rule {
@@ -267,10 +269,21 @@ export function evaluate(
   const nTool = normalise(toolName)
   const nCommand = normalise(command)
   const nTarget = normalise(target)
+  let words: PhraseText | null = null
 
   for (const rule of rules) {
+    if (rule.subject === 'phrase') {
+      // The source is `|`-separated phrases matched as words against the raw
+      // command (phrases.ts), not a regex: a backtracking regex for "whatever
+      // separates the words" is super-linear on crafted input.
+      words ??= phraseText(command)
+      const w = words
+      if (!rule.pattern.source.split('|').some((p) => hasPhrase(w, p, true))) continue
+    }
     const subjects =
-      rule.subject === 'tool'
+      rule.subject === 'phrase'
+        ? [nCommand]
+        : rule.subject === 'tool'
         ? [nTool]
         : rule.subject === 'command'
           ? [nCommand]
@@ -279,7 +292,7 @@ export function evaluate(
             : [nCommand, nTarget]
 
     for (const subject of subjects) {
-      if (!rule.pattern.test(subject)) continue
+      if (rule.subject !== 'phrase' && !rule.pattern.test(subject)) continue
       if (rule.severity === SEV_SHADOW) {
         return { severity: SEV_SHADOW, reason: `${rule.reason} [${rule.id}]`, ruleId: rule.id }
       }

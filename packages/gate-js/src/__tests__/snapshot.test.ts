@@ -177,3 +177,45 @@ describe('evaluation', () => {
     expect(evaluate('write_file', '.intutic/x', '', s, true).severity).toBe(SEV_BLOCK)
   })
 })
+
+// Port of TestPhraseRules: a `phrase` rule's source is phrases joined by |,
+// matched as words by the phrase matcher, never as a regex — the gap regex it
+// replaced backtracked for seconds on a few hundred kilobytes of crafted text.
+describe('phrase rules', () => {
+  const load = () =>
+    loadSnapshot(
+      WS,
+      rulesFile([
+        line('destructive.sql_drop', 'warn', 'i', 'phrase', 'Destructive SQL statement', 'drop table|drop database|drop schema|truncate table'),
+      ]),
+    )
+
+  it.each([
+    "psql -c 'DROP/**/TABLE users'",
+    "psql -c 'DROP -- why\nTABLE users'",
+    "psql -c 'DROP \\\nTABLE users'",
+    "printf 'DROP\\nTABLE users' | psql",
+  ])('matches %j whatever separates the words', (command) => {
+    const d = evaluate('shell', '', command, load())
+    expect(d.severity).toBe(SEV_WARN)
+    expect(d.ruleId).toBe('destructive.sql_drop')
+  })
+
+  it.each(['git stash drop && cat table.md', 'truncate --size 0 table.log', './drop_table.sh'])(
+    'needs the whole words: %j',
+    (command) => {
+      expect(evaluate('shell', '', command, load()).severity).toBeNull()
+    },
+  )
+
+  it.each([
+    ['drop -- ', 25000],
+    ['drop /* ', 25000],
+    ['\\ ', 100000],
+  ] as const)('stays linear on %j repeated %i times', (unit, times) => {
+    const s = load()
+    const t0 = performance.now()
+    evaluate('shell', '', unit.repeat(times), s)
+    expect(performance.now() - t0).toBeLessThan(200)
+  })
+})

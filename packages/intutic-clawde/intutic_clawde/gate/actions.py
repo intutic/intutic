@@ -19,7 +19,7 @@ hook at services/sync-daemon/src/harness/claudeCodeHooks.ts:452.
 
 from __future__ import annotations
 
-import re
+from .phrases import has_phrase, phrase_text
 
 ACTION_PREFIX = "action:"
 
@@ -107,28 +107,6 @@ DB_WRITE_PATTERNS = [
     "alter table",
 ]
 
-# What may separate two words of a command or SQL statement: whitespace, a
-# two-character escaped newline, tab or carriage return, a backslash before
-# whitespace (a line continuation), a /* ... */ comment, a -- comment that runs
-# to a newline, or a run of -- long options. Every phrase in the pattern lists
-# above is matched with it standing for each space. Byte-identical to SQL_GAP
-# in actions.rs (the test compares them); see the comment there for why the
-# gap is matched rather than stripped from the text.
-SQL_GAP = r"(?:(?:\s|\\[ntr\s]|/\*(?:[^*]|\*+[^*/])*\*+/|--(?:[^\n\\]|\\[^n\n])*(?:\n|\\n))+(?:--[^;&|\n]*\s)?|--[^;&|\n]*\s)"
-
-
-def _phrases(patterns: list[str]) -> list[re.Pattern[str]]:
-    """A pattern list's phrases as regexes, each space standing for SQL_GAP."""
-    return [re.compile(SQL_GAP.join(re.escape(w) for w in p.split(" "))) for p in patterns]
-
-
-_TEST_PHRASES = _phrases(TEST_PATTERNS)
-_DEPLOY_PHRASES = _phrases(DEPLOY_PATTERNS)
-_PUBLISH_PHRASES = _phrases(PUBLISH_PATTERNS)
-_RELEASE_PHRASES = _phrases(RELEASE_PATTERNS)
-_HTTP_POST_PHRASES = _phrases(HTTP_POST_PATTERNS)
-_DB_WRITE_PHRASES = _phrases(DB_WRITE_PATTERNS)
-
 # Path fragments that indicate credential material.
 #
 # Note that `kubeconfig` and `service-account` are in here, so any command
@@ -214,9 +192,13 @@ def matches_any(haystack: str, patterns: list[str]) -> bool:
     return any(p in haystack for p in patterns)
 
 
-def matches_phrase(haystack: str, phrases: list[re.Pattern[str]]) -> bool:
-    """matches_any for a phrase list, whatever separates each phrase's words."""
-    return any(r.search(haystack) for r in phrases)
+def matches_phrase(words, patterns: list[str]) -> bool:
+    """matches_any for a phrase list, whatever separates each phrase's words.
+
+    A one-word pattern is a plain substring; see phrases.py, which matches in
+    linear time rather than with a backtracking regex.
+    """
+    return any(has_phrase(words, p) for p in patterns)
 
 
 def tool_is(name: str, group: list[str]) -> bool:
@@ -236,17 +218,19 @@ def classify(tool_name: str, tool_input) -> list[str]:
     """
     args = flatten_input(tool_input)
     actions: list[str] = []
+    # Cut into words once, for every phrase list below.
+    words = phrase_text(args)
 
     if tool_is(tool_name, SHELL_TOOLS):
         # Tests first: `make test && git push` is both, and the ordering rule
         # needs the test to be seen as having happened before the deploy.
-        if matches_phrase(args, _TEST_PHRASES):
+        if matches_phrase(words, TEST_PATTERNS):
             actions.append("run_tests")
-        if matches_phrase(args, _DEPLOY_PHRASES):
+        if matches_phrase(words, DEPLOY_PATTERNS):
             actions.append("deploy")
-        if matches_phrase(args, _PUBLISH_PHRASES):
+        if matches_phrase(words, PUBLISH_PATTERNS):
             actions.append("publish")
-        if matches_phrase(args, _RELEASE_PHRASES):
+        if matches_phrase(words, RELEASE_PATTERNS):
             actions.append("release")
         # Source before sink, so that (secret_read -> http_post) can still fire
         # on a single command that does both.
@@ -254,9 +238,9 @@ def classify(tool_name: str, tool_input) -> list[str]:
             actions.append("secret_read")
         if matches_any(args, PII_PATH_FRAGMENTS):
             actions.append("pii_export")
-        if matches_phrase(args, _HTTP_POST_PHRASES):
+        if matches_phrase(words, HTTP_POST_PATTERNS):
             actions.append("http_post")
-        if matches_phrase(args, _DB_WRITE_PHRASES):
+        if matches_phrase(words, DB_WRITE_PATTERNS):
             actions.append("db_write")
 
     return [ACTION_PREFIX + a for a in actions]

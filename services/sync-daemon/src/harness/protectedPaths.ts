@@ -61,7 +61,7 @@
  * @module
  */
 
-import { SECRET_VALUE_PATTERNS, SKILL_CONTENT_BLOCK_PATTERN_IDS, SKILL_SCAN_PATTERNS } from '@intutic/shared-types'
+import { SECRET_VALUE_PATTERNS, SKILL_CONTENT_BLOCK_PATTERN_IDS, SKILL_SCAN_PATTERNS, hasPhrase, phraseText } from '@intutic/shared-types'
 
 /** Governance config that must hold still, for every harness. */
 export const UNIVERSAL_PROTECTED_PATHS: readonly string[] = [
@@ -161,8 +161,17 @@ export const UNIVERSAL_PROTECTED_PATHS: readonly string[] = [
  */
 /** `action` is the space-padded action-token string the gate classifies a
  *  shell command to (`" action:deploy "`, from `ACTION_NEEDLES`) — the subject
- *  a `review_before: action:deploy` hold rule matches. */
-export type GuardSubject = 'tool' | 'command' | 'target' | 'content' | 'action' | 'any'
+ *  a `review_before: action:deploy` hold rule matches.
+ *
+ *  `phrase` is not a regex at all: the source is phrases joined by `|`, each
+ *  matched as words in the raw command by the phrase matcher
+ *  (`@intutic/shared-types` phrases.ts), with a word boundary before the first
+ *  word and after the last. It is for rules whose words may be split by a
+ *  comment, an escape or a line continuation — a gap a regex can only express
+ *  by backtracking, which runs for seconds on crafted text in the JS and
+ *  Python gates. A gate that predates the subject reads the source as a regex
+ *  over the command and target, which still matches the plain spellings. */
+export type GuardSubject = 'tool' | 'command' | 'target' | 'content' | 'action' | 'phrase' | 'any'
 
 export interface GuardPattern {
   /** Stable id. Appears in the block message and the audit line, so it is the
@@ -384,8 +393,7 @@ function assertGuardTableSane(patterns: readonly GuardPattern[]): readonly Guard
       )
     }
     for (const m of p.matches) {
-      const re = new RegExp(p.source, p.ignoreCase ? 'i' : '')
-      if (!re.test(NORMALISE_CONTRACT.js(m))) {
+      if (!guardMatches(p, m)) {
         throw new Error(
           `GuardPattern ${p.id}: declared match ${JSON.stringify(m)} does not match ` +
             `its own pattern. The fixture and the rule disagree at module load.`,
@@ -400,6 +408,20 @@ function assertGuardTableSane(patterns: readonly GuardPattern[]): readonly Guard
     }
   }
   return patterns
+}
+
+/**
+ * Whether a rule fires on `text` the way every gate evaluates it: a `phrase`
+ * rule through the phrase matcher on the raw text, any other as a regex over
+ * the normalised text. For fixtures and tests; the gates carry their own copy
+ * of each half.
+ */
+export function guardMatches(p: GuardPattern, text: string): boolean {
+  if (p.subject === 'phrase') {
+    const words = phraseText(text)
+    return p.source.split('|').some((phrase) => hasPhrase(words, phrase, true))
+  }
+  return new RegExp(p.source, p.ignoreCase ? 'i' : '').test(NORMALISE_CONTRACT.js(text))
 }
 
 /** Escapes a literal string for use inside a portable ERE. */
@@ -879,23 +901,6 @@ function assertSkillContentArgSane(
 }
 
 /**
- * What may separate two SQL keywords in a normalised command, as portable ERE:
- * a space (normalisation has already turned tabs and newlines into one), a
- * two-character escaped `\n`, `\t` or `\r` (`printf` and `echo -e` expand it
- * before the client reads it), a block comment, or a `--` comment.
- *
- * Normalisation has also removed the newline that ends a `--` comment, so the
- * comment is taken to run up to the keyword — but not across `;`, `&` or `|`,
- * which end the shell command it is in. The gap is matched rather than removed
- * from the text: `--` also begins every long shell flag, and deleting
- * "comments" from `psql --command "drop table x"` would delete the statement.
- * The other gates use the same gap in their own regex dialect (`SQL_GAP` in
- * the proxy's anomaly/actions.rs). The hold classifier (`ACTION_CLASSIFIER` in
- * gateBody.ts) puts it between the words of every action needle.
- */
-export const SQL_GAP_ERE = '( |\\\\[ntr]|/\\*([^*]|\\*+[^*/])*\\*+/)+(--[^;&|]* )?|--[^;&|]* '
-
-/**
  * Commands that destroy the machine or its data irrecoverably.
  *
  * TD-309: none of these were blocked by any harness. They are shipped through
@@ -922,7 +927,8 @@ export const SQL_GAP_ERE = '( |\\\\[ntr]|/\\*([^*]|\\*+[^*/])*\\*+/)+(--[^;&|]* 
 export const DESTRUCTIVE_COMMAND_PATTERNS: readonly GuardPattern[] = assertGuardTableSane(
   // Every rule in this tier is about a shell command, so the subject is stamped
   // here rather than repeated eleven times — one place to be wrong instead of
-  // eleven, which is the whole argument of this module.
+  // eleven, which is the whole argument of this module. A `phrase` rule keeps
+  // its own: it is matched as words, not as a regex over the command.
   ([
   {
     id: 'destructive.rm_rf_root',
@@ -1040,7 +1046,8 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: readonly GuardPattern[] = assertGuard
   },
   {
     id: 'destructive.sql_drop',
-    source: `[^a-zA-Z0-9_](drop(${SQL_GAP_ERE})(table|database|schema)|truncate(${SQL_GAP_ERE})table)[^a-zA-Z0-9_.]`,
+    source: 'drop table|drop database|drop schema|truncate table',
+    subject: 'phrase',
     ignoreCase: true,
     severity: 'warn',
     reason: 'Destructive SQL statement',
@@ -1053,7 +1060,8 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: readonly GuardPattern[] = assertGuard
       'Warn keeps the signal without owning a decision it lacks the context to make. ' +
       'The statement may follow any non-word character, not only a space, so ' +
       '`psql -c "DROP TABLE x"` (quoted) counts — the space-only version missed ' +
-      'it. The keywords may be split by anything SQL_GAP_ERE allows. A text rule: ' +
+      'it. The keywords may be split by any separator the phrase matcher knows ' +
+      '(a comment, an escaped newline, a line continuation). A text rule: ' +
       'a quoted mention (`SELECT \'drop table\'`) also matches, because quoting ' +
       'is how a shell command carries the real statement.',
     matches: [
@@ -1094,7 +1102,7 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: readonly GuardPattern[] = assertGuard
     matches: [' git reset --hard HEAD~3 ', ' git clean -xfd ', ' git push --force origin main '],
     notMatches: [' git reset HEAD~1 ', ' git clean -n ', ' git push origin main '],
   },
-] as GuardPattern[]).map((p) => ({ ...p, subject: 'command' as const })),
+] as GuardPattern[]).map((p) => ({ ...p, subject: p.subject === 'phrase' ? p.subject : ('command' as const) })),
 )
 
 /**

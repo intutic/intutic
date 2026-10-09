@@ -42,10 +42,11 @@ import {
   SKILL_SURFACE_PATTERNS,
   SKILL_CONTENT_PATTERNS,
   NORMALISE_CONTRACT,
+  guardMatches,
   staticFloorPatterns,
   type GuardPattern,
 } from '../../src/harness/protectedPaths.js'
-import { toRulesLine, REVIEW_REQUESTS_LOG } from '../../src/harness/gateBody.js'
+import { toRulesLine, REVIEW_REQUESTS_LOG, GATE_PY_LIB } from '../../src/harness/gateBody.js'
 import { buildSnapshotRules } from '../../src/lib/policySnapshot.js'
 import { createHash } from 'node:crypto'
 
@@ -1688,7 +1689,35 @@ describe('pattern portability', () => {
     return res.status === 0
   }
 
-  for (const pat of all) {
+  /** A phrase rule as the bash gates and the Open WebUI filter run it: GATE_PY_LIB's Python. */
+  async function pythonPhraseMatches(source: string, raw: string): Promise<boolean> {
+    const res = await runProcess('python3', [
+      '-c',
+      'import os, sys\nlib = {}\nexec(os.environ["INTUTIC_PY_LIB"], lib)\n' +
+        'sys.exit(0 if lib["intutic_phrase_rule"](sys.argv[1], sys.argv[2]) else 1)',
+      source,
+      raw,
+    ], { env: { ...process.env, INTUTIC_PY_LIB: GATE_PY_LIB } })
+    return res.status === 0
+  }
+
+  for (const pat of all.filter((p) => p.subject === 'phrase')) {
+    it(`${pat.id} (a phrase rule) means the same thing to JavaScript and Python`, async () => {
+      const cases: Array<[string, boolean]> = [
+        ...pat.matches.map((m) => [m, true] as [string, boolean]),
+        ...pat.notMatches.map((m) => [m, false] as [string, boolean]),
+      ]
+      for (const [raw, expected] of cases) {
+        expect(guardMatches(pat, raw), `JS disagreed with the declared expectation for ${JSON.stringify(raw)}`).toBe(expected)
+        expect(
+          await pythonPhraseMatches(pat.source, raw),
+          `the bash gates' Python disagreed with JavaScript for ${pat.id} on ${JSON.stringify(raw)}`,
+        ).toBe(expected)
+      }
+    })
+  }
+
+  for (const pat of all.filter((p) => p.subject !== 'phrase')) {
     it(`${pat.id} means the same thing to grep, JavaScript and Python`, async () => {
       const re = new RegExp(pat.source, pat.ignoreCase ? 'i' : '')
       const cases: Array<[string, boolean]> = [

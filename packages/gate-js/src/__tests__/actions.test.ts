@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { classify, isDeploy, isTest, touchesInfra, SQL_GAP } from '../actions.js'
+import { classify, isDeploy, isTest, touchesInfra } from '../actions.js'
 
 describe('classify', () => {
   it('only classifies shell-shaped tools', () => {
@@ -66,7 +66,7 @@ describe('db_write, whatever separates the keywords', () => {
   // between the words used to classify as nothing here.
   const vectors = JSON.parse(
     readFileSync(join(__dirname, '../../../proxy/src/plugins/anomaly/action_vectors.json'), 'utf-8'),
-  ) as { held: Array<[string, string[]]>; notHeld: string[] }
+  ) as { held: Array<[string, string[]]>; notHeld: string[]; adversarial: Array<[string, number]> }
 
   it.each(vectors.held)('classifies %j as %j', (command, tokens) => {
     expect(classify('bash', { command })).toEqual(tokens)
@@ -76,11 +76,22 @@ describe('db_write, whatever separates the keywords', () => {
     expect(classify('bash', { command })).toEqual([])
   })
 
-  it('uses the same SQL_GAP as the proxy', () => {
-    const rust = readFileSync(join(__dirname, '../../../proxy/src/plugins/anomaly/actions.rs'), 'utf-8')
-    const m = rust.match(/const SQL_GAP: &str =\s*r"(.*?)";/s)
-    expect(m, 'SQL_GAP not found in actions.rs').not.toBeNull()
-    expect(SQL_GAP).toBe(m![1])
+  // The proxy's regex (SQL_GAP in actions.rs) is safe in Rust's linear
+  // engine; here a backtracking one took seconds on text an agent can be talked
+  // into writing. The phrase matcher must stay linear on every one of these.
+  it.each(vectors.adversarial)(
+    'classifies %j repeated %i times in under 200 ms',
+    (unit, times) => {
+      const command = unit.repeat(times)
+      const t0 = performance.now()
+      classify('bash', { command })
+      expect(performance.now() - t0).toBeLessThan(200)
+    },
+  )
+
+  it('carries a byte-identical copy of the shared phrase matcher', () => {
+    const shared = readFileSync(join(__dirname, '../../../shared-types/src/phrases.ts'), 'utf-8')
+    expect(readFileSync(join(__dirname, '../phrases.ts'), 'utf-8')).toBe(shared)
   })
 })
 

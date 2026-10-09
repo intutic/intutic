@@ -93,13 +93,23 @@ def test_shared_vector_classifies_as_nothing(command):
     assert actions.classify("bash", {"command": command}) == []
 
 
+def _adversarial():
+    v = _vectors()
+    return v.get("adversarial", [])
+
+
 @pytestmark_parity
-def test_sql_gap_matches_rust():
-    import re
-    src = open(ACTIONS_RS, encoding="utf-8").read()
-    m = re.search(r'const SQL_GAP: &str =\s*r"(.*?)";', src, re.S)
-    assert m, f"SQL_GAP not found in {ACTIONS_RS}"
-    assert actions.SQL_GAP == m.group(1), "SQL_GAP drifted from actions.rs; copy the Rust string"
+@pytest.mark.parametrize("unit,times", _adversarial())
+def test_adversarial_input_classifies_in_linear_time(unit, times):
+    # The proxy's regex (SQL_GAP in actions.rs) is safe in Rust's linear
+    # engine; Python's backtracking one took seconds on text an agent can be
+    # talked into writing. The phrase matcher must stay linear on these.
+    import time
+
+    command = unit * times
+    t0 = time.perf_counter()
+    actions.classify("bash", {"command": command})
+    assert time.perf_counter() - t0 < 0.2
 
 
 @pytest.mark.parametrize(

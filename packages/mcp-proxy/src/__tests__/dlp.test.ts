@@ -146,13 +146,17 @@ describe('scanToolInput', () => {
       expect(blocked({ command: 'psql --command "SELECT 1" --table' })).toBe(false)
     })
 
-    it('uses the same SQL gap as the proxy', () => {
-      const dlp = readFileSync(join(__dirname, '../dlp.ts'), 'utf-8')
-      const rust = readFileSync(join(__dirname, '../../../proxy/src/plugins/anomaly/actions.rs'), 'utf-8')
-      const ts = dlp.match(/const SQL_GAP = String\.raw`(.*?)`/)
-      const rs = rust.match(/const SQL_GAP: &str =\s*r"(.*?)";/s)
-      expect(ts && rs, 'SQL_GAP not found in dlp.ts or actions.rs').toBeTruthy()
-      expect(ts![1]).toBe(rs![1])
+    // The scan used a regex with the gap between the keywords, which a
+    // backtracking engine took seconds on; the phrase matcher stays linear.
+    it.each(
+      (JSON.parse(readFileSync(join(__dirname, '../../../proxy/src/plugins/anomaly/action_vectors.json'), 'utf-8')) as {
+        adversarial: Array<[string, number]>
+      }).adversarial,
+    )('scans %j repeated %i times in under 200 ms', (unit, times) => {
+      const command = unit.repeat(times)
+      const t0 = performance.now()
+      scanToolInput({ command })
+      expect(performance.now() - t0).toBeLessThan(200)
     })
   })
 

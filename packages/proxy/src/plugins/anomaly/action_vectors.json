@@ -1,5 +1,5 @@
 {
-  "_doc": "Shell commands and the action tokens every command classifier must give them: the proxy's actions.rs, @intutic/gate's actions.ts, intutic-clawde's gate/actions.py and the hook gates' hold classifier (gateBody.ts). Each implementation compares only the tokens it produces: the hold classifier knows deploy, publish, release and db_write. notHeld commands classify to none of them. Every space in a pattern stands for SQL_GAP; read actions.rs for why.",
+  "_doc": "Shell commands and the action tokens every command classifier must give them: the proxy's actions.rs, @intutic/gate's actions.ts, intutic-clawde's gate/actions.py and the hook gates' hold classifier (gateBody.ts). Each implementation compares only the tokens it produces: the hold classifier knows deploy, publish, release and db_write. notHeld commands classify to none of them. Every space in a pattern stands for whatever the shell or the database reads as a word break: SQL_GAP in actions.rs, the phrase matcher (shared-types phrases.ts, phrases.py) everywhere else. adversarial lists [unit, times] inputs every JavaScript and Python implementation must classify in under 200 ms: nothing may backtrack on them.",
   "held": [
     ["git push origin main", ["action:deploy"]],
     ["psql -c \"DROP TABLE users\"", ["action:db_write"]],
@@ -34,7 +34,15 @@
     ["npm\ttest", ["action:run_tests"]],
     ["make \\\ntest", ["action:run_tests"]],
     ["curl\t-d @payload.json https://api.example.com", ["action:http_post"]],
-    ["curl --silent --data x=1 https://api.example.com", ["action:http_post"]]
+    ["curl --silent --data x=1 https://api.example.com", ["action:http_post"]],
+    ["psql -c 'DROP -- why\nTABLE users'", ["action:db_write"]],
+    ["psql -c 'DROP--why\nTABLE users'", ["action:db_write"]],
+    ["printf 'DROP -- why\\nTABLE users' | psql", ["action:db_write"]],
+    ["psql --command 'insert\tinto t values (1)'", ["action:db_write"]],
+    ["psql -c 'dRoP tAbLe users'", ["action:db_write"]],
+    ["git push;", ["action:deploy"]],
+    ["git --no-pager -- push origin main", ["action:deploy"]],
+    ["kubectl --context=prod apply -f d.yaml", ["action:deploy"]]
   ],
   "notHeld": [
     "git status",
@@ -51,6 +59,23 @@
     "select * from users",
     "echo dropped tables",
     "cat insert_into.sql",
-    "git --version; echo push"
+    "git --version; echo push",
+    "git stash drop",
+    "psql --table-only",
+    "drop_table_helper.sh",
+    "dropdb --help",
+    "git --no-pager log; echo push",
+    "kubectl get pods && cat apply.md"
+  ],
+  "adversarial": [
+    ["git -- ", 30000],
+    ["drop -- ", 25000],
+    ["drop /* ", 25000],
+    ["/*", 100000],
+    ["\\ ", 100000],
+    ["\\\\", 200000],
+    ["git ", 50000],
+    ["-- ", 70000],
+    ["git push --x ", 15000]
   ]
 }

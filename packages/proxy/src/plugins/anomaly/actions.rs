@@ -150,12 +150,13 @@ const DB_WRITE_PATTERNS: &[&str] = &[
 /// hides one.
 ///
 /// The comment alternatives are unambiguous — a comment ends at its first
-/// terminator — and the long-option run sits outside the repetition, so a
-/// backtracking engine cannot blow up on it. `gate/actions.py` in
-/// intutic-clawde, `actions.ts` in `@intutic/gate` and the MCP proxy's
-/// `dlp.ts` carry this exact string, and their tests compare it with this
-/// one; `action_vectors.json` beside this file is the behaviour all of them
-/// and the hook gates' classifier must share.
+/// terminator — and the long-option run sits outside the repetition. Rust's
+/// regex engine is linear-time whatever the pattern; the JavaScript and Python
+/// classifiers (`@intutic/gate`, intutic-clawde, the MCP proxy, the hook
+/// gates) do not use a regex for this, because theirs backtrack: they run the
+/// phrase matcher in `@intutic/shared-types` phrases.ts and its Python
+/// transliteration. `action_vectors.json` beside this file is the behaviour all
+/// of them must share, including inputs that must stay fast.
 const SQL_GAP: &str = r"(?:(?:\s|\\[ntr\s]|/\*(?:[^*]|\*+[^*/])*\*+/|--(?:[^\n\\]|\\[^n\n])*(?:\n|\\n))+(?:--[^;&|\n]*\s)?|--[^;&|\n]*\s)";
 
 /// A pattern list's phrases as regexes, each space standing for [`SQL_GAP`]. A

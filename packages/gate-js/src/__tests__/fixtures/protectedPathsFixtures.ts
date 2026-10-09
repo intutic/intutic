@@ -38,7 +38,7 @@
  * branched from.
  */
 
-export type Subject = 'tool' | 'command' | 'target' | 'any'
+export type Subject = 'tool' | 'command' | 'target' | 'phrase' | 'any'
 export type Severity = 'block' | 'warn' | 'shadow'
 
 export interface FixturePattern {
@@ -221,9 +221,9 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: readonly FixturePattern[] = [
   },
   {
     id: 'destructive.sql_drop',
-    source: '[^a-zA-Z0-9_](drop(( |\\\\[ntr]|/\\*([^*]|\\*+[^*/])*\\*+/)+(--[^;&|]* )?|--[^;&|]* )(table|database|schema)|truncate(( |\\\\[ntr]|/\\*([^*]|\\*+[^*/])*\\*+/)+(--[^;&|]* )?|--[^;&|]* )table)[^a-zA-Z0-9_.]',
+    source: 'drop table|drop database|drop schema|truncate table',
     ignoreCase: true,
-    subject: 'command',
+    subject: 'phrase',
     severity: 'warn',
     reason: 'Destructive SQL statement',
     matches: [

@@ -44,6 +44,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from . import sso_groups as sso
+from .phrases import has_phrase, phrase_text
 
 SNAPSHOT_STALE_AFTER_DAYS = 7
 
@@ -57,7 +58,7 @@ SEV_BLOCK = "block"
 class Rule:
     id: str
     severity: str
-    subject: str          # tool | command | target | any
+    subject: str          # tool | command | target | phrase | any
     reason: str
     pattern: re.Pattern
 
@@ -187,9 +188,19 @@ def evaluate(tool_name: str, target: str, command: str, snap: Snapshot,
         rules = [r for r in rules if not r.id.startswith("destructive.")]
 
     n_tool, n_command, n_target = _normalise(tool_name), _normalise(command), _normalise(target)
+    words = None
 
     for rule in rules:
-        if rule.subject == "tool":
+        if rule.subject == "phrase":
+            # The source is `|`-separated phrases matched as words against the
+            # raw command (phrases.py), not a regex: a backtracking regex for
+            # "whatever separates the words" is super-linear on crafted input.
+            if words is None:
+                words = phrase_text(command)
+            subjects = [n_command] if any(
+                has_phrase(words, p, True) for p in rule.pattern.pattern.split("|")
+            ) else []
+        elif rule.subject == "tool":
             subjects = [n_tool]
         elif rule.subject == "command":
             subjects = [n_command]
@@ -199,7 +210,7 @@ def evaluate(tool_name: str, target: str, command: str, snap: Snapshot,
             subjects = [n_command, n_target]
 
         for subject in subjects:
-            if not rule.pattern.search(subject):
+            if rule.subject != "phrase" and not rule.pattern.search(subject):
                 continue
             if rule.severity == SEV_SHADOW:
                 return Decision(SEV_SHADOW, f"{rule.reason} [{rule.id}]", rule.id)

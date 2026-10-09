@@ -18,6 +18,8 @@
  * they are load-bearing and must survive editing.
  */
 
+import { hasPhrase, phraseText, type PhraseText } from './phrases.js'
+
 export const ACTION_PREFIX = 'action:'
 
 /** Commands that put code or artefacts somewhere real. */
@@ -103,34 +105,6 @@ export const DB_WRITE_PATTERNS: readonly string[] = [
   'truncate ',
   'alter table',
 ]
-
-/**
- * What may separate two words of a command or SQL statement: whitespace, a
- * two-character escaped newline, tab or carriage return, a backslash before
- * whitespace (a line continuation), a block comment, a `--` comment that runs
- * to a newline, or a run of `--` long options. Every phrase in the pattern
- * lists above is matched with it standing for each space. Byte-identical to
- * `SQL_GAP` in actions.rs (the test compares them); see the comment there for
- * why the gap is matched rather than stripped from the text.
- */
-export const SQL_GAP = String.raw`(?:(?:\s|\\[ntr\s]|/\*(?:[^*]|\*+[^*/])*\*+/|--(?:[^\n\\]|\\[^n\n])*(?:\n|\\n))+(?:--[^;&|\n]*\s)?|--[^;&|\n]*\s)`
-
-/** A pattern list's phrases as regexes, each space standing for {@link SQL_GAP}. */
-function phrases(patterns: readonly string[]): readonly RegExp[] {
-  return patterns.map((p) => new RegExp(p.split(' ').map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join(SQL_GAP)))
-}
-
-const TEST_PHRASES = phrases(TEST_PATTERNS)
-const DEPLOY_PHRASES = phrases(DEPLOY_PATTERNS)
-const PUBLISH_PHRASES = phrases(PUBLISH_PATTERNS)
-const RELEASE_PHRASES = phrases(RELEASE_PATTERNS)
-const HTTP_POST_PHRASES = phrases(HTTP_POST_PATTERNS)
-const DB_WRITE_PHRASES = phrases(DB_WRITE_PATTERNS)
-
-/** `matchesAny` for a phrase list, whatever separates each phrase's words. */
-function matchesPhrase(haystack: string, list: readonly RegExp[]): boolean {
-  return list.some((r) => r.test(haystack))
-}
 
 /**
  * Path fragments that indicate credential material.
@@ -224,6 +198,14 @@ export function flattenInput(value: unknown): string {
   return ''
 }
 
+/**
+ * Does `words` contain any of `patterns`, whatever separates each phrase's
+ * words? A one-word pattern is a plain substring (see phrases.ts).
+ */
+function matchesPhrase(words: PhraseText, patterns: readonly string[]): boolean {
+  return patterns.some((p) => hasPhrase(words, p))
+}
+
 export function matchesAny(haystack: string, patterns: readonly string[]): boolean {
   return patterns.some((p) => haystack.includes(p))
 }
@@ -248,20 +230,22 @@ export function toolIs(name: string, group: readonly string[]): boolean {
 export function classify(toolName: string, toolInput: unknown): string[] {
   const args = flattenInput(toolInput)
   const actions: string[] = []
+  // Cut into words once, for every phrase list below (see phrases.ts).
+  const words = phraseText(args)
 
   if (toolIs(toolName, SHELL_TOOLS)) {
     // Tests first: `make test && git push` is both, and the ordering rule
     // needs the test to be seen as having happened before the deploy.
-    if (matchesPhrase(args, TEST_PHRASES)) actions.push('run_tests')
-    if (matchesPhrase(args, DEPLOY_PHRASES)) actions.push('deploy')
-    if (matchesPhrase(args, PUBLISH_PHRASES)) actions.push('publish')
-    if (matchesPhrase(args, RELEASE_PHRASES)) actions.push('release')
+    if (matchesPhrase(words, TEST_PATTERNS)) actions.push('run_tests')
+    if (matchesPhrase(words, DEPLOY_PATTERNS)) actions.push('deploy')
+    if (matchesPhrase(words, PUBLISH_PATTERNS)) actions.push('publish')
+    if (matchesPhrase(words, RELEASE_PATTERNS)) actions.push('release')
     // Source before sink, so that (secret_read -> http_post) can still fire
     // on a single command that does both.
     if (matchesAny(args, SECRET_PATH_FRAGMENTS)) actions.push('secret_read')
     if (matchesAny(args, PII_PATH_FRAGMENTS)) actions.push('pii_export')
-    if (matchesPhrase(args, HTTP_POST_PHRASES)) actions.push('http_post')
-    if (matchesPhrase(args, DB_WRITE_PHRASES)) actions.push('db_write')
+    if (matchesPhrase(words, HTTP_POST_PATTERNS)) actions.push('http_post')
+    if (matchesPhrase(words, DB_WRITE_PATTERNS)) actions.push('db_write')
   }
 
   return actions.map((a) => ACTION_PREFIX + a)
