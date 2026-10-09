@@ -51,7 +51,6 @@ describe('buildVerificationProbe', () => {
     const probe = buildVerificationProbe('azure_openai', {
       apiKey: 'test-key',
       endpoint: 'https://my-resource.openai.azure.com/',
-      deploymentName: 'gpt-4o-deployment',
     })
     expect(probe).not.toBeNull()
     expect(probe!.url).toBe('https://my-resource.openai.azure.com/openai/models?api-version=2024-02-01')
@@ -70,7 +69,6 @@ describe('buildVerificationProbe', () => {
     const probe = buildVerificationProbe('azure_openai', {
       apiKey: 'test-key',
       endpoint: pathological,
-      deploymentName: 'gpt-4o-deployment',
     })
     expect(Date.now() - started).toBeLessThan(100)
     expect(probe!.url).toBe('https://my-resource.openai.azure.com/openai/models?api-version=2024-02-01')

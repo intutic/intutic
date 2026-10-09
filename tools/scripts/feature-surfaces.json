@@ -905,6 +905,41 @@
           { "file": "packages/proxy/tests/upstream_retry_test.rs" }
         ]
       }
+    },
+    {
+      "id": "cloud-providers",
+      "title": "AWS Bedrock, Google Vertex AI and Azure OpenAI upstreams",
+      "plan": "Open-Core",
+      "surfaces": {
+        "api": [
+          { "ref": "PUT /api/v1/workspace/provider-credentials/:provider", "badge": false, "auth": "OWNER/ADMIN" },
+          { "file": "services/control-plane/src/routes/providerCredentials.ts", "contains": "checkCloudCredentialFields(def.id, values)" }
+        ],
+        "dashboard": [{ "file": "apps/dashboard/src/components/settings/ProviderCredentialFields.tsx", "contains": "requiresOneOf" }],
+        "cli": [{ "ref": "credentials set --field-file", "badge": false }],
+        "gateSdk": { "none": "gates decide tool calls; which provider serves the model call is the proxy's" },
+        "clawdeSdk": [
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "setProviderCredential" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "set_provider_credential" }
+        ],
+        "mcpTools": { "none": "model calls, not MCP calls" },
+        "kitkat": { "none": "nothing for an agent to act on; the model name picks the provider" },
+        "terraform": ["intutic_provider_credential"],
+        "docs": [
+          "integrations/aws-bedrock.md#naming-a-bedrock-model",
+          "integrations/google-vertex-ai.md#naming-a-vertex-ai-model",
+          "integrations/azure-openai.md#naming-a-deployment",
+          { "ref": "reference/configuration.md#cloud-providers-intutic-settings-providers", "badge": false },
+          { "ref": "reference/configuration.md#fallbacks-intutic-settings-routing-fallbacks", "badge": false }
+        ],
+        "website": [{ "file": "index.html", "contains": "AWS Bedrock, Google Vertex AI and Azure OpenAI with your own cloud credentials" }],
+        "events": ["siem:execution_traces"],
+        "enforcement": [
+          { "file": "packages/proxy/src/cloud/mod.rs", "contains": "pub async fn send(" },
+          { "file": "packages/proxy/src/cloud/sigv4.rs", "contains": "fn get_vanilla()" },
+          { "file": "packages/proxy/tests/cloud_providers_test.rs" }
+        ]
+      }
     }
   ]
 }

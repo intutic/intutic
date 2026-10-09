@@ -235,15 +235,9 @@ fn spawn_reward_update(
 /// itself does. `wire_shape()` below is what makes that distinction usable:
 /// `is_same_provider`'s job is "does the response need cross-provider
 /// translation," which is a wire-shape question, not an upstream-identity
-/// one. Bedrock, Vertex AI, Azure OpenAI, Cohere, and Ollama are
-/// deliberately NOT here yet — see docs/lld's multi-provider wizard phase 3
-/// notes for why each is out of scope for this pass (Bedrock/Vertex need
-/// SigV4/GCP-OAuth infra this crate has none of; Azure/Ollama need a
-/// workspace-level default-provider mechanism since deployment/model names
-/// are operator-chosen with no reliable naming convention to pattern-match;
-/// Cohere's OpenAI-compatibility endpoint path wasn't confirmed against
-/// live docs during this pass, and shipping a guessed path is worse than
-/// not shipping it).
+/// one. Bedrock, Vertex AI and Azure OpenAI are `Provider::Cloud`, named
+/// by an explicit `bedrock/`, `vertex/` or `azure/` model prefix (or a
+/// `model_list` alias) and served through `crate::cloud`.
 ///
 /// `DeepSeek` (TD-370) is a distinct target too, but unlike Mistral and
 /// OpenRouter it speaks TWO wire shapes natively: an OpenAI-compatible API
@@ -292,6 +286,15 @@ fn resolve_upstream_base(
         // https://api-docs.deepseek.com/ — OpenAI-compatible at this
         // root (`/chat/completions`, also `/v1/chat/completions`).
         Provider::DeepSeek => ("DEEPSEEK_UPSTREAM_URL", "https://api.deepseek.com"),
+        // `crate::cloud::send` builds each cloud call's URL from the region,
+        // project or endpoint it resolves per request; this is only the
+        // label `upstream_url` carries into logs.
+        Provider::Cloud(c) => {
+            return UpstreamBase {
+                url: format!("{}:", c.registry_id()),
+                shared_gateway: false,
+            }
+        }
     };
     let set = |name: &str| var(name).filter(|v| !v.trim().is_empty());
     let (url, shared_gateway) = match (set(specific), set("UPSTREAM_URL")) {
@@ -313,6 +316,10 @@ enum Provider {
     Mistral,
     OpenRouter,
     DeepSeek,
+    /// AWS Bedrock, Google Vertex AI or Azure OpenAI. Only ever a TARGET —
+    /// `from_path` never answers it — and presented to everything here as
+    /// the wire `crate::cloud` makes it speak (`wire_shape`).
+    Cloud(crate::cloud::CloudProvider),
 }
 
 impl Provider {
@@ -337,6 +344,10 @@ impl Provider {
         match self {
             // DeepSeek's default shape; `serves_natively` adds its second one.
             Provider::Mistral | Provider::OpenRouter | Provider::DeepSeek => Provider::OpenAI,
+            Provider::Cloud(c) => match c.wire() {
+                crate::cloud::Wire::Anthropic => Provider::Anthropic,
+                crate::cloud::Wire::OpenAI => Provider::OpenAI,
+            },
             other => other.clone(),
         }
     }
@@ -372,6 +383,7 @@ impl Provider {
             // who it is says so via x-intutic-harness; this is only the
             // unset/malformed-header fallback).
             Provider::Mistral | Provider::OpenRouter | Provider::DeepSeek => "cursor",
+            Provider::Cloud(_) => self.wire_shape().harness_name(),
         }
     }
 }
@@ -1146,6 +1158,11 @@ async fn resolve_finalize_judge_note(p: FinalizeJudgeParams<'_>) -> Option<Strin
 const DEEPSEEK_API_MODELS: &[&str] = &["deepseek-chat", "deepseek-reasoner", "deepseek-flash"];
 
 fn get_model_provider(model: &str) -> Provider {
+    // First: `bedrock/…`, `vertex/…` and `azure/…` contain both "claude"
+    // and '/', which the arms below would read as Anthropic or OpenRouter.
+    if let Some(cloud) = crate::cloud::resolve(model) {
+        return Provider::Cloud(cloud.provider);
+    }
     let m = model.to_lowercase();
     if m.contains("claude") {
         Provider::Anthropic
@@ -1305,6 +1322,11 @@ async fn fetch_provider_credential(
     provider: &Provider,
     require_provisioned: bool,
 ) -> Option<String> {
+    // A cloud upstream's region, endpoint and credential are one structured
+    // configuration, resolved by `crate::cloud::config::resolve`.
+    if let Provider::Cloud(_) = provider {
+        return None;
+    }
     // Mistral/OpenRouter (routingLive: false until this phase) were
     // provisioned by the credential wizard's generalized storage
     // (multi-provider wizard phase 1) as a `{provider}_config` JSON blob —
@@ -1360,7 +1382,7 @@ async fn fetch_provider_credential(
         ],
         Provider::OpenAI => vec!["openai_api_key", "openai", "openaiKey", "authorization"],
         Provider::Gemini => vec!["gemini_api_key", "gemini", "geminiKey"],
-        Provider::Mistral | Provider::OpenRouter | Provider::DeepSeek => {
+        Provider::Mistral | Provider::OpenRouter | Provider::DeepSeek | Provider::Cloud(_) => {
             unreachable!("handled above")
         }
     };
@@ -1381,7 +1403,7 @@ async fn fetch_provider_credential(
         Provider::Anthropic => std::env::var("ANTHROPIC_API_KEY").ok(),
         Provider::OpenAI => std::env::var("OPENAI_API_KEY").ok(),
         Provider::Gemini => std::env::var("GEMINI_API_KEY").ok(),
-        Provider::Mistral | Provider::OpenRouter | Provider::DeepSeek => {
+        Provider::Mistral | Provider::OpenRouter | Provider::DeepSeek | Provider::Cloud(_) => {
             unreachable!("handled above")
         }
     }
@@ -1501,6 +1523,9 @@ fn insert_provider_credential(
                 headers.insert(HeaderName::from_static("x-goog-api-key"), v);
             }
         }
+        // A cloud call is authenticated per attempt inside `crate::cloud::send`
+        // (SigV4 signs each request); there is no header to set here.
+        Provider::Cloud(_) => {}
     }
 }
 
@@ -1513,6 +1538,7 @@ fn provider_display_name(provider: &Provider) -> &'static str {
         Provider::Mistral => "Mistral",
         Provider::OpenRouter => "OpenRouter",
         Provider::DeepSeek => "DeepSeek",
+        Provider::Cloud(c) => c.display_name(),
     }
 }
 
@@ -1525,6 +1551,7 @@ fn provider_key_env(provider: &Provider) -> &'static str {
         Provider::Mistral => "MISTRAL_API_KEY",
         Provider::OpenRouter => "OPENROUTER_API_KEY",
         Provider::DeepSeek => "DEEPSEEK_API_KEY",
+        Provider::Cloud(c) => c.configuration_hint(),
     }
 }
 
@@ -1533,7 +1560,12 @@ fn provider_key_env(provider: &Provider) -> &'static str {
 /// `ExecutionTrace.provider` carries (see `UpstreamError`'s doc comment for
 /// why that distinction matters).
 fn provider_wire_id(provider: &Provider) -> String {
-    provider_display_name(provider).to_lowercase()
+    match provider {
+        // The credential-registry ids, which name these upstreams everywhere
+        // else (`bedrock`, `vertex_ai`, `azure_openai`).
+        Provider::Cloud(c) => c.registry_id().to_string(),
+        _ => provider_display_name(provider).to_lowercase(),
+    }
 }
 
 /// The inverse of `provider_wire_id`, for a fallback target that names its
@@ -1546,6 +1578,9 @@ fn provider_from_wire_id(id: &str) -> Option<Provider> {
         "mistral" => Some(Provider::Mistral),
         "openrouter" => Some(Provider::OpenRouter),
         "deepseek" => Some(Provider::DeepSeek),
+        "bedrock" => Some(Provider::Cloud(crate::cloud::CloudProvider::Bedrock)),
+        "vertex_ai" | "vertex" => Some(Provider::Cloud(crate::cloud::CloudProvider::Vertex)),
+        "azure_openai" | "azure" => Some(Provider::Cloud(crate::cloud::CloudProvider::Azure)),
         _ => None,
     }
 }
@@ -1622,6 +1657,9 @@ struct FallbackRequest<'a> {
     /// The primary's forwarded headers, its credential included.
     primary_headers: &'a reqwest::header::HeaderMap,
     require_provisioned: bool,
+    /// The request carries a `vk_` — a cloud target may then use the
+    /// workspace's stored cloud credential (`cloud::config::resolve`).
+    virtual_key: bool,
     allowed_models: Option<&'a [String]>,
     key_models: &'a [String],
     retry: &'a crate::routing::retry::RetryConfig,
@@ -1670,6 +1708,49 @@ async fn try_fallbacks(
             },
             None => get_model_provider(&model),
         };
+        // A cloud target needs its region, project or endpoint and credential
+        // before anything else: the Bedrock id for "the same model" depends on
+        // the region, and a cloud with nothing configured is skipped like any
+        // provider without a credential.
+        let cloud_config = match provider {
+            Provider::Cloud(cloud) => match crate::cloud::config::resolve(
+                cloud,
+                &req.state.store,
+                req.workspace_id,
+                req.virtual_key,
+                req.require_provisioned,
+                &req.state.config.intutic_settings.providers,
+            )
+            .await
+            {
+                Ok(cfg) => Some((cloud, cfg)),
+                Err(_) => {
+                    attempts.push(UpstreamAttempt::skipped(
+                        &model,
+                        &provider_wire_id(&provider),
+                        "no_credential",
+                    ));
+                    continue;
+                }
+            },
+            _ => None,
+        };
+        // "Same model, another provider" across Anthropic's API, Bedrock and
+        // Vertex AI: the model id is rewritten into the target's scheme.
+        if target.model.is_none() && provider != *req.primary_provider {
+            let into = cloud_config.as_ref().map(|(c, _)| *c);
+            let region = match &cloud_config {
+                Some((_, crate::cloud::CloudConfig::Bedrock(b))) => Some(b.region.as_str()),
+                _ => None,
+            };
+            model = crate::cloud::same_model_for(req.primary_model, into, region);
+        }
+        // A target that pins a cloud model without its prefix still names it.
+        if let Some((cloud, _)) = &cloud_config {
+            if crate::cloud::parse_prefixed(&model).map(|m| m.provider) != Some(*cloud) {
+                model = format!("{}/{model}", cloud.prefix());
+            }
+        }
         // The operator's Anthropic override rewrites every Anthropic-bound
         // model after routing; a fallback is no exception.
         if provider == Provider::Anthropic {
@@ -1709,7 +1790,10 @@ async fn try_fallbacks(
         }
         let Some(url) = url else { continue };
 
-        let headers = if provider == *req.primary_provider {
+        let headers = if cloud_config.is_some() {
+            // Authenticated inside `crate::cloud::send`, per attempt.
+            req.base_headers.clone()
+        } else if provider == *req.primary_provider {
             req.primary_headers.clone()
         } else {
             match fetch_provider_credential(
@@ -1739,23 +1823,56 @@ async fn try_fallbacks(
         body["model"] = json!(model);
         let body = axum::body::Bytes::from(serde_json::to_vec(&body).unwrap_or_default());
 
-        let outcome = crate::routing::retry::send_with_retry(
-            req.retry,
-            req.deadline,
-            &model,
-            &provider_id,
-            attempts,
-            || {
-                req.state
-                    .http_client
-                    .request(req.method.clone(), &url)
-                    .headers(headers.clone())
-                    .body(body.clone())
-                    .timeout(crate::routing::retry::ATTEMPT_TIMEOUT)
-                    .send()
-            },
-        )
-        .await;
+        let outcome = match &cloud_config {
+            Some((cloud, cfg)) => {
+                let cloud_model = crate::cloud::CloudModel {
+                    provider: *cloud,
+                    model: crate::cloud::parse_prefixed(&model)
+                        .map(|m| m.model)
+                        .unwrap_or_else(|| model.clone()),
+                };
+                crate::routing::retry::send_with_retry(
+                    req.retry,
+                    req.deadline,
+                    &model,
+                    &provider_id,
+                    attempts,
+                    || {
+                        crate::cloud::send(
+                            &req.state.http_client,
+                            crate::cloud::CloudCall {
+                                model: &cloud_model,
+                                config: cfg,
+                                protocol: req.protocol,
+                                body: &body,
+                                client_headers: &headers,
+                                timeout: crate::routing::retry::ATTEMPT_TIMEOUT,
+                            },
+                        )
+                    },
+                )
+                .await
+            }
+            None => {
+                crate::routing::retry::send_with_retry(
+                    req.retry,
+                    req.deadline,
+                    &model,
+                    &provider_id,
+                    attempts,
+                    || {
+                        req.state
+                            .http_client
+                            .request(req.method.clone(), &url)
+                            .headers(headers.clone())
+                            .body(body.clone())
+                            .timeout(crate::routing::retry::ATTEMPT_TIMEOUT)
+                            .send()
+                    },
+                )
+                .await
+            }
+        };
         if let Ok(response) = outcome.result {
             if response.status().is_success() {
                 return Some(FallbackServed {
@@ -2486,7 +2603,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                     )
                                 });
                         } else {
-                            let resp_json = match provider {
+                            let resp_json = match provider.wire_shape() {
                                 Provider::Anthropic => {
                                     serde_json::json!({
                                         "id": "msg_predict",
@@ -2515,10 +2632,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                         }
                                     })
                                 }
-                                Provider::OpenAI
-                                | Provider::Mistral
-                                | Provider::OpenRouter
-                                | Provider::DeepSeek => {
+                                _ => {
                                     serde_json::json!({
                                         "id": "chatcmpl-predict",
                                         "object": "chat.completion",
@@ -4969,6 +5083,31 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         );
     }
 
+    // A cloud upstream is reached in its own wire (`Provider::wire_shape`):
+    // natively, or — the OpenAI wire to an Anthropic-wire cloud — through the
+    // OpenAI→Anthropic translation below. Any other pairing has no
+    // translation to run, and is refused rather than forwarded half-translated.
+    if let Provider::Cloud(cloud) = target_provider {
+        let translated =
+            provider == Provider::OpenAI && target_provider.wire_shape() == Provider::Anthropic;
+        if !is_same_provider && !translated {
+            return json_error(
+                StatusCode::BAD_REQUEST,
+                "unsupported_route",
+                &format!(
+                    "{} models are not served on {}. Use {}.",
+                    cloud.display_name(),
+                    uri_path,
+                    match cloud.wire() {
+                        crate::cloud::Wire::Anthropic =>
+                            "/v1/messages, /v1/chat/completions or /v1/responses",
+                        crate::cloud::Wire::OpenAI => "/v1/chat/completions or /v1/responses",
+                    }
+                ),
+            );
+        }
+    }
+
     let (upstream_url, request_body) = if is_same_provider {
         let Some(url) = native_upstream_url(&target_provider, &protocol, host_name, &uri_path)
         else {
@@ -5004,10 +5143,14 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 "/v1/chat/completions"
             }
             Provider::Gemini => "/v1beta/models/gemini-1.5-pro:generateContent",
+            // `crate::cloud::send` builds the URL.
+            Provider::Cloud(_) => "",
         };
         let url = format!("{}{}", target_base_url, target_path);
 
-        let translated_body = match (&provider, &target_provider) {
+        // On the target's wire shape, so an Anthropic-wire cloud upstream
+        // receives the same translated Messages body Anthropic would.
+        let translated_body = match (&provider, &target_provider.wire_shape()) {
             (Provider::OpenAI, Provider::Anthropic) => {
                 let is_responses = protocol == Protocol::OpenAIResponses;
                 let mut req =
@@ -5097,13 +5240,81 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         }
     }
 
+    // ── Cloud upstream configuration (Bedrock, Vertex AI, Azure OpenAI) ──
+    //
+    // Resolved here, beside the API-key injection below and under the same
+    // rules: a `vk_` request uses its workspace's provisioned credential, and
+    // under enforced BYO-key nothing else; a raw caller credential is never
+    // sent to a cloud provider (it authenticates to Intutic or to a
+    // first-party API, not to AWS, Google or Azure), so those requests use
+    // the operator's configuration. The cloud credential itself is applied
+    // by `crate::cloud::send`, per call, because SigV4 signs each request.
+    let cloud_target: Option<(crate::cloud::CloudModel, crate::cloud::CloudConfig)> =
+        if let Provider::Cloud(cloud) = target_provider {
+            let Some(cloud_model) = crate::cloud::resolve(&actual_model) else {
+                return json_error(
+                    StatusCode::BAD_REQUEST,
+                    "unsupported_route",
+                    "The routed model does not name a cloud deployment.",
+                );
+            };
+            let virtual_key = raw_token.starts_with("vk_");
+            let require_provisioned = virtual_key
+                && crate::gateway::provisioned_key_required_for(
+                    key_record.as_ref().and_then(|k| k.byok_required),
+                );
+            match crate::cloud::config::resolve(
+                cloud,
+                &state.store,
+                &workspace_id,
+                virtual_key,
+                require_provisioned,
+                &state.config.intutic_settings.providers,
+            )
+            .await
+            {
+                Ok(cfg) => Some((cloud_model, cfg)),
+                Err(crate::cloud::CredentialError::NotProvisioned(name)) => {
+                    return json_error(
+                        StatusCode::PAYMENT_REQUIRED,
+                        "byok_required",
+                        &format!(
+                            "This workspace has not provisioned its own {name} credential. \
+                             Provision one in the dashboard under Settings → Provider Keys."
+                        ),
+                    );
+                }
+                Err(crate::cloud::CredentialError::NotConfigured(name)) => {
+                    return json_error(
+                        StatusCode::PAYMENT_REQUIRED,
+                        "no_upstream_credential",
+                        &format!(
+                            "No {name} credential is available for this workspace. Provision one \
+                             in the dashboard under Settings → Provider Keys, or configure {} on a \
+                             self-hosted proxy.",
+                            cloud.configuration_hint()
+                        ),
+                    );
+                }
+                Err(e @ crate::cloud::CredentialError::Invalid(..)) => {
+                    return json_error(
+                        StatusCode::PAYMENT_REQUIRED,
+                        "invalid_upstream_credential",
+                        &e.to_string(),
+                    );
+                }
+            }
+        } else {
+            None
+        };
+
     // Kept before any credential is added: a fallback target on another
     // provider starts from these and gets that provider's credential instead.
     let uncredentialed_headers = fwd_headers.clone();
 
     // Inject credentials
     let mut creds_injected = false;
-    if raw_token.starts_with("vk_") {
+    if raw_token.starts_with("vk_") && cloud_target.is_none() {
         // Under `paid`, the workspace's own answer (the key record's
         // `byokRequired`) decides; under `true`, every workspace is enforced.
         let require_provisioned = crate::gateway::provisioned_key_required_for(
@@ -5165,8 +5376,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     }
 
     // Only a raw (non-`vk_`) caller credential reaches this point uninjected:
-    // the `vk_` branch above either injected a provider key or refused.
-    if !creds_injected {
+    // the `vk_` branch above either injected a provider key or refused. A
+    // cloud upstream gets neither: `crate::cloud::send` authenticates it.
+    if !creds_injected && cloud_target.is_none() {
         if !is_same_provider {
             // require_provisioned deliberately hardcoded false here: this
             // branch only runs when raw_token did NOT start with "vk_" (the
@@ -5232,14 +5444,20 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // call with the model swapped to the mirror candidate, so it has to be
     // built from the same URL, headers and body — reconstructing it later
     // would risk measuring a request the user never made.
+    //
+    // Not for a cloud upstream: its call is authenticated per request inside
+    // `crate::cloud::send`, so the captured headers would carry no
+    // credential.
     let mirror_plan: Option<(String, reqwest::header::HeaderMap, Vec<u8>, String)> =
-        mirror_candidate.and_then(|candidate| {
-            let mut mirrored_body = body_json.clone();
-            mirrored_body["model"] = json!(candidate);
-            serde_json::to_vec(&mirrored_body)
-                .ok()
-                .map(|b| (upstream_url.clone(), fwd_headers.clone(), b, candidate))
-        });
+        mirror_candidate
+            .filter(|_| cloud_target.is_none())
+            .and_then(|candidate| {
+                let mut mirrored_body = body_json.clone();
+                mirrored_body["model"] = json!(candidate);
+                serde_json::to_vec(&mirrored_body)
+                    .ok()
+                    .map(|b| (upstream_url.clone(), fwd_headers.clone(), b, candidate))
+            });
 
     // ── Unservable-model fallback plan ──
     //
@@ -5256,8 +5474,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // a Messages request routed from `claude-*` to `deepseek-*` is natively
     // served (DeepSeek speaks the Anthropic wire), but retrying it would send
     // the Claude model id to DeepSeek with the DeepSeek key (TD-370).
+    // A cloud upstream is excluded for the reason the mirror plan is.
     let fallback_plan: Option<(String, reqwest::header::HeaderMap, Vec<u8>)> = if routed_from_to
         .is_some()
+        && cloud_target.is_none()
         && is_same_provider
         && get_model_provider(&model) == target_provider
     {
@@ -5301,23 +5521,51 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         reqwest::Method::from_bytes(method.as_str().as_bytes()).unwrap_or(reqwest::Method::POST);
     let request_body = axum::body::Bytes::from(request_body);
     let mut upstream_attempts: Vec<crate::routing::retry::UpstreamAttempt> = Vec::new();
-    let primary_outcome = crate::routing::retry::send_with_retry(
-        &retry_cfg,
-        retry_deadline,
-        &actual_model,
-        &provider_wire_id(&target_provider),
-        &mut upstream_attempts,
-        || {
-            state
-                .http_client
-                .request(send_method.clone(), &upstream_url)
-                .headers(fwd_headers.clone())
-                .body(request_body.clone())
-                .timeout(crate::routing::retry::ATTEMPT_TIMEOUT)
-                .send()
-        },
-    )
-    .await;
+    let primary_outcome = if let Some((cloud_model, cloud_config)) = &cloud_target {
+        // Built per attempt: a Bedrock call is re-signed and a Vertex or
+        // Entra token re-read each time. The answer comes back in the wire
+        // this request already expects, so everything from here on treats it
+        // as that provider's own.
+        crate::routing::retry::send_with_retry(
+            &retry_cfg,
+            retry_deadline,
+            &actual_model,
+            &provider_wire_id(&target_provider),
+            &mut upstream_attempts,
+            || {
+                crate::cloud::send(
+                    &state.http_client,
+                    crate::cloud::CloudCall {
+                        model: cloud_model,
+                        config: cloud_config,
+                        protocol: &protocol,
+                        body: &request_body,
+                        client_headers: &fwd_headers,
+                        timeout: crate::routing::retry::ATTEMPT_TIMEOUT,
+                    },
+                )
+            },
+        )
+        .await
+    } else {
+        crate::routing::retry::send_with_retry(
+            &retry_cfg,
+            retry_deadline,
+            &actual_model,
+            &provider_wire_id(&target_provider),
+            &mut upstream_attempts,
+            || {
+                state
+                    .http_client
+                    .request(send_method.clone(), &upstream_url)
+                    .headers(fwd_headers.clone())
+                    .body(request_body.clone())
+                    .timeout(crate::routing::retry::ATTEMPT_TIMEOUT)
+                    .send()
+            },
+        )
+        .await
+    };
     let mut fwd_result = primary_outcome.result;
 
     let mut upstream_fallback: Option<crate::routing::retry::UpstreamFallback> = None;
@@ -5346,6 +5594,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 base_headers: &uncredentialed_headers,
                 primary_headers: &fwd_headers,
                 require_provisioned,
+                virtual_key: raw_token.starts_with("vk_"),
                 allowed_models: allowed_models.as_deref(),
                 key_models,
                 retry: &retry_cfg,
@@ -7625,12 +7874,12 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         // (`/v1/messages`, `/v1/chat/completions`, or Gemini's
         // `generateContent`) — the upstream body's shape is always exactly
         // one of those three, never the OpenAI-Responses shape.
-        let usage = match target_provider {
+        // On the wire shape, so an Anthropic-wire cloud upstream is read as
+        // the Anthropic body `crate::cloud` hands back.
+        let usage = match target_provider.wire_shape() {
             Provider::Anthropic => TokenUsage::from_anthropic(&upstream_json),
             Provider::Gemini => TokenUsage::from_gemini_metadata(&upstream_json),
-            Provider::OpenAI | Provider::Mistral | Provider::OpenRouter | Provider::DeepSeek => {
-                TokenUsage::from_openai_chat(&upstream_json)
-            }
+            _ => TokenUsage::from_openai_chat(&upstream_json),
         };
         let prompt_tokens = usage.total_input();
         let completion_tokens = usage.output.unwrap_or(0);
@@ -8660,12 +8909,10 @@ fn delta_shape(protocol: &crate::protocol::Protocol, provider: &Provider) -> Del
         P::OpenAIChatCompletions => DeltaShape::OpenAIChatContent,
         P::OpenAIResponses => DeltaShape::ResponsesOutputText,
         P::Gemini => DeltaShape::Unparsed,
-        P::Unknown => match provider {
+        P::Unknown => match provider.wire_shape() {
             Provider::Anthropic => DeltaShape::AnthropicText,
-            Provider::OpenAI | Provider::Mistral | Provider::OpenRouter | Provider::DeepSeek => {
-                DeltaShape::OpenAIChatContent
-            }
             Provider::Gemini => DeltaShape::Unparsed,
+            _ => DeltaShape::OpenAIChatContent,
         },
     }
 }
@@ -8688,12 +8935,10 @@ fn wire_for(
         P::OpenAIChatCompletions => W::OpenAI,
         P::OpenAIResponses => W::OpenAIResponses,
         P::Gemini => W::Gemini,
-        P::Unknown => match provider {
+        P::Unknown => match provider.wire_shape() {
             Provider::Anthropic => W::Anthropic,
             Provider::Gemini => W::Gemini,
-            Provider::OpenAI | Provider::Mistral | Provider::OpenRouter | Provider::DeepSeek => {
-                W::OpenAI
-            }
+            _ => W::OpenAI,
         },
     }
 }
@@ -8744,7 +8989,11 @@ fn stream_delta_text(v: &serde_json::Value, shape: DeltaShape) -> Option<&str> {
 /// exactly one place for both.
 fn stream_usage(v: &serde_json::Value, shape: DeltaShape) -> TokenUsage {
     match shape {
-        DeltaShape::AnthropicText => TokenUsage::from_anthropic(v),
+        // `message_start` nests its usage under `message`. The first-party
+        // API repeats the input counts on `message_delta`, but Bedrock's
+        // InvokeModel stream reports them on `message_start` only — read
+        // there, a stream that never repeats them is still metered.
+        DeltaShape::AnthropicText => TokenUsage::from_anthropic(v.get("message").unwrap_or(v)),
         // Responses reports usage once, nested under the terminal event's
         // `response` object — never at the top level, which is the only place
         // the chat-completions arm looked.
@@ -8778,12 +9027,10 @@ fn postprocessor_protocol(
         P::OpenAIChatCompletions => PP::OpenAI,
         P::OpenAIResponses => PP::OpenAIResponses,
         P::Gemini => PP::Gemini,
-        P::Unknown => match provider {
+        P::Unknown => match provider.wire_shape() {
             Provider::Anthropic => PP::Anthropic,
             Provider::Gemini => PP::Gemini,
-            Provider::OpenAI | Provider::Mistral | Provider::OpenRouter | Provider::DeepSeek => {
-                PP::OpenAI
-            }
+            _ => PP::OpenAI,
         },
     }
 }
@@ -10766,6 +11013,26 @@ mod tests {
         let usage = stream_usage(&anth, DeltaShape::AnthropicText);
         assert_eq!(usage.total_input(), 7);
         assert_eq!(usage.output, Some(8));
+    }
+
+    /// Input counts reported only on `message_start` (Bedrock InvokeModel
+    /// streams) are read from `message.usage`, and `message_delta` overlays
+    /// the output count.
+    #[test]
+    fn anthropic_message_start_usage_is_metered() {
+        let start: serde_json::Value = serde_json::from_str(
+            r#"{"type":"message_start","message":{"id":"m","usage":{"input_tokens":120,"cache_read_input_tokens":30,"output_tokens":1}}}"#,
+        )
+        .unwrap();
+        let delta: serde_json::Value = serde_json::from_str(
+            r#"{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":42}}"#,
+        )
+        .unwrap();
+        let mut acc = TokenUsage::default();
+        acc.merge_from(stream_usage(&start, DeltaShape::AnthropicText));
+        acc.merge_from(stream_usage(&delta, DeltaShape::AnthropicText));
+        assert_eq!(acc.total_input(), 150);
+        assert_eq!(acc.output, Some(42));
     }
 
     /// TD-370: only DeepSeek's own API ids route to DeepSeek. Untagged

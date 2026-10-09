@@ -55,15 +55,15 @@ export interface ProviderProbeRequest {
  *
  * `fields` is the provider's credential field map exactly as stored — the
  * same shape `PROVIDER_REGISTRY`'s `ProviderCredentialField.key`s describe
- * (`providers.ts`), e.g. `{ apiKey: '...' }` for Anthropic, `{ apiKey, endpoint,
- * deploymentName }` for Azure OpenAI.
+ * (`providers.ts`), e.g. `{ apiKey: '...' }` for Anthropic, `{ apiKey, endpoint }`
+ * for Azure OpenAI.
  *
- * Bedrock and Vertex AI return `null`: verifying them means SigV4 request
- * signing or a GCP OAuth2/JWT exchange, neither of which exists anywhere in
- * this codebase yet (the same "real per-provider engineering, not a config
- * change" boundary LLD #67 §3 draws around routing those two providers). A
- * caller seeing `null` should say "cannot verify automatically," not fail
- * the credential.
+ * Bedrock and Vertex AI return `null`: a probe here is a plain request
+ * description, and both need a request built per call — SigV4-signed, or
+ * carrying a token minted from the service account — which only the proxy's
+ * cloud adapters do. The proxy answers a bad credential on the first real
+ * request with a 401 `authentication_error`. A caller seeing `null` should
+ * say "cannot verify automatically," not fail the credential.
  */
 export function buildVerificationProbe(
   provider: string,

@@ -444,6 +444,14 @@ export default defineConfig({
           ],
         },
         {
+          text: 'Model Providers',
+          items: [
+            { text: 'AWS Bedrock', link: '/integrations/aws-bedrock' },
+            { text: 'Google Vertex AI', link: '/integrations/google-vertex-ai' },
+            { text: 'Azure OpenAI', link: '/integrations/azure-openai' },
+          ],
+        },
+        {
           text: 'Server-Side Platforms',
           items: [
             { text: 'QM', link: '/integrations/qm' },

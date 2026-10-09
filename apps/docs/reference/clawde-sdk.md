@@ -224,6 +224,20 @@ resolution = cp.resolve_gateway()
 | Workspace settings | `getWorkspaceSettings`, `updateWorkspaceSettings` / `get_workspace_settings`, `update_workspace_settings` |
 | Provider credentials | `listProviderCredentials`, `setProviderCredential`, `unsetProviderCredential` |
 
+Cloud providers take several fields. AWS Bedrock takes `awsRegion` with either `awsAccessKeyId` and `awsSecretAccessKey` or a Bedrock `apiKey`; Google Vertex AI takes `projectId`, `serviceAccountJson` and an optional `location`; Azure OpenAI takes `endpoint` and `apiKey`:
+
+```typescript
+await cp.setProviderCredential('bedrock', { awsRegion: 'us-east-1', apiKey: process.env.BEDROCK_API_KEY! });
+await cp.setProviderCredential('vertex_ai', {
+  projectId: 'my-project',
+  location: 'global',
+  serviceAccountJson: fs.readFileSync('sa.json', 'utf8'),
+});
+await cp.setProviderCredential('azure_openai', { endpoint: 'https://my-resource.openai.azure.com', apiKey: process.env.AZURE_OPENAI_API_KEY! });
+```
+
+A chat call then names the model with the provider's prefix — `bedrock/anthropic.claude-opus-4-7`, `vertex/gemini-2.5-pro`, `azure/<deployment>` — through `ClawdeClient` unchanged. See [AWS Bedrock](/integrations/aws-bedrock), [Google Vertex AI](/integrations/google-vertex-ai) and [Azure OpenAI](/integrations/azure-openai).
+
 `getGatewayStatus` reports `appliedConfigVersion`, the config version the gateway said it runs in its last heartbeat (`null` when it is unreachable or has not reported one), beside `desiredConfigVersion`, the version the latest config change produced. `getGatewayConfig` returns the flags set on the gateway and that version, readable by any member of the gateway's org.
 
 `updateWorkspaceSettings({ key: value })` is the route `intutic settings set` calls: only the keys given change, and the control plane applies the same checks. An unknown key or a bad value is refused with a 400 that names it, a setting the plan does not include (the group policy for high-risk tools below Biz Org) with a 403 `Upgrade required`, and a member below OWNER or ADMIN with a 403. Each refusal throws (raises) `ClawdeConnectionError` with the server's answer in its message. See [Settings](/guide/settings) for the keys.

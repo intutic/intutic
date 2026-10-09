@@ -366,6 +366,19 @@ def test_set_provider_credential_puts_fields(mock_request):
 
 
 @patch("requests.request")
+def test_set_provider_credential_sends_every_cloud_field(mock_request):
+    mock_request.return_value = _mock_response(json_body={"provider": "vertex_ai", "routingLive": True})
+    client = ControlPlaneClient(api_key="vk_test", base_url="https://cp.example.com")
+    fields = {"projectId": "proj-1", "location": "us-east5", "serviceAccountJson": '{"type": "service_account"}'}
+    res = client.set_provider_credential("vertex_ai", fields)
+
+    args, kwargs = mock_request.call_args
+    assert args[1] == "https://cp.example.com/api/v1/workspace/provider-credentials/vertex_ai"
+    assert kwargs["json"] == fields
+    assert res["routingLive"] is True
+
+
+@patch("requests.request")
 def test_unset_provider_credential(mock_request):
     mock_request.return_value = _mock_response()
     client = ControlPlaneClient(api_key="vk_test", base_url="https://cp.example.com")

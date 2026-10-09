@@ -92,6 +92,9 @@ pub struct IntuticSettings {
     /// L2 hosted-gateway front door — vk_-only enforcement (LLD #64).
     #[serde(default)]
     pub gateway: crate::gateway::GatewayConfig,
+    /// Cloud upstreams — Bedrock, Vertex AI, Azure OpenAI (`crate::cloud`).
+    #[serde(default)]
+    pub providers: crate::cloud::config::ProvidersConfig,
 }
 
 /// Refusing a forbidden tool call in the model's *response*, before the client

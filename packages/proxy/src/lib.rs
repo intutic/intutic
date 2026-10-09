@@ -1,3 +1,5 @@
+/// Cloud-hosted upstreams: AWS Bedrock, Google Vertex AI, Azure OpenAI
+pub mod cloud;
 pub mod commands;
 pub mod config;
 /// The caller's credential, typed by where it may be sent

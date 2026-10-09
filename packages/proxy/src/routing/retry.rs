@@ -205,6 +205,13 @@ pub fn parse_key_context(body: &serde_json::Value) -> Option<WorkspaceRetry> {
 /// Rate limited (429), provider error (500), bad gateway (502), unavailable
 /// (503), gateway timeout (504) and Anthropic's overloaded (529). 4xx other
 /// than 429 describe the request itself and would fail the same way again.
+///
+/// Bedrock and Vertex AI errors reach this list already re-expressed by
+/// `cloud::errors`: throttling and quota (`ThrottlingException`,
+/// `ServiceQuotaExceededException`, `RESOURCE_EXHAUSTED`) as 429, an
+/// unavailable or not-ready model as 529, a model timeout or
+/// `DEADLINE_EXCEEDED` as 504, a model error as 502. Azure answers with
+/// OpenAI's statuses and `retry-after-ms`, read as they are.
 pub const DEFAULT_RETRY_STATUSES: [u16; 6] = [429, 500, 502, 503, 504, 529];
 
 /// Error codes that mean a 429 will not clear by waiting: a spend cap or an

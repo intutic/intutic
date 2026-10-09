@@ -24,7 +24,7 @@ export interface ProviderProbeOutcome {
 /**
  * Verify a credential the caller holds locally (not yet, or not necessarily,
  * saved anywhere). `fields` matches the provider's registry field shape,
- * e.g. `{apiKey: '...'}` for Anthropic, `{apiKey, endpoint, deploymentName}`
+ * e.g. `{apiKey: '...'}` for Anthropic, `{apiKey, endpoint}`
  * for Azure OpenAI.
  */
 export async function probeProviderCredential(

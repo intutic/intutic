@@ -4,7 +4,7 @@
  *
  * Subcommands:
  *   - `intutic credentials list [--json]`
- *   - `intutic credentials set <provider> --field key=value [--field key=value ...]`
+ *   - `intutic credentials set <provider> --field key=value [--field-file key=path ...]`
  *   - `intutic credentials unset <provider>`
  *
  * Server side: services/control-plane/src/routes/providerCredentials.ts.
@@ -20,7 +20,8 @@ import { log } from '../lib/logger.js'
 import { loadCredentials } from '../config/store.js'
 import { resolveControlPlaneUrl } from '../config/paths.js'
 import { createApiClient } from '../lib/api.js'
-import { PROVIDER_REGISTRY, getProviderDefinition } from '@intutic/shared-types'
+import { readFileSync } from 'node:fs'
+import { PROVIDER_REGISTRY, checkCloudCredentialFields, getProviderDefinition } from '@intutic/shared-types'
 import pc from 'picocolors'
 
 const NOT_AUTHENTICATED = 'Not authenticated. Run `intutic login` first.'
@@ -86,9 +87,27 @@ export async function runCredentialsList(opts: CredentialsCliOpts): Promise<void
 /** `intutic credentials set <provider>` */
 export async function runCredentialsSet(
   provider: string,
-  opts: CredentialsCliOpts & { field?: string[] },
+  opts: CredentialsCliOpts & { field?: string[]; fieldFile?: string[] },
 ): Promise<void> {
-  const fields = opts.field ?? []
+  // `--field-file key=path` reads the value from a file: a Vertex AI
+  // service-account key is a multi-line JSON document no shell quotes well.
+  const fromFiles: string[] = []
+  for (const f of opts.fieldFile ?? []) {
+    const idx = f.indexOf('=')
+    if (idx <= 0) {
+      log.error(`--field-file "${f}" is not in key=path form`)
+      process.exit(1)
+    }
+    let value: string
+    try {
+      value = readFileSync(f.slice(idx + 1), 'utf8')
+    } catch {
+      log.error(`--field-file ${f.slice(0, idx)}: could not read ${f.slice(idx + 1)}`)
+      process.exit(1)
+    }
+    fromFiles.push(`${f.slice(0, idx)}=${value}`)
+  }
+  const fields = [...(opts.field ?? []), ...fromFiles]
   if (fields.length === 0) {
     log.error(
       'At least one --field key=value is required (e.g. --field apiKey=sk-ant-... for a single-key ' +
@@ -135,6 +154,18 @@ export async function runCredentialsSet(
       process.exit(1)
     }
   }
+  if (def.requiresOneOf && !def.requiresOneOf.some((set) => set.every((k) => body[k]))) {
+    log.error(
+      `${def.displayName} requires one of: ${def.requiresOneOf.map((set) => set.map((k) => `--field ${k}=<value>`).join(' ')).join('  or  ')}`,
+    )
+    process.exit(1)
+  }
+  const trimmed = Object.fromEntries(Object.entries(body).map(([k, v]) => [k, v.trim()]))
+  const cloudError = checkCloudCredentialFields(def.id, trimmed)
+  if (cloudError) {
+    log.error(cloudError)
+    process.exit(1)
+  }
 
   const client = await getClient(opts)
 
@@ -150,6 +181,7 @@ export async function runCredentialsSet(
     }
 
     log.success(`${provider}: provisioned (…${res.lastFour ?? '????'}).`)
+    if (def.usageHint) log.dim(`  ${def.usageHint}`)
     if (!res.routingLive) {
       log.warn(
         `${provider} is stored but not yet routable — the proxy does not forward requests to it. ` +

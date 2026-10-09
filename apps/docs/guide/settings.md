@@ -106,9 +106,10 @@ There is no in-place rotation: create a new key, move clients to it, then revoke
 
 ### Provider Keys
 
-Provision your workspace's own upstream API key for each model provider — Anthropic, OpenAI,
-Gemini, Mistral, OpenRouter, and DeepSeek today, with more providers pre-configurable ahead of their
-routing support (see below). Configuring your own key means requests bill against your
+Provision your workspace's own upstream credential for each model provider — Anthropic, OpenAI,
+Gemini, Mistral, OpenRouter, DeepSeek, [AWS Bedrock](/integrations/aws-bedrock),
+[Google Vertex AI](/integrations/google-vertex-ai) and [Azure OpenAI](/integrations/azure-openai),
+with more providers pre-configurable ahead of their routing support (see below). Configuring your own key means requests bill against your
 provider account directly rather than Intutic's shared operator key.
 
 Each provider row shows a **Live** or **Not yet routable** badge. **Live** means the gateway
@@ -129,9 +130,12 @@ intutic credentials set anthropic --field apiKey=sk-ant-...
 intutic credentials unset anthropic
 ```
 
-A provider needing more than one field (e.g. Azure OpenAI: endpoint, deployment, key) takes a
-repeated `--field key=value` flag, one per field — the wizard's dynamic form and the CLI submit
-the same shape.
+A provider needing more than one field takes a repeated `--field key=value` flag, one per field,
+and `--field-file key=path` reads a value from a file — the wizard's dynamic form and the CLI
+submit the same shape. AWS Bedrock takes a region and either an access key pair or a Bedrock API
+key; Google Vertex AI a project, an optional location and a service-account key; Azure OpenAI the
+resource endpoint, which must be an Azure host over `https`, and its key. Requests name these
+providers' models as `bedrock/<model id>`, `vertex/<model>` and `azure/<deployment>`.
 
 **Guided setup**, on the Provider Keys card, walks through provisioning a provider and verifying
 it against the provider's own API in one flow. See
