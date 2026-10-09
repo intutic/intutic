@@ -611,8 +611,8 @@ export async function runPolicyTest(opts: { wasm: string; mock: string }): Promi
       log.info('  as a block. Return 1 to block, or 3 to reask.')
     } else {
       log.error(`Result: unmapped verdict code ${verdict}`)
-      log.info('  Valid codes are 0 (allow), 1 (block) and 3 (reask). The proxy allows')
-      log.info('  anything else, so a rule returning this enforces nothing.')
+      log.info('  Valid codes are 0 (allow), 1 (block) and 3 (reask). Anything else is')
+      log.info('  no verdict: the proxy refuses the call with GOVERNANCE_UNAVAILABLE.')
     }
   } catch (err) {
     log.error(`Execution error during WASM policy test: ${errMessage(err)}`)
@@ -906,8 +906,8 @@ export async function runPolicyInstall(opts: {
       }
       if (![0, 1, 2, 3].includes(validationVerdict)) {
         log.error(
-          `Rule returned verdict code ${validationVerdict}, which the proxy does not map — ` +
-            'it would be allowed on every request. Valid codes: 0 allow, 1 block, 3 reask.'
+          `Rule returned verdict code ${validationVerdict}, which is not a verdict — ` +
+            'the proxy would refuse every such call with GOVERNANCE_UNAVAILABLE. Valid codes: 0 allow, 1 block, 3 reask.'
         )
         process.exit(1)
       }

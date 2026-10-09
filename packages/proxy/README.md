@@ -10,10 +10,11 @@ intutic-proxy is a high-performance AI agent proxy written in Rust (edition 2021
 
 ### WASM Plugin Sandbox
 
-- **Runtime**: wasmtime v29 with pre-compiled module caching
+- **Runtime**: wasmtime 36 with pre-compiled module caching
 - **Memory limit**: 16 MB per plugin invocation
-- **Fuel limit**: 1,000,000 units per plugin invocation
-- **Execution timeout**: 5 ms hard wall-clock cutoff
+- **Fuel limit**: the limit a rule is held to, deterministic on any machine: 1,000,000 instructions for a native rule, 100,000,000 for a Rego rule
+- **Wall-clock backstop**: 1 s for a native rule, 2 s for a Rego rule, enforced by epoch interruption for stalls fuel cannot see; set far above the time it takes to use up the fuel on a loaded machine
+- **No verdict refuses**: a rule stopped by either limit, or one that traps or returns something that is not a verdict, refuses the request with `GOVERNANCE_UNAVAILABLE`, whatever the fail setting
 - **Isolation**: Each plugin runs in a dedicated WASM store
 
 ### Plugin Chain
@@ -56,10 +57,10 @@ The proxy processes every request through an ordered plugin chain:
 
 ### Security & Observability
 
-- **DLP scanner**: Pattern-based and entropy-based secret detection
+- **DLP scanner**: Pattern-based and entropy-based secret detection, plus validated PII detectors for payment cards (Luhn), IBANs (mod 97) and US Social Security numbers (issued ranges), on by default, and email addresses and phone numbers, off by default. `dlp.detectors` in the proxy config sets each detector's action, and a connected workspace's `piiDetectors` setting sets a baseline the local config may only make stricter. See [PII detectors](https://docs.intutic.ai/guide/policies#pii-detectors)
 - **Code skeleton extraction**: Uses `tree-sitter` and `syn` for AST-level code analysis
 - **Token counting**: Accurate pre-flight token estimation via `tiktoken-rs`
-- **Telemetry**: OpenTelemetry OTLP export for traces and metrics — a `SpanExporter` and `SdkMeterProvider` ship in `src/main.rs`, with the exported instrument set declared in `src/metrics.rs` (snip compaction histograms, egress counters, policy refusals). Still no logs pipeline (TD-161's resolution covers the metrics half only)
+- **Telemetry**: OpenTelemetry OTLP export for traces and metrics — a `SpanExporter` and `SdkMeterProvider` ship in `src/main.rs`, with the exported instrument set declared in `src/metrics.rs` (snip compaction histograms, egress counters, policy refusals). No logs pipeline
 
 ## Dependencies
 

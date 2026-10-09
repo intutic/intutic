@@ -192,8 +192,8 @@ export class RequestContext {
   graph_node_count: i32 = -1;
 
   // `transition_baseline` is deliberately NOT parsed. It is a
-  // map of transition -> frequency that the guest would have to walk under a
-  // 5 ms budget, for a statistic a rule has no business re-deriving. The host
+  // map of transition -> frequency that the guest would have to walk within
+  // its fuel budget, for a statistic a rule has no business re-deriving. The host
   // acts on it. `__tests__/contextParity.test.ts` records the exemption so its
   // absence is a decision rather than the oversight the other twelve were.
 }
@@ -718,7 +718,8 @@ function runRules(ctx: RequestContext): i32 {
   // of you, so the library models it rather than only describing it.
   //
   // Delete the ones you do not want. They are ordered cheapest-first: each
-  // returns before the next runs, and the whole file shares one 5 ms budget.
+  // returns before the next runs, and the whole file shares one fuel budget
+  // (1,000,000 instructions per evaluation).
 
   const contract = ruleToolContractPinned(ctx);
   if (contract != 0) return contract;

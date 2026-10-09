@@ -295,7 +295,7 @@ Beyond the three hot-path gates, the circuit breaker can invoke additional evalu
 |---|---|---|
 | **SSL enforcement** | Scheduling, structural and logical checks against the session's SOP graph | Every gated tool call — **in shadow**: findings are recorded to `detector_findings` and the call proceeds |
 | **SSL compliance reporting** | Reports which SSL graph steps a session followed | On demand, `POST /api/v1/sessions/:id/ssl-audit` |
-| **DLP Scanner** | Regex-based secret/PII detection in prompts | Every request (proxy-side, pre-forwarding) |
+| **DLP Scanner** | Regex-based secret detection, plus validated PII detectors for payment cards, IBANs and US Social Security numbers (email and phone opt-in) | Every request (proxy-side, pre-forwarding), and responses |
 | **Tool-poisoning redaction** | Strips hidden/adversarial instructions from third-party MCP tool descriptions before the agent ever sees them (`[REDACTED_TOOL_POISON]`) — the same call still makes sense to the agent, it just loses the injected instruction | Every request, unconditionally (proxy-side, pre-forwarding) |
 | **SnipCompactor** | Token compression — collapse repetitions, truncate JSON | Every request (proxy-side, pre-forwarding) |
 

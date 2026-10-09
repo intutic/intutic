@@ -1,6 +1,6 @@
 # SIEM Export <Badge type="warning" text="Biz Org+" />
 
-Stream governance events — execution traces, incidents, detector findings, plan decisions, sign-ins, settings and policy changes, MCP registry decisions, SCIM changes, held-decision reviews, secret rotations, evidence downloads, gate and integrity alerts, and optionally every gate decision — to your own SIEM or warehouse, each naming the person behind it.
+Stream governance events — execution traces, incidents, detector findings, plan decisions, device firewall enforcement, machine disconnects, sign-ins, settings and policy changes, MCP registry decisions, SCIM changes, held-decision reviews, secret rotations, evidence downloads, gate and integrity alerts, ungoverned AI tools found on a machine, and optionally every gate decision — to your own SIEM or warehouse, each naming the person behind it.
 
 ---
 
@@ -23,9 +23,11 @@ Six destination types are supported:
 
 From **Settings › Integrations › SIEM Export**, click **Add Destination**, choose a type, and provide its connection config as JSON. Each type's placeholder shows the fields it expects (a webhook URL, a Splunk HEC token, an S3 bucket + credentials, etc.).
 
-Credentials are encrypted at rest and are never returned unmasked after creation: a read shows `********` and, for a value longer than eight characters, its last four. When you edit a destination's `config`, a credential you leave out, or send back exactly as it was masked, keeps its stored value; any other value replaces it. Only OWNER/ADMIN roles can create, edit, or deactivate a destination. Any workspace member can view the destination list and its health status.
+Credentials are encrypted at rest and are never returned unmasked after creation: a read shows `********` and, for a value longer than eight characters, its last four. When you edit a destination's `config`, a credential you leave out, or send back exactly as it was masked, keeps its stored value; any other value replaces it. The one exception is a webhook destination's `signingSecret`: the control plane generates it, an edit always keeps it whatever `config` says, and only **New signing secret** (`POST /api/v1/siem/destinations/:id/signing-secret`) replaces it. Only OWNER/ADMIN roles can create, edit, or deactivate a destination. Any workspace member can view the destination list and its health status.
 
 Use **Test** to run a synchronous health check against a destination without waiting for a real event.
+
+From the CLI, `intutic siem list`, `show`, `sources`, `create`, `update`, `delete` and `rotate-secret` do the same. See [the CLI reference](/reference/cli#intutic-siem-list).
 
 ## Plans {#plans}
 
@@ -60,7 +62,7 @@ Every event carries a `sourceTable` naming its source:
 | `mcp_server_changes` | The [MCP server registry](/guide/mcp-governance#the-registry): an owner or admin approving, blocking or resetting a server (`action` `approved`, `blocked` or `candidate`, with `previous_status`), switching one of its tools (`tool_enabled`, `tool_disabled`, with `tool_name`), and every scored change to a server's tool set (`tools_changed`, with `risk_score`, `risk_level`, `risk_reasons`, the tools `added`, `removed` and `changed`, and `held` when the change returned the server to the approval queue). Every score is sent, low ones included; the notification hub hears only of high ones |
 | `scim_changes` | Your identity provider writing through [SCIM](/guide/scim): `resource_type` (`User` or `Group`), `action` (`provisioned`, `updated` or `deprovisioned` for a user, including a PATCH or PUT that sets `active: false`; `created`, `updated` or `deleted` for a group), the resource id, the user's `user_name` and `active` or the group's `display_name` and member count, the PATCH operations by `op` and `path` (never their values), and the SCIM token that pushed it |
 | `decision_reviews` | A [held decision](/guide/decisions#slack-interactive-reviews) approved or rejected, in Slack or with `intutic decision`: `status` (`APPROVED` or `REJECTED`), the reviewer, `via` (`API`, or the Slack account), the reviewer's reason, the decision summary, and whether a review-hold bypass was written |
-| `secret_rotations` | A signing secret replaced: `target` (`notification_rule`, `siem_destination` or `github_webhook`), its id and name, and who replaced it. Never the secret |
+| `secret_rotations` | A signing secret replaced: `target` (`notification_rule`, `siem_destination` or `github_webhook`), `target_id` (the rule's or destination's id; `null` for the GitHub webhook, which a workspace has one of), `target_name` (the destination's name for a SIEM destination, `null` otherwise), and who replaced it. Never the secret |
 | `evidence_exports` | A compliance evidence download: `kind` (`soc2_archive`, `framework_report` or `human_oversight`), `format`, the framework, the evidence run, the period, whether it was signed, and who downloaded it |
 | `gate_decisions` | **Opt-in.** Every verdict a hook gate records: allow, block, flag, would-block (shadow mode), hold and approved bypass, with the tool name, reason, rule, harness and session. Also `TAMPER`: a governance file (a gate, a hook registration, the policy snapshot or a VS Code hook setting) changed outside the sync daemon, which the daemon put back. Also every tool call the proxy's response gate withholds under the SSO group policy, as a block with source `proxy_response_gate`. The tool's input is not included |
 
@@ -96,9 +98,9 @@ Delivery is in-process by default (no Kafka or Debezium dependency by default): 
 
 A destination's `sourceTables` list selects what it receives. Leave it empty, as **Add Destination** does by default, to receive every source except `gate_decisions`; new low-volume sources reach such a destination as they are added. A non-empty list is exact: the destination receives those sources and nothing else. An unknown name is refused when you save, and `GET /api/v1/siem/destinations` returns the valid names (`sources.all`) and the default set (`sources.defaults`).
 
-To change an existing destination's sources, click **Sources** on its row: tick the sources it should receive and **Save sources**. Ticking exactly the default set saves an empty list, so the destination stays on the defaults and keeps receiving new sources as they are added. The **Sources** column says `Defaults` or how many it receives. Owners and admins see the button, on a plan with SIEM export; it sends `PUT /api/v1/siem/destinations/:id` with `sourceTables`.
+To change an existing destination's sources, click **Sources** on its row: tick the sources it should receive and **Save sources**. Ticking exactly the default set saves an empty list, so the destination stays on the defaults and keeps receiving new sources as they are added. The **Sources** column says `Defaults` or how many it receives. Owners and admins see the button on an active destination, on a plan with SIEM export; it sends `PUT /api/v1/siem/destinations/:id` with `sourceTables`.
 
-Gate decisions are opt-in because there is one per tool call, allows included. Tick **Also stream gate decisions** when adding a destination, or send a `sourceTables` list that includes `gate_decisions`:
+Gate decisions are opt-in because there is one per tool call, allows included. Tick **Also stream gate decisions** when adding a destination, or send a `sourceTables` list that includes `gate_decisions`. Either way the destination gets an exact list (the box saves the current default set plus `gate_decisions`), so sources added later do not reach it until you add them under **Sources**:
 
 ```bash
 curl -X PUT https://<control-plane>/api/v1/siem/destinations/<id> \

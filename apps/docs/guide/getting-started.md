@@ -312,7 +312,7 @@ When you run `intutic connect`, Intutic:
 3. Watches the **filesystem** for harness config drift — auto-reverts unauthorized changes
 4. Runs a **30-second poll loop** as a secondary fallback (configurable with `--interval`)
 5. Syncs any **offline traces** accumulated while the daemon was stopped
-6. Writes harness-specific config (e.g., `.cursor/rules/intutic.mdc` for Cursor, pre-tool-use hooks for Claude Code)
+6. Installs each configured harness's gate (pre-tool-use hooks for Claude Code, for example) and writes the rule sets into the file each harness reads (e.g., `.cursor/rules/intutic-governance.mdc` for Cursor, `.claude/rules/intutic-governance.md` for Claude Code); it never writes `CLAUDE.md`. See [Where rule sets go](/guide/how-it-works#where-rule-sets-go)
 
 ::: tip Background options
 ```bash

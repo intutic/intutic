@@ -42,14 +42,14 @@ Intutic auto-detects and configures these AI coding harnesses:
 
 | Harness | Detection | Config Method |
 |---------|-----------|---------------|
-| **Claude Code** | `~/.claude/` directory | `CLAUDE.md` + `settings.json` |
-| **Cursor** | `~/.cursor/` directory | `.cursorrules` file |
-| **Aider** | `~/.aider/` directory | `.aider.conf.yml` |
-| **Antigravity** | `~/.gemini/` directory | Environment variables |
-| **Codex** | `~/.codex/` directory | `codex.json` config |
-| **n8n** | Running n8n instance | Workflow JSON file |
+| **Claude Code** | `~/.claude/` directory | `.claude/rules/intutic-governance.md` (never `CLAUDE.md`) + PreToolUse gate in `.claude/settings.json` |
+| **Cursor** | `~/.cursor/` directory | `.cursor/rules/intutic-governance.mdc` + gate in `.cursor/hooks.json` |
+| **Aider** | `~/.aider/` directory | `.intutic/aider-sops.md`, loaded by `read:` in `.aider.conf.yml` |
+| **Antigravity** | `~/.gemini/` directory | `GEMINI.md` section + `PreToolUse` gate in `~/.gemini/config/hooks.json` (Gemini CLI: `BeforeTool` gate in `~/.gemini/settings.json`) |
+| **Codex** | `~/.codex/` directory | `AGENTS.md` section + gate in `.codex/hooks.json`; proxy routing in `~/.codex/config.toml` |
+| **n8n** | Running n8n instance | Workflow JSON file + external hook gate `~/.intutic/hooks/n8n-governance-hook.js` |
 | **OpenClaw** | `~/.openclaw/` directory | `AGENTS.md` section in its agent workspace + `~/.intutic/hooks/openclaw/intutic-governance.cjs` (plugin gate, listed in `~/.openclaw/openclaw.json`) |
-| **Hermes** | `~/.hermes/` directory | `config.toml` |
+| **Hermes** | `~/.hermes/` directory | `AGENTS.md` section + `hooks.pre_tool_call` gate in `~/.hermes/config.yaml` |
 | **OpenCode** | `.opencode/`, `opencode.json`, `~/.config/opencode/` or `opencode` on PATH | `AGENTS.md` + `.opencode/plugins/intutic-governance.js` (plugin gate) |
 
 ## Trace Inspection

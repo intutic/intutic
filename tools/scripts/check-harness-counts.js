@@ -130,7 +130,9 @@ const NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'sev
 const asNumber = (s) => (/^\d+$/.test(s) ? Number(s) : NUMBER_WORDS.indexOf(s.toLowerCase()))
 // Each pattern only matches a phrasing that states the count of one kind.
 const GATE_KIND_PATTERNS = [
-  [/native (?:pre-execution )?hook gates in \*{0,2}(\d+)\b/gi, hookGated, 'hook-gated'],
+  // "native hooks in N" too: compare/index.md said "native hooks in 19" while
+  // the pattern only knew "hook gates", so the stale count passed.
+  [/native (?:pre-execution )?hook(?:s| gates) in \*{0,2}(\d+)\b/gi, hookGated, 'hook-gated'],
   [/\b(\d+) install as native hook gates\b/gi, hookGated, 'hook-gated'],
   [/in-process SDK gates in \*{0,2}(\d+)\b/gi, sdkGated, 'SDK-gated'],
   [/\b(\d+) SDK-gated frameworks\b/gi, sdkGated, 'SDK-gated'],

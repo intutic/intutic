@@ -22,7 +22,7 @@
 
 ## 💡 Why Intutic?
 
-Observability tools and LLM gateways (like LangSmith or Portkey) work on model traffic: they trace each call, and their gateways and guardrails can cap spend, redact or reject a request inline. What they do not see is the agent's tool call — the shell command that deletes files, the write that leaks a secret, the loop that keeps calling an API.
+Observability tools and LLM gateways (like LangSmith or Portkey) work on model traffic: they trace each call, and their gateways and guardrails can cap spend, redact or reject a request inline. What they do not control is the agent's local tool execution — the shell command that deletes files, the write that leaks a secret, the loop that keeps calling an API. A gateway can stop an MCP call only when the call is routed through its own MCP gateway, as Portkey's now can.
 
 **Intutic is an active circuit breaker at the tool call.** In 36 of the 43 supported harnesses, each tool call passes through a policy gate before it runs — a rule decision, not a model call — that blocks dangerous commands and steers agentic loops in real time. The proxies cover the rest, and the model traffic as well.
 
@@ -36,7 +36,7 @@ Intutic runs as a high-performance local or self-hosted proxy (written in Rust) 
 flowchart TD
     subgraph DevEnvironment[" 💻 Developer Environment "]
         Agent["🤖 AI Coding Agent<br><i>(Claude Code, Cursor, Aider, LangGraph)</i>"]
-        SOP["📝 Local SOP Rules<br><i>(CLAUDE.md / .cursorrules / SKILL.md)</i>"]
+        SOP["📝 SOP Rules<br><i>(.intutic/sops/ + workspace SOPs)</i>"]
     end
 
     subgraph HotPathProxy[" ⚡ Intutic Hot-Path Proxy (:4000) "]
@@ -143,7 +143,7 @@ Intutic ships **43 harness adapters**: 18 install as native hook gates in the ha
 
 ## 📝 Write Your First SOP
 
-Intutic governance rules are written in standard Markdown files inside your repository root (`CLAUDE.md`, `.cursorrules`, or `.windsurfrules`). Intutic automatically syncs and enforces them in real time:
+Intutic governance rules are written as standard Markdown files under `.intutic/sops/` in your repository, one folder per rule set (for example `.intutic/sops/safety/rules.md`), or as workspace SOPs on a connected control plane. `intutic connect` writes them into the file each harness reads, such as `.claude/rules/intutic-governance.md`, `.cursor/rules/intutic-governance.mdc` or a marked section of `AGENTS.md` (never `CLAUDE.md`), and compiles them into the rules its gates enforce:
 
 ```markdown
 # Standard Operating Procedure (SOP): Safety Guardrails

@@ -44,12 +44,13 @@ Every governance check proxy mode applies to a stdio server — allowlists, `too
 
 ### DLP Scanning
 
-16 built-in regex patterns, plus any the workspace adds. A match in a call's arguments blocks the call; a credential in a result is redacted before the agent reads it:
+Built-in patterns, plus any the workspace adds. A match in a call's arguments blocks the call; a credential in a result is redacted before the agent reads it:
 
-- API keys and tokens: OpenAI, Anthropic, Google, GitHub, Slack, AWS access key IDs
-- PEM and EC private keys, long hex strings that look like secrets
-- US Social Security numbers
-- Destructive commands (`rm -rf /`, `DROP TABLE`, `DROP DATABASE`, `TRUNCATE TABLE`) — arguments only, matched against each decoded argument string; whitespace, a line continuation, comments or an escaped `\n` between the SQL keywords do not hide them, and a quoted mention counts
+- 9 secret patterns: OpenAI, Anthropic and Google API keys, GitHub personal access and server tokens, Slack bot and user tokens, AWS access key IDs, and long hex strings that look like secrets
+- 2 private-key patterns: PEM and EC private key headers
+- Destructive commands: `rm -rf /` and 4 SQL statements (`DROP TABLE`, `DROP DATABASE`, `DROP SCHEMA`, `TRUNCATE TABLE`) — arguments only, matched against each decoded argument string; whitespace, a line continuation, comments or an escaped `\n` between the SQL keywords do not hide them, and a quoted mention counts
+
+**PII detectors**, the same validated detectors the LLM proxy runs: payment card numbers (Luhn check), IBANs (mod 97 check) and US Social Security numbers (checked against issued ranges) are on by default, email addresses and phone numbers off. Arguments are never rewritten, so an enabled detector blocks the call when it finds PII in the arguments; in a result, the PII is redacted. `INTUTIC_MCP_DLP_DETECTORS` sets this machine's actions, as a JSON object of detector id → `off`, `redact` or `block` (such as `{"pii.email":"redact"}`), and a connected workspace's `piiDetectors` setting sets the baseline, which the machine's own setting may only make stricter. See [PII detectors](https://docs.intutic.ai/guide/policies#pii-detectors).
 
 ### Policy Enforcement
 

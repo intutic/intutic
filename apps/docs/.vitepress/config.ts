@@ -224,6 +224,7 @@ const sidebarReference = [
       { text: 'SOP Front Matter (Open-Core)', link: '/reference/sop-front-matter' },
       ...(!IS_OSS ? [
         { text: 'REST API (Cloud)', link: '/reference/api' },
+        { text: 'Workspace Settings (Cloud)', link: '/reference/workspace-settings' },
         { text: 'SOP Format (Cloud)', link: '/reference/sop-format' },
         {
           text: 'Terraform Provider (Cloud)',

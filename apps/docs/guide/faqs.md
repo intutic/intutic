@@ -49,7 +49,7 @@ It is a hybrid system divided between the **Local Rust Proxy** and the **Remote 
 
 **No, they are not limited to security rules.** 
 
-The local WASM rules engine acts as a general-purpose pattern, regex, and AST scanner. It evaluates *any* rules defined under the `# Rules` or `## Rules` headers in markdown files (such as `.cursorrules`, `CLAUDE.md`, and your `.intutic/sops/` folders). 
+Rules come from your SOPs: the workspace's, and the markdown files under `.intutic/sops/`. Intutic writes them into the rules file each harness reads and compiles them into the rules its gates enforce; it does not read rules from `.cursorrules` or `CLAUDE.md`, and never writes `CLAUDE.md`. An SOP can state any development standard, and a [custom WASM or Rego rule](/guide/wasm-rules) can enforce one programmatically. 
 
 This allows you to enforce a wide variety of development standards, including:
 *   **Design & Styling Compliance:** (e.g., *“Strictly use CSS custom variables from variables.css; hardcoded hex codes are prohibited in component CSS.”*)

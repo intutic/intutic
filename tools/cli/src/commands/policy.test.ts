@@ -303,16 +303,20 @@ describe('runPolicyInstall end to end', () => {
   })
 
   it('refuses to install a rule returning a verdict code the proxy does not map', async () => {
-    // The bypass this closes: outside {0,1,2,3}, the proxy's runner logs a
-    // warning and falls through to Bypass — so a rule that ships believing in
-    // a rung it can never reach (an author inventing "4 = escalate to human")
-    // would install clean and then allow every request it thinks it refuses.
+    // Outside {0,1,2,3} a rule reaches no verdict, and both proxies refuse the
+    // call with GOVERNANCE_UNAVAILABLE — so a rule that ships believing in a
+    // rung it can never reach (an author inventing "4 = escalate to human")
+    // would refuse every call it means to escalate. Install catches it first,
+    // and says what the proxy would do.
     const wasmPath = path.join(wasmDir, 'unmapped-verdict-rule.wasm')
     await fs.writeFile(wasmPath, moduleReturningVerdict(5))
 
     await install(wasmPath)
 
     expect(exitCode, 'a rule returning an unmapped verdict code must not install').toBe(1)
+    const printed = vi.mocked(console.error).mock.calls.flat().join('\n')
+    expect(printed).toContain('GOVERNANCE_UNAVAILABLE')
+    expect(printed).not.toContain('allowed on every request')
     const installed = (await fs.readdir(wasmDir)).filter((f) => f !== 'unmapped-verdict-rule.wasm')
     expect(installed, 'nothing should have been written to the local rules directory').toEqual([])
   })

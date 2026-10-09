@@ -58,6 +58,18 @@ vocabulary.
 | `checkCommand`, `checkImages`, `checkWrittenManifest`, `ImageVerdict` | `imagecheck.ts` | Tier A2: container-image provenance on deploy commands. |
 | `McpRegistryRecord`, `McpAllowlistRecord` | `mcpRegistryRecord.ts` | Tier M: the snapshot's MCP server registry and allowlist (`Snapshot.mcpRegistry`, `Snapshot.mcpAllowlist`), decided as the hook gates and the MCP proxy decide them; a byte-identical copy of `@intutic/shared-types`' module. |
 | `classify`, `isDeploy`, `isTest`, `touchesInfra` | `actions.ts` | Command classifier shared by A2's deploy trigger. |
+| `canonicalJson`, `holdKey`, `holdMessage` | `hold.ts` | The hold helpers: key-sorted JSON, the tool name and argument hash an approved hold is matched on, and the message a held call carries. |
+| `COMMAND_SIZE_LIMIT`, `ARGUMENTS_SIZE_LIMIT`, `GATE_DEADLINE_MS` | `limits.ts` | A command over 256 KiB or arguments over 1 MiB are refused with `COMMAND_TOO_LARGE` before any tier runs. `GATE_DEADLINE_MS` (9000) is how long the hook script `intuticSandboxBootstrap()` writes may evaluate, from process start, before it refuses with `GATE_DEADLINE`: one second under that hook entry's 10-second timeout, so a slow rule is refused rather than left to the harness. |
+
+The snapshot must carry the `#digest <hash>` line the sync daemon writes (the
+first 32 hex characters of the SHA-256 of its non-comment lines) and, when the
+gate is given a workspace id, that workspace's id. A file without the line, or
+one whose digest or workspace does not match, is not trusted: its rules are
+dropped, the SSO group policy still refuses, and every MCP call is refused with
+`POLICY_SNAPSHOT_UNVERIFIED`. A hand-written snapshot for a test needs the line
+too.
+
+Full reference: [Gate SDK](https://docs.intutic.ai/reference/gate-sdk).
 
 ### A note for sibling adapter phases
 

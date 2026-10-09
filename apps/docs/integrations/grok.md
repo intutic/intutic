@@ -49,7 +49,7 @@ To undo what `intutic connect` writes here, run `intutic disconnect --harness gr
 
 ## Pre-tool hooks (blocking)
 
-Grok Build's `PreToolUse` hook contract is **confirmed**, not assumed: the hook process writes `{"decision":"deny","reason":"..."}` as JSON on **stdout** and exits 0 to signal a block — a different shape from Cline/Roo Code's `{"cancel":true}`, so Intutic's gate for this harness carries its own dedicated block contract rather than reusing theirs. An allow prints nothing and exits 0. The default hook `timeout` is 5s, ample for a local policy-snapshot evaluation.
+Grok Build's `PreToolUse` hook contract is **confirmed**, not assumed: the hook process writes `{"decision":"deny","reason":"..."}` as JSON on **stdout** and exits 0 to signal a block — a different shape from Cline's `{"cancel":true}`, so Intutic's gate for this harness carries its own dedicated block contract rather than reusing theirs. An allow prints nothing and exits 0. Grok Build's default hook `timeout` is 5 s; `intutic connect` sets 10 s on the hook entry, and the gate refuses with `GATE_DEADLINE` at 9 s (see [Hook timeouts](/reference/harness-security-matrix#hook-timeouts)).
 
 Every decision is appended to `.intutic/events/hook-events.jsonl` and drained to the control plane, same as every other harness.
 
