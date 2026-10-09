@@ -16,7 +16,7 @@ npm install @intutic/clawde
 - **Budget Check:** `checkBudget()` reports whether the workspace has budget left, from the control plane's `GET /api/v1/budget`.
 - **Circuit Breaker:** `client.circuitBreaker(toolName, options)(fn)` runs `fn`, after a workspace budget check when `requireBudget` is set, failing closed unless `failOpen` is set.
 - **Context Resolution:** `resolveContext()` reads the sync daemon's `~/.intutic/config.json` (git branch, Jira ticket, PagerDuty incident, CI pipeline, workspace, session), falling back to environment variables.
-- **Control-Plane Management (`ControlPlaneClient`):** Org signup, team/workspace creation, gateway registration and assignment, and provider-credential provisioning — the CLI's management surface, callable programmatically. See the [SDK reference](https://docs.intutic.ai/reference/clawde-sdk#control-plane-management-controlplaneclient).
+- **Control-Plane Management (`ControlPlaneClient`):** The operator APIs the CLI exposes, callable programmatically: org and workspace setup, gateways, settings and provider credentials, the MCP registry, notification rules, SIEM destinations, usage, the AI inventory, compliance evidence (with `verifyEvidenceArchive()` to check an archive offline), policy guardrails, held decisions and loop runs, findings, traces, trace integrity, policies and SOPs. The Python SDK has the same methods in snake_case. See the [SDK reference](https://docs.intutic.ai/reference/clawde-sdk#control-plane-management-controlplaneclient).
 
 ## License
 
