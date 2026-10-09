@@ -357,11 +357,11 @@ How the proxy retries a provider call that failed before any response reached th
 
 | Setting | Type | Default | Description |
 | :--- | :---: | :---: | :--- |
-| `enabled` | boolean | `true` | `false` makes one call per model. Fallbacks need retries enabled |
+| `enabled` | boolean | `true` | `false` makes one call per model; configured fallbacks still run after it fails |
 | `max_attempts` | number | `3` | Calls per model, the first included. At most `5` |
 | `initial_backoff_ms` | number | `500` | Upper bound of the first wait. Each wait is random between zero and a bound that doubles per attempt |
 | `max_backoff_ms` | number | `8000` | Cap on that bound. At most `60000` |
-| `budget_ms` | number | `30000` | Time for the whole request: every call, wait and fallback. A retry or fallback that cannot start inside it is not made. At most `120000` |
+| `budget_ms` | number | `30000` | Time for the whole request: every call, wait and fallback. A retry or fallback that cannot start inside it is not made (`time_budget` on the trace). At most `120000` |
 | `on_status` | number[] | `[429, 500, 502, 503, 504, 529]` | Statuses retried. Timeouts and failed connections are always retried |
 
 ### Fallbacks (`intutic_settings.routing.fallbacks`)

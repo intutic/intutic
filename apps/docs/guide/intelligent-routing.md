@@ -268,15 +268,21 @@ intutic_settings:
 ```
 
 A fallback runs only after the model's retries are spent on a retryable failure, and each target
-gets the same retry policy within the same budget. A target is skipped, and the skip recorded,
-when it:
+gets the same retry policy within the same time budget. With retries turned off
+(`retry.enabled: false`), each model gets one call and the fallbacks still run after it fails. A
+target is skipped, and the skip recorded, when it:
 
 - cannot take your request as it is: another wire format (a Claude target for a Chat Completions
   request), or the Gemini route, which names the model in its URL;
 - is not allowed by the workspace's [approved models](/guide/settings#approved-models) or the
   key's own model list;
+- would not fit a spend budget the request passed. The proxy runs the same pre-request check the
+  request went through — the key's and workspace's budgets, or a standalone proxy's
+  [daily cap](/guide/budgets#local-daily-cap) — priced for the target's model, and skips it with
+  `budget` on the trace. A fallback never spends past a cap the request was held to;
 - has no credential for its provider. A request made with your own provider key is sent on with
-  that key to the same provider only.
+  that key to the same provider only;
+- would start after the time budget is spent (`time_budget`).
 
 If every target fails, your agent gets the routed model's own error.
 

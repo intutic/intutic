@@ -321,6 +321,52 @@ async fn retries_off_makes_one_call() {
     assert_eq!(hits(&upstream).await, 1);
 }
 
+/// With retries off, the routed model gets one call, and its configured
+/// fallbacks still run after that call fails.
+#[tokio::test]
+async fn with_retries_off_fallbacks_run_after_the_single_call() {
+    let _guard = serial();
+    let upstream = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .and(body_string_contains("gpt-primary"))
+        .respond_with(ResponseTemplate::new(503))
+        .mount(&upstream)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .and(body_string_contains("gpt-backup"))
+        .respond_with(chat_ok("gpt-backup", "served by the fallback"))
+        .mount(&upstream)
+        .await;
+    set_env(&upstream.uri(), &upstream.uri());
+    let addr = app_with(
+        r#"
+model_list: []
+intutic_settings:
+  routing:
+    enabled: false
+    retry:
+      enabled: false
+    fallbacks:
+      gpt-primary:
+        - model: gpt-backup
+"#,
+    )
+    .await;
+
+    let res = post_chat(addr, "gpt-primary", "ses_retries_off").await;
+    let status = res.status();
+    let attempts = header_str(&res, "x-intutic-upstream-attempts");
+    let fallback_from = header_str(&res, "x-intutic-upstream-fallback-from");
+    let body = res.text().await.expect("body");
+
+    assert!(status.is_success(), "status={status} body={body}");
+    assert!(body.contains("served by the fallback"), "{body}");
+    assert_eq!(attempts.as_deref(), Some("2"), "one call each");
+    assert_eq!(fallback_from.as_deref(), Some("gpt-primary"));
+}
+
 /// A provider that asks for longer than the budget allows gets no retry: its
 /// answer, `retry-after` included, goes straight back so the caller's own
 /// client can wait.

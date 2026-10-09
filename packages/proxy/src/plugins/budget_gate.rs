@@ -51,6 +51,33 @@ impl BudgetGatePlugin {
     fn cost_per_1k_tokens(model: &str) -> f64 {
         pricing::input_cost_per_1k(model)
     }
+
+    /// The gate's decision for `estimated_input_tokens` sent to `model` against
+    /// `budget_remaining_usd`. `evaluate` decides the request with it, and the
+    /// upstream fallback decides each target with it, priced for that
+    /// target's model, so a fallback is held to the same cap.
+    pub fn verdict(model: &str, estimated_input_tokens: u32, budget_remaining_usd: f64) -> Verdict {
+        let rate = Self::cost_per_1k_tokens(model);
+        let estimated_cost = (estimated_input_tokens as f64 / 1000.0) * rate * SAFETY_MARGIN;
+
+        if estimated_cost > budget_remaining_usd {
+            Verdict::Kill {
+                reason: format!(
+                    "Estimated cost ${:.6} exceeds remaining budget ${:.6} \
+                     (model={}, tokens={}, rate=${:.6}/1K, margin={}%)",
+                    estimated_cost,
+                    budget_remaining_usd,
+                    model,
+                    estimated_input_tokens,
+                    rate,
+                    ((SAFETY_MARGIN - 1.0) * 100.0) as u32,
+                ),
+                policy_id: Some("budget-exceeded".into()),
+            }
+        } else {
+            Verdict::Bypass
+        }
+    }
 }
 
 impl Default for BudgetGatePlugin {
@@ -79,26 +106,11 @@ impl IntuticPlugin for BudgetGatePlugin {
     /// 3. If `estimated_cost > budget_remaining_usd` → `Kill`.
     /// 4. Otherwise → `Bypass`.
     fn evaluate(&self, ctx: &RequestContext) -> Verdict {
-        let rate = Self::cost_per_1k_tokens(&ctx.model);
-        let estimated_cost = (ctx.estimated_input_tokens as f64 / 1000.0) * rate * SAFETY_MARGIN;
-
-        if estimated_cost > ctx.budget_remaining_usd {
-            Verdict::Kill {
-                reason: format!(
-                    "Estimated cost ${:.6} exceeds remaining budget ${:.6} \
-                     (model={}, tokens={}, rate=${:.6}/1K, margin={}%)",
-                    estimated_cost,
-                    ctx.budget_remaining_usd,
-                    ctx.model,
-                    ctx.estimated_input_tokens,
-                    rate,
-                    ((SAFETY_MARGIN - 1.0) * 100.0) as u32,
-                ),
-                policy_id: Some("budget-exceeded".into()),
-            }
-        } else {
-            Verdict::Bypass
-        }
+        Self::verdict(
+            &ctx.model,
+            ctx.estimated_input_tokens,
+            ctx.budget_remaining_usd,
+        )
     }
 }
 

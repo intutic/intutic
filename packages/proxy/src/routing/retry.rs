@@ -35,7 +35,10 @@ use serde::{Deserialize, Serialize};
 #[serde(default)]
 pub struct RetryConfig {
     /// On by default: without it every provider overload surfaces as the
-    /// proxy's failure the moment it is inline.
+    /// proxy's failure the moment it is inline. Off makes one call per model;
+    /// configured fallbacks still run after that one failed call, since they
+    /// are opted into per model and failing a request one of them could serve
+    /// helps nobody.
     pub enabled: bool,
     /// Calls per target, the first one included. `1` disables retries while
     /// leaving fallbacks on.
@@ -247,11 +250,13 @@ pub struct UpstreamAttempt {
     /// `retry-after-ms`, `x-ratelimit-reset-*`) rather than the backoff curve.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub server_delay: bool,
-    /// Why no further call was made on this target: `max_attempts`, `budget`,
-    /// `retry_after_exceeds_budget`, `provider_declined` (`x-should-retry:
-    /// false`) or `quota_exhausted` (a spend cap or quota 429). For a skipped
-    /// fallback target: `same_target`, `wire_mismatch`, `model_not_allowed`,
-    /// `no_credential`, `unknown_provider` or `budget`.
+    /// Why no further call was made on this target: `max_attempts`,
+    /// `time_budget`, `retry_after_exceeds_budget`, `provider_declined`
+    /// (`x-should-retry: false`) or `quota_exhausted` (a spend cap or quota
+    /// 429). For a skipped fallback target: `same_target`, `wire_mismatch`,
+    /// `model_not_allowed`, `budget` (priced for its model, the request would
+    /// not fit a spend budget), `no_credential`, `unknown_provider` or
+    /// `time_budget`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stopped: Option<String>,
 }
@@ -464,7 +469,7 @@ pub fn backoff(attempt: u32, cfg: &RetryConfig, rng: &mut impl Rng) -> Duration 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stop {
     MaxAttempts,
-    Budget,
+    TimeBudget,
     RetryAfterExceedsBudget,
     ProviderDeclined,
     QuotaExhausted,
@@ -474,7 +479,7 @@ impl Stop {
     fn as_str(self) -> &'static str {
         match self {
             Stop::MaxAttempts => "max_attempts",
-            Stop::Budget => "budget",
+            Stop::TimeBudget => "time_budget",
             Stop::RetryAfterExceedsBudget => "retry_after_exceeds_budget",
             Stop::ProviderDeclined => "provider_declined",
             Stop::QuotaExhausted => "quota_exhausted",
@@ -507,7 +512,7 @@ pub fn plan_wait(
     }
     let wait = backoff(attempt, cfg, rng);
     if wait >= remaining {
-        return Err(Stop::Budget);
+        return Err(Stop::TimeBudget);
     }
     Ok((wait, false))
 }
@@ -815,7 +820,7 @@ mod tests {
         );
         assert_eq!(
             plan_wait(1, &cfg, None, Duration::ZERO, &mut rng),
-            Err(Stop::Budget)
+            Err(Stop::TimeBudget)
         );
     }
 

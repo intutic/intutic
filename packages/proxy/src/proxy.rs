@@ -715,6 +715,40 @@ fn json_error(status: StatusCode, error_type: &str, message: &str) -> Response {
     (status, axum::Json(body)).into_response()
 }
 
+/// What a request is estimated to cost on `model`, as the pre-request spend
+/// check prices it: the prompt at four characters per token in, `max_tokens`
+/// (else 4096) out.
+fn estimated_request_cost(model: &str, prompt_chars: usize, body_json: &serde_json::Value) -> f64 {
+    let prompt_tokens = (prompt_chars as f64 / 4.0).max(1.0) as u32;
+    let max_tokens = body_json
+        .get("max_tokens")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(4096) as u32;
+    pricing::estimate_cost(model, prompt_tokens, max_tokens)
+}
+
+/// The pre-request spend check against the key's and workspace's budgets:
+/// the refusal to send when they do not cover `estimated_cost`, else `None`.
+///
+/// The one entry point for that check. It decides the request as the caller
+/// wrote it, and decides again, priced for the target's model, before each
+/// upstream fallback is tried (`try_fallbacks`) — so a fallback can never
+/// spend past a budget the request itself was held to, and a budget added
+/// here applies to both.
+fn key_budget_refusal(
+    key: &VirtualKeyRecord,
+    workspace_id: &str,
+    estimated_cost: f64,
+) -> Option<Response> {
+    let e = check_budget(key, estimated_cost).err()?;
+    tracing::warn!(workspace_id = %workspace_id, "Budget check failed: {}", e);
+    Some(json_error(
+        StatusCode::TOO_MANY_REQUESTS,
+        "BUDGET_EXCEEDED",
+        "Remaining budget is insufficient for this request's safety margin.",
+    ))
+}
+
 /// The cost-prediction gate's answer to a non-streaming request: the reason as
 /// an assistant turn, status 200, and `x-intutic-refusal: COST_GATE_EXCEEDED`
 /// (see `crate::refusal`).
@@ -1624,8 +1658,36 @@ struct FallbackRequest<'a> {
     require_provisioned: bool,
     allowed_models: Option<&'a [String]>,
     key_models: &'a [String],
+    /// What the pre-request spend checks need to price a target: the key
+    /// whose budgets apply, the prompt size they priced the request on, and
+    /// the machine's own cap as `(input tokens, remaining USD)` when it is
+    /// enforced.
+    key_record: Option<&'a VirtualKeyRecord>,
+    prompt_chars: usize,
+    machine_budget: Option<(u32, f64)>,
     retry: &'a crate::routing::retry::RetryConfig,
     deadline: Instant,
+}
+
+impl FallbackRequest<'_> {
+    /// Whether the spend budgets the request passed would also admit it on
+    /// `model` — the same checks, priced for the target.
+    fn budget_admits(&self, model: &str) -> bool {
+        if let Some(key) = self.key_record {
+            let cost = estimated_request_cost(model, self.prompt_chars, self.body_json);
+            if key_budget_refusal(key, self.workspace_id, cost).is_some() {
+                return false;
+            }
+        }
+        if let Some((tokens, remaining)) = self.machine_budget {
+            if let crate::wasm::context::Verdict::Kill { .. } =
+                crate::plugins::budget_gate::BudgetGatePlugin::verdict(model, tokens, remaining)
+            {
+                return false;
+            }
+        }
+        true
+    }
 }
 
 /// A fallback target that answered with a 2xx.
@@ -1644,6 +1706,8 @@ struct FallbackServed {
 ///     Gemini route, whose model sits in the URL path rather than the body);
 ///   - names a model the workspace allowlist or the key does not allow — a
 ///     fallback is not a way around the model allowlist;
+///   - would not fit a spend budget the request passed, priced for its own
+///     model (`key_budget_refusal`, the machine cap) — nor around a budget;
 ///   - is on a provider with no credential for this workspace. A request made
 ///     with the caller's own provider key reuses it only on that same
 ///     provider, as routing does;
@@ -1698,8 +1762,10 @@ async fn try_fallbacks(
             .is_err()
         {
             Some("model_not_allowed")
-        } else if Instant::now() >= req.deadline {
+        } else if !req.budget_admits(&model) {
             Some("budget")
+        } else if Instant::now() >= req.deadline {
+            Some("time_budget")
         } else {
             None
         };
@@ -3078,21 +3144,13 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         }
     }
 
+    // Kept for the upstream fallback, which prices each target on this same
+    // prompt size before trying it (`try_fallbacks`).
+    let budget_prompt_chars = body_str.len();
     if let Some(ref key) = key_record {
-        let prompt_tokens = (body_str.len() as f64 / 4.0).max(1.0) as u32;
-        let max_tokens = body_json
-            .get("max_tokens")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(4096) as u32;
-        let estimated_cost = pricing::estimate_cost(&model, prompt_tokens, max_tokens);
-
-        if let Err(e) = check_budget(key, estimated_cost) {
-            tracing::warn!(workspace_id = %workspace_id, "Budget check failed: {}", e);
-            return json_error(
-                StatusCode::TOO_MANY_REQUESTS,
-                "BUDGET_EXCEEDED",
-                "Remaining budget is insufficient for this request's safety margin.",
-            );
+        let estimated_cost = estimated_request_cost(&model, budget_prompt_chars, &body_json);
+        if let Some(refused) = key_budget_refusal(key, &workspace_id, estimated_cost) {
+            return refused;
         }
     }
 
@@ -3861,6 +3919,13 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     }
 
     // Evaluate native budget gate: the machine's own cap, standalone only.
+    // When it is enforced, the fallback re-runs it per target with the
+    // target's model, on the same token estimate and remaining budget.
+    let machine_budget: Option<(u32, f64)> = (machine_budget_applies() && local_budget_enforced())
+        .then_some((
+            wasm_ctx.estimated_input_tokens,
+            wasm_ctx.budget_remaining_usd,
+        ));
     let budget_plugin = crate::plugins::budget_gate::BudgetGatePlugin::new();
     let machine_verdict = if machine_budget_applies() {
         budget_plugin.evaluate(&wasm_ctx)
@@ -5323,9 +5388,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     let mut upstream_fallback: Option<crate::routing::retry::UpstreamFallback> = None;
     if let (Some(primary_failure), Some(targets)) = (
         primary_outcome.retryable,
-        fallback_map
-            .get(&actual_model)
-            .filter(|_| retry_cfg.enabled),
+        // Not gated on `retry_cfg.enabled`: with retries off the one failed
+        // call is the model's last, and its configured fallbacks still run.
+        fallback_map.get(&actual_model),
     ) {
         let require_provisioned = raw_token.starts_with("vk_")
             && crate::gateway::provisioned_key_required_for(
@@ -5348,6 +5413,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 require_provisioned,
                 allowed_models: allowed_models.as_deref(),
                 key_models,
+                key_record: key_record.as_ref(),
+                prompt_chars: budget_prompt_chars,
+                machine_budget,
                 retry: &retry_cfg,
                 deadline: retry_deadline,
             },
@@ -11908,6 +11976,55 @@ mod tests {
                 b,
                 Some(own_key),
                 "ws_b's own provisioned key is unaffected by ws_a's absence"
+            );
+        }
+    }
+
+    /// A fallback target is held to the spend budgets the request passed,
+    /// priced for its own model, through the same entry point.
+    mod fallback_budget {
+        use super::super::*;
+
+        fn key(max_budget: f64, spend: f64) -> VirtualKeyRecord {
+            serde_json::from_value(serde_json::json!({
+                "token": "vk_test",
+                "max_budget": max_budget,
+                "spend": spend,
+                "models": [],
+            }))
+            .expect("a key record")
+        }
+
+        #[test]
+        fn the_estimate_is_priced_for_the_model_it_names() {
+            let body = serde_json::json!({"max_tokens": 1000});
+            let cheap = estimated_request_cost("gpt-4.1-nano", 40_000, &body);
+            let dear = estimated_request_cost("gpt-4", 40_000, &body);
+            assert!(dear > cheap * 100.0, "cheap={cheap} dear={dear}");
+        }
+
+        #[test]
+        fn a_budget_that_covers_the_model_admits_and_a_dearer_model_is_refused() {
+            let body = serde_json::json!({"max_tokens": 1000});
+            let k = key(0.10, 0.0);
+            let cheap = estimated_request_cost("gpt-4.1-nano", 40_000, &body);
+            let dear = estimated_request_cost("gpt-4", 40_000, &body);
+            assert!(key_budget_refusal(&k, "ws", cheap).is_none());
+            let refused = key_budget_refusal(&k, "ws", dear).expect("over budget");
+            assert_eq!(refused.status(), StatusCode::TOO_MANY_REQUESTS);
+        }
+
+        /// The request's own check and the fallback's go through one function,
+        /// so a budget added to it (per key, per member) binds both.
+        #[test]
+        fn the_request_and_every_fallback_use_one_budget_check() {
+            let src = include_str!("proxy.rs");
+            let calls = src
+                .matches(&["key_budget_refusal", "(key,"].concat())
+                .count();
+            assert_eq!(calls, 2, "the request's check and the fallback's");
+            assert!(
+                src.contains(&["BudgetGatePlugin::verdict", "(model, tokens, remaining)"].concat())
             );
         }
     }

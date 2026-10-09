@@ -248,16 +248,16 @@ export interface TraceStep {
   timestamp: string
 }
 
-/** Full detail of a single trace. */
 /**
  * One upstream call the LLM proxy made for a request: a retry of the routed
  * model or a fallback target. `outcome` is `ok`, `http_<status>`, `timeout`,
  * `connect_error`, `transport_error`, or `skipped` for a fallback target that
  * was not called; `stopped` says why no further call was made (`max_attempts`,
- * `budget`, `retry_after_exceeds_budget`, `provider_declined`,
+ * `time_budget`, `retry_after_exceeds_budget`, `provider_declined`,
  * `quota_exhausted`) or, for a skipped target, why it was skipped
- * (`same_target`, `wire_mismatch`, `model_not_allowed`, `no_credential`,
- * `unknown_provider`, `budget`).
+ * (`same_target`, `wire_mismatch`, `model_not_allowed`, `budget` — priced
+ * for its model, the request would not fit a spend budget — `no_credential`,
+ * `unknown_provider`, `time_budget`).
  */
 export interface UpstreamAttempt {
   model: string
@@ -281,6 +281,7 @@ export interface UpstreamFallback {
   cacheAffinityBroken?: boolean
 }
 
+/** Full detail of a single trace. */
 export interface TraceDetail {
   traceId: string
   sessionId: string
