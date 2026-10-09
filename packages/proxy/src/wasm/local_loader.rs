@@ -135,12 +135,18 @@ pub fn load_local_modules(
             .and_then(|bytes| {
                 let sha256 = hex::encode(Sha256::digest(&bytes));
                 let module = Module::from_binary(engine, &bytes)?;
-                super::host::check_imports_resolvable(&module)?;
-                Ok((sha256, module))
+                // EXPERIMENTAL: an OPA build speaks its own ABI (super::opa).
+                let rego = super::opa::enabled() && super::opa::is_opa_module(&module);
+                if rego {
+                    super::opa::check_loadable(engine, &module)?;
+                } else {
+                    super::host::check_imports_resolvable(&module)?;
+                }
+                Ok((sha256, module, rego))
             });
 
         match compiled {
-            Ok((sha256, module)) => {
+            Ok((sha256, module, rego)) => {
                 let (priority, name) = parse_priority(&file_name);
                 modules.push(LoadedModule {
                     rule_id,
@@ -155,6 +161,7 @@ pub fn load_local_modules(
                     // walk an import section to find out whether it needs to
                     // read anything from disk.
                     reads_referenced_files: super::host::module_reads_referenced_files(&module),
+                    rego,
                     module,
                 });
             }

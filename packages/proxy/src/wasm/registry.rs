@@ -92,6 +92,10 @@ pub struct LoadedModule {
     /// what makes a module that does not import the function cost exactly what
     /// it cost before the function existed.
     pub reads_referenced_files: bool,
+    /// EXPERIMENTAL: an OPA-compiled Rego policy, evaluated through
+    /// [`super::opa`] instead of the native rule ABI. Only a local rule loaded
+    /// while `INTUTIC_EXPERIMENTAL_REGO_WASM=1` can be one.
+    pub rego: bool,
 }
 
 struct WorkspaceModules {
@@ -273,7 +277,11 @@ impl PluginRegistry {
                 );
                 continue;
             }
-            let verdict = evaluate_wasm_rule(&self.engine, &m.module, ctx, &files).await;
+            let verdict = if m.rego {
+                super::opa::evaluate_opa_rule(&self.engine, &m.module, ctx).await
+            } else {
+                evaluate_wasm_rule(&self.engine, &m.module, ctx, &files).await
+            };
 
             // A shadowed rule reports and falls through. It is evaluated exactly
             // as an enforcing one — same engine, same fuel, same timeout — so
@@ -533,6 +541,7 @@ impl PluginRegistry {
                         priority: desc.priority,
                         mode: desc.mode,
                         reads_referenced_files: super::host::module_reads_referenced_files(module),
+                        rego: false,
                         module: module.clone(),
                     });
                 } else {
@@ -561,6 +570,7 @@ impl PluginRegistry {
                             reads_referenced_files: super::host::module_reads_referenced_files(
                                 &module,
                             ),
+                            rego: false,
                             module,
                         });
                     } else {
