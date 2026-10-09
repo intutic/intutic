@@ -18,6 +18,7 @@ import { httpRequest } from './httpJson.js'
 import type { CallerIdentity } from './identity.js'
 import type { AnomalyFinding } from './anomaly/index.js'
 import type { BudgetEventDetail } from './budget.js'
+import type { ShadowReport } from './wasm/runner.js'
 
 const log = createLogger('mcp-proxy-emitter')
 
@@ -83,6 +84,19 @@ export type EventKind =
    * plane files one incident per version, as for the LLM proxy's refusals.
    */
   | 'wasm_rule_refused'
+  /**
+   * The call was evaluated against custom rules in `SHADOW` mode: what each
+   * would have done, bypasses included, in `wasmShadowReports`. The same
+   * report the LLM proxy carries on a trace (`wasm_shadow_reports`); the
+   * control plane counts both toward the rule's promotion evidence.
+   */
+  | 'wasm_shadow_evaluated'
+
+/** What a custom-rule event carries: `wasmRule` on `wasm_rule_refused`, `wasmShadowReports` on `wasm_shadow_evaluated`. */
+export interface RuleEventDetail {
+  wasmRule?: WasmRuleRefusalDetail
+  wasmShadowReports?: ShadowReport[]
+}
 
 /** Which rule version a `wasm_rule_refused` event is about, and why it was refused. */
 export interface WasmRuleRefusalDetail {
@@ -156,6 +170,8 @@ export interface GovernanceEvent {
   budget?: BudgetEventDetail
   /** Set on `wasm_rule_refused`. */
   wasmRule?: WasmRuleRefusalDetail
+  /** Set on `wasm_shadow_evaluated`. */
+  wasmShadowReports?: ShadowReport[]
   timestamp: string
 }
 
@@ -176,7 +192,7 @@ export class GovernanceEmitter {
     reason?: string,
     finding?: DetectionFinding,
     budget?: BudgetEventDetail,
-    wasmRule?: WasmRuleRefusalDetail,
+    rule?: RuleEventDetail,
   ): void {
     const event: GovernanceEvent = {
       incidentId: node_crypto.randomUUID(),
@@ -191,7 +207,8 @@ export class GovernanceEmitter {
       finding,
       principal: this.identity,
       budget,
-      wasmRule,
+      wasmRule: rule?.wasmRule,
+      wasmShadowReports: rule?.wasmShadowReports,
       timestamp: new Date().toISOString(),
     }
 
@@ -213,7 +230,8 @@ export class GovernanceEmitter {
         toolInput,
         principal: event.principal,
         budget,
-        wasmRule,
+        wasmRule: event.wasmRule,
+        wasmShadowReports: event.wasmShadowReports,
       }
       callDaemonSocket('telemetry.enqueue', eventPayload).then(() => {
         log.debug({ action: 'telemetry_enqueued' }, 'Telemetry successfully enqueued to daemon')
@@ -257,6 +275,7 @@ export class GovernanceEmitter {
           principal: event.principal,
           budget: event.budget,
           wasmRule: event.wasmRule,
+          wasmShadowReports: event.wasmShadowReports,
           timestamp: event.timestamp,
         },
       ],

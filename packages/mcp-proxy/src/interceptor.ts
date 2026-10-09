@@ -22,7 +22,7 @@ import { scanText, injectionSeverity, setDynamicInjectionPatterns } from './inje
 import { evaluateSequenceDetectors, resolveEffectiveDisposition, REASK_MAX_ATTEMPTS } from './anomaly/index.js'
 import type { AnomalyMode, Disposition } from './anomaly/index.js'
 import { SessionState } from './session.js'
-import type { WasmRunner } from './wasm/runner.js'
+import type { ShadowReport, WasmRunner } from './wasm/runner.js'
 import type { PolicyClient, SopRule } from './policy.js'
 import { detectionFinding, type GovernanceEmitter } from './emitter.js'
 import type { ApprovalHolds } from './approvalHold.js'
@@ -574,6 +574,7 @@ export class ToolCallInterceptor {
       const unloaded = await this.checkCloudRulesLoaded(this.wasmRunner, toolName, toolInput)
       if (unloaded) return unloaded
       try {
+        const shadow: ShadowReport[] = []
         const verdict = await this.wasmRunner.evaluate({
           sessionId: this.session.sessionId,
           workspaceId: this.workspaceId,
@@ -589,7 +590,12 @@ export class ToolCallInterceptor {
           corroboratingDetectors: corroboratingDetectorsForContext,
           toolContractChanged: this.session.getToolContractChanged(),
           serverName: this.serverName,
-        })
+        }, shadow)
+        // Whatever the call's outcome: the shadowed rules' evaluations are
+        // promotion evidence whether or not another rule refused the call.
+        if (shadow.length > 0) {
+          this.emitter.emit('wasm_shadow_evaluated', toolName, toolInput, undefined, undefined, undefined, { wasmShadowReports: shadow })
+        }
 
         if (verdict.code === 'unavailable') {
           // A rule reached no verdict: refused whatever `failOpen` says (see

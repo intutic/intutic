@@ -14,7 +14,7 @@ use super::limits::Failure;
 use super::local_loader;
 use super::referenced_files::{self, ReferencedFiles};
 use super::runner::evaluate_wasm_rule;
-use crate::store::ControlPlaneCache;
+use crate::store::{ControlPlaneCache, RuleRefusalWire};
 
 /// Wall-clock ceiling on reading every file one request references.
 ///
@@ -761,12 +761,23 @@ impl PluginRegistry {
             "Refusing control-plane WASM rule: {why}. {consequence}"
         );
         control_plane
-            .publish_system_anomaly(
+            .publish_rule_refusal(
                 workspace_id,
                 &format!(
                     "WASM rule '{}' ({}) was refused: {why}. {consequence}",
                     desc.name, desc.rule_id
                 ),
+                &RuleRefusalWire {
+                    rule_id: desc.rule_id.clone(),
+                    name: desc.name.clone(),
+                    sha256: desc.sha256.clone(),
+                    refusal: refusal.kind(),
+                    actual_sha256: match refusal {
+                        Refusal::HashMismatch { actual } => Some(actual.clone()),
+                        _ => None,
+                    },
+                    previous_in_force: has_previous,
+                },
             )
             .await;
     }
@@ -781,6 +792,15 @@ enum Refusal {
 }
 
 impl Refusal {
+    /// The reason's name on the wire, as the MCP proxy names it too.
+    fn kind(&self) -> &'static str {
+        match self {
+            Self::Missing => "missing",
+            Self::HashMismatch { .. } => "hash_mismatch",
+            Self::Unloadable(_) => "unloadable",
+        }
+    }
+
     /// What makes two refusals of one version the same report.
     fn key(&self) -> String {
         match self {

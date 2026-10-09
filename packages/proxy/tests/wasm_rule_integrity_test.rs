@@ -12,7 +12,7 @@
 //! does not provide) is refused and reported the same way, so a rule that never
 //! loaded does not leave the workspace ungoverned without an incident.
 
-use intutic_proxy::store::ControlPlaneCache;
+use intutic_proxy::store::{ControlPlaneCache, RuleRefusalWire};
 use intutic_proxy::wasm::context::{RequestContext, Verdict};
 use intutic_proxy::wasm::registry::PluginRegistry;
 use serde_json::json;
@@ -71,6 +71,7 @@ struct CloudRules {
     descriptors: Mutex<String>,
     binaries: Mutex<Vec<(String, Vec<u8>)>>,
     anomalies: Mutex<Vec<String>>,
+    refusals: Mutex<Vec<RuleRefusalWire>>,
 }
 
 impl CloudRules {
@@ -91,6 +92,10 @@ impl CloudRules {
     fn anomalies(&self) -> Vec<String> {
         self.anomalies.lock().unwrap().clone()
     }
+
+    fn refusals(&self) -> Vec<RuleRefusalWire> {
+        self.refusals.lock().unwrap().clone()
+    }
 }
 
 #[async_trait::async_trait]
@@ -108,8 +113,9 @@ impl ControlPlaneCache for CloudRules {
             .find(|(s, _)| s == sha)
             .map(|(_, b)| b.clone()))
     }
-    async fn publish_system_anomaly(&self, _w: &str, description: &str) {
+    async fn publish_rule_refusal(&self, _w: &str, description: &str, rule: &RuleRefusalWire) {
         self.anomalies.lock().unwrap().push(description.to_string());
+        self.refusals.lock().unwrap().push(rule.clone());
     }
     async fn policy_version(&self, _w: &str) -> Option<u64> {
         None
@@ -234,6 +240,19 @@ async fn a_swapped_binary_is_refused_and_reported() {
     assert!(anomalies[0].contains("wasm_shell"), "{}", anomalies[0]);
     assert!(anomalies[0].contains(&sha(SHELL)), "{}", anomalies[0]);
     assert!(anomalies[0].contains(&sha(DEPLOY)), "{}", anomalies[0]);
+    // The version and the reason, which the control plane files the incident
+    // under — the key the MCP proxy's report of the same refusal shares.
+    assert_eq!(
+        rules.refusals(),
+        vec![RuleRefusalWire {
+            rule_id: "wasm_shell".into(),
+            name: "wasm_shell".into(),
+            sha256: sha(SHELL),
+            refusal: "hash_mismatch",
+            actual_sha256: Some(sha(DEPLOY)),
+            previous_in_force: false,
+        }]
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -333,6 +352,11 @@ async fn an_update_that_cannot_load_keeps_the_loaded_version_and_is_reported() {
     let anomalies = rules.anomalies();
     assert_eq!(anomalies.len(), 1, "{anomalies:?}");
     assert!(anomalies[0].contains("stays in force"), "{}", anomalies[0]);
+    let refusals = rules.refusals();
+    assert_eq!(
+        (refusals[0].refusal, refusals[0].previous_in_force),
+        ("unloadable", true)
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -355,5 +379,8 @@ async fn a_rule_whose_binary_is_missing_is_reported() {
     let anomalies = rules.anomalies();
     assert_eq!(anomalies.len(), 1, "{anomalies:?}");
     assert!(anomalies[0].contains("missing"), "{}", anomalies[0]);
+    let refusals = rules.refusals();
+    assert_eq!(refusals[0].refusal, "missing");
+    assert_eq!(refusals[0].actual_sha256, None);
     let _ = std::fs::remove_dir_all(&dir);
 }

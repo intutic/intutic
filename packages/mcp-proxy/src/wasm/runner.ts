@@ -120,6 +120,17 @@ interface RuleFailure {
   detail: string
 }
 
+/**
+ * One shadowed rule's outcome on one call, as the LLM proxy reports it on a
+ * trace (`registry.rs`'s `ShadowReport`): the bypasses are reported too,
+ * because they are the denominator promotion divides by.
+ */
+export interface ShadowReport {
+  ruleId: string
+  /** False when the rule allowed the call; true for a block, a reask, a hold, or no verdict. */
+  wouldAct: boolean
+}
+
 /** One rule as evaluation sees it, whichever source it came from. */
 interface ActiveRule {
   ruleId: string
@@ -389,12 +400,14 @@ export class WasmRunner implements CloudRuleBridge {
    * A quarantined rule (see {@link countRunaway}) refuses at once, without
    * anything being evaluated, until the next rescan.
    *
-   * A `SHADOW` rule is evaluated in its place and its verdict logged, and it
-   * decides nothing: what it would have done, a refusal for reaching no
-   * verdict included, leaves the call as the other rules decide it. A
-   * quarantined one is skipped.
+   * A `SHADOW` rule is evaluated in its place and decides nothing: what it
+   * would have done, a refusal for reaching no verdict included, leaves the
+   * call as the other rules decide it. Each evaluation is appended to
+   * `shadowOut`, the evidence promotion out of shadow is judged on, and a
+   * would-act is logged. A quarantined one is skipped, and reported as
+   * nothing, since nothing ran.
    */
-  async evaluate(input: WasmContextInput): Promise<WasmVerdict> {
+  async evaluate(input: WasmContextInput, shadowOut?: ShadowReport[]): Promise<WasmVerdict> {
     const rules = this.activeRules()
     const held = rules.find((r) => !r.shadow && this.quarantined.has(r.ruleId))
     if (held) {
@@ -436,7 +449,11 @@ export class WasmRunner implements CloudRuleBridge {
       )
       const failure = 'stop' in outcome ? outcome : undefinedVerdict(outcome)
       if (rule.shadow) {
-        logShadow(rule.ruleId, failure ? `no verdict (${failure.stop}): ${failure.detail}` : describeResult(outcome as RuleResult))
+        // A rule that reached no verdict would have refused the call, so it
+        // counts as acting, as the LLM proxy counts its `Unavailable`.
+        const wouldDo = failure ? `no verdict (${failure.stop}): ${failure.detail}` : describeResult(outcome as RuleResult)
+        logShadow(rule.ruleId, wouldDo)
+        shadowOut?.push({ ruleId: rule.ruleId, wouldAct: wouldDo !== undefined })
         continue
       }
       if (failure) {
@@ -620,11 +637,7 @@ function describeResult(result: RuleResult): string | undefined {
   return result.code === 3 ? 'reask' : 'block'
 }
 
-/**
- * A shadowed rule's outcome, logged when it would have acted. The Rust proxy
- * also records every shadow evaluation on the request's trace, as promotion
- * evidence; this proxy has no trace to carry it.
- */
+/** A shadowed rule's outcome, logged when it would have acted. */
 function logShadow(ruleId: string, wouldDo: string | undefined): void {
   if (wouldDo === undefined) return
   log.info(

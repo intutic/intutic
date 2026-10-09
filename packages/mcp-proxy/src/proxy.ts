@@ -596,7 +596,7 @@ export class McpGovernanceProxy {
         // The hook-event ingest caps `reason` at 512 characters; an unloadable
         // rule's compile error can run longer.
         const reason = report.description.slice(0, 512)
-        this.emitter.emit('wasm_rule_refused', report.descriptor.ruleId, undefined, reason, undefined, undefined, refusalDetail(report))
+        this.emitter.emit('wasm_rule_refused', report.descriptor.ruleId, undefined, reason, undefined, undefined, { wasmRule: refusalDetail(report) })
       }),
     )
     this.registryObserver = config.standalone

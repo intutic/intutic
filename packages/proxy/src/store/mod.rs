@@ -39,6 +39,23 @@ use crate::routing::bandit::BanditArmState;
 use crate::routing::mirror::MirrorPairEvent;
 use crate::telemetry::ExecutionTrace;
 
+/// A control-plane rule version a proxy refused to load, as the control plane
+/// reads it: the fields the MCP proxy's `wasm_rule_refused` event carries, in
+/// this channel's snake case.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct RuleRefusalWire {
+    pub rule_id: String,
+    pub name: String,
+    pub sha256: String,
+    /// `missing`, `hash_mismatch` or `unloadable`.
+    pub refusal: &'static str,
+    /// What the binary hashed to, on a hash mismatch.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actual_sha256: Option<String>,
+    /// Whether an earlier version of the rule stays in force on this proxy.
+    pub previous_in_force: bool,
+}
+
 pub mod memory;
 pub mod valkey;
 
@@ -1069,6 +1086,19 @@ pub trait ControlPlaneCache: Send + Sync + 'static {
     /// does nothing: standalone has no control plane to raise it with, and no
     /// control-plane rules to raise it about.
     async fn publish_system_anomaly(&self, _workspace_id: &str, _description: &str) {}
+
+    /// Raise a refused control-plane rule version on the same channel, with
+    /// the version and the reason, so the control plane files one incident
+    /// per version and reason however many proxies refuse it — this proxy's
+    /// replicas and the MCP proxy, which reports the same refusal as a hook
+    /// event. The default does nothing, as for `publish_system_anomaly`.
+    async fn publish_rule_refusal(
+        &self,
+        _workspace_id: &str,
+        _description: &str,
+        _rule: &RuleRefusalWire,
+    ) {
+    }
 
     // ── Token intelligence ───────────────────────────────────────────
 

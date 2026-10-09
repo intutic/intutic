@@ -303,7 +303,21 @@ describe("the workspace's control-plane rules in the MCP proxy", () => {
     ])
 
     expect(runner.getLoadedRuleIds()).toEqual(['wasm_block', 'wasm_conformance'])
-    expect(await runner.evaluate(call('ls'))).toEqual({ code: 'allow' })
+    const shadow: Array<{ ruleId: string; wouldAct: boolean }> = []
+    expect(await runner.evaluate(call('ls'), shadow)).toEqual({ code: 'allow' })
+    // Both are promotion evidence: a block, and a rule that reached no verdict.
+    expect(shadow).toEqual([
+      { ruleId: 'wasm_block', wouldAct: true },
+      { ruleId: 'wasm_conformance', wouldAct: true },
+    ])
+
+    // A bypass is reported too: it is the denominator.
+    const allowRule = nativeRule(0, 'allow')
+    store.put(allowRule)
+    await runner.syncCloudRules([descriptor('wasm_allow', allowRule, 10, 'SHADOW')])
+    const bypass: Array<{ ruleId: string; wouldAct: boolean }> = []
+    await runner.evaluate(call('ls'), bypass)
+    expect(bypass).toEqual([{ ruleId: 'wasm_allow', wouldAct: false }])
 
     // Promoted to enforce, the same binary blocks without another fetch.
     await runner.syncCloudRules([descriptor('wasm_block', block, 10)])
